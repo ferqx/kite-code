@@ -5,6 +5,11 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { NativeResult, NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, electronExecutable, pointId, path, preimage, packagePath] =
   process.argv.slice(2);
 const { _electron } = createRequire(packagePath!)('playwright') as typeof import('playwright');
@@ -27,7 +32,8 @@ async function launch() {
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => console.error('renderer_error', error.message));
   await page.getByRole('button', { name: 'Actual checkpoint', exact: true }).click();
-  await page.getByRole('heading', { name: 'Actual checkpoint', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Actual checkpoint', { exact: true }).waitFor();
+  await openSessionTools(page);
   return { app, page };
 }
 function ownedChild(app: Awaited<ReturnType<typeof _electron.launch>>) {

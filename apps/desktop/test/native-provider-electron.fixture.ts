@@ -5,6 +5,23 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
+async function openSettings(page: import('playwright').Page) {
+  if (!(await page.locator('.desktop-settings-dialog').isVisible()))
+    await page
+      .locator('.session-header')
+      .getByRole('button', { name: '设置', exact: true })
+      .click();
+}
+async function closeSettings(page: import('playwright').Page) {
+  if (await page.locator('.desktop-settings-dialog').isVisible())
+    await page.getByRole('button', { name: '返回应用', exact: true }).click();
+}
+
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [candidate, home, control, storeId] = process.argv.slice(2) as string[];
 const started = Date.now();
 const stage = (name: string, facts = {}) =>
@@ -28,6 +45,7 @@ async function launch() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Provider A', exact: true }).waitFor();
+  await openSessionTools(page);
   childPid = Number(
     String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
       .trim()
@@ -105,6 +123,7 @@ try {
     }
   }
   async function select(id: string) {
+    await closeSettings(page);
     await page.getByRole('button', { name: `Provider ${id.toUpperCase()}`, exact: true }).click();
     await page
       .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
@@ -118,6 +137,7 @@ try {
     .check();
   await page.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
+  await openSettings(page);
   await page.getByRole('button', { name: '提供商', exact: true }).click();
   const aliases = [
     ['compatible', 'OpenAI-compatible', 'model-a'],
@@ -171,6 +191,7 @@ try {
   assert.equal(models.length, 4);
   assert.ok(models.every((m) => m.enabled === false));
   const id = (alias: string) => models.find((m) => m.provider === alias).id;
+  await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   await page.getByRole('button', { name: '读取用户模型配置', exact: true }).click();
   for (const m of models) {
@@ -194,6 +215,7 @@ try {
     true,
   );
   async function choose(alias: string) {
+    await closeSettings(page);
     const picker = page.getByRole('region', { name: '下一轮模型选择', exact: true });
     if (!(await picker.getByRole('region', { name: '模型与思考浮层' }).count()))
       await picker.getByRole('button', { name: /^模型：/ }).click();
@@ -216,6 +238,7 @@ try {
     await page.getByRole('button', { name: '关闭模型选择', exact: true }).click();
   }
   async function send(marker: string) {
+    await closeSettings(page);
     await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(marker);
     const button = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
     await button.click();
@@ -250,6 +273,7 @@ try {
   await choose('compatible');
   await effort('low');
   await send('NATIVE_compatible_effort');
+  await closeSettings(page);
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('NATIVE_compatible_held');
@@ -267,6 +291,8 @@ try {
   );
   await choose('openai');
   await effort('high');
+  await openSettings(page);
+  await page.getByRole('button', { name: '模型', exact: true }).click();
   await page.getByRole('button', { name: '读取用户模型配置', exact: true }).click();
   await page.getByRole('button', { name: '设为默认 ' + id('openai'), exact: true }).click();
   await until(
@@ -274,6 +300,7 @@ try {
     (v) => v === id('openai'),
     'changed default B absent',
   );
+  await closeSettings(page);
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('NATIVE_plain_steer');
@@ -297,6 +324,8 @@ try {
     modelId: id('compatible'),
   });
   await send('NATIVE_openai_next');
+  await openSettings(page);
+  await page.getByRole('button', { name: '模型', exact: true }).click();
   await page.getByRole('button', { name: `设为默认 ${id('compatible')}`, exact: true }).click();
   await until(
     async () => JSON.parse(readFileSync(configPath, 'utf8')).modelId,
@@ -304,8 +333,10 @@ try {
     'new session default A missing',
   );
   const beforeCreate = Number(await (await fetch(`${control}/count`)).text());
-  await page.getByRole('button', { name: '新建会话', exact: true }).click();
-  await page.getByRole('heading', { name: '新对话', exact: true }).waitFor();
+  await closeSettings(page);
+  await page.getByRole('button', { name: '在 Providers 中新建对话', exact: true }).click();
+  await page.locator('.session-header').getByTitle('新对话', { exact: true }).waitFor();
+  await openSessionTools(page);
   assert.equal(Number(await (await fetch(`${control}/count`)).text()), beforeCreate);
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
@@ -323,6 +354,7 @@ try {
   await send('NATIVE_openai_newsession');
   await select('a');
   // Drop exactly the first completed physical save response; never replace its Service result.
+  await openSettings(page);
   await page.getByRole('button', { name: '提供商', exact: true }).click();
   await page.getByRole('button', { name: '编辑 OpenAI-compatible', exact: true }).click();
   await page.getByRole('textbox', { name: '模型名称', exact: true }).fill('model-a');
@@ -381,6 +413,7 @@ try {
   assert.equal((coldRoute as { selectedModelId?: string }).selectedModelId, id('openai'));
   assert.equal(JSON.parse(readFileSync(configPath, 'utf8')).modelId, id('compatible'));
   const before = Number(await (await fetch(`${control}/count`)).text());
+  await openSettings(page);
   await page.getByRole('button', { name: '提供商', exact: true }).click();
   await page.getByRole('button', { name: '查询原提供商提交', exact: true }).click();
   await until(
@@ -397,6 +430,7 @@ try {
     1,
   );
   assert.equal(Number(await (await fetch(`${control}/count`)).text()), before);
+  await closeSettings(page);
   assert.match(
     await page.getByRole('region', { name: '下一轮模型选择' }).innerText(),
     /思考：默认/,
@@ -419,6 +453,8 @@ try {
     );
     t.cleanupTransport = () => transport;
   });
+  await openSettings(page);
+  await page.getByRole('button', { name: '提供商', exact: true }).click();
   await page.getByRole('button', { name: '刷新提供商配置', exact: true }).click();
   await page.waitForTimeout(100);
   await app!.evaluate(

@@ -3,6 +3,19 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
+async function openDraftTools(page: import('playwright').Page) {
+  await openSessionTools(page);
+  const details = page.locator('#native-session-tools details').filter({
+    has: page.locator('summary', { hasText: '目录与已保存草稿' }),
+  });
+  if ((await details.getAttribute('open')) === null) await details.locator('summary').click();
+}
+
 const [
   outdir,
   root,
@@ -28,7 +41,8 @@ async function launch() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openDraftTools(page);
   return { app, page };
 }
 function servicePid(app: Awaited<ReturnType<typeof _electron.launch>>) {
@@ -64,7 +78,8 @@ try {
   assert.equal(await page.getByRole('textbox').first().inputValue(), text);
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   assert.equal(await page.getByRole('textbox').first().inputValue(), text);
   assert.equal(await (await fetch(`${control}/count`)).text(), '0');
   const rejected = await page.evaluate(async (storeId) => {
@@ -83,7 +98,8 @@ try {
   assert.equal((rejected as { phase: string }).phase, 'rejected');
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   assert.equal(await page.getByRole('textbox').first().inputValue(), text);
   // Test-only Inspector instrumentation sends the real POST over Node's actual TCP socket.
   // After Service response headers (the transaction is committed), destroy that socket before
@@ -106,12 +122,14 @@ try {
       });
     };
   })()`);
-  const create = page.getByRole('button', { name: '新建会话', exact: true });
+  const create = page.getByRole('button', { name: '在 Native fixture 中新建对话', exact: true });
   await create.focus();
   await create.press('Enter');
+  await openDraftTools(page);
   await page.getByRole('button', { name: '核实原创建命令', exact: true }).waitFor();
   assert.equal(await app.evaluate('globalThis.__creationPosts'), 1);
   await page.reload();
+  await openDraftTools(page);
   await page.getByRole('button', { name: '核实原创建命令', exact: true }).waitFor();
   assert.equal(await app.evaluate('globalThis.__creationPosts'), 1);
   const originalIntent = await page

@@ -154,6 +154,9 @@ void app
       title: 'kite',
       width: 1100,
       height: 780,
+      ...(process.platform === 'darwin'
+        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 13, y: 19 } }
+        : {}),
       show: false,
       webPreferences: {
         preload: join(app.getAppPath(), 'preload.cjs'),

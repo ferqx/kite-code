@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { checkUnifiedAgentBoundary } from '../../../scripts/check-unified-agent-boundary';
@@ -309,6 +309,106 @@ test('conditional public exports inspect actual runtime branch as well as type b
   ).toBe(true);
 });
 
+test('declared existing stylesheet exports are assets and do not hide source dependencies', () => {
+  const root = fixture({
+    'apps/desktop/src/index.ts':
+      'import "@kite-ai/ui/desktop/style.css"; export { Page } from "@kite-ai/ui";',
+    'packages/ui/src/index.ts': 'export const Page = true;',
+    'packages/ui/src/desktop/style.css': '.page { color: black; }',
+    'packages/ui/private/control.ts': 'import fs from "node:fs";',
+    'packages/ui/package.json': JSON.stringify({
+      name: '@kite-ai/ui',
+      exports: { '.': './src/index.ts', './desktop/style.css': './src/desktop/style.css' },
+    }),
+  });
+  expect(checkUnifiedAgentBoundary(root).violations).toEqual([]);
+  writeFileSync(resolve(root, 'packages/ui/src/index.ts'), 'import fs from "node:fs";');
+  expect(
+    checkUnifiedAgentBoundary(root).violations.some(
+      (v) => v.file === 'packages/ui/src/index.ts' && v.rule === 'portable-dependency',
+    ),
+  ).toBe(true);
+  writeFileSync(resolve(root, 'packages/ui/src/index.ts'), 'export const Page = true;');
+  writeFileSync(
+    resolve(root, 'packages/ui/package.json'),
+    JSON.stringify({
+      name: '@kite-ai/ui',
+      exports: { '.': './src/index.ts', './desktop/style.css': './private/control.ts' },
+    }),
+  );
+  expect(
+    checkUnifiedAgentBoundary(root).violations.some(
+      (v) => v.file === 'packages/ui/private/control.ts' && v.rule === 'portable-dependency',
+    ),
+  ).toBe(true);
+});
+
+test('stylesheet exports still require the exact declaration and a real repository asset', () => {
+  for (const target of [undefined, './src/missing.css', '../../outside.css', './src/picture.png']) {
+    const root = fixture({
+      'apps/desktop/src/index.ts': 'import "@kite-ai/ui/desktop/style.css";',
+      'packages/ui/package.json': JSON.stringify({
+        name: '@kite-ai/ui',
+        exports: target ? { './desktop/style.css': target } : {},
+      }),
+      'packages/ui/src/missing.css.ts': 'export {};',
+      'packages/ui/src/picture.png': 'asset',
+      'outside.css': '.page { color: black; }',
+    });
+    expect(
+      checkUnifiedAgentBoundary(root).violations.some(
+        (v) => v.rule === 'target-unresolved-workspace-export',
+      ),
+    ).toBe(true);
+  }
+  const directory = fixture({
+    'apps/desktop/src/index.ts': 'import "@kite-ai/ui/desktop/style.css";',
+    'packages/ui/package.json': JSON.stringify({
+      name: '@kite-ai/ui',
+      exports: { './desktop/style.css': './src/style.css' },
+    }),
+    'packages/ui/src/style.css/placeholder': 'directory is not an asset',
+  });
+  expect(
+    checkUnifiedAgentBoundary(directory).violations.some(
+      (v) => v.rule === 'target-unresolved-workspace-export',
+    ),
+  ).toBe(true);
+  const outside = fixture({ 'style.css': '.page { color: black; }' });
+  const root = fixture({
+    'apps/desktop/src/index.ts': 'import "@kite-ai/ui/desktop/style.css";',
+    'packages/ui/package.json': JSON.stringify({
+      name: '@kite-ai/ui',
+      exports: { './desktop/style.css': './src/style.css' },
+    }),
+    'packages/ui/src/index.ts': 'export {};',
+  });
+  symlinkSync(resolve(outside, 'style.css'), resolve(root, 'packages/ui/src/style.css'));
+  expect(
+    checkUnifiedAgentBoundary(root).violations.some(
+      (v) => v.rule === 'target-unresolved-workspace-export',
+    ),
+  ).toBe(true);
+  const legacyRoot = fixture({
+    'apps/desktop/src/index.ts': 'import "@kite-ai/ui/desktop/style.css";',
+    'packages/ui/package.json': JSON.stringify({
+      name: '@kite-ai/ui',
+      exports: { './desktop/style.css': './src/style.css' },
+    }),
+    'packages/ui/src/index.ts': 'export {};',
+    'packages/kite-client-ui/src/style.css': '.page { color: black; }',
+  });
+  symlinkSync(
+    resolve(legacyRoot, 'packages/kite-client-ui/src/style.css'),
+    resolve(legacyRoot, 'packages/ui/src/style.css'),
+  );
+  expect(
+    checkUnifiedAgentBoundary(legacyRoot).violations.some(
+      (v) => v.rule === 'target-no-legacy-engine',
+    ),
+  ).toBe(true);
+});
+
 test('standard and Native fixed frontdoors plus caller-supplied build roots cannot hide a legacy barrel', () => {
   for (const entry of [
     'standard-cli',
@@ -332,6 +432,34 @@ test('standard and Native fixed frontdoors plus caller-supplied build roots cann
   });
   expect(
     checkUnifiedAgentBoundary(root, ['scripts/build-custom.ts']).violations.some(
+      (v) => v.rule === 'target-no-legacy-engine',
+    ),
+  ).toBe(true);
+});
+
+test('an explicit UI builder owns IO while UI source cannot import its IO or a legacy builder', () => {
+  const root = fixture({
+    'packages/ui/src/index.ts': 'export const Page = true;',
+    'packages/ui/scripts/build-desktop.ts':
+      'import fs from "node:fs/promises"; import path from "node:path";',
+  });
+  const entrypoints = ['packages/ui/scripts/build-desktop.ts'];
+  expect(checkUnifiedAgentBoundary(root, entrypoints).violations).toEqual([]);
+  writeFileSync(
+    resolve(root, 'packages/ui/src/index.ts'),
+    'export * from "../scripts/build-desktop";',
+  );
+  expect(
+    checkUnifiedAgentBoundary(root, entrypoints).violations.filter(
+      (v) => v.rule === 'portable-dependency',
+    ),
+  ).toHaveLength(2);
+  writeFileSync(
+    resolve(root, 'packages/ui/scripts/build-desktop.ts'),
+    'export * from "@kite-ai/kite-client-ui";',
+  );
+  expect(
+    checkUnifiedAgentBoundary(root, entrypoints).violations.some(
       (v) => v.rule === 'target-no-legacy-engine',
     ),
   ).toBe(true);

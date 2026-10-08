@@ -4,6 +4,11 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, dataRoot, storeId, endpoint, electronExecutable, control, bunExecutable] =
   process.argv.slice(2) as [string, string, string, string, string, string, string, string];
 const application = await _electron.launch({
@@ -55,9 +60,11 @@ try {
   await panel.getByRole('radio', { name: 'Full', exact: true }).check();
   await panel.getByRole('button', { name: '保存模式选择' }).press('Enter');
   await page.getByRole('button', { name: '查询原权限选择', exact: true }).waitFor();
+  await openSessionTools(page);
   assert.equal(await application.evaluate('globalThis.__permissionPosts'), 1);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await openSessionTools(page);
   await page.getByRole('button', { name: '查询原权限选择', exact: true }).press('Enter');
   await page
     .getByRole('button', { name: '查询原权限选择', exact: true })

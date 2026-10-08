@@ -5,6 +5,23 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeMcpSubmission, NativeState } from '../src/native-bridge';
 
+async function openSettings(page: import('playwright').Page) {
+  if (!(await page.locator('.desktop-settings-dialog').isVisible()))
+    await page
+      .locator('.session-header')
+      .getByRole('button', { name: '设置', exact: true })
+      .click();
+}
+async function closeSettings(page: import('playwright').Page) {
+  if (await page.locator('.desktop-settings-dialog').isVisible())
+    await page.getByRole('button', { name: '返回应用', exact: true }).click();
+}
+
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 type Physical = { path: string; method: string };
 type Globals = typeof globalThis & { mcpBrowserPhysical: Physical[] };
 const [candidate, home, control, storeId, serverId] = process.argv.slice(2) as string[];
@@ -28,6 +45,7 @@ async function launch() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'MCP Browser', exact: true }).waitFor();
+  await openSessionTools(page);
   servicePid = Number(
     String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
       .trim()
@@ -56,6 +74,7 @@ async function launch() {
       { preconnect: original.preconnect },
     );
   });
+  await closeSettings(page);
   await page.getByRole('button', { name: 'MCP Browser', exact: true }).click();
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
@@ -90,6 +109,7 @@ try {
     );
   const panel = () => page.getByRole('region', { name: 'MCP settings', exact: true });
   async function settings() {
+    await openSettings(page);
     await page.getByRole('button', { name: 'MCP', exact: true }).click();
     await panel().getByRole('heading', { name: 'Safe directory', exact: true }).waitFor();
   }

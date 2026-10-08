@@ -4,6 +4,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const { _electron } = createRequire(process.argv[11]!)('playwright') as typeof import('playwright');
 
 const [outdir, root, electronExecutable, runId, cardId, revision, kind, ledger, workspace] =
@@ -27,7 +32,8 @@ async function launch() {
       exact: true,
     })
     .click();
-  await page.getByRole('heading', { name: 'Explicit recovery', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Explicit recovery', { exact: true }).waitFor();
+  await openSessionTools(page);
   return { app, page };
 }
 async function quit(app: Awaited<ReturnType<typeof _electron.launch>>) {

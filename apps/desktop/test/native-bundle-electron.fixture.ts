@@ -5,6 +5,11 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [candidate, home, control, storeId] = process.argv.slice(2) as [
   string,
   string,
@@ -27,8 +32,33 @@ async function launch() {
   page.on('pageerror', (error) => console.error('native_bundle_renderer_error', error.message));
   console.log('native_driver_stage: window');
   page.setDefaultTimeout(10000);
-  await page.getByRole('button', { name: 'Native bundled', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native bundled', exact: true }).waitFor();
+  await page
+    .getByRole('button', { name: 'Native bundled', exact: true })
+    .and(page.locator('button.session-row'))
+    .click();
+  await page.locator('.session-header').getByTitle('Native bundled', { exact: true }).waitFor();
+  await openSessionTools(page);
+  const layout = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const shell = document.querySelector('.kite-client.shell')!;
+    const composer = document.querySelector('.composer')!;
+    const shellBounds = shell.getBoundingClientRect(),
+      inputBounds = composer.getBoundingClientRect();
+    return {
+      height: shellBounds.height,
+      inputVisible:
+        inputBounds.width > 0 && inputBounds.height > 0 && inputBounds.bottom <= innerHeight,
+      stylesheet: [...document.styleSheets].some((sheet) => sheet.href?.startsWith('file:')),
+      nativeBridge: !!window.kiteNative,
+      legacyBridge: 'kiteDesktop' in window,
+    };
+  });
+  assert.ok(layout.height >= 700);
+  assert.equal(layout.inputVisible, true);
+  assert.equal(layout.stylesheet, true);
+  assert.equal(layout.nativeBridge, true);
+  assert.equal(layout.legacyBridge, false);
+  console.log('native_driver_stage: retained desktop layout, compiled CSS/fonts, current bridge');
   console.log('native_driver_stage: selection');
   const state = await page.evaluate(
     async () =>
@@ -87,7 +117,9 @@ try {
     document.addEventListener(
       'submit',
       (event) => {
-        if ((event.target as HTMLFormElement).textContent?.includes('当前会话私有草稿'))
+        if (
+          (event.target as HTMLFormElement).querySelector('textarea[aria-label="当前会话私有草稿"]')
+        )
           events.push({ type: event.type, focused: document.hasFocus() });
       },
       { capture: true },

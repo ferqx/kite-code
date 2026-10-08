@@ -10,13 +10,20 @@ import {
   type QuestionAnswerDraft,
   questionDraftKey,
 } from '@kite-ai/ui';
+import {
+  Button as DesktopButton,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  SessionPage,
+} from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
 import { NativeBackgroundPanel } from './native-background-panel';
 import type { NativeDraft, NativeGrantFacts, NativeResult, NativeState } from './native-bridge';
 import { NativeCallerView } from './native-caller';
 import { NativeContextView } from './native-context';
-import { NativeDirectory } from './native-directory';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
@@ -27,14 +34,19 @@ import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
 import { type NativeModelChoice, NativeModelPicker } from './native-model-picker';
 import { NativeModelSettings } from './native-model-settings';
+import { desktopDirectory, desktopMessages } from './native-presentation';
 import { NativeProviderSettings } from './native-provider-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
+import { useNativeTheme } from './native-theme';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
 export function NativeDesktop() {
   const bridge = window.kiteNative;
+  const theme = useNativeTheme();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [state, setState] = useState<NativeState>();
   const [directory, setDirectory] = useState<{
     storeId: string;
@@ -398,125 +410,143 @@ export function NativeDesktop() {
         await select(sessionId);
     });
   }
-  return (
-    <main style={{ padding: 24, maxWidth: 1100, margin: 'auto', fontFamily: 'system-ui' }}>
-      <h1>kite</h1>
-      <p>原生调用者迁移切片。完整设置、资料与发行能力仍在迁移中。</p>
-      {generation.current > 0 && (
-        <section aria-label="设置">
-          <nav aria-label="设置分类">
-            <button
-              type="button"
-              aria-pressed={settingsPage === 'providers'}
-              onClick={() => setSettingsPage('providers')}
-            >
-              提供商
-            </button>
-            <button
-              type="button"
-              aria-pressed={settingsPage === 'models'}
-              onClick={() => setSettingsPage('models')}
-            >
-              模型
-            </button>
-            <button
-              type="button"
-              aria-pressed={settingsPage === 'mcp'}
-              onClick={() => setSettingsPage('mcp')}
-            >
-              MCP
-            </button>
-            <button
-              type="button"
-              aria-pressed={settingsPage === 'skills'}
-              onClick={() => setSettingsPage('skills')}
-            >
-              Skills
-            </button>
-          </nav>
-          {settingsPage === 'skills' ? (
-            <NativeSkillsSettings
-              bridge={bridge}
-              generation={generation.current}
-              selection={selection}
-              historyEpoch={state?.historyEpoch ?? 0}
+  function sendInput() {
+    if (!bridge || !selection) return;
+    void write(async () => {
+      const current = state?.generation ?? 0,
+        nonce = viewIntent.current,
+        sessionId = selection.session.id,
+        commandId = crypto.randomUUID(),
+        submittedText = draft,
+        submittedRevision = draftRevision.current;
+      const intent = nativeTextIntent(
+        selection,
+        commandId,
+        draft,
+        planMode,
+        resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice : undefined,
+      );
+      if (intent.kind !== 'input.steer' && !nextModelReady)
+        throw Error('model_selection_unavailable');
+      const value = await bridge.request({
+        method: 'submit',
+        generation: current,
+        sessionId,
+        intent,
+      });
+      if (
+        nonce === viewIntent.current &&
+        current === generation.current &&
+        draftRevision.current === submittedRevision &&
+        value &&
+        'phase' in value &&
+        !['unknown', 'failed', 'rejected'].includes(value.phase)
+      ) {
+        setDraft((current) => (current === submittedText ? '' : current));
+        setPlanMode(false);
+        planModes.current.delete(
+          JSON.stringify([selection.storeId, selection.session.workspaceId, sessionId]),
+        );
+      }
+    });
+  }
+  const hasPendingInteraction = selection?.interactions.some(
+    (card) =>
+      ['approval', 'question', 'plan_review'].includes(card.kind) && card.state === 'pending',
+  );
+  const canCompose = !!selection && !selection.session.parentSessionId && !hasPendingInteraction;
+  const messageModels = desktopMessages(messages);
+  const messagesById = new Map(messages.map((message) => [message.id, message]));
+  const interactionCards =
+    selection && state ? (
+      <>
+        {selection.interactions.map((interaction) => {
+          const draftKey = questionDraftKey(interaction);
+          const saved = state?.answerSubmissions?.find(
+            (row) =>
+              row.scope.storeId === interaction.originStoreId &&
+              row.scope.sessionId === interaction.presentationSessionId &&
+              row.interaction.id === interaction.id &&
+              row.interaction.revision === interaction.revision,
+          );
+          const currentSubmission = state?.interactionSubmissions.find(
+            (row) => questionDraftKey(row.interaction) === draftKey,
+          );
+          return (
+            <InteractionCard
+              key={draftKey}
+              interaction={interaction}
+              onReadAttachment={attachmentReader}
+              submission={
+                saved
+                  ? { phase: saved.phase, commandId: saved.request.commandId }
+                  : currentSubmission
+                    ? {
+                        phase: currentSubmission.phase,
+                        commandId: currentSubmission.intent.commandId,
+                        error: currentSubmission.error,
+                      }
+                    : undefined
+              }
+              initialQuestionDraft={questionDrafts.current.get(draftKey)?.draft}
+              onQuestionDraftChange={(draft) =>
+                questionDrafts.current.set(draftKey, {
+                  storeId: interaction.originStoreId,
+                  sourceSessionId: interaction.sessionId,
+                  presentationSessionId: interaction.presentationSessionId,
+                  cardId: interaction.id,
+                  draft,
+                })
+              }
+              initialPlanDraft={planDrafts.current.get(draftKey)?.draft}
+              onPlanDraftChange={(draft) =>
+                planDrafts.current.set(draftKey, {
+                  storeId: interaction.originStoreId,
+                  sourceSessionId: interaction.sessionId,
+                  presentationSessionId: interaction.presentationSessionId,
+                  cardId: interaction.id,
+                  runId: interaction.runId,
+                  draft,
+                })
+              }
+              onAnswer={async (_card, answer) => {
+                await bridge.request({
+                  method: 'interaction.answer',
+                  generation: generation.current,
+                  interactionId: interaction.id,
+                  revision: interaction.revision,
+                  answer,
+                });
+                await refresh();
+              }}
             />
-          ) : settingsPage === 'mcp' ? (
-            <NativeMcpSettings
-              bridge={bridge}
-              generation={generation.current}
-              selection={selection}
-              submissions={state?.mcpSubmissions ?? []}
-            />
-          ) : settingsPage === 'providers' ? (
-            <NativeProviderSettings
-              bridge={bridge}
-              generation={generation.current}
-              selection={selection}
-              submissions={state?.providerSettingsSubmissions ?? []}
-              onSaved={() => setSettingsRevision((value) => value + 1)}
-            />
-          ) : (
-            <NativeModelSettings
-              bridge={bridge}
-              generation={generation.current}
-              selection={selection}
-              submissions={state?.modelSettingsSubmissions ?? []}
-              onSaved={() => setSettingsRevision((value) => value + 1)}
-            />
-          )}
-        </section>
-      )}
-      {error && <p role="alert">{error}</p>}
-      <section aria-label="工作区与会话">
-        <h2>已读取的工作区与会话</h2>
-        <button
-          type="button"
-          onClick={() =>
-            void write(async () => {
-              await bridge.request({ method: 'workspace.pick', generation: generation.current });
-              await readDirectory();
-            })
-          }
-        >
-          选择本地项目
-        </button>
-        <button type="button" onClick={() => void report(readDirectory)}>
-          重新读取目录
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            void report(async () => {
-              const value = await bridge.request({
-                method: 'draft.list',
-                generation: generation.current,
-              });
-              if (value && 'drafts' in value) setSavedDrafts(value);
-            })
-          }
-        >
-          读取已保存草稿
-        </button>
-        {savedDrafts?.drafts.map((saved) => (
+          );
+        })}
+      </>
+    ) : undefined;
+  const sessionTools = (
+    <section id="native-session-tools" aria-label="会话与任务">
+      <header>
+        <h2>会话与任务</h2>
+      </header>
+      <details>
+        <summary>目录与已保存草稿</summary>
+        <section aria-label="工作区与会话">
+          <h2>已读取的工作区与会话</h2>
           <button
             type="button"
-            key={saved.id}
             onClick={() =>
-              void report(async () => {
-                const value = await bridge.request({
-                  method: 'draft.original',
-                  generation: generation.current,
-                  draftId: saved.id,
-                });
-                if (value && 'content' in value) setOriginalDraft(value);
+              void write(async () => {
+                await bridge.request({ method: 'workspace.pick', generation: generation.current });
+                await readDirectory();
               })
             }
           >
-            草稿 {saved.rootSessionId} · 修订 {saved.revision}
+            选择本地项目
           </button>
-        ))}
-        {savedDrafts?.nextId && (
+          <button type="button" onClick={() => void report(readDirectory)}>
+            重新读取目录
+          </button>
           <button
             type="button"
             onClick={() =>
@@ -524,82 +554,105 @@ export function NativeDesktop() {
                 const value = await bridge.request({
                   method: 'draft.list',
                   generation: generation.current,
-                  afterId: savedDrafts.nextId!,
                 });
                 if (value && 'drafts' in value) setSavedDrafts(value);
               })
             }
           >
-            下一页草稿
+            读取已保存草稿
           </button>
-        )}
-        {originalDraft && (
-          <section aria-label="原关联草稿">
-            <p>
-              {originalDraft.association === 'current'
-                ? '原关联仍有效；此处仅阅读已保存文本。'
-                : '原关联不可用，文本已保留，没有绑定当前会话。'}
-            </p>
-            <p>
-              原会话 {originalDraft.rootSessionId} · 修订 {originalDraft.revision}
-            </p>
-            <textarea aria-label="保留的原关联草稿" value={originalDraft.content} readOnly />
-            <button type="button" onClick={() => setOriginalDraft(undefined)}>
-              关闭草稿阅读
+          {savedDrafts?.drafts.map((saved) => (
+            <button
+              type="button"
+              key={saved.id}
+              onClick={() =>
+                void report(async () => {
+                  const value = await bridge.request({
+                    method: 'draft.original',
+                    generation: generation.current,
+                    draftId: saved.id,
+                  });
+                  if (value && 'content' in value) setOriginalDraft(value);
+                })
+              }
+            >
+              草稿 {saved.rootSessionId} · 修订 {saved.revision}
             </button>
-          </section>
-        )}
-        {state?.creationSubmissions.map((submission) => (
-          <section key={submission.input.commandId} aria-label="会话创建意图">
-            <p>
-              原会话 {submission.input.sessionId} · 创建
-              {submission.phase === 'pending'
-                ? '正在提交'
-                : submission.phase === 'unknown'
-                  ? '结果待核实'
-                  : submission.phase === 'created'
-                    ? '已确认'
-                    : '被拒绝'}
-            </p>
-            <p>
-              原创建命令 {submission.input.commandId} · 原工作区 {submission.input.workspaceId}
-            </p>
-            <p>{submission.code}</p>
-            {(submission.phase === 'unknown' || submission.phase === 'pending') && (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
-                  void write(async () => {
-                    await bridge.request({
-                      method: 'lookupCreation',
-                      generation: generation.current,
-                      commandId: submission.input.commandId,
-                    });
-                    apply(
-                      await bridge.request({ method: 'state', generation: generation.current }),
-                    );
-                    await readDirectory();
-                  })
-                }
-              >
-                核实原创建命令
+          ))}
+          {savedDrafts?.nextId && (
+            <button
+              type="button"
+              onClick={() =>
+                void report(async () => {
+                  const value = await bridge.request({
+                    method: 'draft.list',
+                    generation: generation.current,
+                    afterId: savedDrafts.nextId!,
+                  });
+                  if (value && 'drafts' in value) setSavedDrafts(value);
+                })
+              }
+            >
+              下一页草稿
+            </button>
+          )}
+          {originalDraft && (
+            <section aria-label="原关联草稿">
+              <p>
+                {originalDraft.association === 'current'
+                  ? '原关联仍有效；此处仅阅读已保存文本。'
+                  : '原关联不可用，文本已保留，没有绑定当前会话。'}
+              </p>
+              <p>
+                原会话 {originalDraft.rootSessionId} · 修订 {originalDraft.revision}
+              </p>
+              <textarea aria-label="保留的原关联草稿" value={originalDraft.content} readOnly />
+              <button type="button" onClick={() => setOriginalDraft(undefined)}>
+                关闭草稿阅读
               </button>
-            )}
-          </section>
-        ))}
-        {directory && (
-          <NativeDirectory
-            key={directory.storeId}
-            workspaces={directory.workspaces}
-            sessions={directory.sessions}
-            selectedId={selection?.storeId === directory.storeId ? selection.session.id : undefined}
-            creating={pending}
-            onCreate={(workspaceId) => void createSession(workspaceId)}
-            onSelect={(sessionId) => void report(() => select(sessionId))}
-          />
-        )}
-      </section>
+            </section>
+          )}
+          {state?.creationSubmissions.map((submission) => (
+            <section key={submission.input.commandId} aria-label="会话创建意图">
+              <p>
+                原会话 {submission.input.sessionId} · 创建
+                {submission.phase === 'pending'
+                  ? '正在提交'
+                  : submission.phase === 'unknown'
+                    ? '结果待核实'
+                    : submission.phase === 'created'
+                      ? '已确认'
+                      : '被拒绝'}
+              </p>
+              <p>
+                原创建命令 {submission.input.commandId} · 原工作区 {submission.input.workspaceId}
+              </p>
+              <p>{submission.code}</p>
+              {(submission.phase === 'unknown' || submission.phase === 'pending') && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    void write(async () => {
+                      await bridge.request({
+                        method: 'lookupCreation',
+                        generation: generation.current,
+                        commandId: submission.input.commandId,
+                      });
+                      apply(
+                        await bridge.request({ method: 'state', generation: generation.current }),
+                      );
+                      await readDirectory();
+                    })
+                  }
+                >
+                  核实原创建命令
+                </button>
+              )}
+            </section>
+          ))}
+        </section>
+      </details>
       {state && directory && (
         <NativeBackgroundPanel
           bridge={bridge}
@@ -610,62 +663,7 @@ export function NativeDesktop() {
         />
       )}
       {selection && state && (
-        <section aria-label="当前会话">
-          <h2>{selection.session.title}</h2>
-          {messages.map((message) => (
-            <article key={message.id}>
-              <small>
-                {message.role} · {message.seq}
-              </small>
-              <ModelOutputMessage
-                message={message}
-                storeId={selection.storeId}
-                onRead={
-                  selection.canReadModelOutput
-                    ? async ({ sessionId, executionId, signal }) => {
-                        const current = state?.generation ?? 0,
-                          nonce = viewIntent.current;
-                        return readNativeModelOutput({
-                          bridge,
-                          generation: current,
-                          expectedStoreId: selection.storeId,
-                          sessionId,
-                          viewSessionId: selection.session.id,
-                          messageId: message.id,
-                          executionId,
-                          signal,
-                          isCurrent: () =>
-                            generation.current === current &&
-                            viewIntent.current === nonce &&
-                            selected.current === selection.session.id,
-                        });
-                      }
-                    : undefined
-                }
-              />
-            </article>
-          ))}
-          <p role="status">
-            {historyState.phase === 'complete'
-              ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
-              : historyState.phase === 'loading'
-                ? '正在完整校准历史；已有正文仍可阅读。'
-                : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
-          </p>
-          {historyState.phase === 'unavailable' && (
-            <button type="button" onClick={() => void report(refresh)}>
-              重新加载会话
-            </button>
-          )}
-          {selection.runs.map((run) => (
-            <p key={run.id}>轮次：{run.status}</p>
-          ))}
-          <p role="status" aria-label="当前会话后台状态">
-            后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
-            {selection.viewLoading || selection.permissionUnavailable || state.backgroundUnavailable
-              ? ' · 上次确认状态'
-              : ''}
-          </p>
+        <section aria-label="当前会话详情">
           {modelInputPort && (
             <ModelInputs
               key={`${state.generation}/${selection.storeId}/${selection.session.id}/${modelInputTarget?.revision ?? 0}`}
@@ -763,221 +761,7 @@ export function NativeDesktop() {
               </details>
             ))}
           </section>
-          {!selection.session.parentSessionId &&
-            !selection.interactions.some(
-              (card) =>
-                ['approval', 'question', 'plan_review'].includes(card.kind) &&
-                card.state === 'pending',
-            ) && (
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void write(async () => {
-                    const current = state?.generation ?? 0,
-                      nonce = viewIntent.current,
-                      sessionId = selection.session.id,
-                      commandId = crypto.randomUUID(),
-                      submittedText = draft,
-                      submittedRevision = draftRevision.current;
-                    const intent = nativeTextIntent(
-                      selection,
-                      commandId,
-                      draft,
-                      planMode,
-                      resolvedChoice?.identity === choiceIdentity
-                        ? resolvedChoice.choice
-                        : undefined,
-                    );
-                    if (intent.kind !== 'input.steer' && !nextModelReady)
-                      throw Error('model_selection_unavailable');
-                    const value = await bridge.request({
-                      method: 'submit',
-                      generation: current,
-                      sessionId,
-                      intent,
-                    });
-                    if (
-                      nonce === viewIntent.current &&
-                      current === generation.current &&
-                      draftRevision.current === submittedRevision &&
-                      value &&
-                      'phase' in value &&
-                      !['unknown', 'failed', 'rejected'].includes(value.phase)
-                    ) {
-                      setDraft((current) => (current === submittedText ? '' : current));
-                      setPlanMode(false);
-                      planModes.current.delete(
-                        JSON.stringify([
-                          selection.storeId,
-                          selection.session.workspaceId,
-                          sessionId,
-                        ]),
-                      );
-                    }
-                  });
-                }}
-              >
-                <NativeModelPicker
-                  bridge={bridge}
-                  generation={state.generation}
-                  selection={selection}
-                  revision={String(settingsRevision)}
-                  value={modelChoices.current.get(choiceKey) ?? {}}
-                  onChange={(choice) => {
-                    modelChoices.current.set(choiceKey, choice);
-                    choiceChanged((value) => value + 1);
-                  }}
-                  onReady={(ready, choice) =>
-                    setResolvedChoice((previous) => {
-                      const value = { identity: choiceIdentity, choice, ready };
-                      return JSON.stringify(previous) === JSON.stringify(value) ? previous : value;
-                    })
-                  }
-                />
-                <label>
-                  当前会话私有草稿
-                  <textarea
-                    value={draft}
-                    disabled={pending}
-                    onChange={(event) => setDraft(event.target.value)}
-                  />
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    aria-label="先审核计划"
-                    checked={planMode}
-                    disabled={pending}
-                    onChange={(event) => {
-                      setPlanMode(event.target.checked);
-                      planModes.current.set(
-                        JSON.stringify([
-                          selection.storeId,
-                          selection.session.workspaceId,
-                          selection.session.id,
-                        ]),
-                        event.target.checked,
-                      );
-                    }}
-                  />
-                  先审核计划
-                </label>
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() =>
-                    void write(async () => {
-                      const original = {
-                        generation: generation.current,
-                        view: viewIntent.current,
-                        sessionId: selection.session.id,
-                      };
-                      const saved = await bridge.request({
-                        method: 'draft.write',
-                        generation: original.generation,
-                        sessionId: original.sessionId,
-                        revision: draftRevision.current,
-                        content: draft,
-                      });
-                      if (
-                        saved &&
-                        'content' in saved &&
-                        generation.current === original.generation &&
-                        viewIntent.current === original.view &&
-                        selected.current === original.sessionId
-                      )
-                        draftRevision.current = saved.revision;
-                    })
-                  }
-                >
-                  保留草稿
-                </button>
-                <button
-                  type="submit"
-                  disabled={
-                    pending ||
-                    !draft.trim() ||
-                    historyState.phase !== 'complete' ||
-                    selection.permissionUnavailable ||
-                    (needsNextModel && !nextModelReady)
-                  }
-                >
-                  {selection.runs.some((run) => run.isActive)
-                    ? planMode
-                      ? '排队新的计划任务'
-                      : ['context.compress', 'context.compression.reset'].includes(
-                            selection.activeCommand?.kind ?? '',
-                          )
-                        ? '排队压缩后的输入'
-                        : '引导当前轮次'
-                    : planMode
-                      ? '发送计划任务'
-                      : '发送明确的新轮次'}
-                </button>
-              </form>
-            )}
-          {selection.interactions.map((interaction) => {
-            const draftKey = questionDraftKey(interaction);
-            const saved = state?.answerSubmissions?.find(
-              (row) =>
-                row.scope.storeId === interaction.originStoreId &&
-                row.scope.sessionId === interaction.presentationSessionId &&
-                row.interaction.id === interaction.id &&
-                row.interaction.revision === interaction.revision,
-            );
-            const currentSubmission = state?.interactionSubmissions.find(
-              (row) => questionDraftKey(row.interaction) === draftKey,
-            );
-            return (
-              <InteractionCard
-                key={draftKey}
-                interaction={interaction}
-                onReadAttachment={attachmentReader}
-                submission={
-                  saved
-                    ? { phase: saved.phase, commandId: saved.request.commandId }
-                    : currentSubmission
-                      ? {
-                          phase: currentSubmission.phase,
-                          commandId: currentSubmission.intent.commandId,
-                          error: currentSubmission.error,
-                        }
-                      : undefined
-                }
-                initialQuestionDraft={questionDrafts.current.get(draftKey)?.draft}
-                onQuestionDraftChange={(draft) =>
-                  questionDrafts.current.set(draftKey, {
-                    storeId: interaction.originStoreId,
-                    sourceSessionId: interaction.sessionId,
-                    presentationSessionId: interaction.presentationSessionId,
-                    cardId: interaction.id,
-                    draft,
-                  })
-                }
-                initialPlanDraft={planDrafts.current.get(draftKey)?.draft}
-                onPlanDraftChange={(draft) =>
-                  planDrafts.current.set(draftKey, {
-                    storeId: interaction.originStoreId,
-                    sourceSessionId: interaction.sessionId,
-                    presentationSessionId: interaction.presentationSessionId,
-                    cardId: interaction.id,
-                    runId: interaction.runId,
-                    draft,
-                  })
-                }
-                onAnswer={async (_card, answer) => {
-                  await bridge.request({
-                    method: 'interaction.answer',
-                    generation: generation.current,
-                    interactionId: interaction.id,
-                    revision: interaction.revision,
-                    answer,
-                  });
-                  await refresh();
-                }}
-              />
-            );
-          })}
+          {!hasPendingInteraction && interactionCards}
           {selection.interactionsAfterId !== null && (
             <button
               type="button"
@@ -1341,8 +1125,320 @@ export function NativeDesktop() {
         }}
         onSelect={select}
       />
-    </main>
+    </section>
+  );
+  return (
+    <SessionPage
+      key={directory?.storeId ?? 'connecting'}
+      workspaces={directory ? desktopDirectory(directory, selection) : []}
+      selected={selection?.storeId === directory?.storeId ? selection?.session.id : undefined}
+      sessionLabel={selection?.session.title ?? 'kite'}
+      readingKey={JSON.stringify([selection?.storeId, selection?.session.id])}
+      messages={messageModels}
+      renderMessage={(model) => {
+        const message = messagesById.get(model.id);
+        if (!message || !selection || !state) return null;
+        return (
+          <ModelOutputMessage
+            message={message}
+            storeId={selection.storeId}
+            onRead={
+              selection.canReadModelOutput
+                ? async ({ sessionId, executionId, signal }) => {
+                    const current = state.generation,
+                      nonce = viewIntent.current;
+                    return readNativeModelOutput({
+                      bridge,
+                      generation: current,
+                      expectedStoreId: selection.storeId,
+                      sessionId,
+                      viewSessionId: selection.session.id,
+                      messageId: message.id,
+                      executionId,
+                      signal,
+                      isCurrent: () =>
+                        generation.current === current &&
+                        viewIntent.current === nonce &&
+                        selected.current === selection.session.id,
+                    });
+                  }
+                : undefined
+            }
+          />
+        );
+      }}
+      loading={!!selection && historyState.phase === 'loading'}
+      connected={generation.current > 0}
+      connectionLabel={generation.current > 0 ? '本地 Agent' : '正在连接'}
+      mutationBusy={pending}
+      defaultExpanded
+      actions={{
+        newSession: selection ? () => void createSession(selection.session.workspaceId) : undefined,
+        newWorkspaceSession: (workspaceId) => void createSession(workspaceId),
+        addWorkspace: () =>
+          void write(async () => {
+            await bridge.request({ method: 'workspace.pick', generation: generation.current });
+            await readDirectory();
+          }),
+        settings: () => setSettingsOpen(true),
+        theme,
+        connection: { label: '重新读取目录', run: () => void report(readDirectory) },
+      }}
+      onOpen={(sessionId) => void report(() => select(sessionId))}
+      headerActions={
+        <>
+          <DesktopButton
+            variant="ghost"
+            aria-expanded={toolsOpen}
+            onClick={() => setToolsOpen(!toolsOpen)}
+          >
+            会话工具
+          </DesktopButton>
+          <DesktopButton variant="ghost" onClick={() => setSettingsOpen(true)}>
+            设置
+          </DesktopButton>
+        </>
+      }
+      notices={
+        error ? (
+          <p className="notice error" role="alert">
+            {error}
+          </p>
+        ) : undefined
+      }
+      statusNotice={
+        selection && (
+          <>
+            <p role="status">
+              {historyState.phase === 'complete'
+                ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
+                : historyState.phase === 'loading'
+                  ? '正在完整校准历史；已有正文仍可阅读。'
+                  : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
+            </p>
+            {historyState.phase === 'unavailable' && (
+              <button type="button" onClick={() => void report(refresh)}>
+                重新加载会话
+              </button>
+            )}
+            {selection.runs.map((run) => (
+              <p key={run.id}>轮次：{run.status}</p>
+            ))}
+            <p role="status" aria-label="当前会话后台状态">
+              后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
+              {selection.viewLoading ||
+              selection.permissionUnavailable ||
+              state?.backgroundUnavailable
+                ? ' · 上次确认状态'
+                : ''}
+            </p>
+          </>
+        )
+      }
+      interaction={hasPendingInteraction ? interactionCards : undefined}
+      composer={
+        canCompose && selection && state
+          ? {
+              draft,
+              onChange: setDraft,
+              onSend: sendInput,
+              active: !!activeInputRun,
+              stopping: false,
+              disabled: pending,
+              sending: pending,
+              sendDisabled:
+                historyState.phase !== 'complete' ||
+                selection.permissionUnavailable ||
+                (needsNextModel && !nextModelReady),
+              inputLabel: '当前会话私有草稿',
+              sendLabel: activeInputRun
+                ? planMode
+                  ? '排队新的计划任务'
+                  : ['context.compress', 'context.compression.reset'].includes(
+                        selection.activeCommand?.kind ?? '',
+                      )
+                    ? '排队压缩后的输入'
+                    : '引导当前轮次'
+                : planMode
+                  ? '发送计划任务'
+                  : '发送明确的新轮次',
+              options: (
+                <>
+                  <NativeModelPicker
+                    bridge={bridge}
+                    generation={state.generation}
+                    selection={selection}
+                    revision={String(settingsRevision)}
+                    value={modelChoices.current.get(choiceKey) ?? {}}
+                    onChange={(choice) => {
+                      modelChoices.current.set(choiceKey, choice);
+                      choiceChanged((value) => value + 1);
+                    }}
+                    onReady={(ready, choice) =>
+                      setResolvedChoice((previous) => {
+                        const value = { identity: choiceIdentity, choice, ready };
+                        return JSON.stringify(previous) === JSON.stringify(value)
+                          ? previous
+                          : value;
+                      })
+                    }
+                  />
+                  <label>
+                    <input
+                      type="checkbox"
+                      aria-label="先审核计划"
+                      checked={planMode}
+                      disabled={pending}
+                      onChange={(event) => {
+                        setPlanMode(event.target.checked);
+                        planModes.current.set(
+                          JSON.stringify([
+                            selection.storeId,
+                            selection.session.workspaceId,
+                            selection.session.id,
+                          ]),
+                          event.target.checked,
+                        );
+                      }}
+                    />
+                    先审核计划
+                  </label>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() =>
+                      void write(async () => {
+                        const original = {
+                          generation: generation.current,
+                          view: viewIntent.current,
+                          sessionId: selection.session.id,
+                        };
+                        const saved = await bridge.request({
+                          method: 'draft.write',
+                          generation: original.generation,
+                          sessionId: original.sessionId,
+                          revision: draftRevision.current,
+                          content: draft,
+                        });
+                        if (
+                          saved &&
+                          'content' in saved &&
+                          generation.current === original.generation &&
+                          viewIntent.current === original.view &&
+                          selected.current === original.sessionId
+                        )
+                          draftRevision.current = saved.revision;
+                      })
+                    }
+                  >
+                    保留草稿
+                  </button>
+                </>
+              ),
+            }
+          : undefined
+      }
+      readOnlyReason={selection?.session.parentSessionId ? '子会话只读' : undefined}
+      detailPanel={
+        toolsOpen
+          ? { label: '会话与任务', content: sessionTools, onClose: () => setToolsOpen(false) }
+          : undefined
+      }
+      overlays={
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogContent
+            portalled={false}
+            className="desktop-settings-dialog translate-x-0 translate-y-0"
+            showCloseButton={false}
+          >
+            <DialogHeader className="desktop-settings-header">
+              <DialogTitle>设置</DialogTitle>
+              <DialogDescription className="sr-only">配置模型、提供商与扩展能力</DialogDescription>
+              <DesktopButton
+                type="button"
+                variant="ghost"
+                className="settings-back"
+                onClick={() => setSettingsOpen(false)}
+              >
+                返回应用
+              </DesktopButton>
+            </DialogHeader>
+            <div className="settings settings-layout desktop-settings">
+              <aside className="settings-sidebar">
+                <nav aria-label="设置分类">
+                  <button
+                    type="button"
+                    aria-pressed={settingsPage === 'providers'}
+                    onClick={() => setSettingsPage('providers')}
+                  >
+                    提供商
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={settingsPage === 'models'}
+                    onClick={() => setSettingsPage('models')}
+                  >
+                    模型
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={settingsPage === 'mcp'}
+                    onClick={() => setSettingsPage('mcp')}
+                  >
+                    MCP
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={settingsPage === 'skills'}
+                    onClick={() => setSettingsPage('skills')}
+                  >
+                    Skills
+                  </button>
+                </nav>{' '}
+              </aside>
+              <div className="settings-content">
+                {error && (
+                  <p className="notice error" role="alert">
+                    {error}
+                  </p>
+                )}
+
+                {settingsPage === 'skills' ? (
+                  <NativeSkillsSettings
+                    bridge={bridge}
+                    generation={generation.current}
+                    selection={selection}
+                    historyEpoch={state?.historyEpoch ?? 0}
+                  />
+                ) : settingsPage === 'mcp' ? (
+                  <NativeMcpSettings
+                    bridge={bridge}
+                    generation={generation.current}
+                    selection={selection}
+                    submissions={state?.mcpSubmissions ?? []}
+                  />
+                ) : settingsPage === 'providers' ? (
+                  <NativeProviderSettings
+                    bridge={bridge}
+                    generation={generation.current}
+                    selection={selection}
+                    submissions={state?.providerSettingsSubmissions ?? []}
+                    onSaved={() => setSettingsRevision((value) => value + 1)}
+                  />
+                ) : (
+                  <NativeModelSettings
+                    bridge={bridge}
+                    generation={generation.current}
+                    selection={selection}
+                    submissions={state?.modelSettingsSubmissions ?? []}
+                    onSaved={() => setSettingsRevision((value) => value + 1)}
+                  />
+                )}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      }
+    />
   );
 }
-if (typeof document !== 'undefined')
-  createRoot(document.getElementById('root')!).render(<NativeDesktop />);

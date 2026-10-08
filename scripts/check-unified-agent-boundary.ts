@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import ts from 'typescript';
 
@@ -81,13 +81,21 @@ function localModules(root: string, file: string, specifier: string): string[] {
       targets.flatMap((target) => {
         if (relative(root, target).startsWith('..')) return [];
         const extensionless = target.replace(/\.[cm]?js$/, '');
-        const found = [
-          target,
-          `${extensionless}.ts`,
-          `${extensionless}.tsx`,
-          resolve(target, 'index.ts'),
-          resolve(target, 'index.tsx'),
-        ].find((candidate) => existsSync(candidate) && /\.[cm]?[jt]sx?$/.test(candidate));
+        const candidates = target.endsWith('.css')
+          ? [target]
+          : [
+              target,
+              `${extensionless}.ts`,
+              `${extensionless}.tsx`,
+              resolve(target, 'index.ts'),
+              resolve(target, 'index.tsx'),
+            ];
+        const found = candidates.find(
+          (candidate) =>
+            existsSync(candidate) &&
+            statSync(candidate).isFile() &&
+            /\.(?:[cm]?[jt]sx?|css)$/.test(candidate),
+        );
         if (!found) return [];
         const actual = realpathSync(found);
         return relative(root, actual).startsWith('..') ? [] : [actual];
@@ -157,6 +165,11 @@ export function checkUnifiedAgentBoundary(
   };
   const scan = (file: string): void => {
     if (imports.has(file)) return;
+    // Stylesheets are assets; their actual build closure is checked by artifact qualification.
+    if (file.endsWith('.css')) {
+      imports.set(file, []);
+      return;
+    }
     const source = ts.createSourceFile(
       file,
       readFileSync(file, 'utf8'),
@@ -298,7 +311,7 @@ export function checkUnifiedAgentBoundary(
     else if (/^(?:tests\/|(?:packages|apps)\/[^/]+\/test\/)/.test(path))
       closure(file, 'test-consumer');
     else if (path.startsWith('packages/ai/')) closure(file, 'ai');
-    else if (/^(?:packages\/(?:client|ui)\/|apps\/(?:cli|desktop|web)\/src\/)/.test(path))
+    else if (/^(?:packages\/(?:client|ui)\/src\/|apps\/(?:cli|desktop|web)\/src\/)/.test(path))
       closure(file, 'portable');
     else closure(file, 'host');
   }

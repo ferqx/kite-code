@@ -5,6 +5,23 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
+async function openSettings(page: import('playwright').Page) {
+  if (!(await page.locator('.desktop-settings-dialog').isVisible()))
+    await page
+      .locator('.session-header')
+      .getByRole('button', { name: '设置', exact: true })
+      .click();
+}
+async function closeSettings(page: import('playwright').Page) {
+  if (await page.locator('.desktop-settings-dialog').isVisible())
+    await page.getByRole('button', { name: '返回应用', exact: true }).click();
+}
+
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 type Physical = {
   path: string;
   query: string;
@@ -37,6 +54,7 @@ async function launch() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Skills Window', exact: true }).waitFor();
+  await openSessionTools(page);
   childPid = Number(
     String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
       .trim()
@@ -117,6 +135,7 @@ try {
     assert.equal(observed.selection?.executions.length, 0);
   }
   async function trust(workspaceId: string) {
+    await closeSettings(page);
     await page
       .getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围', exact: true })
       .check();
@@ -126,6 +145,7 @@ try {
       .waitFor();
   }
   async function skills() {
+    await openSettings(page);
     await page.getByRole('button', { name: 'Skills', exact: true }).click();
   }
   async function complete(count: number) {
@@ -157,6 +177,7 @@ try {
   await panel().getByRole('alert').filter({ hasText: 'workspace_untrusted' }).waitFor();
   assert.equal(await panel().locator('li').count(), 0);
   stage('untrusted_read_rejected');
+  await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   await trust('w');
   await skills();
@@ -230,6 +251,7 @@ try {
   writeFileSync(join(workspace, 'kite-agent.jsonc'), originalProject);
   writeFileSync(join(profile, 'config.jsonc'), originalUser);
   await refresh(306);
+  await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   await select('Second Skills Window', 'w2');
   await trust('w2');
@@ -244,11 +266,13 @@ try {
     await panel().locator('summary').filter({ hasText: 'Refreshed metadata' }).count(),
     0,
   );
+  await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   await select('Skills Window', 'w');
   await skills();
   await complete(306);
   await panel().locator('summary').filter({ hasText: 'Refreshed metadata · 可用' }).waitFor();
+  await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   assert.equal(await panel().count(), 0);
   await skills();

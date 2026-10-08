@@ -6,6 +6,11 @@ import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 import { readNativeCallerRequest } from './native-caller-body.fixture';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, _dataRoot, storeId, _endpoint, electronExecutable, control, bunExecutable] =
   process.argv.slice(2) as string[];
 const launch = () =>
@@ -65,7 +70,8 @@ try {
   let page = await app.firstWindow();
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   await page.evaluate(async () => {
     const state = (await window.kiteNative!.request({
       method: 'state',
@@ -100,7 +106,9 @@ try {
     document.addEventListener(
       'submit',
       (event) => {
-        if ((event.target as HTMLFormElement).textContent?.includes('当前会话私有草稿'))
+        if (
+          (event.target as HTMLFormElement).querySelector('textarea[aria-label="当前会话私有草稿"]')
+        )
           events.push(event.type);
       },
       { capture: true },
@@ -186,7 +194,8 @@ try {
   await page.getByText('Next actual answer', { exact: false }).first().waitFor();
   eq(await count(), 3);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await openSessionTools(page);
   // The original caller intent remains queryable independently of the current view.
   await page.evaluate(async () => {
     const state = (await window.kiteNative!.request({
@@ -209,7 +218,8 @@ try {
   eq(await app.evaluate('globalThis.__compactPosts'), 1);
   await app.evaluate('globalThis.fetch=globalThis.__compactOriginal');
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   panel = page.getByRole('region', { name: '当前所选上下文' });
   await panel.getByRole('button', { name: '读取当前所选上下文' }).click();
   await panel.getByText(/活动压缩记录/).waitFor();
@@ -363,7 +373,8 @@ try {
   page = await app.firstWindow();
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   panel = page.getByRole('region', { name: '当前所选上下文' });
   await panel.getByRole('button', { name: '读取当前所选上下文' }).click();
   await panel.getByText(/活动压缩记录/).waitFor();
@@ -371,7 +382,8 @@ try {
   eq((await panel.innerText()).includes(compression.id), true);
   eq(await count(), 4);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await openSessionTools(page);
   panel = page.getByRole('region', { name: '当前所选上下文' });
   await panel.getByRole('button', { name: '读取当前所选上下文' }).click();
   await panel.getByText('无活动压缩点；重置无需请求模型。', { exact: true }).waitFor();

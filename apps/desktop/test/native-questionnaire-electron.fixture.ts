@@ -5,6 +5,11 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeDraft, NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [candidate, home, control, storeId] = process.argv.slice(2) as [
   string,
   string,
@@ -42,7 +47,8 @@ try {
         type,
         (event) => {
           const element = event.target as HTMLElement;
-          if (!element.closest('form')?.textContent?.includes('当前会话私有草稿')) return;
+          if (!element.closest('form')?.querySelector('textarea[aria-label="当前会话私有草稿"]'))
+            return;
           target.questionnaireEvents.push({
             type,
             target: element.tagName,
@@ -59,7 +65,8 @@ try {
       );
   });
   await page.getByRole('button', { name: 'Question A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Question A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Question A', { exact: true }).waitFor();
+  await openSessionTools(page);
   const state = () =>
     page.evaluate(
       async () =>

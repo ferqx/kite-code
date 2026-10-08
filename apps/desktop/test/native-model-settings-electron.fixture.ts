@@ -5,6 +5,23 @@ import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 import { readNativeCallerRequest } from './native-caller-body.fixture';
 
+async function openSettings(page: import('playwright').Page) {
+  if (!(await page.locator('.desktop-settings-dialog').isVisible()))
+    await page
+      .locator('.session-header')
+      .getByRole('button', { name: '设置', exact: true })
+      .click();
+}
+async function closeSettings(page: import('playwright').Page) {
+  if (await page.locator('.desktop-settings-dialog').isVisible())
+    await page.getByRole('button', { name: '返回应用', exact: true }).click();
+}
+
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, _dataRoot, storeId, _endpoint, electronExecutable, control, bunExecutable] =
   process.argv.slice(2) as string[];
 const launch = () =>
@@ -44,7 +61,7 @@ async function inputDiagnostics(page: import('playwright').Page, phase: string) 
   const dom = await page.evaluate(() => {
     const draft = document.querySelector('textarea');
     const button = [...document.querySelectorAll('button')].find(
-      (v) => v.textContent === '发送明确的新轮次',
+      (v) => v.getAttribute('aria-label') === '发送明确的新轮次',
     );
     return {
       focused: document.hasFocus(),
@@ -133,8 +150,10 @@ async function quitOwned() {
 try {
   let page = await app.firstWindow();
   page.setDefaultTimeout(30000);
+  await closeSettings(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   await page.evaluate(async () => {
     const initial = (await window.kiteNative!.request({
       method: 'state',
@@ -167,7 +186,7 @@ try {
         (event) => {
           if (event instanceof KeyboardEvent && event.key !== 'Enter') return;
           const button = [...document.querySelectorAll('button')].find(
-            (v) => v.textContent === '发送明确的新轮次',
+            (v) => v.getAttribute('aria-label') === '发送明确的新轮次',
           );
           events.push({
             type,
@@ -183,6 +202,7 @@ try {
       );
   });
   const draft = page.getByRole('textbox', { name: '当前会话私有草稿' });
+  await closeSettings(page);
   await draft.fill('Held original model A');
   eq(await draft.inputValue(), 'Held original model A');
   await inputDiagnostics(page, 'draft-filled');
@@ -219,14 +239,18 @@ try {
   eq('modelId' in heldRequest && heldRequest.modelId, 'A');
   const oldRun = held.selection!.runs.find((r) => r.isActive)!.id;
   eq(await count(), 1);
+  await openSettings(page);
   let panel = page.getByRole('region', { name: '模型设置', exact: true });
+  await openSettings(page);
   await panel.getByRole('button', { name: '读取用户模型配置' }).click();
+  await openSettings(page);
   await panel.getByRole('button', { name: '设为默认 B', exact: true }).waitFor();
   // Replace only the owned main-process fetch. Read the physically committed response fully,
   // destroy that socket, and discard its receipt; the Service is not mocked.
   await app.evaluate(
     `(()=>{const original=globalThis.fetch;globalThis.__settingsOriginal=original;globalThis.__settingsPosts=0;globalThis.__settingsGets=0;globalThis.fetch=async(input,init)=>{const request=new Request(input,init);const path=new URL(request.url).pathname;if(request.method==='GET'&&path.includes('/host-mutations/'))globalThis.__settingsGets++;if(request.method!=='POST'||!path.endsWith('/config/user/models'))return original(input,init);globalThis.__settingsPosts++;const body=Buffer.from(await request.arrayBuffer());const http=process.getBuiltinModule('node:http');return await new Promise((resolve,reject)=>{const outgoing=http.request(request.url,{method:'POST',headers:Object.fromEntries(request.headers)},response=>{response.on('data',()=>{});response.on('end',()=>{response.destroy();outgoing.destroy();reject(new TypeError('owned_settings_response_lost'));});});outgoing.on('error',reject);outgoing.end(body);});};})()`,
   );
+  await openSettings(page);
   await panel.getByRole('button', { name: '设为默认 B', exact: true }).click();
   step('default-dispatched');
   const unknown = await waitState(
@@ -242,9 +266,13 @@ try {
   eq((await state(page)).selection!.runs.find((r) => r.id === oldRun)!.isActive, true);
   eq(await count(), 1);
   eq(JSON.parse(await (await controlFetch('configuration')).text()).modelId, 'B');
+  await openSettings(page);
   await panel.getByRole('button', { name: '读取当前项目模型配置' }).click();
+  await closeSettings(page);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await openSessionTools(page);
+  await openSettings(page);
   await page
     .getByRole('region', { name: '模型设置提交', exact: true })
     .getByRole('button', { name: '查询原提交', exact: true })
@@ -265,12 +293,18 @@ try {
   eq(await app.evaluate('globalThis.__settingsGets'), 1);
   eq(await count(), 1);
   await app.evaluate('globalThis.fetch=globalThis.__settingsOriginal');
+  await closeSettings(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
+  await openSettings(page);
   panel = page.getByRole('region', { name: '模型设置', exact: true });
+  await openSettings(page);
   await panel.getByRole('button', { name: '读取用户模型配置' }).click();
+  await openSettings(page);
   await panel.getByRole('button', { name: '禁用模型 A', exact: true }).waitFor();
   await controlFetch('edit');
+  await openSettings(page);
   await panel.getByRole('button', { name: '禁用模型 A', exact: true }).click();
   step('stale-dispatched');
   const failed = await waitState(
@@ -300,6 +334,7 @@ try {
     page,
     (s) => s.selection?.runs.find((r) => r.id === oldRun)?.status === 'completed',
   );
+  await closeSettings(page);
   const picker = page.getByRole('region', { name: '下一轮模型选择', exact: true });
   // The global default is B; this existing Session still owns its original next-run preference A.
   eq(await picker.getByRole('button', { name: /^模型：fixed-A/ }).isVisible(), true);
@@ -316,6 +351,7 @@ try {
   await page.evaluate(() => {
     (Reflect.get(window, '__settingsInputEvents') as unknown[]).length = 0;
   });
+  await closeSettings(page);
   await draft.fill('Explicit next model B');
   eq(await draft.inputValue(), 'Explicit next model B');
   await inputDiagnostics(page, 'next-draft-filled');
@@ -371,13 +407,18 @@ try {
   app = await launch();
   page = await app.firstWindow();
   page.setDefaultTimeout(30000);
+  await closeSettings(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
+  await openSettings(page);
   panel = page.getByRole('region', { name: '模型设置', exact: true });
+  await openSettings(page);
   await panel.getByRole('button', { name: '读取用户模型配置' }).click();
   await panel.getByText(/当前期望默认模型：B/).waitFor();
   eq(await count(), 2);
   eq((await state(page)).selection!.runs.length, 2);
+  await closeSettings(page);
   await page
     .getByRole('region', { name: '下一轮模型选择', exact: true })
     .getByRole('button', { name: /^模型：fixed-B/ })

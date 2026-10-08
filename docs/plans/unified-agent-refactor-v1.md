@@ -2066,7 +2066,7 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 用户要求先执行方案主线，停止追加资源优化切片。正式 TUI 的 `/resume` 搜索与 D 默认保留确认现已接公共单 Session 删除；实际完整候选/共享80×24终端核默认零写、只删除另一原 Session、当前活动 Run 保持及最终完成。实现和当前验证范围归[阶段进度](unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-会话搜索与删除确认)，不重复已闭合的 Native Chrome 与默认 Shell 资格。
 
-用户随后明确重点是 PC 客户端，TUI 按必要验证收口。正式 Native 的项目会话目录现已补齐按原项目分组、独立展开收起、空项目和原选择/草稿保留，证据归[PC 目录进度](unified-agent-refactor-v1-progress.md#2026-10-08pc-客户端项目会话目录)。下一主线缺口是 PC 的 Workspace 批量移除与物理 GC及其余正式客户端行为；之后按既有依赖完成剩余恢复/installed 维护及已发布样本验收、macOS 原资源退出、完整迁移独立审查和最终旧路径删除。现有 RSS 失败保持退出未通过，不以局部默认通过放宽；Win/Linux 仍按用户安排重构完成后由 GitHub Actions 验证。37能力partial、wholeV13=false，授权仍仅本地提交。
+用户随后明确重点是 PC 客户端，TUI 按必要验证收口。正式 Native 的项目会话目录现已补齐按原项目分组、独立展开收起、空项目和原选择/草稿保留，证据归[PC 目录进度](unified-agent-refactor-v1-progress.md#2026-10-08pc-客户端项目会话目录)。用户进一步确认复用原 kite-desktop，不从零重建 PC UI。正式 Native 已接原 SessionPage/Sidebar/Conversation/Composer/RightSidebar、主题/CSS/字体和原 Vite/Tailwind renderer；结果归[原 PC 展示迁移](unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)。主线先完成已有 PC 页面/交互的调用适配，Workspace 批量移除/GC 等服务能力仍按原 owner 补齐；之后按既有依赖完成剩余恢复/installed 维护及已发布样本验收、macOS 原资源退出、完整迁移独立审查和最终旧路径删除。现有 RSS 失败保持退出未通过，不以局部默认通过放宽；Win/Linux 仍按用户安排重构完成后由 GitHub Actions 验证。37能力partial、wholeV13=false，授权仍仅本地提交。
 
 ### 30.3 第一条执行闭环
 

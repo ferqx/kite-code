@@ -2337,3 +2337,81 @@ Workspace/Session完整目录仍由原Main分别读取；两次读取之间出�
 实际 DOM 两个完整文件 actual0/2pass/26assert/695ms，日志 `/private/tmp/kite-pc-directory-dom-final-20261008.log`：同名会话准确分组/原ID，空项目、独立折叠零业务调用，上下焦点零选择，创建期间仍可点击其他会话，未进入项目上界的原会话保留；原 NativeDesktop 草稿场景保持后选视图和文本。首次提取创建函数使 TypeScript 函数内 bridge narrowing 缺失，actual2/三条TS18048，原日志保留；函数内显式核 bridge 后复验。最终三文件Biome actual0/no fixes。类型与正常提交hook按最终输入记录；此次没有增加TUI、Web、资源或跨平台测试范围。
 
 当前 PC 主线仍须闭合项目批量移除/物理GC、其余正式PC能力和installed恢复维护，再按原资源、独立审查及旧路径退出条件收束；现有RSS失败保持，Windows/Linux仍按用户安排重构完成后由Actions验证。wholeV13=false、Goal active，授权仍仅本地stage/commit，无push/PR/发布/dispatch。
+
+
+## 2026-10-08：复用原 PC 桌面展示层
+
+用户确认 PC 客户端以原 kite-desktop 迁移重构，不从零重建。
+基线为本地 c89a27bb05b3060f38d09091c06adecfc679405d 加本片 owned diff；
+macOS 优先，TUI 不扩验，Windows/Linux 待重构完成后交 GitHub Actions。
+宿主 Shell、旧产品数据不迁入、本地提交授权保持。
+
+41 个原共享展示/控件/CSS 文件迁入现有 UI workspace，初始逐字核 SHA。
+当前只在四个页面/控件和 index 增加有限宿主 slot/可访问标签；其余36文件仍逐字相等。
+Theme、Tailwind/typeset、Geist 字体与 Vite/React/Tailwind 沿原已安装版本。
+正式 Native 已消费原 SessionPage/Sidebar/Conversation/Composer/RightSidebar 和全屏设置框架；
+临时 NativeDirectory 被已有 Sidebar 替代，旧目录阶段证据保历史范围。
+adapter 只映射实际公共事实，无更新时间/未观察状态不补造，Message completion 不推断 final reply/旧 Tool grouping。
+完整正文、原身份、草稿、原写入与 unknown GET 沿原 Native/Client，不复活旧 DesktopClient/Host/Runtime 或加入旧 workspace。
+
+原页面 12 项测试迁回新 owner，原 Native 目录/草稿/question/plan DOM 只调整控件入口与布局所需浏览器 API。
+最终 5 文件 16pass/180assert/actual0（1066ms），日志 /private/tmp/kite-pc-reused-dom-final-20261008.log。
+设置样式与发送标签收尾后的同五文件复验 actual0/16pass/180assert/1282ms，
+日志 /private/tmp/kite-pc-reused-dom-current-20261008.log。
+右侧工具关闭收尾后同五文件 actual0/16pass/190assert/1089ms，
+日志 /private/tmp/kite-pc-reused-dom-completion-20261008.log；
+另核消息区/输入框原 DOM 节点与草稿保持，关闭工具内容确实卸载，不保留隐藏 reader。
+第一轮缺 JSDOM ResizeObserver/RAF，第二轮缺 DOMRect；补齐后业务断言保持。
+标题/待决 badge/侧栏入口按实际控件定位，不放宽原身份、迟到或草稿断言。
+
+原源码外 Native 候选测试最终 actual0/1pass/7 Bun断言/46.09秒；driver 两次真实启动另核旧布局、
+编译 CSS/字体、可操作输入框、kiteNative 存在且无 kiteDesktop。
+实际审批 1、Provider 2、sourceFree true、normalQuit true、Main kill 后原 child 两层锁保持与所属收尾通过。
+原 120秒预算、业务断言和生命周期保持。
+首次 UI exports 未产出 JS/CSS，build 准确拒绝 terminal_workspace_export_missing，补齐 UI build 后候选完成；
+项目/会话同名使未限定按钮 ambiguous，限定实际 session-row；
+Native 工具放在旧环境浮层遮挡发送，改接原 RightSidebar 独立列并保持 Conversation 挂载，复验通过。
+原失败与最终日志在 /private/tmp/kite-pc-reused-native-bundle-20261008.log、second/third/fourth-20261008.log。
+Vite 的原样式 nested keyframes 与大 chunk 提示未扩大为拆包/资源优化项目。
+
+实际设置/草稿/刷新窗口复验 actual0/1pass/2 Bun断言/11.02秒，
+日志 /private/tmp/kite-pc-reused-native-settings-window-fourth-20261008.log。
+driver 另核六项真实配置读取、原 scope、零新增 Model 与所属 Service PID 停止；原 45秒 driver/60秒整例预算保持。
+前三轮设置按钮操作失败，实测全屏 Dialog 被通用 translate(-50%,-50%) 移到窗口外；
+调用方明确 translate-x-0/translate-y-0 后实际点击通过，未放宽可见性或操作断言，临时布局诊断已移除。
+
+新增 CSS export 首次边界检查被当成不存在的脚本拒绝；解析器现要求真实声明与仓库内资产，
+只将 CSS 作为非执行资产，仍检查 CSS 命名 export 的实际 TS 目标、symlink 越界/旧目标和原 TS import 闭包。
+第二次 formal graph 正确发现 UI build script 被旧 workspace 前缀误判为 renderer；
+便携 source 现在按准确 src owner 分类，显式 builder 属宿主，renderer 导入 builder 仍拒绝其 I/O。
+两次原红日志保留，最终边界回归和正式 graph 以本片最终核对为准。
+
+关闭宿主工具内容后重新构建的完整源码外候选 actual0/1pass/7 Bun断言/47.66秒，
+日志 /private/tmp/kite-pc-reused-native-bundle-closure-20261008.log，原业务及生命周期断言保持。
+前一次 sandbox 复验在 ps 进程检查 EPERM 后没有窗口资格，原日志
+/private/tmp/kite-pc-reused-native-bundle-current-20261008.log 保留；
+在现有 macOS 测试授权下正常运行所需进程检查后通过，准确原临时目录确认无所属进程并清理。
+真实草稿/物理丢创建回复窗口 actual0/1pass/1 Bun断言/28.39秒，
+日志 /private/tmp/kite-pc-reused-native-drafts-window-20261008.log；
+原 driver 核多次冷启动、准确原 Command 查询零新 POST、换 Store 原草稿只读和真实所属退出。
+新控件选择按原 Sidebar 的项目按钮与显式草稿详情展开，原 45秒 driver/60秒整例预算保持。
+
+最终边界回归 actual0/17pass/163assert/373ms，
+日志 /private/tmp/kite-pc-reused-boundary-tests-closure-20261008.log；
+正式八 workspace/唯一生成 API 静态 graph actual0，
+日志 /private/tmp/kite-pc-reused-boundary-closure-20261008.log。
+根与八 workspace 正常 typecheck actual0；关闭工具后的 UI/Desktop 正常 typecheck 各 actual0。
+静态通过不提升为全能力或 release 资格；docs、影响和计划门禁按最终提交输入再核。
+
+模型设置原窗口在新全屏入口中 actual0/1pass/3 Bun断言/17.12秒，
+日志 /private/tmp/kite-pc-reused-native-model-settings-window-20261008.log；
+driver 42项 Node断言核活动 Run 模型不变、准确 CAS 冲突、物理丢回复后跨选择只查原申请、
+下一轮实际 fixed-A→fixed-B 与冷读原选择、两所属 PID 真退出。
+设置与会话转换补显式返回/打开，原业务断言及预算保持；没有复跑 Chrome/Vault 或任意 Provider 兼容资格。
+
+Desktop 类型检查通过；共享 UI、根类型/边界/文档和本地提交以本片最终核对为准。
+Native drivers 已改为实际侧栏、完整标题和全屏设置入口，业务断言与原预算不变；
+本片不声称逐一重跑所有历史 Native 窗口、Chrome/default Vault 或默认 Shell 资格。
+端口保留不代表所有旧页面细节已迁完；Workspace 批量移除/GC、余下页面/交互、全量 installed/维护与已发布样本、
+macOS 三资源退出、独立迁移审查及最终 legacy 删除仍 pending。
+37能力仍partial、wholeV13=false；没有 push/PR/发布/dispatch。

@@ -6,9 +6,14 @@ import { createRoot } from 'react-dom/client';
 import { verifyInteractionAnswerReceipt } from '../src/controller';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeDraft, NativeEvent, NativeState } from '../src/native-bridge';
+import { prepareDesktopDom } from './native-page-dom.fixture';
 
 test('Native page keeps original question drafts across sessions, missing pages and read failure; only the exact accepted answer clears its draft', async () => {
-  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' });
+  const dom = new JSDOM('<div id="root"></div>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  });
+  const restoreLayoutGlobals = prepareDesktopDom(dom);
   const prior = {
     window: globalThis.window,
     document: globalThis.document,
@@ -153,16 +158,14 @@ test('Native page keeps original question drafts across sessions, missing pages 
   const click = async (name: string) =>
     act(async () => {
       const button = [...host.querySelectorAll('button')].find(
-        (value) => value.textContent === name,
+        (value) => value.textContent === name || value.getAttribute('aria-label') === name,
       )!;
       expect(button).toBeDefined();
       button.click();
     });
   const text = () => host.querySelector<HTMLTextAreaElement>('textarea[aria-label="自由回答"]')!;
   const mainInput = () =>
-    [...host.querySelectorAll('label')]
-      .find((label) => label.textContent?.includes('当前会话私有草稿'))
-      ?.querySelector('textarea') ?? null;
+    host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前会话私有草稿"]');
   const edit = async (value: string) =>
     act(async () => {
       text().value = value;
@@ -172,6 +175,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
   try {
     await act(async () => root.render(<NativeDesktop />));
     await click('Question A');
+    await click('会话工具');
     expect(mainInput() === null).toBe(true);
     await edit('  original A\n雪🙂  ');
     expect(
@@ -254,6 +258,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
     expect(posts).toBe(1);
   } finally {
     await act(async () => root.unmount());
+    restoreLayoutGlobals();
     dom.window.close();
     Object.assign(globalThis, prior);
   }

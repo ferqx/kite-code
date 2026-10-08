@@ -5,6 +5,11 @@ import { _electron } from 'playwright';
 import type { NativeAnswerRecord } from '../electron/answer-journal';
 import type { NativeRequest, NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, storeId, executablePath] = process.argv.slice(2) as string[];
 const launch = () =>
   _electron.launch({
@@ -101,6 +106,7 @@ try {
   page = await app.firstWindow();
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'other', exact: true }).waitFor();
+  await openSessionTools(page);
   console.error('answer_stage', 'cold Main');
   await app.evaluate(
     `(()=>{const original=globalThis.fetch;globalThis.__coldPosts=0;globalThis.__coldGets=[];globalThis.__coldLose=true;globalThis.fetch=async(input,init)=>{const r=new Request(input,init);const path=new URL(r.url).pathname;if(r.method==='POST'&&path.endsWith('/answer'))globalThis.__coldPosts++;if(r.method==='GET'&&path.endsWith('/commands/${commandId}')){globalThis.__coldGets.push(path);const result=await original(input,init);if(globalThis.__coldLose){globalThis.__coldLose=false;await result.arrayBuffer();throw new TypeError('owned_original_get_lost');}return result;}return original(input,init);};})()`,

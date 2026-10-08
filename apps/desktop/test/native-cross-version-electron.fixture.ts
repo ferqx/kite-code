@@ -14,6 +14,11 @@ import type {
 } from '../src/native-bridge';
 import { readNativeModelOutput } from '../src/native-model-output';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [launcher, home, control, desktopPackage] = process.argv.slice(2) as string[];
 const { _electron } = createRequire(desktopPackage!)('playwright') as typeof import('playwright');
 const expected = JSON.parse(readFileSync(join(home!, 'expected.json'), 'utf8')) as {
@@ -88,6 +93,7 @@ async function launch(index: number) {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Native real versions', exact: true }).waitFor();
+  await openSessionTools(page);
   assert.equal(
     await app.evaluate(() => process.execPath),
     join(candidate.root, candidate.electron),
@@ -179,7 +185,7 @@ async function read(page: Page, count: number) {
     (globalThis as Globals).versionPhysical = [];
   });
   const outputs = page
-    .getByRole('region', { name: '当前会话', exact: true })
+    .getByRole('region', { name: '会话消息', exact: true })
     .locator('article')
     .filter({ has: page.locator('small', { hasText: /^assistant ·/ }) });
   if (count) await outputs.nth(count - 1).waitFor();
@@ -272,7 +278,9 @@ async function run(page: Page, index: number) {
     document.addEventListener(
       'submit',
       (event) => {
-        if ((event.target as HTMLFormElement).textContent?.includes('当前会话私有草稿'))
+        if (
+          (event.target as HTMLFormElement).querySelector('textarea[aria-label="当前会话私有草稿"]')
+        )
           events.push(event.type);
       },
       { capture: true, once: true },

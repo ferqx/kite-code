@@ -1,0 +1,296 @@
+import { expect, test } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { SessionPage, type SessionPageProps } from '../src/desktop';
+
+const base: SessionPageProps = {
+  workspaces: [
+    {
+      id: 'w',
+      label: 'Workspace',
+      state: 'loaded',
+      sessionCount: 1,
+      sessions: [{ sessionId: 's', displayName: 'Session', status: 'idle' }],
+    },
+  ],
+  selected: 's',
+  sessionLabel: 'Session',
+  readingKey: 'w/s',
+  messages: [
+    {
+      id: 'm',
+      role: 'assistant',
+      settled: true,
+      text: '[文件](src/main.ts) [网页](https://example.com)',
+    },
+  ],
+  loading: false,
+  connected: true,
+  connectionLabel: 'connected',
+  actions: {},
+  onOpen: () => {},
+};
+
+test('read-only page permits reading and web links without exposing local or mutation operations', () => {
+  const html = renderToStaticMarkup(<SessionPage {...base} readOnlyReason="只读访问" />);
+  expect(html).toContain('只读访问');
+  expect(html).toContain('https://example.com');
+  expect(html).not.toContain('class="file-link"');
+  expect(html).not.toContain('任务输入');
+  expect(html).not.toContain('新对话');
+  expect(html).not.toContain('模型与 Provider 设置');
+  expect(html).toContain('aria-label="收起侧栏"');
+  expect(html).not.toContain('data-tauri-drag-region');
+  expect(html).toContain('<strong>Session</strong>');
+  expect(html).not.toContain('加载更早的会话');
+  expect(html).toContain('data-radix-scroll-area-viewport');
+  expect(html.match(/<header/g)).toHaveLength(2);
+  expect(html).toContain('data-slot="resizable-panel-group"');
+  expect(html).toContain('focus-visible:ring-0');
+  expect(html.match(/ data-panel(?:=|>)/g)).toHaveLength(3);
+  expect(html.match(/role="separator"/g)).toHaveLength(2);
+});
+
+test('the session header limits long labels to ten visible characters', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage {...base} sessionLabel="请测试一次 ask_user 多问题交互" />,
+  );
+  expect(html).toContain('<strong title="请测试一次 ask_user 多问题交互">请测试一次 ask…</strong>');
+  expect(
+    renderToStaticMarkup(<SessionPage {...base} sessionLabel="正好十个字符标题呀哦" />),
+  ).toContain('>正好十个字符标题呀哦</strong>');
+});
+
+test('the same page renders granted operations while an unavailable send stays disabled', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      actions={{ newSession: () => {}, openFile: () => {}, settings: () => {} }}
+      composer={{
+        draft: '保留的草稿',
+        onChange: () => {},
+        active: false,
+        stopping: false,
+        disabled: false,
+      }}
+    />,
+  );
+  expect(html).toContain('class="file-link"');
+  expect(html).toContain('新对话');
+  expect(html).toContain('任务输入');
+  expect(html).toMatch(/<button[^>]*aria-label="发送消息"[^>]*disabled=""/);
+});
+
+test('new and running conversations share one composer prompt', () => {
+  for (const active of [false, true]) {
+    const html = renderToStaticMarkup(
+      <SessionPage
+        {...base}
+        newConversation={
+          active
+            ? undefined
+            : {
+                projects: [],
+                workspace: '/workspace',
+                busy: false,
+                onProject: () => {},
+                onAddProject: () => {},
+                onBranch: () => {},
+                onRefreshBranch: () => {},
+              }
+        }
+        composer={{
+          draft: '',
+          onChange: () => {},
+          active,
+          stopping: false,
+          disabled: false,
+        }}
+      />,
+    );
+    expect(html).toContain('placeholder="描述你想完成的工作…"');
+    expect(html).not.toContain('可以先写下下一步要求');
+    expect(html).not.toContain('Enter 发送');
+    expect(html).not.toContain('仅保留草稿');
+  }
+});
+
+test('a passive run status notice does not hide the composer', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      statusNotice={<p role="status">正在等待后台结果</p>}
+      composer={{
+        draft: '继续检查',
+        onChange: () => {},
+        onSend: () => {},
+        onCancel: () => {},
+        active: true,
+        stopping: false,
+        disabled: false,
+      }}
+    />,
+  );
+  expect(html).toContain('正在等待后台结果');
+  expect(html).toContain('aria-label="任务输入"');
+  expect(html).toContain('aria-label="发送运行中引导"');
+});
+
+test('a required subagent wait appears once after transcript content only while history is visible', () => {
+  const waiting = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      messages={[{ id: 'progress', role: 'assistant', text: '阶段进展', settled: true }]}
+      requiredSubagentWait
+    />,
+  );
+  expect(waiting.match(/正在等待子 Agent 结果/g)).toHaveLength(1);
+  expect(waiting).toMatch(/data-slot="marker"[^>]*role="status"/);
+  expect(waiting.indexOf('阶段进展')).toBeLessThan(waiting.indexOf('正在等待子 Agent 结果'));
+  expect(waiting.indexOf('正在等待子 Agent 结果')).toBeLessThan(
+    waiting.indexOf('class="conversation-footer"'),
+  );
+  expect(renderToStaticMarkup(<SessionPage {...base} />)).not.toContain('正在等待子 Agent 结果');
+  expect(
+    renderToStaticMarkup(<SessionPage {...base} requiredSubagentWait loading />),
+  ).not.toContain('正在等待子 Agent 结果');
+  expect(
+    renderToStaticMarkup(<SessionPage {...base} requiredSubagentWait selected={undefined} />),
+  ).not.toContain('正在等待子 Agent 结果');
+});
+
+test('the primary new-conversation navigation exposes its stable style hook while disabled', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage {...base} busy actions={{ newSession: () => {} }} />,
+  );
+  expect(html).toMatch(/class="[^"]*new-session[^"]*"[^>]*disabled=""/);
+});
+
+test('an optimistic first message replaces loading and welcome content', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      messages={[
+        {
+          id: 'optimistic',
+          role: 'user',
+          text: '正在提交的首条消息',
+          settled: false,
+          delivery: 'sending',
+        },
+      ]}
+      loading={false}
+      composer={{
+        draft: '',
+        onChange: () => {},
+        active: false,
+        stopping: false,
+        disabled: false,
+      }}
+    />,
+  );
+  expect(html).toContain('正在提交的首条消息');
+  expect(html).toContain('正在发送');
+  expect(html).not.toContain('从一个想法开始');
+  expect(html).not.toContain('描述你的目标');
+  expect(html).not.toContain('正在加载会话历史');
+  expect(html).not.toContain('class="welcome"');
+});
+
+test('an uncached conversation keeps the content frame and shows only the centered brand mark', () => {
+  const html = renderToStaticMarkup(<SessionPage {...base} loading messages={[]} />);
+
+  expect(html).toContain('class="conversation-loading"');
+  expect(html).toContain('aria-label="正在加载聊天"');
+  expect(html).toContain('data-icon="kite-loading"');
+  expect(html).not.toContain('正在加载会话历史');
+  expect(html).not.toContain('class="welcome"');
+});
+
+test('an unsettled assistant message exposes reply activity outside its content', () => {
+  const streaming = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      messages={[
+        {
+          id: 'streaming',
+          role: 'assistant',
+          text: '已经生成的部分',
+          settled: false,
+        },
+      ]}
+    />,
+  );
+  expect(streaming).toContain('aria-busy="true"');
+  expect(streaming).toContain('class="message assistant responding"');
+  expect(streaming).toContain('class="response-status" role="status">正在回复…');
+  expect(streaming).toContain('已经生成的部分');
+
+  const settled = renderToStaticMarkup(<SessionPage {...base} />);
+  expect(settled).not.toContain('正在回复');
+  expect(settled).not.toContain('response-status');
+});
+
+test('workbench reuses the shared shell and groups only facts present in session summaries', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      selected={undefined}
+      actions={{ workbench: () => {} }}
+      workbench
+      workspaces={[
+        {
+          id: 'w',
+          label: 'Workspace',
+          state: 'loaded',
+          sessionCount: 5,
+          sessions: [
+            {
+              sessionId: 'waiting',
+              displayName: '需要确认',
+              status: 'waiting',
+              pendingInteractions: 1,
+            },
+            { sessionId: 'running', displayName: '正在测试', status: 'running' },
+            { sessionId: 'recover', displayName: '需要恢复', status: 'recovery_required' },
+            { sessionId: 'idle', displayName: '尚未开始', status: 'idle' },
+            { sessionId: 'done', displayName: '已经结束', status: 'completed' },
+          ],
+        },
+      ]}
+    />,
+  );
+  expect(html).toContain('aria-label="工作台"');
+  expect(html).toContain('data-radix-scroll-area-viewport');
+  expect(html).not.toContain('>全部<');
+  expect(html).not.toContain('最近更新');
+  expect(html).toContain('需要确认');
+  expect(html).toContain('正在测试');
+  expect(html).toContain('需要恢复');
+  expect(html).toContain('尚未开始');
+  expect(html).toContain('已经结束');
+  expect(html).not.toContain('等待下一步');
+  expect(html).not.toContain('已完成');
+  expect(html).not.toContain('需要我处理');
+  expect(html).toContain('最近会话');
+  expect(html).toContain('aria-label="主要导航"');
+  expect(html).not.toContain('任务输入');
+});
+
+test('scheduled tasks is a first-class page below workbench without inventing saved tasks', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      selected={undefined}
+      actions={{ workbench: () => {}, scheduledTasks: () => {} }}
+      scheduledTasks={{ tasks: [], workspaces: base.workspaces }}
+    />,
+  );
+  expect(html).toContain('aria-label="安排任务"');
+  expect(html).toContain('<span>工作台</span>');
+  expect(html).toContain('<span>安排任务</span>');
+  expect(html.indexOf('<span>工作台</span>')).toBeLessThan(html.indexOf('<span>安排任务</span>'));
+  expect(html).toContain('还没有安排任务');
+  expect(html).toContain('创建第一个任务');
+  expect(html).not.toContain('每日检查 CI');
+  expect(html).not.toContain('conversation-footer');
+});

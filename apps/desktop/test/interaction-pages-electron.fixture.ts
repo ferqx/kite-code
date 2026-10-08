@@ -4,6 +4,11 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeRequest, NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, storeId, executablePath] = process.argv.slice(2) as string[];
 const app = await _electron.launch({
   executablePath,
@@ -65,6 +70,7 @@ try {
   // Exercise the renderer's actual next-page button after refreshing to its first window.
   await request({ method: 'select', generation: 1, sessionId: 's' });
   await page.getByRole('button', { name: '下一页待决请求（替换当前窗口）', exact: true }).waitFor();
+  await openSessionTools(page);
   await page.waitForFunction(async () => {
     const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
     if (

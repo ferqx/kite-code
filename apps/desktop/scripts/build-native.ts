@@ -21,6 +21,9 @@ import {
   verifyNativeRuntimeBundle,
 } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import { build as buildRenderer } from 'vite';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
 import { buildWindowsAccess } from './build-windows-access';
 import { probeNativeSqliteEngine } from './sqlite-engine';
@@ -76,18 +79,25 @@ async function buildNativeApp(assets: NativeAssets | { kind: 'candidate' }, outd
     });
     if (!result.success) throw new AggregateError(result.logs, 'native_build_failed');
   }
-  const result = await Bun.build({
-    entrypoints: [join(root, 'src/native.tsx')],
-    target: 'browser',
-    format: 'esm',
-    outdir,
-    naming: 'renderer.js',
+  // Retain the original desktop renderer pipeline and its compiled CSS/fonts.
+  // The already built Main, preload and helpers share this destination.
+  await buildRenderer({
+    root,
+    configFile: false,
+    plugins: [react(), tailwindcss()],
+    base: './',
+    clearScreen: false,
+    logLevel: 'warn',
+    build: {
+      target: 'es2022',
+      outDir: outdir,
+      emptyOutDir: false,
+      rollupOptions: {
+        input: join(root, 'index.html'),
+        output: { entryFileNames: 'renderer.js' },
+      },
+    },
   });
-  if (!result.success) throw new AggregateError(result.logs, 'native_renderer_build_failed');
-  await writeFile(
-    join(outdir, 'index.html'),
-    '<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>kite</title><div id="root"></div><script type="module" src="./renderer.js"></script></html>',
-  );
   await writeFile(
     join(outdir, 'package.json'),
     JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' }),

@@ -1,0 +1,411 @@
+import {
+  ArrowDown01Icon,
+  ArrowUp02Icon,
+  BotIcon,
+  FlashIcon,
+  Loading03Icon,
+  SquareStopIcon,
+  TriangleAlertIcon,
+  UserQuestion01Icon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { Fragment, type ReactNode, type Ref, useRef, useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './components/ui/alert-dialog';
+import { Button as ShadcnButton } from './components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu';
+import { cn } from './lib/utils';
+import { ModelEffortSelector, type ModelOption, type ThinkingEffort } from './ModelEffortSelector';
+import { Button, Textarea } from './ui';
+
+const permissionModes = [
+  { value: 'accept_edits', icon: UserQuestion01Icon },
+  { value: 'auto', icon: BotIcon },
+  { value: 'full', icon: FlashIcon },
+] as const;
+
+const permissionCopy = {
+  zh: {
+    name: '权限',
+    heading: '如何处理操作请求？',
+    helper: '为当前对话选择审批方式',
+    accept_edits: {
+      label: '询问',
+      menuLabel: '需要时询问我',
+      detail: '需批准的操作会暂停，等待你确认',
+    },
+    auto: {
+      label: '自动',
+      menuLabel: '自动审查',
+      detail: '审批模型先判断命令，必要时再询问',
+    },
+    full: {
+      label: '完全',
+      menuLabel: '完全权限',
+      detail: '跳过常规审批，改动可能难以撤销',
+    },
+    fullWarning: {
+      title: '要开启完全权限吗？',
+      description:
+        '开启后，代理无需逐项征得你的同意，就能在当前环境允许的范围内运行命令、读取或修改文件，以及访问互联网。',
+      riskTitle: '请留意这些风险',
+      impact: '文件可能被覆盖或删除；命令和联网操作可能接触、传输敏感数据，造成难以撤销的损失。',
+      limit: '你可以随时切回其他审批方式；系统限制仍然有效。',
+      cancel: '取消',
+      confirm: '启用完全权限',
+    },
+  },
+  en: {
+    name: 'Permission',
+    heading: 'How should actions be approved?',
+    helper: 'Choose an approval mode for this conversation',
+    accept_edits: {
+      label: 'Ask',
+      menuLabel: 'Ask me when needed',
+      detail: 'Pause for your approval when required',
+    },
+    auto: {
+      label: 'Auto',
+      menuLabel: 'Automatic review',
+      detail: 'Review commands first; ask when needed',
+    },
+    full: {
+      label: 'Full',
+      menuLabel: 'Full permission',
+      detail: 'Skip routine approvals; changes may be hard to undo',
+    },
+    fullWarning: {
+      title: 'Enable Full permission?',
+      description:
+        'The agent can act without asking for each approval. Within the capabilities available in this environment, it can run commands, read or change files, and access the internet.',
+      riskTitle: 'Risks to consider',
+      impact:
+        'Files could be overwritten or deleted. Commands and network access could expose or transmit sensitive data and cause changes that are hard to undo.',
+      limit: 'You can switch back to another approval mode at any time. System limits still apply.',
+      cancel: 'Cancel',
+      confirm: 'Enable Full',
+    },
+  },
+} as const;
+
+export interface ComposerProps {
+  inputRef?: Ref<HTMLTextAreaElement>;
+  context?: ReactNode;
+  options?: ReactNode;
+  inputLabel?: string;
+  sendLabel?: string;
+  sendDisabled?: boolean;
+  draft: string;
+  onChange: (value: string) => void;
+  onSend?: () => void;
+  onCancel?: () => void;
+  onSettings?: () => void;
+  active: boolean;
+  stopping: boolean;
+  cancelDisabled?: boolean;
+  disabled: boolean;
+  model?: { readonly provider: string; readonly name: string };
+  models?: readonly ModelOption[];
+  reasoningEffort?: string;
+  onReasoningEffortChange?: (effort: ThinkingEffort) => void;
+  onModelChange?: (provider: string, name: string) => void;
+  modelDisabled?: boolean;
+  permission?: 'accept_edits' | 'auto' | 'full';
+  fullPermissionScope?: string;
+  onPermissionChange?: (permission: 'accept_edits' | 'auto' | 'full') => void;
+  permissionDisabled?: boolean;
+  permissionPending?: boolean;
+  sessionLoading?: boolean;
+  cacheMetrics?: {
+    readonly cacheHitTokens: number;
+    readonly cacheMissTokens: number;
+  };
+  submitStatus?: string;
+  sending?: boolean;
+  promptHidden?: boolean;
+}
+export function Composer(props: ComposerProps) {
+  const composing = useRef(false);
+  const [confirmingFullScope, setConfirmingFullScope] = useState<string | null>(null);
+  const permissionLanguage =
+    typeof navigator !== 'undefined' && navigator.language?.toLowerCase().startsWith('zh')
+      ? 'zh'
+      : 'en';
+  const permissionText = permissionCopy[permissionLanguage];
+  const cacheTokenTotal =
+    (props.cacheMetrics?.cacheHitTokens ?? 0) + (props.cacheMetrics?.cacheMissTokens ?? 0);
+  const cacheHitPercentage =
+    cacheTokenTotal > 0
+      ? Math.round(((props.cacheMetrics?.cacheHitTokens ?? 0) / cacheTokenTotal) * 100)
+      : undefined;
+  const canSend =
+    !!props.onSend &&
+    !props.disabled &&
+    !props.sendDisabled &&
+    !props.sending &&
+    !!props.draft.trim();
+  const showStop =
+    !props.sending && props.active && !!props.onCancel && (!props.draft.trim() || props.stopping);
+  if (props.promptHidden) {
+    return null;
+  }
+  return (
+    <>
+      {props.context}
+      <form
+        className="composer"
+        data-permission-pending={props.permissionPending || undefined}
+        data-session-loading={props.sessionLoading || undefined}
+        onMouseDown={(event) => {
+          const target = event.target;
+          if (
+            target instanceof Element &&
+            (!event.currentTarget.contains(target) ||
+              target.closest('button, textarea, input, a, [role="menuitem"]'))
+          )
+            return;
+          event.preventDefault();
+          event.currentTarget.querySelector('textarea')?.focus();
+        }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canSend && !composing.current) props.onSend?.();
+        }}
+      >
+        <Textarea
+          ref={props.inputRef}
+          aria-label={props.inputLabel ?? '任务输入'}
+          placeholder="描述你想完成的工作…"
+          value={props.draft}
+          onChange={(event) => props.onChange(event.target.value)}
+          disabled={props.disabled}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.shiftKey || event.altKey) return;
+            if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
+            event.preventDefault();
+            if (canSend) props.onSend?.();
+          }}
+        />
+        <div className="composer-bottom">
+          <div className="composer-options">
+            {props.options}
+            {props.onModelChange && props.models?.length ? (
+              <ModelEffortSelector
+                model={props.model}
+                models={props.models}
+                onModelChange={props.onModelChange}
+                reasoningEffort={props.reasoningEffort}
+                onReasoningEffortChange={props.onReasoningEffortChange}
+                disabled={props.modelDisabled}
+              />
+            ) : props.onSettings ? (
+              <Button className="ghost model-button" onClick={props.onSettings}>
+                {props.model?.name || '配置模型'}
+              </Button>
+            ) : (
+              <span>{props.model?.name}</span>
+            )}
+            {props.permission && props.onPermissionChange && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <ShadcnButton
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'permission-trigger',
+                      props.permission === 'full' && 'permission-trigger-danger',
+                    )}
+                    data-permission-trigger
+                    aria-label={`${permissionText.name}${permissionLanguage === 'zh' ? '：' : ': '}${permissionText[props.permission].label}${props.permissionPending ? (permissionLanguage === 'zh' ? '，切换中' : ', changing') : ''}`}
+                    disabled={props.permissionDisabled}
+                  >
+                    <HugeiconsIcon
+                      data-icon="inline-start"
+                      icon={permissionModes.find((mode) => mode.value === props.permission)!.icon}
+                    />
+                    <span>{permissionText[props.permission].label}</span>
+                    <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
+                  </ShadcnButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  className="permission-menu"
+                  portalled={false}
+                  side="top"
+                  align="start"
+                  sideOffset={6}
+                  aria-label={permissionText.name}
+                >
+                  <DropdownMenuLabel className="permission-menu-heading">
+                    <span>{permissionText.heading}</span>
+                    <small>{permissionText.helper}</small>
+                  </DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={props.permission}
+                    onValueChange={(value) => {
+                      if (value === props.permission) return;
+                      if (value === 'full') {
+                        setConfirmingFullScope(props.fullPermissionScope ?? '');
+                      } else
+                        props.onPermissionChange?.(
+                          value as NonNullable<ComposerProps['permission']>,
+                        );
+                    }}
+                  >
+                    <DropdownMenuGroup>
+                      {permissionModes.map((mode) => (
+                        <Fragment key={mode.value}>
+                          {mode.value === 'full' && (
+                            <DropdownMenuSeparator className="permission-menu-divider" />
+                          )}
+                          <DropdownMenuRadioItem
+                            value={mode.value}
+                            indicatorPosition="end"
+                            className={cn(
+                              'permission-menu-item',
+                              mode.value === 'full' && 'permission-menu-item-danger',
+                            )}
+                          >
+                            <HugeiconsIcon icon={mode.icon} aria-hidden="true" />
+                            <span className="permission-menu-copy">
+                              <span>{permissionText[mode.value].menuLabel}</span>
+                              <small>{permissionText[mode.value].detail}</small>
+                            </span>
+                          </DropdownMenuRadioItem>
+                        </Fragment>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {cacheHitPercentage !== undefined && (
+              <span
+                className="composer-cache-rate"
+                title={`缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`}
+              >
+                缓存 {cacheHitPercentage}%
+              </span>
+            )}
+          </div>
+          <div className="composer-actions">
+            {showStop ? (
+              <Button
+                className="primary composer-action stop-action"
+                size="icon-sm"
+                aria-label={props.stopping ? '正在停止…' : '停止任务'}
+                title={props.stopping ? '正在停止…' : '停止任务'}
+                onClick={props.onCancel}
+                disabled={props.stopping || props.cancelDisabled}
+              >
+                <HugeiconsIcon icon={SquareStopIcon} />
+              </Button>
+            ) : (
+              <Button
+                className="primary composer-action"
+                size="icon-sm"
+                type="submit"
+                aria-label={
+                  props.sendLabel ??
+                  (props.sending
+                    ? '正在发送消息'
+                    : props.submitStatus
+                      ? `发送消息：${props.submitStatus}`
+                      : props.active
+                        ? '发送运行中引导'
+                        : '发送消息')
+                }
+                title={
+                  props.sendLabel ??
+                  (props.sending
+                    ? '正在发送消息'
+                    : props.submitStatus || (props.active ? '发送运行中引导' : '发送消息'))
+                }
+                aria-busy={props.sending || undefined}
+                disabled={!canSend}
+              >
+                <HugeiconsIcon
+                  icon={props.sending ? Loading03Icon : ArrowUp02Icon}
+                  className={props.sending ? 'motion-safe:animate-spin' : undefined}
+                  strokeWidth={2}
+                />
+              </Button>
+            )}
+          </div>
+        </div>
+      </form>
+      <AlertDialog
+        open={confirmingFullScope !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmingFullScope(null);
+        }}
+      >
+        <AlertDialogContent className="full-permission-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="full-permission-title">
+              <HugeiconsIcon
+                className="full-permission-title-icon"
+                icon={TriangleAlertIcon}
+                aria-hidden="true"
+              />
+              {permissionText.fullWarning.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild className="full-permission-description">
+              <div>
+                <p className="full-permission-intro">{permissionText.fullWarning.description}</p>
+                <div className="full-permission-risk-notice">
+                  <strong className="full-permission-risk-heading">
+                    {permissionText.fullWarning.riskTitle}
+                  </strong>
+                  <p className="full-permission-risk-copy">{permissionText.fullWarning.impact}</p>
+                </div>
+                <p className="full-permission-limit">{permissionText.fullWarning.limit}</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{permissionText.fullWarning.cancel}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={props.permissionDisabled}
+              onClick={() => {
+                if (confirmingFullScope !== (props.fullPermissionScope ?? '')) return;
+                props.onPermissionChange?.('full');
+              }}
+            >
+              <HugeiconsIcon data-icon="inline-start" icon={TriangleAlertIcon} aria-hidden="true" />
+              {permissionText.fullWarning.confirm}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {props.submitStatus && (
+        <span className="sr-only" aria-live="polite">
+          {props.submitStatus}
+        </span>
+      )}
+    </>
+  );
+}

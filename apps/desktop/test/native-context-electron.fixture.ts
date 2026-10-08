@@ -3,6 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, storeId, electronExecutable, control, bunExecutable] = process.argv.slice(
   2,
 ) as string[];
@@ -18,7 +23,8 @@ try {
   const page = await app.firstWindow();
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('first harmless ledger');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await page.getByText('NATIVE FIRST COMPLETED', { exact: true }).first().waitFor();

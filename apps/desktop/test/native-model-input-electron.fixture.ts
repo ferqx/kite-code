@@ -4,6 +4,11 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, dataRoot, storeId, endpoint, electronExecutable, control, bunExecutable] =
   process.argv.slice(2) as [string, string, string, string, string, string, string, string];
 function expect(value: unknown) {
@@ -55,8 +60,10 @@ try {
   page.on('console', (message) => console.error('renderer', message.text().slice(0, 300)));
   page.on('pageerror', (error) => console.error('renderer_error', error.message.slice(0, 300)));
   await page.getByRole('button', { name: 'Native A', exact: true }).waitFor();
+  await openSessionTools(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   await page.evaluate(async () => {
     const first = (await window.kiteNative!.request({ method: 'attach' })) as NativeState;
     return (await window.kiteNative!.request({
@@ -68,8 +75,10 @@ try {
   // Reattach is a real main/preload operation. Reload restores the renderer's own generation.
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).waitFor();
+  await openSessionTools(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   const generation = await page.evaluate(
     async () =>
       ((await window.kiteNative!.request({ method: 'attach' })) as NativeState).generation,
@@ -173,10 +182,12 @@ try {
   process.kill(servicePid, 0);
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).waitFor();
+  await openSessionTools(page);
   expect(await count()).toBe(1);
   process.kill(servicePid, 0);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue()).toBe(
     'PRIVATE NATIVE DRAFT',
   );
@@ -230,6 +241,7 @@ try {
   await log.locator('summary').click();
   await log.getByRole('button', { name: /检查原 Model 输入/ }).press('Enter');
   await page.getByRole('button', { name: 'Confirm read original input', exact: true }).waitFor();
+  await openSessionTools(page);
   assert.equal(await application.evaluate('globalThis.__inputReads'), 0);
   await page
     .getByRole('button', { name: 'Confirm read original input', exact: true })
@@ -264,7 +276,8 @@ try {
     .press('Enter');
   await application.evaluate('globalThis.__inputEntered');
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await openSessionTools(page);
   await application.evaluate('globalThis.__inputRelease()');
   assert.equal(await application.evaluate('globalThis.__inputReads'), 2);
   assert.equal(await page.getByRole('heading', { name: 'Overview', exact: true }).count(), 0);

@@ -6,6 +6,11 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeDraft, NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 type MainDraftEvent = {
   type: string;
   target: string;
@@ -68,7 +73,7 @@ try {
         (event) => {
           const element = event.target as HTMLElement;
           const form = element.closest('form');
-          if (!form?.textContent?.includes('当前会话私有草稿')) return;
+          if (!form?.querySelector('textarea[aria-label="当前会话私有草稿"]')) return;
           target.planMainEvents.push({
             type: event.type,
             target: element.tagName,
@@ -485,6 +490,7 @@ try {
   }
   async function toolApproval(id: string, runId: string) {
     await page.getByRole('button', { name: 'Approve once', exact: true }).waitFor();
+    await openSessionTools(page);
     const current = await state();
     const approval = current.selection!.interactions.find(
       (card) => card.kind === 'approval' && card.state === 'pending',

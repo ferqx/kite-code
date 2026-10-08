@@ -3,6 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, _dataRoot, _storeId, _endpoint, electronExecutable, control, bunExecutable] =
   process.argv.slice(2) as string[];
 const app = await _electron.launch({
@@ -82,7 +87,8 @@ try {
     await new Promise((r) => setTimeout(r, 20));
   }
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await openSessionTools(page);
   await app.evaluate('globalThis.__historyRelease();globalThis.fetch=globalThis.__historyOriginal');
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
@@ -160,7 +166,8 @@ try {
       eq((await page.locator('main').textContent())!.includes('LARGE_HISTORY_TAIL_5051'), true);
       eq(await page.getByRole('button', { name: '发送明确的新轮次' }).isEnabled(), false);
       await page.getByRole('button', { name: 'Native B', exact: true }).click();
-      await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+      await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+      await openSessionTools(page);
       await app.evaluate('globalThis.__nativeHistoryNetwork.releaseHistory()');
     }
     await until(`globalThis.__nativeHistoryNetwork.ready>${before.ready}`);
@@ -216,7 +223,11 @@ try {
   const beforeLive = await network();
   await rename('Native A after physical gap');
   await until(`globalThis.__nativeHistoryNetwork.changes>${beforeLive.changes}`);
-  await page.getByRole('heading', { name: 'Native A after physical gap', exact: true }).waitFor();
+  await page
+    .locator('.session-header')
+    .getByTitle('Native A after physical gap', { exact: true })
+    .waitFor();
+  await openSessionTools(page);
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
     .waitFor();

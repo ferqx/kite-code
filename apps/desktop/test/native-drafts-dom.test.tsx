@@ -5,9 +5,14 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeCreation, NativeDraft, NativeState } from '../src/native-bridge';
+import { prepareDesktopDom } from './native-page-dom.fixture';
 
 test('actual React DOM keeps the new selected view when an original creation receipt arrives late; no draft is moved', async () => {
-  const dom = new JSDOM('<div id="test-root"></div>', { url: 'http://localhost' });
+  const dom = new JSDOM('<div id="test-root"></div>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  });
+  const restoreLayoutGlobals = prepareDesktopDom(dom);
   const prior = {
     window: globalThis.window,
     document: globalThis.document,
@@ -90,7 +95,7 @@ test('actual React DOM keeps the new selected view when an original creation rec
   const click = async (name: string) =>
     act(async () => {
       const button = [...dom.window.document.querySelectorAll('button')].find(
-        (b) => b.textContent === name,
+        (b) => b.textContent === name || b.getAttribute('aria-label') === name,
       )!;
       expect(button).toBeDefined();
       button.click();
@@ -99,7 +104,7 @@ test('actual React DOM keeps the new selected view when an original creation rec
     await act(async () => root.render(<NativeDesktop />));
     await click('Original A');
     expect(dom.window.document.querySelector('textarea')!.value).toBe('original text');
-    await click('新建会话');
+    await click('在 Workspace 中新建对话');
     expect(posts).toBe(1);
     await click('Other B');
     expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
@@ -116,13 +121,28 @@ test('actual React DOM keeps the new selected view when an original creation rec
       }),
     );
     expect(
-      [...dom.window.document.querySelectorAll('h2')].some(
+      [...dom.window.document.querySelectorAll('.session-header strong')].some(
         (heading) => heading.textContent === 'Other B',
       ),
     ).toBe(true);
     expect(selected).toBe('b');
     expect(posts).toBe(1);
     expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
+    const composer = dom.window.document.querySelector('textarea'),
+      conversation = dom.window.document.querySelector('[aria-label="会话消息"]');
+    expect(composer).not.toBeNull();
+    expect(conversation).not.toBeNull();
+    await click('会话工具');
+    expect(dom.window.document.querySelector('#native-session-tools')).not.toBeNull();
+    expect(dom.window.document.querySelector('[aria-label="会话消息"]')).toBe(conversation);
+    await act(async () =>
+      (dom.window.document.querySelector('.right-sidebar-close') as HTMLButtonElement).click(),
+    );
+    expect(dom.window.document.querySelector('#native-session-tools')).toBeNull();
+    expect(dom.window.document.querySelector('[aria-label="会话消息"]')).toBe(conversation);
+    expect(dom.window.document.querySelector('textarea')).toBe(composer);
+    expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
+    expect(posts).toBe(1);
   } finally {
     release({
       phase: 'unknown',
@@ -135,6 +155,7 @@ test('actual React DOM keeps the new selected view when an original creation rec
       },
     });
     await act(async () => root.unmount());
+    restoreLayoutGlobals();
     dom.window.close();
     Object.assign(globalThis, prior);
   }

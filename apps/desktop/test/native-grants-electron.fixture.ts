@@ -3,6 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, storeId, electronExecutable, control, bunExecutable] = process.argv.slice(
   2,
 ) as string[];
@@ -32,7 +37,8 @@ try {
   await page.getByRole('button', { name: '查询原授权清除选择' }).waitFor();
   assert.equal(await app.evaluate('globalThis.__grantPosts'), 1);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText(/实际会话：other；授权版本：/).waitFor();
   assert.ok((await panel.innerText()).includes('fixture.command@1'));
@@ -43,12 +49,14 @@ try {
   assert.ok((await panel.innerText()).includes('实际会话：other'));
   await app.evaluate('globalThis.fetch=globalThis.__grantOriginal');
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText('此页没有授权记录。', { exact: true }).waitFor();
   assert.equal(await count(), 0);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native B', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText(/实际会话：other；授权版本：/).waitFor();
   // The exact observed epoch drifts in a different actual host command before this POST.

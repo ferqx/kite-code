@@ -8,6 +8,11 @@ import { DatabaseSync } from 'node:sqlite';
 import type { NativeCallerMetadata, NativeDraft, NativeState } from '../src/native-bridge';
 import { readNativeCallerRequest } from './native-caller-body.fixture';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, electronExecutable, requestJson, corePath, , packagePath] = process.argv.slice(
   2,
 ) as string[];
@@ -29,7 +34,8 @@ async function launch() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Original recovery', exact: true }).click();
-  await page.getByRole('heading', { name: '持久原申请', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('持久原申请', { exact: true }).waitFor();
+  await openSessionTools(page);
   const ready = (await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
   )) as NativeState;

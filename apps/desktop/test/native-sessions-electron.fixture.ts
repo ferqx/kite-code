@@ -4,6 +4,11 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, root, _dataRoot, storeId, _endpoint, electronExecutable, control, bunExecutable] =
   process.argv.slice(2) as string[];
 const app = await _electron.launch({
@@ -22,7 +27,8 @@ try {
   );
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   await page.evaluate(async () => {
     const state = (await window.kiteNative!.request({
       method: 'state',
@@ -78,7 +84,8 @@ try {
   assert.equal(await app.evaluate('globalThis.__forkPosts'), 1);
   await app.evaluate('globalThis.fetch=globalThis.__sessionOriginal');
   await panel.getByRole('button', { name: '打开已确认分叉' }).press('Enter');
-  await page.getByRole('heading', { name: 'Forked original', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Forked original', { exact: true }).waitFor();
+  await openSessionTools(page);
   const forked = await page.evaluate(async () => {
     const state = (await window.kiteNative!.request({
       method: 'state',
@@ -116,7 +123,8 @@ try {
   await panel.getByRole('button', { name: '读取当前会话管理事实' }).click();
   await panel.getByRole('textbox', { name: '会话管理名称' }).fill('Renamed fork');
   await panel.getByRole('button', { name: '保存当前会话名称' }).press('Enter');
-  await page.getByRole('heading', { name: 'Renamed fork', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Renamed fork', { exact: true }).waitFor();
+  await openSessionTools(page);
   assert.equal(await count(), 1);
   assert.equal(
     await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).isVisible(),

@@ -21,8 +21,10 @@
     {
       "includes": [
         "apps/kite-desktop/src/tailwind.css",
+        "apps/desktop/src/native-tailwind.css",
         "apps/kite-web/src/styles/globals.css",
-        "packages/kite-client-ui/src/style.css"
+        "packages/kite-client-ui/src/style.css",
+        "packages/ui/src/desktop/style.css"
       ],
       "css": { "parser": { "tailwindDirectives": true } }
     }

@@ -5,6 +5,11 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 type Physical = {
   path: string;
   query: string;
@@ -47,6 +52,7 @@ async function launch() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Job Output Window', exact: true }).waitFor();
+  await openSessionTools(page);
   childPid = Number(
     String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
       .trim()

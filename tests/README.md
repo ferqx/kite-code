@@ -11,7 +11,7 @@ Required CI、release/platform 与正式 soak 固定 Bun 1.4.2。性能或稳定
 | `packages/ai/test/` | 中立模型流与明确 SDK adapter |
 | `packages/agent/test/` | Loop、Execution/Job、业务 Store、I/O 与扩展 leaves |
 | `packages/client/test/` | HTTP/SSE、准入、原意图、Browser/Native 公共合同 |
-| `packages/ui/test/` | 公共表单、阅读门禁与便携 TUI 组件 |
+| `packages/ui/test/` | 公共表单、阅读门禁、复用桌面展示层与便携 TUI 组件 |
 | `apps/service/test/` | 可信默认装配、实际 HTTP/SSE、paired/daemon、配置与 Gateway |
 | `apps/cli/test/` | 薄 CLI/TUI、宿主资源、原请求与真实 PTY |
 | `apps/desktop/test/` | 便携客户端、Electron main/preload/renderer 与私有意图存储 |
@@ -32,6 +32,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 维护的[Core备份](../packages/agent/test/isolated/maintenance/backup.test.ts)与[Desktop资产](../packages/agent/test/isolated/maintenance/assets.test.ts)在首DB前用[真实引擎夹具](fixtures/unified-agent/qualified-sqlite-fixture.ts)复用正式SQLite builder和公共initializer，核完整资产及发行身份；原业务预算不变，新增setup hook有限60秒。文件最后DB关闭后清理自有selected资产，外部preload资产只复验；loaded selection不能reset，因此这些文件沿原isolated每文件独立进程运行。[独立默认Source资产文件](../packages/agent/test/isolated/maintenance/mcp-source-approval-intents.test.ts)实测默认engine身份，并核严格关闭后实际Core DB/WAL/SHM的presence与完整bytes在create/inspect后保持。两个范围分别记录，单文件绿色不构成完整默认或三平台资格。
 
 ## 当前公共场景与证据
+
+复用原桌面页面的 [UI 展示断言](../packages/ui/test/desktop-page.test.tsx)与 Native 目录/草稿/问卷/计划 DOM 核新宿主适配；真实 CSS、字体、输入操作及源码外闭包分别沿 [Native 候选](../apps/desktop/test/isolated/native-bundle.test.ts)和[设置与刷新窗口](../apps/desktop/test/isolated/native-electron.test.ts)核验，不由 DOM 结果推导完整产品视觉资格。[边界测试](isolated/scripts/unified-agent-boundary.test.ts)另核声明的 CSS 真实导出、缺失/越界/旧目标拒绝，以及显式 UI builder 的宿主 I/O 与 source 的便携限制。运行范围、原失败和剩余页面迁移归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)。
 
 [默认 macOS host Shell](../packages/agent/test/isolated/jobs/macos-host-shell.test.ts)核真实宿主/fork/setsid、Full/Workspace写、保护根/准确祖先、网络、父退出及注册清理；[源码外默认消费者](isolated/unified-agent/formal-optional-capabilities.test.ts)与[平台报告](isolated/unified-agent/unified-platform.test.ts)核普通默认Provider/Job和cold输出零重放。[默认 continuous](isolated/unified-agent/unified-default-shell-continuous.test.ts)只做两cycle40Command的实际短验收，原450秒formal组件另由[固定producer](fixtures/unified-agent/soak/continuous-default-shell.ts)运行；并行计算区间取并集，不能加构建/空闲/重复时间取得资格。Win/Linux实际验证依用户选择在重构完成后交给GitHub Actions，平台skip不计原生通过。
 

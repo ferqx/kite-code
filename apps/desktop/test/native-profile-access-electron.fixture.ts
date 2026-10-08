@@ -3,6 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 
+async function openSessionTools(page: import('playwright').Page) {
+  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
 const [outdir, blockedApp, root, electronExecutable, control, bunExecutable] = process.argv.slice(
   2,
 ) as string[];
@@ -72,7 +77,8 @@ async function ready() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(30000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   return page;
 }
 try {
