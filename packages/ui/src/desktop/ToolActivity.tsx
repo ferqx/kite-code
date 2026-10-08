@@ -462,6 +462,7 @@ export function ToolActivity({
   expanded,
   onToggle,
   openFile,
+  openFileForMessage,
   renderChildren,
   suppressGenericFailure,
   expandedItems,
@@ -477,6 +478,7 @@ export function ToolActivity({
   expanded?: boolean;
   onToggle: (open: boolean) => void;
   openFile?: (path: string) => void;
+  openFileForMessage?: (message: Message) => ((path: string) => void) | undefined;
   renderChildren: (toolCallId: string, expanded: boolean) => ReactNode;
   suppressGenericFailure?: boolean;
   childProcess?: boolean;
@@ -485,6 +487,7 @@ export function ToolActivity({
   childDetail?: { readonly label: string; readonly onOpen: () => void };
 }) {
   const message = messages[0]!;
+  const messageOpenFile = openFileForMessage ? openFileForMessage(message) : openFile;
   let ask = message.ask;
   if (!ask && message.toolName === 'ask_user' && message.toolResult?.stdout) {
     try {
@@ -545,7 +548,7 @@ export function ToolActivity({
       : activitySummary(messages)
     : ask
       ? askMultiple
-        ? `询问用户 · ${message.status === 'completed' ? '已回答 ' : ''}${ask.questions.length} 项`
+        ? `询问用户 · ${message.status === 'completed' && !ask.cancelled ? '已回答 ' : ''}${ask.questions.length} 项`
         : '询问用户'
       : toolTitle(message);
   const target = ask
@@ -557,10 +560,12 @@ export function ToolActivity({
       : toolTarget(message);
   const groupedIssues = grouped ? groupedIssueSummary(messages) : undefined;
   const status =
-    ask && message.status === 'cancelled'
+    ask && (ask.cancelled || message.status === 'cancelled')
       ? open
         ? undefined
-        : '已取消'
+        : ask.cancelled
+          ? '已取消回答'
+          : '已取消'
       : grouped
         ? undefined
         : executionLabel(message);
@@ -652,7 +657,7 @@ export function ToolActivity({
             </Button>
           </div>
         ) : read && !childIssue ? (
-          <ToolRow message={message} openFile={openFile} />
+          <ToolRow message={message} openFile={messageOpenFile} />
         ) : edit && !childIssue ? (
           <Marker className="tool-activity-summary tool-edit-heading">
             <MarkerIcon className="tool-activity-marker-icon">
@@ -661,8 +666,8 @@ export function ToolActivity({
             <MarkerContent className="tool-activity-marker-content">
               <span className="tool-label">{label}</span>
               {target &&
-                (openFile ? (
-                  <Button className="file-link" onClick={() => openFile(target)}>
+                (messageOpenFile ? (
+                  <Button className="file-link" onClick={() => messageOpenFile(target)}>
                     {target}
                   </Button>
                 ) : (
@@ -720,10 +725,15 @@ export function ToolActivity({
                     activityId={item.id}
                     restoredExpanded={restoredExpanded}
                     openFile={openFile}
+                    openFileForMessage={openFileForMessage}
                     renderChildren={renderChildren}
                   />
                 ) : (
-                  <ToolRow key={item.id} message={item} openFile={openFile} />
+                  <ToolRow
+                    key={item.id}
+                    message={item}
+                    openFile={openFileForMessage ? openFileForMessage(item) : openFile}
+                  />
                 ),
               )}
             </div>
@@ -732,8 +742,8 @@ export function ToolActivity({
           {hasDiff && <FileDiff message={message} />}
           {ask && (
             <div className="tool-ask-answers">
-              {message.status === 'cancelled' ? (
-                <span>已取消</span>
+              {ask.cancelled || message.status === 'cancelled' ? (
+                <span>{ask.cancelled ? '已取消回答' : '已取消'}</span>
               ) : askMultiple ? (
                 ask.questions.map((question, index) => (
                   <div className="tool-ask-answer" key={question.id}>

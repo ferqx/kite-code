@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PanelImperativeHandle } from 'react-resizable-panels';
 import { Composer, type ComposerProps } from './Composer';
+import type { ToolActivityState } from './Conversation';
 import { Conversation, type ReadingState } from './Conversation';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from './components/ui/sheet';
@@ -54,6 +55,8 @@ export interface SessionPageProps {
   readingKey: string;
   messages: readonly Message[];
   renderMessage?: (message: Message) => ReactNode;
+  renderMessageContent?: (message: Message) => ReactNode;
+  renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   /** Host-confirmed current Turn; omitted when the message source has no Turn identity. */
   turnActivity?: TurnActivity;
   loading: boolean;
@@ -649,6 +652,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                             key={props.readingKey}
                             messages={messages}
                             renderMessage={props.renderMessage}
+                            renderMessageContent={props.renderMessageContent}
+                            renderToolActivity={props.renderToolActivity}
                             turnActivity={props.turnActivity}
                             loading={props.loading}
                             requiredSubagentWait={props.requiredSubagentWait}

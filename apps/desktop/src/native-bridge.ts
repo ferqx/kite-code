@@ -40,7 +40,11 @@ import type { InputMetadata, InputRequest } from './input';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
-import type { NativeToolMessagePage, NativeToolMessageRequest } from './tool-messages-bridge';
+import type {
+  NativeToolMessagePage,
+  NativeToolMessageRequest,
+  NativeToolRunPage,
+} from './tool-messages-bridge';
 
 export type * from './background-bridge';
 export type * from './file-changes-bridge';
@@ -662,6 +666,7 @@ export type NativeRequest =
     };
 export type NativeResult =
   | NativeToolMessagePage
+  | NativeToolRunPage
   | NativeFileTargetPage
   | NativeFileChangePage
   | NativeFileChangeDetail

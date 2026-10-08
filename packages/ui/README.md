@@ -12,6 +12,8 @@
 
 原工具组件允许宿主给 `Message.target` 传展示文本，不从文本取得文件或执行权限。Native 的已知工具行沿准确执行结果与当前视图适配；未来定义／版本不借旧同名分类解释，原文仍可展开。Shell 操作继续复用原工具图标，实际身份、目标、状态与限定证据归 [Desktop owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
 
+SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` 让宿主复用原消息外层、轮次折叠、最终回复复制和分组阅读状态，工具 slot 接完整分组与原展开控制；原 `renderMessage` 及未传新 slot 的缺省行为保持。`copyText=null` 表示当前正文仅可读预览，不能当全文复制；`TurnActivity.cancelling/unavailable` 只表达宿主确认的停止中／上次确认状态。ToolActivity 的 `openFileForMessage` 保每项独立回调，`ask.cancelled` 表达取消信息回答，与工具／Run 终态分开。准确公共 Run、原问答结果和完整正文资格归 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)，纯 UI 不建立来源或业务 authority。
+
 [ModelEffortSelector](src/desktop/ModelEffortSelector.tsx)复用原双栏浮层与 [GemSlider](src/desktop/GemSlider.tsx)。宿主可传准确 `ModelOption.id` 与 `reasoningEffortChoices`；选择、列表键和当前标记按 ID 区分，同一提供商内同名模型补显示 ID。滑块只映射实际支持的正向档位；一档用按钮，零档不造滑块。显式回调提供「配置默认」，`none` 仅在实际 choices 包含它时提供关闭入口。未传新字段的原调用者保持原提供商/名称与六档展示契约。三个[原浮层回归](test/isolated/model-effort.test.tsx)迁回新 owner；准确路由、稀疏档位和实际窗口由 Desktop 验证。
 
 [Desktop 构建](scripts/build-desktop.ts)在普通 workspace 与源码外候选中均输出实际 desktop/index.js 和原样 desktop/style.css，补齐新增 exports；Native renderer 编译 CSS/字体并纳入原递归 manifest。[原页面测试](test/desktop-page.test.tsx)迁回原 12 项展示断言。正式 macOS 窗口、原身份读写和剩余旧页面迁移范围由 Desktop owner 维护。

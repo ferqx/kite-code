@@ -16,6 +16,8 @@ Native 消息路径仍受当前已读 Message／viewSelection／history epoch �
 
 Native 普通工具 metadata 由已读 Message 的唯一 source Execution 沿生成 Client GET 核原身份、tool kind、终态、outcome 与准确 content，不借 Message complete 或重复 callId 判成功。当前活动工具只取同 Store／会话／活动 Run 的已观察 Execution；停止申请与终态分开。请求目标仅作文本，不取得 Files receipt 或宿主动作；未知名称／版本不借旧 UI 分类解释。同一阅读身份的普通事件刷新沿 Main 已验证原视图保留 metadata／消息文件读取，明确选择、reset或Store变化仍撤销。所有所属读取沿当前 generation／viewSelection／history epoch 释放，限定产品行为与证据归 [Native owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
 
+Native 的原轮次 UI 消费准确公共 Run，不从 Message complete 推最终回复或终态。超出有界 View 的 Run metadata 只由当前已观察、未封存的 Message ID 分批32项经当前 Client GET，核原 Run／Session、Store 连接和阅读scope；已恢复在当前 Store 的 foreign terminal 保原出处仅供展示，foreign active 不取得活动或控制权。Fork／Include 的 `originMessage` 不查询来源 Run 后来的状态。默认 ask_user v1 回执须核原成功 Execution／准确结果，问题仅来自唯一原 Model call；信息取消独立于 Run。原 UI slots 只提供布局、聚合和阅读控制，完整回复复制只接受原 reader 当前已验证并显示的正文，不引入新 Core／HTTP／SQL／持久 UI 格式。实际范围归 [Native owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。
+
 读取时机：修改新 Agent 的 Store/执行/模型接口、目标 HTTP schema、跨包依赖或过渡调用者时。
 
 验证：`bun run test:unified-agent`、`bun run check:unified-agent-boundary`，实际运行范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。

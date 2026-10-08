@@ -2875,3 +2875,24 @@ ModelOutputMessage 仅增加同一预览／已验证全文的 renderText slot，
 - 根及八workspaces typecheck最终实际0，日志`/private/tmp/kite-pc-tool-process-types-ready-20261008.log`。本片边界和生成API核对实际0，分别见`boundary`／`api`日志；不是全阶段回归。
 
 本轮新上下文独立审查派发一次，明确返回`agent thread limit reached`，没有复用其他职责的旧Agent或把根自检计为独立审查。完整PC尚欠旧Turn／聚合、审批／Ask历史的全部就地呈现与整体验证；原RSS失败、八轮／60分钟资源资格、剩余维护恢复、独立审查、最终回归及旧路径退役仍未闭合。Win/Linux仍按用户安排重构完成后交GitHub Actions，无push／PR／dispatch／发布。冻结、本地门禁及交付范围归`/private/tmp/kite-pc-tool-process-owned-20261008.json`与`/private/tmp/kite-pc-tool-process-delivery-20261008.json`；不由本片通过关闭§35。
+
+## 2026-10-08：原轮次阅读、聚合与问答回执
+
+本逻辑轮从durable `el-refactor`／HEAD `24fa77376281f61767a583588238faec3f643c13` 继续原PC主线，收束发生于2026-10-09。用户已确认复用原kite-desktop、macOS优先与宿主Shell语义。最高依赖仍是原PC剩余交互，后序为installed必要恢复、macOS原稳定性／资源退出、完整能力与独立审查、最终完整回归／legacy退役；不追加TUI／Chrome矩阵或资源优化。
+
+正式Native使用原Conversation外层、过程折叠、最终回复与复制按钮；有限正文slot保原ModelOutputMessage，工具slot传完整分组及原展开控制。公共Run的准确原身份、终态与起止时间供展示，不从Message complete推成功或最终回复。超近200项历史只以当前已观察且未封存Message ID每批32项经当前Client GET；原scope／Store连接／所属close保持。当前Store保存的foreign终态保原出处作历史事实，foreign active无活动／控制；Fork／Include封存Message不读取来源Run后来的状态。
+
+最终回复须是已确认completed非活动Run的最后完整支持格式、无工具调用且无后续工具结果的助手消息。大正文预览不能复制，原完整reader当前已验证／显示的准确正文才启用复制，关闭或换身份即撤销；临时Map不增加持久格式。相邻已知Files探索沿原聚合，每项文件callback保独立receipt／Main核验。默认ask_user v1以原成功Execution／准确结果显示唯一原请求的问题和人类标签／自由文本，信息取消显示已取消回答但不停止Run。当前人工审批只标唯一真实pending卡；自动审批／通用Interaction历史仍未补造。负责行为归[Native owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)，持久取舍归[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)，原工具Note保仍适用理由并交叉链接。
+
+最终代码已实际执行，环境为macOS26.7.1 arm64／Bun1.4.2：
+
+- `bun test --parallel=1 --max-concurrency=1 apps/desktop/test/native-tool-messages.test.ts apps/desktop/test/native-file-changes.test.ts apps/desktop/test/native-caller.test.ts packages/ui/test/desktop-page.test.tsx`：actual0，4文件33pass／281断言／0.964s，日志`/private/tmp/kite-pc-transcript-direct-ready-20261008.log`。保原业务断言，新增已观察Run第241项、封存边界、恢复终态保出处与foreign active拒绝、准确scope／close／有限IPC，默认Ask原请求／答案／信息取消／未知版本；正式caller在持有普通refresh时原Run读取成立。
+- 原Conversation／工具／FileChanges／原入口／草稿／模型选择六DOM文件：actual0，16pass／200断言／2.54s，日志`/private/tmp/kite-pc-transcript-dom-ready-20261008.log`。核原折叠／展开保选择、相邻2读取聚合、逐项文件ID、准确复制、失败仍在所属轮次、封存不补final、恢复终态只读、32+8旧Run批次与迟到scope隔离；问答核原Unicode／CRLF自由文本与信息取消时Run仍running。全文复制案例仅是原UI snapshot fixture，不冒称真实SHA／EOF验证。
+- `bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-bundle.test.ts`：最终actual0，1pass／7条Bun及全部原Node driver断言／52.26s（案例52125.88ms），日志`/private/tmp/kite-pc-transcript-window-ready-20261008.log`。完整候选搬迁并删除全部原输出，真实默认Main／Service／renderer首次及普通退出后冷重开；新增过程默认折叠、展开、原单个最终复制与准确Markdown正文，复制由所属窗口navigator.clipboard替身接收。原三次Provider、真实Files.write／read3失败／最终输出、审批／目录／General／文件面板／缺失目标拒绝／完整reader／CSS字体、普通退出、Main强杀、子Service终端与双锁全断言保持。原120s整例／45s driver／10s UI预算未改，不实际启动OS编辑器或写系统剪贴板。
+- 根＋八workspaces typecheck actual0，日志`/private/tmp/kite-pc-transcript-types-ready-20261008.log`。所有工具handle已核真实终端0，不以日志文字代替进程完成。
+
+原类型错误保留：`/private/tmp/kite-pc-transcript-types-initial-20261008.log`与`types-second`均actual2，分别修Command.kind字符串联合窄化／ES2022无findLastIndex、DOM bridge遗漏watch／UUID默认参数窄推断；没有删断言或放宽门禁。此前direct-qualified actual0／33pass／280断言、dom-qualified actual0／16pass／195断言、window-initial actual0／49.80s只对应foreign终态补齐前代码；最终资格以上述ready日志为准。多次因格式化位置不符的apply_patch原子失败没有留下部分修改。本逻辑轮新上下文只读recon派发一次返回agent thread limit reached，没有获得新结果或独立审查；root自检不替代整片独立Reviewer。
+
+Desktop／UI owner、桌面手册、active边界、测试入口、原方案、37能力证据与两份Note同步；Core、生成HTTP API、SQL、旧私有格式和依赖核对保持。document-before-commit的iteration_complete／stage／commit按本次实际范围执行，最终文档／边界／API／owner门禁和正常hooks独立核验，详细终端结果、冻结与授权本地提交归`/private/tmp/kite-pc-transcript-owned-20261008.json`与`/private/tmp/kite-pc-transcript-delivery-20261008.json`；这两份仅为本次临时交付证据，不是后续验证缓存。本片未跑全阶段默认。
+
+剩余退出缺口按依赖保持五项：①原PC自动审批／通用交互历史、全部封存／恢复组合与完整客户端核对；②installed方案必要维护恢复／已发布样本；③macOS原RSS失败／八轮稳定性与完整资源退出；④§35适用能力和完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后Win／Linux Actions。37项仍partial、wholeV13=false、Goal active。Root唯一Git owner，AGENTS.md原SHA256 `7e19375d5a9771aef3645fa33dcdbbc0e59c03e8d2276efba54fa97b13d9ea16` 和bun.lock保护，不暂存；仅本地stage／commit，无push／PR／发布／Actions dispatch。

@@ -11,6 +11,40 @@ async function openSessionTools(page: import('playwright').Page) {
 }
 
 async function readOriginalFileChanges(page: import('playwright').Page) {
+  const process = page.locator('.agent-turn-summary').first();
+  await process.waitFor();
+  const final = page.locator('.agent-turn-final');
+  await final.waitFor();
+  assert.equal(await process.getAttribute('aria-expanded'), 'false');
+  await process.click();
+  assert.equal(await process.getAttribute('aria-expanded'), 'true');
+  assert.equal(await final.count(), 1);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as unknown as { nativeCopied?: string }).nativeCopied = text;
+        },
+      },
+    });
+  });
+  const read = final.getByRole('button', {
+    name: 'Read complete recorded Model output',
+    exact: true,
+  });
+  if ((await read.count()) > 0) await read.click();
+  const copy = final.getByRole('button', { name: '复制本轮Agent回复', exact: true });
+  await copy.waitFor();
+  assert.equal(
+    await page.getByRole('button', { name: '复制本轮Agent回复', exact: true }).count(),
+    1,
+  );
+  await copy.click();
+  assert.equal(
+    await page.evaluate(() => (window as unknown as { nativeCopied?: string }).nativeCopied),
+    'bundled complete\n\n[查看文件](bundled.txt) [查看缺失文件](missing.txt)',
+  );
   await page.getByRole('button', { name: 'bundled.txt', exact: true }).waitFor();
   const failed = page
     .locator('.tool-activity-step.failed')
@@ -297,7 +331,9 @@ try {
     if (await page.getByText('轮次：completed', { exact: true }).isVisible()) break;
     const approve = page.getByRole('button', { name: 'Approve once', exact: true });
     if (await approve.isVisible()) {
-      await page.locator('.tool-activity-step.queued').filter({ hasText: '写入' }).waitFor();
+      const write = page.locator('.tool-edit-heading').filter({ hasText: '写入' });
+      await write.waitFor();
+      assert.ok((await write.textContent())!.includes('等待人工审批'));
       const state = await page.evaluate(
           async () =>
             (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,

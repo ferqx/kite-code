@@ -16,6 +16,7 @@ const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
   'toolMessages.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
+  'toolMessages.runs': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.close': ['readId'],
   'fileChanges.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'fileTargets.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
@@ -218,6 +219,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       method === 'fileChanges.list' ||
       method === 'fileTargets.list' ||
       method === 'toolMessages.list' ||
+      method === 'toolMessages.runs' ||
       method === 'messageFile.open') &&
     (!Number.isSafeInteger(input.viewSelection) ||
       Number(input.viewSelection) < 1 ||
@@ -343,7 +345,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   if (
     (method === 'fileChanges.list' ||
       method === 'fileTargets.list' ||
-      method === 'toolMessages.list') &&
+      method === 'toolMessages.list' ||
+      method === 'toolMessages.runs') &&
     (!Array.isArray(input.messageIds) ||
       input.messageIds.length < 1 ||
       input.messageIds.length > 32 ||

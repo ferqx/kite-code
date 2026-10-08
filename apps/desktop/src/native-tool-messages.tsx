@@ -15,6 +15,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'shell.read': [['1'], '读取后台 Shell'],
   'shell.wait': [['1'], '等待后台 Shell'],
   'shell.stop': [['1'], '请求停止后台 Shell'],
+  ask_user: [['1'], '询问用户'],
 };
 const sameReceipt = (left: Message, right: Message) =>
   left.sessionId === right.sessionId &&
@@ -28,7 +29,8 @@ const sameReceipt = (left: Message, right: Message) =>
   left.sourceIds?.length === right.sourceIds?.length &&
   JSON.stringify(left.originMessage) === JSON.stringify(right.originMessage);
 export function desktopToolMessage(
-  fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status' | 'target'>,
+  fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status' | 'target'> &
+    Pick<Partial<NativeToolMessageFact>, 'ask'>,
   id: string,
   text: string,
 ): DesktopMessage {
@@ -50,6 +52,7 @@ export function desktopToolMessage(
       : undefined,
     title: known ? label![1] : `${fact.definitionId} · ${fact.definitionVersion}`,
     target: fact.target,
+    ...(fact.ask ? { ask: fact.ask } : {}),
     status:
       fact.status === 'succeeded'
         ? 'completed'

@@ -1,8 +1,10 @@
 import { type AgentClient, ClientError, type Message } from '@kite-ai/client';
-import type {
-  NativeToolMessagePage,
-  NativeToolMessageRequest,
-  NativeToolMessageScope,
+import {
+  type NativeToolMessagePage,
+  type NativeToolMessageRequest,
+  type NativeToolMessageScope,
+  type NativeToolRunPage,
+  presentableRun,
 } from '../src/tool-messages-bridge';
 
 type Lease = { readId: string; scope: NativeToolMessageScope; abort: AbortController };
@@ -44,7 +46,7 @@ export class NativeToolMessages {
     )
       throw new ClientError('native_selection_changed');
   }
-  private target(message: Message, definitionId: string, scope: NativeToolMessageScope) {
+  private callInput(message: Message, definitionId: string, scope: NativeToolMessageScope) {
     if (!message.toolCallId) return undefined;
     const original = source(message);
     const calls = [...this.messages().values()].flatMap((candidate) => {
@@ -61,12 +63,13 @@ export class NativeToolMessages {
         : [];
     });
     if (calls.length !== 1 || calls[0]!.name !== definitionId) return undefined;
-    let input: Record<string, unknown> | undefined;
     try {
-      input = object(JSON.parse(calls[0]!.arguments));
+      return object(JSON.parse(calls[0]!.arguments));
     } catch {
       return undefined;
     }
+  }
+  private target(input: Record<string, unknown> | undefined, definitionId: string) {
     const key =
       definitionId === 'shell.launch'
         ? 'command'
@@ -85,9 +88,42 @@ export class NativeToolMessages {
     const points = [...target];
     return points.slice(0, 4096).join('') + (points.length > 4096 ? '…' : '');
   }
-  async list(
-    input: Extract<NativeToolMessageRequest, { method: 'toolMessages.list' }>,
-  ): Promise<NativeToolMessagePage> {
+  private ask(input: Record<string, unknown> | undefined, content: string) {
+    let result: Record<string, unknown> | undefined;
+    try {
+      result = object(JSON.parse(content));
+    } catch {
+      return;
+    }
+    if (!result) return;
+    const questions =
+      Array.isArray(input?.questions) && input.questions.length >= 1 && input.questions.length <= 3
+        ? input.questions.flatMap((value, index) => {
+            const question = object(value);
+            return typeof question?.question === 'string' && question.question.trim()
+              ? [{ id: `q${index + 1}`, question: question.question.trim() }]
+              : [];
+          })
+        : [];
+    if (result.cancelled === true && Object.keys(result).length === 1)
+      return { questions, cancelled: true };
+    const answers = object(result.answers);
+    if (
+      Object.keys(result).length !== 2 ||
+      typeof result.answer !== 'string' ||
+      !answers ||
+      Object.entries(answers).some(
+        ([key, value]) => !/^q[1-3]$/.test(key) || typeof value !== 'string',
+      ) ||
+      !Object.keys(answers).length ||
+      (questions.length &&
+        (Object.keys(answers).length !== questions.length ||
+          questions.some((question) => !Object.hasOwn(answers, question.id))))
+    )
+      return;
+    return { questions, summary: result.answer, answers: answers as Record<string, string> };
+  }
+  private open(input: Extract<NativeToolMessageRequest, { messageIds: string[] }>): Lease {
     if (
       input.messageIds.length < 1 ||
       input.messageIds.length > 32 ||
@@ -105,6 +141,61 @@ export class NativeToolMessages {
       throw new ClientError('tool_message_read_busy');
     const lease = { readId: input.readId, scope: { ...scope }, abort: new AbortController() };
     this.reads.set(input.readId, lease);
+    return lease;
+  }
+  async runs(
+    input: Extract<NativeToolMessageRequest, { method: 'toolMessages.runs' }>,
+  ): Promise<NativeToolRunPage> {
+    const lease = this.open(input),
+      { scope } = lease;
+    try {
+      await this.client.verifyConnection({ signal: lease.abort.signal });
+      this.check(lease);
+      const runs: NativeToolRunPage['runs'] = [],
+        read = new Set<string>();
+      for (const id of input.messageIds) {
+        const message = this.messages().get(id);
+        if (!message || message.sessionId !== scope.sessionId)
+          throw new ClientError('tool_message_unavailable');
+        // A sealed Fork/Include has a fixed historical boundary. A later source Run is not its terminal fact.
+        if (message.originMessage || !message.runId || read.has(message.runId)) continue;
+        read.add(message.runId);
+        const run = await this.client.getRun(message.runId, { signal: lease.abort.signal });
+        this.check(lease);
+        const current = this.messages().get(id);
+        if (
+          !current ||
+          current.runId !== message.runId ||
+          current.originMessage ||
+          current.sessionId !== scope.sessionId
+        )
+          throw new ClientError('native_selection_changed');
+        if (run.id !== message.runId || run.sessionId !== scope.sessionId)
+          throw new ClientError('tool_message_identity_mismatch');
+        if (presentableRun(run, scope.storeId, scope.sessionId))
+          runs.push({
+            id: run.id,
+            originStoreId: run.originStoreId,
+            sessionId: run.sessionId,
+            status: run.status,
+            isActive: run.isActive,
+            createdAt: run.createdAt,
+            finishedAt: run.finishedAt,
+            reason: run.reason,
+          });
+      }
+      await this.client.verifyConnection({ signal: lease.abort.signal });
+      this.check(lease);
+      return { kind: 'toolMessages.runs', readId: input.readId, scope: { ...scope }, runs };
+    } finally {
+      this.close(input.readId);
+    }
+  }
+  async list(
+    input: Extract<NativeToolMessageRequest, { method: 'toolMessages.list' }>,
+  ): Promise<NativeToolMessagePage> {
+    const lease = this.open(input),
+      { scope } = lease;
     try {
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
@@ -142,6 +233,7 @@ export class NativeToolMessages {
           result.content !== message.content
         )
           continue;
+        const call = this.callInput(message, execution.definitionId, scope);
         entries.push({
           messageId: message.id,
           executionId: execution.id,
@@ -149,7 +241,12 @@ export class NativeToolMessages {
           definitionVersion: execution.definitionVersion,
           status: execution.status,
           resultRevision: execution.resultRevision,
-          target: this.target(message, execution.definitionId, scope),
+          target: this.target(call, execution.definitionId),
+          ...(execution.definitionId === 'ask_user' &&
+          execution.definitionVersion === '1' &&
+          execution.status === 'succeeded'
+            ? { ask: this.ask(call, message.content) }
+            : {}),
         });
       }
       await this.client.verifyConnection({ signal: lease.abort.signal });

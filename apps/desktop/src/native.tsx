@@ -26,7 +26,8 @@ import {
   DialogTitle,
   MessageContent,
   SessionPage,
-  ToolRow,
+  type SessionPageProps,
+  ToolActivity,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
@@ -64,13 +65,8 @@ import { NativeRecoveryView } from './native-recovery';
 import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
 import { useNativeTheme } from './native-theme';
-import {
-  desktopToolMessage,
-  liveToolMessages,
-  NativeLiveToolMessage,
-  NativeToolMessage,
-  useNativeToolMessages,
-} from './native-tool-messages';
+import { liveToolMessages, useNativeToolMessages } from './native-tool-messages';
+import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-transcript';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
 export function NativeDesktop() {
@@ -153,6 +149,8 @@ export function NativeDesktop() {
     draftRevision = useRef(0),
     writing = useRef(false);
   const selected = useRef<string | undefined>(undefined);
+  const verifiedReplyBodies = useRef(new Map<string, { identity: string; text: string }>());
+  const [, renderVerifiedReply] = useState(0);
   const questionDrafts = useRef(
     new Map<
       string,
@@ -481,6 +479,20 @@ export function NativeDesktop() {
     !preparing && !scheduledTasksView && !childDetail ? selection : undefined,
     messages,
   );
+  const runMessages = useNativeRuns({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    selection: !preparing && !scheduledTasksView && !childDetail ? selection : undefined,
+    historyEpoch: state?.historyEpoch ?? 0,
+    messages,
+    observationRevision: state?.environmentRevision ?? 0,
+  });
+  const replyScope = JSON.stringify([
+    state?.generation ?? generation.current,
+    selection?.storeId,
+    selection?.viewSelection ?? selection?.viewGeneration,
+    state?.historyEpoch ?? 0,
+  ]);
   if (!bridge) return <p>原生桥不可用。此页面不连接替代服务器。</p>;
   async function write(action: () => Promise<unknown>, requiresHistory = true) {
     if (
@@ -905,13 +917,65 @@ export function NativeDesktop() {
                 run.originCommandId === firstSubmission.commandId,
             ))),
     );
-  const messageModels = preparing ? [] : desktopMessages(messages);
+  const transcript = selection
+    ? desktopTranscript({
+        messages,
+        runs: runMessages.runs,
+        tools: toolMessages.entries,
+        storeId: selection.storeId,
+        sessionId: selection.session.id,
+        fullReply: (message) => {
+          const body = verifiedReplyBodies.current.get(JSON.stringify([replyScope, message.id]));
+          return body?.identity === nativeReplyKey(replyScope, message) ? body.text : undefined;
+        },
+      })
+    : { messages: desktopMessages(messages) };
+  const messageModels = preparing ? [] : transcript.messages;
+  for (const entry of liveTools) {
+    const run = runMessages.runs.find(
+      (run) =>
+        run.id === entry.execution.runId &&
+        run.isActive &&
+        run.originStoreId === selection?.storeId &&
+        run.sessionId === selection?.session.id,
+    );
+    const approvals =
+      selection?.interactions.filter(
+        (card) =>
+          card.kind === 'approval' &&
+          card.state === 'pending' &&
+          card.originStoreId === selection.storeId &&
+          card.sessionId === entry.execution.sessionId &&
+          card.runId === entry.execution.runId &&
+          card.executionId === entry.execution.id &&
+          card.definitionId === entry.execution.definitionId &&
+          card.definitionVersion === entry.execution.definitionVersion,
+      ) ?? [];
+    messageModels.push({
+      ...entry.message,
+      ...(run && selection
+        ? {
+            turnId: JSON.stringify(['native-run', selection.storeId, selection.session.id, run.id]),
+          }
+        : {}),
+      ...(approvals.length === 1
+        ? {
+            approval: {
+              state: 'awaiting_user' as const,
+              source: 'user' as const,
+              interactionId: approvals[0]!.id,
+            },
+          }
+        : {}),
+    });
+  }
   if (firstVisible && !firstSaved)
     messageModels.unshift({
       id: firstSubmission.commandId,
       role: 'user',
       text: firstSubmission.text,
       settled: firstSubmission.result?.phase === 'accepted',
+      copyText: null,
       delivery:
         firstSubmission.result?.phase === 'accepted'
           ? undefined
@@ -1599,6 +1663,195 @@ export function NativeDesktop() {
     </section>
   );
   const workspaceModels = directory ? desktopDirectory(directory, selection) : [];
+  const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
+    if (childDetail) {
+      const message = childFacts?.messages.find((entry) => entry.id === model.id),
+        snapshot = childFacts?.modelOutputs.find((entry) => entry.messageId === model.id)?.snapshot;
+      return message ? (
+        <ModelOutputMessage
+          message={message}
+          storeId={selection!.storeId}
+          renderText={
+            message.contentFormat === 'unsupported'
+              ? undefined
+              : (text) => <MessageContent text={text} />
+          }
+          onRead={
+            snapshot
+              ? async ({ signal }) => {
+                  signal.throwIfAborted();
+                  return snapshot;
+                }
+              : undefined
+          }
+        />
+      ) : null;
+    }
+    if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
+      return (
+        <>
+          <p>{model.text}</p>
+          <p
+            className="delivery-status"
+            role={!model.delivery || model.delivery === 'sending' ? 'status' : 'alert'}
+          >
+            {!model.delivery
+              ? '已提交，请打开本次会话查看实际消息。'
+              : model.delivery === 'sending'
+                ? '正在发送'
+                : model.delivery === 'unknown'
+                  ? '发送结果未知，请查询原提交。'
+                  : '发送失败，原文已恢复供重试。'}
+          </p>
+        </>
+      );
+    const message = messagesById.get(model.id);
+    if (!message || !selection || !state) return null;
+    const openable =
+      !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
+    return (
+      <ModelOutputMessage
+        key={`${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${message.id}`}
+        message={message}
+        storeId={selection.storeId}
+        renderText={
+          message.contentFormat === 'unsupported'
+            ? undefined
+            : (text) => (
+                <MessageContent
+                  text={text}
+                  openFile={
+                    openable
+                      ? (path) =>
+                          void report(() =>
+                            bridge.request({
+                              method: 'messageFile.open',
+                              generation: state.generation,
+                              viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                              historyEpoch: state.historyEpoch ?? 0,
+                              messageId: message.id,
+                              path,
+                              editor,
+                            }),
+                          )
+                      : undefined
+                  }
+                />
+              )
+        }
+        onContent={(text) => {
+          const key = JSON.stringify([replyScope, message.id]);
+          const before = verifiedReplyBodies.current.get(key),
+            identity = nativeReplyKey(replyScope, message);
+          if (text === undefined) verifiedReplyBodies.current.delete(key);
+          else verifiedReplyBodies.current.set(key, { identity, text });
+          if (before?.text !== text || (before && before.identity !== identity))
+            renderVerifiedReply((value) => value + 1);
+        }}
+        onRead={
+          selection.canReadModelOutput
+            ? async ({ sessionId, executionId, signal }) => {
+                const current = state.generation,
+                  nonce = viewIntent.current;
+                return readNativeModelOutput({
+                  bridge,
+                  generation: current,
+                  expectedStoreId: selection.storeId,
+                  sessionId,
+                  viewSessionId: selection.session.id,
+                  messageId: message.id,
+                  executionId,
+                  signal,
+                  isCurrent: () =>
+                    generation.current === current &&
+                    viewIntent.current === nonce &&
+                    selected.current === selection.session.id,
+                });
+              }
+            : undefined
+        }
+      />
+    );
+  };
+  const renderNativeTools: NonNullable<SessionPageProps['renderToolActivity']> = (
+    group,
+    controls,
+  ) => {
+    if (
+      childDetail ||
+      group.some(
+        (model) =>
+          !toolMessages.entries.some((entry) => entry.messageId === model.id) &&
+          !fileTargets.entries.some((entry) => entry.messageId === model.id) &&
+          !liveTools.some((entry) => entry.message.id === model.id),
+      )
+    )
+      return group.map((model) => (
+        <article key={model.id} className="message tool">
+          {renderNativeMessage(model)}
+        </article>
+      ));
+    const models = group.map((model) => {
+      const target = fileTargets.entries.find((entry) => entry.messageId === model.id);
+      return target?.path && target.operation
+        ? {
+            ...model,
+            toolName: { read: 'read_file', write: 'write_file', edit: 'edit_file' }[
+              target.operation
+            ],
+            target: target.path,
+            arguments: { path: target.path },
+            status: 'completed' as const,
+            settled: true,
+          }
+        : model;
+    });
+    return (
+      <>
+        <ToolActivity
+          {...controls}
+          messages={models}
+          renderChildren={() => null}
+          openFileForMessage={(model) => {
+            const target = fileTargets.entries.find((entry) => entry.messageId === model.id);
+            if (
+              !selection ||
+              !state ||
+              selection.viewLoading ||
+              historyState.phase !== 'complete' ||
+              directory?.unavailable ||
+              !target?.openable ||
+              !target.path
+            )
+              return;
+            return (path) => {
+              if (path !== target.path) return;
+              void report(() =>
+                bridge.request({
+                  method: 'fileChanges.open',
+                  generation: state.generation,
+                  changeId: target.changeId,
+                  editor,
+                }),
+              );
+            };
+          }}
+        />
+        {group.map((model) => {
+          const live = liveTools.find((entry) => entry.message.id === model.id);
+          return live ? (
+            <p key={model.id} role="status">
+              {selection?.viewLoading || selection?.permissionUnavailable
+                ? '上次确认状态'
+                : live.execution.cancelRequestedAt !== null
+                  ? '已请求停止，等待执行结果。'
+                  : undefined}
+            </p>
+          ) : null;
+        })}
+      </>
+    );
+  };
   return (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
@@ -1620,162 +1873,29 @@ export function NativeDesktop() {
           ? 'new-conversation'
           : JSON.stringify([selection?.storeId, childDetail?.sessionId ?? selection?.session.id])
       }
-      messages={
-        childDetail ? childMessages : [...messageModels, ...liveTools.map((entry) => entry.message)]
+      messages={childDetail ? childMessages : messageModels}
+      renderMessageContent={renderNativeMessage}
+      renderToolActivity={renderNativeTools}
+      turnActivity={
+        childDetail || preparing || !transcript.turnActivity
+          ? undefined
+          : {
+              ...transcript.turnActivity,
+              unavailable: !!(selection?.viewLoading || selection?.permissionUnavailable),
+            }
       }
-      renderMessage={(model) => {
-        if (childDetail) {
-          const message = childFacts?.messages.find((entry) => entry.id === model.id),
-            snapshot = childFacts?.modelOutputs.find(
-              (entry) => entry.messageId === model.id,
-            )?.snapshot;
-          return message ? (
-            <ModelOutputMessage
-              message={message}
-              storeId={selection!.storeId}
-              renderText={
-                message.contentFormat === 'unsupported'
-                  ? undefined
-                  : (text) => <MessageContent text={text} />
-              }
-              onRead={
-                snapshot
-                  ? async ({ signal }) => {
-                      signal.throwIfAborted();
-                      return snapshot;
-                    }
-                  : undefined
-              }
-            />
-          ) : null;
-        }
-        if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
-          return (
-            <>
-              <p>{model.text}</p>
-              <p
-                className="delivery-status"
-                role={!model.delivery || model.delivery === 'sending' ? 'status' : 'alert'}
-              >
-                {!model.delivery
-                  ? '已提交，请打开本次会话查看实际消息。'
-                  : model.delivery === 'sending'
-                    ? '正在发送'
-                    : model.delivery === 'unknown'
-                      ? '发送结果未知，请查询原提交。'
-                      : '发送失败，原文已恢复供重试。'}
-              </p>
-            </>
-          );
-        const live = liveTools.find((entry) => entry.message.id === model.id);
-        if (live)
-          return (
-            <NativeLiveToolMessage
-              {...live}
-              unavailable={!!(selection?.viewLoading || selection?.permissionUnavailable)}
-            />
-          );
-        const message = messagesById.get(model.id);
-        if (!message || !selection || !state) return null;
-        const openable =
-          !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
-        const target = fileTargets.entries.find((entry) => entry.messageId === message.id);
-        if (target?.path && target.operation)
-          return (
-            <ToolRow
-              message={{
-                id: message.id,
-                role: 'tool',
-                text: '',
-                settled: true,
-                toolName: { read: 'read_file', write: 'write_file', edit: 'edit_file' }[
-                  target.operation
-                ],
-                arguments: { path: target.path },
-                status: 'completed',
-              }}
-              openFile={
-                openable && target.openable
-                  ? () =>
-                      void report(() =>
-                        bridge.request({
-                          method: 'fileChanges.open',
-                          generation: state.generation,
-                          changeId: target.changeId,
-                          editor,
-                        }),
-                      )
-                  : undefined
-              }
-            />
-          );
-        const tool = toolMessages.entries.find((entry) => entry.messageId === message.id);
-        if (tool)
-          return (
-            <NativeToolMessage message={desktopToolMessage(tool, message.id, message.content)} />
-          );
-        return (
-          <ModelOutputMessage
-            key={`${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${message.id}`}
-            message={message}
-            storeId={selection.storeId}
-            renderText={
-              message.contentFormat === 'unsupported'
-                ? undefined
-                : (text) => (
-                    <MessageContent
-                      text={text}
-                      openFile={
-                        openable
-                          ? (path) =>
-                              void report(() =>
-                                bridge.request({
-                                  method: 'messageFile.open',
-                                  generation: state.generation,
-                                  viewSelection:
-                                    selection.viewSelection ?? selection.viewGeneration,
-                                  historyEpoch: state.historyEpoch ?? 0,
-                                  messageId: message.id,
-                                  path,
-                                  editor,
-                                }),
-                              )
-                          : undefined
-                      }
-                    />
-                  )
-            }
-            onRead={
-              selection.canReadModelOutput
-                ? async ({ sessionId, executionId, signal }) => {
-                    const current = state.generation,
-                      nonce = viewIntent.current;
-                    return readNativeModelOutput({
-                      bridge,
-                      generation: current,
-                      expectedStoreId: selection.storeId,
-                      sessionId,
-                      viewSessionId: selection.session.id,
-                      messageId: message.id,
-                      executionId,
-                      signal,
-                      isCurrent: () =>
-                        generation.current === current &&
-                        viewIntent.current === nonce &&
-                        selected.current === selection.session.id,
-                    });
-                  }
-                : undefined
-            }
-          />
-        );
-      }}
       notices={
         <>
           {fileTargets.error && (
             <p role="alert">
               {fileTargets.error}{' '}
               <DesktopButton onClick={fileTargets.retry}>重新读取文件路径</DesktopButton>
+            </p>
+          )}
+          {runMessages.error && (
+            <p role="alert">
+              {runMessages.error}{' '}
+              <DesktopButton onClick={runMessages.retry}>重新核对本轮状态</DesktopButton>
             </p>
           )}
           {toolMessages.error && (

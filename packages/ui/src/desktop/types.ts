@@ -1,6 +1,6 @@
 export interface Message {
   readonly id: string;
-  /** Stable Runtime Turn ownership used for per-turn presentation actions. */
+  /** Host-confirmed Runtime Turn or public Run ownership for presentation actions. */
   readonly turnId?: string;
   readonly role: 'user' | 'assistant' | 'tool' | 'subagent' | 'system' | 'thinking';
   readonly text: string;
@@ -13,6 +13,8 @@ export interface Message {
   readonly turnFinishedAtMs?: number;
   /** A settled model response with no following tool calls is the Turn's final reply. */
   readonly finalReply?: boolean;
+  /** Verified copy body; null keeps a preview from being copied as a complete reply. */
+  readonly copyText?: string | null;
   /** Client-local delivery state used before the runtime projection owns the message. */
   readonly delivery?: 'sending' | 'failed' | 'unknown';
   readonly systemKind?:
@@ -48,6 +50,8 @@ export interface Message {
     readonly reason?: string;
   };
   readonly ask?: {
+    /** Information cancellation is independent of the Tool or Run terminal state. */
+    readonly cancelled?: boolean;
     readonly toolCallId?: string;
     readonly questions: readonly {
       readonly id: string;
@@ -76,7 +80,7 @@ export interface Message {
     readonly stderrLines?: number;
   };
   readonly toolName?: string;
-  /** Runtime-owned display classification; missing values remain standalone. */
+  /** Host-confirmed display classification; missing values remain standalone. */
   readonly presentation?: 'exploration' | 'standalone' | 'hidden';
   /** Exact child-task owner for internal tool presentation. */
   readonly presentationOwner?: {
@@ -117,10 +121,12 @@ export interface Message {
 /** Host-confirmed state for the current or most recently settled presentation Turn. */
 export interface TurnActivity {
   readonly turnId: string;
+  readonly unavailable?: boolean;
   readonly status:
     | 'queued'
     | 'running'
     | 'waiting'
+    | 'cancelling'
     | 'completed'
     | 'failed'
     | 'cancelled'

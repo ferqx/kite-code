@@ -38,7 +38,21 @@
 
 执行中的工具行只来自当前 Store、所选会话活动 Run 的真实 tool Execution，与同 Run 的原结果消息接管；旧 Store 恢复记录不遮掉新工作。停止申请尚非终态时明确等待结果，视图不可核实时标“上次确认状态”。Shell launch/read/wait/stop 显示各自实际操作；启动受理不表示后台 Job 已完成，Job 的准确停止与完整输出仍归原环境／Runtime logs 入口。未知定义或版本保原 ID／version 和可展开原文，不借旧 UI 同名分类解释未来结果。
 
-[Main 与有限 IPC](test/native-tool-messages.test.ts)、[正式 caller 路由](test/native-caller.test.ts)、[原工具 DOM](test/isolated/native-tool-messages-dom.test.tsx)和原[源码外窗口](test/isolated/native-bundle.test.ts)分别核关联、作用域、原交互和真实执行／Files读取失败及冷读；准确输入和结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。本片没有推断旧 Turn／工具聚合／最终回复、补造自动审批状态或重建 Ask 历史回执；完整 PC、安装版全路径及其他平台资格仍未闭合。取舍见[工具消息观察决定](../../.agents/notes/implemented/architecture/2026-10-08-native-tool-message-observations.md)。
+[Main 与有限 IPC](test/native-tool-messages.test.ts)、[正式 caller 路由](test/native-caller.test.ts)、[原工具 DOM](test/isolated/native-tool-messages-dom.test.tsx)和原[源码外窗口](test/isolated/native-bundle.test.ts)分别核关联、作用域、原交互和真实执行／Files读取失败及冷读；准确输入和结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。轮次阅读、聚合与已知 Ask 回执的后续接入见下一节；自动审批历史、完整 PC、安装版全路径及其他平台资格仍未闭合。取舍见[工具消息观察决定](../../.agents/notes/implemented/architecture/2026-10-08-native-tool-message-observations.md)。
+
+## 原轮次阅读、聚合与问答回执
+
+[native-transcript](src/native-transcript.ts)把已核实的公共 Run 接入原 [Conversation](../../packages/ui/src/desktop/Conversation.tsx)，保原过程折叠、最终回复、失败行、工具聚合与会话阅读状态。SessionPage 的 `renderMessageContent` 只替换正文、`renderToolActivity` 接完整分组与原展开控制；外层布局和复制按钮仍归原组件。正文继续使用原 ModelOutputMessage，子详情沿原只读 reader，不以子日志重建轮次。
+
+当前 View 的真实 Run 可直接用于展示；完整历史超出近200项时，[Main](electron/tool-messages.ts)只接受当前已经观察、未带 `originMessage` 的 Message ID，每批32项，经当前生成 Client GET 核准确 Run ID／Session 和前后 Store 连接。结果仅含原出处、状态与时间，按原 generation／viewSelection／history epoch 绑定；关闭和切换只释放所属 GET。当前 Store 已保存的旧 Store 终态 Run 可作为历史事实展示，保原 `originStoreId`；foreign active 不进入活动轮次或控制。Fork／Include 的封存 Message 不查询来源 Run 后来的状态，也不据此标最终回复。
+
+只有已确认 completed 且非活动 Run 的最后一条完整、支持格式、无工具调用且后面无工具结果的助手消息才成为最终回复。原起止时间与终态供原组件显示耗时／失败／停止；无法核对时保原消息，活动视图失效显示“上次确认状态”，不补造成功或计时。大正文预览的 `copyText=null`；仅原完整 reader 已验证并显示的准确正文启用“复制本轮Agent回复”，关闭正文、换消息身份或换scope即撤销。本地 Map 只持有当前已显示内容，不写持久日志或格式。
+
+同一准确 Run 中相邻、已核实的 Files read2/3、glob/search2、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
+
+默认 `ask_user` v1 的历史回执沿原成功 Execution／准确结果读取；唯一原 Model call 提供 q1–q3 的实际问题，回答保原人类选项标签与自由文本。`{cancelled:true}` 显示“已取消回答”，工具仍按实际 succeeded，Run 可继续；这不是停止任务。缺原请求不补问题，未来版本只保原文。自动审批历史与通用 Interaction 历史、所有封存／恢复组合及完整 PC 核对尚未关闭。
+
+取舍见[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)。[Main／有限 IPC](test/native-tool-messages.test.ts)、[正式 caller](test/native-caller.test.ts)和[原 Conversation DOM](test/isolated/native-transcript-dom.test.tsx)核身份、所属读取、原展开／复制及问答；原[源码外 macOS 窗口](test/isolated/native-bundle.test.ts)核首次和冷读的折叠、展开与准确最终复制，保原预算和退出断言。实际执行输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)，有限展示证据不代替完整恢复、其他平台或整片独立审查。
 
 ## Native 项目会话目录
 

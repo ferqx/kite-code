@@ -107,6 +107,17 @@ test('formal Native metadata port reads only messages observed through the curre
       cancelRequestedAt: null,
     };
   };
+  connection.getRun = async (id) => ({
+    id,
+    originStoreId: 'store',
+    originCommandId: 'command',
+    sessionId: 's',
+    status: 'failed',
+    isActive: false,
+    createdAt: 1000,
+    finishedAt: 3000,
+    reason: 'actual reason',
+  });
   const caller = new NativeCaller(connection, () => {});
   try {
     await caller.invoke({ method: 'attach' });
@@ -147,6 +158,12 @@ test('formal Native metadata port reads only messages observed through the curre
       entries: [{ messageId: message.id, executionId: 'execution', status: 'failed' }],
     });
     expect(reads).toEqual(['execution']);
+    expect(
+      await caller.invoke({ ...request, method: 'toolMessages.runs', readId: 'run-metadata' }),
+    ).toMatchObject({
+      kind: 'toolMessages.runs',
+      runs: [{ id: 'run', status: 'failed', reason: 'actual reason' }],
+    });
     connection.getView = async (id) => {
       refreshStarted();
       await new Promise<void>((resolve) => {
@@ -169,6 +186,13 @@ test('formal Native metadata port reads only messages observed through the curre
       kind: 'toolMessages.page',
       entries: [{ executionId: 'execution', status: 'failed' }],
     });
+    expect(
+      await caller.invoke({
+        ...request,
+        method: 'toolMessages.runs',
+        readId: 'run-during-refresh',
+      }),
+    ).toMatchObject({ kind: 'toolMessages.runs', runs: [{ id: 'run', status: 'failed' }] });
     releaseRefresh!();
     await caller.invoke({ method: 'state', generation: 1 });
     expect(

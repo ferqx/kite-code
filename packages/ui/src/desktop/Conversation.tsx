@@ -35,6 +35,15 @@ export interface ReadingState {
   expanded: Record<string, boolean>;
 }
 
+export interface ToolActivityState {
+  expanded?: boolean;
+  activityId: string;
+  restoredExpanded: ReadonlySet<string>;
+  expandedItems: Readonly<Record<string, boolean>>;
+  onToggle: (open: boolean) => void;
+  onToggleItem: (id: string, open: boolean) => void;
+}
+
 function isTurnFailure(message: Message): boolean {
   return (
     message.role === 'system' &&
@@ -122,6 +131,7 @@ const MessageItem = memo(function MessageItem({
   expandedItems = {},
   restoredExpanded,
   childDetail,
+  renderContent,
 }: {
   message: Message;
   expanded?: boolean;
@@ -136,6 +146,7 @@ const MessageItem = memo(function MessageItem({
   copyRole?: 'user' | 'assistant';
   writeClipboardText?: (text: string) => Promise<void>;
   childDetail?: { readonly label: string; readonly onOpen: () => void };
+  renderContent?: (message: Message) => ReactNode;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -321,15 +332,10 @@ const MessageItem = memo(function MessageItem({
       data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
       aria-label={message.role === 'user' ? '用户消息' : '助手消息'}
     >
-      {message.role === 'assistant' ? (
-        <>
-          {message.text && <MessageContent text={message.text} openFile={openFile} />}
-          {!message.settled && (
-            <small className="response-status" role="status">
-              正在回复…
-            </small>
-          )}
-        </>
+      {renderContent ? (
+        renderContent(message)
+      ) : message.role === 'assistant' ? (
+        <>{message.text && <MessageContent text={message.text} openFile={openFile} />}</>
       ) : (
         <>
           <p className="user-text">{message.text}</p>
@@ -346,6 +352,11 @@ const MessageItem = memo(function MessageItem({
             </small>
           )}
         </>
+      )}
+      {message.role === 'assistant' && !message.settled && (
+        <small className="response-status" role="status">
+          正在回复…
+        </small>
       )}
       {copyText && (
         <Button
@@ -384,6 +395,8 @@ export function Conversation({
   childSessionIdsByTaskId,
   onOpenChildSession,
   renderMessage,
+  renderMessageContent,
+  renderToolActivity,
 }: {
   messages: readonly Message[];
   loading: boolean;
@@ -400,6 +413,10 @@ export function Conversation({
   onOpenChildSession?: (childSessionId: string) => void;
   /** Public-body hosts supply their verified content reader without fabricating legacy tool facts. */
   renderMessage?: (message: Message) => ReactNode;
+  /** Verified body reader within the original message and copy controls. */
+  renderMessageContent?: (message: Message) => ReactNode;
+  /** Host-adapted tool facts within the original grouping and reading state. */
+  renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
@@ -585,7 +602,10 @@ export function Conversation({
       finalReplyByTurn.set(message.turnId, message);
   }
   const assistantTurnCopies = new Map(
-    [...finalReplyByTurn.values()].map((message) => [message.id, message.text]),
+    [...finalReplyByTurn.values()].map((message) => [
+      message.id,
+      message.copyText === null ? undefined : (message.copyText ?? message.text),
+    ]),
   );
   // Contiguous exploration calls in one explicit Turn share a visual activity,
   // even when separate model responses supplied different presentation groups.
@@ -643,7 +663,7 @@ export function Conversation({
   flushUnscoped();
   if (
     turnActivity &&
-    ['queued', 'running', 'waiting', 'recovery_required', 'cancelled'].includes(
+    ['queued', 'running', 'waiting', 'cancelling', 'recovery_required', 'cancelled'].includes(
       turnActivity.status,
     ) &&
     !seenTurnIds.has(turnActivity.turnId)
@@ -665,6 +685,19 @@ export function Conversation({
         </div>
       );
     const activityKey = `activity:${message.id}`;
+    if (message.role === 'tool' && renderToolActivity)
+      return (
+        <Fragment key={activityKey}>
+          {renderToolActivity(group, {
+            expanded: expanded[activityKey],
+            activityId: activityKey,
+            restoredExpanded: restoredExpanded.current,
+            expandedItems: expanded,
+            onToggle: (open) => onToggle(activityKey, open),
+            onToggleItem: onToggle,
+          })}
+        </Fragment>
+      );
     return message.role === 'tool' ? (
       <ToolActivity
         key={activityKey}
@@ -719,9 +752,12 @@ export function Conversation({
           onToggle={onToggle}
           openFile={openFile}
           writeClipboardText={writeClipboardText}
+          renderContent={renderMessageContent}
           copyText={
             message.role === 'user' && message.settled && !message.delivery && message.text
-              ? message.text
+              ? message.copyText === null
+                ? undefined
+                : (message.copyText ?? message.text)
               : assistantTurnCopies.get(message.id)
           }
           copyRole={message.role === 'user' ? 'user' : 'assistant'}
@@ -743,8 +779,10 @@ export function Conversation({
     const terminalStatus = terminalByTurn.get(entry.turnId);
     const active =
       !terminalStatus &&
-      (activity
-        ? ['queued', 'running', 'waiting', 'recovery_required'].includes(activity.status)
+      (activity && !activity.unavailable
+        ? ['queued', 'running', 'waiting', 'cancelling', 'recovery_required'].includes(
+            activity.status,
+          )
         : !turnActivity &&
           processGroups.some((group) => group.some((message) => !message.settled)));
     const failed =
@@ -773,33 +811,39 @@ export function Conversation({
       : undefined;
     const runningTimer =
       !completed &&
+      !activity?.unavailable &&
       !terminalStatus &&
       ['running', 'waiting'].includes(activity?.status ?? '') &&
       turnElapsedMilliseconds(timing?.turnStartedAtMs, Date.now()) !== undefined;
-    const label = failed
-      ? '本轮失败'
-      : cancelled
-        ? '已停止'
-        : aborted
-          ? '已中断'
-          : completed
-            ? finishedDuration === undefined
-              ? '已完成'
-              : '用时'
-            : activity?.status === 'recovery_required'
-              ? '需要恢复'
-              : activity?.status === 'waiting'
-                ? '正在等待'
-                : activity?.status === 'queued'
-                  ? '等待处理'
-                  : active && thinking && !runningTool
-                    ? '正在思考'
-                    : active
-                      ? runningTimer
-                        ? '已处理'
-                        : '正在处理'
-                      : '处理过程';
-    const showProcess = processGroups.length > 0 || active || cancelled || aborted;
+    const label = activity?.unavailable
+      ? '上次确认状态'
+      : failed
+        ? '本轮失败'
+        : cancelled
+          ? '已停止'
+          : aborted
+            ? '已中断'
+            : completed
+              ? finishedDuration === undefined
+                ? '已完成'
+                : '用时'
+              : activity?.status === 'recovery_required'
+                ? '需要恢复'
+                : activity?.status === 'cancelling'
+                  ? '正在停止'
+                  : activity?.status === 'waiting'
+                    ? '正在等待'
+                    : activity?.status === 'queued'
+                      ? '等待处理'
+                      : active && thinking && !runningTool
+                        ? '正在思考'
+                        : active
+                          ? runningTimer
+                            ? '已处理'
+                            : '正在处理'
+                          : '处理过程';
+    const showProcess =
+      processGroups.length > 0 || active || cancelled || aborted || activity?.unavailable;
     // A settled Turn starts a new reading state even when no final reply was
     // confirmed. Its process closes once, then the reader's choice persists.
     const settled =

@@ -2080,7 +2080,7 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 当前 macOS DB8 原代码回退也已沿复用原页面收束有限边界：固定相同11项依赖的a2b6441f原DB7源码，保真实Agent／Main／renderer差异、原四次兼容窗口和新两冷窗口；旧私有格式拒绝保数据，切回当前版本后只查原申请，六Service普通退出和最终卸载保持。准确失败、当前513断言／320.79秒及限制归[进度](unified-agent-refactor-v1-progress.md#2026-10-08native-db8-真实代码回退)。原17MiB页面刷新红现已修复，原完整管理窗口保持全部断言与10／45／60秒预算，actual0／25.70秒；Main合并连续通知、同范围历史刷新保展开全文，准确范围见[刷新进度](unified-agent-refactor-v1-progress.md#2026-10-08native-大输出刷新与全文保留)。macOS RSS／八轮／全资源退出、其余必要恢复、独立审查、完整默认与最终旧路径退役仍未闭合；Win／Linux按用户顺序留到重构后Actions，37能力partial、wholeV13=false。
 
-原工具过程与结果阅读已接入正式 Native，继续复用 ToolActivity／ToolRow：历史以原 Execution与准确结果核状态，当前工具沿真实活动 Run，未知版本保原文，请求目标不取得文件动作；Files read当前版本3入口亦补齐。原窗口的活动／失败／冷读与有限读取证据归[工具迁移进度](unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。旧Turn／聚合与审批／问答历史的全部就地展示尚未闭合，完整PC核对、维护恢复、macOS资源退出、独立审查、最终回归与旧路径退役仍按原依赖推进。
+原工具过程与结果阅读已接入正式 Native，继续复用 ToolActivity／ToolRow：历史以原 Execution与准确结果核状态，当前工具沿真实活动 Run，未知版本保原文，请求目标不取得文件动作；Files read当前版本3入口亦补齐。原窗口的活动／失败／冷读与有限读取证据归[工具迁移进度](unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。原 Conversation 的轮次折叠／最终正文复制、相邻已知读取聚合及默认问答已保存回执现沿准确公共事实接入，恢复终态保出处，Fork／Include 不查询来源后来的 Run 状态；实际结果归[轮次迁移进度](unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)。自动审批／通用交互历史、全部恢复组合与完整PC核对、维护恢复、macOS资源退出、独立审查、最终回归与旧路径退役仍按原依赖推进。
 
 ### 30.3 第一条执行闭环
 
