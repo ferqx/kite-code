@@ -1631,6 +1631,32 @@ type Execution___schema0 =
   | { [key: string]: Execution___schema0 };
 export type Execution = {
   id: string;
+  authorization?: {
+    dispatched: boolean;
+    review?: {
+      executionId: string;
+      status:
+        | 'planned'
+        | 'dispatching'
+        | 'running'
+        | 'succeeded'
+        | 'failed'
+        | 'cancelled'
+        | 'outcome_unknown';
+      decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
+      reason: string;
+      requireApproval: boolean;
+    };
+    human?: {
+      interactionId: string;
+      state: 'pending' | 'answered' | 'cancelled';
+      revision: string;
+      acceptedDecisionRevision: string | null;
+      accepted: boolean;
+      decision: ('approve' | 'deny') | null;
+      grant?: 'approve_once' | 'same_command';
+    };
+  };
   originStoreId?: string;
   childSessionId?: string | null;
   parentExecutionId?: string | null;
@@ -2288,6 +2314,32 @@ export type BrowserView = {
   }>;
   executions: Array<{
     id: string;
+    authorization?: {
+      dispatched: boolean;
+      review?: {
+        executionId: string;
+        status:
+          | 'planned'
+          | 'dispatching'
+          | 'running'
+          | 'succeeded'
+          | 'failed'
+          | 'cancelled'
+          | 'outcome_unknown';
+        decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
+        reason: string;
+        requireApproval: boolean;
+      };
+      human?: {
+        interactionId: string;
+        state: 'pending' | 'answered' | 'cancelled';
+        revision: string;
+        acceptedDecisionRevision: string | null;
+        accepted: boolean;
+        decision: ('approve' | 'deny') | null;
+        grant?: 'approve_once' | 'same_command';
+      };
+    };
     originStoreId?: string;
     childSessionId?: string | null;
     parentExecutionId?: string | null;
@@ -2717,6 +2769,32 @@ export type SessionView = {
   }>;
   executions: Array<{
     id: string;
+    authorization?: {
+      dispatched: boolean;
+      review?: {
+        executionId: string;
+        status:
+          | 'planned'
+          | 'dispatching'
+          | 'running'
+          | 'succeeded'
+          | 'failed'
+          | 'cancelled'
+          | 'outcome_unknown';
+        decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
+        reason: string;
+        requireApproval: boolean;
+      };
+      human?: {
+        interactionId: string;
+        state: 'pending' | 'answered' | 'cancelled';
+        revision: string;
+        acceptedDecisionRevision: string | null;
+        accepted: boolean;
+        decision: ('approve' | 'deny') | null;
+        grant?: 'approve_once' | 'same_command';
+      };
+    };
     originStoreId?: string;
     childSessionId?: string | null;
     parentExecutionId?: string | null;

@@ -8996,6 +8996,109 @@
         "maxLength": 128,
         "pattern": "^[A-Za-z0-9_-]+$"
       },
+      "authorization": {
+        "type": "object",
+        "properties": {
+          "dispatched": {
+            "type": "boolean"
+          },
+          "review": {
+            "type": "object",
+            "properties": {
+              "executionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "planned",
+                  "dispatching",
+                  "running",
+                  "succeeded",
+                  "failed",
+                  "cancelled",
+                  "outcome_unknown"
+                ]
+              },
+              "decision": {
+                "type": "string",
+                "enum": ["approve_once", "reject", "ask_user", "unavailable"]
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "requireApproval": {
+                "type": "boolean"
+              }
+            },
+            "required": ["executionId", "status", "decision", "reason", "requireApproval"],
+            "additionalProperties": false
+          },
+          "human": {
+            "type": "object",
+            "properties": {
+              "interactionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["pending", "answered", "cancelled"]
+              },
+              "revision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "acceptedDecisionRevision": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "accepted": {
+                "type": "boolean"
+              },
+              "decision": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": ["approve", "deny"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "grant": {
+                "type": "string",
+                "enum": ["approve_once", "same_command"]
+              }
+            },
+            "required": [
+              "interactionId",
+              "state",
+              "revision",
+              "acceptedDecisionRevision",
+              "accepted",
+              "decision"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": ["dispatched"],
+        "additionalProperties": false
+      },
       "originStoreId": {
         "type": "string",
         "minLength": 1,
@@ -12797,6 +12900,109 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_-]+$"
             },
+            "authorization": {
+              "type": "object",
+              "properties": {
+                "dispatched": {
+                  "type": "boolean"
+                },
+                "review": {
+                  "type": "object",
+                  "properties": {
+                    "executionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "planned",
+                        "dispatching",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "outcome_unknown"
+                      ]
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": ["approve_once", "reject", "ask_user", "unavailable"]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    "requireApproval": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["executionId", "status", "decision", "reason", "requireApproval"],
+                  "additionalProperties": false
+                },
+                "human": {
+                  "type": "object",
+                  "properties": {
+                    "interactionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["pending", "answered", "cancelled"]
+                    },
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "acceptedDecisionRevision": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^(0|[1-9][0-9]*)$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "decision": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["approve", "deny"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "grant": {
+                      "type": "string",
+                      "enum": ["approve_once", "same_command"]
+                    }
+                  },
+                  "required": [
+                    "interactionId",
+                    "state",
+                    "revision",
+                    "acceptedDecisionRevision",
+                    "accepted",
+                    "decision"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["dispatched"],
+              "additionalProperties": false
+            },
             "originStoreId": {
               "type": "string",
               "minLength": 1,
@@ -15383,6 +15589,109 @@
               "minLength": 1,
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "authorization": {
+              "type": "object",
+              "properties": {
+                "dispatched": {
+                  "type": "boolean"
+                },
+                "review": {
+                  "type": "object",
+                  "properties": {
+                    "executionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "planned",
+                        "dispatching",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "outcome_unknown"
+                      ]
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": ["approve_once", "reject", "ask_user", "unavailable"]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    "requireApproval": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["executionId", "status", "decision", "reason", "requireApproval"],
+                  "additionalProperties": false
+                },
+                "human": {
+                  "type": "object",
+                  "properties": {
+                    "interactionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": ["pending", "answered", "cancelled"]
+                    },
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "acceptedDecisionRevision": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^(0|[1-9][0-9]*)$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "decision": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["approve", "deny"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "grant": {
+                      "type": "string",
+                      "enum": ["approve_once", "same_command"]
+                    }
+                  },
+                  "required": [
+                    "interactionId",
+                    "state",
+                    "revision",
+                    "acceptedDecisionRevision",
+                    "accepted",
+                    "decision"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["dispatched"],
+              "additionalProperties": false
             },
             "originStoreId": {
               "type": "string",

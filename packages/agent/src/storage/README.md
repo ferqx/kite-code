@@ -1,5 +1,13 @@
 # Store 边界
 
+## 只读授权观察
+
+Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-review.ts)从现有记录推导，未增加持久字段或写操作。工具／Job 的原派发状态、准确 reviewer 状态／决定／原因和原人工 Interaction 的保存／accepted decision 分别保留；它不是派发 grant。reviewer 优先沿实际 dispatch binding 读取准确 carrier；没有该 binding 时仅接纳唯一原 purpose 候选，有歧义不猜最新。人工 accepted 还须原答案 revision 与原 Execution 的 decision binding 相符。
+
+观察复核原 Store／Session／Run／attempt／定义／输入／purpose、完整模型结果与原 Artifact proof，不公开原请求、主体、owner、私有上下文或审查全文。历史展示仅跳过当前可变取消标记与重新计算的当前 decision context，以保停止或后续上下文改变后可核对的原决定；这项例外只由只读 observer 显式使用。原 `fact` 授权路径默认仍检查全部当前条件，`getAuthorizationReview`、受理和最终派发不消费观察字段作为资格。
+
+[原授权回归](../../test/isolated/execution/authorization-review.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
+
 ## Worker 请求内的原生语句
 
 `SqliteOperations` 持有同步请求创建的 `query` 和 `prepare` 原生语句，包括 Drizzle query helper 的 prepared statement。具名操作在事务结束后返回已物化的值；Worker 在成功或失败 ACK 前逐项 finalize，在 strict close 前先释放本请求语句。Bun 的 query cache 遇到已 finalize 的条目会重新 prepare，同一语句不会跨请求借用。连接初始化的原生语句仍由 strict close 收束。

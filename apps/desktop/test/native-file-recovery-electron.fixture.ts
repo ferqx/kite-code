@@ -65,7 +65,7 @@ try {
   await panel.getByText(/代码 unknown · 会话 not_started/).waitFor();
   assert.deepEqual(readFileSync(path!), before);
   assert.equal(statSync(path!).ino, inode);
-  const approve = page.getByRole('button', { name: 'Approve once', exact: true });
+  const approve = page.getByRole('button', { name: '仅批准这一次', exact: true });
   await approve.waitFor();
   const beforeInvalid = Number(await app.evaluate('globalThis.__filePosts'));
   const invalid = await page.evaluate(async () => {

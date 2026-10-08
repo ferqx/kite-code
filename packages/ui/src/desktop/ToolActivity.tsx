@@ -264,8 +264,7 @@ function stoppedDuringAutoReview(message: Message): boolean {
     message.status === 'cancelled' &&
     message.approval?.source === 'auto' &&
     message.approval.state === 'reviewing' &&
-    !message.toolProgress &&
-    !message.toolResult
+    (message.dispatchCommitted === false || (!message.toolProgress && !message.toolResult))
   );
 }
 
@@ -273,6 +272,12 @@ function approvalLabel(message: Message): string | undefined {
   const approval = message.approval;
   if (!approval) return;
   switch (approval.state) {
+    case 'submitted':
+      return '已提交批准，待核对';
+    case 'unavailable':
+      return '自动审批结果未知';
+    case 'cancelled':
+      return approval.source === 'auto' ? '自动审批已停止' : '审批已取消';
     case 'reviewing':
       return message.settled ? '自动审批已停止' : '正在自动审批';
     case 'awaiting_user':

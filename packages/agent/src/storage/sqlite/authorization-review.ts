@@ -13,7 +13,12 @@ import type {
   EnsureAuthorizationReviewInput,
   ReadAuthorizationReviewInput,
 } from '../port';
-import { AgentError, type Json } from '../types';
+import {
+  AgentError,
+  type ExecutionAuthorizationObservation,
+  type ExecutionStatus,
+  type Json,
+} from '../types';
 import { ensureAgent } from './child-operations';
 import { verifyModelBody } from './model-body';
 import { verifyModelOutput } from './model-output';
@@ -351,6 +356,7 @@ function fact(
   targetId: string,
   reviewId: string,
   revision: string,
+  observation = false,
 ): { payload: Record<string, Json>; result: AuthorizationReviewResult } {
   const unavailable = (reason: string): AuthorizationReviewResult => ({
     decision: 'unavailable',
@@ -375,9 +381,7 @@ function fact(
     carrier.root_session_id !== target.root_session_id ||
     carrier.kind !== 'job' ||
     !carrier.child_session_id ||
-    command.cancelled ||
-    carrier.cancel_requested ||
-    target.cancel_requested
+    (!observation && (command.cancelled || carrier.cancel_requested || target.cancel_requested))
   )
     throw new AgentError('authorization_review_unverifiable');
   const config = object(JSON.parse(String(carrier.child_configuration_json))),
@@ -394,7 +398,8 @@ function fact(
     rootWork.subject_id !== origin.subject_id ||
     !requestMatches(db, payload.originCommandRequest!, String(origin.request_json), target) ||
     !requestMatches(db, payload.rootWorkRequest!, String(rootWork.request_json), target) ||
-    canonicalJson(payload.decisionContext!) !== canonicalJson(decisionContext(db, target)) ||
+    (!observation &&
+      canonicalJson(payload.decisionContext!) !== canonicalJson(decisionContext(db, target))) ||
     command.subject_id !== origin.subject_id ||
     bound.subjectId !== origin.subject_id ||
     bound.executionId !== target.id ||
@@ -562,6 +567,100 @@ function fact(
     return { payload, result: unavailable('review_output_invalid') };
   }
 }
+/** Display only. Saved approval remains readable after stop; live grant checks still use fact's default. */
+export function executionAuthorizationObservation(
+  db: SqliteOperations,
+  target: Row,
+): ExecutionAuthorizationObservation | undefined {
+  if (!['tool', 'job'].includes(String(target.kind))) return;
+  const observed: ExecutionAuthorizationObservation = { dispatched: Boolean(target.dispatched) };
+  try {
+    const dispatch = target.dispatch_authorization_json
+      ? object(JSON.parse(String(target.dispatch_authorization_json)))
+      : undefined;
+    const pointer = dispatch?.reviewExecutionId;
+    const reviews =
+      typeof pointer === 'string'
+        ? db.rows(
+            "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review' AND e.parent_execution_id=? AND e.id=?",
+            target.id!,
+            pointer,
+          )
+        : db.rows(
+            "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review' AND e.parent_execution_id=? LIMIT 2",
+            target.id!,
+          );
+    // A dispatch names its exact reviewer. Multiple unbound proposals are not a current approval fact.
+    if (reviews.length === 1) {
+      const review = reviews[0]!,
+        payload = object(JSON.parse(String(review.intent_json)));
+      const verified = fact(
+        db,
+        String(target.id),
+        String(review.id),
+        String(payload.policyRevision),
+        true,
+      );
+      observed.review = {
+        executionId: String(review.id),
+        status: review.state as ExecutionStatus,
+        decision: verified.result.decision,
+        reason: verified.result.reason,
+        requireApproval: verified.payload.requireApproval === true,
+      };
+    }
+  } catch {
+    // A corrupt or ambiguous source supplies no display proof and never blocks the original execution reader.
+  }
+  try {
+    const binding = target.interaction_binding_json
+      ? object(JSON.parse(String(target.interaction_binding_json)))
+      : undefined;
+    const human =
+      typeof binding?.interactionId === 'string'
+        ? db.row('SELECT * FROM interaction WHERE id=?', binding.interactionId)
+        : null;
+    if (
+      human &&
+      human.kind === 'approval' &&
+      human.execution_id === target.id &&
+      human.origin_store_id === target.origin_store_id &&
+      human.session_id === target.session_id &&
+      human.run_id === target.run_id &&
+      human.attempt === target.attempt &&
+      human.definition_id === target.adapter_id &&
+      human.definition_version === target.definition_version &&
+      human.input_digest === hash(JSON.parse(String(target.intent_json)))
+    ) {
+      const answer = human.answer_json ? object(JSON.parse(String(human.answer_json))) : undefined;
+      observed.human = {
+        interactionId: String(human.id),
+        state: human.state as 'pending' | 'answered' | 'cancelled',
+        revision: String(human.revision),
+        acceptedDecisionRevision:
+          human.accepted_decision_revision === null
+            ? null
+            : String(human.accepted_decision_revision),
+        accepted:
+          human.state === 'answered' &&
+          human.accepted_decision_revision !== null &&
+          String(human.accepted_decision_revision) === String(human.revision) &&
+          binding?.decisionRevision === String(human.accepted_decision_revision),
+        decision:
+          answer?.kind === 'approval' &&
+          (answer.decision === 'approve' || answer.decision === 'deny')
+            ? answer.decision
+            : null,
+        ...(answer?.kind === 'approval' &&
+        (answer.grant === 'approve_once' || answer.grant === 'same_command')
+          ? { grant: answer.grant }
+          : {}),
+      };
+    }
+  } catch {}
+  return observed.review || observed.human ? observed : undefined;
+}
+
 export function getAuthorizationReview(
   db: SqliteOperations,
   input: ReadAuthorizationReviewInput,

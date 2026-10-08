@@ -71,6 +71,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 [Model Inspector Core](../packages/agent/test/isolated/model-input/inspector.test.ts)、[Client 完整流](../packages/client/test/isolated/model-input.test.ts)、[实际 Service/Gateway](isolated/unified-agent/model-input.test.ts)和[Web DOM](../apps/web/test/model-input.test.tsx)分别验证准确原调用、完整交接和展示。>200 目录压力通过具名 Store 建立 planned intents，不称发生了相同数量的 Provider 调用；实际17MiB内容经过原scope Artifact/固定Model与Native/Browser，成功EOF/hash前不发布正文。真实流在首块后停住仍能取消，非法metadata先释放body；UI确认前零正文GET，隐藏/关闭/切换清正文，缺失settings明确unavailable。IAB验收固定无害内容，关闭后Model计数保持，不将当前Context或Runtime logs导航等同该原请求入口。
 
+原审批 [DOM 回归](../apps/desktop/test/isolated/native-approval-dom.test.tsx)先建立浏览器环境，再动态导入原 Radix／ReactDOM 组件，并在独立文件进程运行，避免服务端模块缓存使菜单 layout effect 缺席。完整请求 fixture 证明 UI 门禁与准确答案，不代替 Service／Artifact 原 proof；[Core 授权](../packages/agent/test/isolated/execution/authorization-review.test.ts)、[HTTP／Client](isolated/unified-agent/client-interactions.test.ts)和[源码外默认窗口](../apps/desktop/test/isolated/native-bundle.test.ts)分别负责原资格、公开投影及首次／冷读的实际原审批。[计划窗口](../apps/desktop/test/isolated/native-plan-review-bundle.test.ts)保独立审批、大正文、反馈、Files 和原预算；标题定位使用当前原 SessionPage 的准确标题并核原 Session ID。实际结果、失败和边界见[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
+
 ## 显式命令与 CI
 
 

@@ -211,6 +211,10 @@ Auto 分类只返回准确 invocation、effects 及可选只读 task/plan/拒绝
 
 自动报告的新 Run 在原 SQL 事务继承父 `requirements` 引用，不重新登记外 Run refs。[planning-configuration.ts](src/planning-configuration.ts) 的 `readBoundJobReportParent` 从实际 report Command/receipt、原 source Execution、carrier result revision/afterTurn、父 Run/config/root work 和原主体核绑定；权限沿该有限历史关系读取原批准，任意同 Session 新 Run 不获得例外。报告仍受原 refs 的最终 head/proof/CAS，初始化不生成新的 Plan/Workflow 意图。Planning 历史 receipt 按原实际 Execution 的批准 Run 重建来源 digest，inactive Run 的当前信息贡献继续 `approval:null`。当前九文件 48/747 与 Planning 三文件 50/454 资格见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，源码外默认 Task、完整冷报告/客户端和平台仍待验证。
 
+## 只读授权观察
+
+现有 Execution／View 响应的可选 `authorization` 直接来自同一 Store 读取，只含原 reviewer 的有限状态／决定／原因、原人工答案的保存／accepted revision 和原派发事实，不增加路由或写操作。[HTTP schema](src/http/schema/index.ts)与生成 API 保持同形，原因上限8192与原 reviewer 答案一致；私有请求、主体、owner、审查全文和上下文不进入响应。停止后读取原决定与当前执行授权分别处理，准确资格归 [Store owner](../../packages/agent/src/storage/README.md#只读授权观察)。[真实 Client 测试](../../tests/isolated/unified-agent/client-interactions.test.ts)核 pending 与迟到保存／未受理，原审批提交和最终派发门禁保持。
+
 ## 默认 Shell 装配
 
 macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 运行根装配可信 `shell.host`。[shell-configuration](src/shell-configuration.ts)为每个 Run 读取真实 Store Workspace，选择 `createMacosHostShellJob` 的 Seatbelt/launchd coalition 后端。JSONC 仅选择 `shell.launch/read/wait/stop@1`，不能提供 executor、cwd、env、保护路径或执行资格；缺 host、资产、正确版本或平台仍局部拒绝，没有另一进程 fallback。Win/Linux 默认后端尚未取得资格，实际验证依用户选择在重构完成后交给 GitHub Actions。

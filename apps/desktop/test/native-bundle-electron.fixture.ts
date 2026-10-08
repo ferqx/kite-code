@@ -19,6 +19,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   await process.click();
   assert.equal(await process.getAttribute('aria-expanded'), 'true');
   assert.equal(await final.count(), 1);
+  await page.locator('.tool-edit-heading').filter({ hasText: '已人工批准' }).waitFor();
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -329,7 +330,7 @@ try {
     deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     if (await page.getByText('轮次：completed', { exact: true }).isVisible()) break;
-    const approve = page.getByRole('button', { name: 'Approve once', exact: true });
+    const approve = page.getByRole('button', { name: '仅批准这一次', exact: true });
     if (await approve.isVisible()) {
       const write = page.locator('.tool-edit-heading').filter({ hasText: '写入' });
       await write.waitFor();

@@ -907,6 +907,31 @@ export const schemas = {
   }),
   Execution: z.object({
     id,
+    authorization: z
+      .object({
+        dispatched: z.boolean(),
+        review: z
+          .object({
+            executionId: id,
+            status: executionStatus,
+            decision: z.enum(['approve_once', 'reject', 'ask_user', 'unavailable']),
+            reason: z.string().max(8192),
+            requireApproval: z.boolean(),
+          })
+          .optional(),
+        human: z
+          .object({
+            interactionId: id,
+            state: z.enum(['pending', 'answered', 'cancelled']),
+            revision: sequence,
+            acceptedDecisionRevision: sequence.nullable(),
+            accepted: z.boolean(),
+            decision: z.enum(['approve', 'deny']).nullable(),
+            grant: z.enum(['approve_once', 'same_command']).optional(),
+          })
+          .optional(),
+      })
+      .optional(),
     originStoreId: id.optional(),
     childSessionId: id.nullable().optional(),
     parentExecutionId: id.nullable().optional(),

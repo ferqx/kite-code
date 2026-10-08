@@ -31,6 +31,7 @@ import {
 } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
+import { NativeApproval } from './native-approval';
 import { NativeBackgroundPanel } from './native-background-panel';
 import type {
   NativeBranchFacts,
@@ -1005,6 +1006,25 @@ export function NativeDesktop() {
             <InteractionCard
               key={draftKey}
               interaction={interaction}
+              renderApproval={(props) => (
+                <NativeApproval
+                  {...props}
+                  disabled={
+                    props.disabled ||
+                    !!selection.viewLoading ||
+                    !!selection.permissionUnavailable ||
+                    historyState.phase !== 'complete' ||
+                    !!directory?.unavailable
+                  }
+                  onAnswer={
+                    props.onAnswer
+                      ? async (card, answer) => {
+                          await report(() => Promise.resolve(props.onAnswer!(card, answer)));
+                        }
+                      : undefined
+                  }
+                />
+              )}
               onReadAttachment={attachmentReader}
               submission={
                 saved

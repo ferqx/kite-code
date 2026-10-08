@@ -222,6 +222,13 @@ test('paired HTTP projects one child Interaction and answers only the root bindi
     expect(child.executionId).toBe('child-tool');
     expect(child.definitionId).toBe('fixture.tool');
     expect(child.inputDigest).toHaveLength(64);
+    const observed = (await f.client.getExecution('child-tool')).authorization;
+    expect(observed).toMatchObject({
+      dispatched: false,
+      human: { interactionId: child.id, state: 'pending', accepted: false, decision: null },
+    });
+    expect(JSON.stringify(observed)).not.toContain('privateSource');
+    expect(JSON.stringify(observed)).not.toContain('subjectId');
     expect(child.policyRevision).toBe('policy-1');
     expect(Object.keys(child)).not.toContain('subjectId');
     expect(Object.keys(child)).not.toContain('source');
@@ -331,6 +338,15 @@ test('paired cancellation precedes a late answer; question schema is enforced an
     expect(card.state).toBe('cancelled');
     expect(card.answer).toEqual(late.answer);
     expect(card.acceptedDecisionRevision).toBeNull();
+    expect((await f.client.getExecution('child-tool')).authorization).toMatchObject({
+      dispatched: false,
+      human: {
+        interactionId: 'child-card',
+        state: 'cancelled',
+        decision: 'approve',
+        accepted: false,
+      },
+    });
     expect(await f.client.answerInteraction('root', 'child-card', late)).toEqual(receipt);
     expect((await f.store.getExecution('child-tool'))?.cancelRequestedAt).not.toBeNull();
     expect((await f.store.getExecution('child-tool'))?.status).toBe('planned');

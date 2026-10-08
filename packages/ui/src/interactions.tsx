@@ -1,5 +1,5 @@
 import type { Interaction, Json } from '@kite-ai/client';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   type AttachmentReader,
   interactionAttachment,
@@ -28,6 +28,13 @@ type InteractionCardProps = {
   initialPlanDraft?: PlanReviewDraft;
   onPlanDraftChange?: (draft: PlanReviewDraft) => void;
   completeContent?: string;
+  renderApproval?: (props: {
+    interaction: Interaction;
+    disabled: boolean;
+    onAnswer?: InteractionCardProps['onAnswer'];
+    completeContent?: string;
+    submission?: InteractionSubmission;
+  }) => ReactNode;
 };
 
 /** Only public persisted facts cross this component boundary. */
@@ -40,8 +47,11 @@ function PlainInteractionCard({
   initialPlanDraft,
   onPlanDraftChange,
   completeContent,
+  renderApproval,
 }: InteractionCardProps) {
   const disabled = !onAnswer || interaction.state !== 'pending' || submission !== undefined;
+  if (interaction.kind === 'approval' && !isMcpSourceReview(interaction) && renderApproval)
+    return renderApproval({ interaction, disabled, onAnswer, completeContent, submission });
   const request = interaction.request;
   const sameCommand =
     request !== null &&

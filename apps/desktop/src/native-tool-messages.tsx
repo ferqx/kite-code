@@ -28,9 +28,46 @@ const sameReceipt = (left: Message, right: Message) =>
   left.sourceIds?.[0] === right.sourceIds?.[0] &&
   left.sourceIds?.length === right.sourceIds?.length &&
   JSON.stringify(left.originMessage) === JSON.stringify(right.originMessage);
+export function authorizationApproval(
+  authorization: Execution['authorization'],
+): DesktopMessage['approval'] {
+  const human = authorization?.human;
+  if (human) {
+    const state =
+      human.state === 'cancelled'
+        ? 'cancelled'
+        : human.state === 'pending'
+          ? 'awaiting_user'
+          : human.decision === 'deny'
+            ? 'rejected'
+            : human.decision === 'approve'
+              ? human.accepted && human.acceptedDecisionRevision === human.revision
+                ? 'approved'
+                : 'submitted'
+              : undefined;
+    if (state)
+      return { source: 'user', state, interactionId: human.interactionId, grant: human.grant };
+  }
+  const review = authorization?.review;
+  if (!review) return;
+  return {
+    source: 'auto',
+    state: ['planned', 'dispatching', 'running'].includes(review.status)
+      ? 'reviewing'
+      : review.status === 'cancelled' && !authorization?.dispatched
+        ? 'cancelled'
+        : review.decision === 'approve_once'
+          ? 'approved'
+          : review.decision === 'reject'
+            ? 'rejected'
+            : 'unavailable',
+    reason: review.reason,
+  };
+}
+
 export function desktopToolMessage(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status' | 'target'> &
-    Pick<Partial<NativeToolMessageFact>, 'ask'>,
+    Pick<Partial<NativeToolMessageFact>, 'ask' | 'authorization'>,
   id: string,
   text: string,
 ): DesktopMessage {
@@ -53,6 +90,12 @@ export function desktopToolMessage(
     title: known ? label![1] : `${fact.definitionId} · ${fact.definitionVersion}`,
     target: fact.target,
     ...(fact.ask ? { ask: fact.ask } : {}),
+    ...(fact.authorization
+      ? {
+          approval: authorizationApproval(fact.authorization),
+          dispatchCommitted: fact.authorization.dispatched,
+        }
+      : {}),
     status:
       fact.status === 'succeeded'
         ? 'completed'

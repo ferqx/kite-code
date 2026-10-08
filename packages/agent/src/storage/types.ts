@@ -301,7 +301,28 @@ export interface RunRecord {
   finishedAt: number | null;
   reason: string | null;
 }
+/** Read-only saved authorization facts. These are never accepted by dispatch as a grant. */
+export interface ExecutionAuthorizationObservation {
+  dispatched: boolean;
+  review?: {
+    executionId: string;
+    status: ExecutionStatus;
+    decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
+    reason: string;
+    requireApproval: boolean;
+  };
+  human?: {
+    interactionId: string;
+    state: 'pending' | 'answered' | 'cancelled';
+    revision: string;
+    acceptedDecisionRevision: string | null;
+    accepted: boolean;
+    decision: 'approve' | 'deny' | null;
+    grant?: 'approve_once' | 'same_command';
+  };
+}
 export interface ExecutionRecord {
+  authorization?: ExecutionAuthorizationObservation;
   resultAcceptance: {
     runId: string | null;
     selectionId: string;

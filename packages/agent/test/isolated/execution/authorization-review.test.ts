@@ -156,6 +156,10 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
         (item) => item.definitionId === definitionId,
       )!;
       expect(target.status).toBe('planned');
+      expect(target.authorization).toMatchObject({
+        dispatched: false,
+        review: { status: 'running', decision: 'unavailable' },
+      });
       expect(target.runId).toBeNull();
       expect(effects).toBe(0);
       release();
@@ -170,6 +174,11 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
         (item) => item.childSessionId !== null,
       )!;
       expect(carrier.status).toBe('succeeded');
+      expect((await store.getExecution(target.id))?.authorization).toMatchObject({
+        dispatched: false,
+        review: { executionId: carrier.id, decision: 'approve_once', requireApproval: true },
+        human: { interactionId: interaction.id, state: 'pending', accepted: false },
+      });
       expect((await store.getCommand(carrier.originCommandId))!.kind).toBe('authorization.review');
       expect((await store.getView(carrier.childSessionId!)).runs).toHaveLength(1);
       const childExecutions = await store.listExecutions(carrier.childSessionId!);
@@ -204,6 +213,10 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
       await runtime.waitForCommand('reviewed-work');
       const completed = (await store.getExecution(target.id))!;
       expect(completed).toMatchObject({ status: 'succeeded' });
+      expect(completed.authorization).toMatchObject({
+        dispatched: true,
+        human: { state: 'answered', decision: 'approve', accepted: true },
+      });
       expect(targetAuthorization).toMatchObject({
         reviewExecutionId: carrier.id,
         interactionId: interaction.id,
@@ -545,6 +558,25 @@ test('reject cancels the original work without target I/O or human fabrication',
     ).toHaveLength(0);
     const target = (await f.store.listExecutions('s')).find((value) => value.kind === 'tool')!;
     expect((await f.runtime.getRun(target.runId!))?.status).toBe('cancelled');
+    expect(target.authorization).toMatchObject({
+      dispatched: false,
+      review: { decision: 'reject', reason: 'bounded review rejects' },
+    });
+    const carrier = (await f.store.listExecutions('s')).find((item) => item.kind === 'job')!;
+    let stoppedGrant: unknown;
+    try {
+      await f.store.getAuthorizationReview({
+        expectedStoreId: f.expectedStoreId,
+        targetExecutionId: target.id,
+        reviewExecutionId: carrier.id,
+        policyRevision: 'p1',
+        request: { task: 'exact harmless effect', parameters: { value: 'exact' } },
+        reviewer: { id: 'reviewer', version: '1', modelId: 'review-model' },
+      });
+    } catch (error) {
+      stoppedGrant = error;
+    }
+    expect(stoppedGrant).toMatchObject({ code: 'authorization_review_unverifiable' });
   } finally {
     await f.close();
   }

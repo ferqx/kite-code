@@ -43,12 +43,21 @@ export interface Message {
   /** Exact terminal fact for a hidden Turn marker; independent of message status. */
   readonly turnTerminalStatus?: 'completed' | 'failed' | 'cancelled' | 'aborted';
   readonly approval?: {
-    readonly state: 'reviewing' | 'awaiting_user' | 'approved' | 'rejected';
+    readonly state:
+      | 'reviewing'
+      | 'awaiting_user'
+      | 'approved'
+      | 'rejected'
+      | 'submitted'
+      | 'unavailable'
+      | 'cancelled';
     readonly source: 'auto' | 'user';
     readonly interactionId?: string;
     readonly grant?: 'approve_once' | 'same_command';
     readonly reason?: string;
   };
+  /** Host-confirmed dispatch fact; approval alone does not prove execution. */
+  readonly dispatchCommitted?: boolean;
   readonly ask?: {
     /** Information cancellation is independent of the Tool or Run terminal state. */
     readonly cancelled?: boolean;

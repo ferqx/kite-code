@@ -1,5 +1,9 @@
 # Client
 
+## 只读授权观察
+
+`getExecution`／`getView` 的生成 Execution 类型可带有限 `authorization`，分别保原自动审查、人工答案保存／accepted revision 与派发事实。生成 schema／validator 同步，不新增路由、写操作或 capability；缺字段不补审批结论，批准不等于执行成功，观察不能作派发资格。当前协议与 private 字段边界归 [Service owner](../../apps/service/README.md#只读授权观察)，原实时／历史证据见[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)。
+
 ## 完整已保存 Job 输出覆盖
 
 公开纯 [ExecutionOutputPages](src/execution-output.ts)由 Native 与 Web 的按需完整 reader 共用。输入私有克隆并沿生成的可扩展 ExecutionOutputPage schema 验证，保未来字段；首 highWaterSeq 固定 H（Native 缩小过大首页时可显式提供原 H），后页 current highWater 可增长。after 从 0 开始，以所有 throughSeq 的最大值推进，严格 Decimal64 不转 Number；原 Job、连续覆盖、普通 seq 唯一及同 stream 不重叠分别核对。coalesced gap 可跨越另一个 stream 的保存内容或与其 gap 重叠，原记录全保留；droppedBytes=null 不补零。完整只表示已覆盖 H 的全部保存内容与缺口，提前空页、不推进、错误区间不能完成前缀。该 leaf 无网络、Store、Session authority 或执行操作；实际作用域、原连接及读取释放由调用者核对，[有限合同](test/execution-output.test.ts)与[Native owner](../../apps/desktop/README.md#native-job-完整已保存输出)记录证据。

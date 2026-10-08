@@ -242,6 +242,9 @@ export class NativeToolMessages {
           status: execution.status,
           resultRevision: execution.resultRevision,
           target: this.target(call, execution.definitionId),
+          ...(!message.originMessage && execution.authorization
+            ? { authorization: execution.authorization }
+            : {}),
           ...(execution.definitionId === 'ask_user' &&
           execution.definitionVersion === '1' &&
           execution.status === 'succeeded'

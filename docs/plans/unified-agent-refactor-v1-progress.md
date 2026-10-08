@@ -2896,3 +2896,25 @@ ModelOutputMessage 仅增加同一预览／已验证全文的 renderText slot，
 Desktop／UI owner、桌面手册、active边界、测试入口、原方案、37能力证据与两份Note同步；Core、生成HTTP API、SQL、旧私有格式和依赖核对保持。document-before-commit的iteration_complete／stage／commit按本次实际范围执行，最终文档／边界／API／owner门禁和正常hooks独立核验，详细终端结果、冻结与授权本地提交归`/private/tmp/kite-pc-transcript-owned-20261008.json`与`/private/tmp/kite-pc-transcript-delivery-20261008.json`；这两份仅为本次临时交付证据，不是后续验证缓存。本片未跑全阶段默认。
 
 剩余退出缺口按依赖保持五项：①原PC自动审批／通用交互历史、全部封存／恢复组合与完整客户端核对；②installed方案必要维护恢复／已发布样本；③macOS原RSS失败／八轮稳定性与完整资源退出；④§35适用能力和完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后Win／Linux Actions。37项仍partial、wholeV13=false、Goal active。Root唯一Git owner，AGENTS.md原SHA256 `7e19375d5a9771aef3645fa33dcdbbc0e59c03e8d2276efba54fa97b13d9ea16` 和bun.lock保护，不暂存；仅本地stage／commit，无push／PR／发布／Actions dispatch。
+
+## 2026-10-09：原审批面板与授权观察
+
+本逻辑轮从 durable `el-refactor`／HEAD `5a32d781cfd1b6134d3487b48e5372a6a3a4205e`继续原 PC 主线，复用原 kite-desktop／kite-client-ui 组件，保持 macOS 优先和宿主 Shell。最高依赖仍是原 PC 剩余交互与完整核对；后序为 installed 必要恢复／发布样本、macOS 原资源退出、完整能力及独立审查、最终完整回归和旧路径退役。没有追加 TUI／Chrome 矩阵或资源优化。
+
+正式 Native 的 ordinary approval 接回原 Approval 按钮和范围菜单；只有准确原请求实际允许的 grants 可提交，大请求继续由原 InteractionCard 核完整正文、身份／hash／UTF-8／EOF 后给回答资格。未读完、换卡、pending／unknown 时禁用，提交仍沿原 Main／Client。原工具标签接可选公共 authorization，分别保答案保存、accepted revision、人工／自动决定及原派发，不从批准推工具成功。Core 只读观察仍核不可变原 purpose 和完整输出 proof，仅历史 observer 不以当前可变取消／上下文否定原决定；原授权默认检查保持。封存 originMessage 不查询来源后来审批，未增加 DB／私有格式。
+
+当前职责与持久取舍归 [Desktop owner](../../apps/desktop/README.md#原审批面板与授权观察)、[Store owner](../../packages/agent/src/storage/README.md#只读授权观察)及[审批决定](../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)。本片不是通用 Interaction 历史、全部封存／恢复组合或完整 Auto Native 窗口资格；生成响应新增字段是观察，不是新的执行入口。
+
+实际验证：
+
+- 原 Core 五文件授权／完整输出／上下文／附件／Interaction 回归：`core-qualified`实际0，63pass／1186断言／29.88s。新增原拒绝后观察仍在、同一 grant 仍拒绝，pending 与 accepted 分别核实；原故障与完整正文门禁全部保留。
+- 真实 HTTP／Client 与 Client Interaction 两文件：`sdk-ready`实际0，4pass／79断言／835ms。核有限公开字段、原 pending、迟到保存未受理与零派发。
+- Main／正式 caller／原页面、工具、Conversation、question、plan DOM 七文件：`desktop-qualified`实际0，37pass／375断言／2.38s，保原 scope 与封存隔离。原审批 DOM 独立文件 `dom-fixed`实际0，2pass／20断言／697ms，核完整请求、实际菜单、准确卡和 grant、换卡撤销与八类标签；UI fixture 不代证原 Artifact。
+- 原源码外默认 macOS 窗口 `window-ready`实际0，1pass／7Bun断言及全部 Node driver／53.02s。同完整 Terminal＋Native 构建、搬迁并删原输出，默认 Main／Service／原 Renderer 首次和冷读保原人工审批及“已人工批准”标签，原文件／General／全文复制／故障／锁／强杀与退出断言保持；不是全自动审批窗口或三平台资格。
+- 原计划窗口 `plan-window-final`实际0，1pass／262Bun断言及全部 Node driver／65.22s。真实大请求、4份原计划决定、12次独立管理审批、2次 Files 审批和18次原 answer POST，精确反馈／批准／拒绝／取消、草稿恢复和冷 Store proof 保持；原观察存在 outcome_unknown 时仍按实际状态退出，不补成功或资源证明。
+
+日志均为 `/private/tmp/kite-pc-approval-<tag>-20261009.log`。生成 API、最终根及八 workspaces 类型、对应边界、文档和交付门禁以本轮 `/private/tmp/kite-pc-approval-delivery-20261009.json` 的实际 terminal 结果为准；没有运行全阶段 default，也不以局部通过关闭 §35。
+
+保留失败证据：`desktop-ready`实际1，旧测试在建立浏览器环境前导入 Radix 导致菜单 layout effect 缺席；仅按原 model-picker fixture 改动态导入，原菜单断言保留。`core-ready`原拒绝 matcher 在5秒内挂起，准确所属 PID32089核命令后 SIGTERM，实际143；只改显式捕获同一错误，期限／安全断言保持，最终五文件全过。`plan-window-ready`实际1／52.88s等旧 heading，`plan-window-qualified`实际1／48.19s等未打开侧栏的 Ask radio；最终 fixture 沿原 session-header标题且核原 Session ID，先开真实会话工具，草稿诊断沿准确 aria-label，未删断言或延长预算。
+
+本轮 bounded recon 派发一次返回 `agent thread limit reached`，没有新子 Agent 结果，也没有把根自检计为独立审查。37能力仍全 partial／wholeV13=false；通用交互历史、全部恢复组合、完整 Auto 窗口及 PC 核对，installed／维护恢复、原 RSS／八轮／60分钟资源退出、完整迁移独立审查、最终回归和 legacy 退役仍未闭合。Win／Linux按用户顺序留重构后 GitHub Actions。本地冻结和交付范围归 `/private/tmp/kite-pc-approval-owned-20261009.json`及上述 delivery；授权不扩大到 push／PR／dispatch／发布。

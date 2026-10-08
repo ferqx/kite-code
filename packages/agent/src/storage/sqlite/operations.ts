@@ -37,6 +37,7 @@ import {
 import { callArtifact } from './artifact-operations';
 import {
   ensureAuthorizationReview,
+  executionAuthorizationObservation,
   getAuthorizationReview,
   verifyAuthorizationReviewDispatch,
 } from './authorization-review';
@@ -546,6 +547,7 @@ export class SqliteOperations {
       row.result_revision!,
     );
     const proof = accepted ? (parse(accepted.request_json) as Record<string, Json>) : null;
+    const authorization = executionAuthorizationObservation(this, row);
     return {
       resultAcceptance: accepted
         ? {
@@ -589,6 +591,7 @@ export class SqliteOperations {
       cancelRequestedAt: row.cancel_requested_at === null ? null : Number(row.cancel_requested_at),
       resultRevision: String(row.result_revision),
       reference: parse(row.reference_json),
+      ...(authorization ? { authorization } : {}),
       recoveryManifest: parse(row.recovery_manifest_json),
       requirements: parse(row.requirements_json) as unknown as RequirementRef[],
       delivery: row.delivery as ExecutionRecord['delivery'],

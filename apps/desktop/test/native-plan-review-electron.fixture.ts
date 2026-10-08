@@ -100,8 +100,13 @@ try {
         (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
     );
   async function select(id: string) {
-    await page.getByRole('button', { name: `Plan ${id.toUpperCase()}`, exact: true }).click();
-    await page.getByRole('heading', { name: `Plan ${id.toUpperCase()}`, exact: true }).waitFor();
+    const title = `Plan ${id.toUpperCase()}`;
+    await page
+      .getByRole('button', { name: title, exact: true })
+      .and(page.locator('button.session-row'))
+      .click();
+    await page.locator('.session-header').getByTitle(title, { exact: true }).waitFor();
+    await until(state, (value) => value.selection?.session.id === id, 'selected original Session');
     await page
       .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
       .waitFor();
@@ -157,6 +162,7 @@ try {
     bodyText: string;
   };
   // Establish Ask and trust using the actual permission form before any Model request.
+  await openSessionTools(page);
   await page.getByRole('radio', { name: 'Ask', exact: true }).check();
   await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
   await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
@@ -205,7 +211,7 @@ try {
       if (request.definitionId === 'planning.write')
         assert.equal(complete.input.body, metadata.bodyText);
     }
-    await page.getByRole('button', { name: 'Approve once', exact: true }).click();
+    await page.getByRole('button', { name: '仅批准这一次', exact: true }).click();
     const accepted = await until(
       state,
       (value) =>
@@ -338,8 +344,8 @@ try {
         method: 'state',
         generation: 1,
       })) as NativeState;
-      const input = Array.from(document.querySelectorAll('textarea')).find((value) =>
-        value.closest('label')?.textContent?.includes('当前会话私有草稿'),
+      const input = document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="当前会话私有草稿"]',
       )!;
       const button = Array.from(input.closest('form')!.querySelectorAll('button')).find(
         (value) => value.textContent === '保留草稿',
@@ -489,7 +495,7 @@ try {
     });
   }
   async function toolApproval(id: string, runId: string) {
-    await page.getByRole('button', { name: 'Approve once', exact: true }).waitFor();
+    await page.getByRole('button', { name: '仅批准这一次', exact: true }).waitFor();
     await openSessionTools(page);
     const current = await state();
     const approval = current.selection!.interactions.find(
@@ -504,7 +510,7 @@ try {
       await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
       0,
     );
-    await page.getByRole('button', { name: 'Approve once', exact: true }).click();
+    await page.getByRole('button', { name: '仅批准这一次', exact: true }).click();
     const accepted = await until(
       state,
       (value) =>

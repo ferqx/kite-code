@@ -109,6 +109,16 @@ test('tool receipts outside the bounded View retain exact outcomes and only uniq
     f.add('failed', 'failed');
     f.add('cancelled', 'cancelled');
     f.add('unknown', 'outcome_unknown');
+    f.executions.get('execution-m240')!.authorization = {
+      dispatched: true,
+      review: {
+        executionId: 'original-review',
+        status: 'succeeded',
+        decision: 'approve_once',
+        reason: '原批准原因 雪🙂',
+        requireApproval: false,
+      },
+    };
     const page = await f.list(['m240', 'failed', 'cancelled', 'unknown']);
     expect(page.entries.map((entry) => entry.status)).toEqual([
       'succeeded',
@@ -129,6 +139,9 @@ test('tool receipts outside the bounded View retain exact outcomes and only uniq
       'execution-unknown',
     ]);
     expect(page.scope).toEqual(f.scope);
+    expect(page.entries[0]!.authorization).toEqual(
+      f.executions.get('execution-m240')!.authorization,
+    );
     f.add('first-same-run', 'succeeded', 'shared');
     f.add('second-same-run', 'failed', 'shared');
     expect((await f.list(['second-same-run'])).entries[0]).toMatchObject({
@@ -168,10 +181,21 @@ test('sealed Fork provenance is read-only, foreign or unsupported results cause 
     const execution = f.executions.get('execution-fork')!;
     execution.sessionId = 'source';
     execution.runId = 'source-run';
+    execution.authorization = {
+      dispatched: false,
+      review: {
+        executionId: 'later-review',
+        status: 'succeeded',
+        decision: 'reject',
+        reason: 'later source state',
+        requireApproval: false,
+      },
+    };
     expect((await f.list(['fork'])).entries[0]).toMatchObject({
       executionId: execution.id,
       status: 'failed',
     });
+    expect((await f.list(['fork'])).entries[0]!.authorization).toBeUndefined();
     f.reads.length = 0;
     message.originMessage.storeId = 'old-store';
     expect((await f.list(['fork'])).entries).toEqual([]);

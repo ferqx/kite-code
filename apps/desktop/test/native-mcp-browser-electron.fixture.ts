@@ -137,7 +137,7 @@ try {
         if (card.state !== 'pending' || card.kind !== 'approval') continue;
         const approval = page.getByRole('article', { name: `approval ${card.id}`, exact: true });
         if (await approval.count()) {
-          await approval.getByRole('button', { name: 'Approve once', exact: true }).click();
+          await approval.getByRole('button', { name: '仅批准这一次', exact: true }).click();
           stage('independent_job_approval', {
             definitionId: card.definitionId,
             revision: card.revision,

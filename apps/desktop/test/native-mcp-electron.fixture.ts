@@ -167,10 +167,10 @@ try {
           const approval = page.getByRole('article', { name: `approval ${card.id}`, exact: true });
           if (await approval.count()) {
             assert.equal(
-              await approval.getByRole('button', { name: 'Approve once', exact: true }).count(),
+              await approval.getByRole('button', { name: '仅批准这一次', exact: true }).count(),
               1,
             );
-            await approval.getByRole('button', { name: 'Approve once', exact: true }).click();
+            await approval.getByRole('button', { name: '仅批准这一次', exact: true }).click();
             stage('independent_job_approval', {
               definitionId: card.definitionId,
               revision: card.revision,
@@ -334,7 +334,7 @@ try {
       const approval = page.getByRole('article', { name: `approval ${card.id}`, exact: true });
       if (await approval.count()) {
         ordinaryToolApproval = true;
-        await approval.getByRole('button', { name: 'Approve once', exact: true }).click();
+        await approval.getByRole('button', { name: '仅批准这一次', exact: true }).click();
         stage('independent_remote_tool_approval', {
           definitionId: card.definitionId,
           revision: card.revision,

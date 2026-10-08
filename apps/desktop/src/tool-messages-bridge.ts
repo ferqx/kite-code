@@ -16,6 +16,8 @@ export type NativeToolMessageFact = Pick<
   executionId: string;
   /** Display only: a unique original Model call in the already observed history. */
   target?: string;
+  /** Read-only original Execution authorization; never a grant or answer capability. */
+  authorization?: Execution['authorization'];
   /** Known ask_user v1 request and successful result; no Interaction authority. */
   ask?: {
     questions: { id: string; question: string }[];
