@@ -10,6 +10,53 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
+async function readOriginalFileChanges(page: import('playwright').Page) {
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('combobox', { name: '默认编辑器', exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole('combobox', { name: '默认编辑器', exact: true }).inputValue(),
+    'vscode',
+  );
+  await page.getByRole('combobox', { name: '默认编辑器', exact: true }).selectOption('textedit');
+  await page.getByRole('button', { name: '返回应用', exact: true }).click();
+  await page.getByRole('button', { name: '文件变更', exact: true }).click();
+  const pane = page.getByRole('complementary', { name: '文件变更', exact: true });
+  await pane.getByText('1 次文件操作', { exact: true }).waitFor();
+  assert.equal(await pane.locator('details.file-change').count(), 1);
+  await pane.locator('details.file-change > summary').click();
+  const diff = pane.getByRole('region', { name: '文件差异', exact: true });
+  await diff.waitFor();
+  assert.ok((await diff.textContent())!.includes('actual bundled bytes'));
+  assert.equal(await pane.getByRole('button', { name: 'bundled.txt', exact: true }).count(), 1);
+  const denied = await page.evaluate(async () => {
+    try {
+      await window.kiteNative!.request({
+        method: 'fileChanges.open',
+        generation: 1,
+        changeId: 'unobserved',
+        editor: 'textedit',
+      });
+      return '';
+    } catch (error) {
+      return (error as Error).message;
+    }
+  });
+  assert.equal(denied, 'file_change_observation_unavailable');
+  await diff.focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await pane.count(), 0);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  assert.equal(
+    await page.getByRole('combobox', { name: '默认编辑器', exact: true }).inputValue(),
+    'textedit',
+  );
+  await page.getByRole('button', { name: '返回应用', exact: true }).click();
+  assert.equal(await (await fetch(`${control}/count`)).text(), '2');
+  console.log(
+    'native_driver_stage: original file changes, exact saved body, current file action, retained editor choice and GET-only reading',
+  );
+}
+
 const [candidate, home, control, storeId] = process.argv.slice(2) as [
   string,
   string,
@@ -367,6 +414,7 @@ try {
   assert.equal(await page.getByText('write one real bundled file', { exact: true }).count(), 1);
   assert.equal(await page.getByText('正在发送', { exact: true }).count(), 0);
   console.log('native_driver_stage: deferred original preparation and one exact first send');
+  await readOriginalFileChanges(page);
   const old = childPid!;
   await app!.evaluate(({ app }) => app.quit());
   await app!.close();
@@ -377,6 +425,7 @@ try {
   assert.deepEqual(await lockState(), { outer: false, inner: false });
   page = await launch();
   assert.equal(await (await fetch(`${control}/count`)).text(), '2');
+  await readOriginalFileChanges(page);
   await page.evaluate(
     async (sessionId) =>
       await window.kiteNative!.request({

@@ -27,6 +27,7 @@ import {
   SessionPage,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { DesktopEditor } from './file-changes-bridge';
 import { NativeBackgroundPanel } from './native-background-panel';
 import type {
   NativeBranchFacts,
@@ -42,6 +43,7 @@ import type {
 import { NativeCallerView } from './native-caller';
 import { NativeContextView } from './native-context';
 import { useNativeEnvironment } from './native-environment';
+import { NativeFileChanges } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
@@ -113,9 +115,10 @@ export function NativeDesktop() {
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
   const [draft, setDraft] = useState('');
   const [planMode, setPlanMode] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<'models' | 'providers' | 'mcp' | 'skills'>(
-    'models',
-  );
+  const [settingsPage, setSettingsPage] = useState<
+    'general' | 'models' | 'providers' | 'mcp' | 'skills'
+  >('general');
+  const [editor, setEditor] = useState<DesktopEditor>('vscode');
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [, choiceChanged] = useState(0);
   const modelChoices = useRef(new Map<string, NativeModelChoice>());
@@ -1703,6 +1706,19 @@ export function NativeDesktop() {
             historyState.phase === 'loading' &&
             (!messages.length || selected.current !== selection.session.id)
       }
+      fileChangesContent={
+        !childDetail && !preparing && !scheduledTasksView && selection ? (
+          <NativeFileChanges
+            bridge={bridge}
+            generation={state?.generation ?? generation.current}
+            selection={selection}
+            historyEpoch={state?.historyEpoch ?? 0}
+            messages={messages}
+            historyComplete={historyState.phase === 'complete'}
+            editor={editor}
+          />
+        ) : undefined
+      }
       environmentInformation={!childDetail ? environment.card : undefined}
       requiredSubagentWait={
         !childDetail &&
@@ -2134,6 +2150,13 @@ export function NativeDesktop() {
                   <nav aria-label="设置分类">
                     <button
                       type="button"
+                      aria-pressed={settingsPage === 'general'}
+                      onClick={() => setSettingsPage('general')}
+                    >
+                      常规
+                    </button>
+                    <button
+                      type="button"
                       aria-pressed={settingsPage === 'providers'}
                       onClick={() => setSettingsPage('providers')}
                     >
@@ -2169,7 +2192,29 @@ export function NativeDesktop() {
                     </p>
                   )}
 
-                  {settingsPage === 'skills' ? (
+                  {settingsPage === 'general' ? (
+                    <section aria-label="常规设置">
+                      <h2>常规</h2>
+                      <h3>文件与模型</h3>
+                      <div className="settings-card">
+                        <label className="settings-row">
+                          <span>
+                            <strong>默认文件打开位置</strong>
+                            <small>选择打开项目文件的应用；本次运行期间生效</small>
+                          </span>
+                          <select
+                            aria-label="默认编辑器"
+                            value={editor}
+                            onChange={(event) => setEditor(event.target.value as DesktopEditor)}
+                          >
+                            <option value="vscode">VS Code</option>
+                            <option value="zed">Zed</option>
+                            <option value="textedit">TextEdit</option>
+                          </select>
+                        </label>
+                      </div>
+                    </section>
+                  ) : settingsPage === 'skills' ? (
                     <NativeSkillsSettings
                       bridge={bridge}
                       generation={generation.current}

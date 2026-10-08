@@ -10,6 +10,16 @@
 
 [原页面契约测试](../../packages/ui/test/desktop-page.test.tsx)迁回原 12 项展示断言；现有 Native 目录、草稿、问答与计划 DOM 只调整控件/浏览器 API，保留业务断言。源码外 [Native 候选](test/isolated/native-bundle.test.ts)与[driver](test/native-bundle-electron.fixture.ts)已核编译 CSS/字体、可操作 Composer、新 preload bridge、实际审批/任务、冷读和两层使用锁收尾。准确输入、原失败与结果归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不代表完整客户端、installed 全量、独立审查或 Windows/Linux 阶段退出。
 
+## 原文件变更面板与编辑器
+
+[NativeFileChanges](src/native-file-changes.tsx)将原 [FileChanges / FileDiff](../../packages/ui/src/desktop/FileChanges.tsx)接到 SessionPage 的“文件变更”入口，复用右栏、行号、高亮、展开与焦点行为。它只在面板打开后扫描当前已读完整历史的工具消息，每批32项；展开一项才读取原结果正文。目录扫描与单项 GET 各有自己的 read ID；折叠、关闭、切换会话、detach 或 history epoch 更换只释放相应读取，不取消执行。会话工具与文件变更切换时关闭原面板，RightSidebar 按用途保独立组件身份，避免旧 Tabs 选择遮住新内容；拥有读取的 Native 内容关闭即卸载，不在收起栏内保活。
+
+[Main reader](electron/file-changes.ts)从 NativeCaller 已登记的原 Message 取得唯一 `sourceIds`，经生成 Client GET 核原 Store、Session、Run、Execution、定义、结果 revision 和准确 content。仅 succeeded 的 `files.write/edit` 进入列表；同名 tool call 不建立关联，Shell/MCP 和 failed/unknown/cancelled 不猜逐文件贡献。`details.fileChange@1` 由 [Files owner](../../packages/agent/src/tools/files/README.md#逐操作文件变更预览)提供。旧 receipt 或未知格式保留已确认操作与可用路径，明确无差异，不从当前文件或恢复检查点重建。历史来源沿已封存 originMessage 读取；原来源和当前 Workspace 不同或不能确认时不提供打开按钮。
+
+“常规”复用原编辑器选择，默认 VS Code，Zed/TextEdit 可选，只在当前 renderer 进程保留。文件操作中的路径按钮传 Main 观察 ID 和封闭 editor 枚举，不传任意路径、工作区根或应用名。Main 再读原 receipt、当前登记 Workspace 和物理根 dev/inode，沿迁入的 [editor leaf](electron/editor.ts)只接受该项目内存在的普通文件；保护 Profile 与候选目录。调用固定 macOS `/usr/bin/open` 的独立 argv，打开当前磁盘内容；编辑器未安装或目标漂移明确失败。Main 在所有读取后、分发前重新检查原 renderer frame。正文阅读不以编辑器可用为前提，路径按钮也不证明历史 diff 等于当前磁盘。原消息内其他路径入口和设置摘要的剩余迁移仍按完整 PC 计划核对，不以本面板接入宣称全页完成。
+
+取舍见[文件结果迁移决定](../../.agents/notes/implemented/architecture/2026-10-08-native-file-change-receipts.md)。[真实 Files 回归](../../packages/agent/test/isolated/files/change-preview.test.ts)、[Main 端口](test/native-file-changes.test.ts)、[原面板 DOM](test/isolated/native-file-changes-dom.test.tsx)与原[源码外窗口](test/isolated/native-bundle.test.ts)分别负责 IO/receipt、准确作用域、原入口与冷读。实际执行输入、失败与通过边界归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原文件变更与编辑器入口迁入)；OS 编辑器窗口、安装版全路径和 Windows/Linux 资格不由有限 callback 或按钮断言代证。
+
 ## Native 项目会话目录
 
 正式目录直接复用 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx)，替代临时 NativeDirectory。适配器按公共 workspaceId 分组，项目默认展开，可独立收起；空项目显示“暂无聊天”。上下键只移动当前项目列表焦点，确认沿原 Session ID 读取；收起不调用 bridge、不改选或取消工作。首次发送等待不阻止阅读已有会话，原 NativeDesktop 仍保护迟到创建、后来选择和草稿。选择标记核同 Store，目录 Store 更换重置展示。侧栏先显示五项、“展开更多”每次增加十项只是展示完整已读目录，不改变公共分页或高水位。

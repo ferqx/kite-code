@@ -1,18 +1,24 @@
 import { fileURLToPath } from 'node:url';
 import { type CallerCommandRequest, canonicalCallerCommandRequest } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import type { DesktopEditor } from '../src/file-changes-bridge';
 import {
   type NativeReply,
   type NativeRequest,
   type NativeResult,
   nativeChannel,
 } from '../src/native-bridge';
+import { openEditor } from './editor';
 import { parseNativeMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
 
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'fileChanges.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
+  'fileChanges.detail': ['readId', 'changeId'],
+  'fileChanges.close': ['readId'],
+  'fileChanges.open': ['changeId', 'editor'],
   'background.open': ['readId'],
   'background.next': ['readId'],
   'background.close': ['readId'],
@@ -203,7 +209,9 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
   }
   if (
-    (method === 'settings.skills.open' || method === 'jobOutput.open') &&
+    (method === 'settings.skills.open' ||
+      method === 'jobOutput.open' ||
+      method === 'fileChanges.list') &&
     (!Number.isSafeInteger(input.viewSelection) ||
       Number(input.viewSelection) < 1 ||
       !Number.isSafeInteger(input.historyEpoch) ||
@@ -325,6 +333,25 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   const resourceId = (value: unknown) =>
     typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+  if (
+    method === 'fileChanges.list' &&
+    (!Array.isArray(input.messageIds) ||
+      input.messageIds.length < 1 ||
+      input.messageIds.length > 32 ||
+      !input.messageIds.every(resourceId) ||
+      new Set(input.messageIds).size !== input.messageIds.length)
+  )
+    throw Error('invalid_native_request');
+  if (
+    (method === 'fileChanges.detail' || method === 'fileChanges.open') &&
+    !resourceId(input.changeId)
+  )
+    throw Error('invalid_native_request');
+  if (
+    method === 'fileChanges.open' &&
+    !['vscode', 'zed', 'textedit'].includes(String(input.editor))
+  )
+    throw Error('invalid_native_request');
   if (
     method === 'modelOutput.open' &&
     input.messageId !== undefined &&
@@ -544,6 +571,7 @@ export function registerNativeIpc(options: {
   rendererUrl: string;
   caller: () => Promise<NativeCaller>;
   confirmWorkspaceRemoval?: (label: string) => Promise<boolean>;
+  openEditor?: (editor: DesktopEditor, path: string) => Promise<void>;
   pickWorkspace?: (
     generation: number,
     caller: NativeCaller,
@@ -572,6 +600,16 @@ export function registerNativeIpc(options: {
             return confirmed;
           },
         );
+      } else if (request.method === 'fileChanges.open') {
+        await caller.openChangedFile(request, async (editor, target) => {
+          assertNativeSender(event, options.window(), options.rendererUrl);
+          try {
+            await (options.openEditor ?? openEditor)(editor, target);
+          } catch {
+            throw Error('file_editor_open_failed');
+          }
+        });
+        value = null;
       } else value = await caller.invoke(request);
       if (Buffer.byteLength(JSON.stringify(value)) > responseBytes)
         throw Error('native_response_too_large');

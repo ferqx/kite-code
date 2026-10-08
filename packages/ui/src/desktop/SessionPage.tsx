@@ -82,6 +82,8 @@ export interface SessionPageProps {
   historyError?: { title: string; detail: string; retry: () => void };
   overlays?: ReactNode;
   fileChanges?: readonly Message[];
+  /** Host receipt reader rendered within the retained FileChanges sidebar. */
+  fileChangesContent?: ReactNode;
   newConversation?: NewConversationProps;
   workbench?: boolean;
   scheduledTasks?: ScheduledTasksProps;
@@ -118,7 +120,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const detailsPanelFrame = useRef<number | undefined>(undefined);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
   const [changesKey, setChangesKey] = useState<string>();
-  const changesOpen = changesKey === props.readingKey && fileChanges !== undefined;
+  const hasFileChanges = fileChanges !== undefined || props.fileChangesContent !== undefined;
+  const changesOpen = changesKey === props.readingKey && hasFileChanges;
   const [scheduledEditorOpen, setScheduledEditorOpen] = useState(false);
   const [sessionViewElement, setSessionViewElement] = useState<HTMLDivElement | null>(null);
   const [environmentPreference, setEnvironmentPreference] = useState<'default' | 'open' | 'closed'>(
@@ -151,6 +154,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const previousEnvironmentFits = useRef(environmentFits);
   const previousEnvironmentMode = useRef(environmentMode);
   const hostDetailsOpen = !!props.detailPanel;
+  useLayoutEffect(() => {
+    if (hostDetailsOpen) setChangesKey(undefined);
+  }, [hostDetailsOpen]);
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
   const rightSidebarOpen =
@@ -233,12 +239,10 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       setScheduledEditorOpen(false);
     }
   }, [props.scheduledTasks, collapseDetails]);
-  const previousHostDetails = useRef(false);
   useEffect(() => {
-    if (hostDetailsOpen) expandDetails();
-    else if (previousHostDetails.current) collapseDetails();
-    previousHostDetails.current = hostDetailsOpen;
-  }, [hostDetailsOpen, expandDetails, collapseDetails]);
+    if (rightSidebarOpen) expandDetails();
+    else collapseDetails();
+  }, [rightSidebarOpen, expandDetails, collapseDetails]);
   useEffect(() => {
     const element = sessionViewElement;
     if (!element) return;
@@ -406,6 +410,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   );
   const rightSidebarPanel = props.detailPanel ? (
     <RightSidebar
+      key="host-details"
       label={props.detailPanel.label}
       tabs={[
         { value: 'details', label: props.detailPanel.label, content: props.detailPanel.content },
@@ -417,13 +422,16 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     />
   ) : changesOpen ? (
     <RightSidebar
+      key="file-changes"
       id="session-file-changes"
       label="文件变更"
       tabs={[
         {
           value: 'changes',
           label: '文件变更',
-          content: <FileChanges messages={fileChanges!} openFile={props.actions.openFile} />,
+          content: props.fileChangesContent ?? (
+            <FileChanges messages={fileChanges!} openFile={props.actions.openFile} />
+          ),
         },
       ]}
       onClose={() => {
@@ -434,6 +442,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     />
   ) : scheduledEditorOpen && props.scheduledTasks ? (
     <RightSidebar
+      key="scheduled-editor"
       label="新建安排任务"
       title="新建"
       onClose={() => {
@@ -453,8 +462,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     </RightSidebar>
   ) : null;
   // Host panels may own active readers: closing must unmount them, not retain hidden I/O.
-  if (rightSidebarPanel && !props.detailPanel)
+  if (rightSidebarPanel && !props.detailPanel && !props.fileChangesContent)
     retainedRightSidebarPanel.current = rightSidebarPanel;
+  else if (props.fileChangesContent) retainedRightSidebarPanel.current = null;
   return (
     <div className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
       <ResizablePanelGroup
@@ -557,7 +567,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   <HugeiconsIcon icon={InformationCircleIcon} />
                 </Button>
               )}
-              {fileChanges !== undefined && (
+              {hasFileChanges && (
                 <Button
                   ref={changesToggle}
                   className="ghost"
@@ -565,7 +575,10 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   aria-controls="session-file-changes"
                   onClick={() => {
                     if (changesOpen) collapseDetails();
-                    else expandDetails();
+                    else {
+                      props.detailPanel?.onClose();
+                      expandDetails();
+                    }
                     setChangesKey(changesOpen ? undefined : props.readingKey);
                   }}
                 >

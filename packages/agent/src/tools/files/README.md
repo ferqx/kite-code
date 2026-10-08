@@ -14,6 +14,14 @@ search 未指定 limit 返回全部匹配；显式 limit<=200 给出完整 next 
 
 文件写入先校验原完整基线、再临时发布。发布后同步/读取失败返回 file_publish_outcome_unknown；Tool 保留 outcome_unknown，不把已发生替换假报为零效果失败。
 
+## 逐操作文件变更预览
+
+普通 UTF-8 write/edit 在最后一次基线验证保存实际完整 preimage，publish/fsync 后读取实际 postimage，并核其完整内容和发布 FD 的 dev/inode；确认漂移保留 `file_publish_outcome_unknown`。成功 [FileSnapshot](../files.ts)带 `change`，由迁入的原 [共同前后缀行差异](../files-diff.ts)生成行号与增删内容。新建或内容不变展示真实写入内容；不是 Git diff、LCS 或 Shell/外部编辑捕获。每次操作独立保存，不合并为累计贡献。
+
+[Tool wrapper](../files-tools.ts)保持 write/edit 版本2及原 Model `content:{path,baseline}`，只将可选中立 `FileChangePreview` 放入 `ToolResult.details.fileChange`：version1、format、path、before/after 完整 baseline、text 和 truncated。预览最多65536 UTF-8 bytes，截在完整字符边界；这个额度只限制展示 receipt，不限制文件 IO、完整 baseline、Model 读写正文或 Artifact。before/after capture 最后保存失败和派发后确认失败仍 unknown，不发布可用成功预览；read/search/glob、字节恢复及未装配该预览的工具不伪造记录。消费者须核原 succeeded Execution/Run/结果 revision，旧或未知格式明确不可读。
+
+没有新增 SQL 表、Store major、维护资产或 Model 工具权限。恢复检查点保首 preimage 与末 postimage，只服务准确恢复，不能冒充每次操作的差异。长期边界见[迁移决定](../../../../../.agents/notes/implemented/architecture/2026-10-08-native-file-change-receipts.md)。[真实预览与 Core receipt 测试](../../../test/isolated/files/change-preview.test.ts)核完整 BOM/CRLF pre/post、外部后改不改变历史、数 MiB 完整写入与 UTF-8 截断、失败/unknown 不保存成功预览，以及跨 Run 重复 call ID 的唯一原 source；各客户端实际资格由 owner 和进度维护。
+
 POSIX anchored 路径调用由 [files-native](../files-native.ts) 将 NUL 结尾的 Buffer 直接交给 Bun FFI；参数保持 JavaScript 引用直至 libc 调用结束。不能先对临时 Buffer 取数字指针再丢弃引用，否则 GC 可使仍存在的原路径返回 ENOENT。[路径寿命回归](../../../test/isolated/files/native-path-lifetime.test.ts)在真实 openat/renameat/linkat/unlinkat 前强制 GC，验证完整字节、原 inode 基线、创建与删除；实际资格当前只覆盖 macOS。捕获测试另核三条真实成功 Tool 回执与 first/last 的准确原 Execution ID，不把第二条单独成功误当成两次成功捕获。
 
 文件系统不是 SQLite 事务：不合作的外部编辑器可能在最后一次基线核对与 rename 之间修改目标或移动目录，无法宣称任意外部 rename/编辑原子 CAS。当前机制绑定原目录对象，合作宿主可装配 Workspace serial 许可；不会创建另一个持久授权或文件状态机。

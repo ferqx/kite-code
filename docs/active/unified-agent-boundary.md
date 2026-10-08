@@ -10,6 +10,8 @@
 
 Extension 的业务 Context 贡献只接收 scoped read projections，Core 检查 namespace、有限格式和预算，并强制以 user 数据呈现。公开执行证明仅提供准确 identity、attempt、定义、参数摘要、结果 revision 和原来源 id/digest；信息 receipt 另行核实原 Interaction 的 accepted revision，不替代工具授权。配置文件、正文、展示卡和调用者自报证明不能生成这些权威事实。
 
+文件变更阅读继续沿原 Message 的唯一 source Execution 和准确原 Run/Store/结果 revision，不以 tool call 名称或模型参数关联。普通 Files 可保存有版本的中立 `details.fileChange`，由实际已验证 preimage 与确认 postimage 生成；只限展示预算，不改完整文件或 Model 内容合同。Main 只给当前已读 scope 的成功 File receipt 建立有限观察，缺预览明确不可读；恢复检查点和当前磁盘不是历史 diff 的替代来源。编辑器跳转另核当前登记项目的物理根、目标普通文件和原 frame，不从历史来源继承另一 Workspace 的文件范围。当前实现与证据见 [Files owner](../../packages/agent/src/tools/files/README.md#逐操作文件变更预览)和 [Native owner](../../apps/desktop/README.md#原文件变更面板与编辑器)。Core、生成 HTTP schema 与私有 UI 数据格式均保持。
+
 读取时机：修改新 Agent 的 Store/执行/模型接口、目标 HTTP schema、跨包依赖或过渡调用者时。
 
 验证：`bun run test:unified-agent`、`bun run check:unified-agent-boundary`，实际运行范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。

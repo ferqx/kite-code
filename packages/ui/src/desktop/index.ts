@@ -51,6 +51,7 @@ export {
   SheetTitle,
   SheetTrigger,
 } from './components/ui/sheet';
+export { FileChanges, FileDiff } from './FileChanges';
 export {
   ModelEffortSelector,
   type ModelEffortSelectorProps,

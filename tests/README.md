@@ -21,6 +21,8 @@ Required CI、release/platform 与正式 soak 固定 Bun 1.4.2。性能或稳定
 
 Owner-local tests 可读自己非公开源码；root integration 使用公开 package exports 或明确 App surface。root 不通过相对 deep-import 另建生产语义，不仅为测试便利扩大 production export。fixtures/helpers 不自动拥有测试；根不保存散落测试或第二通用 `tests/runtime/` owner。
 
+[PC 文件变更迁移](../apps/desktop/README.md#原文件变更面板与编辑器)沿原完整 Native 窗口夹具新增文件侧栏、编辑器选择、关闭与冷读断言；默认 Service 真实 Files 回执来自原本机 Provider fixture，不替换 Main/preload/renderer。另由 Files 的 change-preview、Native 的 file-changes 端口和隔离 DOM 文件验证实际 pre/post、精确关联、原 UI 入口与读取释放；端口 callback 不冒充 OS 编辑器窗口，窗口按钮不冒充完整安装／跨平台资格。实际运行与失败归同一[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原文件变更与编辑器入口迁入)。
+
 ## 默认执行与隔离
 
 根 `test`、`test:all` 和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)。它只发现上述当前 owner 与有限的 root 脚本安全列表，不扩展到整个旧 integration/qualification/release/e2e/golden/TUI 树。纯 `--list` 不创建 Profile、Provider 或子进程。

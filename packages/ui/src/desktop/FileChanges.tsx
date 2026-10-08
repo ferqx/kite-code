@@ -1,19 +1,45 @@
+import { type ReactNode, useState } from 'react';
 import type { Message } from './types';
 import { Button } from './ui';
 
 export function FileChanges({
   messages,
   openFile,
+  renderDetail,
+  loading,
 }: {
   messages: readonly Message[];
   openFile?: (path: string) => void;
+  renderDetail?: (message: Message) => ReactNode;
+  loading?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(new Set<string>());
   return (
     <div className="results">
       <p>{messages.length} 次文件操作</p>
-      {!messages.length && <p>当前会话还没有已确认的文件工具变更。</p>}
+      {loading ? (
+        <p role="status">正在读取文件操作记录。</p>
+      ) : (
+        !messages.length && <p>当前会话还没有已确认的文件工具变更。</p>
+      )}
       {messages.map((message) => (
-        <details className="file-change" key={message.id}>
+        <details
+          className="file-change"
+          key={message.id}
+          onToggle={
+            renderDetail
+              ? (event) => {
+                  const open = event.currentTarget.open;
+                  setExpanded((previous) => {
+                    const next = new Set(previous);
+                    if (open) next.add(message.id);
+                    else next.delete(message.id);
+                    return next;
+                  });
+                }
+              : undefined
+          }
+        >
           <summary title={message.changedFile}>
             {message.changedFile || '历史记录未提供文件路径'}
           </summary>
@@ -22,7 +48,9 @@ export function FileChanges({
               {message.changedFile}
             </Button>
           )}
-          {!message.toolResult ? (
+          {renderDetail ? (
+            expanded.has(message.id) && renderDetail(message)
+          ) : !message.toolResult ? (
             <p>尚无可读的终态输出，请检查工具过程。</p>
           ) : (
             <FileDiff message={message} />

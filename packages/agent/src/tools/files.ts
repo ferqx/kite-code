@@ -13,6 +13,7 @@ import {
 import { isAbsolute, resolve } from 'node:path';
 import { assertNoSymlinkPath } from '../platform/profile-identity';
 import { AgentError } from '../storage/types';
+import { fileChangePreview } from './files-diff';
 import { directoryFlags, listAt, openAt, publishAt, unlinkAt } from './files-native';
 
 export interface FileBaseline {
@@ -25,12 +26,23 @@ export interface FileSnapshot {
   path: string;
   content: string;
   baseline: FileBaseline;
+  /** Saved from the verified preimage and the confirmed publication, only for text mutations. */
+  change?: FileChangePreview;
   selection?: {
     fromLine: number;
     toLine: number | null;
     totalLines: number;
     nextOffset: number | null;
   };
+}
+export interface FileChangePreview {
+  version: 1;
+  format: 'line_diff' | 'file_content';
+  path: string;
+  before: FileBaseline | null;
+  after: FileBaseline;
+  text: string;
+  truncated: boolean;
 }
 export interface FileByteSnapshot {
   path: string;
@@ -263,11 +275,13 @@ export function createWorkspaceFiles(options: {
       fail('file_encoding_invalid');
     checkTextSample(Buffer.from(input.content.slice(0, 8192)));
     return withParent(input.path, (parent, name) => {
+      let before: FileSnapshot | null = null;
       const verify = () => {
         try {
           const current = readAt(parent, name, input.path);
           if (!input.base || !baselineEqual(current.baseline, input.base))
             fail('file_baseline_conflict');
+          before = current;
         } catch (error) {
           if (!(missing(error) && input.base === null)) throw error;
         }
@@ -289,7 +303,15 @@ export function createWorkspaceFiles(options: {
         publishAt(parent, temp, name, input.base === null);
         published = true;
         fsyncSync(parent);
-        return readAt(parent, name, input.path);
+        const after = readAt(parent, name, input.path);
+        const publishedFile = fstatSync(fd, { bigint: true });
+        if (
+          after.content !== input.content ||
+          after.baseline.device !== String(publishedFile.dev) ||
+          after.baseline.inode !== String(publishedFile.ino)
+        )
+          fail('file_publication_changed');
+        return { ...after, change: fileChangePreview(before, after) };
       } catch (error) {
         if (published)
           throw new AgentError(

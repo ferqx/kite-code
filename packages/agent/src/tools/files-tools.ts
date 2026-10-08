@@ -333,7 +333,13 @@ export function createFileTools(
             modelContent: { kind: 'artifact', reference, encoding: 'utf-8' },
           };
         }
-        return { outcome: 'succeeded', content };
+        const change =
+          d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot).change : undefined;
+        return {
+          outcome: 'succeeded',
+          content,
+          ...(change ? { details: { fileChange: change } as unknown as Json } : {}),
+        };
       } catch (error) {
         return {
           outcome:

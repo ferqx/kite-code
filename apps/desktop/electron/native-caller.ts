@@ -13,6 +13,7 @@ import {
   type DesktopController,
   type DesktopSnapshot,
 } from '../src/controller';
+import type { DesktopEditor } from '../src/file-changes-bridge';
 import { DesktopInput, inputMetadata } from '../src/input';
 import type {
   NativeCreation,
@@ -33,6 +34,7 @@ import {
 import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
 import { NativeConversation } from './conversation';
+import { NativeFileChanges } from './file-changes';
 import { NativeFileRecovery } from './file-recovery';
 import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
 import { NativeJobOutputReads } from './job-output-reads';
@@ -93,6 +95,7 @@ export class NativeCaller {
   private readonly mcp: NativeMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
   private readonly jobOutput: NativeJobOutputReads;
+  private readonly fileChanges: NativeFileChanges;
   private readonly background: NativeBackground;
   private readonly environment: NativeBackground;
   private environmentRevision = 0;
@@ -265,6 +268,36 @@ export class NativeCaller {
           }
         : undefined;
     this.outputReads = new NativeModelOutputReads(client, current);
+    this.fileChanges = new NativeFileChanges(
+      client,
+      () => {
+        const scope = current(),
+          snapshot = this.controller.snapshot;
+        return scope &&
+          !this.observationUnavailable &&
+          snapshot?.sessionId === scope.sessionId &&
+          snapshot.view.storeId === scope.storeId
+          ? {
+              generation: scope.generation,
+              viewSelection: scope.selection,
+              historyEpoch: this.historyEpoch,
+              storeId: scope.storeId,
+              sessionId: scope.sessionId,
+              workspaceId: snapshot.view.session.workspaceId,
+            }
+          : undefined;
+      },
+      (id) => this.observedMessages.get(id),
+      (id) => {
+        const observed = this.workspaceObservation;
+        return !this.observationUnavailable &&
+          observed?.generation === this.generation &&
+          observed.storeId === this.client.serverInfo?.storeId
+          ? observed.workspaces.find((workspace) => workspace.id === id)
+          : undefined;
+      },
+      protectedRoots,
+    );
     this.jobOutput = new NativeJobOutputReads(client, (executionId) => {
       const scope = current(),
         snapshot = this.controller.snapshot,
@@ -463,6 +496,7 @@ export class NativeCaller {
     this.mcp.release();
     this.skills.release();
     this.jobOutput.release();
+    this.fileChanges.release();
     this.resetHistory?.resolve();
     this.resetHistory = undefined;
     this.messageRead?.abort.abort();
@@ -613,6 +647,7 @@ export class NativeCaller {
       this.historyEpoch++;
       this.skills.release();
       this.jobOutput.release();
+      this.fileChanges.release();
       this.attachmentReads.release();
       this.messageRead?.abort.abort();
       this.grants.release();
@@ -884,6 +919,15 @@ export class NativeCaller {
     this.changed();
     return value;
   }
+  async openChangedFile(
+    request: Extract<NativeRequest, { method: 'fileChanges.open' }>,
+    perform: (editor: DesktopEditor, target: string) => Promise<void>,
+  ) {
+    await this.drainRefresh();
+    this.check(request.generation);
+    await this.fileChanges.open(request.changeId, request.editor, perform);
+    this.check(request.generation);
+  }
   async invoke(request: NativeRequest): Promise<NativeResult> {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
@@ -918,6 +962,9 @@ export class NativeCaller {
         'jobOutput.open',
         'jobOutput.next',
         'jobOutput.close',
+        'fileChanges.list',
+        'fileChanges.detail',
+        'fileChanges.close',
       ].includes(request.method)
     )
       await this.drainRefresh();
@@ -929,6 +976,18 @@ export class NativeCaller {
         : this.background;
     let result: NativeResult;
     switch (request.method) {
+      case 'fileChanges.list':
+        result = await this.fileChanges.list(request);
+        break;
+      case 'fileChanges.detail':
+        result = await this.fileChanges.detail(request.changeId, request.readId);
+        break;
+      case 'fileChanges.close':
+        this.fileChanges.close(request.readId);
+        result = null;
+        break;
+      case 'fileChanges.open':
+        throw new ClientError('native_host_operation_unavailable');
       case 'background.open':
         result = await background.open(request.readId);
         break;

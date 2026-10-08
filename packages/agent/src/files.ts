@@ -19,6 +19,7 @@ export {
   createWorkspaceFiles,
   type FileBaseline,
   type FileByteSnapshot,
+  type FileChangePreview,
   type FileEntry,
   type FileRemoval,
   type FileSnapshot,
