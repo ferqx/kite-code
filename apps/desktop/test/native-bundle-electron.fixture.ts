@@ -20,6 +20,24 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   assert.equal(await process.getAttribute('aria-expanded'), 'true');
   assert.equal(await final.count(), 1);
   await page.locator('.tool-edit-heading').filter({ hasText: '已人工批准' }).waitFor();
+  await openSessionTools(page);
+  const history = page.locator('[data-interaction-history]');
+  await history.locator(':scope > summary').click();
+  const historyPanel = page.getByRole('region', { name: '交互记录', exact: true });
+  await historyPanel.getByText(/^已完整读取 \d+ 项交互记录。$/).waitFor();
+  const originalApproval = historyPanel
+    .locator('details[data-interaction-id]')
+    .filter({ hasText: '审批 · 已保存回答' });
+  assert.equal(await originalApproval.count(), 1);
+  await originalApproval.locator(':scope > summary').click();
+  await originalApproval
+    .getByText('本次执行已接收该回答；这不表示执行成功。', { exact: true })
+    .waitFor();
+  assert.equal(
+    await originalApproval.getByRole('button', { name: 'Approve once', exact: true }).isDisabled(),
+    true,
+  );
+  await history.locator(':scope > summary').click();
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,

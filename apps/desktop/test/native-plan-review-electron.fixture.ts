@@ -607,6 +607,39 @@ try {
   await capture(second, 'approve', 'auto');
   await toolApproval('a', second.runId!);
   await done('a', second.runId!, 'completed', mainDraft);
+  const postsBeforeHistory = await posts();
+  const history = page.locator('[data-interaction-history]');
+  await history.locator(':scope > summary').click();
+  const historyPanel = page.getByRole('region', { name: '交互记录', exact: true });
+  await historyPanel.getByText(/^已完整读取 \d+ 项交互记录。$/).waitFor();
+  const originalReview = historyPanel.locator(`[data-interaction-id="${first.id}"]`);
+  await originalReview.locator(':scope > summary').click();
+  await originalReview
+    .getByText('本次执行已接收该回答；这不表示执行成功。', { exact: true })
+    .waitFor();
+  await originalReview
+    .getByRole('button', { name: 'Load complete attachment', exact: true })
+    .click();
+  await originalReview.getByLabel('完整计划正文', { exact: true }).waitFor();
+  await originalReview.getByText('完整原附件', { exact: true }).click();
+  await originalReview.locator('[data-complete-attachment="verified"]').waitFor();
+  const completeRecord = await originalReview
+    .locator('[data-complete-attachment="verified"]')
+    .textContent();
+  assert.equal(JSON.parse(completeRecord!).body, metadata.bodyText);
+  assert.equal(
+    Buffer.byteLength(completeRecord!),
+    Number(first.request.policy.review.reference.size),
+  );
+  assert.equal(
+    await originalReview
+      .getByRole('button', { name: 'Approve this exact plan', exact: true })
+      .count(),
+    0,
+  );
+  assert.ok((await originalReview.textContent())!.includes(metadata.feedback));
+  assert.equal(await posts(), postsBeforeHistory);
+  await history.locator(':scope > summary').click();
   const bDraft = '  B 原草稿 雪🙂  ';
   const b = await start('b', bDraft);
   assert.equal(await approve.isDisabled(), true);

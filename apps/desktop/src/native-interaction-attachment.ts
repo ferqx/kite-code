@@ -9,6 +9,7 @@ export async function readNativeInteractionAttachment(input: {
   attachment: InteractionAttachment;
   signal: AbortSignal;
   isCurrent: () => boolean;
+  surface?: 'history';
 }) {
   const readId = crypto.randomUUID(),
     attachment = structuredClone(input.attachment);
@@ -18,7 +19,14 @@ export async function readNativeInteractionAttachment(input: {
   };
   const close = () =>
     input.bridge
-      .request({ method: 'interactionAttachment.close', generation: input.generation, readId })
+      .request({
+        method:
+          input.surface === 'history'
+            ? 'interactionHistory.attachment.close'
+            : 'interactionAttachment.close',
+        generation: input.generation,
+        readId,
+      })
       .catch(() => {});
   const abort = () => {
     void close();
@@ -27,7 +35,10 @@ export async function readNativeInteractionAttachment(input: {
   try {
     check();
     const raw = await input.bridge.request({
-      method: 'interactionAttachment.open',
+      method:
+        input.surface === 'history'
+          ? 'interactionHistory.attachment.open'
+          : 'interactionAttachment.open',
       generation: input.generation,
       readId,
       key: attachment.key,
@@ -59,7 +70,10 @@ export async function readNativeInteractionAttachment(input: {
     for (;;) {
       check();
       const chunk = await input.bridge.request({
-        method: 'interactionAttachment.read',
+        method:
+          input.surface === 'history'
+            ? 'interactionHistory.attachment.read'
+            : 'interactionAttachment.read',
         generation: input.generation,
         readId,
         offset,

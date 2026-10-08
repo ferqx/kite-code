@@ -2918,3 +2918,24 @@ Desktop／UI owner、桌面手册、active边界、测试入口、原方案、37
 保留失败证据：`desktop-ready`实际1，旧测试在建立浏览器环境前导入 Radix 导致菜单 layout effect 缺席；仅按原 model-picker fixture 改动态导入，原菜单断言保留。`core-ready`原拒绝 matcher 在5秒内挂起，准确所属 PID32089核命令后 SIGTERM，实际143；只改显式捕获同一错误，期限／安全断言保持，最终五文件全过。`plan-window-ready`实际1／52.88s等旧 heading，`plan-window-qualified`实际1／48.19s等未打开侧栏的 Ask radio；最终 fixture 沿原 session-header标题且核原 Session ID，先开真实会话工具，草稿诊断沿准确 aria-label，未删断言或延长预算。
 
 本轮 bounded recon 派发一次返回 `agent thread limit reached`，没有新子 Agent 结果，也没有把根自检计为独立审查。37能力仍全 partial／wholeV13=false；通用交互历史、全部恢复组合、完整 Auto 窗口及 PC 核对，installed／维护恢复、原 RSS／八轮／60分钟资源退出、完整迁移独立审查、最终回归和 legacy 退役仍未闭合。Win／Linux按用户顺序留重构后 GitHub Actions。本地冻结和交付范围归 `/private/tmp/kite-pc-approval-owned-20261009.json`及上述 delivery；授权不扩大到 push／PR／dispatch／发布。
+
+## 2026-10-09：原交互记录只读历史
+
+上一逻辑轮已本地提交原审批面板与有限授权观察，属于 progress。本轮从 durable `el-refactor`／HEAD `006ab133c733e0d8aded34d7a49e97b97a7a0316`继续第一依赖：原 PC 剩余交互与完整核对。macOS 优先、宿主 Shell、原 kite-desktop／kite-client-ui 复用和仅本地交付授权保持；未扩大 TUI、Chrome 或平台矩阵。
+
+正式 Native 在原“会话工具”接“交互记录”，复用原 InteractionCard 阅读问题、计划和审批、已保存答案、取消与 accepted revision，历史卡没有回答入口。公共 all-state listInteractions 按原根会话读取实际 child 来源，每页20项而无累计截断；Main／Renderer 均核准确 Store／Session／Workspace／选择／epoch、同一 snapshotCursor、原 source-first ancestry 与严格 ID，直到 EOF 才发布完整记录。不同范围或迟到结果不替换，失败保留同范围上次完整事实并标未更新。Store 观察游标可因其他会话／Model 变化而漂移，本片明确失败与显式重读；没有新增冻结历史 API，也没有承诺持续变化时一定完成。
+
+历史使用独立附件 reader，先 fresh GET 核原卡，再沿既有公共 SDK 与 Native reader 核原身份／字节／hash／UTF-8／EOF；它不进入当前 pending 审批的 loaded proof，不提交答案或命令。原 PlanBody 格式化正文，完整原 JSON 附件仍可展开，revise feedback 保准确原字符串；读取不把保存或接受答案推成执行成功。关闭／refresh／换会话只撤销所属 GET 与句柄。Core、生成公共 API、SQL 和私有维护格式均未变。当前只核当前 Store 原记录，全部封存／恢复到新 Store 组合仍开放。职责归 [Desktop owner](../../apps/desktop/README.md#原交互记录只读历史)，取舍归[交互历史决定](../../.agents/notes/implemented/architecture/2026-10-09-native-interaction-history.md)；原审批与轮次 Note 保留仍适用理由并交叉链接。
+
+实际验证以本轮输入为准，日志均为 `/private/tmp/kite-pc-interaction-history-<tag>-20261009.log`：
+
+- Main／正式 caller／原附件三文件 `main-final`实际0，18pass／169断言／895ms；新历史用43项三页核无总截断、准确 EOF、原 child、自定义 question、取消与保存未受理、游标漂移／迟到拒绝、独立完整附件 proof 和零当前答权。自建 SDK port 测试不代证真实 Artifact IO。
+- 原卡／question／plan／页面 DOM 四文件 `dom-final`实际0，15pass／173断言／1.52s；未到 EOF 不发布，原通用请求和答案、准确 feedback、只读入口与换会话拒绝迟到。UI fixture 不代证完整原附件。
+- 真实 Core／SQLite／Service／公共 Client 三例 `http-final`实际0，3pass／80断言／697ms；核实际 child 原来源／ancestry、保存未受理、自定义 Tool question 完成后原记录、只读不变 cursor／Provider／effect，保原所有错误与授权断言。
+- 原源码外默认 macOS 窗口 `window-qualified`实际0，1pass／7Bun断言及全部 Node driver／53.02s；完整 Terminal＋Native 搬迁且删除原输出，真实 Main／Service／原 Renderer 首次和冷启动读原人工审批历史，只读卡禁用原按钮。原 Files／General／最终全文复制／退出／Main强杀／Service双使用锁与所属终端断言保持。
+- 原计划窗口 `plan-window-final`实际0，1pass／262Bun断言及全部 Node driver／66.84s；历史沿原格式化展示，同时打开完整原附件，核准确原 JSON body／UTF-8 字节数与准确 feedback，无历史审批控件且原18次 answer POST 不增加。原计划4份、12次独立管理审批、2次 Files 审批、冷 Store proof 和全部原预算／断言保持。
+- `types-final`实际0，根与八 runtime workspaces。最终文档、边界、API、workspace／test owner、plan-evidence与正常 Git hooks按当前实际范围独立核验；输入、冻结与本地交付结果记录于 `/private/tmp/kite-pc-interaction-history-owned-20261009.json`和 `/private/tmp/kite-pc-interaction-history-delivery-20261009.json`。它们仅为本次临时证据，不是后续验证缓存。本片未跑全阶段 default。
+
+保留失败证据：`main-initial`／`attachment-recheck`／`main-ready`实际1，原相邻附件测试把 debounced refresh 当成已完成。`attachment-baseline`以准确 HEAD NativeCaller复现同一失败（内层 Bun实际1，3pass／1fail／62断言）；临时同目录 baseline 文件均已删除。只在原 fixture 加有界等待实际失败／恢复 GET，原答权、scope、EOF和5秒预算保持，最终三文件全过。`types-initial`／`types-ready`／`types-qualified`实际2，擦除语法与 SDK mock／Selection完整类型修正；`format-dom`／`format-qualified`实际1，最终使用语义 section＋pre。`plan-window-ready`实际1／51.99s，新增断言误将格式化 Markdown 当原文；`plan-window-qualified`实际1／66.52s，误找原只读表单并不呈现的按钮。最终仍断言格式化阅读，并更强地核完整原文／字节及零历史控件；当前 pending 审批与所有原故障断言未删，未延长预算。
+
+bounded recon 本逻辑轮派发一次返回 `agent thread limit reached`；无新子 Agent 结果或写入，根自检不计独立审查。剩余退出依赖按顺序最多五项：①原 PC 完整自动审批窗口、全部封存／恢复组合与完整客户端核对；②installed方案必要恢复／维护及已发布版本样本；③macOS原 RSS／八轮稳定性和完整资源退出；④§35适用能力与完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后 Win／Linux Actions。37能力仍全 partial／wholeV13=false／Goal active，有限历史入口不代表全阶段关闭。Root唯一Git／文件owner，AGENTS.md原 SHA256 `7e19375d5a9771aef3645fa33dcdbbc0e59c03e8d2276efba54fa97b13d9ea16`与bun.lock受保护且不暂存；无push／PR／发布／Actions dispatch。

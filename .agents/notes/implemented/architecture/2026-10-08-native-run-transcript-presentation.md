@@ -14,6 +14,8 @@ Status: implemented
 
 完整回复复制只持有原 reader 当前已验证并显示的准确正文；预览 copyText=null，关闭／换身份即撤销，不写新的持久缓存。相邻已知 Files 探索交原组件聚合，每项保自己的 receipt／文件回调，分组不授予范围。默认 ask_user v1 只按原成功 Execution／准确结果展示已保存人类答案，唯一原 Model call 才提供问题；信息取消与停止 Run 分开。原 pending 审批提交仍沿准确卡片；原 Approval 表单和有限审批历史已由[后续审批决定](2026-10-09-native-approval-observations.md)接入，本篇的来源、轮次、复制与问答理由继续适用。
 
+原通用问题、计划和审批的记录阅读由[后续交互历史决定](2026-10-09-native-interaction-history.md)补入；本篇的唯一来源、封存边界、轮次、复制与默认问答结果理由继续适用。
+
 本决定部分接续[工具消息观察决定](2026-10-08-native-tool-message-observations.md)：原唯一source、结果核验、32项scope、未来版本及Shell／Job分离理由继续适用；此前未接入轮次／聚合／默认Ask历史的范围由本片更新。完整当前行为与验证归[Native owner](../../../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。
 
 ## Alternatives considered
@@ -27,4 +29,4 @@ Status: implemented
 
 ## Consequences
 
-原交互可迁入正式 Native，同时原出处、阅读和控制分别保持边界。没有新 Core／HTTP API／SQL／私有维护或 UI 持久格式。Main／正式 caller、原 DOM 与首次／冷启动 macOS 源码外窗口覆盖本片断言；DOM全文使用UI snapshot fixture，不代证真实hash／EOF门禁。完整自动审批窗口、通用Interaction历史、全部封存／恢复组合、完整PC及整片独立审查尚未关闭，本片不提升全阶段或其他平台资格。
+原交互可迁入正式 Native，同时原出处、阅读和控制分别保持边界。没有新 Core／HTTP API／SQL／私有维护或 UI 持久格式。Main／正式 caller、原 DOM 与首次／冷启动 macOS 源码外窗口覆盖本片断言；DOM全文使用UI snapshot fixture，不代证真实hash／EOF门禁。当前 Store 的原交互记录已沿后续决定接入；完整自动审批窗口、全部封存／恢复组合、完整PC及整片独立审查尚未关闭，本片不提升全阶段或其他平台资格。

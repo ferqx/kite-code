@@ -160,6 +160,8 @@ Skill知识目录属于Service宿主：公共只读目录和实际Run装配共�
 
 ## 授权观察与执行资格
 
+Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准确来源／展示关系和 EOF；它不建立新的原卡回答观察。完整历史附件与当前审批分别持有 reader／loaded proof，前者不能授权后者；关闭、刷新或切范围只释放所属读取。记录与受理、执行成功分开，当前接口的变化拒绝与恢复限制归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)。
+
 公共 Execution 的可选 `authorization` 是同一读取内的有限原事实，分别保自动审查、人工答案保存／受理与派发；它不携私有请求、主体、owner、完整审查或上下文，不进入执行 grant。历史 observer 可忽略当前可变取消／上下文，但仍验证原身份、purpose、完整原输出和 Artifact proof；原授权默认路径继续核全部当前条件，见 [Store owner](../../packages/agent/src/storage/README.md#只读授权观察)。Native 复用原审批组件，附件资格和提交仍归原 InteractionCard／Client；封存 Message 不借来源 Execution 后来的审批补历史，准确客户端范围见 [Desktop owner](../../apps/desktop/README.md#原审批面板与授权观察)。
 
 ## Skill Workflow 的执行边界

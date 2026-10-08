@@ -213,6 +213,8 @@ test.each([
 ] as const)('actual Native main requires full EOF and keeps the original attachment proof scoped through %s', async (change) => {
   let writes = 0;
   let failNextView = false;
+  let failedViewReads = 0;
+  let successfulViewReads = 0;
   let observer: { onChange: () => void; onReset: () => void } | undefined;
   const privateData = memoryPrivateData();
   const client = {
@@ -226,7 +228,11 @@ test.each([
       );
     },
     async getView(id: string) {
-      if (failNextView) throw Error('original_view_read_unavailable');
+      if (failNextView) {
+        failedViewReads++;
+        throw Error('original_view_read_unavailable');
+      }
+      successfulViewReads++;
       return {
         storeId: 'store',
         snapshotCursor: '0',
@@ -338,11 +344,22 @@ test.each([
     await main.invoke({ method: 'state', generation: 1 });
     failNextView = true;
     observer!.onChange();
+    const deadline = Date.now() + 1000;
+    while (failedViewReads === 0) {
+      if (Date.now() >= deadline) throw Error('original view failure was not observed');
+      await Bun.sleep(1);
+    }
     await main.invoke({ method: 'state', generation: 1 });
     expect(await code(main.invoke(answer))).not.toBe('success');
     expect(writes).toBe(0);
     failNextView = false;
+    const beforeRestore = successfulViewReads;
     observer!.onChange();
+    const restoreDeadline = Date.now() + 1000;
+    while (successfulViewReads === beforeRestore) {
+      if (Date.now() >= restoreDeadline) throw Error('original view restoration was not observed');
+      await Bun.sleep(1);
+    }
     await main.invoke({ method: 'state', generation: 1 });
     expect(await code(main.invoke(answer))).toBe('success');
     expect(writes).toBe(1);

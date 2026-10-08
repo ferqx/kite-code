@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { NativeInteractionHistoryReads } from '../../../apps/desktop/electron/interaction-history-reads';
 import { startService } from '../../../apps/service/src';
 import { createClient } from '../../../packages/client/src';
 import { decodeResponse } from '../../../packages/client/src/decode';
@@ -295,6 +296,30 @@ test('paired HTTP projects one child Interaction and answers only the root bindi
       },
     );
     expect(response.status).toBe(400);
+    const history = new NativeInteractionHistoryReads(f.client, () => ({
+      generation: 1,
+      viewSelection: 1,
+      historyEpoch: 0,
+      storeId: f.expectedStoreId,
+      sessionId: 'root',
+      workspaceId: 'w',
+    }));
+    try {
+      const page = await history.open({
+        readId: 'root-history',
+        viewSelection: 1,
+        historyEpoch: 0,
+      });
+      const source = page.page.interactions.find((card) => card.id === child.id)!;
+      expect(source.sessionId).toBe(f.child.session.id);
+      expect(source.ancestry[0]).toBe(f.child.session.id);
+      expect(source.ancestry.at(-1)).toBe('root');
+      expect(source.answer).toEqual(intent.answer);
+      expect(source.acceptedDecisionRevision).toBeNull();
+      expect(f.model.requests).toHaveLength(0);
+    } finally {
+      history.close('root-history');
+    }
     const forbidden = await fetch(
       `${f.service.endpoint}/v1/sessions/root/interactions/child-card/accept`,
       { method: 'POST', headers: { authorization: `Bearer ${f.service.bootstrap.token}` } },
@@ -539,6 +564,34 @@ test('actual Core approval and Tool question wait for HTTP answers before the or
       (await client.getInteraction('s', approval.id, { storeId: expectedStoreId }))
         .acceptedDecisionRevision,
     ).toBe('2');
+    const beforeHistory = (await client.getView('s')).snapshotCursor;
+    const history = new NativeInteractionHistoryReads(client, () => ({
+      generation: 1,
+      viewSelection: 1,
+      historyEpoch: 0,
+      storeId: expectedStoreId,
+      sessionId: 's',
+      workspaceId: 'w',
+    }));
+    try {
+      const original = await history.open({
+        readId: 'original-history',
+        viewSelection: 1,
+        historyEpoch: 0,
+      });
+      expect(original.page.nextAfterId).toBeNull();
+      expect(original.page.interactions).toHaveLength(2);
+      const saved = original.page.interactions.find((card) => card.id === question.id)!;
+      expect(saved.definitionId).toBe('fixture.question');
+      expect(saved.request).toEqual(question.request);
+      expect(saved.answer).toEqual({ kind: 'question', answers: { reply: 'chosen response' } });
+      expect(saved.acceptedDecisionRevision).toBe(saved.revision);
+      expect((await client.getView('s')).snapshotCursor).toBe(beforeHistory);
+      expect(model.requests).toHaveLength(2);
+      expect(effects).toBe(1);
+    } finally {
+      history.close('original-history');
+    }
   } finally {
     client.disposeNetwork();
     await service.close();

@@ -50,7 +50,7 @@
 
 同一准确 Run 中相邻、已核实的 Files read2/3、glob/search2、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
 
-默认 `ask_user` v1 的历史回执沿原成功 Execution／准确结果读取；唯一原 Model call 提供 q1–q3 的实际问题，回答保原人类选项标签与自由文本。`{cancelled:true}` 显示“已取消回答”，工具仍按实际 succeeded，Run 可继续；这不是停止任务。缺原请求不补问题，未来版本只保原文。原审批的当前接入见下一节；通用 Interaction 历史、所有封存／恢复组合及完整 PC 核对尚未关闭。
+默认 `ask_user` v1 的历史回执沿原成功 Execution／准确结果读取；唯一原 Model call 提供 q1–q3 的实际问题，回答保原人类选项标签与自由文本。`{cancelled:true}` 显示“已取消回答”，工具仍按实际 succeeded，Run 可继续；这不是停止任务。缺原请求不补问题，未来版本只保原文。原审批的当前接入见下一节；原记录另由[交互历史](#原交互记录只读历史)读取，所有封存／恢复组合及完整 PC 核对尚未关闭。
 
 取舍见[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)。[Main／有限 IPC](test/native-tool-messages.test.ts)、[正式 caller](test/native-caller.test.ts)和[原 Conversation DOM](test/isolated/native-transcript-dom.test.tsx)核身份、所属读取、原展开／复制及问答；原[源码外 macOS 窗口](test/isolated/native-bundle.test.ts)核首次和冷读的折叠、展开与准确最终复制，保原预算和退出断言。实际执行输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)，有限展示证据不代替完整恢复、其他平台或整片独立审查。
 
@@ -62,7 +62,17 @@
 
 直接历史只沿当前已观察 Message 的准确原 Execution 读取；Fork／Include 的封存 `originMessage` 不取得来源 Execution 后来的审批。原外部 Store／恢复边界继续适用。观察是现有响应的可选字段，不改持久格式，不公开私有审查正文或上下文；审批事实也不让未知工具版本进入旧结果分类。具体取舍见[审批观察决定](../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)。
 
-[Core 授权测试](../../packages/agent/test/isolated/execution/authorization-review.test.ts)、[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)、[Main](test/native-tool-messages.test.ts)和[原组件 DOM](test/isolated/native-approval-dom.test.tsx)分别核原授权门禁、公开字段、封存隔离及完整请求与标签；[源码外默认窗口](test/isolated/native-bundle.test.ts)核首次和冷读的原人工审批及已保存标签，[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核独立审批与大请求。实际结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。完整 Auto Native 窗口组合、通用交互历史、全部恢复组合及整片独立审查仍待核对，本节不代表完整 PC 退出。
+[Core 授权测试](../../packages/agent/test/isolated/execution/authorization-review.test.ts)、[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)、[Main](test/native-tool-messages.test.ts)和[原组件 DOM](test/isolated/native-approval-dom.test.tsx)分别核原授权门禁、公开字段、封存隔离及完整请求与标签；[源码外默认窗口](test/isolated/native-bundle.test.ts)核首次和冷读的原人工审批及已保存标签，[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核独立审批与大请求。实际结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。原记录阅读见[交互历史](#原交互记录只读历史)，完整 Auto Native 窗口组合、全部恢复组合及整片独立审查仍待核对，本节不代表完整 PC 退出。
+
+## 原交互记录只读历史
+
+原“会话工具”侧栏的“交互记录”由 [NativeInteractionHistory](src/native-interaction-history.tsx)复用 `InteractionCard` 阅读问题、计划审核和普通／MCP 审批，保存答案、取消、当前 revision 与 accepted decision 分开表达。通用 question 保原 schema／JSON 答案，不借默认 `ask_user` 的 q1–q3 解释任意定义。计划的实际修改反馈按原字符串显示；原 PlanBody 提供格式化阅读，完整原附件可另行展开。没有回答回调，待回答记录也只读；当前真正待输入卡和原提交链继续独立。
+
+[Main reader](electron/interaction-history-reads.ts)只从已准入的当前 Store／Session／Workspace 与阅读 generation、viewSelection、historyEpoch 推导范围，经原公共 `listInteractions` 每页20项读取全部状态，没有累计项数截断。首 snapshotCursor 在每页保持，核原来源／展示关系、ancestry、规范游标、严格 ID 顺序和准确 nextAfterId，真正 EOF 才发布完整记录。分页期间任意 Store 通知水位变化会拒绝拼接，含其他会话或模型输出变化；本会话上次完整记录可保留并明确未更新，用户显式重读。它没有冻结新历史 API，也不承诺连续变化时一次完成。
+
+附件仅从本次已观察卡的准确 key 推导，先经公共 GET 核原 card／revision，再由原 SDK reader 完整核 Store、scope、hash／UTF-8／EOF；[64KiB Native reader](src/native-interaction-attachment.ts)继续核原字节。历史使用独立附件实例和方法，不能进入当前审批的 loaded proof；关闭、刷新、切范围或 detach 释放所属 GET 与正文资格，迟到结果不能替换新范围。没有业务 POST、恢复、DB／私有格式或 Core／HTTP schema 变化。当前原接口只包含当前 Store 实际保存的 Interaction；Fork／Include 不补来源后来的记录，新 Store 恢复组合仍按原资格核对。
+
+[Main／分页与附件反例](test/native-interaction-history.test.ts)、[原卡 DOM](test/isolated/native-interaction-history-dom.test.tsx)与[真实 HTTP／Core](../../tests/isolated/unified-agent/client-interactions.test.ts)分别核完整读取、只读／迟到与通用问题／child 来源；原[默认源码外窗口](test/isolated/native-bundle.test.ts)核首次／冷读记录，原[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核历史大附件、准确反馈和零重复提交。准确执行输入、失败与范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)，取舍见[历史阅读决定](../../.agents/notes/implemented/architecture/2026-10-09-native-interaction-history.md)。完整 PC、全部封存／恢复组合、完整自动审批窗口和整片独立审查仍未关闭。
 
 ## Native 项目会话目录
 

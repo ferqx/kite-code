@@ -18,6 +18,12 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'toolMessages.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.runs': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.close': ['readId'],
+  'interactionHistory.open': ['readId', 'viewSelection', 'historyEpoch'],
+  'interactionHistory.next': ['readId'],
+  'interactionHistory.close': ['readId'],
+  'interactionHistory.attachment.open': ['readId', 'key'],
+  'interactionHistory.attachment.read': ['readId', 'offset', 'limit'],
+  'interactionHistory.attachment.close': ['readId'],
   'fileChanges.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'fileTargets.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'fileChanges.detail': ['readId', 'changeId'],
@@ -214,7 +220,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
   }
   if (
-    (method === 'settings.skills.open' ||
+    (method === 'interactionHistory.open' ||
+      method === 'settings.skills.open' ||
       method === 'jobOutput.open' ||
       method === 'fileChanges.list' ||
       method === 'fileTargets.list' ||
@@ -423,6 +430,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (
     (method === 'background.child.read' ||
+      method === 'interactionHistory.attachment.read' ||
       method === 'modelOutput.read' ||
       method === 'modelInput.read' ||
       method === 'interactionAttachment.read') &&
@@ -518,7 +526,10 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       Number(input.limit) > 65536)
   )
     throw Error('invalid_native_request');
-  if (method === 'interactionAttachment.open' && (typeof input.key !== 'string' || !input.key))
+  if (
+    (method === 'interactionAttachment.open' || method === 'interactionHistory.attachment.open') &&
+    (typeof input.key !== 'string' || !input.key)
+  )
     throw Error('invalid_native_request');
   if (method === 'interaction.answer') {
     if (

@@ -37,6 +37,10 @@ import type {
   NativeFileTargetPage,
 } from './file-changes-bridge';
 import type { InputMetadata, InputRequest } from './input';
+import type {
+  NativeInteractionHistoryPage,
+  NativeInteractionHistoryRequest,
+} from './interaction-history-bridge';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
@@ -48,6 +52,7 @@ import type {
 
 export type * from './background-bridge';
 export type * from './file-changes-bridge';
+export type * from './interaction-history-bridge';
 export type * from './job-output-bridge';
 export type * from './mcp-bridge';
 export type * from './skills-bridge';
@@ -400,6 +405,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeInteractionHistoryRequest
   | NativeToolMessageRequest
   | NativeFileChangeRequest
   | NativeBackgroundRequest
@@ -665,6 +671,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeInteractionHistoryPage
   | NativeToolMessagePage
   | NativeToolRunPage
   | NativeFileTargetPage

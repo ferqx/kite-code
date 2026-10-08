@@ -37,6 +37,7 @@ import { NativeConversation } from './conversation';
 import { NativeFileChanges } from './file-changes';
 import { NativeFileRecovery } from './file-recovery';
 import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
+import { NativeInteractionHistoryReads } from './interaction-history-reads';
 import { NativeJobOutputReads } from './job-output-reads';
 import { NativeMcpSettings } from './mcp-settings';
 import { verifyNativeMcpSourceAnswer } from './mcp-source-answer';
@@ -98,6 +99,7 @@ export class NativeCaller {
   private readonly jobOutput: NativeJobOutputReads;
   private readonly fileChanges: NativeFileChanges;
   private readonly toolMessages: NativeToolMessages;
+  private readonly interactionHistory: NativeInteractionHistoryReads;
   private readonly background: NativeBackground;
   private readonly environment: NativeBackground;
   private environmentRevision = 0;
@@ -298,6 +300,7 @@ export class NativeCaller {
         : undefined;
     };
     this.toolMessages = new NativeToolMessages(client, messageScope, () => this.observedMessages);
+    this.interactionHistory = new NativeInteractionHistoryReads(client, messageScope);
     this.fileChanges = new NativeFileChanges(
       client,
       messageScope,
@@ -512,6 +515,7 @@ export class NativeCaller {
     this.jobOutput.release();
     this.fileChanges.release();
     this.toolMessages.release();
+    this.interactionHistory.release();
     this.resetHistory?.resolve();
     this.resetHistory = undefined;
     this.messageRead?.abort.abort();
@@ -664,6 +668,7 @@ export class NativeCaller {
       this.jobOutput.release();
       this.fileChanges.release();
       this.toolMessages.release();
+      this.interactionHistory.release();
       this.attachmentReads.release();
       this.messageRead?.abort.abort();
       this.grants.release();
@@ -969,6 +974,7 @@ export class NativeCaller {
     }
     if (
       !request.method.startsWith('background.') &&
+      !request.method.startsWith('interactionHistory.') &&
       ![
         'select',
         'detach',
@@ -1005,6 +1011,26 @@ export class NativeCaller {
         : this.background;
     let result: NativeResult;
     switch (request.method) {
+      case 'interactionHistory.open':
+        result = await this.interactionHistory.open(request);
+        break;
+      case 'interactionHistory.next':
+        result = await this.interactionHistory.next(request.readId);
+        break;
+      case 'interactionHistory.close':
+        this.interactionHistory.close(request.readId);
+        result = null;
+        break;
+      case 'interactionHistory.attachment.open':
+        result = await this.interactionHistory.attachments.open(request);
+        break;
+      case 'interactionHistory.attachment.read':
+        result = this.interactionHistory.attachments.read(request);
+        break;
+      case 'interactionHistory.attachment.close':
+        this.interactionHistory.attachments.close(request.readId);
+        result = null;
+        break;
       case 'toolMessages.list':
         result = await this.toolMessages.list(request);
         break;

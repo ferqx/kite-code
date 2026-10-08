@@ -54,6 +54,7 @@ import { NativeGeneralSettings } from './native-general-settings';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
+import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 import { NativeMcpSettings } from './native-mcp-settings';
 import { createNativeModelInputPort } from './native-model-input';
@@ -71,6 +72,7 @@ import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-trans
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
 export function NativeDesktop() {
+  const [interactionHistoryOpen, setInteractionHistoryOpen] = useState(false);
   const bridge = window.kiteNative;
   const theme = useNativeTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1078,6 +1080,22 @@ export function NativeDesktop() {
       <header>
         <h2>会话与任务</h2>
       </header>
+      {selection && state && !childDetail && (
+        <details
+          data-interaction-history
+          onToggle={(event) => setInteractionHistoryOpen(event.currentTarget.open)}
+        >
+          <summary>交互记录</summary>
+          {interactionHistoryOpen && (
+            <NativeInteractionHistory
+              bridge={bridge}
+              generation={state.generation}
+              selection={selection}
+              historyEpoch={state.historyEpoch ?? 0}
+            />
+          )}
+        </details>
+      )}
       <details>
         <summary>目录与已保存草稿</summary>
         <section aria-label="工作区与会话">
