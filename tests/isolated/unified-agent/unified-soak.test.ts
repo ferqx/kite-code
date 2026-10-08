@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -23,12 +24,19 @@ import {
   UNIFIED_SOAK_CASES,
 } from '../../../scripts/runtime/unified-soak-cases';
 import {
+  CONTINUOUS_SHELL_SOURCE,
+  CONTINUOUS_SHELL_UNITS,
+  type ContinuousEvidence,
+} from '../../../scripts/runtime/unified-soak-continuous';
+import {
   FORMAL_DURATION_MS,
   GLOBAL_DEADLINE_MS,
+  hasRetainedResourceGrowth,
   QUALIFICATION_MISSING,
   qualificationMissing,
   seal,
   type UnifiedSoakReport,
+  verifyBlockedWorkloadCollection,
   verifyUnifiedSoakReport,
 } from '../../../scripts/runtime/unified-soak-report';
 
@@ -166,6 +174,23 @@ test('malformed packet fails closed and argv has no arbitrary probe, seed or ite
   ])
     expect(() => parseUnifiedSoakArgs(args)).toThrow();
   expect(parseUnifiedSoakArgs(['--profile=ci', '--output=/tmp/x']).profile).toBe('ci');
+});
+
+test('explicit blocked collection selects qualification only and exposes no duration or iteration override', () => {
+  expect(
+    parseUnifiedSoakArgs(['--profile=qualification', '--output=/tmp/x', '--collect-blocked'])
+      .collectBlocked,
+  ).toBe(true);
+  expect(parseUnifiedSoakArgs(['--profile=qualification', '--output=/tmp/x']).collectBlocked).toBe(
+    false,
+  );
+  for (const args of [
+    ['--profile=ci', '--output=/tmp/x', '--collect-blocked'],
+    ['--profile=qualification', '--output=/tmp/x', '--collect-blocked', '--collect-blocked'],
+    ['--profile=qualification', '--output=/tmp/x', '--collect-blocked=true'],
+    ['--profile=qualification', '--output=/tmp/x', '--collect-blocked', '--minimum=1'],
+  ])
+    expect(() => parseUnifiedSoakArgs(args)).toThrow();
 });
 
 test('formal retained growth and sustained slope are rejected even when packet is resealed', () => {
@@ -520,6 +545,192 @@ function nativeMatrixPacket() {
   }
   return report;
 }
+
+/** Synthetic closed verifier input, never an execution or qualification receipt. */
+function blockedCollectionPacket() {
+  const report = nativeMatrixPacket();
+  report.profile = 'qualification';
+  report.status = 'inconclusive';
+  report.durationMs = FORMAL_DURATION_MS;
+  report.unsupported = qualificationMissing('darwin');
+  report.qualificationPreflight = {
+    status: 'blocked',
+    requiredIterations: 8,
+    minimumDurationMs: FORMAL_DURATION_MS,
+    maximumDurationMs: GLOBAL_DEADLINE_MS,
+    diagnosticIterations: 1,
+    reasons: [...report.unsupported],
+    collectionMode: 'full',
+  };
+  const prototype = report.attempts[0]!,
+    sample = prototype.cases![0]!.points![0]!.observations!.before;
+  prototype.lifecycle.points = Array.from({ length: 9 }, (_, sequence) => ({
+    ...structuredClone(prototype.lifecycle.points[0]!),
+    sequence,
+    before: structuredClone(sample.metrics),
+    after: structuredClone(sample.metrics),
+    observations: {
+      before: {
+        ...structuredClone(sample),
+        native: { ...structuredClone(sample.native), pid: prototype.lifecycle.pid },
+      },
+      after: {
+        ...structuredClone(sample),
+        native: { ...structuredClone(sample.native), pid: prototype.lifecycle.pid },
+      },
+    },
+  }));
+  for (const item of prototype.cases!) {
+    item.durationMs = 90;
+    item.workloadDurationMs = 90;
+    item.points = Array.from({ length: 9 }, (_, sequence) => ({
+      sequence,
+      before: structuredClone(sample.metrics),
+      after: structuredClone(sample.metrics),
+      durationMs: 10,
+      assertions: structuredClone(item.assertions),
+      observations: {
+        before: {
+          ...structuredClone(sample),
+          native: { ...structuredClone(sample.native), pid: item.pid },
+        },
+        after: {
+          ...structuredClone(sample),
+          native: { ...structuredClone(sample.native), pid: item.pid },
+        },
+      },
+      ...(item.caseId === 'runtime_sigkill_recovery'
+        ? {
+            identities: [
+              {
+                storeId: 'store',
+                sessionId: 'session',
+                runId: 'run',
+                executionId: 'execution',
+                commandId: 'command',
+              },
+            ],
+            descendants: (['crash', 'recovery'] as const).map((role, index) => ({
+              role,
+              native: { ...structuredClone(sample.native), pid: 10 + index, parentPid: item.pid },
+              exitCode: role === 'crash' ? 137 : 0,
+              reaped: true,
+            })),
+          }
+        : {}),
+    }));
+  }
+  const hash = (text: string | Uint8Array) => createHash('sha256').update(text).digest('hex');
+  const bytes = Buffer.alloc(65536, 16);
+  bytes.writeUInt32LE(CONTINUOUS_SHELL_UNITS - 1);
+  const digest = hash(bytes),
+    wallStartedAt = 1000000;
+  const sessionIds = Array.from({ length: 20 }, (_, i) => `session-${i}`),
+    commandIds = Array.from({ length: 40 }, (_, i) => `command-${i}`);
+  prototype.continuous = {
+    version: 2,
+    mode: 'formal',
+    status: 'passed',
+    storeId: 'store',
+    serviceInstanceIds: ['a', 'b'],
+    sessionIds,
+    commandIds,
+    childExecutionIds: commandIds.map((id) => `child-${id}`),
+    synchronousEffects: 40,
+    childCalls: 40,
+    slowEntered: true,
+    peerEvents: 1,
+    reconnects: 2,
+    completedCycles: 2,
+    wallDurationMs: 450001,
+    activeWorkloadDurationMs: 450000,
+    busyIntervals: commandIds.map((_, i) => [i * 11250, (i + 1) * 11250]),
+    operationDurationMs: commandIds.map(() => 11250),
+    admissionLatencyMs: commandIds.map(() => 1),
+    cleanupConfirmed: true,
+    missing: [],
+    shell: {
+      backend: 'macos-launchd-coalition',
+      candidateDigest: report.artifact.candidateId,
+      sourceSha256: hash(CONTINUOUS_SHELL_SOURCE),
+      wallStartedAt,
+      coldRead: true,
+      noReplay: true,
+      jobs: commandIds.map((commandId, i) => {
+        const startedAt = wallStartedAt + i * 11250,
+          endedAt = startedAt + 11250;
+        return {
+          commandId,
+          sessionId: sessionIds[i % 20]!,
+          executionId: `job-${i}`,
+          coalitionId: String(i + 1),
+          startedAt,
+          endedAt,
+          units: CONTINUOUS_SHELL_UNITS,
+          digest,
+          processTreeStopped: true,
+          stdoutSha256: hash(
+            `${JSON.stringify({ nonce: commandId, startedAt, endedAt, units: CONTINUOUS_SHELL_UNITS, digest })}\n`,
+          ),
+        };
+      }),
+    },
+  } satisfies ContinuousEvidence;
+  report.attempts = Array.from({ length: 8 }, (_, i) => ({
+    ...structuredClone(prototype),
+    iteration: i + 1,
+  }));
+  return reseal(report);
+}
+
+test('full blocked collection preserves formal rejection and all original workload and numeric growth gates', () => {
+  const valid = blockedCollectionPacket();
+  expect(hasRetainedResourceGrowth(valid.attempts[0]!.lifecycle.points)).toBe(false);
+  expect(verifyBlockedWorkloadCollection(valid)).toEqual([]);
+  const formal = verifyUnifiedSoakReport(valid, null, true);
+  expect(formal).toContain('qualification_preflight_blocked');
+  expect(formal).toContain('metric_unsupported');
+  expect(formal).toContain('formal_source_invalid');
+  expect(formal).toContain('descendant_identity_qualification_not_implemented');
+  for (const mode of [
+    'short',
+    'iterations',
+    'points',
+    'busy',
+    'growth',
+    'fd',
+    'recovery',
+    'cleanup',
+    'environment',
+    'claimed_pass',
+    'foreign_candidate',
+    'foreign_source',
+    'fake_bun_counter',
+  ] as const) {
+    const report = structuredClone(valid);
+    if (mode === 'short') report.durationMs = 1;
+    if (mode === 'iterations') report.attempts.pop();
+    if (mode === 'points') report.attempts[0]!.cases![0]!.points!.pop();
+    if (mode === 'busy') report.attempts[0]!.continuous!.activeWorkloadDurationMs = 1;
+    if (mode === 'growth') {
+      for (const point of report.attempts[0]!.lifecycle.points.slice(2)) {
+        point.before.rssBytes! += 40 * 1024 * 1024;
+        point.observations!.before.metrics.rssBytes = point.before.rssBytes!;
+      }
+      expect(hasRetainedResourceGrowth(report.attempts[0]!.lifecycle.points)).toBe(true);
+    }
+    if (mode === 'fd') report.attempts[0]!.lifecycle.points[0]!.before.fileDescriptors = null;
+    if (mode === 'recovery') report.attempts[0]!.recovery.calls = 1;
+    if (mode === 'cleanup') report.attempts[0]!.cleanupConfirmed = false;
+    if (mode === 'environment') report.environment.platform = 'linux';
+    if (mode === 'claimed_pass') report.status = 'passed';
+    if (mode === 'foreign_candidate')
+      report.attempts[0]!.continuous!.shell!.candidateDigest = 'e'.repeat(64);
+    if (mode === 'foreign_source') report.artifact.source.commit = 'e'.repeat(40);
+    if (mode === 'fake_bun_counter') report.attempts[0]!.lifecycle.points[0]!.before.handles = 0;
+    expect(verifyBlockedWorkloadCollection(reseal(report)).length).toBeGreaterThan(0);
+  }
+});
 for (const mode of [
   'foreign_pid',
   'reused_pid',

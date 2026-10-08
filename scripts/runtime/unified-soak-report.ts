@@ -35,6 +35,8 @@ export interface QualificationPreflight {
   maximumDurationMs: number;
   diagnosticIterations: 1;
   reasons: string[];
+  /** Explicit full collection retains blocked qualification and the original thresholds. */
+  collectionMode?: 'full';
 }
 export const RESOURCE_LIMITS = {
   rssBytes: 32 * 1024 * 1024,
@@ -43,6 +45,37 @@ export const RESOURCE_LIMITS = {
   listeners: 2,
   handles: 2,
 } as const;
+/** The same retained-growth gate is used for each completed stage and the final report. */
+export function hasRetainedResourceGrowth(
+  points: readonly { before: Record<string, number | null> }[],
+): boolean {
+  const retained = points.slice(1);
+  for (const [metric, limit] of Object.entries(RESOURCE_LIMITS)) {
+    const observed = retained.map((point) => point.before[metric]);
+    const baseline = observed[0];
+    if (typeof baseline !== 'number') continue;
+    for (let at = 2; at < observed.length; at++)
+      if (
+        observed
+          .slice(at - 2, at + 1)
+          .every((value) => typeof value === 'number' && value - baseline > limit)
+      )
+        return true;
+    const increases = observed
+      .slice(1)
+      .filter(
+        (value, at) =>
+          typeof value === 'number' && typeof observed[at] === 'number' && value > observed[at]!,
+      ).length;
+    if (
+      increases >= 6 &&
+      typeof observed.at(-1) === 'number' &&
+      observed.at(-1)! - baseline > limit
+    )
+      return true;
+  }
+  return false;
+}
 export interface SourceIdentity {
   repository: string;
   headSha: string;
@@ -261,14 +294,18 @@ function verifyReport(
     if (!value.qualificationPreflight) return ['qualification_preflight_invalid'];
     const preflight = value.qualificationPreflight;
     if (
-      !closed(preflight, [
-        'status',
-        'requiredIterations',
-        'minimumDurationMs',
-        'maximumDurationMs',
-        'diagnosticIterations',
-        'reasons',
-      ]) ||
+      !closed(
+        preflight,
+        [
+          'status',
+          'requiredIterations',
+          'minimumDurationMs',
+          'maximumDurationMs',
+          'diagnosticIterations',
+          'reasons',
+        ],
+        ['collectionMode'],
+      ) ||
       preflight.status !== 'blocked' ||
       preflight.requiredIterations !== 8 ||
       preflight.minimumDurationMs !== FORMAL_DURATION_MS ||
@@ -276,7 +313,9 @@ function verifyReport(
       preflight.diagnosticIterations !== 1 ||
       canonical(preflight.reasons) !==
         canonical(qualificationMissing(value.environment.platform)) ||
-      value.profile !== 'qualification'
+      value.profile !== 'qualification' ||
+      (Object.hasOwn(preflight, 'collectionMode') &&
+        (preflight.collectionMode !== 'full' || value.environment.platform !== 'darwin'))
     )
       return ['qualification_preflight_invalid'];
     if (formal) errors.push('qualification_preflight_blocked');
@@ -534,34 +573,8 @@ function verifyReport(
           (item.points?.length ?? 0) !== 9
         )
           errors.push('case_lifecycle_missing');
-        if (formal && item.points) {
-          for (const [metric, limit] of Object.entries(RESOURCE_LIMITS)) {
-            const before = item.points.slice(1).map((point) => point.before[metric]);
-            const baseline = before[0];
-            if (typeof baseline !== 'number') continue;
-            for (let at = 2; at < before.length; at++)
-              if (
-                before
-                  .slice(at - 2, at + 1)
-                  .every((value) => typeof value === 'number' && value - baseline > limit)
-              )
-                errors.push('retained_resource_growth');
-            const slopes = before
-              .slice(1)
-              .filter(
-                (value, at) =>
-                  typeof value === 'number' &&
-                  typeof before[at] === 'number' &&
-                  value > before[at]!,
-              );
-            if (
-              slopes.length >= 6 &&
-              typeof before.at(-1) === 'number' &&
-              before.at(-1)! - baseline > limit
-            )
-              errors.push('retained_resource_growth');
-          }
-        }
+        if (formal && item.points && hasRetainedResourceGrowth(item.points))
+          errors.push('retained_resource_growth');
       }
     }
     for (const proof of [attempt.lifecycle, attempt.recovery]) {
@@ -575,13 +588,14 @@ function verifyReport(
         !Array.isArray(proof.assertions)
       )
         return ['probe_structure_invalid'];
-      for (const point of proof.points)
+      for (const [sequence, point] of proof.points.entries())
         if (
           !closed(
             point,
             ['sequence', 'before', 'after', 'durationMs', 'assertions'],
             ['observations'],
           ) ||
+          point.sequence !== sequence ||
           !closed(point.before, Object.keys(RESOURCE_LIMITS)) ||
           !closed(point.after, Object.keys(RESOURCE_LIMITS))
         )
@@ -652,36 +666,8 @@ function verifyReport(
       errors.push('continuous_workload_missing');
     if (attempt.lifecycle.mode !== 'lifecycle' || attempt.recovery.mode !== 'recover')
       errors.push('probe_mode_invalid');
-    const retained = attempt.lifecycle.points.slice(1).map((point) => point.before);
-    if (formal)
-      for (const [metric, limit] of Object.entries(RESOURCE_LIMITS)) {
-        const baseline = retained[0]?.[metric];
-        if (typeof baseline !== 'number') continue;
-        for (let index = 2; index < retained.length; index++)
-          if (
-            retained
-              .slice(index - 2, index + 1)
-              .every(
-                (point) => typeof point[metric] === 'number' && point[metric]! - baseline > limit,
-              )
-          )
-            errors.push('retained_resource_growth');
-        const observed = retained.map((point) => point[metric]);
-        const increases = observed
-          .slice(1)
-          .filter(
-            (value, index) =>
-              typeof value === 'number' &&
-              typeof observed[index] === 'number' &&
-              value > observed[index]!,
-          ).length;
-        if (
-          increases >= 6 &&
-          typeof observed.at(-1) === 'number' &&
-          observed.at(-1)! - baseline > limit
-        )
-          errors.push('retained_resource_growth');
-      }
+    if (formal && hasRetainedResourceGrowth(attempt.lifecycle.points))
+      errors.push('retained_resource_growth');
     if (
       attempt.recovery.calls !== 0 ||
       attempt.recovery.effectLedgerLines !== 1 ||
@@ -726,5 +712,74 @@ export function verifyUnifiedSoakReport(
     return verifyReport(value, expectedSource, formal);
   } catch {
     return ['report_structure_invalid'];
+  }
+}
+
+/** Validates the collected workload only. The unchanged formal verifier still rejects this report. */
+export function verifyBlockedWorkloadCollection(value: UnifiedSoakReport): string[] {
+  try {
+    if (
+      value.version !== 2 ||
+      value.profile !== 'qualification' ||
+      value.status !== 'inconclusive' ||
+      value.failures.length !== 0 ||
+      value.qualificationPreflight?.collectionMode !== 'full' ||
+      value.environment.platform !== 'darwin' ||
+      !['arm64', 'x64'].includes(value.environment.arch) ||
+      value.environment.bunVersion !== '1.4.2' ||
+      !/^[a-f0-9]{40}$/.test(value.checkout.commit) ||
+      value.artifact.source.commit !== value.checkout.commit ||
+      (value.source !== null &&
+        (!sourceValid(value.source) || value.source.headSha !== value.checkout.commit)) ||
+      canonical(value.unsupported) !== canonical(qualificationMissing('darwin'))
+    )
+      return ['blocked_collection_configuration_invalid'];
+    if (
+      value.attempts.some(
+        (attempt) => attempt.continuous?.shell?.candidateDigest !== value.artifact.candidateId,
+      )
+    )
+      return ['blocked_collection_candidate_mismatch'];
+    // Only the explicitly unavailable Bun counters remain null. Native FD,
+    // listener and identity evidence is mandatory even for this collection.
+    const points = value.attempts.flatMap((attempt) => [
+      ...attempt.lifecycle.points,
+      ...(attempt.cases ?? []).flatMap((item) => item.points ?? []),
+    ]);
+    for (const point of points)
+      for (const boundary of ['before', 'after'] as const) {
+        const metrics = point[boundary],
+          observation = point.observations?.[boundary];
+        if (
+          metrics.activeResources !== null ||
+          metrics.handles !== null ||
+          !['rssBytes', 'fileDescriptors', 'listeners'].every(
+            (key) =>
+              typeof metrics[key] === 'number' &&
+              Number.isFinite(metrics[key]) &&
+              metrics[key]! >= 0,
+          ) ||
+          observation?.native.collector !== 'darwin-libproc'
+        )
+          return ['blocked_collection_observation_invalid'];
+      }
+    // Keep all behavior, duration, per-point identity and numeric growth checks.
+    // These known eligibility errors are retained by verifyUnifiedSoakReport;
+    // excluding them here cannot turn collection into release qualification.
+    const eligibility = new Set([
+      'qualification_preflight_blocked',
+      'report_not_passed',
+      'metric_unsupported',
+      'formal_candidate_checkout_source_invalid',
+      'formal_source_invalid',
+      'formal_environment_invalid',
+      'formal_evidence_unsupported',
+      'descendant_identity_qualification_not_implemented',
+    ]);
+    return verifyUnifiedSoakReport(value, value.source, true).filter(
+      (error) => !eligibility.has(error),
+    );
+  } catch {
+    return ['blocked_collection_structure_invalid'];
   }
 }

@@ -1,20 +1,74 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import type { ContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
-import { openDefaultShellContinuousFixture } from '../../fixtures/unified-agent/soak/continuous-default-shell';
 
 test.skipIf(process.platform !== 'darwin')(
   'two default packaged Services run twenty original Sessions with real Files, child Agents and Shell work; cold facts cannot qualify padded elapsed time',
   async () => {
     const root = realpathSync.native(mkdtempSync('/private/tmp/kite-default-shell-continuous-'));
-    const fixture = await openDefaultShellContinuousFixture(root);
+    const candidate = await buildTerminalBundle({ destination: join(root, 'candidate') });
+    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'), 'dir');
+    const workload = join(root, 'workload'),
+      result = join(root, 'evidence.json');
+    const entry = join(root, 'compiled-collection.ts');
+    writeFileSync(
+      entry,
+      `import {writeFileSync} from 'node:fs';
+import {openDefaultShellContinuousFixture} from ${JSON.stringify(join(import.meta.dir, '../../fixtures/unified-agent/soak/continuous-default-shell.ts'))};
+const fixture=await openDefaultShellContinuousFixture(${JSON.stringify(workload)},process.argv[2]);
+try {await fixture.cycle();await fixture.cycle();await fixture.confirmCold();writeFileSync(${JSON.stringify(result)},JSON.stringify(fixture.evidence()),{mode:0o600});}
+finally {await fixture.close();}`,
+      { mode: 0o600 },
+    );
+    const built = await Bun.build({
+      entrypoints: [entry],
+      target: 'bun',
+      packages: 'external',
+      outdir: root,
+    });
+    expect(built.success).toBe(true);
+    const child = Bun.spawn(
+      [
+        join(candidate.root, candidate.manifest.entries.runtime),
+        join(root, 'compiled-collection.js'),
+        candidate.root,
+      ],
+      {
+        cwd: root,
+        env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
+    const output = Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    const deadline = setTimeout(() => child.kill('SIGKILL'), 180000);
     let closed = false;
     try {
-      await fixture.cycle();
-      await fixture.cycle();
-      await fixture.confirmCold();
+      const code = await child.exited;
+      const [stdout, stderr] = await output;
+      if (code !== 0)
+        console.error(
+          JSON.stringify({ caseId: 'compiled_default_continuous_failed', code, stdout, stderr }),
+        );
+      expect(code).toBe(0);
       closed = true;
-      const evidence = fixture.evidence();
+      const evidence = JSON.parse(readFileSync(result, 'utf8')) as ContinuousEvidence;
+      expect(evidence.shell!.candidateDigest).toBe(candidate.digest);
+      expect(existsSync(join(workload, 'candidate'))).toBe(false);
       expect(verifyContinuousEvidence(evidence, false)).toEqual([]);
       expect(evidence.sessionIds).toHaveLength(20);
       expect(evidence.serviceInstanceIds).toHaveLength(2);
@@ -51,7 +105,10 @@ test.skipIf(process.platform !== 'darwin')(
         }),
       );
     } finally {
-      await fixture.close();
+      clearTimeout(deadline);
+      if (child.exitCode === null) child.kill('SIGKILL');
+      await child.exited;
+      await output;
       if (closed) rmSync(root, { recursive: true, force: true });
     }
   },

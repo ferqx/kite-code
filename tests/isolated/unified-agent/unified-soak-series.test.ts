@@ -5,6 +5,34 @@ import { join, resolve } from 'node:path';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { runStableCrashSeries } from '../../../scripts/runtime/unified-soak';
 import { sameNativeProcess } from '../../../scripts/runtime/unified-soak-native';
+import { runProbe } from '../../../scripts/runtime/unified-soak-probe';
+
+test.skipIf(process.platform === 'win32')(
+  'lifecycle observations cover the active window without replacing earlier measured boundaries',
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-soak-active-window-'));
+    try {
+      const result = await runProbe(root, 'lifecycle', 3, 2000);
+      if (result.completedCycles === undefined) throw Error('lifecycle_cycle_count_missing');
+      expect(result.completedCycles).toBeGreaterThan(3);
+      expect(result.calls).toBe(result.completedCycles * 2);
+      expect(result.points.map((point) => point.sequence)).toEqual([0, 1, 2]);
+      expect(result.workloadDurationMs).toBeGreaterThanOrEqual(2000);
+      expect(
+        result.points.slice(1).reduce((total, point) => total + point.durationMs, 0),
+      ).toBeGreaterThan(1000);
+      for (const point of result.points) {
+        expect(point.durationMs).toBeLessThan(180000);
+        expect(
+          sameNativeProcess(point.observations.before.native, point.observations.after.native),
+        ).toBe(true);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  15000,
+);
 
 test.skipIf(process.platform === 'win32')(
   'stable SIGKILL collector owns warmup plus eight actual recovery points',

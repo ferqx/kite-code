@@ -352,13 +352,14 @@ export async function runContinuousSchedule(
   root: string,
   mode: 'diagnostic' | 'formal',
   signal?: AbortSignal,
+  candidateRoot?: string,
 ): Promise<ContinuousEvidence> {
   if (signal?.aborted) throw Error('continuous_schedule_stopped');
   if (mode === 'formal') {
     if (process.platform !== 'darwin')
       throw Error('continuous_qualified_background_shell_required');
     const { openDefaultShellContinuousFixture } = await import('./continuous-default-shell');
-    const fixture = await openDefaultShellContinuousFixture(root);
+    const fixture = await openDefaultShellContinuousFixture(root, candidateRoot);
     try {
       do {
         await fixture.cycle(signal);

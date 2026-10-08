@@ -134,6 +134,7 @@ export async function runProbe(
     durationMs: number;
     assertions: string[];
   }[] = [];
+  let operationTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     await client.connect();
     if (mode === 'recover') {
@@ -189,23 +190,25 @@ export async function runProbe(
     });
     const workloadStarted = performance.now();
     let completedCycles = 0;
+    let boundary: { observation: ReturnType<typeof sample>; started: number } | undefined;
     for (
       let sequence = 0;
       mode === 'crash'
         ? sequence < 1
-        : sequence < cycles || performance.now() - workloadStarted < minimumDurationMs;
+        : points.length < cycles || performance.now() - workloadStarted < minimumDurationMs;
       sequence++
     ) {
       Bun.gc(true);
       await Bun.sleep(0);
-      const operationTimer = setTimeout(() => {
+      operationTimer ??= setTimeout(() => {
         console.error('operation_deadline');
         process.exit(1);
       }, 180_000);
       try {
-        const beforeObservation = sample(),
+        boundary ??= { observation: sample(), started: performance.now() };
+        const beforeObservation = boundary.observation,
           before = beforeObservation.metrics,
-          started = performance.now();
+          started = boundary.started;
         const sessionId = mode === 'crash' ? 'crashed' : `s-${sequence}`;
         await client.createSession({
           expectedStoreId: storeId,
@@ -297,23 +300,32 @@ export async function runProbe(
         Bun.gc(true);
         await Bun.sleep(0);
         completedCycles++;
-        const afterObservation = sample();
-        points.push({
-          sequence,
-          before,
-          after: afterObservation.metrics,
-          observations: { before: beforeObservation, after: afterObservation },
-          durationMs: performance.now() - started,
-          assertions: [
-            'completed',
-            'cancel_settled',
-            'reconnected_original_receipt',
-            'sessions_deleted',
-          ],
-        });
-        if (points.length > 9) points.splice(1, 1);
+        // Warmup then fixed observations across actual active work. Never
+        // replace the earlier measured boundaries with the final few cycles.
+        const target =
+          cycles === 1 ? minimumDurationMs : (points.length * minimumDurationMs) / (cycles - 1);
+        if (performance.now() - workloadStarted >= target) {
+          const afterObservation = sample();
+          points.push({
+            sequence: points.length,
+            before,
+            after: afterObservation.metrics,
+            observations: { before: beforeObservation, after: afterObservation },
+            durationMs: performance.now() - started,
+            assertions: [
+              'completed',
+              'cancel_settled',
+              'reconnected_original_receipt',
+              'sessions_deleted',
+            ],
+          });
+          boundary = undefined;
+        }
       } finally {
-        clearTimeout(operationTimer);
+        if (!boundary) {
+          clearTimeout(operationTimer);
+          operationTimer = undefined;
+        }
       }
     }
     return {
@@ -327,6 +339,7 @@ export async function runProbe(
       workloadDurationMs: performance.now() - workloadStarted,
     };
   } finally {
+    clearTimeout(operationTimer);
     client.disposeNetwork();
     await service.close();
     await runtime.close();
@@ -403,7 +416,7 @@ if (import.meta.main) {
       const scheduleMode = process.argv[5];
       if (scheduleMode !== 'diagnostic' && scheduleMode !== 'formal')
         throw Error('invalid_continuous_mode');
-      const result = await runContinuousSchedule(root, scheduleMode);
+      const result = await runContinuousSchedule(root, scheduleMode, undefined, process.argv[6]);
       writeFileSync(join(root, 'continuous.json'), JSON.stringify(result), { mode: 0o600 });
     } else if ((mode as string) === 'cases') {
       const artifact = JSON.parse(readFileSync(process.argv[5]!, 'utf8')) as CLIServiceArtifact;

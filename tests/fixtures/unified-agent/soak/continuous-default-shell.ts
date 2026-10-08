@@ -8,7 +8,10 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { buildTerminalBundle } from '../../../../scripts/release/terminal-bundle';
+import {
+  buildTerminalBundle,
+  verifyTerminalBundle,
+} from '../../../../scripts/release/terminal-bundle';
 import {
   busyDuration,
   CONTINUOUS_OPERATION_MS,
@@ -31,7 +34,7 @@ interface Operation {
 }
 
 /** Two source-free default Services. No configure hook, custom Tool, Job or permission adapter. */
-export async function openDefaultShellContinuousFixture(root: string) {
+export async function openDefaultShellContinuousFixture(root: string, candidateRoot?: string) {
   if (process.platform !== 'darwin') throw Error('continuous_qualified_background_shell_required');
   const cleanup: (() => Promise<unknown>)[] = [];
   let closing: Promise<void> | undefined;
@@ -52,7 +55,9 @@ export async function openDefaultShellContinuousFixture(root: string) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
     const workspace = join(root, 'workspace');
     mkdirSync(join(workspace, 'effects'), { recursive: true, mode: 0o700 });
-    const candidate = await buildTerminalBundle({ destination: join(root, 'candidate') });
+    const candidate = candidateRoot
+      ? verifyTerminalBundle(candidateRoot)
+      : await buildTerminalBundle({ destination: join(root, 'candidate') });
     const access = acquireArtifactAccess({ root: candidate.root, mode: 'shared' });
     cleanup.push(async () => access.release());
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'continuous' });

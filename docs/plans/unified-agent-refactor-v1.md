@@ -1996,7 +1996,7 @@ x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销
 
 | 缺口及实际入口 | 完整行为与验收条件 |
 | --- | --- |
-| macOS 完整混合负载与全局资源 | 默认宿主 Shell 的 execute/read/stop、持久输出、单组件 formal continuous 及 Native 完整用户路径已实际通过。完整 8outer/60分钟仍缺 activeResources、handles 和整个 Runtime 全部所属后代的可信观测；单次 Shell coalition 不替代全局指标。 |
+| macOS 完整混合负载与全局资源 | 默认宿主 Shell 的 execute/read/stop、持久输出、单组件 formal continuous 及 Native 完整用户路径已实际通过。完整负载入口现传递并重新核父runner同一冻结包，macOS可显式collect-blocked按原8outer／九点／60—168分钟预算采集；完成阶段复用原增长门槛，失败保留原JSON。真实450秒九点lifecycle已自然失败于RSS增长，尚无八轮稳定性通过；当前实测归进度，已支持检查通过仍inconclusive，formal拒绝保持。activeResources、handles和整个Runtime全部所属后代仍缺可信观测，单次Shell coalition不替代全局指标。 |
 | release install/update/uninstall/标准CLI与maintenance backup/inspect/restore/status | macOS 既有真实制品、GUI/PTY/双lease和保数据卸载、独立引擎与真实代码前驱证据保持；默认 Shell 现另通过实际 installed 前门的 Main/Service 强杀、双层使用锁及保数据卸载。已发布新基线 predecessor/T029、其余必要恢复/安装子场景仍需实际证据；Windows/Linux 按用户顺序留到重构完成后由 GitHub Actions 验证。 |
 | 完整能力与整片独立审查 | Native MCP Chrome/default Vault 和默认后台 Shell 用户路径已有本机组合证据；全部适用 §35/T/E、参考功能/既有扩展/未见样本和整片独立审查仍须按原退出条件闭合，root 自检不替代独立审查。 |
 | 正式切换后的旧路径最终退役 | 前三项达到实际退出条件后完成必要 legacy 删除，并复验新基线兼容与完整回归；不能以当前无正式旧调用或全量 unit 通过提前宣布整体退出。 |

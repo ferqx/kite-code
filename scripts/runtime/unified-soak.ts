@@ -27,24 +27,33 @@ import { observeNativeProcess, sameNativeProcess } from './unified-soak-native';
 import {
   FORMAL_DURATION_MS,
   GLOBAL_DEADLINE_MS,
+  hasRetainedResourceGrowth,
   type ProbeEvidence,
   qualificationMissing,
   type SourceIdentity,
   seal,
   UNIFIED_SOAK_REVISION,
   type UnifiedSoakReport,
+  verifyBlockedWorkloadCollection,
   verifyUnifiedSoakReport,
 } from './unified-soak-report';
 
 export function parseUnifiedSoakArgs(args: readonly string[]) {
   const values = new Map<string, string>();
   for (const arg of args) {
+    if (arg === '--collect-blocked' && !values.has('collect-blocked')) {
+      values.set('collect-blocked', 'true');
+      continue;
+    }
     const match = /^--(profile|output|candidate)=(.+)$/.exec(arg);
     if (!match || values.has(match[1]!)) throw Error('invalid_unified_soak_argument');
     values.set(match[1]!, match[2]!);
   }
   const profile = values.get('profile');
   if (profile !== 'ci' && profile !== 'qualification') throw Error('unified_soak_profile_required');
+  const collectBlocked = values.has('collect-blocked');
+  if (collectBlocked && profile !== 'qualification')
+    throw Error('unified_soak_collection_requires_qualification');
   const output = values.get('output');
   if (!output || output.length > 4096 || output.includes('\0'))
     throw Error('unified_soak_output_required');
@@ -53,7 +62,12 @@ export function parseUnifiedSoakArgs(args: readonly string[]) {
     (values.get('candidate')!.length > 4096 || values.get('candidate')!.includes('\0'))
   )
     throw Error('invalid_unified_soak_argument');
-  return { profile, output: resolve(output), candidate: values.get('candidate') } as const;
+  return {
+    profile,
+    output: resolve(output),
+    candidate: values.get('candidate'),
+    collectBlocked,
+  } as const;
 }
 /** Only create missing report descendants of an observed owned, non-writable parent. */
 export function prepareUnifiedSoakReportPath(output: string) {
@@ -239,6 +253,8 @@ export async function runStableCrashSeries(
 export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSoakReport> {
   const options = parseUnifiedSoakArgs(args),
     repositoryRoot = resolve(import.meta.dir, '../..');
+  if (options.collectBlocked && process.platform !== 'darwin')
+    throw Error('unified_soak_collection_platform_unsupported');
   const output = prepareUnifiedSoakReportPath(options.output);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-unified-soak-')));
   const started = performance.now();
@@ -246,7 +262,12 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
     attempts: UnifiedSoakReport['attempts'] = [];
   const unsupported = qualificationMissing(process.platform);
   const qualificationBlocked = options.profile === 'qualification' && unsupported.length > 0;
-  const formalWorkload = options.profile === 'qualification' && !qualificationBlocked;
+  const formalWorkload =
+    options.profile === 'qualification' && (!qualificationBlocked || options.collectBlocked);
+  if (options.collectBlocked)
+    console.log(
+      JSON.stringify({ event: 'blocked_workload_collection_started', root, pid: process.pid }),
+    );
   let candidateId = '',
     probeSha256 = '',
     samplerSha256 = '';
@@ -308,6 +329,7 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
           mode,
           String(cycles),
           String(minimumMs),
+          candidate.root,
         ],
         {
           cwd: root,
@@ -364,6 +386,17 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
         formalWorkload ? 9 : 2,
         formalWorkload ? FORMAL_DURATION_MS / 8 : 0,
       );
+      if (options.collectBlocked)
+        console.log(
+          JSON.stringify({
+            event: 'workload_stage_completed',
+            iteration,
+            stage: 'lifecycle',
+            elapsedMs: performance.now() - started,
+          }),
+        );
+      if (options.collectBlocked && hasRetainedResourceGrowth(lifecycle.points))
+        throw Error('retained_resource_growth');
       if (maximumMs - (performance.now() - started) <= 30_000) throw Error('unified_soak_deadline');
       const crashed = await runStableCrashSeries(crash, formalWorkload ? 9 : 2, (directory, mode) =>
         spawn(directory, mode, mode === 'crash' ? 1 : 0),
@@ -375,6 +408,8 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
         identities: crashIdentities,
         durationMs: crashDuration,
       } = crashed;
+      if (options.collectBlocked && hasRetainedResourceGrowth(crashPoints))
+        throw Error('retained_resource_growth');
       const artifactFile = join(root, 'selected-artifact.json');
       writeFileSync(artifactFile, JSON.stringify(candidate.artifact), { mode: 0o600 });
       const matrix = (await run(
@@ -383,6 +418,11 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
         formalWorkload ? 9 : 2,
         artifactFile,
       )) as unknown as CaseEvidence[];
+      if (
+        options.collectBlocked &&
+        matrix.some((item) => item.points && hasRetainedResourceGrowth(item.points))
+      )
+        throw Error('retained_resource_growth');
       const crashCase: CaseEvidence = {
         caseId: 'runtime_sigkill_recovery',
         identities: crashIdentities,
@@ -445,12 +485,23 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
         durationMs: performance.now() - attemptStarted,
         cleanupConfirmed: !existsSync(directory),
       });
+      if (options.collectBlocked)
+        console.log(
+          JSON.stringify({
+            event: 'workload_iteration_completed',
+            iteration,
+            busyMs: continuous.activeWorkloadDurationMs,
+            elapsedMs: performance.now() - started,
+          }),
+        );
     }
   } catch (error) {
     const code = error instanceof Error ? error.message : '';
     failures.push(/^[a-z_]+$/.test(code) ? code : 'unified_soak_operation_failed');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    if (options.collectBlocked && failures.length)
+      console.log(JSON.stringify({ event: 'workload_failure_retained', root }));
+    else rmSync(root, { recursive: true, force: true });
   }
   const body = {
     version: 2 as const,
@@ -479,12 +530,13 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
             maximumDurationMs: GLOBAL_DEADLINE_MS,
             diagnosticIterations: 1 as const,
             reasons: unsupported,
+            ...(options.collectBlocked ? { collectionMode: 'full' as const } : {}),
           },
         }
       : {}),
   };
   let report = seal(body);
-  if ((options.profile === 'ci' || qualificationBlocked) && !failures.length) {
+  if ((options.profile === 'ci' || (qualificationBlocked && !formalWorkload)) && !failures.length) {
     const { qualificationPreflight: _preflight, ...diagnostic } = body;
     const errors = verifyUnifiedSoakReport(
       seal({ ...diagnostic, profile: 'ci', status: 'passed' }),
@@ -494,17 +546,22 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
     if (errors.length) report = seal({ ...body, status: 'failed', failures: errors });
   }
   if (formalWorkload && !failures.length) {
-    const errors = verifyUnifiedSoakReport(report, report.source, true);
-    const hard = errors.filter((code) =>
-      [
-        'retained_resource_growth',
-        'lifecycle_evidence_invalid',
-        'recovery_evidence_invalid',
-        'continuous_workload_missing',
-        'attempt_identity_or_cleanup_invalid',
-      ].includes(code),
-    );
-    if (hard.length) report = seal({ ...body, status: 'failed', failures: hard });
+    if (qualificationBlocked) {
+      const errors = verifyBlockedWorkloadCollection(report);
+      if (errors.length) report = seal({ ...body, status: 'failed', failures: errors });
+    } else {
+      const errors = verifyUnifiedSoakReport(report, report.source, true);
+      const hard = errors.filter((code) =>
+        [
+          'retained_resource_growth',
+          'lifecycle_evidence_invalid',
+          'recovery_evidence_invalid',
+          'continuous_workload_missing',
+          'attempt_identity_or_cleanup_invalid',
+        ].includes(code),
+      );
+      if (hard.length) report = seal({ ...body, status: 'failed', failures: hard });
+    }
   }
   if (process.platform === 'win32') {
     const native = (
