@@ -2802,3 +2802,18 @@ Main目录与所选View分别保一个在途读取及一个后继通知位，快
 最终Root与八workspace typecheck、文档结构、all作用域文档影响、plan-evidence和三owned代码文件Biome均actual0，日志为 `/private/tmp/kite-pc-refresh-` 前缀types／docs／docs-impact／plan-evidence／format。三个准确失败根与两个通过窗口的Service PID40544／43052只读进程核对均无残留；原完整窗口普通退出断言另已核实。正常hooks在实际本地提交时仍独立执行，不复用上述结果代替。
 
 Native owner与能力映射同步；产品手册的切换不取消执行、同会话保正文／阅读状态和真实终态定义核对保持，不制造新的行为承诺。iteration_complete仅收束该原PC刷新失败。当前四项剩余依赖为① macOS原RSS／八轮稳定性和全资源退出；② 其余计划必要维护恢复／发布中断窗口；③ 完整迁移独立审查（本逻辑轮仅一次fresh只读Agent尝试，thread limit拒绝，Root自检不替代）；④ 前置满足后的完整默认阶段回归／最终旧路径退役与重构后的Win／Linux Actions。37能力partial、wholeV13=false、Goal active；本片未跑完整默认、TUI或无关Chrome矩阵，不以这次通过覆盖旧RSS失败。Root唯一Git owner，无关AGENTS.md原SHA保持不暂存；本地stage／commit沿原授权，push／PR／发布／Actions dispatch未授权。
+
+
+## 2026-10-08：安装版 PC 恢复目录缺失边界
+
+沿 durable el-refactor／HEAD `97d8015f3e70fd12e27788cebf5cbbf019a3ff78`继续主线，保留原 PC 组件与现有 macOS 宿主 Shell。原 RSS 多轮失败、Bun 全局资源缺可信指标及全部后代退出资格仍缺证据；本轮只读核对未找到可安全修改的新 allocator owner，依用户要求不继续该优化。转向 §32.10 R07／T102/T104/T105 的实际 PC 入口缺口，复用 Core 已有七个 SIGKILL 窗口，仅补旧目录移出、journal 更新前这一条 installed 消费者链。
+
+新增 [原入口测试](../../tests/isolated/unified-agent/native-restore-interruption.test.ts)实际构建／搬迁／安装完整 Native，删除原输出，核两层摘要。fault publisher 使用现有 source `runProfileRestore` 的 `old_directory_moved` 观察点，候选内 Bun 与准确所选 SQLite；这是明确的 source seam，不冒称 installed `restore` argv 的注入。Main／Service、preload／renderer、候选维护代码与原全部窗口测试均未打补丁，原完整 API、Shell、Core/私有资产格式与 UI 组件不变。
+
+最终 `bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-restore-interruption.test.ts` actual0／1pass／54条Bun断言及真实 [Node窗口断言](../../tests/fixtures/unified-agent/native-restore-electron.ts)／86.32秒，日志 `/private/tmp/kite-pc-restore-window-final-20261008.log`。新例180秒、driver45秒和窗口10秒均保持。实际 installed `bin/kite-desktop`在外置EX仍持有时拒开；准确SIGKILL并await holder后，再次attach仍拒开。诊断Service不具业务capabilities，真实错误为required_capability_missing；它不是新空Store。两次Profile/Core均缺失且保持缺失，稳定锁dev16777233／inode314715241，保留目录Core／配置完整bytes保持，其他Profile实际可用。实际 installed `bin/kite maintenance status`观察prepared与准确旧/newStore，明确complete绑定所观察restore ID／digest；之后status无journal，同窗重新加载取原备份Session／新Store `aba8dee7-8bc9-45ca-9bed-48e1620980de`，无Model请求。冷公开Store核原Session与备份后改名Command不存在；普通退出Service PID67439确已消失，Profile EX／双制品EX可取，实际卸载保Core／协调锁。Provider0，成功自有fixture已删除。
+
+初始夹具错误完整保留：原import未公开的acquireProfileAccess和Buffer类型导致types／测试加载失败；fixed轮source bundling未携其相对SQL资产，在到达中断点前actual1／51.85秒；source-seam轮已到观察点但重新用Response消费disturbed stdout，actual1／46.33秒。改为直接source观察点和同一管道reader排空，不复制或修改生产SQL。pipe-fixed轮已打开真实PC但把拒开误断言为bootstrap_channel_closed，actual1／72.73秒；只读真实窗口诊断得到required_capability_missing并核Profile/Core仍缺失，纠正断言。全部失败日志为 `/private/tmp/kite-pc-restore-` 的 window／window-fixed／window-source-seam／window-pipe-fixed 和 types；真实诊断日志为 diagnostic。没有删原断言、扩大原预算、改生产行为或将失败当通过。
+
+最终Root及八workspace types实际0（正常提交hooks另核最终输入），owned两TS readonlyBiome实际0；相关文档、all／staged影响、plan-evidence及本地commit结果按本片交付记录。产品手册对拒绝未知／损坏存储且不生成空历史的承诺核对保持，无用户行为变化；更新Native/maintenance owner与测试入口。没有新架构取舍，未制造Note。iteration_complete仅收束这一有限调用者补充；不重复扩PC故障矩阵，不冒称installed restore全窗口、rollback、完整R07/W19、完整默认或整体退出。
+
+剩余完整依赖保四项：①macOS原RSS／八轮稳定性及全局资源退出；②其余方案必要维护恢复／发布中断条件；③整片独立迁移审查（本逻辑轮fresh只读Agent仅一次尝试，thread limit拒绝，Root自检不替代）；④前置满足后的完整默认、最终legacy退役及重构后Win／Linux Actions。37能力仍partial，wholeV13=false，Goal active；原T029首发前无适用新基线published样本的范围保持。Root唯一Git owner，无关AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258`保护且不暂存；授权仅本地stage／commit，无push／PR／发布／dispatch。

@@ -2001,6 +2001,8 @@ x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销
 | 完整能力与整片独立审查 | Native MCP Chrome/default Vault 和默认后台 Shell 用户路径已有本机组合证据；全部适用 §35/T/E、参考功能/既有扩展/未见样本和整片独立审查仍须按原退出条件闭合，root 自检不替代独立审查。 |
 | 正式切换后的旧路径最终退役 | 前三项达到实际退出条件后完成必要 legacy 删除，并复验新基线兼容与完整回归；不能以当前无正式旧调用或全量 unit 通过提前宣布整体退出。 |
 
+macOS 安装版 PC 的目录缺失恢复入口现补一条有限证据：沿原 source 观察点暂停旧目录移出／journal 更新前，真实持锁和 SIGKILL 后的 installed Main／Service 均拒绝业务准入且不建空库；installed status／明确 complete 后同窗读回原 Session／新 Store，稳定锁及原目录数据保持。原 Core 七个窗口复用，未将安装版全中断矩阵或整个 R07／W19标为完成；故障 publisher 与实际 installed 消费者的边界见[本片进度](unified-agent-refactor-v1-progress.md#2026-10-08安装版-pc-恢复目录缺失边界)。上述四项完整退出依赖保持。
+
 完整能力缺口中的 T055 当前会话展示已补齐：正式 TUI 和 Native 分别显示主轮次事实、当前 Session/Store 未结束 Job 数与未知数；父完成不清后台，准确停止一项不改 sibling，旧 Store 历史不计入。原真实80×24 PTY与installed默认Native完整文件已通过，详情见[本阶段证据](unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。完整能力及其余§35/T/E条件不因这项展示闭合而默认通过。
 
 正式 TUI 原有 `/language` 的固定提示缺口现另补齐：后台/恢复/文件恢复/待决选择/文件候选/粘贴与宿主提示沿已保存语言呈现，原业务材料和机器身份保留。普通输入与答案的 paste 显示和光标行采用同一 cell 宽度，保存失败、原 GET-only 和关闭语义不变。实际原 paired/shared 完整偏好 PTY及准确回归范围见[当前阶段证据](unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-的语言提示与原始内容)；不以此替代四项退出缺口或整体能力通过。

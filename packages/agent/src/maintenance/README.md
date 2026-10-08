@@ -72,6 +72,8 @@ owner 门禁只在 root `session.create` 来源与当前 Store 不同的准确�
 
 [恢复验证](../../test/isolated/maintenance/restore.test.ts) 实际使用第二进程和 SIGKILL 覆盖 prepared、新目录身份提交后、旧目录移出后及 journal 更新前后、候选发布后及 journal 更新前后、最终 verified 之后，以及 journal 删除完成后仍持锁的窗口。锁持有时普通入口 busy；未完成 journal 的窗口强杀后拒开且不创建空 profile；journal 已完成窗口强杀后冷打开取得完整新 Store。其他 profile 仍可取得锁。测试还验证旧来源与缺 key 不重做、同 Store unknown 门禁保留、明确新工作成功，以及备份后真实 Tool 写外置计数一次，恢复后旧 Store 重试不增加计数或 Model。这里的成功不完成平台、引擎补丁、安装包、真实用户恢复或整个 R01/R07/W19 资格。
 
+macOS 另有[实际 installed PC 消费者](../../../../tests/isolated/unified-agent/native-restore-interruption.test.ts)核旧目录已移出、journal 更新前的同一内部观察点：持锁与真实 SIGKILL 后，默认 Main／配对 Service 均拒绝业务准入，不创建空 Profile／Core；安装版 status／显式 complete 绑定准确 journal ID／digest，随后原窗口重新加载读回原 Session／新 Store，稳定外置锁及保留数据保持。只有 fault publisher 使用 source seam，安装版消费者与维护入口未打补丁；其他窗口沿上述 Core 证据，不将这条有限补充当作安装版全矩阵。完整边界归[Native owner](../../../../apps/desktop/docs/native-release.md#macos-安装版离线维护)。
+
 restore候选现在发布DB、引用媒体以及备份明确存在的原config/UI资产；原当前目录整体仍保留。资产完整hash及UI格式先验证，候选全目录digest包含它们，最终切换仍沿原journal。不改UI draft.store_id、原scope/草稿ID或creation.input.expectedStoreId/commandId/phase；冷读保原身份，不自动重放creation。旧Store草稿关联由Native原ID读取/明确unavailable处理，不能改标成新Store。未采集的私有文件与凭据仍不出现在新profile，GC和engine/平台资格未完成。
 
 [资产验证](../../test/isolated/maintenance/assets.test.ts) 使用实际Node/Desktop私有库owner与真实外置共享lease，采集133条草稿和unknown creation，恢复新Store后冷Node读取得相同原scope/创建身份；包含raw坏JSONC/敏感fixture字节、完整proof、缺失/篡改/额外文件、坏UI schema/app/version/物理格式/journal、链接/权限与取消失败无ready。七个SIGKILL窗口现携config/Desktop UI/TUI原草稿与preferences原始字节；complete取备份133条/原配置/原偏好，rollback取后续134条/后续配置/后续偏好。CLI维护测试也从源码树外built包实际恢复这些资产。此验证不访问用户vault或付费Provider；媒体原字节和旧origin仍需Root的公共Artifact/Model端口联验，不能代替其他调用者证据。

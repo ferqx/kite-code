@@ -41,6 +41,8 @@ Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先
 
 恢复生成新 Store，原目录的 Core／Node 私有 DB 字节和 inode 保留；恢复的私有文件与所选 SQLite 备份快照字节相同，公开只读 Store 核原历史、执行和 Command，旧 Store 身份拒绝。维护期间 Provider 不增加。实际卸载取得所有安装候选 EX，保独立 Profile、配置、项目文件和备份；原三 Service 正常退出、准确所属进程为空、原候选两层 EX 可再取。准确结果归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08native-安装版离线维护)。该有限链不覆盖恢复发布中断的 reconcile、新基线发布后的前版样本、任意版本或全部 W19／三平台资格；DB8 的旧代码运行边界另见下节。
 
+[安装版 PC 恢复中断](../../../tests/isolated/unified-agent/native-restore-interruption.test.ts)另补 macOS 的目录缺失入口：现有 source 恢复观察点暂停在旧 Profile 已移走、journal 仍为 prepared，使用候选内 Bun 和所选引擎，真实 SIGKILL。实际 installed `bin/kite-desktop` 的 Main／Service 在持锁和强杀后分别拒绝接入；诊断 Service 的 `required_capability_missing` 不获得业务能力，也不创建空 Profile／Core。外置锁 dev／inode、保留目录 Core／配置原字节保持，其他 Profile 可用。实际安装版 `bin/kite maintenance status/reconcile` 绑定所观察 ID／digest 后明确 complete；同一窗口重新加载读回备份原 Session／新 Store，冷读无重发，普通退出所属 Service 后两层 EX 可取，实际卸载保数据。故障 publisher 使用 source 内部观察点，正式 Main／Service 和维护命令字节未修改；这一条不冒称 installed restore 自身全中断矩阵、rollback 或整个 R07／W19。准确结果见[本片证据](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08安装版-pc-恢复目录缺失边界)。
+
 ## 真实代码升级与冷回退
 
 [跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。当前 macOS 固定复用原 PC 展示层后的 DB7 原提交 `a2b6441fde28d9c0f895a26e6a9d2471d2b1b242`，由其自己的 Terminal 和 Native builder 构建，与当前代码核全部11项相同锁文件、根与八 workspace 清单、补丁及 Core format 1；前四窗口的原任务链从 Native DB7 开始。原3140输入已不满足变化后的锁文件，历史资格保留，不能沿用于当前组合；两者 productVersion 都是 `0.1.0`，inner、Main、renderer 的实际字节及候选 ID 不同，两个原前端字节断言保持。[物化夹具](../../../tests/fixtures/unified-agent/terminal-predecessor.ts)在删除旧源码前完成旧 Native 构建，随后两个候选均归档、解包、搬迁并删除原输出。临时旧 clone 仅是验证输入，不承载当前实现或 Git 交付。
