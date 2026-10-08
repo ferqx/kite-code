@@ -194,6 +194,14 @@ async function launch() {
       inputVisible:
         inputBounds.width > 0 && inputBounds.height > 0 && inputBounds.bottom <= innerHeight,
       stylesheet: [...document.styleSheets].some((sheet) => sheet.href?.startsWith('file:')),
+      startupStyles: [...document.styleSheets].some((sheet) => {
+        try {
+          return [...sheet.cssRules].some((rule) => rule.cssText.includes('.desktop-startup'));
+        } catch {
+          return false;
+        }
+      }),
+      startupVisible: !!document.querySelector('main[aria-label="kite 启动页"]'),
       nativeBridge: !!window.kiteNative,
       legacyBridge: 'kiteDesktop' in window,
     };
@@ -201,9 +209,13 @@ async function launch() {
   assert.ok(layout.height >= 700);
   assert.equal(layout.inputVisible, true);
   assert.equal(layout.stylesheet, true);
+  assert.equal(layout.startupStyles, true);
+  assert.equal(layout.startupVisible, false);
   assert.equal(layout.nativeBridge, true);
   assert.equal(layout.legacyBridge, false);
-  console.log('native_driver_stage: retained desktop layout, compiled CSS/fonts, current bridge');
+  console.log(
+    'native_driver_stage: retained startup styles, completed directory, desktop layout, compiled CSS/fonts and current bridge',
+  );
   console.log('native_driver_stage: selection');
   const state = await page.evaluate(
     async () =>

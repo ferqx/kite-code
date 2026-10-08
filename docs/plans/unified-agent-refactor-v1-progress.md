@@ -2972,3 +2972,17 @@ bounded recon 本逻辑轮一次派发返回 `agent thread limit reached`；没�
 失败保留：初次 `typecheck` actual2为NativeResult的泛化Command.kind未被充分收窄、nullable来源runId及fixture缺字段／verifyConnection返回类型；`typecheck-ready` actual2只剩两处nullable runId。均修正真实类型，原断言未删。初次格式检查actual1为effect依赖；采用稳定的观察描述符，避免无关React render重复失败GET，保正文变化与实际通知重读，最终只读格式门禁核当前输入。两次原子patch前检失败未产生部分修改；未启动依赖这些失败补丁的窗口。
 
 本逻辑轮bounded recon一次派发仍返回 `agent thread limit reached`；无新子Agent结果或写入，Root自检不计独立审查。剩余退出依赖按顺序最多五项：①原PC剩余入口／完整页面与全部封存恢复组合核对；②方案必要installed维护恢复及已发布版本样本；③macOS原RSS／八轮稳定性和完整资源退出；④§35适用能力与完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后Win／Linux Actions。37能力全partial／wholeV13=false，Goal active；保持宿主Shell及macOS PC优先。Root唯一Git owner，AGENTS.md原SHA256 `7e19375d5a9771aef3645fa33dcdbbc0e59c03e8d2276efba54fa97b13d9ea16`与bun.lock受保护且不暂存；仅本地提交，无push／PR／发布／Actions dispatch。
+
+## 2026-10-09：原启动页与初始化重试
+
+上一轮原缓存用量已本地提交，属于 progress。本轮从 durable `el-refactor`／HEAD `bdff6055640466a3786faaea3f6ef57a9d96be4c`继续 PC 主线；对照原 kite-desktop App 与现行桌面手册，正式 Native 原先在 attach／首屏目录尚未完成时直接显示主页面，初始化失败也没有原重试入口。本片直接迁入原启动页布局、完整相同 SVG 和四项启动样式，接现有 attach／完整目录观察。未核实目录仍等待，空项目／无模型正常进入；失败后明确重试，同步抑制重复，旧代次撤销和迟到响应隔离；进入后断线保原页面与草稿。Main／Service、业务控制、共享 UI、公开 HTTP、SQL 和私有格式均未改。当前职责归[Desktop owner](../../apps/desktop/README.md#原启动页与初始化重试)，现有 Main 不提供“保存诊断”，本片不虚构端口或宣称安装恢复完整通过。此项原页面适配不产生新的长期架构取舍，已核 Notes 规范，不另建重复 Note。
+
+当前生产与测试输入的必要证据，环境为 macOS 26.7.1（25G241）arm64、Bun 1.4.2：
+
+- `bun test --parallel=1 --max-concurrency=1` 对启动、原新对话、草稿与安排任务四个 isolated DOM 文件，`/private/tmp/kite-pc-startup-dom-ready-20261009.log` actual0，11pass／229断言／2.39秒。实际 NativeDesktop 保首次连接／目录等待、unavailable 目录不进入、空项目／缺模型正常进入、attach 与目录失败、双击仅一次重试、旧响应不覆盖和断线草稿原文，全部请求只读／观察；原业务断言保持。有限 bridge 不代证真实 Service 初始化故障。
+- 同一命令对原 `apps/desktop/test/isolated/native-bundle.test.ts`，`/private/tmp/kite-pc-startup-window-20261009.log` actual0，完整源码外默认 Native 1pass／7Bun断言及全部 Node driver／47.08秒。首次和冷启动核编译启动样式、完成目录后原输入区；人工审批1／Provider3，原安排任务草稿、首次发送、目录状态、50%缓存、工具／准确 Files 失败、文件变更／编辑器选择、普通退出与 Main 强杀后所属双锁／终端断言保持。120秒整例、45秒driver、10秒UI预算未变，实际窗口未新增失败矩阵或观察短暂启动页。所属 prefix 进程结束后为0，证明归 `/private/tmp/kite-pc-startup-processes-final-20261009.json`。
+- Desktop `tsc --noEmit -p tsconfig.json` 对最终输入 actual0，日志 `/private/tmp/kite-pc-startup-types-qualified-20261009.log`。边界、API、workspace、test owner、文档／all影响、plan-evidence、只读格式和差异门禁均 actual0；根 typecheck 与正常 Git hooks 在精确暂存后独立执行。冻结和交付证明归 `/private/tmp/kite-pc-startup-owned-20261009.json`与 `/private/tmp/kite-pc-startup-delivery-20261009.json`，只是临时本片证据。本片未重跑全阶段 default、TUI、Chrome 或其他窗口矩阵。
+
+原失败保留：`types-initial` actual2 暴露 bridge 可空的原调用点，改为公开薄入口加必需 bridge 的原内容组件；初次格式 actual1 暴露两个 memo 缺 bridge 依赖，已补实际依赖。该格式失败后曾启动的 `types-ready`不能代证最终输入。`types-final` actual2 为新 fixture 缺协议 `defaultModelId`，修为真实 null；`dom-initial` actual1／10pass1fail227断言，误断言缺模型的内部 code，而原控件实际展示人类提示，现保断言并改核原提示，同时加强未核目录等待。一次 patch 前检失败无部分修改，依赖验证未启动。最终证据不删业务断言或改变原预算。 首次临时冻结前检误用不存在的旧 toast 选择器作为 CSS 结束点；按实际注释边界核实四项启动样式与原文件起始部分逐字一致，生产输入未改。
+
+本逻辑轮 bounded recon 一次派发返回 `agent thread limit reached`，无新子 Agent 结果或写入，Root 自检不计独立审查。剩余退出依赖按顺序最多五项：①原 PC 剩余入口与完整页面／封存恢复组合核对，已核原主题 Hook 与 Main 窗口背景联动尚未迁入；②必要 installed 维护恢复与已发布版本样本；③macOS 原 RSS／八轮稳定性和完整资源退出；④§35能力与完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后 Win／Linux Actions。37能力全 partial／wholeV13=false，Goal active；继续复用原 PC，保宿主 Shell。Root 唯一 Git owner，AGENTS.md 与 bun.lock 原 hash 不变且不暂存，仅本地 stage／commit，无push／PR／发布／Actions dispatch。

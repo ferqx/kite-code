@@ -35,6 +35,7 @@ import { NativeApproval } from './native-approval';
 import { NativeBackgroundPanel } from './native-background-panel';
 import type {
   NativeBranchFacts,
+  NativeBridge,
   NativeConversationResult,
   NativeCreation,
   NativeDirectory,
@@ -67,14 +68,28 @@ import { NativeProviderSettings } from './native-provider-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
+import { NativeStartup } from './native-startup';
 import { useNativeTheme } from './native-theme';
 import { liveToolMessages, useNativeToolMessages } from './native-tool-messages';
 import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-transcript';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
 export function NativeDesktop() {
-  const [interactionHistoryOpen, setInteractionHistoryOpen] = useState(false);
   const bridge = window.kiteNative;
+  return bridge ? (
+    <NativeDesktopContent bridge={bridge} />
+  ) : (
+    <NativeStartup phase="failed" error="原生桥不可用，请核对客户端资源。" />
+  );
+}
+
+function NativeDesktopContent({ bridge }: { bridge: NativeBridge }) {
+  const [interactionHistoryOpen, setInteractionHistoryOpen] = useState(false);
+  const [startup, setStartup] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [startupError, setStartupError] = useState('');
+  const [startupAttempt, setStartupAttempt] = useState(0);
+  const startupPhase = useRef(startup);
+  startupPhase.current = startup;
   const theme = useNativeTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -180,9 +195,16 @@ export function NativeDesktop() {
       }
     >(),
   );
+  function acceptDirectory(value: NativeDirectory) {
+    setDirectory(value);
+    if (startupPhase.current === 'loading' && !value.unavailable) {
+      startupPhase.current = 'ready';
+      setStartup('ready');
+    }
+  }
   function apply(value: NativeResult) {
     if (value && 'generation' in value && value.generation === generation.current) {
-      if (value.directory) setDirectory(value.directory);
+      if (value.directory) acceptDirectory(value.directory);
       historyEpoch.current = value.historyEpoch;
       // Main has verified the exact answer_saved receipt. Promise resolution and
       // omission from a bounded pending page are not confirmation of an answer.
@@ -268,7 +290,8 @@ export function NativeDesktop() {
       if (code === 'directory_observation_changed') return;
       throw cause;
     }
-    if (current === generation.current && value && 'workspaces' in value) setDirectory(value);
+    if (current === generation.current && value && 'workspaces' in value) acceptDirectory(value);
+    else if (current === generation.current) throw Error('native_directory_unavailable');
   }
   async function readGrants(nextPage = false) {
     const scope = state?.selection;
@@ -326,29 +349,55 @@ export function NativeDesktop() {
       }
     }
   }
-  // biome-ignore lint/correctness/useExhaustiveDependencies: One bridge lifetime; generation and message facts are read through refs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Startup retries replace only this bridge observation; other facts are read through refs.
   useEffect(() => {
-    if (!bridge) return;
     let alive = true;
     const unwatch = bridge.watch((event) => {
-      if (alive && event.generation === generation.current) void report(refresh, false);
+      if (alive && generation.current > 0 && event.generation === generation.current)
+        void refresh().catch((cause) => {
+          if (alive && event.generation === generation.current)
+            void report(async () => {
+              throw cause;
+            }, false);
+        });
     });
-    void report(async () => {
+    void (async () => {
       const value = await bridge.request({ method: 'attach' });
-      if (!alive || !value || !('generation' in value)) return;
+      if (!alive) return;
+      if (
+        !value ||
+        !('generation' in value) ||
+        !Number.isSafeInteger(value.generation) ||
+        value.generation < 1
+      )
+        throw Error('native_initialization_unavailable');
       generation.current = value.generation;
       apply(value);
       if (!value.selection) setPreparing(true);
       await readDirectory();
+    })().catch((cause) => {
+      if (!alive) return;
+      const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+      if (startupPhase.current === 'ready') {
+        setError(/^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '目录状态待核实。');
+        return;
+      }
+      startupPhase.current = 'failed';
+      setStartupError(
+        /^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '请重新尝试准备工作空间。',
+      );
+      setStartup('failed');
     });
     return () => {
       alive = false;
       unwatch();
       history.current?.close();
-      if (generation.current)
-        void bridge.request({ method: 'detach', generation: generation.current }).catch(() => {});
+      const attached = generation.current;
+      generation.current = 0;
+      viewIntent.current++;
+      if (attached) void bridge.request({ method: 'detach', generation: attached }).catch(() => {});
     };
-  }, []);
+  }, [bridge, startupAttempt]);
   const selection = state?.selection
     ? {
         ...state.selection,
@@ -416,7 +465,7 @@ export function NativeDesktop() {
           nonce === viewIntent.current &&
           selected.current === sessionId,
       });
-  }, [attachmentGeneration, attachmentSessionId, attachmentView, attachmentEpoch]);
+  }, [bridge, attachmentGeneration, attachmentSessionId, attachmentView, attachmentEpoch]);
   useEffect(() => {
     if (selection?.permissionUnavailable && !selection.viewLoading) setGrantFacts(undefined);
   }, [selection?.permissionUnavailable, selection?.viewLoading]);
@@ -443,7 +492,7 @@ export function NativeDesktop() {
         viewIntent.current === nonce &&
         selected.current === inputSession,
     });
-  }, [inputStore, inputSession, inputEnabled, inputGeneration, inputView]);
+  }, [bridge, inputStore, inputSession, inputEnabled, inputGeneration, inputView]);
   const environment = useNativeEnvironment({
     bridge,
     generation: state?.generation ?? generation.current,
@@ -506,7 +555,6 @@ export function NativeDesktop() {
     selection?.viewSelection ?? selection?.viewGeneration,
     state?.historyEpoch ?? 0,
   ]);
-  if (!bridge) return <p>原生桥不可用。此页面不连接替代服务器。</p>;
   async function write(action: () => Promise<unknown>, requiresHistory = true) {
     if (
       writing.current ||
@@ -1928,6 +1976,25 @@ export function NativeDesktop() {
       </>
     );
   };
+  if (startup !== 'ready')
+    return (
+      <NativeStartup
+        phase={startup}
+        error={startupError}
+        onRetry={
+          bridge
+            ? () => {
+                if (startupPhase.current !== 'failed') return;
+                startupPhase.current = 'loading';
+                setError('');
+                setStartupError('');
+                setStartup('loading');
+                setStartupAttempt((attempt) => attempt + 1);
+              }
+            : undefined
+        }
+      />
+    );
   return (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}

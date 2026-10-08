@@ -1,0 +1,21 @@
+.desktop-startup {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+.desktop-startup-content {
+  width: min(100%, 420px);
+  text-align: center;
+}
+.desktop-startup-content h1 {
+  margin: 16px 0 12px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -1px;
+}
+.desktop-startup-content p {
+  color: var(--muted-foreground);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}

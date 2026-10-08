@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { NativeDesktop } from './native';
 import { applyTheme, readThemePreference } from './native-theme';
 import './native-tailwind.css';
+import './native-startup.css';
 import '@kite-ai/ui/desktop/style.css';
 
 if (/Macintosh|Mac OS X/i.test(navigator.userAgent))

@@ -160,6 +160,8 @@ Skill知识目录属于Service宿主：公共只读目录和实际Run装配共�
 
 终端显示偏好由 CLI host 持有当前 profile 的 `ui/preferences.jsonc`，共享 UI 仅接收有限已确认值和单字段 CAS 保存 port。`/theme`、`/language` 不写 Service 配置、不提交业务 Command，不依赖 SSE freshness；更新呈现 context 保原 Session、草稿、审批和完整输出。原 profile shared authority 必须在读写发布时仍有效，文件由现有 configuration leaf 提供锁与原子发布；偏好原字节纳入维护备份。具体实现与失败行为由 [CLI owner](../../apps/cli/README.md#开发-tui-显示偏好) 负责。
 
+Native 原启动页的进入条件只消费当前 attach generation 与已经核实的首屏完整目录，不成为执行授权。初始化的明确重试只替换旧观察，Main 原 detach 释放所属读取和选择；迟到旧代次不进入新页面。已进入后的断线保留原内容和草稿，未知业务提交仍按原命令核实，不因重试启动页获得重放或 Service 控制资格。共享 UI、Core、公开 API 与私有格式保持；当前范围与分层证据归[Native owner](../../apps/desktop/README.md#原启动页与初始化重试)。
+
 ## 授权观察与执行资格
 
 Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准确来源／展示关系和 EOF；它不建立新的原卡回答观察。完整历史附件与当前审批分别持有 reader／loaded proof，前者不能授权后者；关闭、刷新或切范围只释放所属读取。记录与受理、执行成功分开，当前接口的变化拒绝与恢复限制归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)。

@@ -37,6 +37,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 ## 当前公共场景与证据
 
+原[启动 DOM](../apps/desktop/test/isolated/native-startup-dom.test.tsx)使用实际 NativeDesktop 与原共享 UI，核 attach／完整目录等待、未核实目录、空项目／无模型进入、初始化失败后一次明确重试、旧代次隔离及进入后断线保原草稿，有限 bridge 不代证实际服务故障。原[默认源码外 macOS 整窗口](../apps/desktop/test/isolated/native-bundle.test.ts)核启动 CSS 打包、首次与冷启动完成后进入页面，原任务／审批／业务／双锁退出断言及期限保持，不直接验证短暂启动页或真实初始化故障。准确输入、实际执行结果和未验范围归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)。
+
 原Composer的[缓存指标DOM](../apps/desktop/test/isolated/native-cache-metrics-dom.test.tsx)核实际样本累计、封存副本去重、32项批次、历史未完整时隐藏、无样本与真实0%的区别、迟到会话隔离和失败后显式只读重试。[Main来源测试](../apps/desktop/test/native-tool-messages.test.ts)核不可变Model用量、来源／恢复终态、无缓存字段和原消息变化拒绝；原[默认源码外macOS窗口](../apps/desktop/test/isolated/native-bundle.test.ts)在原三次实际SDK请求中记录200／400缓存token，核首次50%、切无样本会话隐藏、返回与冷读50%，Provider不增长。完整driver、退出／双锁／原期限保持；准确运行版本和结果见[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原输入区累计缓存命中率)，DOM不代证实际SDK或平台资格。
 
 复用原桌面页面的 [UI 展示断言](../packages/ui/test/desktop-page.test.tsx)与 Native 目录/草稿/问卷/计划 DOM 核新宿主适配；真实 CSS、字体、输入操作及源码外闭包分别沿 [Native 候选](../apps/desktop/test/isolated/native-bundle.test.ts)和[设置与刷新窗口](../apps/desktop/test/isolated/native-electron.test.ts)核验，不由 DOM 结果推导完整产品视觉资格。[边界测试](isolated/scripts/unified-agent-boundary.test.ts)另核声明的 CSS 真实导出、缺失/越界/旧目标拒绝，以及显式 UI builder 的宿主 I/O 与 source 的便携限制。运行范围、原失败和剩余页面迁移归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)。

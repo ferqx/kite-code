@@ -10,6 +10,14 @@
 
 [原页面契约测试](../../packages/ui/test/desktop-page.test.tsx)迁回原 12 项展示断言；现有 Native 目录、草稿、问答与计划 DOM 只调整控件/浏览器 API，保留业务断言。源码外 [Native 候选](test/isolated/native-bundle.test.ts)与[driver](test/native-bundle-electron.fixture.ts)已核编译 CSS/字体、可操作 Composer、新 preload bridge、实际审批/任务、冷读和两层使用锁收尾。准确输入、原失败与结果归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不代表完整客户端、installed 全量、独立审查或 Windows/Linux 阶段退出。
 
+## 原启动页与初始化重试
+
+[NativeStartup](src/native-startup.tsx)迁入原 kite-desktop 的启动页布局、[图标](app-icon.svg)和[启动样式](src/native-startup.css)，按钮仍用原共享 Button。[正式入口](src/native.tsx)先完成现有 Main 的 attach 与首屏完整 Workspace／Session 目录观察，再显示原 SessionPage；尚未核实的目录不能进入，空目录与未配置模型可以进入处理。没有人为最短停留时间，不另建服务或执行路径。
+
+初始化失败保留启动页、公开错误分类和明确“重新尝试”。同步状态阻止重复点击；每次重试撤销旧观察、所属历史读取和旧 generation，迟到响应不能覆盖新的目录。Main 的 detach 只释放读取与选择，不停止 Service、Run 或重发业务。进入主界面后连接或目录读取失败保留原页面与草稿，不重新遮挡。缺 preload bridge 时沿同一启动页说明资源错误，不提供不能执行的重试。现有 Main 没有原“保存诊断”端口，本片不宣称该安装恢复能力已迁入。
+
+[启动 DOM](test/isolated/native-startup-dom.test.tsx)沿实际 NativeDesktop 核首次等待、未核目录、空项目／无模型、两类失败、重复重试、旧响应隔离和进入后草稿保持；同轮原新对话／草稿／安排任务测试保业务断言。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)核编译启动样式及首次／冷启动完成后进入原页面，保原任务、审批、冷读与退出；实际窗口不代证初始化失败矩阵。代码输入、执行结果及剩余迁移归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)，完整 PC、安装恢复及阶段退出仍按原方案核对。
+
 ## 原文件变更面板与编辑器
 
 [NativeFileChanges](src/native-file-changes.tsx)将原 [FileChanges / FileDiff](../../packages/ui/src/desktop/FileChanges.tsx)接到 SessionPage 的“文件变更”入口，复用右栏、行号、高亮、展开与焦点行为。它只在面板打开后扫描当前已读完整历史的工具消息，每批32项；展开一项才读取原结果正文。目录扫描与单项 GET 各有自己的 read ID；折叠、关闭、切换会话、detach 或 history epoch 更换只释放相应读取，不取消执行。会话工具与文件变更切换时关闭原面板，RightSidebar 按用途保独立组件身份，避免旧 Tabs 选择遮住新内容；拥有读取的 Native 内容关闭即卸载，不在收起栏内保活。
