@@ -8,6 +8,8 @@ export interface ModelOutputMessageProps {
   readonly suspended?: boolean;
   /** Explicit diagnostic host opt-in; ordinary conversation reading excludes raw reasoning. */
   readonly showReasoning?: boolean;
+  /** The host reader independently proves the original Model Store after profile restore. */
+  readonly canReadRestoredOrigin?: boolean;
   readonly onRead?: (input: {
     sessionId: string;
     executionId: string;
@@ -24,6 +26,7 @@ export function ModelOutputMessage({
   storeId,
   suspended = false,
   showReasoning = false,
+  canReadRestoredOrigin = false,
   onRead,
   onContent,
   renderText,
@@ -31,6 +34,7 @@ export function ModelOutputMessage({
   const body = message.outputBody;
   const identity = JSON.stringify([
     storeId,
+    canReadRestoredOrigin,
     message.sessionId,
     message.runId,
     message.id,
@@ -85,7 +89,10 @@ export function ModelOutputMessage({
     )
       return;
     const origin = message.originMessage;
-    if (origin && (origin.storeId !== storeId || origin.runId === null)) {
+    if (
+      origin &&
+      (origin.runId === null || (origin.storeId !== storeId && !canReadRestoredOrigin))
+    ) {
       setError('model_output_identity_conflict');
       return;
     }

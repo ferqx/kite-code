@@ -22,6 +22,8 @@ Native 的原轮次 UI 消费准确公共 Run，不从 Message complete 推最�
 
 读取时机：修改新 Agent 的 Store/执行/模型接口、目标 HTTP schema、跨包依赖或过渡调用者时。
 
+Native 原大Model正文将当前连接Store与封存出处分别核实。Service从真实sealed Message的私有output head保原Store；Main只接已观察Message的原Model／Session／Run／originStoreId，所属GET核准确Execution后再读Core完整snapshot，以当前Store验证原链、完整性与字节数。该资格不从renderer字段、来源Run后来状态或Store ID相等推导，不重绑origin、不补发旧工作。共享组件只有具备此reader的Native提供 `canReadRestoredOrigin`；其他宿主缺省限制保持。Core／API schema／持久格式不变，准确范围归[Native owner](../../apps/desktop/README.md#恢复后封存-model-正文)。
+
 验证：`bun run test:unified-agent`、`bun run check:unified-agent-boundary`，实际运行范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 
 总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确八个新 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。旧源码与历史测试保留作参考，不进入正式产物或默认调度。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。

@@ -1855,6 +1855,7 @@ function NativeDesktopContent({
         key={`${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${message.id}`}
         message={message}
         storeId={selection.storeId}
+        canReadRestoredOrigin
         renderText={
           message.contentFormat === 'unsupported'
             ? undefined

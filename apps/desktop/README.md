@@ -306,7 +306,7 @@ main 的私有草稿由 [private-data.ts](electron/private-data.ts) 使用实际
 
 本入口当前提供完整目录读取、根会话创建、Fork/rename/delete、消息页、新轮次/原命令核实与停止、普通 Interaction、模式与信任及授权目录控制、Model 输入/输出 Inspector、Context Rewind/Include。完整设置、附件 reader、Context 导出、发行安装、Linux/Windows 和旧视觉迁移仍未接入本实际窗口；有大附件但缺 reader 的审批继续只读。Node fixture 绑定已构建 Service；实际 Electron fixture 在私有临时目录构建当前 Service JS，按实际 SHA 与明确 Bun executable 接入。这两者均使用 workspace 公共依赖，不宣称完整 source-free installed Desktop 制品。限定新测试组合当前为 5 项、35 条 Bun 断言通过；实际 Electron 场景另含 14 条 Node 断言与实际 DOM 操作，类型、局部 Biome 与文档结构检查通过。
 
-原生大 Model 输出通过 [main view-read lease](electron/model-output-reads.ts) 与 [renderer reader](src/native-model-output.ts) 接入共享 `ModelOutputMessage`。有 `model_outputs` capability 时才提供显式完整读取；缺能力保持标明的 preview。open 仅调用公共 `Client.getModelOutput`，固定当前 Store、Session、Execution、窗口 generation 与选择身份；main 最多一个在途读取/正文 lease，不恢复丢失句柄，不创建执行或 spool 权威。跨 IPC 每块最多 64KiB（二进制用 base64），请求必须按准确下一 offset 推进，原 1MiB/4MiB IPC 预算没有提高。close、切换、刷新、网络释放只 abort 本读取和清除正文，不提交 Command 或取消 Model/Run。
+原生大 Model 输出通过 [main view-read lease](electron/model-output-reads.ts) 与 [renderer reader](src/native-model-output.ts) 接入共享 `ModelOutputMessage`。有 `model_outputs` capability 时才提供显式完整读取；缺能力保持标明的 preview。open 固定当前连接 Store、阅读 Session、Execution、窗口 generation 与选择身份。封存 Message 的来源只从 Main 已观察副本取得；先用公共 `Client.getExecution` 核准确原 Model／Session／Run／originStoreId，再以当前 Store 和原 Session 调用 `Client.getModelOutput`，核封存完整性与计数。恢复后的当前 Store 与原出处分别校验，不重绑 origin；这些 GET 不读取来源 Run 的后来状态。main 最多一个在途读取/正文 lease，不恢复丢失句柄，不创建执行或 spool 权威。跨 IPC 每块最多 64KiB（二进制用 base64），请求必须按准确下一 offset 推进，原 1MiB/4MiB IPC 预算没有提高。close、切换、刷新、网络释放只 abort 本读取和清除正文，不提交 Command 或取消 Model/Run。
 
 renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后调用公共 `verifyModelOutputSnapshot` 的生成 schema、canonical body SHA、字节数及 completion 核验，再检查原 Store/Session/Execution/hash，只有当前视图可显示。普通会话不启用 reasoning 展示；正文不进入持久缓存。main 的 SDK 快照与 renderer 的完整正文仍可能各占一份整块内存，不能把有限 IPC chunk 声称为固定内存 streaming。[test/native-model-output.test.ts](test/native-model-output.test.ts) 的有限 port 测试覆盖 >17MiB、offset、hash/UTF-8 损坏、迟到 SDK 返回/取消与旧选择；[实际 Electron 测试](test/isolated/native-model-output-electron.test.ts) 使用私有构建 Service、真实 SQLite/本机兼容 SDK 输出，检查完整 >17MiB DOM 尾、显式关闭、跨窗口/旧 generation 拒绝、刷新只保 preview、模型计数不变与退出原 PID 清理。正文采用完整多段；不将单个巨大 glyph raster 的 GPU 平台上界误作本文传输裁剪许可。
 
@@ -419,6 +419,12 @@ Native 普通 Work 与准确单 Job 停止现在通过 [main caller journal](ele
 本片最终输入/恢复/profile/模型设置/压缩邻接组合为 11 文件、37 项、296 条 Bun 断言全通过（108.97 秒，2026-10-03）；其中五种实际 Electron 普通 caller 窗口全部通过，模型设置窗口另保留 35 条 Node 断言、压缩 40 条、profile 锁 16 条。Desktop types、portable build、21 个归属代码文件 Biome、统一边界、测试归属和文档检查通过。首组合复制 driver 时漏带具名 reader helper，迁移新增断言一度误读只列未决的 creation 目录；两项修复只同步 fixture 实际制品与原持久回执检查，保留失败日志及原期限，没有改为 stub。
 
 最终组合之后新增的五种实际 Electron 窗口增量为 5 项、20 条 Bun 断言全通过（40.60 秒），另在实际 Node driver 核对强杀前后 Core 原 Run/Execution ID 集合完全相同，冷原 GET 不新增执行。该增量独立保留，不替代上述 11 文件邻接结果或将受理回执称为业务完成。
+
+## 恢复后封存 Model 正文
+
+当前 Native 为原Model来源的独立证明提供共享组件的 `canReadRestoredOrigin` 资格；组件仍复核当前 snapshot Store、原 Session／Run／Execution、完整性和字节数。关闭正文撤销准确复制资格；封存 Fork 不借原 Run 的后来状态成为最终回复。Service 的原大正文出处从已核 sealed SQL 的私有 output head 保留，不以当前连接 Store 替换，完整链验证继续由 Core 负责。
+
+[实际安装回归](test/isolated/native-restored-output-bundle.test.ts)构建、搬迁并安装完整候选，删除构建源，通过默认 Main／配对 Service／preload／原页面生成一次108031字节Unicode／CRLF正文并显式Fork。三个真实窗口覆盖原Fork、包内installed CLI明确backup／restore为新Store、恢复首次与冷读，核原Message／Model／Run／Store出处、完整内容／SHA／字节数、关闭／切会话撤销全文、原source复制资格及三Service普通退出／双制品EX释放。读取阶段业务POST为0，Provider总数1；复制按钮资格不代证本片实际写OS剪贴板。原120秒整例／45秒driver／10秒页面期限保持。macOS actual0／1pass／22Bun断言及全部Node流程／78.06秒；局部6文件29pass／254断言和原17MiB HTTP／SDK Fork1pass／46断言通过。准确输入、先前失败和未验组合归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09恢复后封存-model-正文)。其他封存／恢复组合、完整installed／发布样本与平台资格仍待核对。
 
 ## Native Files 检查点恢复
 

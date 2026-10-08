@@ -75,6 +75,13 @@ test('Native linked output derives original Session/run only from cloned observe
       messages: [],
     }),
     listMessages: async () => [message],
+    getExecution: async () => ({
+      id: 'model',
+      kind: 'model',
+      sessionId: 'original',
+      runId: 'run-original',
+      originStoreId: 'store',
+    }),
     async getModelOutput(id: string) {
       gets.push(id);
       return value;

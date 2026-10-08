@@ -53,7 +53,12 @@ export class NativeModelOutputReads<K extends 'modelOutput' | 'modelInput' = 'mo
       sessionId: string;
       executionId: string;
     },
-    source?: { sessionId: string; runId: string; body: NonNullable<Message['outputBody']> },
+    source?: {
+      sessionId: string;
+      runId: string;
+      originStoreId?: string;
+      body: NonNullable<Message['outputBody']>;
+    },
   ): Promise<NativeModelBodyOpen<K>> {
     if (this.lease) throw new ClientError(this.code('model_output_read_busy'));
     const scope = this.current();
@@ -76,6 +81,20 @@ export class NativeModelOutputReads<K extends 'modelOutput' | 'modelInput' = 'mo
     this.lease = lease;
     try {
       const sourceSessionId = source?.sessionId ?? input.sessionId;
+      if (source?.originStoreId !== undefined) {
+        const execution = await this.client.getExecution(input.executionId, {
+          signal: lease.abort.signal,
+        });
+        this.check(lease);
+        if (
+          execution.id !== input.executionId ||
+          execution.kind !== 'model' ||
+          execution.sessionId !== source.sessionId ||
+          execution.runId !== source.runId ||
+          execution.originStoreId !== source.originStoreId
+        )
+          throw new ClientError('model_output_identity_mismatch');
+      }
       const snapshot = await (this.kind === 'modelInput'
         ? this.client.getModelInput(input.sessionId, input.executionId, {
             expectedStoreId: input.expectedStoreId,

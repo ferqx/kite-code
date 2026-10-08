@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { AgentClient, Message } from '@kite-ai/client';
+import { createHash } from 'node:crypto';
+import type { AgentClient, Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { canonicalCallerCommandRequest } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerTextDigest } from '../electron/caller-journal';
@@ -61,6 +62,145 @@ function authority() {
     frame,
   };
 }
+test('formal Native reads an observed restored Fork through the original Model provenance and current Store, without rebinding or writes', async () => {
+  const connection = client(),
+    content = 'original 雪🙂\r\ncomplete tail',
+    output = { content, reasoning: '', toolCalls: [], complete: true },
+    body = JSON.stringify(output),
+    message: Message = {
+      id: 'sealed-message',
+      sessionId: 'fork',
+      runId: null,
+      seq: '1',
+      status: 'complete',
+      role: 'assistant',
+      content: 'preview',
+      originMessage: {
+        storeId: 'original-store',
+        sessionId: 's',
+        messageId: 'original-message',
+        runId: 'r',
+      },
+      outputBody: {
+        kind: 'model_output',
+        executionId: 'e',
+        complete: true,
+        contentBytes: String(Buffer.byteLength(content)),
+        reasoningBytes: '0',
+        toolCallCount: 0,
+      },
+    },
+    snapshot: ModelOutputSnapshot = {
+      storeId: 'store',
+      sessionId: 's',
+      rootSessionId: 's',
+      runId: 'r',
+      executionId: 'e',
+      originCommandId: 'cmd',
+      rootWorkCommandId: 'cmd',
+      rootWorkSeq: '1',
+      attempt: 1,
+      status: 'succeeded',
+      bodyHash: createHash('sha256').update(body).digest('hex'),
+      bodyBytes: String(Buffer.byteLength(body)),
+      contentBytes: message.outputBody!.contentBytes,
+      reasoningBytes: '0',
+      snapshotCursor: '1',
+      output,
+    };
+  Object.assign(connection.serverInfo!, { capabilities: ['model_outputs'] });
+  const originalView = connection.getView.bind(connection);
+  connection.getView = async (id) => {
+    const view = await originalView(id);
+    return { ...view, session: { ...view.session, nextSeq: '1' } };
+  };
+  connection.verifyConnection = async () => connection.serverInfo!;
+  connection.listMessages = async () => [message];
+  const reads: string[] = [],
+    signals: AbortSignal[] = [];
+  let originStoreId = 'original-store';
+  connection.getExecution = async (id, options) => {
+    reads.push(`execution:${id}`);
+    signals.push(options!.signal!);
+    return {
+      id,
+      originStoreId,
+      sessionId: 's',
+      runId: 'r',
+      kind: 'model',
+      definitionId: 'model',
+      definitionVersion: '1',
+      status: 'succeeded',
+      result: null,
+      resultRevision: '1',
+      cancelRequestedAt: null,
+    };
+  };
+  connection.getModelOutput = async (sessionId, executionId, options) => {
+    reads.push(`output:${sessionId}:${executionId}:${options!.expectedStoreId}`);
+    signals.push(options!.signal!);
+    return snapshot;
+  };
+  const caller = new NativeCaller(connection, () => {}, memoryPrivateData()),
+    request = {
+      method: 'modelOutput.open' as const,
+      generation: 1,
+      readId: 'full',
+      expectedStoreId: 'store',
+      sessionId: 'fork',
+      messageId: message.id,
+      executionId: 'e',
+    };
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'fork' });
+    await expect(caller.invoke(request)).rejects.toMatchObject({
+      code: 'model_output_message_unavailable',
+    });
+    expect(reads).toEqual([]);
+    await caller.invoke({
+      method: 'messages',
+      generation: 1,
+      sessionId: 'fork',
+      expectedStoreId: 'store',
+      readId: 'history',
+      afterSeq: '0',
+      upperSeq: '1',
+      limit: 32,
+    });
+    expect(await caller.invoke(request)).toMatchObject({
+      kind: 'modelOutput.opened',
+      storeId: 'store',
+      sessionId: 's',
+      executionId: 'e',
+      bodyHash: snapshot.bodyHash,
+    });
+    const chunk = await caller.invoke({
+      method: 'modelOutput.read',
+      generation: 1,
+      readId: 'full',
+      offset: 0,
+      limit: 65536,
+    });
+    if (!chunk || !('data' in chunk) || !('eof' in chunk) || chunk.kind !== 'modelOutput.chunk')
+      throw Error('missing_full_body');
+    expect(chunk.eof).toBe(true);
+    expect(JSON.parse(Buffer.from(chunk.data, 'base64').toString('utf8'))).toEqual(snapshot);
+    expect(reads).toEqual(['execution:e', 'output:s:e:store']);
+    expect(signals[0]).toBe(signals[1]);
+    await caller.invoke({ method: 'modelOutput.close', generation: 1, readId: 'full' });
+    expect(signals[0]!.aborted).toBe(true);
+    originStoreId = 'wrong-origin';
+    await expect(caller.invoke({ ...request, readId: 'wrong' })).rejects.toMatchObject({
+      code: 'model_output_identity_mismatch',
+    });
+    expect(reads).toEqual(['execution:e', 'output:s:e:store', 'execution:e']);
+    expect(message.originMessage!.storeId).toBe('original-store');
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
 test('quit inspection aborts only its complete directory/view GET when the service does not answer, preserving unknown work and zero writes', async () => {
   const port = client(),
     signals: AbortSignal[] = [];

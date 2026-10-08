@@ -1470,7 +1470,7 @@ export class NativeCaller {
         )
           throw new ClientError('model_output_message_unavailable');
         const origin = message?.originMessage;
-        if (origin && (origin.storeId !== request.expectedStoreId || origin.runId === null))
+        if (origin && origin.runId === null)
           throw new ClientError('model_output_identity_mismatch');
         const runId = origin?.runId ?? message?.runId;
         if (message && !runId) throw new ClientError('model_output_identity_mismatch');
@@ -1479,6 +1479,7 @@ export class NativeCaller {
           message
             ? {
                 sessionId: origin?.sessionId ?? message.sessionId,
+                ...(origin ? { originStoreId: origin.storeId } : {}),
                 runId: runId!,
                 body: message.outputBody!,
               }

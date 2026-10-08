@@ -265,3 +265,69 @@ test('abort during SDK open prevents a late body lease; malicious transport offs
     expect(f.reads).toBe(1);
   }
 });
+test('sealed provenance must match the original Model before any full-body GET, and closing its pending check rejects late metadata', async () => {
+  const value = snapshot('sealed original'),
+    original = {
+      id: 'e',
+      kind: 'model',
+      sessionId: 's',
+      runId: 'r',
+      originStoreId: 'original-store',
+    },
+    source = {
+      sessionId: 's',
+      runId: 'r',
+      originStoreId: 'original-store',
+      body: {
+        kind: 'model_output' as const,
+        executionId: 'e',
+        complete: true,
+        contentBytes: value.contentBytes,
+        reasoningBytes: '0',
+        toolCallCount: 0,
+      },
+    },
+    input = { readId: 'sealed', expectedStoreId: 'store', sessionId: 'fork', executionId: 'e' };
+  let bodyReads = 0,
+    execution = { ...original };
+  const port = {
+    serverInfo: { capabilities: ['model_outputs'] },
+    getExecution: async () => execution,
+    getModelOutput: async () => {
+      bodyReads++;
+      return value;
+    },
+  } as unknown as AgentClient;
+  const main = new NativeModelOutputReads(port, () => ({
+    generation: 1,
+    selection: 1,
+    storeId: 'store',
+    sessionId: 'fork',
+  }));
+  for (const key of ['id', 'kind', 'sessionId', 'runId', 'originStoreId'] as const) {
+    execution = { ...original, [key]: 'wrong' };
+    expect(await errorCode(main.open(input, source))).toBe('model_output_identity_mismatch');
+    expect(bodyReads).toBe(0);
+  }
+  let entered!: () => void, release!: (value: typeof original) => void, signal!: AbortSignal;
+  const pending = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  port.getExecution = (_id, options) => {
+    signal = options!.signal!;
+    entered();
+    return new Promise((resolve) => {
+      release = resolve as typeof release;
+    });
+  };
+  const opening = main.open(input, source);
+  await pending;
+  main.close(input.readId);
+  expect(signal.aborted).toBe(true);
+  release(original);
+  expect(await errorCode(opening)).toBe('model_output_view_changed');
+  expect(bodyReads).toBe(0);
+  expect(() => main.read({ readId: input.readId, offset: 0, limit: 1 })).toThrow(
+    'model_output_read_missing',
+  );
+});

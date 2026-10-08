@@ -1,0 +1,68 @@
+import { expect, test } from 'bun:test';
+import type { AgentRuntime } from '@kite-ai/agent';
+import type { MessageRecord } from '@kite-ai/agent/storage';
+import { messageResponses } from '../src/message-response';
+
+test('restored sealed Model history projects the original private output Store while the read remains bound to the current Store', async () => {
+  const original: MessageRecord = {
+      id: 'original',
+      sessionId: 'source',
+      runId: 'run',
+      seq: '1',
+      role: 'assistant',
+      status: 'complete',
+      content: 'preview',
+      sourceIds: ['model'],
+      modelOutput: {
+        kind: 'model_output',
+        version: 1,
+        seq: '1',
+        contentBytes: '70000',
+        reasoningBytes: '0',
+        toolCallCount: 0,
+        complete: true,
+        head: {
+          id: 'original-head',
+          storeId: 'original-store',
+          sessionId: 'source',
+          subjectId: 'owner',
+          scope: { kind: 'execution', id: 'model' },
+          hash: 'a'.repeat(64),
+          size: '32768',
+          mediaType: 'application/json',
+        },
+      },
+    },
+    copied: MessageRecord = {
+      ...structuredClone(original),
+      id: 'copied',
+      sessionId: 'fork',
+      runId: null,
+    },
+    runtime = {
+      getMessageOrigin: async (input: unknown) => {
+        expect(input).toEqual({
+          expectedStoreId: 'restored-store',
+          sessionId: 'fork',
+          subjectId: 'owner',
+          messageId: 'copied',
+        });
+        return { message: original, subjectId: 'owner' };
+      },
+    } as unknown as AgentRuntime;
+  const [message] = await messageResponses(runtime, [copied], 'restored-store', 'owner');
+  expect(message).toMatchObject({
+    id: 'copied',
+    sessionId: 'fork',
+    runId: null,
+    originMessage: {
+      storeId: 'original-store',
+      sessionId: 'source',
+      messageId: 'original',
+      runId: 'run',
+    },
+    outputBody: { executionId: 'model', complete: true, contentBytes: '70000' },
+  });
+  expect(original.modelOutput!.head.storeId).toBe('original-store');
+  expect(copied.modelOutput!.head.storeId).toBe('original-store');
+});

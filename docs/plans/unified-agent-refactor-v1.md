@@ -2096,6 +2096,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原“保存启动诊断”现已复用原函数／启动按钮接入正式 Native：只在本次所属 Service 提供有效闭合诊断时可保存，系统对话框选新的私有 JSON，取消零写／已有文件不覆盖；保存失败可改名重试，外部修复存储条件后同窗明确重试。Service 真实 Store 故障只报当前 `data_unavailable/opening_store`，不补造旧数据迁移分类或覆写原坏文件。20项局部／204断言、两端types与原源码外 macOS 整窗口1／13及全部driver／94.75秒通过，原业务／退出／双锁与预算保持；准确输入及受限环境失败归[诊断迁移进度](unified-agent-refactor-v1-progress.md#2026-10-09原启动诊断保存与明确重试)。完整PC封存恢复、installed维护恢复／样本、macOS资源退出、§35独立迁移审查、最终回归／旧路径退役及后序平台仍按原依赖推进，37能力partial／wholeV13=false。
 
+原页面的封存大Model正文已补齐当前Store／原出处分开核对，Service保原head出处，Main从已观察Message核原Model后只读完整Core链。macOS实际installed默认窗口完成明确Fork、包内CLI备份恢复、首次与冷读及零业务重发；复制资格仍归原组件，准确失败与有限范围见[恢复正文进度](unified-agent-refactor-v1-progress.md#2026-10-09恢复后封存-model-正文)。其他封存／恢复组合和完整PC验收、剩余installed／发布样本、macOS资源退出、§35独立迁移审查、最终回归／退役与后序Actions保持，37能力partial／wholeV13=false。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

@@ -99,6 +99,48 @@ test('Fork full reader uses the proved original Session/Run; foreign origin and 
     await f.close();
   }
 });
+test('a qualified host can read the restored sealed origin using the current snapshot Store; closing revokes the displayed full body', async () => {
+  const f = await domFixture(),
+    data = outputFixture('恢复原文\r\n雪🙂 tail'),
+    content: (string | undefined)[] = [];
+  const message: Message = {
+    ...data.message,
+    sessionId: 'fork',
+    runId: null,
+    originMessage: {
+      storeId: 'original-store',
+      sessionId: 'a',
+      messageId: 'original',
+      runId: 'run-a',
+    },
+  };
+  let reads = 0;
+  try {
+    await f.render({
+      message,
+      storeId: 'store',
+      canReadRestoredOrigin: true,
+      onContent: (value) => content.push(value),
+      onRead: async (input) => {
+        reads++;
+        expect(input.sessionId).toBe('a');
+        expect(input.executionId).toBe('model');
+        return data.snapshot;
+      },
+    });
+    await f.click('Read complete recorded Model output');
+    expect(reads).toBe(1);
+    expect(f.host.textContent).toContain('Complete Model output');
+    expect(content.at(-1)).toBe(data.snapshot.output.content);
+    expect(message.originMessage!.storeId).toBe('original-store');
+    await f.click('Close full Model output');
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+    expect(content.at(-1)).toBeUndefined();
+    expect(reads).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
 async function domFixture() {
   const dom = new JSDOM('<div id="root"></div>');
   const prior = { window: globalThis.window, document: globalThis.document };

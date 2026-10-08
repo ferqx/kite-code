@@ -61,7 +61,10 @@ export async function messageResponses(
           subjectId,
           messageId: message.id,
         });
-        return messageResponse(message, { storeId, message: origin.message });
+        return messageResponse(message, {
+          storeId: origin.message.modelOutput?.head.storeId ?? storeId,
+          message: origin.message,
+        });
       } catch (error) {
         if (!(error instanceof AgentError) || error.code !== 'fork_content_unsupported')
           throw error;
