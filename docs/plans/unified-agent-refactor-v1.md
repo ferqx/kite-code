@@ -2092,6 +2092,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原消息复制和标题栏双击缩放的宿主回调已接正式 Native，复用原 SessionPage／Conversation 资格与完整正文，不从浏览器替身推导系统剪贴板效果。原 1 MiB UTF-8 限制、准确窗口／frame 和零业务 caller 保持；局部 DOM 与源码外 macOS 窗口范围归[窗口回调进度](unified-agent-refactor-v1-progress.md#2026-10-09原消息复制与标题栏缩放)。原全部页面／封存恢复组合、installed 维护恢复、资源退出、独立迁移审查、最终回归与旧路径退役仍按原依赖推进，37能力partial／wholeV13=false。
 
+原二十秒退出收尾与紧急退出流程已复用原函数接到正式 Main，完整活动检查沿原两秒期限，只读撤销所属 GET，未知时默认保留服务。关闭／activate 和正常退出仍沿当前唯一清理；原测试、源码外窗口与有限完成通知 fault 的准确范围归[退出迁移进度](unified-agent-refactor-v1-progress.md#2026-10-09原窗口关闭与退出收尾)。这不代证保存启动诊断、完整封存恢复或全部 installed 故障；继续原 PC 主线及后序资源／独立审查／最终退役依赖，37能力partial／wholeV13=false。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

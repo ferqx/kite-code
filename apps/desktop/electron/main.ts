@@ -14,6 +14,7 @@ import { registerNativeIpc, registerNativeThemeIpc, registerNativeWindowIpc } fr
 import { spawnNodePairedChild } from './node-process';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
+import { inspectNativeQuitWork, settleDesktopQuit } from './quit-settlement';
 import { assertNativeSqliteEngine } from './sqlite-engine';
 
 declare const __KITE_DESKTOP_NATIVE_ASSETS__: unknown;
@@ -54,6 +55,7 @@ app.setName('kite-native');
 let window: BrowserWindow | undefined, caller: NativeCaller | undefined;
 let opening: Promise<NativeCaller> | undefined;
 let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
+let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
 let privateAccess: DesktopProfileAccess | undefined;
 let artifactAccess: { close(): void }[] = [];
@@ -106,7 +108,10 @@ async function openCaller(): Promise<NativeCaller> {
       profile,
       entrypoint: assets.serviceEntrypoint,
       executable: assets.bunExecutable,
-      spawnChild: spawnNodePairedChild,
+      spawnChild(command, options) {
+        ownedPairedChild = spawnNodePairedChild(command, options);
+        return ownedPairedChild;
+      },
       instanceId: crypto.randomUUID(),
       buildId: assets.buildId,
       apiMajor: assets.apiMajor,
@@ -271,8 +276,14 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (quitting) return;
   quitting = true;
+  if (window && !window.isDestroyed()) {
+    window.show();
+    window.focus();
+  }
   void (async () => {
-    const active = caller ? await caller.hasActiveWork().catch(() => true) : !!opening;
+    const active = caller
+      ? await inspectNativeQuitWork((signal) => caller!.hasActiveWork(signal), 2000)
+      : !!opening;
     if (active) {
       const result = await dialog.showMessageBox(window!, {
         type: 'warning',
@@ -286,13 +297,27 @@ app.on('before-quit', (event) => {
         return;
       }
     }
-    await opening?.catch(() => {});
-    await caller?.close();
-    privateData?.close();
-    privateAccess?.close();
-    await paired?.close();
-    for (const lease of artifactAccess.reverse()) lease.close();
-    artifactAccess = [];
+    const outcome = await settleDesktopQuit({
+      async closeService() {
+        await opening?.catch(() => {});
+        await caller?.close();
+        privateData?.close();
+        privateAccess?.close();
+        await paired?.close();
+        if (paired && (await paired.exited) !== 0) throw Error('native_service_cleanup_unverified');
+        for (const lease of artifactAccess.reverse()) lease.close();
+        artifactAccess = [];
+      },
+      confirmForceExit: () => showQuitWarning(true),
+      warnFailedCleanup: async () => {
+        await showQuitWarning(false);
+      },
+      waitMs: 20000,
+    });
+    if (outcome === 'force') {
+      forceExit();
+      return;
+    }
     exitAllowed = true;
     app.quit();
   })().catch(() => {
@@ -300,3 +325,32 @@ app.on('before-quit', (event) => {
     dialog.showErrorBox('服务结果待核实', '无法确认清理完成；没有将未知结果标记为成功。');
   });
 });
+
+async function showQuitWarning(stillWaiting: boolean): Promise<boolean> {
+  const options = {
+    type: 'warning' as const,
+    title: stillWaiting ? '服务仍在收尾' : '服务收尾未正常完成',
+    message: stillWaiting
+      ? '可以继续等待，或强制退出 kite。'
+      : 'kite 无法确认服务已安全收尾，仍可退出应用。',
+    detail: '强制退出可能中断正在进行的任务。下次启动后请检查会话和文件结果。',
+    buttons: stillWaiting ? ['强制退出', '继续等待'] : ['退出应用'],
+    defaultId: stillWaiting ? 1 : 0,
+    cancelId: stillWaiting ? 1 : 0,
+    noLink: true,
+  };
+  const result =
+    window && !window.isDestroyed()
+      ? await dialog.showMessageBox(window, options)
+      : await dialog.showMessageBox(options);
+  return result.response === 0;
+}
+
+function forceExit() {
+  try {
+    ownedPairedChild?.kill('SIGKILL');
+  } finally {
+    exitAllowed = true;
+    app.exit(1);
+  }
+}

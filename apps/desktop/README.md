@@ -34,6 +34,14 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 
 [Main 端口测试](test/native-window-ipc.test.ts)核原 Unicode／换行、UTF-8 边界、准确 frame、宿主失败、连接失败及零 caller；[实际 Native DOM](test/isolated/native-window-actions-dom.test.tsx)核原 header 过滤、双栏回调和失败时草稿，原[轮次 DOM](test/isolated/native-transcript-dom.test.tsx)保全文复制门禁。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)首次／冷启动以实际 Main 剪贴板读取核准确完整正文，浏览器 fallback 明确失败；测试的[剪贴板保护进程](test/native-clipboard-guard.fixture.jxa)仅在内存保留原各格式字节，stdin 关闭时恢复，不导出用户内容。header 的 DOM 事件验证真实 BrowserWindow 缩放，不代证物理鼠标双击或窗口拖拽；完整 PC 资格仍另核。准确输入、执行结果与未验范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原消息复制与标题栏缩放)。
 
+## 原窗口关闭与退出收尾
+
+[Main](electron/main.ts)保留关闭窗口时隐藏、activate 时显示并聚焦的现有行为，阅读、草稿和所属 Service 不因此停止。明确退出先从完整 Session 目录／View 只读核活动或未知执行；原两秒检查上限沿 [inspectNativeQuitWork](electron/quit-settlement.ts)接当前 NativeCaller，只 abort 本次检查 GET。失败或超时按未知工作提示，默认保留服务，取消退出后可继续原页面；检查不提交业务或重发任务。
+
+原 [settleDesktopQuit](electron/quit-settlement.ts)函数逐字迁入，Main 沿现有唯一清理顺序关闭原 caller、私有数据／使用权和配对 Service，另核实际 Service 退出为零后才释放制品使用权；launcher close 返回不代证正常退出。收尾只启动一次；超过原二十秒后提供“继续等待／强制退出”，默认继续等待。清理失败先说明结果待核实，再提供退出。明确紧急退出只对 Main 当前直接创建的配对 child 句柄发 SIGKILL，随后 app.exit(1)；不从 PID／目录发现任意进程，也不把未知效果改写为成功。普通重复退出不另开清理，业务／私有格式与公共协议保持。
+
+原四项[收尾测试](test/quit-settlement.test.ts)逐字迁入，保正常、失败、等待强退和继续等待后完成；[实际 caller 测试](test/native-caller.test.ts)核检查的同一 signal 传到完整目录与 View、超时撤销所属读取及零写。[默认源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)保全部原业务、冷读和双锁收尾，另在同一候选以[退出 driver](test/native-quit-electron.fixture.ts)核关闭／激活、SIGSTOP 实际 Service 时两秒未知确认与保留草稿，以及原二十秒警告、明确强退、实际 Service SIGKILL 后的异常收尾提示、Main 非零退出和所属双锁释放。长等待使用夹具扣住所属 Node adapter 完成通知，生产候选／Service 字节保持；原生确认的响应来自有限 dialog port，不宣称 OS 对话框人工点击或真实 Service 全故障资格。准确输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原窗口关闭与退出收尾)。
+
 ## 原文件变更面板与编辑器
 
 [NativeFileChanges](src/native-file-changes.tsx)将原 [FileChanges / FileDiff](../../packages/ui/src/desktop/FileChanges.tsx)接到 SessionPage 的“文件变更”入口，复用右栏、行号、高亮、展开与焦点行为。它只在面板打开后扫描当前已读完整历史的工具消息，每批32项；展开一项才读取原结果正文。目录扫描与单项 GET 各有自己的 read ID；折叠、关闭、切换会话、detach 或 history epoch 更换只释放相应读取，不取消执行。会话工具与文件变更切换时关闭原面板，RightSidebar 按用途保独立组件身份，避免旧 Tabs 选择遮住新内容；拥有读取的 Native 内容关闭即卸载，不在收起栏内保活。

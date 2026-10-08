@@ -3014,3 +3014,17 @@ bounded recon 本逻辑轮一次派发返回 `agent thread limit reached`；没�
 本轮原格式失败保留于 `format-20261009.log`：新增夹具在 finally 内抛恢复错误，违反 noUnsafeFinally，已移到 finally 后，保原清理与错误；修正后 `format-ready` actual0 才启动依赖验证。现有 Native IPC void union warning 与原 fragment info 保持，未使用 unsafe 自动修复。无产品测试失败或预算扩张。
 
 本逻辑轮 bounded 原 App callback 只读核对一次派发返回 `agent thread limit reached`，无新子 Agent 结果或写入，Root 自检不计独立审查。剩余退出依赖仍按顺序：①原 PC 剩余页面／入口与全部封存恢复组合核对；②必要 installed 维护恢复与已发布版本样本；③macOS 原 RSS／八轮稳定性和完整资源退出；④§35能力与完整独立迁移审查；⑤前置完成后的完整回归、最终旧路径退役与重构后 Win／Linux Actions。37能力全 partial、wholeV13=false、Goal active。保宿主 Shell 与原 PC 复用，AGENTS.md／bun.lock 原 SHA 不变且不暂存；Root 唯一 Git owner，仅本地 stage／commit，无push／PR／发布／Actions dispatch。
+
+## 2026-10-09：原窗口关闭与退出收尾
+
+上一轮原复制与标题栏缩放已本地提交，属于 progress。本轮从 durable `el-refactor`／HEAD `b60ba77016411ccdc8c5f6f5b6e355d57cf717e9`继续原 PC 调用迁移。源码已保关闭隐藏、activate、活动／未知退出确认，但缺原二十秒收尾选择，退出活动查询还可能一直等服务。现逐字迁入原 settleDesktopQuit 和四项测试，Main 接既有唯一清理与当前直接创建的配对 child 句柄；原两秒检查沿公共完整目录／View，仅 abort 所属 GET，未知默认保留。继续等待不再开清理，明确紧急退出为 app.exit(1)，不从 PID／目录发现其他进程。配对 close 返回不代证正常退出，Main 另核 Service exit0；非零或清理失败先说明结果待核实，再明确退出。当前职责归[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)。原宿主行为迁移与直接句柄边界可由 owner 完整说明，无新的长期架构取舍，不另建重复 Note。
+
+必要验证适用于最终固定输入，macOS 26.7.1（25G241）arm64、Bun1.4.2、Electron44.3.0／Playwright1.63.0：
+
+- `bun test --parallel=1 --max-concurrency=1 apps/desktop/test/quit-settlement.test.ts apps/desktop/test/native-caller.test.ts`，`/private/tmp/kite-pc-quit-local-qualified-20261009.log` actual0，16pass／103断言／0.700秒。原函数前缀与原四项测试逐字一致，保正常／失败／等待强退／继续等待后完成。实际 caller 新检查同一 signal 到完整目录和 View，超时撤销所属读、返回未知、零业务写；原205项完整目录、活动／失败、观察和冷查询断言保持。
+- 同一命令对完整原 `apps/desktop/test/isolated/native-bundle.test.ts`，`/private/tmp/kite-pc-quit-window-qualified-20261009.log` actual0，1pass／10Bun断言及全部 Node driver／83.86秒。先保原首次／冷启动、准备／草稿、任务、审批1／Provider3、目录／缓存、工具／Files失败、文件侧栏／编辑器、原复制／主题、正常退出与 Main 强杀双锁／所属终端断言；原剪贴板恢复回执保持。随后同一不可变候选的退出 driver 实际 close／activate 保原草稿和 Service，SIGSTOP 所属 Service 后原两秒到未知确认，默认保留／取消后继续。扣住所属 Node child 完成通知后，实际二十秒到默认继续等待的原警告，明确响应强退后 Main exit1、所属 Service 终态与双 EX 可取；该 finite port fault 不冒称真实 Service 全等待故障。再冷启动实际 SIGKILL Service，非零状态不判正常收尾，原失败提示明确退出后 Main exit1／双锁释放／零模型重放。dialog 响应来自有限 port，不代证 OS 原生窗口人工点击。原120秒整例／各45秒driver／10秒页面预算不变，新增警告观察30秒对应原20秒机制，没有用删断言或延长原期限通过。
+- Desktop types 对最终输入 actual0，`/private/tmp/kite-pc-quit-types-qualified-20261009.log`。边界／workspace／API／test owner／plan-evidence／只读格式均 actual0；文档／all影响／diff按最终文档核，根 typecheck与正常提交 hooks独立执行。七项代码／fixture在启动依赖验证前固定于 `/private/tmp/kite-pc-quit-test-input-20261009.json`，窗口结束复核全等；所属 candidate、原driver／quit-driver及clipboard guard进程最终0，`/private/tmp/kite-pc-quit-processes-final-20261009.json`。完整冻结与本地交付归 `/private/tmp/kite-pc-quit-owned-20261009.json`和 `/private/tmp/kite-pc-quit-delivery-20261009.json`。本片不重跑已闭合 TUI／Chrome或全阶段 default。
+
+前次 `/private/tmp/kite-pc-quit-window-20261009.log` actual0／1pass／10Bun断言及driver／78.53秒，仅适用于未补退出码检查和真实非零窗口的旧输入。Root 在尚未核定该窗口结果时补 Main 实际 Service 退出检查，改变验证输入；该结果不作最终通过证明。已重新固定所有源码／fixture并执行上述完整窗口，原初次16／103与type通过同样不替代最终输入。所有旧证据保留，无产品红、断言删除、跳过或预算扩张。
+
+本逻辑轮 bounded quit／startup 原入口只读核对一次派发返回 `agent thread limit reached`，无新子 Agent 结果或写入，Root 自检不计独立审查。剩余退出依赖按顺序最多五项：①原 PC 剩余入口与封存恢复组合，已核有效 Service 启动诊断保存入口仍未接；②必要 installed 维护恢复与已发布版本样本资格；③macOS 原 RSS／八轮稳定性和完整资源退出；④§35能力与完整独立迁移审查；⑤前置完成后的完整回归、最终旧路径退役及重构后 Win／Linux Actions。37能力全partial／wholeV13=false／Goal active，继续复用原 PC、保宿主 Shell。Root 唯一 Git owner，AGENTS.md／bun.lock 原 SHA不变且不暂存；仅本地 stage／commit，无push／PR／发布／Actions dispatch。

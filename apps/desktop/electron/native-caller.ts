@@ -1967,10 +1967,10 @@ export class NativeCaller {
     this.check(generation);
     return result;
   }
-  async hasActiveWork() {
-    const sessions = await this.client.listAllSessions();
+  async hasActiveWork(signal?: AbortSignal) {
+    const sessions = await this.client.listAllSessions({ signal });
     for (const session of sessions) {
-      const view = await this.client.getView(session.id);
+      const view = await this.client.getView(session.id, { signal });
       if (
         view.runs.some((run) => run.isActive) ||
         view.executions.some((execution) =>

@@ -166,6 +166,8 @@ Native 原主题属于窗口 Host。preload 的固定主题端口只传暗／亮
 
 Native 原消息复制与标题栏缩放同属窗口 Host。preload 只提供固定文本复制／无参数缩放端口，Main 在宿主动作前核当前窗口、准确主 frame、renderer URL 和闭合 payload；复制保原 1 MiB UTF-8 上限，超限失败、不截断，缩放只按实际窗口状态切换。端口不取得 Store／Session／Service 或执行 authority，正文是否完整及当前可复制仍归原共享 UI／原 reader。失败不重发业务或丢弃草稿；实现与分层验证归[Native owner](../../apps/desktop/README.md#原消息复制与标题栏缩放)。
 
+Native 明确退出的活动检查只读完整公共目录与 View；两秒超时仅撤销本次 GET，不能把未回答当无活动，也不撤销其他观察。原窗口隐藏／激活不停止 Service。原二十秒收尾决定由 Main 持有，继续等待复用同一清理 promise；紧急退出只调用当前配对 child 的直接进程句柄，不发现其他 PID，不给卸载或普通读取强杀资格。配对 launcher close 与实际退出状态分别核实，非零退出进入异常收尾提示；未知执行保持原事实，正常清理顺序和双层制品使用权不放宽；实现与有限故障／实际窗口范围见[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)。
+
 ## 授权观察与执行资格
 
 Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准确来源／展示关系和 EOF；它不建立新的原卡回答观察。完整历史附件与当前审批分别持有 reader／loaded proof，前者不能授权后者；关闭、刷新或切范围只释放所属读取。记录与受理、执行成功分开，当前接口的变化拒绝与恢复限制归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)。

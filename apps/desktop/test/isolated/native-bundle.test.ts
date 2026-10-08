@@ -226,6 +226,56 @@ test.skipIf(process.platform !== 'darwin')(
         clearTimeout(timer);
       }
       expect(requests).toBe(3);
+      const quitFixture = join(root, 'quit-driver.ts');
+      writeFileSync(
+        quitFixture,
+        readFileSync(
+          resolve(import.meta.dir, '../native-quit-electron.fixture.ts'),
+          'utf8',
+        ).replace(
+          "import { _electron } from 'playwright';",
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+        ),
+      );
+      const quitBuild = await Bun.build({
+        entrypoints: [quitFixture],
+        target: 'node',
+        format: 'esm',
+        packages: 'external',
+        outdir: root,
+        naming: 'quit-driver.js',
+      });
+      expect(quitBuild.success).toBe(true);
+      driver = Bun.spawn(
+        [
+          realpathSync(Bun.which('node')!),
+          join(root, 'quit-driver.js'),
+          moved,
+          home,
+          provider.url.href.replace(/\/$/, ''),
+        ],
+        {
+          cwd: home,
+          env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+          stdout: 'pipe',
+          stderr: 'pipe',
+          stdin: 'ignore',
+        },
+      );
+      const quitOut = new Response(driver.stdout).text(),
+        quitErr = new Response(driver.stderr).text(),
+        quitTimer = setTimeout(() => driver!.kill('SIGKILL'), 45000);
+      try {
+        const code = await driver.exited,
+          stdout = await quitOut,
+          stderr = await quitErr;
+        if (code) console.error({ stdout, stderr });
+        else console.log(stdout);
+        expect(code).toBe(0);
+      } finally {
+        clearTimeout(quitTimer);
+      }
+      expect(requests).toBe(3);
       expect(readFileSync(join(home, 'old-user-data/old-database'), 'utf8')).toBe(
         'must remain independent',
       );
