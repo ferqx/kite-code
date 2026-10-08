@@ -33,9 +33,14 @@ function parse(value: unknown) {
     return fail();
   }
 }
-function session(db: SqliteOperations, id: string, subjectId: string): Row {
+function session(db: SqliteOperations, id: string, subjectId: string, historical = false): Row {
   const row = db.row('SELECT * FROM session WHERE id=?', id);
-  if (!row || row.delete_requested || row.parent_id !== null) return fail();
+  if (
+    !row ||
+    row.parent_id !== null ||
+    (row.delete_requested && (!historical || db.session(row).historyPurgedAt !== undefined))
+  )
+    return fail();
   const creator = db.row("SELECT * FROM command WHERE session_id=? AND kind='session.create'", id);
   if (!creator || creator.subject_id !== subjectId || creator.status !== 'applied') return fail();
   return row;
@@ -103,7 +108,7 @@ export function forkRecordSources(db: SqliteOperations, input: Input): ForkRecor
       ancestorIds.has(fork.sourceSessionId)
     )
       return fail();
-    const source = session(db, fork.sourceSessionId, input.subjectId);
+    const source = session(db, fork.sourceSessionId, input.subjectId, true);
     if (source.workspace_id !== current.workspace_id) return fail();
     const snapshot = db.row(
       "SELECT request_json FROM context_snapshot WHERE id=? AND session_id=? AND kind='selection'",
@@ -135,7 +140,7 @@ export function forkRecordSources(db: SqliteOperations, input: Input): ForkRecor
     if (visiting.has(identity)) return fail();
     if (records.has(identity)) return;
     if (records.size >= 64) throw new AgentError('dispatch_read_set_invalid');
-    const target = session(db, sessionId, input.subjectId);
+    const target = session(db, sessionId, input.subjectId, sessionId !== input.sessionId);
     if (target.workspace_id !== current.workspace_id) return fail();
     const row = db.row(
       "SELECT * FROM extension_record WHERE extension_id=? AND scope_kind='session' AND scope_id=? AND key=?",
@@ -188,7 +193,7 @@ export function forkRecordSources(db: SqliteOperations, input: Input): ForkRecor
       return fail();
     if (p.mode === 'copy' && (p.sources.length !== 1 || object(p.sources[0]).key !== key))
       return fail();
-    const source = session(db, p.sourceSessionId, input.subjectId);
+    const source = session(db, p.sourceSessionId, input.subjectId, true);
     if (source.workspace_id !== current.workspace_id) return fail();
     const command = db.row(
       "SELECT * FROM command WHERE id=? AND session_id=? AND kind='session.create'",

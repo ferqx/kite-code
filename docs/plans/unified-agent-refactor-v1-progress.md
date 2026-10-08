@@ -2735,3 +2735,25 @@ Root唯一Git owner；无关 AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e9
 
 
 当前收尾强制门禁actual0：Root与八workspace typecheck（types-delivery）、边界（boundary）、精确八workspace（packages）、唯一生成API（api）、ownership、docs-final、scope=all impact、plan-evidence，日志完整前缀 `/private/tmp/kite-workspace-history-`、后缀 `-20261008.log`。源码与测试的最终只读Biome及正常Git hooks仍按冻结owned范围单独核验；完整阶段默认回归未在此增量运行，原退出门禁不放宽。本地交付冻结、原AGENTS保护与实际commit核验归 `/private/tmp/kite-workspace-history-delivery-20261008.json`，不以文档提前宣称整体或独立审查完成。
+
+## 2026-10-08：单会话离线清理与存活 Fork 来源保留
+
+durable HEAD `9000661be3ed7361d04b256d374f8409a778715f` 加本轮owned diff，沿原PC「删除当前会话」及同一公开GC继续实施。原SessionPage／Sidebar／Composer／设置布局仍复用kite-desktop，新增删除说明及既有清理状态槽位文案；不新建客户端或执行链。macOS保宿主Shell，Win／Linux按用户安排在重构后Actions验；无push／PR／dispatch／发布。
+
+单独删除的完整root组在宽限、全部tombstone、无活动／unknown／待核对工作时可清正文。闭合关系及实际Fork创建的typed来源边决定留存；空Message历史Fork仍保全部祖先。候选仅存连接内存TEMP表，保留向祖先传播；最后一个依赖也删除且符合条件后可一次清链。未结束／unknown组保Core完整bytes。与空间清理共用单SQL事务、原源证明、附件完整预检、secure_delete／checkpoint／VACUUM／WAL和排他Profile权，保原删除控制快照／receipt／digest／终态与其他空间登记。
+
+独立闭合 `sessionHistoryCollection@1` 映射root→清理时间，既有Session DTO `historyPurgedAt`优先返回原单组时间，后来空间清理不改写。没有新Core基线、公开HTTP请求或Native private格式。当前Fork namespace仍须未删除；原历史祖先tombstone允许读取未清理的sealed／record来源，原subject／Workspace／creator／receipt／selection／stamps仍核，已清理来源拒绝，不继承执行权或扩大普通reader。上述规则与原PC删除说明、产品手册、Fork／Store／维护owner、active和既有Note已同步。
+
+本轮实际证据：
+
+- GC原文件actual0／6pass／93assert，`/private/tmp/kite-session-history-gc-integration-20261008.log`。selected SQLite3.51.3，保原空间／CLI／hostile反例，新增单组unknown原bytes、live Fork空历史来源链保留、无关组清理、删除最后依赖后同批清3组、原delete receipt／控制快照／digest／迟到封锁、Workspace继续新建、后来空间清理仍保各组原时间；目标Core sentinel与无引用媒体清除，项目文件保留。只推进维护时钟，不改真实mtime／ctime。
+- Core原管理／Workspace／records／sealed Fork四文件actual0／45pass／533assert，`/private/tmp/kite-session-history-core-20261008.log`。新增真实两层Fork来源删除后读完整原Model input／output／媒体EOF及Message aliases，纯query不增cursor／Model／effect，删除源namespace及新Fork准入仍拒绝。其生产输入未在后续修改，复用此证据。
+- Native原管理／linked output／DOM三文件actual0／5pass／30assert，`/private/tmp/kite-session-history-native-neighbors-20261008.log`。原冻结单POST、切换后原GET、CAS／child／准确输出scope保持。既有Client生成DTO非负清理时间与GET-only合同输入未变，沿上一轮证据，不重复扩展故障矩阵。
+- 原源码外默认Native窗口actual0／1pass／73assert／70.946秒，`/private/tmp/kite-session-history-default-window-20261008.log`。原侧栏、真实任务／准确stop／252000B Unicode子详情、v15 A→B冷GET baseline和cursor151、空间未知1POST／显式原GET及同路径新UUID保持。三次所属Service普通退出后公开GC清1Workspace／6Session／5附件775263B，真实Node DB8与备份完整bytes、原Workspace receipt保持，Provider仍9，owned进程为空且两制品EX可再取。该窗口覆盖共用空间路径，单组清理由上面实际Runtime测试证明；没有冒称安装选择器GC或单组清理后的新冷窗口资格。
+- Root与八workspace typecheck actual0，`/private/tmp/kite-session-history-types-delivery-20261008.log`。boundary、八包、生成API、test ownership及docs／impact已通过；准确最终门禁与本地Git结果归 `/private/tmp/kite-session-history-delivery-20261008.json`。没有更改默认发现、scheduler、原业务预算或排除文件。
+
+真实失败仍保留：gc-second错误比较包含已清除request正文的完整Command返回，现核原receipt／控制快照／digest；gc-third新增fixture漏required permissions导致零Model，补正常公开端口并新增实际succeeded断言；gc-delivery错误期望现行删除准入码，改为既有session_not_found且仍核拒绝；fork-first误读不存在lineage字段，改核实际records的原Session集合。types首两轮分别指出unknown类型与新增fixture缺permissions／误取数组items，已修。原日志均在 `/private/tmp/kite-session-history-`，断言及5秒预算保持。
+
+新增资格探查 `/private/tmp/kite-session-history-window-20261008.log` 为actual1：原Native 17MiB管理窗口在进入Fork／删除前，等待轮次completed的原10秒期限失败，已见Model succeeded而页面保running并重复校准；原因尚未确定，不能直接归因RSS。临时追加的退出后单组维护断言未执行，已撤销这份追加、原测试及全部断言仍在默认图；不删原断言、不放宽预算、不排除该文件。这一红属于下列客户端稳定性缺口，默认完整阶段未重标通过。
+
+当前第一项增量已闭合Core单组清理与live Fork来源边界；剩余退出依赖四项：① installed维护／已发布前版样本与DB8回退；② macOS原RSS／八轮与全资源退出，及本次17MiB窗口刷新红；③ 完整迁移独立审查（本逻辑轮新Agent仅一次尝试、thread limit拒绝，Root核验不替代）；④ 前置闭合后的完整默认回归／旧路径最终退役和Win／Linux Actions。37能力仍partial、wholeV13=false、Goal active。Root唯一Git owner，无关AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258` 保持且不暂存；iteration_complete仅收束本增量，本地stage／commit沿原授权及正常hooks。

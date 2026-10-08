@@ -36,6 +36,8 @@ Fork 最终 SQL 在原实际 source group 已静止且没有 accepted work 时�
 
 aliases 按当前完整 selected Message 与每层真实 applied Fork receipt/selection/upper 重建，列出当前及所有真实中间祖先 ID/seq，不以 sourceIds 或 seq 单独推来源。getMessage(messageId) 只返回这些 exact alias 的原完整 Message 与新增有限 ordered parts（ordinal/kind/contentVersion/revision/value）；不是 foreign Session 列表。parts 上限 8192、完整返回 1MiB；无法完整返回则拒绝。全部原 Message/parts 摘要进入 binding。合法 User commandId 可与 Model executionId 相同，只有 actual assistant+Model 关系形成 Model 证明。未选中 Tool 的 readonly 后像证据不使它的 trigger 变为可选节点。
 
+当前namespace仍须为未删除root。准确历史祖先允许已tombstone但未清理的root，仍核原creator／subject／Workspace／receipt／selection和全部sealed stamps；来源删除不扩大一般reader或执行许可，来源已清理则拒绝。离线GC保留存活Fork依赖的整条来源链，合同见[维护owner](../../maintenance/README.md#显式无引用附件-gc)。
+
 projection 与 live observer 同 callback lifetime；闭合后及 inflight 晚回都不能交付来源值。Action prepare 自动收集三字段 forkSourceBindings，与旧 observer 共用最多 64 bindings、32KiB record/stamp/binding 预算；原 records 独立保最多 64。final owned dispatch SQL 重建 current anchor、完整 aliases 与 sealed immutable source proof，Ask 不刷新旧摘要。该 proof 不把信息阅读变为文件写、恢复、grant 或原义务的执行资格。1MiB graph/proof、最多 64 sources/refs 声明、8192 stamps 与 64 层祖先保持 failclosed，不截断。
 
 [sealed source 实际测试](../../../test/isolated/storage/fork-readonly-sources.test.ts)验证两层 Fork、null/0 后像 evidence、Tool 自动 Model/full reader、原 head 后变不扩大读取、精确媒体子集/EOF、subject/namespace/伪 anchor、legal User ID 碰撞、callback/inflight 关闭、真实 Ask 正例与 drift、最终 SQL 的 Execution/Model/ref/anchor 变化零效果，以及 accepted/unknown group 与声明预算拒绝、sealed inherited 来源和当前新 Model 的混合封存。它证明通用只读来源合同，完整 Files checkpoint/Fork 产品链不在此测试范围。

@@ -109,7 +109,7 @@ import { manageSession } from './session-management-operations';
 import {
   readWorkspaceRemoval,
   removeWorkspace,
-  workspaceHistoryCollectedAt,
+  sessionHistoryCollectedAt,
   workspaceRemoval,
 } from './workspace-removal';
 
@@ -477,9 +477,10 @@ export class SqliteOperations {
     const authority =
       row.parent_id === null ? row : this.row('SELECT * FROM session WHERE id=?', row.root_id!)!;
     const historyPurgedAt = row.delete_requested
-      ? workspaceHistoryCollectedAt(
+      ? sessionHistoryCollectedAt(
           this.row('SELECT metadata_json FROM workspace WHERE id=?', row.workspace_id!)!
             .metadata_json,
+          String(row.root_id),
         )
       : null;
     return {

@@ -173,6 +173,9 @@ export function NativeSessionPanel({
                     />
                     我确认删除此会话；服务请求取消并继续收尾，工作区文件不受影响
                   </label>
+                  <p>
+                    删除先隐藏会话并请求停止任务。退出客户端后的离线维护可在宽限期后清理历史正文；未结束或结果未知的执行、存活分支依赖的来源会继续保留。
+                  </p>
                   <button
                     type="button"
                     disabled={pending || unresolved || !confirmed}

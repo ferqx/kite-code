@@ -461,6 +461,38 @@ test('selected Message aliases include every actual ancestor and bind full parts
     await f.close();
   }
 });
+test('a live Fork keeps exact sealed and record sources after its ancestors are deleted, without reviving their authority', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.read();
+    for (const id of ['s', 'f1']) {
+      const source = (await f.store.getSession(id))!;
+      await f.runtime.deleteSession({
+        ...f.base,
+        sessionId: id,
+        commandId: `delete-${id}`,
+        ifRevision: source.controlRevision,
+      });
+    }
+    expect((await f.read()).proof).toEqual(original.proof);
+    const records = await f.store.readForkRecordSources({
+      ...f.base,
+      sessionId: 'f2',
+      extensionId: 'fixture',
+      localKey: 'bundle',
+    });
+    expect(records.records.map((entry) => entry.sessionId)).toEqual(['f2', 'f1', 's']);
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    await f.query(); // Full original Model input/output, media EOF and all Message aliases.
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(f.counts()).toEqual({ calls: 2, effects: 0 });
+    expect(await code(f.read('s'))).toBe('fork_source_unverifiable');
+    expect(await code(f.read('f1'))).toBe('fork_source_unverifiable');
+    expect(await code(f.fork('s', 'late'))).toBe('session_not_found');
+  } finally {
+    await f.close();
+  }
+});
 test('foreign subject namespace and forged anchor are unavailable', async () => {
   const f = await fixture();
   try {

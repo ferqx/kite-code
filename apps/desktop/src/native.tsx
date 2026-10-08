@@ -1889,7 +1889,7 @@ export function NativeDesktop() {
           <>
             <p role="status">
               {selection.session.historyPurgedAt !== undefined
-                ? '此空间的历史正文已由离线维护清理；原移除回执和执行边界仍保留。'
+                ? '此会话的历史正文已由离线维护清理；原操作回执和执行边界仍保留。'
                 : historyState.phase === 'complete'
                   ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
                   : historyState.phase === 'loading'

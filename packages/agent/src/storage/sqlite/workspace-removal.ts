@@ -5,6 +5,37 @@ import { AgentError, type Json, type WorkspaceRemoval } from '../types';
 import type { SqliteOperations } from './operations';
 
 type Input = Parameters<Store['removeWorkspace']>[0];
+/** Root groups collected independently of a later Workspace removal. */
+export function sessionHistoryCollections(metadata: unknown): Readonly<Record<string, number>> {
+  const value = JSON.parse(String(metadata)) as { sessionHistoryCollection?: unknown };
+  if (!Object.hasOwn(value, 'sessionHistoryCollection')) return {};
+  const marker = value.sessionHistoryCollection as {
+    version?: unknown;
+    roots?: Record<string, unknown>;
+  };
+  if (
+    !marker ||
+    Object.keys(marker).sort().join(',') !== 'roots,version' ||
+    marker.version !== 1 ||
+    !marker.roots ||
+    typeof marker.roots !== 'object' ||
+    Array.isArray(marker.roots) ||
+    !Object.keys(marker.roots).length ||
+    Object.entries(marker.roots).some(
+      ([id, at]) =>
+        !/^[A-Za-z0-9_-]{1,128}$/.test(id) ||
+        typeof at !== 'number' ||
+        !Number.isSafeInteger(at) ||
+        at < 0,
+    )
+  )
+    throw new AgentError('session_history_invalid');
+  return marker.roots as Record<string, number>;
+}
+export function sessionHistoryCollectedAt(metadata: unknown, rootId: string): number | null {
+  const roots = sessionHistoryCollections(metadata);
+  return Object.hasOwn(roots, rootId) ? roots[rootId]! : workspaceHistoryCollectedAt(metadata);
+}
 /** Collection never changes the original removal receipt or its cancellation evidence. */
 export function workspaceHistoryCollectedAt(metadata: unknown): number | null {
   const value = JSON.parse(String(metadata)) as { historyCollection?: unknown };

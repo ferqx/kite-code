@@ -61,13 +61,13 @@ const finite = (value: unknown) => {
   )
     throw new AgentError('fork_source_budget_exceeded');
 };
-function session(db: SqliteOperations, id: string, subject: string) {
+function session(db: SqliteOperations, id: string, subject: string, historical = false) {
   const s = db.row('SELECT * FROM session WHERE id=?', id);
   const c = db.row("SELECT * FROM command WHERE session_id=? AND kind='session.create'", id);
   if (
     !s ||
     s.parent_id !== null ||
-    s.delete_requested ||
+    (s.delete_requested && (!historical || db.session(s).historyPurgedAt !== undefined)) ||
     c?.subject_id !== subject ||
     c.status !== 'applied'
   )
@@ -225,7 +225,7 @@ export function assertReadonlyProof(
     if (ids.has(s.executionId) || !Array.isArray(s.artifactRefs) || s.artifactRefs.length > 64)
       return fail();
     ids.add(s.executionId);
-    const ss = session(db, s.sessionId, scope.subjectId),
+    const ss = session(db, s.sessionId, scope.subjectId, true),
       current = session(db, scope.sessionId, scope.subjectId);
     if (ss.workspace_id !== current.workspace_id) return fail();
     const e = db.row(
@@ -381,7 +381,7 @@ function anchor(db: SqliteOperations, scope: Scope, localKey: string) {
     receipt.sourceUpperSeq !== p.sourceUpperSeq
   )
     return fail();
-  const source = session(db, String(p.sourceSessionId), scope.subjectId);
+  const source = session(db, String(p.sourceSessionId), scope.subjectId, true);
   if (source.workspace_id !== current.workspace_id) return fail();
   const proof = p.readonlySources as ForkReadonlyProof;
   if (!proof) return fail();
@@ -562,7 +562,7 @@ export function forkSourceProjection(
       seen.has(f.sourceSessionId)
     )
       return fail();
-    const source = session(db, f.sourceSessionId, input.subjectId);
+    const source = session(db, f.sourceSessionId, input.subjectId, true);
     if (source.workspace_id !== current.workspace_id) return fail();
     const snap = db.row(
       "SELECT request_json FROM context_snapshot WHERE id=? AND session_id=? AND kind='selection'",

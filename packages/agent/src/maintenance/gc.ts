@@ -28,9 +28,13 @@ export interface ProfileGarbageCollection {
   outcome: 'collected';
   gracePeriodMs: number;
   purgedWorkspaces: number;
+  purgedSessionGroups: number;
   purgedSessions: number;
   retainedRecentWorkspaces: number;
   retainedUnsettledWorkspaces: number;
+  retainedRecentSessionGroups: number;
+  retainedUnsettledSessionGroups: number;
+  retainedReferencedSessionGroups: number;
   scannedFiles: number;
   retainedReferenced: number;
   retainedRecent: number;
@@ -157,9 +161,13 @@ export async function collectProfileGarbage(
       outcome: 'collected',
       gracePeriodMs,
       purgedWorkspaces: 0,
+      purgedSessionGroups: 0,
       purgedSessions: 0,
       retainedRecentWorkspaces: 0,
       retainedUnsettledWorkspaces: 0,
+      retainedRecentSessionGroups: 0,
+      retainedUnsettledSessionGroups: 0,
+      retainedReferencedSessionGroups: 0,
       scannedFiles: 0,
       retainedReferenced: 0,
       retainedRecent: 0,
@@ -186,17 +194,20 @@ export async function collectProfileGarbage(
       const plan = planHistoryCollection(db, now - gracePeriodMs);
       result.retainedRecentWorkspaces = plan.retainedRecentWorkspaces;
       result.retainedUnsettledWorkspaces = plan.retainedUnsettledWorkspaces;
+      result.retainedRecentSessionGroups = plan.retainedRecentSessionGroups;
+      result.retainedUnsettledSessionGroups = plan.retainedUnsettledSessionGroups;
+      result.retainedReferencedSessionGroups = plan.retainedReferencedSessionGroups;
       // The entire namespace is checked before either SQL bodies or artifact files are removed.
       for (const entry of entries(join(access.profilePath, 'blobs'))) {
         input.signal?.throwIfAborted();
         closePrivate(openPrivate(entry.path, entry.hash !== null));
         await checkpoint(input.signal);
       }
-      if (!plan.workspaces.length && !plan.previouslyCollected)
+      if (!plan.workspaces.length && !plan.sessionGroups.length && !plan.previouslyCollected)
         await collectArtifacts(db, access.profilePath, result, now, input.signal);
       return plan;
     });
-    if (plan.workspaces.length || plan.previouslyCollected) {
+    if (plan.workspaces.length || plan.sessionGroups.length || plan.previouslyCollected) {
       // The unchanged-source snapshot proof has finished before original SQL may be mutated.
       input.signal?.throwIfAborted();
       const db = openMaintenanceDatabase(access.databasePath);
@@ -208,7 +219,11 @@ export async function collectProfileGarbage(
           throw new MaintenanceError('backup_content_changed');
         collectHistory(db, plan, now);
         result.purgedWorkspaces = plan.workspaces.length;
-        result.purgedSessions = plan.workspaces.reduce((n, w) => n + w.sessions, 0);
+        result.purgedSessionGroups = plan.sessionGroups.length;
+        result.purgedSessions = [...plan.workspaces, ...plan.sessionGroups].reduce(
+          (n, w) => n + w.sessions,
+          0,
+        );
       } finally {
         db.close(true);
       }

@@ -445,93 +445,284 @@ test.skipIf(process.platform === 'win32')(
   },
 );
 
+for (const scope of ['workspace', 'session'] as const)
+  test.skipIf(process.platform === 'win32')(
+    `grace never purges an unknown Runtime Execution and its exact recovery evidence after ${scope} deletion`,
+    async () => {
+      const f = await fixture();
+      const originalNow = Date.now;
+      const finish: ModelEvent = {
+        type: 'finish',
+        reason: 'stop',
+        usage: { inputTokens: 1, outputTokens: 1 },
+      };
+      const runtime = createRuntime({
+        store: f.store,
+        model: createFixedModel([
+          [
+            { type: 'tool_call', id: 'uncertain', name: 'fixture.effect', arguments: '{}' },
+            { ...finish, reason: 'tool_calls' },
+          ],
+          [finish],
+        ]),
+        permissions: {
+          async authorize() {
+            return { allowed: true, revision: '1' };
+          },
+        },
+        extensions: [
+          {
+            id: 'fixture',
+            version: '1',
+            apiMajor: 1,
+            tools: [
+              {
+                id: 'fixture.effect',
+                version: '1',
+                description: 'Actual uncertain adapter evidence',
+                inputSchema: { type: 'object' },
+                async execute() {
+                  return {
+                    outcome: 'outcome_unknown',
+                    content: 'unconfirmed effect: retain original evidence',
+                  };
+                },
+              },
+            ],
+          },
+        ],
+      });
+      let peer: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+      try {
+        await runtime.submitCommand({
+          expectedStoreId: f.storeId,
+          subjectId: 'user',
+          sessionId: 's',
+          commandId: 'unknown-work',
+          request: { kind: 'run.start', content: 'retain original uncertain input' },
+        });
+        await runtime.waitForCommand('unknown-work', { timeoutMs: 5000 });
+        const uncertain = (await f.store.getView('s')).executions.find(
+          (e) => e.status === 'outcome_unknown',
+        )!;
+        expect(uncertain).toBeDefined();
+        if (scope === 'workspace')
+          await runtime.removeWorkspace({
+            expectedStoreId: f.storeId,
+            subjectId: 'user',
+            workspaceId: 'w',
+            commandId: 'remove',
+          });
+        else
+          await runtime.deleteSession({
+            expectedStoreId: f.storeId,
+            subjectId: 'user',
+            sessionId: 's',
+            commandId: 'delete',
+            ifRevision: (await f.store.getSession('s'))!.controlRevision,
+          });
+        const original = await f.store.getView('s');
+        await runtime.close();
+        await f.store.close();
+        const core = readFileSync(join(f.path, 'core.db'));
+        Date.now = () => originalNow() + 8 * 86400000;
+        expect(
+          await collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
+        ).toMatchObject({
+          purgedWorkspaces: 0,
+          retainedUnsettledWorkspaces: scope === 'workspace' ? 1 : 0,
+          retainedUnsettledSessionGroups: scope === 'session' ? 1 : 0,
+          retainedReferenced: 1,
+        });
+        expect(readFileSync(join(f.path, 'core.db'))).toEqual(core);
+        Date.now = originalNow;
+        peer = await openSqliteStore(f.profile);
+        const retained = await peer.getView('s');
+        expect(retained.messages).toEqual(original.messages);
+        expect(retained.executions).toEqual(original.executions);
+        expect(retained.runs).toEqual(original.runs);
+        expect(retained.snapshotCursor).toBe(original.snapshotCursor);
+        expect((await peer.getExecution(uncertain.id))!.status).toBe('outcome_unknown');
+      } finally {
+        Date.now = originalNow;
+        await peer?.close();
+        await runtime.close();
+        await f.store.close();
+        rmSync(f.root, { recursive: true, force: true });
+      }
+    },
+  );
+
 test.skipIf(process.platform === 'win32')(
-  'grace never purges an unknown Runtime Execution and its exact recovery evidence',
+  'single-group GC preserves live Fork ancestry, then collects the deleted chain together and retains the original delete receipt',
   async () => {
     const f = await fixture();
     const originalNow = Date.now;
-    const finish: ModelEvent = {
-      type: 'finish',
-      reason: 'stop',
-      usage: { inputTokens: 1, outputTokens: 1 },
-    };
+    const sentinel = 'PURGE-SINGLE-GROUP-HISTORY-';
+    let calls = 0;
     const runtime = createRuntime({
       store: f.store,
-      model: createFixedModel([
-        [
-          { type: 'tool_call', id: 'uncertain', name: 'fixture.effect', arguments: '{}' },
-          { ...finish, reason: 'tool_calls' },
-        ],
-        [finish],
-      ]),
+      model: {
+        async *stream() {
+          calls++;
+          yield { type: 'text_delta', text: sentinel.repeat(6000) };
+          yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+        },
+      },
+      artifacts: createArtifactStore({ profile: f.profile, store: f.store }),
       permissions: {
         async authorize() {
           return { allowed: true, revision: '1' };
         },
       },
-      extensions: [
-        {
-          id: 'fixture',
-          version: '1',
-          apiMajor: 1,
-          tools: [
-            {
-              id: 'fixture.effect',
-              version: '1',
-              description: 'Actual uncertain adapter evidence',
-              inputSchema: { type: 'object' },
-              async execute() {
-                return {
-                  outcome: 'outcome_unknown',
-                  content: 'unconfirmed effect: retain original evidence',
-                };
-              },
-            },
-          ],
-        },
-      ],
     });
     let peer: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+    const base = { expectedStoreId: f.storeId, subjectId: 'user' };
+    const deletion = async (sessionId: string) => {
+      const input = {
+        ...base,
+        sessionId,
+        commandId: `delete-${sessionId}`,
+        ifRevision: (await f.store.getSession(sessionId))!.controlRevision,
+      };
+      return { input, result: await runtime.deleteSession(input) };
+    };
     try {
       await runtime.submitCommand({
-        expectedStoreId: f.storeId,
-        subjectId: 'user',
+        ...base,
         sessionId: 's',
-        commandId: 'unknown-work',
-        request: { kind: 'run.start', content: 'retain original uncertain input' },
+        commandId: 'work',
+        request: { kind: 'run.start', content: sentinel.repeat(4000) },
       });
-      await runtime.waitForCommand('unknown-work', { timeoutMs: 5000 });
-      const uncertain = (await f.store.getView('s')).executions.find(
-        (e) => e.status === 'outcome_unknown',
-      )!;
-      expect(uncertain).toBeDefined();
-      await runtime.removeWorkspace({
-        expectedStoreId: f.storeId,
-        subjectId: 'user',
+      await runtime.waitForCommand('work', { timeoutMs: 5000 });
+      expect(calls).toBe(1);
+      expect((await f.store.getView('s')).executions.map((e) => e.status)).toEqual(['succeeded']);
+      for (const [source, id] of [
+        ['s', 'f1'],
+        ['f1', 'f2'],
+      ])
+        await runtime.forkSession({
+          ...base,
+          sourceSessionId: source!,
+          newSessionId: id!,
+          commandId: `create-${id}`,
+          expectedContextSelectionId: (await f.store.getSession(source!))!.contextSelectionId,
+          title: id!,
+          boundary: null, // No Message aliases: the actual Fork creation still keeps ancestry.
+        });
+      await f.store.createSession({
+        ...base,
         workspaceId: 'w',
-        commandId: 'remove',
+        sessionId: 'independent',
+        commandId: 'create-independent',
+        title: 'independent',
       });
-      const original = await f.store.getView('s');
+      const independent = await deletion('independent');
+      await deletion('s');
+      await deletion('f1');
+      const sourceView = await f.store.getView('s');
+      const liveView = await f.store.getView('f2');
+      const userFile = join(f.root, 'project');
+      writeFileSync(userFile, 'project remains');
       await runtime.close();
-      await f.store.close();
-      const core = readFileSync(join(f.path, 'core.db'));
+      const recent = await collectProfileGarbage({
+        profile: f.profile,
+        expectedStoreId: f.storeId,
+      });
+      expect(recent).toMatchObject({ purgedSessionGroups: 0, retainedRecentSessionGroups: 3 });
       Date.now = () => originalNow() + 8 * 86400000;
       expect(
         await collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
       ).toMatchObject({
         purgedWorkspaces: 0,
-        retainedUnsettledWorkspaces: 1,
-        retainedReferenced: 1,
+        purgedSessionGroups: 1,
+        purgedSessions: 1,
+        retainedReferencedSessionGroups: 2,
       });
-      expect(readFileSync(join(f.path, 'core.db'))).toEqual(core);
       Date.now = originalNow;
       peer = await openSqliteStore(f.profile);
-      const retained = await peer.getView('s');
-      expect(retained.messages).toEqual(original.messages);
-      expect(retained.executions).toEqual(original.executions);
-      expect(retained.runs).toEqual(original.runs);
-      expect(retained.snapshotCursor).toBe(original.snapshotCursor);
-      expect((await peer.getExecution(uncertain.id))!.status).toBe('outcome_unknown');
+      const collectedAt = (await peer.getSession('independent'))!.historyPurgedAt;
+      expect(collectedAt).toBeGreaterThan(0);
+      const retainedDelete = {
+        session: independent.result.session,
+        command: {
+          id: independent.result.command.id,
+          requestDigest: independent.result.command.requestDigest,
+          receipt: independent.result.command.receipt,
+          status: independent.result.command.status,
+        },
+      };
+      expect(await peer.deleteSession(independent.input)).toMatchObject(retainedDelete);
+      expect((await peer.getSession('s'))!.historyPurgedAt).toBeUndefined();
+      expect((await peer.getView('s')).messages).toEqual(sourceView.messages);
+      expect((await peer.getView('s')).executions).toEqual(sourceView.executions);
+      expect((await peer.getView('f2')).session).toEqual(liveView.session);
+      expect(readFileSync(f.referenced.file)).toEqual(f.referenced.bytes);
+      await peer.deleteSession({
+        ...base,
+        sessionId: 'f2',
+        commandId: 'delete-f2',
+        ifRevision: liveView.session.controlRevision,
+      });
+      await peer.close();
+      peer = undefined;
+      Date.now = () => originalNow() + 9 * 86400000;
+      expect(
+        await collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
+      ).toMatchObject({
+        purgedWorkspaces: 0,
+        purgedSessionGroups: 3,
+        purgedSessions: 3,
+        retainedReferencedSessionGroups: 0,
+      });
+      expect(readFileSync(join(f.path, 'core.db')).includes(Buffer.from(sentinel))).toBe(false);
+      expect(existsSync(f.referenced.file)).toBe(false);
+      expect(readFileSync(userFile, 'utf8')).toBe('project remains');
+      expect(calls).toBe(1);
+      Date.now = originalNow;
+      peer = await openSqliteStore(f.profile);
+      for (const id of ['s', 'f1', 'f2']) {
+        expect((await peer.getSession(id))!.historyPurgedAt).toBeGreaterThan(collectedAt!);
+        expect((await peer.getView(id)).messages).toEqual([]);
+      }
+      expect((await peer.getSession('independent'))!.historyPurgedAt).toBe(collectedAt);
+      expect(await peer.deleteSession(independent.input)).toMatchObject(retainedDelete);
+      const late = await peer
+        .acceptCommand({
+          ...base,
+          sessionId: 's',
+          commandId: 'late',
+          request: { kind: 'run.start', content: 'no resurrection' },
+        })
+        .catch((e) => e);
+      expect(late).toMatchObject({ code: 'session_not_found' });
+      expect((await peer.listWorkspaces({ limit: 100 })).map((w) => w.id)).toEqual(['w']);
+      await peer.createSession({
+        ...base,
+        workspaceId: 'w',
+        sessionId: 'new',
+        commandId: 'create-new',
+        title: 'Workspace remains usable',
+      });
+      expect((await peer.getSession('new'))!.deletedAt).toBeNull();
+      const originalSourceTime = (await peer.getSession('s'))!.historyPurgedAt;
+      await peer.removeWorkspace({ ...base, workspaceId: 'w', commandId: 'remove-later' });
+      await peer.close();
+      peer = undefined;
+      Date.now = () => originalNow() + 10 * 86400000;
+      expect(
+        await collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
+      ).toMatchObject({
+        purgedWorkspaces: 1,
+        purgedSessionGroups: 0,
+        purgedSessions: 5,
+      });
+      Date.now = originalNow;
+      peer = await openSqliteStore(f.profile);
+      expect((await peer.getSession('s'))!.historyPurgedAt).toBe(originalSourceTime);
+      expect((await peer.getSession('independent'))!.historyPurgedAt).toBe(collectedAt);
+      expect((await peer.getSession('new'))!.historyPurgedAt).toBeGreaterThan(originalSourceTime!);
+      expect(await peer.deleteSession(independent.input)).toMatchObject(retainedDelete);
     } finally {
       Date.now = originalNow;
       await peer?.close();
