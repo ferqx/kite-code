@@ -18,7 +18,8 @@ const [candidate, home, control, storeId] = process.argv.slice(2) as [
 ];
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: number | undefined;
 let conversationId = 's',
-  conversationTitle = 'Native bundled';
+  conversationTitle = 'Native bundled',
+  conversationUpdatedAt: number | undefined;
 const lockState = async () =>
   (await (await fetch(`${control}/locks`)).json()) as { outer: boolean; inner: boolean };
 async function launch() {
@@ -67,6 +68,12 @@ async function launch() {
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
   );
   assert.equal(state.selection?.storeId, storeId);
+  if (conversationUpdatedAt !== undefined)
+    assert.equal(
+      state.directory?.sessions.find((session) => session.id === conversationId)?.activity
+        ?.updatedAt,
+      conversationUpdatedAt,
+    );
   const ps = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
     .trim()
     .split('\n')
@@ -238,6 +245,51 @@ try {
         continue;
       }
       if (!approvals.includes(card.id)) {
+        if (approvals.length === 0) {
+          const pendingRow = page
+            .getByRole('button', { name: '新对话', exact: true })
+            .and(page.locator('button.session-row'));
+          await pendingRow.getByText('待用户输入', { exact: true }).waitFor();
+          const actualSession = state.selection!.session.id;
+          await page
+            .getByRole('button', { name: 'Native bundled', exact: true })
+            .and(page.locator('button.session-row'))
+            .click();
+          await page
+            .locator('.session-header')
+            .getByTitle('Native bundled', { exact: true })
+            .waitFor();
+          assert.equal(await pendingRow.getByText('待用户输入', { exact: true }).isVisible(), true);
+          const reading = await page.evaluate(
+            async () =>
+              (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+          );
+          assert.equal(reading.selection?.session.id, 's');
+          const activity = reading.directory!.sessions.find(
+            (session) => session.id === actualSession,
+          )!.activity!;
+          assert.equal(activity.pendingInteractions, 1);
+          assert.equal(activity.run!.id, state.selection!.runs.find((run) => run.isActive)!.id);
+          assert.equal(activity.updatedAt! > 0, true);
+          assert.equal(
+            await page.locator('button.session-row[aria-label]').first().getAttribute('aria-label'),
+            '新对话',
+          );
+          assert.equal(await (await fetch(`${control}/count`)).text(), '1');
+          await pendingRow.click();
+          await approve.waitFor();
+          const original = await page.evaluate(
+            async () =>
+              (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+          );
+          assert.equal(original.selection?.session.id, actualSession);
+          assert.ok(
+            original.selection?.interactions.some((interaction) => interaction.id === card.id),
+          );
+          console.log(
+            'native_driver_stage: non-selected original pending activity, real time, retained sorting and GET-only navigation',
+          );
+        }
         approvals.push(card.id);
         await approve.click();
       }
@@ -286,6 +338,29 @@ try {
   assert.equal(afterFirst.creationSubmissions[0]!.phase, 'created');
   conversationId = afterFirst.creationSubmissions[0]!.input.sessionId;
   conversationTitle = '新对话';
+  await page.waitForFunction(async (sessionId) => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    const activity = state.directory?.sessions.find(
+      (session) => session.id === sessionId,
+    )?.activity;
+    return (
+      !state.directory?.unavailable &&
+      activity?.run?.status === 'completed' &&
+      !activity.run.isActive &&
+      activity.pendingInteractions === 0
+    );
+  }, conversationId);
+  const settledDirectory = await page.evaluate(
+    async () =>
+      (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+  );
+  conversationUpdatedAt = settledDirectory.directory!.sessions.find(
+    (session) => session.id === conversationId,
+  )!.activity!.updatedAt!;
+  assert.ok(conversationUpdatedAt > 0);
   assert.equal(afterFirst.selection?.session.id, conversationId);
   assert.equal(afterFirst.inputSubmissions.length, 1);
   assert.equal(afterFirst.callerSubmissions?.length, 1);

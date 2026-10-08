@@ -40,11 +40,13 @@
 
 ## 目录分页
 
-[SQLite directory](sqlite/directory.ts) 在短只读事务中读取 Workspace/Session 分配 rowid 的 Decimal64 上界与通知观察水位。每页最多 200 项，客户端固定首 upperSeq 并沿 nextAfterSeq 读完，不用名称/id排序或累计数量截断充当完整证明。后创建项目不混入封存上界；未来/越界/非规范游标拒绝。该上界冻结分配范围，并非跨页内容事务快照；标题与删除等现行投影仍按每页读取时事实呈现。
+[SQLite directory](sqlite/directory.ts) 在短只读事务中读取 Workspace/Session 分配 rowid 的 Decimal64 上界与通知观察水位。每页最多 200 项，客户端固定首 upperSeq 并沿 nextAfterSeq 读完，不用名称/id排序或累计数量截断充当完整证明。后创建项目不混入封存上界；未来/越界/非规范游标拒绝。该上界冻结分配范围；不传快照约束时，标题与删除等现行投影仍按每页读取时事实呈现。Session 续页可传首 `snapshotCursor`，同一只读事务核通知水位，变化返回 `directory_changed`，不拼接不同观察。
 
 Workspace 沿用原 profile 范围，核对 expectedStoreId；现有 Workspace 没有主体创建字段，不从 Session 推造所有权，合法空 Workspace 仍可列出。Session 仅列 root、未请求删除的记录，先核当前 Store 准入，再核对真实 `session.create` Command 的宿主主体；恢复保留的旧创建出处不要求等于当前 Store，并在 SQL 分页前执行 workspace 过滤。child 入口保持 Task/父视图的独立权限，不因目录分页扩大。旧 `listWorkspaces/listSessions` 是明确当前页内部接口，不能用它们的默认 100 项证明目录已经读完。
 
-[真实目录测试](../../../../tests/isolated/unified-agent/directory.test.ts) 使用具名创建命令、超过 200 项 Workspace/root Session、多主体、Native/Browser HTTP 与冷 readonly Store，核对固定上界、准确过滤、空 Workspace、零读取事件/Model 和原身份；不伪造 Model 成功记录。
+Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Run 的 ID/status/isActive/是否仍有必需结果，未取消且越过停止边界的 accepted run.start/follow-up、同主体当前 Store 的 pending presentation Interaction 数量。没有 Run 不伪造完成，排队不替换尚活动的 Run。时间来自原 Session 最后 cursor 的私人 `kite.session-log@1.occurredAt`；旧／未知／损坏／非整数时间明确 null，不用读取时钟、Run 开始时间或其他会话时间填补。只读取有限字段，不公开原事件 payload、Run config 或输入。没有新增表／列、baseline checksum、Store major 或维护资产，冷读取不写事件。日志封存理由仍归[原决定](../../../../.agents/notes/implemented/architecture/2026-10-03-bounded-session-log-observation.md)，目录取舍见[本决定](../../../../.agents/notes/implemented/architecture/2026-10-08-session-directory-activity-observation.md)。
+
+[真实目录测试](../../../../tests/isolated/unified-agent/directory.test.ts) 使用具名创建命令、超过 200 项 Workspace/root Session、多主体、Native/Browser HTTP 与冷 readonly Store，核对固定上界、准确过滤、空 Workspace、零读取事件/Model 和原身份；另核改名没有 Run 的真实事件时间、queued/active/latest 与未知时间保留，不伪造 Model 成功记录。
 
 [Session 管理 owner](sqlite/session-management/README.md) 负责 root 改名 CAS 和执行组删除意图；目录隐藏 tombstone，真实停止事实与只读历史保留独立。删除回执不代表所有外部效果已停止。
 

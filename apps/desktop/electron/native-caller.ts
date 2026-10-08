@@ -16,6 +16,7 @@ import {
 import { DesktopInput, inputMetadata } from '../src/input';
 import type {
   NativeCreation,
+  NativeDirectory,
   NativeEvent,
   NativeRequest,
   NativeResult,
@@ -73,6 +74,18 @@ export class NativeCaller {
   private readonly preparationConfiguration: NativeConfiguration;
   private readonly conversation: NativeConversation;
   private workspaceObservation?: { generation: number; storeId: string; workspaces: Workspace[] };
+  private directory?: NativeDirectory;
+  private directoryUnavailable = false;
+  private directoryEnabled = false;
+  private directoryRefreshing?: Promise<void>;
+  private directoryRefreshRequested = false;
+  private directoryEpoch = 0;
+  private directoryRead?: {
+    generation: number;
+    epoch: number;
+    abort: AbortController;
+    promise: Promise<NativeDirectory>;
+  };
   private readonly providers: NativeProviderSettings;
   private readonly mcp: NativeMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
@@ -412,7 +425,78 @@ export class NativeCaller {
     this.sessions.release();
     this.observedMessages.clear();
   }
+  private invalidateDirectory(clear = false) {
+    this.directoryEpoch++;
+    this.directoryRead?.abort.abort();
+    this.directoryRead = undefined;
+    this.directoryRefreshing = undefined;
+    this.directoryRefreshRequested = false;
+    this.directoryUnavailable = true;
+    this.workspaceObservation = undefined;
+    if (clear) this.directory = undefined;
+  }
+  private directoryState(): NativeDirectory | undefined {
+    return this.directory
+      ? { ...this.directory, unavailable: this.directoryUnavailable || this.observationUnavailable }
+      : undefined;
+  }
+  private async readDirectory(): Promise<NativeDirectory> {
+    const generation = this.generation,
+      epoch = this.directoryEpoch;
+    if (this.directoryRead?.generation === generation && this.directoryRead.epoch === epoch)
+      return this.directoryRead.promise;
+    const abort = new AbortController(),
+      storeId = this.client.serverInfo!.storeId!;
+    const promise = (async () => {
+      const workspaces = await this.client.listAllWorkspaces({ signal: abort.signal });
+      const sessions = this.client.serverInfo!.capabilities.includes('session_directory_activity')
+        ? (await this.client.listAllSessionDirectory({ signal: abort.signal })).map((item) => ({
+            ...item.session,
+            activity: item.activity,
+          }))
+        : await this.client.listAllSessions({ signal: abort.signal });
+      this.check(generation);
+      abort.signal.throwIfAborted();
+      if (epoch !== this.directoryEpoch || this.client.serverInfo?.storeId !== storeId)
+        throw new ClientError('directory_identity_conflict');
+      this.directory = { storeId, workspaces, sessions };
+      this.directoryUnavailable = false;
+      this.workspaceObservation = { generation, storeId, workspaces };
+      return this.directory;
+    })();
+    const reading = { generation, epoch, abort, promise };
+    this.directoryRead = reading;
+    try {
+      return await promise;
+    } catch (error) {
+      if (generation === this.generation && epoch === this.directoryEpoch)
+        this.directoryUnavailable = true;
+      throw error;
+    } finally {
+      if (this.directoryRead === reading) this.directoryRead = undefined;
+    }
+  }
+  private scheduleDirectoryRefresh() {
+    if (!this.directoryEnabled || this.closed) return;
+    this.directoryRefreshRequested = true;
+    if (this.directoryRefreshing) return;
+    this.directoryRefreshRequested = false;
+    const generation = this.generation;
+    const refresh = this.readDirectory().then(
+      () => {},
+      () => {},
+    );
+    this.directoryRefreshing = refresh;
+    void refresh.finally(() => {
+      if (this.directoryRefreshing !== refresh) return;
+      this.directoryRefreshing = undefined;
+      if (generation !== this.generation || !this.directoryEnabled || this.closed) return;
+      this.changed();
+      if (this.directoryRefreshRequested) this.scheduleDirectoryRefresh();
+    });
+  }
   private scheduleRefresh(signal: AbortSignal) {
+    this.scheduleDirectoryRefresh();
     this.refreshRequested = true;
     if (this.refreshing || this.refreshTimer || signal.aborted || this.closed) return;
     const refresh = (async () => {
@@ -455,6 +539,7 @@ export class NativeCaller {
     this.observer = signal;
     const originalStore = this.client.serverInfo!.storeId!;
     const invalidate = () => {
+      this.invalidateDirectory();
       this.background.release();
       this.observationUnavailable = true;
       this.permissionUnavailable = true;
@@ -483,8 +568,7 @@ export class NativeCaller {
               { signal: signal.signal },
             );
             startAfter = { storeId: originalStore, sequence: baseline.snapshotCursor };
-            await this.client.listAllWorkspaces({ signal: signal.signal });
-            await this.client.listAllSessions({ signal: signal.signal });
+            if (this.directoryEnabled) await this.readDirectory();
             if (this.selected) {
               const sessionId = this.selected,
                 selection = this.selection;
@@ -514,6 +598,7 @@ export class NativeCaller {
               this.observationUnavailable = false;
               this.permissionUnavailable = false;
               this.changed();
+              this.scheduleRefresh(signal.signal);
             },
             onChange: () => this.scheduleRefresh(signal.signal),
             onReset: () => {
@@ -604,6 +689,7 @@ export class NativeCaller {
         : undefined;
     return {
       generation: this.generation,
+      directory: this.directoryState(),
       backgroundUnavailable: this.observationUnavailable,
       selection,
       historyEpoch: this.historyEpoch,
@@ -727,6 +813,8 @@ export class NativeCaller {
       if (this.closed) throw new ClientError('native_closed');
       this.releaseReads();
       this.background.release();
+      this.invalidateDirectory(true);
+      this.directoryEnabled = true;
       this.selection++;
       const generation = ++this.generation;
       this.selected = undefined;
@@ -1059,17 +1147,8 @@ export class NativeCaller {
         this.detach();
         return null;
       case 'directory':
-        result = {
-          storeId: this.client.serverInfo!.storeId!,
-          workspaces: await this.client.listAllWorkspaces(),
-          sessions: await this.client.listAllSessions(),
-        };
-        this.check(generation);
-        this.workspaceObservation = {
-          generation,
-          storeId: result.storeId,
-          workspaces: result.workspaces,
-        };
+        await this.readDirectory();
+        result = this.directoryState()!;
         break;
       case 'select': {
         this.releaseReads();
@@ -1593,8 +1672,10 @@ export class NativeCaller {
     return result;
   }
   detach() {
+    this.directoryEnabled = false;
     this.releaseReads();
     this.background.release();
+    this.invalidateDirectory(true);
     this.preparationConfiguration.release();
     this.workspaceObservation = undefined;
     this.selection++;
@@ -1607,6 +1688,7 @@ export class NativeCaller {
     this.refreshRequested = false;
     this.releaseReads();
     this.background.release();
+    this.invalidateDirectory();
     this.observer?.abort();
     this.client.disposeNetwork();
     await this.stream;

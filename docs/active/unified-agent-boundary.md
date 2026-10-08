@@ -54,6 +54,8 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 
 正式 Native 已复用 [UI 的原桌面展示层](../../packages/ui/README.md#原桌面展示层)，SessionPage、侧栏、消息区、输入框、右侧栏与样式由纯展示 owner 维护；[Desktop adapter](../../apps/desktop/src/native-presentation.ts)只映射实际公共事实。有限宿主 slot 接原完整正文与写入回调，打开右侧工具不卸载消息区。旧 Host/Runtime/私有存储没有迁入此层。声明的 CSS export 必须解析到实际仓库资产，缺失、越界与旧目标仍拒绝；CSS 不作为 TypeScript 执行模块，实际编译资产闭包另由候选 manifest 和窗口验收证明。显式 UI 构建脚本属于 I/O 宿主，UI source 经 export/import 到达该脚本时仍按便携依赖检查；不存在整个 UI workspace 的 I/O 豁免。
 
+全局 PC 目录复用原 Sidebar 展示，公共 `session_directory_activity` 从同 Store／主体的只读事务提供准确 Run／pending 和已封存事件时间。SDK 只有穷尽同 upper／snapshotCursor 后才发布，变化丢弃前缀、持续变化明确失败；没有新增 Store schema 或第二个运行索引。Native 全局读取与选中会话正文／草稿分别管理，SSE 只触发 GET，迟到读取按原 attach／Store／epoch 拒绝，失败保上次目录并标明。没有目录事实时不从当前选择推造其他会话状态，目录成功不 ACK 或授予执行／审批权；owner 见[Store](../../packages/agent/src/storage/README.md#目录分页)、[Client](../../packages/client/README.md#完整目录读取)与[Native](../../apps/desktop/README.md#native-项目会话目录)。
+
 原模型浮层只接受宿主提供的准确 ID、名称与实际支持档位，再回调原选择；稀疏滑块不补造服务能力。Native catalogue、原作用域、Session route、临时 effort 与就绪判定仍归 Desktop，详见 [UI owner](../../packages/ui/README.md#原桌面展示层)及 [Native owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。展示重用不扩大公共管理或运行权限。
 
 原安排任务页只有现行手册定义的字段草稿，Native 不提供不存在的保存、调度或通知回调。页面导航与原 Session 的读取/写入意图分别管理，晚创建回执不能抢占后来页面；返回原会话不以持久草稿覆盖未保存原文。负责实现与当前验收归 [Native owner](../../apps/desktop/README.md#native-安排任务草稿)，不增加 Service 能力或执行权限。

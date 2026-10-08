@@ -1258,6 +1258,7 @@ export const BrowserInfoSchema = z.object({
     z.enum([
       'workspaces',
       'sessions',
+      'session_directory_activity',
       'history',
       'context',
       'execution_output',
@@ -1288,6 +1289,7 @@ export const WorkspaceDirectoryQuerySchema = z.strictObject({
 });
 export const SessionDirectoryQuerySchema = WorkspaceDirectoryQuerySchema.extend({
   workspaceId: id.optional(),
+  snapshotCursor: sequence.optional(),
 });
 export const BrowserWorkspaceDirectoryQuerySchema = WorkspaceDirectoryQuerySchema.omit({
   storeId: true,
@@ -1306,9 +1308,25 @@ export const WorkspaceDirectoryPageSchema = z.object({
   ...directoryHeader,
   items: z.array(z.object({ seq: sequence, workspace: schemas.Workspace })).max(200),
 });
+export const SessionDirectoryActivitySchema = z.object({
+  updatedAt: z.number().int().min(0).max(8640000000000000).nullable(),
+  run: z
+    .object({ id, status: runStatus, isActive: z.boolean(), waitingForResults: z.boolean() })
+    .nullable(),
+  queued: z.boolean(),
+  pendingInteractions: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+});
 export const SessionDirectoryPageSchema = z.object({
   ...directoryHeader,
-  items: z.array(z.object({ seq: sequence, session: schemas.Session })).max(200),
+  items: z
+    .array(
+      z.object({
+        seq: sequence,
+        session: schemas.Session,
+        activity: SessionDirectoryActivitySchema.optional(),
+      }),
+    )
+    .max(200),
 });
 export const BackgroundExecutionQuerySchema = SessionDirectoryQuerySchema.extend({
   rootSessionId: id.optional(),
@@ -1503,6 +1521,7 @@ export const apiSchemas = {
   BrowserSessionDirectoryQuery: BrowserSessionDirectoryQuerySchema,
   WorkspaceDirectoryPage: WorkspaceDirectoryPageSchema,
   SessionDirectoryPage: SessionDirectoryPageSchema,
+  SessionDirectoryActivity: SessionDirectoryActivitySchema,
   BrowserWorkspaceDirectoryPage: BrowserWorkspaceDirectoryPageSchema,
   BrowserInfo: BrowserInfoSchema,
   BrowserContextQuery: BrowserContextQuerySchema,

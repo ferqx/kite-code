@@ -12,7 +12,7 @@ type Page = {
 export function validateDirectoryPage<T extends Page>(
   page: T,
   storeId: string,
-  input: { afterSeq?: string; upperSeq?: string; limit?: number },
+  input: { afterSeq?: string; upperSeq?: string; snapshotCursor?: string; limit?: number },
 ): T {
   const after = parseCursorSequence(input.afterSeq ?? '0'),
     upper = parseCursorSequence(page.upperSeq),
@@ -21,6 +21,7 @@ export function validateDirectoryPage<T extends Page>(
     page.storeId !== storeId ||
     upper > high ||
     (input.upperSeq !== undefined && page.upperSeq !== input.upperSeq) ||
+    (input.snapshotCursor !== undefined && page.snapshotCursor !== input.snapshotCursor) ||
     after > upper ||
     page.items.length > (input.limit ?? 200)
   )
@@ -69,4 +70,37 @@ export async function collectDirectory<T>(
     afterSeq = page.nextAfterSeq;
   } while (afterSeq !== undefined);
   return items;
+}
+
+/** A mutable directory is published only after every page shares the original observation. */
+export async function collectSnapshotDirectory<T extends { seq: string }>(
+  read: (page: {
+    afterSeq?: string;
+    upperSeq?: string;
+    snapshotCursor?: string;
+    limit: number;
+  }) => Promise<Page & { items: T[] }>,
+  signal?: AbortSignal,
+  identity?: (item: T) => string,
+): Promise<T[]> {
+  for (let attempt = 0; ; attempt++) {
+    let snapshotCursor: string | undefined;
+    try {
+      return await collectDirectory(
+        async (input) => {
+          const page = await read({ ...input, snapshotCursor });
+          if (snapshotCursor !== undefined && page.snapshotCursor !== snapshotCursor)
+            throw new ClientError('directory_identity_conflict');
+          snapshotCursor ??= page.snapshotCursor;
+          return page;
+        },
+        signal,
+        identity,
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (!(error instanceof ClientError) || error.code !== 'directory_changed' || attempt >= 2)
+        throw error;
+    }
+  }
 }

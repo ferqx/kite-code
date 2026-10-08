@@ -36088,6 +36088,124 @@ function validate43(
 }
 validate43.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var response_SessionDirectoryPage = validate44;
+var schema51 = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  type: 'object',
+  properties: {
+    storeId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+    highWaterSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+    upperSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+    nextAfterSeq: { anyOf: [{ type: 'string', pattern: '^(0|[1-9][0-9]*)$' }, { type: 'null' }] },
+    snapshotCursor: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+    items: {
+      maxItems: 200,
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          seq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+          session: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+              workspaceId: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 128,
+                pattern: '^[A-Za-z0-9_-]+$',
+              },
+              parentSessionId: {
+                anyOf: [
+                  { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+                  { type: 'null' },
+                ],
+              },
+              rootSessionId: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 128,
+                pattern: '^[A-Za-z0-9_-]+$',
+              },
+              title: { type: 'string' },
+              controlRevision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+              contextSelectionId: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 128,
+                pattern: '^[A-Za-z0-9_-]+$',
+              },
+              nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+              deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+            },
+            required: [
+              'id',
+              'workspaceId',
+              'parentSessionId',
+              'title',
+              'controlRevision',
+              'contextSelectionId',
+              'nextSeq',
+              'deletedAt',
+            ],
+            additionalProperties: true,
+          },
+          activity: {
+            type: 'object',
+            properties: {
+              updatedAt: {
+                anyOf: [
+                  { type: 'integer', minimum: 0, maximum: 8640000000000000 },
+                  { type: 'null' },
+                ],
+              },
+              run: {
+                anyOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      id: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 128,
+                        pattern: '^[A-Za-z0-9_-]+$',
+                      },
+                      status: {
+                        type: 'string',
+                        enum: [
+                          'running',
+                          'waiting_interaction',
+                          'waiting_execution',
+                          'cancelling',
+                          'completed',
+                          'failed',
+                          'cancelled',
+                          'interrupted',
+                        ],
+                      },
+                      isActive: { type: 'boolean' },
+                      waitingForResults: { type: 'boolean' },
+                    },
+                    required: ['id', 'status', 'isActive', 'waitingForResults'],
+                    additionalProperties: true,
+                  },
+                  { type: 'null' },
+                ],
+              },
+              queued: { type: 'boolean' },
+              pendingInteractions: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
+            },
+            required: ['updatedAt', 'run', 'queued', 'pendingInteractions'],
+            additionalProperties: true,
+          },
+        },
+        required: ['seq', 'session'],
+        additionalProperties: true,
+      },
+    },
+  },
+  required: ['storeId', 'highWaterSeq', 'upperSeq', 'nextAfterSeq', 'snapshotCursor', 'items'],
+  additionalProperties: true,
+};
 function validate44(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -37253,6 +37371,679 @@ function validate44(
                                       var valid3 = _errs23 === errors;
                                     } else {
                                       var valid3 = true;
+                                    }
+                                    if (valid3) {
+                                      if (data6.activity !== undefined) {
+                                        let data18 = data6.activity;
+                                        const _errs52 = errors;
+                                        if (errors === _errs52) {
+                                          if (
+                                            data18 &&
+                                            typeof data18 == 'object' &&
+                                            !Array.isArray(data18)
+                                          ) {
+                                            let missing3;
+                                            if (
+                                              (data18.updatedAt === undefined &&
+                                                (missing3 = 'updatedAt')) ||
+                                              (data18.run === undefined && (missing3 = 'run')) ||
+                                              (data18.queued === undefined &&
+                                                (missing3 = 'queued')) ||
+                                              (data18.pendingInteractions === undefined &&
+                                                (missing3 = 'pendingInteractions'))
+                                            ) {
+                                              validate44.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath + '/items/' + i0 + '/activity',
+                                                  schemaPath:
+                                                    '#/properties/items/items/properties/activity/required',
+                                                  keyword: 'required',
+                                                  params: { missingProperty: missing3 },
+                                                  message:
+                                                    "must have required property '" +
+                                                    missing3 +
+                                                    "'",
+                                                },
+                                              ];
+                                              return false;
+                                            } else {
+                                              if (data18.updatedAt !== undefined) {
+                                                let data19 = data18.updatedAt;
+                                                const _errs55 = errors;
+                                                const _errs56 = errors;
+                                                let valid8 = false;
+                                                const _errs57 = errors;
+                                                if (
+                                                  !(
+                                                    typeof data19 == 'number' &&
+                                                    !(data19 % 1) &&
+                                                    !isNaN(data19) &&
+                                                    isFinite(data19)
+                                                  )
+                                                ) {
+                                                  const err13 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/items/' +
+                                                      i0 +
+                                                      '/activity/updatedAt',
+                                                    schemaPath:
+                                                      '#/properties/items/items/properties/activity/properties/updatedAt/anyOf/0/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'integer' },
+                                                    message: 'must be integer',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err13];
+                                                  } else {
+                                                    vErrors.push(err13);
+                                                  }
+                                                  errors++;
+                                                }
+                                                if (errors === _errs57) {
+                                                  if (
+                                                    typeof data19 == 'number' &&
+                                                    isFinite(data19)
+                                                  ) {
+                                                    if (
+                                                      data19 > 8640000000000000 ||
+                                                      isNaN(data19)
+                                                    ) {
+                                                      const err14 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/items/' +
+                                                          i0 +
+                                                          '/activity/updatedAt',
+                                                        schemaPath:
+                                                          '#/properties/items/items/properties/activity/properties/updatedAt/anyOf/0/maximum',
+                                                        keyword: 'maximum',
+                                                        params: {
+                                                          comparison: '<=',
+                                                          limit: 8640000000000000,
+                                                        },
+                                                        message: 'must be <= 8640000000000000',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err14];
+                                                      } else {
+                                                        vErrors.push(err14);
+                                                      }
+                                                      errors++;
+                                                    } else {
+                                                      if (data19 < 0 || isNaN(data19)) {
+                                                        const err15 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/items/' +
+                                                            i0 +
+                                                            '/activity/updatedAt',
+                                                          schemaPath:
+                                                            '#/properties/items/items/properties/activity/properties/updatedAt/anyOf/0/minimum',
+                                                          keyword: 'minimum',
+                                                          params: { comparison: '>=', limit: 0 },
+                                                          message: 'must be >= 0',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err15];
+                                                        } else {
+                                                          vErrors.push(err15);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                                var _valid3 = _errs57 === errors;
+                                                valid8 = valid8 || _valid3;
+                                                const _errs59 = errors;
+                                                if (data19 !== null) {
+                                                  const err16 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/items/' +
+                                                      i0 +
+                                                      '/activity/updatedAt',
+                                                    schemaPath:
+                                                      '#/properties/items/items/properties/activity/properties/updatedAt/anyOf/1/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'null' },
+                                                    message: 'must be null',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err16];
+                                                  } else {
+                                                    vErrors.push(err16);
+                                                  }
+                                                  errors++;
+                                                }
+                                                var _valid3 = _errs59 === errors;
+                                                valid8 = valid8 || _valid3;
+                                                if (!valid8) {
+                                                  const err17 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/items/' +
+                                                      i0 +
+                                                      '/activity/updatedAt',
+                                                    schemaPath:
+                                                      '#/properties/items/items/properties/activity/properties/updatedAt/anyOf',
+                                                    keyword: 'anyOf',
+                                                    params: {},
+                                                    message: 'must match a schema in anyOf',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err17];
+                                                  } else {
+                                                    vErrors.push(err17);
+                                                  }
+                                                  errors++;
+                                                  validate44.errors = vErrors;
+                                                  return false;
+                                                } else {
+                                                  errors = _errs56;
+                                                  if (vErrors !== null) {
+                                                    if (_errs56) {
+                                                      vErrors.length = _errs56;
+                                                    } else {
+                                                      vErrors = null;
+                                                    }
+                                                  }
+                                                }
+                                                var valid7 = _errs55 === errors;
+                                              } else {
+                                                var valid7 = true;
+                                              }
+                                              if (valid7) {
+                                                if (data18.run !== undefined) {
+                                                  let data20 = data18.run;
+                                                  const _errs61 = errors;
+                                                  const _errs62 = errors;
+                                                  let valid9 = false;
+                                                  const _errs63 = errors;
+                                                  if (errors === _errs63) {
+                                                    if (
+                                                      data20 &&
+                                                      typeof data20 == 'object' &&
+                                                      !Array.isArray(data20)
+                                                    ) {
+                                                      let missing4;
+                                                      if (
+                                                        (data20.id === undefined &&
+                                                          (missing4 = 'id')) ||
+                                                        (data20.status === undefined &&
+                                                          (missing4 = 'status')) ||
+                                                        (data20.isActive === undefined &&
+                                                          (missing4 = 'isActive')) ||
+                                                        (data20.waitingForResults === undefined &&
+                                                          (missing4 = 'waitingForResults'))
+                                                      ) {
+                                                        const err18 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/items/' +
+                                                            i0 +
+                                                            '/activity/run',
+                                                          schemaPath:
+                                                            '#/properties/items/items/properties/activity/properties/run/anyOf/0/required',
+                                                          keyword: 'required',
+                                                          params: { missingProperty: missing4 },
+                                                          message:
+                                                            "must have required property '" +
+                                                            missing4 +
+                                                            "'",
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err18];
+                                                        } else {
+                                                          vErrors.push(err18);
+                                                        }
+                                                        errors++;
+                                                      } else {
+                                                        if (data20.id !== undefined) {
+                                                          let data21 = data20.id;
+                                                          const _errs66 = errors;
+                                                          if (errors === _errs66) {
+                                                            if (typeof data21 === 'string') {
+                                                              if (func2(data21) > 128) {
+                                                                const err19 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/items/' +
+                                                                    i0 +
+                                                                    '/activity/run/id',
+                                                                  schemaPath:
+                                                                    '#/properties/items/items/properties/activity/properties/run/anyOf/0/properties/id/maxLength',
+                                                                  keyword: 'maxLength',
+                                                                  params: { limit: 128 },
+                                                                  message:
+                                                                    'must NOT have more than 128 characters',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err19];
+                                                                } else {
+                                                                  vErrors.push(err19);
+                                                                }
+                                                                errors++;
+                                                              } else {
+                                                                if (func2(data21) < 1) {
+                                                                  const err20 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/items/' +
+                                                                      i0 +
+                                                                      '/activity/run/id',
+                                                                    schemaPath:
+                                                                      '#/properties/items/items/properties/activity/properties/run/anyOf/0/properties/id/minLength',
+                                                                    keyword: 'minLength',
+                                                                    params: { limit: 1 },
+                                                                    message:
+                                                                      'must NOT have fewer than 1 characters',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err20];
+                                                                  } else {
+                                                                    vErrors.push(err20);
+                                                                  }
+                                                                  errors++;
+                                                                } else {
+                                                                  if (!pattern123.test(data21)) {
+                                                                    const err21 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/items/' +
+                                                                        i0 +
+                                                                        '/activity/run/id',
+                                                                      schemaPath:
+                                                                        '#/properties/items/items/properties/activity/properties/run/anyOf/0/properties/id/pattern',
+                                                                      keyword: 'pattern',
+                                                                      params: {
+                                                                        pattern: '^[A-Za-z0-9_-]+$',
+                                                                      },
+                                                                      message:
+                                                                        'must match pattern "' +
+                                                                        '^[A-Za-z0-9_-]+$' +
+                                                                        '"',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err21];
+                                                                    } else {
+                                                                      vErrors.push(err21);
+                                                                    }
+                                                                    errors++;
+                                                                  }
+                                                                }
+                                                              }
+                                                            } else {
+                                                              const err22 = {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/items/' +
+                                                                  i0 +
+                                                                  '/activity/run/id',
+                                                                schemaPath:
+                                                                  '#/properties/items/items/properties/activity/properties/run/anyOf/0/properties/id/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'string' },
+                                                                message: 'must be string',
+                                                              };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err22];
+                                                              } else {
+                                                                vErrors.push(err22);
+                                                              }
+                                                              errors++;
+                                                            }
+                                                          }
+                                                          var valid10 = _errs66 === errors;
+                                                        } else {
+                                                          var valid10 = true;
+                                                        }
+                                                        if (valid10) {
+                                                          if (data20.status !== undefined) {
+                                                            let data22 = data20.status;
+                                                            const _errs68 = errors;
+                                                            if (typeof data22 !== 'string') {
+                                                              const err23 = {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/items/' +
+                                                                  i0 +
+                                                                  '/activity/run/status',
+                                                                schemaPath:
+                                                                  '#/properties/items/items/properties/activity/properties/run/anyOf/0/properties/status/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'string' },
+                                                                message: 'must be string',
+                                                              };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err23];
+                                                              } else {
+                                                                vErrors.push(err23);
+                                                              }
+                                                              errors++;
+                                                            }
+                                                            if (
+                                                              !(
+                                                                data22 === 'running' ||
+                                                                data22 === 'waiting_interaction' ||
+                                                                data22 === 'waiting_execution' ||
+                                                                data22 === 'cancelling' ||
+                                                                data22 === 'completed' ||
+                                                                data22 === 'failed' ||
+                                                                data22 === 'cancelled' ||
+                                                                data22 === 'interrupted'
+                                                              )
+                                                            ) {
+                                                              const err24 = {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/items/' +
+                                                                  i0 +
+                                                                  '/activity/run/status',
+                                                                schemaPath:
+                                                                  '#/properties/items/items/properties/activity/properties/run/anyOf/0/properties/status/enum',
+                                                                keyword: 'enum',
+                                                                params: {
+                                                                  allowedValues:
+                                                                    schema51.properties.items.items
+                                                                      .properties.activity
+                                                                      .properties.run.anyOf[0]
+                                                                      .properties.status.enum,
+                                                                },
+                                                                message:
+                                                                  'must be equal to one of the allowed values',
+                                                              };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err24];
+                                                              } else {
+                                                                vErrors.push(err24);
+                                                              }
+                                                              errors++;
+                                                            }
+                                                            var valid10 = _errs68 === errors;
+                                                          } else {
+                                                            var valid10 = true;
+                                                          }
+                                                          if (valid10) {
+                                                            if (data20.isActive !== undefined) {
+                                                              const _errs70 = errors;
+                                                              if (
+                                                                typeof data20.isActive !== 'boolean'
+                                                              ) {
+                                                                const err25 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/items/' +
+                                                                    i0 +
+                                                                    '/activity/run/isActive',
+                                                                  schemaPath:
+                                                                    '#/properties/items/items/properties/activity/properties/run/anyOf/0/properties/isActive/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'boolean' },
+                                                                  message: 'must be boolean',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err25];
+                                                                } else {
+                                                                  vErrors.push(err25);
+                                                                }
+                                                                errors++;
+                                                              }
+                                                              var valid10 = _errs70 === errors;
+                                                            } else {
+                                                              var valid10 = true;
+                                                            }
+                                                            if (valid10) {
+                                                              if (
+                                                                data20.waitingForResults !==
+                                                                undefined
+                                                              ) {
+                                                                const _errs72 = errors;
+                                                                if (
+                                                                  typeof data20.waitingForResults !==
+                                                                  'boolean'
+                                                                ) {
+                                                                  const err26 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/items/' +
+                                                                      i0 +
+                                                                      '/activity/run/waitingForResults',
+                                                                    schemaPath:
+                                                                      '#/properties/items/items/properties/activity/properties/run/anyOf/0/properties/waitingForResults/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'boolean' },
+                                                                    message: 'must be boolean',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err26];
+                                                                  } else {
+                                                                    vErrors.push(err26);
+                                                                  }
+                                                                  errors++;
+                                                                }
+                                                                var valid10 = _errs72 === errors;
+                                                              } else {
+                                                                var valid10 = true;
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    } else {
+                                                      const err27 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/items/' +
+                                                          i0 +
+                                                          '/activity/run',
+                                                        schemaPath:
+                                                          '#/properties/items/items/properties/activity/properties/run/anyOf/0/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'object' },
+                                                        message: 'must be object',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err27];
+                                                      } else {
+                                                        vErrors.push(err27);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                  }
+                                                  var _valid4 = _errs63 === errors;
+                                                  valid9 = valid9 || _valid4;
+                                                  const _errs74 = errors;
+                                                  if (data20 !== null) {
+                                                    const err28 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/items/' +
+                                                        i0 +
+                                                        '/activity/run',
+                                                      schemaPath:
+                                                        '#/properties/items/items/properties/activity/properties/run/anyOf/1/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'null' },
+                                                      message: 'must be null',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err28];
+                                                    } else {
+                                                      vErrors.push(err28);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                  var _valid4 = _errs74 === errors;
+                                                  valid9 = valid9 || _valid4;
+                                                  if (!valid9) {
+                                                    const err29 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/items/' +
+                                                        i0 +
+                                                        '/activity/run',
+                                                      schemaPath:
+                                                        '#/properties/items/items/properties/activity/properties/run/anyOf',
+                                                      keyword: 'anyOf',
+                                                      params: {},
+                                                      message: 'must match a schema in anyOf',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err29];
+                                                    } else {
+                                                      vErrors.push(err29);
+                                                    }
+                                                    errors++;
+                                                    validate44.errors = vErrors;
+                                                    return false;
+                                                  } else {
+                                                    errors = _errs62;
+                                                    if (vErrors !== null) {
+                                                      if (_errs62) {
+                                                        vErrors.length = _errs62;
+                                                      } else {
+                                                        vErrors = null;
+                                                      }
+                                                    }
+                                                  }
+                                                  var valid7 = _errs61 === errors;
+                                                } else {
+                                                  var valid7 = true;
+                                                }
+                                                if (valid7) {
+                                                  if (data18.queued !== undefined) {
+                                                    const _errs76 = errors;
+                                                    if (typeof data18.queued !== 'boolean') {
+                                                      validate44.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/items/' +
+                                                            i0 +
+                                                            '/activity/queued',
+                                                          schemaPath:
+                                                            '#/properties/items/items/properties/activity/properties/queued/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'boolean' },
+                                                          message: 'must be boolean',
+                                                        },
+                                                      ];
+                                                      return false;
+                                                    }
+                                                    var valid7 = _errs76 === errors;
+                                                  } else {
+                                                    var valid7 = true;
+                                                  }
+                                                  if (valid7) {
+                                                    if (data18.pendingInteractions !== undefined) {
+                                                      let data26 = data18.pendingInteractions;
+                                                      const _errs78 = errors;
+                                                      if (
+                                                        !(
+                                                          typeof data26 == 'number' &&
+                                                          !(data26 % 1) &&
+                                                          !isNaN(data26) &&
+                                                          isFinite(data26)
+                                                        )
+                                                      ) {
+                                                        validate44.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/items/' +
+                                                              i0 +
+                                                              '/activity/pendingInteractions',
+                                                            schemaPath:
+                                                              '#/properties/items/items/properties/activity/properties/pendingInteractions/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'integer' },
+                                                            message: 'must be integer',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      }
+                                                      if (errors === _errs78) {
+                                                        if (
+                                                          typeof data26 == 'number' &&
+                                                          isFinite(data26)
+                                                        ) {
+                                                          if (
+                                                            data26 > 9007199254740991 ||
+                                                            isNaN(data26)
+                                                          ) {
+                                                            validate44.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/items/' +
+                                                                  i0 +
+                                                                  '/activity/pendingInteractions',
+                                                                schemaPath:
+                                                                  '#/properties/items/items/properties/activity/properties/pendingInteractions/maximum',
+                                                                keyword: 'maximum',
+                                                                params: {
+                                                                  comparison: '<=',
+                                                                  limit: 9007199254740991,
+                                                                },
+                                                                message:
+                                                                  'must be <= 9007199254740991',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          } else {
+                                                            if (data26 < 0 || isNaN(data26)) {
+                                                              validate44.errors = [
+                                                                {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/items/' +
+                                                                    i0 +
+                                                                    '/activity/pendingInteractions',
+                                                                  schemaPath:
+                                                                    '#/properties/items/items/properties/activity/properties/pendingInteractions/minimum',
+                                                                  keyword: 'minimum',
+                                                                  params: {
+                                                                    comparison: '>=',
+                                                                    limit: 0,
+                                                                  },
+                                                                  message: 'must be >= 0',
+                                                                },
+                                                              ];
+                                                              return false;
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                      var valid7 = _errs78 === errors;
+                                                    } else {
+                                                      var valid7 = true;
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          } else {
+                                            validate44.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/items/' + i0 + '/activity',
+                                                schemaPath:
+                                                  '#/properties/items/items/properties/activity/type',
+                                                keyword: 'type',
+                                                params: { type: 'object' },
+                                                message: 'must be object',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                        }
+                                        var valid3 = _errs52 === errors;
+                                      } else {
+                                        var valid3 = true;
+                                      }
                                     }
                                   }
                                 }
@@ -67328,6 +68119,7 @@ var schema62 = {
         enum: [
           'workspaces',
           'sessions',
+          'session_directory_activity',
           'history',
           'context',
           'execution_output',
@@ -67350,7 +68142,7 @@ var schema62 = {
   ],
   additionalProperties: true,
 };
-var pattern389 = new RegExp('^[0-9a-f]{64}$', 'u');
+var pattern390 = new RegExp('^[0-9a-f]{64}$', 'u');
 function validate58(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -67500,7 +68292,7 @@ function validate58(
               const _errs6 = errors;
               if (errors === _errs6) {
                 if (typeof data2 === 'string') {
-                  if (!pattern389.test(data2)) {
+                  if (!pattern390.test(data2)) {
                     validate58.errors = [
                       {
                         instancePath: instancePath + '/pageIdentity',
@@ -67710,6 +68502,7 @@ function validate58(
                             !(
                               data6 === 'workspaces' ||
                               data6 === 'sessions' ||
+                              data6 === 'session_directory_activity' ||
                               data6 === 'history' ||
                               data6 === 'context' ||
                               data6 === 'execution_output' ||
@@ -103184,7 +103977,7 @@ function validate99(
 }
 validate99.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var response_ResumeJobReportResponse = validate102;
-var pattern627 = new RegExp('^[a-z0-9_]+$', 'u');
+var pattern628 = new RegExp('^[a-z0-9_]+$', 'u');
 function validate102(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -103852,7 +104645,7 @@ function validate102(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern627.test(data11)) {
+                                        if (!pattern628.test(data11)) {
                                           const err22 = {
                                             instancePath: instancePath + '/receipt/reason',
                                             schemaPath:
@@ -129307,7 +130100,7 @@ function validate152(
 }
 validate152.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var request_ConfigurationPatchRequest = validate153;
-var pattern804 = new RegExp(
+var pattern805 = new RegExp(
   '^(?!(?:__proto__|constructor|prototype)$)[^\\u0000-\\u001f\\u007f]+$',
   'u',
 );
@@ -130057,7 +130850,7 @@ function validate153(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern804.test(data8)) {
+                                                            if (!pattern805.test(data8)) {
                                                               const err8 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -130483,7 +131276,7 @@ function validate153(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern804.test(data12)) {
+                                                            if (!pattern805.test(data12)) {
                                                               const err24 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -139190,7 +139983,8 @@ function validate170(
               key0 === 'afterSeq' ||
               key0 === 'upperSeq' ||
               key0 === 'limit' ||
-              key0 === 'workspaceId'
+              key0 === 'workspaceId' ||
+              key0 === 'snapshotCursor'
             )
           ) {
             validate170.errors = [
@@ -139449,6 +140243,42 @@ function validate170(
                   } else {
                     var valid0 = true;
                   }
+                  if (valid0) {
+                    if (data.snapshotCursor !== undefined) {
+                      let data5 = data.snapshotCursor;
+                      const _errs12 = errors;
+                      if (errors === _errs12) {
+                        if (typeof data5 === 'string') {
+                          if (!pattern14.test(data5)) {
+                            validate170.errors = [
+                              {
+                                instancePath: instancePath + '/snapshotCursor',
+                                schemaPath: '#/properties/snapshotCursor/pattern',
+                                keyword: 'pattern',
+                                params: { pattern: '^(0|[1-9][0-9]*)$' },
+                                message: 'must match pattern "' + '^(0|[1-9][0-9]*)$' + '"',
+                              },
+                            ];
+                            return false;
+                          }
+                        } else {
+                          validate170.errors = [
+                            {
+                              instancePath: instancePath + '/snapshotCursor',
+                              schemaPath: '#/properties/snapshotCursor/type',
+                              keyword: 'type',
+                              params: { type: 'string' },
+                              message: 'must be string',
+                            },
+                          ];
+                          return false;
+                        }
+                      }
+                      var valid0 = _errs12 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
+                  }
                 }
               }
             }
@@ -139510,9 +140340,9 @@ function validate171(
               key0 === 'upperSeq' ||
               key0 === 'limit' ||
               key0 === 'workspaceId' ||
+              key0 === 'snapshotCursor' ||
               key0 === 'rootSessionId' ||
-              key0 === 'executionId' ||
-              key0 === 'snapshotCursor'
+              key0 === 'executionId'
             )
           ) {
             validate171.errors = [
@@ -139772,54 +140602,28 @@ function validate171(
                     var valid0 = true;
                   }
                   if (valid0) {
-                    if (data.rootSessionId !== undefined) {
-                      let data5 = data.rootSessionId;
+                    if (data.snapshotCursor !== undefined) {
+                      let data5 = data.snapshotCursor;
                       const _errs12 = errors;
                       if (errors === _errs12) {
                         if (typeof data5 === 'string') {
-                          if (func2(data5) > 128) {
+                          if (!pattern14.test(data5)) {
                             validate171.errors = [
                               {
-                                instancePath: instancePath + '/rootSessionId',
-                                schemaPath: '#/properties/rootSessionId/maxLength',
-                                keyword: 'maxLength',
-                                params: { limit: 128 },
-                                message: 'must NOT have more than 128 characters',
+                                instancePath: instancePath + '/snapshotCursor',
+                                schemaPath: '#/properties/snapshotCursor/pattern',
+                                keyword: 'pattern',
+                                params: { pattern: '^(0|[1-9][0-9]*)$' },
+                                message: 'must match pattern "' + '^(0|[1-9][0-9]*)$' + '"',
                               },
                             ];
                             return false;
-                          } else {
-                            if (func2(data5) < 1) {
-                              validate171.errors = [
-                                {
-                                  instancePath: instancePath + '/rootSessionId',
-                                  schemaPath: '#/properties/rootSessionId/minLength',
-                                  keyword: 'minLength',
-                                  params: { limit: 1 },
-                                  message: 'must NOT have fewer than 1 characters',
-                                },
-                              ];
-                              return false;
-                            } else {
-                              if (!pattern123.test(data5)) {
-                                validate171.errors = [
-                                  {
-                                    instancePath: instancePath + '/rootSessionId',
-                                    schemaPath: '#/properties/rootSessionId/pattern',
-                                    keyword: 'pattern',
-                                    params: { pattern: '^[A-Za-z0-9_-]+$' },
-                                    message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
-                                  },
-                                ];
-                                return false;
-                              }
-                            }
                           }
                         } else {
                           validate171.errors = [
                             {
-                              instancePath: instancePath + '/rootSessionId',
-                              schemaPath: '#/properties/rootSessionId/type',
+                              instancePath: instancePath + '/snapshotCursor',
+                              schemaPath: '#/properties/snapshotCursor/type',
                               keyword: 'type',
                               params: { type: 'string' },
                               message: 'must be string',
@@ -139833,16 +140637,16 @@ function validate171(
                       var valid0 = true;
                     }
                     if (valid0) {
-                      if (data.executionId !== undefined) {
-                        let data6 = data.executionId;
+                      if (data.rootSessionId !== undefined) {
+                        let data6 = data.rootSessionId;
                         const _errs14 = errors;
                         if (errors === _errs14) {
                           if (typeof data6 === 'string') {
                             if (func2(data6) > 128) {
                               validate171.errors = [
                                 {
-                                  instancePath: instancePath + '/executionId',
-                                  schemaPath: '#/properties/executionId/maxLength',
+                                  instancePath: instancePath + '/rootSessionId',
+                                  schemaPath: '#/properties/rootSessionId/maxLength',
                                   keyword: 'maxLength',
                                   params: { limit: 128 },
                                   message: 'must NOT have more than 128 characters',
@@ -139853,8 +140657,8 @@ function validate171(
                               if (func2(data6) < 1) {
                                 validate171.errors = [
                                   {
-                                    instancePath: instancePath + '/executionId',
-                                    schemaPath: '#/properties/executionId/minLength',
+                                    instancePath: instancePath + '/rootSessionId',
+                                    schemaPath: '#/properties/rootSessionId/minLength',
                                     keyword: 'minLength',
                                     params: { limit: 1 },
                                     message: 'must NOT have fewer than 1 characters',
@@ -139865,8 +140669,8 @@ function validate171(
                                 if (!pattern123.test(data6)) {
                                   validate171.errors = [
                                     {
-                                      instancePath: instancePath + '/executionId',
-                                      schemaPath: '#/properties/executionId/pattern',
+                                      instancePath: instancePath + '/rootSessionId',
+                                      schemaPath: '#/properties/rootSessionId/pattern',
                                       keyword: 'pattern',
                                       params: { pattern: '^[A-Za-z0-9_-]+$' },
                                       message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
@@ -139879,8 +140683,8 @@ function validate171(
                           } else {
                             validate171.errors = [
                               {
-                                instancePath: instancePath + '/executionId',
-                                schemaPath: '#/properties/executionId/type',
+                                instancePath: instancePath + '/rootSessionId',
+                                schemaPath: '#/properties/rootSessionId/type',
                                 keyword: 'type',
                                 params: { type: 'string' },
                                 message: 'must be string',
@@ -139894,28 +140698,54 @@ function validate171(
                         var valid0 = true;
                       }
                       if (valid0) {
-                        if (data.snapshotCursor !== undefined) {
-                          let data7 = data.snapshotCursor;
+                        if (data.executionId !== undefined) {
+                          let data7 = data.executionId;
                           const _errs16 = errors;
                           if (errors === _errs16) {
                             if (typeof data7 === 'string') {
-                              if (!pattern14.test(data7)) {
+                              if (func2(data7) > 128) {
                                 validate171.errors = [
                                   {
-                                    instancePath: instancePath + '/snapshotCursor',
-                                    schemaPath: '#/properties/snapshotCursor/pattern',
-                                    keyword: 'pattern',
-                                    params: { pattern: '^(0|[1-9][0-9]*)$' },
-                                    message: 'must match pattern "' + '^(0|[1-9][0-9]*)$' + '"',
+                                    instancePath: instancePath + '/executionId',
+                                    schemaPath: '#/properties/executionId/maxLength',
+                                    keyword: 'maxLength',
+                                    params: { limit: 128 },
+                                    message: 'must NOT have more than 128 characters',
                                   },
                                 ];
                                 return false;
+                              } else {
+                                if (func2(data7) < 1) {
+                                  validate171.errors = [
+                                    {
+                                      instancePath: instancePath + '/executionId',
+                                      schemaPath: '#/properties/executionId/minLength',
+                                      keyword: 'minLength',
+                                      params: { limit: 1 },
+                                      message: 'must NOT have fewer than 1 characters',
+                                    },
+                                  ];
+                                  return false;
+                                } else {
+                                  if (!pattern123.test(data7)) {
+                                    validate171.errors = [
+                                      {
+                                        instancePath: instancePath + '/executionId',
+                                        schemaPath: '#/properties/executionId/pattern',
+                                        keyword: 'pattern',
+                                        params: { pattern: '^[A-Za-z0-9_-]+$' },
+                                        message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                                      },
+                                    ];
+                                    return false;
+                                  }
+                                }
                               }
                             } else {
                               validate171.errors = [
                                 {
-                                  instancePath: instancePath + '/snapshotCursor',
-                                  schemaPath: '#/properties/snapshotCursor/type',
+                                  instancePath: instancePath + '/executionId',
+                                  schemaPath: '#/properties/executionId/type',
                                   keyword: 'type',
                                   params: { type: 'string' },
                                   message: 'must be string',
@@ -140148,7 +140978,8 @@ function validate173(
             key0 === 'afterSeq' ||
             key0 === 'upperSeq' ||
             key0 === 'limit' ||
-            key0 === 'workspaceId'
+            key0 === 'workspaceId' ||
+            key0 === 'snapshotCursor'
           )
         ) {
           validate173.errors = [
@@ -140343,6 +141174,42 @@ function validate173(
                 var valid0 = _errs8 === errors;
               } else {
                 var valid0 = true;
+              }
+              if (valid0) {
+                if (data.snapshotCursor !== undefined) {
+                  let data4 = data.snapshotCursor;
+                  const _errs10 = errors;
+                  if (errors === _errs10) {
+                    if (typeof data4 === 'string') {
+                      if (!pattern14.test(data4)) {
+                        validate173.errors = [
+                          {
+                            instancePath: instancePath + '/snapshotCursor',
+                            schemaPath: '#/properties/snapshotCursor/pattern',
+                            keyword: 'pattern',
+                            params: { pattern: '^(0|[1-9][0-9]*)$' },
+                            message: 'must match pattern "' + '^(0|[1-9][0-9]*)$' + '"',
+                          },
+                        ];
+                        return false;
+                      }
+                    } else {
+                      validate173.errors = [
+                        {
+                          instancePath: instancePath + '/snapshotCursor',
+                          schemaPath: '#/properties/snapshotCursor/type',
+                          keyword: 'type',
+                          params: { type: 'string' },
+                          message: 'must be string',
+                        },
+                      ];
+                      return false;
+                    }
+                  }
+                  var valid0 = _errs10 === errors;
+                } else {
+                  var valid0 = true;
+                }
               }
             }
           }

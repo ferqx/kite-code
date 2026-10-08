@@ -158,6 +158,9 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
         ...(original.capabilities.includes('sessions')
           ? ['workspaces', 'sessions', 'execution_output']
           : []),
+        ...(original.capabilities.includes('session_directory_activity')
+          ? ['session_directory_activity']
+          : []),
         ...(original.capabilities.includes('history') ? ['history'] : []),
         ...(original.capabilities.includes('context') ? ['context'] : []),
         ...(original.capabilities.includes('model_inputs') ? ['model_inputs'] : []),
@@ -380,7 +383,7 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
           query(
             url,
             isSession
-              ? ['afterSeq', 'upperSeq', 'limit', 'workspaceId']
+              ? ['afterSeq', 'upperSeq', 'snapshotCursor', 'limit', 'workspaceId']
               : ['afterSeq', 'upperSeq', 'limit'],
           );
           const parsed = (

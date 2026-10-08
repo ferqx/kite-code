@@ -1,6 +1,6 @@
 import { verifyContextCompression } from './context';
 import { ClientError, decodeResponse, type Responses, validateRequest } from './decode';
-import { collectDirectory, validateDirectoryPage } from './directory';
+import { collectDirectory, collectSnapshotDirectory, validateDirectoryPage } from './directory';
 import {
   validateFileCheckpointTarget,
   verifyFileCheckpointDetail,
@@ -135,6 +135,7 @@ export class BrowserClient {
     const storeId = this.info!.storeId!,
       frozen = structuredClone(input);
     validateRequest('BrowserSessionDirectoryQuery', frozen);
+    if (frozen.snapshotCursor !== undefined) this.require('session_directory_activity');
     if (
       frozen.upperSeq !== undefined &&
       parseCursorSequence(frozen.afterSeq ?? '0') > parseCursorSequence(frozen.upperSeq)
@@ -159,6 +160,11 @@ export class BrowserClient {
       )
     )
       throw new ClientError('browser_identity_mismatch');
+    if (
+      this.info!.capabilities.includes('session_directory_activity') &&
+      page.items.some((item) => !item.activity)
+    )
+      throw new ClientError('directory_activity_unavailable');
     return validateDirectoryPage(page, storeId, frozen);
   }
   async listAllWorkspaces(options: { signal?: AbortSignal } = {}) {
@@ -177,6 +183,24 @@ export class BrowserClient {
     if (this.info!.storeId !== storeId || this.networkGeneration !== generation)
       throw new ClientError('directory_identity_conflict');
     return result.map((item) => item.workspace);
+  }
+  async listAllSessionDirectory(options: { workspaceId?: string; signal?: AbortSignal } = {}) {
+    this.require('session_directory_activity');
+    const workspaceId = options.workspaceId,
+      storeId = this.info!.storeId!,
+      generation = this.networkGeneration;
+    const result = await collectSnapshotDirectory(
+      (page) => {
+        if (this.info!.storeId !== storeId || this.networkGeneration !== generation)
+          throw new ClientError('directory_identity_conflict');
+        return this.listSessionDirectory({ workspaceId, ...page }, options);
+      },
+      options.signal,
+      (item) => item.session.id,
+    );
+    if (this.info!.storeId !== storeId || this.networkGeneration !== generation)
+      throw new ClientError('directory_identity_conflict');
+    return result;
   }
   async listAllSessions(options: { workspaceId?: string; signal?: AbortSignal } = {}) {
     this.require('sessions');

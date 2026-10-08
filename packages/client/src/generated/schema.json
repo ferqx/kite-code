@@ -10126,6 +10126,10 @@
         "maxLength": 128,
         "pattern": "^[A-Za-z0-9_-]+$"
       },
+      "snapshotCursor": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
       "rootSessionId": {
         "type": "string",
         "minLength": 1,
@@ -10137,10 +10141,6 @@
         "minLength": 1,
         "maxLength": 128,
         "pattern": "^[A-Za-z0-9_-]+$"
-      },
-      "snapshotCursor": {
-        "type": "string",
-        "pattern": "^(0|[1-9][0-9]*)$"
       }
     },
     "required": ["storeId"],
@@ -11793,6 +11793,10 @@
         "minLength": 1,
         "maxLength": 128,
         "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "snapshotCursor": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
       }
     },
     "required": ["storeId"],
@@ -11840,6 +11844,10 @@
         "minLength": 1,
         "maxLength": 128,
         "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "snapshotCursor": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
       }
     },
     "additionalProperties": false
@@ -12031,6 +12039,72 @@
                 "deletedAt"
               ],
               "additionalProperties": false
+            },
+            "activity": {
+              "type": "object",
+              "properties": {
+                "updatedAt": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "run": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "waiting_interaction",
+                            "waiting_execution",
+                            "cancelling",
+                            "completed",
+                            "failed",
+                            "cancelled",
+                            "interrupted"
+                          ]
+                        },
+                        "isActive": {
+                          "type": "boolean"
+                        },
+                        "waitingForResults": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "status", "isActive", "waitingForResults"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "queued": {
+                  "type": "boolean"
+                },
+                "pendingInteractions": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["updatedAt", "run", "queued", "pendingInteractions"],
+              "additionalProperties": false
             }
           },
           "required": ["seq", "session"],
@@ -12039,6 +12113,73 @@
       }
     },
     "required": ["storeId", "highWaterSeq", "upperSeq", "nextAfterSeq", "snapshotCursor", "items"],
+    "additionalProperties": false
+  },
+  "SessionDirectoryActivity": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "updatedAt": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8640000000000000
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "run": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running",
+                  "waiting_interaction",
+                  "waiting_execution",
+                  "cancelling",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "interrupted"
+                ]
+              },
+              "isActive": {
+                "type": "boolean"
+              },
+              "waitingForResults": {
+                "type": "boolean"
+              }
+            },
+            "required": ["id", "status", "isActive", "waitingForResults"],
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "queued": {
+        "type": "boolean"
+      },
+      "pendingInteractions": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    },
+    "required": ["updatedAt", "run", "queued", "pendingInteractions"],
     "additionalProperties": false
   },
   "BrowserWorkspaceDirectoryPage": {
@@ -12152,6 +12293,7 @@
           "enum": [
             "workspaces",
             "sessions",
+            "session_directory_activity",
             "history",
             "context",
             "execution_output",

@@ -485,6 +485,12 @@ Service 在任何 vault 效果前核完整原 readSet，发现后和 JSONC 短 C
 
 [Native MCP 测试装配](test/native-mcp-process.fixture.ts)仅由 Terminal builder 的固定 `native-mcp-loopback` 选项在构建前写入，网络选项和可选公开测试证书均进入 inventory/digest；普通 main/daemon 不选择它。该候选保默认权限、默认 OS vault 和系统 opener，但 loopback/证书网络不是生产默认资格。实际窗口及人工浏览器资格的入口和限制归 [Desktop owner](../desktop/README.md#native-mcp-完整设置)。
 
+## Session 目录活动摘要
+
+默认 Service 声明 `session_directory_activity`，沿原认证 `GET /v1/session-directory` 返回同事务的 root 身份和有限 activity；主体仍只由宿主提供。活动 Run 优先、否则最新 Run；排队、同主体当前 Store 的待输入数量与最后 Core 事件封存时间分别保留，没有新运行或取消 authority。旧／未知时间保持 null，不读取当前配置或公开事件正文。Store 负责范围与来源，见[目录 owner](../../packages/agent/src/storage/README.md#目录分页)。
+
+Session closed query 新增可选 `snapshotCursor`；续页元数据变化返回409 `directory_changed`。生成响应保持 additive，旧 producer 可省略 activity；SDK 仅在宣告能力时要求它存在并完整扫描。Cookie Gateway 允许该有限只读字段并转交原准入 Store，BrowserInfo 只转发服务实际宣告能力，不增加路径、主体或写入入口。[真实目录测试](../../tests/isolated/unified-agent/directory.test.ts)核超过200项、改名无 Run 的真实更新时间、Native／Browser 一致和冷 readonly 零事件；[SDK 反例](../../packages/client/test/directory.test.ts)核变更前缀丢弃、字段缺席／坏时间和持续变化拒绝。实际 PC 窗口资格归[Native owner](../desktop/README.md#native-项目会话目录)。
+
 ## 完整后台执行目录
 
 公开只读 `GET /v1/background-executions` 使用 closed 查询和有限 `BackgroundExecutionPage`：subject 仅由当前宿主准入填入，页面 Store必须匹配当前连接；root所有权、恢复根内旧来源、未删除状态、真实来源／root-work／child-start 与 Workspace/root/Execution过滤由Store在分页前核对。完整 Job目录包含 child/task carrier及其后代，原 originStoreId 不改成新 Store；读取资格不授予历史取消或重放许可。`snapshotCursor`冲突返回409 `directory_changed`，不产生新Command或业务效果。正文和输出沿原接口按需读取；Browser gateway未增加控制或目录准入。原身份、父/child Run、取消守卫和分页契约见[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)，实际协议见[测试](../../tests/isolated/unified-agent/background-directory.test.ts)。

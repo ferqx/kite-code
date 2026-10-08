@@ -169,3 +169,89 @@ test('closed directory input rejects authority/cursor before fetch and response 
   const result = await client.listSessionDirectory({ storeId: 'store' });
   expect((result as typeof result & { future: unknown }).future).toEqual({ preserved: true });
 });
+
+for (const browser of [false, true])
+  test(`${browser ? 'Browser' : 'Native'} activity directory publishes one complete snapshot, restarts a changed prefix, and refuses missing facts or perpetual change`, async () => {
+    let mode = 'retry',
+      scans = 0;
+    const queries: string[] = [];
+    const transport = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        expect(init?.method ?? 'GET').toBe('GET');
+        if (url.pathname.endsWith('/server'))
+          return Response.json(
+            {
+              ...(browser ? browserInfo : nativeInfo),
+              capabilities: ['sessions', 'session_directory_activity'],
+            },
+            { headers: { 'x-kite-web-identity': identity } },
+          );
+        queries.push(url.search);
+        const after = url.searchParams.get('afterSeq');
+        if (!after) scans++;
+        if (after && (mode === 'changing' || (mode === 'retry' && scans === 1)))
+          return Response.json(
+            {
+              code: 'directory_changed',
+              message: 'directory_changed',
+              scope: 'request',
+              requestId: 'id',
+              retryable: false,
+            },
+            { status: 409, headers: { 'x-kite-web-identity': identity } },
+          );
+        const value = page(after);
+        value.snapshotCursor = mode === 'drift' && after ? '999' : String(scans);
+        value.items[0]!.session.id = after ? 'two' : scans === 1 ? 'discarded-prefix' : 'fresh-one';
+        if (mode !== 'missing')
+          Object.assign(value.items[0]!, {
+            activity: {
+              updatedAt: mode === 'bad-time' ? -1 : 1000 + scans,
+              run: null,
+              queued: false,
+              pendingInteractions: 0,
+            },
+          });
+        return Response.json(value, { headers: { 'x-kite-web-identity': identity } });
+      },
+      { preconnect() {} },
+    ) as typeof fetch;
+    if (!browser) {
+      const spy = spyOn(globalThis, 'fetch').mockImplementation(transport);
+      restore = () => spy.mockRestore();
+    }
+    const client = browser
+      ? createBrowserClient({
+          origin: 'http://localhost',
+          pageIdentity: identity,
+          fetch: transport,
+        })
+      : createClient({
+          endpoint: 'http://localhost',
+          token: 'private',
+          expected: { profile, apiMajor: 1, requiredCapabilities: [] },
+        });
+    await client.connect();
+    const result = await client.listAllSessionDirectory();
+    expect(result.map((item) => item.session.id)).toEqual(['fresh-one', 'two']);
+    expect(result.every((item) => item.activity?.updatedAt === 1002)).toBe(true);
+    expect(scans).toBe(2);
+    expect(queries[1]).toContain('snapshotCursor=1');
+    expect(queries[3]).toContain('snapshotCursor=2');
+    expect(queries[3]).toContain('upperSeq=9007199254740994');
+    for (const next of ['drift', 'missing', 'bad-time', 'changing']) {
+      mode = next;
+      scans = 0;
+      queries.length = 0;
+      expect(await failure(client.listAllSessionDirectory())).not.toBeNull();
+      if (next === 'missing') expect(queries).toHaveLength(1);
+      if (next === 'changing') expect(scans).toBe(3);
+    }
+    queries.length = 0;
+    const abort = new AbortController();
+    abort.abort();
+    expect(await failure(client.listAllSessionDirectory({ signal: abort.signal }))).not.toBeNull();
+    expect(queries).toHaveLength(0);
+    client.disposeNetwork();
+  });

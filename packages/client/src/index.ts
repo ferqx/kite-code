@@ -6,7 +6,7 @@ import {
   validateQueryInput,
   validateRequest,
 } from './decode';
-import { collectDirectory, validateDirectoryPage } from './directory';
+import { collectDirectory, collectSnapshotDirectory, validateDirectoryPage } from './directory';
 import {
   validateFileCheckpointTarget,
   verifyFileCheckpointDetail,
@@ -2229,6 +2229,7 @@ export class AgentClient {
     const generation = this.connectionGeneration;
     const frozen = structuredClone(input);
     validateRequest('SessionDirectoryQuery', frozen);
+    if (frozen.snapshotCursor !== undefined) this.requireCapability('session_directory_activity');
     if (
       frozen.upperSeq !== undefined &&
       parseCursorSequence(frozen.afterSeq ?? '0') > parseCursorSequence(frozen.upperSeq)
@@ -2255,6 +2256,11 @@ export class AgentClient {
       )
     )
       throw new ClientError('directory_identity_conflict');
+    if (
+      this.serverInfo!.capabilities.includes('session_directory_activity') &&
+      page.items.some((item) => !item.activity)
+    )
+      throw new ClientError('directory_activity_unavailable');
     return validateDirectoryPage(page, frozen.storeId, frozen);
   }
   async listAllWorkspaces(options: { signal?: AbortSignal } = {}) {
@@ -2273,6 +2279,24 @@ export class AgentClient {
     this.requireConnection();
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
     return result.map((item) => item.workspace);
+  }
+  async listAllSessionDirectory(options: { workspaceId?: string; signal?: AbortSignal } = {}) {
+    this.requireCapability('session_directory_activity');
+    const storeId = this.serverInfo!.storeId!,
+      workspaceId = options.workspaceId,
+      generation = this.connectionGeneration;
+    const result = await collectSnapshotDirectory(
+      (page) => {
+        if (generation !== this.connectionGeneration)
+          throw new ClientError('connection_superseded');
+        return this.listSessionDirectory({ storeId, workspaceId, ...page }, options);
+      },
+      options.signal,
+      (item) => item.session.id,
+    );
+    this.requireConnection();
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return result;
   }
   async listAllSessions(options: { workspaceId?: string; signal?: AbortSignal } = {}) {
     this.requireCapability('sessions');

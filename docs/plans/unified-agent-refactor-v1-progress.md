@@ -2582,3 +2582,74 @@ double-submit-green、types-completion、double-submit-biome-20261008.log（完�
 不再重复物理矩阵。Git交付证明按这三项实际收尾后重新冻结，正常hooks仍独立执行。
 
 最后连续提交修复的原5项DOM、当前Desktop类型和两文件readonly Biome均actual0；原控件存在与业务断言保留，未增加新测试文件或调度例外。
+
+## 2026-10-08：原 PC 全局会话状态与时间排序
+
+基于 durable HEAD `56f012fac8e02e1740b3064178d9a3c1191d1189` 加本片 owned diff，继续用户要求的原 kite-desktop 迁移，
+没有重建侧栏。读取原 App 的 Session 目录映射、当前原 Sidebar、现行桌面手册和新 Store／Service／Client owner。
+上一轮已有新对话准备／首次发送的实际本地提交，归 progress；本片最高依赖为全局目录状态／时间，已完成这一能力。
+剩余退出依赖按顺序不超过五项：其余 PC 页面细节；Workspace 批量移除与物理 GC；installed 恢复与已发布前版样本；
+macOS 原资源退出；完整迁移独立审查、阶段完整回归及最终 legacy 删除。各完整依赖仍未宣布退出，原 RSS 失败保留。
+
+正式 Native 全局目录现在消费真实同快照 activity。未打开会话也有准确 active／latest Run、排队和同主体当前 Store 的
+pending presentation 数量。必需结果等待复用原通用活动提示，与用户待输入 Badge 分开。最后更新时间来自已经存在的
+原 Session 最新 Core event 私人 `kite.session-log@1.occurredAt`，不以读取时钟或 Run 开始时间代替；
+没有 Run 的改名同样更新时间，未知／旧／损坏时间保持 null。原 Sidebar 继续排序、显示本地时间、默认5条/+10展开。
+没有新表／列、baseline／Store major／维护资产或第二个运行索引，旧身份目录与旧 producer 的兼容入口保持。
+
+Session 页可约束原 snapshotCursor，变化409 `directory_changed`。新的 Native／Browser 完整 reader 丢弃整个变更前缀，
+最多三次扫描后明确失败；不发布混合水位、缺事实或迟到集合。Main 按 SSE ready/change 合并只读刷新，不逐个读未选中 view，
+全局目录读取与当前正文／选择分别持有生命周期，慢目录不挡原阅读。断线/reset/失败保原目录和时间，显示上次确认状态，
+移除当前活动标记；attach／Store／epoch 拒绝迟到读取，detach 只 abort 所属 GET，不停止工作或重发意图。
+字段由 Service 唯一 schema 生成；Cookie Gateway 只转交原准入 Store 的有限 GET，没有新路径／主体／控制权。
+
+本机实际验证和原失败均保留，生产输入为上述基线加本片 durable owned diff：
+
+- Client／Main／原 Sidebar 三文件定向组合 actual0/16pass/208assert/673ms，日志
+  `/private/tmp/kite-pc-directory-contracts-third-20261008.log`。包含第201项之后的未选中变化、缺事实／坏时间／水位漂移、
+  持续变更三次后失败、旧目录保留、慢读取不挡选择／detach 迟到拒绝及原5/+10状态展示；Mock port／受控传输不替代真实 Store。
+- 真实 SQLite／Core／HTTP／Cookie Native和Browser三项最终 actual0/3pass/61assert/1.58秒，日志
+  `/private/tmp/kite-pc-directory-http-final-20261008.log`。真实超过200项、固定上界／变化拒绝、改名无 Run 的时间与原日志相等、
+  queued/active/latest、未记录时间null、冷 readonly 保原全部元数据与零读事件／Provider。
+- 源码外默认 macOS Native 制品／真实 Electron 窗口 actual0/1pass/7Bunassert/50.20秒，日志
+  `/private/tmp/kite-pc-directory-native-window-20261008.log`。新会话实际 Files Ask 后选择另一原会话，未选中目标仍有原待输入 Badge、
+  原 active Run ID／真实时间／排序，返回仍为原卡，导航零新增 Provider；原审批1／Provider2、单消息接管、冷重开时间相同、
+  正常退出及 Main kill／child 两 root 使用锁的原断言均保留。原45秒 driver／120秒整例预算未扩大。
+- Root与八workspace类型 actual0，日志 `/private/tmp/kite-pc-directory-types-final-20261008.log`。
+  当前 API、边界、受影响邻接、文档及正常 Git hooks 的最终结果按下方交付收尾记录，未运行本片阶段完整默认或无关 TUI／Chrome／Vault矩阵。
+
+初次未提权的真实 HTTP 组合因本机受限端口绑定失败，其他13项通过，原日志 `kite-pc-directory-initial-20261008.log` 保留；
+实际 loopback／窗口验证随后在已授权本机测试范围执行。第一轮真实摘要发现安全整数查询返回 bigint，最初时间 guard 错误地置null；
+改为仅对可表示真实整数作受限 Number 转换。第二轮真实 Browser 发现 Gateway 的手写字段白名单遗漏 snapshotCursor，现已修正接收端。
+对应 HTTP 原红 `kite-pc-directory-http-20261008.log`、`kite-pc-directory-http-second-20261008.log` 保留。
+两个 DOM 原红仅为新 fixture 缺原 Sidebar 必填 actions／connectionLabel，以及把“展开更多”同类按钮当会话行，
+修正实际组件输入／原可访问标识，没有删业务断言；原日志 contracts、contracts-second 保留，完整前缀均为 `/private/tmp/kite-pc-directory-`。
+
+[Native owner](../../apps/desktop/README.md#native-项目会话目录)、[Store owner](../../packages/agent/src/storage/README.md#目录分页)、
+[Client owner](../../packages/client/README.md#完整目录读取)、[Service owner](../../apps/service/README.md#session-目录活动摘要)、
+[桌面手册](../handbook/clients/desktop/README.md)、[当前边界](../active/unified-agent-boundary.md)、§30.2.15和持久[目录取舍](../../.agents/notes/implemented/architecture/2026-10-08-session-directory-activity-observation.md)同步。
+37能力仍partial、wholeV13=false、Goal active；只取本片真实窗口／协议资格，不宣称独立审查或阶段退出。
+独立 Agent 本轮只尝试一次但线程数量限制，Root完成源码／diff核对，不复用无关旧 Agent 冒充独立审查。
+Win/Linux仍按用户要求重构后由Actions验，当前无 dispatch／push／PR／发布。
+
+收尾源码核对新增一个准确反例：SQLite `json_extract` 将布尔时间转成整数1，不能作为原时间。
+原有限 Core 例保留未来版本未知断言，再核布尔 time／version，原红0pass/1fail/10assert、2filtered，
+日志 `/private/tmp/kite-pc-directory-json-time-red-20261008.log`；目录现在按原 Session logs 规则限定两个字段均为 JSON integer。
+最终真实三项 HTTP／Core／Cookie 复验为上列3/61，原正式 integer 时间仍与最后封存事件相等。
+此修复仅拒绝损坏字段；上述窗口证据输入在最后 guard 前，原封存 writer、SDK／Main／renderer／Sidebar 未再改变，
+当前正常 integer 路径由最终真实 HTTP 核验，复用原窗口导航／冷读／退出证据，不重标为另一轮窗口运行。
+
+受影响的会话／历史／权限／配置／输入、后台目录、Browser／CSP及Service／Gateway邻接10文件
+actual0/53pass/399assert/15.03秒，日志 `/private/tmp/kite-pc-directory-neighbors-20261008.log`。
+18个owned代码文件只读Biome actual0/no fixes/1既有info，最终两文件guard复验actual0，
+日志 biome-final、json-time-biome-20261008.log。静态边界／八workspace／唯一API graph、
+docs、scope=all impact、plan-evidence与Test ownership均actual0，日志 architecture-final、docs-closure、
+impact-closure、plan-closure、ownership-final-20261008.log，完整前缀均为 `/private/tmp/kite-pc-directory-`。
+最后JSON guard与新增断言后Root及八workspace正常typecheck仍actual0，日志 types-closure-20261008.log。
+当前默认发现625文件，原目录和源码外窗口各恰好一次；没有新测试文件、调度例外或完整图运行，
+发现证据 `/private/tmp/kite-pc-directory-discovery-20261008.log`。
+
+iteration_complete 产品与技术同步就绪；stage／commit按最终准确owned内容与正常hooks核，
+本地交付证明记录在 `/private/tmp/kite-pc-directory-delivery-20261008.json`。
+Root唯一Git owner；无关 AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258`
+保持且不暂存。本片不改变整体迁移、原资源退出或完整回归的未完成结论。

@@ -2070,7 +2070,7 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原模型与思考双栏浮层、宝石滑块也已接入正式 Native；准确路由和服务档位适配及 macOS 窗口证据见[选择器进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-模型与思考选择器)。此项收束不提升余下 PC 页面或全阶段的退出状态。
 
-原安排任务页与右侧编辑表单已接入 Native，沿现行手册仅提供页面草稿、禁用保存，不以 UI 状态补造服务调度；工作台仍隐藏。实际入口与原草稿往返、晚创建隔离及源码外窗口结果见[安排任务进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-安排任务草稿页)。原新对话准备与首次发送亦已接正式 Native，沿原页面／建议／项目分支／模型权限选择、已有创建和输入链完成，未知只查原提交，失败保原 Session 和草稿；真实窗口及消息接管修复见[新对话进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-新对话准备与首次发送)。下一 PC 依赖仍包括全局目录索引状态／时间等剩余页面细节，完整阶段退出未通过。
+原安排任务页与右侧编辑表单已接入 Native，沿现行手册仅提供页面草稿、禁用保存，不以 UI 状态补造服务调度；工作台仍隐藏。实际入口与原草稿往返、晚创建隔离及源码外窗口结果见[安排任务进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-安排任务草稿页)。原新对话准备与首次发送亦已接正式 Native，沿原页面／建议／项目分支／模型权限选择、已有创建和输入链完成，未知只查原提交，失败保原 Session 和草稿；真实窗口及消息接管修复见[新对话进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-新对话准备与首次发送)。原全局目录状态／时间排序亦已接公共同快照 activity 并复用 Sidebar，未选中原会话的 pending、真实事件时间、分页冲突／失败保事实和 macOS 冷读已核；见[目录进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-全局会话状态与时间排序)。剩余 PC 页面细节及后序依赖仍按原计划推进，完整阶段退出未通过。
 
 ### 30.3 第一条执行闭环
 

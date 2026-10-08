@@ -5,7 +5,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerTextDigest } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
-import { nativeChannel } from '../src/native-bridge';
+import { type NativeState, nativeChannel } from '../src/native-bridge';
 import { memoryPrivateData } from './private-data.fixture';
 
 function client() {
@@ -496,6 +496,121 @@ test('main shutdown and directory exhaust admitted SDK pages: activity beyond 20
     });
     expect(await code(caller.hasActiveWork())).toBe('query unavailable');
   } finally {
+    await caller.close();
+  }
+});
+
+test('global activity refresh follows non-selected changes, retains failed observations, and never blocks selected reading or revives a detached read', async () => {
+  const port = client();
+  port.serverInfo!.capabilities.push('session_directory_activity');
+  let change!: () => void,
+    mode = 'ok',
+    timestamp = 1000,
+    pending = 1;
+  let heldSignal: AbortSignal | undefined;
+  let release!: (value: unknown) => void;
+  const views: string[] = [];
+  const original = port.getView.bind(port);
+  Object.assign(port, {
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      change = () => {
+        void options.onChange?.({} as never);
+      };
+      await options.onReady?.({} as never);
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+    async listAllWorkspaces() {
+      return [{ id: 'w', name: 'w', rootUri: 'file:///w' }];
+    },
+    async listAllSessionDirectory(options: { signal: AbortSignal }) {
+      if (mode === 'fail') throw Error('activity unavailable');
+      const entries = Array.from({ length: 205 }, (_, index) => ({
+        seq: String(index + 1),
+        session: {
+          id: `s-${index}`,
+          workspaceId: 'w',
+          rootSessionId: `s-${index}`,
+          parentSessionId: null,
+          title: 'same name',
+          controlRevision: '0',
+          contextSelectionId: 'selection',
+          nextSeq: '0',
+          deletedAt: null,
+        },
+        activity: {
+          updatedAt: timestamp,
+          queued: false,
+          pendingInteractions: index === 204 ? pending : 0,
+          run:
+            index === 204
+              ? {
+                  id: 'actual-run',
+                  status: pending ? 'waiting_interaction' : 'completed',
+                  isActive: !!pending,
+                  waitingForResults: false,
+                }
+              : null,
+        },
+      }));
+      if (mode === 'hold') {
+        heldSignal = options.signal;
+        return await new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+      return entries;
+    },
+    async getView(id: string) {
+      views.push(id);
+      return original(id);
+    },
+    async listAllSessions() {
+      throw Error('identity-only directory forbidden');
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, memoryPrivateData());
+  const wait = async (accept: (value: NativeState) => boolean) => {
+    for (let i = 0; i < 100 && !accept(caller.state()); i++) await Bun.sleep(1);
+    expect(accept(caller.state())).toBe(true);
+  };
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await wait((state) => state.directory?.sessions.length === 205);
+    await caller.invoke({ method: 'select', generation, sessionId: 's-0' });
+    expect(caller.state().directory!.sessions[204]!.activity).toMatchObject({
+      pendingInteractions: 1,
+      run: { id: 'actual-run', status: 'waiting_interaction' },
+    });
+    timestamp = 2000;
+    pending = 0;
+    change();
+    await wait((state) => state.directory?.sessions[204]?.activity?.updatedAt === 2000);
+    expect(caller.state().selection?.session.id).toBe('s-0');
+    expect(caller.state().directory!.sessions[204]!.activity?.pendingInteractions).toBe(0);
+    expect(views.every((id) => id === 's-0')).toBe(true);
+    mode = 'fail';
+    change();
+    await wait((state) => state.directory?.unavailable === true);
+    expect(caller.state().directory!.sessions).toHaveLength(205);
+    expect(caller.state().directory!.sessions[204]!.activity?.updatedAt).toBe(2000);
+    mode = 'hold';
+    change();
+    for (let i = 0; i < 100 && !heldSignal; i++) await Bun.sleep(1);
+    expect(heldSignal).toBeDefined();
+    await caller.invoke({ method: 'select', generation, sessionId: 's-1' });
+    expect(
+      ((await caller.invoke({ method: 'state', generation })) as NativeState).selection?.session.id,
+    ).toBe('s-1');
+    await caller.invoke({ method: 'detach', generation });
+    expect(heldSignal!.aborted).toBe(true);
+    release([]);
+    await Bun.sleep(2);
+    expect(caller.state().directory).toBeUndefined();
+    expect(port.writes).toBe(0);
+  } finally {
+    release?.([]);
     await caller.close();
   }
 });

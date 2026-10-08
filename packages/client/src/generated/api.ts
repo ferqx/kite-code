@@ -1827,9 +1827,9 @@ export type BackgroundExecutionQuery = {
   upperSeq?: string;
   limit?: number;
   workspaceId?: string;
+  snapshotCursor?: string;
   rootSessionId?: string;
   executionId?: string;
-  snapshotCursor?: string;
 };
 export type BackgroundExecutionItem = {
   seq: string;
@@ -2100,6 +2100,7 @@ export type SessionDirectoryQuery = {
   upperSeq?: string;
   limit?: number;
   workspaceId?: string;
+  snapshotCursor?: string;
 };
 export type BrowserWorkspaceDirectoryQuery = {
   afterSeq?: string;
@@ -2111,6 +2112,7 @@ export type BrowserSessionDirectoryQuery = {
   upperSeq?: string;
   limit?: number;
   workspaceId?: string;
+  snapshotCursor?: string;
 };
 export type WorkspaceDirectoryPage = {
   storeId: string;
@@ -2139,7 +2141,45 @@ export type SessionDirectoryPage = {
       nextSeq: string;
       deletedAt: number | null;
     };
+    activity?: {
+      updatedAt: number | null;
+      run: {
+        id: string;
+        status:
+          | 'running'
+          | 'waiting_interaction'
+          | 'waiting_execution'
+          | 'cancelling'
+          | 'completed'
+          | 'failed'
+          | 'cancelled'
+          | 'interrupted';
+        isActive: boolean;
+        waitingForResults: boolean;
+      } | null;
+      queued: boolean;
+      pendingInteractions: number;
+    };
   }>;
+};
+export type SessionDirectoryActivity = {
+  updatedAt: number | null;
+  run: {
+    id: string;
+    status:
+      | 'running'
+      | 'waiting_interaction'
+      | 'waiting_execution'
+      | 'cancelling'
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted';
+    isActive: boolean;
+    waitingForResults: boolean;
+  } | null;
+  queued: boolean;
+  pendingInteractions: number;
 };
 export type BrowserWorkspaceDirectoryPage = {
   storeId: string;
@@ -2158,6 +2198,7 @@ export type BrowserInfo = {
   capabilities: Array<
     | 'workspaces'
     | 'sessions'
+    | 'session_directory_activity'
     | 'history'
     | 'context'
     | 'execution_output'

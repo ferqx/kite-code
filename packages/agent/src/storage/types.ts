@@ -777,9 +777,21 @@ export interface BackgroundExecutionPage {
   snapshotCursor: string;
 }
 
+/** Read-only activity facts captured with the directory page, never execution authority. */
+export interface SessionDirectoryActivity {
+  updatedAt: number | null;
+  run: {
+    id: string;
+    status: RunRecord['status'];
+    isActive: boolean;
+    waitingForResults: boolean;
+  } | null;
+  queued: boolean;
+  pendingInteractions: number;
+}
 export interface SessionDirectoryPage {
   storeId: string;
-  items: { seq: string; session: SessionRecord }[];
+  items: { seq: string; session: SessionRecord; activity: SessionDirectoryActivity }[];
   highWaterSeq: string;
   upperSeq: string;
   nextAfterSeq: string | null;

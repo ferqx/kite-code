@@ -4,9 +4,9 @@
 
 正式 [NativeDesktop](src/native.tsx) 已使用原 kite-desktop 的共享 [SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)、Sidebar、Conversation、Composer 与 RightSidebar。[renderer 入口](src/native-main.tsx)载入原主题、字体、Tailwind/typeset 和共享 CSS；[构建器](scripts/build-native.ts)复用原 Vite/React/Tailwind 管线，仅替换 renderer 构建，Main/preload、Service 闭包、递归制品清单与使用锁保持。macOS 沿原 hiddenInset 与 trafficLightPosition 布局；正式 workspace 仍为原八个。
 
-[适配器](src/native-presentation.ts)只将生成 Client 的真实 Workspace/Session/Message 转为原 UI view model。未观察状态显示“状态待读取”，缺少的更新时间不补造；完成消息不推断 final reply、Turn、Tool grouping 或执行成功。正文 slot 继续使用现有 ModelOutputMessage 与完整原身份 reader；未知格式、预览与不完整内容继续保留。原 Composer 的发送、草稿、model choice 和 planMode 回调沿现有 Native controller，不建立第二条提交链。
+[适配器](src/native-presentation.ts)只将生成 Client 的真实 Workspace/Session/Message 转为原 UI view model。目录状态与时间消费同快照只读 activity，缺能力或未记录的事实保持待读取／未知；完成消息不推断 final reply、Turn、Tool grouping 或执行成功。正文 slot 继续使用现有 ModelOutputMessage 与完整原身份 reader；未知格式、预览与不完整内容继续保留。原 Composer 的发送、草稿、model choice 和 planMode 回调沿现有 Native controller，不建立第二条提交链。
 
-“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页、新对话准备与首次发送已迁入，Workspace 批量移除/GC、全局目录状态与更新时间等剩余旧页面细节仍待迁移。
+“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页、新对话准备与首次发送、全局目录状态和时间排序已迁入，Workspace 批量移除/GC 等剩余旧页面细节仍待迁移。
 
 [原页面契约测试](../../packages/ui/test/desktop-page.test.tsx)迁回原 12 项展示断言；现有 Native 目录、草稿、问答与计划 DOM 只调整控件/浏览器 API，保留业务断言。源码外 [Native 候选](test/isolated/native-bundle.test.ts)与[driver](test/native-bundle-electron.fixture.ts)已核编译 CSS/字体、可操作 Composer、新 preload bridge、实际审批/任务、冷读和两层使用锁收尾。准确输入、原失败与结果归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不代表完整客户端、installed 全量、独立审查或 Windows/Linux 阶段退出。
 
@@ -14,9 +14,11 @@
 
 正式目录直接复用 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx)，替代临时 NativeDirectory。适配器按公共 workspaceId 分组，项目默认展开，可独立收起；空项目显示“暂无聊天”。上下键只移动当前项目列表焦点，确认沿原 Session ID 读取；收起不调用 bridge、不改选或取消工作。首次发送等待不阻止阅读已有会话，原 NativeDesktop 仍保护迟到创建、后来选择和草稿。选择标记核同 Store，目录 Store 更换重置展示。侧栏先显示五项、“展开更多”每次增加十项只是展示完整已读目录，不改变公共分页或高水位。
 
-Workspace/Session 完整目录分别读取；其间新登记的项目可能还未进入项目上界。相应 Session 保留在“项目待读取的会话”，可读原历史，但不提供该未观察项目的新建入口。公开 Session 没有更新时间，原排序没有时间值时保读出顺序，不补造时间。项目移除/批量删除、物理 GC 与剩余旧页面行为仍未闭合。
+Workspace/Session 完整目录分别读取；其间新登记的项目可能还未进入项目上界。相应 Session 保留在“项目待读取的会话”，可读原历史，但不提供该未观察项目的新建入口。Session 目录使用公共 `listAllSessionDirectory` 穷尽同一观察，未选中会话也有实际 active／latest Run、排队及同主体当前 Store 的待输入数量。更新时间取原 Core 最后事件封存时间，读取不修改它；未记录或未知格式保持缺席，原 Sidebar 按真实时间排序、悬浮显示本地时间。必需后台结果等待沿原通用活动指示，与人类待输入 Badge 分开。
 
-[目录 DOM](test/native-directory.test.tsx)与[草稿 DOM](test/isolated/native-drafts-dom.test.tsx)已直接核已有 Sidebar/实际 NativeDesktop：同名会话准确项目/原 ID、空项目、独立折叠零写、项目列表焦点零选择、创建期间阅读、晚项目保留与迟到创建保后来选择/草稿。具体结果归本片进度，不以有限 DOM 宣称完整 installed/跨平台资格。
+[Main](electron/native-caller.ts)在 SSE ready／change 后合并刷新全局目录，不逐个读取未选中 view、不取得其他会话执行权；目录读取与当前正文读取分别持有生命周期，慢目录不阻挡阅读。Store／attach generation 与独立读取 epoch 核对迟到结果；断线、reset 或读取失败保上次标题和时间，状态标为“上次确认状态”，连接文字显示“目录状态待核实”，不以旧数量显示当前待输入。detach 只 abort 所属 GET 并清本视图目录，不取消工作。显式刷新仍沿原目录入口，完整成功后才恢复当前状态。项目移除/批量删除、物理 GC 与剩余旧页面行为仍未闭合。
+
+[目录 DOM](test/native-directory.test.tsx)与[草稿 DOM](test/isolated/native-drafts-dom.test.tsx)已直接核已有 Sidebar/实际 NativeDesktop：同名会话准确项目/原 ID、空项目、独立折叠零写、项目列表焦点零选择、创建期间阅读、晚项目保留与迟到创建保后来选择/草稿。新目录 DOM 另核真实时间排序、5/+10 展示、全局待输入／required 等待和旧事实保留；Main 有限 port 核第201项之后的非选中变化、失败保目录、慢读取不挡选择及 detach 迟到拒绝。源码外默认 macOS [窗口](test/isolated/native-bundle.test.ts)实际核审批期间切到另一会话、原目录 Badge／准确 Run／时间／排序、原卡返回、Provider 不增加与冷时间保留。具体输入和结果归[本片进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-全局会话状态与时间排序)，不以有限 DOM 宣称完整 installed/跨平台资格。
 
 ## Native 新对话准备与首次发送
 

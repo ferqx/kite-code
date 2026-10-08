@@ -223,6 +223,7 @@ export async function startService(options: ServiceOptions) {
     options.capabilities ?? [
       'service_lifecycle',
       'sessions',
+      'session_directory_activity',
       'commands',
       'events',
       'history',

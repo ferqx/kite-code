@@ -17,6 +17,7 @@ import type {
   SelectContextRequest,
   SelectedContextPage,
   Session,
+  SessionDirectoryActivity,
   StartCommandRequest,
   Workspace,
 } from '@kite-ai/client';
@@ -300,7 +301,14 @@ export type NativeFileRecoveryObservation = {
   detail: FileCheckpointDetail;
   boundary: FileCheckpointRecoveryBoundary;
 };
+export type NativeDirectory = {
+  storeId: string;
+  workspaces: Workspace[];
+  sessions: (Session & { activity?: SessionDirectoryActivity })[];
+  unavailable?: boolean;
+};
 export type NativeState = {
+  readonly directory?: NativeDirectory;
   readonly backgroundUnavailable?: boolean;
   readonly generation: number;
   readonly fileRecoverySubmissions?: readonly FileRecoveryIntent[];
@@ -658,7 +666,7 @@ export type NativeResult =
   | NativeModelOutputChunk
   | NativeAttachmentOpen
   | NativeAttachmentChunk
-  | { workspaces: Workspace[]; sessions: Session[]; storeId: string }
+  | NativeDirectory
   | { messages: Message[]; nextAfterSeq: string | null; highWaterSeq: string }
   | NativeDraft
   | NativeCreation

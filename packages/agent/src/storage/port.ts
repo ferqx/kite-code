@@ -501,6 +501,7 @@ export interface Store {
     workspaceId?: string;
     afterSeq?: string;
     upperSeq?: string;
+    snapshotCursor?: string;
     limit?: number;
   }): Promise<SessionDirectoryPage>;
   listWorkspaces(options?: { limit?: number; afterId?: string }): Promise<WorkspaceRecord[]>;

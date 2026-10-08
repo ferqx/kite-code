@@ -95,11 +95,13 @@ R10 SDK 提供 `getContext(sessionId,ContextQuery)`、`rewind(sessionId,SelectCo
 
 ## 完整目录读取
 
-Native `listWorkspaceDirectory({storeId,afterSeq?,upperSeq?,limit?},{signal?})` 与 `listSessionDirectory({storeId,workspaceId?,afterSeq?,upperSeq?,limit?},{signal?})` 返回具名页。Browser 同名方法不接受 Store，使用原文档准入身份。每页最多 200 项，序列保留 Decimal64；每次响应核 Store、冻结 upper、递增且不越界的 seq 和下一游标。snapshotCursor 是读取时观察水位，可变化，不冒充整个目录的跨页内容快照。
+Native `listWorkspaceDirectory({storeId,afterSeq?,upperSeq?,limit?},{signal?})` 与 `listSessionDirectory({storeId,workspaceId?,afterSeq?,upperSeq?,snapshotCursor?,limit?},{signal?})` 返回具名页。Browser 同名方法不接受 Store，使用原文档准入身份。每页最多 200 项，序列保留 Decimal64；每次响应核 Store、冻结 upper、递增且不越界的 seq 和下一游标。未传快照约束时 snapshotCursor 是读时水位，可变化。传 Session 首 snapshotCursor 时须已有 `session_directory_activity`，每页另核相同水位，不将不同观察拼接成完整目录。
 
 `listAllWorkspaces({signal?})`、`listAllSessions({workspaceId?,signal?})` 明确穷尽固定 upper 的所有页，没有任意总项目截断。只有完整成功才返回集合；重复 ID、范围/身份改变、游标冲突或 dispose/迟到页均失败，不发布前缀、不重绑定旧读取。原 `listWorkspaces/listSessions` 保留当前页兼容入口，不能用于完整目录或退出检查。Web 完整目录与 Native 完整退出检查应使用 listAll 方法。目录读取不执行模型、工具、恢复或 mutation，不推进 SSE 游标。
 
-[SDK 目录反例](test/directory.test.ts) 核对高于 Number 精度的固定上界、闭合输入、未来字段、错误身份/重复项、dispose 后迟到页；[真实目录链路](../../tests/isolated/unified-agent/directory.test.ts) 另用实际创建的超过 200 项验证 Native/Browser 的完整身份、workspace SQL 过滤与冷 readonly 读取。
+`session_directory_activity` 提供 `listAllSessionDirectory({workspaceId?,signal?})`，返回全部 `{seq,session,activity}` 项。activity 仅含原事件时间、准确 active／latest Run 的有限状态、排队与待输入数量，不是控制权。生成响应 schema 为旧 producer 保留 activity 可省略；已宣告能力却缺失则拒绝。完整 reader 固定首 upper 和 snapshotCursor，`directory_changed` 时丢弃整个前缀从0重读，最多三次完整扫描；持续变化明确失败，消费者保上次事实。错误水位、缺事实、取消和迟到结果均不发布前缀。旧 listAllSessions 的身份集合合同与旧服务兼容保持，不能从它的返回值推测目录活动。
+
+[SDK 目录反例](test/directory.test.ts) 核对高于 Number 精度的固定上界、闭合输入、未来字段、错误身份/重复项、dispose 后迟到页，另核快照漂移／缺事实／坏时间和持续变化；[真实目录链路](../../tests/isolated/unified-agent/directory.test.ts) 另用实际创建的超过 200 项验证 Native/Browser 的完整身份、workspace SQL 过滤、真实事件时间与冷 readonly 读取。
 
 
 Native 配置管理以可选 `configuration_management` 能力开放 `getConfiguration`、`patchConfiguration`、`repairConfiguration`、`putCredential`、`revokeCredential` 和 `getHostMutation`。可用数据读写固定原 Store 与 connection generation；只在数据不可用的诊断连接中，用户配置读允许省略 Store，坏 JSONC 保留 `raw/effective/snapshot:null` 和准确 ETag/错误。Workspace 请求只含已有 Workspace ID，没有文件路径。

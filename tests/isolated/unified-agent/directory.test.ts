@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -78,6 +79,12 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
       workspaces = await client.listWorkspaceDirectory({ storeId, limit: 200 });
     expect(first.items).toHaveLength(200);
     expect(workspaces.items).toHaveLength(200);
+    expect(
+      first.items.every(
+        (item) => item.activity?.updatedAt !== null && (item.activity?.updatedAt ?? 0) > 0,
+      ),
+    ).toBe(true);
+    expect(first.items.every((item) => item.activity?.run === null)).toBe(true);
     await client.createSession({
       expectedStoreId: storeId,
       commandId: 'late-create',
@@ -91,6 +98,16 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
       name: 'late',
       rootUri: `file://${root}/late`,
     });
+    expect(
+      await errorCode(
+        client.listSessionDirectory({
+          storeId,
+          afterSeq: first.nextAfterSeq!,
+          upperSeq: first.upperSeq,
+          snapshotCursor: first.snapshotCursor,
+        }),
+      ),
+    ).toBe('directory_changed');
     const second = await client.listSessionDirectory({
       storeId,
       afterSeq: first.nextAfterSeq!,
@@ -109,6 +126,28 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
     expect(all).toHaveLength(206);
     expect(all.some((item) => item.id === 'foreign')).toBe(false);
     expect(new Set(all.map((item) => item.id)).size).toBe(206);
+    const summaries = await client.listAllSessionDirectory();
+    expect(summaries.map((item) => item.session.id)).toEqual(all.map((item) => item.id));
+    const beforeRename = summaries.find((item) => item.session.id === 's-0')!;
+    await Bun.sleep(2);
+    await client.renameSession('s-0', {
+      expectedStoreId: storeId,
+      commandId: 'rename-s-0',
+      ifRevision: beforeRename.session.controlRevision,
+      title: 'Renamed without a Run',
+    });
+    const renamed = (await client.listAllSessionDirectory()).find(
+      (item) => item.session.id === 's-0',
+    )!;
+    const logs = await store.getSessionLogs({
+      expectedStoreId: storeId,
+      subjectId: 'owner',
+      sessionId: 's-0',
+      afterCursor: '0',
+    });
+    expect(renamed.activity!.updatedAt).toBe(logs.entries.at(-1)!.occurredAt!);
+    expect(renamed.activity!.updatedAt).toBeGreaterThan(beforeRename.activity!.updatedAt!);
+    expect(renamed.activity!.run).toBeNull();
     expect((await client.listAllSessions({ workspaceId: 'w-204' })).map((item) => item.id)).toEqual(
       ['s-204'],
     );
@@ -174,6 +213,8 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
     const before = (await store.getMetadata()).lastChangeCursor;
     const browserSessions = await browser.listAllSessions(),
       browserWorkspaces = await browser.listAllWorkspaces();
+    const browserSummaries = await browser.listAllSessionDirectory();
+    expect(browserSummaries).toEqual(await client.listAllSessionDirectory());
     expect(browserSessions.map((item) => item.id)).toEqual(all.map((item) => item.id));
     expect(browserWorkspaces).toHaveLength(206);
     expect(browserWorkspaces.some((item) => item.id === 'w-203')).toBe(true);
@@ -194,6 +235,116 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
     rmSync(root, { recursive: true, force: true });
   }
 }, 20000);
+
+test('actual Core activity follows queued work, the active or latest Run and persisted events; missing historical clocks stay unknown', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-session-activity-'));
+  const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
+  let db: Database | undefined;
+  try {
+    const expectedStoreId = (await store.getMetadata()).storeId;
+    await store.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: `file://${root}` });
+    for (const sessionId of ['working', 'old'])
+      await store.createSession({
+        expectedStoreId,
+        subjectId: 'owner',
+        commandId: `create-${sessionId}`,
+        sessionId,
+        workspaceId: 'w',
+        title: sessionId,
+      });
+    const read = () => store.listSessionDirectory({ expectedStoreId, subjectId: 'owner' });
+    const activity = async () =>
+      (await read()).items.find((item) => item.session.id === 'working')!.activity;
+    await store.acceptCommand({
+      expectedStoreId,
+      commandId: 'first-work',
+      sessionId: 'working',
+      subjectId: 'owner',
+      request: { kind: 'run.start', content: 'PRIVATE_RAW_INPUT' },
+    });
+    expect(await activity()).toMatchObject({ queued: true, run: null, pendingInteractions: 0 });
+    const owner = (await store.acquireSessionOwner('working', 'fixture'))!;
+    const first = await store.startRun({
+      expectedStoreId,
+      owner,
+      commandId: 'first-work',
+      configuration: { secret: 'PRIVATE_CONFIGURATION' },
+    });
+    expect(await activity()).toMatchObject({
+      queued: false,
+      run: { id: first.id, status: 'running', isActive: true, waitingForResults: false },
+    });
+    await store.acceptCommand({
+      expectedStoreId,
+      commandId: 'second-work',
+      sessionId: 'working',
+      subjectId: 'owner',
+      request: { kind: 'run.start', content: 'second' },
+    });
+    expect(await activity()).toMatchObject({
+      queued: true,
+      run: { id: first.id, status: 'running', isActive: true },
+    });
+    await store.finishRun({
+      expectedStoreId,
+      owner,
+      runId: first.id,
+      status: 'completed',
+      requirements: [],
+    });
+    expect(await activity()).toMatchObject({
+      queued: true,
+      run: { id: first.id, status: 'completed', isActive: false },
+    });
+    const second = await store.startRun({
+      expectedStoreId,
+      owner,
+      commandId: 'second-work',
+      configuration: {},
+    });
+    await store.finishRun({
+      expectedStoreId,
+      owner,
+      runId: second.id,
+      status: 'failed',
+      requirements: [],
+    });
+    const observed = await activity();
+    expect(observed).toMatchObject({
+      queued: false,
+      run: { id: second.id, status: 'failed', isActive: false },
+    });
+    const logs = await store.getSessionLogs({
+      expectedStoreId,
+      sessionId: 'working',
+      subjectId: 'owner',
+      afterCursor: '0',
+    });
+    expect(observed.updatedAt).toBe(logs.entries.at(-1)!.occurredAt!);
+    expect(JSON.stringify(await read())).not.toContain('PRIVATE_');
+    db = new Database(join(root, 'test', 'core.db'));
+    const before = await store.getMetadata();
+    for (const envelope of [
+      { format: 'kite.session-log', version: 2, occurredAt: Date.now() },
+      { format: 'kite.session-log', version: 1, occurredAt: true },
+      { format: 'kite.session-log', version: true, occurredAt: Date.now() },
+    ]) {
+      db.run(
+        "UPDATE change_event SET payload_json=? WHERE cursor=(SELECT MAX(cursor) FROM change_event WHERE scope_session_id='old')",
+        [JSON.stringify(envelope)],
+      );
+      expect(
+        (await read()).items.find((item) => item.session.id === 'old')!.activity.updatedAt,
+      ).toBeNull();
+      expect(await store.getMetadata()).toEqual(before);
+    }
+    await store.releaseSessionOwner(owner);
+  } finally {
+    db?.close();
+    await store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('cold readonly directory preserves original allocation upper and Store/subject scope without writing snapshot events', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-readonly-directory-'));
@@ -230,8 +381,8 @@ test('cold readonly directory preserves original allocation upper and Store/subj
           subjectId: 'owner',
           upperSeq: sessionPage.upperSeq,
         })
-      ).items.map((item) => item.session.id),
-    ).toEqual(['one']);
+      ).items,
+    ).toEqual(sessionPage.items);
     expect(
       (await store.listWorkspaceDirectory({ expectedStoreId: storeId, upperSeq: empty.upperSeq }))
         .items,

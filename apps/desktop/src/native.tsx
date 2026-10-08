@@ -1,4 +1,4 @@
-import type { Message, Session, Workspace } from '@kite-ai/client';
+import type { Message } from '@kite-ai/client';
 import {
   InteractionCard,
   ModelInputs,
@@ -32,6 +32,7 @@ import type {
   NativeBranchFacts,
   NativeConversationResult,
   NativeCreation,
+  NativeDirectory,
   NativeDraft,
   NativeGrantFacts,
   NativeRequest,
@@ -91,11 +92,7 @@ export function NativeDesktop() {
   const contextIntent = useRef(0);
   const draftCache = useRef(new Map<string, string>());
   const [state, setState] = useState<NativeState>();
-  const [directory, setDirectory] = useState<{
-    storeId: string;
-    workspaces: Workspace[];
-    sessions: Session[];
-  }>();
+  const [directory, setDirectory] = useState<NativeDirectory>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyState, setHistoryState] = useState<HistoryState>({
     messages: [],
@@ -167,6 +164,7 @@ export function NativeDesktop() {
   );
   function apply(value: NativeResult) {
     if (value && 'generation' in value && value.generation === generation.current) {
+      if (value.directory) setDirectory(value.directory);
       historyEpoch.current = value.historyEpoch;
       // Main has verified the exact answer_saved receipt. Promise resolution and
       // omission from a bounded pending page are not confirmation of an answer.
@@ -1543,7 +1541,13 @@ export function NativeDesktop() {
       }}
       loading={!preparing && !!selection && historyState.phase === 'loading'}
       connected={generation.current > 0}
-      connectionLabel={generation.current > 0 ? '本地 Agent' : '正在连接'}
+      connectionLabel={
+        generation.current > 0
+          ? directory?.unavailable
+            ? '本地 Agent · 目录状态待核实'
+            : '本地 Agent'
+          : '正在连接'
+      }
       mutationBusy={pending}
       defaultExpanded
       actions={{

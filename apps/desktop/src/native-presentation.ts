@@ -1,14 +1,40 @@
-import type { Message, Session, Workspace } from '@kite-ai/client';
+import type { Message } from '@kite-ai/client';
 import type { Message as DesktopMessage, WorkspaceSummary } from '@kite-ai/ui/desktop';
-import type { NativeSelection } from './native-bridge';
+import type { NativeDirectory, NativeSelection } from './native-bridge';
 
 /** Adapt public facts to the retained desktop view model; missing facts stay missing. */
 export function desktopDirectory(
-  directory: { storeId: string; workspaces: readonly Workspace[]; sessions: readonly Session[] },
+  directory: NativeDirectory,
   selection?: NativeSelection,
 ): WorkspaceSummary[] {
   const sessions = directory.sessions.filter((session) => !session.deletedAt);
-  const summary = (session: Session) => {
+  const summary = (session: NativeDirectory['sessions'][number]) => {
+    if (session.activity) {
+      const { run, queued, pendingInteractions, updatedAt } = session.activity;
+      const waiting = run?.isActive && run.status === 'waiting_execution' && run.waitingForResults;
+      return {
+        sessionId: session.id,
+        displayName: session.title,
+        status: directory.unavailable
+          ? '上次确认状态'
+          : run?.isActive
+            ? run.status === 'waiting_interaction' || waiting
+              ? 'waiting'
+              : run.status === 'waiting_execution'
+                ? '等待执行结果'
+                : run.status === 'cancelling'
+                  ? '正在停止'
+                  : run.status
+            : queued
+              ? 'queued'
+              : (run?.status ?? 'idle'),
+        ...(updatedAt !== null ? { updatedAt: new Date(updatedAt).toISOString() } : {}),
+        ...(!directory.unavailable ? { pendingInteractions } : {}),
+        ...(!directory.unavailable && waiting
+          ? { waitingReason: 'required_background' as const }
+          : {}),
+      };
+    }
     const observed =
       selection?.storeId === directory.storeId && selection.session.id === session.id;
     const active = observed ? selection.runs.find((run) => run.isActive) : undefined;
@@ -17,7 +43,7 @@ export function desktopDirectory(
       displayName: session.title,
       status: !observed
         ? '状态待读取'
-        : selection.viewLoading || selection.permissionUnavailable
+        : directory.unavailable || selection.viewLoading || selection.permissionUnavailable
           ? '上次确认状态'
           : active?.status === 'waiting_interaction'
             ? 'waiting'
