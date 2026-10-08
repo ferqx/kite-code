@@ -2939,3 +2939,22 @@ Desktop／UI owner、桌面手册、active边界、测试入口、原方案、37
 保留失败证据：`main-initial`／`attachment-recheck`／`main-ready`实际1，原相邻附件测试把 debounced refresh 当成已完成。`attachment-baseline`以准确 HEAD NativeCaller复现同一失败（内层 Bun实际1，3pass／1fail／62断言）；临时同目录 baseline 文件均已删除。只在原 fixture 加有界等待实际失败／恢复 GET，原答权、scope、EOF和5秒预算保持，最终三文件全过。`types-initial`／`types-ready`／`types-qualified`实际2，擦除语法与 SDK mock／Selection完整类型修正；`format-dom`／`format-qualified`实际1，最终使用语义 section＋pre。`plan-window-ready`实际1／51.99s，新增断言误将格式化 Markdown 当原文；`plan-window-qualified`实际1／66.52s，误找原只读表单并不呈现的按钮。最终仍断言格式化阅读，并更强地核完整原文／字节及零历史控件；当前 pending 审批与所有原故障断言未删，未延长预算。
 
 bounded recon 本逻辑轮派发一次返回 `agent thread limit reached`；无新子 Agent 结果或写入，根自检不计独立审查。剩余退出依赖按顺序最多五项：①原 PC 完整自动审批窗口、全部封存／恢复组合与完整客户端核对；②installed方案必要恢复／维护及已发布版本样本；③macOS原 RSS／八轮稳定性和完整资源退出；④§35适用能力与完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后 Win／Linux Actions。37能力仍全 partial／wholeV13=false／Goal active，有限历史入口不代表全阶段关闭。Root唯一Git／文件owner，AGENTS.md原 SHA256 `7e19375d5a9771aef3645fa33dcdbbc0e59c03e8d2276efba54fa97b13d9ea16`与bun.lock受保护且不暂存；无push／PR／发布／Actions dispatch。
+
+## 2026-10-09：原会话权限停止与自动审批闭环
+
+上一逻辑轮已本地提交原交互只读历史，属于 progress。本轮沿 durable `el-refactor`／HEAD `3d0f3ee708875ae5f02309a14afb92a9ff476d78`继续原 PC 交互主线，保 macOS 优先、宿主 Shell 与原 kite-desktop／kite-client-ui 复用；未扩 TUI、Chrome、其他平台或对外交付授权。
+
+已有根会话现接原 Composer 的 Ask／Auto／Full 和停止：模式沿原 permission observation 只改当前会话，未信任时禁用原菜单且提交回调拒绝写入，Full 保原风险确认及准确阅读身份撤销，草稿保留；停止保存并提交原 `command.cancel`，目标为当前同 Store／Session 活动 Run 的原开始 Command，未知申请禁重复。自动审查转人工保原 reviewer 原因，原 Approval／ToolActivity 继续拥有表单及展示，不重做组件或另开执行链。共享 UI、Core／Service／Client 公开 API、SQL 与私有格式未变。当前职责归 [Desktop owner](../../apps/desktop/README.md#原会话输入区权限与停止)，原审批 [Note](../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)同步仍适用取舍及准确当前范围。
+
+本轮最终输入的实际证据均为 `/private/tmp/kite-pc-auto-controls-<tag>-20261009.log`：
+
+- `window-trust-final` actual0，完整源码外 macOS Auto 整例1pass／96Bun断言及全部 Node driver／54.87秒。真实默认 Core／Service／Main／原 Renderer 先确认未信任菜单禁用，再从原面板核对并信任范围，随后由原菜单切换 Ask／Full 取消／Full 确认／Auto，再实际发原任务。五个原根会话逐一核自动批准、拒绝、请求人工、无效审查结果及审批中精确停止；原 Store／Session／Execution／定义版本／完整任务与实际参数均匹配。只有三条准许记录写入准确 CRLF／Unicode 文件，拒绝和停止零效果；拒绝沿内核取消原任务，停止后释放迟到批准也不派发。实际两个人工 answer、13次模型调用；普通退出后五条原记录冷读完全相等，调用次数不增加。最后公开 Store 只读核同 ID／Run／Command 和真实终态。保120秒整例、45秒 driver、10秒 UI 预算，不扩为全恢复或 installed 资格。
+- `window-default-trust-final` actual0，原默认源码外完整窗口1pass／7Bun断言及全部原 Node driver／48.42秒。真实人工审批及冷读、Files／General／最终正文复制、普通退出、Main强杀后所属 Service 双锁与终端断言均保持，Provider仍3。没有删原预算／业务断言。
+- `dom-trust-final` actual0，五个受影响 Main／原页面／审批／工具文件19pass／275断言／2.29秒，未信任模式菜单禁用、原 Full 取消、跨会话旧确认撤销、草稿及零任务提交、原未知权限申请与迟到隔离保持。原转人工原因与批准／提交／终态分别表达。夹具不代证真实授权，真实首次／冷读另由上述窗口核实。
+- `types-trust-final` actual0，根和精确八 runtime workspaces。最终 docs／all影响、边界／API／workspace／test owner／plan-evidence、只读 Biome与差异检查均actual0；正常 Git hooks在本次精确暂存后独立执行。冻结／交付记录归 `/private/tmp/kite-pc-auto-controls-owned-20261009.json`及 `/private/tmp/kite-pc-auto-controls-delivery-20261009.json`，只属临时证据，不是后续验证缓存。本片未运行全阶段 default。
+
+文档核对发现现行桌面手册要求工作区未信任时不能修改权限，早先当前 Native 适配没有这项 UI 门禁；本片在原菜单和提交回调补齐，保 Core／公共控制语义，真实夹具改为先核对并信任范围再切模式。此前 `window-contract`、`window-default`、`dom-final`、`dom-contract` 和 `types-contract`只证明补门禁前输入，最终输入另由 trust-final 证据核实。
+
+原红保留：`window-ready`错误导入 SQLite engine；`window-qualified`／`window-observed`新 fixture 误把默认根工具目录认定为仅 Files，真实还含内置 ask_user；`window-current`／`window-diagnostic`45秒 driver 失败，诊断确认原审查事实已到，测试误定位通用行，而实际 Files 用原 `.tool-edit-heading`。后者在失败时仍持审查造成退出等待，现只释放所属审查并保原错误；两失败根的10个 Electron／Service 进程已准确 SIGTERM 清理，终态0，证据归 `failed-processes-20261009.json`。`window-file-row` actual1／49.87秒，夹具误等拒绝 Run completed；依据现行 Core 契约改核 cancelled、目标 failed、无效果与原拒绝标签，准确总调用为13。`types-final` actual2，新增 pending human grant null 不符合协议，已改正确 fixture；更早 type／format 红均保原日志。曾一次原子编辑前检失败后错误启动旧输入验证，旧结果保留且不作最终输入证据。没有删业务断言、跳过产品失败或延长预算。
+
+bounded recon 本逻辑轮一次派发返回 `agent thread limit reached`；没有新子 Agent 结果或写入，Root 自检不计独立审查。剩余退出依赖按顺序最多五项：①原 PC 全部封存／恢复组合与完整客户端核对；②installed方案必要恢复／维护及已发布版本样本；③macOS原 RSS／八轮稳定性和完整资源退出；④§35适用能力与完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后 Win／Linux Actions。37能力全 partial、wholeV13=false、Goal active；当前 Store 的完整 Auto 用户路径不提升整个阶段。Root 唯一 Git owner，AGENTS.md与bun.lock受保护且不暂存；仅本地 stage／commit，无push／PR／发布／Actions dispatch。

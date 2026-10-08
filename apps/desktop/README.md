@@ -58,11 +58,19 @@
 
 [NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只提供原请求实际允许的 `approve_once`／`same_command`。已知 `shell.launch@1` 显示准确原命令；其他定义保原身份、目标、原因和可展开完整请求。`InteractionCard.renderApproval` 沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格提供完整正文与回答回调；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
 
-公共 Execution 的可选 `authorization` 是 [Store 只读观察](../../packages/agent/src/storage/README.md#只读授权观察)，只表达原 reviewer、人工答案、accepted decision 与派发事实。Native 将它映射到原 ToolActivity 的审批标签，分别显示“已提交批准，待核对”“已人工批准”、自动批准／拒绝／等待或结果未知；停止后保留可核对的已有记录。批准不覆盖工具的真实失败、取消或未知状态，也不授予执行权限。当前唯一 pending 审批卡仍以实际 Interaction 为准。
+公共 Execution 的可选 `authorization` 是 [Store 只读观察](../../packages/agent/src/storage/README.md#只读授权观察)，只表达原 reviewer、人工答案、accepted decision 与派发事实。Native 将它映射到原 ToolActivity 的审批标签，分别显示“已提交批准，待核对”“已人工批准”、自动批准／拒绝／等待或结果未知；停止后保留可核对的已有记录。批准不覆盖工具的真实失败、取消或未知状态，也不授予执行权限。当前唯一 pending 审批卡仍以实际 Interaction 为准；Auto 转人工时保留原审查原因。
 
 直接历史只沿当前已观察 Message 的准确原 Execution 读取；Fork／Include 的封存 `originMessage` 不取得来源 Execution 后来的审批。原外部 Store／恢复边界继续适用。观察是现有响应的可选字段，不改持久格式，不公开私有审查正文或上下文；审批事实也不让未知工具版本进入旧结果分类。具体取舍见[审批观察决定](../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)。
 
-[Core 授权测试](../../packages/agent/test/isolated/execution/authorization-review.test.ts)、[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)、[Main](test/native-tool-messages.test.ts)和[原组件 DOM](test/isolated/native-approval-dom.test.tsx)分别核原授权门禁、公开字段、封存隔离及完整请求与标签；[源码外默认窗口](test/isolated/native-bundle.test.ts)核首次和冷读的原人工审批及已保存标签，[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核独立审批与大请求。实际结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。原记录阅读见[交互历史](#原交互记录只读历史)，完整 Auto Native 窗口组合、全部恢复组合及整片独立审查仍待核对，本节不代表完整 PC 退出。
+[Core 授权测试](../../packages/agent/test/isolated/execution/authorization-review.test.ts)、[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)、[Main](test/native-tool-messages.test.ts)和[原组件 DOM](test/isolated/native-approval-dom.test.tsx)分别核原授权门禁、公开字段、封存隔离及完整请求与标签；[源码外默认窗口](test/isolated/native-bundle.test.ts)核首次和冷读的原人工审批及已保存标签，[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核独立审批与大请求。实际结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。原记录阅读见[交互历史](#原交互记录只读历史)，当前 Store 的 Auto 窗口与原输入区控制见下一节；全部封存／恢复组合及整片独立审查仍待核对，本节不代表完整 PC 退出。
+
+## 原会话输入区权限与停止
+
+[NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的 Ask／Auto／Full 菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；Ask 在原组件使用既有 Accept Edits 显示值，提交统一模式 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、工作区未信任、事实不可用或原权限申请未核实时等待；提交回调也拒绝未信任的模式写入。
+
+停止沿现有 [NativeCaller](electron/native-caller.ts)保存并提交 `command.cancel`，目标是已核实当前 Store／Session 活动 Run 的 `originCommandId`。它不新增停止端口，也不把申请当成终态；原保存／提交中／未知申请禁止重复，准确结果仍由原 Run 和持久申请核实。只读子详情没有这组控制，切换阅读不停止原工作。
+
+[原页面 DOM](test/isolated/native-new-conversation-dom.test.tsx)核模式、Full 取消／跨会话确认撤销、草稿和零任务提交；[原 Main 权限](test/native-permissions.test.ts)保独立原申请及未知结果。[实际源码外 Auto 窗口](test/isolated/native-auto-approval-bundle.test.ts)经完整候选的默认 Core／Service／Main 和原 Renderer，核批准、拒绝、请求人工、无效审查结果和审批中准确停止。转人工保原原因，只有实际批准产生准确文件效果；拒绝终止原任务，停止后迟到批准没有效果。普通退出后五种原记录完整冷读，Provider 与回答次数保持。该窗口只证明本机 macOS 当前 Store；全部封存／恢复、完整 PC 和独立迁移审查仍开放。实际执行及原失败见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原会话权限停止与自动审批闭环)。共享 Composer、Core／公共 API、SQL 和私有持久格式均未改。
 
 ## 原交互记录只读历史
 
@@ -72,7 +80,7 @@
 
 附件仅从本次已观察卡的准确 key 推导，先经公共 GET 核原 card／revision，再由原 SDK reader 完整核 Store、scope、hash／UTF-8／EOF；[64KiB Native reader](src/native-interaction-attachment.ts)继续核原字节。历史使用独立附件实例和方法，不能进入当前审批的 loaded proof；关闭、刷新、切范围或 detach 释放所属 GET 与正文资格，迟到结果不能替换新范围。没有业务 POST、恢复、DB／私有格式或 Core／HTTP schema 变化。当前原接口只包含当前 Store 实际保存的 Interaction；Fork／Include 不补来源后来的记录，新 Store 恢复组合仍按原资格核对。
 
-[Main／分页与附件反例](test/native-interaction-history.test.ts)、[原卡 DOM](test/isolated/native-interaction-history-dom.test.tsx)与[真实 HTTP／Core](../../tests/isolated/unified-agent/client-interactions.test.ts)分别核完整读取、只读／迟到与通用问题／child 来源；原[默认源码外窗口](test/isolated/native-bundle.test.ts)核首次／冷读记录，原[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核历史大附件、准确反馈和零重复提交。准确执行输入、失败与范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)，取舍见[历史阅读决定](../../.agents/notes/implemented/architecture/2026-10-09-native-interaction-history.md)。完整 PC、全部封存／恢复组合、完整自动审批窗口和整片独立审查仍未关闭。
+[Main／分页与附件反例](test/native-interaction-history.test.ts)、[原卡 DOM](test/isolated/native-interaction-history-dom.test.tsx)与[真实 HTTP／Core](../../tests/isolated/unified-agent/client-interactions.test.ts)分别核完整读取、只读／迟到与通用问题／child 来源；原[默认源码外窗口](test/isolated/native-bundle.test.ts)核首次／冷读记录，原[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核历史大附件、准确反馈和零重复提交。准确执行输入、失败与范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)，取舍见[历史阅读决定](../../.agents/notes/implemented/architecture/2026-10-09-native-interaction-history.md)。当前 Store 自动审批的实际窗口范围见[输入区控制](#原会话输入区权限与停止)；完整 PC、全部封存／恢复组合和整片独立审查仍未关闭。
 
 ## Native 项目会话目录
 

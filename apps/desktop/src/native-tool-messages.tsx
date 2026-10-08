@@ -46,7 +46,15 @@ export function authorizationApproval(
                 : 'submitted'
               : undefined;
     if (state)
-      return { source: 'user', state, interactionId: human.interactionId, grant: human.grant };
+      return {
+        source: 'user',
+        state,
+        interactionId: human.interactionId,
+        grant: human.grant,
+        ...(state === 'awaiting_user' && authorization?.review?.reason
+          ? { reason: authorization.review.reason }
+          : {}),
+      };
   }
   const review = authorization?.review;
   if (!review) return;

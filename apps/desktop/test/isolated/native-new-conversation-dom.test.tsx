@@ -26,7 +26,7 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, originals);
 bootstrap.window.close();
 
-function fixture() {
+function fixture(withPermissions = false, trusted = true) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -64,6 +64,10 @@ function fixture() {
     contextSelectionId: 'context',
   });
   const sessions = [session('a'), session('b')];
+  const modes = new Map<string, 'ask' | 'auto' | 'full'>([
+    ['a', 'ask'],
+    ['b', 'auto'],
+  ]);
   let selected = 'a',
     release: ((value: NativeConversationResult) => void) | undefined;
   let rejectNext = false;
@@ -83,6 +87,32 @@ function fixture() {
       executions: [],
       interactions: [],
       interactionsAfterId: null,
+      ...(withPermissions
+        ? {
+            permissions: {
+              observationId: selected === 'a' ? 1 : 2,
+              mode: {
+                storeId: 'store',
+                sessionId: selected,
+                scopeSessionId: selected,
+                mode: modes.get(selected) ?? 'auto',
+                revision: '0',
+                defaultMode: 'auto' as const,
+                defaultRevision: '0',
+              },
+              trust: {
+                storeId: 'store',
+                workspaceId: 'w',
+                status: trusted ? ('trusted' as const) : ('untrusted' as const),
+                trusted,
+                revision: '0',
+                canonicalIdentity: 'a'.repeat(64),
+                externalReadScopeDigest: 'b'.repeat(64),
+                readScopes: [{ kind: 'workspace' as const, description: 'Workspace' }],
+              },
+            },
+          }
+        : {}),
     },
   });
   const bridge: NativeBridge = {
@@ -102,6 +132,23 @@ function fixture() {
       if (input.method === 'select') {
         selected = input.sessionId;
         return state();
+      }
+      if (input.method === 'permission.mode') {
+        expect(input.observationId).toBe(selected === 'a' ? 1 : 2);
+        expect(input.makeDefault).toBe(false);
+        modes.set(selected, input.mode as 'ask' | 'auto' | 'full');
+        return {
+          commandId: `mode-${calls.length}`,
+          kind: 'permission.mode',
+          state: 'applied',
+          receipt: {
+            status: 'applied',
+            mode: input.mode,
+            makeDefault: false,
+            revision: '1',
+            defaultRevision: '0',
+          },
+        };
       }
       if (input.method === 'messages')
         return {
@@ -210,6 +257,9 @@ function fixture() {
     edit,
     input,
     selected: () => selected,
+    trustWorkspace: () => {
+      trusted = true;
+    },
     loseNextResponse: () => {
       rejectNext = true;
     },
@@ -265,6 +315,73 @@ function fixture() {
     },
   };
 }
+
+test('original current-Session permission menu uses the observed command, preserves drafts and scopes Full confirmation', async () => {
+  const f = fixture(true, false);
+  const permission = () => f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!;
+  const mutations = () => f.calls.filter((call) => call.method === 'permission.mode');
+  async function choose(index: number) {
+    await act(async () => {
+      permission().focus();
+      permission().dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await act(async () => {
+      const item = f.host.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[index]!;
+      expect(item).toBeDefined();
+      item.click();
+    });
+  }
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('retained current draft 雪🙂', '当前会话私有草稿');
+    expect(permission().getAttribute('aria-label')).toBe('Permission: Ask');
+    expect(permission().disabled).toBe(true);
+    expect(mutations()).toHaveLength(0);
+    f.trustWorkspace();
+    await f.click('Other B');
+    await f.click('Original A');
+    expect(permission().disabled).toBe(false);
+    await choose(1);
+    expect(permission().getAttribute('aria-label')).toBe('Permission: Auto');
+    expect(mutations()).toHaveLength(1);
+    expect(mutations()[0]).toMatchObject({
+      generation: 1,
+      observationId: 1,
+      mode: 'auto',
+      makeDefault: false,
+    });
+    expect(f.input('当前会话私有草稿')?.value).toBe('retained current draft 雪🙂');
+    await choose(2);
+    await f.click('Cancel');
+    expect(mutations()).toHaveLength(1);
+    await choose(2);
+    await f.click('Other B');
+    const staleConfirm = [...f.host.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Enable Full',
+    );
+    if (staleConfirm) await act(async () => staleConfirm.click());
+    expect(mutations()).toHaveLength(1);
+    expect(permission().getAttribute('aria-label')).toBe('Permission: Auto');
+    await choose(2);
+    await f.click('Enable Full');
+    expect(mutations()).toHaveLength(2);
+    expect(mutations()[1]).toMatchObject({ observationId: 2, mode: 'full', makeDefault: false });
+    expect(permission().getAttribute('aria-label')).toBe('Permission: Full');
+    await f.click('Original A');
+    expect(permission().getAttribute('aria-label')).toBe('Permission: Auto');
+    expect(f.input('当前会话私有草稿')?.value).toBe('retained current draft 雪🙂');
+    expect(
+      f.calls.filter((call) =>
+        ['submit', 'conversation.send', 'caller.submit'].includes(call.method),
+      ),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
 
 test('original global/project preparation, suggestions and page navigation retain independent drafts with no empty creation', async () => {
   const f = fixture();

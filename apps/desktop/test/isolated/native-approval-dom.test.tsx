@@ -209,6 +209,26 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
       },
     });
     expect(f.host.textContent).toContain('自动审批结果未知');
+    for (const decision of ['ask_user', 'unavailable'] as const) {
+      const reason = `原转人工原因 ${decision} 雪🙂`;
+      await render(
+        {
+          dispatched: false,
+          human: { ...human, state: 'pending', decision: null, grant: undefined },
+          review: {
+            executionId: 'review',
+            status: decision === 'ask_user' ? 'succeeded' : 'failed',
+            decision,
+            reason,
+            requireApproval: false,
+          },
+        },
+        'planned',
+      );
+      expect(f.host.textContent).toContain('等待人工审批');
+      expect(f.host.textContent).toContain(reason);
+      expect(f.host.textContent).not.toContain('已人工批准');
+    }
     await render(
       {
         dispatched: false,

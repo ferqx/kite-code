@@ -513,6 +513,52 @@ export function NativeDesktop() {
       await report(refresh, false);
     }
   }
+  async function setPermissionMode(
+    mode: 'ask' | 'accept_edits' | 'auto' | 'full',
+    makeDefault: boolean,
+  ) {
+    if (!bridge || !selection?.permissions || !state) throw Error('permission_facts_unavailable');
+    if (!selection.permissions.trust.trusted) throw Error('workspace_untrusted');
+    const sessionId = selection.session.id;
+    const receipt = await bridge.request({
+      method: 'permission.mode',
+      generation: state.generation,
+      observationId: selection.permissions.observationId,
+      mode,
+      makeDefault,
+    });
+    if (receipt && 'state' in receipt && receipt.state === 'applied')
+      setFirstSubmission((previous) =>
+        previous?.creation.sessionId === sessionId
+          ? { ...previous, permissionMode: mode }
+          : previous,
+      );
+    await refresh();
+  }
+  async function stopCurrentRun() {
+    if (
+      !bridge ||
+      !selection ||
+      !state ||
+      !activeInputRun?.isActive ||
+      activeInputRun.sessionId !== selection.session.id ||
+      activeInputRun.originStoreId !== selection.storeId
+    )
+      throw Error('native_run_unavailable');
+    const commandId = crypto.randomUUID();
+    await bridge.request({
+      method: 'caller.prepare',
+      generation: state.generation,
+      sessionId: selection.session.id,
+      intent: {
+        kind: 'command.cancel',
+        expectedStoreId: selection.storeId,
+        commandId,
+        targetCommandId: activeInputRun.originCommandId,
+      },
+    });
+    await bridge.request({ method: 'caller.submit', generation: state.generation, commandId });
+  }
   function rememberDraft() {
     if (state?.selection && selected.current === state.selection.session.id)
       draftCache.current.set(
@@ -967,6 +1013,7 @@ export function NativeDesktop() {
               state: 'awaiting_user' as const,
               source: 'user' as const,
               interactionId: approvals[0]!.id,
+              reason: entry.execution.authorization?.review?.reason ?? undefined,
             },
           }
         : {}),
@@ -1410,26 +1457,7 @@ export function NativeDesktop() {
                 ['saved', 'submitting', 'unknown'].includes(value.phase),
               )
             }
-            onSetMode={
-              selection.permissions
-                ? async (mode, makeDefault) => {
-                    const receipt = await bridge.request({
-                      method: 'permission.mode',
-                      generation: generation.current,
-                      observationId: selection.permissions!.observationId,
-                      mode,
-                      makeDefault,
-                    });
-                    if (receipt && 'state' in receipt && receipt.state === 'applied')
-                      setFirstSubmission((previous) =>
-                        previous?.creation.sessionId === selection.session.id
-                          ? { ...previous, permissionMode: mode }
-                          : previous,
-                      );
-                    await refresh();
-                  }
-                : undefined
-            }
+            onSetMode={selection.permissions ? setPermissionMode : undefined}
             onSetTrust={
               selection.permissions
                 ? async (trusted) => {
@@ -2276,10 +2304,52 @@ export function NativeDesktop() {
                   draft,
                   onChange: setDraft,
                   onSend: sendInput,
+                  onCancel: () => void write(stopCurrentRun),
                   active: !!activeInputRun,
-                  stopping: false,
+                  stopping: activeInputRun?.status === 'cancelling',
+                  cancelDisabled:
+                    pending ||
+                    !!selection.permissionUnavailable ||
+                    !!state.callerUnavailable ||
+                    historyState.phase !== 'complete' ||
+                    !!state.callerSubmissions?.some(
+                      (value) =>
+                        value.request.kind === 'command.cancel' &&
+                        value.scope.storeId === selection.storeId &&
+                        value.scope.sessionId === selection.session.id &&
+                        ['saved', 'submitting', 'unknown'].includes(value.phase),
+                    ),
                   disabled: pending,
                   sending: pending,
+                  permission:
+                    selection.permissions?.mode.mode === 'ask'
+                      ? 'accept_edits'
+                      : selection.permissions?.mode.mode,
+                  fullPermissionScope: JSON.stringify([
+                    state.generation,
+                    selection.storeId,
+                    selection.session.id,
+                    selection.viewSelection,
+                    state.historyEpoch ?? 0,
+                  ]),
+                  permissionDisabled:
+                    pending ||
+                    historyState.phase !== 'complete' ||
+                    !!selection.permissionUnavailable ||
+                    !selection.permissions ||
+                    !selection.permissions.trust.trusted ||
+                    state.permissionSubmissions.some((value) =>
+                      ['saved', 'submitting', 'unknown'].includes(value.phase),
+                    ),
+                  permissionPending: state.permissionSubmissions.some(
+                    (value) =>
+                      value.sessionId === selection.session.id &&
+                      ['saved', 'submitting', 'unknown'].includes(value.phase),
+                  ),
+                  onPermissionChange: (mode) =>
+                    void write(() =>
+                      setPermissionMode(mode === 'accept_edits' ? 'ask' : mode, false),
+                    ),
                   sendDisabled:
                     historyState.phase !== 'complete' ||
                     selection.permissionUnavailable ||

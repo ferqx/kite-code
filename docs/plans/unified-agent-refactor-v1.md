@@ -2082,7 +2082,7 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原工具过程与结果阅读已接入正式 Native，继续复用 ToolActivity／ToolRow：历史以原 Execution与准确结果核状态，当前工具沿真实活动 Run，未知版本保原文，请求目标不取得文件动作；Files read当前版本3入口亦补齐。原窗口的活动／失败／冷读与有限读取证据归[工具迁移进度](unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。原 Conversation 的轮次折叠／最终正文复制、相邻已知读取聚合及默认问答已保存回执现沿准确公共事实接入，恢复终态保出处，Fork／Include 不查询来源后来的 Run 状态；实际结果归[轮次迁移进度](unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)。自动审批／通用交互历史、全部恢复组合与完整PC核对、维护恢复、macOS资源退出、独立审查、最终回归与旧路径退役仍按原依赖推进。
 
-原审批面板现复用原 Approval 及其范围菜单，公共只读授权观察区分保存、受理与执行事实；当前职责归 [Native owner](../../apps/desktop/README.md#原审批面板与授权观察)，实际窗口和原授权门禁结果归[审批迁移进度](unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。通用交互历史、全部恢复组合、完整自动审批窗口与完整 PC 核对，以及后序维护恢复、资源退出、独立审查、最终回归和旧路径退役仍按原依赖推进，37能力保持partial。
+原审批面板现复用原 Approval 及其范围菜单，公共只读授权观察区分保存、受理与执行事实；当前职责归 [Native owner](../../apps/desktop/README.md#原审批面板与授权观察)，实际窗口和原授权门禁结果归[审批迁移进度](unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。原会话 Composer 的权限／准确停止及 macOS 当前 Store 的 Auto 批准、拒绝、转人工及停止后迟到批准不派发现已沿默认链核实，首次和冷读范围归[控制与 Auto 进度](unified-agent-refactor-v1-progress.md#2026-10-09原会话权限停止与自动审批闭环)。全部封存／恢复组合与完整 PC 核对，以及后序维护恢复、资源退出、独立审查、最终回归和旧路径退役仍按原依赖推进，37能力保持partial。
 
 ### 30.3 第一条执行闭环
 

@@ -16,6 +16,8 @@ Execution 的可选 authorization 从现有 SQL 记录推导，未增加持久�
 
 原记录的完整只读分页和独立附件阅读由[后续交互历史决定](2026-10-09-native-interaction-history.md)接入；本篇的授权事实、原 proof 与执行资格分离理由继续适用。
 
+已有根会话继续复用原 Composer 权限菜单／Full 风险确认，沿现有 permission observation 只改该会话；Native 原菜单和提交回调在未信任工作区时拒绝修改，确认随准确阅读身份变化撤销。原停止按钮沿既有持久 Caller，以当前准确活动 Run 的原开始 Command 提交 command.cancel；读取标签、保存申请与终态仍分别核实。Auto 转人工保原 reviewer 原因，不能因存在人工卡丢掉此前审查事实；这些控制没有新增公开端口或存储格式。
+
 本决定部分接续[原轮次决定](2026-10-08-native-run-transcript-presentation.md)与[工具观察决定](2026-10-08-native-tool-message-observations.md)：更新审批表单和有限直接历史观察；原唯一来源、完整结果、32项scope、sealed／foreign、轮次与复制理由继续适用。当前实现和测试范围归 [Desktop owner](../../../../apps/desktop/README.md#原审批面板与授权观察)与 [Store owner](../../../../packages/agent/src/storage/README.md#只读授权观察)。
 
 ## Alternatives considered
@@ -29,4 +31,4 @@ Execution 的可选 authorization 从现有 SQL 记录推导，未增加持久�
 
 原 UI 可在正式 Native 复用，历史批准与当前执行权分开。生成 Execution 响应增加可选字段，Core、Service、Client 和 Native 需要同步此投影，但 DB／私有格式和执行状态机保持。每次读取仍核原 proof，不引入第二份持久缓存；歧义或破坏的原证据不补审批结论。
 
-Core 原门禁、真实 HTTP／Client、Main 封存隔离、原表单 DOM 与 macOS 首次／冷读窗口分别提供本片证据，准确失败与通过归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。当前 Store 的原交互记录已沿后续决定接入；全部封存／恢复组合、完整 Auto Native 窗口、完整 PC 和整片独立审查仍未关闭；本决定不提升其他平台或全阶段退出。
+Core 原门禁、真实 HTTP／Client、Main 封存隔离、原表单 DOM 与 macOS 首次／冷读窗口分别提供本片证据，准确失败与通过归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。当前 Store 的原交互记录已沿后续决定接入；原会话权限／停止及 Auto 批准、拒绝、转人工、无效结果与停止后迟到批准现已核实际首次／冷读窗口，准确范围见[输入区控制](../../../../apps/desktop/README.md#原会话输入区权限与停止)。全部封存／恢复组合、完整 PC 和整片独立审查仍未关闭；本决定不提升其他平台或全阶段退出。

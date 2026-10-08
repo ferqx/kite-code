@@ -73,6 +73,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 原审批 [DOM 回归](../apps/desktop/test/isolated/native-approval-dom.test.tsx)先建立浏览器环境，再动态导入原 Radix／ReactDOM 组件，并在独立文件进程运行，避免服务端模块缓存使菜单 layout effect 缺席。完整请求 fixture 证明 UI 门禁与准确答案，不代替 Service／Artifact 原 proof；[Core 授权](../packages/agent/test/isolated/execution/authorization-review.test.ts)、[HTTP／Client](isolated/unified-agent/client-interactions.test.ts)和[源码外默认窗口](../apps/desktop/test/isolated/native-bundle.test.ts)分别负责原资格、公开投影及首次／冷读的实际原审批。[计划窗口](../apps/desktop/test/isolated/native-plan-review-bundle.test.ts)保独立审批、大正文、反馈、Files 和原预算；标题定位使用当前原 SessionPage 的准确标题并核原 Session ID。实际结果、失败和边界见[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
 
+[当前会话 Auto 窗口](../apps/desktop/test/isolated/native-auto-approval-bundle.test.ts)构建完整 Native＋Terminal，搬迁并删除原输出后沿原 Composer／Approval／ToolActivity 验证实际批准、拒绝、转人工、无效结果和准确停止；本机固定 Provider 持有原审查，核 Store／Session／Execution／任务与参数，停止后才释放迟到批准。原文件效果、两个人工 answer、普通退出后五条冷记录及零重复调用分别核实，最终再以公开 Store 只读核原 ID 和终态。夹具按原写入卡 `.tool-edit-heading` 定位，失败会释放所属审查以收尾而保留原断言；120秒整例、45秒 driver 和10秒 UI 时限保持。它是 macOS 当前 Store 的产品路径验证，不代替全恢复／installed／其他平台；实际输入与失败见[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原会话权限停止与自动审批闭环)。
+
 ## 显式命令与 CI
 
 原 [交互历史 DOM](../apps/desktop/test/isolated/native-interaction-history-dom.test.tsx)核通用 JSON 答案、取消、准确反馈、只读按钮与迟到范围；[Main reader](../apps/desktop/test/native-interaction-history.test.ts)核43项分页、child 原关系、变化拒绝和历史／当前审批附件资格隔离。[真实 HTTP](isolated/unified-agent/client-interactions.test.ts)另核实际 child 卡和 Core 通用问题的原答案／受理、游标与效果不增长。原默认窗口保首次／冷读，计划历史原字节从已验证完整附件读取，不把格式化 Markdown 的显示文本当源字节。邻接附件 fixture 等实际通知读取失败／恢复后才断言，原拒绝、零写入和期限保持；准确失败与通过归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。

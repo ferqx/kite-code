@@ -164,6 +164,8 @@ Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准�
 
 公共 Execution 的可选 `authorization` 是同一读取内的有限原事实，分别保自动审查、人工答案保存／受理与派发；它不携私有请求、主体、owner、完整审查或上下文，不进入执行 grant。历史 observer 可忽略当前可变取消／上下文，但仍验证原身份、purpose、完整原输出和 Artifact proof；原授权默认路径继续核全部当前条件，见 [Store owner](../../packages/agent/src/storage/README.md#只读授权观察)。Native 复用原审批组件，附件资格和提交仍归原 InteractionCard／Client；封存 Message 不借来源 Execution 后来的审批补历史，准确客户端范围见 [Desktop owner](../../apps/desktop/README.md#原审批面板与授权观察)。
 
+Native 原 Composer 的当前会话模式选择沿既有 permission observation；Full 确认以阅读身份撤销。停止沿原持久 Caller 的 `command.cancel`，只目标已核实当前活动 Run 的原开始 Command，未知申请保原身份；控制与只读授权标签分别拥有资格。当前职责与窗口范围见 [Native owner](../../apps/desktop/README.md#原会话输入区权限与停止)，没有新增执行端口或持久格式。
+
 ## Skill Workflow 的执行边界
 
 已有有条件 Workflow 使用 Agent 的[显式业务扩展](../../packages/agent/src/business/skill-workflow/README.md)。Core 只保存通用具版本 `extensionInputs` 原意图与 Command 摘要；Service 先验证支持、可信实际源、flags 与 payload，再读取凭据。初始化记录先于首次 Model；动态必要条件绑定对应 Extension 判定器，不能由全局业务 provider 错接或忽略。知识目录和 selectedSkills 不触发 activation。
