@@ -2086,7 +2086,9 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原输入区累计缓存命中率现沿原Composer接入所选会话的真实Model用量，完整已读历史按原Execution累计／封存副本去重，无缓存样本不显示0%；来源、迟到、默认窗口首次与冷读证据归[缓存指标进度](unified-agent-refactor-v1-progress.md#2026-10-09原输入区累计缓存命中率)。本片仅补原PC已有显示，继续上述退出依赖，37能力partial／wholeV13=false。
 
-原 kite-desktop 启动页现已迁入正式 Native，首次 attach／完整目录核实后进入，初始化失败明确重试，旧代次迟到隔离，进入后断线保原页面与草稿。DOM 与原 macOS 整窗口首次／冷启动结果归[启动迁移进度](unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)。仅闭合原 PC 的该入口，原宿主主题联动、剩余页面／封存恢复组合和后序依赖继续核对；37能力partial／wholeV13=false，阶段退出未通过。
+原 kite-desktop 启动页现已迁入正式 Native，首次 attach／完整目录核实后进入，初始化失败明确重试，旧代次迟到隔离，进入后断线保原页面与草稿。DOM 与原 macOS 整窗口首次／冷启动结果归[启动迁移进度](unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)。剩余页面／封存恢复组合和后序依赖继续核对；37能力partial／wholeV13=false，阶段退出未通过。
+
+原用户菜单三档主题与 Main 窗口底色已沿原 Hook、nativeTheme 和本机偏好迁入；独立窗口端口不打开 Service caller。原四项主题断言、闭合 IPC、实际 macOS 整窗口的菜单／引擎／冷启动结果归[主题迁移进度](unified-agent-refactor-v1-progress.md#2026-10-09原主题与窗口背景联动)。实际引擎信号与物理 OS 切换／高速拉伸分开，不提高完整 PC、资源或 §35 退出状态。
 
 ### 30.3 第一条执行闭环
 

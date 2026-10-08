@@ -6,7 +6,9 @@ import {
   type NativeReply,
   type NativeRequest,
   type NativeResult,
+  type NativeThemePreference,
   nativeChannel,
+  nativeThemeChannel,
 } from '../src/native-bridge';
 import { openEditor } from './editor';
 import { parseNativeMcpOperation } from './mcp-input';
@@ -604,6 +606,33 @@ export function assertNativeSender(
   }
   if (!same) throw Error('native_sender_denied');
 }
+/** Original window-only theme operation; it never opens the business caller. */
+export function registerNativeThemeIpc(options: {
+  ipcMain: IpcMain;
+  window: () => BrowserWindow | undefined;
+  rendererUrl: string;
+  setTheme: (theme: NativeThemePreference) => void;
+}) {
+  options.ipcMain.handle(nativeThemeChannel, (event, payload: unknown): NativeReply => {
+    try {
+      assertNativeSender(event, options.window(), options.rendererUrl);
+      const input = record(payload);
+      exact(input, ['theme']);
+      if (input.theme !== 'dark' && input.theme !== 'light' && input.theme !== 'system')
+        throw Error('invalid_native_theme');
+      options.setTheme(input.theme);
+      return { ok: true, value: null };
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      return {
+        ok: false,
+        code: /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : 'native_theme_failed',
+      };
+    }
+  });
+  return () => options.ipcMain.removeHandler(nativeThemeChannel);
+}
+
 export function registerNativeIpc(options: {
   ipcMain: IpcMain;
   window: () => BrowserWindow | undefined;

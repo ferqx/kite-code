@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState } from 'react';
+import type { NativeThemePreference } from './native-bridge';
 
-export type ThemePreference = 'dark' | 'light' | 'system';
+export type ThemePreference = NativeThemePreference;
 const themeKey = 'kite.desktop.theme';
 
 export function readThemePreference(): ThemePreference {
@@ -26,6 +27,7 @@ export function useNativeTheme() {
   const [preference, setPreference] = useState<ThemePreference>(readThemePreference);
   useLayoutEffect(() => {
     applyTheme(preference);
+    void window.kiteNative?.setTheme?.(preference).catch(console.error);
     const media = window.matchMedia?.('(prefers-color-scheme: dark)');
     const update = () => applyTheme(preference);
     if (preference === 'system') media?.addEventListener('change', update);

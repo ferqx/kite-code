@@ -5,12 +5,12 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
 import { nativeEventChannel } from '../src/native-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { NativeCaller } from './native-caller';
-import { registerNativeIpc } from './native-ipc';
+import { registerNativeIpc, registerNativeThemeIpc } from './native-ipc';
 import { spawnNodePairedChild } from './node-process';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
@@ -162,6 +162,7 @@ void app
         ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 13, y: 19 } }
         : {}),
       show: false,
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa',
       webPreferences: {
         preload: join(app.getAppPath(), 'preload.cjs'),
         contextIsolation: true,
@@ -170,6 +171,12 @@ void app
         webSecurity: true,
       },
     });
+    const updateSystemBackground = () => {
+      if (window && !window.isDestroyed())
+        window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa');
+    };
+    nativeTheme.on('updated', updateSystemBackground);
+    window.once('closed', () => nativeTheme.off('updated', updateSystemBackground));
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-attach-webview', (event) => event.preventDefault());
     window.webContents.on('will-navigate', (event, url) => {
@@ -193,6 +200,15 @@ void app
         },
       }),
     );
+    registerNativeThemeIpc({
+      ipcMain,
+      window: () => window,
+      rendererUrl,
+      setTheme(theme) {
+        nativeTheme.themeSource = theme;
+        updateSystemBackground();
+      },
+    });
     registerNativeIpc({
       ipcMain,
       window: () => window,

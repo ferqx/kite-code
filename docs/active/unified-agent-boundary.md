@@ -162,6 +162,8 @@ Skill知识目录属于Service宿主：公共只读目录和实际Run装配共�
 
 Native 原启动页的进入条件只消费当前 attach generation 与已经核实的首屏完整目录，不成为执行授权。初始化的明确重试只替换旧观察，Main 原 detach 释放所属读取和选择；迟到旧代次不进入新页面。已进入后的断线保留原内容和草稿，未知业务提交仍按原命令核实，不因重试启动页获得重放或 Service 控制资格。共享 UI、Core、公开 API 与私有格式保持；当前范围与分层证据归[Native owner](../../apps/desktop/README.md#原启动页与初始化重试)。
 
+Native 原主题属于窗口 Host。preload 的固定主题端口只传暗／亮／系统枚举，Main 在同一同步调用内核准确窗口、主 frame、renderer URL 和闭合 payload 后更新原外观引擎与底色；它没有 Store／Session／generation 或路径参数，不打开业务 caller，不取得服务或执行权。renderer 的本机偏好和 media 监听沿原 Hook，Main 的 updated 监听由窗口 closed 释放；业务观察和持久提交保持原边界。当前实现与实际 macOS 首次／冷读范围见[Native owner](../../apps/desktop/README.md#原主题与窗口背景联动)。
+
 ## 授权观察与执行资格
 
 Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准确来源／展示关系和 EOF；它不建立新的原卡回答观察。完整历史附件与当前审批分别持有 reader／loaded proof，前者不能授权后者；关闭、刷新或切范围只释放所属读取。记录与受理、执行成功分开，当前接口的变化拒绝与恢复限制归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)。

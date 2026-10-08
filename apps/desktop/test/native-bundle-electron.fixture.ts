@@ -164,6 +164,89 @@ let conversationId = 's',
   conversationUpdatedAt: number | undefined;
 const lockState = async () =>
   (await (await fetch(`${control}/locks`)).json()) as { outer: boolean; inner: boolean };
+let themeLaunches = 0;
+async function readOriginalTheme(page: import('playwright').Page, cold: boolean) {
+  assert.equal(await page.evaluate(() => typeof window.kiteNative?.setTheme), 'function');
+  console.log('native_theme_before_unemulated', {
+    native: await app!.evaluate(({ nativeTheme }) => ({
+      preference: nativeTheme.themeSource,
+      dark: nativeTheme.shouldUseDarkColors,
+    })),
+    renderer: await page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      mediaDark: matchMedia('(prefers-color-scheme: dark)').matches,
+    })),
+  });
+  // Playwright defaults media to light. Remove that override to observe the real Native engine.
+  await page.emulateMedia({ colorScheme: null });
+  const before = await (await fetch(`${control}/count`)).text();
+  async function matches(preference: 'dark' | 'light' | 'system') {
+    const deadline = Date.now() + 10000;
+    let appearance: {
+      preference: 'dark' | 'light' | 'system';
+      dark: boolean;
+      background: string;
+    };
+    for (;;) {
+      appearance = await app!.evaluate(({ BrowserWindow, nativeTheme }) => ({
+        preference: nativeTheme.themeSource,
+        dark: nativeTheme.shouldUseDarkColors,
+        background: BrowserWindow.getAllWindows()[0]!.getBackgroundColor(),
+      }));
+      if (
+        appearance.preference === preference &&
+        appearance.background.toLowerCase() === (appearance.dark ? '#191919' : '#fafafa')
+      )
+        break;
+      assert.ok(Date.now() < deadline, `original window theme did not settle: ${preference}`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    await page.waitForFunction(
+      (dark) =>
+        document.documentElement.dataset.theme === (dark ? 'dark' : 'light') &&
+        document.documentElement.style.colorScheme === (dark ? 'dark' : 'light'),
+      appearance.dark,
+    );
+    assert.equal(
+      await page.evaluate(
+        () => getComputedStyle(document.querySelector('.kite-client.shell')!).backgroundColor,
+      ),
+      appearance.dark ? 'rgb(25, 25, 25)' : 'rgb(250, 250, 250)',
+    );
+  }
+  async function choose(preference: 'dark' | 'light' | 'system', label: string) {
+    await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+    await page.getByRole('menuitemradio', { name: label, exact: true }).click();
+    assert.equal(await page.evaluate(() => localStorage.getItem('kite.desktop.theme')), preference);
+    await matches(preference);
+  }
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem('kite.desktop.theme') ?? 'system'),
+    cold ? 'dark' : 'system',
+  );
+  await matches(cold ? 'dark' : 'system');
+  await choose('light', '亮');
+  await choose('system', '跟随系统');
+  // Drive the real Electron appearance engine, without changing the user's OS settings.
+  await app!.evaluate(({ nativeTheme }) => {
+    nativeTheme.themeSource = 'dark';
+  });
+  await matches('dark');
+  await app!.evaluate(({ nativeTheme }) => {
+    nativeTheme.themeSource = 'light';
+  });
+  await matches('light');
+  await app!.evaluate(({ nativeTheme }) => {
+    nativeTheme.themeSource = 'system';
+  });
+  await matches('system');
+  await choose('dark', '暗');
+  assert.equal(await (await fetch(`${control}/count`)).text(), before);
+  console.log(
+    'native_driver_stage: original theme menu, window background, engine updates and cold preference with zero Model work',
+  );
+}
+
 async function launch() {
   console.log('native_driver_stage: launch');
   app = await _electron.launch({
@@ -213,6 +296,7 @@ async function launch() {
   assert.equal(layout.startupVisible, false);
   assert.equal(layout.nativeBridge, true);
   assert.equal(layout.legacyBridge, false);
+  await readOriginalTheme(page, themeLaunches++ > 0);
   console.log(
     'native_driver_stage: retained startup styles, completed directory, desktop layout, compiled CSS/fonts and current bridge',
   );
