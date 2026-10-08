@@ -81,6 +81,7 @@ export class NativeCaller {
   private directoryEnabled = false;
   private directoryRefreshing?: Promise<void>;
   private directoryRefreshRequested = false;
+  private directoryRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private directoryEpoch = 0;
   private directoryRead?: {
     generation: number;
@@ -483,6 +484,8 @@ export class NativeCaller {
     this.directoryRead = undefined;
     this.directoryRefreshing = undefined;
     this.directoryRefreshRequested = false;
+    clearTimeout(this.directoryRefreshTimer);
+    this.directoryRefreshTimer = undefined;
     this.directoryUnavailable = true;
     this.workspaceObservation = undefined;
     if (clear) this.directory = undefined;
@@ -533,7 +536,7 @@ export class NativeCaller {
   private scheduleDirectoryRefresh() {
     if (!this.directoryEnabled || this.closed) return;
     this.directoryRefreshRequested = true;
-    if (this.directoryRefreshing) return;
+    if (this.directoryRefreshing || this.directoryRefreshTimer) return;
     this.directoryRefreshRequested = false;
     const generation = this.generation;
     const refresh = this.readDirectory().then(
@@ -546,11 +549,19 @@ export class NativeCaller {
       this.directoryRefreshing = undefined;
       if (generation !== this.generation || !this.directoryEnabled || this.closed) return;
       this.changed();
-      if (this.directoryRefreshRequested) this.scheduleDirectoryRefresh();
+      // Persistent output can notify once per segment. Keep one successor observation,
+      // including notifications that arrive just after a fast directory read finishes.
+      this.directoryRefreshTimer = setTimeout(() => {
+        this.directoryRefreshTimer = undefined;
+        if (this.directoryRefreshRequested) this.scheduleDirectoryRefresh();
+      }, 100);
     });
   }
   private scheduleRefresh(signal: AbortSignal) {
     this.scheduleDirectoryRefresh();
+    this.scheduleSelectionRefresh(signal);
+  }
+  private scheduleSelectionRefresh(signal: AbortSignal) {
     this.refreshRequested = true;
     if (this.refreshing || this.refreshTimer || signal.aborted || this.closed) return;
     const refresh = (async () => {
@@ -573,12 +584,13 @@ export class NativeCaller {
     })();
     this.refreshing = refresh;
     void refresh.finally(() => {
-      if (this.refreshing === refresh) this.refreshing = undefined;
-      if (this.refreshRequested && !signal.aborted && !this.closed)
+      if (this.refreshing !== refresh) return;
+      this.refreshing = undefined;
+      if (!signal.aborted && !this.closed)
         this.refreshTimer = setTimeout(() => {
           this.refreshTimer = undefined;
-          this.scheduleRefresh(signal);
-        }, 0);
+          if (this.refreshRequested) this.scheduleSelectionRefresh(signal);
+        }, 100);
     });
   }
   private async drainRefresh() {
@@ -649,12 +661,14 @@ export class NativeCaller {
           await this.client.observe({
             signal: signal.signal,
             ...(startAfter ? { startAfter } : acknowledged ? { cursor: acknowledged } : {}),
-            onReady: () => {
+            onReady: (ready) => {
               this.environmentRevision++;
               this.observationUnavailable = false;
               this.permissionUnavailable = false;
               this.changed();
-              this.scheduleRefresh(signal.signal);
+              // A ready-only stream at the reloaded baseline adds no new facts.
+              if (!startAfter || ready.highWaterCursor !== startAfter.sequence)
+                this.scheduleRefresh(signal.signal);
             },
             onChange: () => {
               this.environmentRevision++;

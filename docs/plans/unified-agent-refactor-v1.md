@@ -2076,7 +2076,7 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原环境信息卡和只读子详情已接入当前会话，保留原卡布局、准确停止、完整日志与返回主会话的草稿／等待提示；全局总览继续独立读取。实际 scope、目录 reset 与 macOS 窗口证据见[环境卡进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-环境信息卡与只读子详情)。后续按原依赖推进 Workspace 批量移除／物理 GC、installed 恢复与发布样本、macOS 原资源退出、独立审查及阶段完整回归后最终旧路径退役；本片局部通过不关闭这些依赖。
 
-当前 macOS DB8 原代码回退也已沿复用原页面收束有限边界：固定相同11项依赖的a2b6441f原DB7源码，保真实Agent／Main／renderer差异、原四次兼容窗口和新两冷窗口；旧私有格式拒绝保数据，切回当前版本后只查原申请，六Service普通退出和最终卸载保持。准确失败、当前513断言／320.79秒及限制归[进度](unified-agent-refactor-v1-progress.md#2026-10-08native-db8-真实代码回退)。原17MiB页面刷新红、macOS RSS／八轮／全资源退出、其余必要恢复、独立审查、完整默认与最终旧路径退役仍未闭合；Win／Linux按用户顺序留到重构后Actions，37能力partial、wholeV13=false。
+当前 macOS DB8 原代码回退也已沿复用原页面收束有限边界：固定相同11项依赖的a2b6441f原DB7源码，保真实Agent／Main／renderer差异、原四次兼容窗口和新两冷窗口；旧私有格式拒绝保数据，切回当前版本后只查原申请，六Service普通退出和最终卸载保持。准确失败、当前513断言／320.79秒及限制归[进度](unified-agent-refactor-v1-progress.md#2026-10-08native-db8-真实代码回退)。原17MiB页面刷新红现已修复，原完整管理窗口保持全部断言与10／45／60秒预算，actual0／25.70秒；Main合并连续通知、同范围历史刷新保展开全文，准确范围见[刷新进度](unified-agent-refactor-v1-progress.md#2026-10-08native-大输出刷新与全文保留)。macOS RSS／八轮／全资源退出、其余必要恢复、独立审查、完整默认与最终旧路径退役仍未闭合；Win／Linux按用户顺序留到重构后Actions，37能力partial、wholeV13=false。
 
 ### 30.3 第一条执行闭环
 

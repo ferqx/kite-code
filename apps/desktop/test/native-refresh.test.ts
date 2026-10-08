@@ -113,7 +113,7 @@ test('Native reset reloads original facts before a ready-only stream restores wr
   }
 });
 
-test('Native notification backlog keeps one view read, preserves same selection while loading, and removes write qualification', async () => {
+test('Native notification backlog coalesces fast directory and view reads, retains the final observation, and removes write qualification while loading', async () => {
   let notify!: () => void;
   let release!: () => void;
   let entered!: () => void;
@@ -123,7 +123,9 @@ test('Native notification backlog keeps one view read, preserves same selection 
   const waiting = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  let reads = 0;
+  let reads = 0,
+    directoryReads = 0,
+    title = 's';
   const client = {
     serverInfo: { storeId: 'store', capabilities: [] },
     connect: async () => {},
@@ -134,6 +136,13 @@ test('Native notification backlog keeps one view read, preserves same selection 
       );
     },
     disposeNetwork() {},
+    async listAllWorkspaces() {
+      directoryReads++;
+      return [];
+    },
+    async listAllSessions() {
+      return [];
+    },
     async getView(id: string) {
       reads++;
       if (reads === 2) {
@@ -147,7 +156,7 @@ test('Native notification backlog keeps one view read, preserves same selection 
           workspaceId: 'w',
           rootSessionId: id,
           parentSessionId: null,
-          title: id,
+          title,
           nextSeq: '0',
           contextSelectionId: 'selection',
           controlRevision: '0',
@@ -178,6 +187,23 @@ test('Native notification backlog keeps one view read, preserves same selection 
       selection: { session: { id: 's' }, permissionUnavailable: false, viewLoading: false },
     });
     expect(reads).toBeLessThan(20);
+    for (let index = 0; index < 200; index++) {
+      notify();
+      await Promise.resolve();
+    }
+    expect(directoryReads).toBeLessThan(4);
+    expect(reads).toBeLessThan(4);
+    title = 'final persistent observation';
+    notify();
+    const deadline = Date.now() + 5000;
+    while (caller.state().selection?.session.title !== title) {
+      if (Date.now() > deadline) throw Error('native_refresh_fixture_timeout');
+      await Bun.sleep(1);
+    }
+    expect(caller.state().selection).toMatchObject({
+      session: { id: 's', title },
+      permissionUnavailable: false,
+    });
     await caller.invoke({ method: 'select', generation: 1, sessionId: 'other' });
     expect(caller.state().selection?.session.id).toBe('other');
   } finally {

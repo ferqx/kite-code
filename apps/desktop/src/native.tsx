@@ -1630,6 +1630,7 @@ export function NativeDesktop() {
         if (!message || !selection || !state) return null;
         return (
           <ModelOutputMessage
+            key={`${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${message.id}`}
             message={message}
             storeId={selection.storeId}
             onRead={
@@ -1697,7 +1698,10 @@ export function NativeDesktop() {
       loading={
         childDetail
           ? childDetail.loading && !childFacts
-          : !preparing && !!selection && historyState.phase === 'loading'
+          : !preparing &&
+            !!selection &&
+            historyState.phase === 'loading' &&
+            (!messages.length || selected.current !== selection.session.id)
       }
       environmentInformation={!childDetail ? environment.card : undefined}
       requiredSubagentWait={

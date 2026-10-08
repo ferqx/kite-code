@@ -20,6 +20,8 @@ Workspace/Session 完整目录分别读取；其间新登记的项目可能还�
 
 [目录 DOM](test/native-directory.test.tsx)与[草稿 DOM](test/isolated/native-drafts-dom.test.tsx)已直接核已有 Sidebar/实际 NativeDesktop：同名会话准确项目/原 ID、空项目、独立折叠零写、项目列表焦点零选择、创建期间阅读、晚项目保留与迟到创建保后来选择/草稿。新目录 DOM 另核真实时间排序、5/+10 展示、全局待输入／required 等待和旧事实保留；Main 有限 port 核第201项之后的非选中变化、失败保目录、慢读取不挡选择及 detach 迟到拒绝。源码外默认 macOS [窗口](test/isolated/native-bundle.test.ts)实际核审批期间切到另一会话、原目录 Badge／准确 Run／时间／排序、原卡返回、Provider 不增加与冷时间保留。具体输入和结果归[本片进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-全局会话状态与时间排序)，不以有限 DOM 宣称完整 installed/跨平台资格。
 
+Main 对目录与所选会话分别保留一个在途读取和一个后继通知位，读取结束后合并100ms内的连续变化；所选会话的后继读取不再额外刷新目录。显式选择与原命令操作不等待该合并窗口，慢目录仍不阻塞所选会话。reset 后先读原事实与历史，ready 高水位等于该 baseline 时不重复读取，也不将 snapshot 当作已应用事件游标。同一阅读范围的历史刷新保留原消息组件和已展开全文，真实 attach／选择／history epoch 变化才释放原全文状态；加载中写资格仍按原门禁撤除。取舍见[刷新修复](../../.agents/notes/implemented/bug-fix/2026-10-08-native-observation-output-refresh.md)，原17MiB管理窗口与直接回归结果见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08native-大输出刷新与全文保留)。
+
 ## Native 空间批量移除
 
 原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的空间行移除按钮继续使用原悬浮／键盘焦点交互。[Main](electron/main.ts) 显示原生确认，默认和取消均为「保留空间」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他空间的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
