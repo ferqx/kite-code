@@ -102,6 +102,197 @@ function fixture() {
   };
 }
 
+test('cache samples use immutable original Model receipts beyond the View, retain sealed origins and reject invented token pairs', async () => {
+  const f = fixture();
+  const add = (id: string, usage: unknown = { inputTokens: 100, cachedInputTokens: 40 }) => {
+    const message: Message = {
+      id,
+      seq: String(f.messages.size + 1),
+      sessionId: 's',
+      runId: `run-${id}`,
+      role: 'assistant',
+      status: 'complete',
+      content: `original-${id}`,
+      sourceIds: [`model-${id}`],
+    };
+    f.messages.set(id, message);
+    f.executions.set(`model-${id}`, {
+      id: `model-${id}`,
+      originStoreId: 'store',
+      sessionId: 's',
+      runId: message.runId,
+      kind: 'model',
+      definitionId: 'fixed',
+      definitionVersion: '1',
+      status: 'succeeded',
+      result: { content: message.content, usage },
+      resultRevision: '1',
+      cancelRequestedAt: null,
+    } as Execution);
+    return message;
+  };
+  const read = (messageIds: string[]) =>
+    f.manager.usage({
+      method: 'toolMessages.usage',
+      generation: 1,
+      viewSelection: f.scope.viewSelection,
+      historyEpoch: f.scope.historyEpoch,
+      readId: crypto.randomUUID(),
+      messageIds,
+    });
+  try {
+    for (let i = 0; i < 241; i++) add(`usage-${i}`);
+    expect((await read(['usage-240'])).entries).toEqual([
+      {
+        messageId: 'usage-240',
+        executionId: 'model-usage-240',
+        originStoreId: 'store',
+        cacheHitTokens: 40,
+        cacheMissTokens: 60,
+      },
+    ]);
+    add('no-cache-field', { inputTokens: 100 });
+    add('zero-input', { inputTokens: 0, cachedInputTokens: 0 });
+    add('observed-zero', { inputTokens: 100, cachedInputTokens: 0 });
+    expect((await read(['no-cache-field', 'zero-input', 'observed-zero'])).entries).toMatchObject([
+      { messageId: 'observed-zero', cacheHitTokens: 0, cacheMissTokens: 100 },
+    ]);
+    const original = f.messages.get('usage-240')!;
+    f.messages.set('copied-usage', {
+      ...original,
+      id: 'copied-usage',
+      runId: null,
+      originMessage: {
+        storeId: 'store',
+        sessionId: 's',
+        messageId: original.id,
+        runId: original.runId ?? null,
+      },
+    });
+    expect((await read(['copied-usage'])).entries).toMatchObject([
+      { messageId: 'copied-usage', executionId: 'model-usage-240', cacheHitTokens: 40 },
+    ]);
+    const restored = add('restored');
+    f.executions.get('model-restored')!.originStoreId = 'old-store';
+    f.client.getRun = async () =>
+      ({
+        id: restored.runId,
+        sessionId: 's',
+        originStoreId: 'old-store',
+        status: 'interrupted',
+        isActive: false,
+      }) as Run;
+    expect((await read(['restored'])).entries[0]?.originStoreId).toBe('old-store');
+    f.client.getRun = async () =>
+      ({
+        id: restored.runId,
+        sessionId: 's',
+        originStoreId: 'old-store',
+        status: 'running',
+        isActive: true,
+      }) as Run;
+    await expect(read(['restored'])).rejects.toMatchObject({
+      code: 'model_usage_identity_mismatch',
+    });
+    for (const usage of [
+      { inputTokens: null, cachedInputTokens: 1 },
+      { inputTokens: 10, cachedInputTokens: 11 },
+      { inputTokens: 10, cachedInputTokens: -1 },
+      { inputTokens: 10.5, cachedInputTokens: 1 },
+    ]) {
+      add('invalid', usage);
+      await expect(read(['invalid'])).rejects.toMatchObject({ code: 'model_usage_unavailable' });
+    }
+    add('wrong-source');
+    f.executions.get('model-wrong-source')!.sessionId = 'other';
+    await expect(read(['wrong-source'])).rejects.toMatchObject({
+      code: 'model_usage_identity_mismatch',
+    });
+    expect(() =>
+      decodeNativeRequest({
+        method: 'toolMessages.usage',
+        generation: 1,
+        viewSelection: 2,
+        historyEpoch: 0,
+        readId: 'r',
+        messageIds: ['usage-0'],
+        executionId: 'unchecked',
+      }),
+    ).toThrow('invalid_native_request');
+  } finally {
+    f.manager.release();
+  }
+});
+
+test('late cache metadata is confined to its original observed message and read scope', async () => {
+  const f = fixture();
+  const message: Message = {
+    id: 'm',
+    seq: '1',
+    sessionId: 's',
+    runId: 'r',
+    role: 'assistant',
+    status: 'complete',
+    content: 'original',
+    sourceIds: ['model'],
+  };
+  f.messages.set(message.id, message);
+  let entered!: () => void, release!: (value: Execution) => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  f.client.getExecution = async () => {
+    entered();
+    return new Promise<Execution>((resolve) => {
+      release = resolve;
+    });
+  };
+  const execution = {
+    id: 'model',
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'r',
+    kind: 'model',
+    definitionId: 'fixed',
+    definitionVersion: '1',
+    status: 'succeeded',
+    result: { content: 'original', usage: { inputTokens: 10, cachedInputTokens: 5 } },
+    resultRevision: '1',
+    cancelRequestedAt: null,
+  } as Execution;
+  const read = f.manager.usage({
+    method: 'toolMessages.usage',
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    readId: 'late-usage',
+    messageIds: ['m'],
+  });
+  await started;
+  f.scope = { ...f.scope, sessionId: 'other', viewSelection: 3 };
+  release(execution);
+  await expect(read).rejects.toMatchObject({ code: 'native_selection_changed' });
+  f.scope = { ...f.scope, sessionId: 's', viewSelection: 2 };
+  f.client.getExecution = async () => execution;
+  let verified = 0;
+  const verifyConnection = f.client.verifyConnection.bind(f.client);
+  f.client.verifyConnection = async () => {
+    if (++verified === 2) f.messages.set('m', { ...message, content: 'later body' });
+    return verifyConnection();
+  };
+  await expect(
+    f.manager.usage({
+      method: 'toolMessages.usage',
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      readId: 'changed-usage',
+      messageIds: ['m'],
+    }),
+  ).rejects.toMatchObject({ code: 'native_selection_changed' });
+  f.manager.release();
+});
+
 test('tool receipts outside the bounded View retain exact outcomes and only unique original call targets; repeated call IDs never establish execution identity', async () => {
   const f = fixture();
   try {

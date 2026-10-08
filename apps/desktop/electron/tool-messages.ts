@@ -1,5 +1,7 @@
 import { type AgentClient, ClientError, type Message } from '@kite-ai/client';
 import {
+  modelUsageMessageKey,
+  type NativeModelUsagePage,
   type NativeToolMessagePage,
   type NativeToolMessageRequest,
   type NativeToolMessageScope,
@@ -187,6 +189,104 @@ export class NativeToolMessages {
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
       return { kind: 'toolMessages.runs', readId: input.readId, scope: { ...scope }, runs };
+    } finally {
+      this.close(input.readId);
+    }
+  }
+  async usage(
+    input: Extract<NativeToolMessageRequest, { method: 'toolMessages.usage' }>,
+  ): Promise<NativeModelUsagePage> {
+    const lease = this.open(input),
+      { scope } = lease;
+    try {
+      await this.client.verifyConnection({ signal: lease.abort.signal });
+      this.check(lease);
+      const entries: NativeModelUsagePage['entries'] = [];
+      const observed = new Map<string, { key: string; content: string }>();
+      for (const id of input.messageIds) {
+        const message = this.messages().get(id);
+        if (!message || message.sessionId !== scope.sessionId)
+          throw new ClientError('tool_message_unavailable');
+        const key = modelUsageMessageKey(message),
+          content = message.content;
+        observed.set(id, { key, content });
+        const origin = source(message);
+        if (
+          message.role !== 'assistant' ||
+          message.status !== 'complete' ||
+          message.contentFormat === 'unsupported' ||
+          !origin.runId ||
+          message.sourceIds?.length !== 1
+        )
+          continue;
+        const execution = await this.client.getExecution(message.sourceIds[0]!, {
+          signal: lease.abort.signal,
+        });
+        this.check(lease);
+        const current = this.messages().get(id);
+        if (!current || modelUsageMessageKey(current) !== key || current.content !== content)
+          throw new ClientError('native_selection_changed');
+        if (
+          execution.id !== message.sourceIds[0] ||
+          execution.sessionId !== origin.sessionId ||
+          execution.runId !== origin.runId ||
+          (message.originMessage && execution.originStoreId !== message.originMessage.storeId)
+        )
+          throw new ClientError('model_usage_identity_mismatch');
+        if (execution.originStoreId !== scope.storeId) {
+          const run = await this.client.getRun(origin.runId, { signal: lease.abort.signal });
+          this.check(lease);
+          if (
+            run.id !== origin.runId ||
+            run.originStoreId !== execution.originStoreId ||
+            !presentableRun(run, scope.storeId, origin.sessionId) ||
+            run.isActive
+          )
+            throw new ClientError('model_usage_identity_mismatch');
+        }
+        const result = object(execution.result),
+          usage = object(result?.usage);
+        if (
+          execution.kind !== 'model' ||
+          execution.status !== 'succeeded' ||
+          result?.content !== content ||
+          !usage ||
+          usage.cachedInputTokens === undefined
+        )
+          continue;
+        const total = usage.inputTokens,
+          cached = usage.cachedInputTokens;
+        if (
+          typeof total !== 'number' ||
+          typeof cached !== 'number' ||
+          !Number.isSafeInteger(total) ||
+          !Number.isSafeInteger(cached) ||
+          total < 0 ||
+          cached < 0 ||
+          cached > total
+        )
+          throw new ClientError('model_usage_unavailable');
+        if (total > 0)
+          entries.push({
+            messageId: message.id,
+            executionId: execution.id,
+            originStoreId: execution.originStoreId,
+            cacheHitTokens: cached,
+            cacheMissTokens: total - cached,
+          });
+      }
+      await this.client.verifyConnection({ signal: lease.abort.signal });
+      this.check(lease);
+      for (const [id, receipt] of observed) {
+        const message = this.messages().get(id);
+        if (
+          !message ||
+          modelUsageMessageKey(message) !== receipt.key ||
+          message.content !== receipt.content
+        )
+          throw new ClientError('native_selection_changed');
+      }
+      return { kind: 'toolMessages.usage', readId: input.readId, scope: { ...scope }, entries };
     } finally {
       this.close(input.readId);
     }

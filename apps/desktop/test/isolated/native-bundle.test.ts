@@ -97,8 +97,13 @@ test.skipIf(process.platform !== 'darwin')(
           requests++;
           const call = requests === 1;
           const read = requests === 2;
+          const sample = [
+            [100, 40],
+            [200, 160],
+            [100, 0],
+          ][requests - 1]!;
           const frame = (delta: unknown, finish_reason: string | null) =>
-            `data: ${JSON.stringify({ id: `native-${requests}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+            `data: ${JSON.stringify({ id: `native-${requests}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }], ...(finish_reason ? { usage: { prompt_tokens: sample[0], completion_tokens: 4, total_tokens: sample[0]! + 4, prompt_tokens_details: { cached_tokens: sample[1] } } } : {}) })}\n\n`;
           return new Response(
             frame(
               call

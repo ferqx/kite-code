@@ -45,6 +45,7 @@ import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-b
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
+  NativeModelUsagePage,
   NativeToolMessagePage,
   NativeToolMessageRequest,
   NativeToolRunPage,
@@ -674,6 +675,7 @@ export type NativeResult =
   | NativeInteractionHistoryPage
   | NativeToolMessagePage
   | NativeToolRunPage
+  | NativeModelUsagePage
   | NativeFileTargetPage
   | NativeFileChangePage
   | NativeFileChangeDetail

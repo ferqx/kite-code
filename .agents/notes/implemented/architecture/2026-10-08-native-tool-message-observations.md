@@ -16,6 +16,8 @@ Main 的普通 metadata reader 只读取已观察 Message 的唯一 source Execu
 
 Native直接复用原ToolActivity／ToolRow的轻量行、箭头和结果展开；只对已知定义／版本适配旧分类。未知定义／版本保原ID、version与可展开原文，不能借同名旧分类解释。当前范围归[Native owner](../../../../apps/desktop/README.md#原工具过程与结果阅读)与[实际进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。
 
+原Composer累计缓存用量复用同一有限reader与所属lease，另设只读usage页，避免把用量读取失败连带为Run／工具展示失败。完整已观察助手Message的唯一原Model成功结果、Session／Run／content及实际cached字段分别核实，32项分批；sealed副本按原Store／Execution只计一次。用量是不可变Model事实，允许读取准确封存来源，不能套用轮次reader的未封存限制，也不查询来源Run后来状态；已恢复foreign结果另核终态出处，foreign active拒绝。无样本不造0%，新批读取失败不发布部分累计，不新增持久缓存、Core／HTTP或执行链。当前实现与证据归[Native owner](../../../../apps/desktop/README.md#原输入区累计缓存命中率)。
+
 ## Alternatives considered
 
 - 将Message complete直接映射为工具成功：会把真实失败、取消与未知当作成功；未采用。
@@ -24,6 +26,9 @@ Native直接复用原ToolActivity／ToolRow的轻量行、箭头和结果展开�
 - 所有定义名直接交旧工具分类：未来同名task等会触发旧分支并隐藏正文；未知定义／版本仅提供文字标题与原文。
 - 从请求字段授予文件打开或重建逐操作diff：请求不证明执行成功／目标／结果；只作展示，仍沿[Files回执决定](2026-10-08-native-file-change-receipts.md)处理实际文件入口。
 - 重写消息UI或重新接旧Runtime：不符合原PC复用与统一调用目标；直接消费已有组件，不增加第二提交链。
+
+- 将缓存用量并入仅保代表Message的Run页：会遗漏同Run的其他Model记录，并使遥测失败影响轮次阅读；保独立有限usage页、复用原Main观察与lease。
+- 把缺缓存字段当成零命中，或逐个sealed副本重复累计：前者编造样本，后者重复同一Model；仅累计真实用量并按原Store／Execution去重。
 
 ## Consequences
 

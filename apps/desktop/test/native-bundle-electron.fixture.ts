@@ -10,6 +10,23 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
+async function readOriginalCacheMetrics(page: import('playwright').Page) {
+  await page
+    .locator('.composer-cache-rate')
+    .filter({ hasText: /^缓存 50%$/ })
+    .waitFor();
+  assert.equal(
+    await page.locator('.composer-cache-rate').getAttribute('title'),
+    '缓存命中 200 / 400 tokens',
+  );
+  const state = await page.evaluate(
+    async () =>
+      (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+  );
+  assert.equal(state.selection?.session.id, conversationId);
+  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
+}
+
 async function readOriginalFileChanges(page: import('playwright').Page) {
   const process = page.locator('.agent-turn-summary').first();
   await process.waitFor();
@@ -487,6 +504,29 @@ try {
   assert.equal(await page.getByText('write one real bundled file', { exact: true }).count(), 1);
   assert.equal(await page.getByText('正在发送', { exact: true }).count(), 0);
   console.log('native_driver_stage: deferred original preparation and one exact first send');
+  await readOriginalCacheMetrics(page);
+  await page
+    .getByRole('button', { name: 'Native bundled', exact: true })
+    .and(page.locator('button.session-row'))
+    .click();
+  await page.locator('.session-header').getByTitle('Native bundled', { exact: true }).waitFor();
+  await page
+    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .waitFor();
+  assert.equal(await page.locator('.composer-cache-rate').count(), 0);
+  const empty = await page.evaluate(
+    async () =>
+      (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+  );
+  assert.equal(empty.selection?.session.id, 's');
+  await page
+    .getByRole('button', { name: conversationTitle, exact: true })
+    .and(page.locator('button.session-row'))
+    .click();
+  await readOriginalCacheMetrics(page);
+  console.log(
+    'native_driver_stage: original cumulative cache usage, absent samples hidden and GET-only Session scope',
+  );
   await readOriginalFileChanges(page);
   // Capture the complete public directory after result/command publication and all reading checks.
   // An earlier completed Run snapshot may precede its final durable command event.
@@ -508,6 +548,10 @@ try {
   assert.deepEqual(await lockState(), { outer: false, inner: false });
   page = await launch();
   assert.equal(await (await fetch(`${control}/count`)).text(), '3');
+  await readOriginalCacheMetrics(page);
+  console.log(
+    'native_driver_stage: original persisted cache usage after cold launch and zero replay',
+  );
   await readOriginalFileChanges(page);
   await page.evaluate(
     async (sessionId) =>

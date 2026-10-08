@@ -72,6 +72,14 @@
 
 [原页面 DOM](test/isolated/native-new-conversation-dom.test.tsx)核模式、Full 取消／跨会话确认撤销、草稿和零任务提交；[原 Main 权限](test/native-permissions.test.ts)保独立原申请及未知结果。[实际源码外 Auto 窗口](test/isolated/native-auto-approval-bundle.test.ts)经完整候选的默认 Core／Service／Main 和原 Renderer，核批准、拒绝、请求人工、无效审查结果和审批中准确停止。转人工保原原因，只有实际批准产生准确文件效果；拒绝终止原任务，停止后迟到批准没有效果。普通退出后五种原记录完整冷读，Provider 与回答次数保持。该窗口只证明本机 macOS 当前 Store；全部封存／恢复、完整 PC 和独立迁移审查仍开放。实际执行及原失败见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原会话权限停止与自动审批闭环)。共享 Composer、Core／公共 API、SQL 和私有持久格式均未改。
 
+## 原输入区累计缓存命中率
+
+[NativeDesktop](src/native.tsx)通过 [cache metrics adapter](src/native-cache-metrics.ts)给原 [Composer](../../packages/ui/src/desktop/Composer.tsx)传累计缓存用量，继续使用原百分比、token 提示和无样本隐藏行为。完整历史读到固定高水位后，按所选会话全部已观察的完整助手消息读取，不限于 View 近200项；真实 cached input为0且input大于0才显示0%，缺缓存字段或总量为0不补造样本。分叉／包含的封存消息保原来源，同一个原 Store／Model Execution只计一次。切换选择、generation或history epoch不沿用上一范围的指标；未完成历史校准时隐藏，失败可显式重新读取，不启动或重放任务。
+
+[Main reader](electron/tool-messages.ts)沿已有有限IPC增加 `toolMessages.usage`，复用close与所属read lease，每批至多32个已观察 Message ID，从当前生成 Client GET核原 Model Execution／Session／Run、成功结果和准确content，以及前后连接与原消息未变。它只返回已核实的缓存命中／未命中token；整数、非负及cached不大于input分别校验，不将缺失视为0。封存来源读取不可变Model用量，不借来源Run后来状态取得热事实；当前Store保存的旧Store结果另核终态出处，foreign active拒绝。读取失败不发布部分新样本；原历史正文、权限与准确停止继续独立，未新增Core／HTTP／SQL／私有持久格式。
+
+[Main与有限IPC测试](test/native-tool-messages.test.ts)、[原Composer DOM](test/isolated/native-cache-metrics-dom.test.tsx)和原[源码外默认窗口](test/isolated/native-bundle.test.ts)分别负责来源资格、累计／去重／迟到／无样本和默认SDK用量的首次及冷读。实际输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原输入区累计缓存命中率)，原共享UI实现保持；完整PC、全部恢复组合、资源退出和全阶段独立审查仍按原计划核对。
+
 ## 原交互记录只读历史
 
 原“会话工具”侧栏的“交互记录”由 [NativeInteractionHistory](src/native-interaction-history.tsx)复用 `InteractionCard` 阅读问题、计划审核和普通／MCP 审批，保存答案、取消、当前 revision 与 accepted decision 分开表达。通用 question 保原 schema／JSON 答案，不借默认 `ask_user` 的 q1–q3 解释任意定义。计划的实际修改反馈按原字符串显示；原 PlanBody 提供格式化阅读，完整原附件可另行展开。没有回答回调，待回答记录也只读；当前真正待输入卡和原提交链继续独立。

@@ -2958,3 +2958,17 @@ bounded recon 本逻辑轮派发一次返回 `agent thread limit reached`；无�
 原红保留：`window-ready`错误导入 SQLite engine；`window-qualified`／`window-observed`新 fixture 误把默认根工具目录认定为仅 Files，真实还含内置 ask_user；`window-current`／`window-diagnostic`45秒 driver 失败，诊断确认原审查事实已到，测试误定位通用行，而实际 Files 用原 `.tool-edit-heading`。后者在失败时仍持审查造成退出等待，现只释放所属审查并保原错误；两失败根的10个 Electron／Service 进程已准确 SIGTERM 清理，终态0，证据归 `failed-processes-20261009.json`。`window-file-row` actual1／49.87秒，夹具误等拒绝 Run completed；依据现行 Core 契约改核 cancelled、目标 failed、无效果与原拒绝标签，准确总调用为13。`types-final` actual2，新增 pending human grant null 不符合协议，已改正确 fixture；更早 type／format 红均保原日志。曾一次原子编辑前检失败后错误启动旧输入验证，旧结果保留且不作最终输入证据。没有删业务断言、跳过产品失败或延长预算。
 
 bounded recon 本逻辑轮一次派发返回 `agent thread limit reached`；没有新子 Agent 结果或写入，Root 自检不计独立审查。剩余退出依赖按顺序最多五项：①原 PC 全部封存／恢复组合与完整客户端核对；②installed方案必要恢复／维护及已发布版本样本；③macOS原 RSS／八轮稳定性和完整资源退出；④§35适用能力与完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后 Win／Linux Actions。37能力全 partial、wholeV13=false、Goal active；当前 Store 的完整 Auto 用户路径不提升整个阶段。Root 唯一 Git owner，AGENTS.md与bun.lock受保护且不暂存；仅本地 stage／commit，无push／PR／发布／Actions dispatch。
+
+## 2026-10-09：原输入区累计缓存命中率
+
+上一轮原会话控制与当前Store Auto窗口已本地提交，属于progress。本轮从durable `el-refactor`／HEAD `6c5a2c3e314810576fc45b4848066ad2c89a6718`继续原PC主线；对照原kite-desktop App／history projection和现行桌面手册，补齐正式Native未传入原Composer的累计缓存用量。共享组件继续使用原百分比及token提示，完整已观察历史按原Store／Model Execution去重，无缓存字段不造0%；真实零命中有正input才显示0%。封存副本读不可变Model用量，不借来源Run后来状态；恢复foreign终态保出处，foreign active拒绝。失败不发布部分新累计，关闭与切范围只释放所属GET，明确重试仍只读。当前实现归[Desktop owner](../../apps/desktop/README.md#原输入区累计缓存命中率)，既有[来源观察Note](../../.agents/notes/implemented/architecture/2026-10-08-native-tool-message-observations.md)补准确取舍；Core／生成HTTP／SQL／私有持久格式和共享Composer均未改。
+
+最终生产输入的必要证据：
+
+- `/private/tmp/kite-pc-cache-metrics-local-final-20261009.log` actual0，Main／正式caller与三个原DOM文件合计27pass／247断言／1.88秒，核原Model来源、超View历史、32项批次、sealed去重、恢复终态、无字段／真实0、未完整历史隐藏、迟到scope／正文变化拒绝及显式失败重试；原工具、轮次／复制和所属读取断言保持。
+- `/private/tmp/kite-pc-cache-metrics-window-20261009.log` actual0，原完整macOS源码外默认候选1pass／7Bun断言及全部Node driver／48.48秒。原三次真实兼容SDK请求分别记录40／100、160／200、0／100缓存token；首次原Composer显示50%与准确200／400，切无样本原Session隐藏、返回和普通退出冷读保持。Provider始终3、人工审批1，原任务／准确Files失败／完整最终复制／文件变更／编辑器偏好／Main强杀后Service双锁与终端断言保持，120秒整例／45秒driver／10秒UI预算未变。
+- 根与前六个workspace的当前生产输入typecheck在 `typecheck-ready`日志已通过；该次仅在Desktop新增fixture的nullable runId报错。修正为协议null后，Desktop与Web各自typecheck actual0，其他源码输入未变，覆盖根及精确八workspace。当前文档、all影响、边界／API／workspace／test owner／plan-evidence、只读格式与差异门禁另按精确交付核验；正常Git hooks独立执行。冻结及交付记录归 `/private/tmp/kite-pc-cache-metrics-owned-20261009.json`和 `/private/tmp/kite-pc-cache-metrics-delivery-20261009.json`，仅属临时证据；本片未重跑全阶段default，也未扩Auto／Plan／TUI／Chrome矩阵。
+
+失败保留：初次 `typecheck` actual2为NativeResult的泛化Command.kind未被充分收窄、nullable来源runId及fixture缺字段／verifyConnection返回类型；`typecheck-ready` actual2只剩两处nullable runId。均修正真实类型，原断言未删。初次格式检查actual1为effect依赖；采用稳定的观察描述符，避免无关React render重复失败GET，保正文变化与实际通知重读，最终只读格式门禁核当前输入。两次原子patch前检失败未产生部分修改；未启动依赖这些失败补丁的窗口。
+
+本逻辑轮bounded recon一次派发仍返回 `agent thread limit reached`；无新子Agent结果或写入，Root自检不计独立审查。剩余退出依赖按顺序最多五项：①原PC剩余入口／完整页面与全部封存恢复组合核对；②方案必要installed维护恢复及已发布版本样本；③macOS原RSS／八轮稳定性和完整资源退出；④§35适用能力与完整独立迁移审查；⑤前置满足后的完整回归、最终旧路径退役及重构后Win／Linux Actions。37能力全partial／wholeV13=false，Goal active；保持宿主Shell及macOS PC优先。Root唯一Git owner，AGENTS.md原SHA256 `7e19375d5a9771aef3645fa33dcdbbc0e59c03e8d2276efba54fa97b13d9ea16`与bun.lock受保护且不暂存；仅本地提交，无push／PR／发布／Actions dispatch。

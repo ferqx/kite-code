@@ -1,4 +1,4 @@
-import type { Execution, Run } from '@kite-ai/client';
+import type { Execution, Message, Run } from '@kite-ai/client';
 
 export type NativeToolMessageScope = {
   generation: number;
@@ -38,6 +38,33 @@ export type NativeToolRunPage = {
   scope: NativeToolMessageScope;
   runs: NativeRunFact[];
 };
+export type NativeModelUsageFact = {
+  messageId: string;
+  executionId: string;
+  originStoreId: string;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+};
+export type NativeModelUsagePage = {
+  kind: 'toolMessages.usage';
+  readId: string;
+  scope: NativeToolMessageScope;
+  entries: NativeModelUsageFact[];
+};
+export function modelUsageMessageKey(message: Message): string {
+  return JSON.stringify([
+    message.id,
+    message.sessionId,
+    message.seq,
+    message.runId,
+    message.role,
+    message.status,
+    message.contentFormat,
+    message.sourceIds,
+    message.originMessage,
+    message.outputBody,
+  ]);
+}
 export type NativeRunFact = Pick<
   Run,
   | 'id'
@@ -60,6 +87,14 @@ export function presentableRun(run: NativeRunFact, storeId: string, sessionId: s
 }
 
 export type NativeToolMessageRequest =
+  | {
+      method: 'toolMessages.usage';
+      generation: number;
+      viewSelection: number;
+      historyEpoch: number;
+      readId: string;
+      messageIds: string[];
+    }
   | {
       method: 'toolMessages.list';
       generation: number;

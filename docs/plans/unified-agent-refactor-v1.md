@@ -2084,6 +2084,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原审批面板现复用原 Approval 及其范围菜单，公共只读授权观察区分保存、受理与执行事实；当前职责归 [Native owner](../../apps/desktop/README.md#原审批面板与授权观察)，实际窗口和原授权门禁结果归[审批迁移进度](unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。原会话 Composer 的权限／准确停止及 macOS 当前 Store 的 Auto 批准、拒绝、转人工及停止后迟到批准不派发现已沿默认链核实，首次和冷读范围归[控制与 Auto 进度](unified-agent-refactor-v1-progress.md#2026-10-09原会话权限停止与自动审批闭环)。全部封存／恢复组合与完整 PC 核对，以及后序维护恢复、资源退出、独立审查、最终回归和旧路径退役仍按原依赖推进，37能力保持partial。
 
+原输入区累计缓存命中率现沿原Composer接入所选会话的真实Model用量，完整已读历史按原Execution累计／封存副本去重，无缓存样本不显示0%；来源、迟到、默认窗口首次与冷读证据归[缓存指标进度](unified-agent-refactor-v1-progress.md#2026-10-09原输入区累计缓存命中率)。本片仅补原PC已有显示，继续上述退出依赖，37能力partial／wholeV13=false。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

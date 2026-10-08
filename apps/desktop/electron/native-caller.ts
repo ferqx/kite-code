@@ -997,6 +997,7 @@ export class NativeCaller {
         'fileTargets.list',
         'toolMessages.list',
         'toolMessages.runs',
+        'toolMessages.usage',
         'toolMessages.close',
         'fileChanges.detail',
         'fileChanges.close',
@@ -1036,6 +1037,9 @@ export class NativeCaller {
         break;
       case 'toolMessages.runs':
         result = await this.toolMessages.runs(request);
+        break;
+      case 'toolMessages.usage':
+        result = await this.toolMessages.usage(request);
         break;
       case 'toolMessages.close':
         this.toolMessages.close(request.readId);

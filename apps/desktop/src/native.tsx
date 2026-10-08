@@ -44,6 +44,7 @@ import type {
   NativeResult,
   NativeState,
 } from './native-bridge';
+import { useNativeCacheMetrics } from './native-cache-metrics';
 import { NativeCallerView } from './native-caller';
 import { NativeContextView } from './native-context';
 import { useNativeEnvironment } from './native-environment';
@@ -488,6 +489,15 @@ export function NativeDesktop() {
     selection: !preparing && !scheduledTasksView && !childDetail ? selection : undefined,
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
+    observationRevision: state?.environmentRevision ?? 0,
+  });
+  const cacheMetrics = useNativeCacheMetrics({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    selection: !preparing && !scheduledTasksView && !childDetail ? selection : undefined,
+    historyEpoch: state?.historyEpoch ?? 0,
+    messages,
+    historyComplete: historyState.phase === 'complete',
     observationRevision: state?.environmentRevision ?? 0,
   });
   const replyScope = JSON.stringify([
@@ -1964,6 +1974,12 @@ export function NativeDesktop() {
               <DesktopButton onClick={runMessages.retry}>重新核对本轮状态</DesktopButton>
             </p>
           )}
+          {cacheMetrics.error && (
+            <p role="status">
+              {cacheMetrics.error}{' '}
+              <DesktopButton onClick={cacheMetrics.retry}>重新读取缓存指标</DesktopButton>
+            </p>
+          )}
           {toolMessages.error && (
             <p role="alert">
               {toolMessages.error}{' '}
@@ -2306,6 +2322,7 @@ export function NativeDesktop() {
                   onSend: sendInput,
                   onCancel: () => void write(stopCurrentRun),
                   active: !!activeInputRun,
+                  cacheMetrics: cacheMetrics.metrics,
                   stopping: activeInputRun?.status === 'cancelling',
                   cancelDisabled:
                     pending ||

@@ -2,6 +2,8 @@
 
 状态：active
 
+Native累计缓存用量沿已观察Message的原Model Execution只读取得：成功结果、准确原Session／Run／content、实际cached字段及token范围须核实；封存副本按原Store／Execution去重，不查询来源Run后来状态。恢复在当前Store的旧Store结果仅接纳终态出处，foreign active拒绝。有限IPC只收已观察Message ID与阅读scope，关闭／切会话只释放所属GET；用量不成为权限、执行状态或完整正文证明。组件继续复用原Composer，当前实现与证据归[Native owner](../../apps/desktop/README.md#原输入区累计缓存命中率)，Core／生成HTTP／持久格式保持。
+
 必要业务义务通过[范围登记与最终 read-set 核对](../../packages/agent/src/storage/sqlite/requirements/README.md)实现。可信 initializer 在首个 Execution 前只创建当前 Run namespace 的不可变 executable 元数据；普通 Tool 追加义务，不得撤回已封存 refs。当前 boundary 和只读关联记录由 Core 提供，派发/完成事务核对准确原 Store、revision 和 related-record CAS，缺实现或未知判定值拒绝。已创建 Job 继续使用原 refs 与原配置 lease。
 
 原结果自动报告也保留这个边界：`applyJobReport` 在实际 source/carrier/afterTurn 应用事务中复制父 requirements 到新 report Run，不重新登记外国 Run refs。默认 Service 只通过实际原 report Command/receipt、source Execution、父 config、已知 result revision、root work 和主体关系读取原 Planning 批准；任意同 Session 新 Run 不获得例外。历史 receipt 的来源 digest 按原实际 Execution/批准 Run 重建，当前 inactive Run 的信息贡献保持 `approval:null`。各 owner 与真实资格见[Service](../../apps/service/README.md)和[Planning](../../packages/agent/src/business/planning/README.md)。

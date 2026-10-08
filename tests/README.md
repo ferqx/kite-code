@@ -37,6 +37,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 ## 当前公共场景与证据
 
+原Composer的[缓存指标DOM](../apps/desktop/test/isolated/native-cache-metrics-dom.test.tsx)核实际样本累计、封存副本去重、32项批次、历史未完整时隐藏、无样本与真实0%的区别、迟到会话隔离和失败后显式只读重试。[Main来源测试](../apps/desktop/test/native-tool-messages.test.ts)核不可变Model用量、来源／恢复终态、无缓存字段和原消息变化拒绝；原[默认源码外macOS窗口](../apps/desktop/test/isolated/native-bundle.test.ts)在原三次实际SDK请求中记录200／400缓存token，核首次50%、切无样本会话隐藏、返回与冷读50%，Provider不增长。完整driver、退出／双锁／原期限保持；准确运行版本和结果见[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原输入区累计缓存命中率)，DOM不代证实际SDK或平台资格。
+
 复用原桌面页面的 [UI 展示断言](../packages/ui/test/desktop-page.test.tsx)与 Native 目录/草稿/问卷/计划 DOM 核新宿主适配；真实 CSS、字体、输入操作及源码外闭包分别沿 [Native 候选](../apps/desktop/test/isolated/native-bundle.test.ts)和[设置与刷新窗口](../apps/desktop/test/isolated/native-electron.test.ts)核验，不由 DOM 结果推导完整产品视觉资格。[边界测试](isolated/scripts/unified-agent-boundary.test.ts)另核声明的 CSS 真实导出、缺失/越界/旧目标拒绝，以及显式 UI builder 的宿主 I/O 与 source 的便携限制。运行范围、原失败和剩余页面迁移归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)。
 原 PC 工具行的 [Main metadata／有限 IPC](../apps/desktop/test/native-tool-messages.test.ts)、[正式 caller](../apps/desktop/test/native-caller.test.ts)与[工具 DOM](../apps/desktop/test/isolated/native-tool-messages-dom.test.tsx)核准确原结果、>200历史、未知同名版本、所属GET释放和原结果展开；原 [源码外 Native](../apps/desktop/test/isolated/native-bundle.test.ts)另核活动工具、真实 Files read3失败及正常／冷读，保原完整预算与退出断言。实际执行与剩余PC边界归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。
 

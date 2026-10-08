@@ -15,6 +15,7 @@ import type { NativeCaller } from './native-caller';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'toolMessages.usage': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.runs': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.close': ['readId'],
@@ -227,6 +228,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       method === 'fileTargets.list' ||
       method === 'toolMessages.list' ||
       method === 'toolMessages.runs' ||
+      method === 'toolMessages.usage' ||
       method === 'messageFile.open') &&
     (!Number.isSafeInteger(input.viewSelection) ||
       Number(input.viewSelection) < 1 ||
@@ -353,7 +355,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     (method === 'fileChanges.list' ||
       method === 'fileTargets.list' ||
       method === 'toolMessages.list' ||
-      method === 'toolMessages.runs') &&
+      method === 'toolMessages.runs' ||
+      method === 'toolMessages.usage') &&
     (!Array.isArray(input.messageIds) ||
       input.messageIds.length < 1 ||
       input.messageIds.length > 32 ||
