@@ -4,6 +4,20 @@ import { defaultTuiPreferences } from './preferences';
 
 /** Only explicit UI-owned labels enter this catalog. Public machine values and body text do not. */
 export const tuiChinese: Readonly<Record<string, string>> = {
+  Search: '搜索',
+  'Delete Session?': '删除会话？',
+  'Delete hides this Session and requests its work to stop. Workspace files stay unchanged.':
+    '删除会隐藏此会话并请求停止其中的工作；工作区文件保持不变。',
+  'Reading original Session control…': '正在读取原会话控制信息…',
+  'Keep Session': '保留会话',
+  'Delete Session': '删除会话',
+  'Up/Down: choose · Enter: confirm · Esc/Ctrl+C: keep':
+    '上下键选择 · Enter 确认 · Esc/Ctrl+C 保留',
+  'Original deletion:': '原删除申请：',
+  'R: query original deletion · Esc/Ctrl+C: close': 'R 查询原删除申请 · Esc/Ctrl+C 关闭',
+  'No matching Sessions': '没有匹配的会话',
+  'Up/Down: search/list · Enter: open · D: delete with empty search · Esc: clear/back':
+    '上下键切换搜索和列表 · Enter 打开 · 搜索为空时 D 删除 · Esc 清空或返回',
   Question: '问题',
   Answer: '回答',
   '↑ Earlier input': '↑ 前面的输入',

@@ -2062,6 +2062,12 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 本片 Native 资格不修改生产 Shell/权限/API/Runtime 或旧默认断言。当前完整回归暴露的 Skill 目录超时另由[Service 同源目录](../../apps/service/README.md#同源-skill-知识目录)保全校验并限制独立 I/O 并发，准确原失败和最终输入结果归进度。macOS 完整资源三项、installed/已发布样本与剩余恢复、整片独立审查及最后旧路径退役继续按§30.2.9的四项依赖推进；Windows/Linux仍依用户安排后交GitHub Actions。37能力保持partial、wholeV13=false，本地stage/commit不扩大到push/PR/发布。
 
+### 30.2.15 回到完整用户能力迁移主线
+
+用户要求先执行方案主线，停止追加资源优化切片。正式 TUI 的 `/resume` 搜索与 D 默认保留确认现已接公共单 Session 删除；实际完整候选/共享80×24终端核默认零写、只删除另一原 Session、当前活动 Run 保持及最终完成。实现和当前验证范围归[阶段进度](unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-会话搜索与删除确认)，不重复已闭合的 Native Chrome 与默认 Shell 资格。
+
+下一主线缺口是 Workspace 批量移除与物理 GC；之后按既有依赖完成剩余恢复/installed 维护及已发布样本验收、macOS 原资源退出、完整迁移独立审查和最终旧路径删除。现有 RSS 失败保持退出未通过，不以局部默认通过放宽；Win/Linux 仍按用户安排重构完成后由 GitHub Actions 验证。37能力partial、wholeV13=false，授权仍仅本地提交。
+
 ### 30.3 第一条执行闭环
 
 第一条生产语义闭环必须是：

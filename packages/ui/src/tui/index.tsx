@@ -37,6 +37,7 @@ import {
   TuiAnswerInput,
 } from './question-panel';
 import { TuiRecoveryPanel } from './recovery-panel';
+import { TuiSessionChooser } from './session-chooser';
 import { TuiSkillsPanel } from './skills-panel';
 import { TuiStatusPanel } from './status-panel';
 
@@ -360,7 +361,6 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     composers.current.set(composerScope, composer);
   }
   const [chooser, setChooser] = useState(false);
-  const [selected, setSelected] = useState(0);
   const [cardChooser, setCardChooser] = useState(false);
   const [cardIndex, setCardIndex] = useState(0);
   const [cardOptions, setCardOptions] = useState<readonly Interaction[]>([]);
@@ -377,6 +377,10 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       controller.closePanel();
     }
   }, [state.chooserRequested, controller]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a changed selection closes the local chooser.
+  useEffect(() => {
+    setChooser(false);
+  }, [state.sessionId]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: selection change resets the finite panel cursor.
   useEffect(() => {
     setPanelIndex(0);
@@ -468,6 +472,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     { isActive: !state.panel },
   );
   useInput((input, key) => {
+    if (chooser) return;
     const cancelKey = (key.ctrl && input === 'c') || (!state.panel && isCtrlCBatch(input));
     if (state.panel === 'recovery') return;
     if (state.panel === 'executions') return;
@@ -540,16 +545,6 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           panelIndex
         ];
         if (item) void controller.includeExecution(item.id);
-      }
-      return;
-    }
-    if (chooser) {
-      if (key.escape) setChooser(false);
-      else if (key.upArrow) setSelected((n) => Math.max(0, n - 1));
-      else if (key.downArrow) setSelected((n) => Math.min(state.sessions.length - 1, n + 1));
-      else if (key.return && state.sessions[selected]) {
-        void controller.select(state.sessions[selected]!.id);
-        setChooser(false);
       }
       return;
     }
@@ -808,19 +803,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       {state.panel === 'permissions' && (
         <TuiPermissionPanel key={state.sessionId} controller={controller} />
       )}
-      {chooser && (
-        <Box flexDirection="column">
-          <Text>{t('Select Session (arrows/Enter, Esc)')}</Text>
-          {state.sessions.map((session, index) => (
-            <Text key={session.id}>
-              {index === selected ? '> ' : '  '}
-              {terminalText(session.title)} {'['}
-              {terminalText(session.id)}
-              {']'}
-            </Text>
-          ))}
-        </Box>
-      )}
+      {chooser && <TuiSessionChooser controller={controller} close={() => setChooser(false)} />}
       {cardChooser && (
         <Box flexDirection="column">
           <Text bold>

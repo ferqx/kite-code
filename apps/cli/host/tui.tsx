@@ -410,6 +410,12 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       },
       fileRecovery: createFileRecoveryPort({ client, journal: fileRecoveryOwner! }),
       management: {
+        async readSessionControl(sessionId, signal) {
+          const view = await client.getView(sessionId, { signal });
+          if (view.session.workspaceId !== workspaceId)
+            throw new CLIHostError('management_scope_unavailable');
+          return { storeId: view.storeId, session: view.session };
+        },
         readContext: (sessionId, contextSelectionId, signal) =>
           getCompleteContext(
             sessionId,

@@ -45,6 +45,7 @@ import type {
   TuiManagementIntent,
   TuiManagementOutcome,
   TuiManagementPort,
+  TuiSessionDeletion,
 } from './management';
 import type { TuiMcpIntent, TuiMcpOutcome, TuiMcpPort, TuiMcpSnapshot } from './mcp';
 import {
@@ -191,6 +192,7 @@ export interface TuiState {
   preferenceError?: string;
   preferenceSaved?: boolean;
   management?: TuiManagementOutcome;
+  sessionDeletion?: TuiSessionDeletion;
   recovery?: TuiRecoveryOutcome;
   context?: import('@kite-ai/client').SelectedContextPage;
   fileRecovery?: {
@@ -389,6 +391,7 @@ export class TuiController {
   private historyGeneration = 0;
   private historyRead?: AbortController;
   private contextRead?: AbortController;
+  private sessionDeletionRead?: AbortController;
   private modelRead?: AbortController;
   private modelIntents = new Map<string, TuiModelOutcome>();
   private mcpRead?: AbortController;
@@ -442,6 +445,7 @@ export class TuiController {
   private unknownIntents = new Map<string, TuiIntent>();
   private cancelled = new Set<string>();
   private managementIntents = new Map<string, TuiManagementOutcome>();
+  private handledDeletions = new Set<string>();
   private recoveryRestoring = false;
   private recoveryRestoreFailed = false;
   private recoveryIntents = new Map<string, TuiRecoveryOutcome>();
@@ -836,6 +840,7 @@ export class TuiController {
       same && options.preserveReconnectionReview && !this.value.stale;
     if (!preserveReconnectionReview) this.mcpReconnectionRead?.abort();
     if (!same) {
+      this.closeSessionDeletion();
       this.clearedDisplay = undefined;
       this.fileRecoveryRead?.abort();
       this.port.drafts?.flush();
@@ -1729,7 +1734,9 @@ export class TuiController {
       this.publish({ error: 'management_scope_unavailable' });
       return;
     }
-    const generation = this.generation;
+    await this.performManagement(saved, this.generation);
+  }
+  private async performManagement(saved: TuiManagementIntent, generation: number) {
     if (this.managementIntents.size >= 128) {
       this.publish({ error: 'management_intent_limit' });
       return;
@@ -1739,26 +1746,14 @@ export class TuiController {
     this.publish({ management: pending });
     let result: TuiManagementOutcome;
     try {
-      result = await this.port.management.manage(saved);
+      result = await this.port.management!.manage(saved);
     } catch {
       result = pending;
     }
     if (JSON.stringify(result.intent) !== JSON.stringify(saved)) result = pending;
     this.managementIntents.set(saved.request.commandId, result);
     this.publish({ management: result });
-    if (
-      !this.disposed &&
-      generation === this.generation &&
-      this.value.sessionId === saved.sessionId &&
-      result.status === 'delete_requested' &&
-      saved.kind === 'session.delete'
-    ) {
-      try {
-        await this.port.management.newSession();
-      } catch {
-        this.publish({ error: 'session_creation_unknown' });
-      }
-    }
+    await this.finishSessionDeletion(result, generation);
     if (!this.disposed && this.value.sessionId === saved.sessionId && result.status === 'applied') {
       if (saved.kind === 'session.fork') {
         await this.list();
@@ -1766,6 +1761,31 @@ export class TuiController {
           await this.select(saved.request.newSessionId);
       } else await this.select(saved.sessionId);
     }
+  }
+  private async finishSessionDeletion(result: TuiManagementOutcome, generation: number) {
+    const saved = result.intent;
+    if (
+      this.disposed ||
+      saved.kind !== 'session.delete' ||
+      result.status !== 'delete_requested' ||
+      this.handledDeletions.has(saved.request.commandId)
+    )
+      return;
+    this.handledDeletions.add(saved.request.commandId);
+    if (generation === this.generation && this.value.sessionId === saved.sessionId) {
+      try {
+        const id = await this.port.management!.newSession();
+        if (
+          !this.disposed &&
+          generation === this.generation &&
+          this.value.sessionId === saved.sessionId
+        )
+          await this.select(id);
+      } catch {
+        this.publish({ error: 'session_creation_unknown' });
+      }
+    }
+    await this.list();
   }
   async lookupManagement(commandId?: string) {
     const saved = commandId ? this.managementIntents.get(commandId) : this.value.management;
@@ -1779,8 +1799,134 @@ export class TuiController {
     if (JSON.stringify(result.intent) !== JSON.stringify(saved.intent)) return;
     this.managementIntents.set(saved.intent.request.commandId, result);
     this.publish({ management: result });
+    await this.finishSessionDeletion(result, this.generation);
     if (this.value.sessionId === saved.intent.sessionId && result.status === 'applied')
       await this.select(saved.intent.sessionId);
+  }
+  closeSessionDeletion() {
+    this.sessionDeletionRead?.abort();
+    this.publish({ sessionDeletion: undefined });
+  }
+  async requestSessionDeletion(sessionId: string) {
+    this.closeSessionDeletion();
+    const source = this.value.snapshot?.view.session,
+      selected = this.value.sessions.find((item) => item.id === sessionId),
+      reader = this.port.management?.readSessionControl;
+    if (
+      this.disposed ||
+      !reader ||
+      !source ||
+      !selected ||
+      this.value.stale ||
+      source.parentSessionId !== null ||
+      source.rootSessionId !== source.id
+    ) {
+      this.publish({ error: 'management_scope_unavailable' });
+      return;
+    }
+    const prior = [...this.managementIntents.values()].find(
+      (entry) =>
+        entry.intent.kind === 'session.delete' &&
+        entry.intent.sessionId === sessionId &&
+        ['outcome_unknown', 'accepted', 'queued'].includes(entry.status),
+    );
+    const target: TuiSessionDeletion = {
+      sessionId,
+      title: selected.title,
+      sourceSessionId: source.id,
+      workspaceId: source.workspaceId,
+      phase: prior ? 'outcome_unknown' : 'reading',
+      ...(prior
+        ? { intent: prior.intent as Extract<TuiManagementIntent, { kind: 'session.delete' }> }
+        : {}),
+    };
+    this.publish({ sessionDeletion: target, error: undefined });
+    if (prior) return;
+    const read = this.reading(),
+      generation = this.generation;
+    this.sessionDeletionRead = read;
+    try {
+      const control = await reader(sessionId, read.signal);
+      if (read.signal.aborted || generation !== this.generation) return;
+      const session = control.session;
+      if (
+        control.storeId !== this.port.storeId ||
+        session.id !== sessionId ||
+        session.workspaceId !== target.workspaceId ||
+        session.rootSessionId !== sessionId ||
+        session.parentSessionId !== null ||
+        session.deletedAt !== null
+      )
+        throw Error('management_scope_unavailable');
+      this.publish({
+        sessionDeletion: freezeIntent({ ...target, title: session.title, session, phase: 'ready' }),
+      });
+    } catch (error) {
+      if (!read.signal.aborted && generation === this.generation)
+        this.publish({
+          sessionDeletion: {
+            ...target,
+            phase: 'failed',
+            error: error instanceof Error ? error.message : 'session_control_unavailable',
+          },
+        });
+    } finally {
+      this.reads.delete(read);
+    }
+  }
+  async confirmSessionDeletion() {
+    const target = this.value.sessionDeletion,
+      source = this.value.snapshot?.view.session;
+    if (
+      this.disposed ||
+      target?.phase !== 'ready' ||
+      !target.session ||
+      !this.port.management ||
+      this.value.stale ||
+      source?.id !== target.sourceSessionId ||
+      source.workspaceId !== target.workspaceId
+    )
+      return;
+    if (this.managementIntents.size >= 128) {
+      this.publish({
+        sessionDeletion: { ...target, phase: 'failed', error: 'management_intent_limit' },
+      });
+      return;
+    }
+    const intent = freezeIntent({
+      kind: 'session.delete' as const,
+      sessionId: target.sessionId,
+      request: {
+        expectedStoreId: this.port.storeId,
+        commandId: this.port.nextCommandId(),
+        ifRevision: target.session.controlRevision,
+      },
+    });
+    this.publish({ sessionDeletion: { ...target, phase: 'submitting', intent } });
+    await this.performManagement(intent, this.generation);
+    this.updateSessionDeletion(intent);
+  }
+  private updateSessionDeletion(intent: Extract<TuiManagementIntent, { kind: 'session.delete' }>) {
+    const target = this.value.sessionDeletion,
+      result = this.managementIntents.get(intent.request.commandId);
+    if (target?.intent?.request.commandId !== intent.request.commandId || !result) return;
+    this.publish({
+      sessionDeletion: {
+        ...target,
+        phase:
+          result.status === 'delete_requested'
+            ? 'delete_requested'
+            : result.status === 'failed'
+              ? 'failed'
+              : 'outcome_unknown',
+      },
+    });
+  }
+  async lookupSessionDeletion() {
+    const intent = this.value.sessionDeletion?.intent;
+    if (!intent || this.value.sessionDeletion?.phase !== 'outcome_unknown') return;
+    await this.lookupManagement(intent.request.commandId);
+    this.updateSessionDeletion(intent);
   }
   async rewindBoundary(boundary: { messageId: string; seq: string } | null) {
     const snapshot = this.value.snapshot,

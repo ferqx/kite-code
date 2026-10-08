@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import {
   existsSync,
@@ -143,15 +144,48 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     server = driver(root, 'Server'),
     socket = join(root, 'owned.sock');
   let calls = 0,
-    started = false;
+    started = false,
+    stopped = false,
+    databasePath = '';
+  const directoryObservations: Record<string, unknown>[] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
+      if (request.method === 'GET' && new URL(request.url).pathname === '/directory-observation') {
+        const db = new Database(databasePath, { readonly: true });
+        try {
+          directoryObservations.push({
+            target: db
+              .query(
+                "SELECT id,delete_requested,control_revision FROM session WHERE id='resume-delete-target'",
+              )
+              .get(),
+            active: db
+              .query(
+                "SELECT id,origin_command_id,cancel_requested FROM run WHERE session_id='formal-session' AND is_active=1",
+              )
+              .get(),
+            deletions: db
+              .query(
+                "SELECT id,session_id,request_json,receipt_json FROM command WHERE kind='session.delete'",
+              )
+              .all(),
+            calls,
+          });
+          return new Response('observed');
+        } finally {
+          db.close(true);
+        }
+      }
       const body = (await request.json()) as { messages: { role: string; content: string }[] };
       const user = body.messages.filter((m) => m.role === 'user').at(-1)!.content;
       expect(['formal source task', 'formal TUI task'].includes(user)).toBe(true);
       calls++;
+      if (user === 'formal TUI task') {
+        writeFileSync(join(root, 'tui-model-started'), 'original model waiting');
+        while (!stopped && !existsSync(join(root, 'release-tui-model'))) await Bun.sleep(5);
+      }
       const frame = (delta: unknown, finish_reason: string | null) =>
         `data: ${JSON.stringify({ id: 'formal', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
       return new Response(
@@ -215,7 +249,12 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     );
     const prepared = await execute([runtime, setup], workspace, home);
     expect(prepared.code).toBe(0);
-    const profile = JSON.parse(prepared.stdout) as { profilePath: string };
+    const profile = JSON.parse(prepared.stdout) as { profilePath: string; databasePath: string };
+    databasePath = profile.databasePath;
+    mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
+      mode: 0o600,
+    });
     writeFileSync(
       join(profile.profilePath, 'config.jsonc'),
       JSON.stringify({
@@ -304,34 +343,96 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     );
     expect(status.code).toBe(0);
     expect(JSON.parse(status.stdout).instanceId).toBe(identity.instanceId);
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct
+    const seedDirectory = join(root, 'seed-directory.mjs');
+    writeFileSync(
+      seedDirectory,
+      `import {selectProfile} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/profile.js'))};import {requestDaemonBootstrap,selectDaemonEndpoint} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/service/daemon.js'))};import {createClient} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/client/index.js'))};const p=selectProfile({dataRoot:${JSON.stringify(dataRoot)},profile:'default'}),profile={dataRoot:p.dataRoot,name:p.profile,accessKey:p.profileAccessKey};const b=await requestDaemonBootstrap(selectDaemonEndpoint({profileAccessKey:p.profileAccessKey,explicitSocket:${JSON.stringify(socket)}}),profile);const c=createClient({endpoint:b.httpEndpoint,token:b.token,expected:{profile,apiMajor:1,instanceId:b.instanceId,buildId:b.buildId,requiredCapabilities:['sessions','commands']}});try{const info=await c.connect();await c.createSession({expectedStoreId:info.storeId,commandId:'create-resume-delete-target',sessionId:'resume-delete-target',workspaceId:${JSON.stringify(first.session.workspaceId)},title:'Directory delete target'});console.log('DIRECTORY_SEEDED');}finally{c.disposeNetwork();}`,
+    );
+    const seeded = await execute([runtime, seedDirectory], workspace, home);
+    expect(seeded.code).toBe(0);
+    expect(seeded.stdout).toContain('DIRECTORY_SEEDED');
+    expect(calls).toBe(1);
+    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,urllib.request
 signal.signal(signal.SIGTERM,lambda *_: (_ for _ in ()).throw(RuntimeError('owned PTY cancelled')))
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],env={'PATH':'/usr/bin:/bin','HOME':${JSON.stringify(home)},'LANG':'C.UTF-8','TERM':'xterm-256color'},stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b''
+master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],env={'PATH':'/usr/bin:/bin','HOME':${JSON.stringify(home)},'LANG':'C.UTF-8','TERM':'xterm-256color'},stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';transcript=b''
 def read_until(text, seconds):
- global buffer
+ global buffer,transcript
  end=time.monotonic()+seconds
  while text not in re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace')):
   if time.monotonic()>end:raise RuntimeError('formal PTY deadline '+buffer[-4000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
+  if select.select([master],[],[],.05)[0]:
+   chunk=os.read(master,65536);buffer+=chunk;transcript+=chunk
+def key(value,text):
+ global buffer
+ buffer=b'';os.write(master,value);read_until(text,10)
 try:
  read_until('FORMAL CLI COMPLETE',10)
+ read_until('New Run >',10)
  os.write(master,b'formal TUI task')
  read_until('formal TUI task',10)
  os.write(master,b'\\r')
+ read_until('Working',10)
+ end=time.monotonic()+10
+ while not os.path.exists(${JSON.stringify(join(root, 'tui-model-started'))}):
+  if time.monotonic()>end:raise RuntimeError('original model did not start')
+  if select.select([master],[],[],.05)[0]:
+   chunk=os.read(master,65536);buffer+=chunk;transcript+=chunk
+ key(b'\\x12','Select Session (arrows/Enter, Esc)')
+ read_until('Directory delete target [resume-delete-target]',10)
+ key(b'\\x1b[B','> Directory delete target')
+ key(b'd','Delete Session?');read_until('> Keep Session',10)
+ key(b'\\r','Select Session (arrows/Enter, Esc)')
+ urllib.request.urlopen(${JSON.stringify(`${provider.url.href}directory-observation`)}).read()
+ key(b'd','Delete Session?');read_until('> Keep Session',10)
+ key(b'\\x1b[B','> Delete Session')
+ key(b'\\r','delete_requested');read_until('stop unconfirmed',10)
+ urllib.request.urlopen(${JSON.stringify(`${provider.url.href}directory-observation`)}).read()
+ key(b'\\x1b','Select Session (arrows/Enter, Esc)')
+ key(b'\\x1b','Working')
+ open(${JSON.stringify(join(root, 'release-tui-model'))},'w').write('explicit fixture release')
  read_until('FORMAL TUI COMPLETE',10)
  os.write(master,b'\\x11');end=time.monotonic()+5
  while p.poll() is None and time.monotonic()<end:
   if select.select([master],[],[],.05)[0]:
    try:buffer+=os.read(master,65536)
    except OSError:break
- p.wait(timeout=3);assert p.returncode==0;open(${JSON.stringify(join(root, 'pty-output'))},'wb').write(buffer);print('FORMAL_PTY_COMPLETE')
+ p.wait(timeout=3);assert p.returncode==0;open(${JSON.stringify(join(root, 'pty-output'))},'wb').write(transcript);print('FORMAL_PTY_COMPLETE')
 finally:
+ open(${JSON.stringify(join(root, 'pty-output'))},'wb').write(transcript)
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(master)
 `;
     const pty = await execute(['/usr/bin/python3', '-c', program], workspace, home);
     expect(pty.code).toBe(0);
     expect(pty.stdout).toContain('FORMAL_PTY_COMPLETE');
+    expect(directoryObservations).toHaveLength(2);
+    expect(directoryObservations[0]).toMatchObject({
+      target: { id: 'resume-delete-target', delete_requested: 0, control_revision: 0 },
+      active: { cancel_requested: 0 },
+      deletions: [],
+      calls: 2,
+    });
+    expect(directoryObservations[1]).toMatchObject({
+      target: { id: 'resume-delete-target', delete_requested: 1, control_revision: 1 },
+      active: directoryObservations[0]!.active,
+      calls: 2,
+    });
+    const deletions = directoryObservations[1]!.deletions as {
+      session_id: string;
+      request_json: string;
+      receipt_json: string;
+    }[];
+    expect(deletions).toHaveLength(1);
+    expect(deletions[0]!.session_id).toBe('resume-delete-target');
+    expect(JSON.parse(deletions[0]!.request_json)).toEqual({
+      kind: 'session.delete',
+      ifRevision: '0',
+    });
+    expect(JSON.parse(deletions[0]!.receipt_json)).toMatchObject({
+      outcome: 'delete_requested',
+      stopConfirmed: false,
+      session: { id: 'resume-delete-target' },
+    });
     const after = await execute([runtime, read], workspace, home);
     expect(after.code).toBe(0);
     const facts = JSON.parse(after.stdout);
@@ -398,6 +499,7 @@ finally:
       }),
     );
   } finally {
+    stopped = true;
     if (started)
       await execute([process.execPath, cli, 'server', 'stop', '--server', socket], workspace, home);
     provider.stop(true);

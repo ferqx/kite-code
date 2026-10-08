@@ -84,6 +84,8 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 开发 TUI 明确路由 `/new`、`/resume`、`/context`、`/rewind`、`/compact [focus]`、`/compact reset`、`/status`、`/exit`（`/quit`/`/q`），以及开发管理词汇 `/session rename <title>`、`/session delete confirm`、`/session fork <title>`。陌生或本阶段不支持的旧 slash 保留草稿并局部报 unavailable，不发送 Model。`/new` 可复用无用户消息的空 Session；当前 Session 删除受理后创建新空 Session，但不假称旧 work 已停止。Context 面板只展示当前选择，绝不是原 Model 输入 Inspector；`/rewind` 另走下文 Files 三范围目录，实际 Fork/Code 提交保留静止门禁与准确边界，Include 保存准确结果 revision 与实际 active Run（如存在），queued 不显示已纳入。维护 Run 期间普通文本使用原 Run/context selection 的 follow-up，而不是 steer 压缩执行。切换、EOF 不批准、不取消别的工作；关闭 Context 面板只 abort 所属读取。
 
+正式 Terminal 和开发 TUI 共用 `/resume` 搜索与删除确认。host 的 `readSessionControl` 只调用已准入 Client 的 `getView` 并核固定 Workspace，不加载目标历史、不选中目标，也不初始化 Model。默认保留后，明确 D 确认沿既有 Session 管理提交/查询，保存准确目标与原 control revision；关闭确认只 abort 所属读取。删除其他会话不会切换或取消当前原 Run，当前会话受理删除后新建空 Session。失回复只查原命令，不自动重发；该选择器没有新增持久 journal、Workspace 删除 API 或 Store baseline。验收见[正式候选共享终端](../../tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts)，实际候选、80×24 PTY、公共 Client/HTTP 和 SQLite 同时核默认零写、准确另一目标仅一次删除、当前活动原 Run 保留与最终完成。
+
 新验证见 [纯 Context 分页](test/context-pagination.test.ts)、[实际管理 HTTP](test/isolated/session-context-management.test.ts)、[真实开发 argv](test/isolated/management-argv.test.ts) 与 [实际管理 PTY](test/isolated/tui-management-host.test.ts)。HTTP fixture 物理丢弃已提交 rename 响应后核对原 ID/零重发，并读取 202 条真实消息；压缩使用实际 Model/Run 终态，缺可信 expanded preflight 的 reset 准确失败并保留旧点。该开发消费者资格不等于正式旧 CLI/TUI 切换、复杂终端编辑或 Linux/Windows/全发行资格。
 
 

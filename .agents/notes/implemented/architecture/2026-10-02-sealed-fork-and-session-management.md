@@ -33,3 +33,12 @@ Fork 和历史读取不初始化 Provider。普通 Model output snapshot 的 bod
 ## 后续 namespace 与原文导出
 
 [Namespace Fork](2026-10-02-namespace-fork-provenance.md)已补上可信 copy/rebuild 与派生资格；[原始导出](2026-10-02-session-export-frozen-read-set.md)保留未知原文和来源。两者沿用本记录的 sealed 原正文、主体与原命令边界。原段落中的待验证范围反映该切片首次交付时点，当前完整状态回到[实施证据](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
+
+## 正式 TUI 目录删除确认
+
+正式 Terminal 与开发 TUI 的 `/resume` 使用同一公共单会话删除边界。先读目标 root 控制元数据，再核原 Store/Workspace/Session 和控制 revision；确认默认保留，不先切换目标或加载其历史。这样用户在 A 运行期间确认删除 B 时，准备确认不会变成对 B 的 resume，也不会把后续意图绑定到 A。搜索、取消确认和主草稿都由本地视图负责。
+
+删除失回复沿既有管理意图保存原 Command ID，重开只展示未知，显式 R 才查询原结果；确认当前会话已受理删除后，新建回调最多一次。意图仍在当前进程的有限管理 map，不建立另一个冷恢复协议。新建／重发一条删除去“恢复确认”会改变原意图；先选中目标再确认会改变前台和草稿作用域，均未采用。`delete_requested` 保留停止未确认，工作区批量删除和物理 GC 仍是独立的未实现范围。
+
+验证由[选择器测试](../../../../packages/ui/test/tui/session-chooser.test.tsx)和[正式共享终端](../../../../tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts)覆盖。后者使用源码外完整候选、真实 80×24 PTY 和实际 SQLite，核默认零删除、仅 B 的原 Command、A 的活动 Run／取消标志保持和两个原 Run 最终完成；平台、完整阶段与剩余删除能力仍回到当前进度。

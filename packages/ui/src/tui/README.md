@@ -43,6 +43,10 @@ Context 有独立读取取消域、固定选择与双游标，明确是当前投
 
 [management.test.tsx](../../test/tui/management.test.tsx) 核对原版本/active include、late Fork、关闭读取、未知容量与维护 follow-up；实际开发 PTY 由 [CLI owner](../../../../apps/cli/README.md) 记录。新增有限 Context/Session slash 不改变正文控制字符转义、完整原输出 reader、EOF/审批或 observer 生命周期边界。
 
+正式 `/resume` 与 Ctrl+R 使用 [session-chooser.tsx](session-chooser.tsx)：按原完整目录的名称/ID 本地过滤，搜索复用 Composer 的字素编辑和 literal paste，五行可见窗口保原 ID；Esc 清搜索／返回列表／关闭，Ctrl+C 只关闭本地面板。空搜索且列表聚焦时 D 先经可选 `readSessionControl` 读取目标 root 的公共控制元数据，不切换当前 Session。controller 复核同一 Store/Workspace、准确 root、未删除和当前视图可用后，默认保留；明确确认才封存该目标控制 revision 与原删除 ID。关闭或切换使迟到读取失效。未知结果保留原意图，R 只查询原 Command，重开不 POST；当前目标删除受理或原查询确认后，新建回调最多执行一次，其他目标删除只刷新目录。当前进程的意图沿既有 128 项管理 map 保存，不新增冷启动 journal 或持久 DTO。
+
+[session-chooser.test.tsx](../../test/tui/session-chooser.test.tsx) 核默认保留、原目标/版本、Unicode 搜索、局部取消、草稿、失回复原查询和迟到控制读取；[正式候选终端验收](../../../../tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts) 在真实 80×24 PTY 删除另一会话，并由实际 SQL 核当前原 Run 不取消、仅一条删除 Command、停止仍未确认和两个原 Run 完成。工作区批量移除与物理 GC 不属于该单会话确认的已实现范围。
+
 
 `/permissions` 不带参数，使用独立 [TuiPermissionPort](permissions.ts) 当场读取原 Session 模式、实际 Workspace 信任范围和完整固定上界授权目录；Model 等待期间也可读取。面板上下选择模式、D 明确选择以后 Session 默认值、T/U 核对信任/撤销、C 核对清除当前准确 Session 的授权；首次 Enter 只打开原观察确认，第二次 Enter 才提交，Esc 不改变事实。原 child 模式继承根事实且不能写，清除只选中 Session、不借根清除 child。读取、刷新、关闭或 EOF 都不提交授权。
 

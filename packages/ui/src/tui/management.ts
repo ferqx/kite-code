@@ -8,6 +8,7 @@ import type {
   ResetCompressionRequest,
   SelectContextRequest,
   SelectedContextPage,
+  SessionView,
 } from '@kite-ai/client';
 export type TuiManagementIntent =
   | { kind: 'session.rename'; sessionId: string; request: RenameSessionRequest }
@@ -29,6 +30,11 @@ export interface TuiManagementOutcome {
   omittedExtensionState?: true;
 }
 export interface TuiManagementPort {
+  /** Read only the original root control metadata; this does not select or resume it. */
+  readSessionControl?(
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<{ storeId: string; session: SessionView['session'] }>;
   readContext(
     sessionId: string,
     contextSelectionId: string,
@@ -38,6 +44,17 @@ export interface TuiManagementPort {
   lookup(intent: TuiManagementIntent): Promise<TuiManagementOutcome>;
   newSession(): Promise<string>;
   quit(): void;
+}
+
+export interface TuiSessionDeletion {
+  sessionId: string;
+  title: string;
+  sourceSessionId: string;
+  workspaceId: string;
+  phase: 'reading' | 'ready' | 'submitting' | 'delete_requested' | 'outcome_unknown' | 'failed';
+  session?: SessionView['session'];
+  intent?: Extract<TuiManagementIntent, { kind: 'session.delete' }>;
+  error?: string;
 }
 
 export interface TuiFileRecoveryPort {
