@@ -909,7 +909,12 @@ export interface Store {
   ): Promise<import('./types').ForkRecordSources>;
   getMessageOrigin(
     input: WriteContext & { sessionId: string; subjectId: string; messageId: string },
-  ): Promise<{ message: MessageRecord; subjectId: string }>;
+  ): Promise<{
+    message: MessageRecord;
+    subjectId: string;
+    /** Immutable original Command/Run provenance, never the current admission Store. */
+    originStoreId?: string;
+  }>;
   consumeJobResult(
     input: OwnedWrite & {
       commandId: string;

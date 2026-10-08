@@ -2098,6 +2098,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原页面的封存大Model正文已补齐当前Store／原出处分开核对，Service保原head出处，Main从已观察Message核原Model后只读完整Core链。macOS实际installed默认窗口完成明确Fork、包内CLI备份恢复、首次与冷读及零业务重发；复制资格仍归原组件，准确失败与有限范围见[恢复正文进度](unified-agent-refactor-v1-progress.md#2026-10-09恢复后封存-model-正文)。其他封存／恢复组合和完整PC验收、剩余installed／发布样本、macOS资源退出、§35独立迁移审查、最终回归／退役与后序Actions保持，37能力partial／wholeV13=false。
 
+原已回答问答也已沿原 Questionnaire／ToolRow 完成 installed 的源会话与封存 Fork、真实包内备份恢复和首次／冷读。Core 私有出处从原 Command／Run 固定读取，Main 只核原终态 Execution／完整结果；原答案和 Store 保持，阅读零 POST／Provider，封存不查来源 Run 后来状态。当前证据及新增测试的真实失败归[问答恢复进度](unified-agent-refactor-v1-progress.md#2026-10-09恢复后已保存问答回执)。其他 PC／交互恢复组合、必要 installed 维护和已发布样本、macOS RSS／八轮／全资源退出、§35 独立审查及最终回归／旧路径退役仍按原依赖推进；Win／Linux 留到重构后 Actions，37能力partial／wholeV13=false。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

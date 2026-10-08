@@ -172,6 +172,19 @@ test('cache samples use immutable original Model receipts beyond the View, retai
     expect((await read(['copied-usage'])).entries).toMatchObject([
       { messageId: 'copied-usage', executionId: 'model-usage-240', cacheHitTokens: 40 },
     ]);
+    f.executions.get('model-usage-240')!.originStoreId = 'old-store';
+    f.messages.get('copied-usage')!.originMessage!.storeId = 'old-store';
+    f.client.getRun = async () => {
+      throw new Error('sealed_source_run_state_must_not_be_read');
+    };
+    expect((await read(['copied-usage'])).entries).toMatchObject([
+      {
+        messageId: 'copied-usage',
+        executionId: 'model-usage-240',
+        originStoreId: 'old-store',
+        cacheHitTokens: 40,
+      },
+    ]);
     const restored = add('restored');
     f.executions.get('model-restored')!.originStoreId = 'old-store';
     f.client.getRun = async () =>
@@ -358,7 +371,7 @@ test('tool receipts outside the bounded View retain exact outcomes and only uniq
   }
 });
 
-test('sealed Fork provenance is read-only, foreign or unsupported results cause no Execution GET, and close/selection change abort only the owned metadata read', async () => {
+test('sealed Fork provenance is read-only, mismatched original Stores are rejected, unsupported results cause no Execution GET, and close/selection change abort only the owned metadata read', async () => {
   const f = fixture();
   try {
     f.add('fork', 'failed');
@@ -389,8 +402,11 @@ test('sealed Fork provenance is read-only, foreign or unsupported results cause 
     expect((await f.list(['fork'])).entries[0]!.authorization).toBeUndefined();
     f.reads.length = 0;
     message.originMessage.storeId = 'old-store';
-    expect((await f.list(['fork'])).entries).toEqual([]);
-    expect(f.reads).toEqual([]);
+    await expect(f.list(['fork'])).rejects.toMatchObject({
+      code: 'tool_message_identity_mismatch',
+    });
+    expect(f.reads).toEqual([execution.id]);
+    f.reads.length = 0;
     message.originMessage.storeId = 'store';
     message.originMessage.runId = null;
     expect((await f.list(['fork'])).entries).toEqual([]);
@@ -597,6 +613,47 @@ test('observed Run history beyond the bounded View preserves restored terminal o
   expect(await pending).toMatchObject({ code: 'native_selection_changed' });
 });
 
+test('restored source and sealed Fork ask_user receipts preserve the original questions and human answers as read-only facts', async () => {
+  const f = fixture();
+  f.add('restored-ask', 'succeeded', 'original-run', 'ask_user');
+  const call = f.messages.get('call-restored-ask')!,
+    message = f.messages.get('restored-ask')!,
+    execution = f.executions.get('execution-restored-ask')!;
+  const questions = [{ question: '保留哪个实现？', options: [{ label: '原PC界面' }] }];
+  call.toolCalls![0]!.arguments = JSON.stringify({ questions });
+  message.content = JSON.stringify({ answer: '原PC界面', answers: { q1: '原PC界面' } });
+  execution.originStoreId = 'original-store';
+  execution.result = { outcome: 'succeeded', content: message.content };
+  f.client.getRun = async () => {
+    throw Error('source_run_state_must_not_be_read');
+  };
+  try {
+    const direct = await f.list([message.id]);
+    expect(direct.entries[0]!.ask).toEqual({
+      questions: [{ id: 'q1', question: questions[0]!.question }],
+      summary: '原PC界面',
+      answers: { q1: '原PC界面' },
+    });
+    for (const row of [call, message]) {
+      row.originMessage = {
+        storeId: 'original-store',
+        sessionId: 'source',
+        messageId: `original-${row.id}`,
+        runId: 'original-run',
+      };
+      row.runId = null;
+    }
+    execution.sessionId = 'source';
+    execution.authorization = { dispatched: false };
+    const sealed = await f.list([message.id]);
+    expect(sealed.entries[0]!.ask).toEqual(direct.entries[0]!.ask);
+    expect(sealed.entries[0]!.authorization).toBeUndefined();
+    expect(message.originMessage!.storeId).toBe('original-store');
+    expect(f.reads).toEqual([execution.id, execution.id]);
+  } finally {
+    f.manager.release();
+  }
+});
 test('known ask_user receipts keep the actual human answer and information cancellation; an ambiguous request or future version cannot invent question ownership', async () => {
   const f = fixture();
   const questions = [

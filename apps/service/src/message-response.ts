@@ -44,7 +44,7 @@ export function messageResponse(
   };
 }
 
-/** Only sealed SQL provenance can identify an original body across an explicit Fork. */
+/** Only sealed SQL provenance can identify an original message across an explicit Fork. */
 export async function messageResponses(
   runtime: AgentRuntime,
   messages: readonly MessageRecord[],
@@ -61,10 +61,11 @@ export async function messageResponses(
           subjectId,
           messageId: message.id,
         });
-        return messageResponse(message, {
-          storeId: origin.message.modelOutput?.head.storeId ?? storeId,
-          message: origin.message,
-        });
+        const originalStoreId = origin.originStoreId ?? origin.message.modelOutput?.head.storeId;
+        return messageResponse(
+          message,
+          originalStoreId ? { storeId: originalStoreId, message: origin.message } : undefined,
+        );
       } catch (error) {
         if (!(error instanceof AgentError) || error.code !== 'fork_content_unsupported')
           throw error;

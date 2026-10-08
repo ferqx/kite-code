@@ -102,7 +102,28 @@ export function getMessageOrigin(
       )
     )
       throw new AgentError('fork_content_unsupported');
-    const result = { message: db.message(actual), subjectId: input.subjectId };
+    const original = db.message(actual);
+    // Read only immutable provenance. A source Run's later state is not a sealed-copy fact.
+    const provenance = original.originCommandId
+      ? db.row(
+          'SELECT origin_store_id FROM command WHERE id=? AND session_id=?',
+          original.originCommandId,
+          original.sessionId,
+        )
+      : original.runId
+        ? db.row(
+            'SELECT origin_store_id FROM run WHERE id=? AND session_id=?',
+            original.runId,
+            original.sessionId,
+          )
+        : undefined;
+    if ((original.originCommandId || original.runId) && !provenance)
+      throw new AgentError('fork_origin_unverifiable');
+    const result = {
+      message: original,
+      subjectId: input.subjectId,
+      ...(provenance ? { originStoreId: String(provenance.origin_store_id) } : {}),
+    };
     db.db.run('COMMIT');
     return result;
   } catch (error) {

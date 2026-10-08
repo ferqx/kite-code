@@ -94,6 +94,10 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 
 默认 `ask_user` v1 的历史回执沿原成功 Execution／准确结果读取；唯一原 Model call 提供 q1–q3 的实际问题，回答保原人类选项标签与自由文本。`{cancelled:true}` 显示“已取消回答”，工具仍按实际 succeeded，Run 可继续；这不是停止任务。缺原请求不补问题，未来版本只保原文。原审批的当前接入见下一节；原记录另由[交互历史](#原交互记录只读历史)读取，所有封存／恢复组合及完整 PC 核对尚未关闭。
 
+恢复为新 Store 后，原源会话和封存 Fork 的已回答记录继续交原 ToolRow 展示。Main 核已观察 Message 的唯一原 Execution、原 Session／Run、明确封存的 Store 及终态／准确结果；原问题只从同一原 Store／Session／Run 中唯一较早的 Model call 取得，不把当前准入 Store 当作原出处。封存记录不读来源 Run 的后来状态，也不提供原授权或回答入口；当前活动工具与回答资格仍由原独立入口控制。恢复后的封存 Model 用量同样只核原成功 Execution，不借来源 Run 的后来状态补历史。
+
+[安装版问答回归](test/isolated/native-restored-questionnaire-bundle.test.ts)使用默认 installed Main／Service／preload 与原 Questionnaire，保存一次选项和完整 Unicode／换行自由文本，再明确 Fork、退出并通过包内 CLI 备份恢复为新 Store。三个真实 macOS 窗口核源会话／分支的原问题、答案、Message／Execution／Run／Store、首次与冷读及切换清理；原回答 POST 仅一次、Provider 两次，读取 POST 与封存来源 Run GET 均为零，三次 Service 普通退出及双层 EX 可取。当前结果为 1pass／24Bun断言及全部 Node 流程／79.14秒；[Core 冷出处](../../packages/agent/test/isolated/context/restored-origin.test.ts)、[投影](../service/test/message-response.test.ts)与上述 Main／原 DOM 提供各自范围的证据，准确输入和失败归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09恢复后已保存问答回执)。本片不扩展取消回答、审批、通用交互历史的全部恢复组合或完整 PC 资格，公共 schema、原 UI 与持久格式保持。
+
 取舍见[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)。[Main／有限 IPC](test/native-tool-messages.test.ts)、[正式 caller](test/native-caller.test.ts)和[原 Conversation DOM](test/isolated/native-transcript-dom.test.tsx)核身份、所属读取、原展开／复制及问答；原[源码外 macOS 窗口](test/isolated/native-bundle.test.ts)核首次和冷读的折叠、展开与准确最终复制，保原预算和退出断言。实际执行输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)，有限展示证据不代替完整恢复、其他平台或整片独立审查。
 
 ## 原审批面板与授权观察

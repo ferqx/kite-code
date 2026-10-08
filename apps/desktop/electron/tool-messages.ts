@@ -57,7 +57,7 @@ export class NativeToolMessages {
         candidate.status === 'complete' &&
         candidate.contentFormat !== 'unsupported' &&
         candidate.sessionId === scope.sessionId &&
-        (!candidate.originMessage || candidate.originMessage.storeId === scope.storeId) &&
+        candidate.originMessage?.storeId === message.originMessage?.storeId &&
         origin.sessionId === original.sessionId &&
         origin.runId === original.runId &&
         BigInt(candidate.seq) < BigInt(message.seq)
@@ -228,12 +228,13 @@ export class NativeToolMessages {
           throw new ClientError('native_selection_changed');
         if (
           execution.id !== message.sourceIds[0] ||
+          !execution.originStoreId ||
           execution.sessionId !== origin.sessionId ||
           execution.runId !== origin.runId ||
           (message.originMessage && execution.originStoreId !== message.originMessage.storeId)
         )
           throw new ClientError('model_usage_identity_mismatch');
-        if (execution.originStoreId !== scope.storeId) {
+        if (execution.originStoreId !== scope.storeId && !message.originMessage) {
           const run = await this.client.getRun(origin.runId, { signal: lease.abort.signal });
           this.check(lease);
           if (
@@ -310,8 +311,7 @@ export class NativeToolMessages {
           message.status !== 'complete' ||
           message.sourceIds?.length !== 1 ||
           message.contentFormat === 'unsupported' ||
-          !origin.runId ||
-          (message.originMessage && message.originMessage.storeId !== scope.storeId)
+          !origin.runId
         )
           continue;
         const execution = await this.client.getExecution(message.sourceIds[0]!, {
@@ -320,7 +320,8 @@ export class NativeToolMessages {
         this.check(lease);
         if (
           execution.id !== message.sourceIds[0] ||
-          execution.originStoreId !== scope.storeId ||
+          !execution.originStoreId ||
+          (message.originMessage && execution.originStoreId !== message.originMessage.storeId) ||
           execution.sessionId !== origin.sessionId ||
           execution.runId !== origin.runId
         )

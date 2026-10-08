@@ -20,6 +20,12 @@ Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-r
 
 等待耗尽仍返回原 `SQLITE_BUSY`，不自动重发 Worker 请求、事务回调、Command 或外部效果。原 `BEGIN IMMEDIATE`、事务失败回滚、原 ID 回执和提交未知时查询规则保持。真实 Store 测试以独立连接持锁 300ms 核一次原 Command 及零重试事件；持续持锁核有限失败、原意图缺席及释放后的准确同 ID 受理。当前取舍见[写锁等待 Note](../../../../.agents/notes/implemented/bug-fix/2026-10-07-bounded-sqlite-writer-lock-wait.md)。这不证明 Worker crash/提交未知的全部 T095 或 formal 连续负载资格。
 
+## 原 Message 的恢复出处
+
+[getMessageOrigin](sqlite/fork-operations.ts)在原只读事务中核当前准入 Store、主体／Session 与每层 sealed Message／Part，另从原 Message 明确绑定的 Command 或 Run 读取固定 `origin_store_id`。显式输入 Command 优先于所在 Run，查询只取原出处和准确 Session，不取来源 Run 的后来状态。私有 [Store port](port.ts)返回可选 `originStoreId`，未记录绑定时保持缺省；明确绑定缺失则拒绝为 `fork_origin_unverifiable`，不能补当前 Store。它只为 Service 投影原历史来源，不构成执行、审批、恢复或读取其他来源的 authority。
+
+[冷恢复回归](../../test/isolated/context/restored-origin.test.ts)经真实 Core／SQLite 的普通 Run 与一次 harmless fixture Tool、明确 Fork、严格关闭和公开维护备份恢复为新 Store，核四条原用户／Model／Tool 消息的完整身份与内容、冷只读原 Store 和零新水位／Model／效果。原 [Fork 回归](../../test/isolated/context/fork.test.ts)继续核完整大正文、配对、未来格式及拒绝边界；公共 HTTP 与实际 PC 的范围归 [Service](../../../../apps/service/README.md)及 [Native](../../../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。本片不改 SQL baseline、维护资产格式或公共 HTTP schema。
+
 ## 当前会话视图
 
 `getView` 在同一短只读事务读取原 Session、Store、通知水位与显示投影。Run 选取该 Session 最近200个分配身份，加全部 `is_active=1`；Execution 选取最近200个身份，加全部 `planned/dispatching/running/outcome_unknown` 原事实。两组身份分别去重后按原 rowid 顺序返回，历史数量不能隐藏当前 Run、较早的运行中 Job 或未知结果。未知结果即使另有核实证明，也不在此查询中改写原状态；显示不授予恢复或取消权限。

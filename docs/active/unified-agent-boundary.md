@@ -20,6 +20,8 @@ Native 普通工具 metadata 由已读 Message 的唯一 source Execution 沿生
 
 Native 的原轮次 UI 消费准确公共 Run，不从 Message complete 推最终回复或终态。超出有界 View 的 Run metadata 只由当前已观察、未封存的 Message ID 分批32项经当前 Client GET，核原 Run／Session、Store 连接和阅读scope；已恢复在当前 Store 的 foreign terminal 保原出处仅供展示，foreign active 不取得活动或控制权。Fork／Include 的 `originMessage` 不查询来源 Run 后来的状态。默认 ask_user v1 回执须核原成功 Execution／准确结果，问题仅来自唯一原 Model call；信息取消独立于 Run。原 UI slots 只提供布局、聚合和阅读控制，完整回复复制只接受原 reader 当前已验证并显示的正文，不引入新 Core／HTTP／SQL／持久 UI 格式。实际范围归 [Native owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。
 
+恢复后的普通 Fork Message 出处由 Core 的原 sealed SQL 与绑定 Command／Run 的固定 Store 证明，当前 Store 只承担准入。私有 `getMessageOrigin.originStoreId` 可缺省，明确绑定缺失拒绝；Service 不给无证明的普通预览补当前 Store。Native 原工具回执须有原 Execution Store、准确 Session／Run、终态及完整结果匹配；封存原请求还须同一原 Store，唯一已观察 Model call 才可提供问题。封存回执和 Model 用量不 GET 来源 Run 后来状态，原 UI 展示不提供回答或授权 authority。当前活动／控制入口仍独立核当前 Store 和实际 Run；公共 DTO、SQL／维护及私有 UI 格式保持。Core、投影与 installed 问答的准确范围归[Store owner](../../packages/agent/src/storage/README.md#原-message-的恢复出处)及上述 Native owner。
+
 读取时机：修改新 Agent 的 Store/执行/模型接口、目标 HTTP schema、跨包依赖或过渡调用者时。
 
 Native 原大Model正文将当前连接Store与封存出处分别核实。Service从真实sealed Message的私有output head保原Store；Main只接已观察Message的原Model／Session／Run／originStoreId，所属GET核准确Execution后再读Core完整snapshot，以当前Store验证原链、完整性与字节数。该资格不从renderer字段、来源Run后来状态或Store ID相等推导，不重绑origin、不补发旧工作。共享组件只有具备此reader的Native提供 `canReadRestoredOrigin`；其他宿主缺省限制保持。Core／API schema／持久格式不变，准确范围归[Native owner](../../apps/desktop/README.md#恢复后封存-model-正文)。
