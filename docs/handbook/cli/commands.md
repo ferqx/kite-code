@@ -71,12 +71,12 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 ## 通用开发入口离线维护
 
-正式 Terminal 的 `kite maintenance ...` 与通用开发入口 `bun run cli:dev maintenance ...` 提供同一独立离线维护，不启动 Service 或模型。只对调用者明确指定的 data root/profile 操作；路径必须是绝对路径，profile 是有限名称，不读取缺省用户 profile。
+正式 Terminal、Native 自带或登记后的 `kite maintenance ...` 与通用开发入口 `bun run cli:dev maintenance ...` 使用同一独立离线维护，不启动 Service 或模型。安装入口先核所选完整制品并持有其使用权；操作只作用于明确指定的 data root/profile。路径必须是绝对路径，profile 是有限名称，不读取缺省用户 profile。
 
 | 操作 | 参数 |
 | --- | --- |
 | 创建 DB/媒体及配置/UI 备份 | `backup --data-root <绝对根路径> --profile <名称> --destination <绝对备份根路径>` |
-| 显式清理已移除空间历史与无引用附件 | `gc --data-root <绝对根路径> --profile <名称> --expected-store <原观察StoreId> [--grace-period-ms <毫秒>]` |
+| 显式清理已删除空间／会话历史与无引用附件 | `gc --data-root <绝对根路径> --profile <名称> --expected-store <原观察StoreId> [--grace-period-ms <毫秒>]` |
 | 完整验证所选备份 | `inspect <绝对备份目录>` |
 | 只读未完成恢复观察 | `status --data-root <绝对根路径> --profile <名称>` |
 | 显式替换当前数据 | `restore <绝对备份目录> --data-root <绝对根路径> --profile <名称> --expected-store <原观察StoreId> --confirm-data-loss` |
@@ -84,7 +84,7 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 `maintenance --help` 不触碰 profile。未知、重复、缺值、相对路径及缺少恢复确认的参数直接非零失败。成功输出 JSON，失败输出有限错误码；busy 不杀进程、不升级共享锁，不改变当前数据。只读 status 在没有 journal 时输出 null，不创建空 profile。未完成 journal 阻止普通开库；调用者核对 status 的准确 restoreId/digest，再明确选择 complete 或 rollback，入口不会自动选择。
 
-GC 默认宽限7天，可显式设为1–365天。先普通退出使用该Profile的客户端，再明确调用；运行中的客户端会使维护返回busy。已移除且所有任务结束的空间可清理历史正文和其附件，原删除边界、申请去重摘要与回执保留。活动任务、未知执行结果或待核对申请保留原证据，JSON中的 `retainedUnsettledWorkspaces` 给出数量；最近空间以 `retainedRecentWorkspaces` 给出数量。空间外的历史来源依赖会明确拒绝。未发送草稿、项目文件和独立备份保留；单独删除的会话尚不在此空间清理范围内。无引用附件须过宽限并完整核SHA及原实体才删除。本机macOS已验证，Windows该GC端口尚未支持。
+GC 默认宽限7天，可显式设为1–365天。先普通退出使用该Profile的客户端，再明确调用；运行中的客户端会使维护返回busy。已移除且所有任务结束的空间可清理历史正文和其附件，原删除边界、申请去重摘要与回执保留。活动任务、未知执行结果或待核对申请保留原证据，JSON中的 `retainedUnsettledWorkspaces` 给出数量；最近空间以 `retainedRecentWorkspaces` 给出数量。空间外的历史来源依赖会明确拒绝。单独删除的完整根会话执行组按相同条件清理；存活Fork及其他未清理会话依赖的来源保留，最后一个依赖删除并符合条件后可一起清理。对应 `retainedRecentSessionGroups`、`retainedUnsettledSessionGroups`、`retainedReferencedSessionGroups` 说明留存原因。未发送草稿、项目文件和独立备份保留。无引用附件须过宽限并完整核SHA及原实体才删除。本机macOS已验证，Windows该GC端口尚未支持。
 
 恢复表示明确回退到选定备份内容；必须提供当前原 StoreId，错误身份拒绝，成功后产生新 Store，旧写身份继续拒绝。原历史 ID 与来源身份保留，旧目录单独保存，路径在结果中输出。恢复不会自动重做旧工作或模型请求。
 

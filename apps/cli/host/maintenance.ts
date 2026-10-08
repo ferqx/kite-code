@@ -1,7 +1,7 @@
 import type { MaintenanceCLIArguments } from '../src/arguments';
 
 export const maintenanceHelp = [
-  'Development offline maintenance (DB/media + separate raw config/MCP sources/Desktop UI/TUI drafts; vault excluded):',
+  'Offline maintenance (DB/media + separate raw config/MCP sources/Desktop UI/TUI drafts; vault excluded):',
   'maintenance backup --data-root <absolute> --profile <name> --destination <absolute>',
   'maintenance inspect <absolute-backup-directory>',
   'maintenance gc --data-root <absolute> --profile <name> --expected-store <observed-id> [--grace-period-ms <at-least-86400000>]',

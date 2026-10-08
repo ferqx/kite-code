@@ -2757,3 +2757,20 @@ durable HEAD `9000661be3ed7361d04b256d374f8409a778715f` 加本轮owned diff，�
 新增资格探查 `/private/tmp/kite-session-history-window-20261008.log` 为actual1：原Native 17MiB管理窗口在进入Fork／删除前，等待轮次completed的原10秒期限失败，已见Model succeeded而页面保running并重复校准；原因尚未确定，不能直接归因RSS。临时追加的退出后单组维护断言未执行，已撤销这份追加、原测试及全部断言仍在默认图；不删原断言、不放宽预算、不排除该文件。这一红属于下列客户端稳定性缺口，默认完整阶段未重标通过。
 
 当前第一项增量已闭合Core单组清理与live Fork来源边界；剩余退出依赖四项：① installed维护／已发布前版样本与DB8回退；② macOS原RSS／八轮与全资源退出，及本次17MiB窗口刷新红；③ 完整迁移独立审查（本逻辑轮新Agent仅一次尝试、thread limit拒绝，Root核验不替代）；④ 前置闭合后的完整默认回归／旧路径最终退役和Win／Linux Actions。37能力仍partial、wholeV13=false、Goal active。Root唯一Git owner，无关AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258` 保持且不暂存；iteration_complete仅收束本增量，本地stage／commit沿原授权及正常hooks。
+
+
+## 2026-10-08：Native 安装版离线维护
+
+本片关闭 macOS 原 PC 客户端数据的五项常用维护安装资格：沿原 Main／preload／SessionPage、三次普通窗口和原 SQLite owner 产生实际 DB8，退出后使用现有 installer API 安装完整 Native 与独立 Terminal 并登记。实际 Native 自带／登记后的 `bin/kite` 执行 backup、inspect、真实宽限 GC、restore、status，共用公开 maintenance leaf，不另建调用链。help 原来的 Development-only 标记更正，CLI 手册同步单会话执行组清理范围，生产权限、格式和选择器不变。
+
+- 原源码外 PC 窗口整文件 actual0／1pass／119assert／125.152秒，日志 `/private/tmp/kite-installed-maintenance-native-window-final-20261008.log`。原三窗口／9次 Provider／252000B 完整子详情／准确 stop／v15 A→B 原 cursor151／空间 unknown 单POST、冷明确GET与同路径新UUID全部保持，未删断言或放宽190秒 driver／240秒整例期限。实际 bin 的最近 GC 保宽限；过期 GC 由安装包 Bun／公开 `runNativeTerminalCLI` 完整 Host 选择器执行，外部夹具只推进自身时钟，不改生产选项、真实mtime／ctime或原 receipt，也不冒称 actual bin 等了七天。清1Workspace／6Session／5附件775263B，原 Node DB8与独立备份保留。
+- 实际 DB8 backup／inspect 为 closed v17；实际 registered bin restore 到第三个 Store，原目录 Core／Node DB完整bytes及inode保留，当前私有文件与所选一致快照 bytes 相等。公开 readonly Store核原完整 Message／Run／Execution／Command，旧Store身份拒绝；实际 bin status 无未完成journal。Native和独立Terminal均真实卸载保新Profile／配置／项目／备份，原三Service正常退出、owned集合为空、原两root EX可再取。维护期间Provider仍9；不冒称新v17恢复后的冷Electron窗口、reconcile发布中断或全部W19资格。
+- Root及精确八workspace typecheck actual0，日志 `/private/tmp/kite-installed-maintenance-types-delivery-20261008.log`。本片未修改GC／restore／私有DB grammar、Core基线、Service／Client或原GUI输入；上一轮六项93断言GC与四文件45／533 Core证据在其输入不变的范围继续适用，不再围绕它们扩矩阵。
+
+原失败保留：types-20261008.log为新fixture静态跨workspace导入导致Desktop rootDir拒绝，现复用原动态加载方式；types-final为新断言误用不存在的SessionView.commands，现通过公开getCommand保原完整记录。native-window-20261008.log为新断言把恢复的VACUUM一致快照要求成源Node文件物理bytes；现原保留目录仍核源bytes/inode，当前恢复文件核所选备份snapshot bytes并保原历史／执行／Command断言。所有日志完整前缀 `/private/tmp/kite-installed-maintenance-`；首个真实窗口的三Service同样正常退出，owned为空，失败Profile及制品保诊断，没有掩盖为通过。
+
+已发布前版范围按D08核实：只读Releases API完整返回4条（<100），3条draft；唯一公开预发布v0.1.0-alpha-2发布于2026-08-20。远端tag对象`16a3a8343cb1ffc94d53cd1be654f827e9d6e902`与本地一致，原commit`20e83747c4c7d1f992dc96af0360266193498c7f`仍是旧`@kite-ai/kite-code`／`src/index.ts`产品，不是10月新基线。精确输入及SHA归 `/private/tmp/kite-installed-maintenance-published-classification-20261008.json`；没有下载或执行旧制品。当前T029无适用的新基线已发布样本，不把旧产品迁移引入授权，也不以本地候选冒称T029通过；新基线首发后的向后兼容要求保持。当前scope归[release control](../active/release-control.md#sqlite-与可选能力)。
+
+剩余退出依赖仍四项：① DB8原旧代码回退及其余必要维护恢复窗口（原前驱只接DB7的源码边界已核，实际DB8回退运行资格未取得）；② macOS原RSS／八轮／全资源退出及原17MiB页面completed刷新红；③ 完整迁移独立审查（本逻辑轮fresh只读Agent仅一次尝试、thread limit拒绝，Root自检不替代）；④ 前置闭合后的完整默认阶段回归、旧路径最终退役与Win／Linux Actions。37能力仍partial、wholeV13=false、Goal active；安装常用链通过不代表整体完成。
+
+Native／CLI owner、维护合同、客户端／CLI手册、release control与原持久决定同步；不制造生产边界或新数据格式diff。Root唯一Git owner，无关AGENTS.md原SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258`保持不暂存。iteration_complete／stage／commit只覆盖本增量，文档门禁、最终owned冻结和正常本地hooks独立核验；本地授权不扩大到push／PR／发布。

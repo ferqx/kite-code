@@ -35,6 +35,12 @@ Node main 持 outer/inner 两个 SH，继承 Bun helper 只关闭副本，不对
 
 Native 自带 `bin/kite`、`bin/kite-tui`、`bin/kite-desktop`；独立 Terminal 前门也可选择该 Native。安装更新只更新自己仍拥有的登记，卸载以 nonce CAS 撤销，不能抹掉后来另一个 Native 的登记。独立前门仍存在时，标准命令恢复该 Terminal。若父 shell 已缓存 Native-bin-first 的路径，删除后该缓存真实返回 127；用户执行 `hash -r` 或打开新 shell 后恢复 PATH 查找。安装器无法清除父 shell 缓存，不留未经用户授权的 stub，不修改 PATH/RC。
 
+## macOS 安装版离线维护
+
+Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先核完整候选、持原使用权，再调用同一[离线维护 leaf](../../cli/host/maintenance.ts)。明确的 data root/profile 与制品目录分开；维护不连接 Service 或 Provider。macOS 的[原 PC 窗口用例](../test/isolated/native-background-bundle.test.ts)在原三次普通窗口退出后，用实际 installer API 安装完整 Native 和独立 Terminal 并登记，实际 `bin/kite` 执行 backup、inspect、真实时钟下的 GC、restore 和 status。DB8 备份为 manifest v17；最近删除仍保留宽限。过期清理由候选内 Bun 执行外部夹具，调用安装包的公开 `runNativeTerminalCLI` 选择器，仅推进夹具时钟，不修改原时间戳或回执，也不新增生产时钟选项；这一步不冒称实际 bin 等待了七天。
+
+恢复生成新 Store，原目录的 Core／Node 私有 DB 字节和 inode 保留；恢复的私有文件与所选 SQLite 备份快照字节相同，公开只读 Store 核原历史、执行和 Command，旧 Store 身份拒绝。维护期间 Provider 不增加。实际卸载取得所有安装候选 EX，保独立 Profile、配置、项目文件和备份；原三 Service 正常退出、准确所属进程为空、原候选两层 EX 可再取。准确结果归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08native-安装版离线维护)。该有限链不覆盖恢复发布中断的 reconcile、DB8 旧代码回退、新基线发布后的前版样本、任意版本或全部 W19／三平台资格。
+
 ## 真实代码升级与冷回退
 
 [跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。macOS固定旧提交 `3140fe6d37131050033c66ffd9637fe7cd967da9` 由自己的 Terminal 和 Native builder 构建，与当前代码保持相同锁文件、八 workspace 清单、补丁、Core format 1 与 Native DB7；两者 productVersion 都是 `0.1.0`，inner、Main、renderer 的实际字节及候选 ID 不同，两个原前端字节断言保持。[物化夹具](../../../tests/fixtures/unified-agent/terminal-predecessor.ts)在删除旧源码前完成旧 Native 构建，随后两个候选均归档、解包、搬迁并删除原输出。临时旧 clone 仅是验证输入，不承载当前实现或 Git 交付。

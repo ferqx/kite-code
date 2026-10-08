@@ -2,12 +2,14 @@ import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -15,8 +17,9 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
-  collectProfileGarbage,
   createProfileBackup,
+  type ProfileBackup,
+  type ProfileGarbageCollection,
   restoreProfileBackup,
 } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -27,11 +30,16 @@ import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'source-free default Native background overview retains original tasks, full child logs and exact stop across actual backup restore cold reopen plus original PC Workspace removal',
+  'source-free default Native background overview retains original tasks, full child logs and exact stop across actual backup restore cold reopen plus original PC Workspace removal and installed offline maintenance',
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-background-bundle-')),
       home = join(root, 'home'),
       moved = join(root, 'relocated');
+    const runtimeRoots = [
+      moved,
+      join(root, 'installed-native/releases'),
+      join(root, 'installed-terminal/releases'),
+    ];
     mkdirSync(home, { mode: 0o700 });
     const workspace = join(home, 'workspace'),
       secondWorkspace = join(home, 'workspace-two');
@@ -198,8 +206,11 @@ test.skipIf(process.platform !== 'darwin')(
       candidatePaths: string[] = [],
       cleanupFailures: unknown[] = [];
     try {
-      const { buildTerminalBundle } = await import(
+      const { buildTerminalBundle, installTerminalBundle, uninstallTerminalBundle } = await import(
         resolve(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')
+      );
+      const { installNativeBundle, uninstallNativeBundle } = await import(
+        resolve(import.meta.dir, '../../../../scripts/release/native-install.ts')
       );
       // Production default process Service: no source, resolver, Runtime, credential,
       // model, OAuth, network-policy or processHostFixture injection.
@@ -390,7 +401,21 @@ test.skipIf(process.platform !== 'darwin')(
         profile: profile.profile,
         mode: 'readonly',
       });
+      let originalBeforeMaintenance: Awaited<ReturnType<typeof removedStore.getView>> | undefined,
+        executionsBeforeMaintenance:
+          | Awaited<ReturnType<typeof removedStore.listExecutions>>
+          | undefined;
+      const commandsBeforeMaintenance: NonNullable<
+        Awaited<ReturnType<typeof removedStore.getCommand>>
+      >[] = [];
       try {
+        originalBeforeMaintenance = await removedStore.getView('original-root');
+        executionsBeforeMaintenance = await removedStore.listExecutions('original-root');
+        for (const run of originalBeforeMaintenance.runs) {
+          const command = await removedStore.getCommand(run.originCommandId);
+          expect(command).not.toBeNull();
+          commandsBeforeMaintenance.push(command!);
+        }
         for (const original of baseline!.sessions) {
           expect((await removedStore.getSession(original.id))!.deletedAt).toBe(
             removal.applied.receipt.removedAt,
@@ -408,24 +433,96 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         await removedStore.close();
       }
-      const currentBackup = await createProfileBackup({
-        profile,
-        destinationRoot: join(root, 'db8-backup'),
-      });
+      const terminalInstallation = installTerminalBundle({
+          bundleRoot: join(moved, 'terminal'),
+          prefix: join(root, 'installed-terminal'),
+        }),
+        nativeInstallation = installNativeBundle({
+          bundleRoot: moved,
+          prefix: join(root, 'installed-native'),
+          cliPrefix: terminalInstallation.root,
+        }),
+        nativeCLI = join(nativeInstallation.root, 'bin/kite'),
+        registeredCLI = join(terminalInstallation.root, 'bin/kite'),
+        profileArguments = ['--data-root', profile.dataRoot, '--profile', profile.profile],
+        privatePath = join(profile.profilePath, 'desktop-private/data.sqlite'),
+        privateBytes = readFileSync(privatePath),
+        privateInode = lstatSync(privatePath).ino,
+        originalCoreBytes = readFileSync(profile.databasePath);
+      const maintenance = async (launcher: string, args: string[]) => {
+        const result = JSON.parse(await execute([launcher, 'maintenance', ...args], home));
+        expect(result.kind).toBe('offline_maintenance');
+        expect(result.coverage.profileComplete).toBe(false);
+        return result;
+      };
+      const backupResult = await maintenance(nativeCLI, [
+        'backup',
+        ...profileArguments,
+        '--destination',
+        join(root, 'db8-backup'),
+      ]);
+      expect(backupResult.status).toBe('verified');
+      const currentBackup = backupResult.backup as ProfileBackup;
       expect(currentBackup.manifest.version).toBe(17);
       expect(currentBackup.manifest.assets.desktopUi.format!.userVersion).toBe(8);
-      const privatePath = join(profile.profilePath, 'desktop-private/data.sqlite'),
-        privateBytes = readFileSync(privatePath),
-        backupBytes = readFileSync(join(currentBackup.directory, 'core.db'));
-      const originalNow = Date.now;
-      let gc: Awaited<ReturnType<typeof collectProfileGarbage>>;
-      try {
-        // Only maintenance observes a future grace clock; real filesystem timestamps stay intact.
-        Date.now = () => originalNow() + 8 * 86400000;
-        gc = await collectProfileGarbage({ profile, expectedStoreId: report.restoredStoreId });
-      } finally {
-        Date.now = originalNow;
-      }
+      expect(
+        (await maintenance(registeredCLI, ['inspect', currentBackup.directory])).backup,
+      ).toEqual(currentBackup);
+      expect(readFileSync(profile.databasePath)).toEqual(originalCoreBytes);
+      expect(readFileSync(privatePath)).toEqual(privateBytes);
+      const recent = await maintenance(registeredCLI, [
+        'gc',
+        ...profileArguments,
+        '--expected-store',
+        report.restoredStoreId,
+      ]);
+      expect(recent.gc).toMatchObject({
+        purgedWorkspaces: 0,
+        purgedSessions: 0,
+        retainedRecentWorkspaces: 1,
+      });
+      expect(readFileSync(profile.databasePath)).toEqual(originalCoreBytes);
+      const backupBytes = readFileSync(join(currentBackup.directory, 'core.db')),
+        backupPrivateBytes = readFileSync(
+          join(currentBackup.directory, 'desktop-private/data.sqlite'),
+        );
+      const probeDirectory = join(root, 'maintenance-probe');
+      mkdirSync(probeDirectory, { mode: 0o700 });
+      symlinkSync(
+        join(nativeInstallation.releaseRoot, 'terminal/node_modules'),
+        join(probeDirectory, 'node_modules'),
+        'dir',
+      );
+      writeFileSync(
+        join(probeDirectory, 'grace.js'),
+        `
+import { runNativeTerminalCLI } from '@kite-ai/cli/host';
+// This external harness changes only its clock. It uses the installed, verified
+// host selector; no production clock option, stored timestamp or receipt changes.
+const now = Date.now;
+Date.now = () => now() + 8 * 86400000;
+process.exitCode = await runNativeTerminalCLI(process.argv.slice(3), process.argv[2]);
+`,
+        { mode: 0o600 },
+      );
+      const agedResult = JSON.parse(
+        await execute(
+          [
+            join(nativeInstallation.releaseRoot, 'terminal/runtime/bun'),
+            join(probeDirectory, 'grace.js'),
+            nativeInstallation.releaseRoot,
+            'maintenance',
+            'gc',
+            ...profileArguments,
+            '--expected-store',
+            report.restoredStoreId,
+          ],
+          home,
+        ),
+      );
+      expect(agedResult.kind).toBe('offline_maintenance');
+      expect(agedResult.coverage.profileComplete).toBe(false);
+      const gc = agedResult.gc as ProfileGarbageCollection;
       expect(gc).toMatchObject({
         purgedWorkspaces: 1,
         purgedSessions: 6,
@@ -433,6 +530,7 @@ test.skipIf(process.platform !== 'darwin')(
       });
       expect(gc.removedFiles).toBeGreaterThan(0);
       expect(readFileSync(privatePath)).toEqual(privateBytes);
+      expect(lstatSync(privatePath).ino).toBe(privateInode);
       expect(readFileSync(join(currentBackup.directory, 'core.db'))).toEqual(backupBytes);
       expect(calls.length).toBe(report.callsBeforeCold);
       const collectedStore = await openSqliteStore({
@@ -463,6 +561,83 @@ test.skipIf(process.platform !== 'darwin')(
         await collectedStore.close();
       }
       expect((await snapshot(profile)).sessions).toEqual([]);
+      const beforeRestoreBytes = readFileSync(profile.databasePath),
+        beforeRestoreInode = lstatSync(profile.databasePath).ino;
+      const restored = await maintenance(registeredCLI, [
+        'restore',
+        currentBackup.directory,
+        ...profileArguments,
+        '--expected-store',
+        report.restoredStoreId,
+        '--confirm-data-loss',
+      ]);
+      expect(restored.status).toBe('restored');
+      expect(restored.storeId).not.toBe(report.restoredStoreId);
+      expect(restored.previousDirectoryPreserved).toBe(true);
+      expect(readFileSync(join(restored.preservedDirectory, 'core.db'))).toEqual(
+        beforeRestoreBytes,
+      );
+      expect(lstatSync(join(restored.preservedDirectory, 'core.db')).ino).toBe(beforeRestoreInode);
+      expect(
+        readFileSync(join(restored.preservedDirectory, 'desktop-private/data.sqlite')),
+      ).toEqual(privateBytes);
+      expect(lstatSync(join(restored.preservedDirectory, 'desktop-private/data.sqlite')).ino).toBe(
+        privateInode,
+      );
+      expect(readFileSync(privatePath)).toEqual(backupPrivateBytes);
+      const status = await maintenance(nativeCLI, ['status', ...profileArguments]);
+      expect(status.restore).toBeNull();
+      const restoredStore = await openSqliteStore({
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        mode: 'readonly',
+      });
+      try {
+        expect((await restoredStore.getMetadata()).storeId).toBe(restored.storeId);
+        const original = await restoredStore.getView('original-root');
+        expect(original.session.deletedAt).toBe(removal.applied.receipt.removedAt);
+        expect(original.session.historyPurgedAt).toBe(
+          originalBeforeMaintenance!.session.historyPurgedAt,
+        );
+        expect(original.messages).toEqual(originalBeforeMaintenance!.messages);
+        expect(original.runs).toEqual(originalBeforeMaintenance!.runs);
+        for (const command of commandsBeforeMaintenance)
+          expect(await restoredStore.getCommand(command.id)).toEqual(command);
+        expect(await restoredStore.listExecutions('original-root')).toEqual(
+          executionsBeforeMaintenance!,
+        );
+        let foreignCode: string | undefined;
+        try {
+          await restoredStore.getWorkspaceRemoval({
+            expectedStoreId: report.restoredStoreId,
+            subjectId: 'local-user',
+            workspaceId: 'w',
+            commandId: removal.applied.receipt.commandId,
+          });
+        } catch (cause) {
+          foreignCode = (cause as { code?: string }).code;
+        }
+        expect(foreignCode).toBe('store_identity_mismatch');
+      } finally {
+        await restoredStore.close();
+      }
+      const restoredCoreBytes = readFileSync(profile.databasePath),
+        restoredCoreInode = lstatSync(profile.databasePath).ino,
+        configurationPath = join(profile.profilePath, 'config.jsonc'),
+        configurationBytes = readFileSync(configurationPath);
+      uninstallNativeBundle(nativeInstallation.root);
+      uninstallTerminalBundle(terminalInstallation.root);
+      expect(existsSync(nativeInstallation.root)).toBe(false);
+      expect(existsSync(terminalInstallation.root)).toBe(false);
+      expect(readFileSync(profile.databasePath)).toEqual(restoredCoreBytes);
+      expect(lstatSync(profile.databasePath).ino).toBe(restoredCoreInode);
+      expect(readFileSync(privatePath)).toEqual(backupPrivateBytes);
+      expect(readFileSync(configurationPath)).toEqual(configurationBytes);
+      expect(readFileSync(join(currentBackup.directory, 'core.db'))).toEqual(backupBytes);
+      expect(readFileSync(join(workspace, 'retained-project-file'), 'utf8')).toBe(
+        'original project bytes',
+      );
+      expect(calls.length).toBe(report.callsBeforeCold);
       const original = baseline!.sessions.find((row) => row.id === 'original-root')!;
       const task = original.executions.find((row) => row.id === report.stoppedId)!;
       expect(task.cancelRequestedAt).not.toBeNull();
@@ -492,6 +667,18 @@ test.skipIf(process.platform !== 'darwin')(
           stoppedId: report.stoppedId,
           pids: report.pids,
           gc,
+          installedMaintenance: {
+            nativeCandidateId: nativeInstallation.candidateId,
+            terminalCandidateId: terminalInstallation.candidateId,
+            realBinActions: ['backup', 'inspect', 'gc_with_real_grace', 'restore', 'status'],
+            expiredGC: 'installed_host_selector_with_external_harness_clock',
+            manifestVersion: currentBackup.manifest.version,
+            desktopUserVersion: currentBackup.manifest.assets.desktopUi.format!.userVersion,
+            restoredStoreId: restored.storeId,
+            preservedPreviousProfile: true,
+            uninstalled: true,
+            providerReplay: false,
+          },
         }),
       );
       completed = true;
@@ -520,7 +707,9 @@ test.skipIf(process.platform !== 'darwin')(
         const rows = readRows();
         const originalIdentity = new Map(rows.map((row) => [row.pid, row.command]));
         const owned = new Set(
-          rows.filter((row) => row.command.startsWith(`${moved}/`)).map((row) => row.pid),
+          rows
+            .filter((row) => runtimeRoots.some((path) => row.command.startsWith(`${path}/`)))
+            .map((row) => row.pid),
         );
         for (let count = 0; count < rows.length; count++)
           for (const row of rows) if (owned.has(row.parent)) owned.add(row.pid);
@@ -554,7 +743,7 @@ test.skipIf(process.platform !== 'darwin')(
               current
                 .filter(
                   (row) =>
-                    row.command.startsWith(`${moved}/`) ||
+                    runtimeRoots.some((path) => row.command.startsWith(`${path}/`)) ||
                     (owned.has(row.pid) && originalIdentity.get(row.pid) === row.command),
                 )
                 .map((row) => row.pid),
@@ -614,6 +803,32 @@ test.skipIf(process.platform !== 'darwin')(
   },
   240000,
 );
+
+async function execute(argv: string[], home: string) {
+  const child = Bun.spawn(argv, {
+    cwd: home,
+    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const timer = setTimeout(() => child.kill('SIGKILL'), 30000);
+  try {
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    if (code) throw Error(`installed_maintenance_failed:${argv[0]}:${code}:${stderr.slice(-4000)}`);
+    return stdout;
+  } finally {
+    clearTimeout(timer);
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+      await child.exited;
+    }
+  }
+}
 
 async function snapshot(profile: ReturnType<typeof selectProfile>) {
   const store = await openSqliteStore({

@@ -36,6 +36,10 @@ Native 的本机真实跨代码组合也已沿 installed `bin/kite-desktop` 核�
 
 ## SQLite 与可选能力
 
+macOS 完整 Native 的安装版离线维护已沿实际 Native 自带／登记后的 `bin/kite` 验证 DB8／manifest v17 的 backup、inspect、真实宽限 GC、restore 和 status；过期 GC 单独使用安装包公开 Host 选择器与外部夹具时钟，未更改生产时钟或存储时间。原目录保字节／inode，恢复产生新 Store并拒绝旧身份，维护零 Provider 增量；实际卸载保独立数据。范围归[Native owner](../../apps/desktop/docs/native-release.md#macos-安装版离线维护)，不扩大到 reconcile 发布中断、DB8 旧代码回退或全部平台资格。
+
+新基线前版样本遵循 V1.3 D08。2026-10-08 只读核对原仓库 Releases：四份记录中三份为 draft，唯一公开预发布为 [v0.1.0-alpha-2](https://github.com/ferqx/kite-code/releases/tag/v0.1.0-alpha-2)，发布于 2026-08-20；其远端 tag 与本地原对象一致，commit `20e83747c4c7d1f992dc96af0360266193498c7f` 仍是旧 `src/index.ts` 产品。当前没有已发布的新基线前版，T029 在首发前没有适用样本；不为满足该项迁移、读取或执行旧 Store/State。新基线发布后持续向后兼容的要求保持，本地真实代码候选仍不能冒充已发布样本。实际 DB8 回退到不识别该格式的原前驱仍需独立资格，现有四窗口 DB7 证据不覆盖它。
+
 Terminal 保存实际 `bun:sqlite` driver/linkage/version/sourceId/engine manifest SHA，Native 保存独立 `node:sqlite` 身份。构建测量复制后 runtime，正式启动在首次数据库前选择并核包内 metadata，Worker 核同一 process-global 引擎。完全无选定资产的开发模式 unqualified；损坏/不完整资产拒绝，不查系统库 fallback。
 
 WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多连接 WAL/备份恢复为依据，不以“最新”或永久 minimum 放行。当前已审查来源为 [SQLite3.51.3](https://www.sqlite.org/releaselog/3_51_3.html)、[SQLite3.53.2](https://sqlite.org/releaselog/3_53_2.html)与[SQLite3.53.4](https://www.sqlite.org/releaselog/3_53_4.html)；精确集合由[release identity](../../apps/service/src/sqlite-release-assets.ts)负责。macOS 构建复制已安装且审查的动态库，Linux/Windows 核 Bun builtin；任一实际引擎不符合集合即拒绝资格。

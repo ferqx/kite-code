@@ -33,6 +33,6 @@ Status: implemented
 
 ## Consequences
 
-目录和工作封锁原子提交，但真正资源终态另行确认。删除受理后准确旧ID历史先保留；显式GC可清理合格已移除空间的正文与引用，同时原控制回执、去重和已保存草稿保留。单会话执行组也可按相同条件清理，未结束执行的后续核实与完整永久删除资格尚未闭合。同目录重加使用新 Workspace ID；项目文件不删除。Node DB8 回退到不识别的新旧 builder、已发布版本样本、Windows GC和完整平台资格尚未验证，不能将本决定解释为完整 W19或V1.3退出。
+目录和工作封锁原子提交，但真正资源终态另行确认。删除受理后准确旧ID历史先保留；显式GC可清理合格已移除空间的正文与引用，同时原控制回执、去重和已保存草稿保留。单会话执行组也可按相同条件清理，未结束执行的后续核实与完整永久删除资格尚未闭合。同目录重加使用新 Workspace ID；项目文件不删除。macOS 原PC数据的安装版五项常用维护已沿Native自带／登记前门取得有限证据；过期GC只由安装包公开Host选择器与外部夹具时钟验证，原时间和回执不改。Node DB8 回退到不识别的新旧 builder、其余维护恢复窗口、Windows GC和完整平台资格尚未验证。按D08排除旧Store/State；当前没有新基线已发布前版样本，首发后的向后兼容要求仍保持，不能将本决定解释为完整 W19或V1.3退出。
 
 实现、数据合同与实际验证由 [Native owner](../../../../apps/desktop/README.md#native-空间批量移除)、[Store owner](../../../../packages/agent/src/storage/sqlite/session-management/README.md#workspace-原子移除)、[maintenance owner](../../../../packages/agent/src/maintenance/README.md#desktop-db8-与-manifest-v17)和[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-空间批量移除与显式附件-gc)维护。双 Worker 原事务、真实 owned Tool／Job取消、实际 Node backup／restore／cold以及 SDK原回执反例均按有限证据核，不替代独立审查或整个阶段回归。实际清理、Core/WAL正文检查、原回执／去重、其他空间／独立备份及真实Node私有资产的证据归同一maintenance owner和当前进度。
