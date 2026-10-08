@@ -1,5 +1,7 @@
 # Session 管理测试
 
+[statement-lifecycle.test.ts](statement-lifecycle.test.ts)经公开 SQLite Store 启动真实 Worker；夹具只观察 Operations 创建的原生语句，并在实际响应发送前读取 `isFinalized`，覆盖 Drizzle prepare、Bun cached query 的重复使用、错误响应后继续读取、strict close 与只读重开。原实现首次 ACK 时实际有三个 live 语句，明确失败；修复后各响应语句已释放，cursor 与原 Store 身份保持。它不以 JS heap、短执行或 FD 数代替原 450 秒 RSS 门槛；双 Worker timing、事务 rollback 和完整默认仍分别验证。
+
 [store.test.ts](store.test.ts) 用独立真实 SQLite 连接持有 `BEGIN IMMEDIATE`，300ms 后释放时核原 Command 只登记一次、同 ID 返回原回执且 cursor 不增长；持续持锁时核有限 `SQLITE_BUSY`、原意图与事件缺席、释放后的准确受理。旧 100ms 写连接已实际复现正例失败，当前写连接 1000ms 与 readonly/preflight 100ms 的边界归 [Store owner](../../../src/storage/README.md#写锁的有界等待)。rollback、双 Worker timing 与 preflight 仍沿原完整文件独立执行。
 
 [session-management.test.ts](session-management.test.ts) 使用真实双 Worker/root creator、固定 Model 与 Tool/Job 监督，验证控制修订 CAS、原 ID 快照重试、主体/Store/child 边界、trigger rollback 和 INT64 overflow；删除只提交 tombstone/停止意图，迟到创建/派发零效果，unknown 保留、其他 Session 继续、readonly 查询零 Model。

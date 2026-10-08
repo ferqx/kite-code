@@ -54,6 +54,7 @@ function execute(request: WorkerRequest): void {
     result?: unknown;
     error?: { code: string; message: string };
   }): void => {
+    (operations ?? tracked)?.releaseStatements();
     const timing: DbTiming = {
       operation: method,
       requestId: id,
@@ -85,6 +86,7 @@ function execute(request: WorkerRequest): void {
     if (method === 'close') {
       // Release outstanding prepared statements and the SQLite handle before close ACK.
       // close(false) can leave a zombie connection until Worker garbage collection.
+      operations.releaseStatements();
       operations.db.close(true);
       operations = undefined;
       result = null;

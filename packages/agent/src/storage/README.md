@@ -1,5 +1,11 @@
 # Store 边界
 
+## Worker 请求内的原生语句
+
+`SqliteOperations` 持有同步请求创建的 `query` 和 `prepare` 原生语句，包括 Drizzle query helper 的 prepared statement。具名操作在事务结束后返回已物化的值；Worker 在成功或失败 ACK 前逐项 finalize，在 strict close 前先释放本请求语句。Bun 的 query cache 遇到已 finalize 的条目会重新 prepare，同一语句不会跨请求借用。连接初始化的原生语句仍由 strict close 收束。
+
+释放计入 Worker total timing；原 SQL/COMMIT 分项、事务回滚、Command 身份和提交未知时查询规则保持。释放失败不能发送成功 ACK，也不重发原操作或效果。[原生 Worker 回归](../../test/isolated/storage/statement-lifecycle.test.ts)以真实 statement 的 `isFinalized` 在响应发送前核成功、错误与关闭路径，继续查询、只读重开和 cursor 保持。采用请求边界的理由见[语句 owner Note](../../../../.agents/notes/implemented/bug-fix/2026-10-08-request-scoped-sql-statements.md)；这项释放不代表完整 RSS 或全部 Runtime 资源资格。
+
 ## 写锁的有界等待
 
 正式 SQLite 写连接使用原生 `busy_timeout=1000`，只读连接与启动格式 preflight 保留 100ms。两个 Worker 共享 WAL 时，持锁 peer 被调度延迟不应在原 100ms 实验窗口内直接使普通 Run 失败；当前值让短竞争在原具名事务上等待。它是 SQLite busy handler 的累计等待预算，不是 HTTP wall-time 承诺。

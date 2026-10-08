@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import type { Database, Statement } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { asc, eq, gt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
@@ -134,6 +134,7 @@ type Row = Record<string, string | number | bigint | null>;
 export class SqliteOperations {
   readonly db: Database;
   readonly readonly: boolean;
+  private readonly statements = new Set<Statement>();
   constructor(db: Database, readOnly: boolean) {
     this.db = this.timedDatabase(db);
     this.readonly = readOnly;
@@ -149,6 +150,13 @@ export class SqliteOperations {
       sqlDurationMs: this.sqlDurationMs,
       ...(this.commitMs === undefined ? {} : { commitMs: this.commitMs }),
     };
+  }
+  /** Worker operations return materialized values; no native statement crosses an ACK. */
+  releaseStatements(): void {
+    for (const statement of this.statements) {
+      statement.finalize();
+      this.statements.delete(statement);
+    }
   }
   private timedDatabase(database: Database): Database {
     const measure = <T>(sql: string, work: () => T): T => {
@@ -172,7 +180,8 @@ export class SqliteOperations {
           return (...args: unknown[]) => {
             const statement = measure(String(args[0]), () =>
               Reflect.apply(value, target, args),
-            ) as object;
+            ) as Statement;
+            this.statements.add(statement);
             return new Proxy(statement, {
               get: (stmt, property) => {
                 const operation = Reflect.get(stmt, property, stmt) as unknown;
