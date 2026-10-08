@@ -74,6 +74,16 @@ export const nativeEventChannel = 'kite:native:changed';
 export const nativeThemeChannel = 'kite:native:theme';
 export const nativeClipboardChannel = 'kite:native:clipboard';
 export const nativeWindowMaximizeChannel = 'kite:native:window-maximize';
+export const nativeStartupStatusChannel = 'kite:native:startup-status';
+export const nativeStartupDiagnosticSaveChannel = 'kite:native:startup-diagnostic-save';
+export type NativeStartupStatus = { readonly diagnosticAvailable: boolean };
+export type NativeStartupReply =
+  | { ok: true; value: NativeStartupStatus | boolean }
+  | { ok: false; code: string };
+export interface NativeStartupBridge {
+  startupStatus(): Promise<NativeStartupStatus>;
+  saveStartupDiagnostic(): Promise<boolean>;
+}
 export type NativeThemePreference = 'dark' | 'light' | 'system';
 /** Window appearance is a host port, independent of the Service observation. */
 export interface NativeThemeBridge {
@@ -743,6 +753,8 @@ export interface NativeBridge {
 }
 declare global {
   interface Window {
-    readonly kiteNative?: Readonly<NativeBridge & Partial<NativeThemeBridge & NativeWindowBridge>>;
+    readonly kiteNative?: Readonly<
+      NativeBridge & Partial<NativeThemeBridge & NativeWindowBridge & NativeStartupBridge>
+    >;
   }
 }

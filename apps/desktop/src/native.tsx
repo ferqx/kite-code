@@ -83,11 +83,19 @@ export function NativeDesktop() {
   );
 }
 
-function NativeDesktopContent({ bridge }: { bridge: NativeBridge }) {
+function NativeDesktopContent({
+  bridge,
+}: {
+  bridge: NativeBridge & Partial<import('./native-bridge').NativeStartupBridge>;
+}) {
   const [interactionHistoryOpen, setInteractionHistoryOpen] = useState(false);
   const [startup, setStartup] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [startupError, setStartupError] = useState('');
+  const [diagnosticAvailable, setDiagnosticAvailable] = useState(false);
+  const [diagnosticSaveError, setDiagnosticSaveError] = useState('');
   const [startupAttempt, setStartupAttempt] = useState(0);
+  const startupAttemptRef = useRef(startupAttempt);
+  startupAttemptRef.current = startupAttempt;
   const startupPhase = useRef(startup);
   startupPhase.current = startup;
   const theme = useNativeTheme();
@@ -375,7 +383,7 @@ function NativeDesktopContent({ bridge }: { bridge: NativeBridge }) {
       apply(value);
       if (!value.selection) setPreparing(true);
       await readDirectory();
-    })().catch((cause) => {
+    })().catch(async (cause) => {
       if (!alive) return;
       const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
       if (startupPhase.current === 'ready') {
@@ -387,6 +395,15 @@ function NativeDesktopContent({ bridge }: { bridge: NativeBridge }) {
         /^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '请重新尝试准备工作空间。',
       );
       setStartup('failed');
+      try {
+        const status = await bridge.startupStatus?.();
+        if (alive && startupPhase.current === 'failed')
+          setDiagnosticAvailable(
+            status?.diagnosticAvailable === true && !!bridge.saveStartupDiagnostic,
+          );
+      } catch {
+        // Missing diagnostics do not turn a generic startup error into a report.
+      }
     });
     return () => {
       alive = false;
@@ -1981,13 +1998,29 @@ function NativeDesktopContent({ bridge }: { bridge: NativeBridge }) {
       <NativeStartup
         phase={startup}
         error={startupError}
+        diagnosticSaveError={diagnosticSaveError}
+        onSaveDiagnostic={
+          diagnosticAvailable
+            ? () => {
+                setDiagnosticSaveError('');
+                const attempt = startupAttempt;
+                void bridge.saveStartupDiagnostic?.().catch(() => {
+                  if (startupPhase.current === 'failed' && attempt === startupAttemptRef.current)
+                    setDiagnosticSaveError('保存启动诊断失败，请选择新的文件名并重试。');
+                });
+              }
+            : undefined
+        }
         onRetry={
           bridge
             ? () => {
                 if (startupPhase.current !== 'failed') return;
                 startupPhase.current = 'loading';
+                startupAttemptRef.current++;
                 setError('');
                 setStartupError('');
+                setDiagnosticAvailable(false);
+                setDiagnosticSaveError('');
                 setStartup('loading');
                 setStartupAttempt((attempt) => attempt + 1);
               }

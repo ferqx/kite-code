@@ -1,16 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { launchPairedService } from '@kite-ai/service/paired';
+import {
+  formatServiceStartupReport,
+  launchPairedService,
+  PairedServiceError,
+  type ServiceStartupDiagnostic,
+} from '@kite-ai/service/paired';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme } from 'electron';
 import { nativeEventChannel } from '../src/native-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { NativeCaller } from './native-caller';
-import { registerNativeIpc, registerNativeThemeIpc, registerNativeWindowIpc } from './native-ipc';
+import {
+  registerNativeIpc,
+  registerNativeStartupIpc,
+  registerNativeThemeIpc,
+  registerNativeWindowIpc,
+} from './native-ipc';
 import { spawnNodePairedChild } from './node-process';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
@@ -59,12 +70,14 @@ let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
 let privateAccess: DesktopProfileAccess | undefined;
 let artifactAccess: { close(): void }[] = [];
+let startupDiagnostic: ServiceStartupDiagnostic | undefined;
 let quitting = false,
   exitAllowed = false;
 async function openCaller(): Promise<NativeCaller> {
   if (quitting) throw Error('native_draining');
   if (caller) return caller;
   opening ??= (async () => {
+    startupDiagnostic = undefined;
     if (formalAssets) {
       for (const root of [formalAssets.candidateRoot, formalAssets.terminalRoot])
         artifactAccess.push(
@@ -144,6 +157,7 @@ async function openCaller(): Promise<NativeCaller> {
     );
     return caller;
   })().catch(async (error) => {
+    if (error instanceof PairedServiceError) startupDiagnostic = error.startupDiagnostic;
     privateData?.close();
     privateAccess?.close();
     await paired?.close();
@@ -219,6 +233,23 @@ void app
       window: () => window,
       rendererUrl,
       writeClipboardText: (text) => clipboard.writeText(text),
+    });
+    registerNativeStartupIpc({
+      ipcMain,
+      window: () => window,
+      rendererUrl,
+      report: () =>
+        startupDiagnostic && !quitting ? formatServiceStartupReport(startupDiagnostic) : null,
+      async pickPath(window) {
+        const result = await dialog.showSaveDialog(window, {
+          title: '保存启动诊断',
+          defaultPath: 'kite-startup-diagnostic.json',
+          filters: [{ name: 'JSON', extensions: ['json'] }],
+        });
+        return result.canceled || !result.filePath ? null : result.filePath;
+      },
+      write: (path, report) =>
+        writeFile(path, report, { encoding: 'utf8', flag: 'wx', mode: 0o600 }),
     });
     registerNativeIpc({
       ipcMain,

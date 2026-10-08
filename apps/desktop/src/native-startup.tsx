@@ -5,10 +5,14 @@ import appIcon from '../app-icon.svg';
 export function NativeStartup({
   phase,
   error,
+  diagnosticSaveError,
+  onSaveDiagnostic,
   onRetry,
 }: {
   phase: 'loading' | 'failed';
   error?: string;
+  diagnosticSaveError?: string;
+  onSaveDiagnostic?: () => void;
   onRetry?: () => void;
 }) {
   return (
@@ -25,6 +29,8 @@ export function NativeStartup({
         ) : (
           <>
             <p role="alert">启动未完成：{error}</p>
+            {onSaveDiagnostic && <Button onClick={onSaveDiagnostic}>保存诊断</Button>}
+            {diagnosticSaveError && <p role="alert">{diagnosticSaveError}</p>}
             {onRetry && <Button onClick={onRetry}>重新尝试</Button>}
           </>
         )}

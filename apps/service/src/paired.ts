@@ -11,6 +11,9 @@ import {
 } from './bootstrap';
 import { schemas } from './http/schema';
 import type { RuntimeProtection } from './runtime-protection';
+import { parseServiceStartupDiagnostic, type ServiceStartupDiagnostic } from './startup-diagnostic';
+
+export { formatServiceStartupReport, type ServiceStartupDiagnostic } from './startup-diagnostic';
 
 export interface PairedServiceChild {
   readonly stdin: {
@@ -48,9 +51,11 @@ export interface PairedServiceOptions {
 }
 export class PairedServiceError extends Error {
   readonly code: string;
-  constructor(code: string) {
+  readonly startupDiagnostic?: ServiceStartupDiagnostic;
+  constructor(code: string, startupDiagnostic?: ServiceStartupDiagnostic) {
     super(code);
     this.code = code;
+    this.startupDiagnostic = startupDiagnostic;
   }
 }
 const bootstrapSchema = z.intersection(
@@ -246,17 +251,23 @@ export async function launchPairedService(options: PairedServiceOptions) {
       get diagnostics() {
         return diagnostics();
       },
+      get startupDiagnostic() {
+        return parseServiceStartupDiagnostic(stderr);
+      },
       close,
     };
   } catch (error) {
     await close();
-    if (error instanceof PairedServiceError) throw error;
+    const startupDiagnostic = parseServiceStartupDiagnostic(stderr);
+    if (error instanceof PairedServiceError)
+      throw new PairedServiceError(error.code, startupDiagnostic);
     const code =
       error && typeof error === 'object' && 'code' in error
         ? String(error.code)
         : 'paired_startup_failed';
     throw new PairedServiceError(
       /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : 'paired_startup_failed',
+      startupDiagnostic,
     );
   }
 }

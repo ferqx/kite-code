@@ -35,6 +35,7 @@ allowlist 只接受有限 metric/attribute 枚举与有限数值；单样本 can
 metric、日志、报告或 artifact。未知 route/capability 只能折叠为固定低基数 alias，不能携带原值。
 运行时权限切换的 `interaction_mode.changed` 是 Runtime Store 审计事实，不产生 observability metric 或
 属性；其 user source 与时间戳不得通过观测通道外发。
+当前 Native 启动报告由 Service 的[闭合诊断 codec](../../apps/service/src/startup-diagnostic.ts)和 paired 私有管道交接，只接受实际 `data_unavailable/opening_store` 分类与阶段，拒绝未知字段。报告保有限版本、null 格式号和固定处理提示，不含原异常、stderr、路径、身份、bootstrap 或正文；Main 的系统对话框路径仅用于本次独占新文件写入，不进入诊断对象或 renderer，具体 owner 归[桌面启动保存](../../apps/desktop/README.md#原启动诊断保存)。
 TUI 历史会话打开的 `NODE_DEBUG=kite-session` 是显式 opt-in 的本地诊断，不是 metric 或远程 transport。
 它只允许输出固定 admission/replay stage 和闭集 failure code；即使本地启用，也不得输出 thread/session ID、
 Workspace/Store path、Project digest、事件正文或原始异常。cleanup failure 使用同一约束，且只作为 primary

@@ -168,6 +168,8 @@ Native 原消息复制与标题栏缩放同属窗口 Host。preload 只提供固
 
 Native 明确退出的活动检查只读完整公共目录与 View；两秒超时仅撤销本次 GET，不能把未回答当无活动，也不撤销其他观察。原窗口隐藏／激活不停止 Service。原二十秒收尾决定由 Main 持有，继续等待复用同一清理 promise；紧急退出只调用当前配对 child 的直接进程句柄，不发现其他 PID，不给卸载或普通读取强杀资格。配对 launcher close 与实际退出状态分别核实，非零退出进入异常收尾提示；未知执行保持原事实，正常清理顺序和双层制品使用权不放宽；实现与有限故障／实际窗口范围见[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)。
 
+Native 启动诊断只来自本次所属 Service 的闭合私有 stderr 帧，经 paired launcher 重建后由 Main 持有；通用错误不变造有效报告。保存沿两个无 payload 的固定 host IPC，renderer 不提供报告或路径，Main 只写系统对话框选定的新文件，等待后复核当前 frame／窗口／报告。重试清除前次资格，保存不打开业务 caller、不修改 Store、不获得执行或恢复 authority；当前实现与范围见[Native owner](../../apps/desktop/README.md#原启动诊断保存)和[Service owner](../../apps/service/README.md)。
+
 ## 授权观察与执行资格
 
 Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准确来源／展示关系和 EOF；它不建立新的原卡回答观察。完整历史附件与当前审批分别持有 reader／loaded proof，前者不能授权后者；关闭、刷新或切范围只释放所属读取。记录与受理、执行成功分开，当前接口的变化拒绝与恢复限制归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)。

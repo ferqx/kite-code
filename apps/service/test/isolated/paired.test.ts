@@ -15,7 +15,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { launchPairedService } from '../../src/paired';
+import {
+  formatServiceStartupReport,
+  launchPairedService,
+  PairedServiceError,
+} from '../../src/paired';
 
 const entrypoint = join(import.meta.dir, '../fixtures/paired-child.ts');
 function fixture() {
@@ -98,6 +102,54 @@ test.each([
     if (process.platform !== 'win32')
       expect(lockAvailable(join(data.profile.coordinationPath, 'profile-use.lock'))).toBe(true);
   } finally {
+    rmSync(data.root, { recursive: true, force: true });
+  }
+}, 20_000);
+
+test('actual default Store failure survives failed admission as a bounded diagnostic; external repair permits an explicit new launch', async () => {
+  const data = fixture(),
+    original = 'private database bytes /private/user credential session-content';
+  mkdirSync(data.profile.profilePath, { recursive: true, mode: 0o700 });
+  writeFileSync(data.profile.databasePath, original, { mode: 0o600 });
+  const options = {
+    entrypoint: join(import.meta.dir, '../../src/main.ts'),
+    profile: data.profile,
+    instanceId: 'diagnostic',
+    buildId: 'diagnostic-build',
+    apiMajor: 1,
+    requiredCapabilities: ['file_recovery'],
+  };
+  let unexpected: Awaited<ReturnType<typeof launchPairedService>> | undefined;
+  try {
+    const failure = await launchPairedService(options).then(
+      (service) => {
+        unexpected = service;
+        return null;
+      },
+      (error) => error,
+    );
+    expect(failure).toBeInstanceOf(PairedServiceError);
+    expect(failure.code).toBe('required_capability_missing');
+    expect(failure.startupDiagnostic).toEqual({ code: 'data_unavailable', stage: 'opening_store' });
+    const report = formatServiceStartupReport(failure.startupDiagnostic);
+    expect(report).not.toContain('private');
+    expect(report).not.toContain('credential');
+    expect(report).not.toContain('session-content');
+    expect(readFileSync(data.profile.databasePath, 'utf8')).toBe(original);
+    if (process.platform !== 'win32')
+      expect(lockAvailable(join(data.profile.coordinationPath, 'profile-use.lock'))).toBe(true);
+    // Repair is a fixture action, never a client overwrite or old-data migration.
+    rmSync(data.profile.databasePath);
+    const retry = await launchPairedService({ ...options, instanceId: 'explicit-retry' });
+    try {
+      expect(retry.bootstrap.storeId).toBeString();
+      expect(retry.startupDiagnostic).toBeUndefined();
+    } finally {
+      await retry.close();
+    }
+    expect(await retry.exited).toBe(0);
+  } finally {
+    await unexpected?.close();
     rmSync(data.root, { recursive: true, force: true });
   }
 }, 20_000);

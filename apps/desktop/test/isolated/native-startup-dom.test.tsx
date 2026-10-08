@@ -7,6 +7,7 @@ import type {
   NativeEvent,
   NativeRequest,
   NativeResult,
+  NativeStartupBridge,
   NativeState,
 } from '../../src/native-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
@@ -36,7 +37,10 @@ const state = (generation: number, directory?: NativeDirectory): NativeState => 
   permissionSubmissions: [],
   interactionSubmissions: [],
 });
-function fixture(read: (request: NativeRequest) => NativeResult | Promise<NativeResult>) {
+function fixture(
+  read: (request: NativeRequest) => NativeResult | Promise<NativeResult>,
+  hostBridge: Partial<NativeStartupBridge> = {},
+) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -55,7 +59,8 @@ function fixture(read: (request: NativeRequest) => NativeResult | Promise<Native
   });
   const calls: NativeRequest[] = [],
     listeners = new Set<(event: NativeEvent) => void>();
-  const bridge: NativeBridge = {
+  const bridge: NativeBridge & Partial<NativeStartupBridge> = {
+    ...hostBridge,
     request: async (request) => {
       calls.push(request);
       if (request.method === 'conversation.models.read')
@@ -226,6 +231,53 @@ test('startup failures retry explicitly once; a late previous observation and po
         ),
       ),
     ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('retained save button requires the Service diagnostic; fixed save failure and explicit retry preserve startup boundaries', async () => {
+  let failed = true,
+    saves = 0;
+  const f = fixture(
+    (request) => {
+      if (request.method === 'attach') {
+        if (failed) throw Error('required_capability_missing');
+        return state(1);
+      }
+      if (request.method === 'directory') return empty;
+      return null;
+    },
+    {
+      startupStatus: async () => ({ diagnosticAvailable: true }),
+      saveStartupDiagnostic: async () => {
+        saves++;
+        if (saves === 1) throw Error('/private/user credential session-content');
+        return false;
+      },
+    },
+  );
+  const save = () =>
+    act(async () => {
+      [...f.host.querySelectorAll('button')]
+        .find((button) => button.textContent === '保存诊断')!
+        .click();
+    });
+  try {
+    await f.render();
+    expect(f.host.textContent).toContain('保存诊断');
+    await save();
+    expect(f.host.textContent).toContain('保存启动诊断失败，请选择新的文件名并重试。');
+    expect(f.host.textContent).not.toContain('credential');
+    await save();
+    expect(f.host.textContent).not.toContain('保存启动诊断失败');
+    expect(saves).toBe(2);
+    expect(f.calls.map((call) => call.method)).toEqual(['attach']);
+    failed = false;
+    await f.retry();
+    expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();
+    expect(f.host.textContent).not.toContain('保存诊断');
+    expect(f.calls.filter((call) => call.method === 'attach').length).toBe(2);
   } finally {
     await f.close();
   }

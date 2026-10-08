@@ -52,6 +52,10 @@ SSE 从单一扫描游标读取持久变更。未来、过期或格式错误的�
 
 HTTP/SSE 断连和网络释放不会关闭父进程存活 pipe。父 EOF 或 launch handle 的幂等 close 只 drain 自己的 Service：拒绝新工作，drain 期间保留取消/读取，关闭 SSE，取消并 drain 所属 Runtime，关闭 Worker、释放锁，再停止 HTTP 并退出。优雅退出失败时，有界关闭期限只能强杀本次启动的 child。bootstrap stdout 不承载日志或业务 RPC。生产 stderr 只写公开错误码；launcher 最多保留 16 KiB，只暴露解析后的有界诊断码，丢弃非结构化内容以免转发秘密。
 
+[startup-diagnostic](src/startup-diagnostic.ts)复用原有界前缀／报告格式的闭合投影，当前只从实际 Store 打开失败生成 `data_unavailable/opening_store`。普通 `data_unavailable` stderr 分类保持，另有不含正文的有限诊断帧；私有 launcher 在原16KiB保留上界内只接受320字符以内的准确闭合帧，拒绝未知 code、stage、字段和旧迁移分类，不转发 stderr、原 Error 或 bootstrap。诊断不改变安全 HTTP 的 unavailable 行为、准入或 child 清理；失败后 `PairedServiceError.startupDiagnostic` 与正常 handle 的只读诊断 getter 均重建同一小对象。`@kite-ai/service/paired` 导出类型与报告 formatter，未增加业务 HTTP 或新的公开入口。报告保 `kite.startup-diagnostic.v1` 形状，未知格式号为 null，固定提示只允许解决条件后明确重试。保存路径／对话框／独占新文件写入归[Native owner](../desktop/README.md#原启动诊断保存)。
+
+[诊断 codec](test/startup-diagnostic.test.ts)核未知字段／正文／秘密拒绝与固定报告；原[配对测试](test/isolated/paired.test.ts)增真实默认坏 Store、正式 Native 的 `file_recovery` 准入失败、诊断交接、原文件保持及外部修复后的显式新启动，保原配对／双进程／过大帧／安全 unavailable 断言；原[启动帧](test/isolated/startup-frame.test.ts)与[共用装配](test/isolated/process-service.test.ts)仍分别核帧拒绝与清理所有权。新基线不执行旧数据迁移，不以泛化 Store 错误补造损坏或权限细分类；实际本机结果见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动诊断保存与明确重试)。
+
 验证入口：`bun test apps/service/test/isolated/`、`bun run --cwd apps/service typecheck`。测试绑定真实 loopback listener，通过实际 Worker 打开临时 SQLite profile。HTTP schema 是生成 Client 类型与 OpenAPI 的唯一来源；修改 schema owner 后重新生成，不手改生成文件。
 
 双 Service 测试共享同一 profile 和 Session。受控 Model 或权限 barrier 保持 live owner，另一 Service 接纳工作或取消；外部效果 ledger 核对每个 Tool Execution 只执行一次。切换订阅和延迟消费 replay 将断连与执行分开验证。跨宿主取消必须到达原 live AbortSignal；owner Service 关闭后，已接纳工作应在存活 Service 上推进。

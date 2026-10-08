@@ -279,6 +279,73 @@ test.skipIf(process.platform !== 'darwin')(
       expect(readFileSync(join(home, 'old-user-data/old-database'), 'utf8')).toBe(
         'must remain independent',
       );
+      const diagnosticHome = join(root, 'diagnostic-home'),
+        diagnosticProfile = selectProfile({
+          dataRoot: join(diagnosticHome, '.kite-code/unified-agent'),
+          profile: 'default',
+        });
+      mkdirSync(diagnosticProfile.profilePath, { recursive: true, mode: 0o700 });
+      writeFileSync(
+        diagnosticProfile.databasePath,
+        'private-corrupt-database credential session-content',
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(diagnosticHome, 'existing.json'),
+        'existing file must not be overwritten',
+        { mode: 0o600 },
+      );
+      const diagnosticFixture = join(root, 'diagnostic-driver.ts');
+      writeFileSync(
+        diagnosticFixture,
+        readFileSync(
+          resolve(import.meta.dir, '../native-startup-diagnostic-electron.fixture.ts'),
+          'utf8',
+        ).replace(
+          "import { _electron } from 'playwright';",
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+        ),
+      );
+      const diagnosticBuild = await Bun.build({
+        entrypoints: [diagnosticFixture],
+        target: 'node',
+        format: 'esm',
+        packages: 'external',
+        outdir: root,
+        naming: 'diagnostic-driver.js',
+      });
+      expect(diagnosticBuild.success).toBe(true);
+      driver = Bun.spawn(
+        [
+          realpathSync(Bun.which('node')!),
+          join(root, 'diagnostic-driver.js'),
+          moved,
+          diagnosticHome,
+          provider.url.href.replace(/\/$/, ''),
+          diagnosticProfile.databasePath,
+        ],
+        {
+          cwd: diagnosticHome,
+          env: { HOME: diagnosticHome, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+          stdout: 'pipe',
+          stderr: 'pipe',
+          stdin: 'ignore',
+        },
+      );
+      const diagnosticOut = new Response(driver.stdout).text(),
+        diagnosticErr = new Response(driver.stderr).text(),
+        diagnosticTimer = setTimeout(() => driver!.kill('SIGKILL'), 20000);
+      try {
+        const code = await driver.exited,
+          stdout = await diagnosticOut,
+          stderr = await diagnosticErr;
+        if (code) console.error({ stdout, stderr });
+        else console.log(stdout);
+        expect(code).toBe(0);
+      } finally {
+        clearTimeout(diagnosticTimer);
+      }
+      expect(requests).toBe(3);
       expect(verifyNativeRuntimeBundle(moved).digest).toBe(built.digest);
     } finally {
       if (driver && driver.exitCode === null) {

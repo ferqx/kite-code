@@ -4,16 +4,34 @@ import {
   type NativeEvent,
   type NativeReply,
   type NativeRequest,
+  type NativeStartupBridge,
+  type NativeStartupReply,
   type NativeThemeBridge,
   type NativeWindowBridge,
   nativeChannel,
   nativeClipboardChannel,
   nativeEventChannel,
+  nativeStartupDiagnosticSaveChannel,
+  nativeStartupStatusChannel,
   nativeThemeChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 
-const bridge: NativeBridge & NativeThemeBridge & NativeWindowBridge = {
+const bridge: NativeBridge & NativeThemeBridge & NativeWindowBridge & NativeStartupBridge = {
+  async startupStatus() {
+    const reply = (await ipcRenderer.invoke(nativeStartupStatusChannel)) as NativeStartupReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (typeof reply.value === 'boolean') throw Error('invalid_native_startup_status');
+    return reply.value;
+  },
+  async saveStartupDiagnostic() {
+    const reply = (await ipcRenderer.invoke(
+      nativeStartupDiagnosticSaveChannel,
+    )) as NativeStartupReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (typeof reply.value !== 'boolean') throw Error('invalid_native_startup_save_result');
+    return reply.value;
+  },
   async writeClipboardText(text) {
     const reply = (await ipcRenderer.invoke(nativeClipboardChannel, { text })) as NativeReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });

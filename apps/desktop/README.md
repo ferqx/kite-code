@@ -14,9 +14,19 @@
 
 [NativeStartup](src/native-startup.tsx)迁入原 kite-desktop 的启动页布局、[图标](app-icon.svg)和[启动样式](src/native-startup.css)，按钮仍用原共享 Button。[正式入口](src/native.tsx)先完成现有 Main 的 attach 与首屏完整 Workspace／Session 目录观察，再显示原 SessionPage；尚未核实的目录不能进入，空目录与未配置模型可以进入处理。没有人为最短停留时间，不另建服务或执行路径。
 
-初始化失败保留启动页、公开错误分类和明确“重新尝试”。同步状态阻止重复点击；每次重试撤销旧观察、所属历史读取和旧 generation，迟到响应不能覆盖新的目录。Main 的 detach 只释放读取与选择，不停止 Service、Run 或重发业务。进入主界面后连接或目录读取失败保留原页面与草稿，不重新遮挡。缺 preload bridge 时沿同一启动页说明资源错误，不提供不能执行的重试。现有 Main 没有原“保存诊断”端口，本片不宣称该安装恢复能力已迁入。
+初始化失败保留启动页、公开错误分类和明确“重新尝试”。同步状态阻止重复点击；每次重试撤销旧观察、所属历史读取和旧 generation，迟到响应不能覆盖新的目录。Main 的 detach 只释放读取与选择，不停止 Service、Run 或重发业务。进入主界面后连接或目录读取失败保留原页面与草稿，不重新遮挡。缺 preload bridge 时沿同一启动页说明资源错误，不提供不能执行的重试。原“保存诊断”现已接回，范围见下节；完整安装恢复仍按原方案验收。
 
 [启动 DOM](test/isolated/native-startup-dom.test.tsx)沿实际 NativeDesktop 核首次等待、未核目录、空项目／无模型、两类失败、重复重试、旧响应隔离和进入后草稿保持；同轮原新对话／草稿／安排任务测试保业务断言。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)核编译启动样式及首次／冷启动完成后进入原页面，保原任务、审批、冷读与退出；实际窗口不代证初始化失败矩阵。代码输入、执行结果及剩余迁移归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)，完整 PC、安装恢复及阶段退出仍按原方案核对。
+
+## 原启动诊断保存
+
+原 [saveStartupDiagnosticReport](electron/startup-report.ts) 从 kite-desktop 逐字迁入，原两项[保存测试](test/startup-report.test.ts)只调整 owner import。Service 的真实 Store 打开失败产生闭合 `data_unavailable/opening_store`，配对启动准入失败在关闭所属 child 后把有效诊断交给 [Main](electron/main.ts)。没有有效 Service 诊断的通用连接、资源或目录错误不显示保存按钮；重试清除前次诊断，进入主界面不保留该启动操作。诊断协议与报告生成归 [Service owner](../service/README.md)，不导入旧 runtime，也不恢复旧数据迁移。
+
+[preload](electron/preload.ts) 固定提供 `startupStatus/saveStartupDiagnostic`；[IPC](electron/native-ipc.ts) 只接受无 payload 的两个固定端口，核当前窗口、准确主 frame 和 renderer URL，不打开业务 caller。renderer 只得到可保存与保存结果，不接收报告、路径或任意文件写权限。Main 复用原系统保存对话框、JSON filter 和默认文件名，只有用户选定新路径后才以 `wx/0600` 写入。取消不写，已有文件不覆盖；保存失败沿原启动页说明选择新的文件名重试，不把 OS 异常正文或路径送回页面。对话框等待后重新核 frame、当前窗口和捕获报告，重试或退出撤销旧保存资格。
+
+报告保原 `kite.startup-diagnostic.v1` JSON 形状、缩进及固定处理提示，只记录当前真实错误分类与准备阶段；没有有效的存储格式号诊断，`actualSchema/expectedSchema` 均为 null，不推断损坏类型或旧格式迁移。原 [NativeStartup](src/native-startup.tsx) 的保存按钮／错误提示与明确重试沿当前 [NativeDesktop](src/native.tsx) 接入。保存和读取诊断不发送任务、不修改原 Store。
+
+[闭合诊断](../service/test/startup-diagnostic.test.ts)、[实际配对失败与重试](../service/test/isolated/paired.test.ts)、[Main 保存资格](test/native-startup-ipc.test.ts)和[启动 DOM](test/isolated/native-startup-dom.test.tsx)分别核 producer、交接、无 payload／迟到 frame 与报告变化、原页面及固定失败提示。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)保已有任务／冷读／退出断言，再以同一不可变候选运行[诊断 driver](test/native-startup-diagnostic-electron.fixture.ts)：真实坏 Store、原保存入口、取消／已有文件／新 JSON、原坏文件保持、外部修复后同窗口明确重试和零 Model。只有 OS 对话框的选路径 callback 被控制，不代证 OS 人工点击或所有存储故障分类；原 120秒整例预算保持，新增 driver 有界20秒，页面10秒。实际结果、输入和仍未验的完整恢复／平台范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动诊断保存与明确重试)。
 
 ## 原主题与窗口背景联动
 

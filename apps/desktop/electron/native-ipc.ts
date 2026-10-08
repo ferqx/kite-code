@@ -6,15 +6,19 @@ import {
   type NativeReply,
   type NativeRequest,
   type NativeResult,
+  type NativeStartupReply,
   type NativeThemePreference,
   nativeChannel,
   nativeClipboardChannel,
+  nativeStartupDiagnosticSaveChannel,
+  nativeStartupStatusChannel,
   nativeThemeChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 import { openEditor } from './editor';
 import { parseNativeMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
+import { saveStartupDiagnosticReport } from './startup-report';
 
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
@@ -678,6 +682,57 @@ export function registerNativeWindowIpc(options: {
   return () => {
     options.ipcMain.removeHandler(nativeClipboardChannel);
     options.ipcMain.removeHandler(nativeWindowMaximizeChannel);
+  };
+}
+
+/** Report content and destination remain Main-owned; no business caller is opened. */
+export function registerNativeStartupIpc(options: {
+  ipcMain: IpcMain;
+  window: () => BrowserWindow | undefined;
+  rendererUrl: string;
+  report: () => string | null;
+  pickPath: (window: BrowserWindow) => Promise<string | null>;
+  write: (path: string, report: string) => Promise<void>;
+}) {
+  options.ipcMain.handle(
+    nativeStartupStatusChannel,
+    (event, payload: unknown): NativeStartupReply => {
+      try {
+        assertNativeSender(event, options.window(), options.rendererUrl);
+        if (payload !== undefined) throw Error('invalid_native_request');
+        return { ok: true, value: { diagnosticAvailable: options.report() !== null } };
+      } catch {
+        return { ok: false, code: 'native_startup_status_unavailable' };
+      }
+    },
+  );
+  options.ipcMain.handle(
+    nativeStartupDiagnosticSaveChannel,
+    async (event, payload: unknown): Promise<NativeStartupReply> => {
+      try {
+        const window = options.window();
+        assertNativeSender(event, window, options.rendererUrl);
+        if (payload !== undefined) throw Error('invalid_native_request');
+        const report = options.report();
+        const saved = await saveStartupDiagnosticReport(
+          report,
+          () => options.pickPath(window!),
+          async (path, content) => {
+            assertNativeSender(event, options.window(), options.rendererUrl);
+            if (options.window() !== window || options.report() !== report)
+              throw Error('native_startup_diagnostic_changed');
+            await options.write(path, content);
+          },
+        );
+        return { ok: true, value: saved };
+      } catch {
+        return { ok: false, code: 'native_startup_diagnostic_save_failed' };
+      }
+    },
+  );
+  return () => {
+    options.ipcMain.removeHandler(nativeStartupStatusChannel);
+    options.ipcMain.removeHandler(nativeStartupDiagnosticSaveChannel);
   };
 }
 

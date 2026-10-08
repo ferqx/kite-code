@@ -13,6 +13,7 @@ import { type ConfigureProcessHost, type PrivateStartup, privateStartupSchema } 
 import { createDefaultProcessConfiguration, type ShellConfigurationOptions } from './configuration';
 import { startService } from './index';
 import { runtimeProtectionRoots, verifyRuntimeProtection } from './runtime-protection';
+import { encodeServiceStartupDiagnostic } from './startup-diagnostic';
 
 type ProcessResources = {
   runtime?: ReturnType<typeof createRuntime>;
@@ -143,6 +144,9 @@ export async function assembleProcessService(
   } catch {
     // Safe diagnostic HTTP survives Store failure; no replacement empty Store.
     process.stderr.write(`${JSON.stringify({ code: 'data_unavailable' })}\n`);
+    process.stderr.write(
+      encodeServiceStartupDiagnostic({ code: 'data_unavailable', stage: 'opening_store' }),
+    );
   }
   if (store) {
     try {
