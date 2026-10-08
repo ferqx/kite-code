@@ -8,6 +8,8 @@
 
 原 [FileChanges／FileDiff](src/desktop/FileChanges.tsx)公开给宿主复用，`renderDetail` 只在展开项挂载、`loading` 表示宿主读取状态；原 messages／openFile 缺省展示保持。SessionPage 的 `fileChangesContent` 接原“文件变更”入口，关闭即卸载宿主内容；会话工具与文件变更切换先关闭原面板，各用途保独立 RightSidebar 身份，栏宽跟随总体开关。实际文件回执、读取释放和编辑器目标校验归 [Desktop owner](../../apps/desktop/README.md#原文件变更面板与编辑器)，此层不取得文件或执行权限。
 
+原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
+
 [ModelEffortSelector](src/desktop/ModelEffortSelector.tsx)复用原双栏浮层与 [GemSlider](src/desktop/GemSlider.tsx)。宿主可传准确 `ModelOption.id` 与 `reasoningEffortChoices`；选择、列表键和当前标记按 ID 区分，同一提供商内同名模型补显示 ID。滑块只映射实际支持的正向档位；一档用按钮，零档不造滑块。显式回调提供「配置默认」，`none` 仅在实际 choices 包含它时提供关闭入口。未传新字段的原调用者保持原提供商/名称与六档展示契约。三个[原浮层回归](test/isolated/model-effort.test.tsx)迁回新 owner；准确路由、稀疏档位和实际窗口由 Desktop 验证。
 
 [Desktop 构建](scripts/build-desktop.ts)在普通 workspace 与源码外候选中均输出实际 desktop/index.js 和原样 desktop/style.css，补齐新增 exports；Native renderer 编译 CSS/字体并纳入原递归 manifest。[原页面测试](test/desktop-page.test.tsx)迁回原 12 项展示断言。正式 macOS 窗口、原身份读写和剩余旧页面迁移范围由 Desktop owner 维护。

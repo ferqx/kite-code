@@ -24,7 +24,9 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  MessageContent,
   SessionPage,
+  ToolRow,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
@@ -45,6 +47,8 @@ import { NativeContextView } from './native-context';
 import { useNativeEnvironment } from './native-environment';
 import { NativeFileChanges } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
+import { useNativeFileTargets } from './native-file-targets';
+import { NativeGeneralSettings } from './native-general-settings';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
@@ -450,6 +454,14 @@ export function NativeDesktop() {
   const childDetail = environment.child,
     childFacts = childDetail?.facts,
     childMessages = childFacts ? desktopMessages(childFacts.messages) : [];
+  const fileTargets = useNativeFileTargets({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    selection: !preparing && !scheduledTasksView && !childDetail ? selection : undefined,
+    historyEpoch: state?.historyEpoch ?? 0,
+    messages,
+    includeRead: true,
+  });
   if (!bridge) return <p>原生桥不可用。此页面不连接替代服务器。</p>;
   async function write(action: () => Promise<unknown>, requiresHistory = true) {
     if (
@@ -1600,6 +1612,11 @@ export function NativeDesktop() {
             <ModelOutputMessage
               message={message}
               storeId={selection!.storeId}
+              renderText={
+                message.contentFormat === 'unsupported'
+                  ? undefined
+                  : (text) => <MessageContent text={text} />
+              }
               onRead={
                 snapshot
                   ? async ({ signal }) => {
@@ -1631,11 +1648,69 @@ export function NativeDesktop() {
           );
         const message = messagesById.get(model.id);
         if (!message || !selection || !state) return null;
+        const openable =
+          !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
+        const target = fileTargets.entries.find((entry) => entry.messageId === message.id);
+        if (target?.path && target.operation)
+          return (
+            <ToolRow
+              message={{
+                id: message.id,
+                role: 'tool',
+                text: '',
+                settled: true,
+                toolName: { read: 'read_file', write: 'write_file', edit: 'edit_file' }[
+                  target.operation
+                ],
+                arguments: { path: target.path },
+                status: 'completed',
+              }}
+              openFile={
+                openable && target.openable
+                  ? () =>
+                      void report(() =>
+                        bridge.request({
+                          method: 'fileChanges.open',
+                          generation: state.generation,
+                          changeId: target.changeId,
+                          editor,
+                        }),
+                      )
+                  : undefined
+              }
+            />
+          );
         return (
           <ModelOutputMessage
             key={`${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${message.id}`}
             message={message}
             storeId={selection.storeId}
+            renderText={
+              message.contentFormat === 'unsupported'
+                ? undefined
+                : (text) => (
+                    <MessageContent
+                      text={text}
+                      openFile={
+                        openable
+                          ? (path) =>
+                              void report(() =>
+                                bridge.request({
+                                  method: 'messageFile.open',
+                                  generation: state.generation,
+                                  viewSelection:
+                                    selection.viewSelection ?? selection.viewGeneration,
+                                  historyEpoch: state.historyEpoch ?? 0,
+                                  messageId: message.id,
+                                  path,
+                                  editor,
+                                }),
+                              )
+                          : undefined
+                      }
+                    />
+                  )
+            }
             onRead={
               selection.canReadModelOutput
                 ? async ({ sessionId, executionId, signal }) => {
@@ -1663,6 +1738,12 @@ export function NativeDesktop() {
       }}
       notices={
         <>
+          {fileTargets.error && (
+            <p role="alert">
+              {fileTargets.error}{' '}
+              <DesktopButton onClick={fileTargets.retry}>重新读取文件路径</DesktopButton>
+            </p>
+          )}
           {removingWorkspace &&
             state?.workspaceRemovalSubmissions?.some(
               (r) => r.phase === 'submitting' && r.label === removingWorkspace,
@@ -2193,27 +2274,15 @@ export function NativeDesktop() {
                   )}
 
                   {settingsPage === 'general' ? (
-                    <section aria-label="常规设置">
-                      <h2>常规</h2>
-                      <h3>文件与模型</h3>
-                      <div className="settings-card">
-                        <label className="settings-row">
-                          <span>
-                            <strong>默认文件打开位置</strong>
-                            <small>选择打开项目文件的应用；本次运行期间生效</small>
-                          </span>
-                          <select
-                            aria-label="默认编辑器"
-                            value={editor}
-                            onChange={(event) => setEditor(event.target.value as DesktopEditor)}
-                          >
-                            <option value="vscode">VS Code</option>
-                            <option value="zed">Zed</option>
-                            <option value="textedit">TextEdit</option>
-                          </select>
-                        </label>
-                      </div>
-                    </section>
+                    <NativeGeneralSettings
+                      bridge={bridge}
+                      generation={generation.current}
+                      storeId={directory?.storeId}
+                      selection={!preparing ? selection : undefined}
+                      revision={settingsRevision}
+                      editor={editor}
+                      onEditorChange={setEditor}
+                    />
                   ) : settingsPage === 'skills' ? (
                     <NativeSkillsSettings
                       bridge={bridge}

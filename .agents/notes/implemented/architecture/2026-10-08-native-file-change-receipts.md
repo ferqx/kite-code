@@ -14,13 +14,17 @@ Native Main 沿已读 Message 的唯一 source Execution，核原 Store/Session/
 
 两个侧栏入口切换时关闭原 host 面板，并按用途区分 RightSidebar 组件身份，避免保留旧 Tabs 选择；栏宽只跟随当前右栏总体开关，不在 host 面板关闭时误折叠接续的文件面板。Native 内容拥有 GET，关闭即卸载；旧纯展示内容的保留规则不扩大为隐藏读取。
 
+消息中的普通 Markdown 文件路径继续迁入原 MessageContent 回调，经当前已读 Message、独立 viewSelection/history epoch 和登记 Workspace 绑定，允许有限 UTF-8 路径与封闭编辑器枚举；Main 不接受 renderer 的根或应用名，复核项目内普通目标、保护目录、源 Workspace 和派发前 frame。这只命名当前文件，不形成工具成功或历史贡献证明。真实 Files read/write/edit 的消息行另沿准确原 Execution/结果资格取得观察 ID，完整历史不依赖 View 近200项；双消费者扫描同一完整原结果保持观察 ID，实际 scope/root/结果/来源变化才替换。正文 slot 只改变同一预览或已验证全文的展示，原 EOF/身份/字节/关闭门禁保持。
+
+原常规卡显示准确作用域配置默认，不复用临时会话选择或活动 Model 快照；消息切换和设置关闭只释放各自 GET。新对话准备页沿已有用户配置读取，所选主会话沿当前项目配置读取；没有增加私有存储或恢复格式。
+
 ## Alternatives considered
 
 - 重新读取当前文件或 Git diff：没有原操作前像，独立编辑与后续修改会污染历史；未采用。
 - 用恢复检查点生成差异：首/末快照不能表达每次中间操作；恢复与贡献阅读的身份范围不同；未采用。
 - 从模型参数/工具名推断路径和 diff：不能证明实际派发与成功，也不能排除同名 call 或 MCP 伪相似输出；未采用。
 - 给 Message 增加另一套 Execution 关联或专用文件字段：已有通用 sourceIds/result.details 可准确关联，不需要重复身份字段或格式升级；未采用。
-- renderer 直接传根、路径和应用名：超出原项目阅读范围，不能复核观察来源；沿有限 ID 和现有固定应用 leaf 处理。
+- File receipt 按钮接受 renderer 任意根、路径和应用名：会替换已确认操作的目标且不能复核观察来源；该入口继续沿有限 ID 和现有固定应用 leaf 处理。
 - 新建面板/编辑器 UI 或继续依赖旧 Runtime workspace：违背已确认的原 PC 复用目标，并产生另一条执行链；直接迁入原组件与中立 leaf。
 
 ## Consequences

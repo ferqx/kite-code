@@ -23,6 +23,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 [PC 文件变更迁移](../apps/desktop/README.md#原文件变更面板与编辑器)沿原完整 Native 窗口夹具新增文件侧栏、编辑器选择、关闭与冷读断言；默认 Service 真实 Files 回执来自原本机 Provider fixture，不替换 Main/preload/renderer。另由 Files 的 change-preview、Native 的 file-changes 端口和隔离 DOM 文件验证实际 pre/post、精确关联、原 UI 入口与读取释放；端口 callback 不冒充 OS 编辑器窗口，窗口按钮不冒充完整安装／跨平台资格。实际运行与失败归同一[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原文件变更与编辑器入口迁入)。
 
+原 PC 消息路径与常规摘要沿同一 Native 整窗口核首次／冷读、真实缺失文件拒绝、默认配置与 Provider 次数保持；隔离 original-entries DOM 核准确作用域、临时选择分离和原 Markdown 的预览／全文／关闭，文件端口另核已观察 Message、普通目标与派发前 frame。完整证据与未实际启动 OS 编辑器的边界归 [Native owner](../apps/desktop/README.md#原消息文件路径与常规摘要)。
+
 ## 默认执行与隔离
 
 根 `test`、`test:all` 和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)。它只发现上述当前 owner 与有限的 root 脚本安全列表，不扩展到整个旧 integration/qualification/release/e2e/golden/TUI 树。纯 `--list` 不创建 Profile、Provider 或子进程。

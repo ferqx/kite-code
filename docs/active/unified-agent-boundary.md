@@ -12,6 +12,8 @@ Extension 的业务 Context 贡献只接收 scoped read projections，Core 检�
 
 文件变更阅读继续沿原 Message 的唯一 source Execution 和准确原 Run/Store/结果 revision，不以 tool call 名称或模型参数关联。普通 Files 可保存有版本的中立 `details.fileChange`，由实际已验证 preimage 与确认 postimage 生成；只限展示预算，不改完整文件或 Model 内容合同。Main 只给当前已读 scope 的成功 File receipt 建立有限观察，缺预览明确不可读；恢复检查点和当前磁盘不是历史 diff 的替代来源。编辑器跳转另核当前登记项目的物理根、目标普通文件和原 frame，不从历史来源继承另一 Workspace 的文件范围。当前实现与证据见 [Files owner](../../packages/agent/src/tools/files/README.md#逐操作文件变更预览)和 [Native owner](../../apps/desktop/README.md#原文件变更面板与编辑器)。Core、生成 HTTP schema 与私有 UI 数据格式均保持。
 
+Native 消息路径仍受当前已读 Message／viewSelection／history epoch 与登记 Workspace 约束，封闭应用枚举和项目内普通文件由 Main 复核；一般 Markdown 路径只命名当前文件，不生成 File receipt／贡献证明。真实 Files 的工具行路径另由原 Execution 定义与成功结果核实，旧完整历史不依赖有界 View 执行列表。原组件接入与配置默认摘要归 [Native owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，生成 API、Core 和私有存储格式保持。
+
 读取时机：修改新 Agent 的 Store/执行/模型接口、目标 HTTP schema、跨包依赖或过渡调用者时。
 
 验证：`bun run test:unified-agent`、`bun run check:unified-agent-boundary`，实际运行范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。

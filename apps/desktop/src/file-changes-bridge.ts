@@ -13,6 +13,7 @@ export type NativeFileChange = {
   path?: string;
   preview: 'available' | 'unavailable';
   openable: boolean;
+  operation?: 'read' | 'write' | 'edit';
 };
 export type NativeFileChangePage = {
   kind: 'fileChanges.page';
@@ -26,6 +27,9 @@ export type NativeFileChangeDetail = {
   text?: string;
   truncated?: boolean;
 };
+export type NativeFileTargetPage = Omit<NativeFileChangePage, 'kind'> & {
+  kind: 'fileTargets.page';
+};
 export type NativeFileChangeRequest =
   | {
       method: 'fileChanges.list';
@@ -35,6 +39,23 @@ export type NativeFileChangeRequest =
       readId: string;
       messageIds: string[];
     }
+  | {
+      method: 'fileTargets.list';
+      generation: number;
+      viewSelection: number;
+      historyEpoch: number;
+      readId: string;
+      messageIds: string[];
+    }
   | { method: 'fileChanges.detail'; generation: number; changeId: string; readId: string }
   | { method: 'fileChanges.close'; generation: number; readId: string }
-  | { method: 'fileChanges.open'; generation: number; changeId: string; editor: DesktopEditor };
+  | { method: 'fileChanges.open'; generation: number; changeId: string; editor: DesktopEditor }
+  | {
+      method: 'messageFile.open';
+      generation: number;
+      viewSelection: number;
+      historyEpoch: number;
+      messageId: string;
+      path: string;
+      editor: DesktopEditor;
+    };

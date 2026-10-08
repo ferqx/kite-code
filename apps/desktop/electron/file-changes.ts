@@ -15,6 +15,7 @@ import type {
   NativeFileChangeDetail,
   NativeFileChangePage,
   NativeFileChangeScope,
+  NativeFileTargetPage,
 } from '../src/file-changes-bridge';
 import { editorFileTarget } from './editor';
 
@@ -126,7 +127,7 @@ export class NativeFileChanges {
     this.reads.set(readId, lease);
     return lease;
   }
-  private async receipt(lease: Lease, message: Message) {
+  private async receipt(lease: Lease, message: Message, includeRead = false) {
     this.check(lease);
     if (
       message.role !== 'tool' ||
@@ -154,7 +155,8 @@ export class NativeFileChanges {
       throw new ClientError('file_change_identity_mismatch');
     const result = object(execution.result);
     return execution.kind === 'tool' &&
-      ['files.write', 'files.edit'].includes(execution.definitionId) &&
+      (['files.write', 'files.edit'].includes(execution.definitionId) ||
+        (includeRead && execution.definitionId === 'files.read')) &&
       execution.status === 'succeeded' &&
       result?.outcome === 'succeeded' &&
       result.content === message.content
@@ -202,12 +204,15 @@ export class NativeFileChanges {
       return false;
     }
   }
-  async list(input: {
-    readId: string;
-    messageIds: string[];
-    viewSelection: number;
-    historyEpoch: number;
-  }): Promise<NativeFileChangePage> {
+  async list(
+    input: {
+      readId: string;
+      messageIds: string[];
+      viewSelection: number;
+      historyEpoch: number;
+    },
+    includeRead = false,
+  ): Promise<NativeFileChangePage | NativeFileTargetPage> {
     if (
       input.messageIds.length < 1 ||
       input.messageIds.length > 32 ||
@@ -230,7 +235,7 @@ export class NativeFileChanges {
       for (const id of input.messageIds) {
         const message = this.message(id);
         if (!message) throw new ClientError('file_change_message_unavailable');
-        const execution = await this.receipt(lease, message);
+        const execution = await this.receipt(lease, message, includeRead);
         if (!execution) continue;
         const facts = resultFacts(execution),
           changeId = randomUUID();
@@ -242,6 +247,7 @@ export class NativeFileChanges {
             preview: facts.preview ? 'available' : 'unavailable',
             // Reading Fork provenance does not bind another physical Workspace.
             openable: !!root && !!facts.path && (await this.sameWorkspace(lease, message)),
+            operation: execution.definitionId.slice('files.'.length) as 'read' | 'write' | 'edit',
           },
           scope: lease.scope,
           message: structuredClone(message),
@@ -250,14 +256,39 @@ export class NativeFileChanges {
           root,
         };
         const previous = this.byMessage.get(message.id);
-        if (previous) this.entries.delete(previous);
-        this.byMessage.set(message.id, changeId);
-        this.entries.set(changeId, entry);
-        entries.push({ ...entry.public });
+        const original = previous ? this.entries.get(previous) : undefined;
+        // Two retained UI consumers may read the same immutable receipt. Keep its observation stable.
+        if (
+          original &&
+          original.resultRevision === entry.resultRevision &&
+          original.executionId === entry.executionId &&
+          original.message.content === entry.message.content &&
+          original.message.runId === entry.message.runId &&
+          JSON.stringify(original.message.originMessage) ===
+            JSON.stringify(entry.message.originMessage) &&
+          original.public.path === entry.public.path &&
+          original.public.preview === entry.public.preview &&
+          original.public.openable === entry.public.openable &&
+          original.public.operation === entry.public.operation &&
+          JSON.stringify(original.scope) === JSON.stringify(entry.scope) &&
+          JSON.stringify(original.root) === JSON.stringify(entry.root)
+        ) {
+          entries.push({ ...original.public });
+        } else {
+          if (previous) this.entries.delete(previous);
+          this.byMessage.set(message.id, changeId);
+          this.entries.set(changeId, entry);
+          entries.push({ ...entry.public });
+        }
       }
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
-      return { kind: 'fileChanges.page', readId: input.readId, scope: { ...scope }, entries };
+      return {
+        kind: includeRead ? 'fileTargets.page' : 'fileChanges.page',
+        readId: input.readId,
+        scope: { ...scope },
+        entries,
+      };
     } finally {
       this.close(input.readId);
     }
@@ -280,7 +311,7 @@ export class NativeFileChanges {
   private async original(lease: Lease, entry: Entry) {
     await this.client.verifyConnection({ signal: lease.abort.signal });
     this.check(lease);
-    const execution = await this.receipt(lease, entry.message);
+    const execution = await this.receipt(lease, entry.message, true);
     if (
       !execution ||
       execution.id !== entry.executionId ||
@@ -341,6 +372,66 @@ export class NativeFileChanges {
         throw new ClientError('file_editor_target_unavailable');
       this.check(lease);
       await perform(editor, target);
+    } finally {
+      this.close(lease.readId);
+    }
+  }
+  /** A clicked Markdown path names a current project file; it is not a file-change receipt. */
+  async openMessageFile(
+    input: {
+      messageId: string;
+      path: string;
+      editor: DesktopEditor;
+      viewSelection: number;
+      historyEpoch: number;
+    },
+    perform: (editor: DesktopEditor, path: string) => Promise<void>,
+  ) {
+    const scope = this.current();
+    if (
+      !scope ||
+      scope.viewSelection !== input.viewSelection ||
+      scope.historyEpoch !== input.historyEpoch
+    )
+      throw new ClientError('native_selection_changed');
+    const message = this.message(input.messageId);
+    if (
+      !message ||
+      message.sessionId !== scope.sessionId ||
+      message.contentFormat === 'unsupported' ||
+      (message.originMessage && message.originMessage.storeId !== scope.storeId)
+    )
+      throw new ClientError('file_change_message_unavailable');
+    if (!['vscode', 'zed', 'textedit'].includes(input.editor))
+      throw new ClientError('invalid_native_request');
+    const lease = this.begin(randomUUID(), scope);
+    try {
+      await this.client.verifyConnection({ signal: lease.abort.signal });
+      this.check(lease);
+      const root = await this.root(lease);
+      if (!root || !(await this.sameWorkspace(lease, message)))
+        throw new ClientError('file_editor_target_unavailable');
+      await this.client.verifyConnection({ signal: lease.abort.signal });
+      this.check(lease);
+      let target: string;
+      try {
+        const current = statSync(root.path, { bigint: true });
+        if (String(current.dev) !== root.device || String(current.ino) !== root.inode)
+          throw new ClientError('workspace_directory_unavailable');
+        target = editorFileTarget(root.path, input.path);
+      } catch (cause) {
+        if (cause instanceof ClientError) throw cause;
+        throw new ClientError('file_editor_target_unavailable');
+      }
+      if (
+        this.protectedRoots.some((root) => {
+          const path = relative(root, target);
+          return !isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`);
+        })
+      )
+        throw new ClientError('file_editor_target_unavailable');
+      this.check(lease);
+      await perform(input.editor, target);
     } finally {
       this.close(lease.readId);
     }

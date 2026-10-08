@@ -118,7 +118,10 @@ test.skipIf(process.platform !== 'darwin')(
                       },
                     ],
                   }
-                : { content: 'bundled complete' },
+                : {
+                    content:
+                      'bundled complete\n\n[查看文件](bundled.txt) [查看缺失文件](missing.txt)',
+                  },
               null,
             ) +
               frame({}, call ? 'tool_calls' : 'stop') +

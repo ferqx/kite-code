@@ -1,5 +1,5 @@
 import { ClientError, type Message, type ModelOutputSnapshot } from '@kite-ai/client';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { SafeMessageMarkdown } from './markdown';
 
 export interface ModelOutputMessageProps {
@@ -15,6 +15,8 @@ export interface ModelOutputMessageProps {
   }) => Promise<ModelOutputSnapshot>;
   /** Current rendered full content only; undefined means the original explicitly labeled preview. */
   readonly onContent?: (content: string | undefined) => void;
+  /** Host presentation of the same preview or verified body; reading semantics stay here. */
+  readonly renderText?: (content: string) => ReactNode;
 }
 /** Only current-view full-body state. The host reader verifies complete wire EOF/hash before resolving. */
 export function ModelOutputMessage({
@@ -24,6 +26,7 @@ export function ModelOutputMessage({
   showReasoning = false,
   onRead,
   onContent,
+  renderText,
 }: ModelOutputMessageProps) {
   const body = message.outputBody;
   const identity = JSON.stringify([
@@ -133,13 +136,19 @@ export function ModelOutputMessage({
       }
     }
   }
+  const render = (content: string) =>
+    renderText ? (
+      <div className="message-markdown">{renderText(content)}</div>
+    ) : (
+      <SafeMessageMarkdown content={content} />
+    );
   if (!body)
     return (
       <>
         {message.contentFormat === 'unsupported' && (
           <p>Unsupported content format · original preview preserved</p>
         )}
-        <SafeMessageMarkdown content={message.content} />
+        {render(message.content)}
       </>
     );
   return (
@@ -153,7 +162,7 @@ export function ModelOutputMessage({
             ? 'Model output preview · full body not loaded'
             : 'Incomplete Model output preview · recorded prefix not loaded'}
       </p>
-      <SafeMessageMarkdown content={full?.output.content ?? message.content} />
+      {render(full?.output.content ?? message.content)}
       {!full && (
         <button
           type="button"

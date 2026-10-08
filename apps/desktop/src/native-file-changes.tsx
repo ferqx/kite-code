@@ -1,12 +1,13 @@
 import type { Message } from '@kite-ai/client';
 import { Button, type Message as DesktopMessage, FileChanges, FileDiff } from '@kite-ai/ui/desktop';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   DesktopEditor,
   NativeFileChange,
   NativeFileChangeDetail,
 } from './file-changes-bridge';
 import type { NativeBridge, NativeSelection } from './native-bridge';
+import { useNativeFileTargets } from './native-file-targets';
 
 function ChangeDetail({
   bridge,
@@ -124,104 +125,14 @@ export function NativeFileChanges({
   historyComplete: boolean;
   editor: DesktopEditor;
 }) {
-  const viewSelection = selection.viewSelection ?? selection.viewGeneration;
-  const scope = JSON.stringify([
-    generation,
-    selection.storeId,
-    selection.session.id,
-    viewSelection,
-    historyEpoch,
-  ]);
-  const candidates = messages.filter(
-    (message) =>
-      message.role === 'tool' && message.status === 'complete' && message.sourceIds?.length === 1,
-  );
-  const ids = candidates.map((message) => message.id).join(',');
-  const [revision, setRevision] = useState(0);
-  const cache = useRef({
-    scope,
-    revision,
-    read: new Set<string>(),
-    entries: new Map<string, NativeFileChange>(),
-  });
-  const [state, setState] = useState<{
-    scope: string;
-    entries: NativeFileChange[];
-    loading: boolean;
-    error?: string;
-  }>({ scope, entries: [], loading: true });
-  useEffect(() => {
-    if (cache.current.scope !== scope || cache.current.revision !== revision)
-      cache.current = { scope, revision, read: new Set(), entries: new Map() };
-    const current = cache.current;
-    let active = true,
-      readId: string | undefined;
-    const publish = (loading: boolean, error?: string) =>
-      setState({ scope, entries: [...current.entries.values()], loading, error });
-    publish(true);
-    void (async () => {
-      const pending = ids ? ids.split(',').filter((id) => !current.read.has(id)) : [];
-      for (let index = 0; index < pending.length; index += 32) {
-        const batch = pending.slice(index, index + 32);
-        readId = crypto.randomUUID();
-        const page = await bridge.request({
-          method: 'fileChanges.list',
-          generation,
-          viewSelection,
-          historyEpoch,
-          readId,
-          messageIds: batch,
-        });
-        if (!active) return;
-        if (
-          !page ||
-          !('entries' in page) ||
-          !('kind' in page) ||
-          page.kind !== 'fileChanges.page' ||
-          page.readId !== readId ||
-          page.scope.generation !== generation ||
-          page.scope.storeId !== selection.storeId ||
-          page.scope.sessionId !== selection.session.id ||
-          page.scope.viewSelection !== viewSelection ||
-          page.scope.historyEpoch !== historyEpoch ||
-          page.scope.workspaceId !== selection.session.workspaceId ||
-          page.entries.some((entry) => !batch.includes(entry.messageId))
-        )
-          throw Error('file_change_identity_mismatch');
-        for (const id of batch) current.read.add(id);
-        for (const entry of page.entries) current.entries.set(entry.messageId, entry);
-        publish(true);
-      }
-      if (active) publish(false);
-    })().catch(() => {
-      if (active) publish(false, '部分工具记录目前不可读，尚无法确认全部文件操作。');
-    });
-    return () => {
-      active = false;
-      if (readId)
-        void bridge.request({ method: 'fileChanges.close', generation, readId }).catch(() => {});
-    };
-  }, [
-    bridge,
-    scope,
-    ids,
-    revision,
-    generation,
-    historyEpoch,
-    selection.storeId,
-    selection.session.id,
-    selection.session.workspaceId,
-    viewSelection,
-  ]);
-  const entries = state.scope === scope ? state.entries : [];
+  const targets = useNativeFileTargets({ bridge, generation, selection, historyEpoch, messages });
+  const entries = targets.entries;
   return (
     <>
-      {state.error && <p role="alert">{state.error}</p>}
-      {state.error && (
-        <Button onClick={() => setRevision((value) => value + 1)}>重新读取文件操作</Button>
-      )}
+      {targets.error && <p role="alert">{targets.error}</p>}
+      {targets.error && <Button onClick={() => targets.retry()}>重新读取文件操作</Button>}
       <FileChanges
-        loading={state.loading || !historyComplete}
+        loading={targets.loading || !historyComplete}
         messages={entries.map((entry) => ({
           id: entry.messageId,
           role: 'tool',

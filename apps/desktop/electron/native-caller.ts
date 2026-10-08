@@ -928,6 +928,15 @@ export class NativeCaller {
     await this.fileChanges.open(request.changeId, request.editor, perform);
     this.check(request.generation);
   }
+  async openMessageFile(
+    request: Extract<NativeRequest, { method: 'messageFile.open' }>,
+    perform: (editor: DesktopEditor, target: string) => Promise<void>,
+  ) {
+    await this.drainRefresh();
+    this.check(request.generation);
+    await this.fileChanges.openMessageFile(request, perform);
+    this.check(request.generation);
+  }
   async invoke(request: NativeRequest): Promise<NativeResult> {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
@@ -963,6 +972,7 @@ export class NativeCaller {
         'jobOutput.next',
         'jobOutput.close',
         'fileChanges.list',
+        'fileTargets.list',
         'fileChanges.detail',
         'fileChanges.close',
       ].includes(request.method)
@@ -979,6 +989,9 @@ export class NativeCaller {
       case 'fileChanges.list':
         result = await this.fileChanges.list(request);
         break;
+      case 'fileTargets.list':
+        result = await this.fileChanges.list(request, true);
+        break;
       case 'fileChanges.detail':
         result = await this.fileChanges.detail(request.changeId, request.readId);
         break;
@@ -987,6 +1000,7 @@ export class NativeCaller {
         result = null;
         break;
       case 'fileChanges.open':
+      case 'messageFile.open':
         throw new ClientError('native_host_operation_unavailable');
       case 'background.open':
         result = await background.open(request.readId);

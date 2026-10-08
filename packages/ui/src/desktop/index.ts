@@ -52,6 +52,7 @@ export {
   SheetTrigger,
 } from './components/ui/sheet';
 export { FileChanges, FileDiff } from './FileChanges';
+export { MessageContent } from './MessageContent';
 export {
   ModelEffortSelector,
   type ModelEffortSelectorProps,
@@ -67,5 +68,6 @@ export {
 export { SessionPage, type SessionPageProps } from './SessionPage';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
 export { statusLabel } from './status';
+export { ToolRow } from './ToolActivity';
 export type { Message, TurnActivity, WorkspaceSummary } from './types';
 export { Button } from './ui';

@@ -248,7 +248,7 @@ test('editor opening rechecks actual registered root identity, confines symlinks
     f.client.getView = (async (id: string) => ({
       storeId: 'store',
       session: { id, workspaceId: 'other' },
-    })) as AgentClient['getView'];
+    })) as unknown as AgentClient['getView'];
     await expect(f.manager.open(foreign.changeId, 'vscode', perform)).rejects.toMatchObject({
       code: 'file_editor_target_unavailable',
     });
@@ -304,18 +304,33 @@ test('closing a file read aborts only its GET and rejects a late result; mismatc
   }
 });
 
-test('finite editor IPC rejects renderer paths/apps and rechecks a replaced frame immediately before launch', async () => {
+test('finite editor IPC confines receipt and clicked Markdown targets and rechecks a replaced frame immediately before launch', async () => {
   const valid = {
     method: 'fileChanges.open',
     generation: 1,
     changeId: 'observed',
     editor: 'vscode',
   } as const;
+  const clicked = {
+    method: 'messageFile.open',
+    generation: 1,
+    viewSelection: 1,
+    historyEpoch: 0,
+    messageId: 'message',
+    path: 'space 雪.txt',
+    editor: 'vscode',
+  } as const;
   expect(decodeNativeRequest(valid)).toEqual(valid);
+  expect(decodeNativeRequest(clicked)).toEqual(clicked);
   for (const invalid of [
     { ...valid, path: '/arbitrary' },
     { ...valid, editor: '/bin/sh' },
     { ...valid, workspaceId: 'w' },
+    { ...clicked, root: '/arbitrary' },
+    { ...clicked, path: 'file:///outside' },
+    { ...clicked, path: 'line\nfile' },
+    { ...clicked, editor: '/bin/sh' },
+    { ...clicked, viewSelection: 0 },
     {
       method: 'fileChanges.list',
       generation: 1,
@@ -335,6 +350,13 @@ test('finite editor IPC rejects renderer paths/apps and rechecks a replaced fram
     replace = false;
   const caller = {
     async openChangedFile(
+      _request: unknown,
+      perform: (editor: 'vscode', target: string) => Promise<void>,
+    ) {
+      if (replace) contents.mainFrame = { url: frame.url };
+      await perform('vscode', '/qualified/file');
+    },
+    async openMessageFile(
       _request: unknown,
       perform: (editor: 'vscode', target: string) => Promise<void>,
     ) {
@@ -362,10 +384,97 @@ test('finite editor IPC rejects renderer paths/apps and rechecks a replaced fram
   try {
     expect(await handler(event, valid)).toEqual({ ok: true, value: null });
     expect(launches).toBe(1);
+    expect(await handler(event, clicked)).toEqual({ ok: true, value: null });
+    expect(launches).toBe(2);
     replace = true;
+    expect(await handler(event, clicked)).toEqual({ ok: false, code: 'native_sender_denied' });
+    contents.mainFrame = frame;
     expect(await handler(event, valid)).toEqual({ ok: false, code: 'native_sender_denied' });
-    expect(launches).toBe(1);
+    expect(launches).toBe(2);
   } finally {
     remove();
+  }
+});
+
+test('message file paths use the current registered project and original reading scope; old tool receipts remain linked after both consumers scan', async () => {
+  const f = fixture(),
+    opened: string[] = [];
+  const perform = async (editor: string, path: string) => {
+    opened.push(`${editor}:${path}`);
+  };
+  try {
+    f.add('read', 'files.read');
+    const first = (await f.list(['first'])).entries[0]!;
+    const targets = await f.manager.list(
+      { readId: 'inline', viewSelection: 1, historyEpoch: 0, messageIds: ['first', 'read'] },
+      true,
+    );
+    expect(targets.kind).toBe('fileTargets.page');
+    expect(targets.entries.map((entry) => entry.operation)).toEqual(['write', 'read']);
+    expect(targets.entries[0]!.changeId).toBe(first.changeId);
+    await f.manager.open(first.changeId, 'vscode', perform);
+    await f.manager.open(targets.entries[1]!.changeId, 'textedit', perform);
+    const message: Message = {
+      id: 'answer',
+      sessionId: 's',
+      runId: 'run',
+      seq: '7',
+      role: 'assistant',
+      status: 'complete',
+      content: `[file](${f.path})`,
+    };
+    f.messages.set(message.id, message);
+    const input = {
+      messageId: message.id,
+      path: f.path,
+      editor: 'zed' as const,
+      viewSelection: 1,
+      historyEpoch: 0,
+    };
+    await f.manager.openMessageFile(input, perform);
+    expect(opened).toEqual([
+      `vscode:${join(f.workspace, f.path)}`,
+      `textedit:${join(f.workspace, f.path)}`,
+      `zed:${join(f.workspace, f.path)}`,
+    ]);
+    for (const invalid of [
+      { ...input, messageId: 'unobserved' },
+      { ...input, historyEpoch: 1 },
+      { ...input, path: '../outside' },
+      { ...input, path: 'protected/file' },
+    ])
+      await expect(f.manager.openMessageFile(invalid, perform)).rejects.toThrow();
+    const outside = join(f.root, 'outside');
+    writeFileSync(outside, 'outside');
+    symlinkSync(outside, join(f.workspace, 'outside-link'));
+    await expect(
+      f.manager.openMessageFile({ ...input, path: 'outside-link' }, perform),
+    ).rejects.toMatchObject({ code: 'file_editor_target_unavailable' });
+    message.originMessage = {
+      storeId: 'store',
+      sessionId: 'other',
+      messageId: 'source',
+      runId: 'original',
+    };
+    f.client.getView = (async () => ({
+      storeId: 'store',
+      session: { id: 'other', workspaceId: 'foreign' },
+    })) as unknown as AgentClient['getView'];
+    await expect(f.manager.openMessageFile(input, perform)).rejects.toMatchObject({
+      code: 'file_editor_target_unavailable',
+    });
+    message.originMessage = undefined;
+    const verify = f.client.verifyConnection;
+    f.client.verifyConnection = async (options) => {
+      const result = await verify(options);
+      f.scope = { ...f.scope, viewSelection: 2 };
+      return result;
+    };
+    await expect(f.manager.openMessageFile(input, perform)).rejects.toMatchObject({
+      code: 'native_selection_changed',
+    });
+    expect(opened).toHaveLength(3);
+  } finally {
+    f.close();
   }
 });

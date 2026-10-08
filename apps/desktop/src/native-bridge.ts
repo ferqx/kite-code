@@ -34,6 +34,7 @@ import type {
   NativeFileChangeDetail,
   NativeFileChangePage,
   NativeFileChangeRequest,
+  NativeFileTargetPage,
 } from './file-changes-bridge';
 import type { InputMetadata, InputRequest } from './input';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
@@ -658,6 +659,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeFileTargetPage
   | NativeFileChangePage
   | NativeFileChangeDetail
   | NativeWorkspaceRemoval

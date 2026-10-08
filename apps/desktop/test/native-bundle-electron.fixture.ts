@@ -11,8 +11,18 @@ async function openSessionTools(page: import('playwright').Page) {
 }
 
 async function readOriginalFileChanges(page: import('playwright').Page) {
+  await page.getByRole('button', { name: 'bundled.txt', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '查看文件', exact: true }).count(), 1);
+  await page.getByRole('button', { name: '查看缺失文件', exact: true }).click();
+  const failure = page.getByRole('alertdialog');
+  await failure.waitFor();
+  assert.ok((await failure.textContent())!.includes('file_editor_target_unavailable'));
+  await failure.getByRole('button', { name: '确定', exact: true }).click();
+  assert.equal(await failure.count(), 0);
+  assert.equal(await (await fetch(`${control}/count`)).text(), '2');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('combobox', { name: '默认编辑器', exact: true }).waitFor();
+  await page.getByText('compatible · fixed', { exact: true }).waitFor();
   assert.equal(
     await page.getByRole('combobox', { name: '默认编辑器', exact: true }).inputValue(),
     'vscode',

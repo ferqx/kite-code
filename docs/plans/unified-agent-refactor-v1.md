@@ -2001,7 +2001,7 @@ x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销
 | 完整能力与整片独立审查 | Native MCP Chrome/default Vault 和默认后台 Shell 用户路径已有本机组合证据；全部适用 §35/T/E、参考功能/既有扩展/未见样本和整片独立审查仍须按原退出条件闭合，root 自检不替代独立审查。 |
 | 正式切换后的旧路径最终退役 | 前三项达到实际退出条件后完成必要 legacy 删除，并复验新基线兼容与完整回归；不能以当前无正式旧调用或全量 unit 通过提前宣布整体退出。 |
 
-macOS 安装版 PC 的目录缺失恢复入口现补一条有限证据：沿原 source 观察点暂停旧目录移出／journal 更新前，真实持锁和 SIGKILL 后的 installed Main／Service 均拒绝业务准入且不建空库；installed status／明确 complete 后同窗读回原 Session／新 Store，稳定锁及原目录数据保持。原 Core 七个窗口复用，未将安装版全中断矩阵或整个 R07／W19标为完成；故障 publisher 与实际 installed 消费者的边界见[本片进度](unified-agent-refactor-v1-progress.md#2026-10-08安装版-pc-恢复目录缺失边界)。上述四项完整退出依赖保持。 原 PC 文件变更面板与编辑器选择另沿原组件/leaf迁入，实际 File receipt 保存中立预览，Main 从已读 Message/source Execution 精确核对；旧预览不可用不补造。当前仅收束这一完整操作阅读与文件变更路径按钮，其他旧消息路径入口、设置摘要及上表完整退出条件保持；首次与冷读和真实失败归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-08原文件变更与编辑器入口迁入)。
+macOS 安装版 PC 的目录缺失恢复入口现补一条有限证据：沿原 source 观察点暂停旧目录移出／journal 更新前，真实持锁和 SIGKILL 后的 installed Main／Service 均拒绝业务准入且不建空库；installed status／明确 complete 后同窗读回原 Session／新 Store，稳定锁及原目录数据保持。原 Core 七个窗口复用，未将安装版全中断矩阵或整个 R07／W19标为完成；故障 publisher 与实际 installed 消费者的边界见[本片进度](unified-agent-refactor-v1-progress.md#2026-10-08安装版-pc-恢复目录缺失边界)。上述四项完整退出依赖保持。 原 PC 文件变更面板与编辑器选择另沿原组件/leaf迁入，实际 File receipt 保存中立预览，Main 从已读 Message/source Execution 精确核对；旧预览不可用不补造。当前仅收束这一完整操作阅读与文件变更路径按钮，旧消息路径入口与常规配置默认摘要现沿原组件迁入，当前限定证据见同进度“原消息文件路径与常规摘要”，上表完整退出条件保持；首次与冷读和真实失败归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-08原文件变更与编辑器入口迁入)。
 
 完整能力缺口中的 T055 当前会话展示已补齐：正式 TUI 和 Native 分别显示主轮次事实、当前 Session/Store 未结束 Job 数与未知数；父完成不清后台，准确停止一项不改 sibling，旧 Store 历史不计入。原真实80×24 PTY与installed默认Native完整文件已通过，详情见[本阶段证据](unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。完整能力及其余§35/T/E条件不因这项展示闭合而默认通过。
 
