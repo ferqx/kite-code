@@ -47,6 +47,7 @@ export function NativeDesktop() {
   const theme = useNativeTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [state, setState] = useState<NativeState>();
   const [directory, setDirectory] = useState<{
     storeId: string;
@@ -93,6 +94,7 @@ export function NativeDesktop() {
   const generation = useRef(0),
     historyEpoch = useRef<number | undefined>(undefined),
     viewIntent = useRef(0),
+    pageIntent = useRef(0),
     draftRevision = useRef(0),
     writing = useRef(false);
   const selected = useRef<string | undefined>(undefined);
@@ -232,6 +234,7 @@ export function NativeDesktop() {
   }
   async function select(sessionId: string) {
     if (!bridge) return;
+    setScheduledTasksView(false);
     const nonce = ++viewIntent.current,
       current = generation.current;
     selected.current = sessionId;
@@ -388,7 +391,8 @@ export function NativeDesktop() {
       const sessionId = crypto.randomUUID(),
         commandId = crypto.randomUUID(),
         current = generation.current,
-        selectionAtClick = viewIntent.current;
+        selectionAtClick = viewIntent.current,
+        pageAtClick = pageIntent.current;
       const value = await bridge.request({
         method: 'createSession',
         generation: current,
@@ -406,7 +410,11 @@ export function NativeDesktop() {
       if (!value || !('phase' in value) || value.phase !== 'created')
         throw Error('session_receipt_unknown');
       await readDirectory();
-      if (generation.current === current && viewIntent.current === selectionAtClick)
+      if (
+        generation.current === current &&
+        viewIntent.current === selectionAtClick &&
+        pageIntent.current === pageAtClick
+      )
         await select(sessionId);
     });
   }
@@ -1127,11 +1135,16 @@ export function NativeDesktop() {
       />
     </section>
   );
+  const workspaceModels = directory ? desktopDirectory(directory, selection) : [];
   return (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
-      workspaces={directory ? desktopDirectory(directory, selection) : []}
-      selected={selection?.storeId === directory?.storeId ? selection?.session.id : undefined}
+      workspaces={workspaceModels}
+      selected={
+        !scheduledTasksView && selection?.storeId === directory?.storeId
+          ? selection?.session.id
+          : undefined
+      }
       sessionLabel={selection?.session.title ?? 'kite'}
       readingKey={JSON.stringify([selection?.storeId, selection?.session.id])}
       messages={messageModels}
@@ -1181,19 +1194,55 @@ export function NativeDesktop() {
             await readDirectory();
           }),
         settings: () => setSettingsOpen(true),
+        scheduledTasks: () => {
+          pageIntent.current++;
+          setToolsOpen(false);
+          setScheduledTasksView(true);
+        },
         theme,
         connection: { label: '重新读取目录', run: () => void report(readDirectory) },
       }}
-      onOpen={(sessionId) => void report(() => select(sessionId))}
+      onOpen={(sessionId) => {
+        const returning =
+          scheduledTasksView &&
+          selection?.storeId === directory?.storeId &&
+          selection?.session.id === sessionId &&
+          selected.current === sessionId;
+        pageIntent.current++;
+        setScheduledTasksView(false);
+        if (!returning) void report(() => select(sessionId));
+      }}
+      scheduledTasks={
+        scheduledTasksView
+          ? {
+              tasks: [],
+              workspaces: workspaceModels.filter((workspace) => workspace.state === 'loaded'),
+            }
+          : undefined
+      }
       headerActions={
         <>
-          <DesktopButton
-            variant="ghost"
-            aria-expanded={toolsOpen}
-            onClick={() => setToolsOpen(!toolsOpen)}
-          >
-            会话工具
-          </DesktopButton>
+          {scheduledTasksView ? (
+            selection && (
+              <DesktopButton
+                variant="ghost"
+                onClick={() => {
+                  pageIntent.current++;
+                  setScheduledTasksView(false);
+                }}
+              >
+                返回会话
+              </DesktopButton>
+            )
+          ) : (
+            <DesktopButton
+              variant="ghost"
+              aria-expanded={toolsOpen}
+              onClick={() => setToolsOpen(!toolsOpen)}
+            >
+              会话工具
+            </DesktopButton>
+          )}
           <DesktopButton variant="ghost" onClick={() => setSettingsOpen(true)}>
             设置
           </DesktopButton>

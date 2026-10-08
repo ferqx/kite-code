@@ -2070,6 +2070,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原模型与思考双栏浮层、宝石滑块也已接入正式 Native；准确路由和服务档位适配及 macOS 窗口证据见[选择器进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-模型与思考选择器)。此项收束不提升余下 PC 页面或全阶段的退出状态。
 
+原安排任务页与右侧编辑表单已接入 Native，沿现行手册仅提供页面草稿、禁用保存，不以 UI 状态补造服务调度；工作台仍隐藏。实际入口与原草稿往返、晚创建隔离及源码外窗口结果见[安排任务进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-安排任务草稿页)。下一 PC 依赖仍包括新对话准备与全局目录索引状态/时间，完整阶段退出未通过。
+
 ### 30.3 第一条执行闭环
 
 第一条生产语义闭环必须是：

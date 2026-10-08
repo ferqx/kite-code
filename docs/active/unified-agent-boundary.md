@@ -56,6 +56,8 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 
 原模型浮层只接受宿主提供的准确 ID、名称与实际支持档位，再回调原选择；稀疏滑块不补造服务能力。Native catalogue、原作用域、Session route、临时 effort 与就绪判定仍归 Desktop，详见 [UI owner](../../packages/ui/README.md#原桌面展示层)及 [Native owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。展示重用不扩大公共管理或运行权限。
 
+原安排任务页只有现行手册定义的字段草稿，Native 不提供不存在的保存、调度或通知回调。页面导航与原 Session 的读取/写入意图分别管理，晚创建回执不能抢占后来页面；返回原会话不以持久草稿覆盖未保存原文。负责实现与当前验收归 [Native owner](../../apps/desktop/README.md#native-安排任务草稿)，不增加 Service 能力或执行权限。
+
 只读浏览器通过 [Service gateway](../../apps/service/src/development-web.ts)、独立 Cookie [BrowserClient](../../packages/client/src/browser.ts)与[Web](../../apps/web/README.md)连接。Native token、配置和文件路径停留在可信宿主；browser finite GET 不获得执行权限。page 还封存有限资产的完整 hash；page/instance/build/Store 变化拒绝原读取，Cookie 续期/关闭不改变 Runtime 生命周期。逐请求 `verifyConnection` 只核实原身份，不重置共享 Native 读取或 SSE。校验函数从唯一 HTTP schema 在构建时生成，浏览器保留禁止动态代码生成的 CSP。Web 当前按固定上界穷尽历史后核对一致 view，仅可见且实际 isActive 的选择会话轮询；最后快照与错误/过期状态分开，跨选择迟到响应不发布。按需 Context/output 使用原 selection 或准确 Session/Job 范围，不等于实际 Model 请求和完整 Runtime events。根开发 `web:dev` 已使用独立新 profile 与配对子进程；正式入口和完整 Web 页面资格仍按进度记录。
 
 Native 的已保存 Job 读取只从当前实际 kind=job 详情进入；Main 在 GET 前核原观察并同步登记 read ID，fresh Execution 与每页前后 Service 身份分别复核。只读 lease 绑定原 Store/Session/Workspace/Execution、attach/viewSelection/historyEpoch，有限 IPC 页与自适应缩页仍保首次 H；公共 Client 纯覆盖规则由 Native/Web 共用，保持跨 stream gap 与普通内容全部可见，只有覆盖 H 才发布完整保存事实。关闭、折叠、切换、reset 和冷读不取得取消、恢复或重执行 authority。默认 macOS producer 已核真实普通 Job/全树停止及 cold 原输出零重放；这些消费者资格不外推其他平台或全局发布，实际负责与验证归 [Native owner](../../apps/desktop/README.md#native-job-完整已保存输出)。

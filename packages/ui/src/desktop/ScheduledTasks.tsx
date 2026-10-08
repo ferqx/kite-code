@@ -143,6 +143,11 @@ export function ScheduledTasks({
             新建任务
           </Button>
         </header>
+        {!props.onCreate && (
+          <p className="scheduled-unavailable" role="note">
+            当前桌面服务尚未接入任务保存与后台运行。
+          </p>
+        )}
         {props.tasks.length ? (
           <section className="scheduled-list" aria-label="任务列表">
             {props.tasks.map((task) => (

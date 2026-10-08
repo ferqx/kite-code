@@ -2448,3 +2448,39 @@ docs、all 作用域影响核对和 plan-evidence 均 actual0，产品/UI/Native
 stage/commit 门禁按最终 owned 输入核对；未运行本片全量默认，不把历史绿图拼成当前完整资格。
 PC 剩余页面/交互、Workspace 批量移除/GC、余下 installed/恢复与已发布样本、macOS 资源、
 独立迁移审查及旧路径最终删除仍 pending；37能力partial、wholeV13=false、Goal active。
+
+## 2026-10-08：原 PC 安排任务草稿页
+
+上一轮为 progress：模型浮层正式迁入并本地提交。本轮核 durable HEAD
+`da03720a27e7d66f462146cdf16d3f46e7be2da0` 加 owned diff，只有原无关 AGENTS dirty。
+退出依赖仍为剩余PC页面/交互、Workspace批量移除/GC、installed恢复与已发布样本、
+macOS原资源、独立审查及最终旧路径退役。按原手册核 Workbench 暂时隐藏；安排任务明确已有草稿页，
+Service无保存/调度/运行记录/通知协议，因此直接迁原 ScheduledTasks/Editor，不扩大服务功能。
+
+正式 Native 已提供左侧入口、原任务空态和右侧表单，名称/说明/实际项目/频率/环境均沿原控件。
+未观察项目不加入选择；缺写入callback时页面和编辑器明确说明不可保存/后台运行，submit不造任务。
+页面意图只保护后来导航不被晚创建回执抢占；Session读代次、原创建Command与Main authority保持。
+返回或点击同一原Session恢复未保存主草稿/问答；其他Session仍沿原读取与原持久草稿。
+没有新增协议、私有格式、调度器、Runtime或依赖版本。
+
+先核准确原红：新Native DOM actual1/0pass/2fail，均缺安排任务入口，日志
+/private/tmp/kite-pc-scheduled-dom-red-20261008.log。
+初次接入后原返回会重挂模型选择器，实际一次只读 input.models.read；测试按准确GET核对，不把它误判为业务写。
+最终新DOM actual0/2pass/38assert/848ms，日志 /private/tmp/kite-pc-scheduled-dom-final-20261008.log；
+五文件原页面/目录/创建草稿/question/plan邻接 actual0/16pass/196assert/1056ms，
+日志 /private/tmp/kite-pc-scheduled-neighbor-dom-20261008.log；原断言保持，问卷补页面往返零答复与原文恢复。
+默认发现新增isolated文件恰好一次、共623文件，未改调度或排除旧例。
+
+源码外默认Native候选 actual0/1pass/7 Bun断言/47.72秒，
+日志 /private/tmp/kite-pc-scheduled-sourcefree-window-second-20261008.log。
+原真实builder、搬迁/删构建源、CSS/字体、新bridge、原审批/文件任务/冷读与双层使用锁收尾均保持；
+实际窗口另核安排任务字段、项目准确w、禁用保存/submit零工作、原完整主草稿、原s选择与零新Session/Run。
+首窗口精确「项目」标签未匹配控件，读取选项为零；按原combobox角色/实际标签前缀定位后通过，
+原失败日志 /private/tmp/kite-pc-scheduled-sourcefree-window-20261008.log；未改45秒driver/120秒整例预算及业务断言。
+
+根与八workspace types、当前Desktop types、正式边界/八workspace/API graph均actual0；
+日志分别为 /private/tmp/kite-pc-scheduled-all-types-20261008.log、types-current与architecture-20261008.log。
+5个owned代码文件Biome actual0/no fixes，已有warning/info不扩优化；文档与实际staged/range门禁按最终输入核对。
+新只读recon Agent创建仍被thread数量限制拒绝，Root完成本片核查，不宣称新增独立迁移审查。
+未复跑Chrome/Vault、TUI或本片完整默认；本片不是全PC或阶段收束，剩余新对话准备/全局目录状态与时间、
+其余退出依赖继续pending，37能力partial、wholeV13=false、Goal active，无外部交付。

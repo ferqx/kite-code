@@ -6,7 +6,7 @@
 
 [适配器](src/native-presentation.ts)只将生成 Client 的真实 Workspace/Session/Message 转为原 UI view model。未观察状态显示“状态待读取”，缺少的更新时间不补造；完成消息不推断 final reply、Turn、Tool grouping 或执行成功。正文 slot 继续使用现有 ModelOutputMessage 与完整原身份 reader；未知格式、预览与不完整内容继续保留。原 Composer 的发送、草稿、model choice 和 planMode 回调沿现有 Native controller，不建立第二条提交链。
 
-“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback，Workspace 批量移除/GC、剩余 Workbench/安排任务及全部旧页面细节尚未完成迁移。
+“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页已迁入，Workspace 批量移除/GC、新对话准备、全局目录状态与更新时间等剩余旧页面细节仍待迁移。
 
 [原页面契约测试](../../packages/ui/test/desktop-page.test.tsx)迁回原 12 项展示断言；现有 Native 目录、草稿、问答与计划 DOM 只调整控件/浏览器 API，保留业务断言。源码外 [Native 候选](test/isolated/native-bundle.test.ts)与[driver](test/native-bundle-electron.fixture.ts)已核编译 CSS/字体、可操作 Composer、新 preload bridge、实际审批/任务、冷读和两层使用锁收尾。准确输入、原失败与结果归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不代表完整客户端、installed 全量、独立审查或 Windows/Linux 阶段退出。
 
@@ -17,6 +17,14 @@
 Workspace/Session 完整目录分别读取；其间新登记的项目可能还未进入项目上界。相应 Session 保留在“项目待读取的会话”，可读原历史，但不提供该未观察项目的新建入口。公开 Session 没有更新时间，原排序没有时间值时保读出顺序，不补造时间。项目移除/批量删除、物理 GC 与剩余旧页面行为仍未闭合。
 
 [目录 DOM](test/native-directory.test.tsx)与[草稿 DOM](test/native-drafts-dom.test.tsx)已直接核已有 Sidebar/实际 NativeDesktop：同名会话准确项目/原 ID、空项目、独立折叠零写、项目列表焦点零选择、创建期间阅读、晚项目保留与迟到创建保后来选择/草稿。具体结果归本片进度，不以有限 DOM 宣称完整 installed/跨平台资格。
+
+## Native 安排任务草稿
+
+正式 Native 左侧「安排任务」直接消费原 [ScheduledTasks/ScheduledTaskEditor](../../packages/ui/src/desktop/ScheduledTasks.tsx)与右侧栏。创建只打开名称、任务说明、真实项目、频率和本地／独立工作树环境表单；未观察项目不成为可选项。当前 Service 没有任务保存、调度、运行记录或通知协议，host 不传写入回调；页面及编辑器明确显示限制，保存保持禁用，表单提交也不产生任务、Session 或 Run。
+
+页面导航保留当前准确 Session 及主输入／交互草稿，隐藏会话工具。返回会话或点击同一原会话只恢复页面，不重读持久草稿覆盖未保存原文；点击其他会话仍走原 select/历史/草稿路径。独立页面意图只阻止迟到创建回执抢占后来页面，不替换正在读取的 Session 代次。回到输入区重新挂载模型控件可读取目录，不产生新工作。
+
+[实际 DOM](test/isolated/native-scheduled-tasks-dom.test.tsx)核真实项目、disabled/submit 零调用、原未保存草稿与晚创建；[问卷 DOM](test/native-questionnaire-dom.test.tsx)核页面往返保原答案。源码外默认 [Native 候选](test/isolated/native-bundle.test.ts)及 [driver](test/native-bundle-electron.fixture.ts)沿实际窗口核同一入口、完整字段、禁用保存、原草稿和零工作；准确输入及结果见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-安排任务草稿页)。这项迁移完成原手册已有的页面能力，不声明新增定时运行能力。
 
 ## Native 跨会话后台总览
 

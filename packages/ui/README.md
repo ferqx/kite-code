@@ -10,6 +10,8 @@
 
 [Desktop 构建](scripts/build-desktop.ts)在普通 workspace 与源码外候选中均输出实际 desktop/index.js 和原样 desktop/style.css，补齐新增 exports；Native renderer 编译 CSS/字体并纳入原递归 manifest。[原页面测试](test/desktop-page.test.tsx)迁回原 12 项展示断言。正式 macOS 窗口、原身份读写和剩余旧页面迁移范围由 Desktop owner 维护。
 
+原 [ScheduledTasks/ScheduledTaskEditor](src/desktop/ScheduledTasks.tsx)已由正式 Native 消费，沿原页面与右侧栏布局维护字段草稿。任务事实与保存/启禁/删除均只来自宿主显式参数；缺少保存回调时，页面和编辑器说明不可保存及后台运行，保存禁用，表单 submit 不推造持久任务。实际项目、页面导航、Session 草稿与窗口证据归 [Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)。
+
 ## 公共表单与观察
 
 普通问题共用中立的 [原 schema 解析器](src/question.ts)。DOM [Questionnaire](src/questionnaire.tsx) 为完整可表达的标量或浅 object 提供单选、闭合自由输入与多步骤；可以先浏览未回答的题目，最终明确点击提交时才发送完整答案。原字段和 choice 值、Unicode codepoint 长度与非空白约束保持；仅闭合浅 object 加明确 null alternative 的根 oneOf 可作为整份问卷的另一项决定，其他未知或重叠约束仍回退原 JSON。选项说明以悬停／聚焦浮层展示完整原文，不推移翻页按钮；翻页和最终提交保留不同按钮身份，避免浏览器将末次翻页解释为提交。

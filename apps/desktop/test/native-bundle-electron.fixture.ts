@@ -82,6 +82,56 @@ async function launch() {
 }
 try {
   let page = await launch();
+  const retainedDraft = 'source-free retained draft\n雪🙂';
+  await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(retainedDraft);
+  await page.getByRole('button', { name: '安排任务', exact: true }).click();
+  await page.getByRole('main', { name: '安排任务', exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
+    0,
+  );
+  assert.equal(await page.getByRole('button', { name: '工作台', exact: true }).count(), 0);
+  await page.getByRole('button', { name: '创建第一个任务', exact: true }).click();
+  const scheduledEditor = page.getByRole('complementary', { name: '新建安排任务', exact: true });
+  await scheduledEditor.getByRole('textbox', { name: '名称', exact: true }).fill('原页面任务草稿');
+  await scheduledEditor
+    .getByRole('textbox', { name: '任务说明', exact: true })
+    .fill('核对原项目\n🙂');
+  const projectChoice = scheduledEditor.getByRole('combobox', { name: /^项目/ });
+  await projectChoice.waitFor();
+  assert.deepEqual(
+    await projectChoice
+      .locator('option')
+      .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)),
+    ['w'],
+  );
+  await scheduledEditor.getByRole('combobox', { name: /^运行环境/ }).selectOption('local');
+  await scheduledEditor.getByRole('combobox', { name: /^重复/ }).selectOption('weekly-monday-0900');
+  assert.equal(
+    await scheduledEditor.getByRole('button', { name: '保存任务', exact: true }).isDisabled(),
+    true,
+  );
+  await scheduledEditor
+    .locator('form')
+    .evaluate((form) => (form as HTMLFormElement).requestSubmit());
+  assert.equal(await page.locator('.scheduled-card').count(), 0);
+  await page.getByRole('button', { name: '返回会话', exact: true }).click();
+  assert.equal(
+    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).inputValue(),
+    retainedDraft,
+  );
+  const afterSchedule = await page.evaluate(
+    async () =>
+      (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+  );
+  assert.equal(afterSchedule.selection?.session.id, 's');
+  assert.equal(afterSchedule.inputSubmissions.length, 0);
+  assert.equal(afterSchedule.creationSubmissions.length, 0);
+  assert.equal(await (await fetch(`${control}/count`)).text(), '0');
+  await openSessionTools(page);
+  console.log(
+    'native_driver_stage: original scheduled page, disabled persistence, exact draft and zero work',
+  );
   await page.evaluate(async () => {
     let state = (await window.kiteNative!.request({
       method: 'state',
