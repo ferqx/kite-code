@@ -96,6 +96,7 @@ test.skipIf(process.platform !== 'darwin')(
           await request.json();
           requests++;
           const call = requests === 1;
+          const read = requests === 2;
           const frame = (delta: unknown, finish_reason: string | null) =>
             `data: ${JSON.stringify({ id: `native-${requests}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
           return new Response(
@@ -118,13 +119,27 @@ test.skipIf(process.platform !== 'darwin')(
                       },
                     ],
                   }
-                : {
-                    content:
-                      'bundled complete\n\n[查看文件](bundled.txt) [查看缺失文件](missing.txt)',
-                  },
+                : read
+                  ? {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: 'bundled-failed-read',
+                          type: 'function',
+                          function: {
+                            name: 'files.read',
+                            arguments: JSON.stringify({ path: 'missing-tool-target.txt' }),
+                          },
+                        },
+                      ],
+                    }
+                  : {
+                      content:
+                        'bundled complete\n\n[查看文件](bundled.txt) [查看缺失文件](missing.txt)',
+                    },
               null,
             ) +
-              frame({}, call ? 'tool_calls' : 'stop') +
+              frame({}, call || read ? 'tool_calls' : 'stop') +
               'data: [DONE]\n\n',
             { headers: { 'content-type': 'text/event-stream' } },
           );
@@ -142,7 +157,10 @@ test.skipIf(process.platform !== 'darwin')(
               baseURL: `${provider.url.href}v1`,
             },
           ],
-          tools: [{ id: 'files.write', definitionVersion: '2' }],
+          tools: [
+            { id: 'files.write', definitionVersion: '2' },
+            { id: 'files.read', definitionVersion: '3' },
+          ],
         }),
       );
       mkdirSync(join(home, 'old-user-data'), { mode: 0o700 });
@@ -198,7 +216,7 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         clearTimeout(timer);
       }
-      expect(requests).toBe(2);
+      expect(requests).toBe(3);
       expect(readFileSync(join(home, 'old-user-data/old-database'), 'utf8')).toBe(
         'must remain independent',
       );

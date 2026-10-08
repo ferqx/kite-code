@@ -403,7 +403,7 @@ test('message file paths use the current registered project and original reading
     opened.push(`${editor}:${path}`);
   };
   try {
-    f.add('read', 'files.read');
+    f.add('read', 'files.read', 'succeeded', true, '3');
     const first = (await f.list(['first'])).entries[0]!;
     const targets = await f.manager.list(
       { readId: 'inline', viewSelection: 1, historyEpoch: 0, messageIds: ['first', 'read'] },

@@ -14,6 +14,8 @@ Extension 的业务 Context 贡献只接收 scoped read projections，Core 检�
 
 Native 消息路径仍受当前已读 Message／viewSelection／history epoch 与登记 Workspace 约束，封闭应用枚举和项目内普通文件由 Main 复核；一般 Markdown 路径只命名当前文件，不生成 File receipt／贡献证明。真实 Files 的工具行路径另由原 Execution 定义与成功结果核实，旧完整历史不依赖有界 View 执行列表。原组件接入与配置默认摘要归 [Native owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，生成 API、Core 和私有存储格式保持。
 
+Native 普通工具 metadata 由已读 Message 的唯一 source Execution 沿生成 Client GET 核原身份、tool kind、终态、outcome 与准确 content，不借 Message complete 或重复 callId 判成功。当前活动工具只取同 Store／会话／活动 Run 的已观察 Execution；停止申请与终态分开。请求目标仅作文本，不取得 Files receipt 或宿主动作；未知名称／版本不借旧 UI 分类解释。同一阅读身份的普通事件刷新沿 Main 已验证原视图保留 metadata／消息文件读取，明确选择、reset或Store变化仍撤销。所有所属读取沿当前 generation／viewSelection／history epoch 释放，限定产品行为与证据归 [Native owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
+
 读取时机：修改新 Agent 的 Store/执行/模型接口、目标 HTTP schema、跨包依赖或过渡调用者时。
 
 验证：`bun run test:unified-agent`、`bun run check:unified-agent-boundary`，实际运行范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。

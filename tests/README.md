@@ -38,6 +38,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 ## 当前公共场景与证据
 
 复用原桌面页面的 [UI 展示断言](../packages/ui/test/desktop-page.test.tsx)与 Native 目录/草稿/问卷/计划 DOM 核新宿主适配；真实 CSS、字体、输入操作及源码外闭包分别沿 [Native 候选](../apps/desktop/test/isolated/native-bundle.test.ts)和[设置与刷新窗口](../apps/desktop/test/isolated/native-electron.test.ts)核验，不由 DOM 结果推导完整产品视觉资格。[边界测试](isolated/scripts/unified-agent-boundary.test.ts)另核声明的 CSS 真实导出、缺失/越界/旧目标拒绝，以及显式 UI builder 的宿主 I/O 与 source 的便携限制。运行范围、原失败和剩余页面迁移归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)。
+原 PC 工具行的 [Main metadata／有限 IPC](../apps/desktop/test/native-tool-messages.test.ts)、[正式 caller](../apps/desktop/test/native-caller.test.ts)与[工具 DOM](../apps/desktop/test/isolated/native-tool-messages-dom.test.tsx)核准确原结果、>200历史、未知同名版本、所属GET释放和原结果展开；原 [源码外 Native](../apps/desktop/test/isolated/native-bundle.test.ts)另核活动工具、真实 Files read3失败及正常／冷读，保原完整预算与退出断言。实际执行与剩余PC边界归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。
+
 
 [默认 macOS host Shell](../packages/agent/test/isolated/jobs/macos-host-shell.test.ts)核真实宿主/fork/setsid、Full/Workspace写、保护根/准确祖先、网络、父退出及注册清理；[源码外默认消费者](isolated/unified-agent/formal-optional-capabilities.test.ts)与[平台报告](isolated/unified-agent/unified-platform.test.ts)核普通默认Provider/Job和cold输出零重放。[默认 continuous](isolated/unified-agent/unified-default-shell-continuous.test.ts)只做两cycle40Command的实际短验收，原450秒formal组件另由[固定producer](fixtures/unified-agent/soak/continuous-default-shell.ts)运行；并行计算区间取并集，不能加构建/空闲/重复时间取得资格。Win/Linux实际验证依用户选择在重构完成后交给GitHub Actions，平台skip不计原生通过。
 

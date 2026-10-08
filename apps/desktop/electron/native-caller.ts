@@ -47,6 +47,7 @@ import { NativeProviderSettings } from './provider-settings';
 import { NativeRecovery } from './recovery';
 import { NativeSessionManagement } from './session-management';
 import { NativeSkillCatalogueReads } from './skill-catalogue-reads';
+import { NativeToolMessages } from './tool-messages';
 import { NativeWorkspaceRemovalPort } from './workspace-removal';
 
 export class NativeCaller {
@@ -96,6 +97,7 @@ export class NativeCaller {
   private readonly skills: NativeSkillCatalogueReads;
   private readonly jobOutput: NativeJobOutputReads;
   private readonly fileChanges: NativeFileChanges;
+  private readonly toolMessages: NativeToolMessages;
   private readonly background: NativeBackground;
   private readonly environment: NativeBackground;
   private environmentRevision = 0;
@@ -268,25 +270,37 @@ export class NativeCaller {
           }
         : undefined;
     this.outputReads = new NativeModelOutputReads(client, current);
+    const messageScope = () => {
+      const scope = current(),
+        fresh = this.controller.snapshot;
+      // An ordinary observation refresh temporarily clears the controller snapshot.
+      // The same verified reading identity remains valid; reset/selection still releases it.
+      const snapshot = scope
+        ? fresh?.sessionId === scope.sessionId
+          ? fresh
+          : this.lastView?.selection === scope.selection &&
+              this.lastView.snapshot.sessionId === scope.sessionId
+            ? this.lastView.snapshot
+            : undefined
+        : undefined;
+      return scope &&
+        !this.observationUnavailable &&
+        snapshot?.sessionId === scope.sessionId &&
+        snapshot.view.storeId === scope.storeId
+        ? {
+            generation: scope.generation,
+            viewSelection: scope.selection,
+            historyEpoch: this.historyEpoch,
+            storeId: scope.storeId,
+            sessionId: scope.sessionId,
+            workspaceId: snapshot.view.session.workspaceId,
+          }
+        : undefined;
+    };
+    this.toolMessages = new NativeToolMessages(client, messageScope, () => this.observedMessages);
     this.fileChanges = new NativeFileChanges(
       client,
-      () => {
-        const scope = current(),
-          snapshot = this.controller.snapshot;
-        return scope &&
-          !this.observationUnavailable &&
-          snapshot?.sessionId === scope.sessionId &&
-          snapshot.view.storeId === scope.storeId
-          ? {
-              generation: scope.generation,
-              viewSelection: scope.selection,
-              historyEpoch: this.historyEpoch,
-              storeId: scope.storeId,
-              sessionId: scope.sessionId,
-              workspaceId: snapshot.view.session.workspaceId,
-            }
-          : undefined;
-      },
+      messageScope,
       (id) => this.observedMessages.get(id),
       (id) => {
         const observed = this.workspaceObservation;
@@ -497,6 +511,7 @@ export class NativeCaller {
     this.skills.release();
     this.jobOutput.release();
     this.fileChanges.release();
+    this.toolMessages.release();
     this.resetHistory?.resolve();
     this.resetHistory = undefined;
     this.messageRead?.abort.abort();
@@ -648,6 +663,7 @@ export class NativeCaller {
       this.skills.release();
       this.jobOutput.release();
       this.fileChanges.release();
+      this.toolMessages.release();
       this.attachmentReads.release();
       this.messageRead?.abort.abort();
       this.grants.release();
@@ -973,6 +989,8 @@ export class NativeCaller {
         'jobOutput.close',
         'fileChanges.list',
         'fileTargets.list',
+        'toolMessages.list',
+        'toolMessages.close',
         'fileChanges.detail',
         'fileChanges.close',
       ].includes(request.method)
@@ -986,6 +1004,13 @@ export class NativeCaller {
         : this.background;
     let result: NativeResult;
     switch (request.method) {
+      case 'toolMessages.list':
+        result = await this.toolMessages.list(request);
+        break;
+      case 'toolMessages.close':
+        this.toolMessages.close(request.readId);
+        result = null;
+        break;
       case 'fileChanges.list':
         result = await this.fileChanges.list(request);
         break;

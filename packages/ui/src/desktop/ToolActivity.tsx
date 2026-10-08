@@ -116,6 +116,7 @@ function shellSnapshotLabel(snapshot: ShellSnapshot): string {
 }
 
 function toolTarget(message: Message): string | undefined {
+  if (message.target !== undefined) return message.target;
   const argument = (name: string) =>
     typeof message.arguments?.[name] === 'string' ? message.arguments[name] : undefined;
   if (message.changedFile) return message.changedFile;
@@ -201,6 +202,10 @@ function toolIcon(message: Message) {
     case 'glob':
       return FileSearchIcon;
     case 'shell_execute':
+    case 'shell.launch':
+    case 'shell.read':
+    case 'shell.wait':
+    case 'shell.stop':
       return TerminalIcon;
     case 'edit_file':
     case 'write_file':

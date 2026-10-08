@@ -30,6 +30,16 @@
 
 [原入口 DOM](test/isolated/native-original-entries-dom.test.tsx)、[Main 文件端口](test/native-file-changes.test.ts)和原[源码外窗口](test/isolated/native-bundle.test.ts)核默认与临时选择分离、旧scope、预览／全文／关闭、准确路径／frame和首次／冷读；窗口只核可用路径按钮及真实缺失目标拒绝，不实际启动 OS 编辑器。输入、实际通过与旧错误见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原消息文件路径与常规摘要)，完整PC／installed全路径／其他平台和阶段退出仍按原条件核对。
 
+## 原工具过程与结果阅读
+
+[NativeToolMessage](src/native-tool-messages.tsx)直接消费原 [ToolActivity / ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)，保轻量工具行、状态、箭头和结果展开。历史 Message 的 complete 只表示消息完整；[Main metadata reader](electron/tool-messages.ts)按已读 Message 的唯一 source Execution GET，核原 Store／Session／Run、tool kind、终态、result outcome 和完全相同的 content。每批最多32项，完整已读历史不限于 View 近200项；无法核实的条目保原正文，读取失败可明确重试。metadata close、切会话、detach 或 history epoch 变更只释放所属 GET，不停止、重做或恢复工具执行。同一阅读身份的普通事件刷新暂清 controller snapshot 时沿 Main 已验证 lastView 保留只读观察；明确选择、reset 或 Store 变化仍撤销旧范围。
+
+工具目标仅展示同一原来源／Run、结果之前且已读历史中唯一 Model call 的请求字段；重复 callId 不建立执行关联，有歧义不补目标。请求文本不证明实际文件变更，也不授予打开文件资格。成功 Files 路径按钮仍沿独立原 receipt／观察 ID；Files read 的当前版本3与已知版本2均核原 baseline，write/edit 仍限版本2。文件读取失败继续原单行状态，不附原始错误段落。
+
+执行中的工具行只来自当前 Store、所选会话活动 Run 的真实 tool Execution，与同 Run 的原结果消息接管；旧 Store 恢复记录不遮掉新工作。停止申请尚非终态时明确等待结果，视图不可核实时标“上次确认状态”。Shell launch/read/wait/stop 显示各自实际操作；启动受理不表示后台 Job 已完成，Job 的准确停止与完整输出仍归原环境／Runtime logs 入口。未知定义或版本保原 ID／version 和可展开原文，不借旧 UI 同名分类解释未来结果。
+
+[Main 与有限 IPC](test/native-tool-messages.test.ts)、[正式 caller 路由](test/native-caller.test.ts)、[原工具 DOM](test/isolated/native-tool-messages-dom.test.tsx)和原[源码外窗口](test/isolated/native-bundle.test.ts)分别核关联、作用域、原交互和真实执行／Files读取失败及冷读；准确输入和结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。本片没有推断旧 Turn／工具聚合／最终回复、补造自动审批状态或重建 Ask 历史回执；完整 PC、安装版全路径及其他平台资格仍未闭合。取舍见[工具消息观察决定](../../.agents/notes/implemented/architecture/2026-10-08-native-tool-message-observations.md)。
+
 ## Native 项目会话目录
 
 正式目录直接复用 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx)，替代临时 NativeDirectory。适配器按公共 workspaceId 分组，项目默认展开，可独立收起；空项目显示“暂无聊天”。上下键只移动当前项目列表焦点，确认沿原 Session ID 读取；收起不调用 bridge、不改选或取消工作。首次发送等待不阻止阅读已有会话，原 NativeDesktop 仍保护迟到创建、后来选择和草稿。选择标记核同 Store，目录 Store 更换重置展示。侧栏先显示五项、“展开更多”每次增加十项只是展示完整已读目录，不改变公共分页或高水位。

@@ -12,14 +12,29 @@ async function openSessionTools(page: import('playwright').Page) {
 
 async function readOriginalFileChanges(page: import('playwright').Page) {
   await page.getByRole('button', { name: 'bundled.txt', exact: true }).waitFor();
+  const failed = page
+    .locator('.tool-activity-step.failed')
+    .filter({ hasText: 'missing-tool-target.txt' });
+  await failed.waitFor();
+  assert.ok((await failed.textContent())!.includes('读取'));
+  assert.ok((await failed.textContent())!.includes('失败'));
+  assert.equal(await failed.locator('button').count(), 0);
+  assert.equal(await failed.locator('.tool-step-preview').count(), 0);
+  console.log(
+    'native_driver_stage: original tool rows, accurate Files read failure and no file action',
+  );
   assert.equal(await page.getByRole('button', { name: '查看文件', exact: true }).count(), 1);
   await page.getByRole('button', { name: '查看缺失文件', exact: true }).click();
   const failure = page.getByRole('alertdialog');
   await failure.waitFor();
-  assert.ok((await failure.textContent())!.includes('file_editor_target_unavailable'));
+  const failureText = await failure.textContent();
+  assert.ok(
+    failureText!.includes('file_editor_target_unavailable'),
+    failureText ?? 'missing dialog text',
+  );
   await failure.getByRole('button', { name: '确定', exact: true }).click();
   assert.equal(await failure.count(), 0);
-  assert.equal(await (await fetch(`${control}/count`)).text(), '2');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('combobox', { name: '默认编辑器', exact: true }).waitFor();
   await page.getByText('compatible · fixed', { exact: true }).waitFor();
@@ -61,7 +76,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
     'textedit',
   );
   await page.getByRole('button', { name: '返回应用', exact: true }).click();
-  assert.equal(await (await fetch(`${control}/count`)).text(), '2');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
   console.log(
     'native_driver_stage: original file changes, exact saved body, current file action, retained editor choice and GET-only reading',
   );
@@ -282,6 +297,7 @@ try {
     if (await page.getByText('轮次：completed', { exact: true }).isVisible()) break;
     const approve = page.getByRole('button', { name: 'Approve once', exact: true });
     if (await approve.isVisible()) {
+      await page.locator('.tool-activity-step.queued').filter({ hasText: '写入' }).waitFor();
       const state = await page.evaluate(
           async () =>
             (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
@@ -386,7 +402,7 @@ try {
     readFileSync(join(home, 'workspace/bundled.txt'), 'utf8'),
     'actual bundled bytes\r\n',
   );
-  assert.equal(await (await fetch(`${control}/count`)).text(), '2');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
   const afterFirst = await page.evaluate(
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
@@ -410,14 +426,6 @@ try {
       activity.pendingInteractions === 0
     );
   }, conversationId);
-  const settledDirectory = await page.evaluate(
-    async () =>
-      (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
-  );
-  conversationUpdatedAt = settledDirectory.directory!.sessions.find(
-    (session) => session.id === conversationId,
-  )!.activity!.updatedAt!;
-  assert.ok(conversationUpdatedAt > 0);
   assert.equal(afterFirst.selection?.session.id, conversationId);
   assert.equal(afterFirst.inputSubmissions.length, 1);
   assert.equal(afterFirst.callerSubmissions?.length, 1);
@@ -425,6 +433,16 @@ try {
   assert.equal(await page.getByText('正在发送', { exact: true }).count(), 0);
   console.log('native_driver_stage: deferred original preparation and one exact first send');
   await readOriginalFileChanges(page);
+  // Capture the complete public directory after result/command publication and all reading checks.
+  // An earlier completed Run snapshot may precede its final durable command event.
+  const settledDirectory = await page.evaluate(
+    async () => await window.kiteNative!.request({ method: 'directory', generation: 1 }),
+  );
+  assert.ok(settledDirectory && 'sessions' in settledDirectory);
+  conversationUpdatedAt = settledDirectory.sessions.find(
+    (session) => session.id === conversationId,
+  )!.activity!.updatedAt!;
+  assert.ok(conversationUpdatedAt > 0);
   const old = childPid!;
   await app!.evaluate(({ app }) => app.quit());
   await app!.close();
@@ -434,7 +452,7 @@ try {
   childPid = undefined;
   assert.deepEqual(await lockState(), { outer: false, inner: false });
   page = await launch();
-  assert.equal(await (await fetch(`${control}/count`)).text(), '2');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
   await readOriginalFileChanges(page);
   await page.evaluate(
     async (sessionId) =>
@@ -446,7 +464,7 @@ try {
       }),
     conversationId,
   );
-  assert.equal(await (await fetch(`${control}/count`)).text(), '2');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
   process.kill(childPid!, 'SIGSTOP');
   app!.process().kill('SIGKILL');
   await new Promise<void>((resolve) => app!.process().once('exit', () => resolve()));
@@ -464,7 +482,7 @@ try {
   console.log(
     JSON.stringify({
       approvals: approvals.length,
-      provider: 2,
+      provider: 3,
       sourceFree: true,
       normalQuit: true,
       mainKilledChildRetainsBoth: true,

@@ -2853,3 +2853,25 @@ ModelOutputMessage 仅增加同一预览／已验证全文的 renderText slot，
 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)、[UI owner](../../packages/ui/README.md#原桌面展示层)、PC手册、当前边界、能力矩阵、测试入口、原方案和[已实施取舍](../../.agents/notes/implemented/architecture/2026-10-08-native-file-change-receipts.md)同步；Files producer、Core／生成HTTP API、格式与维护资产沿原owner核对保持。Root＋八workspace最终types actual0，日志 `/private/tmp/kite-pc-entries-types-final-20261008.log`；最终文档结构/all影响、plan-evidence、15 owned TS/TSX readonly Biome、边界/API/workspace与测试owner均actual0，日志为同前缀docs-final/docs-impact-final/plan-evidence-final/biome-final/boundary-final/api-final/workspaces-final/test-ownership-final；Biome仅原void联合warning和fragment info。当前Native bundle所属进程为空，归同前缀processes JSON。实际staged范围与正常本地hooks仍独立核验，不以工作树门禁替代。iteration_complete仅收束这项原PC消息入口/摘要，完整阶段默认尚未在本片重跑。
 
 原第一项两个入口已接通，完整退出依赖保持四项：①macOS原RSS／八轮稳定性及全资源退出；②其余方案必要维护恢复／发布中断条件；③完整原PC及§35适用能力与整片独立迁移审查（本逻辑轮新只读Agent仅一次尝试、thread limit拒绝，Root核验不替代）；④前置满足后的完整默认、最终legacy退役及重构后Win／Linux Actions。37能力仍partial、wholeV13=false、Goal active。Root唯一Git owner；本轮AGENTS.md起始clean、SHA256 `7e19375d5a9771aef3645fa33dcdbbc0e59c03e8d2276efba54fa97b13d9ea16` 保护且不暂存。授权仅本地stage／commit，无push／PR／发布／Actions dispatch。
+
+
+## 2026-10-08：原工具过程与结果阅读
+
+上一goal答复仅只读核对原PC复用关系，没有新增实现，按no progress重新核对当前源码。本轮沿durable `el-refactor`／HEAD `1b24b11db0b79004e4b7d5147b634e33b22ce13a`，直接补当前原工具行缺口；没有回到allocator优化、扩展TUI验证或重建PC界面。最高依赖仍是原PC剩余交互适配，其后为安装版维护恢复、macOS原稳定性／资源退出、完整能力与独立审查、最终完整回归／旧路径退役；wholeV13=false、37项partial和本地提交授权保持。
+
+正式Native直接消费原ToolActivity／ToolRow，历史工具以已读Message的唯一source Execution核同原Store／Session／Run、tool kind、终态、result outcome与完全相同content；每批32项、完整历史不依赖近200项View。重复toolCallId不建立执行关联，目标仅展示同源／同Run、结果前且已读历史中唯一原Model call的请求字段，无歧义事实不从UI文字补造。成功Files路径仍沿独立receipt／观察ID；当前read3与已知read2入口补齐，write/edit仍限2。文件读取失败保原单行，不附原始错误段落。
+
+当前非终态工具行只取当前Store／会话活动Run的tool Execution，原结果接管，foreign恢复消息不遮掉新工作；停止申请等待真实终态。Shell各工具操作保准确名称，启动受理不冒充Job完成，完整Job输出和控制继续原入口。未知定义／版本只给文字标题与可展开原文，避免同名旧task分类隐藏正文。metadata close／切会话／detach／history epoch变更只释放所属GET；普通事件刷新暂清controller snapshot时沿相同选择／Store已验证lastView保阅读范围，明确reset／选择仍撤销。没有改Core、生成HTTP schema、SQL或维护私有格式。负责行为归[Native owner](../../apps/desktop/README.md#原工具过程与结果阅读)、[UI owner](../../packages/ui/README.md)、[工具消息决定](../../.agents/notes/implemented/architecture/2026-10-08-native-tool-message-observations.md)及当前桌面手册／active。
+
+原错误全部保留：`/private/tmp/kite-pc-tool-process-types-initial-20261008.log`与`types-second`实际2，修正Command.kind字符串判别、erasableSyntaxOnly的parameter properties、label窄化和只读fixture；`dom-initial`实际1，原Marker asChild使button本身带class，纠正selector且保全部断言。`direct-initial`新fixture在释放前调用Bun pending rejects断言挂起，只按精确原命令识别并SIGTERM本轮PID65208，实际143；改为先捕获rejection、等待GET已开始、关闭／释放后核结果，不计作通过。`direct-final`实际1为猜viewSelection，改用正式Main返回作用域。
+
+源码外原窗口的`window-initial`实际0／1pass／7Bun断言／56.72s，已核新活动工具行和真实read3失败，但日志尾部旧provider常量2修为实际3。最终版本`window-final`实际1／42.89s，真实缺失文件弹窗未匹配旧预期；追加原文本诊断而未削弱断言。`window-diagnostic`实际1／50.77s，该文件入口通过，冷目录updatedAt比早期completed观察晚18ms。源码说明普通refresh清snapshot可能使同阅读范围暂缺，本轮caller持真实getView确定性验证修复：保同选择／Store已验证lastView；不是改变scope/reset安全门禁。冷时间基线改在全部原结果／命令发布及阅读操作后显式穷尽公共directory，冷读仍严格相等。`types-refresh`实际2的optional scope窄化／notify赋值亦修复；原失败不被后续局部通过撤销。
+
+最终已执行：
+
+- `bun test --parallel=1 --max-concurrency=1 apps/desktop/test/native-tool-messages.test.ts apps/desktop/test/native-file-changes.test.ts apps/desktop/test/native-caller.test.ts packages/ui/test/desktop-page.test.tsx`：实际0，4文件31pass／259断言／1.148s，日志`/private/tmp/kite-pc-tool-process-direct-qualified-20261008.log`。核第241项原结果、四类终态、重复call不同Run／同Run歧义、outcome/body/身份漂移、sealed／foreign出处、所属GET释放、有限IPC和正式Main观察注册；ordinary刷新持getView时原读取可完成。有限port不代证真实IO。
+- 原DOM工具／FileChanges／原入口／草稿／模型选择五文件：实际0，12pass／153断言／2.24s，日志`/private/tmp/kite-pc-tool-process-dom-final-20261008.log`。核原展开／收起、失败单行、Shell受理、未来同名task原文和HTML逃逸、32+8批次、晚scope、新content不用旧状态、准确当前Run及foreign旧结果不遮当前工具；保原业务断言。
+- `bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-bundle.test.ts`：最终实际0，1pass／7Bun断言及全部Node driver／51.88s，日志`/private/tmp/kite-pc-tool-process-window-ready-20261008.log`。同原完整Terminal＋Native构建、搬迁且删除全部原输出，默认Main／Service／原主题／preload／Renderer真实首次与冷窗口；普通compatible Model第1真实Files.write、第2真实Files.read3失败、第3final，三次Provider后GET-only阅读／冷启动不增加。原审批、待输入导航／时间、准确首次输入、文件／General、缺失文件拒绝、原diff、原预算、普通退出、Main强杀、Service实际终端与双使用锁断言保留；没有启动实际OS编辑器、old用户迁移或Windows/Linux资格。
+- 根及八workspaces typecheck最终实际0，日志`/private/tmp/kite-pc-tool-process-types-ready-20261008.log`。本片边界和生成API核对实际0，分别见`boundary`／`api`日志；不是全阶段回归。
+
+本轮新上下文独立审查派发一次，明确返回`agent thread limit reached`，没有复用其他职责的旧Agent或把根自检计为独立审查。完整PC尚欠旧Turn／聚合、审批／Ask历史的全部就地呈现与整体验证；原RSS失败、八轮／60分钟资源资格、剩余维护恢复、独立审查、最终回归及旧路径退役仍未闭合。Win/Linux仍按用户安排重构完成后交GitHub Actions，无push／PR／dispatch／发布。冻结、本地门禁及交付范围归`/private/tmp/kite-pc-tool-process-owned-20261008.json`与`/private/tmp/kite-pc-tool-process-delivery-20261008.json`；不由本片通过关闭§35。

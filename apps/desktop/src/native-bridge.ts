@@ -40,6 +40,7 @@ import type { InputMetadata, InputRequest } from './input';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
+import type { NativeToolMessagePage, NativeToolMessageRequest } from './tool-messages-bridge';
 
 export type * from './background-bridge';
 export type * from './file-changes-bridge';
@@ -395,6 +396,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeToolMessageRequest
   | NativeFileChangeRequest
   | NativeBackgroundRequest
   | NativeSkillsRequest
@@ -659,6 +661,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeToolMessagePage
   | NativeFileTargetPage
   | NativeFileChangePage
   | NativeFileChangeDetail

@@ -86,6 +86,8 @@ export interface Message {
   /** Opaque Runtime grouping identity used only for adjacent exploration calls. */
   readonly presentationGroupId?: string;
   readonly title?: string;
+  /** Host-confirmed display text; this does not grant a file or execution action. */
+  readonly target?: string;
   readonly arguments?: Readonly<Record<string, unknown>>;
   readonly status?:
     | 'creating'

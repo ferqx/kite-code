@@ -68,6 +68,6 @@ export {
 export { SessionPage, type SessionPageProps } from './SessionPage';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
 export { statusLabel } from './status';
-export { ToolRow } from './ToolActivity';
+export { ToolActivity, ToolRow } from './ToolActivity';
 export type { Message, TurnActivity, WorkspaceSummary } from './types';
 export { Button } from './ui';

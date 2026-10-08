@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { AgentClient } from '@kite-ai/client';
+import type { AgentClient, Message } from '@kite-ai/client';
 import { canonicalCallerCommandRequest } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerTextDigest } from '../electron/caller-journal';
@@ -60,6 +60,126 @@ function authority() {
     frame,
   };
 }
+test('formal Native metadata port reads only messages observed through the current original history', async () => {
+  const connection = client();
+  const message: Message = {
+    id: 'tool-message',
+    sessionId: 's',
+    runId: 'run',
+    seq: '1',
+    status: 'complete',
+    role: 'tool',
+    content: 'real_failure',
+    sourceIds: ['execution'],
+  };
+  const originalView = connection.getView.bind(connection);
+  connection.getView = async (id) => {
+    const view = await originalView(id);
+    return { ...view, session: { ...view.session, nextSeq: '1' } };
+  };
+  connection.verifyConnection = async () => connection.serverInfo!;
+  connection.listMessages = async () => [message];
+  const reads: string[] = [];
+  let notify!: Parameters<AgentClient['observe']>[0]['onChange'];
+  connection.observe = async (options) => {
+    notify = options.onChange;
+    await new Promise<void>((resolve) =>
+      options.signal?.addEventListener('abort', () => resolve(), { once: true }),
+    );
+  };
+  let refreshStarted!: () => void, releaseRefresh: (() => void) | undefined;
+  const refreshing = new Promise<void>((resolve) => {
+    refreshStarted = resolve;
+  });
+  connection.getExecution = async (id) => {
+    reads.push(id);
+    return {
+      id,
+      originStoreId: 'store',
+      sessionId: 's',
+      runId: 'run',
+      kind: 'tool',
+      definitionId: 'custom.tool',
+      definitionVersion: '1',
+      status: 'failed',
+      result: { outcome: 'failed', content: message.content },
+      resultRevision: '1',
+      cancelRequestedAt: null,
+    };
+  };
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    const selected = (await caller.invoke({
+      method: 'select',
+      generation: 1,
+      sessionId: 's',
+    })) as NativeState;
+    const request = {
+      method: 'toolMessages.list' as const,
+      generation: 1,
+      viewSelection: selected.selection!.viewSelection!,
+      historyEpoch: selected.historyEpoch!,
+      readId: 'tools',
+      messageIds: [message.id],
+    };
+    await expect(caller.invoke(request)).rejects.toMatchObject({
+      code: 'tool_message_unavailable',
+    });
+    expect(reads).toEqual([]);
+    await caller.invoke({
+      method: 'messages',
+      generation: 1,
+      sessionId: 's',
+      expectedStoreId: 'store',
+      readId: 'history',
+      afterSeq: '0',
+      upperSeq: '1',
+      limit: 32,
+    });
+    expect(await caller.invoke(request)).toMatchObject({
+      kind: 'toolMessages.page',
+      scope: {
+        sessionId: 's',
+        storeId: 'store',
+        viewSelection: selected.selection!.viewSelection!,
+      },
+      entries: [{ messageId: message.id, executionId: 'execution', status: 'failed' }],
+    });
+    expect(reads).toEqual(['execution']);
+    connection.getView = async (id) => {
+      refreshStarted();
+      await new Promise<void>((resolve) => {
+        releaseRefresh = resolve;
+      });
+      const view = await originalView(id);
+      return { ...view, session: { ...view.session, nextSeq: '1' } };
+    };
+    await notify?.({
+      cursor: '1',
+      objectId: 'execution',
+      sessionId: 's',
+      type: 'execution.completed',
+      revision: '1',
+      payload: null,
+    });
+    await refreshing;
+    // Metadata can finish against the retained same-identity view during an ordinary refresh.
+    expect(await caller.invoke({ ...request, readId: 'during-refresh' })).toMatchObject({
+      kind: 'toolMessages.page',
+      entries: [{ executionId: 'execution', status: 'failed' }],
+    });
+    releaseRefresh!();
+    await caller.invoke({ method: 'state', generation: 1 });
+    expect(
+      await caller.invoke({ method: 'toolMessages.close', generation: 1, readId: 'tools' }),
+    ).toBeNull();
+    expect(connection.writes).toBe(0);
+  } finally {
+    releaseRefresh?.();
+    await caller.close();
+  }
+});
 test('Native history shrinks public response and IPC pages with the original cursor and high water; closing aborts only that read', async () => {
   const connection = client();
   const queries: { afterSeq?: string; upperSeq?: string; limit?: number }[] = [];

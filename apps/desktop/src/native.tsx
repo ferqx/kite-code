@@ -64,6 +64,13 @@ import { NativeRecoveryView } from './native-recovery';
 import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
 import { useNativeTheme } from './native-theme';
+import {
+  desktopToolMessage,
+  liveToolMessages,
+  NativeLiveToolMessage,
+  NativeToolMessage,
+  useNativeToolMessages,
+} from './native-tool-messages';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
 export function NativeDesktop() {
@@ -462,6 +469,18 @@ export function NativeDesktop() {
     messages,
     includeRead: true,
   });
+  const toolMessages = useNativeToolMessages({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    selection: !preparing && !scheduledTasksView && !childDetail ? selection : undefined,
+    historyEpoch: state?.historyEpoch ?? 0,
+    messages,
+    observationRevision: state?.environmentRevision ?? 0,
+  });
+  const liveTools = liveToolMessages(
+    !preparing && !scheduledTasksView && !childDetail ? selection : undefined,
+    messages,
+  );
   if (!bridge) return <p>原生桥不可用。此页面不连接替代服务器。</p>;
   async function write(action: () => Promise<unknown>, requiresHistory = true) {
     if (
@@ -1601,7 +1620,9 @@ export function NativeDesktop() {
           ? 'new-conversation'
           : JSON.stringify([selection?.storeId, childDetail?.sessionId ?? selection?.session.id])
       }
-      messages={childDetail ? childMessages : messageModels}
+      messages={
+        childDetail ? childMessages : [...messageModels, ...liveTools.map((entry) => entry.message)]
+      }
       renderMessage={(model) => {
         if (childDetail) {
           const message = childFacts?.messages.find((entry) => entry.id === model.id),
@@ -1646,6 +1667,14 @@ export function NativeDesktop() {
               </p>
             </>
           );
+        const live = liveTools.find((entry) => entry.message.id === model.id);
+        if (live)
+          return (
+            <NativeLiveToolMessage
+              {...live}
+              unavailable={!!(selection?.viewLoading || selection?.permissionUnavailable)}
+            />
+          );
         const message = messagesById.get(model.id);
         if (!message || !selection || !state) return null;
         const openable =
@@ -1679,6 +1708,11 @@ export function NativeDesktop() {
                   : undefined
               }
             />
+          );
+        const tool = toolMessages.entries.find((entry) => entry.messageId === message.id);
+        if (tool)
+          return (
+            <NativeToolMessage message={desktopToolMessage(tool, message.id, message.content)} />
           );
         return (
           <ModelOutputMessage
@@ -1742,6 +1776,12 @@ export function NativeDesktop() {
             <p role="alert">
               {fileTargets.error}{' '}
               <DesktopButton onClick={fileTargets.retry}>重新读取文件路径</DesktopButton>
+            </p>
+          )}
+          {toolMessages.error && (
+            <p role="alert">
+              {toolMessages.error}{' '}
+              <DesktopButton onClick={toolMessages.retry}>重新核对工具状态</DesktopButton>
             </p>
           )}
           {removingWorkspace &&

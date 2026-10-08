@@ -57,7 +57,8 @@ function resultFacts(execution: Execution) {
     /* Old unreadable result. */
   }
   const path =
-    execution.definitionVersion === '2' &&
+    (execution.definitionVersion === '2' ||
+      (execution.definitionId === 'files.read' && execution.definitionVersion === '3')) &&
     baseline(content?.baseline) &&
     typeof content?.path === 'string'
       ? content.path

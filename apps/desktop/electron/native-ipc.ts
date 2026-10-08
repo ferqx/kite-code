@@ -15,6 +15,8 @@ import type { NativeCaller } from './native-caller';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'toolMessages.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
+  'toolMessages.close': ['readId'],
   'fileChanges.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'fileTargets.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'fileChanges.detail': ['readId', 'changeId'],
@@ -215,6 +217,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       method === 'jobOutput.open' ||
       method === 'fileChanges.list' ||
       method === 'fileTargets.list' ||
+      method === 'toolMessages.list' ||
       method === 'messageFile.open') &&
     (!Number.isSafeInteger(input.viewSelection) ||
       Number(input.viewSelection) < 1 ||
@@ -338,7 +341,9 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   const resourceId = (value: unknown) =>
     typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
   if (
-    (method === 'fileChanges.list' || method === 'fileTargets.list') &&
+    (method === 'fileChanges.list' ||
+      method === 'fileTargets.list' ||
+      method === 'toolMessages.list') &&
     (!Array.isArray(input.messageIds) ||
       input.messageIds.length < 1 ||
       input.messageIds.length > 32 ||
