@@ -340,12 +340,12 @@ try {
   eq(await picker.getByRole('button', { name: /^模型：fixed-A/ }).isVisible(), true);
   eq(JSON.parse(retained.replace(/\n\/\/ external editor retained\n$/, '')).modelId, 'B');
   await picker.getByRole('button', { name: /^模型：/ }).click();
-  await picker
-    .getByRole('region', { name: '模型与思考浮层' })
-    .getByRole('button', { name: 'fixed-A', exact: true })
+  const modelPopup = page.getByRole('dialog', { name: '模型与思考程度', exact: true });
+  await modelPopup
+    .getByRole('button', { name: '选择模型，当前 compatible / fixed-A', exact: true })
     .click();
-  await picker.getByRole('button', { name: '选择模型 B', exact: true }).click();
-  await picker.getByRole('button', { name: '关闭模型选择', exact: true }).click();
+  await modelPopup.getByRole('option', { name: '选择模型 B', exact: true }).click();
+  await modelPopup.press('Escape');
   eq(await picker.getByRole('button', { name: /^模型：fixed-B/ }).isVisible(), true);
   eq(await count(), 1);
   await page.evaluate(() => {

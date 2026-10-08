@@ -2068,6 +2068,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 用户随后明确重点是 PC 客户端，TUI 按必要验证收口。正式 Native 的项目会话目录现已补齐按原项目分组、独立展开收起、空项目和原选择/草稿保留，证据归[PC 目录进度](unified-agent-refactor-v1-progress.md#2026-10-08pc-客户端项目会话目录)。用户进一步确认复用原 kite-desktop，不从零重建 PC UI。正式 Native 已接原 SessionPage/Sidebar/Conversation/Composer/RightSidebar、主题/CSS/字体和原 Vite/Tailwind renderer；结果归[原 PC 展示迁移](unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)。主线先完成已有 PC 页面/交互的调用适配，Workspace 批量移除/GC 等服务能力仍按原 owner 补齐；之后按既有依赖完成剩余恢复/installed 维护及已发布样本验收、macOS 原资源退出、完整迁移独立审查和最终旧路径删除。现有 RSS 失败保持退出未通过，不以局部默认通过放宽；Win/Linux 仍按用户安排重构完成后由 GitHub Actions 验证。37能力partial、wholeV13=false，授权仍仅本地提交。
 
+原模型与思考双栏浮层、宝石滑块也已接入正式 Native；准确路由和服务档位适配及 macOS 窗口证据见[选择器进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-模型与思考选择器)。此项收束不提升余下 PC 页面或全阶段的退出状态。
+
 ### 30.3 第一条执行闭环
 
 第一条生产语义闭环必须是：

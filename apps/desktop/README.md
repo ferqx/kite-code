@@ -293,6 +293,8 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 模型选择按 Store/Session 保存，首条原 start/follow-up intent FULL 保存后才记本次模型 ID；打开新 Session 或读设置本身不绑定 route。输入只从 enabled/configured 的完整目录选择；缺失原显式 route 不回退全局默认。临时 effort 只在当前页面会话状态中，换模型/刷新后清除，不进入 model_routes 或配置 journal。[主输入](src/native-input.ts)冻结实际下一次 model/effort 到 start 与 active follow-up；普通 active steer 保原文本/target，不改活动 Run。ModelInput 和实际 wire 使用同一原设置。
 
+正式输入区复用[原模型与思考浮层](../../packages/ui/src/desktop/ModelEffortSelector.tsx)和宝石滑块；Native 仍负责准确目录读取、作用域/迟到隔离、原 route 与就绪门禁。双栏列表按实际 Model ID 选择，同一提供商内同名模型显示 ID；档位只取 Service 声明的集合，配置默认清临时选择，关闭只在实际支持 `none` 时可选。观察事件或临时 effort 不触发重复目录读取。[隔离 DOM](test/isolated/native-model-picker-dom.test.tsx)保留原四项并补准确同名路由、稀疏档位、关闭和默认回归；实际 [Model Settings 窗口](test/isolated/native-model-settings-electron.test.ts)仍核活动绑定、原 CAS/丢回执、下一轮切换及冷读，当前输入和源码外候选结果见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-模型与思考选择器)。其他历史 Provider/Vault 窗口记录保留其原输入范围。
+
 [实际默认 Native 候选](test/isolated/native-provider-bundle.test.ts)与[Electron driver](test/native-provider-electron.fixture.ts)在 macOS、源码外搬迁制品、自有 HOME、OS PATH、固定 SQLite 与默认 OS vault 下通过1项/190条Bun断言：四类表单、一次真实发现、7根Run/8次SDK请求、原 effort、活动冻结与下一次切换、新 Session 首次绑定、物理保存丢回执后冷原GET一次/POST零。两个所属 Service PID 正常结束；实际两枚测试凭据由 Service 准确 revoke，profile exclusive lease 可重新取得。endpoint 是受控 loopback，退出 warning 用明确 dialog 端口回答；不证明付费远端、系统 modal 点击、签名安装或其他平台。有限 Main/DOM/输入15项137断言、真实 HTTP8项93断言支持对应局部边界。
 
 本轮当前原完整默认589文件/471原任务全部通过，runner exit0/drain815.977s，4009regular输入与Git前后相同；其中上述实际Provider窗口45573ms及原Model、安装、CLI/TUI、Context/后页/持久答复消费者均通过。原红、嵌套同名fixture、制品摘要和权限环境范围见[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-06native-provider-设置与下一次真实模型选择)；完整默认通过不代表完整V1.3、MCP设置或三平台资格。

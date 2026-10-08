@@ -11,9 +11,12 @@ export function prepareDesktopDom(dom: JSDOM) {
   Object.assign(dom.window, { ResizeObserver: ResizeObserverStub, matchMedia: media });
   const globals = {
     HTMLElement: dom.window.HTMLElement,
+    HTMLFormElement: dom.window.HTMLFormElement,
     HTMLInputElement: dom.window.HTMLInputElement,
     HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
     Node: dom.window.Node,
+    NodeFilter: dom.window.NodeFilter,
+    MutationObserver: dom.window.MutationObserver,
     Element: dom.window.Element,
     DOMRect: dom.window.DOMRect,
     Event: dom.window.Event,

@@ -2,19 +2,25 @@ import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { Slider } from './components/ui/slider';
 
 export const effortNames = ['极低', '低', '中', '高', '极高', '最大'];
+const allPositions = [0, 1, 2, 3, 4, 5];
 
 export function GemSlider({
   value,
   valueText,
   onValueChange,
+  allowedValues = allPositions,
 }: {
   value: number;
   valueText?: string;
   onValueChange: (value: number) => void;
+  allowedValues?: readonly number[];
 }) {
   const root = useRef<HTMLSpanElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const target = useRef(value);
+  const positions = useRef(allowedValues);
+  positions.current = allowedValues;
+  const position = Math.max(0, allowedValues.indexOf(value));
   const redraw = useRef<(() => void) | null>(null);
   const pressedPointer = useRef<number | null>(null);
   const [release, setRelease] = useState(0);
@@ -49,7 +55,10 @@ export function GemSlider({
 
     function draw(delta: number) {
       ctx.clearRect(0, 0, width, height);
-      const active = thumbSize / 2 + ((width - thumbSize) * target.current) / 5;
+      const fraction =
+        Math.max(0, positions.current.indexOf(target.current)) /
+        Math.max(1, positions.current.length - 1);
+      const active = thumbSize / 2 + (width - thumbSize) * fraction;
       const speed = 0.6 + energy * 0.5 + energy * energy * 0.16;
       const staticMode = motion.matches;
       ctx.save();
@@ -181,9 +190,15 @@ export function GemSlider({
       ref={root}
       className="gem-slider"
       data-maximum={value === 5}
-      value={[value]}
-      onValueChange={([next]) => onValueChange(next!)}
-      onValueCommit={([next]) => onValueChange(next!)}
+      value={[position]}
+      onValueChange={([next]) => {
+        if (next !== undefined && allowedValues[next] !== undefined)
+          onValueChange(allowedValues[next]!);
+      }}
+      onValueCommit={([next]) => {
+        if (next !== undefined && allowedValues[next] !== undefined)
+          onValueChange(allowedValues[next]!);
+      }}
       onPointerDown={(event) => {
         if (event.button === 0) pressedPointer.current = event.pointerId;
       }}
@@ -197,15 +212,15 @@ export function GemSlider({
         pressedPointer.current = null;
       }}
       min={0}
-      max={5}
+      max={allowedValues.length - 1}
       step={1}
       aria-label="思考程度"
       aria-valuetext={valueText ?? effortNames[value]}
       rangeContent={<canvas ref={canvas} tabIndex={-1} aria-hidden="true" />}
       trackContent={
         <span className="gem-ticks" aria-hidden="true">
-          {effortNames.map((name, index) => (
-            <i key={name} data-passed={index <= value} />
+          {allowedValues.map((value, index) => (
+            <i key={value} data-passed={index <= position} />
           ))}
         </span>
       }

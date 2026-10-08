@@ -217,25 +217,27 @@ try {
   async function choose(alias: string) {
     await closeSettings(page);
     const picker = page.getByRole('region', { name: '下一轮模型选择', exact: true });
-    if (!(await picker.getByRole('region', { name: '模型与思考浮层' }).count()))
-      await picker.getByRole('button', { name: /^模型：/ }).click();
-    await picker
-      .getByRole('region', { name: '模型与思考浮层' })
-      .getByRole('button')
-      .first()
+    const popup = page.getByRole('dialog', { name: '模型与思考程度', exact: true });
+    if (!(await popup.count())) await picker.getByRole('button', { name: /^模型：/ }).click();
+    await popup.getByRole('button', { name: /^选择模型，当前/ }).click();
+    await popup
+      .getByRole('tablist', { name: '模型提供商', exact: true })
+      .getByRole('tab', { name: alias, exact: true })
       .click();
-    await picker
-      .getByRole('region', { name: '模型提供商', exact: true })
-      .getByRole('button', { name: alias, exact: true })
-      .click();
-    await picker.getByRole('button', { name: `选择模型 ${id(alias)}`, exact: true }).click();
+    await popup.getByRole('option', { name: `选择模型 ${id(alias)}`, exact: true }).click();
   }
   async function effort(value: string) {
     const picker = page.getByRole('region', { name: '下一轮模型选择', exact: true });
-    if (!(await page.getByRole('combobox', { name: '思考强度', exact: true }).count()))
-      await picker.getByRole('button', { name: /^模型：/ }).click();
-    await page.getByRole('combobox', { name: '思考强度', exact: true }).selectOption(value);
-    await page.getByRole('button', { name: '关闭模型选择', exact: true }).click();
+    const popup = page.getByRole('dialog', { name: '模型与思考程度', exact: true });
+    if (!(await popup.count())) await picker.getByRole('button', { name: /^模型：/ }).click();
+    const label = ({ low: '低', high: '高' } as Record<string, string>)[value];
+    assert.ok(label, 'fixture requests an explicit supported effort');
+    const slider = popup.getByRole('slider', { name: '思考程度', exact: true });
+    await slider.press('Home');
+    for (let step = 0; step < 6 && (await slider.getAttribute('aria-valuetext')) !== label; step++)
+      await slider.press('ArrowRight');
+    assert.equal(await slider.getAttribute('aria-valuetext'), label);
+    await popup.press('Escape');
   }
   async function send(marker: string) {
     await closeSettings(page);

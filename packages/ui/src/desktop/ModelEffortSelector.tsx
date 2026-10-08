@@ -13,17 +13,21 @@ import { cn } from './lib/utils';
 const effortValues = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ThinkingEffort = (typeof effortValues)[number];
 export interface ModelOption {
+  readonly id?: string;
   readonly provider: string;
   readonly name: string;
   readonly reasoningEffortSupported?: boolean;
   readonly reasoningEffort?: string;
+  readonly reasoningEffortChoices?: readonly (ThinkingEffort | 'none')[];
 }
 export interface ModelEffortSelectorProps {
-  model?: { readonly provider: string; readonly name: string };
+  model?: { readonly id?: string; readonly provider: string; readonly name: string };
   models: readonly ModelOption[];
-  onModelChange: (provider: string, name: string) => void;
+  onModelChange: (provider: string, name: string, id?: string) => void;
   reasoningEffort?: string;
   onReasoningEffortChange?: (effort: ThinkingEffort) => void;
+  onReasoningEffortReset?: () => void;
+  onReasoningEffortOff?: () => void;
   disabled?: boolean;
 }
 
@@ -34,13 +38,26 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
   const modelSwitch = useRef<HTMLButtonElement>(null);
   const modelView = useRef<HTMLDivElement>(null);
   const providers = [...new Set(props.models.map((model) => model.provider))];
-  const selected = props.models.find(
-    (model) => model.provider === props.model?.provider && model.name === props.model.name,
+  const selected = props.models.find((model) =>
+    props.model?.id !== undefined
+      ? model.id === props.model.id
+      : model.provider === props.model?.provider && model.name === props.model.name,
   );
   const supported = selected?.reasoningEffortSupported === true && !!props.onReasoningEffortChange;
   const configuredEffort = props.reasoningEffort ?? selected?.reasoningEffort;
   const effortIndex = (effortValues as readonly string[]).indexOf(configuredEffort ?? '');
-  const effortLabel = effortIndex >= 0 ? effortNames[effortIndex] : configuredEffort || '默认';
+  const effortLabel =
+    effortIndex >= 0
+      ? effortNames[effortIndex]
+      : configuredEffort === 'none'
+        ? '关闭'
+        : configuredEffort || '默认';
+  const choices = effortValues.filter(
+    (value) =>
+      selected?.reasoningEffortChoices === undefined ||
+      selected.reasoningEffortChoices.includes(value),
+  );
+  const allowedPositions = choices.map((value) => effortValues.indexOf(value));
   const provider = providers.includes(activeProvider) ? activeProvider : providers[0];
 
   useEffect(() => {
@@ -126,11 +143,44 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
             </div>
             {supported ? (
               <div className="mt-3">
-                <GemSlider
-                  value={effortIndex >= 0 ? effortIndex : 2}
-                  valueText={effortLabel}
-                  onValueChange={(value) => props.onReasoningEffortChange?.(effortValues[value]!)}
-                />
+                {choices.length > 1 ? (
+                  <GemSlider
+                    value={
+                      allowedPositions.includes(effortIndex)
+                        ? effortIndex
+                        : allowedPositions.includes(2)
+                          ? 2
+                          : allowedPositions[0]!
+                    }
+                    valueText={effortLabel}
+                    allowedValues={allowedPositions}
+                    onValueChange={(value) => props.onReasoningEffortChange?.(effortValues[value]!)}
+                  />
+                ) : choices.length === 1 ? (
+                  <Button
+                    variant="ghost"
+                    onClick={() => props.onReasoningEffortChange?.(choices[0]!)}
+                  >
+                    {effortNames[allowedPositions[0]!]}
+                  </Button>
+                ) : null}
+                {(props.onReasoningEffortReset ||
+                  (selected?.reasoningEffortChoices?.includes('none') &&
+                    props.onReasoningEffortOff)) && (
+                  <div className="flex justify-center gap-2 mt-2">
+                    {props.onReasoningEffortReset && (
+                      <Button variant="ghost" onClick={props.onReasoningEffortReset}>
+                        配置默认
+                      </Button>
+                    )}
+                    {selected?.reasoningEffortChoices?.includes('none') &&
+                      props.onReasoningEffortOff && (
+                        <Button variant="ghost" onClick={props.onReasoningEffortOff}>
+                          关闭思考
+                        </Button>
+                      )}
+                  </div>
+                )}
               </div>
             ) : (
               <p className="model-effort-unavailable">当前模型不支持思考程度调节</p>
@@ -167,7 +217,11 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                     label={`${item} 模型`}
                     tabIndex={0}
                     shouldFilter={false}
-                    defaultValue={props.model?.provider === item ? props.model.name : undefined}
+                    defaultValue={
+                      props.model?.provider === item
+                        ? (props.model.id ?? props.model.name)
+                        : undefined
+                    }
                   >
                     <ScrollArea type="auto" className="min-h-0 flex-1" data-model-scroll>
                       <CommandList label={`${item} 模型`} className="max-h-none overflow-visible">
@@ -176,10 +230,11 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                             .filter((model) => model.provider === item)
                             .map((model) => (
                               <CommandItem
-                                key={model.name}
-                                value={model.name}
+                                key={model.id ?? model.name}
+                                value={model.id ?? model.name}
+                                aria-label={model.id ? `选择模型 ${model.id}` : undefined}
                                 onSelect={() => {
-                                  props.onModelChange(model.provider, model.name);
+                                  props.onModelChange(model.provider, model.name, model.id);
                                   setView('effort');
                                   focusModelSwitch();
                                 }}
@@ -187,11 +242,18 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                               >
                                 <span className="truncate" title={model.name}>
                                   {model.name}
+                                  {model.id &&
+                                    props.models.filter(
+                                      (entry) =>
+                                        entry.provider === model.provider &&
+                                        entry.name === model.name,
+                                    ).length > 1 && (
+                                      <small className="text-muted-foreground"> · {model.id}</small>
+                                    )}
                                 </span>
-                                {selected?.provider === model.provider &&
-                                  selected.name === model.name && (
-                                    <HugeiconsIcon icon={Tick02Icon} aria-label="当前模型" />
-                                  )}
+                                {selected === model && (
+                                  <HugeiconsIcon icon={Tick02Icon} aria-label="当前模型" />
+                                )}
                               </CommandItem>
                             ))}
                         </CommandGroup>

@@ -51,6 +51,12 @@ export {
   SheetTitle,
   SheetTrigger,
 } from './components/ui/sheet';
+export {
+  ModelEffortSelector,
+  type ModelEffortSelectorProps,
+  type ModelOption,
+  type ThinkingEffort,
+} from './ModelEffortSelector';
 export { RightSidebar, type RightSidebarProps, type RightSidebarTab } from './RightSidebar';
 export {
   type ScheduledTaskSummary,

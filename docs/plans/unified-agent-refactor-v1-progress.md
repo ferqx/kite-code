@@ -2415,3 +2415,36 @@ Native drivers 已改为实际侧栏、完整标题和全屏设置入口，业�
 端口保留不代表所有旧页面细节已迁完；Workspace 批量移除/GC、余下页面/交互、全量 installed/维护与已发布样本、
 macOS 三资源退出、独立迁移审查及最终 legacy 删除仍 pending。
 37能力仍partial、wholeV13=false；没有 push/PR/发布/dispatch。
+
+## 2026-10-08：原 PC 模型与思考选择器
+
+从 durable HEAD `0ee1030c4950b7c8af0a4b1b978f90b38f36c80e` 加本片 owned diff 继续原 PC 页面适配。
+正式 Native 输入区接入原 ModelEffortSelector/GemSlider，沿用双栏、键盘交互、CSS 和动画；
+准确 Model ID 区分同提供商同名路由，滑块只映射实际支持集合，配置默认与明确支持的 none 保临时选择语义。
+原 catalogue、原 Scope/迟到隔离、缺失 route 不回退、Session 持久选择和活动 Run 冻结门禁保持。
+没有新增 Runtime、I/O、Provider 协议、依赖版本或私有格式。
+
+迁回的三个原 UI 浮层回归 actual0/3pass/18assert/1037ms，
+日志 /private/tmp/kite-pc-original-model-selector-dom-20261008.log。
+Native 原四项加同名 ID/稀疏档位/none/default 一项 actual0/5pass/63assert/1106ms，
+日志 /private/tmp/kite-pc-native-model-selector-dom-fourth-20261008.log。
+初次静态导入早于 JSDOM，Radix Portal 未挂载；随后缺 HTMLFormElement，以及卸载延迟事件落入下个 DOM，均有原失败日志。
+测试改为 isolated、在模块读取前装浏览器，补浏览器构造器并在恢复 globals 前等待 FocusScope 收尾；生产 Portal 和业务断言保持。
+原页面/目录/草稿/question/plan 五文件邻接回归 actual0/16pass/190assert/1397ms，
+日志 /private/tmp/kite-pc-model-selector-page-neighbors-20261008.log。
+默认发现核两个新增/迁移文件各恰好一次，旧路径为零，共622文件；没有修改测试计划、删断言或放宽预算。
+
+实际 macOS Model Settings 窗口 actual0/1pass/3 Bun断言/18.03秒，
+日志 /private/tmp/kite-pc-original-model-selector-window-20261008.log；driver 42项 Node断言保 held Run、CAS、
+物理丢回执后原GET、下一轮 A→B、冷读原路由、两个所属 PID 停止，原45秒driver/60秒整例预算保持。
+源码外实际 Native 候选重新构建、搬迁、删构建源后 actual0/1pass/7assert/48.11秒，
+日志 /private/tmp/kite-pc-original-model-selector-bundle-20261008.log；原 CSS/字体、新 bridge、审批、输入、冷读及双层锁收尾保持。
+Provider driver 仅随新控件更新定位和键盘档位，不宣称本片重跑其四协议/default Vault 完整窗口。
+
+正式边界/八 workspace/API graph actual0，日志 /private/tmp/kite-pc-model-selector-architecture-20261008.log；
+9个 owned 代码文件 Biome actual0/no fixes，存在原样式代码及测试的 warnings，未扩大优化。
+根与八 workspace 类型 actual0，日志 /private/tmp/kite-pc-model-selector-all-types-20261008.log；
+docs、all 作用域影响核对和 plan-evidence 均 actual0，产品/UI/Native/active/计划同步。
+stage/commit 门禁按最终 owned 输入核对；未运行本片全量默认，不把历史绿图拼成当前完整资格。
+PC 剩余页面/交互、Workspace 批量移除/GC、余下 installed/恢复与已发布样本、macOS 资源、
+独立迁移审查及旧路径最终删除仍 pending；37能力partial、wholeV13=false、Goal active。
