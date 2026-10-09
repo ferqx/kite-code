@@ -125,15 +125,20 @@ export class NativeCaller {
   private readonly client: AgentClient;
   private readonly emit: (event: NativeEvent) => void;
   private readonly privateData: PrivateData | undefined;
+  private initialAdmission: (() => boolean) | undefined;
   constructor(
     client: AgentClient,
     emit: (event: NativeEvent) => void,
     privateData?: PrivateData,
     protectedRoots: readonly string[] = [],
+    initialAdmission?: { readonly client: AgentClient; consume(): boolean },
   ) {
     this.client = client;
     this.emit = emit;
     this.privateData = privateData;
+    if (initialAdmission && initialAdmission.client !== client)
+      throw new ClientError('connection_not_admitted');
+    this.initialAdmission = initialAdmission?.consume;
     this.answerJournal = privateData ? new NativeAnswerJournal(client, privateData) : undefined;
     if (!client.serverInfo?.storeId) throw new ClientError('connection_not_admitted');
     try {
@@ -682,7 +687,11 @@ export class NativeCaller {
   }
   private async startObservation() {
     if (this.stream) return;
-    await this.client.connect();
+    // Main may hand off its just-completed paired admission. Consume it once;
+    // serverInfo alone is insufficient after network disposal or a later attach.
+    const initialAdmission = this.initialAdmission;
+    this.initialAdmission = undefined;
+    if (!initialAdmission?.()) await this.client.connect();
     const signal = new AbortController();
     this.observer = signal;
     const originalStore = this.client.serverInfo!.storeId!;
@@ -1957,6 +1966,7 @@ export class NativeCaller {
     return result;
   }
   detach() {
+    this.initialAdmission = undefined;
     this.directoryEnabled = false;
     this.releaseReads();
     this.background.release();
@@ -1968,6 +1978,7 @@ export class NativeCaller {
     this.selected = undefined;
   }
   async disposeNetwork() {
+    this.initialAdmission = undefined;
     clearTimeout(this.refreshTimer);
     this.refreshTimer = undefined;
     this.refreshRequested = false;

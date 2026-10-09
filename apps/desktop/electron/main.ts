@@ -144,6 +144,8 @@ async function openCaller(): Promise<NativeCaller> {
       throw Error('native_draining');
     }
     privateData = openPrivateData(profile.profilePath, privateAccess);
+    const admittedService = paired;
+    let admissionAvailable = true;
     caller = new NativeCaller(
       paired.client,
       (event) => {
@@ -154,6 +156,14 @@ async function openCaller(): Promise<NativeCaller> {
         profile.profilePath,
         ...(formalAssets ? [formalAssets.candidateRoot, formalAssets.terminalRoot] : []),
       ],
+      {
+        client: admittedService.client,
+        consume: () => {
+          const available = admissionAvailable;
+          admissionAvailable = false;
+          return available && paired === admittedService && !quitting;
+        },
+      },
     );
     return caller;
   })().catch(async (error) => {

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { AgentClient, Message, ModelOutputSnapshot } from '@kite-ai/client';
-import { canonicalCallerCommandRequest } from '@kite-ai/client';
+import type { AgentClient, Message, ModelOutputSnapshot, ServerInfo } from '@kite-ai/client';
+import { canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerTextDigest } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
@@ -62,6 +62,126 @@ function authority() {
     frame,
   };
 }
+test('paired first admission is consumed once; standalone cached identity and reconnect still require real admission', async () => {
+  const identity: ServerInfo = {
+    profile: { dataRoot: '/chosen/data', name: 'native', accessKey: 'native-profile' },
+    instanceId: 'native-instance',
+    buildId: 'native-build',
+    apiMajor: 1,
+    capabilities: ['events', 'sessions'],
+    dataAvailability: 'available',
+    storeId: 'native-store',
+  };
+  let current = identity,
+    admissions = 0;
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      expect(request.headers.get('authorization')).toBe('Bearer native-token');
+      const path = new URL(request.url).pathname;
+      if (path === '/v1/server') {
+        admissions++;
+        return Response.json(current);
+      }
+      if (path === '/v1/events')
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(
+                  `event: ready\ndata: ${JSON.stringify({ storeId: identity.storeId, replayFloor: '0', highWaterCursor: '0' })}\n\n`,
+                ),
+              );
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      return new Response(null, { status: 404 });
+    },
+  });
+  const connection = createClient({
+    endpoint: server.url.href,
+    token: 'native-token',
+    bootstrap: identity,
+    expected: {
+      profile: identity.profile,
+      instanceId: identity.instanceId,
+      buildId: identity.buildId,
+      apiMajor: identity.apiMajor,
+      requiredCapabilities: ['events', 'sessions'],
+    },
+  });
+  const callers: NativeCaller[] = [];
+  try {
+    await connection.connect();
+    let consumed = 0;
+    const paired = new NativeCaller(connection, () => {}, undefined, [], {
+      client: connection,
+      consume: () => ++consumed === 1,
+    });
+    callers.push(paired);
+    await paired.invoke({ method: 'attach' });
+    expect(admissions).toBe(1);
+    expect(consumed).toBe(1);
+    await paired.disposeNetwork();
+    await paired.invoke({ method: 'attach' });
+    expect(admissions).toBe(2);
+    expect(consumed).toBe(1);
+    await paired.close();
+
+    // A retained serverInfo after disposal is not a new admission.
+    expect(connection.serverInfo?.storeId).toBe(identity.storeId);
+    const standalone = new NativeCaller(connection, () => {});
+    callers.push(standalone);
+    await standalone.invoke({ method: 'attach' });
+    expect(admissions).toBe(3);
+    current = { ...identity, storeId: 'replacement-store' };
+    await expect(connection.verifyConnection()).rejects.toMatchObject({
+      code: 'store_identity_mismatch',
+    });
+    current = { ...identity, profile: { ...identity.profile, accessKey: 'wrong-profile' } };
+    await standalone.disposeNetwork();
+    await expect(standalone.invoke({ method: 'attach' })).rejects.toMatchObject({
+      code: 'profile_identity_mismatch',
+    });
+    expect(admissions).toBe(5);
+    expect(consumed).toBe(1);
+
+    current = identity;
+    await connection.connect();
+    const revoked = new NativeCaller(connection, () => {}, undefined, [], {
+      client: connection,
+      consume: () => {
+        throw Error('revoked admission must not be consumed');
+      },
+    });
+    callers.push(revoked);
+    revoked.detach();
+    await revoked.invoke({ method: 'attach' });
+    expect(admissions).toBe(7);
+    await revoked.close();
+
+    await connection.connect();
+    let failedConsumptions = 0;
+    const failed = new NativeCaller(connection, () => {}, undefined, [], {
+      client: connection,
+      consume: () => {
+        failedConsumptions++;
+        throw Error('handoff_unavailable');
+      },
+    });
+    callers.push(failed);
+    await expect(failed.invoke({ method: 'attach' })).rejects.toThrow('handoff_unavailable');
+    await failed.invoke({ method: 'attach' });
+    expect(failedConsumptions).toBe(1);
+    expect(admissions).toBe(9);
+  } finally {
+    for (const caller of callers) await caller.close();
+    connection.disposeNetwork();
+    server.stop(true);
+  }
+});
 test('formal Native reads an observed restored Fork through the original Model provenance and current Store, without rebinding or writes', async () => {
   const connection = client(),
     content = 'original 雪🙂\r\ncomplete tail',

@@ -141,6 +141,16 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(f.calls.map((request) => request.method)).toEqual(['attach', 'directory']);
     await act(async () => directory(observed));
     expect(f.host.querySelector('.shell')).toBeNull();
+    expect(f.host.querySelector('main[aria-label="kite 启动页"]')?.getAttribute('aria-busy')).toBe(
+      'false',
+    );
+    expect(f.host.querySelector('[role="alert"]')?.textContent).toContain(
+      'native_directory_unavailable',
+    );
+    expect(
+      [...f.host.querySelectorAll('button')].some((button) => button.textContent === '重新尝试'),
+    ).toBe(true);
+    expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
     observed = { ...empty, unavailable: false };
     await f.notify(1);
     expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();

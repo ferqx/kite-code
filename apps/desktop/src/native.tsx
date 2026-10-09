@@ -99,6 +99,7 @@ function NativeDesktopContent({
   startupAttemptRef.current = startupAttempt;
   const startupPhase = useRef(startup);
   startupPhase.current = startup;
+  const startupDirectoryUnavailable = useRef(false);
   const theme = useNativeTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -206,8 +207,20 @@ function NativeDesktopContent({
   );
   function acceptDirectory(value: NativeDirectory) {
     setDirectory(value);
-    if (startupPhase.current === 'loading' && !value.unavailable) {
+    if (startupPhase.current === 'loading' && value.unavailable) {
+      startupDirectoryUnavailable.current = true;
+      startupPhase.current = 'failed';
+      setStartupError('native_directory_unavailable');
+      setStartup('failed');
+    } else if (
+      !value.unavailable &&
+      (startupPhase.current === 'loading' || startupDirectoryUnavailable.current)
+    ) {
+      // A complete observation from this generation may recover while the user
+      // is still on the retry page. Explicit retries revoke the old generation.
+      startupDirectoryUnavailable.current = false;
       startupPhase.current = 'ready';
+      setStartupError('');
       setStartup('ready');
     }
   }
@@ -391,6 +404,7 @@ function NativeDesktopContent({
         setError(/^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '目录状态待核实。');
         return;
       }
+      startupDirectoryUnavailable.current = false;
       startupPhase.current = 'failed';
       setStartupError(
         /^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '请重新尝试准备工作空间。',
@@ -2017,6 +2031,7 @@ function NativeDesktopContent({
           bridge
             ? () => {
                 if (startupPhase.current !== 'failed') return;
+                startupDirectoryUnavailable.current = false;
                 startupPhase.current = 'loading';
                 startupAttemptRef.current++;
                 setError('');

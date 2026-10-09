@@ -18,6 +18,7 @@ const [candidate, home, control, storeId] = process.argv.slice(2) as [
 ];
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
 let childPid: number | undefined;
+const startedAt = performance.now();
 type TextInputEvent = {
   type: string;
   target: string;
@@ -326,12 +327,29 @@ try {
       console.error(
         'questionnaire_actual_failure',
         JSON.stringify({
+          elapsedMs: performance.now() - startedAt,
           state: await page.evaluate(async () => {
             const current = (await window.kiteNative!.request({
               method: 'state',
               generation: 1,
             })) as NativeState;
             return {
+              generation: current.generation,
+              historyEpoch: current.historyEpoch,
+              directory: current.directory
+                ? {
+                    storeId: current.directory.storeId,
+                    unavailable: current.directory.unavailable === true,
+                    workspaces: current.directory.workspaces.length,
+                    sessions: current.directory.sessions.length,
+                  }
+                : null,
+              startup: {
+                busy: document
+                  .querySelector('main[aria-label="kite 启动页"]')
+                  ?.getAttribute('aria-busy'),
+                error: document.querySelector('[role="alert"]')?.textContent,
+              },
               session: current.selection?.session.id,
               runs: current.selection?.runs.map((run) => ({ id: run.id, status: run.status })),
               interactions: current.selection?.interactions.map((card) => ({

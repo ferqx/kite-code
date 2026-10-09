@@ -14,7 +14,9 @@
 
 [NativeStartup](src/native-startup.tsx)迁入原 kite-desktop 的启动页布局、[图标](app-icon.svg)和[启动样式](src/native-startup.css)，按钮仍用原共享 Button。[正式入口](src/native.tsx)先完成现有 Main 的 attach 与首屏完整 Workspace／Session 目录观察，再显示原 SessionPage；尚未核实的目录不能进入，空目录与未配置模型可以进入处理。没有人为最短停留时间，不另建服务或执行路径。
 
-初始化失败保留启动页、公开错误分类和明确“重新尝试”。同步状态阻止重复点击；每次重试撤销旧观察、所属历史读取和旧 generation，迟到响应不能覆盖新的目录。Main 的 detach 只释放读取与选择，不停止 Service、Run 或重发业务。进入主界面后连接或目录读取失败保留原页面与草稿，不重新遮挡。缺 preload bridge 时沿同一启动页说明资源错误，不提供不能执行的重试。原“保存诊断”现已接回，范围见下节；完整安装恢复仍按原方案验收。
+初始化失败保留启动页、公开错误分类和明确“重新尝试”。初始目录观察确认 unavailable 时显示 `native_directory_unavailable`，不会一直显示准备中；原 generation 后来取得完整可用目录仍自动进入。同步状态阻止重复点击；每次重试撤销旧观察、所属历史读取和旧 generation，迟到响应不能覆盖新的目录。Main 的 detach 只释放读取与选择，不停止 Service、Run 或重发业务。进入主界面后连接或目录读取失败保留原页面与草稿，不重新遮挡。缺 preload bridge 时沿同一启动页说明资源错误，不提供不能执行的重试。原“保存诊断”现已接回，范围见下节；完整安装恢复仍按原方案验收。
+
+[Main](electron/main.ts)从已完成真实身份准入的 paired Service 向 [NativeCaller](electron/native-caller.ts)交接同一个 Client 的一次初次许可，首次 attach 不再重复 `/v1/server`。许可消费前同步清空，Main 核原 paired Service 与退出状态；detach、网络释放和关闭都撤销未消费许可。standalone Client 的缓存 `serverInfo` 不能替代准入，后续重连仍沿 Client 完整身份核验。内部交接不增加 renderer／IPC 权利，不改变必需能力或超时；[真实 HTTP caller 测试](test/native-caller.test.ts)核一次交接、再次准入、错 Store／profile 和撤销，准确结果归[普通启动进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动目录恢复与准入交接)。
 
 [启动 DOM](test/isolated/native-startup-dom.test.tsx)沿实际 NativeDesktop 核首次等待、未核目录、空项目／无模型、两类失败、重复重试、旧响应隔离和进入后草稿保持；同轮原新对话／草稿／安排任务测试保业务断言。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)核编译启动样式及首次／冷启动完成后进入原页面，保原任务、审批、冷读与退出；实际窗口不代证初始化失败矩阵。代码输入、执行结果及剩余迁移归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)，完整 PC、安装恢复及阶段退出仍按原方案核对。
 
