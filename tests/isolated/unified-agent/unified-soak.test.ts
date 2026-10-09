@@ -253,6 +253,29 @@ test.skipIf(process.platform === 'win32')(
       expect(verifyUnifiedSoakReport(report, report.source, true)).toContain(
         'formal_duration_invalid',
       );
+      if (process.platform === 'darwin') {
+        const mcp = report.attempts[0]!.cases!.find((item) => item.caseId === 'mcp_churn')!;
+        expect(
+          mcp.points!.every(
+            (point) => point.mcpStdioHandoff?.coverage === 'original-mcp-stdio-job',
+          ),
+        ).toBe(true);
+        const altered = structuredClone(report);
+        const alteredMcp = altered.attempts[0]!.cases!.find((item) => item.caseId === 'mcp_churn')!;
+        Object.assign(alteredMcp.points![1]!.mcpStdioHandoff!.cold, {
+          originalOutputUnchanged: false,
+        });
+        expect(verifyUnifiedSoakReport(reseal(altered), report.source, false)).toContain(
+          'mcp_stdio_handoff_cold_invalid',
+        );
+        const foreign = structuredClone(report);
+        const foreignMcp = foreign.attempts[0]!.cases!.find((item) => item.caseId === 'mcp_churn')!;
+        foreignMcp.points![1]!.mcpStdioHandoff!.callExecutionId =
+          foreignMcp.points![1]!.mcpStdioHandoff!.connectExecutionId;
+        expect(verifyUnifiedSoakReport(reseal(foreign), report.source, false)).toContain(
+          'mcp_stdio_handoff_invalid',
+        );
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

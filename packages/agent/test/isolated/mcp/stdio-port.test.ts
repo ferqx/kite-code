@@ -233,6 +233,7 @@ macTest(
       });
       if (evidence.version !== 2) throw Error('mcp_coalition_evidence_required');
       expect(evidence.broker!.birth).not.toBeNull();
+      expect(evidence.broker!.kernelState).toBe('alive');
       expect(evidence.guardian!.birth).not.toBeNull();
       expect(evidence.coalition).toMatchObject({
         claimTaskCount: 1,

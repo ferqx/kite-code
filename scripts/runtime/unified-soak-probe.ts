@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
+import { mcpStdioGuardianAsset } from '@kite-ai/agent/mcp';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { CLIServiceArtifact } from '@kite-ai/cli/host';
 import { createClient } from '@kite-ai/client';
@@ -375,7 +376,16 @@ export async function runCaseMatrix(root: string, cycles: number, artifact: CLIS
       }, 180_000);
       let result: CaseEvidence;
       try {
-        result = await runFunctionalCase(directory, caseId);
+        result = await runFunctionalCase(
+          directory,
+          caseId,
+          caseId === 'mcp_churn'
+            ? {
+                guardianPath: mcpStdioGuardianAsset(),
+                bunExecutable: artifact.executable,
+              }
+            : undefined,
+        );
       } finally {
         clearTimeout(operationTimer);
       }
@@ -390,6 +400,7 @@ export async function runCaseMatrix(root: string, cycles: number, artifact: CLIS
         after: afterObservation.metrics,
         observations: { before: beforeObservation, after: afterObservation },
         ...(result.identities ? { identities: result.identities } : {}),
+        ...(result.mcpStdioHandoff ? { mcpStdioHandoff: result.mcpStdioHandoff } : {}),
         durationMs: result.durationMs,
         assertions: result.assertions,
       };

@@ -130,6 +130,8 @@ Windows transport的原Store/config测试加[五项Node后端案例](../apps/des
 
 macOS 另可显式执行 `bun run scripts/runtime/unified-soak.ts --profile=qualification --collect-blocked --output="${TMPDIR%/}/kite-full-soak/report.json"`，按原完整8outer／九点／60—168分钟预算采集，而不缩短到preflight。报告必须位于当前用户拥有且其他用户不可写的父目录；共享 `/private/tmp` 不能直接作父目录。支持的检查通过后仍blocked／inconclusive及退出1；实际失败则failed／退出1，formal拒绝保持。完成的各阶段复用原最终保留资源增长判定，增长失败保留私有原root与JSON，不以提前退出充作八轮通过。完整默认continuous消费父runner的同一已核验候选，源码外编译测试仍保两cycle／40Command、全部原断言与180秒预算，并核候选摘要和零重建。当前真实九点RSS增长失败、缺失Bun资源指标及全体后代资格仍单独记未具备，证据归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。
 
+macOS [原 mcp_churn 场景](fixtures/unified-agent/soak/mcp-owned-stdio.ts)现沿默认 Source／Core／connection Job 完成真实调用后 exit7、原 Tool unknown、完整所属树及 cold 原结果保全。原五类[完整场景](isolated/unified-agent/unified-soak-cases.test.ts)和[完整报告](isolated/unified-agent/unified-soak.test.ts)保原案例／断言／预算，另在原 macOS 场景内核精确交接及缺 broker reap／cold输出变化／错 Execution 身份拒绝，没有增加独立矩阵。非 macOS 继续原公开 adapter 协议诊断，不产生正式 Job 收据；原通过和清理断言仍执行，Mac owner 失败不转诊断。原 Source 后端的平台未具备保持。准确冻结、首轮失败、最终四文件有效结果与复用范围归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10原-soak-stdio-caller-迁移与冷结果保全)，它不代替阶段完整默认或资源资格。
+
 当前命令以根 [package.json](../package.json) 为准。`test:mock` 使用固定模型配置；`test:runtime:fault`、`test:e2e`、`test:runtime:stdio`、`test:runtime:transport` 与 `test:desktop:native` 指向新 owner。`test:desktop:window` 验完整 Native lifecycle；`test:shell:native` 验实际 confined leaf。纯 version smoke 不能替代真实窗口/PTY/平台证据。
 
 `check:docs` 核可检查链接、active 元数据和当前 owner；`check:docs-impact` 提示实际 diff 的产品/技术核对范围，Markdown diff 不证明语义。`check:plan-evidence` 核保留历史证据与对应代码身份，不将旧 run 当新资格。文档同步 Skill 的 ready/blocked 只覆盖对应 action，不能扩大 Git 授权或表示完整 V1.3 完成。

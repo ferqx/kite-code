@@ -918,4 +918,7 @@ export {
   type McpStdioPortOptions,
   mcpStdioGuardianAsset,
 } from './stdio-port';
-export type { McpStdioProcessEvidence } from './stdio-process-evidence';
+export {
+  decodeMcpStdioProcessEvidence,
+  type McpStdioProcessEvidence,
+} from './stdio-process-evidence';

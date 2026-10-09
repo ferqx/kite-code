@@ -126,6 +126,12 @@ Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)仍生成 
 
 [Service HTTP port](../../../../apps/service/src/mcp-http-port.ts)提供另一显式 trusted transport：完整 DNS 候选核验、socket 地址 pinning、原 Host/TLS servername、禁止 redirect/proxy 继承和有界取消/关闭。秘密 headers 由宿主注入，不进入 lifecycle 固定配置或目录；仍必须提供真实 Job 准入。它与 stdio port 的资格分别验证，不能由低层 adapter 的默认 fetch 推导。
 
+公共 `./mcp` leaf 同时导出纯 `decodeMcpStdioProcessEvidence`；冷消费者只解码原记录，不调用原生观察、signal 或 spawn。正式 port 在 READY 私有帧的 broker PID／parent／birth 验证后实际读取其内核状态，保存当时的 alive／reused／absent／unavailable；不再固定写 unavailable，也不由出生记录推定仍存活。原 terminal 的实际 exit／close／reap 和 guardian exit:null 合同保持。
+
+macOS [原完整 Soak 的 stdio 场景](../../../../tests/fixtures/unified-agent/soak/mcp-owned-stdio.ts)已切到默认 `mcp.json` Source、Core 准入和 connection Job：真实 SDK 依次调用 sources.list、connect 和原远端 Tool，server exit7 后原 Tool 保 outcome_unknown。连接 Job 归独立 operation.job Command、runId:null；connect／call Tool 沿原用户 Run，身份取自真实 Store Execution。原 progress／terminal 经公开 decoder 核同 binding／三角色出生／真实 reap／coalition，再由[有限交接校验](../../../../scripts/runtime/unified-soak-mcp-handoff.ts)消费。cold 公共 GET 保三个完整 Execution、两个原 Command、Run、全部 Job 输出和 View，所属 Store 补核公开 DTO 不包含的原 reference；cursor 与 Provider 次数不增长。
+
+[场景分流](../../../../tests/fixtures/unified-agent/soak/cases.ts)在调用前选择已具备的平台。非 macOS 保留原公开 adapter 协议诊断及四项原断言，不生成正式 Job 交接收据；正式 Source stdio 后端仍明确 unsupported。macOS 正式 owner 失败不转诊断路径。当前退役范围是 macOS 原 collector 的直接 stdio caller，HTTP catalogue drift／release 和其他平台协议诊断保持。报告只授予原 MCP connection Job 的有限证据，完整资源资格归[Runtime 边界](../../../../docs/active/runtime-resilience-qualification.md)。
+
 ## 连接 transport 凭据 broker
 
 [createMcpCredentialBroker](credentials.ts) 使用明确注入的 `vault.resolve(credentialRef)`，factory 和 `issue` 不读 vault、不联网。`issue` 只供可信宿主签发 process-local opaque `McpCredentialRef`：私有 registry 绑定 profile、原 Store、canonical Workspace、Session、原 connection Job、配置 source/revision、server/configDigest、auth profile/policy revision，以及 purpose、expiry 和 revocation revision。已知字段封闭且有界；复制任意 DTO 或未知 ref 不能建立 registry 绑定。当前 closed purpose 仅为 `mcp.http`，含义是连接 transport 的 Bearer 认证，不是远端 Tool/Task 的逐操作授权，也不是 OAuth flow。最多 512 个 handle（宿主可明确调整至 4096），过期/撤销条目在显式签发时回收；新 broker/process 不能恢复旧 handle。

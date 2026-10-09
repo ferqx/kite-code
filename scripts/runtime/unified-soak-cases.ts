@@ -1,3 +1,4 @@
+import type { McpStdioJobHandoff } from './unified-soak-mcp-handoff';
 import {
   type NativeProcessObservation,
   observeNativeProcess,
@@ -51,6 +52,7 @@ export interface CaseEvidence {
   cleanupConfirmed: boolean;
   assertions: AssertionReceipt[];
   unavailable: string[];
+  mcpStdioHandoff?: McpStdioJobHandoff;
   identities?: {
     storeId: string;
     sessionId: string;
@@ -65,6 +67,7 @@ export interface CaseEvidence {
     durationMs: number;
     assertions: AssertionReceipt[];
     observations?: { before: ResourceObservation; after: ResourceObservation };
+    mcpStdioHandoff?: McpStdioJobHandoff;
     descendants?: {
       role: 'crash' | 'recovery';
       native: NativeProcessObservation;

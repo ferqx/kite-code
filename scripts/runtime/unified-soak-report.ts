@@ -6,6 +6,7 @@ import {
   UNIFIED_SOAK_CASES,
 } from './unified-soak-cases';
 import { type ContinuousEvidence, verifyContinuousEvidence } from './unified-soak-continuous';
+import { verifyMcpStdioJobHandoff } from './unified-soak-mcp-handoff';
 import { type NativeProcessObservation, sameNativeProcess } from './unified-soak-native';
 
 export const UNIFIED_SOAK_REVISION = 'unified-soak-v2' as const;
@@ -395,7 +396,7 @@ function verifyReport(
               'assertions',
               'unavailable',
             ],
-            ['points', 'identities'],
+            ['points', 'identities', 'mcpStdioHandoff'],
           ) ||
           item.caseId !== UNIFIED_SOAK_CASES[caseIndex] ||
           !Array.isArray(item.unavailable) ||
@@ -468,7 +469,7 @@ function verifyReport(
               !closed(
                 point,
                 ['sequence', 'before', 'after', 'durationMs', 'assertions'],
-                ['observations', 'descendants', 'identities'],
+                ['observations', 'descendants', 'identities', 'mcpStdioHandoff'],
               ) ||
               point.sequence !== sequence ||
               !closed(point.before, Object.keys(RESOURCE_LIMITS)) ||
@@ -533,6 +534,15 @@ function verifyReport(
             )
               return ['case_native_observation_invalid'];
             if (formal && !point.observations) errors.push('native_observation_missing');
+            if (Object.hasOwn(point, 'mcpStdioHandoff')) {
+              if (item.caseId !== 'mcp_churn') return ['mcp_stdio_handoff_invalid'];
+              errors.push(
+                ...verifyMcpStdioJobHandoff(point.mcpStdioHandoff!, {
+                  ownerPid: item.pid,
+                  identities: point.identities ?? [],
+                }),
+              );
+            }
             if (point.descendants) {
               if (
                 item.caseId !== 'runtime_sigkill_recovery' ||
@@ -567,6 +577,22 @@ function verifyReport(
               }
           }
         }
+        if (Object.hasOwn(item, 'mcpStdioHandoff')) {
+          if (
+            item.caseId !== 'mcp_churn' ||
+            !item.points?.length ||
+            item.points.some((point) => !Object.hasOwn(point, 'mcpStdioHandoff')) ||
+            JSON.stringify(item.mcpStdioHandoff) !== JSON.stringify(item.points[0]!.mcpStdioHandoff)
+          )
+            return ['mcp_stdio_handoff_invalid'];
+          errors.push(
+            ...verifyMcpStdioJobHandoff(item.mcpStdioHandoff!, {
+              ownerPid: item.pid,
+              identities: item.identities ?? [],
+            }),
+          );
+        } else if (item.points?.some((point) => Object.hasOwn(point, 'mcpStdioHandoff')))
+          return ['mcp_stdio_handoff_invalid'];
         if (
           formal &&
           item.caseId === 'runtime_sigkill_recovery' &&

@@ -309,7 +309,11 @@ export function createMcpStdioTransportPort(
               const next = decodeMcpStdioProcessEvidence(
                 {
                   ...processEvidence,
-                  broker: { ...frame.broker, exit: null, kernelState: 'unavailable' },
+                  broker: {
+                    ...frame.broker,
+                    exit: null,
+                    kernelState: mcpStdioKernelState(frame.broker),
+                  },
                   guardian: frame.guardian,
                   server: frame.server,
                   coalition: {

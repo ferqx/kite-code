@@ -10,6 +10,9 @@ import type {
   UnifiedSoakCaseId,
 } from '../../../../scripts/runtime/unified-soak-cases';
 import { check, fixture, until } from './common';
+import { type McpSoakStdioAssets, runOwnedMcpStdio } from './mcp-owned-stdio';
+
+export type { McpSoakStdioAssets } from './mcp-owned-stdio';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -20,6 +23,7 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 export async function runFunctionalCase(
   root: string,
   caseId: UnifiedSoakCaseId,
+  stdioAssets?: McpSoakStdioAssets,
 ): Promise<CaseEvidence> {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const evidence: CaseEvidence = {
@@ -38,7 +42,7 @@ export async function runFunctionalCase(
     if (caseId === 'long_runtime_replay') await replayPolicy(root, evidence);
     else if (caseId === 'subagent_cancel_recovery') await childCancel(root, evidence);
     else if (caseId === 'model_transient_stream') await modelFault(root, evidence);
-    else if (caseId === 'mcp_churn') await mcpChurn(root, evidence);
+    else if (caseId === 'mcp_churn') await mcpChurn(root, evidence, stdioAssets);
     else if (caseId === 'storage_and_logger_faults') await storageFault(root, evidence);
     else {
       evidence.status = 'unavailable';
@@ -504,7 +508,7 @@ async function modelFault(root: string, e: CaseEvidence) {
     e.cleanupConfirmed = true;
   }
 }
-async function mcpChurn(root: string, e: CaseEvidence) {
+async function mcpChurn(root: string, e: CaseEvidence, stdioAssets?: McpSoakStdioAssets) {
   let changed = false,
     calls = 0;
   const server = Bun.serve({
@@ -594,7 +598,10 @@ async function mcpChurn(root: string, e: CaseEvidence) {
       rejected = true;
     }
     check(e.assertions, 'released_scope_rejected', rejected, true);
-    await stdioExit(root, e);
+    if (process.platform === 'darwin') {
+      if (!stdioAssets) throw Error('mcp_stdio_owned_assets_missing');
+      await runOwnedMcpStdio(root, e, stdioAssets);
+    } else await stdioProtocolDiagnostic(root, e);
   } finally {
     await f.close();
     await adapter.close();
@@ -699,7 +706,8 @@ async function storageFault(root: string, e: CaseEvidence) {
   }
 }
 
-async function stdioExit(root: string, e: CaseEvidence) {
+/** Optional public-adapter protocol diagnostic; no formal process-owner receipt. */
+async function stdioProtocolDiagnostic(root: string, e: CaseEvidence) {
   const directory = join(root, 'stdio');
   mkdirSync(directory, { mode: 0o700 });
   const marker = join(directory, 'wire');
