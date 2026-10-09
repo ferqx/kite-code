@@ -12,6 +12,10 @@ macOS guardian 通过私有 Darwin owned-child port 原生启动直接 child，�
 
 自然退出、cancel、EOF、失败共用原 guardian 的一次 closing，后到入口加入同一 promise，保留首个进入收尾的事实。端口自行拥有 pipe FD、原根和动态库；释放需要原根已回收且 FD 已关闭。argv/env 地址表不代替 CString 的生存期，局部强引用集合在 native spawn 返回后有真实可观察读取；核验失败保留 owner/unknown，不在成功 spawn 后抛错丢失原根。
 
+2026-10-10，默认 host 已由 launchd guardian 拥有完整 coalition，但原 adapter 在收到私有 terminal 后立即结束 Job，尚未等自己直接拥有的 broker exit/close。现在原 Job reference 保存独立启动快照，原 root WNOWAIT／匹配的 waitpid 事实沿同次 nonce／Session／Execution交接，terminal 暂存至真实 broker exit及close，另核准确注册清理和 guardian 原 birth absence/reuse。launchd guardian 的 exit 保 null，不代造它的 reap；首个终态保持、迟到证明不改旧 unknown。取消在 broker exit→close 窗口加入同一原期限，不向已结束 stdin 再写控制。当前完整边界归 Jobs owner，此补充不把原组证明扩大为任意树。
+
+共享只读出生观察归中立平台 leaf，MCP／Shell／OAuth 各由原 effect owner 绑定及持久保存。纯历史 decoder 不调用 native observer，冷 reference 仍不是控制句柄；新 leaf 不提供信号、后代枚举或执行 authority。
+
 ## Alternatives considered
 
 - 只在每次信号前核 PID 启动时间、kill(0) 或 ps：检查到信号之间仍可失去占位，不能提供同一内核原组所有权，未采用。
@@ -19,6 +23,9 @@ macOS guardian 通过私有 Darwin owned-child port 原生启动直接 child，�
 - Darwin kqueue NOTE_TRACK/CHILD：当前平台不提供所需跟踪能力，NOTE_FORK 也不给出完整 child 身份；不能冒充可用后代监督。
 - 将成员表中的非根 zombie 当作已停止：成员可能在退出前已派生新后代，条件快照不能据此证明完整停止；只采用准确原根一项的最小证明。
 - 放开 fork、仅禁止 setsid/setpgid 后默认启用 Shell：真实 posix_spawn 可从内部调用改变组/会话；额外拒绝 posix_spawn 虽保传统 fork/exec，却尚不支持通用 Bun/Node 工具链。本次没有改变任何生产 Seatbelt 权限或默认装配。
+
+- 只凭 launchd guardian 的业务 terminal 宣告原 Job 监督结束：它证明 root／子树的清理，不能证明由 adapter 直接拥有的 broker 已 reap，未采用。保留原终态事实并完成真实父方交接。
+- 让 Jobs 或 Service 依赖 MCP 命名的出生观察实现：该观察本身无 MCP 语义；采用中立只读平台 leaf，MCP 旧导出保持别名兼容，不把业务 owner 合为另一个执行入口。
 
 ## Consequences
 

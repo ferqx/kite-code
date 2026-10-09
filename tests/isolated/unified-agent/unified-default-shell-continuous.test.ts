@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { shellProcessEvidenceEnded } from '@kite-ai/agent/jobs/shell';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import type { ContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
@@ -104,6 +105,18 @@ finally {await fixture.close();}`,
       expect(evidence.synchronousEffects).toBe(40);
       expect(evidence.childCalls).toBe(40);
       expect(evidence.shell!.jobs).toHaveLength(40);
+      expect(
+        evidence.shell!.jobs.every(
+          (job) =>
+            job.ownedProcesses?.coverage === 'shell-owned-coalition' &&
+            shellProcessEvidenceEnded(job.ownedProcesses),
+        ),
+      ).toBe(true);
+      const unreaped = structuredClone(evidence);
+      unreaped.shell!.jobs[0]!.ownedProcesses!.broker.exit = null;
+      expect(verifyContinuousEvidence(unreaped, false)).toContain(
+        'continuous_shell_process_handoff_invalid',
+      );
       expect(evidence.shell).toMatchObject({ coldRead: true, noReplay: true });
       expect(evidence.slowEntered).toBe(true);
       expect(evidence.peerEvents).toBeGreaterThan(0);

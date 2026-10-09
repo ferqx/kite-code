@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
+  decodeShellProcessEvidence,
+  type ShellProcessEvidence,
+  shellProcessEvidenceEnded,
+} from '@kite-ai/agent/jobs/shell';
+import {
   type PairedServiceResources,
   verifyPairedServiceResources,
 } from './unified-soak-service-resources';
@@ -28,6 +33,8 @@ export interface ContinuousShellEvidence {
     digest: string;
     processTreeStopped: true;
     stdoutSha256: string;
+    /** Original Shell Job handoff only; no whole Runtime resource qualification. */
+    ownedProcesses?: ShellProcessEvidence;
   }[];
   coldRead: boolean;
   noReplay: boolean;
@@ -212,7 +219,21 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
       shell.jobs.some(
         (job, index) =>
           Object.keys(job).sort().join(',') !==
-            'coalitionId,commandId,digest,endedAt,executionId,processTreeStopped,sessionId,startedAt,stdoutSha256,units' ||
+            [
+              'coalitionId',
+              'commandId',
+              'digest',
+              'endedAt',
+              'executionId',
+              'processTreeStopped',
+              'sessionId',
+              'startedAt',
+              'stdoutSha256',
+              'units',
+              ...(Object.hasOwn(job, 'ownedProcesses') ? ['ownedProcesses'] : []),
+            ]
+              .sort()
+              .join(',') ||
           job.commandId !== value.commandIds[index] ||
           !value.sessionIds.includes(job.sessionId) ||
           !/^[1-9][0-9]{0,19}$/.test(job.coalitionId) ||
@@ -234,6 +255,26 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
       )
     )
       return ['continuous_background_shell_invalid'];
+    for (const job of shell.jobs) {
+      if (!Object.hasOwn(job, 'ownedProcesses')) continue;
+      const proof = job.ownedProcesses;
+      const decoded =
+        proof &&
+        decodeShellProcessEvidence(proof, {
+          sessionId: job.sessionId,
+          executionId: job.executionId,
+          nonce: proof.binding?.nonce,
+        });
+      if (
+        !decoded ||
+        !shellProcessEvidenceEnded(decoded) ||
+        decoded.coalition.id !== job.coalitionId ||
+        (shell.serviceResources &&
+          (!Array.isArray(shell.serviceResources.services) ||
+            !shell.serviceResources.services.some((service) => service?.pid === decoded.ownerPid)))
+      )
+        return ['continuous_shell_process_handoff_invalid'];
+    }
   }
   if (value.version === 2 && value.shell && Object.hasOwn(value.shell, 'serviceResources')) {
     const resourceErrors = verifyPairedServiceResources(value.shell.serviceResources!, {

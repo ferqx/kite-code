@@ -11,12 +11,25 @@ import type {
   StopConfirmation,
   ToolResult,
 } from '@kite-ai/agent/extensions';
+import { ownedProcessKernelState } from '../platform/process/owned-process-observation';
 import {
   type ConfinedLaunch,
   type ConfinedPaths,
   captureConfinedLaunch,
 } from './confined-preparation';
 import { captureMacosHostLaunch, type MacosHostPaths } from './host-preparation';
+import {
+  copyShellProcessEvidence,
+  decodeShellProcessEvidence,
+  type ShellProcessEvidence,
+  shellProcessEvidenceEnded,
+} from './shell-process-evidence';
+
+export {
+  decodeShellProcessEvidence,
+  type ShellProcessEvidence,
+  shellProcessEvidenceEnded,
+} from './shell-process-evidence';
 
 export interface ShellJobOptions {
   readonly cwd: string;
@@ -45,6 +58,11 @@ interface State {
   groupStopped: boolean;
   groupId?: number;
   coalitionId?: string;
+  evidence?: ShellProcessEvidence;
+  readyEvidence?: ShellProcessEvidence;
+  pendingTerminal?: ToolResult;
+  terminalTimer?: ReturnType<typeof setTimeout>;
+  brokerExit?: { code: number | null; signal: string | null; reaped: true };
   terminal: Promise<void>;
   stopped: Promise<void>;
   proveStop: () => void;
@@ -168,6 +186,8 @@ function shellJob(
     }
     if (state.result) return;
     if (!groupStopped) result = { ...result, outcome: 'outcome_unknown' };
+    if (state.terminalTimer) clearTimeout(state.terminalTimer);
+    state.terminalTimer = undefined;
     state.result = result;
     state.groupStopped = groupStopped;
     enqueue(state, { type: 'terminal', result, supervision: groupStopped ? 'ended' : 'unknown' });
@@ -179,11 +199,13 @@ function shellJob(
         status: state.groupStopped ? 'already_finished' : 'unknown',
         details: { processGroupId: state.groupId ?? null },
       };
-    if (state.process.exitCode !== null || state.process.signalCode !== null)
+    const brokerExited = state.process.exitCode !== null || state.process.signalCode !== null;
+    if (brokerExited && !(configuration.supervision && state.readyEvidence))
       return { status: 'unknown', details: { processGroupId: state.groupId ?? null } };
     if (state.stopping) return state.stopping;
     state.stopping = (async () => {
-      state.process.stdin?.write(`${JSON.stringify({ type: 'cancel', nonce: state.nonce })}\n`);
+      if (!brokerExited && !state.pendingTerminal && state.process.stdin?.writable)
+        state.process.stdin.write(`${JSON.stringify({ type: 'cancel', nonce: state.nonce })}\n`);
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         state.stopped,
@@ -334,6 +356,43 @@ function shellJob(
                   BigInt(frame.coalitionId) > 18446744073709551615n
                 )
                   throw Error('invalid_private_coalition');
+                const evidence = decodeShellProcessEvidence(
+                  {
+                    version: 1,
+                    coverage: 'shell-owned-coalition',
+                    binding: frame.binding,
+                    ownerPid: process.pid,
+                    broker: { ...(frame.broker as object), exit: null, kernelState: 'unavailable' },
+                    guardian: frame.guardian,
+                    root: frame.nativeRoot,
+                    coalition: {
+                      id: frame.coalitionId,
+                      guardianUniqueId: (frame.coalition as { uniqueId?: string })?.uniqueId,
+                      guardianPidVersion: (frame.coalition as { pidVersion?: number })?.pidVersion,
+                      claimTaskCount: 1,
+                      terminalTaskCount: null,
+                      processTreeStopped: false,
+                      label: (frame.registration as { label?: string })?.label,
+                      domain: (frame.registration as { domain?: string })?.domain,
+                      registrationRemoved: false,
+                    },
+                  },
+                  { sessionId: context.sessionId, executionId: context.executionId, nonce },
+                  process.pid,
+                );
+                if (
+                  !evidence ||
+                  evidence.broker.pid !== proc.pid ||
+                  evidence.guardian.pid !== frame.supervisorPid ||
+                  evidence.root.identity.pid !== frame.processGroupId ||
+                  (frame.coalition as { pid?: number })?.pid !== evidence.guardian.pid ||
+                  (frame.coalition as { coalitionId?: string })?.coalitionId !==
+                    frame.coalitionId ||
+                  (frame.registration as { removed?: boolean })?.removed !== false
+                )
+                  throw Error('invalid_private_process_evidence');
+                state.evidence = evidence;
+                state.readyEvidence = evidence;
                 state.coalitionId = frame.coalitionId;
               }
               state.groupId = Number(frame.processGroupId);
@@ -356,29 +415,83 @@ function shellJob(
               ) &&
               typeof frame.groupStopped === 'boolean'
             ) {
+              if (configuration.supervision && state.pendingTerminal) continue;
               if (
                 configuration.supervision &&
                 frame.groupStopped &&
                 frame.coalitionId !== state.coalitionId
               )
                 throw Error('invalid_private_coalition');
-              finish(
-                state,
-                {
-                  outcome: frame.outcome as ToolResult['outcome'],
-                  content: `Shell ${frame.outcome}`,
-                  details: {
-                    exitCode: typeof frame.exitCode === 'number' ? frame.exitCode : null,
-                    processGroupId: state.groupId ?? null,
-                    groupStopped: frame.groupStopped,
-                    forced: frame.forced === true,
-                    ...(state.coalitionId
-                      ? { coalitionId: state.coalitionId, processTreeStopped: frame.groupStopped }
-                      : {}),
-                  },
+              const result: ToolResult = {
+                outcome: frame.outcome as ToolResult['outcome'],
+                content: `Shell ${frame.outcome}`,
+                details: {
+                  exitCode: typeof frame.exitCode === 'number' ? frame.exitCode : null,
+                  processGroupId: state.groupId ?? null,
+                  groupStopped: frame.groupStopped,
+                  forced: frame.forced === true,
+                  ...(state.coalitionId
+                    ? { coalitionId: state.coalitionId, processTreeStopped: frame.groupStopped }
+                    : {}),
                 },
-                frame.groupStopped,
-              );
+              };
+              if (configuration.supervision) {
+                const original = state.evidence;
+                const evidence =
+                  original &&
+                  decodeShellProcessEvidence(
+                    {
+                      ...original,
+                      guardian: frame.guardian,
+                      root: frame.nativeRoot,
+                      coalition: {
+                        ...original.coalition,
+                        processTreeStopped: frame.processTreeStopped === true,
+                        terminalTaskCount: frame.terminalTaskCount ?? null,
+                        registrationRemoved: frame.registrationRemoved === true,
+                      },
+                    },
+                    original.binding,
+                    process.pid,
+                  );
+                if (
+                  !evidence ||
+                  frame.groupStopped !== evidence.coalition.processTreeStopped ||
+                  JSON.stringify(evidence.root.identity) !==
+                    JSON.stringify(original!.root.identity) ||
+                  JSON.stringify(evidence.guardian.birth) !==
+                    JSON.stringify(original!.guardian.birth) ||
+                  evidence.guardian.pid !== original!.guardian.pid ||
+                  JSON.stringify(frame.binding) !== JSON.stringify(original!.binding) ||
+                  (frame.coalition as { uniqueId?: string })?.uniqueId !==
+                    original!.coalition.guardianUniqueId ||
+                  (frame.coalition as { pidVersion?: number })?.pidVersion !==
+                    original!.coalition.guardianPidVersion ||
+                  (frame.coalition as { coalitionId?: string })?.coalitionId !==
+                    original!.coalition.id ||
+                  (frame.registration as { label?: string })?.label !== original!.coalition.label ||
+                  (frame.registration as { domain?: string })?.domain !==
+                    original!.coalition.domain ||
+                  (frame.registration as { removed?: boolean })?.removed !== true
+                )
+                  throw Error('invalid_private_process_evidence');
+                state.evidence = evidence;
+                state.pendingTerminal = result;
+                state.terminalTimer ??= setTimeout(() => {
+                  proc.stdin!.end();
+                  finish(
+                    state,
+                    {
+                      ...result,
+                      details: {
+                        ...(result.details as Record<string, Json>),
+                        ownedProcesses: copyShellProcessEvidence(evidence) as unknown as Json,
+                      },
+                    },
+                    false,
+                  );
+                }, grace + 4000);
+              } else finish(state, result, frame.groupStopped);
               state.acknowledge();
             } else throw new Error('invalid_private_frame');
           } catch {
@@ -398,7 +511,39 @@ function shellJob(
         finish(state, { outcome: 'outcome_unknown', content: 'Shell supervisor failed' }, false);
         state.rejectReady(new Error('shell_supervisor_failed'));
       });
+      proc.once('exit', (code, signal) => {
+        state.brokerExit = { code, signal, reaped: true };
+      });
       proc.on('close', () => {
+        if (configuration.supervision && state.pendingTerminal && state.evidence) {
+          const snapshot = copyShellProcessEvidence({
+            ...state.evidence,
+            broker: {
+              ...state.evidence.broker,
+              exit: state.brokerExit ?? null,
+              kernelState: ownedProcessKernelState(state.evidence.broker),
+            },
+          });
+          const evidence = decodeShellProcessEvidence(
+            snapshot,
+            state.evidence.binding,
+            process.pid,
+          );
+          finish(
+            state,
+            {
+              ...state.pendingTerminal,
+              details: {
+                ...(state.pendingTerminal.details as Record<string, Json>),
+                ...(evidence
+                  ? { ownedProcesses: evidence as unknown as Json }
+                  : { ownedProcessesUnavailable: 'shell_owned_process_evidence_unavailable' }),
+              },
+            },
+            !!evidence && shellProcessEvidenceEnded(evidence),
+          );
+          return;
+        }
         finish(
           state,
           { outcome: 'outcome_unknown', content: 'Shell supervisor ended without confirmation' },
@@ -410,6 +555,9 @@ function shellJob(
         `${JSON.stringify({
           type: 'start',
           nonce,
+          ...(configuration.supervision
+            ? { sessionId: context.sessionId, executionId: context.executionId }
+            : {}),
           executable: launch.executable,
           argv: launch.argv,
           identities: confined?.identities,
@@ -443,6 +591,12 @@ function shellJob(
           nonce,
           processGroupId: state.groupId ?? null,
           supervisorPid: proc.pid ?? null,
+          ...(state.readyEvidence
+            ? {
+                launchdGuardianPid: state.readyEvidence.guardian.pid,
+                ownedProcesses: copyShellProcessEvidence(state.readyEvidence) as unknown as Json,
+              }
+            : {}),
           ...(state.coalitionId ? { coalitionId: state.coalitionId } : {}),
           executionId: context.executionId,
           ...(confined

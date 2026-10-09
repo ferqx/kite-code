@@ -12,9 +12,12 @@ import {
 } from './darwin-launchd-supervisor';
 import { type DarwinOwnedChild, startDarwinOwnedChild } from './darwin-owned-child';
 import { claimDarwinOwnedCoalition } from './darwin-owned-coalition';
+import { observeOwnedProcessIdentity, ownedProcessKernelState } from './owned-process-observation';
 
 interface Request {
   nonce: string;
+  sessionId?: string;
+  executionId?: string;
   executable: string;
   argv: string[];
   cwd: string;
@@ -32,6 +35,7 @@ const coalition = launchdOwned ? claimDarwinOwnedCoalition() : undefined;
 const launchdControl = launchdOwned ? await connectLaunchdControl(process.argv[3]!) : undefined;
 const incoming = launchdControl?.socket ?? process.stdin;
 const outgoing = launchdControl?.socket ?? process.stdout;
+const brokerIdentity = launchdOwned ? undefined : observeOwnedProcessIdentity(process.pid);
 let bridge: Awaited<ReturnType<typeof startLaunchdSupervisor>> | undefined;
 let bridgeStarting: Promise<void> | undefined;
 let request: Request | undefined;
@@ -99,7 +103,12 @@ incoming.on('data', (chunk: string) => {
           Number(frame.graceMs) > 5000 ||
           (frame.supervision !== undefined && frame.supervision !== 'macos-launchd-coalition') ||
           (frame.supervision === 'macos-launchd-coalition' &&
-            (typeof frame.controlBase !== 'string' || !frame.controlBase.startsWith('/'))) ||
+            (typeof frame.controlBase !== 'string' ||
+              !frame.controlBase.startsWith('/') ||
+              typeof frame.sessionId !== 'string' ||
+              !frame.sessionId ||
+              typeof frame.executionId !== 'string' ||
+              !frame.executionId)) ||
           (launchdOwned && frame.supervision !== 'macos-launchd-coalition') ||
           process.platform === 'win32'
         )
@@ -177,7 +186,18 @@ async function start(): Promise<void> {
       bridge = await startLaunchdSupervisor({
         frame: input as unknown as Record<string, unknown>,
         controlBase: input.controlBase!,
-        onFrame: send,
+        includeRegistration: true,
+        cancelled: () => parentGone,
+        async onFrame(frame) {
+          if (frame.type === 'ready') await send({ ...frame, broker: brokerIdentity });
+          else if (frame.type === 'terminal' && frame.guardian) {
+            const guardian = frame.guardian as ReturnType<typeof observeOwnedProcessIdentity>;
+            await send({
+              ...frame,
+              guardian: { ...guardian, kernelState: ownedProcessKernelState(guardian) },
+            });
+          } else await send(frame);
+        },
       });
       if (parentGone) bridge.stop();
     })();
@@ -237,7 +257,23 @@ async function start(): Promise<void> {
       type: 'ready',
       processGroupId: processChild.pid,
       supervisorPid: process.pid,
-      ...(coalition ? { coalitionId: coalition.id } : {}),
+      ...(coalition && ownedChild
+        ? {
+            coalitionId: coalition.id,
+            coalition: coalition.identity,
+            binding: {
+              sessionId: input.sessionId,
+              executionId: input.executionId,
+              nonce: input.nonce,
+            },
+            guardian: {
+              ...observeOwnedProcessIdentity(process.pid),
+              exit: null,
+              kernelState: 'alive',
+            },
+            nativeRoot: ownedChild.readProcessEvidence(),
+          }
+        : {}),
     });
     const outputs = Promise.all([
       drain(processChild.stdout!, 'stdout'),
@@ -307,7 +343,25 @@ function close(
       exitCode,
       groupStopped: stopped.confirmed,
       forced: stopped.forced,
-      ...(coalition ? { coalitionId: coalition.id } : {}),
+      ...(coalition && ownedChild
+        ? {
+            coalitionId: coalition.id,
+            coalition: coalition.identity,
+            binding: {
+              sessionId: request!.sessionId,
+              executionId: request!.executionId,
+              nonce: request!.nonce,
+            },
+            guardian: {
+              ...observeOwnedProcessIdentity(process.pid),
+              exit: null,
+              kernelState: 'alive',
+            },
+            nativeRoot: ownedChild.readProcessEvidence(),
+            processTreeStopped: stopped.confirmed,
+            terminalTaskCount: stopped.confirmed ? 1 : null,
+          }
+        : {}),
     });
     coalition?.close();
     if (launchdControl && orphaned && stopped.confirmed) {

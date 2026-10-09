@@ -3,6 +3,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
+import {
+  decodeShellProcessEvidence,
+  type ShellProcessEvidence,
+  shellProcessEvidenceEnded,
+} from '@kite-ai/agent/jobs/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
@@ -39,6 +44,7 @@ interface Operation {
   childId?: string;
   shell?: ContinuousShellEvidence['jobs'][number];
   output?: unknown;
+  result?: unknown;
 }
 
 /** Two source-free default Services. No configure hook, custom Tool, Job or permission adapter. */
@@ -434,10 +440,29 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
                     units: number;
                     digest: string;
                   };
-                  const details = (job.result as { details?: { coalitionId?: string } } | null)
-                    ?.details;
+                  const details = (
+                    job.result as {
+                      details?: { coalitionId?: string; ownedProcesses?: ShellProcessEvidence };
+                    } | null
+                  )?.details;
                   if (fact.nonce !== operation.commandId || !details?.coalitionId)
                     throw Error('continuous_original_shell_identity_failed');
+                  const proof = details.ownedProcesses;
+                  const originalProcesses =
+                    proof &&
+                    decodeShellProcessEvidence(proof, {
+                      sessionId,
+                      executionId: job.id,
+                      nonce: proof.binding?.nonce,
+                    });
+                  if (
+                    !originalProcesses ||
+                    !shellProcessEvidenceEnded(originalProcesses) ||
+                    !services.some((service) => service.pid === originalProcesses.ownerPid) ||
+                    originalProcesses.coalition.id !== details.coalitionId
+                  )
+                    throw Error('continuous_original_shell_process_handoff_failed');
+                  operation.result = structuredClone(job.result);
                   operation.childId = child.id;
                   operation.shell = {
                     commandId: operation.commandId,
@@ -450,6 +475,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
                     digest: fact.digest,
                     processTreeStopped: true,
                     stdoutSha256: hash(stdout),
+                    ownedProcesses: originalProcesses,
                   };
                   operation.output = output;
                   operation.durationMs = performance.now() - operation.began;
@@ -556,8 +582,36 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
               afterSeq: '0',
               limit: 200,
             });
+            const terminal = operation.shell!.ownedProcesses!;
+            const reference = job?.reference as { ownedProcesses?: unknown; nonce?: string } | null;
+            const ready = decodeShellProcessEvidence(
+              reference?.ownedProcesses,
+              terminal.binding,
+              terminal.ownerPid,
+            );
+            const identity = (row: ShellProcessEvidence['broker']) => ({
+              pid: row.pid,
+              parentPid: row.parentPid,
+              birth: row.birth,
+              unavailable: row.unavailable,
+            });
             if (
               job?.status !== 'succeeded' ||
+              JSON.stringify(job.result) !== JSON.stringify(operation.result) ||
+              !ready ||
+              reference?.nonce !== terminal.binding.nonce ||
+              job.originStoreId !== storeId ||
+              job.sessionId !== operation.sessionId ||
+              JSON.stringify(identity(ready.broker)) !==
+                JSON.stringify(identity(terminal.broker)) ||
+              JSON.stringify(identity(ready.guardian)) !==
+                JSON.stringify(identity(terminal.guardian)) ||
+              JSON.stringify(ready.root.identity) !== JSON.stringify(terminal.root.identity) ||
+              ready.coalition.id !== terminal.coalition.id ||
+              ready.coalition.guardianUniqueId !== terminal.coalition.guardianUniqueId ||
+              ready.coalition.guardianPidVersion !== terminal.coalition.guardianPidVersion ||
+              ready.coalition.label !== terminal.coalition.label ||
+              ready.coalition.domain !== terminal.coalition.domain ||
               !JSON.stringify(job.result).includes('"processTreeStopped":true') ||
               JSON.stringify(output) !== JSON.stringify(operation.output) ||
               (await reader.getCommand(operation.commandId))?.status !== 'applied'

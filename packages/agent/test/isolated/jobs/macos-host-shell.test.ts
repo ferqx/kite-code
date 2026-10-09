@@ -16,7 +16,12 @@ import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import type { JobDefinition, JobEvent, JobHandle } from '../../../src/extensions';
 import { launchIdentity } from '../../../src/jobs/launch-identity';
-import { createMacosHostShellJob } from '../../../src/jobs/shell';
+import {
+  createMacosHostShellJob,
+  decodeShellProcessEvidence,
+  type ShellProcessEvidence,
+  shellProcessEvidenceEnded,
+} from '../../../src/jobs/shell';
 import { removeLaunchdRegistration } from '../../../src/platform/process/darwin-launchd-supervisor';
 
 const macTest = process.platform === 'darwin' ? test : test.skip;
@@ -166,11 +171,32 @@ function options(full = false) {
     filesystemScope: full ? ('full_access' as const) : ('workspace_write' as const),
   };
 }
-function start(job: JobDefinition, command: string) {
-  return job.start(
+async function start(job: JobDefinition, command: string) {
+  const executionId = crypto.randomUUID();
+  const handle = await job.start(
     { command },
-    { sessionId: 'owned', executionId: crypto.randomUUID(), signal: new AbortController().signal },
+    { sessionId: 'owned', executionId, signal: new AbortController().signal },
   );
+  const reference = handle.reference as unknown as {
+    nonce: string;
+    supervisorPid: number;
+    launchdGuardianPid: number;
+    ownedProcesses: ShellProcessEvidence;
+  };
+  const evidence = decodeShellProcessEvidence(
+    reference.ownedProcesses,
+    { sessionId: 'owned', executionId, nonce: reference.nonce },
+    process.pid,
+  );
+  expect(evidence?.broker.pid).toBe(reference.supervisorPid);
+  expect(evidence?.guardian.pid).toBe(reference.launchdGuardianPid);
+  expect(evidence?.coalition).toMatchObject({
+    claimTaskCount: 1,
+    terminalTaskCount: null,
+    processTreeStopped: false,
+    registrationRemoved: false,
+  });
+  return handle;
 }
 async function collect(job: JobDefinition, handle: JobHandle) {
   const events: JobEvent[] = [];
@@ -207,7 +233,49 @@ function terminal(events: JobEvent[]) {
     supervision: 'ended',
     result: { details: { groupStopped: true, processTreeStopped: true } },
   });
-  return values[0]!;
+  const value = values[0]!;
+  if (value.type !== 'terminal') throw Error('missing_terminal');
+  const evidence = (value.result.details as unknown as { ownedProcesses: ShellProcessEvidence })
+    .ownedProcesses;
+  expect(evidence).toMatchObject({
+    version: 1,
+    coverage: 'shell-owned-coalition',
+    binding: { sessionId: 'owned' },
+    ownerPid: process.pid,
+    broker: { parentPid: process.pid, exit: { reaped: true } },
+    guardian: { parentPid: 1, exit: null },
+    root: { reaped: true, observationFailed: false, waitpid: { statusMatched: true } },
+    coalition: {
+      claimTaskCount: 1,
+      terminalTaskCount: 1,
+      processTreeStopped: true,
+      registrationRemoved: true,
+    },
+  });
+  expect(
+    [evidence.broker, evidence.guardian].every((record) =>
+      ['absent', 'reused'].includes(record.kernelState),
+    ),
+  ).toBe(true);
+  expect(evidence.root.identity.parentPid).toBe(evidence.guardian.pid);
+  expect(
+    decodeShellProcessEvidence(JSON.parse(JSON.stringify(evidence)), evidence.binding, process.pid),
+  ).toEqual(evidence);
+  expect(shellProcessEvidenceEnded(evidence)).toBe(true);
+  expect(
+    decodeShellProcessEvidence(
+      evidence,
+      { ...evidence.binding, executionId: 'foreign' },
+      process.pid,
+    ),
+  ).toBeUndefined();
+  expect(
+    decodeShellProcessEvidence(
+      { ...evidence, guardian: { ...evidence.guardian, exit: evidence.broker.exit } },
+      evidence.binding,
+    ),
+  ).toBeUndefined();
+  return value;
 }
 
 macTest(

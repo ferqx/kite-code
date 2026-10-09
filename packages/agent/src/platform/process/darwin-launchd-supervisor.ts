@@ -140,6 +140,7 @@ export async function startLaunchdSupervisor(input: {
   frame: Record<string, unknown>;
   controlBase: string;
   kind?: 'shell' | 'mcp';
+  includeRegistration?: boolean;
   cancelled?: () => boolean;
   onFrame(frame: Record<string, unknown>): Promise<void>;
 }): Promise<{
@@ -244,7 +245,7 @@ export async function startLaunchdSupervisor(input: {
               finishResolve();
             } else
               await input.onFrame(
-                kind === 'mcp' && frame.type === 'ready'
+                (kind === 'mcp' || input.includeRegistration) && frame.type === 'ready'
                   ? {
                       ...frame,
                       registration: {
@@ -336,7 +337,7 @@ export async function startLaunchdSupervisor(input: {
             throw error;
           }
           await input.onFrame(
-            kind === 'mcp'
+            kind === 'mcp' || input.includeRegistration
               ? {
                   ...terminal!,
                   registrationRemoved: true,

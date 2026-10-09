@@ -33,7 +33,7 @@ HTTP raw auth 接受 none、有限手工 Bearer credential 或 oauth。OAuth 只
 
 认证完成、连接 ready 和 Tool 权限分别证明。认证不自动 reconnect/discovery，不重放旧 Tool 或 Task；新连接由现有普通 connect/reconnect 入口独立申请。普通 connect 首次失败留下的隔离，仅在原 parent/Job 全身份、真实终态及同一 owned transport 已停止后允许新的普通申请；reconnect 的未知 stop/publication fence 不因此解除。
 
-`mcp.auth.status@1` 读当前安全 policy、backend status 和 presence，零 OAuth network/browser。`mcp.auth.result@1 {commandId}` 只读原 SQL Command/Execution/Session 与完整最终回执，保原 binding、authStatus、effectAttempted 和有限 reason；零当前 Source、physical Workspace、Vault、transport、Model 或补写。Command applied 单独不足以证明认证成功。
+`mcp.auth.status@1` 读当前安全 policy、backend status 和 presence，零 OAuth network/browser。`mcp.auth.result@1 {commandId}` 只读原 SQL Command/Execution/Session 与完整最终回执，保原 binding、authStatus、effectAttempted 和有限 reason；零当前 Source、physical Workspace、Vault、transport、Model 或补写。Command applied 单独不足以证明认证成功。原 Login 可在这份原最终结果中携 `ownedLauncher`：closed v1 固定完整 Auth binding、实际 owner／launcher PPID／Darwin birth，以及原 Bun `exited`／signal／reap 和 kernel 状态；覆盖 `oauth-launcher-only`，浏览器本体是 external。只有真实所属 child 的 exit 生成 reap，不把 null／error／listener close 当作退出。无 launcher 的原结果保持旧六字段，严格新字段继续进入完整 finalization digest；公开 Auth Query 九字段 payload 保持，完整 proof 沿原 Execution GET 读取；查询只读历史、不重新观察内核、不执行登录或恢复。URL／state／code／PKCE／token／argv／env 不进入这份有限事实，观察不可用不改变已发生认证效果。实际实现归[Service owner](../../apps/service/README.md)。
 
 ## 来源删除与客户端
 

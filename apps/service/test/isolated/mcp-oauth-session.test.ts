@@ -7,10 +7,12 @@ import {
   createCredentialVault,
   createTemporaryCredentialBackend,
 } from '@kite-ai/agent/config';
+import { createMcpOAuthBrowser } from '../../src/mcp-oauth-browser';
+import { decodeMcpOAuthLauncherObservation } from '../../src/mcp-oauth-launcher-evidence';
 import { createMcpOAuthSession, type McpOAuthSessionOptions } from '../../src/mcp-oauth-session';
 
 const scope = { namespace: 'mcp.oauth' as const, ownerDigest: 'c'.repeat(64) };
-async function asFixture() {
+async function asFixture(ownedLauncher = false) {
   const sockets = new Set<Socket>();
   const requests: { path: string; method: string; body: URLSearchParams }[] = [];
   const revokedTokens: string[] = [];
@@ -39,7 +41,7 @@ async function asFixture() {
       response.end(
         JSON.stringify({
           issuer: base,
-          authorization_endpoint: `${base}/authorize`,
+          authorization_endpoint: `${ownedLauncher ? base.replace('http:', 'https:') : base}/authorize`,
           token_endpoint: `${base}/token`,
           registration_endpoint: `${base}/register`,
           ...(supportsRevoke ? { revocation_endpoint: `${base}/revoke` } : {}),
@@ -135,6 +137,7 @@ async function asFixture() {
 function sessionOptions(
   f: Awaited<ReturnType<typeof asFixture>>,
   backend: CredentialBackend = createTemporaryCredentialBackend(),
+  ownedLauncher = false,
 ) {
   const controller = new AbortController(),
     vault = createCredentialVault({ backend });
@@ -150,14 +153,27 @@ function sessionOptions(
     callbackTimeoutMs: 1000,
     now: () => clock,
     network: { allowLoopbackForTests: true },
-    async openBrowser(url) {
+    async openBrowser(url, signal, observe) {
       opened++;
       callback = new URL(url.searchParams.get('redirect_uri')!);
       expect(url.searchParams.get('code_challenge_method')).toBe('S256');
       f.challenge(url.searchParams.get('code_challenge')!);
       callback.searchParams.set('state', url.searchParams.get('state')!);
       callback.searchParams.set('code', 'owned-code');
-      expect((await fetch(callback)).status).toBe(200);
+      if (ownedLauncher) {
+        const browser = createMcpOAuthBrowser((_argv, spawnOptions) =>
+          Bun.spawn(
+            [
+              process.execPath,
+              '-e',
+              'const response=await fetch(process.argv[1]);if(response.status!==200)process.exit(2);',
+              callback!.href,
+            ],
+            spawnOptions,
+          ),
+        );
+        await browser(url, signal, observe);
+      } else expect((await fetch(callback)).status).toBe(200);
     },
   };
   return {
@@ -194,11 +210,11 @@ async function callbackClosed(url: URL) {
 }
 
 test('actual SDK DCR/PKCE accepts only exact callback; cold vault resumes and proactive refresh never opens browser or registers', async () => {
-  const f = await asFixture(),
-    v = sessionOptions(f);
+  const f = await asFixture(true),
+    v = sessionOptions(f, createTemporaryCredentialBackend(), true);
   let callback: URL | undefined;
   const original = v.options.openBrowser;
-  v.options.openBrowser = async (url, signal) => {
+  v.options.openBrowser = async (url, signal, observe) => {
     callback = new URL(url.searchParams.get('redirect_uri')!);
     const invalid = new URL(callback);
     invalid.searchParams.set('code', 'owned-code');
@@ -213,13 +229,36 @@ test('actual SDK DCR/PKCE accepts only exact callback; cold vault resumes and pr
     duplicate.searchParams.append('code', 'owned-code');
     expect((await fetch(duplicate)).status).toBe(400);
     expect(f.requests.filter((x) => x.path === '/token')).toHaveLength(0);
-    await original(url, signal);
+    await original(url, signal, observe);
     expect((await fetch(invalid)).status).toBe(400);
   };
   try {
     const session = createMcpOAuthSession(v.options);
     await session.login();
     await callbackClosed(callback!);
+    const launcher = session.readLauncherEvidence()!;
+    expect(launcher).toMatchObject({
+      version: 1,
+      coverage: 'oauth-launcher-only',
+      browserOwnership: 'external',
+      ownerPid: process.pid,
+      launcher: { exit: { code: 0, signal: null, reaped: true }, kernelState: 'absent' },
+    });
+    if (process.platform === 'darwin') {
+      expect(launcher.launcher.parentPid).toBe(process.pid);
+      expect(launcher.launcher.birth).not.toBeNull();
+      expect(launcher.launcher.unavailable).toEqual([]);
+    } else expect(launcher.launcher.birth).toBeNull();
+    expect(Object.isFrozen(launcher.launcher)).toBe(true);
+    expect(decodeMcpOAuthLauncherObservation({ ...launcher, url: 'private' })).toBeUndefined();
+    expect(
+      decodeMcpOAuthLauncherObservation({
+        ...launcher,
+        launcher: { ...launcher.launcher, kernelState: 'alive' },
+      }),
+    ).toBeUndefined();
+    expect(JSON.stringify(launcher)).not.toContain('owned-code');
+    expect(JSON.stringify(launcher)).not.toContain('owned-access');
     const material = JSON.parse((await v.vault.readOwned(scope))!);
     expect(material.tokens.access_token).toBe('owned-access');
     expect(material.codeVerifier).toBeUndefined();
@@ -257,6 +296,53 @@ test('actual SDK DCR/PKCE accepts only exact callback; cold vault resumes and pr
     await expect(cold.credential()).rejects.toThrow('mcp_oauth_reauth_required');
     expect(f.requests.filter((x) => x.path === '/register')).toHaveLength(registrations);
     expect(v.opened()).toBe(1);
+    // A real launcher remains alive after the callback publishes tokens. A failed
+    // cleanup signal must not be swallowed as an ordinary browser error.
+    const cleanup = sessionOptions(f);
+    let ownedChild: ReturnType<typeof Bun.spawn> | undefined;
+    cleanup.options.openBrowser = async (url, signal, observe) => {
+      const redirect = new URL(url.searchParams.get('redirect_uri')!);
+      f.challenge(url.searchParams.get('code_challenge')!);
+      redirect.searchParams.set('state', url.searchParams.get('state')!);
+      redirect.searchParams.set('code', 'owned-code');
+      const browser = createMcpOAuthBrowser((_argv, options) => {
+        const child = Bun.spawn(
+          [
+            process.execPath,
+            '-e',
+            'const response=await fetch(process.argv[1]);if(response.status!==200)process.exit(2);setInterval(()=>{},1000);await new Promise(()=>{});',
+            redirect.href,
+          ],
+          options,
+        );
+        ownedChild = child;
+        return new Proxy(child, {
+          get(target, key) {
+            if (key === 'kill')
+              return () => {
+                throw new Error('injected_launcher_signal_failure');
+              };
+            const value = Reflect.get(target, key, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      });
+      await browser(url, signal, observe);
+    };
+    try {
+      const session = createMcpOAuthSession(cleanup.options);
+      await expect(session.login()).rejects.toThrow('mcp_oauth_cleanup_unknown');
+      expect(JSON.parse((await cleanup.vault.readOwned(scope))!).tokens.access_token).toBe(
+        'owned-access',
+      );
+      expect(session.readLauncherEvidence()?.launcher.exit).toBeNull();
+    } finally {
+      cleanup.controller.abort();
+      if (ownedChild) {
+        ownedChild.kill('SIGKILL');
+        await ownedChild.exited;
+      }
+    }
   } finally {
     v.controller.abort();
     await f.close();

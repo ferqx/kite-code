@@ -9,6 +9,7 @@ import type {
 } from '@kite-ai/agent/extensions';
 import { McpAdapterError } from '@kite-ai/agent/mcp';
 import type { CommandRecord, ExecutionRecord, JsonSchema } from '@kite-ai/agent/storage';
+import { decodeMcpOAuthLauncherEvidence, type McpAuthBinding } from './mcp-oauth-launcher-evidence';
 import { type createMcpOAuthSession, McpOAuthSessionError } from './mcp-oauth-session';
 import { validMcpSourceReadSet } from './mcp-source-result';
 
@@ -31,24 +32,17 @@ const closed = (value: Record<string, Json>, keys: readonly string[]) =>
 const finite = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-z][a-z0-9_]{0,127}$/.test(value);
 type Host = Pick<AgentRuntime, 'getMetadata' | 'getSession' | 'getCommand' | 'getExecution'>;
-interface Binding {
-  version: 1;
-  executionId: string;
-  originCommandId: string;
-  originalStoreId: string;
-  sessionId: string;
-  workspaceId: string;
-  actionId: AuthAction;
-  serverId: string;
-  inputDigest: string;
-}
+type Binding = McpAuthBinding;
 export interface McpOAuthTarget {
   workspaceId: string;
   loginAllowed: boolean;
   /** Same actual Workspace coordinator used by connection resume and source removal. */
   acquire(signal: AbortSignal): Promise<() => void>;
   assertFresh(signal: AbortSignal): void;
-  session(signal: AbortSignal): ReturnType<typeof createMcpOAuthSession>;
+  session(
+    signal: AbortSignal,
+  ): Omit<ReturnType<typeof createMcpOAuthSession>, 'readLauncherEvidence'> &
+    Partial<Pick<ReturnType<typeof createMcpOAuthSession>, 'readLauncherEvidence'>>;
   status(signal: AbortSignal): Promise<{
     policy: 'oauth' | 'auto';
     status: 'available' | 'locked' | 'unavailable';
@@ -141,6 +135,23 @@ export function createMcpOAuthActions(options: {
     let identity: Binding | null = null,
       effectAttempted = false;
     let release: (() => void) | undefined;
+    let loginSession: ReturnType<McpOAuthTarget['session']> | undefined;
+    const launcherDetails = (): Record<string, Json> => {
+      if (!loginSession?.readLauncherEvidence || !identity) return {};
+      try {
+        const observation = loginSession.readLauncherEvidence();
+        if (observation === undefined) return {};
+        const evidence = decodeMcpOAuthLauncherEvidence(
+          { ...observation, binding: identity },
+          identity,
+          process.pid,
+        );
+        if (evidence) return { ownedLauncher: evidence as unknown as Json };
+      } catch {
+        /* Observation cannot change the original OAuth outcome. */
+      }
+      return { ownedLauncherUnavailable: 'mcp_oauth_launcher_evidence_unavailable' };
+    };
     const result = (
       outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown',
       code: string,
@@ -155,6 +166,7 @@ export function createMcpOAuthActions(options: {
         effectAttempted,
         connectionAttempted: false,
         modelAttempted: false,
+        ...launcherDetails(),
       },
     });
     const perform = async () => {
@@ -217,8 +229,10 @@ export function createMcpOAuthActions(options: {
           throw new McpOAuthSessionError('mcp_oauth_login_unavailable');
         const session = target.session(context.signal);
         effectAttempted = true;
-        if (action === 'mcp.auth.login') await session.login();
-        else if (action === 'mcp.auth.refresh') await session.refresh();
+        if (action === 'mcp.auth.login') {
+          loginSession = session;
+          await session.login();
+        } else if (action === 'mcp.auth.refresh') await session.refresh();
         else if (action === 'mcp.auth.clear') await session.clear();
         else if ((await session.revoke()) === 'not_supported')
           return result('succeeded', 'mcp_oauth_revocation_not_supported', 'not_supported');
@@ -435,6 +449,10 @@ export function createMcpOAuthActions(options: {
           if (
             !closed(result, ['outcome', 'content', 'details']) ||
             !closed(details, [
+              ...(Object.hasOwn(details, 'ownedLauncher') ? ['ownedLauncher'] : []),
+              ...(Object.hasOwn(details, 'ownedLauncherUnavailable')
+                ? ['ownedLauncherUnavailable']
+                : []),
               'binding',
               'code',
               'authStatus',
@@ -460,6 +478,24 @@ export function createMcpOAuthActions(options: {
             ].includes(String(details.authStatus))
           )
             return output();
+          if (
+            Object.hasOwn(details, 'ownedLauncher') ||
+            Object.hasOwn(details, 'ownedLauncherUnavailable')
+          ) {
+            if (
+              original.action !== 'mcp.auth.login' ||
+              (Object.hasOwn(details, 'ownedLauncher') &&
+                Object.hasOwn(details, 'ownedLauncherUnavailable'))
+            )
+              return output();
+            if (Object.hasOwn(details, 'ownedLauncher')) {
+              const evidence = decodeMcpOAuthLauncherEvidence(details.ownedLauncher, expected);
+              if (!evidence) return output();
+            } else {
+              if (details.ownedLauncherUnavailable !== 'mcp_oauth_launcher_evidence_unavailable')
+                return output();
+            }
+          }
           const succeeded =
             own.status === 'succeeded' &&
             details.effectAttempted === true &&

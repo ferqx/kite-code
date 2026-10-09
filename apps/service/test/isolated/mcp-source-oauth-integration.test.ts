@@ -15,12 +15,17 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { CommandRecord, ExecutionRecord } from '@kite-ai/agent/storage';
-import { createClient } from '@kite-ai/client';
+import { createClient, decodeMcpAuthResult } from '@kite-ai/client';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
+import { createMcpOAuthBrowser } from '../../src/mcp-oauth-browser';
+import {
+  decodeMcpOAuthLauncherEvidence,
+  type McpOAuthLauncherEvidence,
+} from '../../src/mcp-oauth-launcher-evidence';
 
 const object = (v: unknown): Record<string, Json> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, Json>) : {};
@@ -36,7 +41,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
 }
 
 /** Actual SDK MCP endpoint and AS wire. Tokens never enter a public ledger or model fixture. */
-async function peer() {
+async function peer(ownedLauncher = false) {
   const calls = {
     metadata: 0,
     register: 0,
@@ -98,7 +103,7 @@ async function peer() {
         calls.metadata++;
         return Response.json({
           issuer: base,
-          authorization_endpoint: `${base}/authorize`,
+          authorization_endpoint: `${ownedLauncher ? base.replace('http:', 'https:') : base}/authorize`,
           token_endpoint: `${base}/token`,
           registration_endpoint: `${base}/register`,
           revocation_endpoint: `${base}/revoke`,
@@ -188,7 +193,10 @@ async function peer() {
 }
 
 type Auth = 'implicit' | 'oauth' | 'none' | 'manual';
-async function fixture(auth: Auth = 'oauth', options: { ask?: boolean; observer?: string } = {}) {
+async function fixture(
+  auth: Auth = 'oauth',
+  options: { ask?: boolean; observer?: string; ownedLauncher?: boolean } = {},
+) {
   const root = mkdtempSync('/private/tmp/kite-source-oauth-integration-');
   chmodSync(root, 0o700);
   const workspace = join(root, 'workspace');
@@ -196,7 +204,7 @@ async function fixture(auth: Auth = 'oauth', options: { ask?: boolean; observer?
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   const sourcePath = join(profile.profilePath, 'mcp.json');
-  const remote = await peer(),
+  const remote = await peer(options.ownedLauncher),
     temporary = createTemporaryCredentialBackend();
   let failRead = false,
     failRemove = false;
@@ -263,9 +271,29 @@ async function fixture(auth: Auth = 'oauth', options: { ask?: boolean; observer?
           network: { allowLoopbackForTests: true },
           callbackTimeoutMs: 2000,
           now: () => Date.now() + clockOffset,
-          async openBrowser(url, signal) {
+          async openBrowser(url, signal, observe) {
             browser++;
             signal.throwIfAborted();
+            if (options.ownedLauncher) {
+              const launcher = createMcpOAuthBrowser((argv, spawnOptions) =>
+                Bun.spawn(
+                  [
+                    process.execPath,
+                    '-e',
+                    `const url=new URL(process.argv[1]);url.protocol='http:';
+const response=await fetch(url,{redirect:'manual'});if(response.status!==302)process.exit(2);
+const callback=new URL(response.headers.get('location'));
+if(process.argv[2]==='hold')await new Promise(()=>{});
+const result=await fetch(callback);if(result.status!==200)process.exit(3);`,
+                    argv.at(-1)!,
+                    holdBrowser ? 'hold' : 'complete',
+                  ],
+                  spawnOptions,
+                ),
+              );
+              await launcher(url, signal, observe);
+              return;
+            }
             const response = await fetch(url, { redirect: 'manual', signal });
             expect(response.status).toBe(302);
             const callback = new URL(response.headers.get('location')!);
@@ -396,6 +424,7 @@ async function fixture(auth: Auth = 'oauth', options: { ask?: boolean; observer?
         expect(rows[0]!.actions).toEqual([]);
         expect(rows[0]!.artifactRefs).toEqual([]);
         expect(Buffer.byteLength(JSON.stringify(rows))).toBeLessThanOrEqual(16384);
+        expect(object(decodeMcpAuthResult(rows))).toEqual(object(rows[0]!.payload));
         return object(rows[0]!.payload);
       },
       async connect(id: string) {
@@ -514,7 +543,7 @@ function originalProof(
 }
 
 test('implicit real 401 permits explicit Login; fresh connect and cold owned token resume do not auto-login or retry old Tools', async () => {
-  const f = await fixture('implicit');
+  const f = await fixture('implicit', { ownedLauncher: true });
   try {
     const warm = await f.launch();
     const absent = await warm.auth('before-401');
@@ -546,6 +575,33 @@ test('implicit real 401 permits explicit Login; fresh connect and cold owned tok
     originalProof(login, fact);
     expect(fact.phase).toBe('completed');
     expect(fact.authStatus).toBe('authenticated');
+    const originalExecution = await warm.client.getExecution(login.execution.id);
+    const launcher = object(originalExecution.result).details as Record<string, Json>;
+    const proof = launcher.ownedLauncher as unknown as McpOAuthLauncherEvidence;
+    expect(proof).toMatchObject({
+      version: 1,
+      coverage: 'oauth-launcher-only',
+      browserOwnership: 'external',
+      ownerPid: process.pid,
+      launcher: { exit: { reaped: true }, kernelState: 'absent' },
+    });
+    expect(proof.binding).toEqual(
+      launcher.binding as unknown as McpOAuthLauncherEvidence['binding'],
+    );
+    expect(proof.binding.executionId).toBe(login.execution.id);
+    expect(proof.binding.originCommandId).toBe(login.command.id);
+    expect(proof.binding.inputDigest).toBe(sha(login.execution.input));
+    if (process.platform === 'darwin') {
+      expect(proof.launcher.birth).not.toBeNull();
+      expect(proof.launcher.parentPid).toBe(process.pid);
+    } else expect(proof.launcher.birth).toBeNull();
+    expect(originalExecution.result).toEqual(login.execution.result);
+    expect(
+      decodeMcpOAuthLauncherEvidence(proof, { ...proof.binding, sessionId: 'foreign' }),
+    ).toBeUndefined();
+    expect(JSON.stringify(proof)).not.toContain('owned-code');
+    expect(JSON.stringify(proof)).not.toContain('owned-client');
+    expect(JSON.stringify(proof)).not.toContain('code_verifier');
     expect(f.remote.counts().initialize).toBe(0);
     const connected = await warm.connect('fresh');
     if (connected.fact.phase !== 'ready') {
@@ -581,6 +637,11 @@ test('implicit real 401 permits explicit Login; fresh connect and cold owned tok
     const before = f.counts();
     const cold = await f.launch();
     expect((await cold.history('login')).phase).toBe('completed');
+    const coldExecution = await cold.client.getExecution(login.execution.id);
+    expect(object(object(coldExecution.result).details).ownedLauncher).toEqual(
+      proof as unknown as Json,
+    );
+    expect(await cold.client.getExecution(login.execution.id)).toEqual(originalExecution);
     expect(f.counts()).toEqual(before);
     const resumed = await cold.connect('cold-fresh');
     expect(resumed.fact.phase).toBe('ready');
@@ -659,7 +720,7 @@ test('locked preflight and full captured read-set drift have no browser/AS publi
 }, 30000);
 
 test('ordinary Auth Ask is independent; explicit execution.cancel closes only owned callback and preserves original history', async () => {
-  const f = await fixture('oauth', { ask: true });
+  const f = await fixture('oauth', { ask: true, ownedLauncher: true });
   try {
     const host = await f.launch();
     f.hold();
@@ -697,6 +758,18 @@ test('ordinary Auth Ask is independent; explicit execution.cancel closes only ow
       fact = await host.history('cancel-login');
     originalProof(original, fact);
     expect(fact.phase).toBe('cancelled');
+    const launcher = object(object(original.execution.result).details)
+      .ownedLauncher as unknown as McpOAuthLauncherEvidence;
+    expect(launcher).toMatchObject({
+      coverage: 'oauth-launcher-only',
+      browserOwnership: 'external',
+      launcher: { exit: { reaped: true }, kernelState: 'absent' },
+    });
+    expect(launcher.binding.executionId).toBe(original.execution.id);
+    const publicExecution = await host.client.getExecution(original.execution.id);
+    expect(object(object(publicExecution.result).details).ownedLauncher).toEqual(
+      launcher as unknown as Json,
+    );
     expect(f.remote.counts().token).toBe(0);
     expect(f.counts().vault.write).toBeGreaterThan(0);
     expect(f.remote.counts().tool).toBe(0);

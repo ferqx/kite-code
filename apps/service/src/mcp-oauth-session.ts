@@ -13,6 +13,11 @@ import {
   startAuthorization,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { OAuthClientInformationMixed } from '@modelcontextprotocol/sdk/shared/auth.js';
+import type { McpOAuthLauncherObserver } from './mcp-oauth-browser';
+import {
+  decodeMcpOAuthLauncherObservation,
+  type McpOAuthLauncherObservation,
+} from './mcp-oauth-launcher-evidence';
 import { createMcpOAuthNetwork, type McpOAuthNetworkOptions } from './mcp-oauth-network';
 
 export class McpOAuthSessionError extends McpCredentialError {
@@ -33,7 +38,11 @@ export interface McpOAuthSessionOptions {
   readonly clientSecretRef?: string;
   readonly signal: AbortSignal;
   readonly assertFresh: () => void;
-  readonly openBrowser: (url: URL, signal: AbortSignal) => Promise<void>;
+  readonly openBrowser: (
+    url: URL,
+    signal: AbortSignal,
+    observe?: McpOAuthLauncherObserver,
+  ) => Promise<void>;
   readonly network?: Pick<
     McpOAuthNetworkOptions,
     'resolveAddresses' | 'allowLoopbackForTests' | 'trustedTestCertificate' | 'limits'
@@ -45,6 +54,12 @@ export interface McpOAuthSessionOptions {
 
 /** One admitted operation's private protocol state. It is not an MCP transport or execution owner. */
 export function createMcpOAuthSession(options: McpOAuthSessionOptions) {
+  let launcherEvidence: McpOAuthLauncherObservation | undefined;
+  let launcherObservationInvalid = false;
+  const readLauncherEvidence = () => {
+    if (launcherObservationInvalid) throw new Error('mcp_oauth_launcher_evidence_unavailable');
+    return decodeMcpOAuthLauncherObservation(launcherEvidence, process.pid);
+  };
   const signal = options.signal;
   const now = options.now ?? Date.now;
   const assertFresh = () => {
@@ -127,6 +142,8 @@ export function createMcpOAuthSession(options: McpOAuthSessionOptions) {
   };
 
   async function login(): Promise<void> {
+    launcherEvidence = undefined;
+    launcherObservationInvalid = false;
     await available();
     const local = new AbortController();
     const flowSignal = AbortSignal.any([signal, local.signal]);
@@ -250,7 +267,12 @@ export function createMcpOAuthSession(options: McpOAuthSessionOptions) {
         fail('mcp_oauth_authorization_url_invalid');
       flowFresh();
       try {
-        browser = Promise.resolve().then(() => options.openBrowser(new URL(url), flowSignal));
+        browser = Promise.resolve().then(() =>
+          options.openBrowser(new URL(url), flowSignal, (evidence) => {
+            launcherEvidence = decodeMcpOAuthLauncherObservation(evidence, process.pid);
+            launcherObservationInvalid = launcherEvidence === undefined;
+          }),
+        );
         await Promise.race([
           browser,
           callback.then(
@@ -431,5 +453,5 @@ export function createMcpOAuthSession(options: McpOAuthSessionOptions) {
       }
     }
   }
-  return { login, refresh, credential, clear, revoke };
+  return { login, refresh, credential, clear, revoke, readLauncherEvidence };
 }

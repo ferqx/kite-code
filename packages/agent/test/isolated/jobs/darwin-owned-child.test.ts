@@ -160,7 +160,28 @@ darwinTest(
       const stopped = await child.terminateGroup(0);
       expect(stopped).toEqual({ confirmed: true, forced: false });
       expect(waitable(child.pid)).toMatchObject({ result: 0, pid: child.pid, status: 23 });
+      const held = child.readProcessEvidence();
+      expect(held).toMatchObject({
+        identity: { pid: child.pid, parentPid: process.pid, unavailable: [] },
+        observation: { kind: 1, status: 23 },
+        observationFailed: false,
+        waitpid: null,
+        reaped: false,
+      });
+      expect(held.identity.birth).not.toBeNull();
+      expect(
+        Object.isFrozen(held) &&
+          Object.isFrozen(held.identity) &&
+          Object.isFrozen(held.observation),
+      ).toBe(true);
       child.reapAfterConfirmedStop();
+      expect(child.readProcessEvidence()).toMatchObject({
+        observation: { kind: 1, status: 23 },
+        observationFailed: false,
+        waitpid: { pid: child.pid, status: 23 << 8, statusMatched: true },
+        reaped: true,
+      });
+      expect(held.reaped).toBe(false);
       expect(waitable(child.pid)).toMatchObject({ result: -1, errno: 10 });
       const unrelated = Bun.spawn(['/bin/sleep', '2'], { stdout: 'ignore', stderr: 'ignore' });
       try {

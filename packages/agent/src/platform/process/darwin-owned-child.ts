@@ -1,5 +1,9 @@
 import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
 import { Readable } from 'node:stream';
+import {
+  type OwnedProcessIdentity,
+  observeOwnedProcessIdentity,
+} from './owned-process-observation';
 
 // Darwin SDK ABI (arm64/x86_64): opaque spawn handles are pointer slots,
 // siginfo_t is 104 bytes. No process is started on import.
@@ -32,12 +36,20 @@ function loadProc() {
   });
 }
 
+export interface DarwinOwnedChildEvidence {
+  identity: OwnedProcessIdentity;
+  observation: { kind: 1 | 2 | 3; status: number } | null;
+  observationFailed: boolean;
+  waitpid: { pid: number; status: number; statusMatched: boolean } | null;
+  reaped: boolean;
+}
 export interface DarwinOwnedChild {
   readonly pid: number;
   readonly stdout: Readable;
   readonly stderr: Readable;
   /** Actual original-root exit; WNOWAIT deliberately keeps its PID reserved. */
   readonly exited: Promise<number | null>;
+  readProcessEvidence(): Readonly<DarwinOwnedChildEvidence>;
   terminateGroup(graceMs: number): Promise<{ confirmed: boolean; forced: boolean }>;
   /** Requires confirmed group stop. Exact root reap once; no later group signals. */
   reapAfterConfirmedStop(): void;
@@ -217,6 +229,8 @@ export function startDarwinOwnedChild(input: {
     release();
   }
   const pid = pidSlot[0]!;
+  const identity = observeOwnedProcessIdentity(pid);
+  let reapReceipt: DarwinOwnedChildEvidence['waitpid'] = null;
   const info = Buffer.alloc(104);
   let observed = false;
   let observationFailed = false;
@@ -303,6 +317,21 @@ export function startDarwinOwnedChild(input: {
     stdout: stdout!,
     stderr: stderr!,
     exited,
+    readProcessEvidence() {
+      const value: DarwinOwnedChildEvidence = {
+        identity: structuredClone(identity),
+        observation: observed ? { kind: observedKind as 1 | 2 | 3, status: observedStatus } : null,
+        observationFailed,
+        waitpid: reapReceipt ? { ...reapReceipt } : null,
+        reaped,
+      };
+      Object.freeze(value.identity.unavailable);
+      if (value.identity.birth) Object.freeze(value.identity.birth);
+      Object.freeze(value.identity);
+      if (value.observation) Object.freeze(value.observation);
+      if (value.waitpid) Object.freeze(value.waitpid);
+      return Object.freeze(value);
+    },
     terminateGroup(graceMs) {
       if (!Number.isSafeInteger(graceMs) || graceMs < 0 || graceMs > 5000)
         return Promise.reject(Error('darwin_owned_child_invalid_grace'));
@@ -337,12 +366,14 @@ export function startDarwinOwnedChild(input: {
       observeTimer = undefined;
       release();
       const rawStatus = status[0]!;
+      reapReceipt = { pid: result, status: rawStatus, statusMatched: false };
       if (
         (observedKind === 1 && (rawStatus & 0x7f) !== 0) ||
         (observedKind === 1 && ((rawStatus >> 8) & 0xff) !== observedStatus) ||
         (observedKind !== 1 && (rawStatus & 0x7f) !== observedStatus)
       )
         throw Error('darwin_owned_child_reap_status_mismatch');
+      reapReceipt.statusMatched = true;
     },
   };
 }

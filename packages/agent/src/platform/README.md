@@ -41,3 +41,10 @@ Windows 维护使用独立的 private Profile 文件政策和原稳定排他锁�
 ## Shell guardian 与 macOS confinement
 
 [Shell Job owner](../jobs/README.md)负责固定 launcher、Seatbelt、资产/目录新鲜度及 macOS 运行范围。私有 [owned-child port](process/darwin-owned-child.ts)保留准确原根直到真实停止证明与精确回收，所有结束入口加入同一次 closing。普通 POSIX 只监督原组、confined 固定拒绝 fork；默认宿主另由[launchd broker](process/darwin-launchd-supervisor.ts)创建独占 resource coalition，[coalition port](process/darwin-owned-coalition.ts)以原 guardian 身份、内核 task count 和原 pidversion 信号核允许 fork/setsid 的完整后代。控制秘密、父 EOF/SIGKILL、准确注册清理与实际测试范围归 Jobs owner；数值 PGID、PID 枚举或 bootout 本身不构成全树证明。冷 import 不加载 native 库，不从持久 reference 重建旧执行。
+
+
+## 所属进程的只读身份观察
+
+公开 [process-observation](../process-observation.ts) leaf 由 Shell、MCP 与 Service 的实际 effect owner 显式调用，共享 [owned-process-observation](process/owned-process-observation.ts) 的 Darwin libproc PPID／sec／usec 读取与原 birth 对比。import 不打开 native 库；只有实际观察才加载，非 Darwin 或无法取得原身份时保存有限 unavailable。原 birth 一致为 alive，准确不同为 reused，只有内核 ESRCH 确认 absent；不能从读取失败推断进程已退出。该 leaf 不启动、枚举或发送信号，也不授予 Task／Job、Profile 或恢复 authority。
+
+观察身份与停止所有权分别由 [Jobs owner](../jobs/README.md)和[MCP owner](../mcp/README.md)定义。各纯 decoder 只核有限历史数据和原 binding，冷读取不调用 native observer，也不把 PID 重新构造成控制句柄。完整构建的每个公开 leaf 由[源码树外 consumer](../../../../tests/isolated/unified-agent/built-package.test.ts)解析实际产物；运行证据仍只覆盖本机平台和对应 owner 的原流程。
