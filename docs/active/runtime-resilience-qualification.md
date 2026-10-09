@@ -32,6 +32,8 @@ Store strict-close 未确认时，[原锁 owner](../../packages/agent/src/storag
 
 原 Model-only RSS 的[本次原生归因](../plans/unified-agent-refactor-v1-progress.md#2026-10-10原-rss-负载的原生分配与驻留归因)复用当前候选的原450秒／九点负载，只在私有副本增加观察。完整 mimalloc 页与 system malloc 统计、同一原进程的两份 VM 映射已取得；root／Worker native dump 重叠，不按角色求和。增长主要见于 allocator tag 的 clean resident 类别，尚无具体业务分配或可重用页证明。诊断接口自身 collect 与同步 dump 会干预分配器；业务完成退出0不等于原资源门禁通过。原 RSS 增长仍失败，不以 physical footprint、在用块容量或此私有候选替换原32MiB、八outer和全部资格要求。
 
+同一归因的本机自身进程观察确认MADV_FREE_REUSABLE可让footprint下降而原RSS保持，真正munmap后RSS才下降；不能据此解释原负载全部增长。唯一 `MIMALLOC_ARENA_RESERVE=0` 启动控制恢复原未插桩Worker／probe／sampler，完成原450秒／九点业务后RSS仍增115.203125MiB，原三点与增长规则失败。参数未接入正式入口，此候选已收束，准确源码、实际进程、冻结核对与失败保留在上述进度。Bun完整全局观测、全Runtime后代与平台资格缺项继续保持，不重复关闭矩阵或将本控制建为独立目标。
+
 完整probe的default continuous现使用父runner已冻结且重新核验的Terminal候选，传递原canonical root，两个Service、包内Bun/SQLite、Shell producer和cold reader共享该完整包。源码外编译后不重新定位仓库或构建另一候选。普通独立fixture未提供候选时仍沿既有builder；实际完整8outer结果与当前编译验收归[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。采集probe失败保留私有原root与精确阶段日志以核原Job／DB／错误；它不建立新的执行authority或扩大生产启动行为。
 
 持续lifecycle采样以首个真实周期为warmup，随后按原活动窗口分布固定观测点；每个窗口继续执行原完成／取消／重连／删除周期，而不是sleep等待。只在边界采样并保准确0—8序号，原180秒timer覆盖整个观测窗口，结束／异常均释放。旧滚动数组丢弃早期点的实现已移除；报告另核每个原point序号，不能把最后几次快速循环当整段资源稳定性。实际两秒红／绿与当前完整结果归同一[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。

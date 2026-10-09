@@ -3559,12 +3559,24 @@ Store／Runtime生命周期／Service owner与active资格同步实际diff；手
 
 准确root `/private/tmp/kite-native-heap-owner-20261010-kBfWx6` 保存原candidate manifest、原／诊断probe与Worker SHA、root18／Worker10完整raw dumps、两份VM映射、原业务JSON、before／after输入与所有实际结果。4268 regular源码、Git和Bun／Node资产前后全等；18907 candidate文件、944links与原sampler在私有诊断既定改动之外保持。完整native分析由私有纯脚本重算，27项root核验全部为真，来源／完整页totals／原业务与资源失败归 `evidence-audit.json`。独立只读复核要求区分before与after终点、全过程峰值及VM映射时间／单位，已在上表保留；system zone事实的原来源为JSONL而非缺此字段的native摘要。
 
+后续沿 clean `fe09d5f6e57d575aab57d95d608cae16d5b4c861` 只补尚缺的内核计数关系，并验证一个由固定源码支持的归还路径候选。自身 native 进程仅做一次16MiB mmap／touch→MADV_FREE_REUSABLE→munmap，直接查询同一 TASK_BASIC_INFO 与 TASK_VM_INFO：advice实际返回0后，RSS仍18186240B、reusable增加16777216B、footprint减少16777216B；munmap返回0后RSS降回1409024B。本机SDK、计数结构长度和实际Darwin内核均记录，clang严格编译与观察actual0，准确 `/private/tmp/kite-self-task-vm-20261010/{observation,evidence-audit}.json`。这只证明本机reusable可留在原RSS，不证明原负载全部增长均为可重用页，也不把footprint替换为原指标。
+
+固定mimalloc的[arena选项](https://raw.githubusercontent.com/oven-sh/mimalloc/6a64e1ba7f5b2130d4efccb67ec87fd0003f0f6a/src/options.c)接受0；[自动arena与OS fallback](https://raw.githubusercontent.com/oven-sh/mimalloc/6a64e1ba7f5b2130d4efccb67ec87fd0003f0f6a/src/arena.c)在reserve0时不新增自动arena，普通新页可用直接OS映射，全空页释放可走munmap。已有／显式／exclusive arena、存活块、延迟retirement与其他VM域仍有边界，参数也会影响进程内共用allocator。此前purge_delay0／purge_decommits1的原450秒失败复用，不再做参数矩阵。本次只在新的私有实际Bun启动前请求 `MIMALLOC_ARENA_RESERVE=0`；未取得effective option getter或逐次syscall证明，不能将源码fallback称为整个负载均已走munmap。
+
+原未插桩Worker、probe和sampler分别恢复原SHA `32d19312593185897f2d905131273248d37f6604db6c184edce8bee4f3f8f178`、`3f7066660ad964dea843a0e6847fb79603136c87901417c765cd860be53ad8c4`、`eda164c9479692a433f7df191b64b2dd1a25a57033c484e1079a90494fd59b59`，候选manifest仍为上述原digest，18907文件／944links全部核对。候选仍如实记录source bb7bf320；fe09只改两份文档，4268项冻结输入与原构建源码仅有这两份文档差异，运行资产全等。未加GC、Worker请求、dump、helper或负载timer；原业务、九点、450000ms忙负载、180000ms操作与32MiB门禁保持。
+
+控制的原子进程PID15745、libproc birth `1791579425:145680`，实际busy450010.180334ms、2479完整循环、4958Model调用、原model-ledger完整1—4958，全部九点原完成／取消／重连原receipt／删除Session断言保持。原exited handle实际等待exit0，无强制结束；原RSS measured1为170.53125MiB、measured8为285.734375MiB，增115.203125MiB。三点规则在sequence4—8失败，八个measured before中六次增长也触发原规则，`originalMetricRetainedGrowth:true`。FD全为13、listener全为1；activeResources／handles仍null，不伪造为零。控制失败，不能采用此参数或宣布普通任务资源能力闭合。
+
+准确root `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1` 保存未插桩候选、请求环境、原业务JSON、源码／资产before-after和实际结果；19项来源／完整业务／原失败核验全为真，`evidence-audit.json` SHA `e2e90533025dfc1ae437d79c7d2056214b5bdece6324175611998c90ed66ed01`。这些核验通过只说明证据一致，RSS门禁实际失败；formal／wholeV13保持false。正式入口只读审查确认paired与daemon的环境白名单是实际Service启动owner，单改安装wrapper不会覆盖Service；没有将失败参数接入这些入口或资格producer。2026-10-10的[官方最新发布查询](https://api.github.com/repos/oven-sh/bun/releases/latest)仍返回bun-v1.4.2／固定744846f8，未下载、切换或改运行时资产。
+
+本候选到此收束。原严格RSS失败和Bun完整全局资源观测缺项连续存在，当前没有经原验收支持的allocator参数可接入生产；继续重复负载不能补齐这些退出条件。普通任务仍依赖可验证的运行时资源回收／完整观测能力，Win／Linux等正式平台证据也仍缺。没有新增用户能力闭合、正式caller迁移或退役结果，不从局部完成推导阶段退出，也不绕过原断言、默认inventory或资格拒绝。
+
 本轮只更新进度与active资格说明，产品行为、API、持久schema、Store／Runtime owner和默认验证inventory未变。上一轮保锁47pass／327断言及既有Daemon／MCP／Shell／OAuth／Native helper、原完整默认与RSS失败仅按冻结范围复用，不升级为当前完整阶段验收。文档检查与正常本地commit hooks独立强制；无push、PR、发布或Actions dispatch。
 
 剩余仍按三个完整能力缺口排序，不将采样或journal设为长期独立目标：
 
 | 顺序 | 实际用户入口与完整能力 | 验收与剩余阻塞 |
 | --- | --- | --- |
-| 1 | installed CLI／TUI／Native普通任务执行、准确取消、完整输出、cold只读与退出 | 保原身份／完整原结果／零重放和实际所属资源退出，原全部资源门禁。原RSS真实失败仍在；具体allocator驻留归属／回收未闭，八outer／九点、activeResources／handles及全Runtime后代资格仍缺。 |
+| 1 | installed CLI／TUI／Native普通任务执行、准确取消、完整输出、cold只读与退出 | 保原身份／完整原结果／零重放和实际所属资源退出，原全部资源门禁。原RSS真实失败仍在；唯一reserve0启动控制也失败且不采用，具体allocator驻留归属／回收未闭，八outer／九点、activeResources／handles及全Runtime后代资格仍缺。 |
 | 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及平台证据仍有缺口；原macOS维护／冷回退证据复用。 |
 | 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役，阶段未过滤完整默认与强制门禁通过。当前归因不改变37partial／wholeV13=false。 |
