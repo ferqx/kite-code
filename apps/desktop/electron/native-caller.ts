@@ -34,6 +34,7 @@ import {
 import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
 import { NativeConversation } from './conversation';
+import { openEditor } from './editor';
 import { NativeExtensions } from './extensions';
 import { NativeFileChanges } from './file-changes';
 import { NativeFileRecovery } from './file-recovery';
@@ -43,6 +44,7 @@ import { NativeJobOutputReads } from './job-output-reads';
 import { NativeMcpSettings } from './mcp-settings';
 import { verifyNativeMcpSourceAnswer } from './mcp-source-answer';
 import { NativeModelOutputReads } from './model-output-reads';
+import { NativeProcessOwner } from './native-processes';
 import { NativePermissionGrants } from './permission-grants';
 import type { PrivateData } from './private-data';
 import { NativeProviderSettings } from './provider-settings';
@@ -137,13 +139,16 @@ export class NativeCaller {
   private readonly emit: (event: NativeEvent) => void;
   private readonly privateData: PrivateData | undefined;
   private initialAdmission: (() => boolean) | undefined;
+  private readonly processes: NativeProcessOwner;
   constructor(
     client: AgentClient,
     emit: (event: NativeEvent) => void,
     privateData?: PrivateData,
     protectedRoots: readonly string[] = [],
     initialAdmission?: { readonly client: AgentClient; consume(): boolean },
+    processes = new NativeProcessOwner(),
   ) {
+    this.processes = processes;
     this.client = client;
     this.emit = emit;
     this.privateData = privateData;
@@ -279,6 +284,7 @@ export class NativeCaller {
       () => this.hasActiveWork(),
       () => this.changed(),
       protectedRoots,
+      this.processes,
     );
     const current = () =>
       !this.closed && this.selected
@@ -993,6 +999,10 @@ export class NativeCaller {
     this.creations.set(commandId, value);
     this.changed();
     return value;
+  }
+  async openEditor(editor: DesktopEditor, target: string): Promise<void> {
+    if (this.closed) throw new ClientError('native_draining');
+    await openEditor(editor, target, this.processes);
   }
   async openChangedFile(
     request: Extract<NativeRequest, { method: 'fileChanges.open' }>,
@@ -2022,11 +2032,16 @@ export class NativeCaller {
   async close() {
     this.closed = true;
     this.detach();
-    await this.disposeNetwork();
-    await Promise.allSettled(this.creating.values());
-    await this.conversation.close();
-    this.input.disposeObserver();
-    this.controller.disposeNetwork();
+    const stopped = this.processes.close();
+    try {
+      await this.disposeNetwork();
+      await Promise.allSettled(this.creating.values());
+      await this.conversation.close();
+      this.input.disposeObserver();
+      this.controller.disposeNetwork();
+    } finally {
+      await stopped;
+    }
   }
   private acceptWorkspaceRemoval(result: import('../src/native-bridge').NativeWorkspaceRemoval) {
     if (result.phase !== 'applied' || result.storeId !== this.client.serverInfo?.storeId) return;

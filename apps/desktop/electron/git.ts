@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { NativeProcessOwner } from './native-processes';
 export interface BranchSnapshot {
   workspace: string;
   repository: boolean;
@@ -15,8 +15,12 @@ export interface BranchSnapshot {
 const GIT_OUTPUT_LIMIT = 1_048_576;
 const GIT_TIMEOUT_MS = 15_000;
 
-async function runGit(path: string, args: readonly string[]): Promise<[boolean, string]> {
-  const child = spawn(
+async function runGit(
+  path: string,
+  args: readonly string[],
+  processes: NativeProcessOwner,
+): Promise<[boolean, string]> {
+  const running = processes.start(
     'git',
     ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args],
     {
@@ -29,51 +33,43 @@ async function runGit(path: string, args: readonly string[]): Promise<[boolean, 
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     },
+    {
+      timeoutMs: GIT_TIMEOUT_MS,
+      timeoutError: 'Git 操作超时，请刷新分支确认实际状态。',
+      launchError: '无法启动 Git，请检查是否已安装。',
+    },
   );
+  const { child } = running;
   const output: Buffer[] = [];
   let outputBytes = 0;
   let errorBytes = 0;
-  let oversized = false;
-  child.stdout.on('data', (value: Buffer) => {
+  child.stdout!.on('data', (value: Buffer) => {
     outputBytes += value.length;
     if (outputBytes <= GIT_OUTPUT_LIMIT) output.push(value);
     else {
-      oversized = true;
-      child.kill('SIGKILL');
+      running.stop(new Error('Git 输出过大，无法确认项目状态。'));
     }
   });
-  child.stderr.on('data', (value: Buffer) => {
+  child.stderr!.on('data', (value: Buffer) => {
     errorBytes += value.length;
     if (errorBytes > GIT_OUTPUT_LIMIT) {
-      oversized = true;
-      child.kill('SIGKILL');
+      running.stop(new Error('Git 输出过大，无法确认项目状态。'));
     }
   });
-  const result = await new Promise<{ code: number | null }>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error('Git 操作超时，请刷新分支确认实际状态。'));
-    }, GIT_TIMEOUT_MS);
-    child.once('error', () => {
-      clearTimeout(timer);
-      reject(new Error('无法启动 Git，请检查是否已安装。'));
-    });
-    child.once('close', (code) => {
-      clearTimeout(timer);
-      resolve({ code });
-    });
-  });
-  if (oversized) throw new Error('Git 输出过大，无法确认项目状态。');
+  const code = await running.result;
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(output));
   } catch {
     throw new Error('Git 输出编码不可用。');
   }
-  return [result.code === 0, text];
+  return [code === 0, text];
 }
 
-export async function queryBranch(path: string): Promise<BranchSnapshot> {
+export async function queryBranch(
+  path: string,
+  processes: NativeProcessOwner,
+): Promise<BranchSnapshot> {
   let canonical: string;
   try {
     canonical = realpathSync.native(path);
@@ -87,25 +83,28 @@ export async function queryBranch(path: string): Promise<BranchSnapshot> {
   let repository: boolean;
   let rootOutput: string;
   try {
-    [repository, rootOutput] = await runGit(path, ['rev-parse', '--show-toplevel']);
+    [repository, rootOutput] = await runGit(path, ['rev-parse', '--show-toplevel'], processes);
   } catch {
     return ordinaryDirectory(path);
   }
   if (!repository) return ordinaryDirectory(path);
   const root = rootOutput.trimEnd();
-  const [hasBranch, branch] = await runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
-  const [hasHead, head] = await runGit(path, ['rev-parse', '--verify', 'HEAD']);
-  const [refsOk, refs] = await runGit(path, [
-    'for-each-ref',
-    '--format=%(refname:short)',
-    'refs/heads',
-  ]);
-  const [statusOk, status] = await runGit(path, [
-    'status',
-    '--porcelain=v1',
-    '-z',
-    '--untracked-files=all',
-  ]);
+  const [hasBranch, branch] = await runGit(
+    path,
+    ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+    processes,
+  );
+  const [hasHead, head] = await runGit(path, ['rev-parse', '--verify', 'HEAD'], processes);
+  const [refsOk, refs] = await runGit(
+    path,
+    ['for-each-ref', '--format=%(refname:short)', 'refs/heads'],
+    processes,
+  );
+  const [statusOk, status] = await runGit(
+    path,
+    ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+    processes,
+  );
   if (!refsOk || !statusOk) throw new Error('无法确认 Git 分支或工作区改动。');
   let canonicalRoot: string | undefined;
   try {
@@ -129,8 +128,9 @@ export async function switchBranch(
   path: string,
   branch: string,
   expected: BranchSnapshot,
+  processes: NativeProcessOwner,
 ): Promise<BranchSnapshot> {
-  const current = await queryBranch(path);
+  const current = await queryBranch(path, processes);
   if (
     current.workspace !== expected.workspace ||
     current.root !== expected.root ||
@@ -142,9 +142,9 @@ export async function switchBranch(
   if (!current.canSwitch) throw new Error('请打开 Git 仓库根目录后切换分支。');
   if (current.dirty) throw new Error('工作区有未提交或未跟踪的改动，请先处理后再切换分支。');
   if (!current.branches.includes(branch)) throw new Error('所选本地分支已不存在，请刷新后重试。');
-  const [ok] = await runGit(path, ['switch', '--no-guess', '--', branch]);
+  const [ok] = await runGit(path, ['switch', '--no-guess', '--', branch], processes);
   if (!ok) throw new Error('Git 未能切换分支，可能被其他工作目录占用；请刷新确认实际状态。');
-  const actual = await queryBranch(path);
+  const actual = await queryBranch(path, processes);
   if (actual.current !== branch) throw new Error('无法确认分支切换结果，请刷新检查。');
   return actual;
 }

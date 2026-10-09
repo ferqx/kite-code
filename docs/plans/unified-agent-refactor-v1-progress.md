@@ -3447,3 +3447,27 @@ OAuth 原 Login 另沿真实 Bun launcher 启动与 `exited` 保存原 Auth 全 
 MCP owner、Runtime资格、tests及原采集Note同步当前有限边界；手册扩展／恢复承诺核对保持。Daemon 切片继续结束；闭合的 Shell／OAuth／MCP tree 和 RSS归因复用。本轮只收束实际调用者迁移与必要修正，强制文档／边界／API／测试归属／计划证据门禁及正常hooks在本地提交边界独立执行。
 
 剩余退出依赖仍为三项：①installed CLI／TUI／Native普通任务完整执行／取消／输出／cold零重放及资源退出，原RSS真实增长、八outer／九点、Bun activeResources／handles与全Runtime后代资格未闭；②正式安装／升级／回退／维护恢复及必要平台资格，DB9适用旧代码拒绝、准确已发布baseline、Win／Linux生产stdio及原平台证据仍须保持数据身份／零重放／卸载保数据；③前两项满足后的§35正式caller全图审查、旧engine／carrier／builddeps最终退役和阶段未过滤完整默认回归。37partial／wholeV13=false／Goal active；仅授权本地提交，无push／PR／发布或Actions dispatch。
+
+## 2026-10-10：Native 普通用户操作的所属 helper 收尾
+
+本轮继续原退出表①的完整用户入口：新对话准备读实际分支、首次明确切换后创建／发送，以及文件变更／消息“查看文件”沿准确项目打开当前文件，最终明确退出。源码确认 Git 与 editor 的 timeout／error 仅发 kill 就先 reject，Main 的 Caller close 没有覆盖准备页 branch probe 和默认 editor launcher；没有为已闭合 Daemon、MCP、Shell、OAuth 或 RSS 再开故障／采样矩阵。
+
+正式 Caller 现持同一 NativeProcessOwner，Git 每个串行 spawn 与默认 editor IPC 均经过它，旧无所属直接 spawn／IPC默认旁路退役。Caller 在首次 await 前封闭准入、停止原 ChildProcess handles，并等实际 close；Conversation 等 sending 和只读 branch probes，迟到 scope 不恢复。Main 原 await caller.close 后的 private／Profile／paired Service／artifact 顺序不变。保原15秒／1 MiB Git、10秒 editor、两秒检查与20秒退出等待；首错只在 close 后结算，信号失败或未 close 仍待核实。窗口隐藏／取消退出不停止任务，系统编辑器应用仍 external；不生成公共 Job／journal／新收据格式，也不补授后代树或全局资源资格。
+
+当前退出依赖仍为三项，按顺序推进：
+
+| 顺序 | 实际用户入口与完整能力 | 明确验收与剩余缺口 |
+| --- | --- | --- |
+| 1 | installed CLI／TUI／Native 普通任务执行、取消、完整输出、cold只读与退出 | 原用户行为／身份／零重放、实际所属资源关闭及全部原资源门禁。本轮实施 Native helper 所属退出；原RSS真实增长、8outer／9点、Bun activeResources／handles与全Runtime后代仍未闭。只读另发现 SQLite Worker 构造同步抛出时已取得Profile SH没有清理路径，归此原能力，未与RSS建立因果，也未在本轮展开第二切片。 |
+| 2 | 正式安装／版本切换／维护恢复／文件编辑器交付及必要平台 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放及卸载保数据；真实OS编辑器准确文件和Win／Linux正式stdio／原平台证据仍有适用缺口。既有macOS维护／冷回退证据复用，不增加Actions dispatch／发布授权。 |
+| 3 | CLI／TUI／Native／只读Web正式caller和发行闭包最终退役 | 前两项满足后，执行§35独立全图迁移审查、删除确属退役的旧engine／carrier／builddeps，并运行阶段未过滤完整默认与强制门禁；局部整例不提升37partial／wholeV13=false。 |
+
+首个冻结窗口按原默认 inventory 定位七个完整文件，分别以独立 Bun 进程运行，actual0／147065.792ms，4264 regular／Git／Bun／Node／实际Electron／guardian资产前后全等：新helper3pass／34expects、原会话5／58、文件入口5／63、Caller14／146、退出4／8、实际Electron Caller5／20、源码外完整窗口1／13，合计37pass／342Bun断言。原窗口还实际执行其Node流程／退出driver全部原断言，84.244秒与120秒预算保持；原Caller窗口60.540秒。准确逐文件日志SHA与冻结归 `/private/tmp/kite-native-owned-helpers-whole-20261010-{inputs,after-inputs,result}.json`／各 `.log`。新真实Node沿实际Caller.openEditor→Caller.close，并在close返回立即核原editor child已close、之后才等opening，原handle／双EOF／停止后禁止准入成立；夹具仅替换executable，不宣告OS编辑器窗口成功。
+
+独立审查确认六production文件的准入、首错、串行启动与Main依赖释放顺序；另发现新Node fixture失败时缺整个owner收尾，READY未到达可能先终止driver而留helper。该遗漏属测试所属进程清理，正常绿不免除修正；补齐共享finally／SIGTERM实际close交接和原result／READY race，保原十秒整例与全部断言，之后只重跑受影响整文件，未展开新窗口矩阵。初次类型检查暴露erasableSyntaxOnly参数字段和测试pipe联合类型，已改普通字段赋值与准确Subprocess类型，无产品行为放宽。
+
+Main、原settlement、六个既有整文件及两个原driver字节均与9c6634e父提交相同；静态AST核Git的queryBranch／switchBranch仅增加所属owner参数，原行为相等，两个helper原spawn argv／cwd／env／stdio及15秒／10秒参数保持。准确保存性归 `/private/tmp/kite-native-owned-helpers-preservation-20261010.json`，Git两项常量保持。未删断言／排除测试／增加生产fallback；原Daemon、MCP／Shell／OAuth、statement.release和450秒RSS真实失败及前完整默认未改业务范围复用，不把此次局部当前HEAD窗口称为全仓再验。
+
+最终三例整文件 actual0／3pass／34Bun断言，4264 regular／Git／运行资产再次全等，准确 `/private/tmp/kite-native-owned-helpers-closure-final-whole-20261010-{inputs,after-inputs,result}.json`／`.log`。强制ownership初次以真实child要求isolated而失败，现按原规则移动用例，不改检查器／排除清单；当前门禁actual0。失败夹具的两处真实清理遗漏现补齐全局draining、owner构造前准入、READY／原结果race、共享finally与SIGTERM交接；独立只读复核已闭该跨阶段竞态。测试逆向只恢复import／fixture路径与明确SIGTERM后SHA精确等首窗口，原3案例／34断言／10秒预算全部保持。生产六文件、Main／settlement及原六whole输入未变，复用原六结果；最终有效七文件37pass／0fail／342Bun断言，逐文件日志SHA、源SHA与复用边界归 `/private/tmp/kite-native-owned-helpers-merged-evidence-20261010.json`，`fullDefault:false`／`wholeV13:false`。
+
+最终根及八workspace types、八TS只读Biome、boundary／workspaces／API／test ownership／plan evidence与diff均actual0，准确 `/private/tmp/kite-native-owned-helpers-*-final-20261010.log`；Biome保原IPC void union既存warning，无error。Native owner、手册退出收尾、active资源资格、测试及所属Note已按实际diff同步；Native release原Caller完成后释放lease的顺序经源码／原完整窗口核对，不增加无意义diff。文档完整性与all-scope影响检查随后按最终文档字节执行，正常提交hook仍独立执行。仅本地stage／commit，准确scope与hook结果归同前缀private receipt；本轮没有push／PR／发布或Actions dispatch。原三项退出依赖及已定位SQLite Worker构造SH清理遗漏保持，37能力partial／Goal active，不宣告资源阶段或整体V1.3完成。

@@ -12,6 +12,7 @@ import type {
 } from '../src/native-bridge';
 import { callerDigest, callerTextDigest, type NativeCallerJournal } from './caller-journal';
 import { queryBranch, switchBranch } from './git';
+import type { NativeProcessOwner } from './native-processes';
 import type { PrivateData } from './private-data';
 
 type Send = Extract<NativeRequest, { method: 'conversation.send' }>;
@@ -33,6 +34,8 @@ export class NativeConversation {
   private readonly entries = new Map<string, Entry>();
   private readonly controller: DesktopController;
   private sending?: Promise<NativeConversationResult>;
+  private readonly branchReads = new Set<Promise<NativeBranchFacts>>();
+  private closed = false;
   private readonly client: AgentClient;
   private readonly current: () => Scope | undefined;
   private readonly workspace: (id: string) => Workspace | undefined;
@@ -47,6 +50,7 @@ export class NativeConversation {
   private readonly hasActiveWork: () => Promise<boolean>;
   private readonly notify: () => void;
   private readonly protectedRoots: readonly string[];
+  private readonly processes: NativeProcessOwner;
   constructor(
     client: AgentClient,
     current: () => Scope | undefined,
@@ -58,8 +62,10 @@ export class NativeConversation {
     input: DesktopInput,
     hasActiveWork: () => Promise<boolean>,
     notify: () => void,
-    protectedRoots: readonly string[] = [],
+    protectedRoots: readonly string[],
+    processes: NativeProcessOwner,
   ) {
+    this.processes = processes;
     this.client = client;
     this.current = current;
     this.workspace = workspace;
@@ -86,7 +92,7 @@ export class NativeConversation {
   }
   private check(scope: Scope) {
     const now = this.current();
-    if (!now || now.generation !== scope.generation || now.storeId !== scope.storeId)
+    if (this.closed || !now || now.generation !== scope.generation || now.storeId !== scope.storeId)
       throw new ClientError('native_generation_changed');
   }
   private path(workspaceId: string) {
@@ -102,12 +108,21 @@ export class NativeConversation {
       throw new ClientError('workspace_directory_unavailable');
     }
   }
-  async branch(workspaceId: string): Promise<NativeBranchFacts> {
+  branch(workspaceId: string): Promise<NativeBranchFacts> {
+    const pending = this.readBranch(workspaceId);
+    this.branchReads.add(pending);
+    void pending.then(
+      () => this.branchReads.delete(pending),
+      () => this.branchReads.delete(pending),
+    );
+    return pending;
+  }
+  private async readBranch(workspaceId: string): Promise<NativeBranchFacts> {
     const scope = this.current();
-    if (!scope) throw new ClientError('native_generation_changed');
+    if (this.closed || !scope) throw new ClientError('native_generation_changed');
     const path = this.path(workspaceId);
     // Git is optional. A failed probe must not prevent an ordinary directory conversation.
-    const branch = await queryBranch(path).catch(() => undefined);
+    const branch = await queryBranch(path, this.processes).catch(() => undefined);
     this.check(scope);
     return {
       kind: 'conversation.branch',
@@ -191,7 +206,7 @@ export class NativeConversation {
         return structuredClone(entry.result);
       }
       if (!savedCreation && request.targetBranch) {
-        const branch = await queryBranch(path);
+        const branch = await queryBranch(path, this.processes);
         this.check(scope);
         if (!branch.repository) throw new ClientError('git_branch_unavailable');
         if (branch.current !== request.targetBranch) {
@@ -207,7 +222,7 @@ export class NativeConversation {
             throw new ClientError('git_branch_unavailable');
           if (await this.hasActiveWork()) throw new ClientError('git_active_work');
           this.check(scope);
-          await switchBranch(path, request.targetBranch, branch);
+          await switchBranch(path, request.targetBranch, branch, this.processes);
           this.check(scope);
         }
       }
@@ -385,7 +400,12 @@ export class NativeConversation {
     return structuredClone(entry.result);
   }
   async close() {
-    await this.sending;
-    this.controller.disposeNetwork();
+    this.closed = true;
+    try {
+      await this.sending;
+      this.controller.disposeNetwork();
+    } finally {
+      await Promise.allSettled(this.branchReads);
+    }
   }
 }

@@ -19,7 +19,6 @@ import {
   nativeThemeChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
-import { openEditor } from './editor';
 import { parseNativeMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
 import { saveStartupDiagnosticReport } from './startup-report';
@@ -868,7 +867,8 @@ export function registerNativeIpc(options: {
         const perform = async (editor: DesktopEditor, target: string) => {
           assertNativeSender(event, options.window(), options.rendererUrl);
           try {
-            await (options.openEditor ?? openEditor)(editor, target);
+            if (options.openEditor) await options.openEditor(editor, target);
+            else await caller.openEditor(editor, target);
           } catch {
             throw Error('file_editor_open_failed');
           }

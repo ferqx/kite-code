@@ -54,6 +54,10 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 
 原四项[收尾测试](test/quit-settlement.test.ts)逐字迁入，保正常、失败、等待强退和继续等待后完成；[实际 caller 测试](test/native-caller.test.ts)核检查的同一 signal 传到完整目录与 View、超时撤销所属读取及零写。[默认源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)保全部原业务、冷读和双锁收尾，另在同一候选以[退出 driver](test/native-quit-electron.fixture.ts)核关闭／激活、SIGSTOP 实际 Service 时两秒未知确认与保留草稿，以及原二十秒警告、明确强退、实际 Service SIGKILL 后的异常收尾提示、Main 非零退出和所属双锁释放。长等待使用夹具扣住所属 Node adapter 完成通知，生产候选／Service 字节保持；原生确认的响应来自有限 dialog port，不宣称 OS 对话框人工点击或真实 Service 全故障资格。准确输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原窗口关闭与退出收尾)。
 
+新对话的 Git 查询／首次明确分支切换和默认编辑器入口现共用 Caller 所属的 [NativeProcessOwner](electron/native-processes.ts)。明确退出后，Caller 在首次 await 前封闭 helper 新准入，对仍属自己的原 ChildProcess 句柄请求停止，并等待实际 close；Main 继续在 Caller 完成之后释放私有数据／Profile 和制品使用权。Git 每次串行启动都重新经过该 owner，只读分支读取也纳入 Conversation 收尾。超时或启动错误保存首次失败，不能在仅发出 kill 后返回或被迟到的零退出覆盖；信号失败或 close 未到时仍由原二十秒退出机制处理。取消退出确认和普通窗口隐藏不关闭该 owner。范围仅为这些直接 helper，`/usr/bin/open` 后交给系统的编辑器应用仍属于 external，不构成全 Runtime 后代树证明。原十五秒 Git deadline、stdout／stderr 各1 MiB、严格 UTF-8 和编辑器十秒期限保持；期限确定超时结果，实际 close 才结束调用。默认 IPC 沿 `NativeCaller.openEditor` 登记所属 launcher；可信测试 opener 不进入生产 Main 装配。取舍见[Main helper 收束决定](../../.agents/notes/implemented/bug-fix/2026-10-10-native-main-helper-shutdown.md)。
+
+[所属进程整例](test/isolated/native-processes.test.ts)和[实际 Node driver](test/native-processes-node.fixture.ts)核原 handle／双 EOF、首错与 Caller 收束；原首次发送真实 Git、文件目标／frame和上述完整窗口各核原范围。替代编辑器 executable 的夹具不操作个人应用，也不证明 OS 编辑器窗口已打开；准确执行归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10native-普通用户操作的所属-helper-收尾)。
+
 ## 原文件变更面板与编辑器
 
 [NativeFileChanges](src/native-file-changes.tsx)将原 [FileChanges / FileDiff](../../packages/ui/src/desktop/FileChanges.tsx)接到 SessionPage 的“文件变更”入口，复用右栏、行号、高亮、展开与焦点行为。它只在面板打开后扫描当前已读完整历史的工具消息，每批32项；展开一项才读取原结果正文。目录扫描与单项 GET 各有自己的 read ID；折叠、关闭、切换会话、detach 或 history epoch 更换只释放相应读取，不取消执行。会话工具与文件变更切换时关闭原面板，RightSidebar 按用途保独立组件身份，避免旧 Tabs 选择遮住新内容；拥有读取的 Native 内容关闭即卸载，不在收起栏内保活。
@@ -174,7 +178,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 [NativeConversation](electron/conversation.ts)负责有限编排，复用原 NativeCaller 创建意图、私有草稿、permission controller、caller journal 和 DesktopInput。发送前冻结创建五元身份、输入 Command、原文、模型／effort、Plan 与权限；先保存未来原 Session 的准确草稿，再执行原创建。准备的权限 controller 与正在阅读的选择分别持有观察，迟到结果不抢回后来页面。选择项目仅授权该根目录；实际权限包含额外宿主只读范围时，保留创建后的 Session 和原文，打开已有权限面板供明确确认。
 
-原 [Git leaf](electron/git.ts)从 kite-desktop 迁入，仅移除旧展示类型依赖。Main 从同代次／Store 完整目录中的已登记 Workspace 解出规范路径；renderer 只能传 ID，分支结果没有路径或控制句柄。普通目录、缺 Git 的读取均可准备；只有显式选择另一分支才在首次创建前切换。实际根、HEAD、本地分支、脏文件与全部活动 Run／Job 均重新核对；Profile 和 Native／Terminal 制品根及其交叠目录不可切换。目标已与当前分支相同不执行切换，未显式选分支时使用发送时的真实环境。Service 按新 Run 读取／冻结项目配置，不沿旧单项目拓扑关闭或重启 Service。
+原 [Git leaf](electron/git.ts)从 kite-desktop 迁入，保原分支与工作区语义，并使用上文的所属 helper 退出收束。Main 从同代次／Store 完整目录中的已登记 Workspace 解出规范路径；renderer 只能传 ID，分支结果没有路径或控制句柄。普通目录、缺 Git 的读取均可准备；只有显式选择另一分支才在首次创建前切换。实际根、HEAD、本地分支、脏文件与全部活动 Run／Job 均重新核对；Profile 和 Native／Terminal 制品根及其交叠目录不可切换。目标已与当前分支相同不执行切换，未显式选分支时使用发送时的真实环境。Service 按新 Run 读取／冻结项目配置，不沿旧单项目拓扑关闭或重启 Service。
 
 首次发送立即清空准备输入并显示原文等待项。真实消息按原 Command，或 `sourceIds` 加同 Store／Session 的实际 Run 原 Command 证明接管，避免重复展示；不按相同文本猜配，原 Store 的等待项不进入新 Store。发送后切到安排任务等页面时，迟到成功保留当前页面，返回准备页显示已提交，可明确「打开本次会话」读取原 Session，不继续假称发送中。创建后权限或输入失败保留准确 Session 和原文，明确重试只用原创建身份、新输入意图。结果未知停用重复发送，「查询原首次提交」只核原创建／权限／输入；核实预备步骤成功后仍须明确发送，不自动续写。冷创建与持久原命令只具原 GET 资格，不恢复热首次写入权限。空间、Git、分支和命令错误沿现行手册的 shadcn AlertDialog 单次确认；刷新及 SSE 不提前清除它。私有 SQLite 格式与公开 HTTP API 未扩展。
 

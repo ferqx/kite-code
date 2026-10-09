@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { DesktopEditor } from '../src/file-changes-bridge';
+import type { NativeProcessOwner } from './native-processes';
 
 export function editorFileTarget(workspace: string, supplied: string): string {
   if (
@@ -40,30 +40,27 @@ export function editorFileTarget(workspace: string, supplied: string): string {
   return target;
 }
 
-export async function openEditor(editor: DesktopEditor, target: string): Promise<void> {
+export async function openEditor(
+  editor: DesktopEditor,
+  target: string,
+  processes: NativeProcessOwner,
+): Promise<void> {
   if (process.platform !== 'darwin') throw new Error('外部编辑器跳转尚未在此平台验证。');
   const application = {
     vscode: 'Visual Studio Code',
     zed: 'Zed',
     textedit: 'TextEdit',
   }[editor];
-  const child = spawn('/usr/bin/open', ['-a', application, '--', target], {
-    stdio: 'ignore',
-    windowsHide: true,
-  });
-  const code = await new Promise<number | null>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error('打开编辑器超时。'));
-    }, 10_000);
-    child.once('error', () => {
-      clearTimeout(timer);
-      reject(new Error('无法启动编辑器。'));
-    });
-    child.once('close', (result) => {
-      clearTimeout(timer);
-      resolve(result);
-    });
-  });
+  const running = processes.start(
+    '/usr/bin/open',
+    ['-a', application, '--', target],
+    { stdio: 'ignore', windowsHide: true },
+    {
+      timeoutMs: 10_000,
+      timeoutError: '打开编辑器超时。',
+      launchError: '无法启动编辑器。',
+    },
+  );
+  const code = await running.result;
   if (code !== 0) throw new Error('无法打开文件，请确认所选编辑器已安装。');
 }
