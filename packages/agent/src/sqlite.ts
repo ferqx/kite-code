@@ -75,7 +75,13 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
   const selectedEngine = initializeDefaultSqliteEngine();
   const engine = selectedEngine.qualification === 'selected' ? selectedEngine.selection : null;
   const access = acquireProfileAccess(options);
-  const worker = new Worker(sqliteStorageAssets().worker.href);
+  let worker: Worker;
+  try {
+    worker = new Worker(sqliteStorageAssets().worker.href);
+  } catch (error) {
+    access.lock.release();
+    throw error;
+  }
   const pending = new Map<
     number,
     { resolve(value: unknown): void; reject(error: Error): void; bytes: number }

@@ -3471,3 +3471,23 @@ Main、原settlement、六个既有整文件及两个原driver字节均与9c6634
 最终三例整文件 actual0／3pass／34Bun断言，4264 regular／Git／运行资产再次全等，准确 `/private/tmp/kite-native-owned-helpers-closure-final-whole-20261010-{inputs,after-inputs,result}.json`／`.log`。强制ownership初次以真实child要求isolated而失败，现按原规则移动用例，不改检查器／排除清单；当前门禁actual0。失败夹具的两处真实清理遗漏现补齐全局draining、owner构造前准入、READY／原结果race、共享finally与SIGTERM交接；独立只读复核已闭该跨阶段竞态。测试逆向只恢复import／fixture路径与明确SIGTERM后SHA精确等首窗口，原3案例／34断言／10秒预算全部保持。生产六文件、Main／settlement及原六whole输入未变，复用原六结果；最终有效七文件37pass／0fail／342Bun断言，逐文件日志SHA、源SHA与复用边界归 `/private/tmp/kite-native-owned-helpers-merged-evidence-20261010.json`，`fullDefault:false`／`wholeV13:false`。
 
 最终根及八workspace types、八TS只读Biome、boundary／workspaces／API／test ownership／plan evidence与diff均actual0，准确 `/private/tmp/kite-native-owned-helpers-*-final-20261010.log`；Biome保原IPC void union既存warning，无error。Native owner、手册退出收尾、active资源资格、测试及所属Note已按实际diff同步；Native release原Caller完成后释放lease的顺序经源码／原完整窗口核对，不增加无意义diff。文档完整性与all-scope影响检查随后按最终文档字节执行，正常提交hook仍独立执行。仅本地stage／commit，准确scope与hook结果归同前缀private receipt；本轮没有push／PR／发布或Actions dispatch。原三项退出依赖及已定位SQLite Worker构造SH清理遗漏保持，37能力partial／Goal active，不宣告资源阶段或整体V1.3完成。
+
+## 2026-10-10：Service 启动失败后的诊断与维护准入
+
+本轮继续原退出表①的普通任务完整生命周期，修复已定位的 SQLite Worker 构造同步失败泄漏 Profile SH。正式 Service 已有安全 unavailable 诊断，用户失败后须能按原维护流程处理选定 Profile；原 `new Worker` 位于打开清理 try 之前，构造抛错后没有返回 Store，诊断进程却仍保留锁，阻碍同一 Profile 备份。当前只在该构造窗口释放已取得的原锁，成功构造后的数据库打开、请求／ACK、close 与锁规则逐字保持。原异常保留，不生成空 Store、重发申请或补造线程退出证明；没有将这项泄漏与 RSS 建立因果。
+
+新增一个原 Service 隔离整例，先建立并关闭真实 Store，再在构造前抛原错误；核公开 Store 原样返回错误、正式 Service 认证 lifecycle accepting／unavailable与业务503。在诊断 HTTP 仍存活时，调用公开维护备份实际取得同一 Profile EX，核原 Store 身份、数据库 bytes；恢复真实 Worker 后冷 readonly 核完整 metadata／原 View／cursor与零 Model。首先归还 global Worker，再关闭已登记的所属 Service／Store。原五例、全部旧断言和默认预算字节相等；生产构造清理外源码字节相等，准确 `/private/tmp/kite-store-worker-construction-preservation-20261010.json`。
+
+首个新夹具断言误用了嵌套 HTTP error 形状，实际闭合协议是直接 code；私有原日志保 `/private/tmp/kite-store-worker-construction-red-whole-20261010.log`，该结果不充作锁错误复现。按原协议修正后，原完整文件实际5pass／1fail，在真实维护 EX 处报原 `owner_busy`，准确 `/private/tmp/kite-store-worker-construction-red-lock-whole-20261010.log`。修复后同一整文件6pass／48Bun断言；首次 types 发现新增 derived fixture 缺 super，现改 typed constructor Proxy 在目标创建前必抛，未改变生产或原断言／预算。独立只读审查确认实际EX、原资源清理与有限资格边界，无新增故障矩阵。
+
+按实际 diff 运行六个原完整文件，独立 Bun 进程、原测试 inventory与预算：Service装配6／48、Service lifecycle9／78、诊断codec1／21、Profile2／13、preflight7／45、Store10／39，最终有效35pass／0fail／244Bun断言。原 preflight 还实际执行源码外 public Store；原 lifecycle 保真实 paired／诊断／关闭行为。首窗口actual0／5045.543ms，4264 regular／Git／Bun／Node前后全等；仅修新fixture后重跑其整个文件actual0／6pass／48expects，720.155ms、同样冻结全等。两窗口只有该测试文件差异，production／资产及其他五whole输入未变，复用五个结果。逐文件日志 SHA 与准确复用边界归 `/private/tmp/kite-store-worker-construction-merged-evidence-20261010.json`，`fullDefault:false`／`wholeV13:false`。原 Daemon 切片保持结束，MCP／Shell／OAuth／Native helper、statement.release和450秒RSS真实失败复用，未再次扩大矩阵。
+
+Store与Service owner、active资源资格按实际diff同步；手册恢复的诊断后维护、保留原数据与明确重试承诺核对保持，未改变公共 schema／维护格式／客户端入口，不制造手册或新Note diff。最终根及八workspace types、两TS只读Biome、文档完整性／all-scope影响、boundary／workspaces／API、测试归属／计划证据与diff均actual0；正常本地提交hooks仍独立强制。准确日志和本地提交scope／receipt归 `/private/tmp/kite-store-worker-construction-*20261010*`；无push／PR／发布或Actions dispatch。
+
+当前仍按三个用户能力缺口排序推进；本轮结束构造失败修复，不把它、journal或单个测试窗口变成独立长期目标：
+
+| 顺序 | 实际用户入口与完整能力 | 明确验收与剩余阻塞 |
+| --- | --- | --- |
+| 1 | installed CLI／TUI／Native 普通任务执行、准确取消、完整输出、cold只读与退出 | 原身份／完整原结果／零重放及实际所属资源退出，全部原资源门禁。构造失败后的诊断→维护→原Store冷读已闭；原450秒RSS真实增长、8outer／9点、Bun activeResources／handles与全Runtime后代资格仍未闭。 |
+| 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及原平台证据仍有缺口；既有macOS维护／冷回退结果复用。 |
+| 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役、阶段未过滤完整默认及强制门禁均通过。当前局部整例不能提升37partial／wholeV13=false，Goal active。 |

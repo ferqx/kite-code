@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { AgentRuntime } from '@kite-ai/agent';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import {
   assembleProcessService,
@@ -215,6 +216,114 @@ test('Runtime construction failure closes original SQLite and Artifact owners an
     const backup = await createProfileBackup({ profile, destinationRoot: join(root, 'backup') });
     expect(backup.manifest.source.storeId).toBeString();
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('SQLite Worker construction failure preserves safe diagnostics and allows maintenance before cold original Store access', async () => {
+  const root = mkdtempSync('/private/tmp/kite-process-worker-construction-');
+  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
+  const NativeWorker = globalThis.Worker;
+  const originalError = Error('fixture_private_worker_construction_error');
+  let attempts = 0,
+    models = 0;
+  const UnavailableWorker = new Proxy(NativeWorker, {
+    construct() {
+      attempts++;
+      throw originalError;
+    },
+  });
+  let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  let service: Awaited<ReturnType<typeof assembleProcessService>> | undefined;
+  try {
+    store = await openSqliteStore(profile);
+    const expectedStoreId = (await store.getMetadata()).storeId;
+    await store.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      rootUri: 'file:///worker-construction-fixture',
+      name: 'original workspace',
+    });
+    await store.createSession({
+      expectedStoreId,
+      commandId: 'create',
+      sessionId: 's',
+      workspaceId: 'w',
+      subjectId: 'user',
+      title: 'original session',
+    });
+    const originalView = await store.getView('s');
+    const metadata = await store.getMetadata();
+    await store.close();
+    store = undefined;
+    const originalBytes = readFileSync(profile.databasePath);
+    globalThis.Worker = UnavailableWorker;
+    expect(await openSqliteStore(profile).catch((error) => error)).toBe(originalError);
+    expect(attempts).toBe(1);
+
+    const fixed = createFixedModel([]);
+    service = await assembleProcessService(
+      {
+        profile: {
+          dataRoot: profile.dataRoot,
+          profile: profile.profile,
+          profileAccessKey: profile.profileAccessKey,
+        },
+        instanceId: 'worker-construction',
+        buildId: 'fixed',
+        token: 'a'.repeat(64),
+      },
+      {
+        configure() {
+          return {
+            modelId: 'fixed',
+            model: {
+              async *stream(...args: Parameters<typeof fixed.stream>) {
+                models++;
+                yield* fixed.stream(...args);
+              },
+            },
+          };
+        },
+      },
+    );
+    expect(attempts).toBe(2);
+    expect(service.bootstrap).toMatchObject({
+      instanceId: 'worker-construction',
+      buildId: 'fixed',
+      profile: { dataRoot: profile.dataRoot, name: 'test', accessKey: profile.profileAccessKey },
+      dataAvailability: 'unavailable',
+    });
+    const headers = { authorization: `Bearer ${service.bootstrap.token}` };
+    const lifecycle = await (await fetch(`${service.endpoint}/v1/lifecycle`, { headers })).json();
+    expect(lifecycle).toMatchObject({
+      state: 'accepting',
+      busy: false,
+      dataAvailability: 'unavailable',
+    });
+    expect(JSON.stringify(lifecycle)).not.toContain(originalError.message);
+    const response = await fetch(`${service.endpoint}/v1/workspaces`, { headers });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: 'data_unavailable' });
+
+    // Real maintenance takes the same Profile EX while diagnostic HTTP is still accepting.
+    const backup = await createProfileBackup({ profile, destinationRoot: join(root, 'backup') });
+    expect(backup.manifest.source.storeId).toBe(metadata.storeId);
+    expect(readFileSync(profile.databasePath)).toEqual(originalBytes);
+    expect(attempts).toBe(2);
+    await service.close();
+    await service.closedPromise;
+    service = undefined;
+    globalThis.Worker = NativeWorker;
+
+    store = await openSqliteStore({ ...profile, mode: 'readonly' });
+    expect(await store.getMetadata()).toEqual(metadata);
+    expect(await store.getView('s')).toEqual(originalView);
+    expect(models).toBe(0);
+  } finally {
+    globalThis.Worker = NativeWorker;
+    await service?.close();
+    await store?.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

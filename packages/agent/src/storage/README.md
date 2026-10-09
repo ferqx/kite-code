@@ -12,6 +12,12 @@ Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-r
 
 [原授权回归](../../test/isolated/execution/authorization-review.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
 
+## Worker 构造失败的 Profile 释放
+
+[公共 SQLite 入口](../sqlite.ts)先取得原 Profile 使用锁，再创建 Worker。构造器同步抛错时，入口释放已取得的锁并保留原错误；没有返回 Store，也没有创建可等待关闭的 Worker。成功构造后的数据库打开、请求、strict close 和使用锁释放顺序保持原合同。
+
+[正式 Service 装配回归](../../../../apps/service/test/isolated/process-service.test.ts)保原异常、认证 unavailable 诊断和业务503，在诊断 HTTP 仍 accepting 时通过公开维护备份实际取得同一 Profile EX；原数据库 bytes、Store 身份和恢复真实 Worker 后的完整只读 View／cursor 保持，零 Model 调用。这项启动失败清理不证明正常 Worker 物理线程退出或完整 RSS 资格。
+
 ## Worker 请求内的原生语句
 
 `SqliteOperations` 持有同步请求创建的 `query` 和 `prepare` 原生语句，包括 Drizzle query helper 的 prepared statement。具名操作在事务结束后返回已物化的值；Worker 在成功或失败 ACK 前逐项 finalize，在 strict close 前先释放本请求语句。Bun 的 query cache 遇到已 finalize 的条目会重新 prepare，同一语句不会跨请求借用。连接初始化的原生语句仍由 strict close 收束。

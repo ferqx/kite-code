@@ -24,6 +24,8 @@
 
 Store Worker 当前在同步请求的成功或失败 ACK 前释放 Operations 创建的原生 query/prepare 语句，关闭前继续使用 strict close；实现和原生句柄验收归 [Store owner](../../packages/agent/src/storage/README.md#worker-请求内的原生语句)。私有原 450 秒归因对照中，SQLite 原生分配峰值由约134.6MiB降至约2.8MiB，但释放对照仍触发原 RSS 门槛；该结果仅支持 SQL 语句 owner 的收束，不补齐八轮稳定性、Bun 全局指标或整个 Runtime 后代资格。
 
+公共 Store 的 Worker 构造同步失败现释放此前取得的 Profile 使用锁；正式 Service 的安全 unavailable 诊断存活期间，同一 Profile 维护备份可实际取得 EX，原数据与恢复后的冷读身份保持。准确源码和整例归 [Store owner](../../packages/agent/src/storage/README.md#worker-构造失败的-profile-释放)；构造失败没有创建线程，这项清理不补齐正常 Worker 物理退出、原 RSS 增长或整个 Runtime 资源资格。
+
 完整probe的default continuous现使用父runner已冻结且重新核验的Terminal候选，传递原canonical root，两个Service、包内Bun/SQLite、Shell producer和cold reader共享该完整包。源码外编译后不重新定位仓库或构建另一候选。普通独立fixture未提供候选时仍沿既有builder；实际完整8outer结果与当前编译验收归[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。采集probe失败保留私有原root与精确阶段日志以核原Job／DB／错误；它不建立新的执行authority或扩大生产启动行为。
 
 持续lifecycle采样以首个真实周期为warmup，随后按原活动窗口分布固定观测点；每个窗口继续执行原完成／取消／重连／删除周期，而不是sleep等待。只在边界采样并保准确0—8序号，原180秒timer覆盖整个观测窗口，结束／异常均释放。旧滚动数组丢弃早期点的实现已移除；报告另核每个原point序号，不能把最后几次快速循环当整段资源稳定性。实际两秒红／绿与当前完整结果归同一[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。
