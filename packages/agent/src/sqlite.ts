@@ -383,17 +383,22 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       if (closePromise) return closePromise;
       closing = true;
       closePromise = (async () => {
+        let acknowledged = false;
         try {
           await request('close', []);
+          acknowledged = true;
         } finally {
           closed = true;
           worker.terminate();
           rejectAll(new AgentError('store_closed'));
-          for (const held of owners.values()) held.lock.release();
-          owners.clear();
-          for (const held of recoveryLeases.values()) held.lock.release();
-          recoveryLeases.clear();
-          access.lock.release();
+          // Termination requests do not confirm native closure; retain original ownership on error.
+          if (acknowledged) {
+            for (const held of owners.values()) held.lock.release();
+            owners.clear();
+            for (const held of recoveryLeases.values()) held.lock.release();
+            recoveryLeases.clear();
+            access.lock.release();
+          }
         }
       })();
       return closePromise;

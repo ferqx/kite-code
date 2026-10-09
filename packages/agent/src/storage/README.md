@@ -12,6 +12,12 @@ Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-r
 
 [原授权回归](../../test/isolated/execution/authorization-review.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
 
+## Store 关闭未确认时的锁归属
+
+[公共 SQLite Store](../sqlite.ts)的 `close()` 同步封住新请求并缓存原完成 Promise。只有 Worker 已排空原请求、释放语句且 `db.close(true)` 返回成功 ACK，才释放原 Session owner、恢复 lease 和 Profile 使用锁。关闭错误、Worker 不可用或关闭请求未被接纳时，仍请求 terminate 并拒绝 pending，但保留原锁与 ownership，传播原错误；重复关闭不重试、不补造确认。terminate 请求本身不证明物理线程退出，未确认锁由原宿主进程实际退出归还。
+
+[真实 Service 关闭回归](../../../../apps/service/test/isolated/store-close-ownership.test.ts)经共用装配和 Client 完成普通 Model 任务，在真实 Worker strict-close 前注入错误；核原完整正文、`drain_failed`、原关闭 Promise，以及进程存活时公开维护 EX 被拒绝。随后等原 owned child 实际退出，公开备份和冷 readonly 的 metadata／完整 View／cursor／Model 正文保持，冷 Model 零调用。这项交接不补齐正常 Worker 物理退出、原 RSS 或全 Runtime 资源资格。
+
 ## Worker 构造失败的 Profile 释放
 
 [公共 SQLite 入口](../sqlite.ts)先取得原 Profile 使用锁，再创建 Worker。构造器同步抛错时，入口释放已取得的锁并保留原错误；没有返回 Store，也没有创建可等待关闭的 Worker。成功构造后的数据库打开、请求、strict close 和使用锁释放顺序保持原合同。

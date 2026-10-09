@@ -16,4 +16,4 @@ cancel 路径封住新工作，并复用原 owner 范围内的清理链。封门
 
 只有资源关闭完成，状态才变为 `closed`。Job 清理未确认、绑定清理失败或宿主回调失败时，状态变为 `drain_failed`，保留底层 Store/profile 资源，并拒绝共享完成 Promise。宿主不能将该拒绝解释为实际进程退出，也不能因此释放 daemon 所有权。此独立入口不实现 daemon stop/restart 策略、endpoint 锁、HTTP 认证或失败关闭的重试/重置。
 
-验证使用 [lifecycle.test.ts](../test/isolated/execution/lifecycle.test.ts) 中真实可丢弃的 SQLite Worker、固定本机模型和明确 barrier。unknown Job fixture 不含外部进程；只有在证明生产关闭失败和资源保留之后，测试收尾才显式关闭其原 Store。
+验证使用 [lifecycle.test.ts](../test/isolated/execution/lifecycle.test.ts) 中真实可丢弃的 SQLite Worker、固定本机模型和明确 barrier。unknown Job fixture 不含外部进程；只有在证明生产关闭失败和资源保留之后，测试收尾才显式关闭其原 Store。Store strict-close 未确认时的原锁交接与 owned child 实际退出后的维护／冷读见 [Store owner](storage/README.md#store-关闭未确认时的锁归属)；该失败不能因 terminate 请求被提升为资源已关闭。

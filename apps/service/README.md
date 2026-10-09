@@ -304,6 +304,8 @@ Settings 模型业务端口为 `GET /v1/config/{scope}/models?storeId=...&worksp
 
 202 仅表示关闭受理。首次关闭缓存同一 completion，失败进入 `drain_failed` 并保持 cleanup busy、HTTP 诊断和未确认资源；不得在 finally 强制停止 listener 伪装完成。成功关闭后 runner 取消自己的父管道读取并真实退出，即使父管道仍打开；网络断开不代表父进程死亡。丢回复属于原实例未知结果，只能再次观察该实例，不自动重发 shutdown。当前仅有限接口与所属 runner，不代表正式 CLI 停机或 daemon 发现完成。
 
+底层 Store strict-close 未获成功 ACK 时，[原 Store owner](../../packages/agent/src/storage/README.md#store-关闭未确认时的锁归属)保留 Session／恢复／Profile 使用锁，Service 的 `drain_failed` 不能让维护提前接管。[真实共用装配／Client 回归](test/isolated/store-close-ownership.test.ts)保原完成任务和全文，核关闭原错误与同一 completion、存活进程期间维护 `owner_busy`，原 child 实际退出后才允许备份和完整冷读，零新增 Model。该 fixture 的进程退出是测试收尾，不宣称失败关闭已成功或 Worker 线程的完整资格。
+
 [实际 HTTP 与 runner 生命周期测试](test/isolated/lifecycle.test.ts)使用临时 profile/SQLite 和固定本地配置，覆盖闭合身份、空/同源 Origin、Browser 拒绝、慢正文、原配置 mutation 发布、慢纯 GET 排空、真实 Store metadata 故障、父管道仍打开时原 PID 退出与同 profile peer 存活、诊断无 Store 退出，以及未确认清理后原进程/HTTP 保留且维护仍 `owner_busy`。这些测试没有调用 Provider/Tool；失败 fixture 最终由测试的所属子进程清理回收，不把 SIGKILL 作为成功停机证据。
 
 [共用进程装配测试](test/isolated/process-service.test.ts)覆盖原 profile 身份、装配过程中迟到的宿主回调替换、冷 Store 零模型执行和损坏 Store 的只读诊断；[Gateway 测试](test/isolated/development-web.test.ts)覆盖重复关闭同一 completion 与 abort 后真实慢读取排空及完整 17 MiB Model 正文的读取/传输中断，[生命周期测试](test/isolated/lifecycle.test.ts)同时保留配对父 EOF/管道存活验证，并通过真实失败宿主 child 证明诊断、Store 和维护锁保留。此共用装配不代表 daemon main 或正式 CLI 命令已经完成。

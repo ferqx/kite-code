@@ -3513,3 +3513,28 @@ Agent资源owner和active资格按实际diff同步；手册执行、工具审批
 | 1 | installed CLI／TUI／Native 普通任务执行、准确取消、完整输出、cold只读与退出 | 保原身份／完整原结果／零重放及实际所属资源退出，全部原资源门禁。本轮空闲serial索引收束已闭；原RSS真实增长仍无解决证据，8outer／9点、Bun activeResources／handles与全Runtime后代资格仍未闭。 |
 | 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及原平台证据仍有缺口，既有macOS维护／冷回退结果复用。 |
 | 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役，阶段未过滤完整默认及强制门禁均通过。当前27项不能替代资源阶段退出，37partial／wholeV13=false／Goal active。 |
+
+
+## 2026-10-10：普通任务关闭失败后的维护交接
+
+上一轮空闲串行索引修复已正常本地提交 `66415af8ac6a56d020e12a2a7e1b2c5244a0ed62`。本轮继续退出依赖①的完整普通任务生命周期；有界只读核对未找到新的 Model-only RSS 持久引用原因，但定位了确定的关闭交接错误：原 Store close 无论 strict-close 是否成功 ACK，都在 finally 释放 Session／恢复／Profile 锁。正式 Service 已如实进入 drain_failed，却仍允许维护 EX 提前接管，违反手册与 §11.4 的资源归属。当前只在原 close request 成功后记录 acknowledged，成功才执行原锁释放；封门、同一 Promise、Worker terminate 请求、pending 拒绝与原错误保持。未确认锁保至原宿主实际退出，不把 terminate 当物理线程回收。
+
+必要新整例使用真实 owned Bun child、共用 ProcessService 装配和公共 Client 完成普通 Model 任务，原 Worker 的 SqliteOperations timedDatabase 代理只在实际 db.close(true) 前抛原错误。完整正文、原 Command／Run／View和一次Model先核实；原错误与 drain_failed 后、child仍存活时公开备份 EX 应得到 owner_busy。原实现在此实际生成备份，修正夹具后的准确业务红为actual1／1fail／10expects／699ms，日志 `/private/tmp/kite-store-close-ownership-before-20261010.log`。修复后同一整例通过；原 child明确退出并由原 exited handle等待后，公开备份及cold readonly metadata／完整View／cursor／ModelOutput等值、冷Model零调用。仅一个必要故障，不围绕关闭扩矩阵。
+
+早期sandbox listener的EADDRINUSE未进入业务，独立 `/private/tmp/kite-store-close-ownership-setup-sandbox-20261010.log` 保留；新增夹具首版逐chunk UTF8解码的失败已修成fatal streaming decoder，不是产品正文错误。其raw before曾被迭代覆写，仅原工具输出仍存，不能将后来的准确EX红说成首轮。独立审查接受生产ACK边界和完整用户链，并指出原3800ms工作与逐项收尾最坏5200ms超出默认5秒；夹具按同一原默认预算收束共享截止、冷读取与实际owner清理，不删业务断言或扩大预算。失败保留原根与业务／清理错误，测试回收自己的原handle不计作产品成功关闭。
+
+生产ACK guard外字节与父提交相等；五个原整文件、Runtime／原Worker／queue、Service lifecycle／process装配、原Model-only probe／report与默认inventory及保护文件均保持，共17项准确核对归 `/private/tmp/kite-store-close-ownership-preservation-20261010.json`。必要验证沿原 inventory 的新Service整例、Store、preflight、原ProcessService、Service lifecycle和Agent lifecycle六个完整文件，各独立Bun进程、原案例／断言／预算；冻结输入与逐文件实际结果归 `/private/tmp/kite-store-close-ownership-whole-20261010-*`。只覆盖该失败交接与原成功路径，不替代阶段完整默认、八轮稳定性或 §35。
+
+最终六whole实际0／7642.563ms，新Service1／18、Store10／39、preflight7／45、原ProcessService6／48、Service lifecycle9／78、Agent lifecycle14／99，合计47pass／0fail／327Bun断言；4268 regular、Git及实际Bun／Node运行资产前后全等。逐日志SHA与准确计数核验归 `/private/tmp/kite-store-close-ownership-verified-evidence-20261010.json`，`fullDefault:false`／`wholeV13:false`。Agent先前单文件green仅作初验证，不重复计数。
+
+最终根及八workspace types、四TS只读Biome、文档完整性／all-scope影响、boundary／workspaces／API、测试归属／计划证据与diff均actual0；影响映射要求核对的Agent README与active boundary保持既有失败保锁合同，手册无需重复改写。准确日志归 `/private/tmp/kite-store-close-ownership-*-final-20261010.log`；文档最终字节另执行delivery检查，正常本地hooks独立强制。仅本地stage／commit，准确scope与receipt归同一private前缀；无push／PR／发布或Actions dispatch。
+
+Store／Runtime生命周期／Service owner与active资格同步实际diff；手册的drain_failed诊断、数据使用锁与维护busy承诺核对保持，不改变公共API／持久schema／维护格式。既有Daemon、MCP／Shell／OAuth／Native helper、Store构造、statement.release与原450秒RSS真实失败复用；原切片保持结束。自身进程的system malloc原生64MiB分配／释放校准取得实际live统计，准确 `/private/tmp/kite-self-malloc-zones-20261010/evidence-audit.json`；仅DefaultMallocZone，不涵盖Bun／JSC全部分配或原RSS因果，未重跑450秒负载，不用于formal。
+
+剩余仍按三个完整能力缺口依赖推进：
+
+| 顺序 | 实际用户入口与完整能力 | 明确验收与剩余阻塞 |
+| --- | --- | --- |
+| 1 | installed CLI／TUI／Native 普通任务执行、准确取消、完整输出、cold只读与退出 | 保原身份／完整原结果／零重放及实际所属资源退出，全部原资源门禁。本轮未确认Store关闭的维护交接修正已闭；原RSS真实增长、8outer／9点、Bun activeResources／handles与全Runtime后代资格仍未闭。 |
+| 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及平台证据仍有缺口；原macOS维护／冷回退复用。 |
+| 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役，阶段未过滤完整默认与强制门禁均通过。当前局部交接不提升37partial／wholeV13=false／Goal active。 |
