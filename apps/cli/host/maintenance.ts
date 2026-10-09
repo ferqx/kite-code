@@ -58,7 +58,7 @@ export async function runSelectedMaintenance(input: {
     profileComplete: false,
     desktopUi: {
       path: 'desktop-private/data.sqlite',
-      supportedUserVersions: [1, 2, 3, 4, 5, 6, 7, 8],
+      supportedUserVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
     },
     mcpConfiguration: { path: 'mcp.json', rawBytes: true },
     mcpApprovals: { path: 'mcp-approvals.json', rawBytes: true },

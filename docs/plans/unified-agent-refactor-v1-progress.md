@@ -3157,9 +3157,41 @@ Daemon修复已由 `bc31bc51ae178c2486afdc5fba8ea65bf2ec9919` 完成必要验证
 
 | 顺序 | 实际用户入口与完整能力 | 当前缺口与验收 |
 | --- | --- | --- |
-| 1 | 正式Native“会话工具→扩展能力”：选已注册动作、schema表单、Command／Execution状态、已注册Query、通用结果及结果动作 | 便携Desktop和公共UI已有通用链，正式Main／preload／renderer尚未接入。实施不硬编码mini-review，复用公共Client和原持久caller；以既有mini-review沿真实正式链完成analyze、完整findings、mark及新business key重跑，首次／冷读取、未知只查原ID、查询零POST、切换不改绑和普通退出为验收，不把样本加入默认装配。 |
-| 2 | 默认installed CLI／TUI／Native连续普通任务、Shell与child后台工作 | 原macOS RSS增长失败、八轮／60分钟和完整资源资格仍未闭合；需定位实际owner并修复，按原负载、增长算法与原资源要求取得实际通过。已有默认Shell完整入口证据复用，不重复增加Shell故障矩阵。 |
-| 3 | installed `kite`／`kite-desktop` 安装、版本切换、维护恢复与Provider／MCP认证 | 复用已闭合macOS维护、恢复读取与真实代码链；剩余当前候选适用平台与必要样本须取得准确制品、原数据／身份、零重放和保数据卸载证据。T029尚无适用已发布新基线predecessor，不伪造通过。Win／Linux依用户顺序留重构后Actions，本轮无dispatch／push／发布。 |
+| 1 | 正式Native“会话工具→扩展能力”：选已注册动作、schema表单、Command／Execution状态、已注册Query、通用结果及结果动作 | 本轮已接正式Main／preload／renderer、原持久caller和DB9／v18维护，以同一mini-review完成真实HTTP与安装版原页面的完整analyze→findings→mark→新business key、冷GET零POST和普通退出。代码不硬编码样本，默认装配不增加样本；收束完整回归及准确范围归下节，不由局部通过提升整个阶段。 |
+| 2 | 默认installed CLI／TUI／Native启动与连续普通任务、Shell及child后台工作 | 本轮完整默认在Native普通启动的原10秒页面期限真实失败，原macOS RSS增长失败、八轮／60分钟和完整资源资格也未闭合。需定位实际owner并修复，以完整默认实际通过及原负载、增长算法、资源要求验收；单作业通过不抵消并发启动失败。已有默认Shell完整入口证据复用，不重复增加Shell故障矩阵。 |
+| 3 | installed `kite`／`kite-desktop` 安装、版本切换、维护恢复与Provider／MCP认证 | 复用已闭合macOS维护、恢复读取与真实代码链；本轮新增DB9的旧代码实际拒绝仍需资格，当前候选适用平台与必要样本须取得准确制品、原数据／身份、零重放和保数据卸载证据。T029尚无适用已发布新基线predecessor，不伪造通过。Win／Linux依用户顺序留重构后Actions，本轮无dispatch／push／发布。 |
 | 4 | 正式CLI／TUI／Native／只读Web及发行闭包的最终旧路径退役 | 当前正式/default/CI已退出旧闭包，但旧源码与retirement判定仍pending。前序能力及适用资格闭合后完成§35／T-E核对和独立迁移审查，删除确属退役的旧引擎／carrier／构建依赖，核制品闭包并运行完整默认与强制门禁；不能只改pending标签。 |
 
 直接实施第1项，保持原PC展示复用与宿主Shell语义。必要测试围绕尚缺正式消费者和实际风险，复用仍适用Core／HTTP／扩展生命周期证据；完整默认只在能力集成收束点运行并如实登记。37能力partial／wholeV13=false／Goal active，本地提交授权继续，不扩大push、PR、发布或Actions。
+
+## 2026-10-09：正式 Native 公共扩展完整能力
+
+先前Daemon修复／文档／提交 `bc31bc51ae178c2486afdc5fba8ea65bf2ec9919` 已闭合，本片未再扩故障窗口；原PC回归调用者修正已按正常hooks提交 `b735cc492e94618d638fa441a2b6c79b6efd383d`，最新完整默认的Context实际失败和原分片修后通过均保留上文。当前从durable `el-refactor` 直接完成最高优先级第1项，以一条用户能力而非journal或测试窗口为切片。
+
+正式“会话工具→扩展能力”现复用公共schema表单与PublicView，固定Main／IPC从准入和选择冻结完整范围，完整目录／Query经64KiB块、offset／EOF／SHA／fatal UTF-8读取才有动作资格。用户可执行注册Action、核原Command及准确Execution、读取完整findings、执行原结果动作并明确新business key。未知／冷仅GET原ID，查询／阅读／关闭不POST。首次申请复用原完整Caller与first／inflight；Native局部union不扩大共享五类。首次保存才升DB9，closed v18接纳同一表的新增语法，旧DB1–8／v2–v17保持拒绝；新Store保原身份。行为、格式与取舍分别归[Native](../../apps/desktop/README.md#native-公共扩展完整能力)、[maintenance](../../packages/agent/src/maintenance/README.md#desktop-db9-与-manifest-v18)及[Note](../../.agents/notes/implemented/architecture/2026-10-09-native-public-extension-callers.md)。
+
+本片必要证据，不另建故障矩阵：
+
+- [真实SQLite／Runtime／Service HTTP／SDK／NativeCaller](../../apps/desktop/test/isolated/native-extensions-main.test.ts)实际1pass／97断言／0fail／约0.83秒，日志 `/private/tmp/kite-native-extensions-http-20261009.log`。一个原Model／Run、两次实际Tool分析；原analyze已提交后丢回复保unknown并准确GET恢复，重复原ID零新POST；Query／迟到／release零写，cold仅GET，foreignStore零HTTP，整链4POST含source。
+- [Main／原journal／固定IPC](../../apps/desktop/test/native-extensions.test.ts)最终6pass／107断言／0fail／90ms，日志 `/private/tmp/kite-native-extensions-ipc-owner-final-20261009.log`；核EOF观察、原结果坐标、原scope、first／cold、active／unknown／next-attempt不清除。固定IPC新增边界反例仅针对这条新端口和旁路风险，不增加窗口；七方法closed fields、64KiB读块和8192编码字节Query界限保持。
+- [实际Node DB9／维护](../../packages/agent/test/isolated/maintenance/desktop-extensions.test.ts)实际1pass／19断言／0fail／1.75秒，日志 `/private/tmp/kite-native-extensions-maintenance-20261009.log`；原五类与泛型完整Unicode意图／phase、v18 backup／inspect／新Store restore、准确副本、cold1GET／0POST、foreign0HTTP和旧v17／DB8重标拒绝。大合法JSON codec另1pass／4断言，日志 `/private/tmp/kite-native-extensions-maintenance-codec-20261009.log`。
+- [真实组件与reader](../../apps/desktop/test/isolated/native-extensions-dom.test.tsx)最终3pass／25断言／0fail／903ms，核完整原结果、表单、重复抑制、unknown仅lookup、scope／hash拒绝及所属close、切换迟到隔离；独立审查发现目录刷新会错绑旧结果动作，现独立结果观察，保旧全文只读，新Query后才恢复，对应原DOM已复验。
+- [安装版整窗口](../../apps/desktop/test/isolated/native-extensions-bundle.test.ts)actual0／1pass／10Bun断言及全部Node driver／72.36秒，日志 `/private/tmp/kite-native-extensions-window-qualified-20261009.log`。固定参考装配在hash前注册同一mini-review及可信分类；默认模型、权限保存、Service／Main／preload／原页面／真实sandbox保持。构建→搬迁→删源→公开installed `bin/kite-desktop`，原页面完整source→analyze→finding→Mark→新business key，两次实际分析、扩展POST3／Model1／Run1。第二冷窗口准确原Command与结果只GET，POST0／Model仍1；两所属Service普通退出，双EX和保Profile卸载通过。预算120秒／driver45秒／页面10秒不放宽。
+
+真实失败保留：首次新窗口actual1／0pass1fail／7Bun／66.14秒，原分析Job准确failed／permission_denied，日志 `/private/tmp/kite-native-extensions-window-20261009.log`，原页／截图／Core在 `/private/tmp/kite-native-extensions-window-IieTzF`。固定测试装配漏了可信分类，现仅参考定义使用真实模式／trust和control read-set，其他定义继续默认policy；没有放宽生产权限或把failed改assert通过。新driver第一次typecheck错把Run终态写succeeded并调用不存在的Store方法，改为真实completed／getView；真实执行断言保持。HTTP fixture首次受理不能提前断言applied，现等待后严格核实际succeeded；一次迟到fixture未释放自有gate在原20秒超时，改先捕获Promise再release，期限未加。Root完整types与八workspace已actual0，日志 `/private/tmp/kite-native-extensions-types-20261009.log`；build原CSS／chunk size提示仍保留。
+
+新增固定IPC测试还发现共享canonical helper的固定MCP Auth分支能绕入Native通用caller.prepare，实际5pass／1fail／105断言，日志 `/private/tmp/kite-native-extensions-ipc-owner-red-20261009.log`。现通用端口明确只接原五kind，Auth仍走正式MCP观察端口；公共canonical支持与默认Auth权限不扩大或删除。原负例及全部107断言最终通过，Desktoptypes0；实际完整扩展窗口走独立固定端口，不因该五类guard变化失效，完整默认核其相邻消费者。
+
+本次独立整合审查覆盖新Main／IPC／journal／DB9／v18与UI，发现并闭合上述刷新错误；有界IPC反例另闭合真实旁路，不冒称整体§35独立审查。剩余依赖为原第2项macOS RSS／八轮和全资源资格、第3项当前候选必要维护／平台／已发布样本及新增DB9旧代码运行拒绝、第4项§35审查／最终旧路径删除／阶段完整门禁。完整默认正在本能力收束点核对，真实结果另记；37能力仍partial／wholeV13=false，Goal active，仅授权本地提交。
+
+本能力收束第一次原完整默认实际退出1／836.986秒：661文件／522主作业／macOS4槽，219开始／219结束／218通过，安装版恢复原10秒Electron launch失败，303未派发、inflight0；4245 regular输入、AGENTS.md／bun.lock和Git前后全等。Inspector已连接，Chromium DevTools websocket尚未连接；原首次错误页及后续恢复尚未抵达，不能把有限原通过当整轮通过。准确原始 `/private/tmp/kite-native-extensions-default-20261009-{inputs,after-inputs,plan,result}.json`／`.log`；原自有候选与过程资料保留 `/private/var/folders/m2/2brbc_757mn1yvqp09gdyz6c0000gn/T/kite-native-restore-interruption-bJ6p03`。所有CLI分片、原计划／后台／Shell／MCP／完整输出／Skills和问卷窗口本轮已通过，未派发的新扩展窗口及其他作业不冒称本轮已验。
+
+仅把这项准确完整恢复文件转入现有exclusive队列，与其他默认job结束后再执行；默认661文件／522job各一次、4槽／逐文件／进程内1与原180秒整例／45秒driver／10秒launch和页面期限、全部恢复／冷读／双EX断言保持。原保存job／隔离HOME复验实际0／1pass／54断言及全部driver／89.583秒，日志 `/private/tmp/kite-native-extensions-restore-original-20261009.log`；默认计划／实际runner两文件11pass／77断言／2.91秒，日志 `/private/tmp/kite-native-extensions-scheduler-20261009.log`。这证明修后限定运行通过，具体OS或调试连接阻塞因果未知；没有改生产初始化、恢复、hash或资源实现，没有提高预算、删断言、过滤或新增故障矩阵。分类与既有理由同步[受控并行Note](../../.agents/notes/implemented/testing/2026-09-28-controlled-parallel-isolated-tests.md)，新的原完整默认仍待实际结算。
+
+普通沙盒复验HTTP曾listen失败（port0／EADDRINUSE），原日志 `/private/tmp/kite-native-extensions-http-sandbox-20261009.log`；相同单文件／原断言在已授权本机环境实际1pass／97断言／0fail／890ms，最终日志 `/private/tmp/kite-native-extensions-http-20261009.log`。它不改变客户端或Server能力，也不把环境失败删除为产品绿。
+
+本能力收束第二次原完整默认实际退出1／885.575秒：仍661发现文件／522主作业／macOS4槽，231开始／231结束／230通过，291未派发、inflight0；4245 regular输入、AGENTS.md／bun.lock与Git前后全等，所有已派发作业和计划文件均无重复。原Native问卷窗口实际77.274秒退出1，第一次选择Question A前仍显示“正在准备你的工作空间…”，原10秒页面期限触发，Provider0；尚未进入问卷流程。具体启动阻塞原因未知，不能将本轮失败推为已闭合，也不能据单独复验推导完整负载资格。原Terminal真实代码链317.182秒、原Native stdin112.228秒完成drain并通过；原计划／后台／Shell／MCP／完整输出／Skills、全部CLI分片和已派发维护／恢复均保持。未派发的新扩展窗口和剩余作业不冒称该整轮已验。准确原始 `/private/tmp/kite-native-extensions-default-qualified-20261009-{inputs,after-inputs,plan,result,main-event-audit}.json`／`.log`，原失败截图另保 `/private/tmp/kite-native-extensions-questionnaire-startup-failure-20261009.png`。
+
+针对这项未解决启动错误，仅复验保存的同一个原job和隔离HOME；未改其源码、预算或断言，也未增加问卷矩阵。实际0／1pass／32断言及全部driver／64.995秒，日志 `/private/tmp/kite-native-extensions-questionnaire-original-20261009.log`及`-result.json`；原默认Main／Service／问卷完成一次回答和一次信息取消、4次Provider及2个原Run，完整答案、冷状态和所属Service退出保持。这证明限定原作业可通过，原完整默认仍失败。完整负载的普通启动与原RSS／八轮／完整资源资格合为第2项用户能力阻塞，不把该测试窗口另立长期目标。
+
+正式Native扩展的动作→准确Command／Execution→完整Query／PublicView→原结果动作→新business key及冷GET这一消费者已落地，对应真实HTTP、原DOM、Node维护和installed窗口各自的准确通过继续适用；原五类caller与固定MCP端口的相邻消费者也已在本轮已派发范围通过。完整默认和阶段退出没有通过；37能力仍partial、旧路径retirement仍pending、wholeV13=false、Goal active。本次本地交付保留全部真实失败及剩余资格，不把文档或局部绿提升为整片完成；本轮最终根及八workspace types、28个TS文件只读Biome、文档／影响／架构／测试归属／计划证据检查均实际0，日志归 `/private/tmp/kite-native-extensions-final-*-20261009.log`。正常提交hooks另独立执行，仅本地提交，不push／PR／发布。

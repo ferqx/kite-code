@@ -3,6 +3,7 @@ import type {
   ClearPermissionGrantsRequest,
   Command,
   Execution,
+  ExtensionCommandRequest,
   FileCheckpointDetail,
   FileCheckpointPage,
   FileCheckpointRecoveryBoundary,
@@ -30,6 +31,7 @@ import type {
   InteractionAnswerSubmission,
   PermissionSubmission,
 } from './controller';
+import type { NativeExtensionsRequest, NativeExtensionsResult } from './extensions-bridge';
 import type {
   NativeFileChangeDetail,
   NativeFileChangePage,
@@ -93,10 +95,11 @@ export interface NativeWindowBridge {
   writeClipboardText(text: string): Promise<void>;
   toggleWindowMaximize(): Promise<void>;
 }
+export type NativeCallerCommandRequest = CallerCommandRequest | ExtensionCommandRequest;
 export type NativeCallerIntent = {
   scope: { storeId: string; sessionId: string; workspaceId: string };
   subjectId: string;
-  request: CallerCommandRequest;
+  request: NativeCallerCommandRequest;
   target: {
     kind: 'session' | 'run' | 'after_run' | 'command' | 'execution';
     id: string | null;
@@ -111,7 +114,7 @@ export type NativeCallerRecord = {
   phase: 'submitting' | 'unknown' | 'accepted' | 'applied' | 'rejected';
 };
 export type NativeCallerMetadata = Omit<NativeCallerIntent, 'request'> & {
-  request: Pick<CallerCommandRequest, 'kind' | 'commandId' | 'expectedStoreId'>;
+  request: Pick<NativeCallerCommandRequest, 'kind' | 'commandId' | 'expectedStoreId'>;
   phase: NativeCallerRecord['phase'];
 };
 export type NativeCallerBody = {
@@ -126,6 +129,8 @@ export type NativeCallerBody = {
   bodyBytes: number;
 };
 export type NativeSelection = {
+  readonly canReadExtensions?: boolean;
+  readonly canInvokeExtensions?: boolean;
   readonly canReadSkills?: boolean;
   readonly canReadContext?: boolean;
   readonly canReadModelOutput: boolean;
@@ -428,6 +433,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeExtensionsRequest
   | NativeInteractionHistoryRequest
   | NativeToolMessageRequest
   | NativeFileChangeRequest
@@ -694,6 +700,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeExtensionsResult
   | NativeInteractionHistoryPage
   | NativeToolMessagePage
   | NativeToolRunPage

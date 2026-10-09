@@ -40,6 +40,7 @@ test('default selection covers current public safety and formal lifecycle files 
     'apps/cli/test/isolated/tui-export-host.test.ts',
     'tests/isolated/unified-agent/cli-registration-lifecycle.test.ts',
     'tests/isolated/unified-agent/native-cross-version.test.ts',
+    'tests/isolated/unified-agent/native-restore-interruption.test.ts',
     'tests/isolated/unified-agent/terminal-bundle.test.ts',
   ]);
   for (const file of UNIFIED_EXCLUSIVE_TEST_FILES) {

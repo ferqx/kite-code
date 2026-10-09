@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import {
   type AgentClient,
   type BackgroundExecutionItem,
-  type CallerCommandRequest,
   type Command,
   canonicalCallerCommandRequest,
+  canonicalModelBody,
+  validateRequest,
 } from '@kite-ai/client';
 import type {
+  NativeCallerCommandRequest,
   NativeCallerIntent,
   NativeCallerMetadata,
   NativeCallerRecord,
@@ -28,12 +30,29 @@ export const callerCanonical = (value: unknown): string => {
 };
 export const callerTextDigest = (text: string) => createHash('sha256').update(text).digest('hex');
 export const callerDigest = (value: unknown) => callerTextDigest(callerCanonical(value));
+/** Native DB9 adds public extension envelopes without broadening the shared five-command caller. */
+export function canonicalNativeCallerRequest(request: NativeCallerCommandRequest): string {
+  if (request.kind !== 'extension.invoke') return canonicalCallerCommandRequest(request);
+  validateRequest('ExtensionCommandRequest', request);
+  closed(request, [
+    'kind',
+    'expectedStoreId',
+    'commandId',
+    'extensionId',
+    'actionId',
+    'definitionVersion',
+    'input',
+  ]);
+  const { expectedStoreId: _store, commandId: _command, ...body } = request;
+  return canonicalModelBody(body);
+}
 export function callerTarget(
   scope: NativeCallerIntent['scope'],
-  request: CallerCommandRequest,
+  request: NativeCallerCommandRequest,
 ): NativeCallerIntent['target'] {
   switch (request.kind) {
     case 'run.start':
+    case 'extension.invoke':
       return { kind: 'session', id: scope.sessionId };
     case 'input.steer':
       return {
@@ -87,8 +106,8 @@ export function validateCallerRecord(raw: unknown): NativeCallerRecord {
     !['submitting', 'unknown', 'accepted', 'applied', 'rejected'].includes(String(raw.phase))
   )
     throw Error('caller_storage_unavailable');
-  const request = item.request as CallerCommandRequest;
-  const canonical = canonicalCallerCommandRequest(request);
+  const request = item.request as NativeCallerCommandRequest;
+  const canonical = canonicalNativeCallerRequest(request);
   if (
     request.expectedStoreId !== item.scope.storeId ||
     item.bodyDigest !== callerDigest(request) ||
@@ -98,6 +117,7 @@ export function validateCallerRecord(raw: unknown): NativeCallerRecord {
   )
     throw Error('caller_storage_unavailable');
   if (hasDraft) {
+    if (request.kind === 'extension.invoke') throw Error('caller_storage_unavailable');
     closed(item.draft, ['id', 'revision', 'textDigest']);
     if (
       typeof item.draft.id !== 'string' ||
@@ -137,7 +157,7 @@ export class NativeCallerJournal {
   records() {
     return this.data.callers();
   }
-  prepare(sessionId: string, raw: CallerCommandRequest, draft?: NativeCallerIntent['draft']) {
+  prepare(sessionId: string, raw: NativeCallerCommandRequest, draft?: NativeCallerIntent['draft']) {
     return this.prepareIntent(sessionId, raw, draft);
   }
   /** Main supplies an authenticated original directory item; renderer cannot name a child Session. */
@@ -178,12 +198,12 @@ export class NativeCallerJournal {
   }
   private async prepareIntent(
     sessionId: string,
-    raw: CallerCommandRequest,
+    raw: NativeCallerCommandRequest,
     draft?: NativeCallerIntent['draft'],
     backgroundRoot?: string,
   ) {
-    const canonical = canonicalCallerCommandRequest(raw),
-      request = JSON.parse(JSON.stringify(raw)) as CallerCommandRequest;
+    const canonical = canonicalNativeCallerRequest(raw),
+      request = JSON.parse(JSON.stringify(raw)) as NativeCallerCommandRequest;
     const view = await this.client.getView(sessionId),
       scope = {
         storeId: request.expectedStoreId,
@@ -304,6 +324,36 @@ export class NativeCallerJournal {
       const receipt = command.receipt;
       if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt))
         throw Error('caller_receipt_unavailable');
+      if (r.kind === 'extension.invoke') {
+        if (typeof receipt.executionId !== 'string') throw Error('caller_receipt_unavailable');
+        const execution = await this.client.getExecution(receipt.executionId);
+        if (
+          execution.id !== receipt.executionId ||
+          execution.originStoreId !== i.scope.storeId ||
+          execution.sessionId !== i.scope.sessionId ||
+          execution.runId !== null ||
+          execution.parentExecutionId !== null ||
+          execution.kind !== 'job' ||
+          execution.definitionId !== `${r.extensionId}/${r.actionId}` ||
+          execution.definitionVersion !== r.definitionVersion
+        )
+          throw Error('caller_receipt_unavailable');
+        if (
+          ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status) &&
+          (receipt.status !== execution.status ||
+            typeof receipt.preparingNextAttempt !== 'boolean' ||
+            typeof receipt.finalizationDigest !== 'string' ||
+            !/^[a-f0-9]{64}$/.test(receipt.finalizationDigest) ||
+            !/^[1-9][0-9]{0,18}$/.test(execution.resultRevision) ||
+            BigInt(execution.resultRevision) > 9223372036854775807n)
+        )
+          throw Error('caller_receipt_unavailable');
+        if (
+          this.client.serverInfo?.storeId !== i.scope.storeId ||
+          this.client.serverInfo.subjectId !== i.subjectId
+        )
+          throw Error('caller_receipt_unavailable');
+      }
       if (
         (r.kind === 'command.cancel' &&
           (receipt.kind !== r.kind ||
@@ -335,6 +385,12 @@ export class NativeCallerJournal {
   async lookup(commandId: string) {
     this.first.delete(commandId);
     const row = this.original(commandId);
+    if (
+      row.intent.request.kind === 'extension.invoke' &&
+      (this.client.serverInfo?.storeId !== row.intent.scope.storeId ||
+        this.client.serverInfo.subjectId !== row.intent.subjectId)
+    )
+      throw Error('caller_scope_unavailable');
     try {
       return await this.checked(row, await this.client.getCommand(commandId));
     } catch (error) {
@@ -366,15 +422,17 @@ export class NativeCallerJournal {
             throw Error('caller_scope_unavailable');
         }
         const command =
-          r.kind === 'run.start'
-            ? await this.client.startRun(row.intent.scope.sessionId, r)
-            : r.kind === 'input.steer'
-              ? await this.client.steer(row.intent.scope.sessionId, r)
-              : r.kind === 'input.follow_up'
-                ? await this.client.followUp(row.intent.scope.sessionId, r)
-                : r.kind === 'command.cancel'
-                  ? await this.client.cancelCommand(row.intent.scope.sessionId, r)
-                  : await this.client.cancelExecution(row.intent.scope.sessionId, r);
+          r.kind === 'extension.invoke'
+            ? await this.client.invokeExtension(row.intent.scope.sessionId, r)
+            : r.kind === 'run.start'
+              ? await this.client.startRun(row.intent.scope.sessionId, r)
+              : r.kind === 'input.steer'
+                ? await this.client.steer(row.intent.scope.sessionId, r)
+                : r.kind === 'input.follow_up'
+                  ? await this.client.followUp(row.intent.scope.sessionId, r)
+                  : r.kind === 'command.cancel'
+                    ? await this.client.cancelCommand(row.intent.scope.sessionId, r)
+                    : await this.client.cancelExecution(row.intent.scope.sessionId, r);
         return await this.checked(row, command);
       } catch (error) {
         this.data.finishCaller(commandId, 'unknown');
@@ -386,8 +444,35 @@ export class NativeCallerJournal {
     this.inflight.set(commandId, pendingRequest);
     return pendingRequest;
   }
+  /** A prepared row never grants a later observation permission to perform its first POST. */
+  releaseFirst(commandId: string) {
+    this.first.delete(commandId);
+  }
   clear(commandId: string) {
     this.first.delete(commandId);
+    if (
+      this.records().find((row) => row.intent.request.commandId === commandId)?.intent.request
+        .kind === 'extension.invoke'
+    )
+      return this.clearExtension(commandId);
+    return this.data.clearCaller(commandId);
+  }
+  private async clearExtension(commandId: string) {
+    const command = await this.lookup(commandId);
+    if (command.status === 'rejected') {
+      this.data.clearCaller(commandId);
+      return;
+    }
+    const receipt = command.receipt;
+    if (
+      !receipt ||
+      typeof receipt !== 'object' ||
+      Array.isArray(receipt) ||
+      command.status !== 'applied' ||
+      receipt.preparingNextAttempt !== false ||
+      !['succeeded', 'failed', 'cancelled'].includes(String(receipt.status))
+    )
+      throw Error('caller_clear_unconfirmed');
     this.data.clearCaller(commandId);
   }
 }

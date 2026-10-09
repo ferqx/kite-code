@@ -42,6 +42,7 @@ export const UNIFIED_EXCLUSIVE_TEST_FILES = [
   'apps/cli/test/isolated/tui-export-host.test.ts',
   'tests/isolated/unified-agent/cli-registration-lifecycle.test.ts',
   'tests/isolated/unified-agent/native-cross-version.test.ts',
+  'tests/isolated/unified-agent/native-restore-interruption.test.ts',
   'tests/isolated/unified-agent/terminal-bundle.test.ts',
 ] as const;
 

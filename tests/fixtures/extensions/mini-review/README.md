@@ -7,3 +7,5 @@
 `mark` 只对扩展自有 findings 记录做 CAS 更新，合并保留其他字段，不创建模型 Run。`results` Query 只读取已保存记录，输出通用 PublicView 的 summary、payload、artifactRefs 与动作；没有专用 renderer 时仍可展示。计划与结果内容分别注册 schema 与版本。
 
 验证：`bun run --cwd tests/fixtures/extensions/mini-review typecheck`、`build`、`test`，以及根真实 Service→Client 外部扩展集成测试。分析内容是固定 fixture，不调用付费模型、文件系统或用户数据。
+
+正式Native第二消费者的[真实HTTP链](../../../../apps/desktop/test/isolated/native-extensions-main.test.ts)与[安装版整窗口](../../../../apps/desktop/test/isolated/native-extensions-bundle.test.ts)也消费同一公开扩展。固定[Process Host测试装配](../../unified-agent/native-extension-process.ts)在候选hash前注册样本及可信分类，使用真实权限模式／工作区信任，普通定义保默认策略；不扩大默认装配。source→analyze→完整findings→原mark→明确新business key是一条能力验收，查回、Query和冷读不得重放；当前正式owner见[Native](../../../../apps/desktop/README.md#native-公共扩展完整能力)。

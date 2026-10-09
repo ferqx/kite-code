@@ -210,6 +210,8 @@ Service 与 CLI 现在共用 [runtime-assets](../../apps/service/src/runtime-ass
 
 ## 完整申请与事件观察
 
+正式Native公共扩展由固定Main／IPC及原共享表单／PublicView消费，冻结当前完整准入与阅读选择，完整EOF后才可调用已读定义或原结果动作。通用Query与阅读不提交Command；刷新、关闭及切换撤销动作观察，保旧完整结果只读。动作沿原caller首次持久意图与一次热权利，未知和冷记录仅查原Command，generic caller.submit不能绕过扩展观察；受理与准确Execution终态分开。只在Native局部union接公共ExtensionCommandRequest，CLI／TUI原五类不扩大。首次保存惰性DB9，closed manifest v18收集原caller表；旧DB1–8／v2–v17语法保持，新Store不retag或重放。实施与格式分别归[Native](../../apps/desktop/README.md#native-公共扩展完整能力)、[maintenance](../../packages/agent/src/maintenance/README.md#desktop-db9-与-manifest-v18)，持续理由归[决定](../../.agents/notes/implemented/architecture/2026-10-09-native-public-extension-callers.md)；完整阶段与旧writer资格按原退出门禁核对。
+
 普通 CLI/TUI 的原五类 Work/精确取消先在 host 的 `ui/caller-intents.json@1`，Native 则在 Node 私人 SQLite v3 中封存完整闭合请求、原 Store/Workspace/Session/subject、精确目标、规范摘要与独立草稿版本。各自 128 槽/16MiB，完整 Plan/Workflow/UTF-8/CRLF body 不裁剪、不以 draft 或 hash 替代；首次 POST 权利仅属于成功 durable prepare 的当前进程 hot intent，任何既有或冷记录都只按原 Command GET 核实，不能重授该内存权利。缺元数据、错完整 intent、坏文件或容量不足不获得补发权。applied/cancel_requested 分别表示命令受理或取消请求，不能冒充 Run/Job 完成。维护 v5 只验证结构与实际文件 proof，不代替 Service 回执、不重算业务权威或重标恢复后的原 scope。CLI 实际独立 argv/main/shared、TUI PTY 和 Native Node/Electron/main+Service 强杀/丢回复的证据各自归 [caller 决定](../../.agents/notes/implemented/architecture/2026-10-03-complete-caller-command-intents.md)，一种客户端的通过不替代另一种。
 
 当前CLI/TUI的同一Caller文件另接四种固定普通Auth invoke，原完整身份、durable prepare、冷GET与容量合同继续适用；Native五类DTO和DB不扩展。实际Caller资产含Auth时选择closed维护v13，旧v2–v12请求grammar及物理白名单保持。认证复用既有CredentialVault/Broker与实际WorkspaceSerialLocks，效果不进新journal；当前Source/read-set用于新申请，历史只核原C/E与finalization。完整边界归[MCP认证](mcp-authentication.md)及[维护owner](../../packages/agent/src/maintenance/README.md)，此处不把Auth saved、connection ready和Tool许可合成一个结果。

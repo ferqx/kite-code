@@ -20,6 +20,8 @@ strict manifest v5 保存 callerIntents.v1 的完整原字节与 Desktop v3 一�
 
 原人类答案不混入上述五类 DTO；后续准确 DB5 的独立 answer_intents 与 manifest v7，由[原答案资产决定](2026-10-04-original-human-answer-intent-assets.md)说明。原五类 caller、热提交权与旧格式边界继续适用，新的离线答案行不扩大查询或审批权。
 
+Native公共扩展的正式消费者复用此首次／冷权利与完整原文，但新增Native局部请求语法由惰性DB9和closed manifest v18隔离；原五类与旧格式合同不扩大，取舍见[Native公共扩展决定](2026-10-09-native-public-extension-callers.md)。
+
 ## Alternatives considered
 
 - 只存原 ID 和 phase：不能证明正文、主体与目标相同，拒绝。

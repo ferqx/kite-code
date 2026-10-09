@@ -483,6 +483,18 @@ Profile 无三项 raw MCP 文件时，DB6 离线备份使用专属 manifest v14�
 
 原意图、两个介质结果和临时选择的长期取舍见[已实施决定](../../.agents/notes/implemented/architecture/2026-10-06-native-provider-intents-and-next-run-selection.md)。
 
+## Native 公共扩展完整能力
+
+正式 [NativeDesktop](src/native.tsx) 的“会话工具→扩展能力”现消费已注册目录、公共 `ActionInputForm` 和 `PublicViewCard`，通过固定 [协议](src/extensions-bridge.ts)、[IPC](electron/native-ipc.ts) 与 [Main 叶子](electron/extensions.ts) 完成动作表单、原 Command／Execution 状态、注册 Query、完整通用结果和原结果动作。没有按参考扩展业务增加 Client／Service／内核方法；参考样本不进入默认装配。
+
+Main 从当前准入推导 Store／subject／Session／Workspace／contextSelectionId 与 generation／viewSelection／historyEpoch，冻结目录和结果观察。完整 JSON 经每块至多64KiB、准确 offset／EOF／SHA／fatal UTF-8 的 [reader](src/native-extension-read.ts) 交付，没有全文配额或截断；最多两份在读 body，超界明确拒绝。只有完整 EOF 才取得该观察的动作资格；刷新、关闭和切换撤销观察，旧完整结果可保留供阅读，旧结果动作必须重新查询。Query、阅读和关闭均不提交 Command或取消业务。
+
+动作沿原 [CallerJournal](electron/caller-journal.ts) 的完整 intent、first／inflight 与现有 `caller_intents` 表；只有当前进程新成功准备的原对象可首次 POST。未知和冷申请只能明确查同一原 Command，重复调用不重发。Main核公开 Command原主体／scope／requestDigest与receipt指向的实际Execution／定义／版本，受理与终态分开；raw input不冒充prepared digest。泛型 caller.submit 对扩展只查询，不能绕过已读定义／原结果动作坐标。尚未确认终态的申请不能清除，明确新动作才产生新ID和用户填写的新业务身份。
+
+Native局部 `NativeCallerCommandRequest` 增加公共 `ExtensionCommandRequest`，共享CLI／TUI五类Caller不扩大。首次保存这类申请才在同一FULL事务惰性升级DB9，未使用的新旧流程保持原版本；维护仅对应 closed manifest v18 接纳DB9，原DB1–8及v2–v17 grammar保持。恢复保原申请字节与Store，foreignStore／subject在HTTP前拒绝查回。准确格式与实际Node备份恢复归[maintenance owner](../../packages/agent/src/maintenance/README.md#desktop-db9-与-manifest-v18)，取舍归[扩展调用决定](../../.agents/notes/implemented/architecture/2026-10-09-native-public-extension-callers.md)。
+
+[真实公共链](test/isolated/native-extensions-main.test.ts)、[Main／journal](test/native-extensions.test.ts)、[原组件DOM](test/isolated/native-extensions-dom.test.tsx)与[安装版整窗口](test/isolated/native-extensions-bundle.test.ts)分别核真实执行、持久权限、原用户入口及完整mini-review链。窗口只将参考扩展和可信分类在候选hash发布前显式装配，普通模型、权限保存、配对Service、Main／preload／renderer和sandbox保持正式实现；具体通过、失败和平台范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09正式-native-公共扩展完整能力)。它不代证任意外部扩展、旧writer运行DB9、完整PC或阶段退出。
+
 ## Native MCP 完整设置
 
 已确认设计，实施中：[设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已集成。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；此前615文件/489主作业的原完整默认通过，当前原页面迁移后的全部默认范围与真实失败由[PC主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)继续核对，同一运行输入另取得本机 Chrome/default OS vault 的四项 Auth、准确取消与重启恢复资格。[实施方案](../../docs/plans/unified-agent-native-mcp-settings.md)负责完整用户旅程和验收；本机组合通过不代表外部账号、其他平台或整个重构已完成，整片新的独立审查仍未取得。

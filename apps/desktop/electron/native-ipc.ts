@@ -1,5 +1,9 @@
 import { fileURLToPath } from 'node:url';
-import { type CallerCommandRequest, canonicalCallerCommandRequest } from '@kite-ai/client';
+import {
+  type CallerCommandRequest,
+  canonicalCallerCommandRequest,
+  validateRequest,
+} from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import type { DesktopEditor } from '../src/file-changes-bridge';
 import {
@@ -23,6 +27,22 @@ import { saveStartupDiagnosticReport } from './startup-report';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'extensions.open': ['readId', 'viewSelection', 'historyEpoch'],
+  'extensions.query': ['readId', 'observationId', 'extensionId', 'queryId', 'input'],
+  'extensions.read': ['readId', 'offset', 'limit'],
+  'extensions.close': ['readId'],
+  'extensions.release': [],
+  'extensions.invoke': [
+    'observationId',
+    'commandId',
+    'extensionId',
+    'actionId',
+    'definitionVersion',
+    'input',
+    'viewIndex',
+    'actionIndex',
+  ],
+  'extensions.lookup': ['commandId'],
   'toolMessages.usage': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.runs': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
@@ -176,7 +196,9 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   const candidate = record(value);
   if (
     bytes >
-    (candidate.method === 'caller.prepare' || candidate.method === 'submit'
+    (candidate.method === 'caller.prepare' ||
+    candidate.method === 'submit' ||
+    candidate.method === 'extensions.invoke'
       ? 16777216
       : requestBytes)
   )
@@ -185,6 +207,66 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     method = input.method;
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
+  if (method === 'extensions.open') {
+    for (const key of ['viewSelection', 'historyEpoch'])
+      if (!Number.isSafeInteger(input[key]) || Number(input[key]) < 0)
+        throw Error('invalid_native_request');
+  }
+  if (method === 'extensions.read') {
+    if (
+      !Number.isSafeInteger(input.offset) ||
+      Number(input.offset) < 0 ||
+      !Number.isInteger(input.limit) ||
+      Number(input.limit) < 1 ||
+      Number(input.limit) > 65536
+    )
+      throw Error('invalid_native_request');
+  }
+  if (method === 'extensions.invoke') {
+    try {
+      validateRequest('ExtensionCommandRequest', {
+        kind: 'extension.invoke',
+        expectedStoreId: 'native-observed-store',
+        commandId: input.commandId,
+        extensionId: input.extensionId,
+        actionId: input.actionId,
+        definitionVersion: input.definitionVersion,
+        input: input.input,
+      });
+    } catch {
+      throw Error('invalid_native_request');
+    }
+    if ((input.viewIndex === undefined) !== (input.actionIndex === undefined))
+      throw Error('invalid_native_request');
+    for (const key of ['viewIndex', 'actionIndex'])
+      if (input[key] !== undefined && (!Number.isSafeInteger(input[key]) || Number(input[key]) < 0))
+        throw Error('invalid_native_request');
+  }
+  if (method === 'extensions.query') {
+    if (
+      typeof input.extensionId !== 'string' ||
+      !input.extensionId ||
+      typeof input.queryId !== 'string' ||
+      !input.queryId ||
+      input.input === undefined
+    )
+      throw Error('invalid_native_request');
+    try {
+      validateRequest('ExtensionCommandRequest', {
+        kind: 'extension.invoke',
+        expectedStoreId: 'native-observed-store',
+        commandId: 'native-query-validation',
+        extensionId: input.extensionId,
+        actionId: input.queryId,
+        definitionVersion: 'query',
+        input: input.input,
+      });
+      if (encodeURIComponent(JSON.stringify(input.input)).length > 8192)
+        throw Error('invalid_native_request');
+    } catch {
+      throw Error('invalid_native_request');
+    }
+  }
   if (
     method.startsWith('background.') &&
     input.surface !== undefined &&
@@ -498,6 +580,17 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   }
   if (method === 'submit' || method === 'caller.prepare' || method === 'conversation.send') {
     const intent = record(input.intent);
+    if (
+      method === 'caller.prepare' &&
+      ![
+        'run.start',
+        'input.steer',
+        'input.follow_up',
+        'command.cancel',
+        'execution.cancel',
+      ].includes(String(intent.kind))
+    )
+      throw Error('invalid_native_request');
     try {
       canonicalCallerCommandRequest(intent as CallerCommandRequest);
     } catch {

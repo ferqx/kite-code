@@ -266,7 +266,8 @@ async function verify(
         manifest.version === 14 ||
         manifest.version === 15 ||
         manifest.version === 16 ||
-        manifest.version === 17,
+        manifest.version === 17 ||
+        manifest.version === 18,
     );
     exactTree(directory, database, manifest);
   } finally {
@@ -381,32 +382,34 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     const assets = await captureAssets(access.profilePath, staging, input.signal);
     const manifest = parseManifest({
       version:
-        assets.desktopUi.format?.userVersion === 8
-          ? 17
-          : assets.mcpConfiguration
-            ? 16
-            : assets.desktopUi.format?.userVersion === 7
-              ? 15
-              : assets.desktopUi.format?.userVersion === 6
-                ? 14
-                : assets.callerIntents?.present &&
-                    verifyCallerIntentsDocument(join(staging, assets.callerIntents.path), true)
-                  ? 13
-                  : assets.mcpSourceMutationIntents
-                    ? 12
-                    : assets.mcpReconnectionIntents
-                      ? 11
-                      : assets.mcpSourceApprovalIntents
-                        ? 10
-                        : assets.mcpConnectionIntents
-                          ? 9
-                          : assets.mcpSelectionIntents
-                            ? 8
-                            : assets.desktopUi.format?.userVersion === 5
-                              ? 7
-                              : assets.fileRecoveryIntents
-                                ? 6
-                                : 5,
+        assets.desktopUi.format?.userVersion === 9
+          ? 18
+          : assets.desktopUi.format?.userVersion === 8
+            ? 17
+            : assets.mcpConfiguration
+              ? 16
+              : assets.desktopUi.format?.userVersion === 7
+                ? 15
+                : assets.desktopUi.format?.userVersion === 6
+                  ? 14
+                  : assets.callerIntents?.present &&
+                      verifyCallerIntentsDocument(join(staging, assets.callerIntents.path), true)
+                    ? 13
+                    : assets.mcpSourceMutationIntents
+                      ? 12
+                      : assets.mcpReconnectionIntents
+                        ? 11
+                        : assets.mcpSourceApprovalIntents
+                          ? 10
+                          : assets.mcpConnectionIntents
+                            ? 9
+                            : assets.mcpSelectionIntents
+                              ? 8
+                              : assets.desktopUi.format?.userVersion === 5
+                                ? 7
+                                : assets.fileRecoveryIntents
+                                  ? 6
+                                  : 5,
       kind: 'profile_backup',
       createdAt: new Date().toISOString(),
       source: { ...sourceCapture, profileAccessKey: access.profileAccessKey },

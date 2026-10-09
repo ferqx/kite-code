@@ -49,6 +49,7 @@ import { useNativeCacheMetrics } from './native-cache-metrics';
 import { NativeCallerView } from './native-caller';
 import { NativeContextView } from './native-context';
 import { useNativeEnvironment } from './native-environment';
+import { NativeExtensions } from './native-extensions';
 import { NativeFileChanges } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { useNativeFileTargets } from './native-file-targets';
@@ -349,7 +350,7 @@ function NativeDesktopContent({
     if (value && 'generation' in value && !value.selection?.session.parentSessionId) {
       const saved = await bridge.request({ method: 'draft.read', generation: current, sessionId });
       if (nonce !== viewIntent.current || current !== generation.current) return;
-      if (saved && 'content' in saved) {
+      if (saved && 'content' in saved && 'revision' in saved) {
         setDraft(
           draftCache.current.get(JSON.stringify([saved.storeId, sessionId])) ?? saved.content,
         );
@@ -1261,7 +1262,7 @@ function NativeDesktopContent({
                     generation: generation.current,
                     draftId: saved.id,
                   });
-                  if (value && 'content' in value) setOriginalDraft(value);
+                  if (value && 'content' in value && 'revision' in value) setOriginalDraft(value);
                 })
               }
             >
@@ -2556,6 +2557,7 @@ function NativeDesktopContent({
                             if (
                               saved &&
                               'content' in saved &&
+                              'revision' in saved &&
                               generation.current === original.generation &&
                               viewIntent.current === original.view &&
                               selected.current === original.sessionId
@@ -2580,7 +2582,40 @@ function NativeDesktopContent({
       }
       detailPanel={
         !childDetail && toolsOpen
-          ? { label: '会话与任务', content: sessionTools, onClose: () => setToolsOpen(false) }
+          ? {
+              label: '会话与任务',
+              content: (
+                <>
+                  {sessionTools}
+                  {selection && state && (
+                    <NativeExtensions
+                      key={JSON.stringify([
+                        state.generation,
+                        selection.viewSelection,
+                        state.historyEpoch,
+                        selection.storeId,
+                        selection.session.id,
+                        selection.session.contextSelectionId,
+                      ])}
+                      bridge={bridge}
+                      scope={{
+                        generation: state.generation,
+                        viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                        historyEpoch: state.historyEpoch ?? 0,
+                        storeId: selection.storeId,
+                        sessionId: selection.session.id,
+                        workspaceId: selection.session.workspaceId,
+                        contextSelectionId: selection.session.contextSelectionId,
+                      }}
+                      submissions={state.callerSubmissions}
+                      canRead={selection.canReadExtensions === true}
+                      canInvoke={selection.canInvokeExtensions === true}
+                    />
+                  )}
+                </>
+              ),
+              onClose: () => setToolsOpen(false),
+            }
           : undefined
       }
       overlays={

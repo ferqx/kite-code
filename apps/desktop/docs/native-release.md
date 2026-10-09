@@ -73,6 +73,12 @@ Linux使用实际Electron dist和manifest executable路径、Node `.mjs`、准�
 
 此前 x64 用户空间经 Rosetta 仿真的三轮实际失败分别为旧 Node/ESM driver、45秒 driver、临时55秒driver仍撞原120秒整例。失败证据保留，55秒更改已撤销，没有用仿真失败换取原预算放宽。补齐 git 前的 arm64 设置失败也保留。准确输入、原始日志和正常 owned 收尾见[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-native-安装生命周期)。release-candidate 的 Linux 步骤执行整个原文件，Required unit 在 Xvfb 内执行整个默认图；CI 守卫拒绝移除/错平台/echo/过滤或静默关闭显示入口。定义不等于 hosted 通过。
 
+## 公共扩展的安装版正式消费者
+
+[扩展整窗口](../test/isolated/native-extensions-bundle.test.ts) 在制品hash发布前使用固定 `native-extension-reference` 测试装配，将现有mini-review及其可信能力分类加入默认Process Host；分类读取真实页面保存的模式与信任，其他定义继续原默认policy。没有mini-review默认产品入口、额外生产开关或现场改写已发布候选。标准Terminal／Native builder、搬迁和删除原输出、公开installer与 `bin/kite-desktop` 实际launcher保持。
+
+窗口沿正式“会话工具→扩展能力”完成原Model source、schema动作、完整finding、原Mark、明确新business key以及冷原Command／Query；阅读不得增加POST或Model。两个所属Service普通退出后两层EX和保Profile卸载继续检查。准确实际结果与首次权限装配失败归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09正式-native-公共扩展完整能力)。DB9／v18实际Node维护归[维护owner](../../../packages/agent/src/maintenance/README.md#desktop-db9-与-manifest-v18)；此前真实DB8冷回退证据不冒称DB9旧writer或全部平台资格。
+
 ## 验证与限制
 
 [默认宿主 Shell 生命周期](../test/isolated/native-shell-lifecycle-bundle.test.ts)在 macOS 真实安装并删除全部原候选后，三次沿 installed `bin/kite-desktop` 核页面新建后台 Job、完整保存输出、准确停止、Main/Service SIGKILL 后本次 coalition 全树消失及两次冷读零重放。测试不持 fixture SH，实际 Main/Service 持 outer/inner 使用锁；Service 强杀但 Main 仍在时卸载准确 busy，全部退出后两层 EX 均可取得，成功卸载保 Core/Native DB/config 原 inode 和完整字节。它使用生产默认 Service/宿主 Shell；Service 崩溃后的原未完成状态不改写为停止成功。本机安装入口的 Shell 故障组合已有实际证据，不补齐已发布升级样本、其他安装故障或 G1，准确结果归[安装入口进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08默认-shell-实际安装入口与保数据卸载)。

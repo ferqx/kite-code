@@ -63,6 +63,7 @@ function requestTarget(
   sessionId: unknown,
   allowAuth: boolean,
   allowRunEffort: boolean,
+  allowExtension: boolean,
 ) {
   const kind = object(
     value,
@@ -80,7 +81,9 @@ function requestTarget(
       'afterRunId',
       'targetCommandId',
       'executionId',
-      ...(allowAuth ? ['extensionId', 'actionId', 'definitionVersion', 'input'] : []),
+      ...(allowAuth || allowExtension
+        ? ['extensionId', 'actionId', 'definitionVersion', 'input']
+        : []),
     ],
   ).kind;
   const common = ['kind', 'expectedStoreId', 'commandId'];
@@ -121,6 +124,29 @@ function requestTarget(
     request = object(value, [...common, key]);
     if (!id(request[key])) throw invalid();
     target = { kind: kind === 'command.cancel' ? 'command' : 'execution', id: request[key] };
+  } else if (kind === 'extension.invoke' && allowExtension) {
+    request = object(value, [...common, 'extensionId', 'actionId', 'definitionVersion', 'input']);
+    for (const key of ['extensionId', 'actionId']) {
+      text(request[key], 1, 128);
+      if (!/^[A-Za-z0-9_.-]{1,128}$/.test(String(request[key]))) throw invalid();
+    }
+    text(request.definitionVersion, 0, 256);
+    const pending: unknown[] = [request.input];
+    while (pending.length) {
+      const part = pending.pop();
+      if (part === null || typeof part === 'string' || typeof part === 'boolean') continue;
+      if (typeof part === 'number' && Number.isFinite(part)) continue;
+      if (Array.isArray(part)) {
+        for (const child of part) pending.push(child);
+        continue;
+      }
+      if (part && typeof part === 'object') {
+        for (const child of Object.values(part)) pending.push(child);
+        continue;
+      }
+      throw invalid();
+    }
+    target = { kind: 'session', id: sessionId };
   } else if (kind === 'extension.invoke' && allowAuth) {
     request = object(value, [...common, 'extensionId', 'actionId', 'definitionVersion', 'input']);
     if (
@@ -182,6 +208,7 @@ export function verifyCallerIntentRecords(
   records: unknown,
   allowAuth = false,
   allowRunEffort = false,
+  allowExtension = false,
 ): boolean {
   let hasAuth = false;
   if (!Array.isArray(records) || records.length > 128) throw invalid();
@@ -213,6 +240,7 @@ export function verifyCallerIntentRecords(
       scope.sessionId,
       allowAuth,
       allowRunEffort,
+      allowExtension,
     );
     if (request.expectedStoreId !== scope.storeId || commands.has(String(request.commandId)))
       throw invalid();

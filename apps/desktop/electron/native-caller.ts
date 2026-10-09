@@ -34,6 +34,7 @@ import {
 import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
 import { NativeConversation } from './conversation';
+import { NativeExtensions } from './extensions';
 import { NativeFileChanges } from './file-changes';
 import { NativeFileRecovery } from './file-recovery';
 import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
@@ -96,6 +97,7 @@ export class NativeCaller {
   private readonly providers: NativeProviderSettings;
   private readonly mcp: NativeMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
+  private readonly extensions: NativeExtensions;
   private readonly jobOutput: NativeJobOutputReads;
   private readonly fileChanges: NativeFileChanges;
   private readonly toolMessages: NativeToolMessages;
@@ -301,6 +303,32 @@ export class NativeCaller {
     };
     this.toolMessages = new NativeToolMessages(client, messageScope, () => this.observedMessages);
     this.interactionHistory = new NativeInteractionHistoryReads(client, messageScope);
+    this.extensions = new NativeExtensions(
+      client,
+      () => {
+        const scope = messageScope(),
+          fresh = this.controller.snapshot,
+          snapshot =
+            fresh?.sessionId === this.selected
+              ? fresh
+              : this.lastView?.selection === this.selection
+                ? this.lastView.snapshot
+                : undefined;
+        return scope &&
+          snapshot?.sessionId === scope.sessionId &&
+          snapshot.view.session.parentSessionId === null &&
+          snapshot.view.session.deletedAt === null
+          ? { ...scope, contextSelectionId: snapshot.view.session.contextSelectionId }
+          : undefined;
+      },
+      {
+        prepare: (sessionId, request) => this.requireCaller().prepare(sessionId, request),
+        submit: (commandId) => this.requireCaller().submit(commandId),
+        lookup: (commandId) => this.requireCaller().lookup(commandId),
+        records: () => this.requireCaller().records(),
+        releaseFirst: (commandId) => this.requireCaller().releaseFirst(commandId),
+      },
+    );
     this.fileChanges = new NativeFileChanges(
       client,
       messageScope,
@@ -512,6 +540,7 @@ export class NativeCaller {
     this.providers.release();
     this.mcp.release();
     this.skills.release();
+    this.extensions.release();
     this.jobOutput.release();
     this.fileChanges.release();
     this.toolMessages.release();
@@ -665,6 +694,7 @@ export class NativeCaller {
       this.permissionUnavailable = true;
       this.historyEpoch++;
       this.skills.release();
+      this.extensions.release();
       this.jobOutput.release();
       this.fileChanges.release();
       this.toolMessages.release();
@@ -797,6 +827,10 @@ export class NativeCaller {
       snapshot && this.selected === snapshot.sessionId
         ? {
             canReadSkills: this.client.serverInfo!.capabilities.includes('skill_catalogue'),
+            canReadExtensions: this.client.serverInfo!.capabilities.includes('extension_queries'),
+            canInvokeExtensions:
+              this.client.serverInfo!.capabilities.includes('extensions_actions') &&
+              this.client.serverInfo!.capabilities.includes('commands'),
             canReadModelOutput: this.client.serverInfo!.capabilities.includes('model_outputs'),
             canReadModelInput: this.client.serverInfo!.capabilities.includes('model_inputs'),
             canReadPermissionGrants:
@@ -975,6 +1009,7 @@ export class NativeCaller {
     if (
       !request.method.startsWith('background.') &&
       !request.method.startsWith('interactionHistory.') &&
+      !request.method.startsWith('extensions.') &&
       ![
         'select',
         'detach',
@@ -1012,6 +1047,31 @@ export class NativeCaller {
         : this.background;
     let result: NativeResult;
     switch (request.method) {
+      case 'extensions.open':
+        result = await this.extensions.open(request);
+        break;
+      case 'extensions.query':
+        result = await this.extensions.query(request);
+        break;
+      case 'extensions.read':
+        result = this.extensions.read(request);
+        break;
+      case 'extensions.close':
+        this.extensions.close(request.readId);
+        result = null;
+        break;
+      case 'extensions.release':
+        this.extensions.release();
+        result = null;
+        break;
+      case 'extensions.invoke':
+        result = await this.extensions.invoke(request);
+        this.changed();
+        break;
+      case 'extensions.lookup':
+        result = await this.extensions.lookup(request.commandId);
+        this.changed();
+        break;
       case 'interactionHistory.open':
         result = await this.interactionHistory.open(request);
         break;
@@ -1604,7 +1664,13 @@ export class NativeCaller {
       case 'caller.lookup': {
         let verified = true;
         try {
-          if (request.method === 'caller.submit')
+          const original = this.requireCaller()
+            .records()
+            .find((row) => row.intent.request.commandId === request.commandId);
+          if (
+            request.method === 'caller.submit' &&
+            original?.intent.request.kind !== 'extension.invoke'
+          )
             await this.requireCaller().submit(request.commandId);
           else await this.requireCaller().lookup(request.commandId);
         } catch {
@@ -1618,7 +1684,7 @@ export class NativeCaller {
         break;
       }
       case 'caller.clear':
-        this.requireCaller().clear(request.commandId);
+        await this.requireCaller().clear(request.commandId);
         result = null;
         break;
       case 'caller.body': {

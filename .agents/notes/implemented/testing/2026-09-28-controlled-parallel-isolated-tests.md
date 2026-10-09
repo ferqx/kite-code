@@ -22,9 +22,13 @@ Status: implemented
 
 随后原Terminal PTY完整读取／导出文件在默认并发下触90秒整例，实际90001.48ms／2断言失败；末阶段未保存，精确耗时因果未知。原完整文件独立进程实际65375.34ms通过，17断言、九MiB来源／超过8MiB全文、原结果折叠展开／reason显示隐藏、两次导出／0600、准确原Profile及所属Service退出保持，原90秒整例与30秒步骤未提高。仅把这个第四个准确文件加入已有exclusive，其他isolated仍受控并行，没有修改TUI产品实现或增加矩阵。
 
-当前 [统一计划](../../../../scripts/unified-test-plan.ts) 用有限caller声明将[Terminal PTY大正文读取与导出](../../../../apps/cli/test/isolated/tui-export-host.test.ts)、完整CLI登记生命周期、[真实Native代码升级／回滚](../../../../tests/isolated/unified-agent/native-cross-version.test.ts)与[封闭Terminal安装制品](../../../../tests/isolated/unified-agent/terminal-bundle.test.ts)四个准确文件转入已有exclusive队列，其他concurrent全部结束后才逐个执行。Windows本已exclusive，保分类／计数；其他平台只转移同一逐文件job，保完整发现恰好一次、macOS4／Linux2槽、进程内1、CLI登记／Terminal安装原120秒整例及child30秒／20秒、Terminal PTY导出原90秒整例／30秒步骤、Native420秒整例／四窗口driver120秒／原15秒页面观察，以及全部归档、原身份、完整正文、六窗口、Provider、Store、PATH和保数据断言。通用firstFiles支持及原barrier／失败drain反例仍保留；这四个原完整文件与其他默认负载错开，其他isolated继续受控并行。实际runner／默认发现两文件11pass／74断言，新的完整默认结果由[阶段进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)维护；未完成运行不能表示资格通过。
+本次公共扩展能力收束的完整默认又在原安装恢复文件实际失败：首Electron inspector已经连接，但Chromium DevTools websocket未在原10秒launch期限内完成；整文件101.994秒失败，219作业结束后停止派发。未改Main／Service／恢复实现、未放宽原180秒整例／45秒driver／10秒launch与页面期限，也不将未抵达的恢复步骤标通过。该完整文件当前按保存的原job／独立HOME复验89.583秒通过，54断言与全部driver保持；具体OS或调试连接阻塞原因未知。只把这第五个准确文件加入已有exclusive，完整文件及全部业务／数据／身份／资源断言保持，其他isolated继续受控并行。
+
+当前 [统一计划](../../../../scripts/unified-test-plan.ts) 用有限caller声明将[Terminal PTY大正文读取与导出](../../../../apps/cli/test/isolated/tui-export-host.test.ts)、完整CLI登记生命周期、[真实Native代码升级／回滚](../../../../tests/isolated/unified-agent/native-cross-version.test.ts)、[安装版恢复交接](../../../../tests/isolated/unified-agent/native-restore-interruption.test.ts)与[封闭Terminal安装制品](../../../../tests/isolated/unified-agent/terminal-bundle.test.ts)五个准确文件转入已有exclusive队列，其他concurrent全部结束后才逐个执行。Windows本已exclusive，保分类／计数；其他平台只转移同一逐文件job，保完整发现恰好一次、macOS4／Linux2槽、进程内1、CLI登记／Terminal安装原120秒整例及child30秒／20秒、Terminal PTY导出原90秒整例／30秒步骤、Native420秒整例／四窗口driver120秒／原15秒页面观察，以及恢复原180秒整例／45秒driver／10秒launch与页面期限和全部归档、原身份、完整正文、六窗口、Provider、Store、PATH和保数据断言。通用firstFiles支持及原barrier／失败drain反例仍保留；这五个原完整文件与其他默认负载错开，其他isolated继续受控并行。实际runner／默认发现两文件11pass／77断言，新的完整默认结果由[阶段进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)维护；未完成运行不能表示资格通过。
 
 此处替代2026-10-07对CLI单项继续共享优先的选择，并纳入后续已观测的另外三个完整文件；既有owner归属、默认覆盖、其他安全isolated受控并行、每进程环境、OS上界与失败清理仍适用。产品启动与安装验证仍完整读取原内容，不引入复用缓存或降低校验。
+
+五项分类后的当前完整默认仍实际失败：原Native问卷窗口第一次选择会话前，工作空间准备未在原10秒页面期限内结束，Provider0，整轮231作业结束／230通过／实际退出1。保存的原完整job未改源码或预算，独立复验64.995秒／32断言通过；具体启动阻塞原因未知。本轮不据这项单作业通过宣布默认或产品负载资格，不追加问卷窗口矩阵；该未解决启动错误与原RSS／八轮／全资源要求归当前普通启动及任务资格。准确输入、原截图、实际失败及限定复验由[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09正式-native-公共扩展完整能力)保存。
 
 
 ## Alternatives considered

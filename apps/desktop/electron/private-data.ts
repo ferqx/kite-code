@@ -154,7 +154,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       version !== 5 &&
       version !== 6 &&
       version !== 7 &&
-      version !== 8
+      version !== 8 &&
+      version !== 9
     )
       failure();
     if (
@@ -211,7 +212,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         'mcp_intents',
         'model_routes',
         'recovery_intents',
-        ...(version === 8 ? ['workspace_removal_intents'] : []),
+        ...(version >= 8 ? ['workspace_removal_intents'] : []),
       ])
     )
       failure();
@@ -242,7 +243,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     )
       failure();
     if (
-      version === 8 &&
+      version >= 8 &&
       db.prepare("SELECT sql FROM sqlite_master WHERE name='workspace_removal_intents'").get()
         ?.sql !==
         'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)'
@@ -360,6 +361,11 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       bytes += Buffer.byteLength(row.state);
       if (bytes > 16777216 || rows.length >= 128) throw Error('caller_capacity_exceeded');
       const value = validateCallerRecord(JSON.parse(row.state));
+      if (
+        value.intent.request.kind === 'extension.invoke' &&
+        Number(database().prepare('PRAGMA user_version').get()!.user_version) < 9
+      )
+        throw Error('caller_storage_unavailable');
       if (value.intent.request.commandId !== row.command_id)
         throw Error('caller_storage_unavailable');
       rows.push(value);
@@ -897,6 +903,16 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           callerBytes() + Buffer.byteLength(JSON.stringify(value)) > 16777216
         )
           throw Error('caller_capacity_exceeded');
+        if (
+          value.intent.request.kind === 'extension.invoke' &&
+          Number(database().prepare('PRAGMA user_version').get()!.user_version) < 9
+        ) {
+          if (Number(database().prepare('PRAGMA user_version').get()!.user_version) < 8)
+            database().exec(
+              'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL);',
+            );
+          database().exec('PRAGMA user_version=9;');
+        }
         database()
           .prepare('INSERT INTO caller_intents VALUES(?,?)')
           .run(value.intent.request.commandId, JSON.stringify(value));

@@ -1,6 +1,6 @@
 # 显式离线备份
 
-实际 Desktop DB8 优先使用专属 closed manifest v17；原 Workspace 移除申请与旧格式隔离见[DB8 合同](#desktop-db8-与-manifest-v17)。未升级 DB8 的 Profile 才按下面 v5–v16 条件选择。空间历史与无引用附件的显式清理见[GC 合同](#显式无引用附件-gc)。
+实际 Desktop DB9 优先使用专属 closed manifest v18；公共扩展申请与旧格式隔离见[DB9 合同](#desktop-db9-与-manifest-v18)。其余 Desktop DB8 使用 closed manifest v17，原 Workspace 移除申请见[DB8 合同](#desktop-db8-与-manifest-v17)。未升级 DB8／DB9 的 Profile 才按下面 v5–v16 条件选择。空间历史与无引用附件的显式清理见[GC 合同](#显式无引用附件-gc)。
 
 Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 任一实际存在时，当前创建 closed manifest v16；准确 raw 资产与恢复后消费者合同见[Profile MCP 配置资产](#profile-mcp-配置资产与-manifest-v16)。三者均不存在时才使用下述 v5–v15 条件，旧 v2–v15 白名单不扩大。
 
@@ -10,7 +10,7 @@ Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 任一�
 
 现有 `ui/caller-intents.json` 实际含闭合四类 `mcp.auth.login/refresh/clear/revoke@1` 请求时创建 closed v13；它保 v12 全部资产字段与物理白名单，不新增认证 journal。未含 Auth 时继续下述条件版本，旧 v2–v12 的原请求语法和准确格式不扩大。
 
-未含 Auth 而来源条目变更申请实际存在时创建 closed backup v12，携完整 v11 项并增加独立 `mcpSourceMutationIntents`。否则依次按实际存在的重连、来源决定、连接、选择文件创建 v11/v10/v9/v8，其余沿原 Desktop/Files 的 v7/v6/v5 规则；不创建缺失 journal。准确字段和旧物理白名单分别按下文资产合同验证，当前可检查 v2–v17，新版本不扩大任一旧版本。
+未含 Auth 而来源条目变更申请实际存在时创建 closed backup v12，携完整 v11 项并增加独立 `mcpSourceMutationIntents`。否则依次按实际存在的重连、来源决定、连接、选择文件创建 v11/v10/v9/v8，其余沿原 Desktop/Files 的 v7/v6/v5 规则；不创建缺失 journal。准确字段和旧物理白名单分别按下文资产合同验证，当前可检查 v2–v18，新版本不扩大任一旧版本。
 
 独立 MCP Source 决定申请资产与条件 backup v10 已实施；旧 v2–v9 白名单保持，当前格式见[Source 资产 owner](#mcp-来源决定申请的独立离线资产)，本片取舍与已完成的有限验收见[Source 决定](../../../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。
 
@@ -26,7 +26,7 @@ Service 显式 Workflow flags 的 `skill-workflow.jsonc` 是独立受控资产�
 
 仅本次创建的私有 staging 会在失败时删除。数据库、媒体、清单完成验证和 fsync 后才发布 `ready.json`，最后将 staging 改名到独立备份目录并同步父目录。检查备份重新核对数据库、媒体清单、每个媒体完整 hash 和目录内容，不能仅凭 ready 标记认定有效。文件要求私有、当前主体持有、非软链接、单一硬链接；媒体不可写。检查失败不会修改原 profile。
 
-[assets.ts](assets.ts) 独立采集实际 profile 的 `config.jsonc`、三份 raw MCP 配置、`desktop-private/data.sqlite`、`ui/tui.json`、`ui/preferences.jsonc` 和明确的请求 journal，每项记录 path、present、capturedAt 与完整 proof；缺文件记录 absent，不创建替代配置/UI。配置保留精确原字节，包括 BOM、注释、未知字段、credentialRef 和损坏 JSONC；不解析或 redact，也不读取 vault。原配置本身可能包含敏感内容，清单明确 `configurationMayContainSensitiveContent:true`，备份 0600，不承诺原配置没有秘密。Desktop UI 沿同一私有 DB/WAL 配对复制 helper，只在 scratch 上执行 VACUUM INTO 和格式读取；校验 application_id 1263888689、准确 v1 两表、v2 三表、v3 四表、v4 五表、v5 六表、v6 八表、v7 九表或 v8 十表 schema、实际 user_version 与 integrity/FK，单独记录格式和采集时间。未知 UI 格式/rollback journal 拒绝，源 DB/WAL 完整指纹、实体与缺失副文件状态保持。配置、Core、UI 各有采集边界，不宣称跨介质同一瞬间原子。兼容闭合 manifest v2–v17；准确版本与资产白名单按首段契约验证。
+[assets.ts](assets.ts) 独立采集实际 profile 的 `config.jsonc`、三份 raw MCP 配置、`desktop-private/data.sqlite`、`ui/tui.json`、`ui/preferences.jsonc` 和明确的请求 journal，每项记录 path、present、capturedAt 与完整 proof；缺文件记录 absent，不创建替代配置/UI。配置保留精确原字节，包括 BOM、注释、未知字段、credentialRef 和损坏 JSONC；不解析或 redact，也不读取 vault。原配置本身可能包含敏感内容，清单明确 `configurationMayContainSensitiveContent:true`，备份 0600，不承诺原配置没有秘密。Desktop UI 沿同一私有 DB/WAL 配对复制 helper，只在 scratch 上执行 VACUUM INTO 和格式读取；校验 application_id 1263888689、准确 v1 两表、v2 三表、v3 四表、v4 五表、v5 六表、v6 八表、v7 九表或 v8／v9 十表 schema、实际 user_version 与 integrity/FK，单独记录格式和采集时间。未知 UI 格式/rollback journal 拒绝，源 DB/WAL 完整指纹、实体与缺失副文件状态保持。配置、Core、UI 各有采集边界，不宣称跨介质同一瞬间原子。兼容闭合 manifest v2–v18；准确版本与资产白名单按首段契约验证。
 
 清单排除 credentials、credential vault、未列入白名单的宿主私有文件、coordination 和 locks。Desktop私有库是明确的采集例外，不复制该目录其他文件。TUI 的真实用户数据由 CLI host 持久 owner 写入 `ui/tui.json`；清单分别记录存在、采集时间、完整摘要及 `{version:1}` 格式。严格核对完整 JSON、Decimal64、原 Store/Workspace/Session 与 scope hash；完整文本原字节保存，不改绑新 Store。真实终端偏好由 CLI host 的独立 owner 写入 `ui/preferences.jsonc`；备份按原始 JSONC 字节记录存在、采集时间和 proof，包括注释、未知字段及损坏文件，不解析或修复偏好，不创建缺失文件。恢复仍保原字节。`ui` 目录仅白名单采集 `tui.json`、`preferences.jsonc`、`recovery.json`、仅 v4–v17 的 `caller-intents.json`、仅 v6–v17 的 `file-recovery-intents.json`、仅 v8–v17 的 `mcp-selection-intents.json`、仅 v9–v17 的 `mcp-connection-intents.json`、仅 v10–v17 的 `mcp-source-approval-intents.json`、仅 v11–v17 的 `mcp-reconnection-intents.json` 和仅 v12–v17 的 `mcp-source-mutation-intents.json`，不复制其他文件；新增偏好资产不放宽 `tui.json` 的严格格式验证。未发布基线的 closed v2 manifest 必须带独立 `tuiPreferences` 项；旧缺项清单拒绝，不猜测偏好存在或提供旧格式兼容。本入口不派发旧任务或提供在线GC。完整并发安全要求每个打开UI库的Node宿主也持同外置profile共享使用权至库关闭；该宿主生命周期与平台资格由Desktop/平台owner独立实际验证，不能仅据复制测试认定完成。
 
@@ -217,6 +217,14 @@ Node [private-data](../../../../apps/desktop/electron/private-data.ts)首次持�
 [desktop-workspaces.ts](desktop-workspaces.ts)按准确 SQL、主键等于原 commandId、fatal UTF-8 和闭合 `request/workspaceId/subjectId/label/phase` 语法核原申请；128项／256KiB、同 Store／Workspace 一个 pending、原 UUID／Store／主体字节不可修改。它只证明完整采集和结构，不授予 POST。restore 生成新 Store，冷 Native 显示旧 unknown，原 Store不匹配时在 HTTP 前拒绝查询，不 retag、不重做。旧草稿／Caller／配置／MCP 全部原 codec 同时核对，未知表、字段或数据库格式拒绝采集。
 
 [实际 Node DB8 维护测试](../../test/isolated/maintenance/desktop-workspaces.test.ts)在 owned macOS Profile 上使用真正 Node SQLite owner和公开 backup／inspect／restore，核 v17／DB8、原申请字节、新 Store冷读 HTTP零、旧 manifest重标和未知 replay 字段拒绝；没有读取用户旧库或 Vault。
+
+## Desktop DB9 与 manifest v18
+
+Node [private-data](../../../../apps/desktop/electron/private-data.ts) 首次保存泛型公共 `extension.invoke` 时，在同一FULL事务核原库、补齐DB8准确Workspace表并升至 `user_version=9`；复用原 `caller_intents(command_id,state)`，不新增journal资产。未使用这类申请的流程保持原版本。v18必须真实present DB9，继承v17全部闭合独立资产项；DB9不能重标v2–v17，DB1–8的原Caller grammar保持。
+
+[caller-intents.ts](caller-intents.ts) 仅在DB9分支接纳公共七字段扩展请求，核合法namespace／版本／JSON、完整scope／subject／Session target、原SQL主键、phase、UTF-8和两种完整canonical摘要。JSON大数组以迭代遍历验证，不依赖函数参数容量；既有128行／16MiB总量和未知字段拒绝保持。CLI／TUI文件仍按原五类及固定Auth分支校验，DB9不扩大它们的请求范围。
+
+[实际Node维护测试](../../test/isolated/maintenance/desktop-extensions.test.ts) 使用真正私人owner和公开backup／inspect／restore，核五类原行与扩展申请的完整Unicode正文、摘要、phase及私有副本字节，准确v18／DB9和旧manifest重标拒绝。新Store恢复保旧Store身份，foreign查回零HTTP，冷原查询只有GET；维护不保存或授予首次POST权利。正式消费者和实际窗口范围归[Native owner](../../../../apps/desktop/README.md#native-公共扩展完整能力)，完整发布／跨代码／平台资格仍按[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)核对。
 
 ## 显式无引用附件 GC
 

@@ -156,12 +156,15 @@ export async function buildTerminalBundle(input: {
   bunExecutable?: string;
   sqliteLibrary?: string;
   /** Fixed test composition, baked before fingerprinting; production callers leave this absent. */
-  processHostFixture?: 'native-mcp-loopback';
+  processHostFixture?: 'native-mcp-loopback' | 'native-extension-reference';
   /** Public certificate only, embedded in that fixture and therefore in the candidate digest. */
   processHostFixtureCertificate?: string;
 }): Promise<VerifiedTerminalBundle> {
   const repository = realpathSync(input.repositoryRoot ?? resolve(import.meta.dir, '../..'));
-  if (input.processHostFixture !== undefined && input.processHostFixture !== 'native-mcp-loopback')
+  if (
+    input.processHostFixture !== undefined &&
+    !['native-mcp-loopback', 'native-extension-reference'].includes(input.processHostFixture)
+  )
     error('process_fixture_invalid');
   if (
     input.processHostFixtureCertificate !== undefined &&
@@ -240,14 +243,25 @@ export async function buildTerminalBundle(input: {
     ] as const) {
       const folder = join(root, 'node_modules/@kite-ai/service');
       renameSync(join(folder, `${entry}.js`), join(folder, `${entry}-implementation.js`));
-      const fixture = entry === 'main' && input.processHostFixture === 'native-mcp-loopback';
+      const fixture = entry === 'main' ? input.processHostFixture : undefined;
+      const fixtureEntry =
+        fixture === 'native-mcp-loopback'
+          ? 'main-native-mcp-fixture'
+          : 'main-native-extension-fixture';
       if (fixture) {
         const built = await Bun.build({
-          entrypoints: [join(repository, 'apps/service/test/native-mcp-process.fixture.ts')],
+          entrypoints: [
+            join(
+              repository,
+              fixture === 'native-mcp-loopback'
+                ? 'apps/service/test/native-mcp-process.fixture.ts'
+                : 'tests/fixtures/unified-agent/native-extension-process.ts',
+            ),
+          ],
           target: 'bun',
           packages: 'external',
           outdir: folder,
-          naming: 'main-native-mcp-fixture.js',
+          naming: `${fixtureEntry}.js`,
           define: {
             __NATIVE_MCP_FIXTURE_CERTIFICATE__: JSON.stringify(
               input.processHostFixtureCertificate ?? '',
@@ -255,7 +269,7 @@ export async function buildTerminalBundle(input: {
           },
           plugins: [
             {
-              name: 'native-mcp-default-process',
+              name: 'native-reference-default-process',
               setup(build) {
                 build.onResolve({ filter: /^@kite-ai\/service\/main$/ }, () => ({
                   path: './main-implementation.js',
@@ -272,7 +286,7 @@ export async function buildTerminalBundle(input: {
         join(folder, `${entry}.js`),
         `import {resolve} from 'node:path';
 import {acquireArtifactAccess} from '@kite-ai/agent/artifact-access';
-import {${run}} from './${fixture ? 'main-native-mcp-fixture' : `${entry}-implementation`}.js';
+import {${run}} from './${fixture ? fixtureEntry : `${entry}-implementation`}.js';
 export {${run}};
 if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta.dir,'../../..'),mode:'shared'});try{await ${run}();}finally{lease.release();}}
 `,
