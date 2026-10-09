@@ -44,38 +44,139 @@ function BackgroundPanel({
     [accepted, setAccepted] = useState('');
   const epoch = useRef(0);
   const activeStop = useRef(false);
+  const latest = useRef<Awaited<ReturnType<typeof readNativeBackground>> | undefined>(undefined);
+  const directoryRead = useRef<Promise<void> | undefined>(undefined);
+  const admissions = useRef(0);
+  const admitChild = async (item: BackgroundExecutionItem, signal: AbortSignal) => {
+    admissions.current++;
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        admissions.current--;
+        signal.removeEventListener('abort', release);
+      }
+    };
+    signal.addEventListener('abort', release, { once: true });
+    try {
+      signal.throwIfAborted();
+      const pending = directoryRead.current;
+      if (pending) {
+        let aborted!: () => void;
+        try {
+          await Promise.race([
+            pending,
+            new Promise<never>((_, reject) => {
+              aborted = () => reject(signal.reason);
+              signal.addEventListener('abort', aborted, { once: true });
+            }),
+          ]);
+        } finally {
+          signal.removeEventListener('abort', aborted);
+        }
+      }
+      signal.throwIfAborted();
+      const facts = latest.current,
+        current = facts?.items.find((entry) => entry.execution.id === item.execution.id);
+      const identity = (entry: BackgroundExecutionItem) =>
+        JSON.stringify([
+          entry.seq,
+          entry.execution.id,
+          entry.execution.originStoreId,
+          entry.execution.sessionId,
+          entry.execution.runId,
+          entry.execution.originCommandId,
+          entry.execution.rootSessionId,
+          entry.execution.rootWorkCommandId,
+          entry.execution.rootWorkSeq,
+          entry.execution.parentExecutionId,
+          entry.execution.cancelWithParent,
+          entry.execution.childSessionId,
+          entry.execution.definitionId,
+          entry.execution.definitionVersion,
+          entry.session.id,
+          entry.session.workspaceId,
+          entry.session.parentSessionId,
+          entry.session.rootSessionId,
+          entry.rootSession.id,
+          entry.rootSession.parentSessionId,
+          entry.rootSession.workspaceId,
+          entry.childSession?.id,
+          entry.childSession?.parentSessionId,
+          entry.childSession?.rootSessionId,
+          entry.childSession?.workspaceId,
+          entry.childRun?.id,
+          entry.childRun?.originStoreId,
+          entry.childRun?.originCommandId,
+        ]);
+      if (!facts || facts.storeId !== storeId || !current || identity(current) !== identity(item))
+        throw Error('background_observation_changed');
+      const admittedBridge: NativeBridge = {
+        watch: bridge.watch,
+        request: async (request) => {
+          try {
+            return await bridge.request(request);
+          } finally {
+            if (request.method === 'background.child.open') release();
+          }
+        },
+      };
+      return { item: current, observationId: facts.observationId, bridge: admittedBridge, release };
+    } catch (error) {
+      release();
+      throw error;
+    }
+  };
   // biome-ignore lint/correctness/useExhaustiveDependencies: Explicit refresh reopens the same observation without changing its scope.
   useEffect(() => {
     if (!opened) return;
     const abort = new AbortController(),
       current = ++epoch.current;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = async () => {
-      if (activeStop.current) return;
-      setView((old) => ({ ...old, busy: true, error: undefined }));
-      try {
-        const facts = await readNativeBackground({
-          bridge,
-          generation,
-          storeId,
-          signal: abort.signal,
-          isCurrent: () => epoch.current === current,
-        });
-        if (!abort.signal.aborted && epoch.current === current) setView({ ...facts, busy: false });
-      } catch (cause) {
-        if (!abort.signal.aborted && epoch.current === current)
-          setView((old) => ({ ...old, busy: false, error: safeError(cause) }));
-      }
+    const schedule = () => {
       if (!abort.signal.aborted && epoch.current === current)
         timer = setTimeout(() => {
           void read();
         }, 1000);
+    };
+    const read = () => {
+      if (activeStop.current) return;
+      if (admissions.current) {
+        schedule();
+        return;
+      }
+      const operation = (async () => {
+        setView((old) => ({ ...old, busy: true, error: undefined }));
+        latest.current = undefined;
+        try {
+          const facts = await readNativeBackground({
+            bridge,
+            generation,
+            storeId,
+            signal: abort.signal,
+            isCurrent: () => epoch.current === current,
+          });
+          if (!abort.signal.aborted && epoch.current === current) {
+            latest.current = facts;
+            setView({ ...facts, busy: false });
+          }
+        } catch (cause) {
+          if (!abort.signal.aborted && epoch.current === current)
+            setView((old) => ({ ...old, busy: false, error: safeError(cause) }));
+        }
+        schedule();
+      })();
+      directoryRead.current = operation;
+      void operation.finally(() => {
+        if (directoryRead.current === operation) directoryRead.current = undefined;
+      });
     };
     void read();
     return () => {
       epoch.current++;
       clearTimeout(timer);
       abort.abort();
+      latest.current = undefined;
     };
   }, [bridge, generation, storeId, opened, refresh]);
   return (
@@ -227,6 +328,7 @@ function BackgroundPanel({
                     storeId={storeId}
                     observationId={view.observationId}
                     item={item}
+                    admitChild={admitChild}
                   />
                 )}
               </article>
@@ -244,34 +346,52 @@ function BackgroundChildPanel({
   storeId,
   observationId,
   item,
+  admitChild,
 }: {
   bridge: NativeBridge;
   generation: number;
   storeId: string;
   observationId: number;
   item: BackgroundExecutionItem;
+  admitChild: (
+    item: BackgroundExecutionItem,
+    signal: AbortSignal,
+  ) => Promise<{
+    item: BackgroundExecutionItem;
+    observationId: number;
+    bridge: NativeBridge;
+    release: () => void;
+  }>;
 }) {
   const [opened, setOpened] = useState(false),
     [refresh, setRefresh] = useState(0),
     [view, setView] = useState<{ facts?: NativeBackgroundChild; busy: boolean; error?: string }>({
       busy: false,
     });
-  const target = useRef({ item, observationId });
-  target.current = { item, observationId };
+  const target = useRef({ item, observationId, admitChild });
+  target.current = { item, observationId, admitChild };
   const executionId = item.execution.id;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Explicit refresh and original carrier changes reopen the detail, directory polls do not.
   useEffect(() => {
     if (!opened) return;
     const abort = new AbortController();
     setView((old) => ({ ...old, busy: true, error: undefined }));
-    void readNativeBackgroundChild({
-      bridge,
-      generation,
-      storeId,
-      ...target.current,
-      signal: abort.signal,
-      isCurrent: () => !abort.signal.aborted,
-    })
+    void (async () => {
+      const admitted = await target.current.admitChild(target.current.item, abort.signal);
+      try {
+        return await readNativeBackgroundChild({
+          bridge: admitted.bridge,
+          generation,
+          storeId,
+          item: admitted.item,
+          observationId: admitted.observationId,
+          signal: abort.signal,
+          isCurrent: () => !abort.signal.aborted,
+        });
+      } finally {
+        admitted.release();
+      }
+    })()
       .then((facts) => {
         if (!abort.signal.aborted) setView({ facts, busy: false });
       })

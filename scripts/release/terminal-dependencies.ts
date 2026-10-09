@@ -17,6 +17,8 @@ export interface TerminalWorkspacePackage {
   name: string;
   source: string;
   destination: string;
+  /** Trusted build declaration: these ordinary dependencies are already in the generated exports. */
+  bundledDependencies?: readonly string[];
 }
 export interface TerminalDependencyCopy {
   packages: { name: string; version: string; source: string; destination: string }[];
@@ -41,6 +43,7 @@ type Node = {
   manifest: Manifest;
   bytes: Buffer;
   edges: Map<string, Node>;
+  bundledDependencies?: ReadonlySet<string>;
 };
 const packageName = /^(?:@[a-zA-Z0-9_.-]+\/)?[a-zA-Z0-9_.-]+$/;
 function validPackageName(name: string) {
@@ -173,7 +176,28 @@ export function copyTerminalDependencies(input: {
       fail('workspace_invalid');
     const { manifest, bytes } = readManifest(source);
     if (manifest.name !== pkg.name) fail('workspace_invalid');
-    const node: Node = { source, destination: target, manifest, bytes, edges: new Map() };
+    const bundled = pkg.bundledDependencies ?? [];
+    if (
+      !Array.isArray(bundled) ||
+      new Set(bundled).size !== bundled.length ||
+      bundled.some(
+        (name) =>
+          !validPackageName(name) ||
+          name.startsWith('@kite-ai/') ||
+          !Object.hasOwn(manifest.dependencies ?? {}, name) ||
+          Object.hasOwn(manifest.peerDependencies ?? {}, name) ||
+          Object.hasOwn(manifest.optionalDependencies ?? {}, name),
+      )
+    )
+      fail('bundled_dependency_invalid');
+    const node: Node = {
+      source,
+      destination: target,
+      manifest,
+      bytes,
+      edges: new Map(),
+      bundledDependencies: new Set(bundled),
+    };
     workspaces.set(pkg.name, node);
     nodes.set(source, node);
   }
@@ -182,6 +206,7 @@ export function copyTerminalDependencies(input: {
     const node = pending[index]!;
     for (const [name, options] of dependencies(node.manifest)) {
       if (name.startsWith('node:') || name.startsWith('bun:')) continue;
+      if (node.bundledDependencies?.has(name)) continue;
       if (name.startsWith('@kite-ai/') && !workspaces.has(name)) fail('workspace_unknown');
       const installed = resolvePackage(name, node.source);
       if (!installed) {

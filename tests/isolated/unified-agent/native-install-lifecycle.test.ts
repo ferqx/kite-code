@@ -64,6 +64,31 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         );
       }
     };
+    const prepStarted = performance.now();
+    const prep = async <T>(operation: string, run: () => T | Promise<T>): Promise<T> => {
+      const started = performance.now();
+      console.log(
+        JSON.stringify({
+          stage: 'native_install_prep',
+          operation,
+          phase: 'begin',
+          elapsedMs: started - prepStarted,
+        }),
+      );
+      try {
+        return await run();
+      } finally {
+        console.log(
+          JSON.stringify({
+            stage: 'native_install_prep',
+            operation,
+            phase: 'end',
+            elapsedMs: performance.now() - prepStarted,
+            durationMs: performance.now() - started,
+          }),
+        );
+      }
+    };
     const provider = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
@@ -170,51 +195,85 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         }),
         { mode: 0o600 },
       );
-      const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') }),
+      const terminal = await prep('terminal_build', () =>
+          buildTerminalBundle({ destination: join(root, 'terminal-build') }),
+        ),
         req = createRequire(join(repositoryRoot, 'apps/desktop/package.json')),
         electronExecutable = req('electron') as string,
         electronDist =
           process.platform === 'darwin'
             ? resolve(dirname(dirname(electronExecutable)), '../..')
             : dirname(electronExecutable);
-      const built = await buildNativeCandidate({
-        terminalRoot: terminal.root,
-        electronDist,
-        outdir: join(root, 'source'),
-      });
-      const packed = await packNativeBundle({
-        bundleRoot: built.root,
-        archivePath: join(root, 'native.tar.gz'),
-      });
-      expect(packed.candidateId).toBe(built.digest);
-      const unpacked = unpackNativeBundle({ ...packed, destination: join(root, 'unpacked') });
-      renameSync(unpacked.root, join(root, 'relocated'));
-      const relocated = verifyNativeRuntimeBundle(join(root, 'relocated'));
-      expect(relocated.digest).toBe(built.digest);
-      expect(relocated.terminal.digest).toBe(terminal.digest);
+      const built = await prep('first_candidate_build', () =>
+        buildNativeCandidate({
+          terminalRoot: terminal.root,
+          electronDist,
+          outdir: join(root, 'source'),
+        }),
+      );
+      // Start actual archive compression before the independent second-candidate preparation.
+      const archiveBuild = (async () => {
+        const packed = await prep('archive_pack', () =>
+          packNativeBundle({
+            bundleRoot: built.root,
+            archivePath: join(root, 'native.tar.gz'),
+          }),
+        );
+        expect(packed.candidateId).toBe(built.digest);
+        const unpacked = await prep('archive_unpack', () =>
+          unpackNativeBundle({ ...packed, destination: join(root, 'unpacked') }),
+        );
+        const relocated = await prep('archive_relocate_verify', () => {
+          renameSync(unpacked.root, join(root, 'relocated'));
+          return verifyNativeRuntimeBundle(join(root, 'relocated'));
+        });
+        expect(relocated.digest).toBe(built.digest);
+        expect(relocated.terminal.digest).toBe(terminal.digest);
+        return { packed, relocated };
+      })();
+      const secondBuild = (async () => {
+        const synthetic = join(root, 'terminal-samebaseline-v2');
+        await prep('synthetic_terminal', () => {
+          cpSync(built.terminal.root, synthetic, {
+            recursive: true,
+            dereference: false,
+            verbatimSymlinks: true,
+          });
+          const manifestPath = join(synthetic, 'terminal-manifest.json'),
+            inner = JSON.parse(readFileSync(manifestPath, 'utf8'));
+          inner.productVersion = '0.1.1';
+          writeFileSync(manifestPath, `${JSON.stringify(inner, null, 2)}\n`);
+        });
+        const v2Terminal = verifyTerminalRuntimeBundle(synthetic);
+        const second = await prep('second_candidate_build', () =>
+          buildNativeCandidate({
+            terminalRoot: synthetic,
+            electronDist,
+            outdir: join(root, 'second-source'),
+          }),
+        );
+        return { v2Terminal, second };
+      })();
+      // Both real closures settle, including either failure, before any source cleanup.
+      const [secondResult, archiveResult] = await Promise.allSettled([secondBuild, archiveBuild]);
+      if (secondResult.status === 'rejected' || archiveResult.status === 'rejected')
+        throw new AggregateError(
+          [secondResult, archiveResult].flatMap((result) =>
+            result.status === 'rejected' ? [result.reason] : [],
+          ),
+          'native_install_prep_failed',
+        );
+      const { second, v2Terminal } = secondResult.value,
+        { packed, relocated } = archiveResult.value;
+      expect(v2Terminal.manifest.files).toEqual(relocated.terminal.manifest.files);
       rmSync(built.root, { recursive: true, force: true });
       rmSync(terminal.root, { recursive: true, force: true });
-      const synthetic = join(root, 'terminal-samebaseline-v2');
-      cpSync(relocated.terminal.root, synthetic, {
-        recursive: true,
-        dereference: false,
-        verbatimSymlinks: true,
-      });
-      const manifestPath = join(synthetic, 'terminal-manifest.json'),
-        inner = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      inner.productVersion = '0.1.1';
-      writeFileSync(manifestPath, JSON.stringify(inner, null, 2) + '\n');
-      const v2Terminal = verifyTerminalRuntimeBundle(synthetic);
-      expect(v2Terminal.manifest.files).toEqual(relocated.terminal.manifest.files);
-      const second = await buildNativeCandidate({
-        terminalRoot: synthetic,
-        electronDist,
-        outdir: join(root, 'second-source'),
-      });
       secondRoot = second.root;
       secondId = second.digest;
       expect(secondId).not.toBe(built.digest);
-      const installed = installNativeBundle({ bundleRoot: relocated.root, prefix });
+      const installed = await prep('first_install', () =>
+        installNativeBundle({ bundleRoot: relocated.root, prefix }),
+      );
       firstRoot = installed.releaseRoot;
       firstId = installed.candidateId;
       expect(firstId).toBe(built.digest);

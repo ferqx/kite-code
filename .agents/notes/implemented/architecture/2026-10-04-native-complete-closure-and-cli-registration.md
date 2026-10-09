@@ -20,6 +20,10 @@ Native 安装可显式向合法独立 Terminal prefix 登记。两个 prefix 以
 
 真实代码兼容验收使用固定旧源码的原 Terminal/Native builder；不把当前 builder 配旧 inner、改 productVersion 或当前代码自造旧库当两版 Native。旧 Native 构建须在旧源码删除前完成；打包后产品只能使用物化候选的闭包。2026-10-07 已沿正式 installed 窗口完成本机 A→B→A→B，原 Core format 1/Native DB7 与数据保留、完整 B 正文和后续实际工作分别证明。该选择补齐兼容验证输入，不改变安装、回退或 trust 语义，也不把冷 caller 记录提升为新的进程内输入绑定。
 
+普通文件完整 SHA 现由 Service 的同步 file-hash leaf按原匹配大小读取：不超过64KiB的文件保留原readFileSync全文SHA，较大文件逐块读至EOF，每次完整核验按需分配并复用一个1MiB buffer；manifest原字节摘要、完整inventory和内容身份继续执行。Main初次核验不持SH，取得双SH后必须重新完整核内容；Service仍以自己的双SH独立核完整候选。缓冲区减少大资产整份读取分配，不构成路径／mtime缓存，也不复用跨租约或跨进程的内容准入；对绕过SH的同用户并发写者不增加原子读取或绝对内存上限保证。当前实现和必要多块／短尾、两层同大小末字节拒绝证据归 [Service owner](../../../../apps/service/README.md)，实际启动与完整默认结果归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。
+
+共享UI的Desktop浏览器产物现仅内联唯一静态核心图标包，保持原exports、CSS、React peer与其他npm external。该包原12072文件使三次全量校验重复物化浏览器已使用的资产；生成JS扫描拒绝残留external后，生成UI manifest与复制器只去除该workspace的已内联普通dependency，其他真实解析边保留。准确原许可与固定来源进入完整inventory；不按后缀裁剪资产、不缓存内容或省略任一次准入。构建owner及实际完整默认结果归[UI](../../../../packages/ui/README.md#原桌面展示层)与[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
+
 ## Alternatives considered
 
 - 只把 Native CLI 可执行路径写入前门：不足以核 runtime/Service 和完整依赖；改为准确 outer/inner、nonce 与 active 的闭合身份。
@@ -28,6 +32,8 @@ Native 安装可显式向合法独立 Terminal prefix 登记。两个 prefix 以
 - 让继承 Bun helper 对共享锁调用 UNLOCK：会释放 Node Main 仍需要的使用权；helper 只关自身副本，独立 holder 全部结束后才取得 EX。
 - 完整校验候选后才尝试使用 EX：使使用中的实际 Electron 在拒绝卸载前被重复读取，本机有限诊断四次 busy 合计9.204s，原完整默认因此触发45秒 driver 期限。改为结构核准后先取得全部 EX、随后完整校验并复核集合；没有采用放宽期限、移动升级/回滚出原窗口或提前安装第二候选。
 - 为已缓存的 Native-bin 路径保留 stub 或修改 shell RC：扩大卸载副作用，且无法清除父 shell cache；保留准确 `127` 结果，明确 `hash -r` 或新 shell 的恢复操作。
+
+- 用初始digest或metadata缓存跳过Main双SH后复核、让Service接受Main的验证声明：初始核验与后续使用之间有真实async租约空档，独立Service也没有可信内容证明传递；保留三次各自完整核验，以小文件原读取与大文件共享buffer减少分配，同时保完整内容验证。没有采用放宽原启动期限或缩减清单。
 
 ## Consequences
 

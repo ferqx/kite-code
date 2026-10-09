@@ -477,3 +477,211 @@ test('original ask receipts show human answers and cancellation of information w
     await f.close();
   }
 });
+
+test('same reading identity retains terminal Conversation nodes and manual process expansion while fresh metadata is held; current facts and explicit missing win', async () => {
+  const f = fixture(),
+    requests: NativeRequest[] = [];
+  const messages = Array.from({ length: 33 }, (_, i) => [
+    { ...message(`u-${i}`, 'user', String(i * 3 + 1), `user ${i}`), runId: `r-${i}` },
+    {
+      ...message(`p-${i}`, 'assistant', String(i * 3 + 2), `process ${i}`),
+      runId: `r-${i}`,
+      toolCalls: [{ id: `call-${i}`, name: 'files.read', arguments: '{}' }],
+    },
+    { ...message(`f-${i}`, 'assistant', String(i * 3 + 3), `final ${i}`), runId: `r-${i}` },
+  ]).flat();
+  const held: {
+    request: Extract<NativeRequest, { method: 'toolMessages.runs' }>;
+    release: (page: NativeToolRunPage) => void;
+  }[] = [];
+  const page = (
+    request: Extract<NativeRequest, { method: 'toolMessages.runs' }>,
+    runs: NativeRunFact[],
+  ): NativeToolRunPage => ({
+    kind: 'toolMessages.runs',
+    readId: request.readId,
+    scope: {
+      generation: request.generation,
+      viewSelection: request.viewSelection,
+      historyEpoch: request.historyEpoch,
+      storeId: 'store',
+      sessionId: 's',
+      workspaceId: 'w',
+    },
+    runs,
+  });
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      requests.push(request);
+      if (request.method !== 'toolMessages.runs') return null;
+      if (request.historyEpoch === 0)
+        return page(
+          request,
+          request.messageIds.map((id) => run(`r-${id.split('-').at(-1)}`)),
+        );
+      return new Promise<NativeToolRunPage>((release) => held.push({ request, release }));
+    },
+  };
+  function Harness({
+    epoch,
+    current = [],
+    session = 's',
+    viewSelection = 2,
+  }: {
+    epoch: number;
+    current?: NativeRunFact[];
+    session?: string;
+    viewSelection?: number;
+  }) {
+    const selection = {
+      storeId: 'store',
+      viewSelection,
+      viewGeneration: 1,
+      session: { id: session, workspaceId: 'w' },
+      runs: current,
+      executions: [],
+    } as unknown as NativeSelection;
+    const facts = useNativeRuns({
+      bridge,
+      generation: 1,
+      selection,
+      historyEpoch: epoch,
+      messages: session === 's' ? messages : [],
+      observationRevision: epoch + 1,
+    });
+    const transcript = desktopTranscript({
+      messages: session === 's' ? messages : [],
+      runs: facts.runs,
+      tools: [],
+      storeId: 'store',
+      sessionId: session,
+    });
+    return (
+      <SessionPage
+        workspaces={[]}
+        sessionLabel={session}
+        readingKey={session}
+        loading={false}
+        connected
+        connectionLabel="local"
+        actions={{}}
+        messages={transcript.messages}
+        turnActivity={transcript.turnActivity}
+        renderMessageContent={(model) => <MessageContent text={model.text} />}
+      />
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Harness epoch={0} />));
+    const nodes = [...f.host.querySelectorAll<HTMLElement>('.agent-turn')];
+    expect(nodes).toHaveLength(33);
+    await act(async () =>
+      f.root.render(<Harness epoch={0} current={[{ ...run('r-0'), status: 'cancelled' }]} />),
+    );
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('cancelled');
+    await act(async () => f.root.render(<Harness epoch={0} />));
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('cancelled');
+    await act(async () =>
+      f.root.render(
+        <Harness
+          epoch={0}
+          current={[{ ...run('r-0'), status: 'running', isActive: true, finishedAt: null }]}
+        />,
+      ),
+    );
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('running');
+    await act(async () => f.root.render(<Harness epoch={0} />));
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('running');
+    await act(async () =>
+      f.root.render(<Harness epoch={0} current={[{ ...run('r-0'), status: 'interrupted' }]} />),
+    );
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('aborted');
+    await act(async () => f.root.render(<Harness epoch={0} />));
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('aborted');
+    await act(async () => f.root.render(<Harness epoch={0} current={[run('r-0')]} />));
+    await act(async () => f.root.render(<Harness epoch={0} />));
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('completed');
+    const toggle = nodes[32]!.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => f.root.render(<Harness epoch={1} />));
+    expect(held[0]!.request.messageIds).toHaveLength(32);
+    expect(
+      [...f.host.querySelectorAll('.agent-turn')].every((node, index) => node === nodes[index]) &&
+        f.host.querySelectorAll('.agent-turn').length === nodes.length,
+    ).toBe(true);
+    expect(nodes[32]!.isConnected).toBe(true);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const first = held[0]!;
+    await act(async () =>
+      first.release(
+        page(
+          first.request,
+          first.request.messageIds.flatMap((id) => {
+            const index = id.split('-').at(-1)!;
+            return index === '1'
+              ? []
+              : [
+                  {
+                    ...run(`r-${index}`),
+                    ...(index === '0' ? { status: 'failed' as const, reason: 'new fact' } : {}),
+                  },
+                ];
+          }),
+        ),
+      ),
+    );
+    expect(held[1]!.request.messageIds).toHaveLength(1);
+    expect(f.host.querySelectorAll('.agent-turn')).toHaveLength(32);
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('failed');
+    expect(nodes[1]!.isConnected).toBe(false);
+    expect(nodes[32]!.isConnected).toBe(true);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    await act(async () =>
+      f.root.render(<Harness epoch={1} current={[{ ...run('r-32'), status: 'cancelled' }]} />),
+    );
+    expect(nodes[32]!.getAttribute('data-turn-status')).toBe('cancelled');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => f.root.render(<Harness epoch={2} />));
+    expect(nodes[32]!.getAttribute('data-turn-status')).toBe('cancelled');
+    expect(nodes[32]!.isConnected).toBe(true);
+    await act(async () =>
+      f.root.render(
+        <Harness
+          epoch={2}
+          current={[
+            { ...run('r-32'), status: 'running', isActive: true, finishedAt: null },
+            { ...run('r-0'), status: 'interrupted' },
+          ]}
+        />,
+      ),
+    );
+    expect(nodes[32]!.getAttribute('data-turn-status')).toBe('running');
+    expect(nodes[0]!.getAttribute('data-turn-status')).toBe('aborted');
+    await act(async () => f.root.render(<Harness epoch={3} />));
+    expect(nodes[32]!.isConnected).toBe(false);
+    expect(nodes[0]!.isConnected).toBe(false);
+    expect(f.host.querySelectorAll('.agent-turn')).toHaveLength(30);
+    await act(async () => f.root.render(<Harness epoch={3} viewSelection={3} />));
+    expect(f.host.querySelectorAll('.agent-turn')).toHaveLength(0);
+    await act(async () => f.root.render(<Harness epoch={2} session="foreign" />));
+    expect(f.host.querySelectorAll('.agent-turn')).toHaveLength(0);
+    const late = held.at(-1)!;
+    await act(async () => late.release(page(late.request, [run('r-0')])));
+    expect(f.host.querySelectorAll('.agent-turn')).toHaveLength(0);
+    expect(
+      requests
+        .filter((request) => request.method === 'toolMessages.runs')
+        .map((request) => request.historyEpoch),
+    ).toEqual([0, 0, 1, 1, 2, 2, 3, 3]);
+    expect(
+      requests.every(
+        (request) =>
+          request.method === 'toolMessages.runs' || request.method === 'toolMessages.close',
+      ),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});

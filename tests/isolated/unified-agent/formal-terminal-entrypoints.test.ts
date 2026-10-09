@@ -9,14 +9,77 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { verifyTerminalBundle } from '../../../apps/cli/host/terminal-artifact';
 import { sourceServerArguments } from '../../../scripts/development/ensure-web';
 import { sourceTerminalRoot } from '../../../scripts/release/source-terminal';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
-async function execute(command: string[], cwd: string, home: string) {
+function observation(testCase: 'pure' | 'full') {
+  const origin = performance.now();
+  let sequence = 0,
+    cleanup = false;
+  function phase(stage: string, event: string, details: Record<string, unknown> = {}) {
+    console.log(
+      JSON.stringify({
+        observation: 'formal_terminal_entrypoints',
+        testCase,
+        stage,
+        event,
+        cleanup,
+        elapsedMs: Math.round(performance.now() - origin),
+        ...details,
+      }),
+    );
+  }
+  return {
+    phase,
+    cleanup() {
+      cleanup = true;
+      phase('cleanup', 'begin');
+    },
+    execute(command: string[], cwd: string, home: string) {
+      const entry = basename(command[1] ?? '');
+      const step =
+        command[1] === '-c'
+          ? { entry: 'TUI', action: 'owned_pty' }
+          : entry === 'CLI.ts' || entry === 'cli.ts'
+            ? {
+                entry: 'CLI',
+                action:
+                  command[2] === 'server' ? `server_${command[3]}` : (command[2] ?? 'default'),
+              }
+            : entry === 'TUI.ts' || entry === 'tui.ts'
+              ? {
+                  entry: 'TUI',
+                  action:
+                    command[2] === '--help'
+                      ? 'help'
+                      : command[2] === '--version'
+                        ? 'version'
+                        : command[2]
+                          ? 'connect'
+                          : 'non_tty',
+                }
+              : entry === 'Server.ts'
+                ? { entry: 'Server', action: command[2] === '--help' ? 'help' : 'start_web' }
+                : { entry: 'fixture', action: entry };
+      const current = ++sequence;
+      return execute(command, cwd, home, (event, details) =>
+        phase('execute', event, { sequence: current, ...step, ...details }),
+      );
+    },
+  };
+}
+async function execute(
+  command: string[],
+  cwd: string,
+  home: string,
+  observe: (event: string, details?: Record<string, unknown>) => void,
+) {
+  const origin = performance.now();
+  observe('begin');
   const child = Bun.spawn(command, {
     cwd,
     env: { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8', TERM: 'xterm-256color' },
@@ -26,6 +89,7 @@ async function execute(command: string[], cwd: string, home: string) {
   });
   let forced: ReturnType<typeof setTimeout> | undefined;
   const timer = setTimeout(() => {
+    observe('deadline', { durationMs: Math.round(performance.now() - origin) });
     child.kill('SIGTERM');
     forced = setTimeout(() => child.kill('SIGKILL'), 5000);
   }, 20000);
@@ -36,11 +100,13 @@ async function execute(command: string[], cwd: string, home: string) {
       new Response(child.stderr).text(),
     ]);
     if (code) console.error({ command, code, stdout, stderr });
+    observe('end', { code, durationMs: Math.round(performance.now() - origin) });
     return { code, stdout, stderr };
   } finally {
     clearTimeout(timer);
     if (forced) clearTimeout(forced);
     if (child.exitCode === null) {
+      observe('cleanup', { durationMs: Math.round(performance.now() - origin) });
       child.kill('SIGKILL');
       await child.exited;
     }
@@ -59,6 +125,8 @@ function driver(root: string, kind: 'CLI' | 'TUI' | 'Server') {
 }
 
 test('formal source wrappers pure argv and server finite projection never inspect missing candidates or profiles', async () => {
+  const timing = observation('pure'),
+    execute = timing.execute;
   const root = realpathSync(mkdtempSync('/private/tmp/kite-formal-pure-')),
     home = join(root, 'home');
   mkdirSync(home);
@@ -128,11 +196,18 @@ test('formal source wrappers pure argv and server finite projection never inspec
     expect(existsSync(join(home, '.kite-code'))).toBe(false);
     expect(existsSync(join(root, 'dist'))).toBe(false);
   } finally {
+    const cleanupOrigin = performance.now();
+    timing.cleanup();
     rmSync(root, { recursive: true, force: true });
+    timing.phase('cleanup', 'end', {
+      durationMs: Math.round(performance.now() - cleanupOrigin),
+    });
   }
 }, 15000);
 
 test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x24 TUI with actual completed Run facts', async () => {
+  const timing = observation('full'),
+    execute = timing.execute;
   const root = realpathSync(mkdtempSync('/private/tmp/kite-formal-terminal-')),
     home = join(root, 'home'),
     workspace = join(root, 'workspace'),
@@ -203,10 +278,15 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
   });
   let runtime = '';
   try {
+    const buildOrigin = performance.now();
+    timing.phase('candidate_build', 'begin');
     const built = await buildTerminalBundle({
       destination: candidate,
       repositoryRoot,
       bunExecutable: process.execPath,
+    });
+    timing.phase('candidate_build', 'end', {
+      durationMs: Math.round(performance.now() - buildOrigin),
     });
     expect(built.root).toBe(candidate);
     expect(built.buildId).toBe(`terminal-${built.digest}`);
@@ -463,7 +543,14 @@ finally:
     expect(calls).toBe(2);
 
     expect(readFileSync(join(candidate, 'terminal-manifest.json'))).toEqual(manifest);
+    const verifyOrigin = performance.now();
+    timing.phase('candidate_reverify', 'begin');
     expect(verifyTerminalBundle(candidate).digest).toBe(built.digest);
+    timing.phase('candidate_reverify', 'end', {
+      durationMs: Math.round(performance.now() - verifyOrigin),
+    });
+    const stopOrigin = performance.now();
+    timing.phase('final_server_stop', 'begin');
     expect(
       (
         await execute(
@@ -473,6 +560,9 @@ finally:
         )
       ).code,
     ).toBe(0);
+    timing.phase('final_server_stop', 'end', {
+      durationMs: Math.round(performance.now() - stopOrigin),
+    });
     started = false;
     const asset = join(candidate, built.manifest.entries.service),
       original = readFileSync(asset);
@@ -499,10 +589,15 @@ finally:
       }),
     );
   } finally {
+    const cleanupOrigin = performance.now();
+    timing.cleanup();
     stopped = true;
     if (started)
       await execute([process.execPath, cli, 'server', 'stop', '--server', socket], workspace, home);
     provider.stop(true);
+    timing.phase('cleanup', 'end', {
+      durationMs: Math.round(performance.now() - cleanupOrigin),
+    });
     // Retain fresh physical candidate and PTY evidence for independent review; no profile authority escapes.
   }
 }, 60000);

@@ -27,6 +27,8 @@ bun run release:terminal uninstall --prefix /absolute/install/kite-terminal
 
 [依赖复制器](../../../scripts/release/terminal-dependencies.ts)按已安装包的物理依赖图复制实际版本、正文、资源与许可证；每个包保留自己的依赖边，支持 peer、多版本、alias 与循环。仅允许指向候选内部的相对链接。它不在运行时搜索 checkout、全局 node_modules 或 PATH Bun；manifest 固定实际文件字节，并不证明 npm 来源或锁文件真实性。
 
+共享 UI 的 Desktop 产物已内联唯一的 `@hugeicons/core-free-icons`；builder扫描全部生成 JS，拒绝残留该包或子路径的外部引用，然后从生成 UI manifest 与该 workspace 的复制边中移除这条已内联普通依赖。peer、optional、workspace 不能借此跳过；其他 npm 包若真正依赖它仍按原图复制。UI exports、其他解析边和原许可证继续保留，详见[UI build owner](../../../packages/ui/README.md#原桌面展示层)。新闭包的每个实际文件仍由同一完整 verifier 核验，未添加运行时豁免或内容缓存。
+
 manifest 中声明的裸 npm 名称必须按包自己的实际解析位置复制，即使与 builtin 同名；`punycode` 包的 `punycode/` 调用不由 runtime builtin 代替。只省略显式 `node:`/`bun:` 依赖，必需包缺失拒绝构建，不从 builtin 名称推导可用。实际候选 JSDOM/parser 的运行资格与文件清单完整性分别核验。
 
 [完整选择器](../host/terminal-artifact.ts)核对闭合 manifest、native platform/arch、每个文件大小/SHA256/mode、目录祖先与链接实际目标。未知文件、空目录、外部 hardlink、循环或外部 symlink、缺失资源与篡改均拒绝。manifest 的 source commit/dirty 是构建诊断；完整制品身份由 manifest 和它约束的字节给出。清单及 archive sidecar 均未签名，完整性不能等同发布者身份或生产资格。
@@ -42,6 +44,8 @@ stable shell launcher 固定一次 active，清除 NODE_PATH/NODE_OPTIONS/BUN_OP
 升级只影响后续启动，原进程保持原 candidate。回滚完整验证 previous 后交换指针；它不恢复旧数据库或回放业务意图，本轮只验证相同新基线格式的候选组合，不宣称任意未来格式均可回滚。用户应先通过原实例的公开 `server stop` 结束要卸载的 daemon。卸载完整枚举已管理内容、拒绝未知条目/坏 active/坏候选，取得所有候选 exclusive 使用锁后重命名安装根再删除；任何 live lease 都立即拒绝，不强杀或猜测进程。独立 profile 数据保留。
 
 ## 验证边界
+
+完整选择器与独立 Service／Daemon 使用[同一 Terminal verifier](../../service/src/runtime-assets.ts)，普通资产完整 SHA 的大小文件分流与多块／短尾拒绝证据归[Service owner](../../service/README.md)。目录、链接、实际引擎与使用锁守卫保持；当前正式入口的分段时钟及完整默认结果归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。
 
 原有本机资格为 macOS arm64、Bun 1.4.2；新增 Linux 当前安装链见下节。macOS 实际验证包括：搬迁后删除原输出、独立 HOME/PATH、两个安装入口、固定模型一次实际 Run、SQLite Worker 读回原历史、共享 daemon/TUI PTY、升级/回滚原实例固定、live 使用时拒绝卸载、停止后卸载和独立用户数据保持。测试入口：
 

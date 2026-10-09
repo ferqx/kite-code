@@ -40,6 +40,7 @@ test.skipIf(process.platform !== 'darwin')(
     let provider: ReturnType<typeof Bun.serve> | undefined;
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     const fixtureLeases: ReturnType<typeof acquireArtifactAccess>[] = [];
+    let complete = false;
     try {
       const releaseModule = resolve(
         import.meta.dir,
@@ -202,6 +203,16 @@ test.skipIf(process.platform !== 'darwin')(
         naming: 'driver.js',
       });
       expect(result.success).toBe(true);
+      const observer = join(root, 'observer.cjs');
+      const observationBuild = await Bun.build({
+        entrypoints: [resolve(import.meta.dir, '../native-startup-observation.fixture.ts')],
+        target: 'node',
+        format: 'cjs',
+        packages: 'external',
+        outdir: root,
+        naming: 'observer.cjs',
+      });
+      if (!observationBuild.success) throw Error('startup_observation_build_failed');
       driver = Bun.spawn(
         [
           realpathSync(Bun.which('node')!),
@@ -210,6 +221,7 @@ test.skipIf(process.platform !== 'darwin')(
           home,
           provider.url.href.replace(/\/$/, ''),
           storeId,
+          observer,
         ],
         {
           cwd: home,
@@ -324,6 +336,7 @@ test.skipIf(process.platform !== 'darwin')(
         for (const lease of leases.reverse()) lease.release();
       }
       expect(verifyNativeRuntimeBundle(moved).digest).toBe(built.digest);
+      complete = true;
     } finally {
       if (driver && driver.exitCode === null) {
         driver.kill('SIGKILL');
@@ -342,7 +355,8 @@ test.skipIf(process.platform !== 'darwin')(
           } catch {}
       }
       for (const lease of fixtureLeases.reverse()) lease.release();
-      rmSync(root, { recursive: true, force: true });
+      if (complete) rmSync(root, { recursive: true, force: true });
+      else console.error(JSON.stringify({ stage: 'questionnaire_failed_fixture_retained', root }));
     }
   },
   120000,

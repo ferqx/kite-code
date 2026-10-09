@@ -8,8 +8,33 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
+async function openCompletedProcess(page: import('playwright').Page) {
+  phase('process_toggle_begin');
+  const toggle = page
+    .locator('.agent-turn-summary-row')
+    .getByRole('button', { name: /，(?:展开|收起)本轮处理过程$/ });
+  await toggle.waitFor();
+  const expanded = await toggle.getAttribute('aria-expanded');
+  phase(
+    expanded === 'true'
+      ? 'process_toggle_expanded_true'
+      : expanded === 'false'
+        ? 'process_toggle_expanded_false'
+        : 'process_toggle_expanded_missing',
+  );
+  if (expanded !== 'true') await toggle.click();
+  await page
+    .locator('.agent-turn-summary-row')
+    .getByRole('button', { name: /，收起本轮处理过程$/ })
+    .waitFor();
+  phase('process_toggle_complete');
+}
+
 const [outdir, root, _dataRoot, _storeId, _endpoint, electronExecutable, control, bunExecutable] =
   process.argv.slice(2) as string[];
+const phase = (phase: string) =>
+  console.log(JSON.stringify({ stage: 'native_history_phase', phase, at: Date.now(), root }));
+phase('launch_begin');
 const app = await _electron.launch({
   executablePath: electronExecutable,
   args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
@@ -17,6 +42,15 @@ const app = await _electron.launch({
   env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
   timeout: 10000,
 });
+console.log(
+  JSON.stringify({
+    stage: 'native_history_phase',
+    phase: 'launch_complete',
+    at: Date.now(),
+    root,
+    mainPID: app.process().pid,
+  }),
+);
 let assertions = 0;
 function eq(actual: unknown, expected: unknown) {
   assert.equal(actual, expected);
@@ -25,16 +59,33 @@ function eq(actual: unknown, expected: unknown) {
 try {
   const page = await app.firstWindow();
   page.setDefaultTimeout(10000);
+  phase('initial_read_begin');
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.getByText('LARGE_HISTORY_TAIL_5051', { exact: false }).first().waitFor();
   await page
-    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .locator('[role="status"]')
+    .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
     .waitFor();
+  await openCompletedProcess(page);
   eq(await page.locator('article').count(), 5051);
-  eq(await page.getByText('STORED_SHORT_1', { exact: true }).count(), 1);
-  eq(await page.getByText('STORED_SHORT_5001', { exact: true }).count(), 1);
+  phase('initial_complete_5051');
+  eq(
+    await page
+      .locator('article .typeset-chat > p')
+      .getByText('STORED_SHORT_1', { exact: true })
+      .count(),
+    1,
+  );
+  eq(
+    await page
+      .locator('article .typeset-chat > p')
+      .getByText('STORED_SHORT_5001', { exact: true })
+      .count(),
+    1,
+  );
   eq((await page.locator('main').textContent())!.includes('LARGE_HISTORY_TAIL_5051'), true);
   eq(Number(await (await fetch(`${control}/count`)).text()), 0);
+  phase('failed_refresh_begin');
   await app.evaluate(
     `(()=>{const original=globalThis.fetch;globalThis.__historyOriginal=original;globalThis.__historyFail=true;globalThis.fetch=(input,init)=>{const request=new Request(input,init);if(globalThis.__historyFail&&request.method==='GET'&&new URL(request.url).pathname.endsWith('/sessions/s/messages')){globalThis.__historyFail=false;return Promise.reject(new TypeError('owned_history_page_failed'));}return original(input,init);};})()`,
   );
@@ -54,15 +105,22 @@ try {
     });
   });
   await page
-    .getByText('历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。', { exact: true })
+    .locator('[role="status"]')
+    .filter({ hasText: /^历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。$/ })
     .waitFor();
   eq(await page.locator('article').count(), 5051);
   eq((await page.locator('main').textContent())!.includes('LARGE_HISTORY_TAIL_5051'), true);
   eq(await page.getByRole('button', { name: '发送明确的新轮次' }).isEnabled(), false);
+  phase('failure_original_body_retained');
+  phase('reload_begin');
   await page.getByRole('button', { name: '重新加载会话', exact: true }).click();
   await page
-    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .locator('[role="status"]')
+    .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
     .waitFor();
+  await openCompletedProcess(page);
+  phase('reload_complete');
+  phase('held_refresh_begin');
   await app.evaluate(
     `(()=>{globalThis.__historyHeld=false;globalThis.__historyRelease=undefined;globalThis.fetch=async(input,init)=>{const request=new Request(input,init),url=new URL(request.url);const response=await globalThis.__historyOriginal(input,init);if(!globalThis.__historyHeld&&url.pathname.endsWith('/sessions/s/messages')&&Number(url.searchParams.get('afterSeq'))>=200){globalThis.__historyHeld=true;await new Promise(resolve=>globalThis.__historyRelease=resolve);}return response;};})()`,
   );
@@ -86,21 +144,26 @@ try {
     if (Date.now() >= deadline) throw Error('history_barrier_timeout');
     await new Promise((r) => setTimeout(r, 20));
   }
+  phase('history_page_held');
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
   await openSessionTools(page);
   await app.evaluate('globalThis.__historyRelease();globalThis.fetch=globalThis.__historyOriginal');
   await page
-    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .locator('[role="status"]')
+    .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
     .waitFor();
   eq(await page.locator('article').count(), 0);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.getByText('LARGE_HISTORY_TAIL_5051', { exact: false }).first().waitFor();
   await page
-    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .locator('[role="status"]')
+    .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
     .waitFor();
+  await openCompletedProcess(page);
   eq(await page.locator('article').count(), 5051);
   eq(Number(await (await fetch(`${control}/count`)).text()), 0);
+  phase('held_switchback_complete_5051');
   // Disconnect the owned real SSE socket, commit a real HTTP change while disconnected,
   // then advance only this fixture's replay floor. No reset/ready callback is injected.
   type NetworkFacts = {
@@ -144,6 +207,8 @@ try {
   const gapFacts: unknown[] = [];
   for (const switchDuringRead of [false, true]) {
     const before = await network();
+    const gap = switchDuringRead ? 'sse_two' : 'sse_one';
+    phase(`${gap}_reset_begin`);
     await app.evaluate(
       `(()=>{const n=globalThis.__nativeHistoryNetwork;n.pause=true;n.release=undefined;n.held=false;n.abort.abort();})()`,
     );
@@ -158,6 +223,7 @@ try {
     await until(
       `globalThis.__nativeHistoryNetwork.events.slice(${before.events.length}).some(e=>e.status===410)`,
     );
+    phase(`${gap}_reset_410`);
     if (switchDuringRead) {
       await until('globalThis.__nativeHistoryNetwork.held');
       const held = await network();
@@ -170,22 +236,40 @@ try {
       await openSessionTools(page);
       await app.evaluate('globalThis.__nativeHistoryNetwork.releaseHistory()');
     }
+    phase(`${gap}_ready_begin`);
     await until(`globalThis.__nativeHistoryNetwork.ready>${before.ready}`);
+    phase(`${gap}_ready_complete`);
     await page
-      .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+      .locator('[role="status"]')
+      .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
       .waitFor();
     if (switchDuringRead) {
       eq(await page.locator('article').count(), 0);
       eq((await page.locator('main').textContent())!.includes('LARGE_HISTORY_TAIL_5051'), false);
-      await page.getByRole('button', { name: 'Native A', exact: true }).click();
+      await page.getByRole('button', { name: 'Native A gap two', exact: true }).click();
       await page.getByText('LARGE_HISTORY_TAIL_5051', { exact: false }).first().waitFor();
       await page
-        .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+        .locator('[role="status"]')
+        .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
         .waitFor();
     }
+    await openCompletedProcess(page);
     eq(await page.locator('article').count(), 5051);
-    eq(await page.getByText('STORED_SHORT_1', { exact: true }).count(), 1);
-    eq(await page.getByText('STORED_SHORT_5001', { exact: true }).count(), 1);
+    eq(
+      await page
+        .locator('article .typeset-chat > p')
+        .getByText('STORED_SHORT_1', { exact: true })
+        .count(),
+      1,
+    );
+    eq(
+      await page
+        .locator('article .typeset-chat > p')
+        .getByText('STORED_SHORT_5001', { exact: true })
+        .count(),
+      1,
+    );
+    phase(`${gap}_history_complete_5051`);
     const after = await network();
     eq(after.posts.length, before.posts.length + 1);
     const expired = after.events.slice(before.events.length).find((event) => event.status === 410)!;
@@ -221,6 +305,7 @@ try {
   }
   // A fresh business HTTP event must still refresh this exact selected view after new ready.
   const beforeLive = await network();
+  phase('live_rename_begin');
   await rename('Native A after physical gap');
   await until(`globalThis.__nativeHistoryNetwork.changes>${beforeLive.changes}`);
   await page
@@ -229,7 +314,8 @@ try {
     .waitFor();
   await openSessionTools(page);
   await page
-    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .locator('[role="status"]')
+    .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
     .waitFor();
   eq((await network()).posts.length, beforeLive.posts.length + 1);
   eq((await network()).posts.length, beforeGap.posts.length + 3);
@@ -237,8 +323,10 @@ try {
     (await network()).posts.every((path) => path === '/v1/sessions/s/rename'),
     true,
   );
+  await openCompletedProcess(page);
   eq(await page.locator('article').count(), 5051);
   eq(Number(await (await fetch(`${control}/count`)).text()), 0);
+  phase('live_rename_complete_5051');
   console.log('Physical SSE gap facts:', JSON.stringify(gapFacts));
   const parent = await app.evaluate(() => process.pid);
   const line = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
@@ -249,8 +337,12 @@ try {
     });
   const pid = Number(line?.trim().split(/\s+/)[0]);
   eq(pid > 0, true);
+  phase('app_quit_begin');
   await app.evaluate(({ app }) => app.quit());
+  phase('app_quit_complete');
+  phase('app_close_begin');
   await app.close();
+  phase('app_close_complete');
   let stopped = false;
   try {
     process.kill(pid, 0);
@@ -258,12 +350,14 @@ try {
     stopped = true;
   }
   eq(stopped, true);
+  phase('service_pid_stopped');
   console.log(
     'Native History Node assertions:',
     assertions,
     JSON.stringify({ pid, stopped, storedShortMessages: 5001, providerCalls: 0 }),
   );
 } catch (error) {
+  phase('failure_catch');
   console.error(error);
   console.error(
     'physical_network',
@@ -317,6 +411,8 @@ try {
       .count()
       .catch(() => -1),
   );
+  phase('failure_close_begin');
   await app.close().catch(() => {});
+  phase('failure_close_complete');
   throw error;
 }

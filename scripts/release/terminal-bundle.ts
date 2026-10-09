@@ -30,6 +30,7 @@ import {
 import { createTrustedAssets } from '../../apps/web/src/assets';
 import { acquireArtifactAccess } from '../../packages/agent/src/artifact-access';
 import { acquireFileLock } from '../../packages/agent/src/platform/locks';
+import { desktopBundledDependencies } from '../../packages/ui/scripts/bundled-dependencies';
 import { buildTerminalSqliteEngine } from './sqlite-engine';
 import { copyTerminalDependencies } from './terminal-dependencies';
 import { rejectBundleOutput } from './terminal-paths';
@@ -99,6 +100,21 @@ function copyTree(source: string, destination: string) {
     copyFileSync(source, destination);
     chmodSync(destination, stat.mode & 0o111 ? 0o755 : 0o644);
   } else error('file_unsupported');
+}
+function verifyBundledDependencies(root: string, names: readonly string[]): void {
+  if (!names.length) return;
+  const scanner = new Bun.Transpiler({ loader: 'js' });
+  const walk = (path: string) => {
+    const stat = lstatSync(path);
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(path)) walk(join(path, name));
+    } else if (stat.isFile() && path.endsWith('.js')) {
+      for (const item of scanner.scanImports(readFileSync(path)))
+        if (names.some((name) => item.path === name || item.path.startsWith(`${name}/`)))
+          error('bundled_dependency_external');
+    }
+  };
+  walk(root);
 }
 function syncTree(path: string): void {
   const stat = lstatSync(path);
@@ -195,6 +211,7 @@ export async function buildTerminalBundle(input: {
         source: path,
         destination: join(root, 'node_modules', manifest.name),
         manifest,
+        bundledDependencies: manifest.name === '@kite-ai/ui' ? desktopBundledDependencies : [],
       };
     });
     for (const item of packages) {
@@ -209,6 +226,7 @@ export async function buildTerminalBundle(input: {
         );
         await run(runtime, args, item.source);
       }
+      verifyBundledDependencies(item.destination, item.bundledDependencies);
       const exports = Object.fromEntries(
         Object.entries(item.manifest.exports).map(([key, path]) => {
           if (typeof path !== 'string') error('workspace_export_unsupported');
@@ -227,7 +245,13 @@ export async function buildTerminalBundle(input: {
             version: item.manifest.version,
             type: 'module',
             exports,
-            dependencies: item.manifest.dependencies,
+            dependencies: item.manifest.dependencies
+              ? Object.fromEntries(
+                  Object.entries(item.manifest.dependencies).filter(
+                    ([name]) => !item.bundledDependencies.includes(name),
+                  ),
+                )
+              : undefined,
             peerDependencies: item.manifest.peerDependencies,
             optionalDependencies: item.manifest.optionalDependencies,
           },

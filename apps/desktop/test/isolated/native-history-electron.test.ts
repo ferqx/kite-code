@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   mkdirSync,
@@ -17,6 +18,13 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
+// Resolve the existing Bun-only kernel observer without a cross-workspace TS rootDir import.
+const { inspectProcess, readProcessStartIdentity } = require(
+  resolve(import.meta.dir, '../../../service/src/daemon/process-identity.ts'),
+) as {
+  readProcessStartIdentity(pid: number): string | undefined;
+  inspectProcess(pid: number, expectedStart: string): 'alive' | 'dead' | 'uncertain';
+};
 function gate() {
   let release!: () => void, enter!: () => void;
   return {
@@ -46,6 +54,7 @@ async function bounded<T>(promise: Promise<T>, milliseconds = 15000) {
 test.skipIf(process.platform !== 'darwin')(
   'actual Electron automatically reads 5001 stored short messages and >8MiB multi-message history; failed/late pages retain original text with zero Model',
   async () => {
+    const parentDeadline = Date.now() + 90000;
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-history-')),
       barrier = gate(),
       compressionBarrier = gate();
@@ -287,6 +296,7 @@ test.skipIf(process.platform !== 'darwin')(
       packages: 'bundle',
     });
     if (!built.success) throw new AggregateError(built.logs, 'driver_build_failed');
+    const electronExecutable = realpathSync(require('electron') as string);
     const driver = Bun.spawn(
       [
         realpathSync(Bun.which('node')!),
@@ -296,7 +306,7 @@ test.skipIf(process.platform !== 'darwin')(
         profile.dataRoot,
         storeId,
         `127.0.0.1:${provider.port}`,
-        require('electron') as string,
+        electronExecutable,
         `http://127.0.0.1:${provider.port}`,
         bunExecutable,
       ],
@@ -306,14 +316,280 @@ test.skipIf(process.platform !== 'darwin')(
         env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
       },
     );
+    console.log(
+      JSON.stringify({
+        stage: 'native_history_parent',
+        phase: 'spawned',
+        at: Date.now(),
+        root,
+        driverPID: driver.pid,
+      }),
+    );
+    type OwnedProcess = { pid: number; birth: string; depth: number };
+    const owned = new Map<number, OwnedProcess>(),
+      ownershipErrors: unknown[] = [];
+    let mainPID: number | undefined;
+    const processRows = () =>
+      String(
+        execFileSync('/bin/ps', ['-ww', '-axo', 'pid=,ppid=,command='], {
+          encoding: 'utf8',
+          timeout: 1000,
+          maxBuffer: 8 * 1048576,
+        }),
+      )
+        .split('\n')
+        .flatMap((line) => {
+          const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+          return match
+            ? [{ pid: Number(match[1]), parent: Number(match[2]), command: match[3]! }]
+            : [];
+        });
+    const captureTree = () => {
+      if (mainPID === undefined) throw Error('native_history_main_identity_unbound');
+      const pending = [...owned.values()],
+        visited = new Set<number>();
+      for (let index = 0; index < pending.length; index++) {
+        const parent = pending[index]!;
+        if (visited.has(parent.pid)) continue;
+        visited.add(parent.pid);
+        try {
+          const current = readProcessStartIdentity(parent.pid);
+          if (current !== undefined && current !== parent.birth)
+            throw Error('native_history_tree_identity_changed');
+          const state = inspectProcess(parent.pid, parent.birth);
+          if (state === 'dead') continue;
+          if (state !== 'alive') throw Error('native_history_tree_identity_unavailable');
+          for (const row of processRows().filter((row) => row.parent === parent.pid)) {
+            try {
+              const before = readProcessStartIdentity(row.pid);
+              if (!before) {
+                if (inspectProcess(row.pid, '') === 'dead') continue;
+                throw Error('native_history_child_identity_unavailable');
+              }
+              const fresh = processRows().find((candidate) => candidate.pid === row.pid);
+              const after = readProcessStartIdentity(row.pid);
+              if (!fresh && after === undefined && inspectProcess(row.pid, before) === 'dead')
+                continue;
+              if (
+                before !== after ||
+                fresh?.parent !== parent.pid ||
+                readProcessStartIdentity(parent.pid) !== parent.birth
+              )
+                throw Error('native_history_child_observation_changed');
+              const previous = owned.get(row.pid);
+              if (previous && previous.birth !== before)
+                throw Error('native_history_child_identity_changed');
+              const child = previous ?? { pid: row.pid, birth: before, depth: parent.depth + 1 };
+              owned.set(row.pid, child);
+              pending.push(child);
+            } catch (error) {
+              ownershipErrors.push(error);
+            }
+          }
+        } catch (error) {
+          ownershipErrors.push(error);
+        }
+      }
+    };
+    const phases: string[] = [];
+    const decoder = new TextDecoder();
+    let line = '',
+      discarded = false;
+    const tap = new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        controller.enqueue(chunk);
+        for (const character of decoder.decode(chunk, { stream: true })) {
+          if (character !== '\n') {
+            if (line.length < 8192 && !discarded) line += character;
+            else {
+              discarded = true;
+              line = '';
+            }
+            continue;
+          }
+          if (!discarded && line.startsWith('{"stage":"native_history_phase"')) {
+            if (phases.length < 64) phases.push(line);
+            console.info(line);
+            try {
+              const observation = JSON.parse(line) as {
+                phase: string;
+                root: string;
+                mainPID?: number;
+              };
+              if (observation.phase === 'launch_complete') {
+                const pid = observation.mainPID;
+                if (
+                  observation.root !== root ||
+                  !Number.isSafeInteger(pid) ||
+                  !pid ||
+                  mainPID !== undefined
+                )
+                  throw Error('native_history_main_observation_invalid');
+                const driverBirth = readProcessStartIdentity(driver.pid);
+                const birth = readProcessStartIdentity(pid);
+                const row = processRows().find((row) => row.pid === pid);
+                const after = readProcessStartIdentity(pid);
+                if (
+                  !birth ||
+                  birth !== after ||
+                  !driverBirth ||
+                  readProcessStartIdentity(driver.pid) !== driverBirth ||
+                  !row ||
+                  row.parent !== driver.pid ||
+                  !row.command.startsWith(`${electronExecutable} `) ||
+                  !row.command.includes(` ${outdir} `) ||
+                  !row.command.includes(`--user-data-dir=${join(root, 'electron-data')}`)
+                )
+                  throw Error('native_history_main_ownership_mismatch');
+                mainPID = pid;
+                owned.set(pid, { pid, birth, depth: 0 });
+                captureTree();
+              } else if (observation.phase === 'initial_complete_5051') {
+                captureTree();
+              }
+            } catch (error) {
+              ownershipErrors.push(error);
+            }
+          }
+          line = '';
+          discarded = false;
+        }
+      },
+    });
     const stderrPromise = new Response(driver.stderr).text(),
-      stdoutPromise = new Response(driver.stdout).text();
+      stdoutPromise = new Response(driver.stdout.pipeThrough(tap)).text();
+    let completed = false,
+      failure: unknown,
+      treeSettled = false,
+      confirmed = false;
+    const cleanupErrors: unknown[] = [];
+    const captureOwned = () => {
+      try {
+        captureTree();
+      } catch (error) {
+        ownershipErrors.push(error);
+      }
+      cleanupErrors.push(...ownershipErrors.splice(0));
+    };
+    const cleanTree = async () => {
+      let safe = mainPID !== undefined;
+      for (const item of [...owned.values()].sort((a, b) => b.depth - a.depth)) {
+        try {
+          const current = readProcessStartIdentity(item.pid);
+          if (current !== undefined && current !== item.birth)
+            throw Error('native_history_cleanup_identity_changed');
+          const state = inspectProcess(item.pid, item.birth);
+          if (state === 'uncertain') throw Error('native_history_cleanup_identity_unavailable');
+          if (state === 'alive') {
+            if (readProcessStartIdentity(item.pid) !== item.birth)
+              throw Error('native_history_cleanup_identity_changed');
+            try {
+              process.kill(item.pid, 'SIGKILL');
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+            }
+          }
+        } catch (error) {
+          safe = false;
+          cleanupErrors.push(error);
+        }
+      }
+      const deadline = Math.min(Date.now() + 2000, parentDeadline - 100);
+      const verificationErrors = new Set<number>();
+      for (;;) {
+        let pending = false;
+        const uncertain: number[] = [];
+        for (const item of owned.values()) {
+          const current = readProcessStartIdentity(item.pid);
+          if (current !== undefined && current !== item.birth) {
+            safe = false;
+            if (!verificationErrors.has(item.pid)) {
+              verificationErrors.add(item.pid);
+              cleanupErrors.push(Error('native_history_cleanup_identity_changed'));
+            }
+            continue;
+          }
+          const state = inspectProcess(item.pid, item.birth);
+          if (state === 'uncertain') uncertain.push(item.pid);
+          pending ||= state !== 'dead';
+        }
+        if (!pending) return safe;
+        if (Date.now() >= deadline) {
+          for (const pid of uncertain)
+            cleanupErrors.push(Error(`native_history_cleanup_identity_unavailable:${pid}`));
+          cleanupErrors.push(Error('native_history_cleanup_not_confirmed'));
+          return false;
+        }
+        await Bun.sleep(20);
+      }
+    };
+    const settleTree = async (normalExit: boolean) => {
+      captureOwned();
+      const captureFailed = cleanupErrors.length > 0;
+      if (
+        normalExit &&
+        [...owned.values()].some((item) => inspectProcess(item.pid, item.birth) === 'alive')
+      )
+        cleanupErrors.push(Error('native_history_success_left_owned_process_alive'));
+      confirmed = (await cleanTree()) && !captureFailed;
+      treeSettled = true;
+      console.log(
+        JSON.stringify({
+          stage: 'native_history_parent',
+          phase: confirmed ? 'owned_tree_stopped' : 'owned_tree_unconfirmed',
+          at: Date.now(),
+          root,
+          driverPID: driver.pid,
+          pids: [...owned.keys()],
+        }),
+      );
+    };
+    const diagnostics = async () => {
+      const remaining = Math.max(1, parentDeadline - Date.now() - 100);
+      const streams = await Promise.allSettled([
+        bounded(stdoutPromise, remaining),
+        bounded(stderrPromise, remaining),
+      ]);
+      for (const [index, stream] of streams.entries()) {
+        const name = index === 0 ? 'stdout' : 'stderr';
+        console.log(
+          JSON.stringify({
+            stage: 'native_history_parent',
+            phase: `${name}_${stream.status === 'fulfilled' ? 'eof' : 'read_failed'}`,
+            at: Date.now(),
+            root,
+            driverPID: driver.pid,
+            ...(stream.status === 'fulfilled' ? { bytes: Buffer.byteLength(stream.value) } : {}),
+          }),
+        );
+        if (!completed && stream.status === 'fulfilled') {
+          if (name === 'stdout') {
+            const phases = stream.value
+              .split('\n')
+              .filter((line) => line.startsWith('{"stage":"native_history_phase"'));
+            console.error('native_history_failure_phases', JSON.stringify(phases.slice(0, 64)));
+          }
+          console.error(`native_history_failure_${name}_head`, stream.value.slice(0, 4096));
+          if (stream.value.length > 4096)
+            console.error(`native_history_failure_${name}_tail`, stream.value.slice(-4096));
+        }
+      }
+      const errors = streams.flatMap((stream) =>
+        stream.status === 'rejected' ? [stream.reason] : [],
+      );
+      if (errors.length)
+        throw new AggregateError(
+          [...(failure === undefined ? [] : [failure]), ...errors],
+          'native_history_diagnostic_stream_failed',
+        );
+    };
     try {
       const exit = await bounded(driver.exited, 75000);
-      const stderr = await stderrPromise;
-      if (exit !== 0) console.error(stderr.slice(0, 5000));
       expect(exit).toBe(0);
-      const output = await stdoutPromise;
+      await settleTree(true);
+      const remaining = Math.max(1, parentDeadline - Date.now() - 100);
+      await bounded(stderrPromise, remaining);
+      const output = await bounded(stdoutPromise, Math.max(1, parentDeadline - Date.now() - 100));
       console.info(output.trim());
       expect(output).toContain('Native History Node assertions:');
       expect(requests).toBe(0);
@@ -327,14 +603,39 @@ test.skipIf(process.platform !== 'darwin')(
         ).n,
       ).toBe(0);
       durable.close();
+      completed = true;
+    } catch (error) {
+      failure = error;
     } finally {
       barrier.release();
       compressionBarrier.release();
+      if (!treeSettled) captureOwned();
       driver.kill('SIGKILL');
       await driver.exited;
-      provider.stop(true);
-      rmSync(root, { recursive: true, force: true });
+      try {
+        if (!treeSettled) await settleTree(false);
+        await diagnostics();
+      } catch (error) {
+        cleanupErrors.push(error);
+        console.error('native_history_cleanup_failure', {
+          root,
+          driverPID: driver.pid,
+          mainPID,
+          phases,
+          errors: cleanupErrors,
+        });
+      } finally {
+        provider.stop(true);
+        if (confirmed) rmSync(root, { recursive: true, force: true });
+        else console.error('native_history_root_retained', root);
+      }
     }
+    if (cleanupErrors.length)
+      throw new AggregateError(
+        [...(failure === undefined ? [] : [failure]), ...cleanupErrors],
+        'native_history_cleanup_failed',
+      );
+    if (failure !== undefined) throw failure;
   },
   90000,
 );

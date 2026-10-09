@@ -258,6 +258,8 @@ CLI 保持原 Command 的 Store/Session/Run scope；原 Session 中没有独立 
 
 通用 UI composer 提供原 scope 的 grapheme 光标、视觉行导航、历史、固定 slash 候选与真正 bracketed paste；CLI host 继续保存原完整 draft，输入层不扫描文件或取得业务执行权。[80×24 composer fixture](test/isolated/tui-composer-host.test.ts) 使用默认编译 Service、同 Store 明确新 Session、普通 Ask 与实际 loopback SDK relay，核对中文/emoji/combining中间编辑、原完整 CRLF/LF 粘贴一次提交、块删除、补全零提前 POST、真实 held Model 时多行草稿落盘、历史与会话切换，以及原审批一次回答后的 SQLite 完成。relay只保持并转发真实 SDK 响应，不伪造业务成功。
 
+该原PTY的三次会话切换按选择器实际搜索／列表合同导航，不把连续Up当作夹紧到首行；Enter前在原10秒内核最后完整同步Ink帧的当前Session、选择器和准确高亮原ID。默认负载暴露的错误键序和原红帧保留，修正后的完整文件1pass／9Bun断言、9.02秒，原12Python断言、完整编辑／粘贴、POST2／Provider3、两份会话草稿及30秒整例保持。生产选择器和手册行为未改；未过滤完整默认结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
+
 原已中断 Session 的后继输入曾在 composer 诊断中暴露未闭合 Tool history，真实失败日志已交 Core owner；本 fixture 的新明确 Session 资格不能替代那个恢复场景。文件补全、全部输入队列与完整正式终端切换仍分别待闭合。
 
 开发 TUI `Ctrl+B` 已接 UI 的独立 pending 卡选择器。CLI host 保持原 Store 的完整分页公共目录与完整 artifact reader；选择和各卡草稿仅属 UI，POST 仍固定原展示 Session/card/revision，不从父 Run 或有限 view 推导权限。UI 的 [真实四卡 PTY](../../packages/ui/test/isolated/tui/pending-cards.test.ts) 使用 configured Core/Service 证明 sibling/root/ordinary required Job 的独立原作用域与完整附件；实际 `skill.workflow.verify` 默认工厂资格继续由本包 Workflow question/compensation fixture 单独提供。

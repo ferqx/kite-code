@@ -7,7 +7,7 @@ export type HistoryState = {
   highWaterSeq?: string;
   error?: string;
 };
-/** Reading never owns execution. Each scan seals one public high water and publishes pages progressively. */
+/** Reading never owns execution. Each scan seals one public high water before publishing its reading snapshot. */
 export class NativeHistory {
   private scope?: {
     generation: number;
@@ -56,7 +56,7 @@ export class NativeHistory {
     const previous = this.scope;
     this.close();
     if (previous) {
-      this.cached.set(`${previous.storeId}/${previous.sessionId}`, [...this.entries.values()]);
+      this.cached.set(`${previous.storeId}/${previous.sessionId}`, this.state.messages);
       while (this.cached.size > 8) this.cached.delete(this.cached.keys().next().value!);
       this.entries = new Map(
         (this.cached.get(`${previous.storeId}/${sessionId}`) ?? []).map((message) => [
@@ -88,13 +88,13 @@ export class NativeHistory {
       const previous = this.scope;
       this.close();
       if (previous && previous.generation === generation && previous.epoch === epoch) {
-        this.cached.set(`${previous.storeId}/${previous.sessionId}`, [...this.entries.values()]);
+        this.cached.set(`${previous.storeId}/${previous.sessionId}`, this.state.messages);
         while (this.cached.size > 8) this.cached.delete(this.cached.keys().next().value!);
       } else this.cached.clear();
       const same = previous?.storeId === scope.storeId && previous.sessionId === scope.sessionId;
       this.entries = new Map(
         (same
-          ? [...this.entries.values()]
+          ? this.state.messages
           : (this.cached.get(`${scope.storeId}/${scope.sessionId}`) ?? [])
         ).map((message) => [message.id, message]),
       );
@@ -139,7 +139,6 @@ export class NativeHistory {
           last = BigInt(message.seq);
         }
         for (const message of page.messages) this.entries.set(message.id, message);
-        this.publish('loading');
         if (page.nextAfterSeq === null) break;
         if (!page.messages.length || page.nextAfterSeq !== page.messages.at(-1)!.seq)
           throw Error('history_page_cursor_mismatch');

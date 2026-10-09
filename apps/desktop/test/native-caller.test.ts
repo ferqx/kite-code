@@ -503,7 +503,7 @@ test('Native history shrinks public response and IPC pages with the original cur
   const connection = client();
   const queries: { afterSeq?: string; upperSeq?: string; limit?: number }[] = [];
   let readSignal: AbortSignal | undefined;
-  connection.listMessages = (async (_id, options) => {
+  connection.listMessages = (async (id, options) => {
     queries.push({
       afterSeq: options?.afterSeq,
       upperSeq: options?.upperSeq,
@@ -512,12 +512,16 @@ test('Native history shrinks public response and IPC pages with the original cur
     readSignal = options?.signal;
     if (options!.limit! > 50)
       throw Object.assign(Error('oversized public response'), { code: 'response_too_large' });
-    return Array.from({ length: options!.limit! }, (_, index) => ({
-      id: `large-${index}`,
-      sessionId: 's',
-      seq: String(index + 1),
-      content: 'x'.repeat(100000),
-    }));
+    const after = Number(options!.afterSeq ?? '0');
+    return Array.from(
+      { length: Math.min(options!.limit!, Number(options!.upperSeq) - after) },
+      (_, index) => ({
+        id: `large-${after + index + 1}`,
+        sessionId: id,
+        seq: String(after + index + 1),
+        content: 'x'.repeat(100000),
+      }),
+    );
   }) as AgentClient['listMessages'];
   const originalView = connection.getView.bind(connection);
   connection.getView = (async (id) => {
@@ -543,9 +547,65 @@ test('Native history shrinks public response and IPC pages with the original cur
     );
     expect(page).toMatchObject({ highWaterSeq: '100', nextAfterSeq: '25' });
     expect(page && 'messages' in page ? page.messages.length : -1).toBe(25);
+    const request = {
+      method: 'messages' as const,
+      generation: 1,
+      sessionId: 's',
+      expectedStoreId: 'store',
+      readId: 'large-history',
+      upperSeq: '100',
+      limit: 200,
+    };
+    const complete = page && 'messages' in page ? [...page.messages] : [];
+    let afterSeq = page && 'nextAfterSeq' in page ? page.nextAfterSeq : null;
+    while (afterSeq !== null) {
+      const next = await caller.invoke({ ...request, afterSeq });
+      if (!next || !('messages' in next)) throw Error('expected history page');
+      expect(next.highWaterSeq).toBe('100');
+      complete.push(...next.messages);
+      afterSeq = next.nextAfterSeq;
+    }
+    expect(complete.map((message) => message.seq)).toEqual(
+      Array.from({ length: 100 }, (_, index) => String(index + 1)),
+    );
+    expect(complete.every((message) => message.content === 'x'.repeat(100000))).toBe(true);
+    expect(queries.slice(4)).toEqual(
+      [25, 50, 75].map((after) => ({ afterSeq: String(after), upperSeq: '100', limit: 25 })),
+    );
+    queries.length = 0;
+    await caller.invoke({ ...request, readId: 'new-history', afterSeq: '0' });
+    expect(queries.map((query) => query.limit)).toEqual([200, 100, 50, 25]);
+    queries.length = 0;
+    await caller.invoke({ ...request, readId: 'new-history', afterSeq: '25', limit: 10 });
+    await caller.invoke({ ...request, readId: 'new-history', afterSeq: '35' });
+    expect(queries.map((query) => query.limit)).toEqual([10, 10]);
+    queries.length = 0;
+    await caller.invoke({ ...request, readId: 'new-history', afterSeq: '0', upperSeq: '80' });
+    expect(queries.map((query) => query.limit)).toEqual([200, 100, 50, 25]);
+    queries.length = 0;
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'other' });
+    await caller.invoke({
+      ...request,
+      readId: 'new-history',
+      sessionId: 'other',
+      afterSeq: '0',
+      upperSeq: '80',
+    });
+    expect(queries.map((query) => query.limit)).toEqual([200, 100, 50, 25]);
+    await caller.invoke({
+      ...request,
+      sessionId: 'other',
+      afterSeq: '0',
+      upperSeq: '80',
+      limit: 10,
+    });
     expect(readSignal?.aborted).toBe(false);
     await caller.invoke({ method: 'messages.close', generation: 1, readId: 'large-history' });
     expect(readSignal?.aborted).toBe(true);
+    queries.length = 0;
+    await caller.invoke({ ...request, sessionId: 'other', afterSeq: '0', upperSeq: '80' });
+    expect(queries.map((query) => query.limit)).toEqual([200, 100, 50, 25]);
+    await caller.invoke({ method: 'messages.close', generation: 1, readId: 'large-history' });
     expect(connection.writes).toBe(0);
   } finally {
     await caller.close();

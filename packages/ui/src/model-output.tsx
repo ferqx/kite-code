@@ -1,5 +1,5 @@
 import { ClientError, type Message, type ModelOutputSnapshot } from '@kite-ai/client';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { SafeMessageMarkdown } from './markdown';
 
 export interface ModelOutputMessageProps {
@@ -32,16 +32,29 @@ export function ModelOutputMessage({
   renderText,
 }: ModelOutputMessageProps) {
   const body = message.outputBody;
-  const identity = JSON.stringify([
-    storeId,
-    canReadRestoredOrigin,
-    message.sessionId,
-    message.runId,
-    message.id,
-    message.originMessage,
-    body,
-    message.content,
-  ]);
+  const identity = useMemo(
+    () =>
+      JSON.stringify([
+        storeId,
+        canReadRestoredOrigin,
+        message.sessionId,
+        message.runId,
+        message.id,
+        message.originMessage,
+        body,
+        message.content,
+      ]),
+    [
+      storeId,
+      canReadRestoredOrigin,
+      message.sessionId,
+      message.runId,
+      message.id,
+      message.originMessage,
+      body,
+      message.content,
+    ],
+  );
   const current = useRef(identity);
   current.current = identity;
   const callbacks = useRef({ onRead, onContent });

@@ -4,6 +4,8 @@
 
 当前 renderer 沿原桌面的 Vite/React/Tailwind 管线编译复用页面，CSS 与 Geist 字体是候选内的实际文件；Vite 输出保留 Main/preload/helper 的共同目录。新增 UI exports 在 workspace build 中产生实际 desktop/index.js 与 style.css，候选继续逐项核完整递归 manifest。macOS 源码外窗口范围与剩余迁移见[Desktop owner](../README.md#复用原桌面展示层)和[本片进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不替代完整 installed 或三平台资格。
 
+inner Terminal 的共享 UI Desktop build 现内联唯一核心图标依赖，保留原 exports、React peer、CSS 与准确许可，不再物化其完整独立 npm 包；其他真实依赖仍按原解析图复制，边界归[Terminal owner](../../cli/docs/terminal-release.md#制品闭包与身份)。outer、inner和每次启动的全部文件验证保持，启动收益须由原正式窗口及完整默认结果核实，见[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
+
 ## 构建与安装
 
 ```sh
@@ -22,6 +24,8 @@ bun run release:native uninstall --prefix /absolute/install/native
 ## 完整身份与生命周期
 
 [Native verifier](../../service/src/native-runtime-assets.ts)核 outer 的准确普通文件、目录及受限相对框架链接，并独立完整核 inner Terminal。tar 只存普通字节和封闭链接声明；拒绝 traversal、真实 tar links、重复/PAX 冲突、外部 hardlink、篡改及未声明条目，物化后重新核两层。目录中的 Electron 空 locale 也必须在准确清单内。
+
+普通文件的 SHA 沿[Service 只读 leaf](../../service/src/asset-file-hash.ts)核完整内容。通过原大小检查且不超过 64 KiB 的文件保留 `readFileSync`；较大文件逐块读至 EOF，每次完整核验按需分配并复用一个 1 MiB buffer。Main 的同步 `noAsar` 范围继续核物理 archive；初次核验、原双 SH 后复核与 Service 自有准入全部保持。分块内容及两层末字节拒绝由[原 Node-safe 完整测试](../../service/test/isolated/native-runtime-assets.test.ts)核对，实际首屏失败、读取对照与窗口／完整默认资格归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。
 
 Node main 持 outer/inner 两个 SH，继承 Bun helper 只关闭副本，不对 shared description UNLOCK。Service 与共享 Daemon 独立保两 root 使用权。Native proof 只接受已完整核验 inner Terminal 清单中的 `service` 或 `daemon`，两种入口均固定同一包内 Bun、`native-<digest>` 与 outer manifest；CLI/Electron 入口不获得 Service 身份。verify 与 private startup proof 的原 build/entry/runtime/manifest 必须准确相等，默认 Files 保护两个实际完整 root。关窗口、关闭 Client 或父进程退出不等于全部 lease 已释放；原运行/资源确认关闭后才释放。卸载先取得所有候选的双 root EX，busy 立即拒绝，不猜 PID 或强杀服务。
 

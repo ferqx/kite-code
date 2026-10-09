@@ -90,6 +90,10 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 
 当前 View 的真实 Run 可直接用于展示；完整历史超出近200项时，[Main](electron/tool-messages.ts)只接受当前已经观察、未带 `originMessage` 的 Message ID，每批32项，经当前生成 Client GET 核准确 Run ID／Session 和前后 Store 连接。结果仅含原出处、状态与时间，按原 generation／viewSelection／history epoch 绑定；关闭和切换只释放所属 GET。当前 Store 已保存的旧 Store 终态 Run 可作为历史事实展示，保原 `originStoreId`；foreign active 不进入活动轮次或控制。Fork／Include 的封存 Message 不查询来源 Run 后来的状态，也不据此标最终回复。
 
+同一 bridge／generation／Store／Session／Workspace／viewSelection 内，history epoch 刷新会重新核历史 Run；此前已核的 inactive completed／failed／cancelled 仅保留轮次展示，使等待新 metadata 和分批返回时不会暂时拆掉原 Conversation 节点或用户展开的过程。此展示层不填入新 epoch 的读取缓存，也不减少原 GET；已核的新 View 和新 metadata 替换旧事实，明确缺失删除旧展示。当前 View 同时更新该 scope 的 metadata，避免 Run 离开有限页后被较早结果覆盖。active／interrupted 不跨 epoch 保留，换任何展示身份即撤销；大正文复制和所有动作仍沿当前原身份与 authority 核验。原 DOM 文件5pass／80断言核节点、展开保持和新事实／缺失覆盖；原完整历史窗口的75秒资格与完整默认回归仍以[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)为准。
+
+没有 `outputBody` 的普通历史正文按 generation／viewSelection／Store／Session／Message 的 inline 身份保持组件，不因 epoch 重新挂载相同 Markdown；当前文件回调有无仍随核验状态变化。带 `outputBody` 的组件保原 epoch key，完整读取、关闭、换 scope 的撤销仍沿原边界；inline／body 分支切换同样重新挂载。共享正文身份仅按原八项字段 memo，任一字段变更仍清理原已读结果，不以展示组件保持借用旧全文或动作许可。
+
 只有已确认 completed 且非活动 Run 的最后一条完整、支持格式、无工具调用且后面无工具结果的助手消息才成为最终回复。原起止时间与终态供原组件显示耗时／失败／停止；无法核对时保原消息，活动视图失效显示“上次确认状态”，不补造成功或计时。大正文预览的 `copyText=null`；仅原完整 reader 已验证并显示的准确正文启用“复制本轮Agent回复”，关闭正文、换消息身份或换scope即撤销。本地 Map 只持有当前已显示内容，不写持久日志或格式。
 
 同一准确 Run 中相邻、已核实的 Files read2/3、glob/search2、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
@@ -201,6 +205,8 @@ Main 从实际选中根的 controller snapshot 固定 Store／subject／generati
 正式 renderer 的[后台总览](src/native-background-panel.tsx)是独立于选中会话的主动入口。它读取原主体根会话树内全部当前来源 Job，以及准确恢复根中的旧来源历史，包含 child/task carrier 与子会话中的 Job；超过200项仍穷尽全部页，不从有限 `selection.executions` 猜完整集合。每项分别显示原 Store、原父 Run、准确 `child-start-${executionId}` 子 Run、required 等待与 delivery；较新的子 Run 不替换原载体。公共来源与快照合同由[Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录)、[Service](../service/README.md#完整后台执行目录)和[Client](../../packages/client/README.md#完整后台执行目录)维护。
 
 [Main](electron/background.ts)固定 attach generation、Store、subject，先完整核公开目录再登记 immutable lineage 的 observation。512KiB/最多200项的有限 [IPC](electron/native-ipc.ts)只接 read ID、已观察 execution ID、observation ID 与准确停止 command ID；renderer 无法提供 Session、Workspace、路径、游标或 Runtime authority。[完整目录 reader](src/native-background.ts)只有穷尽同一观察才发布；新读取失败保留同 scope 上次完整显示，但新观察使旧停止 authority 失效。选择变化不清后台观察；断线、观察 reset、attach 替换和释放清所属读取及停止资格。
+
+新子日志读取先等待在途完整目录收束，再从最新 facts 核同 Execution、Store、Session、Workspace、原载体及 child 血缘；目录失败不能借用上次显示的令牌。接纳期间暂缓新目录 poll，原 `background.child.open` 返回后即恢复轮询，正文仍沿固定 scope 读到完整 EOF；关闭或 scope 更换可撤销等待及接纳。React 显示尚未提交不影响最新完整 facts 的选择，已固定读取不随后续 observation 更新重开。[原 DOM 回归](test/native-background-panel.test.tsx)6pass／73断言与同一源码外完整后台窗口1pass／119断言核此竞态和后续全流程，实际版本、失败及完整默认资格见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 非选中原输出复用[固定 H reader](electron/job-output-reads.ts)与公共覆盖证明；原目录刷新不重开已经完整的输出。Main 固定当前准入 Store 与原 Execution originStoreId，原输出不改出处。子日志逐页读原子会话固定消息上界，核原载体／父链与根血缘，并以当前 Store 读取完整原 ModelOutput；带 originMessage 的正文另核原 Model 的 Session／Run／originStoreId。64KiB传输核完整EOF、SHA和fatal UTF-8，原载体的子 Run 与日志中后来轮次保持各自身份。关闭详情或总览只 abort 所属 GET，零取消或恢复。这里的完整子日志指子消息与完整 ModelOutput；诊断 SessionLog 的 restore replayFloor 合同保持。
 
@@ -316,9 +322,11 @@ main 的私有草稿由 [private-data.ts](electron/private-data.ts) 使用实际
 
 原生大 Model 输出通过 [main view-read lease](electron/model-output-reads.ts) 与 [renderer reader](src/native-model-output.ts) 接入共享 `ModelOutputMessage`。有 `model_outputs` capability 时才提供显式完整读取；缺能力保持标明的 preview。open 固定当前连接 Store、阅读 Session、Execution、窗口 generation 与选择身份。封存 Message 的来源只从 Main 已观察副本取得；先用公共 `Client.getExecution` 核准确原 Model／Session／Run／originStoreId，再以当前 Store 和原 Session 调用 `Client.getModelOutput`，核封存完整性与计数。恢复后的当前 Store 与原出处分别校验，不重绑 origin；这些 GET 不读取来源 Run 的后来状态。main 最多一个在途读取/正文 lease，不恢复丢失句柄，不创建执行或 spool 权威。跨 IPC 每块最多 64KiB（二进制用 base64），请求必须按准确下一 offset 推进，原 1MiB/4MiB IPC 预算没有提高。close、切换、刷新、网络释放只 abort 本读取和清除正文，不提交 Command 或取消 Model/Run。
 
-renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后调用公共 `verifyModelOutputSnapshot` 的生成 schema、canonical body SHA、字节数及 completion 核验，再检查原 Store/Session/Execution/hash，只有当前视图可显示。普通会话不启用 reasoning 展示；正文不进入持久缓存。main 的 SDK 快照与 renderer 的完整正文仍可能各占一份整块内存，不能把有限 IPC chunk 声称为固定内存 streaming。[test/native-model-output.test.ts](test/native-model-output.test.ts) 的有限 port 测试覆盖 >17MiB、offset、hash/UTF-8 损坏、迟到 SDK 返回/取消与旧选择；[实际 Electron 测试](test/isolated/native-model-output-electron.test.ts) 使用私有构建 Service、真实 SQLite/本机兼容 SDK 输出，检查完整 >17MiB DOM 尾、显式关闭、跨窗口/旧 generation 拒绝、刷新只保 preview、模型计数不变与退出原 PID 清理。正文采用完整多段；不将单个巨大 glyph raster 的 GPU 平台上界误作本文传输裁剪许可。
+renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后调用公共 `verifyModelOutputSnapshot` 的生成 schema、canonical body SHA、字节数及 completion 核验，再检查原 Store/Session/Execution/hash，只有当前视图可显示。普通会话不启用 reasoning 展示；正文不进入持久缓存。main 的 SDK 快照与 renderer 的完整正文仍可能各占一份整块内存，不能把有限 IPC chunk 声称为固定内存 streaming。[test/native-model-output.test.ts](test/native-model-output.test.ts) 的有限 port 测试覆盖 >17MiB、offset、hash/UTF-8 损坏、迟到 SDK 返回/取消与旧选择；[实际 Electron 测试](test/isolated/native-model-output-electron.test.ts) 使用私有构建 Service、真实 SQLite/本机兼容 SDK 输出，检查完整 >17MiB DOM 尾、显式关闭、跨窗口/旧 generation 拒绝、刷新只保 preview、模型计数不变与退出原 PID 清理。共享 MessageContent 将长普通文本组织为相邻 Text 节点，保持完整原文、GFM 与原消息列；不裁剪正文或插入额外换行。原 Fork 窗口继续核 `main.innerText` 超过17MiB及准确尾部，关闭／切范围只释放所属阅读，同范围刷新保已读正文；原完整 scope／hash／EOF 和模型计数门禁保持。该组织不把有限 IPC chunk 声称为固定内存 streaming，本轮实际结果归[普通启动进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。
 
 本次受影响 Native 组合实测 9 项、71 条 Bun 断言通过；大输出最终 fixture 独立复跑约 36 秒通过，另含 24 条 Node 断言，原基础窗口场景另含 14 条 Node 断言。这是 macOS 开发 fixture 的真实窗口/协议证据，仍不代替完整安装制品或其他平台资格。Desktop 类型、局部 Biome、portable build 与文档结构检查均通过。
+
+[Model](test/isolated/native-model-output-electron.test.ts)与[Fork](test/isolated/native-sessions-electron.test.ts)整窗口的私有[进程 owner](test/native-owned-processes.fixture.ts)沿原 launch／run 阶段，以准确 Node executable、driverPath、自有 root、kernel birth 与 fresh PPID 绑定后代，不按名称清理。已绑定进程短暂 uncertain／死亡过渡仅在共享截止内只读等待，未知或复用 PID 不发信号；正常业务退出仍有已绑定 alive 记录必须失败，即使随后清理成功也不改判绿。身份／绑定／截止错误保留并聚合原业务失败，未确认保自有 root。2秒是共享剩余等待截止，平台同步身份读取可能延长墙钟，不构成绝对2秒清理保证。有限 phase 为准确捕获与失败收尾保留，定位用 IPC／DOM 观察已退役；这份测试收尾不代证整个 Runtime 的资源退出。
 
 [private-data.test.ts](test/isolated/private-data.test.ts) 以实际 Node 子进程验证冷打开、两进程同修订竞争、133 份草稿分页而非淘汰，以及未知格式、损坏行/文件和硬链接局部失败保原字节。[native-drafts-electron.test.ts](test/isolated/native-drafts-electron.test.ts) 使用私有实际 Service 制品、真实 SQLite 与 Node Playwright/Electron：草稿与未知创建意图跨冷应用进程恢复，键盘发起的创建响应在服务提交后被真实 TCP socket 断开，刷新/重启后只核实原命令，该未知原意图的实际 POST 为 1，没有新增 Model 请求。另验证真实 command 冲突的明确业务拒绝保留原草稿，把已停止的临时业务 Store 整份保留再创建新 Store，验证同 ID 新会话输入仍空、原草稿可读且明确关联失效，并逐次核实所属服务 PID 已退出。[实际 React DOM 测试](test/isolated/native-drafts-dom.test.tsx) 另证明晚创建回执不能抢回已切换的阅读视图或移动草稿。受影响 8 文件完整组合为 16 项、112 条 Bun 断言通过；最终业务拒绝及新增边界定向 4 文件复验为 10 项、66 条断言。新私有文件 fixture 另含 23 条实际 Node 断言，新冷启动窗口 fixture 另含 26 条实际 Node 断言。Desktop 类型与局部 Biome、文档结构检查通过；这是 macOS 开发制品的限定资格，未声称完整安装、布局持久化、未保存文本自动恢复或其他平台资格。
 
@@ -327,6 +335,8 @@ renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后�
 当前权限事实读取失败或观察流重置/失联时，main 不再向窗口提供旧的可写权限事实；窗口说明暂不可核实并提供显式重新读取入口。迟到的旧视图读取失败不能禁用或改绑新视图。网络释放与刷新只影响调用者网络，不停止所属 Service/Run；原权限意图在视图外显示。现有能力缺席时保持只读；实际授权目录管理边界见下方独立说明。
 
 [test/native-permissions.test.ts](test/native-permissions.test.ts) 的有限 SDK port 证据覆盖重复在途选择、未知原命令、切换及迟到读取、缺 capability 与子会话只读。[test/isolated/native-permissions-electron.test.ts](test/isolated/native-permissions-electron.test.ts) 则使用真实 macOS Electron main/preload/React 窗口、私有构建 Service、SQLite 和本机兼容模型计数端点，实际键盘保存模式/default、信任/撤销，提交后真实 HTTP socket 丢失只查询原命令，以及竞争修改产生真实 `host_control_conflict`。显式失联读取使写入口不可用，重新核实恢复实际事实；两个原 Session 的 Run 均为零，Provider 请求为零，退出清理所属实际 PID。这是当前开发制品的限定窗口证据，不代表旧正式入口已切换、完整安装制品或其他平台通过。
+
+当前原权限窗口在首次选择与 reload 后进入正式“会话工具”，先沿原核范围／信任动作取得模式操作资格，再执行原模式与默认设置、未知回执原查询、失败读取和 CAS，最后明确撤销信任。信任与撤销仍各一次，全部原业务断言与期限保持；同一完整文件1pass／1Bun断言、原13处Node断言通过，Provider0、两个会话无Run及所属Service退出均核实。该调用者适配遵守现行未信任只读的页面合同；准确输入和整体资格归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 原生输入检查器复用公共 UI `ModelInputs`，由 [Native Model Input adapter](src/native-model-input.ts) 连接 main 的公开 `listModelInputs/getModelInput`。Model calls 目录按所选原 Session 和固定 upperSeq 逐页读取，每页不超过 200；不会把第 200 条当作全部记录。Runtime logs 中的原 Model 执行可跳到准确 Execution 的敏感内容确认页，跳转本身不请求正文。这组 logs 只展示当前已保存执行的有限投影，不声称已经迁入完整 Runtime 事件日志。
 
@@ -341,6 +351,8 @@ renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后�
 用户明确核对观察到的 Session/epoch 后，main 固定原 commandId/Store/范围与 CAS；同一在途观察只提交一次。未知结果保持原意图，切换后也仅查询原 mutation，不更换 ID 或重发 POST；其他 Session 仍可只读查询。冲突需要重新读取后再次明确选择。读取失败或观察流失效会去掉旧可写目录，迟到响应不进入另一视图。清除不启动 Run/Model、不撤回已执行效果，组件卸载及网络释放也不停止所属 Service。[main 范围测试](test/native-grants.test.ts) 和 [共享实际 DOM 键盘测试](../../packages/ui/test/permission-grants-dom.test.tsx)覆盖精确原 child 范围、观察漂移、缺 capability、重复提交与 late 结果。
 
 [实际 Electron 授权目录测试](test/isolated/native-grants-electron.test.ts) 从真实临时 SQLite/Core 已接受的两份 `same_command` 授权启动私有构建 Service 与窗口。实际键盘清除后断开真实 HTTP 回应 socket，切换会话查询原 ID，原清除 POST 仅一次，另一会话原授权仍在；另一真实 host Command 造成 epoch 冲突时拒绝且不重试。失败 GET 使清除只读，退出核实所属实际 Service PID 消失，随后 readonly 重开确认两 Session 的原 Run/Model 执行数量没有增加。该窗口 fixture 含 13 条实际 Node 断言；它是 macOS 开发制品证据，尚不代表完整安装、旧正式入口切换、child 窗口清除或 Linux/Windows 资格。
+
+当前原窗口首次选择准确会话后，先核原标题并打开正式“会话工具”，再读取授权；后续选择已有的侧栏步骤保持。只补该首次导航，全部原driver字节、13Node断言及预算保留。同一完整文件1pass／10Bun断言通过，Desktop types／Biome通过；本轮默认真实失败与阶段范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不把私有制品窗口资格提升为完整安装或整体退出。
 
 此前恢复后的输入/输出、私有冷草稿、创建未知意图、模式/信任与完整目录基线仍为 12 文件、24 项、170 条 Bun 断言。原输入窗口另含 29 条 Node 断言，大输出窗口 24 条，基础窗口 14 条，冷草稿窗口 26 条；这些分别核实所属实际 PID 清理。共享 `ModelInputs/ModelInputPort` 保留 Web 原确认/metadata 语义，Runtime logs 的 `initialExecutionId` 跳转不自动 body GET；scope 改变不依赖 remount key，清正文并 abort，Native 输入和输出共享单 main lease。
 
@@ -376,11 +388,15 @@ Native 有独立分页 Context reader，因此仅此宿主以 `readContextOnSele
 
 压缩与通知刷新最终完整 Native/共享权限组合实测 28 文件、51 项、348 条 Bun 断言全通过（约 75 秒）；随后新增确定性授权目录 GET/dirty 后继 barrier 的刷新文件复验为 2 项、7 条断言。新压缩窗口另有 33 条实际 Node 断言、四次自有兼容 SDK 调用及两次所属 PID 清理；原管理窗口 18 条 Node 断言和其他已有窗口证据仍保留。Desktop 类型、portable build、15 个本切片归属代码文件 Biome、文档结构和测试归属检查通过；未运行共享 dist 或全 workspace 构建。这是 macOS 私有开发制品资格，不代表正式旧入口切换、完整安装、Linux/Windows 或付费 Provider 验收。
 
-原生历史由 [NativeHistory](src/native-history.ts) 渐进读取全部公开分页，固定原 Store、Session、选择代次与 highWaterSeq。当前选定会话不设累计记录数或字节截断，另外最多保留八个已读会话缓存；首尾原文不会被截断替代。每页仍受 4MiB IPC 预算约束，公开回应或 IPC 页过大时只在原游标和高水位缩小 GET 页；单项目无法传输时明确未完成。读取失败保留已知正文并撤除操作资格，切换只关闭自己的读取，迟到旧页不能进入新会话，也不取消业务执行。
+原生历史由 [NativeHistory](src/native-history.ts) 分页读取全部公开记录，固定原 Store、Session、选择代次与 highWaterSeq。每页仍核原身份、严格序号与游标；完整扫描后才发布该高水位的阅读快照，后台校准期间保留上次已发布正文。离开会话缓存及同会话新范围复用也只取已发布快照，不把进行中的前缀提前展示。实际失败仍发布已经合法读到的正文并撤除操作资格。当前选定会话不设累计记录数或字节截断，另外最多保留八个已读会话缓存；首尾原文不会被截断替代。
+
+[Main](electron/native-caller.ts) 每页仍执行 4MiB IPC 预算及公开回应校验，过大时只在原游标和高水位缩小 GET 页；已通过校验的页大小仅在同一 generation／selection／Session／Store／highWater／readId 内单调保留，后页仍重新读取和校验全部正文。范围变化、取消、关闭或新读取重置该限制；单项目无法传输时明确未完成。切换只关闭自己的读取，迟到旧页不能进入新会话，也不取消业务执行。取舍与既有观察刷新共同归[完整正文刷新决定](../../.agents/notes/implemented/bug-fix/2026-10-08-native-observation-output-refresh.md)。
 
 观察流缺口使旧操作事实失效。main 在原 Store 先读取全局目录基线，再重读目录、当前 view 与完整历史，随后用公开 `startAfter` 重开观察；该起点不成为已应用游标。经公开 Client 校验的 `onReady` 仅确认观察就绪，历史完成与当前事实共同恢复操作资格，不要求产生额外业务事件。历史暂时 loading 保留只读 Context/授权事实；实际失败才清除相应事实。
 
-[历史 reader](test/native-history.test.ts)、[main 原游标缩页](test/native-caller.test.ts)、[ready-only 恢复](test/native-refresh.test.ts)当前组合为 13 项、81 条断言；[实际长历史窗口](test/isolated/native-history-electron.test.ts)读取 5001 条显式隔离库历史记录和额外超过 8MiB 的多消息正文，验证完整尾部、失败保正文与禁用发送、重新读取及迟到切换，Model 调用为零，另有 13 条 Node 断言与所属 PID 清理。记录通过 fixture 直接存入隔离库，未伪造 5001 次 Provider 执行。当前 Context 窗口复验保留全部 15 条 Node 断言；压缩窗口在真实可操作门禁就绪后继续键盘 Enter，保留全部 33 条 Node 断言与四次兼容 SDK 调用，两个所属 Service PID 已停止。这些证据仍是 macOS 开发窗口切片。
+[历史 reader](test/native-history.test.ts)、[main 原游标缩页](test/native-caller.test.ts)、[ready-only 恢复](test/native-refresh.test.ts)首次组合为 13 项、81 条断言；[实际长历史窗口](test/isolated/native-history-electron.test.ts)读取 5001 条显式隔离库历史记录和额外超过 8MiB 的多消息正文，验证完整尾部、失败保正文与禁用发送、重新读取及迟到切换，Model 调用为零，首次另有 13 条 Node 断言与所属 PID 清理。记录通过 fixture 直接存入隔离库，未伪造 5001 次 Provider 执行。原 Context 窗口复验保留全部 15 条 Node 断言；压缩窗口在真实可操作门禁就绪后继续键盘 Enter，保留全部 33 条 Node 断言与四次兼容 SDK 调用，两个所属 Service PID 已停止。这些证据仍是 macOS 开发窗口切片。
+
+2026-10-09 的原完整默认暴露完成轮次默认折叠后旧 driver 未展开的断言错误；driver 现沿真实“展开本轮处理过程”入口继续原计数与正文断言，原页面、driver、整例期限保持。随后原重载期限仍实际失败；当前 reader 完整文件 4 项／22 条断言核快照保留、失败前缀及切换缓存，Main 完整文件 14 项／146 条断言核固定高水位读至 EOF、后页复用已验证大小和新读取重置。独立审查核并发学习值只缩小、旧读取不能回写。真实历史窗口与完整默认的准确状态归[普通制品收束进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)，局部通过不代证窗口重载或阶段退出。
 
 2026-10-02 在 macOS/Bun 1.4.2 当前工作树执行 `bun test apps/desktop/test packages/ui/test/permissions-dom.test.tsx`，最终完整组合为 34 文件、76 项、509 条 Bun 断言，全部通过（约 111 秒）。包括 >17MiB 原作用域输入/输出、Context、授权、私有冷草稿、管理、压缩、活动刷新和新增长历史窗口；各真实窗口仍独立核对所属 Service 退出。首轮组合曾失败于暂时历史加载清除 Context 事实，以及 fixture 在 disabled 按钮直接发送 Enter；前者已修复为 loading 保留只读事实，后者等待原 actionability 后继续原键盘动作，原断言和期限保持。Desktop typecheck/build、11 个归属代码文件 Biome、文档结构/影响及测试归属/统一边界检查通过。该结果不改变正式入口和跨平台资格的未完成状态。
 
@@ -388,11 +404,17 @@ Native 有独立分页 Context reader，因此仅此宿主以 `readContextOnSele
 
 [后页 child](test/interaction-pages-child.fixture.ts)和[持久答复 child](test/answer-journal-child.fixture.ts)按同一原 Store/Workspace 的只读目录装配，两个原 driver 的首次发送等待实际按钮可点击；模型事件、权限与所有原期限保持。原后页窗口复验仍完成40个原 Job、40次效果和零取消，原持久答复窗口仍核原全文/身份/digest、POST前SQLite提交、丢原回执、两个Main生命周期、冷原GET两次/POST零次与effect once。源码与新回归符合当前目录合同；第六轮后页现场曾显示run admitted，不能将有限复验通过追认为旧0卡的完整因果，详细范围见进度。
 
+当前[原后页 driver](test/interaction-pages-electron.fixture.ts)先打开既有“会话工具”，再等待实际“下一页待决请求”；原完整步骤、断言与期限不变。同一完整文件1pass／3Bun断言通过，20卡替换、关闭／切换撤销旧读取、后页原回答丢回执后只查原申请、40次效果与零取消均核实；这项正式导航适配不改变待决窗口或回答权限。
+
 模型设置的安全读取由 [main 配置观察](electron/configuration.ts) 与 [模型面板](src/native-model-settings.tsx) 直接消费公开 NativeClient `getModelSettings`。封闭 IPC 只允许用户或当前项目两种作用域；项目 Workspace 由 main 对当前 Session 的实际 view 推导，renderer 不能提供路径或 Workspace 权威。main 冻结原 Store、选择代次和配置观察，关闭或切换只中止自身 GET，迟到原读取不能进入新选择。renderer 仅收到模型标识、Provider、模型名称、期望启禁、期望默认模型和安全诊断；配置中的 URL、credentialRef、原 snapshot 与 MCP 字段不进入这个面板，配置列表不代表 live 模型发现或 MCP inventory。
 
 模型启禁与默认选择通过专门 `updateModelSettings` 服务业务端口提交；默认模型不能直接禁用，默认选择必须来自已启用且配置可用的模型。main 保存原 Store、作用域、完整读取集和 commandId，最多保留128项原意图；重复在途共享请求，同作用域存在结果未知则阻止新保存。关闭或切换只取消读取，不取消已保存意图；未知回执仅原 commandId/Store 查询，不自动重发。回执需匹配原 scope/readSet/operation，应用成功才重读原面板，迟到旧结果不覆盖新选择。renderer 显示原提交及其 applied/failed/unknown，冲突后须重新读取。一般 JSONC 仍允许暂时不可路由的期望值，不能代替模型设置服务规则；configured 仅是结构/解析事实，不表示远端发现或凭据可用。推理强度已由AI兼容SDK实际传输并保存metadata，当前面板尚不提供该项。[main/IPC 测试](test/native-configuration.test.ts)覆盖脱敏投影、坏配置诊断、原项目推导、拒绝注入 authority 与迟到关闭；[实际基础窗口](test/isolated/native-electron.test.ts)新增六条 Node 断言，实际读取用户和项目配置，Provider 调用为零，再继续原基础执行与所属 Service 退出检查。
 
 当前 Native 模型设置 main/IPC 与实际 DOM 新增回归5项、51断言通过，覆盖原意图重复、坏回执/未知只原查询、选择切换迟到隔离、默认模型禁用门禁、待决作用域写禁用及原读取集。Desktop types/build通过。[真实两模型窗口](test/isolated/native-model-settings-electron.test.ts)通过27条Node断言：held A在保存B后仍使用A，下一显式Run使用B；物理丢回执仅一次POST、零自动GET，跨作用域和Session后原GET一次；读取集冲突保留外部注释和原启用值，冷读Provider总次数仍为2，两次所属Service PID均退出。该结果是macOS开发窗口切片，不代表完整发现、输入区effort、安装与跨平台资格。
+
+正式全屏设置默认打开“常规”；[原模型窗口 driver](test/native-model-settings-electron.fixture.ts)现沿设置分类明确选择“模型”，再继续原配置操作。该 helper 之外的全部 driver 字节与预算保持；当前同一完整窗口1pass／3Bun断言、42Node断言，held A／下一Run B、原未知回执一次查询、CAS冲突、冷读与两次所属退出通过。Desktop types／Biome通过，真实默认红及当前完整回归范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)；本项夹具适配不改变模型设置行为或整体阶段资格。
+
+[原基础窗口 driver](test/native-electron.fixture.ts)也在同一设置分类核 `aria-pressed` 后明确选择“模型”，再读取用户与项目配置。同一原完整文件1pass／2Bun断言通过，配置读取阶段Provider0、原提交后Provider1、私有草稿／刷新／宿主边界与所属Service退出保持；Desktop types／Biome通过，原完整业务断言及预算未改。
 
 模型设置接入、profile 生命周期锁修改之前的完整 Native 基线实测为 37 文件、82 项、564 条 Bun 断言，全通过（119.85 秒，2026-10-02）。包含两模型窗口的27条Node断言与两个所属Service PID退出，以及原长历史、完整正文、Context、授权和压缩等既有断言；Desktop types/build通过。这是锁接入之前的证据，不代表下面的生命周期回归已经包含在该计数中。
 

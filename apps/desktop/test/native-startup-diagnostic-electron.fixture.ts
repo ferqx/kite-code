@@ -9,6 +9,16 @@ const [candidate, home, control, database] = process.argv.slice(2) as [
   string,
   string,
 ];
+const began = performance.now();
+const observe = (phase: string) =>
+  console.log(
+    JSON.stringify({
+      stage: 'native_diagnostic_driver',
+      phase,
+      elapsedMs: Math.round(performance.now() - began),
+    }),
+  );
+observe('begin');
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
 const locks = async () => await (await fetch(`${control}/locks`)).json();
 try {
@@ -16,6 +26,7 @@ try {
     originalCount = await (await fetch(`${control}/count`)).text(),
     reportPath = join(home, 'startup-report.json'),
     existing = join(home, 'existing.json');
+  observe('launch_begin');
   app = await _electron.launch({
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
@@ -23,7 +34,9 @@ try {
     env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 10000,
   });
+  observe('launch_end');
   const page = await app.firstWindow();
+  observe('window');
   page.setDefaultTimeout(10000);
   const save = page.getByRole('button', { name: '保存诊断', exact: true });
   await save.waitFor();
@@ -43,6 +56,7 @@ try {
     },
     { existing, reportPath },
   );
+  observe('save_begin');
   // Only the native dialog selection callback is controlled. Production Main,
   // Service, preload, renderer and writeFile flags are the unchanged candidate.
   await save.click();
@@ -98,11 +112,15 @@ try {
     'native_startup_diagnostic_stage: real Store failure, retained save UI, cancel, no overwrite, closed private report',
   );
 
+  observe('save_end');
   // External repair is a test action; the desktop must preserve the original
   // failed database. Its explicit retry creates a new launch and observation.
   renameSync(database, `${database}.original`);
+  observe('retry_begin');
   await page.getByRole('button', { name: '重新尝试', exact: true }).click();
+  observe('retry_clicked');
   await page.locator('.session-header').waitFor();
+  observe('ready');
   assert.equal(await page.locator('main[aria-label="kite 启动页"]').count(), 0);
   assert.deepEqual(await page.evaluate(() => window.kiteNative!.startupStatus!()), {
     diagnosticAvailable: false,
@@ -110,7 +128,9 @@ try {
   assert.deepEqual(readFileSync(`${database}.original`), original);
   assert.deepEqual(await locks(), { outer: true, inner: true });
   assert.equal(await (await fetch(`${control}/count`)).text(), originalCount);
+  observe('normal_close_begin');
   await app.close();
+  observe('normal_close_end');
   app = undefined;
   assert.deepEqual(await locks(), { outer: false, inner: false });
   assert.equal(await (await fetch(`${control}/count`)).text(), originalCount);
@@ -118,5 +138,7 @@ try {
     'native_startup_diagnostic_stage: same-window explicit retry after external repair, zero Model, normal owned close',
   );
 } finally {
+  observe('finally_begin');
   await app?.close().catch(() => {});
+  observe('finally_end');
 }

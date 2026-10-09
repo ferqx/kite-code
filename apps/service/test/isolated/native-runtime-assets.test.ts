@@ -34,7 +34,7 @@ import {
 } from '../../src/runtime-assets';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-function fixture() {
+function fixture(largeAssets = false) {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-integrity-'))),
     root = join(parent, 'candidate');
   mkdirSync(root, { mode: 0o700 });
@@ -42,9 +42,16 @@ function fixture() {
   mkdirSync(terminal, { mode: 0o700 });
   const terminalEntries = terminalBundleEntries(process.platform),
     innerFiles: TerminalBundleManifest['files'][number][] = [];
-  for (const path of Object.values(terminalEntries)) {
+  for (const path of [
+    ...Object.values(terminalEntries),
+    ...(largeAssets ? ['node_modules/dependency/large.bin'] : []),
+  ]) {
     mkdirSync(dirname(join(terminal, path)), { recursive: true });
-    const bytes = Buffer.from(path);
+    const bytes =
+      path === 'node_modules/dependency/large.bin'
+        ? Buffer.alloc(2 * 1024 * 1024 + 37, 0x34)
+        : Buffer.from(path);
+    if (path === 'node_modules/dependency/large.bin') bytes.fill(0x56, bytes.length - 37);
     const mode = path === terminalEntries.runtime ? 493 : 420;
     writeFileSync(join(terminal, path), bytes, { mode });
     innerFiles.push({ path, size: bytes.length, sha256: sha(bytes), mode });
@@ -72,16 +79,20 @@ function fixture() {
     'electron/framework/actual',
   ]) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
-    const bytes = Buffer.from(
-        path === '.use-terminal.lock'
-          ? ''
-          : path === 'electron/version'
-            ? '44.3.0'
-            : path === entries.package
-              ? JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' })
-              : path,
-      ),
+    const bytes =
+        largeAssets && path === 'electron/framework/actual'
+          ? Buffer.alloc(3 * 1024 * 1024 + 73, 0x78)
+          : Buffer.from(
+              path === '.use-terminal.lock'
+                ? ''
+                : path === 'electron/version'
+                  ? '44.3.0'
+                  : path === entries.package
+                    ? JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' })
+                    : path,
+            ),
       mode = path === '.use-terminal.lock' ? 384 : path === entries.electron ? 493 : 420;
+    if (largeAssets && path === 'electron/framework/actual') bytes.fill(0x9a, bytes.length - 73);
     writeFileSync(join(root, path), bytes, { mode });
     files.push({ path, size: bytes.length, sha256: sha(bytes), mode });
   }
@@ -109,7 +120,7 @@ function fixture() {
   };
 }
 test('Node-safe full Native closure relocates with exact inner proof, fixed coordination file and confined Electron framework links', async () => {
-  const f = fixture();
+  const f = fixture(true);
   try {
     const selected = verifyNativeRuntimeBundle(f.root),
       moved = join(f.parent, 'relocated');
@@ -165,12 +176,57 @@ test('Node-safe full Native closure relocates with exact inner proof, fixed coor
           'node',
           '--input-type=module',
           '-e',
-          `import {verifyNativeRuntimeBundle} from ${JSON.stringify(out)};const value=verifyNativeRuntimeBundle(${JSON.stringify(moved)});console.log(value.digest);`,
+          `import {verifyNativeRuntimeBundle} from ${JSON.stringify(out)};
+import {readFileSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {join} from 'node:path';
+const root=${JSON.stringify(moved)},value=verifyNativeRuntimeBundle(root),proofs=[];
+for(const [layer,path,manifest,code] of [
+  ['outer','electron/framework/actual',value.manifest,'native_bundle_identity_mismatch'],
+  ['inner','terminal/node_modules/dependency/large.bin',value.terminal.manifest,'native_bundle_unavailable'],
+]) {
+  const target=join(root,path),original=readFileSync(target),changed=Buffer.from(original);
+  const declared=manifest.files.find(file=>file.path===(layer==='outer'?path:'node_modules/dependency/large.bin'));
+  const oracle=createHash('sha256').update(original).digest('hex');
+  changed[changed.length-1]^=1;
+  let rejected;
+  try {
+    writeFileSync(target,changed);
+    try {verifyNativeRuntimeBundle(root);} catch(error) {rejected=error.code;}
+  } finally {writeFileSync(target,original);}
+  if(rejected!==code)throw Error('same_size_tail_rejection_mismatch');
+  const restored=verifyNativeRuntimeBundle(root);
+  proofs.push({layer,size:original.length,declared:declared.sha256,oracle,rejected,restoredDigest:restored.digest});
+}
+process.stderr.write(JSON.stringify(proofs));
+console.log(value.digest);`,
         ],
         { env: { PATH: process.env.PATH!, NODE_PATH: '' }, stdout: 'pipe', stderr: 'pipe' },
       );
     expect(await child.exited).toBe(0);
     expect((await new Response(child.stdout).text()).trim()).toBe(actual.digest);
+    const chunkProofs = JSON.parse(await new Response(child.stderr).text());
+    expect(chunkProofs).toEqual([
+      {
+        layer: 'outer',
+        size: 3 * 1024 * 1024 + 73,
+        declared: actual.manifest.files.find((file) => file.path === 'electron/framework/actual')!
+          .sha256,
+        oracle: sha(readFileSync(join(moved, 'electron/framework/actual'))),
+        rejected: 'native_bundle_identity_mismatch',
+        restoredDigest: actual.digest,
+      },
+      {
+        layer: 'inner',
+        size: 2 * 1024 * 1024 + 37,
+        declared: actual.terminal.manifest.files.find(
+          (file) => file.path === 'node_modules/dependency/large.bin',
+        )!.sha256,
+        oracle: sha(readFileSync(join(moved, 'terminal/node_modules/dependency/large.bin'))),
+        rejected: 'native_bundle_unavailable',
+        restoredDigest: actual.digest,
+      },
+    ]);
     expect(readdirSync(moved)).toEqual(before);
     expect(readFileSync(join(moved, '.use-terminal.lock')).length).toBe(0);
   } finally {

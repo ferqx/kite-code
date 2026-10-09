@@ -6,6 +6,7 @@ import type { NativeState } from '../../../apps/desktop/src/native-bridge';
 
 // Finite harness facade: the runtime remains the installed workspace Playwright, not a test implementation.
 interface Locator {
+  getByRole(role: string, options: { name: string; exact?: boolean }): Locator;
   click(): Promise<void>;
   fill(value: string): Promise<void>;
   waitFor(): Promise<void>;
@@ -139,7 +140,10 @@ try {
   const page = await app.firstWindow();
   await security(app);
   page.setDefaultTimeout(10000);
-  await page.getByRole('button', { name: 'Native installed', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '当前项目会话', exact: true })
+    .getByRole('button', { name: 'Native installed', exact: true })
+    .click();
   const state = await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
   );
@@ -194,7 +198,10 @@ try {
   const cold = await second.firstWindow();
   await security(second);
   cold.setDefaultTimeout(10000);
-  await cold.getByRole('button', { name: 'Native installed', exact: true }).click();
+  await cold
+    .getByRole('navigation', { name: '当前项目会话', exact: true })
+    .getByRole('button', { name: 'Native installed', exact: true })
+    .click();
   await cold.getByText('Native installed complete', { exact: true }).waitFor();
   assert.equal((await query('count')).providerCalls, 1);
   assert.equal((await query('uninstall')).blocked, true);

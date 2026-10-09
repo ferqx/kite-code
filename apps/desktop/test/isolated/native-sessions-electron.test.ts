@@ -14,6 +14,7 @@ import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { buildNativeDesktop } from '../../scripts/build-native';
+import { NativeOwnedProcesses } from '../native-owned-processes.fixture';
 
 const require = createRequire(import.meta.url);
 function gate() {
@@ -221,7 +222,71 @@ test.skipIf(process.platform !== 'darwin')(
         env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
       },
     );
-    const stderrPromise = new Response(driver.stderr).text(),
+    let owner: NativeOwnedProcesses | undefined,
+      completed = false,
+      failure: unknown;
+    const captureOwner = () => {
+      owner ??= new NativeOwnedProcesses({
+        pid: driver.pid,
+        nodeExecutable: realpathSync(Bun.which('node')!),
+        driverPath,
+        root,
+      });
+      owner.capture();
+    };
+    let observedLine = '',
+      observedLines = 0,
+      overlongLine = false;
+    const decoder = new TextDecoder();
+    function observeStderr(text: string) {
+      for (const character of text) {
+        if (character === '\n') {
+          if (
+            !overlongLine &&
+            observedLines < 64 &&
+            /^(?:NATIVE_SESSION_PHASE |NATIVE_SESSION_LAST_PHASE |NATIVE_SESSION_ERROR )/.test(
+              observedLine,
+            )
+          ) {
+            console.error(observedLine);
+            if (observedLine.startsWith('NATIVE_SESSION_PHASE ')) {
+              const phase = JSON.parse(observedLine.slice('NATIVE_SESSION_PHASE '.length)).phase;
+              if (['launch_begin', 'launch_completed', 'run_completed'].includes(phase))
+                captureOwner();
+            }
+            observedLines++;
+          }
+          observedLine = '';
+          overlongLine = false;
+        } else if (!overlongLine) {
+          if (observedLine.length < 8192) observedLine += character;
+          else {
+            observedLine = '';
+            overlongLine = true;
+          }
+        }
+      }
+    }
+    const observedStderr = driver.stderr.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          controller.enqueue(chunk);
+          try {
+            if (observedLines < 64) observeStderr(decoder.decode(chunk, { stream: true }));
+          } catch {
+            /* Observation cannot change the original stderr stream. */
+          }
+        },
+        flush() {
+          try {
+            if (observedLines < 64) observeStderr(`${decoder.decode()}\n`);
+          } catch {
+            /* Original stream completion remains independent of observation. */
+          }
+        },
+      }),
+    );
+    const stderrPromise = new Response(observedStderr).text(),
       stdoutPromise = new Response(driver.stdout).text();
     try {
       const exit = await bounded(driver.exited, 45000);
@@ -232,13 +297,29 @@ test.skipIf(process.platform !== 'darwin')(
       console.info(output.trim());
       expect(output).toContain('Native Session Node assertions:');
       expect(requests).toBe(1);
+      completed = true;
+    } catch (error) {
+      failure = error;
     } finally {
       barrier.release();
+      owner?.capture();
       driver.kill('SIGKILL');
       await driver.exited;
-      provider.stop(true);
-      rmSync(root, { recursive: true, force: true });
+      try {
+        await owner?.settle(completed);
+      } finally {
+        provider.stop(true);
+        console.info('native_owned_processes', owner?.metadata);
+        if (owner?.confirmed) rmSync(root, { recursive: true, force: true });
+        else console.error('native_owned_root_retained', root);
+      }
     }
+    if (!owner?.confirmed || owner.errors.length)
+      throw new AggregateError(
+        [...(failure === undefined ? [] : [failure]), ...(owner?.errors ?? [])],
+        'native_owned_cleanup_failed',
+      );
+    if (failure !== undefined) throw failure;
   },
   60000,
 );

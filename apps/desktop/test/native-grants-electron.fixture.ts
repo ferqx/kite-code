@@ -24,6 +24,8 @@ try {
   const page = await app.firstWindow();
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
+  await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await openSessionTools(page);
   const panel = page.getByRole('region', { name: '当前会话授权目录' });
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText(/实际会话：s；授权版本：/).waitFor();

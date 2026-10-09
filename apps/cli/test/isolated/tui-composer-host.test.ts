@@ -92,6 +92,18 @@ def wait(text):
  while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
   if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-6000:].decode(errors='replace'))
   pump()
+def wait_selection(current,target):
+ deadline=time.monotonic()+10
+ begin=(chr(27)+'[?2026h').encode();end=(chr(27)+'[?2026l').encode()
+ while True:
+  start=buffer.rfind(begin);finish=buffer.find(end,start+len(begin)) if start>=0 else -1
+  if finish>=0:
+   frame=buffer[start+len(begin):finish].decode(errors='replace')
+   lines=re.sub(chr(27)+r'\\[[0-?]*[ -/]*[@-~]','',frame).splitlines()
+   if any(line.startswith('Session '+current+' · ') for line in lines) and 'Select Session (arrows/Enter, Esc)' in lines and '> '+target in lines:
+    print('COMPOSER_SELECTION_FRAME '+current+' -> '+target,flush=True);return
+  if time.monotonic()>deadline:raise RuntimeError('expected current Session '+current+' chooser target '+target+' tail='+buffer[-6000:].decode(errors='replace'))
+  pump()
 def wait_file(path):
  deadline=time.monotonic()+10
  while not os.path.exists(path):
@@ -116,7 +128,7 @@ try:
  open(${JSON.stringify(join(f.root, 'composer-model-release'))},'w').write('explicit owned model release');wait('approval [')
  key(b'\\x1b[B');wait('only this call');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE');assert len(writes())==2
  key(b'\\x1b[A');wait('Pasted');assert len(writes())==2;key(b'\\x1b[B');assert len(writes())==2
- key(b'\\x12');wait('Select Session');key(b'\\x1b[A');key(b'\\x1b[A');key(b'\\r');wait('Session s');key(b'ORIGINAL_SCOPE_TEXT');wait('ORIGINAL_SCOPE_TEXT');key(b'\\x12');wait('Select Session');key(b'\\x1b[A');key(b'\\x1b[A');key(b'\\x1b[B');key(b'\\r');wait('Session composer');key(b'COMPOSER_SCOPE_TEXT');wait('COMPOSER_SCOPE_TEXT');key(b'\\x12');wait('Select Session');key(b'\\x1b[A');key(b'\\x1b[A');key(b'\\r');wait('Session s');wait('ORIGINAL_SCOPE_TEXT');assert len(writes())==2
+ key(b'\\x12');wait('Select Session');key(b'\\x1b[A');wait_selection('composer','Original recovery [s]');key(b'\\r');wait('Session s');key(b'ORIGINAL_SCOPE_TEXT');wait('ORIGINAL_SCOPE_TEXT');key(b'\\x12');wait('Select Session');key(b'\\x1b[B');wait_selection('s','Composer [composer]');key(b'\\r');wait('Session composer');key(b'COMPOSER_SCOPE_TEXT');wait('COMPOSER_SCOPE_TEXT');key(b'\\x12');wait('Select Session');key(b'\\x1b[A');wait_selection('composer','Original recovery [s]');key(b'\\r');wait('Session s');wait('ORIGINAL_SCOPE_TEXT');assert len(writes())==2
  key(b'\\x11');deadline=time.monotonic()+6
  while p.poll() is None and time.monotonic()<deadline:pump()
  p.wait(timeout=3);assert p.returncode==0;print('COMPOSER_REAL_UTF8_ONCE')

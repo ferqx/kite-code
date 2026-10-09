@@ -69,8 +69,8 @@ try {
   );
   // Exercise the renderer's actual next-page button after refreshing to its first window.
   await request({ method: 'select', generation: 1, sessionId: 's' });
-  await page.getByRole('button', { name: '下一页待决请求（替换当前窗口）', exact: true }).waitFor();
   await openSessionTools(page);
+  await page.getByRole('button', { name: '下一页待决请求（替换当前窗口）', exact: true }).waitFor();
   await page.waitForFunction(async () => {
     const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
     if (

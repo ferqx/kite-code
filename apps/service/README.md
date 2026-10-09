@@ -52,6 +52,8 @@ SSE 从单一扫描游标读取持久变更。未来、过期或格式错误的�
 
 可信 Native main 可显式提供中立 `spawnChild` port，用 Node 的进程/stream 能力启动已选定的 Bun 制品；省略时保留 Bun 宿主实现。port 不改变 bootstrap、准入、父存活或所属关闭协议，也不增加默认 PATH/源码回退。Electron main 只持有自己启动的 PID 和 handle；[paired 测试](test/isolated/paired.test.ts)及 Native 实际窗口证据分别证明 launcher 与 Node 调用者的边界。
 
+[Terminal](src/runtime-assets.ts)与[Native](src/native-runtime-assets.ts)完整制品核验共用同步[文件 SHA leaf](src/asset-file-hash.ts)。普通文件先通过原大小／模式／路径／nlink 检查：不超过 64 KiB 的文件保留原 `readFileSync` 完整 SHA；较大文件逐块读至 EOF，每次完整核验按需分配并复用一个 1 MiB scratch buffer，避免大资产整份分配。manifest 原字节摘要、完整目录／链接／inode、SQLite 及两层身份守卫继续执行。Main 初次、取得使用锁后的复核与 Service 独立准入仍各自核完整内容；没有增加对绕过使用锁的同用户写者的原子读取或绝对内存上限保证。[原完整制品测试](test/isolated/native-runtime-assets.test.ts)在 Bun 和实际 Node 核多块／短尾、两层末字节同大小篡改拒绝和恢复后原 digest；启动耗时与完整默认结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。
+
 [process-service.ts](src/process-service.ts) 的 `assembleProcessService(startup, { configure?, beforeResourceClose? })` 只装配显式选定的 profile、配置、原 Store/Artifact、唯一 Runtime 和 HTTP listener，并返回原 Service handle；它不监听父存活、不写 bootstrap、不建立另一执行管理器。传入的 startup 经闭合 schema 和选定 profile identity 校验，首次可信配置与最终资源回调在装配开始时固定。`main.ts` 复用此装配，继续负责原单行私有 startup/bootstrap、父 EOF、HTTP 关闭后父管道退出及未确认清理时保活。`main.ts` 是显式生产进程入口，import 不启动 Service。默认宿主在每个新 Run 解析新范围配置，不隐式选择模型、发现付费凭据或回退 Provider。测试和产品装配可通过 `runServiceProcess` 显式注入。Store 打开失败时，进程仍可提供安全认证 server 诊断并返回 `dataAvailability: unavailable`，业务入口返回 `503 data_unavailable`；不会用空数据替换损坏的 Store。
 
 HTTP/SSE 断连和网络释放不会关闭父进程存活 pipe。父 EOF 或 launch handle 的幂等 close 只 drain 自己的 Service：拒绝新工作，drain 期间保留取消/读取，关闭 SSE，取消并 drain 所属 Runtime，关闭 Worker、释放锁，再停止 HTTP 并退出。优雅退出失败时，有界关闭期限只能强杀本次启动的 child。bootstrap stdout 不承载日志或业务 RPC。生产 stderr 只写公开错误码；launcher 最多保留 16 KiB，只暴露解析后的有界诊断码，丢弃非结构化内容以免转发秘密。

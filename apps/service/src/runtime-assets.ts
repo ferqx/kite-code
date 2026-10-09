@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
 import { verifySqliteEngineAsset } from '@kite-ai/agent/sqlite-engine';
+import { createAssetFileHasher } from './asset-file-hash';
 import {
   parseSqliteReleaseIdentity,
   type SqliteReleaseIdentity,
@@ -246,7 +247,8 @@ export function verifyTerminalRuntimeBundle(bundleRoot: string): VerifiedTermina
     const manifest = parseTerminalBundleManifest(json);
     if (manifest.target.platform !== process.platform || manifest.target.arch !== process.arch)
       fail('terminal_target_mismatch');
-    const expected = new Map(manifest.files.map((item) => [item.path, item]));
+    const fileHash = createAssetFileHasher(),
+      expected = new Map(manifest.files.map((item) => [item.path, item]));
     const links = new Map(manifest.links.map((item) => [item.path, item]));
     const directories = new Set<string>();
     for (const path of [...expected.keys(), ...links.keys()]) {
@@ -287,7 +289,7 @@ export function verifyTerminalRuntimeBundle(bundleRoot: string): VerifiedTermina
             stat.size !== file.size ||
             (stat.mode & 0o777) !== file.mode ||
             realpathSync(absolute) !== absolute ||
-            digest(readFileSync(absolute)) !== file.sha256
+            fileHash(absolute, stat.size) !== file.sha256
           )
             fail('terminal_bundle_identity_mismatch');
           const identity = `${stat.dev}:${stat.ino}`;

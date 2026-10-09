@@ -57,6 +57,49 @@ test('Native automatically reads >4096 observed records and >8MiB multi-message 
   expect(new Set(uppers)).toEqual(new Set(['5001']));
   reader.close();
 });
+test('Native recalibration keeps the completed reading snapshot until its fixed high water completes or fails', async () => {
+  for (const failed of [false, true]) {
+    const original = { id: 'first', sessionId: 's', seq: '1', content: 'original text' } as Message;
+    const updated = { ...original, content: 'updated text' };
+    const last = { id: 'last', sessionId: 's', seq: '2', content: 'new text' } as Message;
+    let recalibrating = false,
+      entered = false,
+      release!: () => void,
+      value!: HistoryState;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const bridge = {
+      async request(request) {
+        if (request.method === 'messages.close') return null;
+        if (request.method !== 'messages') throw Error('unexpected');
+        if (!recalibrating) return { messages: [original], highWaterSeq: '1', nextAfterSeq: null };
+        if (request.afterSeq === '0')
+          return { messages: [updated], highWaterSeq: '2', nextAfterSeq: '1' };
+        entered = true;
+        await gate;
+        if (failed) throw Error('owned_last_page_failed');
+        return { messages: [last], highWaterSeq: '2', nextAfterSeq: null };
+      },
+    } as NativeBridge;
+    const reader = new NativeHistory(bridge, (state) => {
+      value = state;
+    });
+    reader.select(1, selection('s', '1'));
+    await until(() => value.phase === 'complete');
+    expect(value.messages).toEqual([original]);
+    recalibrating = true;
+    reader.select(1, { ...selection('s', '2'), viewGeneration: 2 });
+    await until(() => entered);
+    expect(value.phase).toBe('loading');
+    expect(value.messages).toEqual([original]);
+    release();
+    await until(() => value.phase === (failed ? 'unavailable' : 'complete'));
+    expect(value.messages).toEqual(failed ? [updated] : [updated, last]);
+    expect(value.error).toBe(failed ? 'owned_last_page_failed' : undefined);
+    reader.close();
+  }
+});
 test('Native failed scan preserves read pages; switching aborts only its GET and rejects late old pages', async () => {
   let fail = true,
     release!: () => void,
@@ -110,4 +153,48 @@ test('Native failed scan preserves read pages; switching aborts only its GET and
   reader.preview('s');
   expect(value.messages.map((m) => m.id)).toEqual(['first']);
   reader.close();
+});
+test('Native switching away from an unfinished recalibration restores only the last published reading snapshot', async () => {
+  const original = { id: 'first', sessionId: 's', seq: '1', content: 'original text' } as Message;
+  const updated = { ...original, content: 'unpublished updated text' };
+  let recalibrating = false,
+    entered = false,
+    release!: () => void,
+    value!: HistoryState;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      if (request.sessionId === 'other')
+        return { messages: [], highWaterSeq: '0', nextAfterSeq: null };
+      if (!recalibrating) return { messages: [original], highWaterSeq: '1', nextAfterSeq: null };
+      if (request.afterSeq === '0')
+        return { messages: [updated], highWaterSeq: '2', nextAfterSeq: '1' };
+      entered = true;
+      await gate;
+      return { messages: [], highWaterSeq: '2', nextAfterSeq: null };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, (state) => {
+    value = state;
+  });
+  reader.select(1, selection('s', '1'));
+  await until(() => value.phase === 'complete');
+  recalibrating = true;
+  reader.select(1, { ...selection('s', '2'), viewGeneration: 2 });
+  await until(() => entered);
+  reader.preview('other');
+  reader.select(1, selection('other', '0'));
+  await until(() => value.phase === 'complete');
+  reader.preview('s');
+  expect(value.messages).toEqual([original]);
+  reader.select(1, { ...selection('s', '2'), viewGeneration: 3 });
+  expect(value.messages).toEqual([original]);
+  reader.close();
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(value.messages).toEqual([original]);
 });

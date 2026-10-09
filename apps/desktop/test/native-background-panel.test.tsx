@@ -469,3 +469,157 @@ test('restored background DOM retains original Store and read-only history while
     );
     expect(calls.some((request) => request.method === 'background.stop')).toBe(false);
   }));
+
+test('reopening a complete child waits for the in-flight directory token and guards only Main admission, then directory polls resume before body EOF', async () => {
+  const originalTimeout = globalThis.setTimeout;
+  let poll!: () => void;
+  globalThis.setTimeout = ((
+    callback: (...args: unknown[]) => void,
+    delay?: number,
+    ...args: unknown[]
+  ) => {
+    if (delay === 1000) {
+      poll = () => callback(...args);
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }
+    return originalTimeout(callback, delay, ...args);
+  }) as typeof setTimeout;
+  try {
+    await fixture(async (host, render) => {
+      const item = backgroundItem(1, true),
+        calls: NativeRequest[] = [];
+      item.execution.status = 'succeeded';
+      const body = Buffer.from(
+        JSON.stringify({
+          item,
+          session: item.childSession,
+          upperSeq: '1',
+          messages: [
+            {
+              id: 'child-message',
+              sessionId: item.childSession!.id,
+              seq: '1',
+              role: 'assistant',
+              content: '完整重新读取🙂',
+              runId: item.childRun!.id,
+            },
+          ],
+          modelOutputs: [],
+        }),
+      );
+      let observation = 0,
+        childOpens = 0,
+        bodyReads = 0;
+      let releaseDirectory!: () => void, releaseAdmission!: () => void, releaseBody!: () => void;
+      const directory = new Promise<void>((resolve) => {
+        releaseDirectory = resolve;
+      });
+      const admission = new Promise<void>((resolve) => {
+        releaseAdmission = resolve;
+      });
+      const transmission = new Promise<void>((resolve) => {
+        releaseBody = resolve;
+      });
+      const finished: (() => void)[] = [];
+      const readsFinished = [0, 1].map(
+        () => new Promise<void>((resolve) => finished.push(resolve)),
+      );
+      let closes = 0;
+      const bridge: NativeBridge = {
+        watch: () => () => {},
+        request: async (request) => {
+          calls.push(request);
+          if (request.method === 'background.open') {
+            const token = ++observation;
+            if (token === 2) await directory;
+            return {
+              kind: 'background.page',
+              viewGeneration: 1,
+              storeId: 'store',
+              readId: request.readId,
+              observationId: token,
+              startIndex: 0,
+              nextIndex: 1,
+              total: 1,
+              complete: true,
+              entries: [structuredClone(item)],
+            };
+          }
+          if (request.method === 'background.child.open') {
+            if (request.observationId !== observation)
+              throw Error('background_observation_changed');
+            if (++childOpens === 1) await admission;
+            return {
+              kind: 'background.child.opened',
+              viewGeneration: 1,
+              storeId: 'store',
+              readId: request.readId,
+              observationId: request.observationId,
+              executionId: item.execution.id,
+              childSessionId: item.childSession!.id,
+              childRunId: item.childRun!.id,
+              wireBytes: String(body.length),
+              wireHash: createHash('sha256').update(body).digest('hex'),
+            };
+          }
+          if (request.method === 'background.child.read') {
+            if (++bodyReads === 1) await transmission;
+            return {
+              kind: 'background.child.chunk',
+              readId: request.readId,
+              offset: 0,
+              nextOffset: body.length,
+              eof: true,
+              data: body.toString('base64'),
+            };
+          }
+          if (request.method === 'background.child.close') finished[closes++]?.();
+          return null;
+        },
+      };
+      await render(bridge);
+      await click(host, '打开后台总览');
+      await act(async () => poll());
+      expect(observation).toBe(2);
+      await click(host, '读取完整子日志');
+      expect(calls.filter((call) => call.method === 'background.child.open')).toHaveLength(0);
+      await act(async () => releaseDirectory());
+      expect(calls.find((call) => call.method === 'background.child.open')).toMatchObject({
+        observationId: 2,
+        executionId: item.execution.id,
+      });
+      await act(async () => poll());
+      expect(observation).toBe(2);
+      await act(async () => releaseAdmission());
+      expect(bodyReads).toBe(1);
+      await act(async () => poll());
+      expect(observation).toBe(3);
+      await act(async () => {
+        releaseBody();
+        await readsFinished[0];
+      });
+      expect(host.textContent).toContain('已完整读取子会话');
+      expect(host.textContent).toContain('完整重新读取🙂');
+      expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);
+      expect(calls.filter((call) => call.method === 'background.child.close')).toHaveLength(1);
+      await click(host, '关闭子日志');
+      expect(host.querySelectorAll('article > pre')).toHaveLength(0);
+      await act(async () => {
+        [...host.querySelectorAll('button')]
+          .find((button) => button.textContent === '读取完整子日志')!
+          .click();
+        await readsFinished[1];
+      });
+      expect(
+        calls.flatMap((call) =>
+          call.method === 'background.child.open' ? [call.observationId] : [],
+        ),
+      ).toEqual([2, 3]);
+      expect(host.textContent).toContain('完整重新读取🙂');
+      expect(calls.filter((call) => call.method === 'background.child.close')).toHaveLength(2);
+      expect(calls.some((call) => call.method === 'background.stop')).toBe(false);
+    });
+  } finally {
+    globalThis.setTimeout = originalTimeout;
+  }
+});

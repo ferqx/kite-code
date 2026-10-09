@@ -10,6 +10,10 @@ async function openSettings(page: import('playwright').Page) {
       .locator('.session-header')
       .getByRole('button', { name: '设置', exact: true })
       .click();
+  const category = page
+    .getByRole('navigation', { name: '设置分类', exact: true })
+    .getByRole('button', { name: '模型', exact: true });
+  if ((await category.getAttribute('aria-pressed')) !== 'true') await category.click();
 }
 async function closeSettings(page: import('playwright').Page) {
   if (await page.locator('.desktop-settings-dialog').isVisible())

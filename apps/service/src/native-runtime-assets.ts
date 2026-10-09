@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
+import { createAssetFileHasher } from './asset-file-hash';
 import { type VerifiedTerminalRuntimeBundle, verifyTerminalRuntimeBundle } from './runtime-assets';
 import { parseSqliteReleaseIdentity, type SqliteReleaseIdentity } from './sqlite-release-assets';
 
@@ -274,7 +275,8 @@ export function verifyNativeRuntimeBundle(bundleRoot: string): VerifiedNativeRun
       terminal.manifest.target.arch !== manifest.target.arch
     )
       fail('native_terminal_identity_mismatch');
-    const files = new Map(manifest.files.map((file) => [file.path, file])),
+    const fileHash = createAssetFileHasher(),
+      files = new Map(manifest.files.map((file) => [file.path, file])),
       links = new Map(manifest.links.map((link) => [link.path, link]));
     const declaredEmpty = new Set(manifest.directories),
       actualEmpty = new Set<string>();
@@ -330,7 +332,7 @@ export function verifyNativeRuntimeBundle(bundleRoot: string): VerifiedNativeRun
             stat.size !== file.size ||
             (stat.mode & 0o777) !== file.mode ||
             realpathSync(absolute) !== absolute ||
-            sha(readFileSync(absolute)) !== file.sha256 ||
+            fileHash(absolute, stat.size) !== file.sha256 ||
             identities.has(identity)
           )
             fail('native_bundle_identity_mismatch');

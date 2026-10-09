@@ -44,6 +44,12 @@ async function count() {
 async function waitForModel() {
   await bounded(fetch(`${control}/entered`));
 }
+let lastPhase = 'launch';
+function phase(value: string) {
+  lastPhase = value;
+  console.error('native_model_output_phase', value, Date.now());
+}
+phase('launch_begin');
 const application = await _electron.launch({
   timeout: 10000,
   executablePath: electronExecutable,
@@ -56,6 +62,7 @@ const diagnostics: string[] = [];
 application.process().stderr?.on('data', (chunk) => diagnostics.push(String(chunk).slice(0, 1000)));
 try {
   const page = await application.firstWindow();
+  phase('window');
   page.setDefaultTimeout(10000);
   page.on('console', (message) => console.error('renderer', message.text().slice(0, 300)));
   page.on('pageerror', (error) => console.error('renderer_error', error.message.slice(0, 300)));
@@ -73,12 +80,14 @@ try {
     })) as NativeState;
   });
   // Reattach is a real main/preload operation. Reload restores the renderer's own generation.
+  phase('initial_reload_begin');
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).waitFor();
   await openSessionTools(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
+  phase('initial_reload_ready');
   const generation = await page.evaluate(
     async () =>
       ((await window.kiteNative!.request({ method: 'attach' })) as NativeState).generation,
@@ -151,6 +160,7 @@ try {
   );
   expect(start).toMatchObject({ sessionId: 's' });
   await waitForModel();
+  phase('provider_entered');
   expect(await count()).toBe(1);
   const large = await page.evaluate(async (generation) => {
     try {
@@ -180,6 +190,7 @@ try {
   servicePid = line ? Number(line.trim().split(/\s+/)[0]) : 0;
   expect(servicePid).toBeGreaterThan(0);
   process.kill(servicePid, 0);
+  phase('live_reload_begin');
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).waitFor();
   await openSessionTools(page);
@@ -188,6 +199,7 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
+  phase('live_reload_ready');
   expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue()).toBe(
     'PRIVATE NATIVE DRAFT',
   );
@@ -220,9 +232,12 @@ try {
     return result;
   }, foreignId);
   expect(denied).toBe('native_sender_denied');
+  phase('foreign_denied');
   expect(await count()).toBe(1);
   await fetch(`${control}/release`);
+  phase('provider_released');
   await page.getByText('轮次：completed', { exact: true }).waitFor();
+  phase('run_completed');
   // Full body stays absent until an explicit user read. The current view keeps only a preview.
   expect(await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).count()).toBe(0);
   const fullButton = page.getByRole('button', {
@@ -230,14 +245,19 @@ try {
     exact: true,
   });
   await fullButton.waitFor();
+  phase('full_read_ready');
   await fullButton.focus();
   await page.keyboard.press('Enter');
+  phase('full_read_begin');
   await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ timeout: 30000 });
+  phase('full_tail_visible');
   expect(await count()).toBe(1);
   process.kill(servicePid, 0);
   await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
+  phase('full_closed');
   expect(await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).count()).toBe(0);
   // Exercise the actual closed IPC parser and exact sequential offsets, then release this read.
+  phase('protocol_begin');
   const protocol = await page.evaluate(async (storeId) => {
     const generation = ((await window.kiteNative!.request({ method: 'attach' })) as NativeState)
       .generation;
@@ -318,8 +338,10 @@ try {
   expect(protocol.bad).toBe('model_output_offset_invalid');
   expect(protocol.closed).toBe('model_output_read_missing');
   expect(protocol.stale).toBe('native_generation_changed');
+  phase('protocol_verified');
   expect(await count()).toBe(1);
   process.kill(servicePid, 0);
+  phase('final_reload_begin');
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).waitFor();
   await openSessionTools(page);
@@ -332,9 +354,12 @@ try {
     .waitFor();
   expect(await count()).toBe(1);
   process.kill(servicePid, 0);
+  phase('final_reload_ready');
   const lookup = await page.getByRole('button', { name: '查询原命令', exact: true }).first();
   await lookup.click();
+  phase('lookup_begin');
   await page.getByText(/原命令 native-original：terminal/).waitFor();
+  phase('lookup_terminal');
   expect(await count()).toBe(1);
   const html = await page.content();
   expect(html.includes(dataRoot)).toBe(false);
@@ -342,12 +367,14 @@ try {
   const exited = new Promise<void>((resolve) =>
     application.process().once('exit', () => resolve()),
   );
+  phase('quit_begin');
   await application
     .evaluate(({ app }) => {
       app.quit();
     })
     .catch(() => {});
   await bounded(exited);
+  phase('main_exited');
   let stopped = false;
   try {
     process.kill(servicePid, 0);
@@ -355,7 +382,19 @@ try {
     stopped = true;
   }
   expect(stopped).toBe(true);
+  phase('service_gone');
 } catch (error) {
+  console.error(
+    'native_model_output_error',
+    JSON.stringify({
+      phase: lastPhase,
+      name: error instanceof Error ? error.name : typeof error,
+      code:
+        error instanceof Error && /^[A-Za-z0-9_]+$/.test(error.message)
+          ? error.message.slice(0, 256)
+          : undefined,
+    }),
+  );
   console.error(
     'native_attach',
     await (await application.firstWindow()).evaluate(async () => {
@@ -383,4 +422,5 @@ try {
 } finally {
   await fetch(`${control}/release`);
   await application.close().catch(() => {});
+  phase('application_closed');
 }

@@ -11,6 +11,19 @@ async function openSessionTools(page: import('playwright').Page) {
 
 const [outdir, root, _dataRoot, storeId, _endpoint, electronExecutable, control, bunExecutable] =
   process.argv.slice(2) as string[];
+const observationStarted = performance.now();
+let lastPhase = 'launch_begin';
+function phase(name: string) {
+  lastPhase = name;
+  console.error(
+    'NATIVE_SESSION_PHASE ' +
+      JSON.stringify({
+        phase: name,
+        elapsedMs: Math.round(performance.now() - observationStarted),
+      }),
+  );
+}
+phase('launch_begin');
 const app = await _electron.launch({
   executablePath: electronExecutable,
   args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
@@ -18,6 +31,7 @@ const app = await _electron.launch({
   env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
   timeout: 10000,
 });
+phase('launch_completed');
 let pid = 0;
 const count = async () => Number(await (await fetch(`${control}/count`)).text());
 try {
@@ -52,12 +66,15 @@ try {
       trusted: true,
     });
   });
+  phase('run_begin');
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('one harmless local Model');
   await page.getByRole('button', { name: '发送明确的新轮次' }).press('Enter');
   await fetch(`${control}/entered`);
   await fetch(`${control}/release`);
   await page.getByText('轮次：completed', { exact: true }).waitFor();
+  phase('run_completed');
   assert.equal(await count(), 1);
+  phase('fork_begin');
   const panel = page.getByRole('region', { name: '会话管理' });
   await panel.getByRole('button', { name: '读取当前会话管理事实' }).click();
   await panel.getByRole('textbox', { name: '会话管理名称' }).fill('Forked original');
@@ -66,10 +83,12 @@ try {
   );
   await panel.getByRole('button', { name: '从当前所选上下文分叉' }).press('Enter');
   await panel.getByText(/fork：unknown/).waitFor();
+  phase('fork_unknown');
   assert.equal(await app.evaluate('globalThis.__forkPosts'), 1);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await panel.getByRole('button', { name: '查询原会话操作' }).press('Enter');
   await panel.getByRole('button', { name: '打开已确认分叉' }).waitFor();
+  phase('fork_confirmed');
   const confirmed = await page.evaluate(async () => {
     const state = (await window.kiteNative!.request({
       method: 'state',
@@ -85,6 +104,7 @@ try {
   await app.evaluate('globalThis.fetch=globalThis.__sessionOriginal');
   await panel.getByRole('button', { name: '打开已确认分叉' }).press('Enter');
   await page.locator('.session-header').getByTitle('Forked original', { exact: true }).waitFor();
+  phase('fork_opened');
   await openSessionTools(page);
   const forked = await page.evaluate(async () => {
     const state = (await window.kiteNative!.request({
@@ -108,31 +128,40 @@ try {
   assert.equal(source?.originMessage?.sessionId, 's');
   assert.equal(source?.originMessage?.storeId, storeId);
   assert.equal(source?.runId, null);
+  phase('full_read_begin');
   await page.getByRole('button', { name: 'Read complete recorded Model output' }).press('Enter');
   await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ timeout: 30000 });
+  phase('full_tail_visible');
   assert.ok((await page.locator('main').innerText()).length > 17 * 1048576);
   assert.equal(await count(), 1);
   await panel.getByRole('button', { name: '读取当前会话管理事实' }).click();
+  phase('cas_begin');
   await panel.getByRole('textbox', { name: '会话管理名称' }).fill('CAS rejected name');
   await app.evaluate(
     `(()=>{const original=globalThis.fetch;globalThis.__renameOriginal=original;globalThis.__renamePosts=0;globalThis.fetch=async(input,init)=>{const request=new Request(input,init);if(request.method!=='POST'||!new URL(request.url).pathname.endsWith('/rename'))return original(input,init);globalThis.__renamePosts++;const body=await request.clone().json();await original(request.url,{method:'POST',headers:request.headers,body:JSON.stringify({...body,commandId:'trusted-drift',title:'Actual concurrent name'})});globalThis.fetch=original;return original(request.url,{method:'POST',headers:request.headers,body:JSON.stringify(body)});};})()`,
   );
   await panel.getByRole('button', { name: '保存当前会话名称' }).press('Enter');
   await panel.getByText(/rename：failed/).waitFor();
+  phase('cas_failed');
   assert.equal(await app.evaluate('globalThis.__renamePosts'), 1);
   await panel.getByRole('button', { name: '读取当前会话管理事实' }).click();
+  phase('rename_begin');
   await panel.getByRole('textbox', { name: '会话管理名称' }).fill('Renamed fork');
   await panel.getByRole('button', { name: '保存当前会话名称' }).press('Enter');
   await page.locator('.session-header').getByTitle('Renamed fork', { exact: true }).waitFor();
+  phase('rename_applied');
   await openSessionTools(page);
   assert.equal(await count(), 1);
   assert.equal(
     await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).isVisible(),
     true,
   );
+  phase('full_close_begin');
   await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
   await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Close full Model output' }).waitFor({ state: 'hidden' });
+  phase('full_closed');
+  phase('delete_begin');
   await panel.getByRole('button', { name: '读取当前会话管理事实' }).click();
   await app.evaluate(
     `(()=>{const original=globalThis.fetch;globalThis.__deleteOriginal=original;globalThis.__deletePosts=0;globalThis.fetch=async(input,init)=>{const request=new Request(input,init);if(request.method!=='POST'||!new URL(request.url).pathname.endsWith('/delete'))return original(input,init);globalThis.__deletePosts++;const body=Buffer.from(await request.arrayBuffer());const http=process.getBuiltinModule('node:http');return await new Promise((resolve,reject)=>{const outgoing=http.request(request.url,{method:'POST',headers:Object.fromEntries(request.headers)},response=>{response.destroy();outgoing.destroy();reject(new TypeError('owned_delete_response_lost'));});outgoing.on('error',reject);outgoing.end(body);});};})()`,
@@ -142,10 +171,12 @@ try {
     .check();
   await panel.getByRole('button', { name: '删除当前会话' }).press('Enter');
   await panel.getByText(/delete：unknown/).waitFor();
+  phase('delete_unknown');
   assert.equal(await app.evaluate('globalThis.__deletePosts'), 1);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await panel.getByRole('button', { name: '查询原会话操作' }).press('Enter');
   await panel.getByText('已请求删除；尚未确认所有执行资源停止。', { exact: true }).waitFor();
+  phase('delete_confirmed');
   assert.equal(await app.evaluate('globalThis.__deletePosts'), 1);
   assert.equal(
     await page
@@ -161,6 +192,7 @@ try {
     'Native Session finite HTTP reads',
     JSON.stringify(await app.evaluate('globalThis.__nativeRequests')),
   );
+  phase('quit_begin');
   const parent = await app.evaluate(() => process.pid),
     line = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
       .split('\n')
@@ -172,7 +204,9 @@ try {
   assert.ok(pid > 0);
   const exited = new Promise<void>((resolve) => app.process().once('exit', () => resolve()));
   await app.evaluate(({ app }) => app.quit()).catch(() => {});
+  phase('quit_requested');
   await exited;
+  phase('quit_exited');
   let stopped = false;
   try {
     process.kill(pid, 0);
@@ -182,6 +216,18 @@ try {
   assert.equal(stopped, true);
   console.log('Native Session Node assertions: 18', JSON.stringify({ pid, stopped, storeId }));
 } catch (error) {
+  console.error(
+    'NATIVE_SESSION_ERROR ' +
+      JSON.stringify({
+        lastPhase,
+        name: error instanceof Error ? error.name : typeof error,
+        code:
+          error instanceof Error && /^[A-Za-z0-9_]+$/.test(error.message)
+            ? error.message.slice(0, 256)
+            : undefined,
+      }),
+  );
+  console.error(`NATIVE_SESSION_LAST_PHASE ${lastPhase}`);
   console.error(error);
   console.error(
     'native_requests',

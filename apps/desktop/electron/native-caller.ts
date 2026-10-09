@@ -109,7 +109,18 @@ export class NativeCaller {
   private historyEpoch = 0;
   private observationUnavailable = false;
   private resetHistory: { selection: number; sessionId: string; resolve: () => void } | undefined;
-  private messageRead: { readId: string; abort: AbortController } | undefined;
+  private messageRead:
+    | {
+        readId: string;
+        generation: number;
+        selection: number;
+        sessionId: string;
+        storeId: string;
+        upperSeq: string;
+        abort: AbortController;
+        effectiveLimit?: number;
+      }
+    | undefined;
   private inputDirectory: { readId: string; abort: AbortController } | undefined;
   private readonly cancellations = new Map<string, string>();
   private readonly creations = new Map<string, NativeCreation>();
@@ -1587,12 +1598,28 @@ export class NativeCaller {
         if (BigInt(upperSeq) > BigInt(snapshot.view.session.nextSeq))
           throw new ClientError('history_high_water_unavailable');
         const readId = request.readId ?? crypto.randomUUID();
-        if (this.messageRead?.readId !== readId) {
+        if (
+          this.messageRead?.readId !== readId ||
+          this.messageRead.generation !== request.generation ||
+          this.messageRead.selection !== selection ||
+          this.messageRead.sessionId !== request.sessionId ||
+          this.messageRead.storeId !== snapshot.view.storeId ||
+          this.messageRead.upperSeq !== upperSeq ||
+          this.messageRead.abort.signal.aborted
+        ) {
           this.messageRead?.abort.abort();
-          this.messageRead = { readId, abort: new AbortController() };
+          this.messageRead = {
+            readId,
+            generation: request.generation,
+            selection,
+            sessionId: request.sessionId,
+            storeId: snapshot.view.storeId,
+            upperSeq,
+            abort: new AbortController(),
+          };
         }
         const reading = this.messageRead!;
-        let limit = request.limit ?? 100;
+        let limit = Math.min(request.limit ?? 100, reading.effectiveLimit ?? Infinity);
         for (;;) {
           let messages: Message[];
           try {
@@ -1628,6 +1655,7 @@ export class NativeCaller {
             limit = Math.max(1, Math.floor(limit / 2));
             continue;
           }
+          reading.effectiveLimit = Math.min(reading.effectiveLimit ?? Infinity, limit);
           for (const message of messages)
             this.observedMessages.set(message.id, structuredClone(message));
           if (

@@ -5,7 +5,15 @@ const network = {
   ready: 0,
   changes: 0,
   posts: [] as string[],
-  messages: [] as { session: string; after: string; upper: string }[],
+  messages: [] as {
+    session: string;
+    after: string;
+    upper: string;
+    limit: string;
+    startedAt: number;
+    responseMs?: number;
+    status?: number;
+  }[],
   pause: false,
   release: undefined as (() => void) | undefined,
   abort: undefined as AbortController | undefined,
@@ -22,12 +30,19 @@ const instrumented: (input: RequestInfo | URL, init?: RequestInit) => Promise<Re
     url = new URL(request.url);
   if (request.method === 'POST') network.posts.push(url.pathname);
   if (url.pathname.endsWith('/messages')) {
-    network.messages.push({
+    const reading = {
       session: url.pathname.split('/').at(-2)!,
       after: url.searchParams.get('afterSeq') ?? '0',
       upper: url.searchParams.get('upperSeq') ?? '',
-    });
+      limit: url.searchParams.get('limit') ?? '',
+      startedAt: Date.now(),
+      responseMs: undefined as number | undefined,
+      status: undefined as number | undefined,
+    };
+    network.messages.push(reading);
     const response = await original(input, init);
+    reading.responseMs = Date.now() - reading.startedAt;
+    reading.status = response.status;
     if (
       network.holdHistory &&
       url.pathname.endsWith('/sessions/s/messages') &&

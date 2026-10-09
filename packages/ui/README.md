@@ -4,11 +4,17 @@
 
 `@kite-ai/ui/desktop` 的 [SessionPage](src/desktop/SessionPage.tsx)、Sidebar、Conversation、Composer、RightSidebar 与 shadcn 控件从原 kite-client-ui 展示源码迁入，保留原 CSS、交互和依赖版本；[样式导出](src/desktop/style.css)供正式 Native 的原 Vite/Tailwind 管线编译。此层不导入旧 workspace 或 Runtime，事实映射和写入 authority 属 [Desktop host](../../apps/desktop/README.md#复用原桌面展示层)。
 
+[Desktop build](scripts/build-desktop.ts)将[唯一声明](scripts/bundled-dependencies.ts)的 `@hugeicons/core-free-icons` 内联到原浏览器产物；其余 npm 依赖、React peer、原导出及 CSS 保持。Terminal 的生成 package manifest 不再声明这条已内联依赖，复制器仍保留其他包真正需要的依赖边。原包许可和 NOTICE 完整复制；固定 4.3.2 npm 包实际缺许可正文时，仅对准确版本／MIT使用[附带官方原文](scripts/licenses/core-free-icons-4.3.2/LICENSE.md)和[固定来源](scripts/licenses/core-free-icons-4.3.2/SOURCE.json)，离线核 SHA，不替换其他包许可。制品全部生成文件仍进入完整 inventory，实际原窗口和默认回归结果归[普通启动进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
+
 有限 renderMessage、Composer 控件/输入标签/发送门禁 slot 和 detailPanel 让宿主接入已验证公共正文 reader、准确 controller 与原右侧栏；缺省保持原展示契约。侧栏开关不卸载 Conversation，宿主 detailPanel 关闭则卸载所属工具内容以释放原读取，不沿旧动画缓存保留隐藏 reader。UI 不读文件、发请求或取消业务。缺少真实操作回调时不从 view model 推造能力；Message completion 不能提升为 final reply 或旧 Tool grouping。
 
 原 [FileChanges／FileDiff](src/desktop/FileChanges.tsx)公开给宿主复用，`renderDetail` 只在展开项挂载、`loading` 表示宿主读取状态；原 messages／openFile 缺省展示保持。SessionPage 的 `fileChangesContent` 接原“文件变更”入口，关闭即卸载宿主内容；会话工具与文件变更切换先关闭原面板，各用途保独立 RightSidebar 身份，栏宽跟随总体开关。实际文件回执、读取释放和编辑器目标校验归 [Desktop owner](../../apps/desktop/README.md#原文件变更面板与编辑器)，此层不取得文件或执行权限。
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
+
+`MessageContent` 的宿主文件回调在 layout effect 取得当前已提交值，稳定派发函数只调用这一值；正文解析组件按原 text 与回调能力有无保持 memo。普通状态更新替换回调引用不重做相同 Markdown，实际撤销回调仍把文件按钮改为不可点击文本，重新提供及正文变化正常更新。[原 Markdown 测试](test/markdown.test.tsx)通过实际 DOM 点击核最新回调、撤销／恢复、解码路径、外链和正文更新；不使用忽略回调的比较器保留旧宿主权限。
+
+长普通文本在 Markdown 转换后的树中拆成相邻 Text 节点，不增加包装元素、换行或省略内容，继续沿原消息列和 GFM 展示完整正文；code／pre 保原结构。超过4096个字符串单位的文本按约2048单位组织，非ASCII沿 grapheme 边界，单一更长 grapheme 仍完整保留。原文字、标题、链接、表格、图片替代文字及 HTML 处理保持；全文仍先经宿主完整 EOF／SHA／UTF-8／scope 核验，复制使用原正文，不增加读取或文件权限。[原 Markdown 文件](test/markdown.test.tsx)保全部原断言并核实际 DOM 的完整长文本与 Unicode 边界；实际 Electron 可见性与全文资格归 Desktop owner 和[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)，不据此承诺固定内存或所有设备的延迟。
 
 原工具组件允许宿主给 `Message.target` 传展示文本，不从文本取得文件或执行权限。Native 的已知工具行沿准确执行结果与当前视图适配；未来定义／版本不借旧同名分类解释，原文仍可展开。Shell 操作继续复用原工具图标，实际身份、目标、状态与限定证据归 [Desktop owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
 
@@ -70,6 +76,8 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 `ModelOutputMessage` 消费公开 `Message.outputBody`，默认明确显示有限预览，不把预览声称为完整输出。宿主可提供 `onRead({sessionId,executionId,signal})`；该 reader 必须先通过公共 Client 的完整 EOF、SHA、UTF-8 与正文验证，再返回 `ModelOutputSnapshot`。组件复核原 Store、Session、Run、Execution、完整性与正文长度；只在当前视图保存已读全文。显式关闭、隐藏、身份/预览更新或卸载会 abort 所属读取并清除全文，迟到结果不能显示。缺 reader 时预览仍可读，全文按钮禁用；失败不展示半正文。原完整 Tool calls 需用户展开，不完整前缀不显示完整调用。原 reasoning 缺省不展示；只有明确诊断宿主设置 `showReasoning` 才提供展开入口，普通会话阅读不启用。
 
 `onContent` 只通知当前已显示的完整正文，回到预览时通知 `undefined`，供宿主准确复制；组件不拥有网络关闭或 Runtime 取消。[Model output DOM 测试](test/model-output.test.tsx) 验证超过 17 MiB 的完整尾部、显式读取、single flight、关闭/身份变化/隐藏的 abort 与 late 隔离、缺 reader、身份冲突和不完整前缀。它建立 React/JSDOM 证据，不代表真实浏览器、Electron 或 TUI 资格。
+
+正文身份的序列化按原八项输入 memo：Store、restored-origin 资格、Session、Run、Message、originMessage、outputBody 与 content。相同身份的普通 render 不重复序列化完整正文，任一原字段变化仍触发原 identity 清理；callbacks 更新、suspension、abort、完整 snapshot 门禁和复制撤销不变。原完整 Model output DOM 文件6pass／40断言通过，源码 token 核对仅新增 memo wrapper 与 import；当前完整 Native 历史窗口资格仍归 Desktop owner 和[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
 
 只有独立核实原 Model Store 的宿主 reader 才能提供 `canReadRestoredOrigin`，允许当前连接 Store 与封存出处不同；Native 先核 Main 已观察 Message 的原 Execution／Session／Run／originStoreId，再验证完整正文。组件仍核 snapshot 的当前 Store 与原来源身份；资格变化使旧正文失效，不授予网络或执行权限。缺省保持原限制，Web 未提供此资格。上述 DOM 核已获资格的原正文显示与关闭后 `onContent(undefined)`；实际安装／恢复范围由[Native owner](../../apps/desktop/README.md#恢复后封存-model-正文)负责。
 

@@ -42,6 +42,13 @@ export function useNativeRuns({
     workspaceId = selection?.session.workspaceId,
     viewSelection = selection?.viewSelection ?? selection?.viewGeneration;
   const scope = JSON.stringify([generation, storeId, sessionId, viewSelection, historyEpoch]);
+  const presentationIdentity = JSON.stringify([
+    generation,
+    storeId,
+    sessionId,
+    workspaceId,
+    viewSelection,
+  ]);
   const available = !!selection && !selection.viewLoading && !selection.permissionUnavailable;
   const representatives = new Map<string, string>();
   for (const message of messages)
@@ -56,16 +63,33 @@ export function useNativeRuns({
   const [retryRevision, setRetryRevision] = useState(0);
   const cache = useRef({
     scope,
+    presentationIdentity,
+    bridge,
     retryRevision,
     read: new Map<string, { run?: NativeRunFact; revision: number }>(),
   });
-  const [state, setState] = useState<{ scope: string; runs: NativeRunFact[]; error?: string }>({
+  const [state, setState] = useState<{
+    scope: string;
+    presentationIdentity: string;
+    bridge?: NativeBridge;
+    terminal: NativeRunFact[];
+    runs: NativeRunFact[];
+    error?: string;
+  }>({
     scope,
+    presentationIdentity,
+    bridge,
+    terminal: [],
     runs: [],
   });
   useEffect(() => {
-    if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
-      cache.current = { scope, retryRevision, read: new Map() };
+    if (
+      cache.current.scope !== scope ||
+      cache.current.presentationIdentity !== presentationIdentity ||
+      cache.current.bridge !== bridge ||
+      cache.current.retryRevision !== retryRevision
+    )
+      cache.current = { scope, presentationIdentity, bridge, retryRevision, read: new Map() };
     if (
       !bridge ||
       !storeId ||
@@ -77,6 +101,35 @@ export function useNativeRuns({
       return;
     const current = cache.current,
       observed = new Map((JSON.parse(view) as NativeRunFact[]).map((run) => [run.id, run]));
+    // A verified View supersedes this scope's older metadata even after leaving its bounded page.
+    for (const [id, run] of observed) current.read.set(id, { run, revision: observationRevision });
+    const publish = (error?: string) =>
+      setState((previous) => {
+        const terminal = new Map(
+          (previous.presentationIdentity === presentationIdentity && previous.bridge === bridge
+            ? previous.terminal
+            : []
+          ).map((run) => [run.id, run]),
+        );
+        // Keep display only, never seed the fresh read cache or its request eligibility.
+        for (const [id, run] of [
+          ...[...current.read].map(([id, entry]) => [id, entry.run] as const),
+          ...observed,
+        ]) {
+          terminal.delete(id);
+          if (run && !run.isActive && ['completed', 'failed', 'cancelled'].includes(run.status))
+            terminal.set(id, run);
+        }
+        return {
+          scope,
+          presentationIdentity,
+          bridge,
+          terminal: [...terminal.values()],
+          runs: [...current.read.values()].flatMap((entry) => (entry.run ? [entry.run] : [])),
+          error,
+        };
+      });
+    publish();
     const pending = (JSON.parse(ids) as [string, string][]).filter(([id]) => {
       const previous = current.read.get(id);
       return (
@@ -125,18 +178,10 @@ export function useNativeRuns({
             run: page.runs.find((run) => run.id === id),
             revision: observationRevision,
           });
-        setState({
-          scope,
-          runs: [...current.read.values()].flatMap((entry) => (entry.run ? [entry.run] : [])),
-        });
+        publish();
       }
     })().catch(() => {
-      if (active)
-        setState({
-          scope,
-          runs: [...current.read.values()].flatMap((entry) => (entry.run ? [entry.run] : [])),
-          error: '无法核对本轮状态，已保留原消息。',
-        });
+      if (active) publish('无法核对本轮状态，已保留原消息。');
     });
     return () => {
       active = false;
@@ -152,18 +197,35 @@ export function useNativeRuns({
     viewSelection,
     historyEpoch,
     scope,
+    presentationIdentity,
     available,
     ids,
     view,
     observationRevision,
     retryRevision,
   ]);
-  const runs = new Map((state.scope === scope ? state.runs : []).map((run) => [run.id, run]));
+  const runs = new Map(
+    (state.presentationIdentity === presentationIdentity && state.bridge === bridge
+      ? state.terminal.filter((run) => representatives.has(run.id))
+      : []
+    ).map((run) => [run.id, run]),
+  );
+  if (
+    state.scope === scope &&
+    state.presentationIdentity === presentationIdentity &&
+    state.bridge === bridge
+  )
+    for (const run of state.runs) runs.set(run.id, run);
   // The newer verified View wins over an older metadata response, including explicit recovery.
   for (const run of JSON.parse(view) as NativeRunFact[]) runs.set(run.id, run);
   return {
     runs: [...runs.values()],
-    error: state.scope === scope ? state.error : undefined,
+    error:
+      state.scope === scope &&
+      state.presentationIdentity === presentationIdentity &&
+      state.bridge === bridge
+        ? state.error
+        : undefined,
     retry: () => setRetryRevision((value) => value + 1),
   };
 }

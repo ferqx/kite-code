@@ -1,4 +1,4 @@
-import { existsSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -33,24 +33,25 @@ await runServiceProcess({
           ) {
             gated = true;
             writeFileSync(join(profile.profilePath, 'permission-entered'), 'entered');
-            await new Promise<void>((resolve, reject) => {
-              const release = join(profile.profilePath, 'permission-release');
-              const watcher = watch(profile.profilePath, () => {
-                if (existsSync(release)) finish();
-              });
-              const abort = () => {
-                watcher.close();
-                reject(request.signal.reason);
-              };
-              function finish() {
-                watcher.close();
-                request.signal.removeEventListener('abort', abort);
-                resolve();
+            const release = join(profile.profilePath, 'permission-release');
+            while (!existsSync(release)) {
+              request.signal.throwIfAborted();
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              let abort: (() => void) | undefined;
+              try {
+                await new Promise<void>((resolve, reject) => {
+                  abort = () => reject(request.signal.reason);
+                  request.signal.addEventListener('abort', abort, { once: true });
+                  if (request.signal.aborted) abort();
+                  else timer = setTimeout(resolve, 5);
+                });
+              } finally {
+                if (timer) clearTimeout(timer);
+                if (abort) request.signal.removeEventListener('abort', abort);
               }
-              request.signal.addEventListener('abort', abort, { once: true });
-              if (request.signal.aborted) abort();
-              else if (existsSync(release)) finish();
-            });
+            }
+            request.signal.throwIfAborted();
+            console.error('assembly_permission_gate:release-consumed');
           }
           return { allowed: true, revision: 'explicit-fixture-policy' };
         },

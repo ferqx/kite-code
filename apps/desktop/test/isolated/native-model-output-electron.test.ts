@@ -14,6 +14,7 @@ import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { buildNativeDesktop } from '../../scripts/build-native';
+import { NativeOwnedProcesses } from '../native-owned-processes.fixture';
 
 const require = createRequire(import.meta.url);
 function gate() {
@@ -221,19 +222,96 @@ test.skipIf(process.platform !== 'darwin')(
         env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
       },
     );
-    const stderrPromise = new Response(driver.stderr).text();
+    let owner: NativeOwnedProcesses | undefined,
+      completed = false,
+      failure: unknown;
+    const captureOwner = () => {
+      owner ??= new NativeOwnedProcesses({
+        pid: driver.pid,
+        nodeExecutable: realpathSync(Bun.which('node')!),
+        driverPath,
+        root,
+      });
+      owner.capture();
+    };
+    const decoder = new TextDecoder();
+    let pendingLine = '',
+      truncatedLine = false,
+      observedLines = 0;
+    const observe = (text: string, flush = false) => {
+      const parts = text.split('\n');
+      for (let index = 0; index < parts.length; index++) {
+        if (!truncatedLine) {
+          const part = parts[index]!;
+          const available = 8192 - pendingLine.length;
+          pendingLine += part.slice(0, available);
+          truncatedLine = part.length > available;
+        }
+        if (index < parts.length - 1 || flush) {
+          if (
+            observedLines < 64 &&
+            /^(?:native_model_output_phase|native_model_output_error) /.test(pendingLine)
+          ) {
+            console.error(pendingLine);
+            const phase = pendingLine.match(/^native_model_output_phase (\w+)/)?.[1];
+            if (phase && ['launch_begin', 'window', 'run_completed'].includes(phase))
+              captureOwner();
+            observedLines++;
+          }
+          pendingLine = '';
+          truncatedLine = false;
+        }
+      }
+    };
+    const stderrPromise = new Response(
+      driver.stderr.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            controller.enqueue(chunk);
+            try {
+              observe(decoder.decode(chunk, { stream: true }));
+            } catch {
+              // Observation cannot alter the original stderr stream.
+            }
+          },
+          flush() {
+            try {
+              observe(decoder.decode(), true);
+            } catch {
+              // Observation cannot alter the original stderr EOF.
+            }
+          },
+        }),
+      ),
+    ).text();
     try {
       const exit = await bounded(driver.exited, 45000);
       const stderr = await stderrPromise;
       if (exit !== 0) console.error(stderr.slice(0, 5000));
       expect(exit).toBe(0);
+      completed = true;
+    } catch (error) {
+      failure = error;
     } finally {
       barrier.release();
+      owner?.capture();
       driver.kill('SIGKILL');
       await driver.exited;
-      provider.stop(true);
-      rmSync(root, { recursive: true, force: true });
+      try {
+        await owner?.settle(completed);
+      } finally {
+        provider.stop(true);
+        console.info('native_owned_processes', owner?.metadata);
+        if (owner?.confirmed) rmSync(root, { recursive: true, force: true });
+        else console.error('native_owned_root_retained', root);
+      }
     }
+    if (!owner?.confirmed || owner.errors.length)
+      throw new AggregateError(
+        [...(failure === undefined ? [] : [failure]), ...(owner?.errors ?? [])],
+        'native_owned_cleanup_failed',
+      );
+    if (failure !== undefined) throw failure;
   },
   60000,
 );

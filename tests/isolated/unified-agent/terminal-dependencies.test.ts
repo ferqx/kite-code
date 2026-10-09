@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -246,6 +247,68 @@ test('real locked terminal workspace graph copies actual native assets and resol
     rmSync(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+test('generated workspace exports retain peers and external dependencies after an explicitly bundled dependency and source are absent', async () => {
+  const root = mkdtempSync('/private/tmp/kite-terminal-bundled-deps-');
+  try {
+    const repositoryRoot = join(root, 'repository');
+    mkdirSync(join(repositoryRoot, 'node_modules'), { recursive: true });
+    const workspace = pkg(join(repositoryRoot, 'workspace'), {
+      name: '@kite-ai/fixture',
+      version: '1',
+      dependencies: { icons: '1', external: '1' },
+      peerDependencies: { peer: '1' },
+    });
+    for (const name of ['external', 'peer']) {
+      const dependency = pkg(join(repositoryRoot, 'node_modules', name), {
+        name,
+        version: '1',
+      });
+      link(workspace, name, dependency);
+    }
+    const destination = join(root, 'bundle/node_modules');
+    const built = pkg(
+      join(destination, '@kite-ai/fixture'),
+      {
+        name: '@kite-ai/fixture',
+        version: '1',
+        dependencies: { external: '1' },
+        peerDependencies: { peer: '1' },
+      },
+      'module.exports={icon:"bundled",external:require("external"),peer:require("peer")};',
+    );
+    const selected = { name: '@kite-ai/fixture', source: workspace, destination: built };
+    const report = copyTerminalDependencies({
+      repositoryRoot,
+      destination,
+      workspacePackages: [{ ...selected, bundledDependencies: ['icons'] }],
+    });
+    expect(report.packages.map((item) => item.name).sort()).toEqual(['external', 'peer']);
+    for (const names of [['unknown'], ['peer'], ['icons', 'icons'], ['@kite-ai/fixture']])
+      expect(() =>
+        copyTerminalDependencies({
+          repositoryRoot,
+          destination,
+          workspacePackages: [{ ...selected, bundledDependencies: names }],
+        }),
+      ).toThrow('terminal_dependency_bundled_dependency_invalid');
+    rmSync(repositoryRoot, { recursive: true });
+    const moved = join(root, 'relocated');
+    renameSync(join(root, 'bundle'), moved);
+    validateTree(moved, moved);
+    const child = Bun.spawn(
+      [process.execPath, '-e', 'console.log(JSON.stringify(require("@kite-ai/fixture")));'],
+      { cwd: moved, env: { PATH: '' }, stdout: 'pipe', stderr: 'pipe' },
+    );
+    const output = await new Response(child.stdout).text();
+    const error = await new Response(child.stderr).text();
+    expect(await child.exited).toBe(0);
+    expect(error).toBe('');
+    expect(JSON.parse(output)).toEqual({ icon: 'bundled', external: '1', peer: '1' });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('missing required, unknown workspace, external package and escaping asset are rejected without installing', () => {
   const root = mkdtempSync('/private/tmp/kite-terminal-reject-deps-');

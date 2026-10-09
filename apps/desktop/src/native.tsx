@@ -1867,7 +1867,18 @@ function NativeDesktopContent({
       !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
     return (
       <ModelOutputMessage
-        key={`${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${message.id}`}
+        key={
+          message.outputBody
+            ? `${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${message.id}`
+            : JSON.stringify([
+                state.generation,
+                selection.viewSelection ?? selection.viewGeneration,
+                selection.storeId,
+                selection.session.id,
+                message.id,
+                'inline',
+              ])
+        }
         message={message}
         storeId={selection.storeId}
         canReadRestoredOrigin

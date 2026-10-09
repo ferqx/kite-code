@@ -32,7 +32,10 @@ async function launch() {
       exact: true,
     })
     .click();
-  await page.locator('.session-header').getByTitle('Explicit recovery', { exact: true }).waitFor();
+  await page
+    .locator('.session-header')
+    .getByTitle(kind === 'report' ? 'Original report' : 'Original recovery', { exact: true })
+    .waitFor();
   await openSessionTools(page);
   return { app, page };
 }

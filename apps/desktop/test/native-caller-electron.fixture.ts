@@ -34,7 +34,7 @@ async function launch() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Original recovery', exact: true }).click();
-  await page.locator('.session-header').getByTitle('持久原申请', { exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle('Original recovery', { exact: true }).waitFor();
   await openSessionTools(page);
   const ready = (await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),

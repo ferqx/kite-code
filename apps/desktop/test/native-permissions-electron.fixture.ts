@@ -24,18 +24,17 @@ try {
   const page = await application.firstWindow();
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
+  await openSessionTools(page);
   const panel = page.getByRole('region', { name: '权限与工作区信任' });
+  await panel.getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围' }).check();
+  await panel.getByRole('button', { name: '信任所显示的范围' }).press('Enter');
+  await panel.getByText(/信任状态：trusted/).waitFor();
   await panel.getByRole('radio', { name: 'Accept Edits', exact: true }).check();
   await panel.getByRole('checkbox', { name: '同时设为以后会话的默认模式' }).check();
   await panel.getByRole('button', { name: '保存模式选择' }).press('Enter');
   await panel
     .getByText('当前模式：accept_edits；默认模式：accept_edits', { exact: true })
     .waitFor();
-  await panel.getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围' }).check();
-  await panel.getByRole('button', { name: '信任所显示的范围' }).press('Enter');
-  await panel.getByText(/信任状态：trusted/).waitFor();
-  await panel.getByRole('button', { name: '撤销工作区信任' }).press('Enter');
-  await panel.getByText(/信任状态：untrusted/).waitFor();
   assert.equal(await count(), 0);
   // Main-only network fixture: one actual public mutation reaches Service and commits,
   // but its HTTP response socket is lost before the Native SDK can decode it.
@@ -78,6 +77,7 @@ try {
   await panel.getByText('当前模式：full；默认模式：accept_edits', { exact: true }).waitFor();
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
+  await openSessionTools(page);
   await panel.getByText('当前模式：full；默认模式：accept_edits', { exact: true }).waitFor();
   assert.equal(await count(), 0);
   // A failed read cannot leave stale writable controls visible.
@@ -124,6 +124,8 @@ try {
   assert.equal(html.includes(dataRoot!), false);
   assert.equal(html.includes(endpoint!), false);
   assert.ok(html.includes(storeId!));
+  await panel.getByRole('button', { name: '撤销工作区信任' }).press('Enter');
+  await panel.getByText(/信任状态：untrusted/).waitFor();
   // The final closed public read verifies neither Session has any Run.
   const state = await page.evaluate(async () => {
     const attached = (await window.kiteNative!.request({ method: 'attach' })) as NativeState;

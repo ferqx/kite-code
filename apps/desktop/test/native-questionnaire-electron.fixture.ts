@@ -10,7 +10,8 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
-const [candidate, home, control, storeId] = process.argv.slice(2) as [
+const [candidate, home, control, storeId, observer] = process.argv.slice(2) as [
+  string,
   string,
   string,
   string,
@@ -32,7 +33,12 @@ type TextInputEvent = {
 try {
   app = await _electron.launch({
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
-    args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
+    args: [
+      '-r',
+      observer,
+      join(candidate, 'app'),
+      `--user-data-dir=${join(home, 'electron-data')}`,
+    ],
     cwd: home,
     env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 10000,
@@ -321,57 +327,85 @@ try {
     }),
   );
 } catch (error) {
+  const failureAtDriverMs = performance.now() - startedAt;
+  console.error('questionnaire_failure_time', JSON.stringify({ failureAtDriverMs }));
   if (app)
     try {
       const page = app.windows()[0]!;
+      const stateRequestedAtDriverMs = performance.now() - startedAt;
+      const sampledState = await page.evaluate(async () => {
+        const current = (await window.kiteNative!.request({
+          method: 'state',
+          generation: 1,
+        })) as NativeState;
+        return {
+          generation: current.generation,
+          historyEpoch: current.historyEpoch,
+          directory: current.directory
+            ? {
+                storeId: current.directory.storeId,
+                unavailable: current.directory.unavailable === true,
+                workspaces: current.directory.workspaces.length,
+                sessions: current.directory.sessions.length,
+              }
+            : null,
+          startup: {
+            busy: document
+              .querySelector('main[aria-label="kite 启动页"]')
+              ?.getAttribute('aria-busy'),
+            error: document.querySelector('[role="alert"]')?.textContent,
+          },
+          session: current.selection?.session.id,
+          runs: current.selection?.runs.map((run) => ({ id: run.id, status: run.status })),
+          interactions: current.selection?.interactions.map((card) => ({
+            id: card.id,
+            revision: card.revision,
+            state: card.state,
+          })),
+          answers: current.interactionSubmissions.map((row) => ({
+            commandId: row.intent.commandId,
+            phase: row.phase,
+          })),
+          inputSubmissions: current.inputSubmissions.map((row) => ({
+            commandId: row.intent.commandId,
+            phase: row.phase,
+          })),
+          events: (window as typeof window & { questionnaireEvents: TextInputEvent[] })
+            .questionnaireEvents,
+          draft: document.querySelector('textarea')?.value,
+          focused: document.hasFocus(),
+          active: document.activeElement?.outerHTML,
+        };
+      });
+      const stateCompletedAtDriverMs = performance.now() - startedAt;
+      const earlyObservation = await app
+        .evaluate(
+          () =>
+            (
+              globalThis as typeof globalThis & {
+                nativeStartupEarlyObservation?: {
+                  installedAtMainMs: number;
+                  capacity: number;
+                  overflow: number;
+                  records: unknown[];
+                };
+              }
+            ).nativeStartupEarlyObservation ?? null,
+        )
+        .catch(() => null);
       console.error(
         'questionnaire_actual_failure',
         JSON.stringify({
-          elapsedMs: performance.now() - startedAt,
-          state: await page.evaluate(async () => {
-            const current = (await window.kiteNative!.request({
-              method: 'state',
-              generation: 1,
-            })) as NativeState;
-            return {
-              generation: current.generation,
-              historyEpoch: current.historyEpoch,
-              directory: current.directory
-                ? {
-                    storeId: current.directory.storeId,
-                    unavailable: current.directory.unavailable === true,
-                    workspaces: current.directory.workspaces.length,
-                    sessions: current.directory.sessions.length,
-                  }
-                : null,
-              startup: {
-                busy: document
-                  .querySelector('main[aria-label="kite 启动页"]')
-                  ?.getAttribute('aria-busy'),
-                error: document.querySelector('[role="alert"]')?.textContent,
-              },
-              session: current.selection?.session.id,
-              runs: current.selection?.runs.map((run) => ({ id: run.id, status: run.status })),
-              interactions: current.selection?.interactions.map((card) => ({
-                id: card.id,
-                revision: card.revision,
-                state: card.state,
-              })),
-              answers: current.interactionSubmissions.map((row) => ({
-                commandId: row.intent.commandId,
-                phase: row.phase,
-              })),
-              inputSubmissions: current.inputSubmissions.map((row) => ({
-                commandId: row.intent.commandId,
-                phase: row.phase,
-              })),
-              events: (window as typeof window & { questionnaireEvents: TextInputEvent[] })
-                .questionnaireEvents,
-              draft: document.querySelector('textarea')?.value,
-              focused: document.hasFocus(),
-              active: document.activeElement?.outerHTML,
-            };
-          }),
+          failureAtDriverMs,
+          stateRequestedAtDriverMs,
+          stateCompletedAtDriverMs,
+          traceReadCompletedAtDriverMs: performance.now() - startedAt,
+          startupObservation: {
+            installation: earlyObservation ? 'before_main_module' : 'unavailable',
+            endBoundary: 'response_headers',
+            ...earlyObservation,
+          },
+          state: sampledState,
           visible: await page.locator('body').innerText(),
         }),
       );

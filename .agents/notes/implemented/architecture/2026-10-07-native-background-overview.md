@@ -12,6 +12,8 @@ Status: implemented
 
 Native Main 从已准入连接固定 generation／Store／subject，完整读取后登记原身份 observation；renderer 只能指定已观察 Execution，不能传 Session、Workspace、路径、游标或执行 authority。全局总览观察独立于当前选择；新目录 refresh 使旧停止资格失效，已固定原对象的输出与子日志读取仍按各自完整上界收束。完整保存输出复用原固定 H 公共覆盖，子日志固定原子会话消息上界并读取完整 ModelOutput，64KiB传输核 EOF／SHA／fatal UTF-8。父 Run、原 child Run 和日志中后来轮次保持各自身份。
 
+2026-10-09 修正正式总览的目录与新子日志接纳竞态：在 React 发布前保存最新完整目录 facts，新读取先等待当前目录收束，再核同 Execution、Store、Session、Workspace、原载体和 child 血缘。新目录在 Main 登记后未发布时，不能继续使用上次显示的 observation；目录失败也不能借旧显示授予读取资格。仅在原 background.child.open 接纳前暂缓后续 poll，返回后恢复目录轮询，已固定正文继续按原完整 scope 收束。等待及接纳 guard 沿原 abort 撤销，不新增 Main/API authority、不自动重发停止、不把正文读取的全过程锁住目录。
+
 准确 stop 先要求原 Execution 属于当前 Store，再 fresh 核原身份、活动状态、attempt／owner generation／result revision，再复用既有 durable caller。内部后台 prepare 只为准确 `execution.cancel` 核根、原主体来源和实际后代 Session／Workspace；普通选中根 caller 门禁保持。既有或冷原意图仍只有原 GET，无新取消 journal 或第二套业务效果引擎。close/reset 只释放所属 GET，不取消、恢复或重发任务。存储层取消在首写前核完整目标与 attached 扩展中的当前 Execution／Run／source，混有旧来源时整项拒绝；既有原 receipt 相同请求仍只返回原记录。原出处与当前准入的区分同时用于 Job 输出 lease 和子 Model 正文：ModelOutput snapshot 仍标当前 Store，originMessage 另与真实 Model 原 Session／Run／originStoreId 核对。
 
 2026-10-08 原 PC 环境卡扩展复用上述 Main reader、完整公开目录、原取消 journal 和 child reader；原全局总览的独立选择合同保持。环境实例从实际选中根 snapshot 固定 root／viewSelection，renderer 仅给有限 surface，不能给根或路径；重选只释放环境范围，两个展示互不借用 observation。原 SessionPage 用相同完整 child 事实打开只读详情，保 Main 根和父草稿。SSE 只触发完整 GET，缓存只保有限展示 metadata，停止仍要求 fresh 原身份；observer reset 取消旧目录时，所有共用等待者收到明确失效，页面等待新观察。
@@ -25,6 +27,7 @@ Native Main 从已准入连接固定 generation／Store／subject，完整读取
 - 另建后台停止 journal 或恢复旧 JobHandle：原完整 caller 已有 durable intent／热首次 POST／冷 GET 合同；复制会制造另一效果权威，旧 handle 不适合冷读取，因此未采用。
 - 直接放宽所有 foreign-origin 或要求 Job 出处等于最初 root creator：前者缺少准确恢复根证明，后者会排除两次恢复之间真实新工作，因此采用准确恢复根加各项真实来源链。
 - 只在 renderer 隐藏历史停止按钮：新当前 Store 取消请求仍可进入底层，必须在存储事务首写前拒绝旧来源效果，Main 和页面同时限制。
+- 只禁用 busy 按钮、沿 React 上次显示取令牌或放宽 Main observation 校验：均不能关闭新目录已接纳而展示尚未提交的竞态。采用最新完整 facts 与有限接纳 guard；正文接纳后固定原 scope，继续允许目录刷新。
 - 以最新 child Run 展示原 task 或只展示 Model preview：会改变原载体身份并截断完整日志。实际按准确 child-start 来源和完整公共 ModelOutput 展示。
 
 ## Consequences
@@ -32,5 +35,7 @@ Native Main 从已准入连接固定 generation／Store／subject，完整读取
 正式总览可跨选择显示完整当前工作与准确恢复历史，读取失败保留上次完整事实并冻结停止。Main 保留完整目录和详情，需要相应实际内存；持续变化可能使 snapshot 扫描继续等待，用户关闭只释放读取。业务终态仍由 Core／Service决定，accepted stop 不等于实际停止。
 
 恢复历史显示原 Store 与只读状态，旧来源不获得停止／恢复／重执行许可。期间新 Store 明确创建的工作可按准确当前目标停止；包含旧来源的整组取消被原子拒绝，不能部分修改历史。完整子日志沿子消息与完整 ModelOutput 读取，诊断 SessionLog 的 replayFloor 合同保持。这份后台恢复历史证据不扩大默认普通 Shell 或 Auth 的独立资格；当前资格沿 Desktop owner 的实际证据核对，其他平台和全 V1.3 退出保持未完成。
+
+这次接纳错误的确定性 DOM 原红5pass／1fail，修正后原完整文件6pass／73断言；原49静态断言、准确 stop payload、Main/API 和 EOF／SHA／UTF-8检查保持。原源码外完整后台入口实际1pass／119断言，跨会话日志、准确停止、真实备份恢复、冷读、Workspace移除及安装后离线维护通过；此有限资格不能替代仍须通过的未过滤完整默认回归、持续RSS／八outer／全部资源或全V1.3退出，准确代码与失败保留于进度。
 
 当前合同归[Desktop owner](../../../../apps/desktop/README.md#native-跨会话后台总览)、[Store](../../../../packages/agent/src/storage/README.md#跨会话原-job-目录)、[Service](../../../../apps/service/README.md#完整后台执行目录)、[Client](../../../../packages/client/README.md#完整后台执行目录)与[active](../../../../docs/active/unified-agent-boundary.md)。必要实际验证、原失败和代码版本归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，本决定不替代具体测试范围的资格。
