@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import type { ContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
+import { verifyPairedServiceResources } from '../../../scripts/runtime/unified-soak-service-resources';
 
 test.skipIf(process.platform !== 'darwin')(
   'two default packaged Services run twenty original Sessions with real Files, child Agents and Shell work; cold facts cannot qualify padded elapsed time',
@@ -68,6 +69,33 @@ finally {await fixture.close();}`,
       closed = true;
       const evidence = JSON.parse(readFileSync(result, 'utf8')) as ContinuousEvidence;
       expect(evidence.shell!.candidateDigest).toBe(candidate.digest);
+      const serviceResources = evidence.shell!.serviceResources;
+      expect(serviceResources).toBeDefined();
+      expect(serviceResources).toMatchObject({ version: 1, coverage: 'paired-services-only' });
+      expect(
+        verifyPairedServiceResources(serviceResources!, {
+          storeId: evidence.storeId,
+          candidateDigest: candidate.digest,
+          instanceIds: evidence.serviceInstanceIds,
+          coldRead: evidence.shell!.coldRead,
+        }),
+      ).toEqual([]);
+      const resourceExpected = {
+        storeId: evidence.storeId,
+        candidateDigest: candidate.digest,
+        instanceIds: evidence.serviceInstanceIds,
+        coldRead: evidence.shell!.coldRead,
+      };
+      const missingRss = structuredClone(serviceResources!);
+      missingRss.services[0]!.ready.rssBytes = null;
+      expect(verifyPairedServiceResources(missingRss, resourceExpected)).toContain(
+        'continuous_service_resources_unqualified',
+      );
+      const stillAlive = structuredClone(serviceResources!);
+      stillAlive.services[0]!.exit!.kernelState = 'alive';
+      expect(verifyPairedServiceResources(stillAlive, resourceExpected)).toContain(
+        'continuous_service_resources_unqualified',
+      );
       expect(existsSync(join(workload, 'candidate'))).toBe(false);
       expect(verifyContinuousEvidence(evidence, false)).toEqual([]);
       expect(evidence.sessionIds).toHaveLength(20);

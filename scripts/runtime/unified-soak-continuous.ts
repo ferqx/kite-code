@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import {
+  type PairedServiceResources,
+  verifyPairedServiceResources,
+} from './unified-soak-service-resources';
 
 /** Closed workload evidence. Formal thresholds cannot be caller overrides. */
 export const CONTINUOUS_MINIMUM_BUSY_MS = 450_000;
@@ -27,6 +31,8 @@ export interface ContinuousShellEvidence {
   }[];
   coldRead: boolean;
   noReplay: boolean;
+  /** Optional independently versioned Service boundary observation; not whole resource qualification. */
+  serviceResources?: PairedServiceResources;
 }
 export interface ContinuousEvidence {
   version: 1 | 2;
@@ -180,7 +186,18 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
     if (
       !shell ||
       Object.keys(shell).sort().join(',') !==
-        'backend,candidateDigest,coldRead,jobs,noReplay,sourceSha256,wallStartedAt' ||
+        [
+          'backend',
+          'candidateDigest',
+          'coldRead',
+          'jobs',
+          'noReplay',
+          'sourceSha256',
+          'wallStartedAt',
+          ...(Object.hasOwn(shell, 'serviceResources') ? ['serviceResources'] : []),
+        ]
+          .sort()
+          .join(',') ||
       shell.backend !== 'macos-launchd-coalition' ||
       !hash(shell.candidateDigest) ||
       shell.sourceSha256 !== createHash('sha256').update(CONTINUOUS_SHELL_SOURCE).digest('hex') ||
@@ -217,6 +234,15 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
       )
     )
       return ['continuous_background_shell_invalid'];
+  }
+  if (value.version === 2 && value.shell && Object.hasOwn(value.shell, 'serviceResources')) {
+    const resourceErrors = verifyPairedServiceResources(value.shell.serviceResources!, {
+      storeId: value.storeId,
+      candidateDigest: value.shell.candidateDigest,
+      instanceIds: value.serviceInstanceIds,
+      coldRead: value.shell.coldRead,
+    });
+    if (resourceErrors.length) return resourceErrors;
   }
   if (
     formal &&

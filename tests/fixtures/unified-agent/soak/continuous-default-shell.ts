@@ -20,6 +20,14 @@ import {
   type ContinuousShellEvidence,
 } from '../../../../scripts/runtime/unified-soak-continuous';
 
+import {
+  type NativeProcessObservation,
+  observeNativeProcess,
+  observeNativeProcessResources,
+  observeOwnedProcessExit,
+} from '../../../../scripts/runtime/unified-soak-native';
+import type { PairedServiceResources } from '../../../../scripts/runtime/unified-soak-service-resources';
+
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 interface Operation {
@@ -170,12 +178,26 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
       { mode: 0o600 },
     );
     const services: Awaited<ReturnType<typeof launchPairedService>>[] = [];
+    const resourceServices: PairedServiceResources['services'] = [];
+    let resourceCold: PairedServiceResources['cold'] = null;
     for (let index = 0; index < 2; index++) {
+      let spawnObservation: NativeProcessObservation | null = null;
       const service = await launchPairedService({
         profile,
         entrypoint: join(candidate.root, candidate.manifest.entries.service),
         executable: join(candidate.root, candidate.manifest.entries.runtime),
         instanceId: `continuous-default-${index}`,
+        spawnChild(command, options) {
+          // Exact original default spawn; observation supplies no runtime/Tool/permission adapter.
+          const child = Bun.spawn([...command], {
+            stdin: 'pipe',
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: options.env,
+          });
+          spawnObservation = observeNativeProcess(child.pid);
+          return child;
+        },
         buildId: `terminal-${candidate.digest}`,
         apiMajor: 1,
         runtimeProtection: {
@@ -186,7 +208,27 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         requiredCapabilities: ['sessions', 'commands', 'events', 'permission_controls'],
       });
       services.push(service);
-      cleanup.push(() => service.close());
+      const resources: PairedServiceResources['services'][number] = {
+        instanceId: service.bootstrap.instanceId,
+        pid: service.pid,
+        spawn: spawnObservation,
+        ready: observeNativeProcessResources(service.pid),
+        preclose: null,
+        exit: null,
+      };
+      resourceServices.push(resources);
+      cleanup.push(async () => {
+        resources.preclose = observeNativeProcessResources(service.pid);
+        await service.close();
+        const exitCode = await service.exited;
+        const kernelState = observeOwnedProcessExit(service.pid, resources.ready.before);
+        resources.exit = {
+          exitCode,
+          originalExited: true,
+          reaped: exitCode === 0 && (kernelState === 'absent' || kernelState === 'reused'),
+          kernelState,
+        };
+      });
     }
     const clients = services.map((service) => service.client);
     const storeId = services[0]!.bootstrap.storeId!;
@@ -478,6 +520,15 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
             jobs,
             coldRead,
             noReplay: coldRead,
+            serviceResources: {
+              version: 1,
+              coverage: 'paired-services-only',
+              storeId,
+              candidateDigest: candidate.digest,
+              ownerPid: process.pid,
+              services: resourceServices,
+              cold: resourceCold,
+            },
           },
         };
       },
@@ -519,6 +570,14 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
           )
             throw Error('continuous_cold_replayed');
           coldRead = true;
+          // Original preceding cursor/provider comparisons prove this receipt; no new Core read.
+          resourceCold = {
+            storeId,
+            cursor: metadata.lastChangeCursor,
+            unchanged: true,
+            providerCallsBefore: before,
+            providerCallsAfter: providerCalls,
+          };
         } finally {
           await reader?.close();
           readAccess.release();

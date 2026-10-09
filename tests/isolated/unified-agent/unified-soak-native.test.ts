@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   observeNativeProcess,
+  observeNativeProcessResources,
+  observeOwnedProcessExit,
   observeProcessListeners,
   parseLinuxProcessStat,
   sameNativeProcess,
@@ -86,6 +88,9 @@ test('native self observation measures four real open FDs and original process s
 test('native owned child start identity is observed while alive and never replaced with a supported zero after exit', async () => {
   if (!['darwin', 'linux'].includes(process.platform)) {
     expect(observeNativeProcess().startIdentity).toBeNull();
+    const resources = observeNativeProcessResources(process.pid);
+    expect(resources.rssBytes).toBeNull();
+    expect(resources.unavailable).toContain('native_process_rss_unavailable');
     return;
   }
   const child = Bun.spawn(
@@ -126,6 +131,26 @@ test('native owned child start identity is observed while alive and never replac
     expect(original.startIdentity).not.toBeNull();
     expect(original.fileDescriptors).toBeGreaterThanOrEqual(3);
     expect(sameNativeProcess(original, observeNativeProcess(child.pid))).toBe(true);
+    const resources = observeNativeProcessResources(child.pid);
+    expect(resources.pid).toBe(child.pid);
+    expect(sameNativeProcess(original, resources.before)).toBe(true);
+    expect(sameNativeProcess(original, resources.after)).toBe(true);
+    expect(resources.before.parentPid).toBe(process.pid);
+    expect(resources.after.parentPid).toBe(process.pid);
+    expect(resources.after.fileDescriptors).toBeGreaterThanOrEqual(3);
+    expect(resources.activeResources).toBeNull();
+    expect(resources.handles).toBeNull();
+    expect(resources.unsupported).toEqual(['activeResources', 'handles']);
+    if (process.platform === 'darwin') {
+      expect(resources.unavailable).toEqual([]);
+      expect(resources.rssBytes).toBeGreaterThan(0);
+      expect(resources.fileDescriptors).toBe(resources.after.fileDescriptors);
+    } else {
+      // This collector has no Linux RSS implementation; unknown is not supported zero.
+      expect(resources.rssBytes).toBeNull();
+      expect(resources.fileDescriptors).toBeNull();
+      expect(resources.unavailable).toEqual(['native_process_rss_unavailable']);
+    }
     child.stdin.end();
     expect(await child.exited).toBe(0);
     const ended = observeNativeProcess(child.pid);
@@ -133,6 +158,7 @@ test('native owned child start identity is observed while alive and never replac
     expect(ended.fileDescriptors).toBeNull();
     expect(ended.unavailable).toEqual(['native_process_observation_unavailable']);
     expect(sameNativeProcess(original, ended)).toBe(false);
+    expect(observeOwnedProcessExit(child.pid, original)).toBe('absent');
   } finally {
     clearTimeout(timer);
     if (child.exitCode === null) child.kill('SIGKILL');

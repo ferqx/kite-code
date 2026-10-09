@@ -182,3 +182,87 @@ export function observeProcessListeners(): { listeners: number | null; unavailab
     return { listeners: null, unavailable: ['process_listener_observation_unavailable'] };
   }
 }
+
+/** Independent v1 observation. This does not change the persisted NativeProcessObservation. */
+export interface NativeProcessResources {
+  version: 1;
+  pid: number;
+  observedAt: number;
+  before: NativeProcessObservation;
+  after: NativeProcessObservation;
+  rssBytes: number | null;
+  fileDescriptors: number | null;
+  activeResources: null;
+  handles: null;
+  unsupported: ['activeResources', 'handles'];
+  unavailable: string[];
+}
+let darwinResources: ReturnType<typeof createDarwinResourceCollector> | undefined;
+function createDarwinResourceCollector() {
+  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
+  const api = dlopen('/usr/lib/libproc.dylib', {
+    proc_pidinfo: { args: ['i32', 'i32', 'u64', 'ptr', 'i32'], returns: 'i32' },
+  });
+  return (pid: number) => {
+    // Local SDK sys/proc_info.h: PROC_PIDTASKINFO=4, sizeof=96, resident bytes@8.
+    const bytes = new Uint8Array(96);
+    if (api.symbols.proc_pidinfo(pid, 4, 0, ptr(bytes), bytes.length) !== bytes.length)
+      throw Error('native_process_rss_unavailable');
+    const rss = new DataView(bytes.buffer).getBigUint64(8, true);
+    if (rss > BigInt(Number.MAX_SAFE_INTEGER)) throw Error('native_process_rss_invalid');
+    return Number(rss);
+  };
+}
+/** Only an explicitly already-owned PID; not a tree, VM, handles or heap census. */
+export function observeNativeProcessResources(pid: number): NativeProcessResources {
+  validPid(pid);
+  const before = observeNativeProcess(pid);
+  let rssBytes: number | null = null;
+  const unavailable: string[] = [];
+  try {
+    if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(process.arch))
+      throw Error('native_process_rss_platform_unsupported');
+    darwinResources ??= createDarwinResourceCollector();
+    rssBytes = darwinResources(pid);
+  } catch {
+    unavailable.push('native_process_rss_unavailable');
+  }
+  const after = observeNativeProcess(pid);
+  if (
+    !sameNativeProcess(before, after) ||
+    before.parentPid !== after.parentPid ||
+    before.unavailable.length ||
+    after.unavailable.length
+  ) {
+    rssBytes = null;
+    unavailable.push('native_process_resource_identity_unavailable');
+  }
+  return {
+    version: 1,
+    pid,
+    observedAt: Date.now(),
+    before,
+    after,
+    rssBytes,
+    fileDescriptors: unavailable.length ? null : after.fileDescriptors,
+    activeResources: null,
+    handles: null,
+    unsupported: ['activeResources', 'handles'],
+    unavailable,
+  };
+}
+/** An unavailable native query is never an exit proof. No signals are sent. */
+export function observeOwnedProcessExit(
+  pid: number,
+  original: NativeProcessObservation,
+): 'absent' | 'reused' | 'alive' | 'unavailable' {
+  if (original.pid !== pid || !original.startIdentity) return 'unavailable';
+  const after = observeNativeProcess(pid);
+  if (after.startIdentity) return sameNativeProcess(original, after) ? 'alive' : 'reused';
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'absent';
+  }
+  return 'unavailable';
+}

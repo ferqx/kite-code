@@ -3358,4 +3358,22 @@ Native模型窗口原helper只打开全屏设置，当前默认分类为常规�
 | 2 | installed `kite`／`kite-desktop`安装、版本切换、维护恢复与Provider／MCP认证 | 复用已闭合macOS真实前序代码、维护恢复与本轮独占生命周期；当前候选的适用DB9旧代码拒绝、必要平台和已发布新基线样本仍须准确制品、原数据／身份、零重放与保数据卸载证据。samebaseline改版本号不替代已发布predecessor；Win／Linux依用户安排留重构后Actions，无dispatch／push／发布。 |
 | 3 | 正式CLI／TUI／Native／只读Web及发行闭包的旧路径最终退役 | 前序能力及适用资格齐全后按§35／T-E完成独立整片迁移审查，删除确属退役的旧引擎／carrier／构建依赖，核正式与制品闭包，再运行阶段完整默认和强制门禁；不能仅改pending标签。本次整图通过不提前授最终退役资格。 |
 
-Daemon切片继续保持已结束，37能力partial／wholeV13=false／Goal active；本地提交授权保持，不扩大push、PR或发布。私有资源草案尚未集成，不能将其静态审查当作实施或运行通过。
+Daemon切片继续保持已结束，37能力partial／wholeV13=false／Goal active；本地提交授权保持，不扩大push、PR或发布。该次普通任务提交收束时私有资源草案尚未集成；后续实际实施与验收归下节，静态审查不计运行通过。
+
+
+### 2026-10-10：默认普通任务的Service资源与退出证据
+
+普通任务完整默认已在 durable `el-refactor` 本地提交 `fedd41a87db85897013551984fd249c35dc2fed6`，661文件／522主任务全部通过，正常hooks独立执行；Daemon切片继续结束。当前按同一退出表优先推进 installed 普通任务的资源与退出，正式 source-free default continuous producer 已接两个 Service 的出生身份、READY／preclose当前RSS／FD、原close／exited后reap及kernel终态、原cold只读cursor／Provider零重放收据。责任与格式归[Runtime资格owner](../active/runtime-resilience-qualification.md)，取舍归[既有采集Note](../../.agents/notes/implemented/testing/2026-10-08-blocked-full-workload-collection.md)。没有新增Runtime／Tool／Job／权限adapter；公开spawn参数沿原值／pipe／env，类型要求仅复制readonly argv为mutable数组。
+
+独立资源leaf严格核同Store／候选／实例／owner／birth以及原退出结果；unknown仍null／unavailable，不替换成0。原persisted native格式和legacy v1／v2缺资源字段兼容保持，旧结果不取得新资源证据。有新字段时完整连续verifier也必核leaf；旧源码外短例完整18断言、两cycle／20Session／40Command和180000ms整例／operation预算保留，增加实际leaf通过与缺RSS／原Service仍存活拒绝。SDK close仍可能fallback，当前收据不承诺无fallback；覆盖明确paired-services-only。
+
+必要验证沿原入口与预算选择：
+
+- 原native整文件actual0，4pass／45断言／26ms；原连续diagnostic／report整文件actual0，4pass／38断言／21.45秒。准确 `/private/tmp/kite-paired-service-resources-{native,continuous}-original-20261010.log`。 受新增v2资源字段影响的原报告整文件actual0，44pass／137断言／157.18秒，含真实source-free完成／取消／重连／SIGKILL／cold恢复、原bounded preflight及全部严格格式／增长／出生身份拒绝；准确 `report-original-20261010.log`，无新增故障矩阵。
+- 原源码外默认完整短例actual0，1pass／23断言／97.49秒；40Command、实际busy并集69176ms及原Files／required Task／Shell输出／全树停止／cold零重放全部通过。4252 regular输入及Git前后全等，完整default=false；准确 `/private/tmp/kite-paired-service-resources-default-original-20261010-{inputs,after-inputs,plan,result}.json`与`.log`。原C0成功后按所属root清理，原strict断言和冻结源码证明收据通过，不虚构未保留的RSS读数。
+- 原正式 `unified-soak-probe continuous/formal` 从源码外编译，显式消费同一完整候选 `ff297a5554522a2d9fc698034671d8a7a6029fb1c0ba45dde6545dc088143946`、包内Bun／Service／SQLite；不从compiled目录重定位源码。保原busy≥450000ms、operation／admission≤180000ms、固定二Service／20Session与冷核验。实际actual0／596325ms，12cycle／240Command，busy并集489574ms／wall587193ms，最大operation13761.129ms／admission31.525ms；原continuous和独立资源leaf均无错误，原cold／零重放成立。4252 regular／Git／候选／compiled probe前后全等。准确 `/private/tmp/kite-paired-service-resources-formal-entry-local-network-20261010-{inputs,after-inputs,launch,result}.json`、`.log`及原根 `/private/tmp/kite-paired-formal-entry-3O8V6z`；probe SHA `75e714d17f2a84c6e0f42cc4f5a34df995535359bc98c93dbc4bc98e91527da0`／sampler SHA `eda164c9479692a433f7df191b64b2dd1a25a57033c484e1079a90494fd59b59`／evidence SHA `0efccce9cb0ea41cdfc9ca1e2f02ce06df7e7923a018bec3a8c8b92254490ed1`。仅单个正式continuous组件，wholeDefault=false／wholeV13=false。 原资源收据同时保留Service0当前RSS339558400→681492480bytes、Service1为334807040→620150784bytes，FD各16→20；两个原birth最后kernel absent且exit0／reaped。READY与preclose并非原warmup／九点边界，不能套成九点稳定性通过；这些真实增长亦不删除或隐藏，分配原因仍未知。
+- 根及八workspace typecheck最终actual0，六资源文件只读Biome0。最初typecheck actual2为readonly argv不满足Bun.spawn overload，修正数组类型，保持原所有值／env／stdio／child返回；红日志保留于 `types-20261010.log`，最终 `types-final-20261010.log`。第一次受限正式入口监听启动失败，actual1／8940ms，尚未进入业务，4252 regular／Git／候选／compiled probe均保持，原根与日志保留；获准本机监听后同源同入口另运行，不覆盖原失败。
+
+只读归因没有确定新修复候选：固定Bun1.4.2 commit744846f84的[当前RSS实现](https://github.com/oven-sh/bun/blob/744846f844374847c902b5e7fd59b4342a51ef99/src/jsc/bindings/BunProcess.cpp#L4073-L4093)使用当前resident_size，原185.21875→244.828125MiB九点失败不能归为高水位。旧关闭DB59,592,704bytes／5528 tombstone Session／19348 Command／74629 changes符合原正文、终态、来源和去重保留契约；当前查询按Session／cursor／LIMIT，未发现全量常驻JS集合。文件增长或一次SQL返回不能当RSS因果，SQLite/Bun live allocation owner仍未知；不重复已闭statement／Client／Runtime清理矩阵。
+
+剩余依赖保持原三项：①原RSS、八outer／九点、Bun activeResources／handles及全Runtime后代；正式MCP stdio guardian／server目前仅数字PID／进程组，还缺出生身份与各自退出证据，且现行契约不承诺阻止setsid逃逸。②必要installed平台／维护／已发布样本与DB9旧代码适用拒绝。③前序满足后的§35独立迁移审查、最终旧路径退役和阶段完整回归。两Service边界不删除原descendant拒绝，不授全部后代或九点增长资格；37能力partial／wholeV13=false／Goal active。产品用户流程未变，手册执行／恢复／生命周期承诺按实际源码核对，无无意义手册diff；本地授权不扩push／PR／发布或Actions dispatch。
