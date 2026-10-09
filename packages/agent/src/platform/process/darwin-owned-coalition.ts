@@ -20,6 +20,13 @@ interface Identity {
 }
 export interface DarwinOwnedCoalition {
   readonly id: string;
+  readonly identity: Readonly<{
+    pid: number;
+    uniqueId: string;
+    pidVersion: number;
+    coalitionId: string;
+  }>;
+  stopTree(graceMs: number): Promise<{ confirmed: boolean; forced: boolean }>;
   stop(child: DarwinOwnedChild, graceMs: number): Promise<{ confirmed: boolean; forced: boolean }>;
   close(): void;
 }
@@ -100,12 +107,47 @@ export function claimDarwinOwnedCoalition(): DarwinOwnedCoalition {
         throw Error('darwin_coalition_signal_memory_changed');
     }
   };
+  const waitEmpty = async (
+    empty: () => boolean | undefined,
+    signal: 15 | 9,
+    milliseconds: number,
+  ) => {
+    const deadline = Date.now() + milliseconds;
+    do {
+      if (empty()) return true;
+      signalMembers(signal);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } while (Date.now() < deadline);
+    return Boolean(empty());
+  };
+  const validGrace = (graceMs: number) =>
+    Number.isSafeInteger(graceMs) && graceMs >= 0 && graceMs <= 5000;
   let stopping: Promise<{ confirmed: boolean; forced: boolean }> | undefined;
+  let treeStopping: Promise<{ confirmed: boolean; forced: boolean }> | undefined;
   return {
     id: original.coalition.toString(),
+    identity: Object.freeze({
+      pid: original.pid,
+      uniqueId: original.unique.toString(),
+      pidVersion: original.version,
+      coalitionId: original.coalition.toString(),
+    }),
+    stopTree(graceMs) {
+      if (!validGrace(graceMs)) return Promise.reject(Error('darwin_coalition_invalid_grace'));
+      treeStopping ??= (async () => {
+        const empty = () => isOriginal() && count(original.coalition) === 1 && isOriginal();
+        let forced = false;
+        let confirmed = await waitEmpty(empty, 15, graceMs);
+        if (!confirmed) {
+          forced = true;
+          confirmed = await waitEmpty(empty, 9, 2000);
+        }
+        return { confirmed, forced };
+      })();
+      return treeStopping;
+    },
     stop(child, graceMs) {
-      if (!Number.isSafeInteger(graceMs) || graceMs < 0 || graceMs > 5000)
-        return Promise.reject(Error('darwin_coalition_invalid_grace'));
+      if (!validGrace(graceMs)) return Promise.reject(Error('darwin_coalition_invalid_grace'));
       stopping ??= (async () => {
         let rootExited = false;
         void child.exited.then(() => {
@@ -113,20 +155,11 @@ export function claimDarwinOwnedCoalition(): DarwinOwnedCoalition {
         });
         const empty = () =>
           rootExited && isOriginal() && count(original.coalition) === 1 && isOriginal();
-        const waitEmpty = async (signal: 15 | 9, milliseconds: number) => {
-          const deadline = Date.now() + milliseconds;
-          do {
-            if (empty()) return true;
-            signalMembers(signal);
-            await new Promise((resolve) => setTimeout(resolve, 20));
-          } while (Date.now() < deadline);
-          return Boolean(empty());
-        };
         let forced = false;
-        let confirmed = await waitEmpty(15, graceMs);
+        let confirmed = await waitEmpty(empty, 15, graceMs);
         if (!confirmed) {
           forced = true;
-          confirmed = await waitEmpty(9, 2000);
+          confirmed = await waitEmpty(empty, 9, 2000);
         }
         // Retain the separate original-root/group proof and exact reap. Kernel
         // task count establishes descendant emptiness; neither PID enumeration

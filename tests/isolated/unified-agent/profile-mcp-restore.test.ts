@@ -579,8 +579,8 @@ test('installed maintenance restores raw MCP configuration into a new Store; col
     ) as { ready: boolean; ownedProcesses: McpStdioProcessEvidence };
     expect(ready.ready).toBe(true);
     expect(ready.ownedProcesses).toMatchObject({
-      version: 1,
-      coverage: 'guardian-and-server-only',
+      version: 2,
+      coverage: 'mcp-owned-coalition',
       ownerPid: child.pid,
       binding: {
         originalStoreId: storeB,
@@ -590,10 +590,22 @@ test('installed maintenance restores raw MCP configuration into a new Store; col
         scopeId: JSON.stringify([storeB, 's', user.id]),
         configDigest: connectionRecord.configDigest,
       },
-      guardian: { pid: owned.guardian, parentPid: child.pid, exit: null, unavailable: [] },
+      broker: { parentPid: child.pid, exit: null, unavailable: [] },
+      guardian: { pid: owned.guardian, parentPid: 1, exit: null, unavailable: [] },
       server: { pid: owned.server, parentPid: owned.guardian, exit: null, unavailable: [] },
     });
-    for (const identity of [ready.ownedProcesses.guardian!, ready.ownedProcesses.server!]) {
+    if (ready.ownedProcesses.version !== 2) throw Error('mcp_coalition_ready_required');
+    expect(ready.ownedProcesses.coalition).toMatchObject({
+      claimTaskCount: 1,
+      terminalTaskCount: null,
+      processTreeStopped: false,
+      registrationRemoved: false,
+    });
+    for (const identity of [
+      ready.ownedProcesses.broker!,
+      ready.ownedProcesses.guardian!,
+      ready.ownedProcesses.server!,
+    ]) {
       const native = observeNativeProcess(identity.pid);
       expect(native.unavailable).toEqual([]);
       expect(native.parentPid).toBe(identity.parentPid);
@@ -624,8 +636,10 @@ test('installed maintenance restores raw MCP configuration into a new Store; col
     expect(terminal.details.transportStopped).toBe(true);
     expect(terminal.details.remoteToolStopConfirmed).toBe(false);
     expect(terminal.details.ownedProcesses.binding).toEqual(ready.ownedProcesses.binding);
+    if (terminal.details.ownedProcesses.version !== 2)
+      throw Error('mcp_coalition_terminal_required');
     for (const [before, after] of [
-      [ready.ownedProcesses.guardian!, terminal.details.ownedProcesses.guardian!],
+      [ready.ownedProcesses.broker!, terminal.details.ownedProcesses.broker!],
       [ready.ownedProcesses.server!, terminal.details.ownedProcesses.server!],
     ]) {
       expect(after).toMatchObject({
@@ -636,10 +650,28 @@ test('installed maintenance restores raw MCP configuration into a new Store; col
         exit: { reaped: true },
       });
     }
-    expect(terminal.details.ownedProcesses.guardian!.exit).toEqual({
+    expect(terminal.details.ownedProcesses.broker!.exit).toEqual({
       code: 0,
       signal: null,
       reaped: true,
+    });
+    expect(terminal.details.ownedProcesses.guardian).toMatchObject({
+      pid: ready.ownedProcesses.guardian!.pid,
+      parentPid: ready.ownedProcesses.guardian!.parentPid,
+      birth: ready.ownedProcesses.guardian!.birth,
+      exit: null,
+      kernelState: 'absent',
+    });
+    expect(terminal.details.ownedProcesses.coalition).toMatchObject({
+      id: ready.ownedProcesses.coalition!.id,
+      guardianUniqueId: ready.ownedProcesses.coalition!.guardianUniqueId,
+      guardianPidVersion: ready.ownedProcesses.coalition!.guardianPidVersion,
+      label: ready.ownedProcesses.coalition!.label,
+      domain: ready.ownedProcesses.coalition!.domain,
+      claimTaskCount: 1,
+      terminalTaskCount: 1,
+      processTreeStopped: true,
+      registrationRemoved: true,
     });
     const stoppedOutput = await child.client.listExecutionOutput(connectionId);
     expect(stoppedOutput).toEqual(readyOutput);

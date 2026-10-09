@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
@@ -10,7 +11,7 @@ import {
   copyMcpStdioEvidence,
   decodeMcpStdioProcessEvidence,
   isMcpStdioIdentity,
-  type McpStdioProcessEvidence,
+  type McpStdioProcessEvidenceV2,
   mcpStdioKernelState,
 } from './stdio-process-evidence';
 
@@ -40,13 +41,15 @@ export interface McpStdioPortOptions {
   servers: readonly { id: string; configuration: Configuration }[];
   guardianPath: string;
   bunExecutable: string;
+  /** Trusted private host base; the broker creates and removes its own 0700 directory. */
+  controlBase?: string;
   allowedEnvNames: readonly string[];
   admit(binding: Binding, options: { signal: AbortSignal }): Promise<void>;
   /** Host-only source fence; cancellation/cleanup itself never depends on this check. */
   assertFresh?(binding: Binding, options: { signal: AbortSignal }): void;
   limits?: { frameBytes?: number; stderrBytes?: number; timeoutMs?: number; graceMs?: number };
 }
-/** macOS inherited POSIX process-group supervision, not arbitrary daemon/network containment. */
+/** macOS exclusive resource-coalition supervision of this stdio connection's descendants. */
 export function createMcpStdioTransportPort(
   options: McpStdioPortOptions,
 ): McpLifecycleTransportPort {
@@ -59,7 +62,7 @@ export function createMcpStdioTransportPort(
     admit = options.admit;
   const assertFresh = options.assertFresh;
   if (
-    ![guardianPath, bun].every(isAbsolute) ||
+    ![guardianPath, bun, options.controlBase ?? tmpdir()].every(isAbsolute) ||
     !guardianPath.endsWith('.js') ||
     [maximum, stderrMaximum, timeout].some((n) => !Number.isSafeInteger(n) || n < 1) ||
     maximum > 1024 * 1024 ||
@@ -156,15 +159,15 @@ export function createMcpStdioTransportPort(
         )
       )
         throw new McpStdioPortError('mcp_stdio_asset_unavailable');
-      const guardian = spawn(bun, [guardianPath], {
+      const broker = spawn(bun, [guardianPath], {
         cwd: dirname(guardianPath),
         env: {},
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-      const processEvidence: McpStdioProcessEvidence = {
-        version: 1,
-        coverage: 'guardian-and-server-only',
+      const processEvidence: McpStdioProcessEvidenceV2 = {
+        version: 2,
+        coverage: 'mcp-owned-coalition',
         ownerPid: process.pid,
         binding: {
           originalStoreId: binding.originalStoreId,
@@ -174,9 +177,9 @@ export function createMcpStdioTransportPort(
           scopeId: binding.scopeId,
           configDigest: binding.configDigest,
         },
-        guardian: guardian.pid
+        broker: broker.pid
           ? {
-              pid: guardian.pid,
+              pid: broker.pid,
               parentPid: null,
               birth: null,
               unavailable: ['native_birth_unavailable'],
@@ -184,7 +187,9 @@ export function createMcpStdioTransportPort(
               kernelState: 'unavailable',
             }
           : null,
+        guardian: null,
         server: null,
+        coalition: null,
       };
       const nonce = randomUUID();
       let controlBuffer = Buffer.alloc(0),
@@ -222,7 +227,7 @@ export function createMcpStdioTransportPort(
           pendingBytes = 0;
         },
         async send(message) {
-          if (closing || !guardian.stdin?.writable) throw new McpStdioPortError('mcp_stdio_closed');
+          if (closing || !broker.stdin?.writable) throw new McpStdioPortError('mcp_stdio_closed');
           assertFresh?.(binding, { signal });
           const content = `${JSON.stringify(message)}\n`;
           if (Buffer.byteLength(content) > maximum)
@@ -231,7 +236,7 @@ export function createMcpStdioTransportPort(
           pendingWrites++;
           try {
             await new Promise<void>((resolve, reject) =>
-              guardian.stdin!.write(
+              broker.stdin!.write(
                 `${JSON.stringify({ type: 'rpc', nonce, content })}\n`,
                 (error) =>
                   error ? reject(new McpStdioPortError('mcp_stdio_write_failed')) : resolve(),
@@ -271,7 +276,7 @@ export function createMcpStdioTransportPort(
           }
         }
       }
-      guardian.stdout!.on('data', (chunk: Buffer) => {
+      broker.stdout!.on('data', (chunk: Buffer) => {
         try {
           let offset = 0;
           while (offset < chunk.length) {
@@ -293,26 +298,45 @@ export function createMcpStdioTransportPort(
               frame.type === 'ready' &&
               Number.isSafeInteger(frame.processGroupId) &&
               frame.processGroupId > 1 &&
-              frame.guardianPid === guardian.pid
+              frame.guardianPid === frame.guardian?.pid
             ) {
-              if (!isMcpStdioIdentity(frame.guardian, guardian.pid!, process.pid))
+              if (
+                !isMcpStdioIdentity(frame.broker, broker.pid!, process.pid) ||
+                frame.coalition?.pid !== frame.guardianPid ||
+                frame.registration?.removed !== false
+              )
                 throw Error('guardian_identity');
               const next = decodeMcpStdioProcessEvidence(
                 {
                   ...processEvidence,
-                  guardian: { ...frame.guardian, exit: null, kernelState: 'unavailable' },
+                  broker: { ...frame.broker, exit: null, kernelState: 'unavailable' },
+                  guardian: frame.guardian,
                   server: frame.server,
+                  coalition: {
+                    id: frame.coalition.coalitionId,
+                    guardianUniqueId: frame.coalition.uniqueId,
+                    guardianPidVersion: frame.coalition.pidVersion,
+                    claimTaskCount: 1,
+                    terminalTaskCount: null,
+                    processTreeStopped: false,
+                    label: frame.registration.label,
+                    domain: frame.registration.domain,
+                    registrationRemoved: false,
+                  },
                 },
                 processEvidence.binding,
                 process.pid,
               );
               if (
-                !next?.server ||
+                next?.version !== 2 ||
+                !next.server ||
                 next.server.pid !== frame.processGroupId ||
                 next.server.exit !== null
               )
                 throw Error('server_identity');
+              processEvidence.broker = structuredClone(next.broker);
               processEvidence.guardian = structuredClone(next.guardian);
+              processEvidence.coalition = structuredClone(next.coalition);
               processEvidence.server = structuredClone(next.server);
               acknowledge();
             } else if (
@@ -323,20 +347,45 @@ export function createMcpStdioTransportPort(
               rpc(Buffer.from(frame.content, 'base64'));
             else if (frame.type === 'terminal' && typeof frame.groupStopped === 'boolean') {
               const next = decodeMcpStdioProcessEvidence(
-                { ...processEvidence, server: frame.server },
+                {
+                  ...processEvidence,
+                  guardian: frame.guardian ?? processEvidence.guardian,
+                  server: frame.server,
+                  coalition: processEvidence.coalition
+                    ? {
+                        ...processEvidence.coalition,
+                        processTreeStopped: frame.processTreeStopped === true,
+                        terminalTaskCount: frame.terminalTaskCount ?? null,
+                        registrationRemoved: frame.registrationRemoved === true,
+                      }
+                    : null,
+                },
                 processEvidence.binding,
                 process.pid,
               );
               if (
-                !next ||
+                next?.version !== 2 ||
+                (processEvidence.guardian &&
+                  (next.guardian?.pid !== processEvidence.guardian.pid ||
+                    JSON.stringify(next.guardian.birth) !==
+                      JSON.stringify(processEvidence.guardian.birth))) ||
+                (processEvidence.coalition &&
+                  (frame.registration?.label !== processEvidence.coalition.label ||
+                    frame.registration?.domain !== processEvidence.coalition.domain)) ||
                 (processEvidence.server &&
                   (next.server?.pid !== processEvidence.server.pid ||
                     JSON.stringify(next.server.birth) !==
                       JSON.stringify(processEvidence.server.birth)))
               )
                 throw Error('terminal_identity');
+              processEvidence.guardian = structuredClone(next.guardian);
               processEvidence.server = structuredClone(next.server);
-              groupStopped = frame.groupStopped;
+              processEvidence.coalition = structuredClone(next.coalition);
+              groupStopped =
+                frame.groupStopped &&
+                next.coalition?.processTreeStopped === true &&
+                next.coalition.registrationRemoved &&
+                next.guardian?.kernelState === 'absent';
               closing = true;
               rejectReady(new McpStdioPortError('mcp_stdio_ended'));
             } else throw new Error('control_invalid');
@@ -345,19 +394,19 @@ export function createMcpStdioTransportPort(
           malformed();
         }
       });
-      guardian.stdin!.on('error', () => {
+      broker.stdin!.on('error', () => {
         rejectReady(new McpStdioPortError('mcp_stdio_control_failed'));
       });
-      guardian.stderr!.resume();
-      guardian.on('error', () => rejectReady(new McpStdioPortError('mcp_stdio_guardian_failed')));
-      let guardianExit: { code: number | null; signal: string | null; reaped: true } | null = null;
-      guardian.once('exit', (code, signal) => {
-        guardianExit = { code, signal, reaped: true };
+      broker.stderr!.resume();
+      broker.on('error', () => rejectReady(new McpStdioPortError('mcp_stdio_guardian_failed')));
+      let brokerExit: { code: number | null; signal: string | null; reaped: true } | null = null;
+      broker.once('exit', (code, signal) => {
+        brokerExit = { code, signal, reaped: true };
       });
-      guardian.once('close', () => {
-        if (processEvidence.guardian) {
-          processEvidence.guardian.exit = guardianExit;
-          processEvidence.guardian.kernelState = mcpStdioKernelState(processEvidence.guardian);
+      broker.once('close', () => {
+        if (processEvidence.broker) {
+          processEvidence.broker.exit = brokerExit;
+          processEvidence.broker.kernelState = mcpStdioKernelState(processEvidence.broker);
         }
         exited = true;
         closing = true;
@@ -375,8 +424,8 @@ export function createMcpStdioTransportPort(
         closing = true;
         rejectReady(new McpStdioPortError('mcp_stdio_closed'));
         stopping = (async () => {
-          if (guardian.stdin?.writable)
-            guardian.stdin.write(`${JSON.stringify({ type: 'cancel', nonce })}\n`);
+          if (broker.stdin?.writable)
+            broker.stdin.write(`${JSON.stringify({ type: 'cancel', nonce })}\n`);
           let stopTimer: ReturnType<typeof setTimeout> | undefined;
           try {
             return await Promise.race([
@@ -385,7 +434,7 @@ export function createMcpStdioTransportPort(
               })),
               new Promise<{ status: 'unknown' }>((resolve) => {
                 stopTimer = setTimeout(() => {
-                  guardian.stdin?.end();
+                  broker.stdin?.end();
                   resolve({ status: 'unknown' });
                 }, grace + 4000);
               }),
@@ -406,8 +455,8 @@ export function createMcpStdioTransportPort(
         await stop();
         throw error;
       }
-      guardian.stdin!.write(
-        `${JSON.stringify({ ...server.configuration, type: 'start', nonce, graceMs: grace, stderrBytes: stderrMaximum, frameBytes: maximum })}\n`,
+      broker.stdin!.write(
+        `${JSON.stringify({ ...server.configuration, type: 'start', nonce, controlBase: options.controlBase ?? tmpdir(), graceMs: grace, stderrBytes: stderrMaximum, frameBytes: maximum })}\n`,
       );
       startTimer = setTimeout(() => {
         rejectReady(new McpStdioPortError('mcp_stdio_ready_timeout'));

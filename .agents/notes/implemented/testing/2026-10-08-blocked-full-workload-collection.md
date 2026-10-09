@@ -14,7 +14,7 @@ macOS显式 `--profile=qualification --collect-blocked`沿同一原runner执行�
 
 默认两Service追加独立closed v1资源leaf，保原persisted native packet和v1／v2验收边界；通过原公开spawn端口获取出生身份，在原READY／preclose采当前RSS／FD，原close／exited后核同身份退出，再使用原cold读比较生成收据。有字段必须严格解码；旧缺字段不赋新资格。观察不给Runtime配置、Tool／Job／权限adapter，也不通过信号改变退出结果。它只覆盖两个原Service，不改变原全局未具备条件；SDK close可fallback，收据不声明已证明无fallback。
 
-正式MCP stdio的原connection Job另沿port／guardian私有nonce／sequence帧保存guardian和server的libproc出生身份／PPID、原ChildProcess exit／reap和kernel终态；同步getter仅供lifecycle严格核原六字段绑定及owner后写progress／terminal details。沿现有两个用户整例核真实Tool／取消／维护恢复和installed明确连接／Service退出／冷读，不另建journal或控制authority。缺失、throw、非法或暂不可读保有限不可用，原supervision／远端Tool未知不改变。已知两进程的事实不能补成全Runtime后代；原setsid限制、activeResources／handles缺项和完整报告拒绝保持。具体当前实现归[MCP owner](../../../../packages/agent/src/mcp/README.md#显式-stdio-guardian-port)，实际结果及原失败归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10正式-mcp-连接的进程身份与冷退出证据)。
+正式MCP stdio的原connection Job现沿独立launchd coalition关闭setsid／orphan后代，closed v2区分Service直接broker、launchd guardian及直接server；只有真正父方观察记录exit／reap，guardian保exit:null。原scope／owner重核、progress／terminal及cold零重放继续；旧v1保两进程合同，不补新树证明。该生产所有权扩展及实际失败修正见[决定](../architecture/2026-10-10-macos-mcp-owned-coalition.md)、[MCP owner](../../../../packages/agent/src/mcp/README.md#显式-stdio-guardian-port)与[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10正式-mcp-完整所属进程树与旧组路径退役)。MCP自己的完整树不补全Runtime graph；原RSS失败、activeResources／handles缺项和完整报告拒绝保持。
 
 持续lifecycle的滚动数组另经真实两秒probe确认会删除中段。当前按首个cycle warmup及实际窗口分布固定边界，窗口中继续原业务周期，不用等待补时；同一180秒timer涵盖整个point，报告核连续序号。原红／绿和后续原完整回归分别保留，不以修正前通过覆盖后续输入。
 

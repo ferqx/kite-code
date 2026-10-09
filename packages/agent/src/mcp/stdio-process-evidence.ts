@@ -9,7 +9,7 @@ export interface McpStdioProcessRecord extends McpStdioProcessIdentity {
   exit: { code: number | null; signal: string | null; reaped: true } | null;
   kernelState: 'absent' | 'reused' | 'alive' | 'unavailable';
 }
-export interface McpStdioProcessEvidence {
+export interface McpStdioProcessEvidenceV1 {
   version: 1;
   coverage: 'guardian-and-server-only';
   binding: {
@@ -24,6 +24,29 @@ export interface McpStdioProcessEvidence {
   guardian: McpStdioProcessRecord | null;
   server: McpStdioProcessRecord | null;
 }
+export interface McpStdioCoalitionEvidence {
+  id: string;
+  guardianUniqueId: string;
+  guardianPidVersion: number;
+  claimTaskCount: 1;
+  terminalTaskCount: 1 | null;
+  processTreeStopped: boolean;
+  label: string;
+  domain: string;
+  registrationRemoved: boolean;
+}
+export interface McpStdioProcessEvidenceV2 {
+  version: 2;
+  coverage: 'mcp-owned-coalition';
+  binding: McpStdioProcessEvidenceV1['binding'];
+  ownerPid: number;
+  broker: McpStdioProcessRecord | null;
+  /** launchd owns this process; its disappearance is not a parent-observed reap. */
+  guardian: McpStdioProcessRecord | null;
+  server: McpStdioProcessRecord | null;
+  coalition: McpStdioCoalitionEvidence | null;
+}
+export type McpStdioProcessEvidence = McpStdioProcessEvidenceV1 | McpStdioProcessEvidenceV2;
 let native: ((pid: number) => McpStdioProcessIdentity) | undefined;
 export function observeMcpStdioIdentity(pid: number): McpStdioProcessIdentity {
   try {
@@ -122,9 +145,14 @@ export function decodeMcpStdioProcessEvidence(
     const data = value as McpStdioProcessEvidence;
     if (
       !data ||
-      !exact(data, 'binding,coverage,guardian,ownerPid,server,version') ||
-      data.version !== 1 ||
-      data.coverage !== 'guardian-and-server-only' ||
+      !(
+        (data.version === 1 &&
+          exact(data, 'binding,coverage,guardian,ownerPid,server,version') &&
+          data.coverage === 'guardian-and-server-only') ||
+        (data.version === 2 &&
+          exact(data, 'binding,broker,coalition,coverage,guardian,ownerPid,server,version') &&
+          data.coverage === 'mcp-owned-coalition')
+      ) ||
       !Number.isSafeInteger(data.ownerPid) ||
       data.ownerPid < 1 ||
       (ownerPid !== undefined && data.ownerPid !== ownerPid) ||
@@ -170,12 +198,44 @@ export function decodeMcpStdioProcessEvidence(
       );
     };
     if (
-      !record(data.guardian, data.ownerPid) ||
+      !record(data.guardian, data.version === 1 ? data.ownerPid : 1) ||
       (data.server !== null && (!data.guardian || data.server.pid === data.guardian.pid)) ||
       !record(data.server, data.guardian?.pid ?? 0) ||
       JSON.stringify(data).length > 64 * 1024
     )
       return undefined;
+    if (data.version === 2) {
+      if (
+        !record(data.broker, data.ownerPid) ||
+        (data.guardian && data.guardian.exit !== null) ||
+        (data.broker && [data.guardian?.pid, data.server?.pid].includes(data.broker.pid))
+      )
+        return undefined;
+      const coalition = data.coalition;
+      if (coalition === null) {
+        if (data.guardian || data.server) return undefined;
+      } else if (
+        !data.guardian?.birth ||
+        !exact(
+          coalition,
+          'claimTaskCount,domain,guardianPidVersion,guardianUniqueId,id,label,processTreeStopped,registrationRemoved,terminalTaskCount',
+        ) ||
+        !/^[1-9][0-9]{0,19}$/.test(coalition.id) ||
+        !/^[1-9][0-9]{0,19}$/.test(coalition.guardianUniqueId) ||
+        !Number.isSafeInteger(coalition.guardianPidVersion) ||
+        coalition.guardianPidVersion < 1 ||
+        coalition.guardianPidVersion > 0xffffffff ||
+        coalition.claimTaskCount !== 1 ||
+        typeof coalition.processTreeStopped !== 'boolean' ||
+        coalition.terminalTaskCount !== (coalition.processTreeStopped ? 1 : null) ||
+        !/^com\.kitecode\.mcp\.[a-f0-9-]{36}$/.test(coalition.label) ||
+        !/^user\/[0-9]{1,10}$/.test(coalition.domain) ||
+        typeof coalition.registrationRemoved !== 'boolean' ||
+        (coalition.processTreeStopped &&
+          (!data.server?.exit || data.server.kernelState === 'alive'))
+      )
+        return undefined;
+    }
     return copyMcpStdioEvidence(data);
   } catch {
     return undefined;

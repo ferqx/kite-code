@@ -1,5 +1,12 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
+import { removeRuntimeTemp } from '../jobs/launch-identity';
+import {
+  connectLaunchdControl,
+  removeLaunchdRegistration,
+  startLaunchdSupervisor,
+} from '../platform/process/darwin-launchd-supervisor';
+import { claimDarwinOwnedCoalition } from '../platform/process/darwin-owned-coalition';
 import {
   type McpStdioProcessRecord,
   mcpStdioKernelState,
@@ -13,10 +20,26 @@ interface Start {
   args: string[];
   cwd: string;
   env: Record<string, string>;
+  controlBase: string;
   graceMs: number;
   stderrBytes: number;
   frameBytes: number;
 }
+const launchdOwned = process.argv[2] === '--launchd-owned';
+// The Service's direct child only brokers the private launchd channel.
+const coalition = launchdOwned ? claimDarwinOwnedCoalition() : undefined;
+const control = launchdOwned
+  ? await connectLaunchdControl(process.argv[3]!, 'mcp', async (registration) => {
+      // A broker can die between bootstrap and authentication. No business
+      // child exists here; only the original exclusive guardian may clean up.
+      if (!(await coalition!.stopTree(0)).confirmed) return;
+      removeRuntimeTemp(registration.root);
+      await removeLaunchdRegistration(registration);
+    })
+  : undefined;
+const incoming = control?.socket ?? process.stdin;
+const outgoing = control?.socket ?? process.stdout;
+const brokerIdentity = launchdOwned ? undefined : observeMcpStdioIdentity(process.pid);
 let start: Start | undefined,
   child: ChildProcess | undefined,
   buffer = Buffer.alloc(0),
@@ -26,8 +49,12 @@ let start: Start | undefined,
   exited: Promise<void> | undefined,
   drained: Promise<unknown> | undefined,
   cancelling = false;
+let bridge: Awaited<ReturnType<typeof startLaunchdSupervisor>> | undefined;
+let bridgeStarting: Promise<void> | undefined;
+let guardianSequence = 0;
 let serverEvidence: McpStdioProcessRecord | null = null;
 let serverExit: McpStdioProcessRecord['exit'] = null;
+let guardianEvidence: McpStdioProcessRecord | undefined;
 function evidence() {
   if (serverEvidence) serverEvidence.kernelState = mcpStdioKernelState(serverEvidence);
   return serverEvidence;
@@ -36,8 +63,8 @@ const CONTROL = 2 * 1024 * 1024 + 64 * 1024;
 async function send(value: object) {
   if (parentGone) return;
   await new Promise<void>((resolve) =>
-    process.stdout.write(
-      `${JSON.stringify({ nonce: start?.nonce, sequence: ++sequence, ...value })}\n`,
+    outgoing.write(
+      `${JSON.stringify({ ...value, nonce: start?.nonce, sequence: ++sequence })}\n`,
       (error) => {
         if (error) {
           parentGone = true;
@@ -48,56 +75,87 @@ async function send(value: object) {
     ),
   );
 }
-function alive(pid: number) {
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-}
-async function waitGone(pid: number, ms: number) {
-  const end = Date.now() + ms;
-  while (alive(pid) && Date.now() < end) await Bun.sleep(20);
-  return !alive(pid);
-}
-async function terminate(pid: number) {
-  if (!alive(pid)) return { groupStopped: true, forced: false };
-  for (const [signal, ms] of [
-    ['SIGTERM', start!.graceMs],
-    ['SIGKILL', 2000],
-  ] as const) {
-    try {
-      process.kill(-pid, signal);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
-        return { groupStopped: false, forced: signal === 'SIGKILL' };
-    }
-    if (await waitGone(pid, ms)) return { groupStopped: true, forced: signal === 'SIGKILL' };
-  }
-  return { groupStopped: false, forced: true };
+async function stopTree() {
+  const proof = await coalition!.stopTree(start?.graceMs ?? 200);
+  return {
+    groupStopped: proof.confirmed,
+    processTreeStopped: proof.confirmed,
+    terminalTaskCount: proof.confirmed ? 1 : null,
+    forced: proof.forced,
+  };
 }
 function stop(): Promise<void> {
   cancelling = true;
   if (closing) return closing;
   closing = (async () => {
-    if (!child?.pid) {
+    if (!launchdOwned) {
+      if (bridgeStarting) {
+        try {
+          await bridgeStarting;
+          bridge!.stop();
+          await bridge!.finished;
+        } catch {
+          await send({ type: 'terminal', groupStopped: false, server: null });
+          process.exit(125);
+        }
+      } else process.exit(0);
       return;
     }
-    const proof = await terminate(child.pid);
+    const proof = await stopTree();
     if (proof.groupStopped) await exited;
     else {
-      child.stdout?.destroy();
-      child.stderr?.destroy();
+      child?.stdout?.destroy();
+      child?.stderr?.destroy();
     }
     await drained?.catch(() => {});
-    await send({ type: 'terminal', ...proof, server: evidence() });
+    await send({ type: 'terminal', ...proof, server: evidence(), guardian: guardianEvidence });
+    coalition!.close();
+    if (parentGone && proof.groupStopped) {
+      try {
+        removeRuntimeTemp(control!.registration.root);
+        await removeLaunchdRegistration(control!.registration);
+      } catch {
+        process.exit(125);
+      }
+    }
     process.exit(proof.groupStopped ? 0 : 125);
   })();
   return closing;
 }
 async function run() {
   const input = start!;
+  if (!launchdOwned) {
+    bridgeStarting = (async () => {
+      bridge = await startLaunchdSupervisor({
+        kind: 'mcp',
+        frame: input as unknown as Record<string, unknown>,
+        controlBase: input.controlBase,
+        cancelled: () => cancelling || parentGone,
+        async onFrame(frame) {
+          if (frame.sequence !== guardianSequence + 1) throw Error('mcp_guardian_sequence_invalid');
+          guardianSequence++;
+          if (frame.type === 'ready') await send({ ...frame, broker: brokerIdentity });
+          else if (frame.type === 'terminal') {
+            const guardian = frame.guardian as McpStdioProcessRecord | undefined;
+            await send({
+              ...frame,
+              ...(guardian
+                ? { guardian: { ...guardian, kernelState: mcpStdioKernelState(guardian) } }
+                : {}),
+            });
+          } else await send(frame);
+        },
+      });
+    })();
+    try {
+      await bridgeStarting;
+      await bridge!.finished;
+      process.exit(0);
+    } catch {
+      await send({ type: 'terminal', groupStopped: false, server: null });
+      process.exit(125);
+    }
+  }
   try {
     child = spawn(input.command, input.args, {
       cwd: input.cwd,
@@ -106,9 +164,7 @@ async function run() {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const current = child;
-    current.stdin!.on('error', () => {
-      void stop();
-    });
+    current.stdin!.on('error', () => void stop());
     exited = new Promise((resolve) => {
       current.once('exit', (code, signal) => {
         serverExit = { code, signal, reaped: true };
@@ -149,12 +205,18 @@ async function run() {
       })(),
     ]);
     void drained.catch(() => void stop());
+    guardianEvidence = {
+      ...observeMcpStdioIdentity(process.pid),
+      exit: null,
+      kernelState: 'alive',
+    };
     await send({
       type: 'ready',
       processGroupId: current.pid,
       guardianPid: process.pid,
-      guardian: observeMcpStdioIdentity(process.pid),
+      guardian: guardianEvidence,
       server: evidence(),
+      coalition: coalition!.identity,
     });
     if (cancelling) {
       closing = undefined;
@@ -162,20 +224,13 @@ async function run() {
       return;
     }
     await exited;
-    if (closing) {
-      await closing;
-      return;
-    }
-    await stop();
+    if (closing) await closing;
+    else await stop();
   } catch {
-    const proof = child?.pid ? await terminate(child.pid) : { groupStopped: true, forced: false };
-    child?.stdout?.destroy();
-    child?.stderr?.destroy();
-    await send({ type: 'terminal', ...proof, server: evidence() });
-    process.exit(proof.groupStopped ? 0 : 125);
+    await stop();
   }
 }
-process.stdin.on('data', (chunk: Buffer) => {
+incoming.on('data', (chunk: Buffer) => {
   try {
     let offset = 0;
     while (offset < chunk.length) {
@@ -193,6 +248,7 @@ process.stdin.on('data', (chunk: Buffer) => {
           typeof frame.nonce !== 'string' ||
           !isAbsolute(frame.command) ||
           !isAbsolute(frame.cwd) ||
+          !isAbsolute(frame.controlBase) ||
           !Array.isArray(frame.args) ||
           frame.args.some((x: unknown) => typeof x !== 'string') ||
           !frame.env ||
@@ -212,19 +268,27 @@ process.stdin.on('data', (chunk: Buffer) => {
         start = frame;
         void run();
       } else if (frame.nonce !== start.nonce) throw new Error('control_identity');
-      else if (frame.type === 'cancel') {
-        void stop();
-      } else if (
+      else if (frame.type === 'cancel') void stop();
+      else if (
         frame.type === 'rpc' &&
         typeof frame.content === 'string' &&
         Buffer.byteLength(frame.content) <= start.frameBytes + 1 &&
-        child?.stdin?.writable &&
         !cancelling
       ) {
-        if (!child.stdin.write(frame.content)) {
-          process.stdin.pause();
-          child.stdin.once('drain', () => process.stdin.resume());
-        }
+        if (!launchdOwned) {
+          incoming.pause();
+          void bridgeStarting!
+            .then(() => bridge!.send(frame))
+            .then(
+              () => incoming.resume(),
+              () => void stop(),
+            );
+        } else if (child?.stdin?.writable) {
+          if (!child.stdin.write(frame.content)) {
+            incoming.pause();
+            child.stdin.once('drain', () => incoming.resume());
+          }
+        } else throw new Error('control_closed');
       } else throw new Error('control_invalid');
     }
   } catch {
@@ -232,15 +296,12 @@ process.stdin.on('data', (chunk: Buffer) => {
     void stop();
   }
 });
-process.stdin.on('end', () => {
-  parentGone = true;
-  void stop();
-});
-process.stdin.on('error', () => {
-  parentGone = true;
-  void stop();
-});
-process.stdout.on('error', () => {
+for (const event of ['end', 'error'] as const)
+  incoming.on(event, () => {
+    parentGone = true;
+    void stop();
+  });
+outgoing.on('error', () => {
   parentGone = true;
   void stop();
 });

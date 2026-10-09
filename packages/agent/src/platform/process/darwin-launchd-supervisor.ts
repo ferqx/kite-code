@@ -69,11 +69,16 @@ async function launchctl(args: string[]): Promise<{ code: number | null; output:
 }
 
 /** File and socket are in the trusted host's protected private control base. */
-export async function connectLaunchdControl(path: string): Promise<LaunchdControl> {
+export async function connectLaunchdControl(
+  path: string,
+  kind: 'shell' | 'mcp' = 'shell',
+  onConnectionFailure?: (registration: Registration) => Promise<void>,
+): Promise<LaunchdControl> {
+  if (kind !== 'shell' && kind !== 'mcp') throw Error('launchd_control_invalid');
   const registration = JSON.parse(readFileSync(join(path, 'owner.json'), 'utf8')) as Registration;
   if (
     !/^[a-f0-9-]{36}$/.test(registration.secret) ||
-    !/^com\.kitecode\.shell\.[a-f0-9-]{36}$/.test(registration.label) ||
+    !new RegExp(`^com\\.kitecode\\.${kind}\\.[a-f0-9-]{36}$`).test(registration.label) ||
     registration.domain !== `user/${process.getuid!()}` ||
     registration.root.canonical !== realpathSync.native(path)
   )
@@ -88,10 +93,16 @@ export async function connectLaunchdControl(path: string): Promise<LaunchdContro
   if (realpathSync.native(process.cwd()) !== current.canonical)
     throw Error('launchd_control_cwd_changed');
   const socket = createConnection('control.sock');
-  await new Promise<void>((resolve, reject) => {
-    socket.once('connect', resolve);
-    socket.once('error', reject);
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('error', reject);
+    });
+  } catch (error) {
+    socket.destroy();
+    await onConnectionFailure?.(registration);
+    throw error;
+  }
   // Authentication is independent of the public Job reference/nonce. The secret
   // is never an argv/environment value or business-output frame.
   socket.write(
@@ -128,15 +139,24 @@ export async function removeLaunchdRegistration(registration: Registration): Pro
 export async function startLaunchdSupervisor(input: {
   frame: Record<string, unknown>;
   controlBase: string;
+  kind?: 'shell' | 'mcp';
+  cancelled?: () => boolean;
   onFrame(frame: Record<string, unknown>): Promise<void>;
-}): Promise<{ stop(): void; finished: Promise<void> }> {
+}): Promise<{
+  stop(): void;
+  send(frame: Record<string, unknown>): Promise<void>;
+  finished: Promise<void>;
+}> {
   if (process.platform !== 'darwin' || !input.controlBase.startsWith('/'))
     throw Error('launchd_supervisor_unsupported');
-  const rootPath = realpathSync.native(mkdtempSync(join(input.controlBase, 'shell-')));
+  const kind = input.kind ?? 'shell';
+  if (kind !== 'shell' && kind !== 'mcp') throw Error('launchd_supervisor_unsupported');
+  const frameLimit = kind === 'mcp' ? 2 * 1024 * 1024 + 64 * 1024 : MAX_FRAME;
+  const rootPath = realpathSync.native(mkdtempSync(join(input.controlBase, `${kind}-`)));
   chmodSync(rootPath, 0o700);
   const registration: Registration = {
     secret: randomUUID(),
-    label: `com.kitecode.shell.${randomUUID()}`,
+    label: `com.kitecode.${kind}.${randomUUID()}`,
     domain: `user/${process.getuid!()}`,
     root: launchIdentity(rootPath),
   };
@@ -178,10 +198,17 @@ export async function startLaunchdSupervisor(input: {
     socket.on('end', () => {
       if (!finished) finishReject(Error('launchd_guardian_disconnected'));
     });
+    socket.on('close', () => {
+      if (!finished) {
+        const error = Error('launchd_guardian_disconnected');
+        readyReject(error);
+        finishReject(error);
+      }
+    });
     socket.on('data', (chunk: string) => {
       socket.pause();
       buffer += chunk;
-      if (Buffer.byteLength(buffer) > MAX_FRAME) {
+      if (Buffer.byteLength(buffer) > frameLimit) {
         socket.destroy(Error('launchd_frame_overflow'));
         return;
       }
@@ -215,7 +242,19 @@ export async function startLaunchdSupervisor(input: {
               terminal = frame;
               finished = true;
               finishResolve();
-            } else await input.onFrame(frame);
+            } else
+              await input.onFrame(
+                kind === 'mcp' && frame.type === 'ready'
+                  ? {
+                      ...frame,
+                      registration: {
+                        label: registration.label,
+                        domain: registration.domain,
+                        removed: false,
+                      },
+                    }
+                  : frame,
+              );
           }
         });
         void chain.catch((error: Error) => {
@@ -259,12 +298,24 @@ export async function startLaunchdSupervisor(input: {
     if (bootstrapped.code !== 0) throw Error('launchd_bootstrap_failed');
     registered = true;
     await ready;
+    if (input.cancelled?.()) throw Error('launchd_start_cancelled');
+    const send = async (frame: Record<string, unknown>): Promise<void> => {
+      if (!frame || Array.isArray(frame) || frame.nonce !== input.frame.nonce)
+        throw Error('launchd_frame_identity_invalid');
+      const content = JSON.stringify(frame);
+      if (Buffer.byteLength(content) > frameLimit) throw Error('launchd_frame_overflow');
+      if (finished || !channel?.writable) throw Error('launchd_guardian_disconnected');
+      await new Promise<void>((resolve, reject) =>
+        channel!.write(`${content}\n`, (error) => (error ? reject(error) : resolve())),
+      );
+    };
     businessSent = true;
-    channel!.write(`${JSON.stringify(input.frame)}\n`);
+    await send(input.frame);
     const stop = () =>
       channel?.write(`${JSON.stringify({ type: 'cancel', nonce: input.frame.nonce })}\n`);
     return {
       stop,
+      send,
       finished: completion.then(
         async () => {
           channel?.end();
@@ -284,7 +335,19 @@ export async function startLaunchdSupervisor(input: {
             );
             throw error;
           }
-          await input.onFrame(terminal!);
+          await input.onFrame(
+            kind === 'mcp'
+              ? {
+                  ...terminal!,
+                  registrationRemoved: true,
+                  registration: {
+                    label: registration.label,
+                    domain: registration.domain,
+                    removed: true,
+                  },
+                }
+              : terminal!,
+          );
         },
         async (error) => {
           channel?.end();
@@ -306,7 +369,7 @@ export async function startLaunchdSupervisor(input: {
     writeFileSync(
       join(
         input.controlBase,
-        `shell-failure-${registration.label.slice('com.kitecode.shell.'.length)}.json`,
+        `${kind}-failure-${registration.label.slice(`com.kitecode.${kind}.`.length)}.json`,
       ),
       JSON.stringify({
         code: error instanceof Error ? error.message : 'unknown',

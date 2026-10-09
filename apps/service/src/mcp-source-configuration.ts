@@ -189,7 +189,7 @@ export interface McpSourceConfigurationOptions {
     'resolveAddresses' | 'allowLoopbackForTests' | 'trustedTestCertificate' | 'limits'
   >;
   /** Trusted packaged manifest assets supplied by the host; never source fallback. */
-  stdio?: Pick<McpStdioPortOptions, 'guardianPath' | 'bunExecutable' | 'limits'>;
+  stdio?: Pick<McpStdioPortOptions, 'guardianPath' | 'bunExecutable' | 'limits' | 'controlBase'>;
   oauth?: Partial<
     Pick<McpOAuthSessionOptions, 'openBrowser' | 'network' | 'callbackTimeoutMs' | 'now'>
   > & {
@@ -1450,6 +1450,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       if (!options.stdio) throw new McpAdapterError('mcp_stdio_asset_unavailable');
       port = createMcpStdioTransportPort({
         ...options.stdio,
+        controlBase: options.stdio.controlBase ?? profile.coordinationPath,
         servers: [
           {
             id: input.serverId,
