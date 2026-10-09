@@ -37,6 +37,7 @@ try {
     timeout: 10000,
   });
   const page = await app.firstWindow();
+  await page.bringToFront();
   page.setDefaultTimeout(10000);
   page.on('pageerror', (error) => console.error('questionnaire_renderer_error', error.message));
   await page.evaluate(() => {
@@ -133,8 +134,9 @@ try {
       () => (globalThis as typeof globalThis & { questionnairePosts: number }).questionnairePosts,
     );
   async function select(name: string) {
+    await page.bringToFront();
     await page.getByRole('button', { name, exact: true }).click();
-    await page.getByRole('heading', { name, exact: true }).waitFor();
+    await page.locator('.session-header').getByTitle(name, { exact: true }).waitFor();
   }
   async function completed(runId: string) {
     const deadline = Date.now() + 10000;

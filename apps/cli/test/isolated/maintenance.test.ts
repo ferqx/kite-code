@@ -278,7 +278,7 @@ test('built offline maintenance argv create/inspect/restore is independent of Se
     });
     expect(result.coverage.desktopUi).toEqual({
       path: 'desktop-private/data.sqlite',
-      supportedUserVersions: [1, 2, 3, 4, 5, 6, 7],
+      supportedUserVersions: [1, 2, 3, 4, 5, 6, 7, 8],
     });
     expect(result.backup.manifest.version).toBe(16);
     for (const [key, path, text] of mcpAssets) {

@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, watch, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JobEvent } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -75,23 +75,8 @@ await runServiceProcess({
                 return { reference: {} };
               },
               async *observe(): AsyncIterable<JobEvent> {
-                await new Promise<void>((resolve) => {
-                  const release = join(profile.profilePath, 'finish-job');
-                  if (existsSync(release)) {
-                    resolve();
-                    return;
-                  }
-                  const watcher = watch(profile.profilePath, () => {
-                    if (existsSync(release)) {
-                      watcher.close();
-                      resolve();
-                    }
-                  });
-                  if (existsSync(release)) {
-                    watcher.close();
-                    resolve();
-                  }
-                });
+                const release = join(profile.profilePath, 'finish-job');
+                while (!existsSync(release)) await Bun.sleep(5);
                 yield {
                   type: 'terminal',
                   supervision: 'ended',

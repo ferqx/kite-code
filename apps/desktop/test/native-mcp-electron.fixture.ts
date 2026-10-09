@@ -138,6 +138,8 @@ try {
   const panel = () => page.getByRole('region', { name: 'MCP settings', exact: true });
   await panel().getByRole('heading', { name: 'Safe directory', exact: true }).waitFor();
   async function refresh() {
+    await openSettings(page);
+    await page.getByRole('button', { name: 'MCP', exact: true }).click();
     await panel().getByRole('button', { name: 'Refresh MCP settings', exact: true }).click();
     await panel().getByRole('heading', { name: 'Safe directory', exact: true }).waitFor();
   }
@@ -155,8 +157,10 @@ try {
         .at(-1);
       for (const card of facts.selection?.interactions ?? []) {
         if (card.state !== 'pending') continue;
-        const review = page.getByRole('region', { name: 'MCP Source Review', exact: true });
-        if (card.kind === 'question' && decision && (await review.count())) {
+        if (card.kind === 'question' && decision) {
+          await closeSettings(page);
+          const review = page.getByRole('region', { name: 'MCP Source Review', exact: true });
+          await review.waitFor();
           await review.getByRole('button', { name: decision, exact: true }).click();
           stage('exact_source_review', {
             definitionId: card.definitionId,
@@ -164,7 +168,9 @@ try {
             decision,
           });
         } else if (card.kind === 'approval') {
+          await closeSettings(page);
           const approval = page.getByRole('article', { name: `approval ${card.id}`, exact: true });
+          await approval.waitFor();
           if (await approval.count()) {
             assert.equal(
               await approval.getByRole('button', { name: '仅批准这一次', exact: true }).count(),
@@ -176,7 +182,10 @@ try {
               revision: card.revision,
             });
           }
-        }
+        } else continue;
+        await openSettings(page);
+        await page.getByRole('button', { name: 'MCP', exact: true }).click();
+        await panel().getByRole('heading', { name: 'Safe directory', exact: true }).waitFor();
       }
       if (original && !['submitting', 'pending', 'outcome_unknown'].includes(original.phase)) {
         submissions.push(original);

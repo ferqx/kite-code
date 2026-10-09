@@ -246,8 +246,10 @@ def choose(id,title):
  key(b'\\x12');wait(title)
  for direction in [None,b'\\x1b[B',b'\\x1b[A']:
   if direction:key(direction)
-  rendered=re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace')))
-  if '> '+title+' ['+id+']' in rendered:key(b'\\r');wait('Session '+id+' ·');return
+  frames=buffer.decode(errors='replace').split(chr(27)+'[?2026h')
+  complete=next((frame.split(chr(27)+'[?2026l')[0] for frame in reversed(frames[1:]) if chr(27)+'[?2026l' in frame),'')
+  rendered=re.sub(re.escape(chr(27)+'[')+r'[0-?]*[ -/]*[@-~]','',complete)
+  if '> '+title+' ['+id+']' in rendered.splitlines():key(b'\\r');wait('Session '+id+' ·');return
  raise RuntimeError('original Session target not selected '+id)
 try:
  wait('New Run >');${enter};wait('plan_review');assert not os.path.exists(${JSON.stringify(join(f.workspace, 'before.txt'))}),'original Full wrote before plan';assert not os.path.exists(${JSON.stringify(join(f.workspace, 'after.txt'))}),'effect existed before user approval'

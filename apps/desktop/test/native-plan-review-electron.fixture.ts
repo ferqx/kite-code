@@ -161,16 +161,16 @@ try {
     feedback: string;
     bodyText: string;
   };
-  // Establish Ask and trust using the actual permission form before any Model request.
+  // Establish workspace trust and then Ask using the actual forms before any Model request.
   await openSessionTools(page);
-  await page.getByRole('radio', { name: 'Ask', exact: true }).check();
-  await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
-  await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
   await page
     .getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围', exact: true })
     .check();
   await page.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
+  await page.getByRole('radio', { name: 'Ask', exact: true }).check();
+  await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
+  await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
   async function approvePlanningManagement(expectedRunId?: string) {
     const current = await state();
     const card = current.selection!.interactions.find(

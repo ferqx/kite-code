@@ -1,5 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -54,13 +61,27 @@ test('actual paired Context rewind/include saves exact source without replay; on
     writeFileSync(join(profile.profilePath, 'finish-job'), 'end');
     const deadline = Date.now() + 4000;
     let job: import('@kite-ai/client').Execution | undefined;
+    let observedJobs: import('@kite-ai/client').Execution[] = [];
     while (Date.now() < deadline) {
-      job = (await client.getView('s')).executions.find(
-        (value) => value.kind === 'job' && value.status === 'succeeded',
-      );
+      observedJobs = (await client.getView('s')).executions.filter((value) => value.kind === 'job');
+      job = observedJobs.find((value) => value.status === 'succeeded');
       if (job) break;
       await Bun.sleep(5);
     }
+    if (!job)
+      console.error(
+        JSON.stringify({
+          fixture: 'context_job_completion_unobserved',
+          releaseExists: existsSync(join(profile.profilePath, 'finish-job')),
+          jobs: observedJobs.map(({ id, status, resultRevision, delivery }) => ({
+            id,
+            status,
+            resultRevision,
+            delivery,
+          })),
+          diagnostics: handle.diagnostics,
+        }),
+      );
     expect(job).toBeDefined();
     expect(job!.delivery).toBe('pending');
     expect(models()).toHaveLength(2);

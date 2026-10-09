@@ -103,6 +103,10 @@ test('retained environment card separates Shell and named children, exact stop, 
     }),
   );
   let failed = false;
+  let finishChildRead!: () => void;
+  const childReadFinished = new Promise<void>((resolve) => {
+    finishChildRead = resolve;
+  });
   const port: NativeBridge = {
     watch: () => () => undefined,
     request: async (request) => {
@@ -155,8 +159,11 @@ test('retained environment card separates Shell and named children, exact stop, 
           eof: true,
           data: body.toString('base64'),
         };
-      if (request.method === 'background.close' || request.method === 'background.child.close')
+      if (request.method === 'background.child.close') {
+        finishChildRead();
         return null;
+      }
+      if (request.method === 'background.close') return null;
       throw Error('unexpected_operation');
     },
   };
@@ -201,11 +208,12 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect(region.textContent).toContain(shell.execution.id);
       expect(region.textContent).toContain('原子智能体');
       expect(region.textContent).not.toContain(other.execution.id);
-      await act(async () =>
+      await act(async () => {
         (
           region.querySelector('[aria-label="查看子 Agent 详情：原子智能体"]') as HTMLElement
-        ).click(),
-      );
+        ).click();
+        await childReadFinished;
+      });
       expect(host.textContent).toContain('原子会话全文🙂');
       expect(host.querySelector('input')).toBeNull();
       expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(0);

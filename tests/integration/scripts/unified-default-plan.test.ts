@@ -2,13 +2,13 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { planTestSuites } from '../../../scripts/test-plan';
 import {
   FINITE_ROOT_SCRIPT_TESTS,
-  UNIFIED_FIRST_TEST_FILES,
+  UNIFIED_EXCLUSIVE_TEST_FILES,
   UNIFIED_RUNTIME_WORKSPACES,
   UNIFIED_TEST_SUITES,
   unifiedTestInventory,
+  unifiedTestPlan,
 } from '../../../scripts/unified-test-plan';
 
 const root = join(import.meta.dir, '../../..');
@@ -16,8 +16,13 @@ const root = join(import.meta.dir, '../../..');
 test('default selection covers current public safety and formal lifecycle files exactly once', () => {
   const files = unifiedTestInventory(root);
   expect(new Set(files).size).toBe(files.length);
-  const plan = planTestSuites(root, UNIFIED_TEST_SUITES, 4);
+  const plan = unifiedTestPlan(root, 4);
   expect(plan.counts.parallel + plan.counts.isolated + plan.counts.exclusive).toBe(files.length);
+  const plannedFiles = [...plan.concurrent, ...plan.exclusive].flatMap((job) =>
+    job.files.map((file) => file.slice(root.length + 1).replaceAll('\\', '/')),
+  );
+  expect(plannedFiles.sort()).toEqual(files);
+  expect(new Set(plannedFiles).size).toBe(files.length);
   for (const file of [
     'apps/service/test/isolated/default-after-turn.test.ts',
     'apps/service/test/isolated/task-packaged-default.test.ts',
@@ -31,10 +36,20 @@ test('default selection covers current public safety and formal lifecycle files 
   ])
     expect(files).toContain(file);
   for (const file of FINITE_ROOT_SCRIPT_TESTS) expect(files).toContain(file);
-  expect(UNIFIED_FIRST_TEST_FILES).toEqual([
+  expect(UNIFIED_EXCLUSIVE_TEST_FILES).toEqual([
+    'apps/cli/test/isolated/tui-export-host.test.ts',
     'tests/isolated/unified-agent/cli-registration-lifecycle.test.ts',
+    'tests/isolated/unified-agent/native-cross-version.test.ts',
+    'tests/isolated/unified-agent/terminal-bundle.test.ts',
   ]);
-  for (const file of UNIFIED_FIRST_TEST_FILES) expect(files).toContain(file);
+  for (const file of UNIFIED_EXCLUSIVE_TEST_FILES) {
+    expect(files).toContain(file);
+    const absolute = join(root, file);
+    expect(plan.concurrent.some((job) => job.files.includes(absolute))).toBe(false);
+    expect(plan.exclusive.filter((job) => job.files.includes(absolute))).toEqual([
+      { label: `exclusive:${file}`, files: [absolute], maxConcurrency: 1 },
+    ]);
+  }
   expect(UNIFIED_RUNTIME_WORKSPACES).toHaveLength(8);
   expect(
     files.some((file) => file.startsWith('apps/kite-') || file.startsWith('packages/runtime-')),

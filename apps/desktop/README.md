@@ -6,7 +6,7 @@
 
 [适配器](src/native-presentation.ts)只将生成 Client 的真实 Workspace/Session/Message 转为原 UI view model。目录状态与时间消费同快照只读 activity，缺能力或未记录的事实保持待读取／未知；完成消息不推断 final reply、Turn、Tool grouping 或执行成功。正文 slot 继续使用现有 ModelOutputMessage 与完整原身份 reader；未知格式、预览与不完整内容继续保留。原 Composer 的发送、草稿、model choice 和 planMode 回调沿现有 Native controller，不建立第二条提交链。
 
-“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页、新对话准备与首次发送、全局目录状态和时间排序、环境信息卡与只读子详情已迁入，空间移除已接原侧栏与 Main 原生确认；空间和单会话离线历史清理已接同一公开维护，安装版五项常用维护的 macOS 已验范围见[Native owner](docs/native-release.md#macos-安装版离线维护)，剩余旧页面细节仍待迁移。
+“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页、新对话准备与首次发送、全局目录状态和时间排序、环境信息卡与只读子详情已迁入，空间移除已接原侧栏与 Main 原生确认；空间和单会话离线历史清理已接同一公开维护，安装版五项常用维护的 macOS 已验范围见[Native owner](docs/native-release.md#macos-安装版离线维护)，这些原主入口已有正式适配，完整行为与阶段退出仍须按[PC 主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)的动态结果及剩余资格核对。
 
 [原页面契约测试](../../packages/ui/test/desktop-page.test.tsx)迁回原 12 项展示断言；现有 Native 目录、草稿、问答与计划 DOM 只调整控件/浏览器 API，保留业务断言。源码外 [Native 候选](test/isolated/native-bundle.test.ts)与[driver](test/native-bundle-electron.fixture.ts)已核编译 CSS/字体、可操作 Composer、新 preload bridge、实际审批/任务、冷读和两层使用锁收尾。准确输入、原失败与结果归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不代表完整客户端、installed 全量、独立审查或 Windows/Linux 阶段退出。
 
@@ -112,7 +112,7 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 
 ## 原会话输入区权限与停止
 
-[NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的 Ask／Auto／Full 菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；Ask 在原组件使用既有 Accept Edits 显示值，提交统一模式 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、工作区未信任、事实不可用或原权限申请未核实时等待；提交回调也拒绝未信任的模式写入。
+[NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的 Ask／Auto／Full 菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；Ask 在原组件使用既有 Accept Edits 显示值，提交统一模式 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、工作区未信任、事实不可用或原权限申请未核实时等待；提交回调也拒绝未信任的模式写入。会话工具中的模式表单在工作区未信任时同样只读，核对并明确设置信任后才提供模式选择；信任控制保持独立，修改模式不自动设置信任或启动 Model。原计划窗口按真实信任→Ask 顺序运行，完整审核、独立工具审批、Files 与冷读断言保持；准确回归范围见[PC 迁移主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)。
 
 停止沿现有 [NativeCaller](electron/native-caller.ts)保存并提交 `command.cancel`，目标是已核实当前 Store／Session 活动 Run 的 `originCommandId`。它不新增停止端口，也不把申请当成终态；原保存／提交中／未知申请禁止重复，准确结果仍由原 Run 和持久申请核实。只读子详情没有这组控制，切换阅读不停止原工作。
 
@@ -222,11 +222,11 @@ Main 从实际选中根的 controller snapshot 固定 Store／subject／generati
 
 ## Native Skills 只读目录
 
-正式 Native 左侧的 Skills 分类展示所选 Session 工作区当前可信配置目录的名称、摘要、来源与可用／禁用／不可用状态。[Main reader](electron/skill-catalogue-reads.ts) 从实际选择封存 attach generation、viewSelection、historyEpoch、Store、Session 与 Workspace；open 在任何 GET 前同步核对原选择并登记 read ID，open/next/close 不排队在 controller refresh 后。Main 保存原 revision/cursor，每页限 128 KiB，关闭和作用域变化只中止所属读取。[IPC](electron/native-ipc.ts) 不接收 renderer 提供的 Workspace、路径或执行 authority。
+正式 Native 全屏设置左侧的 Skills 分类展示所选 Session 工作区当前可信配置目录的名称、摘要、来源与可用／禁用／不可用状态。[Main reader](electron/skill-catalogue-reads.ts) 从实际选择封存 attach generation、viewSelection、historyEpoch、Store、Session 与 Workspace；open 在任何 GET 前同步核对原选择并登记 read ID，open/next/close 不排队在 controller refresh 后。Main 保存原 revision/cursor，每页限 128 KiB，关闭和作用域变化只中止所属读取。[IPC](electron/native-ipc.ts) 不接收 renderer 提供的 Workspace、路径或执行 authority。
 
 [完整读取](src/native-skills.ts)复用公共 Client 的闭合页 verifier，穷尽同 revision 后才发布，无总目录截断。[页面](src/native-skills-settings.tsx)区分可用空目录与不可用，刷新失败保留同作用域上次完整事实并说明未更新；实际选择、attach 或观察 epoch 改变时清理旧读取，普通 controller viewGeneration 更新不反复重开目录。来源只说明已准入的配置位置，缺字段说明未记录；页面不读正文、安装或激活 Workflow，发现与执行仍由默认 Service 负责，不恢复旧 home 隐式扫描。
 
-[Main/IPC 测试](test/native-skills-reads.test.ts)与[实际 DOM](test/native-skills-settings.test.tsx)验证完整分页、关闭、迟到响应、刷新失败和作用域隔离。[默认 Native 候选](test/isolated/native-skills-bundle.test.ts)与[Electron driver](test/native-skills-electron.fixture.ts)已在本机 macOS 核搬迁、删除构建源后的默认 Service／网络装配：306 项经 16 个真实同 revision 页完整展示，文件与配置刷新、两个 Workspace、分类关闭重开、冷启动与普通所属 Service 退出均完成；退出后独立公共冷 Store 无 Run/Execution 增长。准确运行证据、原失败和完整默认范围见[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)，取舍见[目录决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。这项资格只覆盖当前 Native 公开目录消费者，完整 Skills/Workflow 与其他平台仍按 [P5](../../docs/plans/unified-agent-refactor-v1.md#3021-当前-native-skills-消费者迁移)核对。
+[Main/IPC 测试](test/native-skills-reads.test.ts)与[实际 DOM](test/native-skills-settings.test.tsx)验证完整分页、关闭、迟到响应、刷新失败和作用域隔离。[默认 Native 候选](test/isolated/native-skills-bundle.test.ts)与[Electron driver](test/native-skills-electron.fixture.ts)已在本机 macOS 核搬迁、删除构建源后的默认 Service／网络装配：306 项经 16 个真实同 revision 页完整展示，文件与配置刷新、两个 Workspace、分类关闭重开、冷启动与普通所属 Service 退出均完成；退出后独立公共冷 Store 无 Run/Execution 增长。切换会话先沿原“返回应用”回到侧栏，再打开所选工作区的Skills设置；关闭设置不停止执行。原目录资格归[早期进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)，当前原窗口复验、真实失败和完整默认范围归[PC主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)，取舍见[目录决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。这项资格只覆盖当前 Native 公开目录消费者，完整 Skills/Workflow 与其他平台仍按 [P5](../../docs/plans/unified-agent-refactor-v1.md#3021-当前-native-skills-消费者迁移)核对。
 
 ## Native 普通问题与页面草稿
 
@@ -294,7 +294,7 @@ candidate Main 只接受固定 `{kind:'candidate'}`，从实际 appPath 推导�
 
 Windows 的[有限 Node-API 后端](native/windows-access/README.md)由 Main 和 Service 各自取得 LockFileEx SH，不借继承 HANDLE 授权。私有 UI prepare 保原 Profile/UI 目录与主 DB HANDLE、volume/FileID，SQLite关闭后再释放，sidecar不永久钉名称。但 hash `.node` 到 require 仍缺加载前原对象/发布者根证明，正式 candidate Main 在应用 addon/SQLite/factory/child 前拒绝 `native_windows_bootstrap_unqualified`，不提供formal bypass。本机负例3项21断言核这些加载/启动计数全零；5个Windows强制案例、MSVC/Electron ABI及完整Native资格尚未执行，不能由类型或POSIX邻接放行。
 
-正式 installed Native 已补齐本机两个真实代码候选的 A→B→A→B 冷启动验收，区别于同源码版本标记测试。默认窗口保原任务、完整正文与持久 caller 记录，回退后继续工作实际使用 B 全文；四次所属 Service 普通退出、两层租约释放及指针切换/卸载的数据保留均核实。完整负责范围、真实旧 builder、失败与平台限制见[Native 发行 owner](docs/native-release.md#真实代码升级与冷回退)，不据此宣称已发布旧样本或三平台完成。
+正式 installed Native 已补齐本机两个真实代码候选的 A→B→A→B 冷启动验收，区别于同源码版本标记测试。默认窗口保原任务、完整正文与持久 caller 记录，回退后继续工作实际使用 B 全文；四次所属 Service 普通退出、两层租约释放及指针切换/卸载的数据保留均核实。完整负责范围、真实旧 builder、失败与平台限制见[Native 发行 owner](docs/native-release.md#真实代码升级与冷回退)。窗口读取兼容前驱的 `assistant 消息` 与迁入原 Conversation 后的 `助手消息` 名称，仍核相同原消息数量、完整正文及零重发；当前实际范围归[PC 主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)，不据此宣称已发布旧样本或三平台完成。
 
 [实际内嵌 Electron 候选](test/isolated/native-bundle.test.ts)使用真正 terminal builder 和本机安装 Electron dist，搬迁后删除原构建输出、独立 HOME/PATH、无 Service 源码或 npm 回退；原默认 Profile 的 Files.write 经实际 approve_once 一次完成，Provider 为 2。正常退出所属 child PID 消失，两 root 可独占；冷重开只读不增 Provider。第二窗口用精确所属 child SIGSTOP 固定有限观测，再 SIGKILL Main，实际 Service 仍持 outer/inner 两锁，SIGKILL child 后才释放；这不是生产暂停、自动恢复或所有进程树场景的证明。[公共 Node verifier](../service/test/isolated/native-runtime-assets.test.ts)另核原 SHA、完整内层、空锁、闭合 schema、模式/字节/硬链接/逃逸链接与空目录负例。最终候选及原 Files/Session Electron 邻接为 4 文件、6 项、55 条 Bun 断言全通过（68.65 秒，2026-10-04），包含真实 driver 独立断言；Desktop/Service types 与 Service build 通过。
 
@@ -310,7 +310,7 @@ main 的私有草稿由 [private-data.ts](electron/private-data.ts) 使用实际
 
 [test/native-caller.test.ts](test/native-caller.test.ts) 证明封闭 sender/输入预算、私有草稿 CAS、旧 generation 拒绝以及网络释放不等于所属 Service 关闭；这些是单元证据。[test/isolated/native-process.test.ts](test/isolated/native-process.test.ts) 用真实 Node→显式 Bun→公开 paired launcher 与新临时 profile 验证私有 bootstrap、身份与 EOF 后所属 PID 退出，制品构建不把宿主资源路径写进 renderer。[test/isolated/native-electron.test.ts](test/isolated/native-electron.test.ts) 使用 Node Playwright driver、真实 macOS Electron、自有窗口/profile 和本机假兼容模型端点，检查实际 main/preload/renderer、刷新执行/草稿、外来窗口拒绝及所属 PID 退出；必须以实际运行结果计资格，不能以 fake port 或启动进程替代。
 
-本入口当前提供完整目录读取、根会话创建、Fork/rename/delete、消息页、新轮次/原命令核实与停止、普通 Interaction、模式与信任及授权目录控制、Model 输入/输出 Inspector、Context Rewind/Include。完整设置、附件 reader、Context 导出、发行安装、Linux/Windows 和旧视觉迁移仍未接入本实际窗口；有大附件但缺 reader 的审批继续只读。Node fixture 绑定已构建 Service；实际 Electron fixture 在私有临时目录构建当前 Service JS，按实际 SHA 与明确 Bun executable 接入。这两者均使用 workspace 公共依赖，不宣称完整 source-free installed Desktop 制品。限定新测试组合当前为 5 项、35 条 Bun 断言通过；实际 Electron 场景另含 14 条 Node 断言与实际 DOM 操作，类型、局部 Biome 与文档结构检查通过。
+以下保留早期私有开发窗口的限定基线，正式原页面与安装版的当前范围见[复用原桌面展示层](#复用原桌面展示层)和[发行 owner](docs/native-release.md)。该基线提供完整目录读取、根会话创建、Fork/rename/delete、消息页、新轮次/原命令核实与停止、普通 Interaction、模式与信任及授权目录控制、Model 输入/输出 Inspector、Context Rewind/Include；当时完整设置、附件 reader、Context 导出、发行安装、Linux/Windows 和旧视觉迁移尚未接入该窗口，有大附件但缺 reader 的审批只读。该轮 Node fixture 绑定已构建 Service，实际 Electron fixture 在私有临时目录构建 Service JS，按实际 SHA 与明确 Bun executable 接入；两者使用 workspace 公共依赖，不宣称完整 source-free installed Desktop 制品。该限定新测试组合为 5 项、35 条 Bun 断言通过，实际 Electron 场景另含 14 条 Node 断言与实际 DOM 操作，类型、局部 Biome 与文档结构检查通过。
 
 原生大 Model 输出通过 [main view-read lease](electron/model-output-reads.ts) 与 [renderer reader](src/native-model-output.ts) 接入共享 `ModelOutputMessage`。有 `model_outputs` capability 时才提供显式完整读取；缺能力保持标明的 preview。open 固定当前连接 Store、阅读 Session、Execution、窗口 generation 与选择身份。封存 Message 的来源只从 Main 已观察副本取得；先用公共 `Client.getExecution` 核准确原 Model／Session／Run／originStoreId，再以当前 Store 和原 Session 调用 `Client.getModelOutput`，核封存完整性与计数。恢复后的当前 Store 与原出处分别校验，不重绑 origin；这些 GET 不读取来源 Run 的后来状态。main 最多一个在途读取/正文 lease，不恢复丢失句柄，不创建执行或 spool 权威。跨 IPC 每块最多 64KiB（二进制用 base64），请求必须按准确下一 offset 推进，原 1MiB/4MiB IPC 预算没有提高。close、切换、刷新、网络释放只 abort 本读取和清除正文，不提交 Command 或取消 Model/Run。
 
@@ -485,9 +485,9 @@ Profile 无三项 raw MCP 文件时，DB6 离线备份使用专属 manifest v14�
 
 ## Native MCP 完整设置
 
-已确认设计，实施中：[设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已集成。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；当前原完整默认615文件/489主作业通过，同一运行输入另取得本机 Chrome/default OS vault 的四项 Auth、准确取消与重启恢复资格。[实施方案](../../docs/plans/unified-agent-native-mcp-settings.md)负责完整用户旅程和验收；本机组合通过不代表外部账号、其他平台或整个重构已完成，整片新的独立审查仍未取得。
+已确认设计，实施中：[设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已集成。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；此前615文件/489主作业的原完整默认通过，当前原页面迁移后的全部默认范围与真实失败由[PC主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)继续核对，同一运行输入另取得本机 Chrome/default OS vault 的四项 Auth、准确取消与重启恢复资格。[实施方案](../../docs/plans/unified-agent-native-mcp-settings.md)负责完整用户旅程和验收；本机组合通过不代表外部账号、其他平台或整个重构已完成，整片新的独立审查仍未取得。
 
-Main 冻结真实 Store/subject/Session/Workspace identity、read-set 和观察代次；renderer 仅提交来源 ID、有限操作与显式范围。换 scope/关闭释放自己的 Reader，不取消业务 Execution。工具页固定原 snapshot，Main 最多两份在途 descriptor、每次至多64KiB chunk；完整 EOF/size/hash 和严格 UTF-8 核验后才显示全文，读取零额外连接或远端 RPC。来源批准/既有 Ref binding 由独立 Source Review 答复，普通父 Action、连接 Job 和远端 Tool 的 Ask 各自保留。
+Main 冻结真实 Store/subject/Session/Workspace identity、read-set 和观察代次；renderer 仅提交来源 ID、有限操作与显式范围。换 scope/关闭释放自己的 Reader，不取消业务 Execution。工具页固定原 snapshot，Main 最多两份在途 descriptor、每次至多64KiB chunk；完整 EOF/size/hash 和严格 UTF-8 核验后才显示全文，读取零额外连接或远端 RPC。来源批准/既有 Ref binding 由独立 Source Review 答复，普通父 Action、连接 Job 和远端 Tool 的 Ask 各自保留。 原全屏设置页保留“返回应用”；来源决定与普通审批在准确会话卡中分别操作，再回MCP设置核同一个原申请，返回页面不取消业务或新建申请。现有源码外窗口已按这些真实导航保原Source Review、独立Ask、一次效果和冷查回，准确范围归上述PC主线。
 
 [私有 MCP codec](electron/mcp-journal.ts)在 DB7 的 `mcp_intents(command_id,state)` FULL 保存完整非秘密原申请，独立128行/16MiB原字节上界，坏行保字节并拒绝写，未知不淘汰。首次提交前保存，冷/foreign 行不获得热 POST 许可；明确 Check 只查询原 ID，取消需准确原 Execution 的普通持久 caller 申请。已确认终态不被后来 pending/unknown GET 降级。来源发表成功但独立凭据清理失败/未知时保声明已保存与总体未确认，不能清除为成功。[DB7/manifest15 维护](../../packages/agent/src/maintenance/README.md#desktop-db7-与-manifest-v15)保独立 codec、历史 DB/manifest 白名单及原 Store 身份，恢复不自动 GET/POST。
 

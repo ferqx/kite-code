@@ -240,10 +240,16 @@ for (const mode of ['paired', 'shared'] as const)
       };
       const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json,urllib.request
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));env=dict(os.environ);env['TUI_SKILLS_SETTINGS']=${JSON.stringify(JSON.stringify(settings))};p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';all_output=b''
-def wait(text):
+def wait(text,exact_line=False):
  global buffer,all_output
  end=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
+ while True:
+  rendered=buffer.decode(errors='replace')
+  if exact_line:
+   frames=rendered.split(chr(27)+'[?2026h')
+   rendered=next((frame.split(chr(27)+'[?2026l')[0] for frame in reversed(frames[1:]) if chr(27)+'[?2026l' in frame),'')
+  rendered=re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',rendered)
+  if (text in rendered.splitlines()) if exact_line else (text in re.sub(r'\\s+',' ',rendered)):return
   if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+buffer[-6000:].decode(errors='replace'))
   if select.select([master],[],[],.05)[0]:
    data=os.read(master,65536);buffer+=data;all_output+=data
@@ -262,7 +268,7 @@ try:
  while not os.path.exists(${JSON.stringify(join(root, 'held-page'))}):
   if time.monotonic()>end:raise RuntimeError('refresh did not request original page')
   time.sleep(.01)
- key(b'\\x1b');wait('New Run >');key(b'\\x12');wait('Select Session');wait('> Beta [b]');key(b'\\r');wait('Session b · Idle')
+ key(b'\\x1b');wait('New Run >');key(b'\\x12');wait('Select Session');key(b'\\x1b[A');wait('> Beta [b]',exact_line=True);key(b'\\r');wait('Session b · Idle')
  open(${JSON.stringify(join(workspace, 'a000', 'SKILL.md'))},'w').write('---\\nname: ScopeFresh000\\ndescription: refreshed real file\\n---\\nKnowledge only; never execute script.sh\\n')
  key(b'/skills');wait('/skills');key(b'\\r');wait('Catalog read: verified');wait('ScopeFresh000 [available]')
  urllib.request.urlopen(${JSON.stringify(`${provider.url.href}release-page`)}).read();time.sleep(.2);key(b'\\x1b[B');wait('ScopeFresh000 [available]');key(b'\\x1b[A');wait('ScopeFresh000 [available]');assert counts()==baseline

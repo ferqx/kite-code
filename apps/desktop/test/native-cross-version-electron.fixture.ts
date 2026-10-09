@@ -203,7 +203,7 @@ async function read(page: Page, count: number) {
   });
   const outputs = page
     .getByRole('region', { name: '会话消息', exact: true })
-    .getByRole('article', { name: 'assistant 消息', exact: true });
+    .getByRole('article', { name: /^(assistant 消息|助手消息)$/ });
   if (count) await outputs.nth(count - 1).waitFor();
   assert.equal(await outputs.count(), count);
   for (let index = 0; index < count; index++) {

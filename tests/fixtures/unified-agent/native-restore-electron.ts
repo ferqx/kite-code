@@ -9,6 +9,7 @@ interface Locator {
   waitFor(): Promise<void>;
 }
 interface Page {
+  bringToFront(): Promise<void>;
   setDefaultTimeout(value: number): void;
   getByRole(role: string, options: { name: string; exact?: boolean }): Locator;
   getByText(text: string, options: { exact: boolean }): Locator;
@@ -68,7 +69,7 @@ const query = async (path: string, body?: unknown) => {
   assert.equal(response.ok, true);
   return response.json();
 };
-let app: ElectronApp | undefined, servicePid: number | undefined;
+let app: ElectronApp | undefined, servicePid: number | undefined, page: Page | undefined;
 const children = () =>
   String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
     .trim()
@@ -97,7 +98,8 @@ try {
     timeout: 10000,
     chromiumSandbox: true,
   });
-  const page = await app.firstWindow();
+  page = await app.firstWindow();
+  await page.bringToFront();
   page.setDefaultTimeout(10000);
   assert.deepEqual(
     await app.evaluate(({ app, BrowserWindow }) => ({
@@ -117,7 +119,7 @@ try {
     },
   );
   // Store failure leaves the diagnostic Service without the PC's required business capabilities.
-  await page.getByText('required_capability_missing', { exact: true }).waitFor();
+  await page.getByText('启动未完成：required_capability_missing', { exact: true }).waitFor();
   assert.equal(children().length, 0);
   const held = await query('snapshot');
   assert.equal(held.profileExists, false);
@@ -168,6 +170,23 @@ try {
     }),
   );
   servicePid = undefined;
+} catch (cause) {
+  if (page)
+    try {
+      console.error(
+        JSON.stringify({
+          phase: 'installed_native_restore_failure',
+          startup: await page.evaluate(async () => ({
+            text: document
+              .querySelector('main[aria-label="kite 启动页"]')
+              ?.textContent?.slice(0, 300),
+            readyState: document.readyState,
+            focused: document.hasFocus(),
+          })),
+        }),
+      );
+    } catch {}
+  throw cause;
 } finally {
   if (app) await app.close();
 }

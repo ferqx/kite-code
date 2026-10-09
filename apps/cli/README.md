@@ -30,7 +30,7 @@ Context 公共薄接口（`rewindContext` 仅选择上下文，不提供 Files �
 
 写入请求返回 `ContextOutcome`，保存原 request、Session 和准确 execution ID；applied 退出码 0 仅表示配置上下文事务落定，不代表模型已消费/执行成功。相同 Client/commandId 的重复提交不再发请求；同 ID 不同内容拒绝。未知响应只查询保存的原 Command，结果仍未知则返回原 intent（退出码 2），可用 `lookupContextOutcome` 显式再次读取，不能自动换 ID、Store、选择或改绑目标。Rewind 仍要求 idle；活动 include 必须由调用者明确封存 `targetRunId`，不从当前视图猜测。原 accepted/result_queued 返回 queued（退出码 2），只表示等待原 Run checkpoint；原 Command applied 才表示来源已纳入，不能把 202 当完成。CLI 不自行创造 steer。每 Client 最多保留 128 个写入意图。
 
-[test/context.test.ts](test/context.test.ts) 通过公开 paired launcher 启动实际 Service 子进程与 SQLite Worker：Job 完成后 Rewind suppressed，Desktop 显式 include 与 CLI 重复 include 只保存同一 source，原外置 ledger 一次，固定模型保持两次请求；另行 startRun 才以准确 source ID/原 execution 在第三次请求读到结果。未调用收费模型，未建立完整 TUI/PTy 或 Context 压缩资格。
+[test/context.test.ts](test/context.test.ts) 的自有结束标记由 fixture 直接读取，原 4 秒完成观察与 15 秒整例预算保持；失败诊断保最后实际 Job 状态与标记存在性，不猜完成。[该场景](test/context.test.ts)通过公开 paired launcher 启动实际 Service 子进程与 SQLite Worker：Job 完成后 Rewind suppressed，Desktop 显式 include 与 CLI 重复 include 只保存同一 source，原外置 ledger 一次，固定模型保持两次请求；另行 startRun 才以准确 source ID/原 execution 在第三次请求读到结果。未调用收费模型，未建立完整 TUI/PTy 或 Context 压缩资格。
 
 
 plan_review 使用同一显式回答回调：收到原 Interaction 后，approve 仅允许请求中明确提供的 auto/accept_edits 模式，缺模式、Full、陌生 metadata/modes 或过长反馈明确保留等待状态，且不发起回答写入。deny/revise 是信息答复，不携带 mode。输出明确 `review information saved / tool permissions unchanged`；原审批、required evaluator 与实际派发资格不由计划答复替代。迟到答复可能按协议保存 answer_saved/cancelled:true 历史，Core 不接受该 decision，也不复活执行。

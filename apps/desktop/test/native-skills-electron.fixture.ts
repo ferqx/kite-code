@@ -124,6 +124,7 @@ try {
     );
   const panel = () => page.getByRole('region', { name: 'Skills 目录', exact: true });
   async function select(name: string, workspaceId: string) {
+    await closeSettings(page);
     await page.getByRole('button', { name, exact: true }).click();
     await page
       .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })

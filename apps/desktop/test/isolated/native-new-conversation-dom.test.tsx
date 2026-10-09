@@ -340,10 +340,23 @@ test('original current-Session permission menu uses the observed command, preser
     expect(permission().getAttribute('aria-label')).toBe('Permission: Ask');
     expect(permission().disabled).toBe(true);
     expect(mutations()).toHaveLength(0);
+    const tools = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === '会话工具',
+    )!;
+    if (tools.getAttribute('aria-expanded') !== 'true') await f.click('会话工具');
+    expect(f.host.querySelectorAll('input[name="permission-mode"]')).toHaveLength(0);
+    expect(f.host.body.textContent).toContain('模式只读。');
+    expect(
+      [...f.host.querySelectorAll('button')].some(
+        (button) => button.textContent === '信任所显示的范围',
+      ),
+    ).toBe(true);
+    expect(mutations()).toHaveLength(0);
     f.trustWorkspace();
     await f.click('Other B');
     await f.click('Original A');
     expect(permission().disabled).toBe(false);
+    expect(f.host.querySelectorAll('input[name="permission-mode"]')).toHaveLength(4);
     await choose(1);
     expect(permission().getAttribute('aria-label')).toBe('Permission: Auto');
     expect(mutations()).toHaveLength(1);

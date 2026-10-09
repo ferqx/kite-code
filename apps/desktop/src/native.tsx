@@ -1532,7 +1532,7 @@ function NativeDesktopContent({
                 ['saved', 'submitting', 'unknown'].includes(value.phase),
               )
             }
-            onSetMode={selection.permissions ? setPermissionMode : undefined}
+            onSetMode={selection.permissions?.trust.trusted ? setPermissionMode : undefined}
             onSetTrust={
               selection.permissions
                 ? async (trusted) => {

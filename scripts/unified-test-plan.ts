@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path';
-import { planTestSuites, runTestPlan } from './test-plan';
+import { planTestSuites, runTestPlan, type TestPlan } from './test-plan';
 import { collectTestFiles, testParallelism } from './test-suite';
 
 export const UNIFIED_RUNTIME_WORKSPACES = [
@@ -36,16 +36,40 @@ export const UNIFIED_TEST_SUITES = [
   ...FINITE_ROOT_SCRIPT_TESTS,
 ] as const;
 
-// The complete install/PATH/PTY/cold chain has a bounded body but copies and syncs
-// a large runtime closure. Source byte size does not represent its scheduling cost.
-export const UNIFIED_FIRST_TEST_FILES = [
+// These tests perform large installation or full text I/O within their original budgets.
+// Run their complete files after the other default jobs have drained.
+export const UNIFIED_EXCLUSIVE_TEST_FILES = [
+  'apps/cli/test/isolated/tui-export-host.test.ts',
   'tests/isolated/unified-agent/cli-registration-lifecycle.test.ts',
+  'tests/isolated/unified-agent/native-cross-version.test.ts',
+  'tests/isolated/unified-agent/terminal-bundle.test.ts',
 ] as const;
 
 export function unifiedTestInventory(root: string): string[] {
   return UNIFIED_TEST_SUITES.flatMap((suite) => collectTestFiles(resolve(root, suite)))
     .map((file) => relative(root, file).replaceAll('\\', '/'))
     .sort();
+}
+
+export function unifiedTestPlan(root: string, concurrency: number): TestPlan {
+  const plan = planTestSuites(root, UNIFIED_TEST_SUITES, concurrency);
+  for (const file of UNIFIED_EXCLUSIVE_TEST_FILES) {
+    const absolute = resolve(root, file);
+    const index = plan.concurrent.findIndex((job) => job.files.includes(absolute));
+    if (index < 0) {
+      if (!plan.exclusive.some((job) => job.files.length === 1 && job.files[0] === absolute))
+        throw new Error(`exclusive_test_unavailable:${file}`);
+      continue;
+    }
+    const job = plan.concurrent[index]!;
+    if (job.files.length !== 1) throw new Error(`exclusive_test_not_isolated:${file}`);
+    plan.concurrent.splice(index, 1);
+    plan.exclusive.push({ label: `exclusive:${file}`, files: job.files, maxConcurrency: 1 });
+    plan.counts.isolated--;
+    plan.counts.exclusive++;
+  }
+  plan.exclusive.sort((left, right) => left.label.localeCompare(right.label));
+  return plan;
 }
 
 export async function runUnifiedTests(root: string, args: readonly string[]): Promise<number> {
@@ -58,9 +82,9 @@ export async function runUnifiedTests(root: string, args: readonly string[]): Pr
     return 0;
   }
   const concurrency = testParallelism();
-  const plan = planTestSuites(root, UNIFIED_TEST_SUITES, concurrency);
+  const plan = unifiedTestPlan(root, concurrency);
   console.log(`[unified-agent] parallelism=${concurrency}`);
-  const code = await runTestPlan(root, plan, concurrency, { firstFiles: UNIFIED_FIRST_TEST_FILES });
+  const code = await runTestPlan(root, plan, concurrency);
   if (code === 0)
     console.log(
       `[unified-agent] passed parallel=${plan.counts.parallel} isolated=${plan.counts.isolated} exclusive=${plan.counts.exclusive}`,
