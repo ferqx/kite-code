@@ -3538,3 +3538,33 @@ Store／Runtime生命周期／Service owner与active资格同步实际diff；手
 | 1 | installed CLI／TUI／Native 普通任务执行、准确取消、完整输出、cold只读与退出 | 保原身份／完整原结果／零重放及实际所属资源退出，全部原资源门禁。本轮未确认Store关闭的维护交接修正已闭；原RSS真实增长、8outer／9点、Bun activeResources／handles与全Runtime后代资格仍未闭。 |
 | 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及平台证据仍有缺口；原macOS维护／冷回退复用。 |
 | 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役，阶段未过滤完整默认与强制门禁均通过。当前局部交接不提升37partial／wholeV13=false／Goal active。 |
+
+## 2026-10-10：原 RSS 负载的原生分配与驻留归因
+
+上一轮 Store strict-close 未确认时的保锁修复已正常本地提交 `bb7bf3207cfe38b900daf45b9b4d3f823e9b2ea5`，该错误切片结束。本轮直接推进退出依赖①的原 RSS 失败，只补缺失的原生分配与驻留归因，没有新增关闭／构造／串行索引故障矩阵，也没有新增用户能力闭合、正式 caller 切换或旧路径退役。
+
+从该 clean HEAD 正常构建并验证 Terminal 候选，原 candidate digest `b510e4ac6064c24718e65a309c16a4af416d0ac105c0be5f7b47e88f2aec6e2d`。随后仅私有 Worker 的原 ACK 前及 probe 的原 sample 点增加观察；先取得并原样返回原资源 metrics，业务循环、Model-only extensions、原 GC、450000ms／九点与180000ms operation deadline保持。Worker只在已有请求触发56250ms观察及最终close，没有新增Worker请求或业务timer。原builder生成的sample函数因符号冲突名为sample2，首版私有patch的唯一性检查退出1，未启动负载；沿同一已构建候选修正定位，不重建或覆盖原失败日志。
+
+私有 reducer 复用已校准的 Bun 1.4.2 `heapStats({dump:true})`。逐页核安全整数、used／reserved与乘积／总和，忽略有损且不稳定的hashed ID；原完整dump全部保存，摘要只有前64bin并明确完整bin数与遗漏。旧4MiB分配／释放校准经独立Python整数oracle核完整totals和bin；未重做校准。system malloc沿已校准的自身进程原生helper只采统计，没有调用其分配／释放函数。root／Worker均枚举全部六个相同heap seq，十个最近观察对应同一PID／birth；native totals不能按两个角色求和，raw thread ID不能赋予业务owner。JS对象统计仍分别属于各自VM。
+
+原子进程PID97004、libproc birth `1791577963:625711`，实际busy450033.705ms、九点、2474完整循环、4948Model调用。原完成／准确取消／重连原receipt／删除Session断言均保持，原model-ledger完整1—4948。进程正常exit0并由原exited handle等待，无强制结束；该0只证明业务与私有采集完成。原before-RSS的measured1为222.71875MiB、measured8为343.765625MiB，增121.046875MiB；原三点规则在sequence5—8仍触发，`diagnosticOriginalMetricRetainedGrowth:true`。原32MiB门槛、点数、warmup和失败判定未改变，不能以此运行宣布稳定性通过。
+
+| 观察域 | 实际变化与边界 |
+| --- | --- |
+| root原warm sequence2→最终sequence17 | `rssAfterStats`净增127041536B；完整页 `Σused×block_size`净增6601624B、`Σreserved×block_size`净增43755904B。这里终点是point8-after，不与上面的before序列混算；该区间root在用块容量98.381—118.772MiB，不能把最终净增约6.3MiB当成全过程上限。reserved capacity不是resident或请求字节。 |
+| JS VM与system malloc | root measured VM heap31.248—33.372MiB，Worker全记录3.287—12.573MiB、最后5.681MiB；不是全进程native域。原 `root-memory.jsonl` 的DefaultMallocZone warm used956416B、最终3304928B，capacity41943040→50331648B；该zone不涵盖mimalloc／JSC。 |
+| 同一原进程的VM映射 | 两次只读vmmap均actual0、核同PID／PPID／birth，时间04:36:07.419与04:39:11.993，属于中途和晚期而非450秒首末。Tag240 resident217.8M→289.0M、dirty78.7M→77.9M、physical footprint99.3M→99.1M，单位是工具显示的舍入类别值。这些不同内核记账字段不能相减解释精确RSS，也不能以footprint平稳替换RSS。 |
+
+固定mimalloc源码的[默认os_tag](https://raw.githubusercontent.com/oven-sh/mimalloc/6a64e1ba7f5b2130d4efccb67ec87fd0003f0f6a/src/options.c)为240，[macOS映射与purge实现](https://raw.githubusercontent.com/oven-sh/mimalloc/6a64e1ba7f5b2130d4efccb67ec87fd0003f0f6a/src/prim/unix/prim.c)使用该tag与madvise；这只支持allocator类别关联。新证据将主要增长缩小至该类别的clean resident变化，未识别具体业务分配栈或实际free／reusable页，不证明无泄漏，也未采用allocator环境覆盖或修改Bun资产。[Bun统计实现](https://raw.githubusercontent.com/oven-sh/bun/744846f844374847c902b5e7fd59b4342a51ef99/src/jsc/modules/BunJSCModule.h)本身执行mi_collect(false)，dump解析、同步写入与VM映射观察也有成本；“没有额外GC调用”不能解读为没有allocator干预。私有Worker／probe改动使候选不再是正式未插桩制品，所有结果保持`formal:false`／`wholeV13:false`。
+
+准确root `/private/tmp/kite-native-heap-owner-20261010-kBfWx6` 保存原candidate manifest、原／诊断probe与Worker SHA、root18／Worker10完整raw dumps、两份VM映射、原业务JSON、before／after输入与所有实际结果。4268 regular源码、Git和Bun／Node资产前后全等；18907 candidate文件、944links与原sampler在私有诊断既定改动之外保持。完整native分析由私有纯脚本重算，27项root核验全部为真，来源／完整页totals／原业务与资源失败归 `evidence-audit.json`。独立只读复核要求区分before与after终点、全过程峰值及VM映射时间／单位，已在上表保留；system zone事实的原来源为JSONL而非缺此字段的native摘要。
+
+本轮只更新进度与active资格说明，产品行为、API、持久schema、Store／Runtime owner和默认验证inventory未变。上一轮保锁47pass／327断言及既有Daemon／MCP／Shell／OAuth／Native helper、原完整默认与RSS失败仅按冻结范围复用，不升级为当前完整阶段验收。文档检查与正常本地commit hooks独立强制；无push、PR、发布或Actions dispatch。
+
+剩余仍按三个完整能力缺口排序，不将采样或journal设为长期独立目标：
+
+| 顺序 | 实际用户入口与完整能力 | 验收与剩余阻塞 |
+| --- | --- | --- |
+| 1 | installed CLI／TUI／Native普通任务执行、准确取消、完整输出、cold只读与退出 | 保原身份／完整原结果／零重放和实际所属资源退出，原全部资源门禁。原RSS真实失败仍在；具体allocator驻留归属／回收未闭，八outer／九点、activeResources／handles及全Runtime后代资格仍缺。 |
+| 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及平台证据仍有缺口；原macOS维护／冷回退证据复用。 |
+| 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役，阶段未过滤完整默认与强制门禁通过。当前归因不改变37partial／wholeV13=false。 |
