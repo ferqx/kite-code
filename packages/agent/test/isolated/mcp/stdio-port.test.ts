@@ -15,6 +15,7 @@ import { createFixedModel } from '@kite-ai/ai';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { createMcpAdapter, createMcpLifecycle } from '../../../src/mcp';
 import { createMcpStdioTransportPort } from '../../../src/mcp/stdio-port';
+import { decodeMcpStdioProcessEvidence } from '../../../src/mcp/stdio-process-evidence';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -153,10 +154,55 @@ macTest(
         tree = f.tree(state);
       expect(state).toMatchObject({ visible: 'selected', ambient: null, proxy: null });
       expect(alive(tree.grand)).toBe(true);
+      const evidence = owned.readProcessEvidence!();
+      expect(evidence).toMatchObject({
+        version: 1,
+        coverage: 'guardian-and-server-only',
+        ownerPid: process.pid,
+        guardian: { pid: state.guardian, parentPid: process.pid, exit: null },
+        server: { pid: state.leader, parentPid: state.guardian, exit: null, kernelState: 'alive' },
+      });
+      expect(evidence.guardian!.birth).not.toBeNull();
+      expect(evidence.server!.birth).not.toBeNull();
+      expect(evidence.binding).toEqual({
+        originalStoreId: 'store',
+        sessionId: 's',
+        executionId: 'job-s',
+        serverId: 'local',
+        scopeId: f.binding().scopeId,
+        configDigest: f.binding().configDigest,
+      });
+      expect(Object.isFrozen(evidence.server!.birth)).toBe(true);
+      expect(decodeMcpStdioProcessEvidence(evidence, evidence.binding, process.pid)).toEqual(
+        evidence,
+      );
+      expect(
+        decodeMcpStdioProcessEvidence({ ...evidence, command: 'private' }, evidence.binding),
+      ).toBeUndefined();
+      expect(
+        decodeMcpStdioProcessEvidence(evidence, { ...evidence.binding, sessionId: 'foreign' }),
+      ).toBeUndefined();
       expect(await owned.stop()).toMatchObject({ status: 'stopped' });
       expect(await owned.stopped).toEqual({ supervision: 'ended' });
       await until(() => ![state.leader, state.guardian, tree.child, tree.grand].some(alive));
       expect([state.leader, state.guardian, tree.child, tree.grand].some(alive)).toBe(false);
+      const terminal = owned.readProcessEvidence!();
+      expect(terminal.guardian).toMatchObject({
+        exit: { code: 0, signal: null, reaped: true },
+        kernelState: 'absent',
+      });
+      expect(terminal.server!.exit!.reaped).toBe(true);
+      expect(terminal.server!.exit!.signal).toBe('SIGTERM');
+      expect(terminal.server!.kernelState).toBe('absent');
+      expect(evidence.server!.exit).toBeNull();
+      expect(
+        decodeMcpStdioProcessEvidence(
+          { ...terminal, server: { ...terminal.server, kernelState: 'alive' } },
+          terminal.binding,
+        ),
+      ).toBeUndefined();
+      expect(JSON.stringify(terminal)).not.toContain('ambient-fixture-secret');
+      expect(JSON.stringify(terminal)).not.toContain('LEDGER');
     } finally {
       await owned.stop();
       if (original === undefined) delete process.env.PORT_SECRET;
@@ -192,6 +238,10 @@ macTest(
       expect(await owned.stopped).toEqual({ supervision: 'ended' });
       await until(() => ![state.guardian, tree.child, tree.grand].some(alive));
       expect(ended).toBe(true);
+      expect(owned.readProcessEvidence!().server).toMatchObject({
+        exit: { code: 0, signal: null, reaped: true },
+        kernelState: 'absent',
+      });
     } finally {
       const state = f.states()[0];
       if (state && alive(state.guardian)) process.kill(state.guardian, 'SIGCONT');

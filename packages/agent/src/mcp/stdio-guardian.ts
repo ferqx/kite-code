@@ -1,5 +1,10 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
+import {
+  type McpStdioProcessRecord,
+  mcpStdioKernelState,
+  observeMcpStdioIdentity,
+} from './stdio-process-evidence';
 
 interface Start {
   type: 'start';
@@ -21,6 +26,12 @@ let start: Start | undefined,
   exited: Promise<void> | undefined,
   drained: Promise<unknown> | undefined,
   cancelling = false;
+let serverEvidence: McpStdioProcessRecord | null = null;
+let serverExit: McpStdioProcessRecord['exit'] = null;
+function evidence() {
+  if (serverEvidence) serverEvidence.kernelState = mcpStdioKernelState(serverEvidence);
+  return serverEvidence;
+}
 const CONTROL = 2 * 1024 * 1024 + 64 * 1024;
 async function send(value: object) {
   if (parentGone) return;
@@ -80,7 +91,7 @@ function stop(): Promise<void> {
       child.stderr?.destroy();
     }
     await drained?.catch(() => {});
-    await send({ type: 'terminal', ...proof });
+    await send({ type: 'terminal', ...proof, server: evidence() });
     process.exit(proof.groupStopped ? 0 : 125);
   })();
   return closing;
@@ -99,13 +110,22 @@ async function run() {
       void stop();
     });
     exited = new Promise((resolve) => {
-      current.once('exit', () => resolve());
+      current.once('exit', (code, signal) => {
+        serverExit = { code, signal, reaped: true };
+        if (serverEvidence) serverEvidence.exit = serverExit;
+        resolve();
+      });
       current.once('error', () => resolve());
     });
     await new Promise<void>((resolve, reject) => {
       current.once('spawn', resolve);
       current.once('error', reject);
     });
+    serverEvidence = {
+      ...observeMcpStdioIdentity(current.pid!),
+      exit: serverExit,
+      kernelState: 'unavailable',
+    };
     let stderrBytes = 0;
     drained = Promise.all([
       (async () => {
@@ -129,7 +149,13 @@ async function run() {
       })(),
     ]);
     void drained.catch(() => void stop());
-    await send({ type: 'ready', processGroupId: current.pid, guardianPid: process.pid });
+    await send({
+      type: 'ready',
+      processGroupId: current.pid,
+      guardianPid: process.pid,
+      guardian: observeMcpStdioIdentity(process.pid),
+      server: evidence(),
+    });
     if (cancelling) {
       closing = undefined;
       await stop();
@@ -145,7 +171,7 @@ async function run() {
     const proof = child?.pid ? await terminate(child.pid) : { groupStopped: true, forced: false };
     child?.stdout?.destroy();
     child?.stderr?.destroy();
-    await send({ type: 'terminal', ...proof });
+    await send({ type: 'terminal', ...proof, server: evidence() });
     process.exit(proof.groupStopped ? 0 : 125);
   }
 }

@@ -6,6 +6,13 @@ import { fileURLToPath } from 'node:url';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { type JSONRPCMessage, JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpAdapter, type McpLifecycleTransportPort } from './index';
+import {
+  copyMcpStdioEvidence,
+  decodeMcpStdioProcessEvidence,
+  isMcpStdioIdentity,
+  type McpStdioProcessEvidence,
+  mcpStdioKernelState,
+} from './stdio-process-evidence';
 
 export class McpStdioPortError extends Error {
   readonly code: string;
@@ -155,6 +162,30 @@ export function createMcpStdioTransportPort(
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      const processEvidence: McpStdioProcessEvidence = {
+        version: 1,
+        coverage: 'guardian-and-server-only',
+        ownerPid: process.pid,
+        binding: {
+          originalStoreId: binding.originalStoreId,
+          sessionId: binding.sessionId,
+          executionId: binding.executionId,
+          serverId: binding.serverId,
+          scopeId: binding.scopeId,
+          configDigest: binding.configDigest,
+        },
+        guardian: guardian.pid
+          ? {
+              pid: guardian.pid,
+              parentPid: null,
+              birth: null,
+              unavailable: ['native_birth_unavailable'],
+              exit: null,
+              kernelState: 'unavailable',
+            }
+          : null,
+        server: null,
+      };
       const nonce = randomUUID();
       let controlBuffer = Buffer.alloc(0),
         rpcBuffer = Buffer.alloc(0),
@@ -263,15 +294,48 @@ export function createMcpStdioTransportPort(
               Number.isSafeInteger(frame.processGroupId) &&
               frame.processGroupId > 1 &&
               frame.guardianPid === guardian.pid
-            )
+            ) {
+              if (!isMcpStdioIdentity(frame.guardian, guardian.pid!, process.pid))
+                throw Error('guardian_identity');
+              const next = decodeMcpStdioProcessEvidence(
+                {
+                  ...processEvidence,
+                  guardian: { ...frame.guardian, exit: null, kernelState: 'unavailable' },
+                  server: frame.server,
+                },
+                processEvidence.binding,
+                process.pid,
+              );
+              if (
+                !next?.server ||
+                next.server.pid !== frame.processGroupId ||
+                next.server.exit !== null
+              )
+                throw Error('server_identity');
+              processEvidence.guardian = structuredClone(next.guardian);
+              processEvidence.server = structuredClone(next.server);
               acknowledge();
-            else if (
+            } else if (
               frame.type === 'rpc' &&
               typeof frame.content === 'string' &&
               frame.content.length <= 32768
             )
               rpc(Buffer.from(frame.content, 'base64'));
             else if (frame.type === 'terminal' && typeof frame.groupStopped === 'boolean') {
+              const next = decodeMcpStdioProcessEvidence(
+                { ...processEvidence, server: frame.server },
+                processEvidence.binding,
+                process.pid,
+              );
+              if (
+                !next ||
+                (processEvidence.server &&
+                  (next.server?.pid !== processEvidence.server.pid ||
+                    JSON.stringify(next.server.birth) !==
+                      JSON.stringify(processEvidence.server.birth)))
+              )
+                throw Error('terminal_identity');
+              processEvidence.server = structuredClone(next.server);
               groupStopped = frame.groupStopped;
               closing = true;
               rejectReady(new McpStdioPortError('mcp_stdio_ended'));
@@ -286,7 +350,15 @@ export function createMcpStdioTransportPort(
       });
       guardian.stderr!.resume();
       guardian.on('error', () => rejectReady(new McpStdioPortError('mcp_stdio_guardian_failed')));
+      let guardianExit: { code: number | null; signal: string | null; reaped: true } | null = null;
+      guardian.once('exit', (code, signal) => {
+        guardianExit = { code, signal, reaped: true };
+      });
       guardian.once('close', () => {
+        if (processEvidence.guardian) {
+          processEvidence.guardian.exit = guardianExit;
+          processEvidence.guardian.kernelState = mcpStdioKernelState(processEvidence.guardian);
+        }
         exited = true;
         closing = true;
         signal.removeEventListener('abort', aborted);
@@ -346,7 +418,14 @@ export function createMcpStdioTransportPort(
         () => clearTimeout(startTimer),
       );
       if (signal.aborted) void stop();
-      return { transport, stopped, stop };
+      return {
+        transport,
+        stopped,
+        stop,
+        readProcessEvidence() {
+          return copyMcpStdioEvidence(processEvidence);
+        },
+      };
     },
   };
 }

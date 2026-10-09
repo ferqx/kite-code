@@ -13,6 +13,7 @@ import {
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
+import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
@@ -23,6 +24,7 @@ import {
   installTerminalBundle,
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { observeNativeProcess } from '../../../scripts/runtime/unified-soak-native';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 const files = [
@@ -544,6 +546,7 @@ test('installed maintenance restores raw MCP configuration into a new Store; col
       input: { serverId: user.id, key: 'B-explicit-connection' },
     });
     expect((await completed(child.client, 'B-connect-user')).status).toBe('succeeded');
+    const connected = await completed(child.client, 'B-connect-user');
     const rpc = readFileSync(ledger, 'utf8');
     expect(rpc).toContain('initialize');
     expect(rpc).toContain('tools/list');
@@ -552,6 +555,52 @@ test('installed maintenance restores raw MCP configuration into a new Store; col
       server: number;
       guardian: number;
     };
+    const connectionRecord = (await reader.getExtensionRecord({
+      sessionId: 's',
+      extensionId: 'builtin.mcp',
+      key: `connection/${user.id}/B-explicit-connection`,
+    }))!.value as { operationRef: { executionId: string }; configDigest: string };
+    const connectionId = connectionRecord.operationRef.executionId;
+    const connection = await child.client.getExecution(connectionId);
+    expect(connection).toMatchObject({
+      originStoreId: storeB,
+      sessionId: 's',
+      parentExecutionId: connected.id,
+      definitionId: 'mcp.source.connection',
+      definitionVersion: '1',
+      status: 'running',
+    });
+    const readyOutput = await until('owned birth persisted', async () => {
+      const page = await child!.client.listExecutionOutput(connectionId);
+      return page.items.some((row) => row.stream === 'progress') ? page : undefined;
+    });
+    const ready = JSON.parse(
+      readyOutput.items.find((row) => row.stream === 'progress')!.content,
+    ) as { ready: boolean; ownedProcesses: McpStdioProcessEvidence };
+    expect(ready.ready).toBe(true);
+    expect(ready.ownedProcesses).toMatchObject({
+      version: 1,
+      coverage: 'guardian-and-server-only',
+      ownerPid: child.pid,
+      binding: {
+        originalStoreId: storeB,
+        sessionId: 's',
+        executionId: connectionId,
+        serverId: user.id,
+        scopeId: JSON.stringify([storeB, 's', user.id]),
+        configDigest: connectionRecord.configDigest,
+      },
+      guardian: { pid: owned.guardian, parentPid: child.pid, exit: null, unavailable: [] },
+      server: { pid: owned.server, parentPid: owned.guardian, exit: null, unavailable: [] },
+    });
+    for (const identity of [ready.ownedProcesses.guardian!, ready.ownedProcesses.server!]) {
+      const native = observeNativeProcess(identity.pid);
+      expect(native.unavailable).toEqual([]);
+      expect(native.parentPid).toBe(identity.parentPid);
+      expect(native.startIdentity?.value).toBe(
+        `${identity.birth!.seconds}:${identity.birth!.microseconds}`,
+      );
+    }
     await child.client.cancelSession('s', {
       expectedStoreId: storeB,
       commandId: 'B-stop',
@@ -561,18 +610,63 @@ test('installed maintenance restores raw MCP configuration into a new Store; col
     await until('owned peers stopped', async () =>
       !alive(owned.server) && !alive(owned.guardian) ? true : undefined,
     );
+    const stopped = await until('owned terminal persisted', async () => {
+      const fact = await child!.client.getExecution(connectionId);
+      return fact.status === 'cancelled' ? fact : undefined;
+    });
+    const terminal = stopped.result as unknown as {
+      details: {
+        transportStopped: boolean;
+        remoteToolStopConfirmed: boolean;
+        ownedProcesses: McpStdioProcessEvidence;
+      };
+    };
+    expect(terminal.details.transportStopped).toBe(true);
+    expect(terminal.details.remoteToolStopConfirmed).toBe(false);
+    expect(terminal.details.ownedProcesses.binding).toEqual(ready.ownedProcesses.binding);
+    for (const [before, after] of [
+      [ready.ownedProcesses.guardian!, terminal.details.ownedProcesses.guardian!],
+      [ready.ownedProcesses.server!, terminal.details.ownedProcesses.server!],
+    ]) {
+      expect(after).toMatchObject({
+        pid: before!.pid,
+        parentPid: before!.parentPid,
+        birth: before!.birth,
+        kernelState: 'absent',
+        exit: { reaped: true },
+      });
+    }
+    expect(terminal.details.ownedProcesses.guardian!.exit).toEqual({
+      code: 0,
+      signal: null,
+      reaped: true,
+    });
+    const stoppedOutput = await child.client.listExecutionOutput(connectionId);
+    expect(stoppedOutput).toEqual(readyOutput);
+    const stoppedRecord = await reader.getExecution(connectionId);
+    expect(stoppedRecord!.result).toEqual(stopped.result);
     await reader.close();
     reader = undefined;
     await child.close();
     expect(await child.exited).toBe(0);
     expect(alive(child.pid)).toBe(false);
     child = undefined;
+    reader = await openSqliteStore({ ...profile, mode: 'readonly' });
+    const stoppedCursor = (await reader.getMetadata()).lastChangeCursor;
+    expect(await reader.getExecution(connectionId)).toEqual(stoppedRecord);
     child = await launch('mcp-restored-B-cold');
+    const coldStart = wire.length;
+    expect(await child.client.getExecution(connectionId)).toEqual(stopped);
+    expect(await child.client.listExecutionOutput(connectionId)).toEqual(stoppedOutput);
     expect((await directory(child.client)).items.every((item) => item.admitted)).toBe(true);
     expect(readFileSync(ledger, 'utf8')).toBe(rpc);
     expect(alive(owned.server)).toBe(false);
     expect(alive(owned.guardian)).toBe(false);
     expect(modelCalls).toBe(0);
+    expect(wire.slice(coldStart).every((row) => row.method === 'GET')).toBe(true);
+    expect((await reader.getMetadata()).lastChangeCursor).toBe(stoppedCursor);
+    await reader.close();
+    reader = undefined;
     await child.close();
     expect(await child.exited).toBe(0);
     expect(alive(child.pid)).toBe(false);
@@ -602,6 +696,10 @@ test('installed maintenance restores raw MCP configuration into a new Store; col
         vaultExcluded: true,
         credentialTransportNotDispatched: true,
         ownedPeersStopped: true,
+        ownedProcessBinding: terminal.details.ownedProcesses.binding,
+        ownedProcessReady: ready.ownedProcesses,
+        ownedProcessTerminal: terminal.details.ownedProcesses,
+        ownedProcessColdPreserved: true,
       }),
     );
     succeeded = true;

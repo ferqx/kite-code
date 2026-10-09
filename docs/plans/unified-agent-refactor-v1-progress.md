@@ -3376,4 +3376,24 @@ Daemon切片继续保持已结束，37能力partial／wholeV13=false／Goal acti
 
 只读归因没有确定新修复候选：固定Bun1.4.2 commit744846f84的[当前RSS实现](https://github.com/oven-sh/bun/blob/744846f844374847c902b5e7fd59b4342a51ef99/src/jsc/bindings/BunProcess.cpp#L4073-L4093)使用当前resident_size，原185.21875→244.828125MiB九点失败不能归为高水位。旧关闭DB59,592,704bytes／5528 tombstone Session／19348 Command／74629 changes符合原正文、终态、来源和去重保留契约；当前查询按Session／cursor／LIMIT，未发现全量常驻JS集合。文件增长或一次SQL返回不能当RSS因果，SQLite/Bun live allocation owner仍未知；不重复已闭statement／Client／Runtime清理矩阵。
 
-剩余依赖保持原三项：①原RSS、八outer／九点、Bun activeResources／handles及全Runtime后代；正式MCP stdio guardian／server目前仅数字PID／进程组，还缺出生身份与各自退出证据，且现行契约不承诺阻止setsid逃逸。②必要installed平台／维护／已发布样本与DB9旧代码适用拒绝。③前序满足后的§35独立迁移审查、最终旧路径退役和阶段完整回归。两Service边界不删除原descendant拒绝，不授全部后代或九点增长资格；37能力partial／wholeV13=false／Goal active。产品用户流程未变，手册执行／恢复／生命周期承诺按实际源码核对，无无意义手册diff；本地授权不扩push／PR／发布或Actions dispatch。
+该轮剩余依赖保持原三项：①原RSS、八outer／九点、Bun activeResources／handles及全Runtime后代；当时正式MCP stdio guardian／server仅有数字PID／进程组，还缺出生身份与各自退出证据，现行契约不承诺阻止setsid逃逸。②必要installed平台／维护／已发布样本与DB9旧代码适用拒绝。③前序满足后的§35独立迁移审查、最终旧路径退役和阶段完整回归。两Service边界不删除原descendant拒绝，不授全部后代或九点增长资格；37能力partial／wholeV13=false／Goal active。产品用户流程未变，手册执行／恢复／生命周期承诺按实际源码核对，无无意义手册diff；本地授权不扩push／PR／发布或Actions dispatch。
+
+
+### 2026-10-10：正式 MCP 连接的进程身份与冷退出证据
+
+两Service资源已按正常hooks本地提交 `2a91c5cb46bdb4a291980a269538a7d5f2d5f5c9`；当前继续同一退出表第①项资源交接，Daemon保持结束。正式 Agent stdio port／guardian现沿原私有nonce／sequence帧传递 guardian／server 的Darwin libproc出生sec/usec与PPID。原 ChildProcess exit才生成code／signal／reaped，error／EOF不生成退出证明；原PID对应kernel状态仍不可读时保unavailable，只有ESRCH确认absence。新closed leaf严格绑定六字段及owner，拒额外字段、跨域身份和reap后alive，getter返回复制／冻结。原 lifecycle 的progress／terminal details存同一原Job的 `ownedProcesses`，getter缺失保原字段，非法／throw只保存有限不可用，原supervision与 `remoteToolStopConfirmed:false`保持。正式Service默认配置无需旁路；范围及持久理由归[MCP owner](../../packages/agent/src/mcp/README.md#显式-stdio-guardian-port)、[资格owner](../active/runtime-resilience-qualification.md)和[既有采集Note](../../.agents/notes/implemented/testing/2026-10-08-blocked-full-workload-collection.md)。
+
+验收复用原完整用户链：source-free包的真实Model／stdio Tool一次效果→精确Session取消→原两进程真实exit／reap／kernel absence→原公共维护A→B→cold原结果／输出；installed默认Service的当前来源准入／独立Question→新Store显式连接→原Job出生身份→Session取消→Service正常退出→cold GET原结果／输出／cursor／Provider0。后者独立libproc核原birth及parent，原credential transport未派发和Tool效果不存在断言保持。没有新操作、journal或长期独立测试目标。
+
+本机macOS26.7.1 arm64／Bun1.4.2实际验证：
+
+- 原 stdio整文件7pass／73断言／3.47秒，日志 `/private/tmp/kite-mcp-stdio-evidence-final-20261010.log`；42原expect／87原await与全部原预算保持，原控制／队列／env／admit／freshness／group cleanup不变。有限独立只读review未发现阻塞，范围严格限guardian／server而非全树。
+- 原计划isolated规则下七个整文件actual0，47pass／1004条Bun断言、总wrapper58.493秒；lifecycle10／149、connection Query3／106、reconnection16／336、Source15／135、cold新连接1／65、source-free包1／63和installed Profile恢复1／150。4253 regular输入及HEAD／status前后全等；准确 `/private/tmp/kite-mcp-process-evidence-consumers-isolated-20261010-{inputs,after-inputs,result}.json`及各原文件`.log`。这与stdio共54pass／1077条Bun断言，源码外包另实际执行 `node:assert` 断言；不是全仓默认或Node runtime资格。
+- installed候选digest `489edc7455da5f4be9c1d0c666b4e09f4093b4d20da65b897846b4887ffc21d9`，当前Store `54417e7a-4109-423a-b5e3-6c3fbc206340`、原connection `d1e19242-3d7a-4bd7-8c04-bfc29a0c0ee0`、owner43469；guardian43496出生1791566720:507211，server43497出生1791566720:533343。取消终态保存guardian exit0／server SIGTERM、两者reaped／kernel absent，cold原Job／progress相等且Provider0／cursor保持；成功按原规则清理所属根，原结构化证据保完整日志。
+- 根与八workspace正常typecheck actual0，八TS只读Biome0。最初Root types actual2仅新增测试把public Execution projection与完整Store record混比及Json type cast，修为分别核原完整record／公共projection，生产API未改；原失败 `kite-mcp-process-evidence-types-20261010.log`与最终 `types-final-20261010.log`保留。两个原消费者共79／173条原AST断言及数值预算均无删除，当前97／200条，准确 `/private/tmp/kite-mcp-process-evidence-preservation-20261010.json`。
+
+第一次Root将七个isolated文件放进同一Bun进程的自选合并命令实际1／59.118秒，Source／包／installed恢复已通过，cold重连业务及清理完成后parent reader报 `sqlite_engine_initialization_failed`；4253 regular／Git无漂移，原root GauYLS与raw结果／日志 `/private/tmp/kite-mcp-process-evidence-consumers-20261010-*`保留。该方式偏离现有每文件进程隔离，SQLite动态选择必须在首次DB前且process-wide；随后按原计划核各单文件job并保持完全相同源码／全部断言／期限，各actual0，没有改生产初始化或排除测试。首轮私有日志的stdout／stderr独立file sink出现交叠，最终每文件共享同一fd完整保输出；原失败文件不覆盖，初轮不冒称完整通过。
+
+强制docs／docs-impact(all)、plan evidence、Agent边界、八workspace闭包、公共API、test ownership、八TS只读Biome及diff均actual0，日志 `/private/tmp/kite-mcp-process-evidence-{docs,docs-impact-final,plan-evidence,boundary,workspaces,api,test-ownership,biome,diff}-20261010.log`。首次docs-impact传错不存在的 `--all`返回2，随后正确 `--scope=all`实际0，原参数错误日志保留；没有豁免语义检查。`document-before-commit action=iteration_complete`：ready，仅本轮进程证据交接与实际两个消费者；产品MCP连接／独立许可／未知远端停止／冷读不执行承诺按手册核对不变，更新MCP owner、Runtime active、原采集Note、tests入口与本进度。八TS与consumer冻结input相同，受保护AGENTS／bun.lock原SHA保持。stage／commit只覆盖本轮实际13文件，正常hooks仍独立运行。
+
+当前剩余退出仍按三项依赖：①installed普通任务完整资源，原RSS增长、八outer／九点、Bun activeResources／handles与全Runtime后代；本轮只补正式MCP两个进程交接，不授setsid逃逸或全部后代资格，也不删除报告原descendant拒绝。②必要installed平台／维护／已发布样本及DB9适用旧代码拒绝。③前序满足后的§35独立整片迁移审查、最终旧引擎／carrier／构建依赖退役与阶段完整默认。每项实际入口及验收仍见原退出表，上一轮661文件／522主任务整体通过只复用未变业务范围，不冒称本次全仓再验。37能力partial／wholeV13=false／Goal active；本轮按最终diff收束授权本地提交，不扩push／PR／发布／Actions dispatch。

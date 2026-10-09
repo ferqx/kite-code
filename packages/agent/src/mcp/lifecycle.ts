@@ -35,6 +35,10 @@ import {
 import { readReconnection } from './reconnection-query';
 import type { McpReconnectionInput } from './reconnection-types';
 import {
+  decodeMcpStdioProcessEvidence,
+  type McpStdioProcessEvidence,
+} from './stdio-process-evidence';
+import {
   publishToolsSnapshot,
   readToolsPage,
   readToolsSnapshot,
@@ -159,6 +163,8 @@ export interface McpLifecycleTransportPort {
     stop(): Promise<StopConfirmation>;
     /** Confirms only this owned transport's lifetime, never remote Tool termination. */
     stopped: Promise<{ supervision: 'ended' | 'unknown' }>;
+    /** Read-only facts for the original Job; absence or invalid data never confirms a stop. */
+    readProcessEvidence?(): McpStdioProcessEvidence;
   }>;
 }
 export interface McpLifecycleOptions {
@@ -393,6 +399,27 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
   const live = new Map<string, Entry>();
   const starting = new Map<string, ReturnType<typeof deferred<Entry>>>();
   let closed = false;
+  function processEvidence(entry: Entry): Record<string, Json> {
+    if (!entry.transport?.readProcessEvidence) return {};
+    try {
+      const ownedProcesses = decodeMcpStdioProcessEvidence(
+        entry.transport.readProcessEvidence(),
+        {
+          originalStoreId: entry.storeId,
+          sessionId: entry.sessionId,
+          executionId: entry.executionId,
+          serverId: entry.serverId,
+          scopeId: scopeKey(entry.storeId, entry.sessionId, entry.serverId),
+          configDigest: entry.server.configDigest,
+        },
+        process.pid,
+      );
+      if (ownedProcesses) return { ownedProcesses: ownedProcesses as unknown as Json };
+    } catch {
+      // Evidence is observational. Its failure must not change the original supervision result.
+    }
+    return { ownedProcessesUnavailable: 'mcp_owned_process_evidence_unavailable' };
+  }
   function end(entry: Entry, supervision: 'ended' | 'unknown') {
     if (entry.terminal) return;
     entry.terminal = supervision;
@@ -738,7 +765,11 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       }
       yield {
         type: 'progress',
-        value: { ready: !entry.failureCode && !entry.terminal, serverId: entry.serverId },
+        value: {
+          ready: !entry.failureCode && !entry.terminal,
+          serverId: entry.serverId,
+          ...processEvidence(entry),
+        },
       };
       const supervision = await entry.end.promise;
       yield {
@@ -751,7 +782,11 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
                 : 'cancelled'
               : 'outcome_unknown',
           content: entry.failureCode ?? 'MCP owned transport ended',
-          details: { transportStopped: supervision === 'ended', remoteToolStopConfirmed: false },
+          details: {
+            transportStopped: supervision === 'ended',
+            remoteToolStopConfirmed: false,
+            ...processEvidence(entry),
+          },
         },
         supervision,
       };
