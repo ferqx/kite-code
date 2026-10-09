@@ -14,6 +14,9 @@ class Semaphore {
   constructor(capacity: number) {
     this.capacity = capacity;
   }
+  get idle(): boolean {
+    return this.used === 0 && this.waiters.length === 0;
+  }
   async acquire(signal: AbortSignal): Promise<() => void> {
     signal.throwIfAborted();
     if (this.used < this.capacity) {
@@ -114,7 +117,20 @@ export class ExecutionResources {
             semaphore = new Semaphore(1);
             this.serial.set(key, semaphore);
           }
-          releases.push(await semaphore.acquire(signal));
+          const original = semaphore;
+          const discardIdle = () => {
+            if (original.idle && this.serial.get(key) === original) this.serial.delete(key);
+          };
+          try {
+            const release = await original.acquire(signal);
+            releases.push(() => {
+              release();
+              discardIdle();
+            });
+          } finally {
+            // A pre-aborted acquire has no holder; a handoff retains its reserved permit.
+            discardIdle();
+          }
         }
       }
       if (request?.slot) releases.push(await this[request.slot].acquire(signal));

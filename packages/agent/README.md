@@ -96,6 +96,10 @@ Job 输出与终态分开保存：单 chunk 32 KiB，内容的 JSON 编码与固
 
 当前资源支持 Runtime/Session 单串行键与单类别槽位。显式 Workspace 后端用稳定 profile 协调区覆盖同 profile、同 Workspace 身份、同 key 的多个 Service；未注入后端时 Workspace 请求仍明确拒绝，不宣称不同 profile 对同一磁盘目录全局互斥。后端等待数与字节有界，取消移除候补；close 拒绝新申请、取消候补并等待活动许可正常释放，期间保留 profile 使用锁，不提前释放执行许可。持有资源的 Action 不能再嵌套获取子操作许可，明确返回不支持。Shell、child、Interaction、输入与结果选择已通过所列本机切片；完整权限/计划/Context、默认 MCP、备份维护、全量客户端与三平台发行资格继续按进度表推进。
 
+Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍有 holder 或 waiter 的原 Semaphore。最后许可归还或没有取得许可的取消结束后，核空闲和 Map 中的原对象身份再删除键；handoff 继续保留预留许可，迟到重复 release 不能删除同 key 的新 owner。serial→slot 获取和逆序释放保持，未确认 Job 仍保留其原 permit。
+
+[真实串行资源回归](test/isolated/resources/serial.test.ts)沿公共 Runtime／SQLite 完成普通 Tool 的完整结果、第二 Run 取消后的原 unknown 事实和冷只读原 View／metadata／cursor，另用同一原 owner 核排队取消、独立键、handoff、旧 release 与新 owner。空闲索引归还不代表原 RSS 或整个 Runtime 资源资格。
+
 必要义务由[requirements owner](src/storage/sqlite/requirements/README.md)负责持久登记。普通 Tool 只能在自己的 namespace 和实际 Run 追加 refs；可信 initializer 在首个 Execution 前使用 `forExtension().records.create` 建立有界的不可变元数据，再由 Store 封存原来源。首个计划执行即关闭该创建窗口。派发与完成读取持久的当前 refs；后台 Job 保留创建时快照及原 permissions/conditions lease。原 Store seal、准确记录 revision 与 satisfied/waived 判定是必要条件，未封存或缺实现不能靠兼容路径放行。
 
 `NecessaryConditions` 获得准确当前 boundary 和有限的 `forRequirement` 只读范围。关联 executable 记录的读取或缺失自动形成 CAS read-set，最终事务核对原 namespace、Session、revision 和 Store；业务判定文字不能代替这些事实。公开 Execution 证明包含原身份、attempt、定义、input digest、result revision 和实际决策来源的 id/digest，不包含 owner 或来源正文。已接纳的 question/plan_review 可返回准确原 receipt，并可从同 Session 的只读 Interaction 核实；信息决定不能充当 Tool approval。

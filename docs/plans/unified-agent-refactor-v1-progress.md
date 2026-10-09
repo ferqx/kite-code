@@ -3491,3 +3491,25 @@ Store与Service owner、active资源资格按实际diff同步；手册恢复的�
 | 1 | installed CLI／TUI／Native 普通任务执行、准确取消、完整输出、cold只读与退出 | 原身份／完整原结果／零重放及实际所属资源退出，全部原资源门禁。构造失败后的诊断→维护→原Store冷读已闭；原450秒RSS真实增长、8outer／9点、Bun activeResources／handles与全Runtime后代资格仍未闭。 |
 | 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及原平台证据仍有缺口；既有macOS维护／冷回退结果复用。 |
 | 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役、阶段未过滤完整默认及强制门禁均通过。当前局部整例不能提升37partial／wholeV13=false，Goal active。 |
+
+## 2026-10-10：普通任务的空闲串行资源归还
+
+上一轮 Worker 构造失败后诊断→维护→原Store冷读已按正常hooks本地提交 `d898c8c472e68a593d6b59f40458c807847a3169`，Daemon及已闭合helper切片保持结束。本轮继续原退出表①的完整普通任务生命周期。有界源码审查先核默认web_fetch的准入、网络／DOM／signal清理，未发现可立即修复的源码错误；其Bun Worker terminate仍不证明物理退出，复用原证据，不展开新网络／Worker矩阵。另在正式Runtime资源owner定位确定保留：runtime/session串行键取得后，原Map从不删除已经空闲的Semaphore；不以该观察推导Model-only RSS因果。
+
+正式普通Tool、Action和Job共用原UnifiedExecution的ExecutionResources，§9.6/§11.4定义原串行键与许可释放边界。当前只在原Semaphore的used／waiters均0、Map仍指向同一对象时删除空闲索引，成功release与未取得许可的取消均核这项条件；handoff时used仍reserved，旧release不能删除同key新owner。serial→slot、逆序释放、Workspace本机锁及model/process槽位保持。未确认Job或dispose失败仍保原release／permit，不能从unknown状态推断已经归还。
+
+必要新整例沿公共Runtime／真实SQLite的普通Run使用session串行Tool：第一次实际完整正文成功，第二Run明确取消后保原outcome_unknown，而非伪造无效果或成功；Model3次／Tool2次保持。随后用同一实际owner核队列取消、独立runtime键、reserved handoff、迟到重复release、新owner及pre-aborted acquire。原实现完成这些行为后Map实际保4个空闲条目，在应为0处真实失败，准确 `/private/tmp/kite-serial-resource-before-20261010.log`；修复后整例1pass／14Bun断言，冷readonly原metadata／View／cursor相等、零新Model。夹具全程登记Store／Runtime，失败finally先取消所有原候补、等settled、逆序归还实际permit，再关闭原owner；错误保留而不吞掉。新增例保Bun默认期限，未增加public debug API或新资源政策。
+
+独立只读审查确认idle／对象身份、handoff、slot等待失败的逆序归还，以及原unconfirmedJobs保持。root核生产清理外字节相等，五原whole的全部案例／断言／预算、Runtime／执行器／ExtensionHost、原Model-only probe／report和默认inventory字节均与d898c8c4相等，共13项；准确 `/private/tmp/kite-serial-resource-preservation-20261010.json`。新回归不是全局资源计数器、原RSS修复或§35整片独立资格。
+
+最终六个完整文件按原默认inventory各用独立Bun进程，actual0／7647.370ms：新serial1／14、原workspace3／15、execution lifecycle14／99、run bindings4／58、正式Service assembly HTTP4／33、child capacity1／6；合计27pass／0fail／225Bun断言。4265 regular／Git／Bun／Node前后全等，原Service整例含实际paired默认装配和原权限／freshness；未过滤整例或修改旧断言／预算。逐文件日志SHA、输入／after／result与核验归 `/private/tmp/kite-serial-resource-whole-20261010-*` 和 `/private/tmp/kite-serial-resource-verified-evidence-20261010.json`，`fullDefault:false`／`wholeV13:false`。此前新文件和原workspace／lifecycle的agent结果只作初验证，不重复计入最终总数。根及八workspace types与两TS只读Biome均actual0，准确 `/private/tmp/kite-serial-resource-{types,biome}-final-20261010.log`。
+
+Agent资源owner和active资格按实际diff同步；手册执行、工具审批与恢复的原完整结果／准确取消／未知不重放承诺及生命周期owner核对保持，没有公共schema／持久格式／客户端操作变化，不新建长期切片或重复Note。最终文档完整性／all-scope影响、boundary／workspaces／API、测试归属／计划证据与diff均actual0，正常本地提交hooks仍独立强制；准确scope与receipt归同一private前缀。复用闭合Daemon／MCP／Shell／OAuth／Native helper／Store ctor和原RSS／heap／SQL／allocator事实，不增加push／PR／发布或Actions dispatch。
+
+剩余仍按三个完整用户能力缺口排序：
+
+| 顺序 | 实际用户入口与完整能力 | 明确验收与剩余阻塞 |
+| --- | --- | --- |
+| 1 | installed CLI／TUI／Native 普通任务执行、准确取消、完整输出、cold只读与退出 | 保原身份／完整原结果／零重放及实际所属资源退出，全部原资源门禁。本轮空闲serial索引收束已闭；原RSS真实增长仍无解决证据，8outer／9点、Bun activeResources／handles与全Runtime后代资格仍未闭。 |
+| 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及原平台证据仍有缺口，既有macOS维护／冷回退结果复用。 |
+| 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役，阶段未过滤完整默认及强制门禁均通过。当前27项不能替代资源阶段退出，37partial／wholeV13=false／Goal active。 |
