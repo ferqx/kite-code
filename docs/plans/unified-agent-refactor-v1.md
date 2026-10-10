@@ -2114,7 +2114,9 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 恢复后TUI／Web完整Context正式读取已修正当前Store与历史出处的错误比较；实际A→B备份恢复后的首次／冷HTTP和Cookie读取保原完整结果、原ID／revision／出处，零Model／Job重放，当前Store／Session和分页守卫保持。原DOM／相邻开发PTY与真实恢复reader分别证明其范围，18项／350断言通过；准确生产红、修正和四项剩余依赖归[Context恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后完整-context-正式消费者)。此局部正式消费者交付不替代上述P6／§35／P7门禁或阶段完整回归。
 
-恢复后TUI `/background` 的原任务目录、完整输出和child日志也已按真实源码缺口修复：目标保当前准入及原Job/definition/version，真实Execution/Run核原Model血缘，历史只读且不产生停止申请。实际A→B两次冷HTTP/Ink、两个原完整PTY和三个原UI单元文件65项／613断言通过；原PTY测试字节、断言与预算保持，fixture只接公开getRun。修复前业务失败、标签正常换行观察及五项有用户入口的依赖归[后台恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-后台任务完整读取)。Native恢复Files历史/路径与Web恢复封存Model正文仍有具体消费者缺口，先于P5完整客户端退出；RSS/观测保持P6/§35门禁，不构成这些独立恢复能力实现前置，不提升37能力partial或整体退出状态。
+恢复后TUI `/background` 的原任务目录、完整输出和child日志也已按真实源码缺口修复：目标保当前准入及原Job/definition/version，真实Execution/Run核原Model血缘，历史只读且不产生停止申请。实际A→B两次冷HTTP/Ink、两个原完整PTY和三个原UI单元文件65项／613断言通过；原PTY测试字节、断言与预算保持，fixture只接公开getRun。修复前业务失败、标签正常换行观察及五项有用户入口的依赖归[后台恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-后台任务完整读取)。RSS/观测保持P6/§35门禁，不构成独立恢复能力实现前置，不提升37能力partial或整体退出状态。
+
+Native恢复Files的Main消费者也已核真实原Run/Execution出处，完整文件变更、read/write/edit工具路径和普通消息路径不再把原Store等同当前准入。默认Files→公开Fork→backup/restore→两次冷Service/Node取得真实原diff、当前文件目标和零重放证据；相邻完整Main/DOM共29文件110项／998Bun断言通过，原断言/预算保持。原来源跨项目仍只读，保存结果摘要不额外保整正文。准确红绿输入和整窗口/实际编辑器等资格局限归[恢复文件进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-文件历史与当前文件入口)。Web恢复封存Model正文仍有具体消费者缺口，先于P5完整客户端退出；P6完整维护/平台/客户端依赖独立、资源、§35审查/最终退役/阶段完整回归及适用P7责任保持。
 
 默认制品SHA保留小文件原读取，大文件复用buffer读至EOF；唯一核心图标包已内联原Desktop产物，保exports／CSS／React和准确许可，原内容核验及使用权保持。Native完整历史固定高水位发布，同次读取保有限页大小；正文同范围保留，范围变化仍清理。长普通文本采用相邻Text节点并保grapheme、全部字符和原排版，code／pre不改；临时IPC／DOM定位观察已退役。原完整Model／Fork及相邻调用者全部原断言和预算保留，具体实现边界归[Desktop owner](../../apps/desktop/README.md)与[UI owner](../../packages/ui/README.md)。37能力保持partial／wholeV13=false；Win／Linux仍依用户安排留重构后Actions，本地授权不扩至push／PR／发布。
 

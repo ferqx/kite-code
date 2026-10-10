@@ -31,6 +31,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 原 PC 消息路径与常规摘要沿同一 Native 整窗口核首次／冷读、真实缺失文件拒绝、默认配置与 Provider 次数保持；隔离 original-entries DOM 核准确作用域、临时选择分离和原 Markdown 的预览／全文／关闭，文件端口另核已观察 Message、普通目标与派发前 frame。完整证据与未实际启动 OS 编辑器的边界归 [Native owner](../apps/desktop/README.md#原消息文件路径与常规摘要)。
 
+[恢复后 Native 文件消费者](../apps/desktop/test/isolated/native-restored-file-changes.test.ts)沿默认 Service 的真实 read/write/edit、公开 Fork/backup/restore，使用两个冷 Service 与实际 Node Main reader 核原 write/edit preview、五项 read/write/edit 目标和普通消息路径。外部当前文件变化不污染原差异；原 Run/Command/Execution/Message 和 metadata 保持，冷 GET 零重放，opener callback 只证明当前物理目标资格。原 Main 两个完整默认作业和三个原 DOM 文件保全部断言；新增身份换绑负例限同 revision 定义/结果变化，不扩已闭合物理路径或 frame 矩阵。原业务红、夹具权限失败、最终4274项冻结输入与实际结果见[恢复文件进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-文件历史与当前文件入口)。这不代证新恢复整窗口点击、OS 编辑器或阶段完整默认。
+
 ## 默认执行与隔离
 
 根 `test`、`test:all` 和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)。它只发现上述当前 owner 与有限的 root 脚本安全列表，不扩展到整个旧 integration/qualification/release/e2e/golden/TUI 树。纯 `--list` 不创建 Profile、Provider 或子进程。

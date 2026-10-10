@@ -109,6 +109,18 @@ function fixture() {
     verifyConnection: async () => {},
     getWorkspace: async () => registered,
     getView: async (id: string) => ({ storeId: 'store', session: { id, workspaceId: 'w' } }),
+    getRun: async (id: string) => {
+      const execution = [...executions.values()].find((entry) => entry.runId === id);
+      const message = [...messages.values()].find(
+        (entry) => (entry.originMessage?.runId ?? entry.runId) === id,
+      );
+      return {
+        id,
+        sessionId: execution?.sessionId ?? message?.originMessage?.sessionId ?? message?.sessionId,
+        originStoreId: 'store',
+        originCommandId: `command-${id}`,
+      };
+    },
     getExecution: async (id: string) => {
       reads.push(id);
       return executions.get(id)!;
@@ -474,6 +486,128 @@ test('message file paths use the current registered project and original reading
       code: 'native_selection_changed',
     });
     expect(opened).toHaveLength(3);
+  } finally {
+    f.close();
+  }
+});
+
+test('restored Files receipts and sealed paths retain original provenance without borrowing current disk diff', async () => {
+  const f = fixture(),
+    opened: string[] = [];
+  const perform = async (_editor: string, path: string) => {
+    opened.push(path);
+  };
+  try {
+    f.scope = { ...f.scope, storeId: 'restored' };
+    f.client.getView = (async (id: string) => ({
+      storeId: 'restored',
+      session: { id, workspaceId: 'w' },
+    })) as unknown as AgentClient['getView'];
+    writeFileSync(join(f.workspace, f.path), 'independently changed current bytes');
+    f.add('restored-edit', 'files.edit');
+    f.add('restored-read', 'files.read', 'succeeded', true, '3');
+    const targets = await f.manager.list(
+      {
+        readId: 'restored-targets',
+        messageIds: ['first', 'restored-edit', 'restored-read'],
+        viewSelection: 1,
+        historyEpoch: 0,
+      },
+      true,
+    );
+    expect(targets.entries.map((entry) => entry.operation)).toEqual(['write', 'edit', 'read']);
+    expect(targets.entries.every((entry) => entry.openable)).toBe(true);
+    const plain = (await f.list(['first'])).entries[0]!;
+    expect(plain.openable).toBe(true);
+    expect((await f.manager.detail(plain.changeId, 'restored-plain')).text).toBe(
+      'SAVED_ORIGINAL_TOOL_PREVIEW',
+    );
+    const message = f.messages.get('first')!;
+    f.messages.set('sealed', {
+      ...message,
+      id: 'sealed',
+      runId: null,
+      originMessage: {
+        storeId: 'store',
+        sessionId: 's',
+        messageId: message.id,
+        runId: message.runId,
+      },
+    });
+    const sealed = (await f.list(['sealed'])).entries[0]!;
+    expect((await f.manager.detail(sealed.changeId, 'restored-sealed')).text).toBe(
+      'SAVED_ORIGINAL_TOOL_PREVIEW',
+    );
+    await f.manager.open(sealed.changeId, 'vscode', perform);
+    expect(opened).toEqual([join(f.workspace, f.path)]);
+    f.messages.set('sealed-path', {
+      id: 'sealed-path',
+      sessionId: 's',
+      runId: null,
+      seq: '20',
+      role: 'user',
+      status: 'complete',
+      content: `[original path](${f.path})`,
+      originMessage: { storeId: 'store', sessionId: 's', messageId: 'original-user', runId: null },
+    });
+    await f.manager.openMessageFile(
+      { messageId: 'sealed-path', path: f.path, editor: 'zed', viewSelection: 1, historyEpoch: 0 },
+      perform,
+    );
+    expect(opened).toHaveLength(2);
+    f.client.getView = (async (id: string) => ({
+      storeId: 'restored',
+      session: { id, workspaceId: 'foreign' },
+    })) as unknown as AgentClient['getView'];
+    const foreign = (await f.list(['sealed'])).entries[0]!;
+    expect(foreign.openable).toBe(false);
+    expect((await f.manager.detail(foreign.changeId, 'foreign-history')).text).toBe(
+      'SAVED_ORIGINAL_TOOL_PREVIEW',
+    );
+    await expect(f.manager.open(foreign.changeId, 'vscode', perform)).rejects.toMatchObject({
+      code: 'file_editor_target_unavailable',
+    });
+    expect(opened).toHaveLength(2);
+  } finally {
+    f.close();
+  }
+});
+
+test('restored Files observation rejects wrong Run provenance and later immutable source rebinding', async () => {
+  const f = fixture();
+  try {
+    f.scope = { ...f.scope, storeId: 'restored' };
+    const getRun = f.client.getRun.bind(f.client);
+    f.client.getRun = (async (id: string) => ({
+      ...(await getRun(id)),
+      originStoreId: 'foreign',
+    })) as AgentClient['getRun'];
+    await expect(f.list(['first'])).rejects.toMatchObject({
+      code: 'file_change_identity_mismatch',
+    });
+    f.client.getRun = getRun;
+    const item = (await f.list(['first'])).entries[0]!;
+    f.executions.get('execution-first')!.definitionVersion = '3';
+    await expect(f.manager.detail(item.changeId, 'rebound')).rejects.toMatchObject({
+      code: 'file_change_observation_unavailable',
+    });
+    f.executions.get('execution-first')!.definitionVersion = '2';
+    const result = f.executions.get('execution-first')!.result as {
+      details: { fileChange: { text: string } };
+    };
+    result.details.fileChange.text = 'CHANGED_SAVED_PREVIEW_SAME_REVISION';
+    await expect(f.manager.detail(item.changeId, 'result-rebound')).rejects.toMatchObject({
+      code: 'file_change_observation_unavailable',
+    });
+    let opened = 0;
+    await expect(
+      f.manager.open(item.changeId, 'vscode', async () => {
+        opened++;
+      }),
+    ).rejects.toMatchObject({
+      code: 'file_change_observation_unavailable',
+    });
+    expect(opened).toBe(0);
   } finally {
     f.close();
   }

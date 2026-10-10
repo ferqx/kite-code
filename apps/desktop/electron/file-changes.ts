@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import {
   ClientError,
   type Execution,
   type Message,
+  type Run,
   type Workspace,
 } from '@kite-ai/client';
 import type {
@@ -26,6 +27,7 @@ type Entry = {
   message: Message;
   executionId: string;
   resultRevision: string;
+  source: string;
   root?: Root;
 };
 type Lease = { readId: string; scope: NativeFileChangeScope; abort: AbortController };
@@ -84,6 +86,28 @@ function resultFacts(execution: Execution) {
   return { path, preview };
 }
 
+function sourceIdentity(execution: Execution, run: Run) {
+  return JSON.stringify({
+    execution: {
+      id: execution.id,
+      originStoreId: execution.originStoreId,
+      sessionId: execution.sessionId,
+      runId: execution.runId,
+      kind: execution.kind,
+      definitionId: execution.definitionId,
+      definitionVersion: execution.definitionVersion,
+      resultRevision: execution.resultRevision,
+      resultDigest: createHash('sha256').update(JSON.stringify(execution.result)).digest('hex'),
+    },
+    run: {
+      id: run.id,
+      sessionId: run.sessionId,
+      originStoreId: run.originStoreId,
+      originCommandId: run.originCommandId,
+    },
+  });
+}
+
 /** Read exact saved Tool receipts. An observed path is never renderer filesystem authority. */
 export class NativeFileChanges {
   private readonly entries = new Map<string, Entry>();
@@ -139,17 +163,24 @@ export class NativeFileChanges {
     )
       return undefined;
     const origin = message.originMessage;
-    if (origin && origin.storeId !== lease.scope.storeId)
-      throw new ClientError('file_change_identity_mismatch');
-    const runId = origin?.runId ?? message.runId;
+    const runId = origin ? origin.runId : message.runId;
     if (!runId) return undefined;
+    const run = await this.client.getRun(runId, { signal: lease.abort.signal });
+    this.check(lease);
+    if (
+      run.id !== runId ||
+      run.sessionId !== (origin?.sessionId ?? message.sessionId) ||
+      !run.originStoreId ||
+      (origin && run.originStoreId !== origin.storeId)
+    )
+      throw new ClientError('file_change_identity_mismatch');
     const execution = await this.client.getExecution(message.sourceIds[0]!, {
       signal: lease.abort.signal,
     });
     this.check(lease);
     if (
       execution.id !== message.sourceIds[0] ||
-      execution.originStoreId !== lease.scope.storeId ||
+      execution.originStoreId !== run.originStoreId ||
       execution.sessionId !== (origin?.sessionId ?? message.sessionId) ||
       execution.runId !== runId
     )
@@ -161,7 +192,7 @@ export class NativeFileChanges {
       execution.status === 'succeeded' &&
       result?.outcome === 'succeeded' &&
       result.content === message.content
-      ? execution
+      ? { execution, source: sourceIdentity(execution, run) }
       : undefined;
   }
   private async root(lease: Lease): Promise<Root | undefined> {
@@ -236,8 +267,9 @@ export class NativeFileChanges {
       for (const id of input.messageIds) {
         const message = this.message(id);
         if (!message) throw new ClientError('file_change_message_unavailable');
-        const execution = await this.receipt(lease, message, includeRead);
-        if (!execution) continue;
+        const receipt = await this.receipt(lease, message, includeRead);
+        if (!receipt) continue;
+        const { execution, source } = receipt;
         const facts = resultFacts(execution),
           changeId = randomUUID();
         const entry: Entry = {
@@ -254,6 +286,7 @@ export class NativeFileChanges {
           message: structuredClone(message),
           executionId: execution.id,
           resultRevision: execution.resultRevision,
+          source,
           root,
         };
         const previous = this.byMessage.get(message.id);
@@ -261,6 +294,7 @@ export class NativeFileChanges {
         // Two retained UI consumers may read the same immutable receipt. Keep its observation stable.
         if (
           original &&
+          original.source === entry.source &&
           original.resultRevision === entry.resultRevision &&
           original.executionId === entry.executionId &&
           original.message.content === entry.message.content &&
@@ -312,9 +346,11 @@ export class NativeFileChanges {
   private async original(lease: Lease, entry: Entry) {
     await this.client.verifyConnection({ signal: lease.abort.signal });
     this.check(lease);
-    const execution = await this.receipt(lease, entry.message, true);
+    const receipt = await this.receipt(lease, entry.message, true);
+    const execution = receipt?.execution;
     if (
       !execution ||
+      receipt?.source !== entry.source ||
       execution.id !== entry.executionId ||
       execution.resultRevision !== entry.resultRevision
     )
@@ -399,8 +435,7 @@ export class NativeFileChanges {
     if (
       !message ||
       message.sessionId !== scope.sessionId ||
-      message.contentFormat === 'unsupported' ||
-      (message.originMessage && message.originMessage.storeId !== scope.storeId)
+      message.contentFormat === 'unsupported'
     )
       throw new ClientError('file_change_message_unavailable');
     if (!['vscode', 'zed', 'textedit'].includes(input.editor))
@@ -409,6 +444,19 @@ export class NativeFileChanges {
     try {
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
+      const origin = message.originMessage,
+        runId = origin ? origin.runId : message.runId;
+      if (runId) {
+        const run = await this.client.getRun(runId, { signal: lease.abort.signal });
+        this.check(lease);
+        if (
+          run.id !== runId ||
+          run.sessionId !== (origin?.sessionId ?? message.sessionId) ||
+          !run.originStoreId ||
+          (origin && run.originStoreId !== origin.storeId)
+        )
+          throw new ClientError('file_change_message_unavailable');
+      }
       const root = await this.root(lease);
       if (!root || !(await this.sameWorkspace(lease, message)))
         throw new ClientError('file_editor_target_unavailable');

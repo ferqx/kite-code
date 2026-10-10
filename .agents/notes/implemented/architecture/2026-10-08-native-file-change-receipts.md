@@ -12,6 +12,8 @@ Status: implemented
 
 Native Main 沿已读 Message 的唯一 source Execution，核原 Store/Session/Run、定义、succeeded 状态、resultRevision 与准确内容；Fork 只沿封存来源读取。renderer 只取得有限观察 ID，展开才读正文，文件按钮只传观察 ID 和封闭 editor 枚举。打开前再次核当前登记 Workspace、原物理根 dev/inode、普通文件、受保护范围与原 renderer frame。原来源项目不同或不能确认时保阅读，不取得当前项目打开入口。固定 `/usr/bin/open` 和独立 argv 保原宿主语义，不引入通用 shell/任意应用 bridge。
 
+恢复历史的当前 Store 只承担准入，原 Files 必须由真实原 Run 与唯一 source Execution 的 Session/Run/出处证明；plain 与 sealed 分别沿原消息和严格封存 originMessage，不把旧出处重标为当前 Store，不借当前 Run 补空来源，也不要求原整 Run 成功才可读已有成功工具。观察 ID 封存原 Run/Command、Execution 定义、revision 和完整结果 SHA-256；详情/打开重核，拒绝同 revision 换绑。固定摘要保整结果变化检测，避免在身份状态中再次持久复制 Files.read 内联正文。普通 Markdown 有原 Run 时核固定身份，无 Run 的原用户路径仍由已观察 Message、当前准入的源 View 同 Workspace 与物理目标约束；它只命名当前文件，不授执行或贡献身份。真实默认 Files、公开恢复及两冷 Node 消费者的准确红绿和有限范围见[恢复文件进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-文件历史与当前文件入口)。
+
 两个侧栏入口切换时关闭原 host 面板，并按用途区分 RightSidebar 组件身份，避免保留旧 Tabs 选择；栏宽只跟随当前右栏总体开关，不在 host 面板关闭时误折叠接续的文件面板。Native 内容拥有 GET，关闭即卸载；旧纯展示内容的保留规则不扩大为隐藏读取。
 
 消息中的普通 Markdown 文件路径继续迁入原 MessageContent 回调，经当前已读 Message、独立 viewSelection/history epoch 和登记 Workspace 绑定，允许有限 UTF-8 路径与封闭编辑器枚举；Main 不接受 renderer 的根或应用名，复核项目内普通目标、保护目录、源 Workspace 和派发前 frame。这只命名当前文件，不形成工具成功或历史贡献证明。真实 Files read/write/edit 的消息行另沿准确原 Execution/结果资格取得观察 ID，完整历史不依赖 View 近200项；双消费者扫描同一完整原结果保持观察 ID，实际 scope/root/结果/来源变化才替换。正文 slot 只改变同一预览或已验证全文的展示，原 EOF/身份/字节/关闭门禁保持。

@@ -3701,3 +3701,39 @@ Context正式消费者已正常本地提交 `7911bfd28fa73728e7012b477ab9988df96
 前两次新夹具因非正式capability名称及不存在的listAllMessages失败，修正为正式TUI admission和公开固定上界消息分页，日志保留且不算业务红。首次绿另因正常Ink行宽将一个只读marker拆行而actual1／17断言；只把相同两个marker断言改为接受词间空白，原生产/原业务断言保持，日志 `/private/tmp/kite-v13-restored-tui-background-green-20261010-tests_isolated_unified-agent_restored-tui-background.test.tsx.log`保留。删本轮追加的目录断言块后新测试SHA与业务red完全相同，已独立核实。
 
 本轮新增闭合为恢复后TUI后台任务完整阅读；正式host继续消费公共Client并新增原Run来源核验，没有新增legacy最终退役。用户指南/参考、UI/CLI owner、共享active、既有恢复Note、tests和能力映射按实际diff同步；文档/影响/计划证据、边界/API/workspace、测试归属、Biome及正常本地提交门禁独立强制。原RSS实际增长失败仍保 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1`，activeResources/handles和完整后代缺项仍未知；未重复参数或重采。Native Files、Web封存Model、P6完整维护/平台/依赖独立、§35审查/最终退役/阶段完整回归及适用P7责任保持未闭，37能力partial／fullDefault=false／wholeV13=false／phaseExit=false；仅已授权本地提交，无push/PR/发布/Actions dispatch。
+
+## 2026-10-10：恢复后 Native 文件历史与当前文件入口
+
+前片恢复TUI后台目录/完整输出/child阅读已正常本地提交 `b033a8ce3b127e9b5cbaa28e6643be45247c06a9`，切片结束。本轮继续按§30.2.16与实际能力映射推进P5完整正式消费者；P6资源、完整维护/平台/客户端依赖独立及§35最终退出仍是汇合门禁。RSS与观测缺项不是独立安装、版本切换、离线维护或恢复阅读实现前置；原安装/维护、DB9真实旧代码和installed rollback证据按未变范围复用，没有重新比较参数或重开Daemon。
+
+本轮源码缺口按真实依赖限定为四项，每项有实际用户入口及验收；最高项直接实施，后三项仍阻止相应退出，不把单个journal或窗口另设长期目标。
+
+| 顺序 | 完整用户入口与源码缺口 | 验收与本轮结果 |
+| --- | --- | --- |
+| 1 | Native“文件变更”详情、成功Files工具行路径、普通消息路径；Main错误把原Message/Execution出处等同当前Store | 恢复后plain/sealed原write/edit差异准确、read/write/edit路径与同项目当前文件目标可用；原来源、结果/revision保留，跨项目只读及路径/frame/迟到守卫保持，读取零重放。本轮Main三入口已实现，真实恢复/两冷Node与原完整Main/DOM通过；新恢复整窗口点击/OS编辑器仍未据此取得资格。 |
+| 2 | 只读Web原Model“完整正文”与封存Fork阅读；实际page仍未提供已核实的恢复出处资格 | 当前Store准入、原Message/Execution/Run/完整Model血缘和EOF/hash分别核实，保持预览/展开/关闭，历史原出处不重标、冷GET零执行；错来源/迟到拒绝。共享reader已有Native资格，Web实际调用者仍缺此消费者证明，本轮未实施。 |
+| 3 | installed CLI/TUI/Native连续普通任务、Shell/child后台、版本切换及包内维护恢复后使用原数据 | 原完整结果/身份和零重放、准确所属资源退出；原RSS32MiB增长、八outer/九点、完整activeResources/handles/Runtime后代、当前制品必要维护/三平台/客户端依赖独立仍未闭。macOS已有有限安装/版本/恢复证据保持；Win/Linux按用户顺序留重构后Actions。 |
+| 4 | 正式客户端和已安装入口独立完成完整能力，最终停用旧路径 | 前序实际能力/资格满足后，§35独立迁移审查、必要legacy最终退役、相应阶段未过滤完整回归及适用P7发布兼容责任通过。首发前无适用新基线published样本不阻止上述独立实现，T029后续适用责任保留；当前不退出阶段。 |
+
+实际问题在 `apps/desktop/electron/file-changes.ts`：plain Tool Execution的原Store不等于恢复后当前Store，sealed originMessage也被当前Store比较拒绝；普通Markdown另有同样的sealed限制。Root先用真实默认Service/Files、公开Fork和backup/restore取得业务红，Node实际消费者返回源会话及sealed的四个 `file_change_identity_mismatch`（fileChanges/fileTargets）和sealed `file_change_message_unavailable`（messageFile），完整新例actual1/0pass/1fail/17条Bun断言。日志 `/private/tmp/kite-v13-restored-native-files-business-red-20261010-apps_desktop_test_isolated_native-restored-file-changes.test.ts.log` SHA `dcdcb2bd83a0b3e71be75c78ef02a876863c2fe7298126af9f2b116fc1c78f82`。更早的夹具config默认为0644被真实备份拒绝，原失败完整保留在 `-red-20261010-result.json`；只补维护合同要求的0600后才取得上述业务红，生产未提前改动，所有业务断言保留。
+
+Main现通过公共Client的真实getRun/getExecution核原Run/Session/Store，sealed严格用原origin.runId，不在原null时借当前Run；只核固定身份，不以来源Run后来状态或整Run成功作为成功Files阅读条件。观察ID封存原Run/Command、Execution的准确定义/版本/结果revision和完整结果固定SHA-256，detail/open再次复核；同revision的来源或合法preview变化仍拒绝旧ID。独立审查发现初版身份字符串额外保整result正文，已收敛为固定摘要，不改变结果检查强度；此有限消除副本不归因为RSS问题修复。现Main生产SHA `50be68865513b7cd09324090c39afa246436a2daa3474b23e73c68486d232688`，单元SHA `20602e25480ca35089269c7c20ae99475e445aded9061fa6232cae3e8337e248`。
+
+普通消息路径有原Run时核出处，无Run的用户/封存消息保已观察Message、当前准入源View同Workspace和物理目标资格。Files历史可读不能直接成为另一项目的文件权限；原工作区根dev/inode、普通文件、symlink/保护目录、封闭editor、派发前frame、scope/history epoch、close/迟到守卫保持。真实三入口继续由NativeCaller/IPC绑定同一Main owner，没有新增生产export、Core/HTTP schema、SQL或私有格式。初始完整单元7/76通过后，摘要修改在原第7例补同revision preview变化：旧detail/open均拒绝、opener0，最终整文件7pass/79断言。原5例及全部原100个assertion AST call节点保留（含expect与matcher两层），未改预算；Root新恢复文件与Node driver在业务红到最终绿字节完全相同。
+
+[真实恢复整例](../../apps/desktop/test/isolated/native-restored-file-changes.test.ts)使用默认read@3/write@2/edit@2和真实磁盘IO，六次固定Provider请求驱动read→write→read→edit→read→完成；原成功Command/Run/五Tool Execution与Model结果均来自正式Service。公开Fork封存同项目原历史，原Service close且actualexited0后才公开备份恢复A→B。当前磁盘随后独立改为另一段Unicode/CRLF正文；两次全新Service与实际Node编译Main leaf均核plain/sealed的两个保存diff、五个工具路径和普通消息路径。每次16个可信opener回调只收到已重新核实的当前物理文件，读取完整当前字节；保存preview保持原文/truncated事实。所有原Message/sourceIds/originMessage、Run、Command、Execution完整相等，metadata/cursor不增长，所有Node请求GET、Provider保持6、磁盘外改不被恢复或重写，三个Service均普通退出且actual0。
+
+最终验证沿当前原 `unifiedTestPlan`/`runTestJob` 保全部文件与原分类/预算，不过滤case。两个原Main作业按当前冻结计划分别完整13/12文件执行，新增恢复与三个原DOM为四个单文件隔离作业；下表合计29个唯一文件、6个原作业。
+
+| 原作业/整文件 | 实际结果 | 支持范围 |
+| --- | --- | --- |
+| `isolated:native-restored-file-changes.test.ts` | 1pass/42Bun断言/0fail/0skip | 真实默认Files、公开维护、plain/sealed两次冷Node/HTTP、保存diff和当前文件目标、原身份与零重放；另有driver Node assertions |
+| 原 `native-file-changes-dom.test.tsx` | 1pass/17 | 原header/面板、所属完整目录与lazy详情、封闭editor观察ID及关闭 |
+| 原 `native-original-entries-dom.test.tsx` | 2pass/21 | 原消息Markdown预览/全文/关闭及配置默认作用域 |
+| 原 `native-tool-messages-dom.test.tsx` | 3pass/29 | 原ToolRow/已验证Files路径、原来源与完整工具内容 |
+| `apps/desktop:shard-4/4`（13完整文件） | 51pass/453 | 含最终Files Main 7/79、原物理路径/frame/迟到、相邻恢复和完整读取 |
+| `apps/desktop:shard-1/4`（12完整文件） | 52pass/436 | 含正式NativeCaller/IPC、完整正文、当前准入及相邻管理守卫 |
+
+合计110pass/998条Bun断言/0fail/0skip，darwin arm64/Bun1.4.2/Nodev22.21.1。两个最终collector的4274项仓库输入、Git/资产前后全等且两批准确输入相同；初版完整结果身份的green单独保留，不将其字节冒称摘要最终资格。Root与八workspace类型、四TS Biome实际0；文档/影响/计划证据、边界/API/workspace、测试归属及正常本地提交hooks独立强制。原真实Files producer、editor/IPC/Caller与原源码外窗口文件字节保持，原窗口/frame证据按其范围复用；新driver从真实HTTP建立已观察scope并直接消费同Main owner，没有新跑恢复后的NativeCaller→IPC→renderer点击链，opener callback不证明OS编辑器窗口。准确原失败、最终日志SHA、断言保全及源码/运行资产归 `/private/tmp/kite-v13-restored-native-files-verified-evidence-20261010.json`，SHA `8d5c2e26c5bf5bddc93051e423474b7d20ef289c0d8769d7ba745ce4f89db11b`。
+
+本轮新增闭合的是恢复后Native文件历史/路径的具体Main消费者拒读缺口，正式调用者继续沿公开Client真实来源证明；没有新增旧路径最终退役。产品手册、Desktop owner、共享active、既有Files Note、测试入口、计划与四条能力证据同步；37能力status仍partial。Web恢复封存Model、P6资源/完整维护/平台/依赖独立、§35独立审查/最终退役/阶段完整回归及适用P7责任仍未闭。原RSS失败 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1`、activeResources/handles和完整Runtime后代缺项保留，未重复参数或重采；fullDefault=false/wholeV13=false/phaseExit=false。仅继续已授权本地提交，无push/PR/发布/Actions dispatch。
