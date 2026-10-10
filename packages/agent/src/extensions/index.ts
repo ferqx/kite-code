@@ -148,6 +148,11 @@ export interface Extension {
   readonly conditions?: NecessaryConditions;
   readonly context?: {
     capture(request: Readonly<SourceRequest>, context: ReadContext): Promise<ContextSource[]>;
+    /** Complete requests for one checkpoint and Session; never a cross-checkpoint cache. */
+    captureBatch?(
+      requests: readonly Readonly<SourceRequest>[],
+      context: ReadContext,
+    ): Promise<ContextSource[]>;
   };
 }
 export interface PublicRun {

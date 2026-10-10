@@ -3901,3 +3901,48 @@ Close后正文撤除；另一读将实际Main已完成Core GET的open回复透�
 | 5 | 前序必要结果齐全后的P5／P6退出及适用P7责任 | §35独立完整能力／正式caller审查，最后legacy退役与阶段未过滤完整回归实际通过；P7新基线发布后的适用T029／兼容样本责任保留，D08首发前无适用published样本不挡独立实现。 |
 
 本轮新增闭合的是正式登记前门的版本回退一致性与修复后继续使用；没有新增全局caller切换或最终退役。Root／workspace类型证据按实际输入核对，文档／staged影响／边界／workspace／API／测试归属与正常hook仍为本地提交门禁。wholeDefault=false／wholeV13=false／phaseExit=false，Goal active；本轮只提交有证据的Native范围，RSS、观测和长Run真实失败均保留，不扩至push／PR／发布／Actions dispatch。
+
+## 2026-10-10长 Run 完整来源与原任务安全接续
+
+本轮闭合默认长主Run及原根任务安全明确接续的两项源码缺口：不因256种完整来源请求结束任务，不因累计已完成历史超过4096条拒绝安全检查点。正式默认paired装配的公开`run.start`完成257次不同Files读取，完整项目指令进入18次实际compatible SDK请求；public `resumeRun`在4096次真实效果后接续同一原Run，保全部旧Execution/attempt/结果和完整请求，零旧效果重放。既有CLI `recovery run`、TUI `/recovery`、Native面板接线按原证据范围复用，新用例不冒称installed整窗口。child每个新Run的30分钟及原after_turn授权不递归延长。
+
+依§30.2.16，原RSS/观测仍是P6/§35退出门禁，不构成独立能力实现前置。本轮只读再核macOS/Linux安装/所选版本/离线维护源码，没有另开已闭合registered Terminal rollback、DB9旧代码拒绝或installed恢复矩阵。Windows仍需可信native launcher→加载前pin→Main独立使用权→installed整链，不能删guard作为局部交付。下一独立完整正式消费者缺口是恢复后TUI `/context` 的明确Include。
+
+实现保定义ID与完整输入语义摘要对应的所有来源请求，移除请求累计256门禁，仍核当前真实source的格式/数量/digest。可选宿主与扩展`captureBatch`接全部原输入；未选择时保持逐项接口。默认项目/Skill/Planning只复用当前检查点实际读取，下一次刷新；每原请求路径/target/directory/byte与nofollow/UTF8/实体守卫保持，目录并集不当单请求预算，selectedMCP逐原请求scope/read-set及Workflow fence保持。扩展核全部Session、自有namespace、每次128和强制user，ReadContext继续清理。
+
+Store逐行验证和流式摘要全部原Execution/Interaction，保持原canonical摘要；当前零派发planned frontier仍最多4096。私有200条页固定原Store/root/主体/Run/Model anchor与严格rowid，穷尽旧完整Model和最新Model全部Tool链。planned Model前也恢复已发现祖先来源，begin/commit仍全历史CAS，原Call/attempt/审批和已完成结果保持，unknown/部分Model/半初始化/child/runless边界不放宽。baseline/HTTP schema不变。取舍及当前事实归[来源Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)、[原Run Note](../../.agents/notes/implemented/architecture/2026-10-02-durable-run-resume-checkpoints.md)、Agent/Storage/Service owner和active边界。
+
+### 真实失败与修正
+
+原4096用例三次在hot准备120秒期限失败，尚未进入cold恢复。第二保留现场`/private/tmp/kite-long-run-resume-VBwJC6`为2432效果/20Model，第三`/private/tmp/kite-long-run-resume-nfcFlJ`为2560效果/21Model；第三仅去掉fixture每Tool额外getExecution仍不足。它们不能称为4096拒绝的业务反例，原期限/断言和失败现场保留。
+
+现有DbTiming的有界真实Runtime诊断到384次原效果后公开取消，并确认Runtime/Store关闭：7850 requests，queue累计11949.72ms、SQL2061.63ms、commit307.98ms，queue p50=1.264833ms/p95=2.728667ms。证据`/private/tmp/kite-v13-long-run-timing-20261010-result.json`仅证明该scope，不是4096或RSS资格。Worker首次/积压pump改`setImmediate`，每宏任务仍一个同步事务后让出；原加权队列/控制预留/accepted close drain/语句释放/ACK/owner CAS保持，未改用连续microtask或放宽原真实公平性断言。
+
+改调度后首次4096整例完成热效果及同原Run冷接续，新fixture第25断言错误要求已派发Model授权仍`not_dispatched`，保留`/private/tmp/kite-v13-long-run-resume-immediate-20261010-result.json`的0pass/1fail/25expect。按现有Model metadata契约补强派发前unavailable及派发后准确allowed/revision/definitionVersion/完整原inputDigest/policy，全部静态metadata、完整请求/hash/旧结果断言保持。最终原完整用例1pass/35expect/0fail/0skip，约27.99s；owned child准确SIGKILL137，原4096效果/33已完成Model/同原planned Model、唯一明确resume回执及准确ID/attempt保持，只有下一个Model完成原任务，重复GET零效果。
+
+两个原实现业务反例使用当前其它固定生产和同一原完整新用例：仅恢复原2行256请求guard时，默认Files主Run在第16次Provider请求后以`context_source_budget_exceeded`失败（0pass/1fail/3expect）；恢复原Run-resume SQLite叶子时，4096真实效果及cold读取成功，公开resume返回409 `run_resume_checkpoint_unavailable`（0pass/1fail/18expect）。各收集输入冻结，finally精确还原固定文件SHA，见`/private/tmp/kite-v13-long-run-sources-original-guard-red-20261010-restoration.json`和`/private/tmp/kite-v13-long-run-resume-original-guard-red-20261010-restoration.json`。这是具名guard/leaf反例，不冒称整个原基线性能资格。
+
+### 验证与交付范围
+
+本轮起点HEAD `a2c124822b00bff988eaa4f9b14928cd3f0ccf08`，macOS arm64/Bun1.4.2 `(744846f84)`持久工作树。统一计划原完整job/maxConcurrency1，无名称过滤或排除，原45/60及120/30/180秒预算、4096效果数量保持。三个最终收集范围合计19个唯一完整文件、90pass/7222expect/0fail/0skip，4283 tracked/untracked输入、Git及实际Bun/Node/Electron/TS/Biome资产各自前后保持：
+
+| 原完整范围 | 实际结果 | 证据 |
+| --- | --- | --- |
+| 默认257Files/完整指令/两次cold、历史分页/canonical、项目批量、扩展贡献、freshness、原Runtime/Store/HTTP resume、configuration/assembly/Planning/MCP及Model metadata | 14 files，84pass/7079expect | `/private/tmp/kite-v13-long-run-final-whole-2-20261010-result.json` |
+| 原queue、真实双Worker公平性、成功/错误语句释放、正式Service strict-close/维护EX | 4 files，5pass/108expect | `/private/tmp/kite-v13-long-run-worker-immediate-20261010-result.json` |
+| 4096真实原效果与public cold resume | 1 file，1pass/35expect | `/private/tmp/kite-v13-long-run-resume-immediate-final-20261010-result.json` |
+
+邻接收集第一次因Root输入不存在的model-freshness路径中止；四个已跑文件通过但没有最终freeze，不算整轮。修正为统一计划实际路径并预检全部job后取得上述14文件/冻结证据。原core-final-3新增历史/扩展fixture错误与真正deadline均保留，后来补齐原合法来源/recordKey及明确调度缺口才通过；两个既存测试文件只追加用例，原prefix保持，没有删原断言或排除用例。Root及八runtime workspace类型、边界/API/test-owner按实际diff执行；文档随后同步，stage/commit保正常hook和强制store-format-lock，不使用no-verify。
+
+有限源码只读审查未发现全历史stream/CAS/准确分页来源及Worker宏任务边界的可操作缺陷；它们不替代运行证据或§35独立完整迁移审查。当前只关闭该完整连续任务/安全原任务接续切片，没有新增宣布全局caller切换或最终legacy退役。
+
+### 四项剩余阻塞与验收（按依赖）
+
+| 顺序 | 实际用户入口与具体缺口 | 完整行为/验收 | 依赖 |
+| --- | --- | --- | --- |
+| 1 | 正式TUI `/context` 选择恢复历史结果按`i`，controller仍把原Execution出处A等同当前准入B | A→B后一次当前B准确Include Command，保原A Execution/revision/完整结果；idle零Model，用户明确新Run完整消费一次；错当前Store/Session/revision/目标零POST，活动Include保原安全checkpoint/取消 | 可独立实现，不依赖RSS或平台退出 |
+| 2 | 正式安装→版本选择→包内维护恢复→原数据继续使用的剩余支持范围 | 保已闭macOS DB9拒绝/切回当前原GET、installed维护restore及登记前门rollback；必要平台/完整维护/客户端依赖独立资格齐全，Windows加载前bootstrap/installer整链保完整准入 | RSS不阻独立实现；Win/Linux按用户顺序留重构后Actions，本地不dispatch。D08首个新基线published样本尚无适用T029，不成为本轮前置 |
+| 3 | 默认installed CLI/TUI/Native连续普通任务、Shell和child后台工作之原RSS及完整观测 | 原八轮/九点及增长算法实际满足RSS与全资源门禁；owned全部Runtime descendants、activeResources/handles完整观察，不以FD/listener替代 | P6/§35强制门禁；原arena-zero RSS +115.203125MiB高于32MiB，资源/handles及完整descendants未知保持，不重比参数 |
+| 4 | 前序齐全后的正式调用者完整迁移、最后旧路径退役和阶段退出 | §35独立全能力/正式caller审查，实际最终legacy退役，阶段未过滤完整回归及适用P7发布/兼容责任 | 依赖1–3和其它原T/E；局部通过不退出 |
+
+37能力仍partial；wholeDefault=false（本轮仅受影响原完整文件）、wholeV13=false、phaseExit=false、Goal active。RSS/观测未重跑，真实失败未删除；本地授权仍只含stage/commit，不扩大到push/PR/发布/Actions dispatch。

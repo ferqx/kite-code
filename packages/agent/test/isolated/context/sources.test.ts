@@ -172,3 +172,61 @@ test('file bytes, total bytes, target count and directory discovery have explici
   }
   await unavailable(total.capture());
 });
+
+test('batch preserves per-request limits, all target ancestry and fresh bytes without cumulative target or directory caps', async () => {
+  const data = fixture();
+  const targets = Array.from({ length: 80 }, (_unused, index) => `target-${index}/a/b/c/value.ts`);
+  for (const target of targets) mkdirSync(join(data.root, target, '..'), { recursive: true });
+  writeFileSync(join(data.root, 'AGENTS.md'), 'original root instructions');
+  const finalDirectory = 'target-79/a/b/c';
+  const finalPath = join(data.root, finalDirectory, 'AGENTS.md');
+  const sources = createProjectSources({
+    async workspaceRoot() {
+      return data.root;
+    },
+    targetPaths(value) {
+      return (value.input as { targets: string[] }).targets;
+    },
+  });
+  const requests: SourceRequest[] = targets.map((target) => ({
+    ...request,
+    input: { targets: [target] },
+  }));
+  // 80 requests and 321 distinct directories: each original request remains within its own bounds.
+  const batch = (values: readonly SourceRequest[]) => sources.captureBatch!(values);
+  const initial = await batch(requests);
+  expect(initial.map((source) => [source.id, source.content])).toEqual([
+    ['project:workspace:AGENTS.md', 'original root instructions'],
+  ]);
+  writeFileSync(finalPath, 'last original rule');
+  const added = await batch(requests);
+  expect(added.map((source) => [source.id, source.content])).toEqual([
+    ['project:workspace:AGENTS.md', 'original root instructions'],
+    [`project:workspace:${finalDirectory}/AGENTS.md`, 'last original rule'],
+  ]);
+  const originalStat = statSync(finalPath);
+  writeFileSync(finalPath, 'last modified rule');
+  utimesSync(finalPath, originalStat.atime, originalStat.mtime);
+  expect(statSync(finalPath).size).toBe(originalStat.size);
+  const rewritten = await batch(requests);
+  expect(rewritten.map((source) => source.content)).toEqual([
+    'original root instructions',
+    'last modified rule',
+  ]);
+  expect(rewritten[1]!.digest).not.toBe(added[1]!.digest);
+  const outside = fixture();
+  writeFileSync(join(outside.root, 'AGENTS.md'), 'outside must never be admitted');
+  symlinkSync(outside.root, join(data.root, 'linked'), 'dir');
+  // The last request shares the Tool definition; batching must not discard its distinct input.
+  await unavailable(batch([...requests, { ...request, input: { targets: ['linked/value.ts'] } }]));
+  await unavailable(
+    batch([
+      {
+        ...request,
+        input: {
+          targets: Array.from({ length: 65 }, (_unused, index) => `single-${index}/value.ts`),
+        },
+      },
+    ]),
+  );
+});

@@ -161,6 +161,8 @@ Native 的 `configuration_management` 通过公共 Client 固定原 Store/genera
 
 同 Store 活动根 Run 的显式 `run.resume` 使用独立目的的准备 lease 和原持久检查点，准确重建原配置后复核 generation、选择、取消与原执行集合，再转普通 owner 进入唯一 Loop。公开 HTTP 只接受原 Store/Session/Run 与申请 ID；owner generation 由服务端读取，同 ID 重用原内部 fence，主体与摘要仍在 Store 校验。已完成初始化不重放，半完成闭包拒绝；原完整 Model 输入/输出、Tool 执行和 Interaction 身份保持，终态 Run 不重开。该受限根恢复不扩大 child/runless 或未知效果的恢复资格，也不改变 Job reconcile 的追加证明边界。实现和证据归 [Runtime](../../packages/agent/README.md)、[Store](../../packages/agent/src/storage/README.md)、[Service](../../apps/service/README.md)与 [Client](../../packages/client/README.md)。
 
+长 Run 不以累计来源请求或已完成 Execution 数量终止。Runtime 保定义/完整输入语义身份，宿主及扩展可选检查点内完整批量捕获；默认项目/Skill/Planning只复用本次读取，所选MCP逐原请求核验，实际来源格式、namespace、数量、digest和新鲜性保持。安全接续由 Store 流式核全部历史生成原摘要，私有有限页重建完整旧 Model/Tool 来源，最终 commit仍全历史CAS；只对当前 planned frontier保有限上界。Worker每次一个事务的宏任务调度、加权控制预留和严格关闭保持。HTTP与持久baseline未新增或放宽，来源取舍见[完整捕获 Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)，实际 257默认Files与4096原效果接续的限定资格归上述owner及[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-10长-run-完整来源与原任务安全接续)；RSS/观测和阶段门禁独立保留。
+
 持久检查点与初始化三态的取舍见[原 Run 接续 Note](../../.agents/notes/implemented/architecture/2026-10-02-durable-run-resume-checkpoints.md)；其implemented范围限上述安全根检查点，不扩展到一般闭包或全部恢复。
 
 原根执行组的显式 `session.recover(decision:"interrupt")` 也只接受原 Store/Session、申请 ID 与认证主体。Service 读取当前或同 ID 原持久请求的内部 generation，Core 的原 OS 锁及 Store fencing 保持唯一权威；HTTP/SDK 不接收或返回 owner lease/generation。公开 Command 查询投影与写回执一致，只保留准确原 ID 集、partial 和 Decimal64 水位。可能产生效果的调用保持 unknown，不因 applied 回执获得重放或普通 owner 资格；GET 只读。真实 Tool/Model 强杀、原 ledger、同 ID 与物理丢回执证据归[Service](../../apps/service/README.md#显式遗留执行组中断)与[Client](../../packages/client/README.md)。

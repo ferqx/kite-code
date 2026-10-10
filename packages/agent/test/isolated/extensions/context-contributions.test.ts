@@ -416,3 +416,234 @@ test('each trusted Run selects its own extension context hook without substituti
     await f.close();
   }
 });
+
+test('checkpoint batches preserve distinct Tool inputs and refreshed business facts fence the original later Tool', async () => {
+  type Request = import('../../../src/context').SourceRequest;
+  const hostBatches: Request[][] = [],
+    extensionBatches: Request[][] = [];
+  let effects = 0,
+    recordKey = '';
+  const ext: Extension = {
+    id: 'fixture',
+    version: '1',
+    apiMajor: 1,
+    records: [{ contentType: 'fixture.record', contentVersion: 1, schema: { type: 'object' } }],
+    tools: [
+      definition('fixture.work', async (input, context) => {
+        if ((input as { ordinal: number }).ordinal === 1) {
+          await context.records.write({
+            key: recordKey,
+            expectedRevision: '1',
+            contentType: 'fixture.record',
+            contentVersion: 1,
+            value: { version: 2 },
+            executable: true,
+          });
+          return { outcome: 'succeeded', content: 'original first effect' };
+        }
+        effects++;
+        return { outcome: 'succeeded', content: 'must not dispatch stale second effect' };
+      }),
+    ],
+    context: {
+      async capture() {
+        throw Error('batch contribution fell back to single capture');
+      },
+      async captureBatch(requests, context) {
+        extensionBatches.push(structuredClone([...requests]));
+        for (const request of requests) expect(request.sessionId).toBe(context.sessionId);
+        expect('owner' in context).toBe(false);
+        expect('write' in context.records).toBe(false);
+        const record = await context.records.get(recordKey);
+        return [
+          {
+            id: 'fixture:business',
+            kind: 'business',
+            scope: context.sessionId,
+            digest: await semanticDigest(record!.value),
+            content: JSON.stringify(record!.value),
+            role: 'system',
+          },
+        ];
+      },
+    },
+  };
+  const f = await fixture(
+    [ext],
+    [
+      [
+        ...[1, 2].map((ordinal) => ({
+          type: 'tool_call' as const,
+          id: `original-${ordinal}`,
+          name: 'fixture.work',
+          arguments: JSON.stringify({ ordinal }),
+        })),
+        { ...finish, reason: 'tool_calls' },
+      ],
+      [finish],
+    ],
+    {
+      async initializeRunRequirements(input) {
+        recordKey = `run/${input.run.id}/business`;
+        await (await input.forExtension('fixture')).records.create({
+          key: recordKey,
+          contentType: 'fixture.record',
+          contentVersion: 1,
+          value: { version: 1 },
+        });
+        return [];
+      },
+      sources: {
+        async capture() {
+          throw Error('batch host fell back to single capture');
+        },
+        async captureBatch(requests) {
+          hostBatches.push(structuredClone([...requests]));
+          return [
+            {
+              id: 'project:instructions',
+              kind: 'instructions',
+              scope: 'w',
+              digest: 'trusted',
+              content: 'Complete trusted instructions',
+            },
+          ];
+        },
+      },
+    },
+  );
+  try {
+    await f.submit('batch-work');
+    expect((await f.done('batch-work'))!.status).toBe('completed');
+    expect(effects).toBe(0);
+    for (const batches of [hostBatches, extensionBatches]) {
+      const complete = batches.find((requests) =>
+        requests.some(
+          (request) =>
+            request.definitionId === 'fixture.work' &&
+            (request.input as { ordinal?: number }).ordinal === 2,
+        ),
+      );
+      expect(complete).toEqual([
+        {
+          sessionId: 's',
+          workspaceId: 'w',
+          definitionId: 'fixed',
+          input: { kind: 'model_request' },
+        },
+        { sessionId: 's', workspaceId: 'w', definitionId: 'fixture.work', input: { ordinal: 1 } },
+        { sessionId: 's', workspaceId: 'w', definitionId: 'fixture.work', input: { ordinal: 2 } },
+      ]);
+    }
+    expect(f.model.requests).toHaveLength(2);
+    for (const [index, request] of f.model.requests.entries()) {
+      const business = request.messages.find((message) =>
+        message.sourceIds?.includes('fixture:business'),
+      )!;
+      expect(business.role).toBe('user');
+      expect(business.content).toBe(JSON.stringify({ version: index + 1 }));
+      expect(
+        request.messages.find((message) => message.sourceIds?.includes('project:instructions'))!
+          .content,
+      ).toBe('Complete trusted instructions');
+    }
+    const tools = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.kind === 'tool',
+    );
+    expect(tools).toHaveLength(2);
+    expect(tools.find((execution) => execution.callId === 'original-1')!.status).toBe('succeeded');
+    const later = tools.find((execution) => execution.callId === 'original-2')!;
+    expect(later.status).toBe('failed');
+    expect((later.result as { content: string }).content).toBe('context_refresh_required');
+  } finally {
+    await f.close();
+  }
+});
+
+test('batch contributions retain namespace, finite sources, conflicting digest and original Session admission', async () => {
+  for (const mode of ['namespace', 'count', 'collision', 'session'] as const) {
+    let batches = 0;
+    const source = (id: string): ContextSource => ({
+      id,
+      kind: 'business',
+      scope: 's',
+      digest: 'original',
+      content: 'Original batch source',
+      role: 'system',
+    });
+    const ext: Extension = {
+      id: 'fixture',
+      version: '1',
+      apiMajor: 1,
+      context: {
+        async capture() {
+          throw Error('unexpected single capture');
+        },
+        async captureBatch(requests, context) {
+          batches++;
+          for (const request of requests) expect(request.sessionId).toBe(context.sessionId);
+          if (mode === 'namespace') return [source('peer:foreign')];
+          if (mode === 'count')
+            return Array.from({ length: 129 }, (_, index) => source(`fixture:${index}`));
+          return [source('fixture:business')];
+        },
+      },
+    };
+    const f = await fixture(
+      [ext],
+      [[finish]],
+      mode === 'collision'
+        ? {
+            sources: {
+              async capture() {
+                return [{ ...source('fixture:business'), digest: 'different' }];
+              },
+            },
+          }
+        : {},
+    );
+    try {
+      await f.submit(`batch-${mode}`);
+      const run = await f.done(`batch-${mode}`);
+      if (mode === 'session') {
+        expect(run!.status).toBe('completed');
+        expect(
+          f.model.requests[0]!.messages.find((message) =>
+            message.sourceIds?.includes('fixture:business'),
+          )!.role,
+        ).toBe('user');
+        const host = Reflect.get(
+          f.runtime,
+          'extensionHost',
+        ) as import('../../../src/extensions/host').ExtensionHost;
+        const command = (await f.store.getCommand(`batch-${mode}`))!;
+        const before = batches;
+        await rejected(
+          host.contextSourcesBatch({
+            command,
+            extensions: [ext],
+            requests: [
+              { sessionId: 's', workspaceId: 'w', definitionId: 'fixed', input: {} },
+              { sessionId: 'foreign', workspaceId: 'w', definitionId: 'fixed', input: {} },
+            ],
+          }),
+          'invalid_extension_scope',
+        );
+        expect(batches).toBe(before);
+      } else {
+        expect(run!.status).toBe('failed');
+        expect(run!.reason).toBe(
+          mode === 'namespace'
+            ? 'extension_source_namespace_mismatch'
+            : mode === 'count'
+              ? 'context_source_budget_exceeded'
+              : 'context_refresh_required',
+        );
+        expect(f.model.requests).toHaveLength(0);
+        expect(await f.store.listExecutions('s')).toHaveLength(0);
+      }
+    } finally {
+      await f.close();
+    }
+  }
+});

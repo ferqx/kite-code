@@ -54,6 +54,11 @@ export class WorkerQueue {
 }
 function categoryOf(method: WorkerRequest['method']): Category {
   if (method === 'persistModelPartial' || method === 'appendExecutionOutput') return 'body';
-  if (method.startsWith('get') || method.startsWith('list')) return 'query';
+  if (
+    method === 'readRunResumeExecutionPage' ||
+    method.startsWith('get') ||
+    method.startsWith('list')
+  )
+    return 'query';
   return 'control';
 }

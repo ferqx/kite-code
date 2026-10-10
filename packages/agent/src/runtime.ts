@@ -257,7 +257,10 @@ export interface ChildAgentConfiguration extends RunConfiguration {
 function sealSources(sources: ContextSources | undefined): ContextSources | undefined {
   if (!sources) return undefined;
   const capture = sources.capture.bind(sources);
-  return Object.freeze({ capture });
+  return Object.freeze({
+    capture,
+    ...(sources.captureBatch ? { captureBatch: sources.captureBatch.bind(sources) } : {}),
+  });
 }
 
 type RunBinding = {
@@ -2311,6 +2314,48 @@ export class AgentRuntime {
     result.modelSource = source;
     const request = (await this.readModelInput({ ...scope, executionId: last.id, signal })).request;
     result.modelRequest = request;
+    const requests = new Map<string, SourceRequest>();
+    let afterRowid = '0';
+    for (;;) {
+      signal.throwIfAborted();
+      const page = await this.options.store.readRunResumeExecutionPage({
+        ...scope,
+        runId: state.run.id,
+        modelExecutionId: last.id,
+        kind: 'prior_models',
+        afterRowid,
+      });
+      for (const item of page.items) {
+        if (BigInt(item.cursor) <= BigInt(afterRowid))
+          throw new AgentError('resume_checkpoint_unavailable');
+        afterRowid = item.cursor;
+        const prior = await this.readModelOutput({
+          ...scope,
+          executionId: item.executionId,
+          signal,
+        });
+        if (!prior.output.complete || prior.runId !== state.run.id)
+          throw new AgentError('resume_checkpoint_unavailable');
+        for (const call of prior.output.toolCalls) {
+          let input: Json = null;
+          try {
+            input = JSON.parse(call.arguments) as Json;
+          } catch {
+            /* Original invalid call remains a known result. */
+          }
+          requests.set(`${call.name}:${await semanticDigest(input)}`, {
+            sessionId: state.run.sessionId,
+            workspaceId: state.session.workspaceId,
+            definitionId: call.name,
+            input,
+          });
+        }
+      }
+      if (page.nextCursor === null) break;
+      if (!page.items.length || page.nextCursor !== afterRowid)
+        throw new AgentError('resume_checkpoint_unavailable');
+    }
+    result.sourceRequests = [...requests.values()];
     if (last.status === 'planned') {
       result.plannedModel = last;
       result.loop = { kind: 'model', request, stepId: last.stepId };
@@ -2319,6 +2364,39 @@ export class AgentRuntime {
     if (last.status !== 'succeeded') throw new AgentError('resume_checkpoint_unavailable');
     const output = (await this.readModelOutput({ ...scope, executionId: last.id, signal })).output;
     if (!output.complete) throw new AgentError('resume_checkpoint_unavailable');
+    const candidates = new Map<string, ExecutionRecord[]>();
+    afterRowid = '0';
+    for (;;) {
+      signal.throwIfAborted();
+      const page = await this.options.store.readRunResumeExecutionPage({
+        ...scope,
+        runId: state.run.id,
+        modelExecutionId: last.id,
+        kind: 'model_tools',
+        afterRowid,
+      });
+      for (const item of page.items) {
+        if (BigInt(item.cursor) <= BigInt(afterRowid))
+          throw new AgentError('resume_checkpoint_unavailable');
+        afterRowid = item.cursor;
+        const execution = await this.options.store.getExecution(item.executionId);
+        if (
+          !execution ||
+          execution.originStoreId !== state.run.originStoreId ||
+          execution.sessionId !== state.run.sessionId ||
+          execution.runId !== state.run.id ||
+          execution.kind !== 'tool' ||
+          execution.stepId !== last.stepId
+        )
+          throw new AgentError('resume_checkpoint_unavailable');
+        const existing = candidates.get(execution.callId) ?? [];
+        existing.push(execution);
+        candidates.set(execution.callId, existing);
+      }
+      if (page.nextCursor === null) break;
+      if (!page.items.length || page.nextCursor !== afterRowid)
+        throw new AgentError('resume_checkpoint_unavailable');
+    }
     const tools = new Map<string, ExecutionRecord>();
     const settled: { callId: string; result: import('./extensions').ToolResult }[] = [];
     let incomplete = false;
@@ -2326,15 +2404,9 @@ export class AgentRuntime {
     for (const call of output.toolCalls) {
       if (callIds.has(call.id)) throw new AgentError('resume_checkpoint_unavailable');
       callIds.add(call.id);
-      const candidates = state.executions.filter(
-        (execution) =>
-          execution.kind === 'tool' &&
-          execution.runId === state.run.id &&
-          execution.stepId === last.stepId &&
-          execution.callId === call.id,
-      );
-      if (candidates.length > 1) throw new AgentError('resume_checkpoint_unavailable');
-      const existing = candidates[0];
+      const matching = candidates.get(call.id) ?? [];
+      if (matching.length > 1) throw new AgentError('resume_checkpoint_unavailable');
+      const existing = matching[0];
       if (!existing) {
         incomplete = true;
         continue;
@@ -2360,28 +2432,6 @@ export class AgentRuntime {
         });
       else throw new AgentError('resume_checkpoint_unavailable');
     }
-    const requests: SourceRequest[] = [];
-    for (const model of models.slice(0, -1)) {
-      if (model.status !== 'succeeded') throw new AgentError('resume_checkpoint_unavailable');
-      const prior = (await this.readModelOutput({ ...scope, executionId: model.id, signal }))
-        .output;
-      if (!prior.complete) throw new AgentError('resume_checkpoint_unavailable');
-      for (const call of prior.toolCalls) {
-        let input: Json = null;
-        try {
-          input = JSON.parse(call.arguments) as Json;
-        } catch {
-          /* Original invalid call remains a known result. */
-        }
-        requests.push({
-          sessionId: state.run.sessionId,
-          workspaceId: state.session.workspaceId,
-          definitionId: call.name,
-          input,
-        });
-      }
-    }
-    result.sourceRequests = requests;
     result.plannedTools = tools;
     result.loop = {
       kind: 'response',
@@ -3902,16 +3952,14 @@ export class AgentRuntime {
         bindings = scope.bindings,
       ) => {
         const sources = new Map<string, ContextSource>();
-        for (const request of requests) {
-          const contributed = await this.extensionHost.contextSources({
-            command,
-            extensions: bindings.extensions,
-            request,
-          });
-          const hostSources = (await configuredSources?.capture(request)) ?? [];
+        const requestList = [...requests];
+        const addHostSources = (hostSources: ContextSource[]) => {
           if (!Array.isArray(hostSources) || hostSources.length > 256)
             throw new AgentError('context_source_budget_exceeded');
-          for (const source of [...hostSources, ...contributed]) {
+          addSources(hostSources);
+        };
+        const addSources = (values: ContextSource[]) => {
+          for (const source of values) {
             assertContextSource(source);
             const previous = sources.get(source.id);
             if (previous && previous.digest !== source.digest)
@@ -3919,7 +3967,19 @@ export class AgentRuntime {
             sources.set(source.id, source);
             if (sources.size > 256) throw new AgentError('context_source_budget_exceeded');
           }
-        }
+        };
+        if (configuredSources?.captureBatch)
+          addHostSources(await configuredSources.captureBatch(requestList));
+        if (!configuredSources?.captureBatch)
+          for (const request of requestList)
+            addHostSources((await configuredSources?.capture(request)) ?? []);
+        addSources(
+          await this.extensionHost.contextSourcesBatch({
+            command,
+            extensions: bindings.extensions,
+            requests: requestList,
+          }),
+        );
         if (continuationSource) {
           if (sources.has(continuationSource.id))
             throw new AgentError('context_source_namespace_collision');
@@ -4243,8 +4303,6 @@ export class AgentRuntime {
             scope.bindings.extensions.some((extension) => extension.context)
           ) {
             const key = `${call.name}:${await semanticDigest(input)}`;
-            if (!sourceRequests.has(key) && sourceRequests.size >= 256)
-              throw new AgentError('context_source_budget_exceeded');
             sourceRequests.set(key, {
               sessionId: session.id,
               workspaceId: session.workspaceId,

@@ -696,6 +696,53 @@ export class ExtensionHost {
     }
     return result;
   }
+  async contextSourcesBatch(input: {
+    command: CommandRecord;
+    extensions: readonly Extension[];
+    requests: readonly SourceRequest[];
+  }): Promise<ContextSource[]> {
+    for (const request of input.requests)
+      if (request.sessionId !== input.command.sessionId)
+        throw new AgentError('invalid_extension_scope');
+    if (!input.requests.length) return [];
+    const result: ContextSource[] = [];
+    for (const extension of input.extensions) {
+      if (!extension.context) continue;
+      if (!extension.context.captureBatch) {
+        for (const request of input.requests)
+          result.push(
+            ...(await this.contextSources({
+              command: input.command,
+              extensions: [extension],
+              request,
+            })),
+          );
+        continue;
+      }
+      const context = await this.readContext(
+        input.command.sessionId,
+        extension.id,
+        undefined,
+        input.command.subjectId,
+        input.command.originStoreId,
+      );
+      let sources: ContextSource[];
+      try {
+        sources = await extension.context.captureBatch(structuredClone(input.requests), context);
+      } finally {
+        this.forkReaderClosers.get(context)?.();
+      }
+      if (!Array.isArray(sources) || sources.length > 128)
+        throw new AgentError('context_source_budget_exceeded');
+      for (const source of sources) {
+        assertContextSource(source);
+        if (!source.id.startsWith(`${extension.id}:`))
+          throw new AgentError('extension_source_namespace_mismatch');
+        result.push({ ...structuredClone(source), role: 'user' });
+      }
+    }
+    return result;
+  }
   async initializationContext(input: {
     command: CommandRecord;
     runId: string;

@@ -196,6 +196,24 @@ export class SqliteOperations {
                 if (['get', 'all', 'values', 'run'].includes(String(property)))
                   return (...values: unknown[]) =>
                     measure(String(args[0]), () => Reflect.apply(operation, stmt, values));
+                if (property === 'iterate')
+                  return (...values: unknown[]) => {
+                    const iterator = Reflect.apply(
+                      operation,
+                      stmt,
+                      values,
+                    ) as IterableIterator<unknown>;
+                    const timed: IterableIterator<unknown> = {
+                      next: (value?: unknown) =>
+                        measure(String(args[0]), () => iterator.next(value)),
+                      return: (value?: unknown) =>
+                        measure(String(args[0]), () =>
+                          iterator.return ? iterator.return(value) : { done: true, value },
+                        ),
+                      [Symbol.iterator]: () => timed,
+                    };
+                    return timed;
+                  };
                 return operation.bind(stmt);
               },
             });
@@ -712,6 +730,7 @@ export class SqliteOperations {
       case 'initializeRunRecord':
         return initializeRunRecord(this, args[0] as Parameters<Store['initializeRunRecord']>[0]);
       case 'verifyRunResume':
+      case 'readRunResumeExecutionPage':
       case 'beginRunResume':
       case 'commitRunResume':
       case 'releaseRunResumeLease':

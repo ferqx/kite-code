@@ -17,6 +17,7 @@ import type {
   ToolDefinition,
   ToolResult,
 } from '../../extensions';
+import { AgentError } from '../../storage/types';
 import { type AutomaticValidationOptions, createAutomaticValidation } from './automatic';
 import { checkArtifactSchema, checkSemanticResult } from './verification';
 
@@ -2383,6 +2384,13 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
       context: {
         async capture(request, context) {
           return capturePlan(request.sessionId, context);
+        },
+        async captureBatch(requests, context) {
+          for (const request of requests)
+            if (request.sessionId !== context.sessionId)
+              throw new AgentError('invalid_extension_scope');
+          if (!requests.length) return [];
+          return capturePlan(context.sessionId, context);
         },
       },
     } satisfies Extension,

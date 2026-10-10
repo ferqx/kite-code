@@ -24,6 +24,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'readRunExecutionSafety',
   'readExecutionGroupSafety',
   'verifyRunResume',
+  'readRunResumeExecutionPage',
   'beginRunResume',
   'commitRunResume',
   'releaseRunResumeLease',

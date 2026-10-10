@@ -21,7 +21,7 @@ function pump(): void {
   if (request) execute(request);
   if (queue.size) {
     scheduled = true;
-    setTimeout(pump, 0);
+    setImmediate(pump);
   }
 }
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
@@ -30,7 +30,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     arrivals.set(event.data.id, performance.now());
     if (!scheduled) {
       scheduled = true;
-      setTimeout(pump, 0);
+      setImmediate(pump);
     }
   } catch (error) {
     self.postMessage({

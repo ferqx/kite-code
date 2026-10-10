@@ -1,5 +1,7 @@
 # Core result checkpoint evidence
 
+[sources.test.ts](sources.test.ts)继续核单请求项目指令与路径守卫，批量捕获用例提供80个完整原请求、321个合并目录，各请求仍在原预算内；最后不同输入路径的symlink拒绝整批，新检查点核新增指令及同mtime/大小字节变更。实际来源按ID去重，不能把全部请求的目录并集当单请求预算，或复用跨检查点的旧字节。默认Service的257次Files实际请求链另由[长任务用例](../../../../../apps/service/test/isolated/long-run-sources.test.ts)负责。
+
 `result-checkpoints.test.ts` uses real temporary SQLite Workers, ordinary Tool → detached Job admission, fixed Model requests and controlled physical ledger gates. It verifies immutable dispatched requests, exact low-trust `user` result source IDs at the next checkpoint, idle reads without Model or writes, frozen completion-cursor pagination including a later lower-ID result, and late completion after original work cancellation without revival. Its trusted Store proxy only delays a real pending-page response; it does not fabricate or manually consume terminal results.
 
 ## Selected context pagination

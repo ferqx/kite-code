@@ -6,6 +6,7 @@ import {
   AgentError,
   type AgentRuntime,
   type ContextCompressor,
+  type ContextSource,
   type RunConfiguration,
   type RuntimeOptions,
 } from '@kite-ai/agent';
@@ -1319,28 +1320,42 @@ export function createDefaultProcessConfiguration(options: {
               snapshot: step.snapshot,
             };
           },
-          sources: selection?.workflowFence
-            ? {
-                async capture(
-                  request: Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0],
-                ) {
-                  assertWorkflowForkCurrent(selection.workflowFence!);
-                  return [
-                    ...(await assembly.sources.capture(request)),
-                    ...(await selectedSources.sources.capture(request)),
-                  ];
-                },
-              }
-            : {
-                async capture(
-                  request: Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0],
-                ) {
-                  return [
-                    ...(await assembly.sources.capture(request)),
-                    ...(await selectedSources.sources.capture(request)),
-                  ];
-                },
-              },
+          sources: {
+            async capture(
+              request: Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0],
+            ) {
+              if (selection?.workflowFence) assertWorkflowForkCurrent(selection.workflowFence);
+              return [
+                ...(await assembly.sources.capture(request)),
+                ...(await selectedSources.sources.capture(request)),
+              ];
+            },
+            async captureBatch(
+              requests: readonly Parameters<
+                NonNullable<RunConfiguration['sources']>['capture']
+              >[0][],
+            ) {
+              if (selection?.workflowFence) assertWorkflowForkCurrent(selection.workflowFence);
+              const sources = new Map<string, ContextSource>();
+              const append = (values: ContextSource[]) => {
+                if (!Array.isArray(values) || values.length > 256)
+                  throw new AgentError('context_source_budget_exceeded');
+                for (const source of values) {
+                  const previous = sources.get(source.id);
+                  if (previous && previous.digest !== source.digest)
+                    throw new AgentError('context_refresh_required');
+                  sources.set(source.id, source);
+                  if (sources.size > 256) throw new AgentError('context_source_budget_exceeded');
+                }
+              };
+              if (assembly.sources.captureBatch)
+                append(await assembly.sources.captureBatch(requests));
+              else for (const request of requests) append(await assembly.sources.capture(request));
+              for (const request of requests)
+                append(await selectedSources.sources.capture(request));
+              return [...sources.values()];
+            },
+          },
           dispose: assembly.dispose,
           snapshot: {
             ...snapshot,

@@ -34,6 +34,8 @@ export function assertContextSource(source: ContextSource): void {
 /** Host-owned applicable sources. Extensions and HTTP callers cannot assert freshness. */
 export interface ContextSources {
   capture(request: SourceRequest): Promise<ContextSource[]>;
+  /** Complete requests at one checkpoint. No cross-checkpoint cache or discarded inputs. */
+  captureBatch?(requests: readonly SourceRequest[]): Promise<ContextSource[]>;
 }
 
 /** A single trusted pure algorithm slot. It describes a recorded Model call; never calls a Provider. */

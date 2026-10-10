@@ -157,8 +157,8 @@ export async function createWorkspaceAssembly(options: {
           sourceId: entry.id,
         }));
     }
-    async function find(id: string) {
-      const entry = (await catalogue()).find((entry) => entry.id === id);
+    async function find(id: string, entries?: Awaited<ReturnType<typeof catalogue>>) {
+      const entry = (entries ?? (await catalogue())).find((entry) => entry.id === id);
       if (!entry) {
         const unavailable = initial.states.find(
           (row) => row.id === id && row.state === 'unavailable',
@@ -167,8 +167,12 @@ export async function createWorkspaceAssembly(options: {
       }
       return entry;
     }
-    async function body(id: string, version?: string) {
-      const entry = await find(id);
+    async function body(
+      id: string,
+      version?: string,
+      entries?: Awaited<ReturnType<typeof catalogue>>,
+    ) {
+      const entry = await find(id, entries);
       const pinned = configured.find((skill) => skill.id === id)?.digest;
       if (pinned !== undefined && entry.version !== pinned)
         throw new AgentError('skill_version_changed');
@@ -267,39 +271,48 @@ export async function createWorkspaceAssembly(options: {
         return typeof request.input.path === 'string' ? [request.input.path] : [];
       },
     });
+    const captureSources = async (requests: readonly SourceRequest[]): Promise<ContextSource[]> => {
+      const result = await project.captureBatch!(requests);
+      if (!requests.length) return result;
+      const current = await catalogue();
+      const bodies = new Map<string, Awaited<ReturnType<typeof body>>>();
+      const checkpointBody = async (id: string) => {
+        const existing = bodies.get(id);
+        if (existing) return existing;
+        const value = await body(id, undefined, current);
+        bodies.set(id, value);
+        return value;
+      };
+      const summaries = current.map(({ id, version, name, description, requiredCapabilities }) => ({
+        id,
+        version,
+        name,
+        description,
+        requiredCapabilities,
+      }));
+      if (summaries.length)
+        result.push(source('skills.catalogue', 'skill_catalogue', JSON.stringify(summaries)));
+      for (const id of [...loaded].sort()) {
+        const selected = await checkpointBody(id);
+        result.push(source(`skill.body:${id}`, 'skill', selected.body));
+      }
+      for (const [key, selected] of [...loadedResources.entries()].sort(([a], [b]) =>
+        a.localeCompare(b),
+      )) {
+        const skill = await checkpointBody(selected.skillId);
+        const resource = await skills.readResource({
+          skillId: skill.id,
+          version: skill.version,
+          path: selected.path,
+          availableCapabilities: allowed,
+        });
+        result.push(source(`skill.resource:${key}`, 'skill_resource', resource.body));
+      }
+      return result;
+    };
     const sources: ContextSources = {
-      async capture(request: SourceRequest) {
-        const result = await project.capture(request);
-        const current = await catalogue();
-        const summaries = current.map(
-          ({ id, version, name, description, requiredCapabilities }) => ({
-            id,
-            version,
-            name,
-            description,
-            requiredCapabilities,
-          }),
-        );
-        if (summaries.length)
-          result.push(source('skills.catalogue', 'skill_catalogue', JSON.stringify(summaries)));
-        for (const id of [...loaded].sort()) {
-          const selected = await body(id);
-          result.push(source(`skill.body:${id}`, 'skill', selected.body));
-        }
-        for (const [key, selected] of [...loadedResources.entries()].sort(([a], [b]) =>
-          a.localeCompare(b),
-        )) {
-          const skill = await body(selected.skillId);
-          const resource = await skills.readResource({
-            skillId: skill.id,
-            version: skill.version,
-            path: selected.path,
-            availableCapabilities: allowed,
-          });
-          result.push(source(`skill.resource:${key}`, 'skill_resource', resource.body));
-        }
-        return result;
-      },
+      capture: (request) => captureSources([request]),
+      captureBatch: captureSources,
     };
     const extensions: Extension[] = [];
     if (files && !externalFiles)

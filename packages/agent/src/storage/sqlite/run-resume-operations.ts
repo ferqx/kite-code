@@ -10,6 +10,7 @@ import {
   type RunResumeState,
 } from '../types';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
+import { identity as modelIdentity, sessionScope } from './model-input-operations';
 import type { SqliteOperations } from './operations';
 
 type Row = Record<string, string | number | bigint | null>;
@@ -64,25 +65,17 @@ function scope(
       prior.request_digest !== hash(request))
   )
     throw new AgentError('command_conflict');
-  const executions =
-    prior && !ignorePrior
-      ? []
-      : db.rows(
-          'SELECT * FROM execution WHERE run_id=? AND session_id=? ORDER BY rowid LIMIT 4097',
-          input.runId,
-          input.sessionId,
-        );
   const base: RunResumeState = {
     command: prior ? db.command(prior) : null,
     run: db.runRecord(run),
     originalCommand: db.command(original),
     session: db.session(session),
-    executions: executions.map((e) => db.execution(e)),
+    executions: [],
     checkpoint: null,
     requirementsInitialized: run.initialization_state === 'completed',
   };
   if (prior && !ignorePrior)
-    return { state: base, run, session, original, executions, request, prior };
+    return { state: base, run, session, original, executions: [] as Row[], request, prior };
   if (!['run.start', 'input.follow_up'].includes(String(original.kind)))
     throw new AgentError('run_resume_checkpoint_unavailable');
   if (String(session.owner_generation) !== (generation ?? input.expectedOwnerGeneration))
@@ -117,8 +110,22 @@ function scope(
     )
   )
     throw new AgentError('run_resume_checkpoint_unavailable');
-  if (executions.length > 4096) throw new AgentError('run_resume_checkpoint_unavailable');
-  for (const e of executions) {
+  // Hash exactly the original canonical object, streaming its sorted keys and row arrays.
+  // Every historical row is validated; only the latest Model and zero-dispatch frontier leave SQLite.
+  const digest = createHash('sha256').update('{"executions":[');
+  const planned: { row: Row; position: bigint }[] = [];
+  let last: Row | undefined;
+  let lastPosition = 0n;
+  let count = 0n;
+  let plannedModels = 0;
+  const rows = db.db.query<Row, [string, string]>(
+    'SELECT * FROM execution WHERE run_id=? AND session_id=? ORDER BY rowid',
+  );
+  (rows as typeof rows & { safeIntegers(value: boolean): typeof rows }).safeIntegers(true);
+  for (const e of rows.iterate(input.runId, input.sessionId)) {
+    if (count) digest.update(',');
+    digest.update(canonicalJson(jsonRow(e)));
+    ++count;
     if (e.origin_store_id !== input.expectedStoreId) throw new AgentError('operation_unverifiable');
     if (['dispatching', 'running', 'outcome_unknown'].includes(String(e.state)))
       throw new AgentError('run_resume_checkpoint_unavailable');
@@ -150,17 +157,19 @@ function scope(
       if (result.modelOutput && !(result.modelOutput as Record<string, Json>).complete)
         throw new AgentError('run_resume_checkpoint_unavailable');
     }
+    if (e.state === 'planned') {
+      planned.push({ row: e, position: count });
+      if (planned.length > 4096) throw new AgentError('run_resume_checkpoint_unavailable');
+      if (e.kind === 'model') ++plannedModels;
+    }
+    if (e.kind === 'model') {
+      last = e;
+      lastPosition = count;
+    }
   }
-  const direct = executions.filter((e) => e.run_id === input.runId),
-    models = direct.filter((e) => e.kind === 'model'),
-    last = models.at(-1),
-    plannedModels = models.filter((e) => e.state === 'planned');
-  if (plannedModels.length > 1 || (plannedModels.length && last?.state !== 'planned'))
+  if (plannedModels > 1 || (plannedModels && last?.state !== 'planned'))
     throw new AgentError('run_resume_checkpoint_unavailable');
-  if (
-    run.initialization_state === 'started' ||
-    (run.initialization_state === 'unstarted' && direct.length)
-  )
+  if (run.initialization_state === 'started' || (run.initialization_state === 'unstarted' && count))
     throw new AgentError('run_initialization_incomplete');
   const boundary: RunResumeCheckpoint['boundary'] =
     !last || last.state === 'planned'
@@ -168,38 +177,115 @@ function scope(
       : (parse(last.result_json) as Record<string, Json>).finishReason === 'tool_calls'
         ? 'tool_calls'
         : 'completion';
-  if (
-    boundary === 'before_model_dispatch' &&
-    direct.some((e) => e.state === 'planned' && e.kind !== 'model')
-  )
+  if (boundary === 'before_model_dispatch' && planned.some(({ row }) => row.kind !== 'model'))
     throw new AgentError('run_resume_checkpoint_unavailable');
-  const interactions = db.rows('SELECT * FROM interaction WHERE run_id=? ORDER BY id', input.runId);
-  for (const i of interactions) {
-    const e = direct.find((e) => e.id === i.execution_id);
-    if (
-      ['pending', 'answered'].includes(String(i.state)) &&
-      (e?.state !== 'planned' ||
+  digest.update('],"interactions":[');
+  const interactions = db.db.query<Row, [string]>(
+    'SELECT * FROM interaction WHERE run_id=? ORDER BY id',
+  );
+  (
+    interactions as typeof interactions & { safeIntegers(value: boolean): typeof interactions }
+  ).safeIntegers(true);
+  let firstInteraction = true;
+  for (const i of interactions.iterate(input.runId)) {
+    if (!firstInteraction) digest.update(',');
+    firstInteraction = false;
+    digest.update(canonicalJson(jsonRow(i)));
+    if (['pending', 'answered'].includes(String(i.state))) {
+      const e = db.row(
+        'SELECT * FROM execution WHERE id=? AND run_id=? AND session_id=?',
+        i.execution_id!,
+        input.runId,
+        input.sessionId,
+      );
+      if (
+        e?.state !== 'planned' ||
         i.origin_store_id !== input.expectedStoreId ||
         i.subject_id !== input.subjectId ||
-        i.attempt !== e.attempt)
-    )
-      throw new AgentError('run_resume_checkpoint_unavailable');
+        i.attempt !== e.attempt
+      )
+        throw new AgentError('run_resume_checkpoint_unavailable');
+    }
   }
+  digest
+    .update('],"run":')
+    .update(canonicalJson(jsonRow(run)))
+    .update(',"selection":')
+    .update(canonicalJson(String(session.context_selection_id)))
+    .update('}');
+  if (last && last.state !== 'planned') planned.push({ row: last, position: lastPosition });
+  const executions = planned
+    .sort((a, b) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0))
+    .map(({ row }) => row);
+  base.executions = executions.map((e) => db.execution(e));
   const checkpoint: RunResumeCheckpoint = {
     boundary,
     contextSelectionId: String(session.context_selection_id),
     initializationState: run.initialization_state as RunResumeCheckpoint['initializationState'],
-    bindingDigest: hash({
-      run: jsonRow(run),
-      executions: executions.map(jsonRow),
-      interactions: interactions.map(jsonRow),
-      selection: String(session.context_selection_id),
-    }),
+    bindingDigest: digest.digest('hex'),
   };
   base.checkpoint = checkpoint;
   return { state: base, run, session, original, executions, request, prior };
 }
+function readExecutionPage(
+  db: SqliteOperations,
+  input: Parameters<Store['readRunResumeExecutionPage']>[0],
+): import('../types').RunResumeExecutionPage {
+  if (!['prior_models', 'model_tools'].includes(input.kind))
+    throw new AgentError('invalid_run_resume_cursor');
+  const cursor = input.afterRowid ?? '0';
+  if (
+    typeof cursor !== 'string' ||
+    !/^(0|[1-9][0-9]*)$/.test(cursor) ||
+    BigInt(cursor) > 9223372036854775807n
+  )
+    throw new AgentError('invalid_run_resume_cursor');
+  db.db.run('BEGIN');
+  try {
+    const session = sessionScope(db, input);
+    if (session.parent_id !== null || session.root_id !== session.id)
+      throw new AgentError('group_root_required');
+    const anchor = db.row(
+      'SELECT rowid AS resume_rowid,* FROM execution WHERE id=?',
+      input.modelExecutionId,
+    );
+    if (
+      !anchor ||
+      anchor.origin_store_id !== input.expectedStoreId ||
+      anchor.run_id !== input.runId
+    )
+      throw new AgentError('operation_unverifiable');
+    modelIdentity(db, input, session, anchor);
+    const page =
+      input.kind === 'prior_models'
+        ? db.rows(
+            "SELECT id,rowid AS resume_rowid FROM execution WHERE run_id=? AND session_id=? AND kind='model' AND rowid>? AND rowid<? ORDER BY rowid LIMIT 201",
+            input.runId,
+            input.sessionId,
+            BigInt(cursor),
+            anchor.resume_rowid!,
+          )
+        : db.rows(
+            "SELECT id,rowid AS resume_rowid FROM execution WHERE run_id=? AND session_id=? AND kind='tool' AND step_id=? AND rowid>? ORDER BY rowid LIMIT 201",
+            input.runId,
+            input.sessionId,
+            anchor.step_id!,
+            BigInt(cursor),
+          );
+    const items = page
+      .slice(0, 200)
+      .map((row) => ({ executionId: String(row.id), cursor: String(row.resume_rowid) }));
+    const result = { items, nextCursor: page.length > 200 ? items.at(-1)!.cursor : null };
+    db.db.run('COMMIT');
+    return result;
+  } catch (error) {
+    db.db.run('ROLLBACK');
+    throw error;
+  }
+}
 export function callRunResume(db: SqliteOperations, method: string, value: unknown): unknown {
+  if (method === 'readRunResumeExecutionPage')
+    return readExecutionPage(db, value as Parameters<Store['readRunResumeExecutionPage']>[0]);
   if (method === 'verifyRunResume') {
     db.db.run('BEGIN');
     try {

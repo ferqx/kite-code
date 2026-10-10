@@ -30,6 +30,8 @@ Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-r
 
 释放计入 Worker total timing；原 SQL/COMMIT 分项、事务回滚、Command 身份和提交未知时查询规则保持。释放失败不能发送成功 ACK，也不重发原操作或效果。[原生 Worker 回归](../../test/isolated/storage/statement-lifecycle.test.ts)以真实 statement 的 `isFinalized` 在响应发送前核成功、错误与关闭路径，继续查询、只读重开和 cursor 保持。采用请求边界的理由见[语句 owner Note](../../../../.agents/notes/implemented/bug-fix/2026-10-08-request-scoped-sql-statements.md)；这项释放不代表完整 RSS 或全部 Runtime 资源资格。
 
+Worker 的首次和积压 pump 使用 `setImmediate`，每个宏任务至多执行一个同步事务后让出。原控制/正文/查询加权队列、容量预留和 close 排空此前已接纳请求保持；不把积压改成连续 microtask。原长 Run 的有界 DbTiming 诊断显示 7850 个请求累计排队约 11.95s、SQL 约 2.06s、COMMIT 约 0.31s，原 `setTimeout(0)` 的排队中位数约 1.26ms；取消和关闭确认。原[双 Worker timing](../../test/isolated/storage/timing.test.ts)继续核 control/body 早于末尾 query及观察异常不影响写入，不能以纯 queue 测试替代。该调度修复不证明 RSS 或完整资源资格。
+
 ## 写锁的有界等待
 
 正式 SQLite 写连接使用原生 `busy_timeout=1000`，只读连接与启动格式 preflight 保留 100ms。两个 Worker 共享 WAL 时，持锁 peer 被调度延迟不应在原 100ms 实验窗口内直接使普通 Run 失败；当前值让短竞争在原具名事务上等待。它是 SQLite busy handler 的累计等待预算，不是 HTTP wall-time 承诺。
@@ -98,6 +100,8 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 [Run resume owner](sqlite/run-resume-operations.ts) 提供只读 `verifyRunResume`、受限 `beginRunResume`、最终 `commitRunResume` 和独立 lease release。当前资格限同 Store、真实 root 创建主体所属的 `run.start`／`input.follow_up` 原 active Run；终态不重开，child、runless planned closure、压缩和 Job report 的特殊 Run 局部拒绝。全组存在其他 active Run 或 dispatching/running/outcome_unknown Execution 时不借普通 owner 接管。原 Run 的完整成功 Model、已知 Tool 结果只读复用；partial／不完整 Model 不作为安全 checkpoint。
 
 只读预检和原申请回执查询先于恢复工厂。同 ID 已登记 accepted 或 applied 意图只返回原回执，不重新准备、派发或执行；同 ID 改变原 Run／epoch 等意图冲突。内部 `RunResumeInput.expectedOwnerGeneration` 做持久 epoch CAS，公开 HTTP 不接收客户端 generation，由 Service 查询原回执或当前 Session 推导。`before_model_dispatch`、`tool_calls`、`completion` checkpoint 封存当前 Run 读集摘要、原 selection 与初始化状态；Runtime 另核完整 Model 正文和原调用身份。
+
+检查点逐行验证全部历史 Execution 和 Interaction，并按原列、顺序和 canonical JSON 流式生成同一摘要；累计历史不因超过 4096 条失效。返回 Runtime 的 frontier 仅保最后原 Model 及全部零派发 planned，当前 planned 仍最多 4096 条。私有 `readRunResumeExecutionPage` 用准确原 root/主体/Store/Run、Model anchor 与严格 Decimal64 rowid 游标，每页至多 200 个原执行身份；旧 Model 受 anchor 上界约束，Tool 受原 step 约束。准备分页是短只读事务，commit 重新核完整摘要；原未知效果、错误身份、部分 Model和历史漂移仍拒绝。[历史回归](../../test/isolated/recovery/run-resume-history.test.ts)核多页、原 canonical 摘要全等、scope/cursor 拒绝与全历史 CAS，未改变 baseline或公开 HTTP schema。
 
 begin 先取得真实 root OS 锁，事务复核后递增 generation、登记 accepted/null 与私有 `RunResumeLease`。这个 lease 只进入 facade 的 recovery map，不能投影为普通 `OwnerRef` 进行 plan、dispatch 或 finish。可信恢复 binding 准备完成后，commit 同事务再核准确 lease、原配置 canonical 等值、checkpoint、selection、主体、取消与原出处，仅重绑准确的零派发 planned Model/Tool generation，随后登记 applied `run_resumed` 回执并转入普通 owner map。原 Run/Execution ID、attempt、成功结果、原 Interaction 和已保存答案保持；后续派发仍检查当前权限、原审批与取消。
 

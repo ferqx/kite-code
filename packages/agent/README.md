@@ -80,6 +80,8 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 模型来源变化时旧工具不派发，唯一 Loop 的下一次请求看到刷新后的实际指令。无模型 Action 的旧未派发 freshness attempt 先结算，最多重新准备一次并重新授权新的执行 ID，原 Command 输入与旧来源保持不变；`preparingNextAttempt` 回执随事务提交，等待者不能把旧 attempt 的失败当作原命令最终完成。再变化或重新准备失败保留明确失败/需核实。文件系统复查与 SQLite、外部 I/O 不是原子事务。
 
+主 Run 的来源请求按定义及完整输入语义摘要保留，不以累计 256 次请求结束长任务。`ContextSources.captureBatch` 可在一个检查点接收全部原请求；未提供时仍逐项调用 `capture`。Core 继续核每个实际 source 的格式、同 ID 摘要一致性及当前最多 256 个唯一来源，不丢弃旧路径或不同输入。默认项目捕获只在该次调用内复用实际目录核验与指令字节，下一检查点重新读取；请求各自的路径、目标、目录及字节门禁保持。取舍见[完整来源捕获 Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)。
+
 `resolveRunConfiguration` 在新 Run 激活前解析实际模型与工具选择，原子保存脱敏配置和准确 Tool 版本；旧 Run 继续使用自己的绑定。宿主可返回每 Run 的 `extensions/sources/dispose`，Core 复制并冻结 schema、资源声明及定义集合；模型目录、自有 namespace 和子操作使用同一绑定。后台 Job 保留该绑定 lease，最后一个真实任务结束后才释放资源，新 Run 的定义或来源不会替换旧任务。未知或重复选择在模型调用前局部拒绝，并释放失败准入的资源。权限请求明确区分 model/tool/job，模型权限不会因同名 Tool 被复用。普通 Tool 的 progress 合并为一个待写点，以 100ms 起测间隔写入，单点最多 32 KiB；终态前排空。观察写入失败记录在真实结果中，不把已知效果改写为未知或再次执行。
 
 宿主可选 `readStepCapabilities` 只读取已存在的目录缓存。每个 Model 安全边界固定额外 extensions、所选 tools 和最多 64 KiB 的非秘密 snapshot；全局注册由 Runtime 加入，调用者不能重复它们。实际 Model 保存准确 `toolBindings` 与 `capabilitySnapshot`，不会重写初始 Run manifest。审批或资源等待期间目录变更使尚未派发的旧调用明确 `capability_refresh_required`，下一 Model 重新选择；模型准入的有限刷新也同时重建 tools。已派发 Job 的 scope、来源和实现保持原绑定。定义版本负责标识实现，宿主负责让整个 Run 的 disposer 保留所有在途 Step 注册资源；Query/历史读取不调用该回调，回调不能建立连接或执行工具。
@@ -87,6 +89,8 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execution 与稳定 key 发布，Query/prepare 只能读取原 subject/scope。终态声明的 Artifact refs 必须再次核实实际 Store、scope 和元数据；效果发生后伪造引用保留未知结果。真实内容下载由 Service/Client 的二进制协议负责，不通过 renderer 路径或 hash 自授权。
 
 显式 `resumeRun` 接续仍活动的同 Store 根 Run，支持原 `run.start/input.follow_up` 的三个持久边界：原 Model 派发前、完整 Model 的工具序列、完成判定。只读 `verifyRunResume` 核原身份和安全状态，再通过独立 `RunResumeLease` 封存检查点；准确重建原配置并复核选择、取消与 generation 后，才转成普通 owner，进入同一个 `executeRun/defaultLoop`。HTTP 的 generation 由 Service 内部派生，Core 可信入口仍要求准确 CAS。原 planned Model 使用完整封存请求，原 planned Tool 保留执行身份与审批，已完成调用跳过；完整无工具回复进入完成门禁，不重复询问 Model。原 Model 输入/输出及大正文都从原作用域完整核验，不用预览重建参数。
+
+累计已完成历史不再以 4096 条拒绝接续。Store 流式核验全部原 Execution/Interaction 并保持原 canonical checkpoint 摘要；只有当前零派发 planned frontier 保留 4096 条上界。Runtime 经私有 200 条分页穷尽准确原 Model 及其 Tool 链，完整读取旧输出恢复来源请求；包括 planned Model 前发现的祖先指令。begin/commit 仍重核全部历史 CAS，分页不授执行权，也不把有限 View 当历史全集。[公开长 Run 接续](../../apps/service/test/isolated/long-run-resume.test.ts)核 4096 次真实效果、原 Run/Execution/attempt/完整请求和旧结果保持、一次明确接续及零旧效果重放；平台与正式客户端完整资格仍分别判断。
 
 Run 保存 `initializationState:unstarted/started/completed` 和原 `contextSelectionId`；完成初始化即使没有 requirements 也不重跑，冷 started 阶段不能重放任意回调。可能已经派发的未决工作、child、runless 闭包、部分 Model 与无法精确重建的配置明确拒绝。独立 `run.resume` Command 保存 accepted/null 或 applied 的有限回执，同 ID 不重复解析或派发；普通调度与恢复清扫不把该申请当作新任务。准备期取消和关闭在交接前复核，清理失败保留资源与 Store，不报告假关闭。真实强杀、完整 80KiB 正文、原审批、当前输入和清理反例见 [Runtime 接续测试](test/isolated/recovery/run-resume-runtime.test.ts)与 [Store 事务测试](test/isolated/recovery/run-resume-store.test.ts)；此范围不代表任意旧执行可恢复。
 
@@ -105,6 +109,8 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 `NecessaryConditions` 获得准确当前 boundary 和有限的 `forRequirement` 只读范围。关联 executable 记录的读取或缺失自动形成 CAS read-set，最终事务核对原 namespace、Session、revision 和 Store；业务判定文字不能代替这些事实。公开 Execution 证明包含原身份、attempt、定义、input digest、result revision 和实际决策来源的 id/digest，不包含 owner 或来源正文。已接纳的 question/plan_review 可返回准确原 receipt，并可从同 Session 的只读 Interaction 核实；信息决定不能充当 Tool approval。
 
 `Extension.context.capture` 只接收本 namespace 的只读投影，来源 ID 必须属于该 Extension；Core 强制将其作为 `user` 数据加入实际模型输入。显式宿主项目指令仍保留自身放置位置。来源身份、格式和数量在 Model I/O 前检查，大正文通过准确 scope Artifact 完整交接，传输阈值不裁剪实际来源；变化使旧 Tool 决策失效，下一 Model 才取得新来源。Query 和普通历史读取不会调用贡献回调、模型或工具。
+
+可选 `Extension.context.captureBatch` 接收该检查点同一 Session 的全部完整请求及一个只读 context；全部 Session scope 在贡献回调前核实，返回最多 128 个自有 namespace 来源，Core 强制 `user` 并核总唯一来源。未选择批量回调的扩展保持逐项捕获；Planning 的批量贡献只在当前检查点读取一次真实计划，不跨检查点缓存。[扩展回归](test/isolated/extensions/context-contributions.test.ts)核完整不同输入、下一检查点刷新、scope/namespace/数量和冲突拒绝，原单项贡献合同保持。
 
 ## 验证
 

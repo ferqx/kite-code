@@ -272,6 +272,9 @@ export interface Store {
       recovery: { commandId: string; subjectId: string; expectedConfiguration: Json };
     },
   ): Promise<void>;
+  readRunResumeExecutionPage(
+    input: import('./types').RunResumeExecutionPageInput,
+  ): Promise<import('./types').RunResumeExecutionPage>;
   verifyRunResume(
     input: import('./types').RunResumeInput,
   ): Promise<import('./types').RunResumeState>;

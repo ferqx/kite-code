@@ -991,11 +991,26 @@ export interface RunResumeCheckpoint {
   contextSelectionId: string;
   initializationState: 'unstarted' | 'started' | 'completed';
 }
+/** Private bounded identity directory; it never grants recovery or dispatch authority. */
+export interface RunResumeExecutionPageInput {
+  expectedStoreId: string;
+  subjectId: string;
+  sessionId: string;
+  runId: string;
+  modelExecutionId: string;
+  kind: 'prior_models' | 'model_tools';
+  afterRowid?: string;
+}
+export interface RunResumeExecutionPage {
+  items: { executionId: string; cursor: string }[];
+  nextCursor: string | null;
+}
 export interface RunResumeState {
   command: CommandRecord | null;
   run: RunRecord;
   originalCommand: CommandRecord;
   session: SessionRecord;
+  /** Latest Model plus all validated zero-dispatch planned executions, in original row order. */
   executions: ExecutionRecord[];
   checkpoint: RunResumeCheckpoint | null;
   requirementsInitialized: boolean;
