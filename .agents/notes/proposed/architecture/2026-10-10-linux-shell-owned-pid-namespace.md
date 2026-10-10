@@ -4,7 +4,7 @@ Status: proposed
 
 ## Problem
 
-已安装 CLI、TUI 与 Native 的普通 Shell、调用 Shell 的 Task，以及 Workflow 验证与补偿，需要按各自实际权限范围执行，并在自然退出、准确取消和 Service 退出时核实全部原后代。Linux 的普通进程组不能覆盖 `setsid` 与孤儿后代；PID 字符串、一次信号、路径存在和冷证据都不能替代原所属对象的结束证明。当前已接默认 Linux Shell、Workspace Skill verifier 与严格补偿源码，完整能力仍缺 Profile Skill 来源投影和原生资格；RSS 与全部可信 Runtime 观测仍独立阻止资源阶段退出。
+已安装 CLI、TUI 与 Native 的普通 Shell、调用 Shell 的 Task，以及 Workflow 验证与补偿，需要按各自实际权限范围执行，并在自然退出、准确取消和 Service 退出时核实全部原后代。Linux 的普通进程组不能覆盖 `setsid` 与孤儿后代；PID 字符串、一次信号、路径存在和冷证据都不能替代原所属对象的结束证明。当前已接默认 Linux Shell、Profile／Workspace Skill verifier 与严格补偿源码，完整原生和 installed 资格尚缺；RSS 与全部可信 Runtime 观测仍独立阻止资源阶段退出。
 
 ## Proposal
 
@@ -16,6 +16,8 @@ Workspace 与 Full 从最终派发授权的所有 leaf 求交，保宿主 HOME �
 
 正常 terminal 同时需要原根 WNOWAIT／waitpid 相符、namespace 内 ECHILD、原 init/root pidfd 死亡事件、原 wrapper exit0 与 close、完整输出 EOF 和全部 FD 严格关闭。`--die-with-parent` 仅为崩溃兜底。首次 unknown 不升级；仍有效且已接纳的原 init pidfd可作一次清理，未知 Close 不重试。启动清理未确认必须交回原 facade，使 Runtime 保留 resource 与 binding lease；冷数据只供读取，不能重建控制对象。
 
+Profile Skill 的[准确原来源交接](../../implemented/architecture/2026-10-10-profile-workflow-read-only-original-source.md)已接源码：每级独立私有tmpfs scaffold在业务尚未创建时以0700打开原DIR FD，核每级只有唯一下级和来源原dev／ino／RO，再改0111并逐项封RO／NOEXEC／NOSUID／NODEV；持原FD复核内部身份、闭合子项并严格关闭。准确原Skill树ro-bind保原cwd，来源内未声明子mount拒绝。其他保护mask保持000，不由该投影暴露其他Profile／coordination。显式协议把source与scaffold区别于mask，全部路径共用原200上界。
+
 ## Alternatives considered
 
 - 复用旧 Linux detached PGID：不能核完整脱离后代，不满足自然退出与 Service 退出契约。
@@ -26,7 +28,7 @@ Workspace 与 Full 从最终派发授权的所有 leaf 求交，保宿主 HOME �
 ## Acceptance criteria
 
 - 正式安装后的默认 Shell、Task 和 Workflow 沿同一公开 Job 合同，保存完整输出与准确取消；严格补偿保持独立范围，没有不受限回退。
-- Profile 内 Skill 验证保原 canonical cwd，准确只读暴露原 Skill 来源且不暴露其他 Profile／coordination 字节；当前拒绝保护根内 cwd，来源投影未完成。macOS 默认 verifier 的原 group 路径仍另需完整迁移，不能用本片 Linux 接线代证。
+- Profile 内 Skill 验证保原 canonical cwd，准确只读暴露原 Skill 来源且不暴露其他 Profile／coordination 字节；来源投影与正式 caller 已接源码，同一正式Service整例定义原生验收。macOS默认verifier已实际切到coalition并取得限定本机证据，不代Linux验收。
 - 可信资产由 Linux 构建生成并进入候选；安装机器不编译或加载 `.ts` fallback，资产漂移在执行前拒绝。
 - Workspace／Full／补偿的文件、网络、父级改名、native 执行与 namespace 逃逸限制，以及所有真实退出资源均取原生 Linux 证据。
 - 源码／mock／纯 BPF 检查只证明其实际断言。依用户顺序，原生 Linux／Windows 资格留到重构完成后的 Actions；不得由这些检查、macOS 邻接或 help 输出提前宣告阶段退出。
@@ -35,4 +37,4 @@ Workspace 与 Full 从最终派发授权的所有 leaf 求交，保宿主 HOME �
 
 user namespace、Linux headers、mount、pidfd、close_range 和 seccomp 的实际可用性仍未在 Linux 验证；缺任一能力均失败封闭。内核 mount 与 flags 的别名、子挂载及当前 UID 行为须由原生测试确认。外部同 UID 不协作替换仍沿现有可信宿主与 sealed asset 边界，不以本片承诺任意外部攻击者隔离。
 
-当前实现与验证归 [Job owner](../../../../packages/agent/src/jobs/README.md)、[Service owner](../../../../apps/service/README.md) 和 [实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10linux-正式-shelltaskworkflow-源码接线)。Profile 来源投影、全部正式 verifier 迁移及原生资格尚未交付，故保留 proposed。
+当前实现与验证归 [Job owner](../../../../packages/agent/src/jobs/README.md)、[Service owner](../../../../apps/service/README.md) 和 [实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10profile-workflow-原来源与正式-verifier-迁移)。完整Linux原生和installed资格尚未交付，故保留 proposed。

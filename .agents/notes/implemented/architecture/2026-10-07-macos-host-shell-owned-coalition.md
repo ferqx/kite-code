@@ -10,7 +10,7 @@ Status: implemented
 
 默认 macOS ProcessService 选择实际 Terminal/Native 资产与宿主路径，使用普通 Tool/Job 及最终 Store 派发事务。已接受的根快照及子 Agent 的 agent.permission-intersection 父子交集进入 Job.start；Service 有界展开全部 builtin.permissions 叶，仅所有叶为 Full 时选择宿主写范围，其他受支持叶选择 Workspace/私有 temp 写，缺失或未知叶拒绝。人工和自动批准保留原快照；原 allowed=false 可表示最终事务已接纳的审批挑战，不能据此覆盖叶的硬门禁或凭元数据另造授权。权限元数据不成为第二授权接口，Model/JSONC 不能选择 launcher、保护路径或隔离声明。
 
-固定 Seatbelt 允许 fork、保留 HOME/宿主运行根和广泛读取；后代继承边界。实际 Profile/coordination 拒读写映射，准确 runtimeAssets/运行根只读，私有 temp 不执行。Full 也拒绝这些根和准确祖先的 unlink。真实 Full 父目录 rename 先复现绕过，随后用准确祖先规则关闭；只保护子路径不足以保持其原归属。非 Full 允许 IP、拒绝 Unix socket bind/outbound，Full 使用宿主网络范围。
+固定 Seatbelt 允许 fork、保留 HOME/宿主运行根和广泛读取；后代继承边界。普通 Shell 的实际 Profile/coordination 拒读写映射，准确 runtimeAssets/运行根只读，私有 temp 不执行。正式 Profile Skill verifier 后来加入[准确原来源只读例外](2026-10-10-profile-workflow-read-only-original-source.md)，仅原 Skill 子树与祖先 metadata 可读，整个保护根写入及 native exec-map 仍拒绝；该例外不适用于普通 Shell。Full 也拒绝这些根和准确祖先的 unlink。真实 Full 父目录 rename 先复现绕过，随后用准确祖先规则关闭；只保护子路径不足以保持其原归属。非 Full 允许 IP、拒绝 Unix socket bind/outbound，Full 使用宿主网络范围。
 
 私有 broker 在受保护 control base 创建0700目录、独立秘密握手及随机准确本用户 launchd Background 标签。先核 launchctl 返回的原 guardian PID，再传业务帧；relative Unix socket 支持长 Profile 路径。guardian 原自身 unique/pidversion/resource coalition 稳定且内核 task count=1 时才启动命令。fork/exec 继承此资源归属，setsid/orphan 不改变它；停止信号使用成员原 pidversion audit token，内核原子比对身份，不回退数值 PID。
 

@@ -2142,6 +2142,8 @@ Windows managed Terminal 的独立安装、current/previous切换、rollback和�
 
 Windows stdio MCP 的当前源码缺口已沿同一正式 Source／SQL connection Job／Tool caller 接通，创建前 Job 归属、原 HANDLE／FILETIME、完整 pipe、实际 guardian reap 与严格关闭证据使用独立 closed v3，Darwin v1／v2 与 cold no-replay 保持。准确范围与最多五项依赖归[当前 MCP 进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-正式-stdio-mcp-完整连接源码)。后台 Agent 本身在同一 Runtime／Store，无 Windows OS-child guard；其调用 Shell 时仍依赖尚缺的真实文件权限后端，不能用 MCP Job 解除 Shell 拒绝。正式安装／版本切换／维护源码不受 RSS 观测门禁阻断，但实机完整消费者、原资源、§35 审查及最终退役仍未闭合，37 能力 partial、wholeV13／phaseExit=false。
 
+Profile Workflow 的原目录只读投影及正式 verifier 接线已沿源码缺口完成：准确 Profile 来源保 canonical cwd 和完整相对依赖／忽略资源，原 Workspace 独立决定写范围；macOS 默认 verifier 迁入完整 coalition，Linux 使用准确私有祖先链／只读来源及 gate 前严格封存源码。原 private／coordination、来源写入／改名／native exec-map 保护保持，普通 Shell 与固定补偿不取得该例外。真实 macOS leaf、正式 Service 及受影响八个完整文件66项／770断言通过；Linux 内核／installed资格仍未取得，37能力 partial、wholeDefault／wholeV13／phaseExit=false。准确红绿、边界和最多五项下一退出依赖归[当前 Workflow 进度](unified-agent-refactor-v1-progress.md#2026-10-10profile-workflow-原来源与正式-verifier-迁移)，RSS／观测不重测、不阻独立源码实现，仍直接阻P6／§35／最终退役。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

@@ -224,7 +224,7 @@ export async function createWorkflowConfiguration(options: {
               ? { linux: { bubblewrapPath: assets[3].path, initExecutable: assets[0].path } }
               : {}),
           },
-          ...(options.shell.platform === 'linux' && options.shell.host
+          ...(options.shell.host
             ? {
                 host: {
                   ...options.shell.host,

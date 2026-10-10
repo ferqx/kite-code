@@ -4207,3 +4207,41 @@ Root 与八 runtime workspace 类型和八 workspace 构建已通过；最后 Li
 | 5 | 完整能力／正式 caller 的 §35 独立审查、最终旧路径退役与阶段收束 | 全部适用 37 能力及 T/E／兼容样本独立审查、实际 legacy 删除、未过滤完整回归与适用 P7 发布责任通过 | 依前四项完整资格；D08 首发前无适用新基线 published T029 样本不阻源码，局部通过不宣布阶段退出 |
 
 新增的是 Linux 正式 Shell／Task／Workspace Workflow 源码选择及独立严格补偿；尚未删除最终 legacy，也未取得完整 Linux 用户能力或平台资格。37 能力状态继续 partial，wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。授权仍仅本地 stage／commit。
+
+## 2026-10-10：Profile Workflow 原来源与正式 verifier 迁移
+
+本轮从上一片 `e18500cb538836c61e95f78b88ffe072718f543b` 的完整来源缺口继续实施。前述 Daemon、正式安装／版本选择和维护切片已结束，不重开其已闭合验证。原 RSS +115.203125 MiB／32 MiB red、八轮／九点及全部可信 Runtime 后代／activeResources／handles缺项直接阻 P6／§35／最终退役；它们不是独立安装、版本选择、维护恢复或当前来源投影源码的前置。安装／rollback／uninstall／维护的 POSIX owner 已存在，本轮未发现需要另开实现的独立源码缺陷；缺真实平台／完整消费者资格按原范围保留。
+
+### 原用户入口、正式切换与保持的行为
+
+实际用户入口是选中 Profile 或已批准 Workspace 的 Skill，在原 Run 显式激活后完成 Skill，按声明执行 required script verifier。原 `contract.files` 会忽略 `node_modules`／`build`／`dist`，只封入该集合或复制 entrypoint后换 cwd不能保原相对依赖和 package resolution；开放整个 Profile也不能保私有数据边界。本轮由[可信 verifier](../../packages/agent/src/business/skill-workflow/verifier.ts)在原来源／revision／依赖／output／strategy复核后，仅为实际 `user`来源提供准确 `readOnlySourceRoot`，固定外部 Bun 仍执行相对 entrypoint，原 canonical Skill cwd和授权 Workspace分别绑定。该字段不进入模型参数、Job JSON或HTTP，不从用户自报标签取得。
+
+共享[来源捕获](../../packages/agent/src/jobs/read-only-source.ts)要求准确 cwd、保护根严格子树、不能包含 Workspace或任何保护根、不能与control双向重叠；原 Workspace不能落入保护根。它保原来源和全部祖先身份，普通 Shell及固定confined不提供例外。macOS仅从private read deny精确减去原来源子树及必要祖先metadata，另拒祖先data／xattr；整个保护根的写／create／unlink／ioctl和native exec-map仍拒绝，Full也不能移动来源或祖先。源码、两种策略和实际拒绝由[Jobs owner](../../packages/agent/src/jobs/README.md#profile-skill-的准确只读来源)维护。
+
+[正式 Service](../../apps/service/src/skill-workflow-configuration.ts)现把可信host配置交给实际verify定义，macOS默认verifier退出原显式group路径，使用同一完整coalition后端；Linux选择原PID namespace owner源码。Workspace来源保持原权限，Profile来源准确只读，Tool和Job仍各自审批。原timeout／cancel、完整输出、失败／unknown事实及cold零重放不改变。显式程序化无host的POSIXgroup合同保留；本片正式调用者切换不代表最终legacy源码删除、全部Workflow／三平台或阶段退出。
+
+Linux沿原namespace协议增加明确sourceProjection：只替换包含来源的一个外层保护mask，以逐层私有0700tmpfs祖先、准确ro-bind原来源和显式noexec清单保cwd；其他遮蔽根不开放。固定init在业务gate前持原DIR FD检查闭合单子链、准确来源device／inode、无未知nested mount，再将祖先0111、逐mount封为只读／noexec／nosuid／nodev，原FD复核并严格关闭后才清capability／启动业务。新增参数保持总路径预算，不从普通identity集合猜测投影；失配或close unknown仍不放行。持久取舍及真实限制归[已实施来源决定](../../.agents/notes/implemented/architecture/2026-10-10-profile-workflow-read-only-original-source.md)和仍为proposed的[Linux owner提案](../../.agents/notes/proposed/architecture/2026-10-10-linux-shell-owned-pid-namespace.md)，不能据源码宣布Linux资格。
+
+### 验证、真实失败与复用范围
+
+本机macOS arm64／Bun 1.4.2最终受影响八个未过滤完整文件实际 **66 pass／770 Bun expect／0 fail／30.22s**，命令为 `bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/business/skill-workflow-host-verifier.test.ts apps/service/test/isolated/skill-workflow-profile-host.test.ts packages/agent/test/isolated/jobs/macos-host-shell.test.ts packages/agent/test/isolated/jobs/shell.test.ts packages/agent/test/isolated/business/skill-workflow-verifier.test.ts apps/service/test/isolated/skill-workflow-configuration.test.ts apps/service/test/isolated/configuration.test.ts apps/service/test/isolated/shell-configuration.test.ts`。准确日志 `/private/tmp/kite-workflow-profile-formal-adjacent-ready-final-20261011.log`；本片新增[macOS leaf](../../packages/agent/test/isolated/business/skill-workflow-host-verifier.test.ts)5项核Workspace／Full的完整原目录、忽略资源、权限实际拒绝、漂移零启动和取消／超时整树证明；新增[正式Service整例](../../apps/service/test/isolated/skill-workflow-profile-host.test.ts)3项沿真实Runtime／SQLite／来源激活／独立审批／verify proof／效果一次，在真实shutdown drain后的beforeResourceClose封存原完整View，冷读原Run／Execution／业务记录／View全等和Model零增量。它不冒称新HTTP或installed客户端资格。
+
+相邻整组首次真实为65 pass／1 fail／766 expect，原日志 `/private/tmp/kite-workflow-profile-formal-adjacent-native-final-20261011.log`保留。唯一旧exact-stop例在Job仍dispatching、尚无原guardian reference时由Model立即发stop，原Store确认cancel_requested／adapterAttempted／stopConfirmation:null及outcome_unknown，shutdown清理未确认；失败根保留。准确原SQL事实归 `/private/tmp/kite-workflow-profile-shell-caller-stop-original-facts-20261011.log`，未改原整文件复验12 pass／144 expect仍不能抹掉该红。该例要验实际已启动guardian的停止证明，现仅在原8秒until内沿原Store／Session／Execution／有效processGroupId等待持久stdout `ready`后才发原stop。原119个expect调用有序逐字相等、15秒整例和所有原8秒期限保持，其他例无callback；AST收据 `/private/tmp/kite-shell-ready-assert-audit-20261011.json`。生产startup取消合同未改，没有删断言、排除失败或延长期限。
+
+新leaf和正式Service在普通sandbox下的启动／协议／cleanup unknown均保原日志和资源；仅为本次真实受影响完整文件取得必要launchd权限后复验。Service新fixture首次错误固定Model identity及合成cold ownerGeneration导致的红也保留，现使用准确Model `fixed`与真实owner drain后的原View，而非丢掉字段／改生产格式。此前原Mac stdio整文件2 pass／5 fail、资源未知及自动审批拒绝仍保持，本片Shell／Workflow绿不覆盖它；本轮没有重试该旧故障矩阵。
+
+Linux五个纯准备／mock owner／Job／cold／正式配置完整文件实际 **11 pass／91 Bun expect／0 fail**，日志 `/private/tmp/kite-workflow-profile-linux-pure-final-20261011.log`。准确C源SHA256为 `8965e0ea40684791bba1134a790752bfd0d5a45f9799626ec5ad65ba6063215c`；Darwin私有声明适配 `-fsyntax-only` actual0仅为静态语法范围，不能证明真实Linux ABI／编译。新增Service整例已有真实Linux分支，编译准确生产init并要求实际Bubblewrap，缺compiler／后端或真实失败必须失败；本机未执行Linuxmount／seccomp／pidfd／Bun加载／整树关闭及installed资格。Win/Linux仍按用户顺序留重构完成后的Actions，本轮没有安装环境或dispatch。
+
+Root及八runtime workspace类型、受影响Agent／Service构建、12个受影响TS的Biome、boundary／runtime-package／生成API／test-owner／docs／all docs-impact／plan-evidence实际通过。独立只读审查核正式来源／scope接线及Linux封闭协议，未发现具体阻塞；范围仅本片，不代§35独立全能力审查。原strict补偿、安装维护和其他未变消费者证据按未变输入及原范围复用，没有围绕闭合事实扩新矩阵。手册Extensions、Agent／Job／Workflow／Service owner、execution boundary／platform active、测试入口、能力映射及Note同步本片真实状态；runtime-resilience与unified-agent boundary active、公共生成API、SQL／cold格式、RSS算法及预算未变，核对后不制造文档diff。阶段完整回归仍保实际收束点。
+
+### 最多五项剩余退出依赖
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与明确验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed普通Shell及调用Shell的Task／Workflow | 当前Shell仍拒Windows；补真实Workspace／Full读写ceiling，Profile／coordination内容和runtime资产／祖先保护，创建前归属、完整输出、准确取消／原全树结束、unknown保资源及cold完整结果零重放，沿正式入口通过 | 原WRITE_RESTRICTED仅限制写、protected_deny_paths为空，Full current-user token及目录HANDLE不代内容隔离；本片Profile投影与macOS正式group切换不再列源码缺口，Linux资格仍归第3项，独立于RSS |
+| 2 | Linux Profile／已批准Workspace `mcp.json`本地stdio完整连接 | 当前port仍拒Linux；补原所属owner／guardian／closed冷证据，Source→SQL connection Job→SDK远端Tool→完整原输出／准确cancel及Service close／真实树与FD关闭，cold原C／E零Provider／RPC | 原Source／权限／SDK合同可复用；完整MCPowner源码可独立推进，不能借普通Shell或WindowsJob资格 |
+| 3 | Win/Linux installed安装、真实跨代码A→B→A、维护恢复和所有正式客户端 | 准确完整候选的install／rollback／uninstall、跨代码、maintenance新Store冷完整读取，Daemon／Native／真实TUI PTY及common whole／always formal取得对应OS原生证据；保所有原断言／预算，标签B和help不代真实行为 | 安装／版本／维护源码已接，本轮无新增独立缺陷；第1、2项及其他实际平台源码完整后取实机资格，用户要求重构后Actions，无dispatch |
+| 4 | installed CLI／TUI／Native持续普通任务、Shell／child后台资源 | 原RSS增长／斜率、八轮／九点、全部可信Runtime后代和activeResources／handles真实满足，原red／unknown不改阈值 | 直接阻P6／§35／最终退役，不是前三项独立源码前置；不重复参数对照 |
+| 5 | 完整能力／正式caller的§35独立审查、最终旧路径退役与阶段收束 | 全部适用37能力和T/E／兼容样本独立审查、实际legacy删除、未过滤完整回归及适用P7发布责任通过 | 前四项完整资格；D08首发前无适用新基线published T029样本不阻独立源码，局部绿不退出阶段 |
+
+新增闭合的是Profile Skill保持原cwd的完整来源读取、macOS正式verifier的完整coalition迁移和Linux准确投影源码／协议；仍缺Windows真实权限、Linuxstdio源码及相应原生完整资格。本轮仅正常本地stage／commit，37能力继续partial，wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。

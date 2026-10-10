@@ -9,10 +9,13 @@ import {
   removeRuntimeTemp,
   verifyLaunchIdentities,
 } from './launch-identity';
+import { captureReadOnlySource } from './read-only-source';
 
 export interface LinuxPaths {
   readonly cwd: string;
   readonly workspaceRoot?: string;
+  readonly controlBase?: string;
+  readonly readOnlySourceRoot?: string;
   readonly bubblewrapPath: string;
   readonly protectedRoots: readonly string[];
   readonly readonlyAssets?: readonly string[];
@@ -24,7 +27,14 @@ export interface LinuxPaths {
     | ((context: JobContext) => 'workspace_write' | 'full_access');
   readonly mode: 'host' | 'confined';
 }
+export interface LinuxSourceProjection {
+  root: string;
+  device: string;
+  inode: string;
+  scaffolds: string[];
+}
 export interface LinuxLaunch {
+  sourceProjection?: LinuxSourceProjection;
   cwd: string;
   temp: string;
   identities: LaunchIdentity[];
@@ -80,7 +90,18 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
   if (options.mode === 'confined' && cwd.canonical !== workspace.canonical)
     throw Error('linux_shell_cwd_outside_workspace');
   const tempBase = launchIdentity(options.temporaryRoot ?? tmpdir());
-  const protectedRoots = [...new Set(options.protectedRoots)].map((path) => launchIdentity(path));
+  const control = options.controlBase ? launchIdentity(options.controlBase) : undefined;
+  const protectedRoots = [
+    ...new Set([...options.protectedRoots, ...(control ? [control.path] : [])]),
+  ].map((path) => launchIdentity(path));
+  const projection = captureReadOnlySource({
+    cwd,
+    workspace,
+    control,
+    protectedRoots,
+    readOnlySourceRoot: options.readOnlySourceRoot,
+    mode: options.mode,
+  });
   const readonly = [...new Set(options.runtimeReadOnlyRoots ?? [])].map((path) =>
     launchIdentity(path),
   );
@@ -92,9 +113,24 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
   const trustedExecutableFiles = [...new Set([launcher.canonical, ...executablePaths])];
   // An outer 000 mount already protects every nested root. Only visible masks
   // enter the native protocol; every original identity is still revalidated.
-  const maskedRoots = [...new Set(protectedRoots.map((fact) => fact.canonical))].filter(
+  const visibleMasks = [...new Set(protectedRoots.map((fact) => fact.canonical))].filter(
     (path, _index, all) => !all.some((other) => other !== path && within(other, path)),
   );
+  const outerSourceMask =
+    projection && visibleMasks.find((root) => within(root, projection.source.canonical));
+  const sourceProjection: LinuxSourceProjection | undefined =
+    projection && outerSourceMask
+      ? {
+          root: projection.source.canonical,
+          device: projection.source.device,
+          inode: projection.source.inode,
+          scaffolds: projection.ancestors
+            .filter((fact) => within(outerSourceMask, fact.canonical))
+            .map((fact) => fact.canonical)
+            .reverse(),
+        }
+      : undefined;
+  const maskedRoots = visibleMasks.filter((root) => root !== outerSourceMask);
   // Compensation exposes only these fixed OS roots, the declared runtime and Workspace.
   const system =
     options.mode === 'confined'
@@ -120,7 +156,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
       (root) =>
         root.canonical === '/' ||
         within(root.canonical, workspace.canonical) ||
-        within(root.canonical, cwd.canonical) ||
+        (!projection && within(root.canonical, cwd.canonical)) ||
         within(root.canonical, tempBase.canonical),
     )
   )
@@ -148,6 +184,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
     ...assets,
     ...system,
     ...parents,
+    ...(projection ? [projection.source, ...projection.ancestors] : []),
   ];
   if (bindings.length > 198) throw Error('linux_shell_paths_invalid');
   return (_command: string, shell: string, context: JobContext): LinuxLaunch => {
@@ -186,6 +223,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
             noExecPaths,
             trustedExecutableFiles,
             maskedRoots,
+            sourceProjection,
             launcher: launcher.digest,
           }),
         )
@@ -198,6 +236,10 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
       executablePaths: [...executablePaths],
       trustedExecutableFiles: [...trustedExecutableFiles],
       maskedRoots: [...maskedRoots],
+      sourceProjection: sourceProjection && {
+        ...sourceProjection,
+        scaffolds: [...sourceProjection.scaffolds],
+      },
       cleanup,
     });
     try {
@@ -253,6 +295,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
       noExecPaths = [
         ...new Set([
           temp,
+          ...(sourceProjection ? [...sourceProjection.scaffolds, sourceProjection.root] : []),
           ...(mode === 'confined'
             ? [
                 workspace.canonical,
@@ -269,11 +312,24 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
       // Apply masks last: a broad runtime bind must never reveal a protected child.
       for (const path of maskedRoots)
         args.push('--perms', '000', '--tmpfs', path, '--remount-ro', path);
+      if (sourceProjection) {
+        // Only the trusted init can read these synthetic 0700 directories. It
+        // checks their exact child chain, chmods 0111 and seals every mount
+        // before dropping capabilities and opening the business fork gate.
+        for (const path of sourceProjection.scaffolds) args.push('--perms', '700', '--tmpfs', path);
+        args.push('--ro-bind', sourceProjection.root, sourceProjection.root);
+      }
       if (mode === 'confined') args.push('--remount-ro', '/');
       args.push('--chdir', cwd.canonical);
       if (Buffer.byteLength(JSON.stringify(args)) > 128 * 1024)
         throw Error('linux_shell_profile_too_large');
-      if (noExecPaths.length + trustedExecutableFiles.length + maskedRoots.length > 200)
+      if (
+        noExecPaths.length +
+          trustedExecutableFiles.length +
+          maskedRoots.length +
+          (sourceProjection ? 1 + sourceProjection.scaffolds.length : 0) >
+        200
+      )
         throw Error('linux_shell_paths_invalid');
       verifyLaunchIdentities([...bindings, runtimeTemp]);
       return capturedLaunch();

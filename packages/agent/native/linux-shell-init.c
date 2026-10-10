@@ -1,7 +1,8 @@
 /*
  * Trusted PID-namespace init; not a general-purpose command launcher.
  * Invocation: nonce graceMs absoluteShell command workspace|full|confined tempPath [confinedNoExecPaths...]
- * --exec-assets trustedExecutableFiles... --masked-roots protectedPaths...; fd 3
+ * --exec-assets trustedExecutableFiles... --masked-roots protectedPaths...
+ * [--source-projection canonicalSource device inode scaffoldPaths...]; fd 3
  * is an inherited private AF_UNIX/SOCK_SEQPACKET endpoint. bubblewrap must use
  * --unshare-user --unshare-pid --as-pid-1. --die-with-parent may be a
  * crash-only fallback; its SIGKILL never proves normal ended. The as-pid-1
@@ -24,6 +25,7 @@
  * close_range, seccomp-filter and a native little-endian x86_64 or arm64 ABI.
  */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -40,6 +42,8 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/mount.h>
+#include <sys/vfs.h>
+#include <linux/magic.h>
 #include <linux/capability.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -401,6 +405,11 @@ static void finish_tree(pid_t root, int grace, int *raw, int *root_done) {
 #define MAX_PATHS 200
 static const char *seal_paths[MAX_PATHS], *exec_files[MAX_PATHS], *masked_roots[MAX_PATHS];
 static size_t seal_count, exec_count, mask_count;
+static const char *source_root, *scaffolds[MAX_PATHS];
+static size_t scaffold_count;
+static uintmax_t source_device, source_inode;
+static DIR *scaffold_dirs[MAX_PATHS];
+static struct stat scaffold_stats[MAX_PATHS];
 static int listed(const char *path, const char *const *list, size_t count) {
   for (size_t i = 0; i < count; i++) if (!strcmp(path, list[i])) return 1;
   return 0;
@@ -475,6 +484,7 @@ static int inspect_submounts(void) {
     if (decode_mount_path(field) != 0) return -1;
     for (size_t i = 0; i < seal_count; i++) {
       if (!below(field, seal_paths[i])) continue;
+      if (source_root && below(field, source_root)) return -1;
       if (listed(field, exec_files, exec_count)) {
         if (inspect_mount_path(field, 1, 0) != 0) return -1;
       } else if (listed(field, masked_roots, mask_count)) {
@@ -484,6 +494,79 @@ static int inspect_submounts(void) {
     line = end + 1;
   }
   return 0;
+}
+/* A scaffold exposes exactly one child, never the original Profile directory.
+ * Its original readable FD survives chmod 0111 and the mount seal. */
+static int scaffold_children(size_t i) {
+  DIR *directory = scaffold_dirs[i];
+  const char *child = i + 1 < scaffold_count ? scaffolds[i + 1] : source_root;
+  const char *name = strrchr(child, '/');
+  if (!name || (size_t)(name - child) != strlen(scaffolds[i]) ||
+      strncmp(child, scaffolds[i], strlen(scaffolds[i]))) return -1;
+  rewinddir(directory);
+  size_t children = 0;
+  errno = 0;
+  struct dirent *entry;
+  while ((entry = readdir(directory))) {
+    if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+    if (strcmp(entry->d_name, name + 1) || ++children != 1) return -1;
+  }
+  return errno || children != 1 ? -1 : 0;
+}
+static int inspect_source(int sealed) {
+  int fd = open(source_root, O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) return -1;
+  struct stat st;
+  struct statvfs flags;
+  int failed = fstat(fd, &st) != 0 || !S_ISDIR(st.st_mode) ||
+    (uintmax_t)st.st_dev != source_device || (uintmax_t)st.st_ino != source_inode ||
+    fstatvfs(fd, &flags) != 0 || !(flags.f_flag & ST_RDONLY) ||
+    (sealed && (flags.f_flag & (ST_NOEXEC | ST_NOSUID | ST_NODEV)) !=
+      (ST_NOEXEC | ST_NOSUID | ST_NODEV));
+  close_owned(&fd);
+  return failed || unknown ? -1 : 0;
+}
+static int prepare_scaffolds(void) {
+  for (size_t i = 0; i < scaffold_count; i++) {
+    int fd = open(scaffolds[i], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return -1;
+    struct statfs filesystem;
+    struct statvfs flags;
+    int failed = fstat(fd, &scaffold_stats[i]) != 0 ||
+      (scaffold_stats[i].st_mode & 07777) != 0700 ||
+      scaffold_stats[i].st_uid != geteuid() ||
+      fstatfs(fd, &filesystem) != 0 || filesystem.f_type != TMPFS_MAGIC ||
+      fstatvfs(fd, &flags) != 0 || (flags.f_flag & ST_RDONLY);
+    if (!failed && (uintmax_t)scaffold_stats[i].st_dev == source_device) failed = 1;
+    for (size_t j = 0; !failed && j < i; j++)
+      if (scaffold_stats[j].st_dev == scaffold_stats[i].st_dev) failed = 1;
+    if (!failed) scaffold_dirs[i] = fdopendir(fd);
+    if (failed || !scaffold_dirs[i]) { close_owned(&fd); return -1; }
+    if (scaffold_children(i) != 0) return -1;
+  }
+  if (inspect_source(0) != 0) return -1;
+  for (size_t i = 0; i < scaffold_count; i++)
+    if (fchmod(dirfd(scaffold_dirs[i]), 0111) != 0) return -1;
+  return 0;
+}
+static int finish_scaffolds(void) {
+  int failed = 0;
+  for (size_t i = 0; i < scaffold_count; i++) {
+    if (!scaffold_dirs[i]) continue;
+    struct stat current, path;
+    struct statvfs flags;
+    int fd = dirfd(scaffold_dirs[i]);
+    if (fstat(fd, &current) != 0 || stat(scaffolds[i], &path) != 0 ||
+        current.st_dev != scaffold_stats[i].st_dev || current.st_ino != scaffold_stats[i].st_ino ||
+        path.st_dev != current.st_dev || path.st_ino != current.st_ino ||
+        (current.st_mode & 07777) != 0111 || fstatvfs(fd, &flags) != 0 ||
+        (flags.f_flag & (ST_RDONLY | ST_NOEXEC | ST_NOSUID | ST_NODEV)) !=
+          (ST_RDONLY | ST_NOEXEC | ST_NOSUID | ST_NODEV) || scaffold_children(i) != 0) failed = 1;
+    if (closedir(scaffold_dirs[i]) != 0) uncertain();
+    scaffold_dirs[i] = NULL;
+  }
+  if (source_root && inspect_source(1) != 0) failed = 1;
+  return failed || unknown ? -1 : 0;
 }
 static unsigned long retained_mount_flags(unsigned long flags) {
   unsigned long result = 0;
@@ -518,6 +601,7 @@ static int prepare_noexec(void) {
       (caps[0].inheritable & ~admin) || caps[1].effective ||
       caps[1].permitted || caps[1].inheritable) return -1;
   int failed = inspect_submounts() != 0;
+  if (!failed && source_root && prepare_scaffolds() != 0) failed = 1;
   for (size_t i = 0; !failed && i < exec_count; i++)
     if (listed(exec_files[i], seal_paths, seal_count) ||
         listed(exec_files[i], masked_roots, mask_count) ||
@@ -533,7 +617,7 @@ static int prepare_noexec(void) {
     failed = fstat(directory, &before) != 0 || fstatvfs(directory, &old_flags) != 0;
     if (!failed) {
       unsigned long retained = retained_mount_flags(old_flags.f_flag);
-      failed = mount(NULL, path, NULL, retained | MS_BIND | MS_REMOUNT |
+      failed = mount(NULL, path, NULL, retained | (source_root && (!strcmp(path, source_root) || listed(path, scaffolds, scaffold_count)) ? MS_RDONLY : 0) | MS_BIND | MS_REMOUNT |
                      MS_NOEXEC | MS_NOSUID | MS_NODEV, NULL) != 0 ||
         stat(path, &after) != 0 || before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
         fstatvfs(directory, &new_flags) != 0 ||
@@ -544,6 +628,7 @@ static int prepare_noexec(void) {
     if (unknown) failed = 1;
   }
   if (!failed && inspect_submounts() != 0) failed = 1;
+  if (source_root && finish_scaffolds() != 0) failed = 1;
   if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0) failed = 1;
   memset(caps, 0, sizeof caps);
   if (syscall(SYS_capset, &header, caps) != 0 || syscall(SYS_capget, &header, caps) != 0)
@@ -569,7 +654,7 @@ static int absolute_path(const char *path) {
 }
 int main(int argc, char **argv) {
   int grace = 0;
-  if (argc < 9 || argc > 209 || !valid_nonce(argv[1]) || parse_grace(argv[2], &grace) != 0 ||
+  if (argc < 9 || argc > 213 || !valid_nonce(argv[1]) || parse_grace(argv[2], &grace) != 0 ||
       !absolute_path(argv[3]) || !absolute_path(argv[6]) ||
       strnlen(argv[4], 1048577) > 1048576 ||
       (strcmp(argv[5], "workspace") && strcmp(argv[5], "full") && strcmp(argv[5], "confined")) || getpid() != 1)
@@ -581,7 +666,21 @@ int main(int argc, char **argv) {
     size_t size = strnlen(argv[i], 1048577);
     if (size >= 1048576 || argument_bytes > 1048576 - size - 1) return 125;
     argument_bytes += size + 1;
-    if (i < 6) continue;
+  }
+  for (int i = 6; i < argc; i++) {
+    if (!strcmp(argv[i], "--source-projection")) {
+      if (section != 2 || confined || source_root || i + 4 >= argc) return 125;
+      source_root = argv[++i];
+      if (!absolute_path(source_root)) return 125;
+      const char *device = argv[++i], *inode = argv[++i];
+      char *end;
+      errno = 0; source_device = strtoumax(device, &end, 10);
+      if (errno || !*device || *end || strspn(device, "0123456789") != strlen(device)) return 125;
+      errno = 0; source_inode = strtoumax(inode, &end, 10);
+      if (errno || !*inode || *end || !source_inode || strspn(inode, "0123456789") != strlen(inode)) return 125;
+      if (++path_count > MAX_PATHS) return 125;
+      section = 3; continue;
+    }
     if (!strcmp(argv[i], "--exec-assets")) {
       if (section != 0 || !seal_count) return 125;
       section = 1; continue;
@@ -591,11 +690,39 @@ int main(int argc, char **argv) {
       section = 2; continue;
     }
     if (++path_count > MAX_PATHS || !absolute_path(argv[i])) return 125;
-    if (section == 0) seal_paths[seal_count++] = argv[i];
-    else if (section == 1) exec_files[exec_count++] = argv[i];
-    else masked_roots[mask_count++] = argv[i];
+    if (section == 0) {
+      if (listed(argv[i], seal_paths, seal_count)) return 125;
+      seal_paths[seal_count++] = argv[i];
+    } else if (section == 1) {
+      if (listed(argv[i], exec_files, exec_count)) return 125;
+      exec_files[exec_count++] = argv[i];
+    } else if (section == 2) {
+      if (listed(argv[i], masked_roots, mask_count)) return 125;
+      masked_roots[mask_count++] = argv[i];
+    } else {
+      if (listed(argv[i], scaffolds, scaffold_count)) return 125;
+      scaffolds[scaffold_count++] = argv[i];
+    }
   }
-  if (section != 2 || (!confined && seal_count != 1)) return 125;
+  if ((!source_root && section != 2) || (source_root && (section != 3 || !scaffold_count))) return 125;
+  if (!confined && !source_root && seal_count != 1) return 125;
+  if (source_root) {
+    char cwd[PATH_MAX + 1];
+    if (!getcwd(cwd, sizeof cwd) || strcmp(cwd, source_root) ||
+        seal_count != scaffold_count + 2 || !listed(source_root, seal_paths, seal_count)) return 125;
+    for (size_t i = 0; i < scaffold_count; i++) {
+      if (!listed(scaffolds[i], seal_paths, seal_count) || !below(source_root, scaffolds[i])) return 125;
+      const char *child = i + 1 < scaffold_count ? scaffolds[i + 1] : source_root;
+      const char *slash = strrchr(child, '/');
+      if (!slash || (size_t)(slash - child) != strlen(scaffolds[i]) ||
+          strncmp(child, scaffolds[i], strlen(scaffolds[i]))) return 125;
+    }
+    for (size_t i = 0; i < exec_count; i++)
+      if (!strcmp(exec_files[i], scaffolds[0]) || below(exec_files[i], scaffolds[0])) return 125;
+    for (size_t i = 0; i < mask_count; i++)
+      if (!strcmp(masked_roots[i], scaffolds[0]) || below(masked_roots[i], scaffolds[0]) ||
+          below(scaffolds[0], masked_roots[i])) return 125;
+  }
   if (confined) {
     char cwd[PATH_MAX + 1];
     if (!getcwd(cwd, sizeof cwd) || seal_count < 2 ||

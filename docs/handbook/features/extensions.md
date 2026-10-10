@@ -24,6 +24,8 @@ Skill Activation 和 Skill Workflow 默认受开关限制。手册不承诺默�
 
 通用 Service 的 Native API 支持显式 Workflow 激活，需在当前 profile 的 `skill-workflow.jsonc` 打开 `skillActivation` 与 `skillWorkflow`；缺文件默认关闭。`verification` 独立控制核验准入，关闭它仍要求输出符合原契约。请求由已支持 `run_extension_inputs` 的 Client 提交原激活意图，inline 使用原指令，fork 使用原子任务完整结果；失败或未知不能靠模型自行宣称成功。脚本核验需要宿主实际提供受监督进程能力，并继续经过原权限和必要审批。精确配置/API 由 [Service owner](../../../apps/service/README.md#有条件-skill-workflow) 维护。
 
+macOS 正式脚本核验保持原 Skill 执行目录和相对资源读取，使用完整后代监督。Profile 中的准确 Skill 来源只读，其余 Profile 与协调数据仍受保护；来源不能写入、移动或执行其中的原生程序。需要写入的核验效果仍按本次权限作用于原 Workspace，Full 也不解除私有数据保护。取消与超时须等真实停止证明；未确认时保留 unknown 和原资源。Linux 已接对应源码，但实机与完整安装资格仍待验证；当前范围见[来源与监督 owner](../../../packages/agent/src/jobs/README.md#profile-skill-的准确只读来源)。
+
 通用开发 CLI 以可重复的 `--activate-skill <名称或Skill ID>` 显式激活 Workflow，`--skill` 继续选择本次任务可按需使用的知识。TUI 使用 `/<Skill 名称> [任务]`，固定命令优先。两者要求宿主确认当前 Workflow 允许手动调用且接受空对象输入；任务文字作为普通任务内容，不自动填充结构化输入或打开开关。活动 Run 上的激活排为独立 follow-up，保持原 Run 的契约；提交结果未知时核实原命令，不重复创建任务。目录只是读取时的可用性，实际开始仍重新核对可信源、配置和权限。Web 保持只读范围。
 
 通用 Workflow 的 required 核验失败后，Agent 可在同一轮普通执行中修复并提交新尝试；原输出与失败保留，不自动重跑原核验 Job。宿主允许时，Agent 可通过普通问题请求用户选择 replan 或 waive，并要求非空修改指令或豁免理由。replan 建立新尝试；waive 只豁免准确原核验义务，历史仍区分 failed 与 waived，不显示为验证通过。来源、权限、取消或尝试已变化时，旧答案不能继续执行；未知外部效果不能靠用户决定解除。每个父工具、子任务和 verifier 仍分别遵守必要审批，前一个批准不能借给后一个调用。

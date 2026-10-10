@@ -20,7 +20,7 @@ export interface SkillWorkflowVerifierOptions {
   readonly entries: readonly CompiledSkillWorkflow[];
   readonly resolveCapability?: (id: string) => WorkflowCapability | undefined;
   readonly shell: ShellJobOptions;
-  readonly host?: Omit<MacosHostPaths, 'cwd' | 'workspaceRoot'>;
+  readonly host?: Omit<MacosHostPaths, 'cwd' | 'workspaceRoot' | 'readOnlySourceRoot'>;
 }
 const definitionId = 'skill.workflow.verify';
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -114,7 +114,13 @@ export function createSkillWorkflowVerifier(options: SkillWorkflowVerifierOption
       if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2147483647)
         throw new AgentError('workflow_verifier_timeout_invalid');
       const jobOptions = { ...configuration, cwd: entry.sourceBinding.canonicalRoot };
-      const host = options.host && { ...options.host, workspaceRoot: configuration.cwd };
+      const host = options.host && {
+        ...options.host,
+        workspaceRoot: configuration.cwd,
+        ...(entry.source === 'user'
+          ? { readOnlySourceRoot: entry.sourceBinding.canonicalRoot }
+          : {}),
+      };
       const shell =
         host && process.platform === 'linux' && configuration.linux
           ? createLinuxHostShellJob({

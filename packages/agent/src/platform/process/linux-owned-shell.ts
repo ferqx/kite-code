@@ -125,6 +125,7 @@ export interface LinuxOwnedShellOptions {
   noExecPaths: readonly string[];
   trustedExecutableFiles: readonly string[];
   maskedRoots: readonly string[];
+  sourceProjection?: { root: string; device: string; inode: string; scaffolds: readonly string[] };
 }
 const retained = new Set<object>();
 function retainUnknown(value: object) {
@@ -377,6 +378,21 @@ function validReceipt(
 }
 /** Explicit native effect; import performs no FFI, filesystem or process operations. */
 export function startLinuxOwnedShell(options: LinuxOwnedShellOptions): LinuxOwnedShell {
+  const projection = options.sourceProjection;
+  const projectionPaths = projection ? [projection.root, ...projection.scaffolds] : [];
+  if (
+    projection &&
+    (options.mode === 'confined' ||
+      projection.root !== options.cwd ||
+      !/^(0|[1-9][0-9]*)$/.test(projection.device) ||
+      !/^[1-9][0-9]*$/.test(projection.inode) ||
+      !projection.scaffolds.length ||
+      new Set(projectionPaths).size !== projectionPaths.length ||
+      projectionPaths.some(
+        (path) => !isAbsolute(path) || path.includes('\0') || !options.noExecPaths.includes(path),
+      ))
+  )
+    throw error('options');
   if (
     !/^[a-zA-Z0-9_-]{16,128}$/.test(options.nonce) ||
     !Number.isInteger(options.graceMs) ||
@@ -394,7 +410,10 @@ export function startLinuxOwnedShell(options: LinuxOwnedShellOptions): LinuxOwne
       (value) => !isAbsolute(value) || value.includes('\0'),
     ) ||
     (options.mode === 'confined' && !options.noExecPaths.includes(options.cwd)) ||
-    (options.mode !== 'confined' && options.noExecPaths.some((path) => path !== options.temp)) ||
+    (options.mode !== 'confined' &&
+      options.noExecPaths.some(
+        (path) => path !== options.temp && !projectionPaths.includes(path),
+      )) ||
     options.command.includes('\0') ||
     options.bubblewrapArgs.some((value) => value.includes('\0')) ||
     !['--unshare-user', '--unshare-pid', '--as-pid-1'].every((value) =>
@@ -426,6 +445,15 @@ export function startLinuxOwnedShell(options: LinuxOwnedShellOptions): LinuxOwne
         ...options.trustedExecutableFiles,
         '--masked-roots',
         ...options.maskedRoots,
+        ...(projection
+          ? [
+              '--source-projection',
+              projection.root,
+              projection.device,
+              projection.inode,
+              ...projection.scaffolds,
+            ]
+          : []),
       ],
       {
         cwd: options.cwd,

@@ -398,7 +398,9 @@ fork 从原 parent Execution 和封存 parent Run 选择可信角色与准确版
 
 脚本核验仅在可信已核准 Shell 装配下注册普通 `skill.workflow.verify@1`。实际资产与非秘密环境摘要封存，模型不能传 command/cwd/env/path；执行前再次核原资产。脚本从原 Skill root 执行，修改该目录内已封存文件会被来源复核拒绝。配置与发现本身不启动进程。核验与 fork 的失败、未知、必要审批和结果始终留在原 Run/Execution；冷 resolver 在读凭据前比较原 Workflow 快照，不偷换现在配置。
 
-Linux verifier现使用host后端，原Skill cwd与授权Workspace分别捕获，scope核实际`skill.workflow.verify@1`最终policy，不能借`shell.command`的快照。Workspace来源已接该源码链；Profile内Skill的cwd仍落在保护dataRoot中，准确拒绝，保原cwd的只读来源投影仍是完整迁移缺口。macOS默认verifier继续原显式group合同，本轮未把它称为全树后端迁移；显式可信host装配仍可选择独立cwd／Workspace，保护根内cwd拒绝。
+macOS／Linux正式verifier均使用原host后端，原Skill cwd与授权Workspace分别捕获，scope核实际`skill.workflow.verify@1`最终policy，不能借`shell.command`的快照。Profile Skill在完整来源复核后只读暴露准确原子树与必要祖先metadata；保原相对资源及忽略目录读取，其余Profile／coordination、来源写入／移动及native exec-map仍受保护。Workspace来源保持原Workspace写范围。默认macOS已从group切到完整coalition；Linux源码接入私有tmpfs祖先链及原目录ro-bind，原生资格继续待验。普通Shell没有此来源例外，模型不能提供投影选项。
+
+[正式来源整例](test/isolated/skill-workflow-profile-host.test.ts)经实际SQLite／Runtime、同一配置工厂、原extensionInputs激活、独立Tool／Job审批和原verifierproof，核Profile／Workspace完整Run及审批期间来源漂移零启动。正常drain后的完整原View／Run／Execution／records在冷只读Store全等，零新Model／Job；macOS已实际通过，同一文件的Linux分支使用真实编译init／Bubblewrap并核v2全部结束事实，尚未运行，不取得installed／HTTP／Linux资格。
 
 声明补偿在实际macOS资产，或明确Linux native init／Bubblewrap资产、trusted policy与Workspace内原声明可用时注册`skill.workflow.compensate@1`。该独立Job始终minimum:user，显式策略硬拒绝仍优先；最低审批不会借原verifier或普通question许可。工厂封存保护整个dataRoot／coordination的受限配置与资产摘要，guard在普通派发前拒绝变更；固定Bun在原Workspace执行完整只读原资产，禁止网络和派生子进程，没有普通Shell fallback。Linux snapshot准确标`linux-bubblewrap-pid-namespace`，实际资格仍未执行；macOS标`macos-seatbelt`。compensated不满足原verification，unknown不豁免。[真实默认Service补偿测试](test/isolated/skill-workflow-compensation.test.ts)使用实际SDK/HTTP/SQLite、超过300KiB的完整审批附件，核一次脚本效果、拒绝零效果、原failed保留、repair attempt2重验和准确waiver；这是本机macOS范围，不是全部平台或正式客户端资格。
 

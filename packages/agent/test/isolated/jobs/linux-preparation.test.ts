@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -194,4 +195,74 @@ test('nested Profile coordination and executable aliases share the exact visible
     } finally {
       launch.cleanup();
     }
+  }));
+test('trusted Profile Skill projection retains canonical cwd while exposing only a private readonly noexec ancestor chain', () =>
+  fixture((options, shell) => {
+    const profile = join(options.temporaryRoot!, '..', 'outside-profile');
+    const control = join(profile, '.coordination');
+    const skill = join(profile, 'skills', 'original');
+    mkdirSync(control, { recursive: true });
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(join(skill, 'verify.sh'), 'original source');
+    const projected = {
+      ...options,
+      cwd: skill,
+      controlBase: control,
+      protectedRoots: [profile],
+      readOnlySourceRoot: skill,
+    };
+    const prepare = captureLinuxLaunch(projected, [shell]);
+    const launch = prepare('unused', shell, context);
+    try {
+      expect(launch.cwd).toBe(skill);
+      expect(mount(launch, '--bind', options.workspaceRoot!, options.workspaceRoot!)).toBe(true);
+      expect(launch.sourceProjection).toEqual({
+        root: skill,
+        device: lstatSync(skill, { bigint: true }).dev.toString(),
+        inode: lstatSync(skill, { bigint: true }).ino.toString(),
+        scaffolds: [profile, join(profile, 'skills')],
+      });
+      expect(launch.maskedRoots).toEqual([]);
+      expect(launch.noExecPaths).toEqual([launch.temp, profile, join(profile, 'skills'), skill]);
+      expect(mount(launch, '--ro-bind', skill, skill)).toBe(true);
+      expect(mount(launch, '--bind', skill, skill)).toBe(false);
+      for (const path of launch.sourceProjection!.scaffolds) {
+        const index = launch.bubblewrapArgs.indexOf(
+          path,
+          launch.bubblewrapArgs.lastIndexOf('--dev'),
+        );
+        expect(launch.bubblewrapArgs.slice(index - 3, index + 1)).toEqual([
+          '--perms',
+          '700',
+          '--tmpfs',
+          path,
+        ]);
+      }
+      expect(launch.identities.some((fact) => fact.canonical === control)).toBe(true);
+      expect(launch.identities.some((fact) => fact.canonical === skill)).toBe(true);
+      expect(launch.bubblewrapArgs.slice(-2)).toEqual(['--chdir', skill]);
+    } finally {
+      launch.cleanup();
+    }
+    expect(() =>
+      captureLinuxLaunch({ ...projected, readOnlySourceRoot: control }, [shell]),
+    ).toThrow('shell_readonly_source_invalid');
+    expect(() => captureLinuxLaunch({ ...projected, controlBase: undefined }, [shell])).toThrow(
+      'shell_readonly_source_invalid',
+    );
+    expect(() => captureLinuxLaunch({ ...projected, workspaceRoot: skill }, [shell])).toThrow(
+      'shell_readonly_source_invalid',
+    );
+    expect(() =>
+      captureLinuxLaunch({ ...projected, runtimeReadOnlyRoots: [profile] }, [shell]),
+    ).toThrow('linux_shell_asset_protected');
+    const nested = join(skill, 'nested');
+    mkdirSync(nested);
+    expect(() =>
+      captureLinuxLaunch({ ...projected, protectedRoots: [profile, nested] }, [shell]),
+    ).toThrow('shell_readonly_source_invalid');
+    // Retain the original inode at another name so this is not an inode-reuse lottery.
+    renameSync(skill, join(profile, 'original-moved'));
+    mkdirSync(skill);
+    expect(() => prepare('unused', shell, context)).toThrow('confined_launch_changed');
   }));

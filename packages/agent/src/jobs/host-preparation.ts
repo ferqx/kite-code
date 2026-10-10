@@ -5,11 +5,14 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { JobContext } from '../extensions';
 import type { ConfinedLaunch } from './confined-preparation';
 import { launchIdentity, removeRuntimeTemp, verifyLaunchIdentities } from './launch-identity';
+import { captureReadOnlySource } from './read-only-source';
 import { SEATBELT_BASE_POLICY } from './seatbelt';
 
 export interface MacosHostPaths {
   readonly cwd: string;
   readonly workspaceRoot?: string;
+  /** Exact original Profile Skill tree selected by the trusted verifier after source revalidation. */
+  readonly readOnlySourceRoot?: string;
   readonly controlBase: string;
   readonly protectedRoots: readonly string[];
   readonly readonlyAssets?: readonly string[];
@@ -51,11 +54,19 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
     (path) => launchIdentity(path),
   );
   const tempBase = launchIdentity(options.temporaryRoot ?? tmpdir());
+  const sourceProjection = captureReadOnlySource({
+    cwd,
+    workspace,
+    control,
+    protectedRoots,
+    readOnlySourceRoot: options.readOnlySourceRoot,
+  });
   if (
     within(workspace.canonical, tempBase.canonical) ||
     protectedRoots.some(
       (root) =>
-        within(root.canonical, workspace.canonical) || within(root.canonical, cwd.canonical),
+        within(root.canonical, workspace.canonical) ||
+        (within(root.canonical, cwd.canonical) && !sourceProjection),
     )
   )
     throw Error('host_shell_workspace_protected');
@@ -63,13 +74,29 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
   const assets = [
     ...new Set([...binaries, '/usr/bin/sandbox-exec', ...(options.readonlyAssets ?? [])]),
   ].map((path) => launchIdentity(path, !lstatSync(realpathSync.native(path)).isDirectory()));
-  const bindings = [cwd, workspace, control, tempBase, ...protectedRoots, ...readonly, ...assets];
+  const bindings = [
+    cwd,
+    workspace,
+    control,
+    tempBase,
+    ...protectedRoots,
+    ...readonly,
+    ...assets,
+    ...(sourceProjection ? [sourceProjection.source, ...sourceProjection.ancestors] : []),
+  ];
   if (bindings.length > 190) throw Error('host_shell_paths_invalid');
   // A protected child can live inside the Workspace. Protect its actual ancestor
   // identities from rename/unlink as well, without denying writes to siblings.
   const renameProtected = [
     ...new Set(
-      [control, tempBase, ...protectedRoots, ...readonly, ...assets].flatMap((fact) =>
+      [
+        control,
+        tempBase,
+        ...protectedRoots,
+        ...readonly,
+        ...assets,
+        ...(sourceProjection ? [sourceProjection.source] : []),
+      ].flatMap((fact) =>
         ancestors(fact.digest === null ? fact.canonical : dirname(fact.canonical)),
       ),
     ),
@@ -111,6 +138,19 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
       const assetFilters = assets.map((asset) =>
         asset.digest === null ? subpath(asset.canonical) : literal(asset.canonical),
       );
+      // Denies retain precedence. Only this original tree and exact ancestor
+      // metadata escape the private read deny; ancestors still cannot be listed.
+      const sourceAncestors =
+        sourceProjection?.ancestors
+          .filter((ancestor) =>
+            protectedRoots.some((root) => within(root.canonical, ancestor.canonical)),
+          )
+          .map((ancestor) => literal(ancestor.canonical)) ?? [];
+      const privateReadFilters = protectedRoots.map((root) =>
+        sourceProjection && within(root.canonical, sourceProjection.source.canonical)
+          ? `(require-all ${subpath(root.canonical)} (require-not (require-any ${subpath(sourceProjection.source.canonical)} ${sourceAncestors.join(' ')})))`
+          : subpath(root.canonical),
+      );
       const profile = [
         SEATBELT_BASE_POLICY.replace('(deny process-fork)', '(allow process-fork)'),
         '(allow file-read* file-read-metadata)',
@@ -121,7 +161,11 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
           ? '(allow file-write* file-write-create file-write-unlink file-ioctl)'
           : `(allow file-write* file-write-create file-write-unlink file-ioctl ${[workspace.canonical, temp].map(subpath).join(' ')})`,
         `(deny file-write* file-write-create file-write-unlink file-ioctl ${assetFilters.join(' ')} ${readonly.map((root) => subpath(root.canonical)).join(' ')})`,
-        `(deny file-read* file-read-metadata file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${protectedRoots.map((root) => subpath(root.canonical)).join(' ')})`,
+        `(deny file-read* file-read-metadata ${privateReadFilters.join(' ')})`,
+        ...(sourceAncestors.length
+          ? [`(deny file-read-data file-read-xattr ${sourceAncestors.join(' ')})`]
+          : []),
+        `(deny process-exec file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${protectedRoots.map((root) => subpath(root.canonical)).join(' ')})`,
         `(deny file-write-unlink ${renameProtected.map(literal).join(' ')})`,
         `(deny process-exec file-map-executable ${subpath(temp)})`,
         '(allow network*)',

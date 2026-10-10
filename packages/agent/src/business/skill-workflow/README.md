@@ -28,7 +28,9 @@ fork 使用普通 `operations.ensure` 的 Agent carrier 并等待原结果。完
 
 [脚本 verifier](verifier.ts) 接受可信已编译 entries 与 Shell 装配，普通 Job `skill.workflow.verify@1` 的闭合输入是 skillId/revision/activationId/attempt/outputDigest/output。start 重核正安全整数 attempt、完整 canonical output digest、原来源、依赖、输出和 script strategy，在原 canonical root 用固定 Bun 执行原 entrypoint，不接受模型提供 command/cwd/env/path。观察、取消和 dispose 复用原 Shell guardian；超时等待真实停止结果，未确认停止仍保 unknown。它不建立隐藏 Provider、Loop 或补偿调度器，也不把进程监督称为文件/网络沙箱。
 
-Linux正式Service verifier传入已封存host配置，执行cwd仍是原Skill根，写范围独立绑定原Workspace；最终scope核准确`skill.workflow.verify`策略。显式Linux配置缺host／错误平台拒绝，不能回落普通进程组。Profile内Skill的原cwd与整个dataRoot保护仍冲突，当前准确拒绝；保原cwd且不暴露其他Profile字节的来源投影尚未实现，不能宣称完整LinuxWorkflow迁移。macOS默认verifier保原显式group路径；可信显式host可选择macOS后端，但不从这些源码分支取得平台资格。
+正式macOS／Linux Service verifier传入已封存host配置，执行cwd仍是原Skill根，写范围独立绑定原Workspace；最终scope核准确`skill.workflow.verify`策略。Profile来源在原完整revalidate后，由可信工厂把准确canonical root作为私有`readOnlySourceRoot`交给host，JSON／模型不获得这个选项。它只开放原Skill子树与必要祖先metadata，保原相对导入、package resolution和忽略目录资源；整个其余dataRoot／coordination仍不可读，来源不可写／移动／native exec-map。Workspace来源不新增只读限制。目录投影不表示被忽略文件进入原revision摘要，也不增加任意同UID外部替换的保证。
+
+默认macOS verifier已切到完整coalition后端，正式调用者不再选择原group路径；显式无host的程序化POSIX装配继续保其有限group合同。明确Linux配置缺host／错误平台拒绝，无group fallback。Linux独立tmpfs祖先链与原来源只读bind在业务gate前由init逐项封RO／NOEXEC／NOSUID／NODEV；其实际Linux运行资格仍待重构后的原生验收，不能用macOS或mock代证。来源投影边界归[Jobs owner](../../jobs/README.md#profile-skill-的准确只读来源)，取舍见[原来源决定](../../../../../.agents/notes/implemented/architecture/2026-10-10-profile-workflow-read-only-original-source.md)。
 
 verifier 从公开 `@kite-ai/agent/jobs/shell` leaf 取得进程实现。完整包构建保留该依赖边界，使 guardian 始终相对于所属公开 leaf 定位；不把带相对资产路径的实现复制到任意共享 chunk，也不回退源码或系统安装目录。
 

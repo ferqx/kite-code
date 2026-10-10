@@ -33,6 +33,7 @@ async function until<T>(read: () => Promise<T | undefined>) {
 }
 function endpoint(command: string, stop = false, background = false, child = false) {
   let actualCommand = command;
+  let beforeStop: (() => Promise<void>) | undefined;
   const requests: Record<string, unknown>[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -82,6 +83,7 @@ function endpoint(command: string, stop = false, background = false, child = fal
               { name: 'shell.read', input: { shellId: key, afterSeq: '0', limit: 200 } },
             ];
       const call = background && results.length > 0 ? undefined : calls[results.length];
+      if (call?.name === 'shell.stop') await beforeStop?.();
       const chunk = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
       return new Response(
@@ -108,6 +110,9 @@ function endpoint(command: string, stop = false, background = false, child = fal
   });
   return {
     requests,
+    beforeStop(callback: () => Promise<void>) {
+      beforeStop = callback;
+    },
     command(value: string) {
       actualCommand = value;
     },
@@ -1008,6 +1013,57 @@ nativeTest(
   async () => {
     const f = await fixture({ stop: true, command: "trap '' TERM; sleep 30 & printf ready; wait" });
     try {
+      f.a.beforeStop(async () => {
+        await until(async () => {
+          const original = await f.store.getExtensionRecord({
+            sessionId: 's',
+            extensionId: 'builtin.shell',
+            key: 'shell/work',
+          });
+          const value = original?.value;
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+          const ref = value.ref;
+          if (
+            !ref ||
+            typeof ref !== 'object' ||
+            Array.isArray(ref) ||
+            typeof ref.executionId !== 'string' ||
+            ref.originStoreId !== f.base.expectedStoreId
+          )
+            return undefined;
+          const job = await f.store.getExecution(ref.executionId);
+          if (
+            job?.kind !== 'job' ||
+            job.definitionId !== 'shell.command' ||
+            job.sessionId !== 's' ||
+            job.originStoreId !== f.base.expectedStoreId ||
+            job.status !== 'running'
+          )
+            return undefined;
+          const reference = job.reference;
+          if (
+            !reference ||
+            typeof reference !== 'object' ||
+            Array.isArray(reference) ||
+            typeof reference.processGroupId !== 'number' ||
+            !Number.isSafeInteger(reference.processGroupId) ||
+            reference.processGroupId < 2
+          )
+            return undefined;
+          const output = await f.store.listExecutionOutput({
+            executionId: job.id,
+            afterSeq: '0',
+            limit: 200,
+          });
+          return output.items
+            .filter((row) => row.stream === 'stdout')
+            .map((row) => row.content)
+            .join('')
+            .includes('ready')
+            ? job
+            : undefined;
+        });
+      });
       await f.submit();
       await f.done();
       const rows = await f.store.listExecutions('s');

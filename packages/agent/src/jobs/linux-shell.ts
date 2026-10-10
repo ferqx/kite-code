@@ -224,6 +224,7 @@ export function createLinuxShellJob(
             noExecPaths: launch.noExecPaths,
             trustedExecutableFiles: launch.trustedExecutableFiles,
             maskedRoots: launch.maskedRoots,
+            ...(launch.sourceProjection ? { sourceProjection: launch.sourceProjection } : {}),
           });
         } catch (error) {
           if (error instanceof LinuxOwnedShellStartError) return error.cleanup;

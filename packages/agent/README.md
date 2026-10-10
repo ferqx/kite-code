@@ -27,7 +27,7 @@
 - [完整 Model 正文与实际输入检查](src/model-body/README.md)：原产物正文与大 Model/Auto 请求以准确 scope 的不可变 Artifact 交接，Provider 前完整展开并核实 hash；只读原 Execution 请求及固定上界调用目录不捕获现在来源、不初始化 Provider，Worker 仍使用有限传输。
 - [完整 Model 输出](src/model-output/README.md)：原 Execution linked segments 的完整 EOF、历史展开与 child 正文；私有 reviewer 另封存有限答案凭据，最终 Store 只核原 descriptor 和不可变登记，不以 preview 代替全文。
 - [Task 入口](src/extensions/task/README.md)与[Shell Tools](src/tools/shell.README.md)：可信角色和原 Job 的普通控制工具，使用同一受控 operations；容量、输入与实际执行资格由 owner 记录。
-- [Shell Jobs](src/jobs/README.md)：显式 POSIX、macOS host／confined 和 Linux host／confined 的可信资产、执行范围与原进程结束证明；Linux 正式 caller 已接源码，Profile Skill 来源投影和原生资格仍缺。
+- [Shell Jobs](src/jobs/README.md)：显式 POSIX、macOS host／confined 和 Linux host／confined 的可信资产、执行范围与原进程结束证明；正式 verifier 已接准确只读 Profile Skill 来源，Linux 原生资格仍缺。
 - [Web Fetch 入口](src/tools/web-fetch/README.md)：普通 `web_fetch` Tool、逐跳资源准入与真实 DNS/socket 绑定，惰性使用已构建的无执行能力解析 Worker；大正文保留完整 Artifact。
 - [配置入口](src/config/README.md)：JSONC 评论保留与短锁 CAS、分层解析、脱敏封存、opaque credential refs 和惰性 OS backend。默认 Service 的每 Run 解析由 Service owner 负责。
 - [Skills](src/skills/README.md)与[MCP](src/mcp/README.md)：摘要发现、按需正文/资源与具有版本的普通 Tool 快照；leaf import 不连接远端或启动进程。
@@ -57,7 +57,7 @@ MCP强制重连的建立失败收尾由[MCP leaf](src/mcp/README.md#强制重连
 
 受控 Job 先按稳定 operation key 原子登记 Command 与 planned Execution，applied 回执只表示创建，实际 handle 由 `markRunning` 保存。普通 Tool 的 namespace 从原 Run 或准确成功 Model 的实际定义绑定核实；后者还核对 Model 请求中的工具版本、同 Store/Session/rootWork 和原 Run，受控无 Run 子操作核对有限父执行链。namespace 资格不替代实际工具授权。Job 继承来源、根工作和必要业务约束。attached/detached 只改变局部父取消边，根工作停止与删除仍有效。终态与目标 Session/contextSelection 的 pending 或 suppressed 投递事实同事务保存，不自动续轮或调用模型。
 
-Job.start 的可选只读 `dispatchAuthorization` 来自资源等待后的最终 decision，仅在原 `markDispatching` 事务接受权限与 controlReads 后交付。Core 克隆 revision/namespace/version/data；人工批准和自动批准保留原 decision snapshot，包括实际 childPermissions 的父子交集树。它是通过派发边界的宿主执行范围元数据，不是新 grant，不覆盖硬门禁或取消。默认 macOS／Linux Shell 与 Linux verifier 消费各自实际定义的全部原策略交集；Core 不认识 Shell mode/路径含义。
+Job.start 的可选只读 `dispatchAuthorization` 来自资源等待后的最终 decision，仅在原 `markDispatching` 事务接受权限与 controlReads 后交付。Core 克隆 revision/namespace/version/data；人工批准和自动批准保留原 decision snapshot，包括实际 childPermissions 的父子交集树。它是通过派发边界的宿主执行范围元数据，不是新 grant，不覆盖硬门禁或取消。默认 macOS／Linux Shell 与正式 verifier 消费各自实际定义的全部原策略交集；Core 不认识 Shell mode/路径含义。
 
 本地子 Agent 通过固定宿主 `childConfigurations` 与普通 `operations.ensure({request:{kind:'agent',configurationId,input}})` 登记。Store 原子创建 child Session、Command 与 carrier Job，Core 取得每父 Run 的有界子许可后激活 child Run，复用同一个 `executeRun/defaultLoop`。父 Tool 等待子工作不持有模型槽；嵌套子工作各有直接子许可，不设置隐藏回合上限。子 Tools/Jobs/namespace 不得超过实际父 Step 允许范围，准确调用执行父子 policy 交集；Ask 与 Review 同时适用时保留双 proof。可信 fresh resolver 使用真实 Store Workspace，新 carrier 重新解析绑定；其 `records.forExtension(id).get(key)` 只读实际父 Session 已绑定 namespace，Host 自动封存有限完整投影 digest/read-set，在 carrier 创建及 child activation 的原事务复核，缺失读取也参与 CAS。getter 随 resolver 结束关闭，不交给 Model/HTTP；空读集不为 runless 工作虚构祖先 Run。同原 key 的冷热查回不重新解析或启动。后台 Job 真正结束后才释放原 binding lease。后台 child 完成前保留根执行组 OS owner；精确取消按 attached 关系传播，根停止仍阻止迟到后代。真实 child SIGKILL 恢复保留原 scope、partial、执行身份与未知效果，不自动重新调用模型或工具。
 

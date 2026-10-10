@@ -17,7 +17,9 @@ projection、release-controlled execution policy 或对应 feature flag 时。
 
 Linux 默认 Service、调用 Shell 的 Task、Workspace Skill verifier 和严格补偿现接[原 PID namespace 后端](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)源码。最终权限仍绑定原 Workspace；verifier 单独保持原 Skill cwd，并核实际 verify 定义的最终策略。namespace 外的原 wrapper、内核 credentials、init/root pidfd 与 namespace FD 在业务执行前交接；只读资产、整个 dataRoot／coordination 遮蔽与祖先保护先封闭，再清 capabilities／设置 no_new_privs。正常结束同时核原根准确 wait、namespace 内空树、原 pidfd 死亡、wrapper 实际 exit/close、双流 EOF 与严格 FD 关闭；关闭未知保原资源及 binding lease，冷读不重建控制对象。
 
-Profile 内 Skill 的保 cwd 只读来源投影尚未实现，当前 Linux verifier 对该来源准确拒绝，完整 Workflow 迁移未闭合。macOS 默认 verifier 继续原显式 group 合同，本轮没有把它改称全树后端；显式 POSIX 与各固定 confined 工厂分别保各自合同。Win/Linux 当前默认 Shell 未取得运行资格；依用户最新选择，重构完成后由 GitHub Actions 验证这两个环境。实际 macOS 邻接、源码/mock 检查不外推三平台、全部资源指标或 production release qualification；RSS 与完整可信 Runtime 观测仍为独立未闭合门禁。
+正式 Profile Skill verifier 现由可信来源复核提供准确原目录只读投影，固定 Bun 保原 canonical cwd，原 Workspace 独立决定写范围。私有根的读取只对准确 Skill 子树和必要祖先 metadata 例外；来源及整个保护根仍拒写／移动／native exec-map，祖先不提供目录内容。macOS 正式 verifier 已选择同一完整 coalition 后端，Linux 已接私有祖先 mount 链与准确 ro-bind 源码；完整实现和验收范围归[Jobs owner](../../packages/agent/src/jobs/README.md#profile-skill-的准确只读来源)。普通 Shell 没有来源例外，显式 POSIX 与各固定 confined 工厂分别保各自合同。
+
+Win/Linux 当前默认 Shell 未取得运行资格；依用户最新选择，重构完成后由 GitHub Actions 验证这两个环境。实际 macOS leaf／正式 Service、源码/mock 检查不外推三平台、installed 全消费者、全部资源指标或 production release qualification；RSS 与完整可信 Runtime 观测仍为独立未闭合门禁。
 
 [当前platform/execution workflow](../../tests/integration/scripts/unified-ci.test.ts)核新 owner paths、实际 source-free probe 与 formal verifier；不再调用下方旧 builtin/App 测试。当前宿主开放范围由上述实现和运行证据界定；下文保历史投影、威胁模型及仍适用的安全约束，未知/未完成范围继续拒绝。
 
