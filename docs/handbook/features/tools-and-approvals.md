@@ -6,7 +6,7 @@
 
 当前统一链路的 macOS 默认 Shell 使用宿主工具链，允许命令派生子进程并保留宿主 HOME。非 Full 模式允许写当前 Workspace 和本次私有临时目录，允许 IP 网络，拒绝 Unix socket 的绑定及外连；Full 允许宿主权限内的外部写入及网络。两种范围都保护实际 Profile、协调目录和运行资产，不能通过移动它们的父目录绕过保护，私有临时目录中的 native 程序也不能直接执行或映射。缺可信资产、最终执行范围或可核实的监督后端时，该次调用失败，不切换到其他执行环境。Windows/Linux 的实际运行验证按当前重构计划在完成后交给 GitHub Actions，不由 macOS 结果推定。
 
-Linux 默认 Shell、调用 Shell 的 Task、Workspace Skill 验证和严格 Workflow 补偿已接入对应范围的源码后端，实际 Linux 运行资格仍待上述验证。验证脚本在原 Skill 目录执行，写范围仍受原 Workspace 授权约束；Profile 内 Skill 的只读来源投影尚未完成，当前该来源的脚本调用会拒绝。完整 Workflow 能力迁移仍未闭合，范围与证据见[实施进度](../../plans/unified-agent-refactor-v1-progress.md#2026-10-10linux-正式-shelltaskworkflow-源码接线)。
+Linux 默认 Shell、调用 Shell 的 Task、Skill 验证和严格 Workflow 补偿已接入对应范围的源码后端，实际 Linux 运行资格仍待上述验证。验证脚本在原 Skill 目录执行，写范围仍受原 Workspace 授权约束。Profile Skill 的可信来源复核会只读开放准确原 Skill 子树，保留相对资源读取；其余 Profile 内容、来源写入和移动仍受保护，普通 Shell 不获得这个例外。macOS 已有实际来源验证，Linux 尚待原生验收。完整 Workflow 能力迁移仍未闭合，范围与证据见[实施进度](../../plans/unified-agent-refactor-v1-progress.md#2026-10-10profile-workflow-原来源与正式-verifier-迁移)。
 
 Shell 启动、读取、等待和停止使用同一个持久 Job。提交停止只表示取消已受理；确认停止必须核实本次命令的完整后代，包括脱离原进程组的后代。Shell 自然退出和所属 Service 退出也执行这项清理。输出丢失区间和未知结果如实保存，冷读取不会重新运行旧命令。
 
@@ -31,6 +31,8 @@ Auto 下需要审查的调用按当前任务、准确参数和授权进入审批
 通用 Agent 的大人工审批请求使用完整附件，有限卡保留原调用与可选授权范围；读取附件后再决定。正文大小不使后端截断参数或扩张授权。普通问题的回答只提供信息；即使问题用于 Workflow replan/waiver，也不等于批准后续工具。等待期间现行权限变化时，旧答案不能授予执行。
 
 文件工具不再因过去的整文件、搜索匹配数、修改原文或模型结果长度上限拒绝操作或隐去结果。`read_file` 未指定 `limit` 时读取剩余全文；显式 `offset`、`limit` 仍按行选择内容并给出续读位置。文件路径权限、二进制检查、目标身份、原文摘要和原子发布检查仍生效。数据能被读取不代表任意模型均能在一个请求中接收它；Provider 的真实请求容量仍生效。
+
+Windows x64 本地 Workspace 的六文件工具及检查点原字节恢复已接入源码后端，完整 Windows 运行与安装版资格仍待验证。操作绑定原 Workspace 对象，不修改已有文件或目录的 ACL。Windows 的备用数据流、设备名、尾点／空格、重解析路径及短名别名会明确拒绝；受保护目录不能借大小写变体绕过。实际能力和验证边界见[Files owner](../../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)。
 
 `search_files` 和 `search_content` 的文件 glob 中，完整目录段 `**/` 匹配零层或多层目录，因此 `**/*.ts` 包含搜索根目录的 `.ts` 文件。`tool_search` 中带具体用途的查询继续搜索匹配能力；只有纯工具／服务目录查询才提示使用 `list_mcp_tools`。
 

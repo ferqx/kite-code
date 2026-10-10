@@ -1,20 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  fsyncSync,
-  lstatSync,
-  openSync,
-  readSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
-import { assertNoSymlinkPath } from '../platform/profile-identity';
 import { AgentError } from '../storage/types';
 import { fileChangePreview } from './files-diff';
-import { directoryFlags, listAt, openAt, publishAt, unlinkAt } from './files-native';
+import { createWorkspaceFileIo } from './files-io';
 
 export interface FileBaseline {
   hash: string;
@@ -137,7 +125,7 @@ function pageLimit(value = 100): number {
   if (!Number.isInteger(value) || value < 1 || value > 200) fail('file_page_invalid');
   return value;
 }
-/** Explicit host selection. POSIX directory descriptors bind operations to the selected objects. */
+/** Explicit host selection. Operations retain the selected physical directory objects. */
 export function createWorkspaceFiles(options: {
   root: string;
   maxFileBytes?: number;
@@ -146,8 +134,6 @@ export function createWorkspaceFiles(options: {
   /** Trusted host may apply the same deny scope to ordinary Tools as well as byte recovery. */
   protectReads?: boolean;
 }): WorkspaceFiles {
-  if (process.platform !== 'darwin' && process.platform !== 'linux')
-    fail('file_platform_unsupported');
   const max = options.maxFileBytes;
   if (max !== undefined && (!Number.isSafeInteger(max) || max < 1)) fail('file_limit_invalid');
   if (options.protectedPaths !== undefined && !Array.isArray(options.protectedPaths))
@@ -161,50 +147,69 @@ export function createWorkspaceFiles(options: {
     fail('file_path_invalid');
   const protectReads = options.protectReads === true;
   const isProtected = (normalized: string) =>
-    protectedPaths.some((path) => normalized === path || normalized.startsWith(`${path}/`));
+    protectedPaths.some((path) => {
+      const name = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+      const denied = process.platform === 'win32' ? path.toLowerCase() : path;
+      return name === denied || name.startsWith(`${denied}/`);
+    });
   const root = resolve(options.root);
-  assertNoSymlinkPath(root);
-  const rootFd = openSync(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-  const initial = fstatSync(rootFd);
-  if (!initial.isDirectory()) {
-    closeSync(rootFd);
-    fail('file_root_invalid');
-  }
+  const io = createWorkspaceFileIo(root, protectedPaths, protectReads);
+  const rootFd = io.root;
   let closed = false;
   function check(): void {
     if (closed) fail('file_closed');
-    assertNoSymlinkPath(root);
-    const current = lstatSync(root);
-    if (current.dev !== initial.dev || current.ino !== initial.ino || realpathSync(root) !== root)
-      fail('file_root_changed');
+    io.verifyRoot();
   }
   function withParent<T>(
     path: string,
     work: (parent: number, name: string) => T,
     strict = false,
+    mutation = false,
   ): T {
     check();
     const parts = segments(path);
     if (!parts.length) fail('file_path_invalid');
     if ((strict || protectReads) && isProtected(parts.join('/'))) fail('file_path_protected');
-    if (strict && fstatSync(rootFd).uid !== process.getuid?.()) fail('file_owner_invalid');
+    if (strict) io.verifyOwner(rootFd);
     const opened: number[] = [];
     let fd = rootFd;
+    let completed = false;
+    let result: T | undefined;
+    let failed = false;
+    let failure: unknown;
     try {
       for (const part of parts.slice(0, -1)) {
-        fd = openAt(fd, part, directoryFlags);
+        fd = io.openAt(fd, part, 'directory', strict);
         opened.push(fd);
-        if (strict && fstatSync(fd).uid !== process.getuid?.()) fail('file_owner_invalid');
+        if (strict) io.verifyOwner(fd);
       }
-      return work(fd, parts.at(-1)!);
+      result = work(fd, parts.at(-1)!);
+      completed = true;
+    } catch (error) {
+      failed = true;
+      failure = error;
     } finally {
-      for (const child of opened.reverse()) closeSync(child);
+      for (const child of opened.reverse()) {
+        try {
+          io.closeHandle(child);
+        } catch (error) {
+          if (!failed) {
+            failure =
+              completed && mutation
+                ? new AgentError('file_publish_outcome_unknown', 'parent_close_unknown')
+                : error;
+            failed = true;
+          }
+        }
+      }
     }
+    if (failed) throw failure;
+    return result!;
   }
   function readAt(path: number, name: string, logical: string): FileSnapshot {
-    const fd = openAt(path, name, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const fd = io.openAt(path, name, 'read');
     try {
-      const before = fstatSync(fd, { bigint: true });
+      const before = io.stat(fd);
       if (!before.isFile()) fail('file_not_regular');
       if (max !== undefined && before.size > BigInt(max)) fail('file_too_large');
       const buffer = Buffer.alloc(64 * 1024);
@@ -213,7 +218,7 @@ export function createWorkspaceFiles(options: {
       const parts: string[] = [];
       let count = 0;
       while (true) {
-        const read = readSync(fd, buffer, 0, buffer.length, null);
+        const read = io.read(fd, buffer);
         if (!read) break;
         count += read;
         if (!Number.isSafeInteger(count) || (max !== undefined && count > max))
@@ -227,7 +232,7 @@ export function createWorkspaceFiles(options: {
         }
         if (count === read) checkTextSample(bytes);
       }
-      const after = fstatSync(fd, { bigint: true });
+      const after = io.stat(fd);
       if (
         before.dev !== after.dev ||
         before.ino !== after.ino ||
@@ -255,7 +260,7 @@ export function createWorkspaceFiles(options: {
         },
       };
     } finally {
-      closeSync(fd);
+      io.closeHandle(fd);
     }
   }
   function baselineEqual(a: FileBaseline, b: FileBaseline): boolean {
@@ -274,60 +279,77 @@ export function createWorkspaceFiles(options: {
     if (Buffer.from(input.content).toString('utf8') !== input.content)
       fail('file_encoding_invalid');
     checkTextSample(Buffer.from(input.content.slice(0, 8192)));
-    return withParent(input.path, (parent, name) => {
-      let before: FileSnapshot | null = null;
-      const verify = () => {
-        try {
-          const current = readAt(parent, name, input.path);
-          if (!input.base || !baselineEqual(current.baseline, input.base))
-            fail('file_baseline_conflict');
-          before = current;
-        } catch (error) {
-          if (!(missing(error) && input.base === null)) throw error;
-        }
-      };
-      verify();
-      const temp = `.kite-write-${randomUUID()}`;
-      const fd = openAt(
-        parent,
-        temp,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-        0o600,
-      );
-      let published = false;
-      try {
-        writeFileSync(fd, input.content, 'utf8');
-        fsyncSync(fd);
+    return withParent(
+      input.path,
+      (parent, name) => {
+        let before: FileSnapshot | null = null;
+        const verify = () => {
+          try {
+            const current = readAt(parent, name, input.path);
+            if (!input.base || !baselineEqual(current.baseline, input.base))
+              fail('file_baseline_conflict');
+            before = current;
+          } catch (error) {
+            if (!(missing(error) && input.base === null)) throw error;
+          }
+        };
         verify();
-        check();
-        publishAt(parent, temp, name, input.base === null);
-        published = true;
-        fsyncSync(parent);
-        const after = readAt(parent, name, input.path);
-        const publishedFile = fstatSync(fd, { bigint: true });
-        if (
-          after.content !== input.content ||
-          after.baseline.device !== String(publishedFile.dev) ||
-          after.baseline.inode !== String(publishedFile.ino)
-        )
-          fail('file_publication_changed');
-        return { ...after, change: fileChangePreview(before, after) };
-      } catch (error) {
-        if (published)
-          throw new AgentError(
-            'file_publish_outcome_unknown',
-            error instanceof Error ? error.message : String(error),
-          );
-        throw error;
-      } finally {
-        closeSync(fd);
+        const temp = `.kite-write-${randomUUID()}`;
+        const fd = io.openAt(parent, temp, 'temporary');
+        let published = false;
+        let result: FileSnapshot | undefined;
+        let failed = false;
+        let failure: unknown;
         try {
-          unlinkAt(parent, temp);
-        } catch {
-          // Publication is authoritative; a failed temporary cleanup cannot undo it.
+          io.write(fd, Buffer.from(input.content));
+          io.sync(fd);
+          verify();
+          check();
+          io.publishAt(parent, temp, name, input.base === null);
+          published = true;
+          io.sync(parent);
+          const after = readAt(parent, name, input.path);
+          const publishedFile = io.stat(fd);
+          if (
+            after.content !== input.content ||
+            after.baseline.device !== String(publishedFile.dev) ||
+            after.baseline.inode !== String(publishedFile.ino)
+          )
+            fail('file_publication_changed');
+          result = { ...after, change: fileChangePreview(before, after) };
+        } catch (error) {
+          failed = true;
+          failure = error;
+        } finally {
+          try {
+            io.closeHandle(fd);
+          } catch (error) {
+            failed = true;
+            failure = error;
+          }
+          try {
+            io.unlinkAt(parent, temp);
+          } catch (error) {
+            // Publication is authoritative; a failed temporary cleanup cannot undo it.
+            if (error instanceof AgentError && error.code === 'file_close_unknown') {
+              failed = true;
+              failure = error;
+            }
+          }
         }
-      }
-    });
+        if (failed) {
+          if (published)
+            throw new AgentError(
+              'file_publish_outcome_unknown',
+              failure instanceof Error ? failure.message : String(failure),
+            );
+          throw failure;
+        }
+        return result!;
+      },
+      false,
+      true,
+    );
   }
   function byteLimit(value: number): number {
     if (!Number.isSafeInteger(value) || value < 1) fail('file_limit_invalid');
@@ -350,23 +372,19 @@ export function createWorkspaceFiles(options: {
     path: string,
     limit: number,
   ): FileByteSnapshot {
-    const fd = openAt(
-      parent,
-      name,
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    );
+    const fd = io.openAt(parent, name, 'read', true);
     try {
-      const before = fstatSync(fd, { bigint: true });
+      const before = io.stat(fd);
       if (!before.isFile()) fail('file_not_regular');
-      if (before.uid !== BigInt(process.getuid!()) || before.nlink !== 1n)
-        fail('file_owner_invalid');
+      io.verifyOwner(fd);
+      if (before.nlink !== 1n) fail('file_owner_invalid');
       if (before.size > BigInt(limit)) fail('file_too_large');
       const chunks: Buffer[] = [];
       const digest = createHash('sha256');
       let count = 0;
       const block = Buffer.alloc(64 * 1024);
       for (;;) {
-        const size = readSync(fd, block, 0, block.length, null);
+        const size = io.read(fd, block);
         if (!size) break;
         count += size;
         if (!Number.isSafeInteger(count) || count > limit) fail('file_too_large');
@@ -374,14 +392,14 @@ export function createWorkspaceFiles(options: {
         digest.update(chunk);
         chunks.push(chunk);
       }
-      const after = fstatSync(fd, { bigint: true });
+      const after = io.stat(fd);
       if (
         before.dev !== after.dev ||
         before.ino !== after.ino ||
         before.size !== after.size ||
         before.mtimeNs !== after.mtimeNs ||
         before.ctimeNs !== after.ctimeNs ||
-        before.uid !== after.uid ||
+        before.owner !== after.owner ||
         after.nlink !== 1n ||
         BigInt(count) !== after.size
       )
@@ -397,7 +415,7 @@ export function createWorkspaceFiles(options: {
         },
       };
     } finally {
-      closeSync(fd);
+      io.closeHandle(fd);
     }
   }
   function verifyBytes(
@@ -431,28 +449,23 @@ export function createWorkspaceFiles(options: {
       (parent, name) => {
         verifyBytes(parent, name, input.path, input.base, limit);
         const temp = `.kite-write-${randomUUID()}`;
-        const fd = openAt(
-          parent,
-          temp,
-          constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-          0o600,
-        );
+        const fd = io.openAt(parent, temp, 'temporary');
         let published = false;
         let result: FileByteSnapshot | undefined;
         let failed = false;
         let failure: unknown;
         try {
-          writeFileSync(fd, bytes);
-          fsyncSync(fd);
+          io.write(fd, bytes);
+          io.sync(fd);
           verifyBytes(parent, name, input.path, input.base, limit);
           check();
-          publishAt(parent, temp, name, input.base === null);
+          io.publishAt(parent, temp, name, input.base === null);
           published = true;
-          // Create-only publication temporarily has two links; remove the private temp first.
-          if (input.base === null) unlinkAt(parent, temp);
-          fsyncSync(parent);
+          // POSIX create-only links retain a second name; Windows moves the original temporary.
+          if (input.base === null && io.createOnlyLeavesTemporary) io.unlinkAt(parent, temp);
+          io.sync(parent);
           result = readBytesAt(parent, name, input.path, limit);
-          const publishedFile = fstatSync(fd, { bigint: true });
+          const publishedFile = io.stat(fd);
           if (
             result.baseline.device !== String(publishedFile.dev) ||
             result.baseline.inode !== String(publishedFile.ino) ||
@@ -466,15 +479,19 @@ export function createWorkspaceFiles(options: {
           failure = error;
         } finally {
           try {
-            closeSync(fd);
+            io.closeHandle(fd);
           } catch (error) {
             failed = true;
             failure = error;
           }
           try {
-            unlinkAt(parent, temp);
-          } catch {
+            io.unlinkAt(parent, temp);
+          } catch (error) {
             /* Published outcome is authoritative. */
+            if (error instanceof AgentError && error.code === 'file_close_unknown') {
+              failed = true;
+              failure = error;
+            }
           }
         }
         if (failed) {
@@ -488,6 +505,7 @@ export function createWorkspaceFiles(options: {
         return result!;
       },
       true,
+      true,
     );
   }
   function remove(input: { path: string; base: FileBaseline; maxBytes: number }): FileRemoval {
@@ -498,16 +516,12 @@ export function createWorkspaceFiles(options: {
       (parent, name) => {
         verifyBytes(parent, name, input.path, input.base, limit);
         check();
-        unlinkAt(parent, name);
+        io.unlinkAt(parent, name, true);
         try {
-          fsyncSync(parent);
+          io.sync(parent);
           try {
-            const fd = openAt(
-              parent,
-              name,
-              constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-            );
-            closeSync(fd);
+            const fd = io.openAt(parent, name, 'read');
+            io.closeHandle(fd);
             fail('file_changed');
           } catch (error) {
             if (!missing(error)) throw error;
@@ -522,15 +536,16 @@ export function createWorkspaceFiles(options: {
         }
       },
       true,
+      true,
     );
   }
   function entries(path: string): FileEntry[] {
     const parts = segments(path);
     const sentinel = [...parts, '.kite-list-sentinel'].join('/');
     return withParent(sentinel, (parent) => {
-      const result = listAt(parent).filter(
-        (entry) => !protectReads || !isProtected([...parts, entry.name].join('/')),
-      );
+      const result = io
+        .listAt(parent)
+        .filter((entry) => !protectReads || !isProtected([...parts, entry.name].join('/')));
       return result.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     });
   }
@@ -760,10 +775,8 @@ export function createWorkspaceFiles(options: {
       };
     },
     async close() {
-      if (!closed) {
-        closed = true;
-        closeSync(rootFd);
-      }
+      closed = true;
+      io.close();
     },
   };
 }

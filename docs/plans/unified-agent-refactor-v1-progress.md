@@ -4357,3 +4357,37 @@ Windows／Linux实际native和installed资格未运行，依用户顺序留重�
 | 4 | §35完整37能力／T/E／正式caller独立审查、最终legacy退役及阶段收束 | 全部适用能力与兼容样本实证、实际删除旧路径、未过滤阶段完整回归以及适用P7责任完整成立 | 前三项适用资格及剩余能力；首发前无适用published新基线样本不阻源码。本片不是阶段收束点，局部绿不能退出 |
 
 Jobs owner、Runtime resilience active、测试入口、Linux proposed Note、能力映射与计划同步实际caller边界；Note保proposed，手册普通执行／取消／恢复承诺不变，当前平台资格仍按实际来源核。37能力partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。只交付已授权正常本地stage／commit，hook和CI强制要求保持，无push／PR／发布。
+
+## 2026-10-10：Windows 普通 Files 与检查点恢复源码
+
+本轮继续以完整能力、正式调用者和真实退出依赖推进。限定审计安装／版本切换／维护恢复、管理／后台／MCP／普通 Skills 未发现新的独立生产装配缺口，但不把限定审计当作全§35或平台通过。重新沿 Files 实际入口发现被先前平台清单遗漏的真实源码缺口：正式六工具已经注册，`createWorkspaceFiles` 却在 Windows 直接 `file_platform_unsupported`；检查点 restore／remove 也复用该工厂，所以历史可读或 UI 接线不等于实际文件能力已迁移。
+
+### 真实依赖与本轮实施
+
+Windows Shell 的 Job owner 可复用，现有 token机制却不能同时满足广泛 HOME／工具读取、Workspace／Full 写范围和私有内容无条件拒绝。用户已决定保留现有合同：Windows Shell 后端继续列为未闭合门禁，guard保留，先完成其他独立能力迁移；不实施读取／Full行为或管理员安装／驱动／VM范围变更。Files的可信宿主直接操作没有这个Shell完成依赖；RSS／完整观测仍只阻适用 P6／§35／最终退役及依赖其结果的 P7，不阻独立安装、维护或本片源码。
+
+因此直接实施当前可独立完成的最高源码项：共享 `WorkspaceFileIo` 保原六工具、UTF-8／BOM／CRLF、完整 baseline、分页／search／glob、Artifact／下一 Model全文、逐操作change和字节恢复语义。Windows x64后端用固定System DLL、原根／祖先／逐段父 HANDLE、root-relative NtCreateFile、canonical长名／case／ADS／8.3／reparse检查、volume＋128-bit FileID与实际ChangeTime。普通 Workspace不修DACL；strict byte单独核currentSID owner／nlink1，新temporary与原0600对应私有。
+
+原temporary HANDLE完整分块写入及flush后，相对原父HANDLE no-overwrite／replace；删除沿原对象disposition、actual close及缺失确认。叶子自身捕获实际效果后的后置unknown，共享write／restore及parent收尾也不把发布后close失败标成功；关闭未知强持原owner，不从数字HANDLE重建或重试。最终核对发现NtCreateFile嵌套FFI buffer借用需强持，已将完整指针图留在owner至同步调用／结果检查结束，SDDL／rename／disposition直接传Buffer或TypedArray；原GC测试增加对应真实Windows操作观测，保完整原业务工作量。Windows目录sync只核原身份，fileflush不称POSIX目录fsync或断电证明，相关原生／制品资格保持。Service／六工具／checkpoint原正式公开工厂实际选择新Windows后端，不恢复旧filesystem Provider、不改Kernel／SQL／HTTP／Tool版本。
+
+### 验证与文档边界
+
+必要验证按共享I/O接缝、完整用户行为及原强制门禁选择，运行原完整文件、不改断言／预算／默认调度。Windows专属四个完整能力用例只在actual win32强制执行，无backend availability skip；本机macOS的四个显式平台skip不授Windows资格。首轮在并行整合新leaf尚未落盘时load失败，未进入产品用例，准确原log保在`/private/tmp/kite-windows-files-new-whole-20261011.log`；此记录既不冒充产品行为反例，也不记通过。
+
+- 现有隔离runner按原每文件进程／concurrency1、macOS四槽和自有HOME／Profile运行全部14受影响完整文件，冻结后实际exit0，34pass／856expects／0fail；四个Win32用例显式skip。包括普通完整Files、源码外built大正文／byte、GC原路径寿命、取消、真实Core receipt，以及正式default／runtimeAssets／Fork／公开backup-restore新Store和cold原历史。12个原文件字节不变；原GC文件只补Windows真实NtCreateFile与rename／disposition调用观测，原八项行为断言、Mac/Linux四项调用预期和默认5秒预算保留，新文件补新平台合同。完整log `/private/tmp/kite-windows-files-owned-jobs-frozen-final-20261011.log` SHA `0a6e1a8bf972d4f5dad8e7026450d825e5f20f9a7b29ba21000f2f22922772dd`；首轮冻结log `/private/tmp/kite-windows-files-owned-jobs-final-20261011.log` 及其原SHA `4acff7bf9f59fb2ec73dabd3b5311c606761b96f0666e60f99ee30fa348cc241` 保留，不以旧输入证明最终修正。
+- 初次将10个isolated文件共用一个Bun进程，实际exit1／24pass／4skip／1fail／317expects：已有libc缓存使后装FFI观测器采不到调用；同一原完整路径寿命文件按其原独立进程实际exit0／1pass／8expects。没有修改该断言或排除该文件，最终完整14原runner作业包含它。原log `/private/tmp/kite-windows-files-shared-whole-20261011.log` 及独立 `/private/tmp/kite-windows-files-native-path-owned-20261011.log` 保留，调度依据归`test-plan.ts`和tests“默认执行与隔离”。
+- Service初次sandbox完整四文件实际exit1／4pass／5fail／64expects，五例在loopback `Bun.serve`前置监听失败；按准确同文件的原runner，必要本机权限复验通过，没有过滤或改变fixture／预算。原log `/private/tmp/kite-windows-files-service-whole-20261011.log` 保留。没有平台安装、真实外部Model、450秒/RSS或新增持续参数实验。
+- 最终Root及八workspace types、五TS只读Biome实际exit0；workspace／boundary／API及test ownership原适用检查实际exit0，相关边界输入未变。独立readonly审查未发现必要语义／ABI修正；共享关闭收尾核全部原父资源，不丢失原业务错误，发布后关闭失败保持unknown。三个源码、Windows新test及原GC测试的冻结SHA在`/private/tmp/kite-windows-files-source-freeze-20261011.json`，完整复验前后`source_changed_after_frozen_validation=[]`；原测试保全收据在`/private/tmp/kite-windows-files-preservation-20261011.json`。本机通过不授Windows syscalls／完整caller或目录断电资格。
+
+手册修正Profile Skill只读原来源仍称未实现的滞后句，与`4f4e975a`及当前正式verifier一致；macOS既有实际来源证据不重新扩矩阵，Linux源码／原生待验分别保留。Service owner也修正Windows Artifact整体不可用的滞后描述：x64已有原发布／完整读取源码，具体资格仍归Artifact owner。Files owner、共享文件active、Windows Shell active及proposed Note归位实际source和未闭合资格，文档不改变用户已确认读写／恢复／unknown合同。
+
+### 最多五项剩余退出缺口
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与明确验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed普通Shell及调用Shell的Task／Workflow | 原Workspace／Full权限求交、广泛HOME／工具读取和无条件private保护，原完整Job输出、全树取消、unknown强持与cold零重放；完整正式Service／installed用户链实证 | 文件权限后端仍缺，现有token／Job不足；用户已决定保原合同、门禁及guard，继续其他独立迁移。独立于RSS和Files |
+| 2 | Windows正式六文件工具、代码恢复及Win/Linux完整安装／版本切换／维护恢复消费者的原生资格 | 原正式Run实际读写／检索／大正文、checkpoint原字节恢复；实际候选install／A→B→A／rollback／uninstall、PTY／窗口、backup／restore新Store／GC、完整原历史／cursor与零重放 | 本轮已补真实Files源码拒绝，限定审查未发现其他独立安装／维护source defect；仍须实际OS／资产及适用Shell权限资格，按用户顺序重构后Actions，无dispatch |
+| 3 | installed混合持续任务／Shell／child／MCP的原RSS和完整资源资格 | 八outer／各九点、原busy≥450000ms／outer与总60—168分钟、增长／斜率、全部可信Runtime后代／activeResources／handles满足原门槛 | 原RSS `+115.203125MiB > 32MiB` red和观测缺项保留，不做重复参数对照；直接阻P6／§35／最终退役，不阻独立source实施 |
+| 4 | §35完整37能力／T/E独立审查、最终legacy退役及阶段收束 | 全部适用能力与兼容样本实证、真实旧路径删除、未过滤阶段完整回归及适用P7责任完整成立 | 前三项适用资格及剩余能力，限定源码／局部通过不代整体退出。本片非阶段收束点，不运行完整回归制造阶段通过 |
+
+37能力仍partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。本轮仅已授权本地提交，无push／PR／发布／平台安装／Actions；原Mac stdio红、RSS红和所有缺资格门禁不被文档或POSIX结果覆盖。

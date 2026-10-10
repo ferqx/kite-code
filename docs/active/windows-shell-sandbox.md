@@ -14,6 +14,8 @@ Probe，或 Windows Full/fallback UI 状态时。
 
 Windows stdio MCP 现有独立[原 Job／HANDLE owner](../../packages/agent/src/platform/process/windows-owned-child.ts)及[正式 transport 接线](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)源码；这不是 Shell sandbox，也不解除上述 Shell guard。下一 Shell 实施须另建当前 Full／Workspace 范围的真实权限 ceiling：旧 `WRITE_RESTRICTED` 的 restricting SID 只参与写检查，不能证明 Profile 读拒绝；旧 `protected_deny_paths` 实际为空，Full＋网络分支还使用无该 guard 的当前用户 token。原目录及祖先 deny-DELETE HANDLE 可保护对象身份，但不能代替内容读写隔离。源码缺口保持，不能先删 guard 再普通 spawn；实机资格继续依用户顺序留重构后。
 
+本轮核对当前源码与 [CreateRestrictedToken 官方语义](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)：现有 current-user token／Job 原语不能同时组成广泛 HOME／工具读取、Workspace／Full 写范围和私有内容无条件拒绝。用户已决定保留现有合同，Windows Shell 后端继续作为未闭合门禁，先完成其他独立能力迁移。AppContainer 的读取资源／Full 行为变更及系统隔离后端的管理员安装／驱动或 VM 范围不在本轮实施授权内。[Windows Files 原 HANDLE 后端](../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)是可信宿主的独立能力，源码实施不依赖 Shell 后端完成，也不解除 guard。
+
 下方V6/restricted-token/Schannel/Job、旧candidate与旧Gate资料保留历史机制、实际限制和安全经验。若后续将其中能力移入新宿主，仍须以新公共Execution/Job、准确封闭来源/许可、实际Windowsnative与完整制品证明；不能包装旧Host/writer，或凭旧pin/CI记录启用新的effectfulplatform。当前新平台formal verifier继续拒完整缺资格；三OS结果由[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。
 
 ## 历史runner与仍适用的安全约束

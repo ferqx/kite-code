@@ -7,12 +7,18 @@
 
 相关：[Agent Note 0111](../../.agents/notes/implemented/feature/2026-08-18-governed-local-provider-seams.md)、[Agent Note 0113](../../.agents/notes/implemented/architecture/2026-08-18-descriptor-relative-workspace-mutation-publication.md)、[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)、[Agent Note 0122](../../.agents/notes/implemented/bug-fix/2026-08-18-windows-handle-locked-workspace-mutation.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)。
 
+## 当前统一 Files 与历史 Provider
+
+V1.3 正式 Service 的 Files 工具及检查点恢复沿 `@kite-ai/agent/files`、原 Core 派发和可信 Workspace scope，不调用下方旧 `WorkspaceFilesystemProvider`。共享六工具、完整正文、baseline、预览及 restore／remove 的当前合同归 [Files owner](../../packages/agent/src/tools/files/README.md)。[平台分派](../../packages/agent/src/tools/files-io.ts)现接 POSIX 原 FD 和 Windows x64 原 HANDLE；Windows 不改普通 Workspace 既有 DACL，拒绝 reparse／名称等价绕过，实际原生和安装版资格仍未完成。
+
+当前验证使用[现有隔离 runner](../../scripts/test-plan.ts)，按[默认执行与隔离](../../tests/README.md#默认执行与隔离)独立运行 `packages/agent/test/isolated/files` 及 Service 原 Files／checkpoint 完整文件；Windows 原生用例必须在 actual win32 运行，不因 backend unavailable 而 skip。Windows file flush／目录身份核对不宣称 POSIX directory fsync或断电持久性，来源和 unknown 约束不变。本文下方保留历史 Provider 机制与仍适用的安全经验，不能把旧生产权威或测试当成新入口的运行证明。
+
 ## 设计目标
 
 在 Windows/Linux/macOS 三平台下，读取、编辑准备与提交使用同一 Local Provider 解码和目标身份，且任何
 Workspace filesystem I/O 都不能绕过 Tool Pipeline 的 durable intent 与 purpose-bound grant。
 
-## 当前生产权威（PS-01 + RM-12）
+## 历史生产权威（PS-01 + RM-12）
 
 生产文件能力的唯一 contract seam 是 `@kite-ai/runtime-spi` 的 `WorkspaceFilesystemProvider`，其三个 purpose
 隔离入口为 `observe`、`prepareMutation` 与 `commitMutation`。`@kite-ai/builtin-runtime/filesystem` 的

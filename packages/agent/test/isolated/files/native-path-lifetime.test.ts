@@ -13,6 +13,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWorkspaceFiles } from '../../../src/files';
 
+// The Windows leaf deliberately uses lazy CJS FFI; initialize that builtin cache
+// before replacing it so the shim observes real native calls in both loaders.
+if (process.platform === 'win32') require('bun:ffi');
 const originalFFI = { ...ffi };
 const collectedCalls = new Set<string>();
 mock.module('bun:ffi', () => ({
@@ -22,15 +25,30 @@ mock.module('bun:ffi', () => ({
     definitions: Parameters<typeof ffi.dlopen>[1],
   ) {
     const library = originalFFI.dlopen(filename, definitions);
-    if (!('__openat' in definitions || 'openat' in definitions)) return library;
+    if (
+      !(
+        '__openat' in definitions ||
+        'openat' in definitions ||
+        'NtCreateFile' in definitions ||
+        'SetFileInformationByHandle' in definitions
+      )
+    )
+      return library;
     return {
       ...library,
       symbols: Object.fromEntries(
         Object.entries(library.symbols).map(([name, call]) => [
           name,
           (...args: unknown[]) => {
-            if (name.includes('openat') || ['renameat', 'linkat', 'unlinkat'].includes(name)) {
-              collectedCalls.add(name);
+            const windowsRenameOrRemove =
+              name === 'SetFileInformationByHandle' && (args[1] === 3 || args[1] === 4);
+            if (
+              name.includes('openat') ||
+              ['renameat', 'linkat', 'unlinkat'].includes(name) ||
+              name === 'NtCreateFile' ||
+              windowsRenameOrRemove
+            ) {
+              collectedCalls.add(windowsRenameOrRemove ? `${name}:${args[1]}` : name);
               Bun.gc(true);
               const churn = Array.from({ length: 256 }, () => Buffer.alloc(256, 120));
               const result = Reflect.apply(call, undefined, args);
@@ -80,12 +98,14 @@ test('anchored Files path bytes survive collection through actual read, rename, 
     await files.remove({ path: createdPath, base: created.baseline, maxBytes });
     expect(existsSync(join(root, createdPath))).toBe(false);
     expect([...collectedCalls].sort()).toEqual(
-      [
-        process.platform === 'darwin' ? '__openat' : 'openat',
-        'linkat',
-        'renameat',
-        'unlinkat',
-      ].sort(),
+      process.platform === 'win32'
+        ? ['NtCreateFile', 'SetFileInformationByHandle:3', 'SetFileInformationByHandle:4'].sort()
+        : [
+            process.platform === 'darwin' ? '__openat' : 'openat',
+            'linkat',
+            'renameat',
+            'unlinkat',
+          ].sort(),
     );
   } finally {
     await files.close();

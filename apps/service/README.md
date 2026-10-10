@@ -111,7 +111,7 @@ W12 管理与 Run 解析共用默认装配 vault。认证 `GET /v1/config/user?s
 
 W09 二进制内容使用 `GET /v1/sessions/{id}/artifacts/{refId}?storeId=&scopeKind=&scopeId=`。宿主填主体，仅通过 `Runtime.readArtifact` 读取；原 Store、Session、引用和准确 session/execution/message scope 始终是访问依据。额外 path/hash/subject query 拒绝，hash 或文件名不授予访问。响应包含已核实完整字节、header 中实际 media type/size/hash、`Content-Disposition: attachment`、`Cache-Control: no-store` 和 `X-Content-Type-Options: nosniff`。scope 错误、缺引用或 Store 不符局部失败，不关闭 Service；GET 不执行工作、不推进 SSE 游标。
 
-默认进程在打开 SQLite 后明确创建宿主 Artifact store，将中立 port 注入 Runtime；Runtime 在 Store 之前关闭该 port。Windows 当前只对这个可选 leaf 报 `artifact_platform_unsupported`，其他 profile 权威失败不吞掉，也不补造 Artifact capability。Query 使用认证宿主主体核实范围引用，不接受 HTTP 自报 subject。
+默认进程在打开 SQLite 后明确创建宿主 Artifact store，将中立 port 注入 Runtime；Runtime 在 Store 之前关闭该 port。Windows x64 已有原 HANDLE 的发布及完整读取源码，实际运行资格见[Artifact owner](../../packages/agent/src/artifacts/README.md)；不支持的平台在实际调用时明确 `artifact_platform_unsupported`，其他 Profile 权威失败不吞掉，也不补造 Artifact capability。Query 使用认证宿主主体核实范围引用，不接受 HTTP 自报 subject。
 
 2 项实际集成测试通过 paired child 中的 Core Tool 发布无害字节，验证准确 binary SDK 下载、原 scope、错误 Store/Session/scope、path/hash 注入拒绝、认证、重复读取零效果以及活动 Run/event cursor 不变。另一个真实进行中 GET 在实际 Artifact store 的受控 reader barrier 被取消，原 Model 仍活动；其他 Service 主体拒绝。测试只用临时文件和 SQLite Worker，不读用户内容。维护 GC 和平台发行资格仍未完成。
 

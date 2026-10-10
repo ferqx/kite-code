@@ -2,9 +2,21 @@
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
-`read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 3，write/edit/search/glob 为 2，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并 fsync，再次验证基线，最后原子替换或 create-only hardlink，并 fsync 目录。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
+`read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 3，write/edit/search/glob 为 2，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并同步，再次验证基线，最后原子替换或 create-only 发布并核实原对象。POSIX 使用文件 fsync、create-only hardlink 和目录 fsync；Windows 的同步与发布边界见下节。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
 
-POSIX 使用目录 FD 与 no-follow openat 逐段锚定路径，macOS 调用非 variadic `__openat`。相对路径禁止 `..`、`.`、绝对路径和反斜线；根与目标链均不跟随符号链接，不读取设备/FIFO/目录作为正文。根目录替换后原对象不被重新解释成另一权限目标。临时文件清理不会覆盖原发布结果。目录描述符设置 close-on-exec。当前 Windows 明确 `file_platform_unsupported`，没有退回弱化的普通路径替换。
+POSIX 使用目录 FD 与 no-follow openat 逐段锚定路径，macOS 调用非 variadic `__openat`。相对路径禁止 `..`、`.`、绝对路径和反斜线；根与目标链均不跟随符号链接，不读取设备/FIFO/目录作为正文。根目录替换后原对象不被重新解释成另一权限目标。临时文件清理不会覆盖原发布结果。目录描述符设置 close-on-exec。Windows x64 的独立原 HANDLE 后端见下节，其他不支持的平台仍明确 `file_platform_unsupported`。
+
+## Windows Workspace 文件源码
+
+[平台分派](../files-io.ts)让同一个 `WorkspaceFiles` 语义层使用 POSIX 原 FD 或 [Windows 原 HANDLE owner](../files-windows.ts)。正式 Service／六工具、完整 Artifact／Model 正文和检查点 restore／remove 沿原公开入口使用该分派；不增加第二套工具、权限来源、恢复状态或旧 filesystem fallback。Windows 源码接入不等于原生、全部正式客户端或安装制品资格已通过。
+
+Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他架构或路径范围不从源码接入推定可用。工厂固定当前 token SID 和 System DLL，只在实际创建能力时加载。它持有原根及祖先目录 HANDLE，以 `NtCreateFile` 的原父 HANDLE 逐段打开，不跟随 reparse；普通 Workspace 使用已有 DACL，不修 ACL。新 temporary 与 POSIX 的 0600 对应，使用当前 SID 私有权限。完整 baseline 使用实际 volume、128-bit FileID、完整 EOF／hash／size，并比较原 HANDLE 的 LastWriteTime 与 ChangeTime。只有字节恢复要求父链及文件的当前 SID owner 和单链接；普通文件读取保宿主已有权限。
+
+组件拒绝 ADS、DOS 设备名、尾点／空格及非规范路径。实际原 HANDLE 的 canonical 长名对照拒绝 8.3 别名；保护范围按实际组件与 Windows 大小写等价核对，普通合法大小写变体仍可读取同一对象。目录枚举使用原 HANDLE，保护范围与原分页、search、glob 语义共用。未知类型、对象漂移、关闭或内存释放未确认均保明确失败，不从数字 HANDLE 重建资源。
+
+发布先完整写入和 flush 原 temporary，再核准确基线，从原 temporary HANDLE 向原父 HANDLE 相对 rename；create-only 不覆盖，replace 明确替换。删除由原对象 HANDLE 的 disposition、真实 close 及缺失确认组成。发布／删除后的确认或关闭失败保 `file_publish_outcome_unknown`；未知原资源强持整个 owner 及父链，`close` 不宣称释放成功。Windows 的 file flush 与目录身份复核不等于 POSIX directory fsync，也未证明断电持久性；该限制和平台验收保留，不能由异常注入或本机 POSIX 测试替代。API依据见 [NtCreateFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile)、[FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)和 [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)。
+
+[Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行六工具、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip；本机 macOS 未运行这些原生用例。共享原完整文件、正式默认装配及恢复后新 Store 的验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
 
 默认没有整文件、原文、搜索匹配数或长行总额度。读取使用固定 64 KiB 字节块，严格增量 UTF-8 解码、完整 hash 与前后 FD 事实校验；默认 read 返回全部剩余行。宿主显式 `maxFileBytes` 可声明该宿主的单文件能力约束，未设置时不回退为旧 8 MiB。真实内存、磁盘、IO 与字符串表示能力仍可能局部失败，不把它们假装 Provider 窗口。二进制控制字节采样检查和严格 UTF-8 保留，BOM/CRLF 不规范化；search 不将已识别二进制当文本。
 
