@@ -1,8 +1,17 @@
 import { createHash } from 'node:crypto';
-import { closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import {
+  closeSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   type NativeRuntimeProtection,
+  readNativeRuntimeBundleContent,
   verifyNativeRuntimeBundle,
 } from '@kite-ai/service/native-runtime-assets';
 import type { SqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
@@ -24,15 +33,23 @@ export function resolveNativeCandidate(appPath: string): NativeAssets & {
   artifactHelper: { path: string; sha256: string };
   sqlite: SqliteReleaseIdentity;
   windowsAsset?: { path: string; sha256: string };
+  windowsCandidateFiles?: readonly (readonly [string, string, string])[];
 } {
   // Electron's patched fs expands .asar paths. Integrity observes the physical archive,
   // synchronously, and restores the host flag before any application work can run.
   const original = Reflect.get(process, 'noAsar');
   const hadFlag = Object.hasOwn(process, 'noAsar');
   let bundle: ReturnType<typeof verifyNativeRuntimeBundle>;
+  let manifestSize: number, terminalManifestSize: number;
   try {
     if (process.versions.electron) Reflect.set(process, 'noAsar', true);
-    bundle = verifyNativeRuntimeBundle(dirname(appPath));
+    bundle = (
+      process.platform === 'win32' ? readNativeRuntimeBundleContent : verifyNativeRuntimeBundle
+    )(dirname(appPath));
+    manifestSize = readFileSync(join(bundle.root, 'native-manifest.json')).length;
+    terminalManifestSize = readFileSync(
+      join(bundle.terminal.root, 'terminal-manifest.json'),
+    ).length;
   } finally {
     if (process.versions.electron) {
       if (hadFlag) Reflect.set(process, 'noAsar', original);
@@ -73,6 +90,20 @@ export function resolveNativeCandidate(appPath: string): NativeAssets & {
     },
     ...(bundle.manifest.entries.windowsAccess
       ? {
+          windowsCandidateFiles: Object.freeze([
+            Object.freeze(['native-manifest.json', bundle.digest, String(manifestSize)] as const),
+            ...bundle.manifest.files.map((file) =>
+              Object.freeze([file.path, file.sha256, String(file.size)] as const),
+            ),
+            Object.freeze([
+              'terminal/terminal-manifest.json',
+              terminal.digest,
+              String(terminalManifestSize),
+            ] as const),
+            ...terminal.manifest.files.map((file) =>
+              Object.freeze([`terminal/${file.path}`, file.sha256, String(file.size)] as const),
+            ),
+          ]),
           windowsAsset: {
             path: join(bundle.root, bundle.manifest.entries.windowsAccess),
             sha256: files.get(bundle.manifest.entries.windowsAccess)!.sha256,

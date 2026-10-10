@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
+import { readWindowsNativeInstallation } from './windows-native-installation';
 import { readWindowsTerminalInstallation } from './windows-terminal-installation';
 
 export const CLI_REGISTRATION_FILE = '.kite-cli-registration.json';
@@ -50,19 +51,26 @@ export function readCLIRegistration(
   owned = false,
 ): Readonly<CLIRegistration> | undefined {
   const path = join(prefix, owned ? OWNED_CLI_REGISTRATION_FILE : CLI_REGISTRATION_FILE);
-  const stat = lstatSync(path, { throwIfNoEntry: false });
-  if (!stat) return undefined;
+  const bytes =
+    process.platform === 'win32'
+      ? defaultWindowsPathSecurity()!.readScopeFile(path, 16384, true)
+      : undefined;
+  if (process.platform === 'win32' && bytes === null) return undefined;
+  const stat =
+    process.platform === 'win32' ? undefined : lstatSync(path, { throwIfNoEntry: false });
+  if (process.platform !== 'win32' && !stat) return undefined;
   if (
-    !stat.isFile() ||
-    stat.isSymbolicLink() ||
-    stat.nlink !== 1 ||
-    (stat.mode & 0o777) !== 0o600 ||
-    stat.size > 16384 ||
-    (process.getuid && stat.uid !== process.getuid())
+    process.platform !== 'win32' &&
+    (!stat!.isFile() ||
+      stat!.isSymbolicLink() ||
+      stat!.nlink !== 1 ||
+      (stat!.mode & 0o777) !== 0o600 ||
+      stat!.size > 16384 ||
+      (process.getuid && stat!.uid !== process.getuid()))
   )
     throw Error('cli_registration_unsafe');
   const result = parseCLIRegistration(
-    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(path))),
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes ?? readFileSync(path))),
   );
   if (
     (owned ? result.nativePrefix : result.terminalPrefix) !== prefix ||
@@ -84,8 +92,9 @@ export function sameCLIRegistration(
   );
 }
 export function assertManagedCLIPrefix(prefix: string, native = false): void {
-  if (process.platform === 'win32' && !native) {
-    readWindowsTerminalInstallation(prefix);
+  if (process.platform === 'win32') {
+    if (native) readWindowsNativeInstallation(prefix);
+    else readWindowsTerminalInstallation(prefix);
     return;
   }
   const directory = lstatSync(prefix);
@@ -132,7 +141,7 @@ export function readManagedCLIActive(prefix: string): string {
       lines.length !== 3 ||
       lines[2] !== '' ||
       !/^[a-f0-9]{64}$/.test(lines[0]!) ||
-      (lines[1] !== '' && !/^[a-f0-9]{64}$/.test(lines[1]!))
+      (lines[1] !== '' && (!/^[a-f0-9]{64}$/.test(lines[1]!) || lines[1] === lines[0]))
     )
       throw Error('cli_registration_active_invalid');
     return lines[0]!;
@@ -151,7 +160,7 @@ export function readManagedCLIActive(prefix: string): string {
     lines.length !== 3 ||
     lines[2] !== '' ||
     !/^[a-f0-9]{64}$/.test(lines[0]!) ||
-    (lines[1] !== '' && !/^[a-f0-9]{64}$/.test(lines[1]!))
+    (lines[1] !== '' && (!/^[a-f0-9]{64}$/.test(lines[1]!) || lines[1] === lines[0]))
   )
     throw Error('cli_registration_active_invalid');
   return lines[0]!;

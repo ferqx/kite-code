@@ -27,6 +27,10 @@ import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
 import { inspectNativeQuitWork, settleDesktopQuit } from './quit-settlement';
 import { assertNativeSqliteEngine } from './sqlite-engine';
+import {
+  acquireWindowsNativeCandidate,
+  parseWindowsNativeHandoff,
+} from './windows-native-candidate';
 
 declare const __KITE_DESKTOP_NATIVE_ASSETS__: unknown;
 declare const __KITE_DESKTOP_PROFILE_ACCESS__: {
@@ -45,13 +49,8 @@ const candidate =
   'kind' in inputAssets &&
   inputAssets.kind === 'candidate';
 if (candidate && Object.keys(inputAssets).length !== 1) throw Error('invalid_native_assets');
-if (candidate && process.platform === 'win32')
-  throw Object.assign(
-    Error(
-      'native_windows_bootstrap_unqualified: Windows 正式候选尚未具备加载前绑定原生资产身份的资格，已停止启动。',
-    ),
-    { code: 'native_windows_bootstrap_unqualified' },
-  );
+const windowsHandoff =
+  candidate && process.platform === 'win32' ? parseWindowsNativeHandoff(process.argv) : undefined;
 const formalAssets = candidate ? resolveNativeCandidate(app.getAppPath()) : undefined;
 const assets = formalAssets ?? parseNativeAssets(inputAssets);
 const windowsAsset =
@@ -69,7 +68,34 @@ let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
 let privateAccess: DesktopProfileAccess | undefined;
-let artifactAccess: { close(): void }[] = [];
+const acquireFormalWindowsAccess = () => {
+  if (!formalAssets || !windowsAsset || !formalAssets.windowsCandidateFiles || !windowsHandoff)
+    throw Object.assign(Error('native_windows_bootstrap_unqualified'), {
+      code: 'native_windows_bootstrap_unqualified',
+    });
+  const lease = acquireWindowsNativeCandidate({
+    root: formalAssets.candidateRoot,
+    windowsAsset,
+    files: formalAssets.windowsCandidateFiles,
+    handoff: windowsHandoff,
+  });
+  try {
+    const fresh = resolveNativeCandidate(app.getAppPath());
+    if (fresh.runtimeProtection.manifestSha256 !== formalAssets.runtimeProtection.manifestSha256)
+      throw Error('native_asset_identity_mismatch');
+    lease.verify();
+    return lease;
+  } catch (error) {
+    try {
+      lease.close();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], 'native_windows_candidate_close_unknown');
+    }
+    throw error;
+  }
+};
+// Acquisition occurs before BrowserWindow, private Profile, SQLite or paired Service admission.
+let artifactAccess: { close(): void }[] = windowsHandoff ? [acquireFormalWindowsAccess()] : [];
 let startupDiagnostic: ServiceStartupDiagnostic | undefined;
 let quitting = false,
   exitAllowed = false;
@@ -79,17 +105,20 @@ async function openCaller(): Promise<NativeCaller> {
   opening ??= (async () => {
     startupDiagnostic = undefined;
     if (formalAssets) {
-      for (const root of [formalAssets.candidateRoot, formalAssets.terminalRoot])
-        artifactAccess.push(
-          await acquireNodeArtifactAccess({
-            root,
-            bunExecutable: assets.bunExecutable,
-            bunSha256: assets.bunSha256,
-            helperPath: formalAssets.artifactHelper.path,
-            helperSha256: formalAssets.artifactHelper.sha256,
-            ...(windowsAsset ? { windowsAsset } : {}),
-          }),
-        );
+      if (windowsHandoff) {
+        if (!artifactAccess.length) artifactAccess.push(acquireFormalWindowsAccess());
+      } else
+        for (const root of [formalAssets.candidateRoot, formalAssets.terminalRoot])
+          artifactAccess.push(
+            await acquireNodeArtifactAccess({
+              root,
+              bunExecutable: assets.bunExecutable,
+              bunSha256: assets.bunSha256,
+              helperPath: formalAssets.artifactHelper.path,
+              helperSha256: formalAssets.artifactHelper.sha256,
+              ...(windowsAsset ? { windowsAsset } : {}),
+            }),
+          );
       const fresh = resolveNativeCandidate(app.getAppPath());
       if (fresh.runtimeProtection.manifestSha256 !== formalAssets.runtimeProtection.manifestSha256)
         throw Error('native_asset_identity_mismatch');

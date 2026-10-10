@@ -10,6 +10,7 @@
     "./configuration": "./src/configuration.ts",
     "./runtime-assets": "./src/runtime-assets.ts",
     "./native-runtime-assets": "./src/native-runtime-assets.ts",
+    "./windows-native-bootstrap": "./src/windows-native-bootstrap.ts",
     "./runtime-protection": "./src/runtime-protection.ts",
     "./sqlite-release-assets": "./src/sqlite-release-assets.ts",
     "./mcp-http-port": "./src/mcp-http-port.ts",
@@ -19,7 +20,7 @@
     "./daemon-main": "./src/daemon-main.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/paired.ts ./src/main.ts ./src/bootstrap.ts ./src/configuration.ts ./src/runtime-assets.ts ./src/native-runtime-assets.ts ./src/runtime-protection.ts ./src/sqlite-release-assets.ts ./src/mcp-http-port.ts ./src/development-web.ts ./src/daemon.ts ./src/daemon-main.ts --target=bun --packages=external --root=./src --outdir=dist",
+    "build": "bun build ./src/index.ts ./src/paired.ts ./src/main.ts ./src/bootstrap.ts ./src/configuration.ts ./src/runtime-assets.ts ./src/native-runtime-assets.ts ./src/windows-native-bootstrap.ts ./src/runtime-protection.ts ./src/sqlite-release-assets.ts ./src/mcp-http-port.ts ./src/development-web.ts ./src/daemon.ts ./src/daemon-main.ts --target=bun --packages=external --root=./src --outdir=dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

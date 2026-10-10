@@ -139,3 +139,5 @@ Windows Bun x64 的开发维护和安装版标准命令源码已接入同一备�
 独立 Terminal 安装的标准前门可以显式登记 Native。登记后实际 CLI/TUI、Bun 与配套 Service 均来自完整 Native；源码或明确 candidate 选择不参与登记。Native 卸载以原 nonce 撤销自己仍拥有的登记，独立前门恢复 Terminal，不改变业务 Profile 或当前 Run。若父 shell 缓存的是已删除 Native-bin 路径，执行 `hash -r` 或使用新 shell 后恢复 PATH 查找。安装器不修改 PATH/RC，也不能清除父 shell 缓存。当前操作及平台限制见[Native owner](../../../apps/desktop/docs/native-release.md)。
 
 独立 Terminal 正常卸载后，Native 可继续通过自己的入口使用和升级。省略 `--cli-prefix` 的升级不会重建已删除的 Terminal 或自动重新登记。明确指定的登记目标仍必须是合法安装；重新使用独立前门时，先安装 Terminal，再明确登记。
+
+Windows x64 的安装、回退与登记源码已接入同一命令；Native 自带前门为 `kite.exe`、`kite-tui.exe`、`kite-desktop.exe`。登记后的独立 Terminal 核原选择再调用 Native 稳定前门；准入时版本已变化会明确拒绝，不自动回退。代码回退与卸载保独立业务数据，维护恢复仍须明确选择原申请和恢复方向。实际 Windows 安装、窗口及维护恢复资格尚未取得，详见[Native owner](../../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。

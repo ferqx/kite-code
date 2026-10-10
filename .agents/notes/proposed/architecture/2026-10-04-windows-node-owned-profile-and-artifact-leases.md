@@ -10,7 +10,7 @@ Windows 的 LockFileEx 具有不同的进程归属。[Microsoft 文档](https://
 
 ## Proposal
 
-在当前 V1.3 发行闭包内增加有限 Windows x64 Node-API 资产，由 Main 自己执行固定 byte 0、length 1 的 LockFileEx shared acquire。它只提供 Profile 与 Artifact 两个 factory，派生原协调键和锁路径，核实际 current SID、原 HANDLE、ACL 和文件身份；不接收任意 SID、ACL、HANDLE、lockPath 或 lock mode。Service 继续沿 Agent 原生后端自行取得另一个 SH，不接纳 Main 的锁句柄。
+在当前 V1.3 发行闭包内增加有限 Windows x64 Node-API 资产，由 Main 自己执行固定 byte 0、length 1 的 LockFileEx shared acquire。原 Profile 与 Artifact 两个 factory 保持固定职责，正式 managed candidate 另接完整 `candidateShared`；各 factory 派生原协调键和锁路径，核实际 current SID、原 HANDLE、ACL 和文件身份；不接收任意 SID、ACL、HANDLE、lockPath 或 lock mode。Service 继续沿 Agent 原生后端自行取得另一个 SH，不接纳 Main 的锁句柄。
 
 Main 在启动 child 前持有原候选 outer/inner 及 Profile SH，保持到私有 UI 数据库、网络和所属 Service drain 完成。原 startup/bootstrap 保留实际 build、profile、token 和 instance 核对，只有 child 的 Store 实际打开成功才算准备就绪；诊断模式的失败 bootstrap 不能代替持锁证明。父、子各自关闭自己的 HANDLE，任一 SIGKILL 不代表另一 holder 已结束。
 
@@ -20,21 +20,21 @@ Main 在启动 child 前持有原候选 outer/inner 及 Profile SH，保持到�
 
 ## 当前实现与加载根限制
 
-有限 Node-API source、固定 header/build、两factory、闭合资产及平台接缝已部分实施。独立审查发现私有UI prepare原先未在 SQLite open/整个 lifetime 保原目录与主DB对象，现保留原 Profile/desktop-private 目录 HANDLE、原主数据库 shareREAD/WRITE且denyDELETE HANDLE 和 volume/FileID，SQLite关闭后才释放。主DB必须存在并与原HANDLE/现路径匹配；WAL/SHM/journal只作当前私有sidecar检查，不永久钉名称影响checkpoint。关闭失败保未关资源，重复prepare拒绝；本机类型或源码review不是Windows syscall资格。
+有限 Node-API source、固定 header/build、原两factory及managed candidate factory、闭合资产及平台接缝已部分实施。独立审查发现私有UI prepare原先未在 SQLite open/整个 lifetime 保原目录与主DB对象，现保留原 Profile/desktop-private 目录 HANDLE、原主数据库 shareREAD/WRITE且denyDELETE HANDLE 和 volume/FileID，SQLite关闭后才释放。主DB必须存在并与原HANDLE/现路径匹配；WAL/SHM/journal只作当前私有sidecar检查，不永久钉名称影响checkpoint。关闭失败保未关资源，重复prepare拒绝；本机类型或源码review不是Windows syscall资格。
 
-另一窗口仍未关闭：Node完成 `.node` hash读取后关闭FD，再 `require(path)`，两者没有绑定原Windows对象。在addon自身加载之前无法用其factory保denyDELETE HANDLE；事后重hash或新manifest已经太晚。正式candidate Main因此在本应用addon/SQLite/factory/child加载前拒绝 `native_windows_bootstrap_unqualified`，没有formal环境bypass。直接owned后端fixture只能证明有限候选，不作为installed/fullNative放行。
+原 Node hash读取后关FD再require的加载窗口曾导致正式candidate全面前置拒绝。现 [managed Native 创建链决定](../../implemented/architecture/2026-10-10-windows-managed-native-admission.md)部分替代该描述：固定C前门在Bun初始化前pin自身/helper，compiled verifier在创建Electron前取得完整outer/inner pin与双SH，两跳证书分别绑定实际创建返回的原child HANDLE；Main核证书和真实pipe进程，再取得自己的完整文件pin/双SH。PPID可指定，不能代替创建证明；缺handoff、错误证书或漂移仍前置拒绝，没有formal环境bypass。事后hash仍不能补回加载前对象身份。
 
-macOS的实际Node消费者负例核formal guard下nativeLoads/factories/children/appReads全零；两文件3项21断言通过，另5个Windows强制案例本机未执行。实际MSVC、Electron ABI、原文件权限和双holder全生命周期仍待本平台证据，提案继续proposed。加载前可信根需要实际原生启动器/发布者或可证明同对象的OS方案；当前未宣称已实施签名、publisher或完整installer。
+该源码决定不替代本篇Profile/私有UI对象、原锁进程归属和原生验收理由。本篇继续proposed：Windows MSVC、Electron ABI、真实文件权限、Profile前加载与lock交接、配套Service及双holder全生命周期尚未取得本平台资格。既有macOS formal-guard负例只证明当时的拒绝断言，直接owned后端fixture也不作installed/fullNative资格。签名、publisher认证及完整平台发行仍未实施或验收。
 
 ## 当前 CI 编译准备
 
 Windows transport的五个mandatory backend cases与release Native build已接同一[有限Bun准备脚本](../../../../scripts/release/prepare-windows-native-ci.ts)。固定预装vswhere/VsDevCmd取得x64 host/target，compiler使用与builder相同的实际canonical path，核SDK header/library；不自动下载或从PATH发现编译器。构建环境仅十个白名单变量与明确compiler，CL/_CL_清空，完整环境不进入日志。CMD以/u的Unicode输出和fatal UTF-16LE解码保完整非ASCII值，vswhere独立fatal UTF-8；坏字节、冲突重复值和缺事实拒绝。
 
-准确PR head/repository、完整历史、准备先于消费及完整三文件原生测试命令由CI guard核验；仅echo路径或过滤到零case不能作证。本机纯准备/CI/workspace三文件18项80断言通过，实际Windows编译/Node/Electron syscall仍未运行。CI所记录compiler SHA与版本只定位当前工具字节，不能填补Main hash到require的加载根，也不证明publisher或完整Native发行；本提案继续proposed。
+准确PR head/repository、完整历史、准备先于消费及完整三文件原生测试命令由CI guard核验；仅echo路径或过滤到零case不能作证。本机纯准备/CI/workspace三文件18项80断言通过，实际Windows编译/Node/Electron syscall仍未运行。CI所记录compiler SHA与版本只定位当前工具字节，不能独自证明Main加载前原对象交接，也不证明publisher或完整Native发行；加载前源码决定另见上述创建链Note，本提案继续proposed。
 
 ## Alternatives considered
 
-Windows managed Terminal 的原生前门、外置安装协调与同一 DELETE-purpose owner 现另接入源码，见 [安装提案](2026-10-10-windows-managed-terminal-frontdoor.md)。它只处理 Terminal Bun 消费者，不能充当 Main 的 Node 加载前身份或独立 SH；本篇理由和原生验收保持，继续 proposed。
+Windows managed Terminal 的原生前门、外置安装协调与同一 DELETE-purpose owner 现另接入源码，见 [安装提案](2026-10-10-windows-managed-terminal-frontdoor.md)。其 Terminal Bun 范围不能单独充当 Main 的 Node 加载前身份或独立 SH。managed Native 两跳证书和独立 candidate SH 的后续源码决定见[创建链Note](../../implemented/architecture/2026-10-10-windows-managed-native-admission.md)；本篇其余理由和原生验收保持，继续 proposed。
 
 - 复用一次性 Bun helper 加继承/DuplicateHandle：不是 Windows Main 自己取得的 LockFileEx 权威，无法提供所需的进程独立生命周期。
 - 常驻锁 broker：需要新增独立权威、通信和失败清理；当前既有 Main/Service 生命周期已能表达两个 holder，不为这个有限需求增加第三个常驻进程。
@@ -45,7 +45,7 @@ Windows managed Terminal 的原生前门、外置安装协调与同一 DELETE-pu
 - 从PATH查cl或把完整SET环境转储进后续step：不能满足既有builder的明确canonical compiler合同，也把无关环境带入证据；采用固定预装安装器、有限SDK事实与白名单，缺工具仍失败。
 
 - Node公共fs打开原FD后将其视作denyDELETE能力：公共API不提供此Windows分享模式，不能证明hash到require仍是原对象。
-- 将已hash资产复制到私有目录或先由Bun helper hash再spawn：复制件仍有相同hash→load窗口，helper自身也需加载前根信任，不能循环证明；保formal拒绝，不把helper/继承HANDLE当Main SH。
+- 将已hash资产复制到私有目录或先由Bun helper hash再spawn：复制件仍有相同hash→load窗口，helper自身也需加载前根信任，不能循环证明；仅该hash/复制方案仍不能放行；现创建链另用实际child HANDLE证书和原加载文件pin，不把helper/继承HANDLE当Main SH。
 
 ## Acceptance criteria
 

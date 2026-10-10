@@ -1,4 +1,3 @@
-import { dlopen, ptr } from 'bun:ffi';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync } from 'node:fs';
 import { defaultWindowsPathSecurity } from './windows-path-security';
 
@@ -128,6 +127,7 @@ function verify(path: string, fd: number): void {
 }
 let flock: ((fd: number, operation: number) => number) | undefined;
 function posixFlock(fd: number, operation: number): number {
+  const { dlopen } = require('bun:ffi') as typeof import('bun:ffi');
   flock ??= dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
     flock: { args: ['i32', 'i32'], returns: 'i32' },
   }).symbols.flock;
@@ -143,6 +143,7 @@ function acquireWindowsLock(
   native.verifyPath(path);
   if (!existsSync(path)) native.createFile(path);
   security.verifyFile(path);
+  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const api = dlopen('kernel32.dll', {
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },

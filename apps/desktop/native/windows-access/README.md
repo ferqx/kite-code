@@ -1,10 +1,12 @@
 # Windows Main 独立使用权
 
-[固定 Node-API source](access.cc)仅为 Windows x64 Main 提供 `artifactShared(root)` 与 `profileShared(dataRoot,profile)` 两个 factory。它们自己派生固定 sibling/coordination lock，固定 byte 0/length 1 的真实 LockFileEx SH；不接收 arbitrary HANDLE、lockPath、mode、SID 或 ACL。Main 与配套 Bun Service 分别取得自己的 SH，继承/DuplicateHandle 不作为 Windows 锁所有权。
+[固定 Node-API source](access.cc)为 Windows x64 Main 提供 `artifactShared(root)`、`profileShared(dataRoot,profile)` 和 `candidateShared(root,prefix,id,files,handoff)`。它们自己派生固定 sibling/coordination lock，固定 byte 0/length 1 的真实 LockFileEx SH；不接收 arbitrary HANDLE、lockPath、mode、SID 或 ACL。正式 candidate 用 prefix 外 outer ID／inner SHA 两个独立 use 键；Main 与配套 Bun Service 分别取得自己的 SH，继承/DuplicateHandle 不作为 Windows 锁所有权。
 
 Profile factory在 Main 启动 child 前核 canonical dataRoot、原 current SID 私有目录/锁与 restore journal，固定 SHA256(dataRoot + NUL + profile) 协调键。新 namespace只使用 private CREATE_NEW descriptor，既有不安全对象拒绝且不修 ACL；没有打开 core/UI 数据库。Artifact factory采用公共可读候选政策，root/parent核 current SID owner及DACL，current SID、SYSTEM、Administrators之外只允许读/执行；保留整个原祖先 HANDLE，拒绝 reparse、link/identity漂移和delete sharing。原 sibling锁仍要求严格private普通单链接对象。
 
-现有 manifest/SHA 验证完整资产字节，但 Node hash 读取完成到 `require(path)` 之间不能绑定同一 Windows 原对象。正式 Windows candidate Main 在任何本应用 addon/SQLite 加载、factory 或 child 启动前明确拒绝 `native_windows_bootstrap_unqualified`，错误说明加载前资产身份资格未满足；没有 environment/development 条件可绕过 formal guard。受控 owned fixture 直接调用固定 factory 的证据不构成 installed/fullNative 资格。Main在child bootstrap期间保持自己的 SH，成功 child必须有实际Store身份；诊断失败bootstrap不能作为Profile持锁证明。数据库真实关闭后才关闭Main lease；原child EOF/退出只释放child自己使用权，任一进程SIGKILL由OS释放其本process的HANDLE。explicit close失败保留尚未关闭的资源，GC finalizer只关闭本lease原句柄，没有常驻broker。原POSIX Node→Bun fd协议不变。
+Node hash 读取完成到 `require(path)` 之间不能自行绑定原 Windows 对象。正式安装前门现在由原生 C 固定并 pin 自身及 compiled verifier，verifier 在 Electron 创建前取得完整 outer/inner 原文件和双 SH；Main 在该加载保护下调用 candidate factory，独立核全部大小／EOF／SHA／ACL／FileID／空目录，再取得自己的双 SH。C→Bun与Bun→Main 各提供32字节原创建证书，闭合 handoff 只有两个私有地址；factory 从管道取得实际 server PID、原进程 HANDLE／FILETIME与固定稳定映像，证书分别绑定实际原 helper 和当前 Main。PPID 由创建者指定并不足以授权。缺 handoff 仍拒绝 `native_windows_bootstrap_unqualified`，假的同 marker/映像不放行。
+
+Main 在 BrowserWindow、Profile/UI SQLite 和 child 前取得 candidate 使用权，并在 child bootstrap 期间保持自己的 SH；成功 child 必须有实际 Store 身份，诊断失败不作 Profile 持锁证明。数据库和所属 child 确认关闭后才关闭 Main lease，所有 fresh probes／pipe event／OVERLAPPED／原文件先确认关闭再释放双 SH。cancel/timeout不作原 I/O 终止证明；explicit close失败保留尚未关闭的原资源。原child EOF/退出只释放child自己使用权，SIGKILL由OS释放该 process 的HANDLE；没有常驻broker，原POSIX Node→Bun fd协议保持。受控后端fixture仍不构成 installed/fullNative 资格。
 
 Node-API ABI使用原样的 Node v22.21.1官方四header，默认明确NAPI_VERSION=8；[builder](../../scripts/build-windows-access.ts)核固定SHA，`decltype`引用官方签名，注册使用官方NAPI_MODULE_INIT宏。有限NAPI symbols仅从当前原exe解析；没有PATH/native库fallback或手写Windows/Node结构。builder只接受明确canonical absolute `KITE_WINDOWS_MSVC` 编译器与其已配置SDK环境，/MT静态CRT，输出固定 `windows-access.node`，已装Main不编译代码。缺编译器、资产、symbol或unsupported平台明确拒绝。
 
@@ -17,4 +19,4 @@ Windows transport/release CI在真实消费之前调用[有限准备脚本](../.
 设计与待验状态见[原生 Main 使用权提案](../../../../.agents/notes/proposed/architecture/2026-10-04-windows-node-owned-profile-and-artifact-leases.md)。当前后端只接 canonical local-drive 路径；UNC/device namespace与ARM64未提供实现资格，不能由此缩写完整平台完成定义。
 
 
-独立审查指出两个不同窗口：最初 UI prepare 只短暂打开安全路径，后续 SQLite 可消费同 SID 替换对象；上述 retention 已在实现中关闭该身份窗口，Windows 强制反例尝试在 prepare→SQLite open 前及真实 WAL checkpoint 后改名 Profile/UI、删除主 DB、用同 SID 私有替代文件覆盖，并核原 FileID/释放后操作成功。加载 bootstrap 则仍缺可信根：Node 公共 fs 的原 FD 不提供 denyDELETE 分享模式，事后重新 hash/manifest 太晚，一次 Bun helper 自身的 hash→spawn 也不能循环建立根信任。当前 formal failclosed 是必要拒绝，可信原生启动器/发布者与实际 Windows 全发行资格仍未完成，不用继承 HANDLE 或常驻 broker 冒充原 SH 所有权。
+独立审查指出的 UI prepare→SQLite 身份窗口沿原 retention 保持；Windows 强制反例仍核同 SID 替代、原 FileID 与释放后成功。加载前原对象交接已由上述固定 C 与两跳证书接线，不能退回事后 hash/manifest 或以 PPID 相同替代。实际原生构建、完整 installed 正常／切换／维护恢复链及发布者认证仍未验收，取舍和原未闭合边界见[Native 创建链决定](../../../../.agents/notes/implemented/architecture/2026-10-10-windows-managed-native-admission.md)。

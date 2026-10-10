@@ -72,6 +72,12 @@ export async function runNativeRelease(
         terminalRoot: resolve(values.terminal ?? join(root, 'dist/unified-terminal')),
         electronDist: resolve(electron),
         outdir: directory,
+        ...(process.platform === 'win32'
+          ? {
+              windowsBuildPort: (await import('./windows-native-build'))
+                .windowsNativeCandidateBuildPort,
+            }
+          : {}),
       });
       return { root: bundle.root, candidateId: bundle.digest };
     }
@@ -198,8 +204,40 @@ export async function runNativeRelease(
     case 'install': {
       const { mkdtempSync, realpathSync, rmSync } = await import('node:fs');
       const { tmpdir } = await import('node:os');
-      const { unpackNativeBundle } = await import('./native-archive');
+      const { unpackNativeBundle, createWindowsNativeArchiveScratch } = await import(
+        './native-archive'
+      );
       const { installNativeBundle } = await import('./native-install');
+      if (process.platform === 'win32') {
+        const scratch = createWindowsNativeArchiveScratch(value('prefix'));
+        let failure: { error: unknown } | undefined;
+        let installed: ReturnType<typeof installNativeBundle> | undefined;
+        try {
+          const bundle = unpackNativeBundle({
+            archivePath: value('archive'),
+            sha256: value('sha256'),
+            destination: scratch.destination,
+          });
+          scratch.accept(bundle);
+          installed = installNativeBundle({
+            bundleRoot: bundle.root,
+            prefix: value('prefix'),
+            ...(values['cli-prefix'] ? { cliPrefix: values['cli-prefix'] } : {}),
+          });
+        } catch (error) {
+          failure = { error };
+        }
+        try {
+          scratch.release();
+        } catch (cleanup) {
+          throw new AggregateError(
+            failure ? [failure.error, cleanup] : [cleanup],
+            'native_install_scratch_close_unknown',
+          );
+        }
+        if (failure) throw failure.error;
+        return installed;
+      }
       const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-unpack-')));
       try {
         const bundle = unpackNativeBundle({

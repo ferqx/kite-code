@@ -18,6 +18,17 @@ export interface WindowsInstallationCoordination {
 }
 
 const maximumMarkerBytes = 16384;
+/** Outer and inner are independent regions in the same durable installation namespace. */
+export function deriveNativeWindowsUseKeys(candidateId: string): {
+  readonly outer: string;
+  readonly terminal: string;
+} {
+  if (!/^[0-9a-f]{64}$/.test(candidateId)) denied();
+  return Object.freeze({
+    outer: candidateId,
+    terminal: createHash('sha256').update(`${candidateId}\0terminal`, 'utf8').digest('hex'),
+  });
+}
 function denied(): never {
   throw Error('windows_installation_coordination_denied');
 }

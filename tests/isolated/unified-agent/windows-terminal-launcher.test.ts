@@ -74,3 +74,31 @@ test('incomplete loader fields, path imports, unterminated or empty imports and 
     expect(value).toEqual(before);
   }
 });
+
+test('owned Electron EXE and DLL copies seal private application plus System32 search without relaxing malformed loader guards', () => {
+  for (const subsystem of [2, 3]) {
+    const original = image();
+    original.writeUInt16LE(subsystem, 152 + 68);
+    const before = Buffer.from(original);
+    const sealed = sealWindowsSystemImportSearch(original, 'electron');
+    expect(original).toEqual(before);
+    expect(sealed.readUInt16LE(846)).toBe(0xa00);
+    expect([...sealed.keys()].filter((index) => sealed[index] !== before[index])).toEqual([
+      846, 847,
+    ]);
+    const delay = Buffer.from(original);
+    delay.writeUInt32LE(4096, 152 + 216);
+    delay.writeUInt32LE(32, 152 + 220);
+    expect(() => sealWindowsSystemImportSearch(delay, 'electron')).toThrow(
+      'windows_terminal_launcher_pe_invalid',
+    );
+    const bad = Buffer.from(original);
+    bad.writeUInt16LE(1, 152 + 68);
+    expect(() => sealWindowsSystemImportSearch(bad, 'electron')).toThrow(
+      'windows_terminal_launcher_pe_invalid',
+    );
+  }
+  const gui = image();
+  gui.writeUInt16LE(2, 152 + 68);
+  expect(() => sealWindowsSystemImportSearch(gui)).toThrow('windows_terminal_launcher_pe_invalid');
+});

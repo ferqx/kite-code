@@ -21,7 +21,25 @@ const send = (phase: string, facts: Record<string, unknown> = {}) =>
     }),
   );
 const commands = createInterface({ input: process.stdin });
-if (input.mode === 'denied') {
+if (input.mode === 'candidate-denied') {
+  const backend = loadWindowsAccess(input.windowsAsset);
+  assert.equal(typeof backend.candidateShared, 'function');
+  assert.throws(
+    () =>
+      backend.candidateShared(
+        input.candidate.root,
+        input.candidate.prefix,
+        input.candidate.id,
+        input.candidate.files,
+        {
+          launcherPipe: `\\\\.\\pipe\\kite-native-launch-${'a'.repeat(32)}`,
+          mainPipe: `\\\\.\\pipe\\kite-native-main-${'b'.repeat(32)}`,
+        },
+      ),
+    /windows_access_unavailable/,
+  );
+  send('candidate-denied');
+} else if (input.mode === 'denied') {
   const acquire =
     input.denyKind === 'artifact'
       ? () =>

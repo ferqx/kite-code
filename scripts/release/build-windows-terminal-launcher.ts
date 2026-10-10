@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { retainWindowsCandidateFiles } from '../../packages/agent/src/platform/windows-candidate-files';
 import {
@@ -7,7 +7,9 @@ import {
   privateDirectory,
 } from '../../packages/agent/src/platform/windows-path-security';
 
-function pe(bytes: Buffer) {
+const pendingLauncherBuilds = new Set<object>();
+
+function pe(bytes: Buffer, subsystem: number | readonly number[] = 3) {
   const denied = (): never => {
     throw Error('windows_terminal_launcher_pe_invalid');
   };
@@ -41,7 +43,9 @@ function pe(bytes: Buffer) {
     count > 96 ||
     optionalSize < 240 ||
     bytes.readUInt16LE(optional) !== 0x20b ||
-    bytes.readUInt16LE(optional + 68) !== 3 ||
+    !(typeof subsystem === 'number' ? [subsystem] : subsystem).includes(
+      bytes.readUInt16LE(optional + 68),
+    ) ||
     bytes.readUInt32LE(optional + 108) < 16
   )
     denied();
@@ -64,8 +68,13 @@ function pe(bytes: Buffer) {
   return { directory, offset, denied };
 }
 
-function systemImportSearch(bytes: Buffer, requireSealed: boolean): number {
-  const image = pe(bytes);
+function systemImportSearch(
+  bytes: Buffer,
+  requireSealed: boolean,
+  subsystem: number | readonly number[] = 3,
+  flags = 0x800,
+): number {
+  const image = pe(bytes, subsystem);
   const imports = image.directory(1);
   if (!imports.rva || imports.size < 40 || imports.size > 65536) image.denied();
   image.offset(imports.rva, imports.size);
@@ -111,21 +120,31 @@ function systemImportSearch(bytes: Buffer, requireSealed: boolean): number {
   const declaredSize = bytes.readUInt32LE(configOffset);
   if (declaredSize < 80 || declaredSize > config.size) image.denied();
   image.offset(config.rva, declaredSize);
-  if (requireSealed && bytes.readUInt16LE(configOffset + 78) !== 0x800) image.denied();
+  if (requireSealed && bytes.readUInt16LE(configOffset + 78) !== flags) image.denied();
   return configOffset + 78;
 }
 
 /** New owned image only: restrict its existing static import search on Windows 10 RS1+. */
-export function sealWindowsSystemImportSearch(bytes: Buffer): Buffer {
-  const offset = systemImportSearch(bytes, false);
+export function sealWindowsSystemImportSearch(
+  bytes: Buffer,
+  kind: 'console' | 'electron' = 'console',
+): Buffer {
+  const subsystem = kind === 'electron' ? [2, 3] : 3;
+  // Electron's private distribution supplies its own DLLs; all are pinned before launch.
+  const flags = kind === 'electron' ? 0xa00 : 0x800;
+  const offset = systemImportSearch(bytes, false, subsystem, flags);
   const sealed = Buffer.from(bytes);
-  sealed.writeUInt16LE(0x800, offset);
-  systemImportSearch(sealed, true);
+  sealed.writeUInt16LE(flags, offset);
+  systemImportSearch(sealed, true, subsystem, flags);
   return sealed;
 }
 
 /** Builder-only CREATE_NEW copy; original runtime/helper bytes and publisher identity are untouched. */
-export function copyWindowsSystemExecutable(source: string, target: string): void {
+export function copyWindowsSystemExecutable(
+  source: string,
+  target: string,
+  kind: 'console' | 'electron' = 'console',
+): void {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw Error('windows_terminal_launcher_platform_unsupported');
   if (
@@ -148,13 +167,18 @@ export function copyWindowsSystemExecutable(source: string, target: string): voi
     const bytes = readFileSync(source);
     if (bytes.length !== stat.size) throw Error('windows_terminal_launcher_content_changed');
     sourcePin.verify();
-    const sealed = sealWindowsSystemImportSearch(Buffer.from(bytes));
+    const sealed = sealWindowsSystemImportSearch(Buffer.from(bytes), kind);
     security.writePrivateArtifactFile(target, sealed);
     targetPin = retainWindowsCandidateFiles(dirname(target), [basename(target)]);
     security.verifyFile(target);
     const actual = readFileSync(target);
     if (!actual.equals(sealed)) throw Error('windows_terminal_launcher_content_changed');
-    systemImportSearch(Buffer.from(actual), true);
+    systemImportSearch(
+      Buffer.from(actual),
+      true,
+      kind === 'electron' ? [2, 3] : 3,
+      kind === 'electron' ? 0xa00 : 0x800,
+    );
     targetPin.verify();
     sourcePin.verify();
   } catch (error) {
@@ -224,6 +248,7 @@ export async function buildWindowsTerminalLauncher(
     verifierPath: string;
     verifierSha256: string;
     verifierSize: number;
+    kind?: 'native';
   },
   compiler = process.env.KITE_WINDOWS_MSVC,
 ) {
@@ -252,7 +277,27 @@ export async function buildWindowsTerminalLauncher(
     throw Error('windows_terminal_launcher_verifier_changed');
   privateDirectory(input.outdir);
   const output = join(input.outdir, 'kite.exe');
+  const verifierPin = retainWindowsCandidateFiles(dirname(input.verifierPath), [
+    basename(input.verifierPath),
+  ]);
+  const owner: {
+    input: typeof input;
+    verifierPin: typeof verifierPin;
+    child?: ReturnType<typeof Bun.spawn>;
+  } = { input, verifierPin };
+  pendingLauncherBuilds.add(owner);
   let succeeded = false;
+  let uncertain = false;
+  let failure: unknown;
+  let failed = false;
+  let result:
+    | {
+        readonly root: string;
+        readonly verifierSha256: string;
+        readonly verifierSize: number;
+        readonly launchers: readonly string[];
+      }
+    | undefined;
   try {
     const child = Bun.spawn(
       [
@@ -265,6 +310,7 @@ export async function buildWindowsTerminalLauncher(
         '/DUNICODE',
         '/D_UNICODE',
         '/D_WIN32_WINNT=0x0A00',
+        ...(input.kind === 'native' ? ['/DKITE_NATIVE_LAUNCHER'] : []),
         `/DKITE_TERMINAL_VERIFIER_SHA256="${input.verifierSha256}"`,
         `/DKITE_TERMINAL_VERIFIER_SIZE=${input.verifierSize}ULL`,
         join(import.meta.dir, 'native/terminal-launcher.cc'),
@@ -296,22 +342,63 @@ export async function buildWindowsTerminalLauncher(
         stderr: 'pipe',
       },
     );
-    const timer = setTimeout(() => child.kill('SIGKILL'), 60000);
-    try {
-      const [exit, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-      ]);
-      if (exit !== 0 || !existsSync(output))
-        throw Error(`windows_terminal_launcher_build_failed:${exit}\n${stdout}\n${stderr}`);
-    } finally {
-      clearTimeout(timer);
-      if (child.exitCode === null) {
+    owner.child = child;
+    let timeoutFailure!: (error: unknown) => void;
+    const failedTermination = new Promise<never>((_resolve, reject) => {
+      timeoutFailure = reject;
+    });
+    let forced = false;
+    const timer = setTimeout(() => {
+      forced = true;
+      try {
         child.kill('SIGKILL');
-        await child.exited;
+      } catch (error) {
+        timeoutFailure(error);
+      }
+    }, 60000);
+    let compilerFailure: unknown;
+    try {
+      const [exit, stdout, stderr] = await Promise.race([
+        Promise.all([
+          child.exited,
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+        ]),
+        failedTermination,
+      ]);
+      if (forced || exit !== 0 || !existsSync(output))
+        throw Error(`windows_terminal_launcher_build_failed:${exit}\n${stdout}\n${stderr}`);
+    } catch (error) {
+      compilerFailure = error;
+    }
+    clearTimeout(timer);
+    if (child.exitCode === null) {
+      const errors: unknown[] = compilerFailure ? [compilerFailure] : [];
+      try {
+        child.kill('SIGKILL');
+      } catch (error) {
+        errors.push(error);
+      }
+      let confirmation: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          child.exited,
+          new Promise<never>((_resolve, reject) => {
+            confirmation = setTimeout(
+              () => reject(Error('windows_terminal_launcher_close_unknown')),
+              5000,
+            );
+          }),
+        ]);
+      } catch (error) {
+        uncertain = true;
+        throw new AggregateError([...errors, error], 'windows_terminal_launcher_close_unknown');
+      } finally {
+        if (confirmation) clearTimeout(confirmation);
       }
     }
+    if (compilerFailure) throw compilerFailure;
+    verifierPin.verify();
     verifyLauncher(readFileSync(output));
     // Do not let a changed builder input become the subsequently installed helper.
     const finalVerifier = readFileSync(input.verifierPath);
@@ -320,17 +407,53 @@ export async function buildWindowsTerminalLauncher(
       createHash('sha256').update(finalVerifier).digest('hex') !== input.verifierSha256
     )
       throw Error('windows_terminal_launcher_verifier_changed');
-    copyFileSync(output, join(input.outdir, 'kite-tui.exe'));
+    const security = defaultWindowsPathSecurity()!;
+    security.copyPrivateFile(output, join(input.outdir, 'kite-tui.exe'));
+    if (input.kind === 'native')
+      security.copyPrivateFile(output, join(input.outdir, 'kite-desktop.exe'));
     succeeded = true;
-    return Object.freeze({
+    result = Object.freeze({
       root: realpathSync(input.outdir),
       verifierSha256: input.verifierSha256,
       verifierSize: input.verifierSize,
-      launchers: Object.freeze(['kite.exe', 'kite-tui.exe'] as const),
+      launchers: Object.freeze(
+        input.kind === 'native'
+          ? (['kite.exe', 'kite-tui.exe', 'kite-desktop.exe'] as const)
+          : (['kite.exe', 'kite-tui.exe'] as const),
+      ),
     });
-  } finally {
-    for (const suffix of ['obj', 'lib', 'exp'])
-      rmSync(join(input.outdir, `terminal-launcher.${suffix}`), { force: true });
-    if (!succeeded) rmSync(input.outdir, { recursive: true, force: true });
+  } catch (error) {
+    failed = true;
+    failure = error;
+    const unknown = (error: unknown): boolean =>
+      error instanceof Error &&
+      (error.message === 'windows_path_security_denied' ||
+        /(?:close|release|acquire).*?(?:unknown|failed)/u.test(error.message) ||
+        (error instanceof AggregateError && error.errors.some(unknown)) ||
+        unknown(error.cause));
+    uncertain ||= unknown(error);
   }
+  if (!uncertain) {
+    try {
+      verifierPin.release();
+    } catch (error) {
+      throw new AggregateError(
+        [...(failed ? [failure] : []), error],
+        'windows_terminal_launcher_close_unknown',
+      );
+    }
+    pendingLauncherBuilds.delete(owner);
+    try {
+      for (const suffix of ['obj', 'lib', 'exp'])
+        rmSync(join(input.outdir, `terminal-launcher.${suffix}`), { force: true });
+      if (!succeeded) rmSync(input.outdir, { recursive: true, force: true });
+    } catch (error) {
+      throw new AggregateError(
+        [...(failed ? [failure] : []), error],
+        'windows_terminal_launcher_cleanup_failed',
+      );
+    }
+  }
+  if (failed) throw failure;
+  return result!;
 }

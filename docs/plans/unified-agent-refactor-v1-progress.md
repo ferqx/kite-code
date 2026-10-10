@@ -4091,3 +4091,43 @@ Root及八runtime workspace类型实际0，20个受影响TS文件Biome actual0�
 | 5 | §35完整能力／正式caller独立审查→最终旧路径退役→阶段完整回归及适用P7责任 | 前序满足后完整审查、实际退役、未过滤完整回归；适用版本／发布样本及T/E责任按真实发布事实验收 | 前四项资格，37能力仍partial；局部source／mock／静态guard不触发阶段退出 |
 
 新增闭合的是Windows正式Daemon与安装版原实例版本交接的源码缺口；正式server／显式共享caller已复用公共HTTP业务边界，实际Windows资格仍未闭合，没有宣称全平台能力或最终legacy退役。手册、owner、active、原设计Note、主计划和三条直接能力证据同步。wholeDefault=false、wholeV13=false、phaseExit=false、Goal active；授权仅本地stage／commit，无push／PR／发布。
+
+## 2026-10-10Windows managed Native 正式安装与可信启动源码
+
+前一 Daemon 切片已按必要验证、文档同步与正常 hook 本地提交 `bd548df3dfe3d4db55073be69874c63ce4d7ee36`，该切片结束。当前核 §30.2 的实际依赖：P5 要求完整正式客户端消费者，P6 要求真实升级／恢复、平台／长期负载及旧路径退役，§35 要求完整能力和独立迁移审查，P7 保适用版本／发布责任。原九点 `arena-zero` 的 RSS 增长 +115.203125 MiB 仍大于 32 MiB，activeResources／handles 和全部可信 Runtime 后代缺项继续阻 P6／§35／最终退役；它们不是独立安装、版本选择或维护恢复源码的前置。本轮没有再次参数对照或重跑该资源组件，D08 首发前仍无适用的新基线已发布前版样本。
+
+### 完整正式入口与实现交接
+
+Windows x64 `release:native build/pack/install/rollback/uninstall` 已从旧 POSIX-only installer 分支切到 [Windows installer](../../scripts/release/windows-native-install.ts) 和 [build port](../../scripts/release/windows-native-build.ts)。后者由 Root 正式 release caller 注入 Desktop 的类型化 build seam，Desktop workspace 不依赖 Root 实现；八 workspace 与包公共 exports 边界保持。完整 archive 精确读 inventory／size／SHA 后，经私有原 HANDLE copy／Flush／同卷 write-through 物化，不以 POSIX mode 或 pathname unlink 冒充 Windows 权限／关闭证明。
+
+首次安装的 closed v2 marker 固定四个稳定 `bin/*.exe`；current／previous 只选择完整不可变候选。正式 `kite.exe`／`kite-tui.exe`／`kite-desktop.exe` 源码使用稳定 C 前门及 compiled Bun verifier。C 在 Bun 初始化前清除五个运行时注入键，先固定自身与 verifier 完整原 bytes，再沿实际 CreateProcess 返回的 helper HANDLE 提供首跳创建证书。Bun 在 Electron 创建前独立核证书、完整 outer／inner 文件和双 SH，再用实际 child HANDLE 绑定第二跳。Main 在窗口、Profile／私有 SQLite 或 Service 之前独立核两份有限证书、原 PID／FILETIME／映像、全部原文件与自身双 SH；配套 Service 仍独立全量准入和保权。PPID 可指定，不能单独证明创建链。缺 handoff／坏证书仍拒绝，raw Windows directory launch 的原 guard 和 desktop 无附加用户参数边界保持。
+
+独立 Terminal 的正式登记 caller 现在转交 Native C 前门。双方 selection 锁／nonce／完整 bytes 两次复核后传入内部 expected candidate；Native 在原选择窗口复核，A 已漂移到 B 时有限返回 `cli_registration_changed`，不启动 child 或 Profile；A 完整接纳后允许 subsequent selection 改成 B。三条前门及 Service 使用同一外部 namespace 和 outer ID／inner `SHA256(ID + NUL + "terminal")` 规则，各自持独立 SH，运行中的 A 不因新选择被撤权。
+
+回退在 publish 之前完整预检仍由原 nonce 持有的 Terminal；卸载在全部候选双 EX、完整原 inventory 与 original DELETE owner 下删除管理树，再以原 nonce CAS 撤销外部 Terminal 记录。Profile 留在安装树外，来源数据和新 Store 恢复合同不改；正常删除可选 Terminal 后不重建前门或自动登记。所有 prefix EX 共享同次资源关闭确认，opaque write／flush／move、原文件／probe、scratch 和目标前门任一关闭未知都保原整个调用 owner。原 child 的流或 kill 错误不是实际退出证明；compiler 和 SQLite probe 必须等待原 `child.exited`，未确认则保 scratch／pin，原业务错误与 cleanup 错误共同保留。
+
+持久选择与真实备选归[源码决定](../../.agents/notes/implemented/architecture/2026-10-10-windows-managed-native-admission.md)；原 Node Profile／Artifact 总提案只被部分替代，继续 proposed。DLL 静态 import／LoadConfig／delay-load 的原严格 guard 保留；实际 Electron Windows 分发是否满足该约束必须由真实构建确认，不能以本机 mock／类型放行。
+
+### 验证与当前边界
+
+当前受影响范围共 27 个唯一完整测试文件，71 pass／820 Bun expect／0 fail／9 个原 Windows platform skip；包含 Windows installer／登记／archive／PE／compiler 与 SQLite probe、两跳证书、Main 加载前负例、Service／Agent 原使用权，以及原完整 Native Node 配套进程、源码树外 bundle、安装窗口和正式登记链。后两条原完整生命周期分别 1 pass／34 expect／108.43s 和 1 pass／65 expect／80.19s，原 120 秒整例、driver 与 UI 期限保持；完整 bundle 原 Main 强杀后 child 终态、双层使用权、搬迁无源码回落和完整 Model 断言保持。原安装／回退／登记／archive 业务断言未删，macOS 新 Store／维护的既有 DB9 原完整证据按不变范围保留，不重开恢复故障矩阵。
+
+归并收据 `/private/tmp/kite-v13-windows-native-verified-evidence-20261010.json` 核各完整日志 SHA、命令与唯一文件，未把重复尝试计入通过。Root `final-2` 的九个仍适用完整文件复用至当前：之后 Main 和新 parser 改变，不在其 installer／登记／archive／compiler／SQLite 输入链中；`final-3` 七文件和 `final-4` 两个证书文件在 3778 个源码／配置／真实 Service dist 输入、Git 与六个实际 Bun／Node／Electron／TS／Biome 资产前后全等时完成，当前生产、依赖、配置、生成输入和资产仍等。暂存检查修正一个未被其余作业导入的 archive 测试字符串尾空格，该原完整文件沿 `final-5` 复验 3 pass／12 expect，同样前后全等。Service／Agent 八文件的 405 输入原冻结，当前仅未执行的 platform owner Markdown 改变；其中 artifact 原完整结果仅跨一个不被它导入的 windows-scope fixture 初始化行复用。实际资产从 Root 首次到最终收据一致，覆盖这些作业的运行时段。证书旧绿之后有 bootstrap 初始化顺序调整，旧结果没有冒充最终组合；沿两个完整原文件复验，2 pass／2 Bun expect。
+
+真实失败保留并沿生产原因修正：原 Node 配套进程因冷 ESM 静态引入 `bun:ffi` 而失败，锁 owner 只在实际 POSIX／Windows 操作时初始化 FFI，原完整 Node 作业复验通过，未把锁语义或权限降级；原 Main guard 测试因 `native_windows_bootstrap_unqualified` 丢失稳定 `.code` 失败，补齐 parser／Main 错误对象后原完整文件 2 pass／11 expect／6 原 skip。FFI mock 的原 CJS 缓存初始化缺失红也保留，准确补一行前置初始化，原 29 个业务 expect 位置与 4／15 秒预算保持。此前登记实际要求两个 prefix EX 的红由共享原调用关闭 owner 修正；新 archive fixture 语法红仅修测试字符串括号。Root 原失败批次、scope 红及登记红日志仍在收据对应路径，没有 availability skip、删断言或排除实际 case。
+
+最终 Root 和八 runtime workspace 类型检查、八 workspace build、43 个受影响 TS／JSON 文件 Biome，boundary／runtime-package／API／test-owner、docs／all docs-impact 与 plan-evidence 均实际 0。文档同步产品 CLI／Desktop 手册、Native／Terminal／Service／platform owner、release active、主计划与三条直接能力证据；Agent README、shared boundary 和适用首发／发布 active 的未变业务／格式／责任依据核对后保留，不制造无意义 diff。正常本地提交仍独立执行既有 hooks。
+
+这些结果只覆盖当前源码和 macOS 实际调用；Windows 的真实 MSVC／PE／DACL／pipe／ABI／console／窗口／完整安装维护链，以及 Linux 对应实机资格仍未执行，按用户顺序留重构后 Actions，本轮无 dispatch。不把 Windows mock、静态字节检查、POSIX 邻接或本机 GUI 结果外推为原生资格；37 能力、P5／P6／§35 与完整阶段回归仍未闭合。
+
+### 最多五项剩余退出依赖
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与验收条件 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows 普通 Shell、child 后台任务和 stdio MCP 的正式调用 | 源码端口仍有 Windows guard；实际启动、完整输出、独立授权、精确取消与原 owned 全树退出，冷原结果零重放，关闭未知保 fencing | Native／Terminal 正式安装准入源码已接；资源门禁不是该独立实施的前置 |
+| 2 | installed Windows／Linux 安装、A→B→A、维护恢复、Daemon／Native 和真实 TUI 用户操作 | 重构后原生执行准确完整候选、原 common whole／Native／always formal、完整维护新 Store 冷读、原 pipe／DACL／HANDLE／PE／窗口／PTY；原断言与预算保持，标签 B 不计跨代码，help 不计 PTY | 前项及各平台源码；用户已将实机资格留重构后 Actions，本轮无 dispatch |
+| 3 | installed CLI／TUI／Native 的持续普通任务与后台资源生命周期 | 原 RSS 增长／斜率、八轮／九点、全部可信 Runtime 后代及 activeResources／handles 实际满足 | 直接阻 P6／§35；原 red／unknown 保留，与前两项独立源码无先后要求 |
+| 4 | 完整能力和正式调用者的 §35 独立迁移审查 | 按实际手册／能力映射和已取得平台证据核全部适用 T/E、参考功能、兼容／未见样本与完整 caller；root 自检不替代 | 前序完整用户能力和资格，不以本片源码／局部通过代证 |
+| 5 | 正式切换后的最终旧路径退役与阶段收束 | 实际 legacy 删除、未过滤完整回归和适用 P7 版本／发布责任通过，保 D08 首发后向后兼容责任 | 前四项；首发前无适用 T029 样本不阻独立实施，真实失败不能删断言／排除测试 |
+
+本轮新增闭合的是 Windows managed Native 正式安装／版本选择／维护前门的源码缺口，正式登记 caller 已转至稳定 Native 前门；没有取得 Windows 完整用户资格或执行最终 legacy 删除。37 能力仍 partial，wholeDefault=false、wholeV13=false、phaseExit=false、Goal active；授权仍仅本地 stage／commit，无 push／PR／发布。

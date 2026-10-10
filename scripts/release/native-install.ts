@@ -36,6 +36,11 @@ import {
   verifyCLIRegistrationTargetWhileLocked,
 } from './cli-registration';
 import { rejectBundleOutput } from './terminal-paths';
+import {
+  installWindowsNativeBundle,
+  rollbackWindowsNativeBundle,
+  uninstallWindowsNativeBundle,
+} from './windows-native-install';
 
 const marker = '.kite-native-install.json',
   pattern = /^[a-f0-9]{64}$/;
@@ -224,6 +229,7 @@ export function installNativeBundle(input: {
   prefix: string;
   cliPrefix?: string;
 }): InstalledNativeBundle {
+  if (process.platform === 'win32') return installWindowsNativeBundle(input);
   platform();
   const source = resolve(input.bundleRoot),
     leases: ReturnType<typeof acquireArtifactAccess>[] = [];
@@ -302,6 +308,7 @@ export function installNativeBundle(input: {
   }
 }
 export function rollbackNativeBundle(prefix: string): InstalledNativeBundle {
+  if (process.platform === 'win32') return rollbackWindowsNativeBundle(prefix);
   platform();
   const root = resolve(prefix);
   installed(root);
@@ -341,6 +348,10 @@ export function rollbackNativeBundle(prefix: string): InstalledNativeBundle {
 }
 /** Both levels of every managed candidate must be idle before any install-root mutation. */
 export function uninstallNativeBundle(prefix: string): void {
+  if (process.platform === 'win32') {
+    uninstallWindowsNativeBundle(prefix);
+    return;
+  }
   platform();
   const root = resolve(prefix);
   installed(root);

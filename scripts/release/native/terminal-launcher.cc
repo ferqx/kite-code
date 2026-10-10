@@ -7,6 +7,9 @@
 #include <vector>
 #include <stdexcept>
 #include <utility>
+#ifdef KITE_NATIVE_LAUNCHER
+#include "native-bootstrap-certificate.h"
+#endif
 
 #ifndef KITE_TERMINAL_VERIFIER_SHA256
 #error The trusted builder must bind the exact verifier SHA256.
@@ -216,8 +219,13 @@ int wmain(int argc, wchar_t** argv) {
     const auto bin = parent(executable), root = parent(bin);
     need(bin.substr(bin.find_last_of(L'\\') + 1) == L"bin");
     const auto name = executable.substr(executable.find_last_of(L'\\') + 1);
+#ifdef KITE_NATIVE_LAUNCHER
+    need(name == L"kite.exe" || name == L"kite-tui.exe" || name == L"kite-desktop.exe");
+    const auto helperPath = bin + L"\\native-verifier.exe";
+#else
     need(name == L"kite.exe" || name == L"kite-tui.exe");
     const auto helperPath = bin + L"\\terminal-verifier.exe";
+#endif
     Policy policy;
     std::vector<Pin> ancestors;
     for (auto path = bin;; path = parent(path)) {
@@ -230,7 +238,12 @@ int wmain(int argc, wchar_t** argv) {
     for (size_t i = 0; i < ancestors.size(); ++i) ancestors[i].verify(policy, i < 2);
     self.verify(policy, true);
     helper.verify(policy, true);
-    std::wstring command = quoted(helperPath) + L" " + quoted(name == L"kite.exe" ? L"cli" : L"tui") + L" " + quoted(root);
+    std::wstring command = quoted(helperPath) + L" " + quoted(name == L"kite.exe" ? L"cli" : name == L"kite-tui.exe" ? L"tui" : L"desktop") + L" " + quoted(root);
+#ifdef KITE_NATIVE_LAUNCHER
+    // Strong native owner remains alive through the actual helper exit.
+    auto* certificate = new NativeBootstrapCertificate(policy.sid);
+    command += L" " + quoted(certificate->path);
+#endif
     for (int i = 1; i < argc; ++i) command += L" " + quoted(argv[i]);
     need(command.size() < 32767);
     // Explicit inherited-handle allowlist preserves stdio without handing over any pin.
@@ -258,13 +271,25 @@ int wmain(int argc, wchar_t** argv) {
     need(CreateProcessW(helperPath.c_str(), command.data(), nullptr, nullptr, TRUE,
       EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, &startup.StartupInfo, &child));
     Handle process(child.hProcess), thread(child.hThread);
+#ifdef KITE_NATIVE_LAUNCHER
+    try { certificate->bind(process.value); }
+    catch (...) { while (WaitForSingleObject(process.value, INFINITE) != WAIT_OBJECT_0) Sleep(10); certificate->close(); throw; }
+#endif
     // Unknown wait failure cannot release pins while this exact helper may still consume them.
     while (WaitForSingleObject(process.value, INFINITE) != WAIT_OBJECT_0) Sleep(10);
     DWORD exit = 1;
     need(GetExitCodeProcess(process.value, &exit));
+#ifdef KITE_NATIVE_LAUNCHER
+    certificate->close();
+    delete certificate;
+#endif
     return static_cast<int>(exit);
   } catch (...) {
+#ifdef KITE_NATIVE_LAUNCHER
+    const char message[] = "native_launcher_denied\r\n";
+#else
     const char message[] = "terminal_launcher_denied\r\n";
+#endif
     DWORD written = 0;
     WriteFile(GetStdHandle(STD_ERROR_HANDLE), message, sizeof(message) - 1, &written, nullptr);
     return 1;

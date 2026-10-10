@@ -2,6 +2,10 @@ import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
+  retainWindowsNativeRuntimeFiles,
+  windowsRuntimePinCloseUnknown,
+} from './native-runtime-assets';
+import {
   retainWindowsTerminalRuntimeFiles,
   windowsTerminalRuntimeArguments,
 } from './runtime-assets';
@@ -42,6 +46,7 @@ export function retainWindowsPairedArtifact(
       leases.push(acquireArtifactAccess({ root: realpathSync(root), mode: 'shared' }));
     const terminalRoot =
       proof.kind === 'native.candidate' ? join(proof.root, 'terminal') : proof.root;
+    if (proof.kind === 'native.candidate') files.push(retainWindowsNativeRuntimeFiles(proof.root));
     files.push(retainWindowsTerminalRuntimeFiles(terminalRoot));
     verifyRuntimeProtection(proof, actual);
     for (const pin of files) pin.verify();
@@ -50,6 +55,10 @@ export function retainWindowsPairedArtifact(
       release: owner.release,
     });
   } catch (error) {
+    if (windowsRuntimePinCloseUnknown(error))
+      throw Object.assign(new AggregateError([error], 'paired_artifact_close_unknown'), {
+        code: 'paired_artifact_close_unknown',
+      });
     try {
       owner.release();
     } catch (cleanupError) {

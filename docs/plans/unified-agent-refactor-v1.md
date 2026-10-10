@@ -2106,7 +2106,9 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
-Windows 正式Daemon的下一源码缺口现已接入：当前SID私有pipe／原record与process HANDLE，正式`kite.exe server`及`--server`沿同一HTTP调用者；父与实际Daemon各持完整candidate使用权，未知native关闭保活。原安装qualification增加B启动／Web→回退A仍复用B→共享完整任务→busy拒绝／明确cancel→原实例实际dead／新A原完整冷结果→正常stop／双EX，保持原120秒、所有原断言和独立维护链。Windows native资格仍未执行，Native加载前guard／Shell-MCP／PTY及完整平台资格继续待实施或验收；原RSS／观测独立阻P6／§35，不作为这些源码实现的前置。最多五项入口／验收及准确验证范围归[当前Daemon进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-正式-daemon-与原实例版本交接源码)，37能力仍partial、wholeV13／phaseExit仍false。
+Windows managed Native 的正式安装／版本选择／维护恢复源码缺口现已接入：四个稳定 C／compiled Bun 前门、closed marker 与双层完整使用权；C→Bun→Electron 两跳原创建证书和全部原文件准入先于 Main 窗口／Profile／SQLite／Service，登记调用以 expected candidate 拒绝版本漂移。原文件／private transfer／子进程关闭未知保同次调用使用权，双 prefix 登记保全部 EX；卸载删除管理树而保独立数据。真实 Windows 构建、窗口、原历史／普通任务、版本切换／新 Store 维护恢复，以及 Win/Linux 完整资格仍待重构后；原 RSS／完整观测直接阻 P6／§35，不是上述独立源码的前置。准确范围、真实失败、当前最多五项依赖与完整文件验证归[当前 Native 进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-managed-native-正式安装与可信启动源码)，37 能力仍 partial、wholeV13／phaseExit 仍 false。
+
+Windows 正式Daemon的下一源码缺口现已接入：当前SID私有pipe／原record与process HANDLE，正式`kite.exe server`及`--server`沿同一HTTP调用者；父与实际Daemon各持完整candidate使用权，未知native关闭保活。原安装qualification增加B启动／Web→回退A仍复用B→共享完整任务→busy拒绝／明确cancel→原实例实际dead／新A原完整冷结果→正常stop／双EX，保持原120秒、所有原断言和独立维护链。Windows native资格仍未执行，Native完整加载前准入源码已由上段接入，Shell-MCP／PTY及完整平台资格继续待实施或验收；原RSS／观测独立阻P6／§35，不作为这些源码实现的前置。最多五项入口／验收及准确验证范围归[当前Daemon进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-正式-daemon-与原实例版本交接源码)，37能力仍partial、wholeV13／phaseExit仍false。
 
 Windows managed Terminal 的正式安装／版本选择及配对消费者已接源码后，当前独立维护缺口继续沿原 owner 实施：GC已接原 READ/DELETE HANDLE、完整 EOF/hash／实际双时间、精确 FR/FA、原对象删除及 strict Close 保 Profile EX；正式 `kite.exe` qualification要求 busy→backup/inspect/status/restore/status/GC→新 Store 原完整冷读零重放。前门只核近期／引用保留，过宽限删除由公共 Windows维护用例只推进维护时钟；原生尚未执行，不提前退出P6／§35。完整验收与不超过五项实际依赖见[当前维护进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-安装版离线维护与-gc-源码)。
 

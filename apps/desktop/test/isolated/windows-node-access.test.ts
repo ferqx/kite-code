@@ -42,7 +42,7 @@ test('fixed Windows Node-API headers retain reviewed identity and inert imports 
     const fixture = join(root, 'contract.cc');
     writeFileSync(
       fixture,
-      '#define NAPI_VERSION 8\n#define NAPI_EXTERN\n#include "node_api.h"\n#include <type_traits>\nstatic_assert(std::is_pointer_v<decltype(&napi_wrap)>);\nstatic_assert(std::is_pointer_v<decltype(&napi_get_value_string_utf16)>);\nNAPI_MODULE_INIT(){return exports;}\n',
+      '#define NAPI_VERSION 8\n#define NAPI_EXTERN\n#include "node_api.h"\n#include <type_traits>\nstatic_assert(std::is_pointer_v<decltype(&napi_wrap)>);\nstatic_assert(std::is_pointer_v<decltype(&napi_get_value_string_utf16)>);\nstatic_assert(std::is_pointer_v<decltype(&napi_get_global)>);\nstatic_assert(std::is_pointer_v<decltype(&napi_call_function)>);\nstatic_assert(std::is_pointer_v<decltype(&napi_get_property_names)>);\nstatic_assert(std::is_pointer_v<decltype(&napi_is_array)>);\nstatic_assert(std::is_pointer_v<decltype(&napi_create_string_utf8)>);\nstatic_assert(std::is_pointer_v<decltype(&napi_create_string_utf16)>);\nNAPI_MODULE_INIT(){return exports;}\n',
     );
     const checked = spawnSync(
       'c++',
@@ -477,6 +477,75 @@ test.skipIf(process.platform !== 'win32')(
       renameSync(ui + '-moved', ui);
       renameSync(replacement, database);
       expect(readFileSync(database, 'utf8')).toBe('owned replacement same SID');
+    } finally {
+      await f.close();
+    }
+  },
+  60000,
+);
+
+test.skipIf(process.platform !== 'win32')(
+  'candidate lease rejects a matching private marker and helper bytes without the actual owned broker parent',
+  async () => {
+    const f = await nativeFixture();
+    try {
+      const { defaultWindowsPathSecurity, privateDirectory } = await import(
+        '@kite-ai/agent/windows-path-security'
+      );
+      const security = defaultWindowsPathSecurity()!;
+      const prefix = join(f.root, 'candidate-installation');
+      privateDirectory(prefix);
+      const id = 'a'.repeat(64),
+        candidateRoot = join(prefix, 'releases', id);
+      privateDirectory(candidateRoot);
+      privateDirectory(join(candidateRoot, 'terminal'));
+      privateDirectory(join(prefix, 'bin'));
+      const body = Buffer.from('fixture declaration alone grants no broker authority');
+      const sha256 = createHash('sha256').update(body).digest('hex');
+      const names = ['kite.exe', 'kite-tui.exe', 'kite-desktop.exe', 'native-verifier.exe'];
+      for (const name of names) security.writePrivateArtifactFile(join(prefix, 'bin', name), body);
+      security.writePrivateFile(
+        join(prefix, '.kite-native-install.json'),
+        Buffer.from(
+          JSON.stringify({
+            version: 2,
+            root: prefix,
+            bootstrap: {
+              candidateId: id,
+              files: names.map((name) => ({ name, size: body.length, sha256 })),
+            },
+          }),
+        ),
+      );
+      const normalized = prefix.toLowerCase();
+      const coordination = join(
+        f.root,
+        `.kite-install-coordination-${createHash('sha256').update(normalized).digest('hex')}`,
+      );
+      privateDirectory(coordination);
+      security.writePrivateFile(
+        join(coordination, 'installation.json'),
+        Buffer.from(JSON.stringify({ version: 1, prefix: normalized })),
+      );
+      const files: [string, string, string][] = [];
+      for (const path of ['native-manifest.json', 'terminal/terminal-manifest.json']) {
+        security.writePrivateArtifactFile(join(candidateRoot, path), body);
+        files.push([path, sha256, String(body.length)]);
+      }
+      const holder = f.spawn({
+        ...f.input,
+        mode: 'candidate-denied',
+        candidate: { root: candidateRoot, prefix, id, files },
+      } as typeof f.input);
+      await holder.next('candidate-denied');
+      expect(await holder.child.exited).toBe(0);
+      expect(existsSync(join(coordination, `use-${id}.lock`))).toBe(false);
+      expect(readFileSync(join(prefix, '.kite-native-install.json'), 'utf8')).toContain(
+        'native-verifier.exe',
+      );
+      renameSync(candidateRoot, `${candidateRoot}-released`);
+      renameSync(`${candidateRoot}-released`, candidateRoot);
+      expect(readFileSync(join(candidateRoot, 'native-manifest.json'))).toEqual(body);
     } finally {
       await f.close();
     }

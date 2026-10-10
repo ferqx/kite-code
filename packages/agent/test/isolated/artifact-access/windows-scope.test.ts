@@ -244,6 +244,7 @@ test('Windows attached lock keeps its original region through scope and native c
 import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
 import * as nativeFFI from 'bun:ffi';
+assert.equal(typeof require('bun:ffi').dlopen, 'function');
 Object.defineProperty(process, 'platform', { value: 'win32' });
 let nextHandle = 1n, region, failClose = false, failScope = true;
 const handles = new Map(), calls = [];

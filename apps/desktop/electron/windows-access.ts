@@ -10,6 +10,13 @@ export interface WindowsAccessLease {
 type Backend = {
   artifactShared(root: string): WindowsAccessLease;
   profileShared(dataRoot: string, profile: string): WindowsAccessLease;
+  candidateShared(
+    candidateRoot: string,
+    prefix: string,
+    candidateId: string,
+    files: readonly (readonly [relativePath: string, sha256: string, decimalSize: string])[],
+    handoff: { launcherPipe: string; mainPipe: string },
+  ): WindowsAccessLease;
 };
 /** Fixed Main-only asset; importing this wrapper does not load native code or acquire locks. */
 export function loadWindowsAccess(asset: { path: string; sha256: string }): Backend {
@@ -18,9 +25,10 @@ export function loadWindowsAccess(asset: { path: string; sha256: string }): Back
   verifyNativeAsset(asset.path, asset.sha256);
   const backend = createRequire(import.meta.url)(asset.path) as Backend;
   if (
-    Object.keys(backend).sort().join(',') !== 'artifactShared,profileShared' ||
+    Object.keys(backend).sort().join(',') !== 'artifactShared,candidateShared,profileShared' ||
     typeof backend.artifactShared !== 'function' ||
-    typeof backend.profileShared !== 'function'
+    typeof backend.profileShared !== 'function' ||
+    typeof backend.candidateShared !== 'function'
   )
     throw Error('windows_access_abi_unavailable');
   return backend;

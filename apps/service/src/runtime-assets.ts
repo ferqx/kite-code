@@ -304,6 +304,19 @@ export function verifyTerminalRuntimeBundle(
   bundleRoot: string,
   removal?: WindowsInstallationRemoval,
 ): VerifiedTerminalRuntimeBundle {
+  return terminalRuntimeBundleContent(bundleRoot, removal, false);
+}
+/** Complete content/hash/inventory only. No ACL, native file pin or usage authority. */
+export function readTerminalRuntimeBundleContent(
+  bundleRoot: string,
+): VerifiedTerminalRuntimeBundle {
+  return terminalRuntimeBundleContent(bundleRoot, undefined, true);
+}
+function terminalRuntimeBundleContent(
+  bundleRoot: string,
+  removal: WindowsInstallationRemoval | undefined,
+  contentOnly: boolean,
+): VerifiedTerminalRuntimeBundle {
   let windowsFiles: ReturnType<typeof retainWindowsTerminalRuntimeFiles> | undefined;
   try {
     const root = realpathSync(bundleRoot);
@@ -320,7 +333,8 @@ export function verifyTerminalRuntimeBundle(
       const { assertWindowsInstallationRemoval } =
         require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
       assertWindowsInstallationRemoval(removal, root);
-    } else if (process.platform === 'win32') windowsFiles = retainWindowsTerminalRuntimeFiles(root);
+    } else if (!contentOnly && process.platform === 'win32')
+      windowsFiles = retainWindowsTerminalRuntimeFiles(root);
     const bytes = readFileSync(manifestPath);
     let json: unknown;
     try {

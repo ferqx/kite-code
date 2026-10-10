@@ -19,7 +19,21 @@ bun run release:native rollback --prefix /absolute/install/native
 bun run release:native uninstall --prefix /absolute/install/native
 ```
 
-目标 Terminal prefix 必须已经是同一管理工具的合法独立安装；`--cli-prefix` 可省略，明确 register-cli 也可在安装后执行。构建、归档和解包目标必须不存在。安装只接受明确归档 SHA 与 prefix，不修改 PATH、shell 配置、用户 Profile 或应用数据。当前安装实现为 POSIX；Windows 安装明确 unsupported，不能以 Windows 类型/构建通过代替安装资格。
+目标 Terminal prefix 必须已经是同一管理工具的合法独立安装；`--cli-prefix` 可省略，明确 register-cli 也可在安装后执行。构建、归档和解包目标必须不存在。安装只接受明确归档 SHA 与 prefix，不修改 PATH、shell 配置、用户 Profile 或应用数据。POSIX 保原实现；Windows x64 已接入正式安装、版本选择、登记与保数据卸载的源码，实际原生资格尚未取得，范围见下节。
+
+## Windows managed Native 当前实现
+
+[Windows installer](../../../scripts/release/windows-native-install.ts)复用明确 archive/prefix 的用户入口。format=2 marker 固定首次候选的四个稳定文件：`bin/kite.exe`、`kite-tui.exe`、`kite-desktop.exe`、`native-verifier.exe`。后续安装及 rollback 只切 current/previous，bootstrap A 保持；运行中的 A 持原 outer/inner 使用权，新启动核当前候选。两个 use 键分别为候选 ID 与 `SHA256(ID + NUL + "terminal")`，均位于 prefix 外同一私有协调 namespace，不与 Profile 交叠。
+
+[Root release build port](../../../scripts/release/windows-native-build.ts)负责固定 compiled verifier 与静态 C 前门，Desktop builder 只通过明确 typed port 调用。源 Terminal 与 Electron 完整原文件 pin 覆盖复制和所有构建 await；Windows 拒绝 links，以私有原 HANDLE 创建／写入／flush，并核全部文件、空目录及实际 SQLite 引擎。新副本的 Electron EXE/DLL 使用 APPDIR/System32 静态 import 搜索；固定 Bun/helper/C 使用 System32。PE 不完整、delay import 或不合格 loader 字段仍拒绝；真实 Electron 分发是否满足这些守卫须由 Windows 构建验证，不能以字节夹具放行。原 publisher 文件不修改，SHA 仍只提供完整性。
+
+已安装 `kite-desktop.exe` 先由 C 清除运行时环境注入、固定并 pin 自身和 helper；[compiled verifier](../../../scripts/release/entrypoints/windows-native-verifier.ts)取得当前完整 outer/inner 文件 pin 与双 SH 后才创建 Electron。C 用实际创建的 helper HANDLE 出具第一份私有证书，verifier 用实际 Electron HANDLE 出具第二份；[Main 原生端口](../native/windows-access/README.md)在 BrowserWindow、Profile、UI SQLite 和 Service 前分别核真实管道 server/client PID、原 FILETIME 与固定映像，并取得自己的完整文件 pin／双 SH。Service 再取得独立使用权，继承 HANDLE 不作所有权证明。缺交接、伪造 parent、漂移或错误证书继续拒绝；原 SDK 允许指定 PPID，不能单凭 PPID/映像相同放行。
+
+Windows 登记后的独立 Terminal CLI/TUI 转发到 Native 稳定 C 前门。双 prefix SH 内核原 nonce、完整候选和原 ID；内部 expected-candidate 只收窄选择。Native 自身准入若已合法切 B，明确返回 `cli_registration_changed`，不会将已核 A 的证据用于 B；接纳 A 后释放 selection，仍允许正常升级。普通任务与 `kite.exe maintenance` 随该候选进入原业务／离线维护，未增加 journal 自动决定、模型调用或数据回退。
+
+rollback 在发布前完整预检仍由原 nonce 持有的 Terminal；正常 Terminal 卸载后的历史登记不重建旧前门。Native uninstall 取得全部 outer/inner EX 和完整树 DELETE owner，复用 genuine removal 验证，原 nonce CAS 撤销外部前向登记，再逐原对象删除并确认根消失；Profile、配置、项目和独立备份不进入删除输入。opaque transfer／关闭未知保留本调用完整锁组与原资源，所有文件确认关闭后才释放使用权。归档私有 scratch 也只以完整库存的原 DELETE owner 清理。
+
+本机必要证据覆盖闭合 marker、版本/登记控制流、原关闭未知、完整 archive/POSIX 邻接和真实 owned builder child 退出；这些不等于 Windows C/MSVC、DACL、pipe、Electron／Service 或 installed 维护恢复资格。Windows/Linux 原生执行按用户顺序留到重构后，当前不 dispatch。raw `release:native launch --directory` 的 Windows 限制保持，正式 Windows 入口是已安装的稳定前门；desktop 前门当前只接受无附加用户参数的启动。完整用户链必须在 Windows 核普通任务／历史、A→B→A、维护新 Store 原完整结果冷读零重放、准确退出、双 EX 及卸载保数据，才能关闭该平台能力。
 
 ## 完整身份与生命周期
 

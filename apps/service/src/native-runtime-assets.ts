@@ -1,8 +1,13 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
+import type { WindowsInstallationRemoval } from '@kite-ai/agent/artifact-access';
 import { createAssetFileHasher } from './asset-file-hash';
-import { type VerifiedTerminalRuntimeBundle, verifyTerminalRuntimeBundle } from './runtime-assets';
+import {
+  readTerminalRuntimeBundleContent,
+  type VerifiedTerminalRuntimeBundle,
+  verifyTerminalRuntimeBundle,
+} from './runtime-assets';
 import { parseSqliteReleaseIdentity, type SqliteReleaseIdentity } from './sqlite-release-assets';
 
 export class NativeRuntimeAssetError extends Error {
@@ -242,7 +247,24 @@ export function parseNativeBundleManifest(value: unknown): NativeBundleManifest 
   });
 }
 /** Entire unsigned integrity closure. This does not establish publisher authenticity. Node-safe. */
-export function verifyNativeRuntimeBundle(bundleRoot: string): VerifiedNativeRuntimeBundle {
+export function verifyNativeRuntimeBundle(
+  bundleRoot: string,
+  removal?: WindowsInstallationRemoval,
+): VerifiedNativeRuntimeBundle {
+  return nativeRuntimeBundleContent(bundleRoot, removal, false);
+}
+/** Complete outer and inner content only; callers must separately acquire native admission. */
+export function readNativeRuntimeBundleContent(bundleRoot: string): VerifiedNativeRuntimeBundle {
+  return nativeRuntimeBundleContent(bundleRoot, undefined, true);
+}
+function nativeRuntimeBundleContent(
+  bundleRoot: string,
+  removal: WindowsInstallationRemoval | undefined,
+  contentOnly: boolean,
+): VerifiedNativeRuntimeBundle {
+  let windowsFiles: ReturnType<typeof retainWindowsNativeRuntimeFiles> | undefined;
+  let verificationError: unknown;
+  let result: VerifiedNativeRuntimeBundle | undefined;
   try {
     if (!isAbsolute(bundleRoot)) fail('native_bundle_unavailable');
     const root = realpathSync(bundleRoot);
@@ -253,8 +275,20 @@ export function verifyNativeRuntimeBundle(bundleRoot: string): VerifiedNativeRun
     if (root !== bundleRoot || !lstatSync(root).isDirectory()) fail('native_bundle_path_alias');
     const manifestPath = join(root, 'native-manifest.json'),
       stat = lstatSync(manifestPath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o777) !== 420)
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      stat.nlink !== 1 ||
+      (process.platform !== 'win32' && (stat.mode & 0o777) !== 420)
+    )
       fail('native_bundle_unavailable');
+    if (removal) {
+      if (process.platform !== 'win32') fail('native_target_mismatch');
+      const { assertWindowsInstallationRemoval } =
+        require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+      assertWindowsInstallationRemoval(removal, root);
+    } else if (!contentOnly && process.platform === 'win32')
+      windowsFiles = retainWindowsNativeRuntimeFiles(root);
     const bytes = readFileSync(manifestPath);
     let json: unknown;
     try {
@@ -263,12 +297,15 @@ export function verifyNativeRuntimeBundle(bundleRoot: string): VerifiedNativeRun
       fail('native_manifest_invalid');
     }
     const manifest = parseNativeBundleManifest(json);
+    if (process.platform === 'win32' && manifest.links.length) fail('native_bundle_link_invalid');
     if (manifest.target.platform !== process.platform || manifest.target.arch !== process.arch)
       fail('native_target_mismatch');
     const terminalPath = join(root, 'terminal');
     if (!lstatSync(terminalPath).isDirectory() || lstatSync(terminalPath).isSymbolicLink())
       fail('native_bundle_path_alias');
-    const terminal = verifyTerminalRuntimeBundle(terminalPath);
+    const terminal = contentOnly
+      ? readTerminalRuntimeBundleContent(terminalPath)
+      : verifyTerminalRuntimeBundle(terminalPath, removal);
     if (
       terminal.digest !== manifest.terminalManifestSha256 ||
       terminal.manifest.target.platform !== manifest.target.platform ||
@@ -313,7 +350,7 @@ export function verifyNativeRuntimeBundle(bundleRoot: string): VerifiedNativeRun
             if (
               realpathSync(absolute) !== absolute ||
               readdirSync(absolute).length !== 0 ||
-              (stat.mode & 0o022) !== 0 ||
+              (process.platform !== 'win32' && (stat.mode & 0o022) !== 0) ||
               (process.getuid && stat.uid !== process.getuid())
             )
               fail('native_bundle_identity_mismatch');
@@ -330,7 +367,7 @@ export function verifyNativeRuntimeBundle(bundleRoot: string): VerifiedNativeRun
             !file ||
             stat.nlink !== 1 ||
             stat.size !== file.size ||
-            (stat.mode & 0o777) !== file.mode ||
+            (process.platform !== 'win32' && (stat.mode & 0o777) !== file.mode) ||
             realpathSync(absolute) !== absolute ||
             fileHash(absolute, stat.size) !== file.sha256 ||
             identities.has(identity)
@@ -360,11 +397,28 @@ export function verifyNativeRuntimeBundle(bundleRoot: string): VerifiedNativeRun
       pkg.main !== 'main.cjs'
     )
       fail('native_app_identity_mismatch');
-    return Object.freeze({ root, manifest, digest: sha(bytes), terminal });
+    if (removal) {
+      const { assertWindowsInstallationRemoval } =
+        require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+      assertWindowsInstallationRemoval(removal, root);
+    }
+    result = Object.freeze({ root, manifest, digest: sha(bytes), terminal });
   } catch (error) {
-    if (error instanceof NativeRuntimeAssetError) throw error;
-    fail('native_bundle_unavailable');
+    verificationError =
+      error instanceof NativeRuntimeAssetError || windowsRuntimePinCloseUnknown(error)
+        ? error
+        : new NativeRuntimeAssetError('native_bundle_unavailable');
   }
+  try {
+    windowsFiles?.release();
+  } catch (cleanup) {
+    verificationError = new AggregateError(
+      verificationError ? [verificationError, cleanup] : [cleanup],
+      'native_runtime_files_close_unknown',
+    );
+  }
+  if (verificationError) throw verificationError;
+  return result!;
 }
 export function verifyNativeRuntimeProtection(
   proof: NativeRuntimeProtection,
@@ -383,4 +437,72 @@ export function verifyNativeRuntimeProtection(
   )
     fail('native_protection_identity_mismatch');
   return bundle;
+}
+
+// Failed native closes keep the original manifest/file/directory owners reachable.
+const windowsNativeOwners = new Set<{ release(): void }>();
+/** Explicit Windows admission only; importing metadata/verifiers never loads Bun FFI. */
+export function retainWindowsNativeRuntimeFiles(root: string): { verify(): void; release(): void } {
+  if (process.platform !== 'win32') fail('native_target_mismatch');
+  const { retainWindowsCandidateFiles } =
+    require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+  const pins: ReturnType<typeof retainWindowsCandidateFiles>[] = [];
+  const owner = {
+    release() {
+      try {
+        while (pins.length) {
+          pins.at(-1)!.release();
+          pins.pop();
+        }
+      } catch (error) {
+        throw new AggregateError([error], 'native_runtime_files_close_unknown');
+      }
+      windowsNativeOwners.delete(owner);
+    },
+  };
+  windowsNativeOwners.add(owner);
+  try {
+    pins.push(retainWindowsCandidateFiles(root, ['native-manifest.json']));
+    const manifest = parseNativeBundleManifest(
+      JSON.parse(readFileSync(join(root, 'native-manifest.json'), 'utf8')),
+    );
+    if (manifest.target.platform !== 'win32' || manifest.target.arch !== process.arch)
+      fail('native_target_mismatch');
+    if (manifest.links.length) fail('native_bundle_link_invalid');
+    pins.push(
+      retainWindowsCandidateFiles(
+        root,
+        manifest.files.map((file) => file.path),
+      ),
+    );
+    for (const directory of manifest.directories)
+      pins.push(retainWindowsCandidateFiles(join(root, directory), []));
+    const verify = () => {
+      if (!pins.length) fail('native_bundle_unavailable');
+      for (const pin of pins) pin.verify();
+      for (const directory of manifest.directories)
+        if (readdirSync(join(root, directory)).length) fail('native_bundle_identity_mismatch');
+    };
+    verify();
+    return Object.freeze({ verify, release: owner.release });
+  } catch (error) {
+    try {
+      owner.release();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], 'native_runtime_files_close_unknown');
+    }
+    throw error;
+  }
+}
+
+export function windowsRuntimePinCloseUnknown(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    ([
+      'native_runtime_files_close_unknown',
+      'artifact_scope_release_failed',
+      'artifact_access_acquire_close_unknown',
+    ].includes(error.message) ||
+      (error instanceof AggregateError && error.errors.some(windowsRuntimePinCloseUnknown)))
+  );
 }

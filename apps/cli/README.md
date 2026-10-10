@@ -329,7 +329,7 @@ kite caller lookup <sessionId> --input '<directory 中的完整原 intent JSON>'
 
 ## 正式前门与 Native 登记
 
-`bun run agent` / `tui` 固定使用 `dist/unified-terminal` 的完整候选；先构建依赖和该候选。显式 source/candidate 选择不读取安装登记。独立安装的 `bin/kite` / `kite-tui` 前门可由 Native 安装器显式登记：它持原 Terminal 使用锁，复核双方 nonce、Native active 与完整 outer/inner 闭包，再执行 Native 包内 Bun 和固定 CLI/TUI。其配套 Service 也来自同一闭包。
+`bun run agent` / `tui` 固定使用 `dist/unified-terminal` 的完整候选；先构建依赖和该候选。显式 source/candidate 选择不读取安装登记。独立安装的 `bin/kite` / `kite-tui` 前门可由 Native 安装器显式登记：它持原 Terminal 使用锁，复核双方 nonce、Native active 与完整 outer/inner 闭包；POSIX 执行 Native 包内 Bun 和固定 CLI/TUI。Windows 源码则转交 Native 稳定 C 前门，以内部 expected candidate 复核原选择，漂移在子进程／Profile 之前明确拒绝。Native 自身完整准入成功后才允许后续指针切换，其配套 Service 独立持同一完整闭包。Windows 原生资格仍待验，具体边界归[Native owner](../desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
 登记更新、撤销和原子指针的负责边界见[终端制品](docs/terminal-release.md)与[Native 制品](../desktop/docs/native-release.md)。纯帮助、版本、trace 及非 TTY 拒绝保持在业务准入之前。三条真实 CLI/TUI Work 已通过公共 Store 原 Command→Run 终态核对；本机证据限 macOS，不代表完整 §35 或其他平台。
 

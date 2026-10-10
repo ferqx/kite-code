@@ -20,7 +20,7 @@ Node/Electron 宿主先打开自己的稳定锁 fd，再以 child stdio 映射�
 
 ## 制品使用权
 
-显式宿主 leaf [artifact-access](../artifact-access.ts) 提供 `acquireArtifactAccess({root,mode})`，校验 canonical、owner 与不可被组/其他用户写入的目录，在候选外的固定 sibling `.use-<basename>.lock` 上复用原 OS shared/exclusive 锁。import 不 acquire；它不授予 Profile、Store 或执行权限。CLI/TUI 与独立 Service 各持自己的 shared lease，卸载者必须取得每个候选的 exclusive lease；退出前不靠另一个进程代持。当前实际资格为 macOS，Linux 与 Windows 不由此推定通过；新 POSIX 安装器与独立 profile 生命周期见[终端 owner](../../../../apps/cli/docs/terminal-release.md)。
+显式宿主 leaf [artifact-access](../artifact-access.ts) 提供 `acquireArtifactAccess({root,mode})`，校验 canonical、owner 与不可被组/其他用户写入的目录；POSIX／非 managed candidate 在候选外的固定 sibling `.use-<basename>.lock` 上复用原 OS shared/exclusive 锁，Windows managed 规则见下方安装协调。import 不 acquire；它不授予 Profile、Store 或执行权限。CLI/TUI 与独立 Service 各持自己的 shared lease，卸载者必须取得每个候选的 exclusive lease；退出前不靠另一个进程代持。当前实际资格为 macOS，Linux 与 Windows 不由此推定通过；新 POSIX 安装器与独立 profile 生命周期见[终端 owner](../../../../apps/cli/docs/terminal-release.md)。
 
 Windows Bun 使用独立的 [public candidate scope](windows-artifact-scope.ts)，不把 POSIX mode/uid 当作原生权限证据。候选 root 与 parent 的原 HANDLE owner 必须是当前 Token SID；普通继承读/执行 ACE 可保留，写入、删除、修改权限/owner 和 directory delete-child 仅允许当前 SID、SYSTEM 与 Administrators。未知 ACE 类型、其他主体的写 grant、null DACL、reparse 与不一致的 volume/file identity 拒绝；deny ACE 不抵消不可信 allow，inherit-only grant 也不能把不可信写权交给后续子对象。它不要求私有 Profile 的精确 protected/current-SID-only FA，不修改候选、Workspace 或已有目录的 ACL。
 
@@ -38,7 +38,7 @@ Node/Electron 宿主以 no-follow 打开准确 sibling fd，通过 child stdio �
 
 Windows 维护使用独立的 private Profile 文件政策和原稳定排他锁，已接入原文件/祖先 pin、FA metadata 与 FR media 分角色验证、GENERIC_WRITE flush 与 same-volume write-through move；它不借 public candidate scope 授权。显式 GC 的 `retainWindowsGcArtifact` 仅接受生成媒体名字，以同一原 DELETE/READ HANDLE 完整 EOF/hash、实际 ChangeTime/mtime及身份复核后删除，保 FR/FA 和原目录角色；原对象、路径复核探针及所有祖先 strict Close 未确认都保资源，由 maintenance owner 保 Profile EX。完整行为、SQL/FD 生命周期和原生未验范围归[maintenance owner](../maintenance/README.md#windows-维护文件端口与验收边界)；当前 macOS 类型与邻接通过不能证明 Windows 运行或安装资格。
 
-[Windows 安装协调](windows-installation-coordination.ts)为正式 Terminal prefix 在安装树外建立稳定私有 sibling namespace，selection 锁与每个 64 字符十六进制 candidate ID 的 use 锁从同一已核 marker 派生。managed candidate 的 `acquireArtifactAccess` 取得这个外部 use 锁，同时保留原候选 scope；卸载不能通过关闭重开普通 scope 借出删除权限。删除专用端口与安装选择归 release／CLI owner，外部 namespace 不随安装树删除，Profile 数据不由制品使用锁管理。
+[Windows 安装协调](windows-installation-coordination.ts)为正式 Terminal／Native prefix 在安装树外建立稳定私有 sibling namespace，selection 锁与每个 64 字符十六进制 candidate ID 的 use 锁从同一已核 marker 派生。Native outer 使用原 candidate ID，inner 使用 `SHA256(id + NUL + "terminal")`；Bun、installer 与 Node 原生端口使用相同规则。`acquireArtifactAccess` 核 closed Native v2 marker 和四个稳定 bootstrap 文件声明，再取得对应外部 use 锁并保留原候选 scope；它仍不代替消费 owner 的全量文件／摘要准入。卸载不能通过关闭重开普通 scope 借出删除权限。删除专用端口与安装选择归 release／CLI owner，外部 namespace 不随安装树删除，Profile 数据不由制品使用锁管理。实际 Windows 完整 Native 资格仍待验，当前源码入口归[Native owner](../../../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
 显式 [完整文件 pin](windows-candidate-files.ts) `retainWindowsCandidateFiles(root, relativeFiles)` 接受消费 owner 从已验 closed manifest 取得的路径；不自动把所有 artifact lease 扩成全树 pin。它复用上述 public candidate ACL，拒绝 reparse、hardlink、别名与非法 relative 路径，沿原 HANDLE 保留所有 nested 目录与每个普通文件，share READ only、拒绝 WRITE／DELETE。复核 volume／FileID、creation／LastWrite、size／link 与路径映射；LastAccessTime 不作为不可变字段，因为读取可改变它。关闭成功才移除所属记录，失败的原 HANDLE 保留，不以 JS 对象或目录存在代替关闭事实。
 
@@ -46,7 +46,9 @@ Windows 的 attached 与无 attachment 锁都只在原 `CloseHandle` 成功后�
 
 [Windows 私有路径端口](windows-path-security.ts)的 `copyPrivateFile` 从原只读 HANDLE 读到 EOF 并复核完整原 size／身份，source 可采用上述 public ACL，不修权限；target 以当前 Token SID 的 protected DACL 和 CREATE_NEW 原 HANDLE 创建。`writePrivateArtifactFile` 接受最多 1 GiB 的明确制品字节，普通 `writePrivateFile` 的原 8 MiB 边界不变。复制与写入使用有限块及短写循环、FlushFileBuffers、原对象／parents 复核和严格关闭，完整内容 SHA 仍由制品消费 owner 核对。`movePrivateEntry` 保留原 source 身份，在同卷通过同步 write-through 原生 move 发布，不采用跨卷 copy 或按 POSIX mode 假验证权限。
 
-这些端口与源码／mock 邻接验证只是当前实现边界，不能声明原生 Windows 安装或完整资源退出资格；Windows Native、Daemon、GC、PTY 及跨代码版本完整链仍待对应原生验收。metadata 的纯 Node／POSIX 读取与显式 Windows acquire 分离，Windows 系统 DLL 在实际端口调用时才加载。
+原私有单文件撤销使用 [Windows private removal](windows-private-file-removal.ts) 的原 DELETE HANDLE／祖先 pin／FileID 和严格关闭，只删除已经核准的登记文件；完整安装树删除仍归安装 removal owner。登记调用的所有 prefix EX 共享同次关闭确认，任一原资源关闭未知时保留全部 EX，不能只保护发生错误的一侧。
+
+这些端口与源码／mock 邻接验证只是当前实现边界，不能声明原生 Windows 安装或完整资源退出资格；Windows Native、Daemon、GC、PTY 及跨代码版本完整链仍待对应原生验收。metadata 的纯 Node／POSIX 读取与显式 Windows acquire 分离；[locks](locks.ts) 仅在实际 POSIX／Windows acquire 内加载 Bun FFI，Node target bundle 的冷 import 不带顶层 `bun:ffi`。这不提供 Node 的 Bun 文件锁执行后端，Windows 系统 DLL 仍在实际端口调用时才加载。
 
 ## Shell guardian 与 macOS confinement
 

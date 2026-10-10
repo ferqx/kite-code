@@ -12,6 +12,10 @@ import { readSessionLogs } from '@kite-ai/agent/storage';
 import { type ConfigureProcessHost, type PrivateStartup, privateStartupSchema } from './bootstrap';
 import { createDefaultProcessConfiguration, type ShellConfigurationOptions } from './configuration';
 import { startService } from './index';
+import {
+  retainWindowsNativeRuntimeFiles,
+  windowsRuntimePinCloseUnknown,
+} from './native-runtime-assets';
 import { retainWindowsTerminalRuntimeFiles } from './runtime-assets';
 import { runtimeProtectionRoots, verifyRuntimeProtection } from './runtime-protection';
 import { encodeServiceStartupDiagnostic } from './startup-diagnostic';
@@ -102,7 +106,9 @@ export async function assembleProcessService(
     try {
       for (const root of runtimeProtectionRoots(startup.runtimeProtection))
         leases.push(acquireArtifactAccess({ root: realpathSync(root), mode: 'shared' }));
-      if (process.platform === 'win32')
+      if (process.platform === 'win32') {
+        if (startup.runtimeProtection.kind === 'native.candidate')
+          windowsFiles.push(retainWindowsNativeRuntimeFiles(startup.runtimeProtection.root));
         windowsFiles.push(
           retainWindowsTerminalRuntimeFiles(
             startup.runtimeProtection.kind === 'native.candidate'
@@ -110,6 +116,7 @@ export async function assembleProcessService(
               : startup.runtimeProtection.root,
           ),
         );
+      }
       runtimeAssets = [
         ...verifyRuntimeProtection(startup.runtimeProtection, {
           entrypoint: entrypoint ?? '',
@@ -118,7 +125,17 @@ export async function assembleProcessService(
         }),
       ];
     } catch (error) {
-      runtimeAssetAccess.release();
+      if (windowsRuntimePinCloseUnknown(error))
+        throw new ProcessServiceCleanupError('runtime_assembly', error, error, {
+          runtimeAssetAccess,
+        });
+      try {
+        runtimeAssetAccess.release();
+      } catch (cleanupError) {
+        throw new ProcessServiceCleanupError('runtime_assembly', error, cleanupError, {
+          runtimeAssetAccess,
+        });
+      }
       throw error;
     }
   }
@@ -135,7 +152,13 @@ export async function assembleProcessService(
           shell: packagedShellAssets(selected, runtimeAssets),
         });
   } catch (error) {
-    runtimeAssetAccess?.release();
+    try {
+      runtimeAssetAccess?.release();
+    } catch (cleanupError) {
+      throw new ProcessServiceCleanupError('runtime_assembly', error, cleanupError, {
+        runtimeAssetAccess,
+      });
+    }
     throw error;
   }
   const {
