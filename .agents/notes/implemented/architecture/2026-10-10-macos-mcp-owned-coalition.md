@@ -22,6 +22,6 @@ closed v2严格区分三角色：broker和server的所属父方可观察exit／r
 
 ## Consequences
 
-依赖同已验证Shell基础的launchd和固定libproc ABI，当前本机范围macOS arm64／Bun1.4.2，其他平台仍明确unsupported。身份漂移、容量不足、失联或准确清理失败保持unknown；没有外部owner代启动daemon、任意同UID对抗或OS资源限额承诺。远端Tool效果仍不能由transport收束证明撤销或停止。
+依赖同已验证Shell基础的launchd和固定libproc ABI，本篇实际资格限macOS arm64／Bun1.4.2。Windows 新增独立 Job／HANDLE 源码与 v3，边界及未闭合原生资格见[Windows 决定](../../proposed/architecture/2026-10-10-windows-mcp-job-ownership.md)；不重写本篇 v2 或以本机结果代证，Linux 仍 unsupported。身份漂移、容量不足、失联或准确清理失败保持unknown；没有外部owner代启动daemon、任意同UID对抗或OS资源限额承诺。远端Tool效果仍不能由transport收束证明撤销或停止。
 
 唯一新增逃逸验收放入原自然退出整例，保原完整RPC／cancel／EOF／SIGKILL／cold消费者与预算；认证前broker强杀对应源码审查发现的真实注册清理缺口。原失败和实际复验由[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10正式-mcp-完整所属进程树与旧组路径退役)维护，当前机制由[MCP owner](../../../../packages/agent/src/mcp/README.md#显式-stdio-guardian-port)维护。原[Shell决定](2026-10-07-macos-host-shell-owned-coalition.md)继续约束其独立权限与held-root，不被本决定替代；[资源采集决定](../testing/2026-10-08-blocked-full-workload-collection.md)继续约束原增长门槛和全局unsupported。

@@ -4131,3 +4131,41 @@ Windows x64 `release:native build/pack/install/rollback/uninstall` 已从旧 POS
 | 5 | 正式切换后的最终旧路径退役与阶段收束 | 实际 legacy 删除、未过滤完整回归和适用 P7 版本／发布责任通过，保 D08 首发后向后兼容责任 | 前四项；首发前无适用 T029 样本不阻独立实施，真实失败不能删断言／排除测试 |
 
 本轮新增闭合的是 Windows managed Native 正式安装／版本选择／维护前门的源码缺口，正式登记 caller 已转至稳定 Native 前门；没有取得 Windows 完整用户资格或执行最终 legacy 删除。37 能力仍 partial，wholeDefault=false、wholeV13=false、phaseExit=false、Goal active；授权仍仅本地 stage／commit，无 push／PR／发布。
+
+## 2026-10-10Windows 正式 stdio MCP 完整连接源码
+
+上一 Native 切片已按必要验证、文档同步和正常 hook 提交 `21eb43d885e973127b480d5c198d5ee0e2c2cf60`，切片结束。本轮继续按真实退出依赖实施：RSS 原 +115.203125 MiB／32 MiB red、全部可信 Runtime 后代及 activeResources／handles 缺项仍阻 P6／§35／最终退役；不阻独立平台源码。本轮未重复参数对照、资源窗口或已闭合故障矩阵，Windows／Linux 实机仍依用户安排留重构后 Actions，无 dispatch。
+
+### 实际入口、完整行为与模块交接
+
+源码核对纠正了上一表的 OS-child 边界：默认后台 Agent／Task 由同一 Runtime／Store 执行 child Run，本身没有 Windows 平台 guard；它调用 Shell 时才依赖 OS 子树后端。Windows Shell 的真实文件权限 ceiling 仍缺：旧 Rust `WRITE_RESTRICTED` 只限制写检查，`protected_deny_paths` 实际为空，Full＋网络还用无该 guard 的 current-user token，不能证明当前 Profile／coordination 读保护；目录及祖先 HANDLE pin 不代内容隔离，当前 Shell 拒绝保持。
+
+可独立完成的 stdio MCP 已从平台 guard 接到完整正式消费者：Profile `mcp.json`／已批准 Workspace `.kite-code/mcp.json` → 原 Source selection／permission／实际 SQL connection Job → 平台 guardian → SDK 连接、远端 Tool 与原完整结果 → Session cancel／Service close → cold 原 Command／Execution／output 零 Provider／RPC。Service 原来源版本、capture／parent input digest、当前批准与最终 freshness 在 await 后及每次 wire 前核对，不建立第二 carrier 或从 Query 恢复执行。
+
+内部 [Windows owner](../../packages/agent/src/platform/process/windows-owned-child.ts) 使用无名非继承 Job、KILL_ON_JOB_CLOSE、准确三 stdio HANDLE_LIST；业务 suspended 创建，以原 process HANDLE 归 Job 后才 resume。有限 overlapped stdin 在取消后仍保原 buffer／event到实际 completion，stdout／stderr 停止后继续排空。启动已创建资源后失败携原 `cleanup` Promise；guardian 必须等原 root Wait／GetExit、Job空树、I/O与 HANDLE 关闭，不把同步 throw 当零资源。cleanup／Close unknown 保原强 owner与进程存活。
+
+[Windows guardian](../../packages/agent/src/mcp/windows-stdio-guardian.ts) 的终态只描述 business owner；同一 [port](../../packages/agent/src/mcp/stdio-port.ts) 另持实际 spawn PID 的原 observation HANDLE／FILETIME，核 ready 原出生、实际 guardian exit＋close、原对象 dead及 observationClosed，全部确认后才 ended。原 startup与 grace＋4000ms stop预算保持，首次 unknown 不被迟到关闭改写。closed v3严格保存六字段 binding及有限 root／Job／guardian事实，不存native HANDLE／command／env／路径／秘密，cold decoder纯读；旧Darwin v1／v2不拓宽。
+
+正式公共资产构建现生成两份 guardian `.js`，同一 Service assembler按实际平台选择，完整候选 inventory／使用权覆盖新资产；缺资产没有 `.ts` fallback。Windows只接明确绝对 native `.exe`＋完整argv，Node／Bun＋脚本可配置，`.cmd`／`.bat`当前准确拒绝，不发现PATH／COMSPEC。Job只覆盖原成员，外部系统broker代启动及远端Tool效果不据此证明结束；它不提供Shell隔离或完整Runtime resource census。持久取舍及原生验收保持 [proposed Note](../../.agents/notes/proposed/architecture/2026-10-10-windows-mcp-job-ownership.md)。
+
+### 验证与尚未闭合范围
+
+受影响的 [正式封装 Service 整例](../../apps/service/test/isolated/mcp-source-packaged-default.test.ts) 在本机 macOS arm64／Bun 1.4.2 以必要 launchd 权限实际完成 1 pass／59 expect／0 fail／9.36s。新增 Windows guardian 进入候选清单，真实默认来源完成一次远端 Tool 效果，准确取消、实际 Service退出及冷原 Command／Execution／完整输出保持；冷段 Provider／RPC零增量，后来可选来源坏项仍不阻普通模型工作。原 180s整例和12s读取期限、所有原业务断言保持，Windows分支另要求 v3／原FILETIME／Job空树／observationClosed。此本机成功只证明封装与macOS邻接，不计Windows syscall资格；其原candidate digest属于该次实际字节，不作为之后未执行Windows leaf增量的原生证据。
+
+此前普通sandbox运行原未修改 `stdio-port.test.ts` 整文件为2 pass／5 fail／21 expect／6.41s，记录启动 `mcp_stdio_ended` 和注册／shutdown清理未确认。原红日志 `/private/tmp/kite-windows-mcp-original-mac-whole-20261011.log` 保留，没有改断言、期限或skip。自动审批拒绝对该原故障矩阵的提权重复，理由为重复已闭矩阵及未确认launchd清理的扰动风险；没有执行该重试。只读核该次五个准确label当前均absence，原owner目录保留，这不足以证明全部进程无残留或确定失败原因。随后仅对本次实际新增验收的上述正式封装整文件取得审批并成功，不将其成功替换原失败记录。
+
+Windows owner整文件2 pass／5 Bun expect，port整文件2 pass／20 Bun expect／1原native Windows skip；这两份本机有限mock加上述实际macOS封装共三个唯一整文件、5 pass／84 Bun expect／0 fail／1 skip，单列原Mac矩阵红，不作为整轮绿。最终审查补齐PID的DWORD、FILETIME的UINT64上限，并纠正v3冷解码曾接纳`false`等非对象记录的真实复现；完整port沿当前源复验，合法未启动null记录保持。owner当前完整字节、port及guardian与封装完成后的适用输入保持；3769个输入在最后ABI约束测试前后只有codec排版改变，原字节SHA可重构且实际Bun转译相等，随后非对象修复的两文件沿上述新整例和Agent类型／构建复验。原封装证据只跨未执行Windows路径、type-only import和说明变更复用，原candidate digest不外推为当前Windows字节。
+
+Root及八runtime workspace类型、八workspace构建实际0；最后只改Agent冷codec，再执行Agent类型与构建0，其他包不变。九个受影响TS Biome、boundary／runtime-package／API／test-owner、docs／all docs-impact和plan-evidence实际通过。归并证据、原红与审批边界见 `/private/tmp/kite-windows-mcp-source-verified-evidence-20261010.json`；正常本地提交仍独立执行hook。整轮默认回归留真实阶段收束点，当前不能宣布wholeDefault／wholeV13通过。
+
+### 最多五项剩余退出依赖
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与验收条件 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows 普通 Shell及调用它的后台 Agent／Workflow | 真实 Full／Workspace权限 ceiling保护 Profile／coordination内容、Runtime只读与祖先delete-chain；固定原解释器／网络语义，创建前归属、完整输出、精确取消、全原资源关闭或unknown fencing，cold原结果零重放 | MCP原Job可复用资源原语，但不提供权限；先补实际安全后端，不能先删guard |
+| 2 | installed Windows／Linux的完整客户端、A→B→A和维护恢复 | 原生完整候选／MSVC／PE／DACL／pipe／HANDLE／ABI／Native窗口／真实TUI；原完整common／always formal及新Store原完整历史冷读，跨代码不以标签B替代，help不代PTY | 对应平台源码及前项；按用户顺序重构后Actions，本轮不dispatch；MCP源码不等于平台资格 |
+| 3 | installed CLI／TUI／Native持续普通任务及后台资源 | 原RSS增长／斜率、八轮／九点、全部可信Runtime后代及activeResources／handles真实满足，原red／unknown不改阈值 | 直接阻P6／§35；不是独立安装／维护或stdio源码前置，仍未闭合 |
+| 4 | §35完整能力与正式caller独立审查 | 按实际手册／37能力映射核完整适用T/E、参考功能、兼容样本及正式入口；独立审查保每项准确资格 | 前序完整用户能力／平台资格；本次leaf审查只审四文件接线，不代整片迁移审查 |
+| 5 | 正式切换后的最终legacy退役及阶段收束 | 实际旧路径删除、未过滤完整回归、适用P7版本／发布责任通过；保D08首发后向后兼容 | 前四项；不以本片局部绿或首发前无T029样本宣布阶段退出，真实失败不能删断言／排除测试 |
+
+本轮新增闭合的是Windows stdio MCP的正式完整连接源码与资产／调用者接线，没有关闭Windows Shell、实机安装维护资格、资源门禁或最终legacy删除。37能力partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active，授权仅本地stage／commit。

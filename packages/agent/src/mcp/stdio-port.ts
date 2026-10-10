@@ -12,6 +12,7 @@ import {
   decodeMcpStdioProcessEvidence,
   isMcpStdioIdentity,
   type McpStdioProcessEvidenceV2,
+  type McpStdioWindowsEvidence,
   mcpStdioKernelState,
 } from './stdio-process-evidence';
 
@@ -25,7 +26,12 @@ export class McpStdioPortError extends Error {
 /** Built leaf resolves only its packaged guardian; source callers must select a built asset. */
 export function mcpStdioGuardianAsset(): string {
   if (!import.meta.url.endsWith('.js')) throw new McpStdioPortError('mcp_stdio_asset_unavailable');
-  const path = fileURLToPath(new URL('./stdio-guardian.js', import.meta.url));
+  const path = fileURLToPath(
+    new URL(
+      process.platform === 'win32' ? './windows-stdio-guardian.js' : './stdio-guardian.js',
+      import.meta.url,
+    ),
+  );
   if (!existsSync(path)) throw new McpStdioPortError('mcp_stdio_asset_unavailable');
   return path;
 }
@@ -49,7 +55,7 @@ export interface McpStdioPortOptions {
   assertFresh?(binding: Binding, options: { signal: AbortSignal }): void;
   limits?: { frameBytes?: number; stderrBytes?: number; timeoutMs?: number; graceMs?: number };
 }
-/** macOS exclusive resource-coalition supervision of this stdio connection's descendants. */
+/** Trusted platform supervision of this connection's owned process resources. */
 export function createMcpStdioTransportPort(
   options: McpStdioPortOptions,
 ): McpLifecycleTransportPort {
@@ -114,7 +120,7 @@ export function createMcpStdioTransportPort(
     throw new McpStdioPortError('mcp_stdio_configuration_invalid');
   return {
     async open(binding, { signal }) {
-      if (process.platform !== 'darwin')
+      if (process.platform !== 'darwin' && process.platform !== 'win32')
         throw new McpStdioPortError('mcp_stdio_platform_unsupported');
       const server = servers.get(binding.serverId);
       if (
@@ -159,6 +165,17 @@ export function createMcpStdioTransportPort(
         )
       )
         throw new McpStdioPortError('mcp_stdio_asset_unavailable');
+      if (process.platform === 'win32') {
+        // No ambient COMSPEC or .cmd fallback: the configured native executable is explicit.
+        if (!/\.exe$/i.test(server.configuration.command))
+          throw new McpStdioPortError('mcp_stdio_executable_unsupported');
+        return openWindowsStdio(binding, signal, server.configuration, options, {
+          maximum,
+          stderrMaximum,
+          timeout,
+          grace,
+        });
+      }
       const broker = spawn(bun, [guardianPath], {
         cwd: dirname(guardianPath),
         env: {},
@@ -481,4 +498,341 @@ export function createMcpStdioTransportPort(
       };
     },
   };
+}
+
+// Unknown native closes retain the original ChildProcess and original observation HANDLE.
+const windowsUnknownOwners = new Set<object>();
+async function openWindowsStdio(
+  binding: Binding,
+  signal: AbortSignal,
+  configuration: Configuration,
+  options: McpStdioPortOptions,
+  limits: { maximum: number; stderrMaximum: number; timeout: number; grace: number },
+): Promise<Awaited<ReturnType<McpLifecycleTransportPort['open']>>> {
+  const { retainWindowsOwnedProcessObservation } =
+    require('../platform/process/windows-owned-child') as typeof import('../platform/process/windows-owned-child');
+  const child = spawn(options.bunExecutable, [options.guardianPath], {
+    cwd: dirname(options.guardianPath),
+    env: {},
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const nonce = randomUUID();
+  let observation: ReturnType<typeof retainWindowsOwnedProcessObservation> | undefined;
+  let evidence: McpStdioWindowsEvidence = {
+    version: 3,
+    coverage: 'windows-job-members',
+    ownerPid: process.pid,
+    binding: {
+      originalStoreId: binding.originalStoreId,
+      sessionId: binding.sessionId,
+      executionId: binding.executionId,
+      serverId: binding.serverId,
+      scopeId: binding.scopeId,
+      configDigest: binding.configDigest,
+    },
+    guardian: null,
+    server: null,
+    job: null,
+    closed: false,
+    closeUnknown: false,
+  };
+  let readyResolve!: () => void, readyReject!: (error: Error) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  void ready.catch(() => {});
+  let finish!: (proof: { supervision: 'ended' | 'unknown' }) => void;
+  const stopped = new Promise<{ supervision: 'ended' | 'unknown' }>((resolve) => {
+    finish = resolve;
+  });
+  let closing = false,
+    started = false,
+    finalUnknown = false,
+    terminalSeen = false,
+    treeStopped = false,
+    actualClosed = false,
+    sequence = 0,
+    pendingBytes = 0,
+    pendingWrites = 0;
+  let exit: NonNullable<McpStdioWindowsEvidence['guardian']>['exit'] = null;
+  let controlBuffer = Buffer.alloc(0),
+    rpcBuffer = Buffer.alloc(0);
+  const pending: JSONRPCMessage[] = [];
+  let startTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopping: Promise<import('../extensions').StopConfirmation> | undefined;
+  const owner = {
+    child,
+    get observation() {
+      return observation;
+    },
+  };
+  function unknown() {
+    finalUnknown = true;
+    closing = true;
+    windowsUnknownOwners.add(owner);
+    finish({ supervision: 'unknown' });
+  }
+  async function stop(): Promise<import('../extensions').StopConfirmation> {
+    if (stopping) return stopping;
+    closing = true;
+    readyReject(new McpStdioPortError('mcp_stdio_closed'));
+    stopping = (async () => {
+      if (
+        !actualClosed &&
+        child.exitCode === null &&
+        child.signalCode === null &&
+        child.stdin?.writable
+      )
+        child.stdin.write(`${JSON.stringify({ type: 'cancel', nonce })}\n`);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          stopped.then((proof) => ({
+            status: proof.supervision === 'ended' ? ('stopped' as const) : ('unknown' as const),
+          })),
+          new Promise<{ status: 'unknown' }>((resolve) => {
+            timer = setTimeout(() => {
+              child.stdin?.end();
+              unknown();
+              resolve({ status: 'unknown' });
+            }, limits.grace + 4000);
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    })();
+    return stopping;
+  }
+  const transport: Transport = {
+    async start() {
+      if (started) throw new McpStdioPortError('mcp_stdio_already_started');
+      started = true;
+      await ready;
+      if (closing) throw new McpStdioPortError('mcp_stdio_closed');
+      for (const message of pending.splice(0)) transport.onmessage?.(message);
+      pendingBytes = 0;
+    },
+    async send(message) {
+      if (closing || !child.stdin?.writable) throw new McpStdioPortError('mcp_stdio_closed');
+      options.assertFresh?.(binding, { signal });
+      const content = `${JSON.stringify(message)}\n`;
+      if (Buffer.byteLength(content) > limits.maximum)
+        throw new McpStdioPortError('mcp_stdio_frame_limit');
+      if (pendingWrites >= 32) throw new McpStdioPortError('mcp_stdio_write_capacity');
+      pendingWrites++;
+      try {
+        await new Promise<void>((resolve, reject) =>
+          child.stdin!.write(`${JSON.stringify({ type: 'rpc', nonce, content })}\n`, (error) =>
+            error ? reject(new McpStdioPortError('mcp_stdio_write_failed')) : resolve(),
+          ),
+        );
+      } finally {
+        pendingWrites--;
+      }
+    },
+    async close() {
+      await stop();
+    },
+  };
+  function rpc(chunk: Buffer) {
+    let offset = 0;
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf(10, offset),
+        end = newline < 0 ? chunk.length : newline;
+      if (rpcBuffer.length + end - offset > limits.maximum) throw Error('frame_limit');
+      rpcBuffer = Buffer.concat([rpcBuffer, chunk.subarray(offset, end)]);
+      if (newline < 0) break;
+      const message = JSONRPCMessageSchema.parse(
+        JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(rpcBuffer)),
+      );
+      rpcBuffer = Buffer.alloc(0);
+      offset = newline + 1;
+      if (started && transport.onmessage) transport.onmessage(message);
+      else {
+        pendingBytes += Buffer.byteLength(JSON.stringify(message));
+        if (pending.length >= 32 || pendingBytes > limits.maximum) throw Error('queue_limit');
+        pending.push(message);
+      }
+    }
+  }
+  child.stdout!.on('data', (chunk: Buffer) => {
+    try {
+      let offset = 0;
+      while (offset < chunk.length) {
+        const newline = chunk.indexOf(10, offset),
+          end = newline < 0 ? chunk.length : newline;
+        if (controlBuffer.length + end - offset > 64 * 1024) throw Error('control_limit');
+        controlBuffer = Buffer.concat([controlBuffer, chunk.subarray(offset, end)]);
+        if (newline < 0) break;
+        const frame = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(controlBuffer));
+        controlBuffer = Buffer.alloc(0);
+        offset = newline + 1;
+        if (frame.nonce !== nonce || frame.sequence !== sequence + 1)
+          throw Error('control_identity');
+        sequence++;
+        if (
+          frame.type === 'rpc' &&
+          typeof frame.content === 'string' &&
+          frame.content.length <= 32768
+        ) {
+          if (terminalSeen) throw Error('rpc_after_terminal');
+          rpc(Buffer.from(frame.content, 'base64'));
+          continue;
+        }
+        if (terminalSeen) throw Error('duplicate_terminal');
+        if (frame.type !== 'ready' && frame.type !== 'terminal') throw Error('control_invalid');
+        if (
+          !observation?.creationTime ||
+          frame.guardian?.pid !== child.pid ||
+          frame.guardian?.parentPid !== process.pid ||
+          frame.guardian?.creationTime !== observation.creationTime
+        )
+          throw Error('guardian_identity');
+        const native = frame.evidence;
+        if (
+          native?.version !== 1 ||
+          native.coverage !== 'windows-job-members' ||
+          Object.keys(native).sort().join(',') !== 'closeUnknown,closed,coverage,job,root,version'
+        )
+          throw Error('job_identity');
+        const candidate: McpStdioWindowsEvidence = {
+          ...evidence,
+          guardian: {
+            pid: child.pid!,
+            parentPid: process.pid,
+            creationTime: observation.creationTime,
+            exit: null,
+            kernelState: observation.inspect(),
+            observationClosed: false,
+          },
+          server: native.root,
+          job: native.job,
+          closed: native.closed,
+          closeUnknown: native.closeUnknown,
+        };
+        const decoded = decodeMcpStdioProcessEvidence(candidate, evidence.binding, process.pid);
+        if (
+          decoded?.version !== 3 ||
+          (evidence.server &&
+            (decoded.server?.pid !== evidence.server.pid ||
+              decoded.server.creationTime !== evidence.server.creationTime))
+        )
+          throw Error('server_identity');
+        if (frame.type === 'ready') {
+          if (
+            evidence.guardian ||
+            closing ||
+            decoded.guardian?.kernelState !== 'alive' ||
+            !decoded.server ||
+            decoded.server.waitConfirmed ||
+            decoded.closed ||
+            decoded.closeUnknown ||
+            decoded.job?.treeStopped
+          )
+            throw Error('ready_invalid');
+          evidence = structuredClone(decoded);
+          readyResolve();
+        } else {
+          terminalSeen = true;
+          closing = true;
+          treeStopped =
+            frame.treeStopped === true &&
+            decoded.closed &&
+            !decoded.closeUnknown &&
+            decoded.job?.treeStopped === true &&
+            decoded.job.activeProcesses === 0 &&
+            decoded.server?.waitConfirmed === true;
+          evidence = structuredClone(decoded);
+          readyReject(new McpStdioPortError('mcp_stdio_ended'));
+          if (!treeStopped) unknown();
+        }
+      }
+    } catch {
+      transport.onerror?.(new McpStdioPortError('mcp_stdio_protocol_invalid'));
+      readyReject(new McpStdioPortError('mcp_stdio_protocol_invalid'));
+      void stop();
+    }
+  });
+  child.stderr!.resume();
+  child.stdin!.on('error', () => {
+    readyReject(new McpStdioPortError('mcp_stdio_control_failed'));
+    void stop();
+  });
+  child.once('error', () => {
+    readyReject(new McpStdioPortError('mcp_stdio_guardian_failed'));
+    unknown();
+  });
+  child.once('exit', (code, signal) => {
+    exit = { code, signal, reaped: true };
+  });
+  const aborted = () => {
+    void stop();
+  };
+  signal.addEventListener('abort', aborted, { once: true });
+  child.once('close', () => {
+    actualClosed = true;
+    closing = true;
+    signal.removeEventListener('abort', aborted);
+    if (startTimer) clearTimeout(startTimer);
+    readyReject(new McpStdioPortError('mcp_stdio_guardian_ended'));
+    let confirmed = false;
+    try {
+      const state = observation?.inspect() ?? 'uncertain';
+      if (evidence.guardian) {
+        evidence.guardian.exit = exit;
+        evidence.guardian.kernelState = state;
+      }
+      if (exit && state === 'dead') {
+        observation!.close();
+        if (evidence.guardian) evidence.guardian.observationClosed = true;
+        confirmed = true;
+      }
+    } catch {
+      windowsUnknownOwners.add(owner);
+    }
+    if (confirmed) {
+      windowsUnknownOwners.delete(owner);
+      finish({ supervision: !finalUnknown && treeStopped ? 'ended' : 'unknown' });
+    } else unknown();
+    transport.onclose?.();
+  });
+  try {
+    if (!child.pid) throw Error('guardian_pid_unavailable');
+    observation = retainWindowsOwnedProcessObservation(child.pid);
+    if (!observation.creationTime || !observation.verify())
+      throw Error('guardian_birth_unavailable');
+    options.assertFresh?.(binding, { signal });
+    if (signal.aborted) throw Error('aborted');
+    child.stdin!.write(
+      `${JSON.stringify({
+        ...configuration,
+        type: 'start',
+        nonce,
+        controlBase: options.controlBase ?? tmpdir(),
+        graceMs: limits.grace,
+        stderrBytes: limits.stderrMaximum,
+        frameBytes: limits.maximum,
+      })}\n`,
+    );
+    startTimer = setTimeout(() => {
+      readyReject(new McpStdioPortError('mcp_stdio_ready_timeout'));
+      void stop();
+    }, limits.timeout);
+    void ready.then(
+      () => clearTimeout(startTimer),
+      () => clearTimeout(startTimer),
+    );
+  } catch (error) {
+    // No business frame was sent. Only the original directly spawned handle is signalled.
+    try {
+      child.kill();
+    } catch {
+      unknown();
+    }
+    await stop();
+    throw error;
+  }
+  return { transport, stopped, stop, readProcessEvidence: () => copyMcpStdioEvidence(evidence) };
 }

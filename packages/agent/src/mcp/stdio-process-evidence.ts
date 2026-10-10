@@ -49,7 +49,130 @@ export interface McpStdioProcessEvidenceV2 {
   server: McpStdioProcessRecord | null;
   coalition: McpStdioCoalitionEvidence | null;
 }
-export type McpStdioProcessEvidence = McpStdioProcessEvidenceV1 | McpStdioProcessEvidenceV2;
+export interface McpStdioWindowsEvidence {
+  version: 3;
+  coverage: 'windows-job-members';
+  binding: McpStdioProcessEvidenceV1['binding'];
+  ownerPid: number;
+  guardian: {
+    pid: number;
+    parentPid: number;
+    creationTime: string;
+    exit: { code: number | null; signal: string | null; reaped: true } | null;
+    kernelState: 'alive' | 'dead' | 'uncertain';
+    observationClosed: boolean;
+  } | null;
+  server: {
+    pid: number;
+    creationTime: string;
+    exitCode: number | null;
+    waitConfirmed: boolean;
+  } | null;
+  job: { activeProcesses: number | null; treeStopped: boolean } | null;
+  closed: boolean;
+  closeUnknown: boolean;
+}
+export type McpStdioProcessEvidence =
+  | McpStdioProcessEvidenceV1
+  | McpStdioProcessEvidenceV2
+  | McpStdioWindowsEvidence;
+
+/** Closed Windows receipt; never reconstructs a process or Job HANDLE on cold read. */
+function decodeWindowsEvidence(
+  value: McpStdioWindowsEvidence,
+  binding: McpStdioProcessEvidenceV1['binding'],
+  ownerPid?: number,
+): McpStdioWindowsEvidence | undefined {
+  const exact = (row: object, fields: string) => Object.keys(row).sort().join(',') === fields;
+  const pid = (n: number) => Number.isSafeInteger(n) && n > 1 && n <= 0xffffffff;
+  const birth = (s: string) =>
+    typeof s === 'string' && /^[1-9][0-9]{0,19}$/.test(s) && BigInt(s) <= 0xffffffffffffffffn;
+  const recordOrNull = (row: unknown) =>
+    row === null || (typeof row === 'object' && !Array.isArray(row));
+  if (
+    !exact(value, 'binding,closeUnknown,closed,coverage,guardian,job,ownerPid,server,version') ||
+    value.coverage !== 'windows-job-members' ||
+    !pid(value.ownerPid) ||
+    (ownerPid !== undefined && ownerPid !== value.ownerPid) ||
+    !value.binding ||
+    !exact(value.binding, 'configDigest,executionId,originalStoreId,scopeId,serverId,sessionId') ||
+    Object.entries(value.binding).some(
+      ([key, entry]) =>
+        typeof entry !== 'string' ||
+        !entry ||
+        entry.length > 8192 ||
+        binding[key as keyof typeof binding] !== entry,
+    ) ||
+    typeof value.closed !== 'boolean' ||
+    typeof value.closeUnknown !== 'boolean' ||
+    (value.closed && value.closeUnknown) ||
+    !recordOrNull(value.guardian) ||
+    !recordOrNull(value.server) ||
+    !recordOrNull(value.job) ||
+    JSON.stringify(value).length > 64 * 1024
+  )
+    return undefined;
+  const g = value.guardian;
+  if (
+    g &&
+    (!exact(g, 'creationTime,exit,kernelState,observationClosed,parentPid,pid') ||
+      !pid(g.pid) ||
+      g.pid === value.ownerPid ||
+      g.parentPid !== value.ownerPid ||
+      !birth(g.creationTime) ||
+      !['alive', 'dead', 'uncertain'].includes(g.kernelState) ||
+      typeof g.observationClosed !== 'boolean' ||
+      (g.observationClosed && (g.kernelState !== 'dead' || g.exit === null)) ||
+      (g.exit !== null &&
+        (!exact(g.exit, 'code,reaped,signal') ||
+          g.exit.reaped !== true ||
+          g.kernelState === 'alive' ||
+          !(
+            (Number.isInteger(g.exit.code) &&
+              g.exit.code! >= 0 &&
+              g.exit.code! <= 0xffffffff &&
+              g.exit.signal === null) ||
+            (g.exit.code === null &&
+              typeof g.exit.signal === 'string' &&
+              /^SIG[A-Z0-9]{1,12}$/.test(g.exit.signal))
+          ))))
+  )
+    return undefined;
+  const r = value.server,
+    j = value.job;
+  if (
+    (r === null) !== (j === null) ||
+    (r &&
+      (!g ||
+        !exact(r, 'creationTime,exitCode,pid,waitConfirmed') ||
+        !pid(r.pid) ||
+        r.pid === g.pid ||
+        r.pid === value.ownerPid ||
+        !birth(r.creationTime) ||
+        typeof r.waitConfirmed !== 'boolean' ||
+        !(
+          r.exitCode === null ||
+          (Number.isInteger(r.exitCode) && r.exitCode >= 0 && r.exitCode <= 0xffffffff)
+        ) ||
+        r.waitConfirmed !== (r.exitCode !== null)))
+  )
+    return undefined;
+  if (
+    j &&
+    (!exact(j, 'activeProcesses,treeStopped') ||
+      typeof j.treeStopped !== 'boolean' ||
+      !(
+        j.activeProcesses === null ||
+        (Number.isSafeInteger(j.activeProcesses) &&
+          j.activeProcesses >= 0 &&
+          j.activeProcesses <= 0xffffffff)
+      ) ||
+      (j.treeStopped && (j.activeProcesses !== 0 || !r?.waitConfirmed)))
+  )
+    return undefined;
+  if (value.closed && (!j?.treeStopped || !r?.waitConfirmed)) return undefined;
+  return copyMcpStdioEvidence(value) as McpStdioWindowsEvidence;
+}
 export function copyMcpStdioEvidence(value: McpStdioProcessEvidence): McpStdioProcessEvidence {
   const copy = structuredClone(value);
   const freeze = (row: object) => {
@@ -66,7 +189,9 @@ export function decodeMcpStdioProcessEvidence(
 ): McpStdioProcessEvidence | undefined {
   try {
     const exact = (row: object, fields: string) => Object.keys(row).sort().join(',') === fields;
-    const data = value as McpStdioProcessEvidence;
+    if ((value as { version?: unknown } | null)?.version === 3)
+      return decodeWindowsEvidence(value as McpStdioWindowsEvidence, binding, ownerPid);
+    const data = value as McpStdioProcessEvidenceV1 | McpStdioProcessEvidenceV2;
     if (
       !data ||
       !(

@@ -2140,6 +2140,8 @@ Native恢复Files的Main消费者也已核真实原Run/Execution出处，完整�
 
 Windows managed Terminal 的独立安装、current/previous切换、rollback和保数据uninstall现已按实际源码接入：native前门在Bun初始化前清五环境键，固定compiled verifier及全候选原对象；paired父/实际Service各持自己的SH与文件pin，外置selection/use协调保过卸载/重装，删除whole verify沿同一DELETE-purpose owner。原bootstrap A保留，B仅变指针；物理依赖展开保真实解析边，原Bun不改，新PE副本只封闭已有loader字段。源码和本机控制流/布局邻接不计Windows原生通过；未验MSVC/ACL/PE/实际安装、完整维护GC、Daemon/Native/PTY/跨代码及原RSS/观测门禁保持。最多五项用户能力与真实依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-managed-terminal-安装与版本切换源码)。37能力partial、wholeV13/phaseExit仍false；Win/Linux按用户顺序留重构后Actions，本地不dispatch。必要阶段完整回归在真实收束点执行，不把本片测试或操作列成长期目标。
 
+Windows stdio MCP 的当前源码缺口已沿同一正式 Source／SQL connection Job／Tool caller 接通，创建前 Job 归属、原 HANDLE／FILETIME、完整 pipe、实际 guardian reap 与严格关闭证据使用独立 closed v3，Darwin v1／v2 与 cold no-replay 保持。准确范围与最多五项依赖归[当前 MCP 进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-正式-stdio-mcp-完整连接源码)。后台 Agent 本身在同一 Runtime／Store，无 Windows OS-child guard；其调用 Shell 时仍依赖尚缺的真实文件权限后端，不能用 MCP Job 解除 Shell 拒绝。正式安装／版本切换／维护源码不受 RSS 观测门禁阻断，但实机完整消费者、原资源、§35 审查及最终退役仍未闭合，37 能力 partial、wholeV13／phaseExit=false。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

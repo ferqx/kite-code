@@ -15,6 +15,8 @@ MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.2`�
 
 正式/default/CI已使用八workspace通用Agent与Service。当前MCP生命周期、原catalogue、Source、强制重连与最终wire准入由[Agent MCP owner](../../packages/agent/src/mcp/README.md)承担，可信来源/transport装配归[Service](../../apps/service/README.md)，共享TUI与薄Caller分别归[UI](../../packages/ui/src/tui/README.md)和[CLI](../../apps/cli/README.md)。原Query不恢复transport或许可，独立Action/Job沿同一Execution；恢复与发布不变量见[当前跨包合同](mcp-config-management.md#强制重连的来源发布与恢复边界)。
 
+Windows stdio 源码沿同一 Source／SQL connection Job／最终 wire 准入，独立 guardian 使用创建前归属的原 Job 和 process HANDLE。closed v3 只描述原 Job 成员、FILETIME、root wait、空树、guardian 实际 reap 与原观察 HANDLE 关闭；旧 Darwin v1／v2 严格合同保持，冷读取不创建 HANDLE。它不借用旧 Host／Rust carrier，不授 Shell filesystem／network ceiling，不证明外部 broker 工作或远端 Tool 停止。当前实现与验收范围归[MCP owner](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)，实际 Windows 资格仍待验证。
+
 下列Manager/Supervisor/provider/control snapshot名称与旧workspace路径记录历史装配和仍需核对的理由，不能作为当前owner、正式运行或测试调度入口。认证、旧policy替代、远端取消、持续Soak与三平台尚有未闭合范围，按[总体进度](../plans/unified-agent-refactor-v1-progress.md)核对，不从旧Note implemented状态推定新功能已交付。
 
 ## 唯一 owner 与 binding

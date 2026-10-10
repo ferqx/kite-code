@@ -110,7 +110,7 @@ root 原字节 SHA 即 indexDigest，节点不含自身 digest。Entry 的 label
 
 ## 显式 stdio guardian port
 
-公共 MCP leaf 导出 [createMcpStdioTransportPort](stdio-port.ts)、`McpStdioPortOptions`、`McpStdioPortError` 和 `mcpStdioGuardianAsset()`。宿主固定完整 server 配置、绝对 Bun/command/cwd、env 名单与必要的 `admit(binding,{signal})`；import/factory 不读取文件或 spawn。`open` 在真实 Job 派发后核实原 Store/Session/execution/configDigest/scope，并调用可信最后准入，之后才启动私有 [guardian](stdio-guardian.ts)。该 port 不自动发现用户凭据或继承环境；秘密、proxy、loader 和 runtime 注入 env 名称被拒绝。准入回调仍须核实实际 SQL Job identity、当前授权及宿主执行资格。
+公共 MCP leaf 导出 [createMcpStdioTransportPort](stdio-port.ts)、`McpStdioPortOptions`、`McpStdioPortError` 和 `mcpStdioGuardianAsset()`，只读类型另含 `McpStdioWindowsEvidence`。宿主固定完整 server 配置、绝对 Bun/command/cwd、env 名单与必要的 `admit(binding,{signal})`；import/factory 不读取文件或 spawn。`open` 在真实 Job 派发后核实原 Store/Session/execution/configDigest/scope，并调用可信最后准入，之后才启动本平台私有 guardian。该 port 不自动发现用户凭据或继承环境；秘密、proxy、loader 和 runtime 注入 env 名称被拒绝。准入回调仍须核实实际 SQL Job identity、当前授权及宿主执行资格。
 
 guardian 使用有界 JSON-RPC frame、控制队列、排队写和 stderr 排空。macOS 的正式 port 以 Service 直接 ChildProcess 作为 broker，经[私有 launchd 通道](../platform/process/darwin-launchd-supervisor.ts)启动新的 guardian；可信宿主可选绝对 `controlBase`，默认 Service 固定选原 Profile coordination，未指定的独立装配使用系统 temp base。每次创建原0700目录、固定 `com.kitecode.mcp.<UUID>` 标签及本用户 domain；秘密握手核准确 guardian PID 后才派发业务配置，command／args／env 不进入 argv。该后端独立取得[原 guardian 的 exclusive resource coalition](../platform/process/darwin-owned-coalition.ts)，不借用 Shell 的权限或 coalition，也不增加文件／网络沙箱。fork／exec／setsid／orphan 后代在本次所有权内。
 
@@ -122,7 +122,19 @@ guardian 使用有界 JSON-RPC frame、控制队列、排队写和 stderr 排空
 
 该 port 只开放已运行验证的 macOS coalition 后端，Linux／Windows仍返回 `mcp_stdio_platform_unsupported`。本次所属后代停止不承诺阻止网络或由其他外部 owner代启动的 daemon，也不证明整个Runtime资源、CPU／内存限制或跨平台资格。[原 stdio 整文件](../../test/isolated/mcp/stdio-port.test.ts)保全部原7整例、断言和期限；原自然退出例实际核 detached grandchild 的出生／PPID1／不同PGID及外部进程树仍存活。实际结果和启动失败记录归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10正式-mcp-完整所属进程树与旧组路径退役)。持久取舍归[决定记录](../../../../.agents/notes/implemented/architecture/2026-10-10-macos-mcp-owned-coalition.md)。
 
-Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)仍生成 `dist/mcp/stdio-guardian.js`，同一资产担任 private broker或明确的launchd guardian。`mcpStdioGuardianAsset()`只定位同包原 `.js`，缺资产失败，不回退 `.ts`。[源码树外包整例](../../../../tests/isolated/unified-agent/built-package.test.ts)沿真实 Model／SDK执行一次 Tool、原 Session取消、三角色及树证明、维护 A→B后原完整结果／输出冷读零重放。[installed默认Service恢复链](../../../../tests/isolated/unified-agent/profile-mcp-restore.test.ts)沿新Store明确连接、Session取消、Service退出及cold GET，独立libproc核出生和PPID，保原Job／输出／cursor及Model0。正式默认caller已切换到此后端；旧stdio negative-PGID停止路径已删除，Shell原组／held-root合同另行保留。
+Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)生成 `dist/mcp/stdio-guardian.js` 与 `dist/mcp/windows-stdio-guardian.js`。Darwin 前者仍担任 private broker或明确的launchd guardian，Windows 只选后者；`mcpStdioGuardianAsset()`只定位同包原 `.js`，缺资产失败，不回退 `.ts`。[源码树外包整例](../../../../tests/isolated/unified-agent/built-package.test.ts)沿真实 Model／SDK执行一次 Tool、原 Session取消、三角色及树证明、维护 A→B后原完整结果／输出冷读零重放。[installed默认Service恢复链](../../../../tests/isolated/unified-agent/profile-mcp-restore.test.ts)沿新Store明确连接、Session取消、Service退出及cold GET，独立libproc核出生和PPID，保原Job／输出／cursor及Model0。正式默认caller已切换到此后端；旧stdio negative-PGID停止路径已删除，Shell原组／held-root合同另行保留。以上实际 macOS 资格不外推下方 Windows 源码。
+
+## Windows stdio 所属 Job
+
+[Windows guardian](windows-stdio-guardian.ts)使用内部[原生 owned-child](../platform/process/windows-owned-child.ts)：无名非继承 Job／KILL_ON_JOB_CLOSE，suspended CreateProcessW 与准确三 stdio HANDLE_LIST，Assign 原 process HANDLE 后才 Resume。该 leaf 不依赖旧 runtime-host／Rust runner，不接受 caller SID／ACL／HANDLE，不提供 Shell sandbox。只覆盖原 Job 成员，外部系统 broker 代启动的工作和远端 Tool 效果另保未知边界。
+
+配置仍由原 Source／SQL connection Job／bootstrap 私有事实选定，准入和 freshness 在 await 后及每次 wire 前复核。Windows 要求绝对 `.exe`、完整 argv／cwd 与明确 env；`.cmd`／`.bat` 返回 `mcp_stdio_executable_unsupported`，不发现 COMSPEC／PATH。Node／Bun executable 加脚本 argv 保原声明。guardian 与业务分别只继承所需管道，秘密和 env 不进 argv／证据。stdin 是私有 first-instance named pipe 的有限 overlapped write；cancel 后保原 buffer／event 到真实 completion，stdout／stderr 在停止后继续完整排空 EOF。
+
+自然根退出、cancel、parent EOF 共用准确 closing。只有原 root 实际 wait／exit code、原 Job ActiveProcesses=0、所有 I/O completion 与原 pipe／thread／process／Job HANDLE 确认关闭才报告业务资源关闭。开始已创建资源后失败返回 `WindowsOwnedChildStartError.cleanup`，guardian 先等原 cleanup，unknown 时保 native owner／keeper，不把同步 throw 当成零资源。parent 另外用实际 spawn PID 的原 observation HANDLE／FILETIME 绑定 ready 自报出生；实际 guardian exit＋close、原对象 dead 和 `observationClosed=true` 都确认后才 `ended`。原 startup 和 grace＋4000ms stop 预算保持，超时保存首个 unknown，迟到证明不改写为成功。
+
+closed v3／`windows-job-members` 保原六字段 binding、owner、guardian 原出生／reap／观察关闭、server 原 wait 和 Job 空树；不存 native HANDLE、command、env、路径或 secret。旧 Darwin v1／v2 严格分支未拓宽，纯 decoder 与 cold GET 不加载 FFI、不构建 owner、不重连。v3 的 `closed` 只描述 guardian 内 business owner，parent 原观察对象另由 `observationClosed` 明确表达，不能只凭前者宣称 transport 完成。
+
+[有限 owner 控制流](../../test/isolated/jobs/windows-owned-child.test.ts)与[port／codec](../../test/isolated/mcp/windows-stdio-port.test.ts)在本机验证 private ABI mock、原 binding、startup／cancel／closeUnknown；真实 Windows 用例保原平台 skip，尚未执行。[正式封装消费者](../../../../apps/service/test/isolated/mcp-source-packaged-default.test.ts)核两个 guardian 进入完整候选、默认 Profile 来源→原 SQL Job→Tool→Session cancel→cold 原 C／E／完整 output 零 Provider／RPC，并在 Windows 分支要求 v3／原 FILETIME／空树／observationClosed。本机实际 macOS 成功只证明该邻接与封装消费，Windows Job／HANDLE／pipe、installed 版本切换／维护恢复和全部正式客户端资格仍待既定实机验证，当前不得宣布平台或阶段退出。持久取舍归[Windows Note](../../../../.agents/notes/proposed/architecture/2026-10-10-windows-mcp-job-ownership.md)。
 
 [Service HTTP port](../../../../apps/service/src/mcp-http-port.ts)提供另一显式 trusted transport：完整 DNS 候选核验、socket 地址 pinning、原 Host/TLS servername、禁止 redirect/proxy 继承和有界取消/关闭。秘密 headers 由宿主注入，不进入 lifecycle 固定配置或目录；仍必须提供真实 Job 准入。它与 stdio port 的资格分别验证，不能由低层 adapter 的默认 fetch 推导。
 

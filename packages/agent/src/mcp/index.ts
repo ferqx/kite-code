@@ -921,4 +921,5 @@ export {
 export {
   decodeMcpStdioProcessEvidence,
   type McpStdioProcessEvidence,
+  type McpStdioWindowsEvidence,
 } from './stdio-process-evidence';

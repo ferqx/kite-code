@@ -10,8 +10,10 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
 
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
   const deadline = Date.now() + 12000;
@@ -32,7 +34,11 @@ function alive(pid: number) {
 }
 
 test('sealed default process discovers and executes owned stdio sources using persistent SDK policy, then stops without cold respawn', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-packaged-default-mcp-'));
+  const root = realpathSync(
+    mkdtempSync(
+      join(process.platform === 'win32' ? tmpdir() : '/private/tmp', 'kite-packaged-default-mcp-'),
+    ),
+  );
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');
   mkdirSync(workspace);
@@ -48,6 +54,7 @@ test('sealed default process discovers and executes owned stdio sources using pe
     built.manifest.entries.service,
     built.manifest.entries.runtime,
     'node_modules/@kite-ai/agent/mcp/stdio-guardian.js',
+    'node_modules/@kite-ai/agent/mcp/windows-stdio-guardian.js',
     'node_modules/@kite-ai/agent/storage/worker/main.js',
   ]) {
     expect(built.manifest.files.some((file) => file.path === asset)).toBe(true);
@@ -162,7 +169,11 @@ test('sealed default process discovers and executes owned stdio sources using pe
       spawnChild: (argv, options) =>
         Bun.spawn([...argv], {
           cwd: workspace,
-          env: { ...options.env, HOME: home },
+          env: {
+            ...options.env,
+            HOME: home,
+            ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+          },
           stdin: 'pipe',
           stdout: 'pipe',
           stderr: 'pipe',
@@ -250,6 +261,33 @@ test('sealed default process discovers and executes owned stdio sources using pe
       visible: string;
     };
     expect(owned.visible).toBe('PRIVATE_OWNED_ENV_SENTINEL');
+    const connectionId = view.executions.find(
+      (execution) => execution.definitionId === 'mcp.source.connection',
+    )!.id;
+    const readyOutput = await client.listExecutionOutput(connectionId);
+    const ready = JSON.parse(
+      readyOutput.items.find((row) => row.stream === 'progress')!.content,
+    ) as { ready: boolean; ownedProcesses: McpStdioProcessEvidence };
+    expect(ready.ready).toBe(true);
+    if (process.platform === 'win32') {
+      expect(ready.ownedProcesses).toMatchObject({
+        version: 3,
+        coverage: 'windows-job-members',
+        ownerPid: child.pid,
+        binding: { originalStoreId: expectedStoreId, sessionId: 's', executionId: connectionId },
+        guardian: {
+          pid: owned.guardian,
+          parentPid: child.pid,
+          exit: null,
+          kernelState: 'alive',
+          observationClosed: false,
+        },
+        server: { pid: owned.server, exitCode: null, waitConfirmed: false },
+        job: { treeStopped: false },
+        closed: false,
+        closeUnknown: false,
+      });
+    }
     await client.cancelSession('s', {
       expectedStoreId,
       commandId: 'stop',
@@ -260,6 +298,44 @@ test('sealed default process discovers and executes owned stdio sources using pe
       async () => [alive(owned.server), alive(owned.guardian)],
       (states) => states.every((state) => !state),
     );
+    const stopped = await until(
+      () => client.getExecution(connectionId),
+      (execution) => execution.status === 'cancelled',
+    );
+    const terminal = stopped.result as unknown as {
+      details: {
+        transportStopped: boolean;
+        remoteToolStopConfirmed: boolean;
+        ownedProcesses: McpStdioProcessEvidence;
+      };
+    };
+    expect(terminal.details.transportStopped).toBe(true);
+    expect(terminal.details.remoteToolStopConfirmed).toBe(false);
+    expect(terminal.details.ownedProcesses.binding).toEqual(ready.ownedProcesses.binding);
+    if (process.platform === 'win32') {
+      if (ready.ownedProcesses.version !== 3 || terminal.details.ownedProcesses.version !== 3)
+        throw Error('packaged_windows_job_evidence_required');
+      expect(terminal.details.ownedProcesses).toMatchObject({
+        guardian: {
+          pid: owned.guardian,
+          creationTime: ready.ownedProcesses.guardian!.creationTime,
+          exit: { code: 0, signal: null, reaped: true },
+          kernelState: 'dead',
+          observationClosed: true,
+        },
+        server: {
+          pid: owned.server,
+          creationTime: ready.ownedProcesses.server!.creationTime,
+          waitConfirmed: true,
+        },
+        job: { activeProcesses: 0, treeStopped: true },
+        closed: true,
+        closeUnknown: false,
+      });
+    }
+    const stoppedOutput = await client.listExecutionOutput(connectionId);
+    expect(stoppedOutput).toEqual(readyOutput);
+    const originalCommand = await client.getCommand('work');
     await child.close();
     expect(await child.exited).toBe(0);
     expect(alive(child.pid)).toBe(false);
@@ -308,9 +384,14 @@ test('sealed default process discovers and executes owned stdio sources using pe
     }
     const stoppedRpc = readFileSync(ledger, 'utf8');
     const stoppedPidLedger = readFileSync(`${ledger}.pid`, 'utf8');
+    const providerBeforeCold = bodies.length;
     child = await launch('packaged-cold');
+    expect(await child.client.getCommand('work')).toEqual(originalCommand);
+    expect(await child.client.getExecution(connectionId)).toEqual(stopped);
+    expect(await child.client.listExecutionOutput(connectionId)).toEqual(stoppedOutput);
     await child.client.queryExtension('s', 'builtin.mcp.sources', 'mcp.sources', {});
     await child.client.queryExtension('s', 'builtin.mcp', 'mcp.catalogue', {});
+    expect(bodies.length).toBe(providerBeforeCold);
     expect(readFileSync(ledger, 'utf8')).toBe(stoppedRpc);
     expect(readFileSync(`${ledger}.pid`, 'utf8')).toBe(stoppedPidLedger);
     expect(readFileSync(`${ledger}.effects`, 'utf8').trim().split('\n')).toHaveLength(1);
