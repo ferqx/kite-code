@@ -491,7 +491,14 @@ test('saved language translates background and recovery instructions without tra
       [
         'stop-original',
         {
-          target: { storeId: 'store', sessionId: 'a', executionId: job.id },
+          target: {
+            storeId: 'store',
+            originStoreId: 'store',
+            sessionId: 'a',
+            executionId: job.id,
+            definitionId: job.definitionId,
+            definitionVersion: job.definitionVersion,
+          },
           request: {
             kind: 'execution.cancel',
             expectedStoreId: 'store',
@@ -503,7 +510,14 @@ test('saved language translates background and recovery instructions without tra
       ],
     ]),
     executionReading: {
-      target: { storeId: 'store', sessionId: 'a', executionId: job.id },
+      target: {
+        storeId: 'store',
+        originStoreId: 'store',
+        sessionId: 'a',
+        executionId: job.id,
+        definitionId: job.definitionId,
+        definitionVersion: job.definitionVersion,
+      },
       phase: 'ready',
       output: {
         highWaterSeq: '3',

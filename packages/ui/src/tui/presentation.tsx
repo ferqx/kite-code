@@ -70,6 +70,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   code: '代码',
   fork: '分支',
   '; L queries selected original intent': '；L 查询所选原申请',
+  ' · restored history; read only': ' · 恢复历史；只读',
   'Original background Jobs · Session': '原后台任务 · 会话',
   'Up/Down target · O complete recorded output · C child logs · S then Enter stop original Job · R refresh · Ctrl+L original receipt · Esc/Ctrl+C close reader':
     '上下键选择目标 · O 读取已保存完整输出 · C 子日志 · S 后按 Enter 停止原 Job · R 刷新 · Ctrl+L 查询原回执 · Esc/Ctrl+C 关闭读取',

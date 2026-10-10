@@ -12,7 +12,7 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
       (execution) =>
         execution.kind === 'job' &&
         execution.sessionId === state.sessionId &&
-        execution.originStoreId === state.snapshot?.storeId,
+        typeof execution.originStoreId === 'string',
     ) ?? [];
   const [selected, setSelected] = useState<string>(),
     [confirm, setConfirm] = useState<string>();
@@ -47,13 +47,26 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
       return;
     }
     if (!job) return;
-    if (input.toLowerCase() === 's') {
+    if (
+      input.toLowerCase() === 's' &&
+      job.originStoreId === state.snapshot?.storeId &&
+      ['planned', 'dispatching', 'running'].includes(job.status) &&
+      job.cancelRequestedAt === null &&
+      !state.stale
+    ) {
       setConfirm(job.id);
       return;
     }
     if (key.return && confirm) {
       setConfirm(undefined);
-      if (confirm === job.id) void controller.stopJob(confirm);
+      if (
+        confirm === job.id &&
+        job.originStoreId === state.snapshot?.storeId &&
+        ['planned', 'dispatching', 'running'].includes(job.status) &&
+        job.cancelRequestedAt === null &&
+        !state.stale
+      )
+        void controller.stopJob(confirm);
       return;
     }
     if (input.toLowerCase() === 'o' || (key.return && !job.childSessionId)) {
@@ -80,6 +93,9 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
         <Text key={item.id}>
           {index === i ? '› ' : '  '}
           {terminalText(item.definitionId)} [{terminalText(item.id)}] {item.status}
+          {item.originStoreId !== state.snapshot?.storeId
+            ? t(' · restored history; read only')
+            : ''}
           {item.cancelRequestedAt === null ? '' : t(' · cancel requested; cleanup not confirmed')}
         </Text>
       ))}

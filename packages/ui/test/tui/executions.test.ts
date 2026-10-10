@@ -7,7 +7,14 @@ import {
   type TuiJobStop,
 } from '../../src/tui/executions';
 
-const target = { storeId: 'store', sessionId: 'original', executionId: 'job-one' };
+const target = {
+  storeId: 'store',
+  originStoreId: 'store',
+  sessionId: 'original',
+  executionId: 'job-one',
+  definitionId: 'one',
+  definitionVersion: '1',
+};
 const job: Execution = {
   id: target.executionId,
   originStoreId: target.storeId,
@@ -30,6 +37,7 @@ const port = (read: TuiExecutionPort['output']): TuiExecutionPort => ({
   getExecution: async () => job,
   output: read,
   getView: unavailable,
+  getRun: unavailable,
   messages: unavailable,
   modelOutput: unavailable,
   stop: unavailable,
@@ -243,4 +251,120 @@ test('child selection or carrier changed during paged read cannot publish origin
     );
     expect(mutations).toBe(0);
   }
+});
+
+test('restored Job output binds its original definition and origin while admitting the current Store', async () => {
+  const restored = { ...target, storeId: 'restored-store' };
+  const saved = {
+    executionId: job.id,
+    seq: '1',
+    throughSeq: '1',
+    stream: 'stdout' as const,
+    content: '完整原输出 α\nEND',
+    droppedBytes: '0',
+  };
+  const reader = port(async () => ({ items: [saved], highWaterSeq: '1' }));
+  expect(await readJobOutput(reader, restored, new AbortController().signal)).toEqual({
+    items: [saved],
+    highWaterSeq: '1',
+  });
+  reader.getExecution = async () => ({ ...job, definitionVersion: 'replacement' });
+  await expect(readJobOutput(reader, restored, new AbortController().signal)).rejects.toThrow(
+    'tui_job_identity_mismatch',
+  );
+});
+
+test('restored child Model history verifies original Execution and Run but reads the admitted Store snapshot', async () => {
+  const { readChildLog } = await import('../../src/tui/executions');
+  const restored = { ...target, storeId: 'restored-store' },
+    parent = { ...parentView, storeId: restored.storeId },
+    child = {
+      ...parent,
+      session: {
+        ...parent.session,
+        id: 'child',
+        parentSessionId: target.sessionId,
+        contextSelectionId: 'child-selection',
+        nextSeq: '1',
+      },
+    },
+    model = {
+      ...job,
+      id: 'model',
+      kind: 'model' as const,
+      sessionId: 'child',
+      runId: 'child-run',
+      parentExecutionId: null,
+      childSessionId: null,
+      status: 'succeeded' as const,
+      resultRevision: '1',
+    },
+    run = {
+      id: 'child-run',
+      sessionId: 'child',
+      originStoreId: target.originStoreId,
+      originCommandId: 'original-model',
+      status: 'completed',
+      isActive: false,
+      createdAt: 1,
+      finishedAt: 2,
+      reason: null,
+    } as import('@kite-ai/client').Run,
+    body = '完整原Model正文 🌿\nTAIL',
+    output = {
+      storeId: restored.storeId,
+      sessionId: 'child',
+      rootSessionId: target.sessionId,
+      runId: run.id,
+      executionId: model.id,
+      originCommandId: 'original-model',
+      rootWorkCommandId: 'original-model',
+      rootWorkSeq: '1',
+      attempt: 1,
+      status: 'succeeded' as const,
+      bodyHash: 'verified-by-host',
+      bodyBytes: String(Buffer.byteLength(body)),
+      contentBytes: String(Buffer.byteLength(body)),
+      reasoningBytes: '0',
+      snapshotCursor: '1',
+      output: { content: body, reasoning: '', toolCalls: [], complete: true },
+    };
+  const reader = port(unavailable);
+  reader.getExecution = async (id) =>
+    id === model.id
+      ? model
+      : id === job.id
+        ? { ...job, childSessionId: 'child' }
+        : { ...job, id: 'parent', kind: 'tool', parentExecutionId: null };
+  reader.getView = async () => child;
+  reader.getRun = async () => run;
+  reader.messages = async () => [
+    {
+      id: 'message',
+      sessionId: 'child',
+      runId: run.id,
+      role: 'assistant',
+      content: 'preview',
+      seq: '1',
+      createdAt: 1,
+      status: 'complete',
+      outputBody: {
+        kind: 'model_output',
+        executionId: model.id,
+        complete: true,
+        contentBytes: output.contentBytes,
+        reasoningBytes: '0',
+        toolCallCount: 0,
+      },
+    },
+  ];
+  reader.modelOutput = async () => output;
+  const result = await readChildLog(reader, restored, parent, new AbortController().signal);
+  expect(result.carrier.originStoreId).toBe(target.originStoreId);
+  expect(result.view.storeId).toBe(restored.storeId);
+  expect(result.modelOutputs.get('message')).toEqual(output);
+  reader.getRun = async () => ({ ...run, originStoreId: 'foreign' });
+  await expect(
+    readChildLog(reader, restored, parent, new AbortController().signal),
+  ).rejects.toThrow('tui_child_model_origin_mismatch');
 });

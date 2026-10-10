@@ -261,6 +261,7 @@ await client.connect();
 let counter = 0;
 const port: TuiPort = {
   executions: {
+    getRun: (id, signal) => client.getRun(id, { signal }),
     getExecution: (id, signal) => client.getExecution(id, { signal }),
     output: (id, query, signal) => client.listExecutionOutput(id, { ...query, signal }),
     getView: (id, signal) => client.getView(id, { signal }),

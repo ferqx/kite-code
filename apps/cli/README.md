@@ -266,7 +266,9 @@ CLI 保持原 Command 的 Store/Session/Run scope；原 Session 中没有独立 
 
 开发 TUI `Ctrl+B` 已接 UI 的独立 pending 卡选择器。CLI host 保持原 Store 的完整分页公共目录与完整 artifact reader；选择和各卡草稿仅属 UI，POST 仍固定原展示 Session/card/revision，不从父 Run 或有限 view 推导权限。UI 的 [真实四卡 PTY](../../packages/ui/test/isolated/tui/pending-cards.test.ts) 使用 configured Core/Service 证明 sibling/root/ordinary required Job 的独立原作用域与完整附件；实际 `skill.workflow.verify` 默认工厂资格继续由本包 Workflow question/compensation fixture 单独提供。
 
-开发 TUI 的 `/background` 由 host 仅接公共 SDK getExecution、listExecutionOutput、getView、listMessages、getModelOutput、cancelExecution/getCommand。UI 不获得 profile 文件、私有 ledger 或新的执行权。停止固定原 Job，独立于父 Run；响应未知只查原 Command。输出 gap 保持原事实，child 日志依实际 carrier/parent chain 与公共 child Session 关系核原 scope，具名 Model 全文单独验证。关闭读取和切会话不取消执行；当前 Job stop unknown 仅保存于 controller 内存，不等同于既有恢复申请的持久 journal。
+正式与开发 TUI 的 `/background` 由 [host](host/tui.tsx)仅接公共 SDK getExecution、getRun、listExecutionOutput、getView、listMessages、getModelOutput、cancelExecution/getCommand。UI 不获得 profile 文件、私有 ledger 或新的执行权。当前 Store 准入和原 Job 出处分开封存；恢复历史目录只读，输出与 child 读取保原 ID/definition/version 和完整原结果。child 日志沿实际 carrier/parent chain、原 Message/Model Execution/Run 与公共 child Session 关系核原 scope，Model 全文仍由当前 Store 的 SDK 完整 reader 校验。停止仅允许当前来源的准确活动 Job，独立于父 Run；响应未知只查原 Command。输出 gap 保持原事实，关闭读取和切会话不取消执行；正式 host 的持久停止意图沿[普通 caller](#tui-普通-caller-的持久原意图)，不提供 caller port 的有限组件只有内存意图。
+
+[真实恢复读取](../../tests/isolated/unified-agent/restored-tui-background.test.tsx)核实际 A→B 维护恢复、两次冷 HTTP、目录只读标记、220 项原输出/gap、完整 child Model 原文与零重放；它调用同一 TUI controller/reader 及公共 host 端口，但不称实际 installed 恢复 PTY。原 Job/child PTY 和下面的持久停止 host PTY 保各自完整文件、按键、断言及期限，正式 getRun 接线已类型核实；准确红绿、复用范围及剩余退出条件归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-后台任务完整读取)。
 
 UI 的 [真实 Job/child PTY](../../packages/ui/test/isolated/tui/executions.test.ts) 在 80×24 与 owned Service 证明原 Job 选择性停止、两条独立完整保留输出/gap、父 Run 完成后完整分页 child 历史和具名外置 Model 正文。实际线端一条停止 POST、原 Command 两条 GET，以及另一 Job 零取消和正常成功分别核验；该资格使用 configured harmless host policy，未覆盖默认 Shell adapter 或应用强杀后的 Job stop 意图持久化。
 

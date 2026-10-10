@@ -4891,13 +4891,16 @@ export class TuiController {
         execution.id === id &&
         execution.kind === 'job' &&
         execution.sessionId === snapshot.view.session.id &&
-        execution.originStoreId === this.port.storeId,
+        typeof execution.originStoreId === 'string',
     );
     if (!job) return;
     return Object.freeze({
       storeId: this.port.storeId,
       sessionId: job.sessionId,
       executionId: job.id,
+      originStoreId: job.originStoreId!,
+      definitionId: job.definitionId,
+      definitionVersion: job.definitionVersion,
     });
   }
   async readExecution(id: string, child: boolean) {
@@ -4954,6 +4957,7 @@ export class TuiController {
       port = this.port.executions;
     if (
       !target ||
+      target.originStoreId !== target.storeId ||
       !port ||
       this.disposed ||
       this.busy ||

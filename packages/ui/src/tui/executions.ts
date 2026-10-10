@@ -5,6 +5,7 @@ import type {
   ExecutionOutputPage,
   Message,
   ModelOutputSnapshot,
+  Run,
   SessionView,
 } from '@kite-ai/client';
 
@@ -16,6 +17,7 @@ export interface TuiExecutionPort {
     signal: AbortSignal,
   ): Promise<ExecutionOutputPage>;
   getView(sessionId: string, signal: AbortSignal): Promise<SessionView>;
+  getRun(id: string, signal: AbortSignal): Promise<Run>;
   messages(
     sessionId: string,
     query: { afterSeq: string; upperSeq: string; limit: number },
@@ -29,7 +31,14 @@ export interface TuiExecutionPort {
   stop(sessionId: string, request: CancelExecutionRequest): Promise<Command>;
   getCommand(commandId: string, signal: AbortSignal): Promise<Command>;
 }
-export type TuiJobTarget = Readonly<{ storeId: string; sessionId: string; executionId: string }>;
+export type TuiJobTarget = Readonly<{
+  storeId: string;
+  originStoreId: string;
+  sessionId: string;
+  executionId: string;
+  definitionId: string;
+  definitionVersion: string;
+}>;
 export type TuiJobStop = Readonly<{
   target: TuiJobTarget;
   request: CancelExecutionRequest;
@@ -45,7 +54,9 @@ export type TuiChildLog = Readonly<{
 export function originalJob(target: TuiJobTarget, execution: Execution): Execution {
   if (
     execution.id !== target.executionId ||
-    execution.originStoreId !== target.storeId ||
+    execution.originStoreId !== target.originStoreId ||
+    execution.definitionId !== target.definitionId ||
+    execution.definitionVersion !== target.definitionVersion ||
     execution.sessionId !== target.sessionId ||
     execution.kind !== 'job'
   )
@@ -175,7 +186,7 @@ export async function readChildLog(
     const source = await port.getExecution(id, signal);
     if (
       source.id !== id ||
-      source.originStoreId !== target.storeId ||
+      source.originStoreId !== target.originStoreId ||
       source.sessionId !== target.sessionId
     )
       throw Error('tui_child_parent_mismatch');
@@ -194,7 +205,8 @@ export async function readChildLog(
   const upper = view.session.nextSeq,
     messages: Message[] = [],
     messageIds = new Set<string>(),
-    modelOutputs = new Map<string, ModelOutputSnapshot>();
+    modelOutputs = new Map<string, ModelOutputSnapshot>(),
+    modelSources: { model: Execution; run: Run }[] = [];
   let after = '0';
   for (;;) {
     signal.throwIfAborted();
@@ -220,17 +232,37 @@ export async function readChildLog(
         message.outputBody.readAvailability !== 'unsupported' &&
         message.contentFormat !== 'unsupported'
       ) {
-        const store = message.originMessage?.storeId ?? target.storeId,
+        const originStore = message.originMessage?.storeId ?? target.originStoreId,
           scope = message.originMessage?.sessionId ?? childId,
           run = message.originMessage ? message.originMessage.runId : message.runId;
-        if (store !== target.storeId) throw Error('tui_child_origin_store_unavailable');
+        const model = await port.getExecution(message.outputBody.executionId, signal);
+        if (
+          !run ||
+          model.id !== message.outputBody.executionId ||
+          model.kind !== 'model' ||
+          model.sessionId !== scope ||
+          model.runId !== run ||
+          model.originStoreId !== originStore
+        )
+          throw Error('tui_child_model_origin_mismatch');
+        const originalRun = await port.getRun(run, signal);
+        if (
+          originalRun.id !== run ||
+          originalRun.sessionId !== scope ||
+          originalRun.originStoreId !== originStore
+        )
+          throw Error('tui_child_model_origin_mismatch');
+        modelSources.push({ model, run: originalRun });
+        signal.throwIfAborted();
         const output = await port.modelOutput(scope, message.outputBody.executionId, signal);
         signal.throwIfAborted();
         if (
-          output.storeId !== store ||
+          output.storeId !== target.storeId ||
+          output.rootSessionId !== parent.session.rootSessionId ||
           output.sessionId !== scope ||
           output.executionId !== message.outputBody.executionId ||
           output.runId !== run ||
+          output.originCommandId !== originalRun.originCommandId ||
           output.output.complete !== message.outputBody.complete ||
           output.contentBytes !== message.outputBody.contentBytes ||
           output.reasoningBytes !== message.outputBody.reasoningBytes ||
@@ -252,6 +284,20 @@ export async function readChildLog(
   for (const source of [carrier, ...parents]) {
     const fresh = await port.getExecution(source.id, signal);
     if (carrierKey(source) !== carrierKey(fresh)) throw Error('tui_child_binding_changed');
+  }
+  for (const source of modelSources) {
+    const fresh = await port.getExecution(source.model.id, signal),
+      freshRun = await port.getRun(source.run.id, signal);
+    if (
+      carrierKey(source.model) !== carrierKey(fresh) ||
+      fresh.runId !== source.model.runId ||
+      fresh.resultRevision !== source.model.resultRevision ||
+      freshRun.id !== source.run.id ||
+      freshRun.sessionId !== source.run.sessionId ||
+      freshRun.originStoreId !== source.run.originStoreId ||
+      freshRun.originCommandId !== source.run.originCommandId
+    )
+      throw Error('tui_child_model_origin_mismatch');
   }
   signal.throwIfAborted();
   return { target, carrier, view, messages, modelOutputs };

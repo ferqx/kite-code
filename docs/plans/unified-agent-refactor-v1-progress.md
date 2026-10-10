@@ -3668,3 +3668,36 @@ Root沿原unifiedTestPlan／runTestJob的单完整文件、原exclusive或isolat
 合计18pass／350条Bun断言／0fail／0skip；原整文件分类、独立HOME和期限保持。Root沿原 `unifiedTestPlan`／`runTestJob` 执行隔离文件，没有过滤case；green及相邻PTY的4271项输入、Git和运行资产在各自测试前后全等，两批冻结输入相同，代码五个SHA与单元AST保全记录相符。文档在测试全部退出后收尾，不升级旧默认661文件／522作业为本轮完整默认。darwin arm64／Bun1.4.2／Nodev22.21.1；原红、green日志、输入／资产SHA和保全证据归 `/private/tmp/kite-v13-restored-context-verified-evidence-20261010.json`，SHA `f008518338263c038d2eb3cc4d1c7838bffc31db09bfc28324ea39d5e98ef7b8`。Root／八workspace类型实际0；文档、边界／API／测试归属及正常提交hooks独立执行。
 
 本轮新增闭合为恢复后的完整Context正式读取，两个正式调用者遵守现有Core来源合同；没有新增legacy最终退役或整体迁移完成。手册、CLI／Web owner、共享active、维护读取说明、现有恢复Note、tests与能力映射同步。RSS／观测、当前制品完整维护／平台／依赖独立、§35审查／最终退役／阶段完整回归及适用P7责任保持未闭，fullDefault=false／wholeV13=false／phaseExit=false；只执行已授权本地提交，无push、PR、发布或Actions dispatch。
+
+## 2026-10-10：恢复后 TUI 后台任务完整读取
+
+Context正式消费者已正常本地提交 `7911bfd28fa73728e7012b477ab9988df96904bf`，该切片结束。本轮继续核§30.2.16、P5/P6/P7和§35实际依赖：恢复后的完整用户阅读能力属于P5；原RSS/观测缺项在P6及最终退出汇合，不是独立安装、版本选择、离线维护或恢复消费者实现的前置。原安装维护 `39b3867c` 与DB9/installed rollback `0dad6e2c`证据按未变范围复用，不重开Daemon、参数对照或已闭合恢复矩阵。
+
+开工时最多五项具体缺口按依赖列为下表，最高优先级本轮直接实施；同层客户端可独立推进，不要求先使RSS通过。状态保持完整能力维度，单个journal/操作/测试窗口不成为独立长期目标。
+
+| 顺序 | 实际用户入口与完整行为 | 验收条件与当前阻塞 |
+| --- | --- | --- |
+| 1 | 明确备份恢复后，正式TUI `/background`、`output <原ID>`、`child <原ID>` | 当前Store准入、原Job/definition/version及父链/Model/Run来源保持；完整已保存输出/gap/子正文、首次及冷读零重放、历史只读零停止申请，当前准确停止仍成立。本轮实现并在真实HTTP/Ink与两个原PTY各自范围验收；不称installed恢复PTY。 |
+| 2 | Native Files侧栏历史详情、原消息路径及同项目编辑器入口 | [Main receipt](../../apps/desktop/electron/file-changes.ts)仍错误要求原Message/Execution出处等于当前Store，A→B历史会拒绝。应核当前准入及真实原Message/Execution/Run/结果，再提供完整历史diff和已重新核实同项目当前文件入口；错来源/跨项目/物理root与frame变化仍拒绝，冷读零执行/写入，实际编辑器资格须保准确范围。尚未实施。 |
+| 3 | Web封存Fork恢复后“Read full Model output” | [页面](../../apps/web/src/page.tsx)未提供原出处资格，shared reader默认拒原Store不同。应从实际已观察Message核原Model/Run/来源，完整EOF/SHA/UTF-8/原content/reasoning/tool calls保持、当前Cookie准入与关闭/迟到/错来源拒绝，零业务POST/Model重放。不能只打开布尔绕过；尚未实施。 |
+| 4 | installed CLI/TUI/Native连续普通任务、Shell/child后台、代码切换及包内维护恢复后继续使用原数据 | 原身份/完整结果/零重放和准确所属资源退出；原RSS32MiB增长、八outer/九点、完整activeResources/handles与Runtime后代门禁，当前制品必要完整维护、三平台与客户端依赖独立资格仍未闭。已提交macOS安装/版本/有限维护证据复用；Win/Linux依用户顺序留重构后Actions，未扩大授权。 |
+| 5 | 用户仅从正式客户端/已安装入口完成上述能力；最终停用原入口 | 前序实际能力及资格满足后，§35独立迁移审查、最终legacy退役、相应阶段未过滤完整回归和适用P7发布兼容责任；不以旧完整默认或局部结果替代当前阶段退出。首发前无适用新基线published样本仍保T029发布责任，不阻止前面的独立实现。 |
+
+原TUI有三处实际错误比较：[目录](../../packages/ui/src/tui/execution-panel.tsx)、[controller目标](../../packages/ui/src/tui/controller.ts)和[Job/child reader](../../packages/ui/src/tui/executions.ts)均将原origin与当前准入Store混合。实际公开备份恢复A→B保原Job出处A，当前B的view已有两个原Job，但 `/background output <原ID>` 的读取状态为undefined。原五个生产文件逐项SHA核对等于HEAD `7911bfd2`，准确业务红actual1／0pass／1fail／13expects，日志 `/private/tmp/kite-v13-restored-tui-background-business-red-20261010-tests_isolated_unified-agent_restored-tui-background.test.tsx.log`；4272输入、Git和运行资产前后全等。主区也有definition文本，red的listed:true不算目录证据；后续另加面板专属原ID与两个只读marker断言，保原全部业务断言。
+
+目标现从已准入当前快照封存当前Store、原originStoreId、Session/Execution和definition ID/version。完整输出仍固定H并保原stream/seq/throughSeq/gap；child沿实际carrier和原父链核原出处，child View仍核当前Store/父/root/Workspace。Model沿原Message或封存来源→真实Model Execution→真实Run核原Session/run/origin，再读当前Store的完整公共snapshot及原Command/字节元数据；结束前复核原Model revision、Run身份与原绑定。正式 [CLI host](../../apps/cli/host/tui.tsx)接真实公开getRun，API/SQL/Artifact合同未改。历史目录显示只读，面板与controller停止守卫分别要求当前出处/活动/未请求取消/准确观察，不生成历史Command或POST；当前后台计数语义保持。
+
+新整文件先由实际Model普通任务生成两项Job/child历史，公开backup/restore后启动两个实际冷Service。真实Ink/controller与公共HTTP分别核两个历史目录条目、220项跨200页输出、stderr17字节gap及原tail、完整Unicode child Model和reasoning、原Job/Command/metadata等值；冷请求全部GET，新增Model0、原Job只启动1次，历史停止零请求/零意图。新child仅少量消息，不单独授多页child资格；该断言由下面原完整Job/child PTY继续证明。恢复HTTP/Ink不是installed恢复PTY，显式无害Job不代证默认ProcessService Shell、三平台或完整维护。
+
+| 完整文件范围 | pass | Bun断言 | fail/skip | 准确证据 |
+| --- | --- | --- | --- | --- |
+| `tests/isolated/unified-agent/restored-tui-background.test.tsx` | 1 | 68 | 0/0 | 真实A→B、两次冷HTTP/Ink、完整原结果与历史只读 |
+| `packages/ui/test/isolated/tui/executions.test.ts` | 1 | 37 | 0/0 | 原80×24、跨页Job/gap、超过200 child消息与完整Model、准确停止/迟到与原丢回复 |
+| `apps/cli/test/isolated/tui-caller-job-stop.test.ts` | 1 | 16 | 0/0 | 原正式host准确单项停止、持久caller冷查回及另一Job保持 |
+| UI原完整 `executions/controller/preferences` 三文件 | 62 | 492 | 0/0 | 原所有expect保留，新增原definition/Run拒绝和实际历史S→Enter零申请 |
+
+合计六完整文件65pass／613expects／0fail／0skip。Root原whole-job collector actual0／22.210秒，3文件4272输入/Git/assets全等；两个原PTY测试文件字节全同原HEAD，fixture只新增真实getRun，没有删断言、改按键/预算/分类或排除原失败。原UI 14/199/83条expect文本行全保，Unit3.30秒。Root与八workspace类型实际0；只读源码审查未发现新增具体缺陷。精确源/测试SHA、日志及保全归 `/private/tmp/kite-v13-restored-tui-background-verified-evidence-20261010.json`，SHA256 `325c31498fae0d91721221d84b5e28cbdc042138670ef7e4bb6da45525dd04e8`。
+
+前两次新夹具因非正式capability名称及不存在的listAllMessages失败，修正为正式TUI admission和公开固定上界消息分页，日志保留且不算业务红。首次绿另因正常Ink行宽将一个只读marker拆行而actual1／17断言；只把相同两个marker断言改为接受词间空白，原生产/原业务断言保持，日志 `/private/tmp/kite-v13-restored-tui-background-green-20261010-tests_isolated_unified-agent_restored-tui-background.test.tsx.log`保留。删本轮追加的目录断言块后新测试SHA与业务red完全相同，已独立核实。
+
+本轮新增闭合为恢复后TUI后台任务完整阅读；正式host继续消费公共Client并新增原Run来源核验，没有新增legacy最终退役。用户指南/参考、UI/CLI owner、共享active、既有恢复Note、tests和能力映射按实际diff同步；文档/影响/计划证据、边界/API/workspace、测试归属、Biome及正常本地提交门禁独立强制。原RSS实际增长失败仍保 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1`，activeResources/handles和完整后代缺项仍未知；未重复参数或重采。Native Files、Web封存Model、P6完整维护/平台/依赖独立、§35审查/最终退役/阶段完整回归及适用P7责任保持未闭，37能力partial／fullDefault=false／wholeV13=false／phaseExit=false；仅已授权本地提交，无push/PR/发布/Actions dispatch。

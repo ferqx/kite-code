@@ -11,6 +11,7 @@ import {
   type TuiSnapshot,
   terminalText,
 } from '../../src/tui';
+import { TuiExecutionPanel } from '../../src/tui/execution-panel';
 
 function snapshot(id = 'a', active = true): TuiSnapshot {
   return {
@@ -1128,6 +1129,9 @@ for (const blocked of ['unknown-observation', 'preparation-close', 'preparation-
     let post = 0,
       finish!: (value: typeof actual) => void;
     f.port.executions = {
+      getRun: async () => {
+        throw Error('unused');
+      },
       getExecution: async () =>
         new Promise((resolve) => {
           finish = resolve;
@@ -1199,6 +1203,9 @@ test('single Job lost response survives Session switch and close; lookup keeps o
   const posts: unknown[] = [],
     gets: string[] = [];
   f.port.executions = {
+    getRun: async () => {
+      throw Error('unused');
+    },
     getExecution: async () => job,
     output: async () => {
       throw Error('unused');
@@ -1444,6 +1451,9 @@ test('capacity refusal never strands a cancellation or exact Job stop as unknown
     throw Error('unexpected execution mutation or reader');
   };
   f.port.executions = {
+    getRun: async () => {
+      throw Error('unused');
+    },
     getExecution: async () => job,
     output: unused,
     getView: unused,
@@ -1461,4 +1471,82 @@ test('capacity refusal never strands a cancellation or exact Job stop as unknown
   expect([...j.state.jobStops.values()].map((i) => i.phase)).toEqual(['rejected', 'rejected']);
   expect(j.state.error).toBe('caller_capacity_exceeded');
   j.dispose();
+});
+
+test('restored background Job remains readable without preparing a historical stop', async () => {
+  const f = fixture(),
+    job = {
+      id: 'saved-job',
+      originStoreId: 'original-store',
+      sessionId: 'a',
+      runId: null,
+      kind: 'job' as const,
+      definitionId: 'saved',
+      definitionVersion: '1',
+      status: 'running' as const,
+      result: null,
+      resultRevision: '0',
+      cancelRequestedAt: null,
+      parentExecutionId: null,
+      childSessionId: null,
+    };
+  f.port.readSession = async (id) => ({
+    ...snapshot(id, false),
+    interactions: [],
+    view: { ...snapshot(id, false).view, executions: [job] },
+  });
+  let stops = 0,
+    reads = 0;
+  const unused = async (): Promise<never> => {
+    throw Error('unused');
+  };
+  f.port.executions = {
+    getExecution: async () => job,
+    getRun: unused,
+    output: async () => {
+      reads++;
+      return { items: [], highWaterSeq: '0' };
+    },
+    getView: unused,
+    messages: unused,
+    modelOutput: unused,
+    getCommand: unused,
+    stop: async () => {
+      stops++;
+      throw Error('historical stop');
+    },
+  };
+  const c = new TuiController(f.port);
+  try {
+    await c.select('a');
+    await c.readExecution(job.id, false);
+    expect(c.state.executionReading?.phase).toBe('ready');
+    expect(c.state.executionReading?.target).toEqual({
+      storeId: 'store',
+      originStoreId: 'original-store',
+      sessionId: 'a',
+      executionId: job.id,
+      definitionId: 'saved',
+      definitionVersion: '1',
+    });
+    expect(reads).toBe(1);
+    await c.stopJob(job.id);
+    expect(stops).toBe(0);
+    expect(c.state.jobStops.size).toBe(0);
+    const ui = render(<TuiExecutionPanel controller={c} />);
+    try {
+      expect(ui.lastFrame()).toContain('saved [saved-job] running · restored history; read only');
+      ui.stdin.write('s');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(ui.lastFrame()).not.toContain('Confirm stop original Job');
+      ui.stdin.write('\r');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(stops).toBe(0);
+      expect(c.state.jobStops.size).toBe(0);
+    } finally {
+      ui.unmount();
+    }
+  } finally {
+    c.dispose();
+  }
 });

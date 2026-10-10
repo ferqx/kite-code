@@ -11,7 +11,7 @@
 | `/permissions` | 无参数 | 当前模式、信任与准确授权事实 |
 | `/skills` | 无参数 | 当前知识和 Workflow 资格目录，只读不执行 |
 | `/mcp` | 无参数 | 安全 Server 目录与详情；明确用户或项目范围启停，查询原未知操作 |
-| `/background` | 可加 `stop/output/child <原executionId>` | 原后台执行目录、准确停止、完整输出或子上下文；不猜当前目标 |
+| `/background` | 可加 `stop/output/child <原executionId>` | 当前会话原后台执行目录、准确停止、完整输出或子日志；恢复历史只读，见[后台任务](../guides/tools-and-subagents.md#查看后台任务与恢复历史) |
 | `/session rename <标题>` | 非空标题 | 原 Session/control revision 重命名 |
 | `/session delete confirm` | 必须明确 confirm | 保存删除与整组停止意图，受理不等于清理结束 |
 | `/session fork <标题>` | 非空标题 | 稳定原选择创建分支，不继承授权 |

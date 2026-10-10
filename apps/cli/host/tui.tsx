@@ -502,6 +502,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       nextCommandId: () => crypto.randomUUID(),
       executions: {
         getExecution: (id, signal) => client.getExecution(id, { signal }),
+        getRun: (id, signal) => client.getRun(id, { signal }),
         output: (id, query, signal) => client.listExecutionOutput(id, { ...query, signal }),
         getView: (id, signal) => client.getView(id, { signal }),
         messages: (id, query, signal) => client.listMessages(id, { ...query, signal }),
