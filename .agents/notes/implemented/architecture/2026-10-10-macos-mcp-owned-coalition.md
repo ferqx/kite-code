@@ -12,6 +12,8 @@ Status: implemented
 
 closed v2严格区分三角色：broker和server的所属父方可观察exit／reap；launchd guardian只存真实出生／PPID1／kernel终态，exit保null。原六字段binding和owner由lifecycle再次核对，读证据不成为authority。旧v1保原两进程语义，不升级为树证明；nonce、配置、env和秘密不持久保存。正式default Service固定原Profile coordination，独立可信装配可选绝对controlBase。这里没有借用Shell的权限、sandbox或coalition；原Shell held-root／exact reap合同保留。
 
+准备目录在控制 listen／plist／bootstrap 之前已经取得原身份，失败也必须归同一 owner 收尾。实际控制 server 关闭后，零 bootstrap attempt 才可直接清理原 dev／ino；有 attempt 且业务未派发须核原 label absence，即使 bootstrap 回复未确认也不能当作未登记。关闭或撤销未知保原目录；收尾错误与首次错误聚合，私有有限诊断不保存配置或秘密。这项修正不重写 coalition 树证明或业务已派发后的 unknown，当前完整实现归[共享 platform owner](../../../../packages/agent/src/platform/README.md#shell-guardian-与-macos-confinement)。
+
 ## Alternatives considered
 
 - 继续PGID或PPID census：真实setsid／reparent可以逃组，枚举不足以证明没有短命后代；不能满足完整连接退出。
@@ -22,6 +24,6 @@ closed v2严格区分三角色：broker和server的所属父方可观察exit／r
 
 ## Consequences
 
-依赖同已验证Shell基础的launchd和固定libproc ABI，本篇实际资格限macOS arm64／Bun1.4.2。Windows 新增独立 Job／HANDLE 源码与 v3，边界及未闭合原生资格见[Windows 决定](../../proposed/architecture/2026-10-10-windows-mcp-job-ownership.md)；不重写本篇 v2 或以本机结果代证，Linux 仍 unsupported。身份漂移、容量不足、失联或准确清理失败保持unknown；没有外部owner代启动daemon、任意同UID对抗或OS资源限额承诺。远端Tool效果仍不能由transport收束证明撤销或停止。
+依赖同已验证Shell基础的launchd和固定libproc ABI，本篇实际资格限macOS arm64／Bun1.4.2。Windows 新增独立 Job／HANDLE 源码与 v3，边界及未闭合原生资格见[Windows 决定](../../proposed/architecture/2026-10-10-windows-mcp-job-ownership.md)；Linux已接独立 namespace／v4 源码，未闭合原生资格见[Linux 决定](../../proposed/architecture/2026-10-10-linux-mcp-owned-pid-namespace.md)。二者不重写本篇 v2 或由本机结果代证。身份漂移、容量不足、失联或准确清理失败保持unknown；没有外部owner代启动daemon、任意同UID对抗或OS资源限额承诺。远端Tool效果仍不能由transport收束证明撤销或停止。
 
 唯一新增逃逸验收放入原自然退出整例，保原完整RPC／cancel／EOF／SIGKILL／cold消费者与预算；认证前broker强杀对应源码审查发现的真实注册清理缺口。原失败和实际复验由[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10正式-mcp-完整所属进程树与旧组路径退役)维护，当前机制由[MCP owner](../../../../packages/agent/src/mcp/README.md#显式-stdio-guardian-port)维护。原[Shell决定](2026-10-07-macos-host-shell-owned-coalition.md)继续约束其独立权限与held-root，不被本决定替代；[资源采集决定](../testing/2026-10-08-blocked-full-workload-collection.md)继续约束原增长门槛和全局unsupported。

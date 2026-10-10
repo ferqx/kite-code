@@ -4507,3 +4507,45 @@ Terminal／Native owners、tests、release／resilience active、原前驱implem
 | 5 | §35全能力／T/E独立审查与正式旧路径退役／阶段收束 | 全部适用完整37能力及样本实际证据、真实legacy调用者清零／删除、未过滤完整阶段回归及适用P7责任 | 前四项适用门禁和剩余完整能力汇合；新source caller／局部通过不宣布整体完成，回归属于收束验收而非独立长期目标 |
 
 37能力status仍partial；wholeDefault=false、wholeV13=false、phaseExit=false。当前只收束真实代码安装／版本／维护的完整源码调用者切片，继续原V1.3实施目标；只作已授权本地提交，无push／PR／发布／平台安装或Actions dispatch。
+
+## 2026-10-11：macOS MCP stdio 完整连接与正常退出
+
+### 原失败与实际用户能力
+
+按用户恢复指令优先收束本机真实 stdio 失败，不扩原已闭合矩阵、不重跑 RSS 参数对照。基线为 durable checkout 的 `39d505140270809615c3773a8f5236f54e9f75e3`，macOS arm64／Bun1.4.2。实际用户链是 TUI `/mcp` 的 Request connection、普通 Run 的 MCP Tool、准确 connection Job／Session 取消和 Service 正常退出；维护 A→B 后只查原结果，新的连接仍需明确申请和当前批准。正式默认 Source／SQL Job／SDK caller 沿现有 macOS coalition 后端，不恢复退役的 negative-PGID 路径。
+
+原 `/private/tmp/kite-windows-mcp-original-mac-whole-20261011.log` 保持实际2pass／5fail／21expects，四个 `stdio_fixture_registration_cleanup_unconfirmed`、`mcp_stdio_ended` 和 Core `shutdown_cleanup_unconfirmed` 不改写。五个原私有根的准备子目录只有 owner.json，没有 control.sock／plist／启动诊断；owner metadata 不能证明实际 launchd 登记。相同原七整例在允许真实本机 socket／launchd 的正常环境、生产修复前已完整 actual0／7pass／118expects，log `/private/tmp/kite-macos-mcp-stdio-unsandboxed-original-whole-20261011.log`。唯一独立原相对 socket listen 探针在默认工具 sandbox 实际 `EPERM`／`syscall:listen`／`address:control.sock`，log `/private/tmp/kite-macos-mcp-control-bind-sandbox-20261011.log`；没有启动业务或 launchctl。故不能把原前置失败认定为 RPC／取消语义错误，也不能删清理断言使工具 sandbox 结果变绿。
+
+源码的真实缺口是启动准备已经持原目录身份，listen／plist 却在收尾 try 外，原首因和原目录清理遗漏。[共享 broker](../../packages/agent/src/platform/process/darwin-launchd-supervisor.ts)现把这部分纳入同一收尾：等待控制 server 真实 close，零 bootstrap attempt 按原 dev／ino 清理；已 attempt 且未派发业务时走原准确 label／domain 的 bootout→print113，再清原目录。最终只读审查发现 bootstrap 可能提交登记但 bounded client 回复未确认，故不再用 code0 的 registered 标志推导零登记。任何控制关闭／准确撤销失败保原目录，首因在 AggregateError 第一位；已可能派发业务保原 unknown，不补造 ended。原0600私有诊断保存有限 causeCode／syscall／address／message和8KiB stderr，不加配置或秘密，原 startup／stop 期限和 coalition 证明不变。
+
+### 必要回归、真实失败与保全
+
+[新增完整启动文件](../../packages/agent/test/isolated/jobs/darwin-launchd-startup.test.ts)只有两个直接对应缺口的有界 child：原 listen EPERM 保同一错误对象、零 bootstrap、无关原字节和原目录释放；bootstrap close(null) 核同一原 target 的 bootout→print113、确认前原目录仍在和原首因。child各4秒、整例默认5秒；使用真实 server close API与有限 transport/client mock，只证明源码收尾，不授实际 launchd 资格。listen 修改前完整文件实际0pass／1fail／3expects，log `/private/tmp/kite-macos-launchd-startup-baseline-red-20261011.log`；bootstrap attempt 修改前实际1pass／1fail／7expects，log `/private/tmp/kite-macos-launchd-bootstrap-unknown-baseline-red-20261011.log`。两项红均因目标收尾断言失败，非编译假红，失败根保留；最终2pass／8expects／actual0。
+
+首轮原相邻四完整文件实际36pass／1fail／502expects，log `/private/tmp/kite-macos-mcp-stdio-final-adjacent-whole-20261011.log`，stdio七项、共享Shell十一项与adapter九项均通过；corrupt-parent 例在已核拒绝后恢复准确 parent 的第二 UPDATE 实际 `SQLITE_BUSY`。夹具独立 SQLite 连接原默认0等待，与仍可提交另一 owned Job 的 Worker 竞争。[lifecycle 夹具](../../packages/agent/test/isolated/mcp/lifecycle.test.ts)仅新增 `PRAGMA busy_timeout = 1000` 及两行说明，复用 Store 原锁等待上限；两条原 UPDATE、所有原断言、await、身份、case和期限不变，不重发业务。移除这三行后逐字节等于 HEAD，收据 `/private/tmp/kite-mcp-lifecycle-busy-preservation-20261011.json`；修后同四完整文件通过，不过滤 corrupt-parent。
+
+Root 曾把两个 installed isolated 文件放入同一个 Bun 宿主，实际1pass／1fail／183expects，log `/private/tmp/kite-macos-mcp-installed-final-whole-20261011.log`；Source 文件最后 cold phase 的 `sqlite_engine_initialization_failed` 是前一文件已初始化 SQLite 后再次选择候选引擎。原[正式 test plan](../../scripts/test-plan.ts)明确每个 isolated job 只含一个文件。本轮按原隔离方式重跑两个完整文件，不改引擎 guard、默认计划、原业务断言或期限；原错误调度日志保留。生命周期默认 sandbox 的 HTTP 前置失败也仅作环境失败保留，不计业务通过。
+
+最终 helper／两新文件冻结后，正常本机相关七个完整文件实际均退出0、0fail／0skip，共41pass／732条Bun expects；该计数是本切片范围，不拼成整个 default graph：
+
+| 完整文件范围 | 实际结果 | 最终日志 |
+| --- | --- | --- |
+| 原 stdio-port、macos-host-shell、mcp、lifecycle 四文件 | 37pass／508expects，12.58s | `/private/tmp/kite-macos-mcp-stdio-closure-adjacent-whole-20261011.log` |
+| 新 darwin-launchd-startup 一文件 | 2pass／8expects，50ms | `/private/tmp/kite-macos-launchd-startup-closure-final-whole-20261011.log` |
+| 原 mcp-source-packaged-default 独立一文件 | 1pass／60expects，8.41s | `/private/tmp/kite-macos-mcp-source-closure-packaged-final-whole-20261011.log` |
+| 原 profile-mcp-restore 独立一文件 | 1pass／156expects，19.30s | `/private/tmp/kite-macos-mcp-profile-closure-final-whole-20261011.log` |
+
+原七整例保完整 RPC、durable准入先于spawn、RPC取消后连接仍受监督、精确 Session隔离、自然退出／TERM-ignoring与setsid后代、父EOF／SIGKILL、准确注册清理与无关进程存活。共享Shell原文件保全部权限／网络、held-root／全树退出及准确label absence，确认共享helper没有弱化该合同。最终两个 installed caller 的 candidate digest同为 `3ad74ac6402580a595a665e369676f488278f0efc9e09ab87af5ce40fe8edcd3`，selected SQLite3.51.3及原 engine manifest保持；Source真实Tool效果一次、正常stop及cold RPC／pid ledger不变。维护新Store保原配置原字节，cold七个GET／Provider0，原Job／完整输出／cursor及三角色coalition终态保持、owned peers实际停止。两个原生产consumer及原stdio文件字节与HEAD相同，没有以重写消费者换绿。
+
+完整根＋八workspace类型检查和四个TS只读Biome实际0。MCP／platform owners、跨包MCP／resilience active、原implemented coalition Note、主计划及能力evidence同步；Note仍指导macOS v2，Win／Linux独立源码／pending原生范围准确归位。手册显式连接／Tool／取消／退出与冷读合同核对不变，没有新增UI操作／参数／权限或安装范围，故不制造手册diff。源码、相关依赖／构建输入、断言保全、全部日志SHA与最终文档／强制门禁实际exit归 `/private/tmp/kite-macos-mcp-stdio-source-freeze-20261011.json`。本轮document-before-commit按实际iteration／stage／commit范围核验，正常hooks仍独立执行，无no-verify。
+
+### 最多五项剩余退出缺口与依赖
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与明确验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed Shell及依赖它的Task／Workflow | 保广泛HOME／宿主工具读取、Workspace／Full写范围求交、private无条件拒绝；完整输出／全树取消／unknown强持／cold零重放 | 用户已决定保原合同与guard，现有原语仍不足；本机MCP闭合不代该源码／产品门禁，不扩大管理员／驱动／VM安装 |
+| 2 | installed普通任务／Shell／child／MCP的完整资源出口 | 原8outer／各9点、每outer≥450000ms真实busy、总60—168分钟、原32MiB增长／斜率、全Runtime原出生后代／activeResources／handles与正常退出 | 原RSS `+115.203125MiB >32MiB` red和观测缺项仍直接阻P6／§35／最终退役及依赖P6的P7；不阻独立安装／版本／维护或本片MCP修复，不重复参数对照 |
+| 3 | 后续GitHub Actions的Win／Linux完整安装、版本、MCP／TUI／Native与维护恢复 | 准确当前候选实际安装／登记、完整连接／Tool／取消／普通退出、跨代码新任务／冷回退完整原历史、真实PTY／窗口、backup／restore新Store／GC及保数据卸载 | 源码caller接线已沿前轮实施，实际平台证据仍按用户安排后续Actions；Shell场景依①，完整平台资源按适用②汇合，本机不dispatch或模拟代证 |
+| 4 | §35完整37能力／T/E独立审查、最终旧路径退役与阶段收束 | 全部适用完整用户能力及样本实证、真实legacy消费者清零／删除、未过滤完整阶段回归及适用P7责任 | ①—③适用门禁与其余完整能力汇合；本机MCP七文件通过不能宣布whole graph、MCP全部场景或V1.3完成 |
+
+当前完整macOS stdio用户链切片收束，新增正式caller验证结果已归位，未新增最终legacy删除；原negative-PGID退役持续保持。37能力status仍partial；wholeDefault=false、wholeV13=false、phaseExit=false，Goal未完成。本轮仅已授权本地提交，无push／PR／发布／平台安装或Actions dispatch，RSS与观测缺项继续保留。

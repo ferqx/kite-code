@@ -21,6 +21,8 @@ Linux stdio 同一 caller 已接原 PID namespace／direct-exec 源码，MCP 保
 
 下列Manager/Supervisor/provider/control snapshot名称与旧workspace路径记录历史装配和仍需核对的理由，不能作为当前owner、正式运行或测试调度入口。认证、旧policy替代、远端取消、持续Soak与三平台尚有未闭合范围，按[总体进度](../plans/unified-agent-refactor-v1-progress.md)核对，不从旧Note implemented状态推定新功能已交付。
 
+macOS 正式 stdio 的启动准备现沿[共享 platform owner](../../packages/agent/src/platform/README.md#shell-guardian-与-macos-confinement)核原控制关闭、bootstrap attempt 与准确标签撤销，保原首次错误；未知清理不成为 ended，RPC取消仍只取消原请求，准确 owned stop 才结束连接。原完整连接／Tool／取消／正常退出和维护后 cold 原结果的本机证据归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)，不扩 Windows／Linux 或整体阶段资格。
+
 ## 唯一 owner 与 binding
 
 MCP 的 connect/discovery/read、Manager/Supervisor、auth/credential、transport、write governance 与结果归一化都由 `packages/builtin-runtime/src/mcp/` 拥有。App 只组合配置、execution/network boundary、共享 CredentialBroker 和 neutral Host process port；Host 只拥有 generic process/network mechanism。不存在 Core/SDK direct caller、第二 Manager 或 App-side Tool decision。

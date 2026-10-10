@@ -2106,6 +2106,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+macOS 正式 MCP stdio 的原真实失败优先切片现按源码修复启动准备收尾：控制关闭、零 bootstrap attempt 的原目录清理，以及 bootstrap 已 attempt 但回复未确认的准确标签撤销保首因与 unknown。原七整例、共享 Shell 和独立 installed 默认 Source／SDK Tool／取消／Service退出／维护恢复的完整用户链按本机证据收束，旧 negative-PGID 退役保持。准确原失败、必要新回归、正式隔离调度与最多五项剩余依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)。它不依赖 RSS 收集即可实施，但不解除 RSS／全观测、Win／Linux实机、Windows Shell原合同guard、§35独立审查／最终退役／完整阶段回归门禁；37partial、wholeDefault／wholeV13／phaseExit=false。
+
 Windows真实跨代码安装／冷回退的下一源码缺口现已实施：同release job的准确Terminal／Native供统一caller，原837a2b8c源码自身两builder且11项锁输入／Core基线逐字相同，actualAgent／candidate／clean commit不同而同0.1.0。Terminal原A任务、live选择B、B新任务、冷回退A的完整B输入与继续原任务、最终B零重放；Native四基础窗口／三明确任务后从B installed CLI恢复新Store并第五窗口冷读／单次保数据卸载。原前驱已支持DB9，因此这条链不计DB9旧代码拒绝或已发布T029。原同代码、TUI／POSIX／默认计划和预算保持，新1140000ms统一绝对截止只对应完整用户链的物化／版本／维护／收尾，不形成独立长期测试目标。源码与本机公开Runtime plain／sealed完整读取、类型／CI守卫只闭合本片接线，Windows/Linux实际验收依用户安排交后续Actions；RSS／全观测／Shell原合同guard、§35／最终退役及阶段完整回归保持未闭合。准确源、原断言保全与最多五项剩余依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)，37partial、wholeDefault／wholeV13／phaseExit=false。
 
 Windows managed Native 的正式安装／版本选择／维护恢复源码缺口现已接入：四个稳定 C／compiled Bun 前门、closed marker 与双层完整使用权；C→Bun→Electron 两跳原创建证书和全部原文件准入先于 Main 窗口／Profile／SQLite／Service，登记调用以 expected candidate 拒绝版本漂移。原文件／private transfer／子进程关闭未知保同次调用使用权，双 prefix 登记保全部 EX；卸载删除管理树而保独立数据。真实 Windows 构建、窗口、原历史／普通任务、版本切换／新 Store 维护恢复，以及 Win/Linux 完整资格仍待重构后；原 RSS／完整观测直接阻 P6／§35，不是上述独立源码的前置。准确范围、真实失败、当前最多五项依赖与完整文件验证归[当前 Native 进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-managed-native-正式安装与可信启动源码)，37 能力仍 partial、wholeV13／phaseExit 仍 false。

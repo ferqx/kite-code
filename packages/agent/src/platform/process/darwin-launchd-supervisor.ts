@@ -164,7 +164,7 @@ export async function startLaunchdSupervisor(input: {
   const owner = join(rootPath, 'owner.json');
   writeFileSync(owner, JSON.stringify(registration), { mode: 0o600, flag: 'wx' });
   let channel: Socket | undefined;
-  let registered = false;
+  let bootstrapAttempted = false;
   let businessSent = false;
   let finished = false;
   let terminal: Record<string, unknown> | undefined;
@@ -270,18 +270,21 @@ export async function startLaunchdSupervisor(input: {
       );
     });
   });
-  // The broker is a dedicated private process. Relative socket paths avoid the
-  // Darwin sockaddr_un length limit for long installed Profile paths.
-  process.chdir(rootPath);
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen('control.sock', resolve);
-  });
-  const plist = join(rootPath, 'job.plist');
-  const strings = [process.execPath, process.argv[1]!, '--launchd-owned', rootPath];
-  writeFileSync(
-    plist,
-    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // The broker is a dedicated private process. Relative socket paths avoid the
+    // Darwin sockaddr_un length limit for long installed Profile paths.
+    // Preparation already owns the saved directory, even before bootstrap.
+    process.chdir(rootPath);
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen('control.sock', resolve);
+    });
+    const plist = join(rootPath, 'job.plist');
+    const strings = [process.execPath, process.argv[1]!, '--launchd-owned', rootPath];
+    writeFileSync(
+      plist,
+      `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
 <key>Label</key><string>${xml(registration.label)}</string>
 <key>ProgramArguments</key><array>${strings.map((value) => `<string>${xml(value)}</string>`).join('')}</array>
 <key>WorkingDirectory</key><string>${xml(rootPath)}</string>
@@ -291,13 +294,12 @@ export async function startLaunchdSupervisor(input: {
 <key>AbandonProcessGroup</key><false/><key>ProcessType</key><string>Background</string>
 <key>LimitLoadToSessionType</key><string>Background</string>
 </dict></plist>`,
-    { mode: 0o600, flag: 'wx' },
-  );
-  const timer = setTimeout(() => readyReject(Error('launchd_guardian_start_timeout')), 4000);
-  try {
+      { mode: 0o600, flag: 'wx' },
+    );
+    timer = setTimeout(() => readyReject(Error('launchd_guardian_start_timeout')), 4000);
+    bootstrapAttempted = true;
     const bootstrapped = await launchctl(['bootstrap', registration.domain, plist]);
     if (bootstrapped.code !== 0) throw Error('launchd_bootstrap_failed');
-    registered = true;
     await ready;
     if (input.cancelled?.()) throw Error('launchd_start_cancelled');
     const send = async (frame: Record<string, unknown>): Promise<void> => {
@@ -366,20 +368,51 @@ export async function startLaunchdSupervisor(input: {
     };
   } catch (error) {
     channel?.end();
-    server.close();
-    writeFileSync(
-      join(
-        input.controlBase,
-        `${kind}-failure-${registration.label.slice(`com.kitecode.${kind}.`.length)}.json`,
-      ),
-      JSON.stringify({
-        code: error instanceof Error ? error.message : 'unknown',
-        guardianStderr: startupDiagnostic(rootPath),
-      }),
-      { mode: 0o600, flag: 'wx' },
-    );
-    if (registered && !businessSent) await removeLaunchdRegistration(registration);
-    else if (!registered) removeRuntimeTemp(registration.root);
+    const cleanupErrors: unknown[] = [];
+    let controlClosed = false;
+    try {
+      await new Promise<void>((resolve, reject) =>
+        server.close((failure) => {
+          if (failure && (failure as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING')
+            reject(failure);
+          else resolve();
+        }),
+      );
+      controlClosed = true;
+    } catch (failure) {
+      cleanupErrors.push(failure);
+    }
+    const cause =
+      error instanceof Error ? (error as NodeJS.ErrnoException & { address?: unknown }) : undefined;
+    try {
+      writeFileSync(
+        join(
+          input.controlBase,
+          `${kind}-failure-${registration.label.slice(`com.kitecode.${kind}.`.length)}.json`,
+        ),
+        JSON.stringify({
+          code: error instanceof Error ? error.message.slice(0, 1024) : 'unknown',
+          causeCode: typeof cause?.code === 'string' ? cause.code.slice(0, 64) : null,
+          syscall: typeof cause?.syscall === 'string' ? cause.syscall.slice(0, 64) : null,
+          address: typeof cause?.address === 'string' ? cause.address.slice(0, 256) : null,
+          guardianStderr: startupDiagnostic(rootPath),
+        }),
+        { mode: 0o600, flag: 'wx' },
+      );
+    } catch (failure) {
+      cleanupErrors.push(failure);
+    }
+    if (controlClosed) {
+      try {
+        // A failed bootstrap reply does not prove that registration never committed.
+        if (bootstrapAttempted && !businessSent) await removeLaunchdRegistration(registration);
+        else if (!bootstrapAttempted) removeRuntimeTemp(registration.root);
+      } catch (failure) {
+        cleanupErrors.push(failure);
+      }
+    }
+    if (cleanupErrors.length)
+      throw new AggregateError([error, ...cleanupErrors], 'launchd_start_cleanup_unconfirmed');
     throw error;
   } finally {
     clearTimeout(timer);

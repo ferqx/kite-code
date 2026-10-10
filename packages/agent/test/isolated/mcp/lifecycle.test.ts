@@ -793,6 +793,9 @@ for (const corruptParent of [false, true])
       if (corruptParent) {
         // Explicit owned-SQLite corruption: preserve the real stopped result but break original parent identity.
         corruption = new Database(selectProfile(f.profile).databasePath);
+        // The Worker can still commit another owned Job after the observed Tool terminal.
+        // Wait only for SQLite's write lock; never retry the business connection or change IDs.
+        corruption.exec('PRAGMA busy_timeout = 1000');
         corruption
           .query('UPDATE execution SET parent_execution_id = ? WHERE id = ?')
           .run(independent.id, child.id);

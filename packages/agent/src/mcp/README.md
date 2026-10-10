@@ -124,6 +124,8 @@ macOS coalition 后端已有运行证据；Windows／Linux 已接下述独立原
 
 Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)生成 `dist/mcp/stdio-guardian.js` 与 `dist/mcp/windows-stdio-guardian.js`。Darwin 前者仍担任 private broker或明确的launchd guardian，Windows 只选后者；`mcpStdioGuardianAsset()`只定位同包原 `.js`，缺资产失败，不回退 `.ts`。[源码树外包整例](../../../../tests/isolated/unified-agent/built-package.test.ts)沿真实 Model／SDK执行一次 Tool、原 Session取消、三角色及树证明、维护 A→B后原完整结果／输出冷读零重放。[installed默认Service恢复链](../../../../tests/isolated/unified-agent/profile-mcp-restore.test.ts)沿新Store明确连接、Session取消、Service退出及cold GET，独立libproc核出生和PPID，保原Job／输出／cursor及Model0。正式默认caller已切换到此后端；旧stdio negative-PGID停止路径已删除，Shell原组／held-root合同另行保留。以上实际 macOS 资格不外推下方 Windows 源码。
 
+启动准备失败与完整 transport 停止分别核对：原目录已经归 broker，listen／plist／bootstrap 失败须保首因并收尾，bootstrap 回复未确认不证明未登记；准确控制关闭及标签清理规则归[共享 platform owner](../platform/README.md#shell-guardian-与-macos-confinement)。本机原 stdio 七整例、共享 Shell 和独立源码树外默认 Source／SDK Tool／取消／Service退出／维护恢复消费者已按本轮完整文件验收，准确失败与证据见[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)。公开连接／RPC取消／原 Session stop／cold零重放合同保持，旧 negative-PGID 路径仍退役；该有限 macOS 闭合不代整体 MCP、Win／Linux、RSS 或阶段资格。
+
 ## Windows stdio 所属 Job
 
 [Windows guardian](windows-stdio-guardian.ts)使用内部[原生 owned-child](../platform/process/windows-owned-child.ts)：无名非继承 Job／KILL_ON_JOB_CLOSE，suspended CreateProcessW 与准确三 stdio HANDLE_LIST，Assign 原 process HANDLE 后才 Resume。该 leaf 不依赖旧 runtime-host／Rust runner，不接受 caller SID／ACL／HANDLE，不提供 Shell sandbox。只覆盖原 Job 成员，外部系统 broker 代启动的工作和远端 Tool 效果另保未知边界。
