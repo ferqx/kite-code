@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { AgentError } from '../storage/types';
 import { defaultWindowsPathSecurity, privateDirectory } from './windows-path-security';
 
@@ -8,6 +9,27 @@ export interface WindowsArtifactTemporary {
   write(bytes: Uint8Array): void;
   publish(hash: string, size: string): void;
   close(): void;
+}
+export interface WindowsGcArtifact {
+  readonly metadata: Readonly<{ size: bigint; ctimeMs: number; mtimeMs: number }>;
+  chunks(): Generator<Uint8Array>;
+  verify(): void;
+  remove(): void;
+  close(): void;
+}
+export class WindowsGcArtifactAcquireUnknownError extends AggregateError {
+  constructor(error: unknown, cleanup: unknown) {
+    super([error, cleanup], 'windows_gc_artifact_acquire_unknown');
+  }
+}
+/** Explicit maintenance deletion purpose; ordinary artifact readers never acquire DELETE. */
+export function retainWindowsGcArtifact(profilePath: string, name: string): WindowsGcArtifact {
+  if (
+    !/^[a-f0-9]{64}$/.test(name) &&
+    !/^\.publish-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(name)
+  )
+    throw new AgentError('artifact_hash_invalid');
+  return api().gc(profilePath, name);
 }
 let implementation: ReturnType<typeof native> | undefined;
 const api = () => (implementation ??= native());
@@ -42,6 +64,7 @@ function native() {
   const kernel = dlopen('kernel32.dll', {
     GetCurrentProcess: { args: [], returns: 'u64' },
     GetLastError: { args: [], returns: 'u32' },
+    GetFileAttributesW: { args: ['ptr'], returns: 'u32' },
     GetSystemDirectoryW: { args: ['ptr', 'u32'], returns: 'u32' },
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },
@@ -177,7 +200,7 @@ function native() {
     if (!handle || BigInt(handle) === 18446744073709551615n) fail();
     return handle;
   };
-  const readonlyAcl = (handle: bigint | number) => {
+  const roleAcl = (handle: bigint | number, readOnly: boolean, directory = false) => {
     // Referencing user here keeps its native SID storage live, not only the numeric pointer.
     if (!user.byteLength) fail();
     const owner = out(),
@@ -202,9 +225,10 @@ function native() {
       const header = new DataView(toArrayBuffer(address, 0, 8));
       if (
         header.getUint8(0) !== 0 ||
-        header.getUint8(1) !== 0 ||
+        (readOnly ? header.getUint8(1) !== 0 : (header.getUint8(1) & ~0x13) !== 0) ||
+        (directory && (header.getUint8(1) & 3) !== 3) ||
         header.getUint16(2, true) < 12 ||
-        header.getUint32(4, true) !== 0x120089 ||
+        header.getUint32(4, true) !== (readOnly ? 0x120089 : 0x1f01ff) ||
         !adv.symbols.EqualSid(pointer(BigInt(address) + 8n), sid)
       )
         fail();
@@ -212,6 +236,7 @@ function native() {
       if (sd[0]) kernel.symbols.LocalFree(pointer(sd[0]));
     }
   };
+  const readonlyAcl = (handle: bigint | number) => roleAcl(handle, true);
   const verifyFile = (handle: bigint | number, path: string, readOnly: boolean, size?: string) => {
     defaultWindowsPathSecurity()!.verifyPath(path);
     const before = info(handle);
@@ -433,5 +458,227 @@ function native() {
       },
     };
   };
-  return { temporary, read };
+  const pendingGc = new Set<object>();
+  const gc = (profile: string, name: string): WindowsGcArtifact => {
+    if (resolve(profile) !== profile || realpathSync(profile) !== profile) fail();
+    const published = /^[a-f0-9]{64}$/.test(name);
+    const parent = published ? join(profile, 'blobs', name.slice(0, 2)) : join(profile, 'blobs');
+    const path = join(parent, name);
+    type Held = {
+      path: string;
+      handle: bigint | number;
+      closed: boolean;
+      directory: boolean;
+      privateObject: boolean;
+      identity: string;
+    };
+    const held: Held[] = [];
+    pendingGc.add(held);
+    let released = false,
+      marked = false,
+      removed = false,
+      complete = false,
+      started = false,
+      reading = false;
+    let file: Held;
+    let original: string;
+    let metadata: WindowsGcArtifact['metadata'];
+    const basic = (handle: bigint | number) => {
+      const bytes = new Uint8Array(40);
+      if (!kernel.symbols.GetFileInformationByHandleEx(handle, 0, ptr(bytes), bytes.length)) fail();
+      return new DataView(bytes.buffer);
+    };
+    const stamp = (handle: bigint | number) => {
+      const value = info(handle),
+        times = basic(handle);
+      return (
+        [0, 4, 8, 20, 24, 28, 32, 36, 40, 44, 48]
+          .map((offset) => value.getUint32(offset, true))
+          .join(':') +
+        ':' +
+        times.getBigInt64(24, true)
+      );
+    };
+    const verifyObject = (entry: Held) => {
+      if (entry.closed) fail();
+      const value = info(entry.handle);
+      if (
+        value.getUint32(0, true) & 0x400 ||
+        Boolean(value.getUint32(0, true) & 0x10) !== entry.directory ||
+        (!entry.directory && value.getUint32(40, true) !== 1)
+      )
+        fail();
+      if (entry.identity && identity(value) !== entry.identity) fail();
+      if (entry.privateObject)
+        roleAcl(entry.handle, !entry.directory && published, entry.directory);
+    };
+    const closeEntry = (entry: Held) => {
+      if (entry.closed) return;
+      close(entry.handle);
+      entry.closed = true;
+    };
+    const closeOwned = () => {
+      if (released) return;
+      const errors: unknown[] = [];
+      for (const entry of [...held].reverse()) {
+        try {
+          closeEntry(entry);
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length) throw new AggregateError(errors, 'windows_gc_artifact_close_unknown');
+      released = true;
+      pendingGc.delete(held);
+    };
+    const verifyMapping = (entry: Held) => {
+      verifyObject(entry);
+      const handle = open(entry.path, 0x20080, 7);
+      const probe: Held = { ...entry, handle, closed: false };
+      held.push(probe);
+      let failure: unknown;
+      try {
+        verifyObject(probe);
+      } catch (error) {
+        failure = error;
+      }
+      try {
+        closeEntry(probe);
+      } catch (cleanup) {
+        throw new AggregateError(
+          failure ? [failure, cleanup] : [cleanup],
+          'windows_gc_artifact_close_unknown',
+        );
+      }
+      held.pop();
+      if (failure) throw failure;
+    };
+    const verify = () => {
+      if (released || marked || removed) fail();
+      for (const entry of [...held]) verifyMapping(entry);
+      if (stamp(file.handle) !== original) fail();
+    };
+    try {
+      const privatePaths = new Set([profile, join(profile, 'blobs'), parent]);
+      const parents: string[] = [];
+      for (let current = parent; ; current = dirname(current)) {
+        if (parents.length >= 256) fail();
+        parents.unshift(current);
+        if (dirname(current) === current) break;
+      }
+      for (const current of parents) {
+        const entry: Held = {
+          path: current,
+          handle: open(current, 0x200a0, 3),
+          closed: false,
+          directory: true,
+          privateObject: privatePaths.has(current),
+          identity: '',
+        };
+        held.push(entry);
+        verifyObject(entry);
+        entry.identity = identity(info(entry.handle));
+      }
+      file = {
+        path,
+        handle: open(path, 0x80030080, 1),
+        closed: false,
+        directory: false,
+        privateObject: true,
+        identity: '',
+      };
+      held.push(file);
+      verifyObject(file);
+      file.identity = identity(info(file.handle));
+      original = stamp(file.handle);
+      const times = basic(file.handle);
+      const milliseconds = (ticks: bigint) => Number(ticks - 116444736000000000n) / 10000;
+      metadata = Object.freeze({
+        size: fileSize(info(file.handle)),
+        ctimeMs: milliseconds(times.getBigInt64(24, true)),
+        mtimeMs: milliseconds(times.getBigInt64(16, true)),
+      });
+      verify();
+    } catch (error) {
+      try {
+        closeOwned();
+      } catch (cleanup) {
+        throw new WindowsGcArtifactAcquireUnknownError(error, cleanup);
+      }
+      throw error;
+    }
+    return Object.freeze({
+      metadata,
+      verify,
+      *chunks() {
+        if (started || reading) fail();
+        verify();
+        started = true;
+        reading = true;
+        const digest = createHash('sha256');
+        let count = 0n;
+        try {
+          for (;;) {
+            const bytes = new Uint8Array(chunkBytes),
+              length = new Uint32Array(1);
+            if (
+              !kernel.symbols.ReadFile(file.handle, ptr(bytes), bytes.length, ptr(length), null) ||
+              length[0]! > bytes.length
+            )
+              fail();
+            if (!length[0]) break;
+            count += BigInt(length[0]);
+            if (count > metadata.size) fail();
+            const part = bytes.subarray(0, length[0]);
+            digest.update(part);
+            yield part;
+          }
+          verify();
+          if (count !== metadata.size || (published && digest.digest('hex') !== name)) fail();
+          complete = true;
+        } finally {
+          reading = false;
+        }
+      },
+      remove() {
+        if (removed) return;
+        if (released || reading || !complete) fail();
+        if (!marked) {
+          verify();
+          if (
+            !kernel.symbols.SetFileInformationByHandle(file.handle, 4, ptr(new Uint8Array([1])), 1)
+          )
+            fail();
+          marked = true;
+        }
+        closeEntry(file);
+        if (
+          kernel.symbols.GetFileAttributesW(ptr(wide(path))) !== 0xffffffff ||
+          ![2, 3].includes(kernel.symbols.GetLastError())
+        )
+          fail();
+        removed = true;
+      },
+      close() {
+        let failure: unknown;
+        if (!released && !marked && held.every((entry) => !entry.closed)) {
+          try {
+            verify();
+          } catch (error) {
+            failure = error;
+          }
+        }
+        try {
+          closeOwned();
+        } catch (cleanup) {
+          throw new AggregateError(
+            failure ? [failure, cleanup] : [cleanup],
+            'windows_gc_artifact_close_unknown',
+          );
+        }
+        if (failure) throw failure;
+      },
+    });
+  };
+  return { temporary, read, gc };
 }

@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { cpSync, existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type {
+  ProfileBackup,
+  ProfileGarbageCollection,
+} from '../../../packages/agent/src/maintenance';
+import type { SessionRecord } from '../../../packages/agent/src/storage/types';
 
 /** Explicit native Windows qualification, never a default availability-skipped test.
  * B differs only in manifest version: this proves selection, not cross-code compatibility.
@@ -276,6 +281,24 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
       /busy|in.use/i,
       'actual_paired_shared_lease_blocks_uninstall',
     );
+    const busyDatabase = readFileSync(profile.databasePath);
+    const busyBackups = join(root, 'busy-backups');
+    const busyBackup = await execute('maintenance_busy_backup', [
+      cli,
+      'maintenance',
+      'backup',
+      '--data-root',
+      dataRoot,
+      '--profile',
+      'default',
+      '--destination',
+      busyBackups,
+    ]);
+    assert.notEqual(busyBackup.code, 0);
+    assert(/owner_busy|store_busy|Lock is busy|in.use/i.test(busyBackup.stderr));
+    assert(!existsSync(busyBackups), 'busy_backup_must_not_publish');
+    assert.deepEqual(readFileSync(profile.databasePath), busyDatabase);
+    assert.equal(providerCalls, 1);
     const upgrade = join(root, 'candidate-b');
     cpSync(relocated, upgrade, { recursive: true, dereference: false, verbatimSymlinks: true });
     const manifestPath = join(upgrade, 'terminal-manifest.json');
@@ -310,7 +333,7 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     security.writePrivateFile(
       reader,
       Buffer.from(
-        `import {openSqliteStore} from ${JSON.stringify(pathToFileURL(join(selectedB.releaseRoot, 'node_modules/@kite-ai/agent/sqlite.js')).href)};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{console.log(JSON.stringify({session:await s.getSession('windows-installed'),messages:await s.listMessages('windows-installed'),executions:await s.listExecutions('windows-installed')}));}finally{await s.close();}`,
+        `import {openSqliteStore} from ${JSON.stringify(pathToFileURL(join(selectedB.releaseRoot, 'node_modules/@kite-ai/agent/sqlite.js')).href)};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const executions=await s.listExecutions('windows-installed');console.log(JSON.stringify({metadata:await s.getMetadata(),session:await s.getSession('windows-installed'),messages:await s.listMessages('windows-installed'),executions,command:await s.getCommand(executions[0].originCommandId)}));}finally{await s.close();}`,
       ),
     );
     const cold = await execute('installed_cold_history', [runtime, reader], {
@@ -319,7 +342,9 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     });
     assert.equal(cold.code, 0);
     const history = JSON.parse(cold.stdout) as {
-      session: { id: string };
+      metadata: { storeId: string; lastChangeCursor: string };
+      command: Record<string, unknown>;
+      session: SessionRecord;
       executions: {
         id: string;
         runId: string;
@@ -347,6 +372,145 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     );
     assert(run.stdout.includes(original.originCommandId), 'actual_run_receipt_original_command');
     assert(JSON.stringify(history.messages).includes(body));
+    assert.equal(providerCalls, 1);
+    const scope = ['--data-root', dataRoot, '--profile', 'default'];
+    const maintenance = async (action: string, args: string[]) => {
+      const result = await execute(`maintenance_${action}`, [cli, 'maintenance', action, ...args]);
+      assert.equal(result.code, 0);
+      assert.equal(result.stderr, '');
+      const value = JSON.parse(result.stdout) as Record<string, unknown>;
+      assert.equal(value.kind, 'offline_maintenance');
+      assert.equal(value.action, action);
+      assert.equal(providerCalls, 1);
+      return value;
+    };
+    const configPath = join(profile.profilePath, 'config.jsonc');
+    const originalConfig = readFileSync(configPath);
+    privateDirectory(join(profile.profilePath, 'ui'));
+    const preferencesPath = join(profile.profilePath, 'ui/preferences.jsonc');
+    const preferences = Buffer.from(
+      '// 原始 private UI bytes\r\n{"language":"system","colorPreset":"purple","unknown":"Café 🔐"}\r\n',
+    );
+    security.writePrivateFile(preferencesPath, preferences);
+    const backed = await maintenance('backup', [...scope, '--destination', join(root, 'backups')]);
+    assert.equal(backed.status, 'verified');
+    const backup = backed.backup as ProfileBackup;
+    assert.equal(backup.manifest.source.storeId, history.metadata.storeId);
+    const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+    assert.equal(backup.manifest.assets.configuration.proof?.sha256, sha(originalConfig));
+    assert.equal(backup.manifest.assets.tuiPreferences.proof?.sha256, sha(preferences));
+    assert.deepEqual(readFileSync(join(backup.directory, 'config.jsonc')), originalConfig);
+    assert.deepEqual(readFileSync(join(backup.directory, 'ui/preferences.jsonc')), preferences);
+    assert(
+      BigInt(backup.manifest.media.referenceCount) > 0n,
+      'original_model_referenced_media_required',
+    );
+    const inventory = readFileSync(join(backup.directory, 'media.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { hash: string; size: string });
+    const verifyOriginalMedia = () => {
+      assert.equal(String(inventory.length), backup.manifest.media.blobCount);
+      for (const entry of inventory) {
+        assert(/^[a-f0-9]{64}$/.test(entry.hash));
+        const parts = ['blobs', entry.hash.slice(0, 2), entry.hash];
+        const captured = readFileSync(join(backup.directory, ...parts));
+        assert.equal(String(captured.length), entry.size);
+        assert.equal(sha(captured), entry.hash);
+        assert.deepEqual(readFileSync(join(profile.profilePath, ...parts)), captured);
+      }
+    };
+    verifyOriginalMedia();
+    const inspected = await maintenance('inspect', [backup.directory]);
+    assert.equal(inspected.status, 'verified');
+    assert.deepEqual(inspected.backup, backup);
+    assert.equal((await maintenance('status', scope)).restore, null);
+    const restore = await maintenance('restore', [
+      backup.directory,
+      ...scope,
+      '--expected-store',
+      history.metadata.storeId,
+      '--confirm-data-loss',
+    ]);
+    assert.equal(restore.status, 'restored');
+    assert.equal(typeof restore.storeId, 'string');
+    assert.notEqual(restore.storeId, history.metadata.storeId);
+    assert.equal(restore.previousDirectoryPreserved, true);
+    assert.deepEqual(readFileSync(configPath), originalConfig);
+    assert.deepEqual(readFileSync(preferencesPath), preferences);
+    verifyOriginalMedia();
+    assert.equal((await maintenance('status', scope)).restore, null);
+    const restoredCold = await execute('installed_restored_cold_history', [runtime, reader], {
+      frontdoor: false,
+      cwd: home,
+    });
+    assert.equal(restoredCold.code, 0);
+    const restoredHistory = JSON.parse(restoredCold.stdout) as typeof history;
+    assert.equal(restoredHistory.metadata.storeId, restore.storeId);
+    assert.deepEqual(restoredHistory.session, {
+      ...history.session,
+      ownerInstanceId: null,
+      ownerGeneration: String(BigInt(history.session.ownerGeneration) + 1n),
+    });
+    assert.deepEqual(restoredHistory.messages, history.messages);
+    assert.deepEqual(restoredHistory.executions, history.executions);
+    assert.deepEqual(restoredHistory.command, history.command);
+    assert(JSON.stringify(restoredHistory.messages).includes(body));
+    assert.equal(providerCalls, 1);
+    // The fixed native artifact publisher creates an actual unreferenced immutable blob.
+    // It is recent: this frontdoor does not fake clock advancement or claim expired deletion.
+    const { createWindowsArtifactTemporary } = await import(
+      '../../../packages/agent/src/platform/windows-artifact-files'
+    );
+    const recent = Buffer.from('WINDOWS_INSTALLED_RECENT_UNREFERENCED_MEDIA');
+    const recentHash = sha(recent);
+    const recentPath = join(profile.profilePath, 'blobs', recentHash.slice(0, 2), recentHash);
+    const temporary = createWindowsArtifactTemporary(profile.profilePath);
+    try {
+      temporary.write(recent);
+      temporary.publish(recentHash, String(recent.length));
+    } finally {
+      temporary.close();
+    }
+    assert.deepEqual(readFileSync(recentPath), recent);
+    const beforeGcDatabase = readFileSync(profile.databasePath);
+    const beforeGcCursor = restoredHistory.metadata.lastChangeCursor;
+    const oldStoreGc = await execute('maintenance_gc_old_store', [
+      cli,
+      'maintenance',
+      'gc',
+      ...scope,
+      '--expected-store',
+      history.metadata.storeId,
+    ]);
+    assert.notEqual(oldStoreGc.code, 0);
+    assert(oldStoreGc.stderr.includes('store_identity_mismatch'));
+    assert.deepEqual(readFileSync(profile.databasePath), beforeGcDatabase);
+    assert.deepEqual(readFileSync(recentPath), recent);
+    const collected = await maintenance('gc', [
+      ...scope,
+      '--expected-store',
+      restore.storeId as string,
+    ]);
+    assert.equal(collected.status, 'collected');
+    const gc = collected.gc as ProfileGarbageCollection;
+    assert.equal(gc.storeId, restore.storeId);
+    assert.equal(gc.outcome, 'collected');
+    assert(gc.retainedReferenced > 0);
+    assert(gc.retainedRecent > 0);
+    assert.equal(gc.removedFiles, 0);
+    assert.equal(gc.removedBytes, '0');
+    verifyOriginalMedia();
+    assert.deepEqual(readFileSync(recentPath), recent);
+    assert.deepEqual(readFileSync(profile.databasePath), beforeGcDatabase);
+    const gcCold = await execute('installed_gc_cold_history', [runtime, reader], {
+      frontdoor: false,
+      cwd: home,
+    });
+    assert.equal(gcCold.code, 0);
+    const gcHistory = JSON.parse(gcCold.stdout) as typeof history;
+    assert.equal(gcHistory.metadata.lastChangeCursor, beforeGcCursor);
+    assert.deepEqual(gcHistory, restoredHistory);
     assert.equal(providerCalls, 1);
     const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
     try {
@@ -379,6 +543,18 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
       candidateA: built.candidateId,
       candidateB: b.candidateId,
       providerCalls,
+      maintenance: {
+        frontdoor: 'kite.exe',
+        actions: ['backup', 'inspect', 'status', 'restore', 'status', 'gc'],
+        busyBackupRejected: true,
+        newStoreId: restore.storeId,
+        oldStoreGcRejected: true,
+        referencedAndRecentRetained: true,
+        expiredDeletion: false,
+        rawConfigAndPreferences: true,
+        desktopUi: false,
+        coldNoReplay: true,
+      },
       originalIdentity: {
         storeId: original.originStoreId,
         sessionId: original.sessionId,

@@ -86,7 +86,7 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 维护报告数据库或句柄关闭失败时，同一 Profile 继续保持忙碌，相关临时目录保留，直到实际维护宿主退出。先确认该宿主已退出，再按原 Store／备份和恢复观察重新核实；不要依据失败回复启动并行维护或手动清除锁。关闭失败不会自动重做原任务。
 
-GC 默认宽限7天，可显式设为1–365天。先普通退出使用该Profile的客户端，再明确调用；运行中的客户端会使维护返回busy。已移除且所有任务结束的空间可清理历史正文和其附件，原删除边界、申请去重摘要与回执保留。活动任务、未知执行结果或待核对申请保留原证据，JSON中的 `retainedUnsettledWorkspaces` 给出数量；最近空间以 `retainedRecentWorkspaces` 给出数量。空间外的历史来源依赖会明确拒绝。单独删除的完整根会话执行组按相同条件清理；存活Fork及其他未清理会话依赖的来源保留，最后一个依赖删除并符合条件后可一起清理。对应 `retainedRecentSessionGroups`、`retainedUnsettledSessionGroups`、`retainedReferencedSessionGroups` 说明留存原因。未发送草稿、项目文件和独立备份保留。无引用附件须过宽限并完整核SHA及原实体才删除。本机macOS已验证，Windows该GC端口尚未支持。
+GC 默认宽限7天，可显式设为1–365天。先普通退出使用该Profile的客户端，再明确调用；运行中的客户端会使维护返回busy。已移除且所有任务结束的空间可清理历史正文和其附件，原删除边界、申请去重摘要与回执保留。活动任务、未知执行结果或待核对申请保留原证据，JSON中的 `retainedUnsettledWorkspaces` 给出数量；最近空间以 `retainedRecentWorkspaces` 给出数量。空间外的历史来源依赖会明确拒绝。单独删除的完整根会话执行组按相同条件清理；存活Fork及其他未清理会话依赖的来源保留，最后一个依赖删除并符合条件后可一起清理。对应 `retainedRecentSessionGroups`、`retainedUnsettledSessionGroups`、`retainedReferencedSessionGroups` 说明留存原因。未发送草稿、项目文件和独立备份保留。无引用附件须过宽限并完整核SHA及原实体才删除。本机macOS已验证；Windows GC已接入同一明确维护入口，原生运行尚未验收。
 
 恢复表示明确回退到选定备份内容；必须提供当前原 StoreId，错误身份拒绝，成功后产生新 Store，旧写身份继续拒绝。原历史 ID 与来源身份保留，旧目录单独保存，路径在结果中输出。恢复不会自动重做旧工作或模型请求。
 
@@ -97,7 +97,7 @@ Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 也按�
 当前范围包括SQLite与被引用不可变媒体，并分别采集实际profile的config.jsonc原字节、Desktop私有UI一致副本、真实TUI未提交文本文件和终端显示偏好 `ui/preferences.jsonc` 原字节；每项记录存在/缺失、采集时间与摘要，不能当作跨介质同一瞬间原子。原配置可能含敏感内容，备份按私有0600保存，不解析vault或自动脱敏。恢复发布备份中存在的这些文件，保留原草稿/创建身份，不重放旧意图。credentials/vault及未采集宿主私有文件仍排除，旧当前字节保存在保留目录。TUI草稿保留原Store/Workspace/Session且不自动发送或改绑，JSON保留 `coverage.profileComplete:false`；本命令尚不满足整个W19或三平台发行资格。实现与实际临时制品验证见 [CLI owner](../../../apps/cli/README.md#开发-cli-离线维护)。
 
 
-Windows Bun x64 的开发维护入口已接入同一备份、检查、恢复和明确 journal 决定；私有权限由当前用户 SID/DACL 核验，既有不安全文件会拒绝且不修权限。实际原生 Windows 流程尚未验收，完整 Windows 安装及标准命令入口仍未完成；macOS 或 Linux 结果不代表 Windows 通过。准确实现与平台范围见[维护 owner](../../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
+Windows Bun x64 的开发维护和安装版标准命令源码已接入同一备份、检查、恢复、GC及明确 journal 决定；私有权限由当前用户 SID/DACL 核验，既有不安全文件会拒绝且不修权限。正式安装版要求通过 `kite.exe` 核完整制品后执行，原生 Windows 安装及维护流程尚未验收；macOS 或 Linux 结果不代表 Windows 通过。准确实现与平台范围见[维护 owner](../../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
 
 ## 通用开发入口核实原 Job
 

@@ -2106,6 +2106,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+Windows managed Terminal 的正式安装／版本选择及配对消费者已接源码后，当前独立维护缺口继续沿原 owner 实施：GC已接原 READ/DELETE HANDLE、完整 EOF/hash／实际双时间、精确 FR/FA、原对象删除及 strict Close 保 Profile EX；正式 `kite.exe` qualification要求 busy→backup/inspect/status/restore/status/GC→新 Store 原完整冷读零重放。前门只核近期／引用保留，过宽限删除由公共 Windows维护用例只推进维护时钟；原生尚未执行，不提前退出P6／§35。完整验收与不超过五项实际依赖见[当前维护进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-安装版离线维护与-gc-源码)。
+
 正式Native的公共扩展完整动作／查询／通用结果／再次操作消费者已沿§14.6／§26.7进入“会话工具→扩展能力”，复用公共schema表单、PublicView、原持久caller和DB9／v18兼容。真实HTTP、原组件、Node维护与安装版原页面取得对应证据；此前普通启动／任务、完整正文／历史／后台与相邻正式调用者的未过滤完整默认actual0，原661文件／522唯一主任务全部通过，包括6项exclusive，4251 regular输入与Git前后全等。准确原失败、修正和收束证据归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-10普通任务完整默认收束与剩余退出依赖)。该结果只闭合当时冻结范围的能力集成回归，不充当后来改动的完整默认或整体V1.3退出。
 
 当前退出条件在P6／§35汇合：①默认installed CLI／TUI／Native的连续普通任务、Shell与child后台工作之原macOS RSS、八轮／九点和完整资源资格；②当前制品必要的平台／维护／已发布样本资格，包括新增DB9的适用旧代码实际拒绝；③前序满足后的§35独立迁移审查、最终旧路径退役及阶段完整回归。①的未闭合不构成②中独立安装、版本切换和离线维护实现的前置；按§30.2继续推进不受影响的完整用户能力，保原增长算法、真实失败和资源未知，不重复已闭合的参数对照。具体源码缺口、用户入口和验收归[当前进度](unified-agent-refactor-v1-progress.md)。回归只作相应能力和阶段收束门禁，不另列长期目标。

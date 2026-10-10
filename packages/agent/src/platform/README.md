@@ -36,7 +36,7 @@ Node/Electron 宿主以 no-follow 打开准确 sibling fd，通过 child stdio �
 [Artifact 隔离测试](../../test/isolated/artifact-access/artifact-access.test.ts) 使用实际 Node→Bun fd 继承，验证 helper release/exit/SIGKILL、两个 holder 的 close/父 SIGKILL 隔离、same-basename foreign scope、替换 inode、alias/links/mode 与所有有效 fd 失败关闭；源码树外 public `@kite-ai/agent/artifact-access` compiled leaf 的 shared/exclusive probes 亦无 TS fallback。unsupported platform 仅做受控分支关闭反例，不是 Windows 资格。当前真实 OS 资格为本机 macOS；Linux 虽有实现分支尚未在本轮运行，Windows inherited fd 不支持。测试不授予 Profile、SQLite、Model 或执行权限，不代替完整 installer/Native 生命周期验收。
 
 
-Windows 维护使用独立的 private Profile 文件政策和原稳定排他锁，已接入原文件/祖先 pin、FA metadata 与 FR media 分角色验证、GENERIC_WRITE flush 与 same-volume write-through move；它不借 public candidate scope 授权。完整行为、SQL/FD 生命周期和原生未验范围归[maintenance owner](../maintenance/README.md#windows-维护文件端口与验收边界)；当前 macOS 类型与邻接通过不能证明 Windows 运行或安装资格。
+Windows 维护使用独立的 private Profile 文件政策和原稳定排他锁，已接入原文件/祖先 pin、FA metadata 与 FR media 分角色验证、GENERIC_WRITE flush 与 same-volume write-through move；它不借 public candidate scope 授权。显式 GC 的 `retainWindowsGcArtifact` 仅接受生成媒体名字，以同一原 DELETE/READ HANDLE 完整 EOF/hash、实际 ChangeTime/mtime及身份复核后删除，保 FR/FA 和原目录角色；原对象、路径复核探针及所有祖先 strict Close 未确认都保资源，由 maintenance owner 保 Profile EX。完整行为、SQL/FD 生命周期和原生未验范围归[maintenance owner](../maintenance/README.md#windows-维护文件端口与验收边界)；当前 macOS 类型与邻接通过不能证明 Windows 运行或安装资格。
 
 [Windows 安装协调](windows-installation-coordination.ts)为正式 Terminal prefix 在安装树外建立稳定私有 sibling namespace，selection 锁与每个 64 字符十六进制 candidate ID 的 use 锁从同一已核 marker 派生。managed candidate 的 `acquireArtifactAccess` 取得这个外部 use 锁，同时保留原候选 scope；卸载不能通过关闭重开普通 scope 借出删除权限。删除专用端口与安装选择归 release／CLI owner，外部 namespace 不随安装树删除，Profile 数据不由制品使用锁管理。
 

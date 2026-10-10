@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdtempSync,
@@ -17,10 +17,15 @@ import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/uni
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { canonicalJson } from '../../../src/json';
-import { type inspectProfileBackup, inspectProfileRestore } from '../../../src/maintenance';
+import {
+  collectProfileGarbage,
+  type inspectProfileBackup,
+  inspectProfileRestore,
+} from '../../../src/maintenance';
 import { runProfileRestore } from '../../../src/maintenance/restore';
 import { openBackupDatabase } from '../../../src/maintenance/sqlite';
 import { acquireProfileAccess, selectProfile } from '../../../src/platform/profile';
+import { createWindowsArtifactTemporary } from '../../../src/platform/windows-artifact-files';
 import {
   defaultWindowsPathSecurity,
   privateDirectory,
@@ -375,4 +380,113 @@ test.skipIf(process.platform !== 'win32')(
     }
   },
   120000,
+);
+
+test.skipIf(process.platform !== 'win32')(
+  'Windows public GC deletes expired original FR/FA objects while retaining referenced and recent media and original Core facts',
+  async () => {
+    const f = await fixture();
+    const originalNow = Date.now;
+    const publishOrphan = (bytes: Buffer) => {
+      const access = acquireProfileAccess(f.profile, 'exclusive');
+      const temporary = createWindowsArtifactTemporary(f.selected.profilePath);
+      try {
+        for (let offset = 0; offset < bytes.length; offset += 65536)
+          temporary.write(bytes.subarray(offset, offset + 65536));
+        const hash = sha(bytes);
+        temporary.publish(hash, String(bytes.length));
+        return artifactPath(f.selected.profilePath, hash);
+      } finally {
+        temporary.close();
+        access.lock.release();
+      }
+    };
+    try {
+      const bytes = Buffer.from(`expired orphan-${'x'.repeat(150000)}-complete-tail`);
+      const orphan = publishOrphan(bytes);
+      const temporary = join(f.selected.profilePath, 'blobs', `.publish-${randomUUID()}`);
+      const temporaryBytes = Buffer.from('expired unpublished private bytes');
+      defaultWindowsPathSecurity()!.writePrivateFile(temporary, temporaryBytes);
+      const source = readFileSync(f.selected.databasePath);
+      const sidecars = ['-wal', '-shm'].map((suffix) =>
+        existsSync(f.selected.databasePath + suffix)
+          ? readFileSync(f.selected.databasePath + suffix)
+          : null,
+      );
+      const original = () => {
+        expect(readFileSync(f.selected.databasePath)).toEqual(source);
+        for (const [index, suffix] of ['-wal', '-shm'].entries()) {
+          expect(existsSync(f.selected.databasePath + suffix)).toBe(sidecars[index] !== null);
+          if (sidecars[index])
+            expect(readFileSync(f.selected.databasePath + suffix)).toEqual(sidecars[index]!);
+        }
+        expect(readFileSync(artifactPath(f.selected.profilePath, f.hash))).toEqual(f.bytes);
+        expect(readFileSync(join(f.selected.profilePath, 'config.jsonc'))).toEqual(f.config);
+        expect(readFileSync(join(f.selected.profilePath, 'ui/caller-intents.json'))).toEqual(
+          f.intents,
+        );
+      };
+      const shared = acquireProfileAccess(f.profile);
+      try {
+        await expect(
+          collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
+        ).rejects.toThrow('owner_busy');
+        original();
+      } finally {
+        shared.lock.release();
+      }
+      await expect(
+        collectProfileGarbage({ profile: f.profile, expectedStoreId: 'foreign' }),
+      ).rejects.toThrow('store_identity_mismatch');
+      original();
+      expect(
+        await collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
+      ).toMatchObject({
+        removedFiles: 0,
+        retainedReferenced: 1,
+        retainedRecent: 2,
+      });
+      original();
+      // Only the maintenance clock advances. Original filesystem ChangeTime/mtime stay real.
+      await new Promise((resolve) => setTimeout(resolve, 32));
+      const cutoff = originalNow();
+      await new Promise((resolve) => setTimeout(resolve, 32));
+      const recentBytes = Buffer.from('recent independent original immutable artifact');
+      const recent = publishOrphan(recentBytes);
+      Date.now = () => cutoff + 7 * 86400000;
+      expect(
+        await collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
+      ).toMatchObject({
+        outcome: 'collected',
+        scannedFiles: 4,
+        retainedReferenced: 1,
+        retainedRecent: 1,
+        removedFiles: 2,
+        removedBytes: String(bytes.length + temporaryBytes.length),
+        purgedWorkspaces: 0,
+        purgedSessionGroups: 0,
+      });
+      expect(existsSync(orphan)).toBe(false);
+      expect(existsSync(temporary)).toBe(false);
+      expect(readFileSync(recent)).toEqual(recentBytes);
+      original();
+      Date.now = originalNow;
+      const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+      try {
+        expect((await cold.getMetadata()).storeId).toBe(f.storeId);
+        expect((await cold.getSession('s'))?.title).toBe('original title');
+        expect(await cold.getCommand('pending')).toMatchObject({
+          status: 'needs_review',
+          originStoreId: f.storeId,
+        });
+      } finally {
+        await cold.close();
+      }
+      expect((await f.argv(['status', ...f.scope])).result?.restore).toBeNull();
+    } finally {
+      Date.now = originalNow;
+      f.close();
+    }
+  },
+  60000,
 );

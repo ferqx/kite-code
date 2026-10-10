@@ -141,11 +141,11 @@ Linux 当前安装候选也已通过实际 `bin/kite maintenance backup/inspect/
 
 Workflow 的独立开关文件 `skill-workflow.jsonc` 作为 `skillWorkflowConfiguration` 原字节资产采集。JSON coverage 明确列出该项，保留注释、未知字段及损坏 JSONC，不解析或启用特性；缺失保持 absent，恢复保原字节。它不改变 `profileComplete:false` 或凭据排除范围。
 
-Windows Bun x64 开发 CLI 的同一维护入口现接入原生私有文件端口；[维护 owner 的实际 argv 用例](../../packages/agent/test/isolated/maintenance/windows.test.ts)要求完整 backup/inspect/restore/status 和准确 journal 的 complete/rollback，保持新 Store、原请求字节与凭据排除。源码与类型已接入，原生 Windows 运行未验；完整 Windows installer、标准 PATH 前门和 Native bootstrap 仍有独立缺口，不能据此声明 installed 资格。权限、媒体与发布屏障详见[维护 owner](../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
+Windows Bun x64 开发 CLI 的同一维护入口现接入原生私有文件端口；[维护 owner 的实际 argv 用例](../../packages/agent/test/isolated/maintenance/windows.test.ts)要求完整 backup/inspect/restore/status 和准确 journal 的 complete/rollback，保持新 Store、原请求字节与凭据排除。源码与类型已接入，managed Terminal installer／标准.exe前门也已接源码；显式安装版 qualification 现要求 busy、完整备份／检查／新 Store 恢复／状态与 GC、完整原历史冷读零重放。原生 Windows 运行未验，Native bootstrap 仍保拒绝，不据源码声明 installed 资格。权限、媒体与发布屏障详见[维护 owner](../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
 
 [host/maintenance.ts](host/maintenance.ts) 接入公开 `@kite-ai/agent/maintenance`，不启动 Service、Provider 或执行任务。命令及用户操作见[手册](../../docs/handbook/cli/commands.md#通用开发入口离线维护)。[纯参数层](src/arguments.ts) 要求显式绝对 data root/profile、选定备份与原观察身份；恢复及 journal 完成/回退另要求独立 `--confirm-data-loss`，未知、重复、缺值及相对路径在 I/O 前拒绝。help 和只读 status 不初始化 profile 或 coordination；开发 selector 原样转发这些参数，无需 Service 资产。正式 Native 自带／登记后的前门先核完整制品并持使用权，macOS 五项常用维护及 DB8／v17 的实际安装资格由[Native owner](../desktop/docs/native-release.md#macos-安装版离线维护)维护；help 不再把共用离线入口仅标为 development。
 
-`maintenance gc --data-root <绝对根> --profile <名称> --expected-store <原Store> [--grace-period-ms <毫秒>]` 显式调用无引用附件回收；默认宽限7天，可选1–365天。它核原 Store，保所有仍被 Core 引用的历史，当前 macOS 实际 argv／busy／完整 bytes／取消证据由[GC owner](../../packages/agent/src/maintenance/README.md#显式无引用附件-gc)负责，Windows 尚未支持该 GC 端口。
+`maintenance gc --data-root <绝对根> --profile <名称> --expected-store <原Store> [--grace-period-ms <毫秒>]` 显式调用无引用附件回收；默认宽限7天，可选1–365天。它核原 Store，保所有仍被 Core 引用的历史，当前 macOS 实际 argv／busy／完整 bytes／取消证据由[GC owner](../../packages/agent/src/maintenance/README.md#显式无引用附件-gc)负责，Windows 原对象删除端口已接源码；安装前门验收只核近期／引用保留及旧 Store 拒绝，过宽限删除由独立 Windows 公共维护用例只推进维护时钟，原生两范围均待验。
 
 backup/restore/reconcile/GC 复用 Agent 外置 profile-use exclusive OS 锁；busy 非零退出且不结束所属进程。status 只输出 journal 观察，reconcile 绑定其中准确 restoreId/digest 和 complete/rollback；普通任务入口不会自动修复未完成 journal。失败只打印有限错误码，不输出 raw stack 或配置正文。
 

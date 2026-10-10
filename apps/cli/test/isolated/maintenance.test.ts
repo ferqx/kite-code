@@ -77,6 +77,7 @@ async function built(root: string) {
         'profile-access.ts',
         'artifact-access.ts',
         'sqlite-engine.ts',
+        'platform/windows-path-security.ts',
       ],
       exports: {
         './maintenance': './maintenance/index.js',
@@ -84,6 +85,7 @@ async function built(root: string) {
         './profile-access': './profile-access.js',
         './artifact-access': './artifact-access.js',
         './sqlite-engine': './sqlite-engine.js',
+        './windows-path-security': './platform/windows-path-security.js',
       },
     },
     {

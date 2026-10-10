@@ -4019,3 +4019,39 @@ Root及八runtime workspace类型、边界/API/原CI消费者/测试归属、doc
 | 5 | 支持范围原生资格→§35独立完整能力/正式caller审查→最终旧路径退役/阶段完整回归及适用P7 | 原生build/install/process/PTY/维护及相关T/E真实通过，再审查、实际退役和未过滤完整回归；保common/native/always formal真实失败 | Win/Linux按用户顺序留重构后Actions，未dispatch。D08首发前没有适用新基线published样本，T029不阻独立实现；首发后责任保持 |
 
 当前新增的是Windows安装/正式paired使用权/版本选择的源码接线及上述关闭缺口修正；平台完整能力未闭合，没有宣布全局caller迁移或最终legacy退役。手册、技术owner、active、Notes、tests与主计划/对应cap证据同步。37能力全部partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active，授权仍仅本地stage/commit，无push/PR/发布。
+
+## 2026-10-10Windows 安装版离线维护与 GC 源码
+
+上一安装／版本选择切片已按正常 hook 本地提交 `e16eed961dfdac3e4e813f655f63dedb34748592`，原99pass／6554Bun断言只证明其冻结22完整文件范围。本轮按用户恢复Goal继续推进完整离线维护，先核真实退出依赖：原 `arena-zero` 九点RSS +115.203125MiB仍高于32MiB，activeResources/handles和全部Runtime descendants缺项继续阻挡P6／§35及最终退役；它们不是Windows正式安装、版本切换和离线维护源码的前置。没有重做参数对照或降低门禁。
+
+### 正式维护入口和原对象 GC
+
+`collectProfileGarbage` 原平台拒绝和持普通deny-delete reader后路径unlink的POSIX假设已改为明确平台分支。Windows仅在同一稳定Profile EX内，按原Store／完整DB-WAL副本、namespace预检、SQL计划／unknown与Fork依赖、宽限及引用合同，取得固定 `retainWindowsGcArtifact`。名字只接受原published hash和`.publish-UUID`，首次打开即原READ/DELETE HANDLE、share READ only、保原全部祖先。published精确FR、temporary精确FA和私有媒体父目录FA保持，DELETE依父目录delete-child准入而不修现有ACL。实际ChangeTime／LastWriteTime、size、完整EOF／published SHA和复核探针均沿原对象；同HANDLE disposition、确认Close及路径消失才计成功。
+
+所有原对象和复核探针Close均须确认，未知保原strong resources；factory还未返回而cleanup未知时，以准确AcquireUnknownError保维护pending和原EX。partial close重试只完成原剩余HANDLE，不能重新获取权限或以已关闭对象构造伪verify失败。POSIX GC、原SQL正文清理／安全事实、四阶段journal、新Store fencing和`profileComplete:false`保持；没有新清理协议、线上自动GC或放宽执行权。持久理由与待验范围归[原维护提案](../../.agents/notes/proposed/architecture/2026-10-07-windows-maintenance-file-publication.md)，继续proposed。
+
+正式 [Windows installed qualification](../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts) 在原held paired Run期间，必须由poisoned环境中的原 `kite.exe maintenance backup`返回busy，不发布备份或改变DB。实际Run退出／双EOF及原B冷历史断言之后，同一前门必须执行backup→inspect→status→新Store restore→status→GC，再核完整冷历史、原IDs／正文、全部media inventory/hash/size/bytes、raw config/preferences、旧Store拒绝和Provider仍1。Session只按原恢复合同增加ownerGeneration并清空ownerInstanceId，不能误断言整个原owner未变。最终原全部candidate EX及保数据卸载保持。
+
+前门GC只核真实近期／引用保留和旧Store拒绝，不假装过宽限删除；[公共Windows维护文件](../../packages/agent/test/isolated/maintenance/windows.test.ts)新增原生正例用actual FR publisher与FA temporary，只推进维护Date.now，不改变文件时间，要求过宽限原对象删除、引用／近期与完整Core／副文件／config／caller字节保持及实际关闭后冷读。原两Windows backup／明确complete-rollback例和预算保持。独立[FFI控制流](../../packages/agent/test/isolated/windows-gc/default.test.ts)只核新purpose、同原HANDLE完整EOF授权、FR/FA和unknown-close保留／重试，不计native ABI／ACL。原完整POSIX GC已涵盖SQL／unknown／Fork／取消／安全事实，本轮按未变范围复用，不扩故障矩阵。
+
+### 验证与适用范围
+
+安装fixture原51个assertion、22个await按AST子序列保留，现109个assertion、34个await；原120秒整链、110秒工作窗、30秒命令和10秒清理预留不变，AST证据 `/private/tmp/kite-windows-maintenance-qualification-preservation-final-20261010.json`。这些静态事实不证明原生整链耗时；Windows actual build/PE/DACL/sharing/前门/维护与GC未运行，按用户顺序留重构后Actions，当前无dispatch。标签B仍不计跨代码，help不计PTY，本片不替完整Native／Desktop UI、恢复发布窗口、OSvault或全W19。
+
+最终受影响范围为六个唯一原完整job／六完整文件，23pass／315Bun expect／0fail／6个原native平台skip。五个原GC／Windows维护／artifact／backup／新mock job沿 `final-3` 保4300输入、Git及六实际Bun/Node/Electron/TS/Biome资产前后全等；该组CLI维护真实红，未计绿。随后只给其临时分发包补既有公开 `windows-path-security` entry/export两行，五已绿job相关生产／依赖／资产未变，其结果按该准确范围复用；`final-4`只复验原CLI四case，4pass／101expect／24.28s，4300输入/Git/assets全等。六job合并收据 `/private/tmp/kite-v13-windows-maintenance-verified-evidence-20261010.json` 核原log SHA及当前输入，不把failed job或重复文件计入通过。原完整文件、断言、maxConcurrency与期限保持，wholeDefault／wholeV13仍false。
+
+两次新mock初始化红保留：`final`和`final-2`各1pass／1fail／6expect，均在actual lazy require第一次初始化时绕开ESM替身并尝试kernel32.dll；有限诊断证明须先初始化原CJS builtin缓存，fixture补准确require后原完整case通过。生产／业务断言／4秒子及默认5秒期限未改。`final-3`原CLI四case也真实0pass／4fail／2expect，因其临时包漏正式Host已依赖的既有public export，未删除或排除case，只补builder entries/exports并沿原文件复验。各原log/result均保留对应prefix，不抹红或availability skip。
+
+Root及八runtime workspace类型、最终Agent与CLI受影响类型、边界／API／runtime-package／test-owner、docs/docs-impact和plan-evidence实际0；五生产/fixture/测试加CLI夹具六TypeScript文件Biome actual0，无业务格式改写。docs-impact提示未改Agent README与shared boundary，核它们现行模块归属、稳定EX、平台及维护合同仍准确，具体Windows新删除实现归platform/maintenance owner；没有制造不变文档diff。独立只读审查闭合本片原对象/关闭/恢复验收合同，没有代替§35审查。原备份格式／SQL／Core原unknown-Fork等已由原GC整文件复验，其余不变恢复矩阵与DB9既有证据按原范围保留，不重开。阶段收束点仍必须完整回归。
+
+### 五项剩余依赖与验收
+
+| 顺序 | 实际用户入口与剩余缺口 | 完整行为／验收 | 依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed `kite.exe` 安装→Run→版本切换／回退→保数据卸载，并含完整离线维护 | 安装和maintenance/GC源码已接；实际原生同一candidate完整pack/install、原SH/EX、B发布／回退不替换A、backup/inspect/newStore restore/status/GC、冷原完整事实零重放和保数据卸载须通过；GC过宽限原HANDLE／FR/FA另外由公共维护原生例实际确认 | 源码缺口已实施，原生qualification留重构后Actions，不以macOS/mock代证 |
+| 2 | Windows正式 `server start/stop`、Native加载及TUI真实交互 | Daemon endpoint仍拒绝Windows；Native加载前身份guard仍保留。各自完成准确transport/自身使用权/Node加载前handoff/全PTY用户行为、取消／实际退出及冷读 | 依正式安装准入与各owner，paired/help不替代 |
+| 3 | 当前installed普通任务完整资源生命周期／持续负载 | 原RSS增长／斜率、八轮／九点门禁与完整可信Runtime descendants、activeResources/handles须实际满足 | 阻P6／§35，原真实红／观测未知保持；不重复参数对照，不阻前两项源码 |
+| 4 | Windows/Linux正式平台全部资格及适用新基线版本样本 | 重构后Actions执行原common whole／Native／always formal及完整install/process/PTY/维护等；真实失败保留。已发布前版适用后再做T029，不使用标签或旧Store样本填补 | 无dispatch；首发前D08无适用published新基线前版，不阻独立实现 |
+| 5 | §35独立完整能力／正式caller审查→最终旧路径退役→阶段完整回归及P7适用责任 | 前序资格满足后完整审查、实际退役和未过滤回归，随后按适用T/E发布责任收束 | 原37能力仍partial，局部修复／静态守卫不触发阶段退出 |
+
+本轮推进的是Windows完整离线维护的正式消费者接线与GC原对象源码缺口，没有新增全局caller迁移或最终legacy退役。wholeDefault=false、wholeV13=false、phaseExit=false、Goal active；仅已授权本地stage/commit，无push/PR／发布。

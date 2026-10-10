@@ -1,9 +1,13 @@
 import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { existsSync, fstatSync, lstatSync, unlinkSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { readPublishedArtifactChunks } from '../artifacts-files';
 import { acquireProfileAccess, type ProfileOptions } from '../platform/profile';
+import {
+  retainWindowsGcArtifact,
+  WindowsGcArtifactAcquireUnknownError,
+} from '../platform/windows-artifact-files';
 import {
   checkpoint,
   closePrivate,
@@ -13,6 +17,7 @@ import {
   preserveMaintenanceFailure,
   privateDirectory,
   retainMaintenanceLease,
+  retainMaintenanceResource,
   syncDirectory,
   syncFile,
   withMaintenanceResources,
@@ -79,6 +84,62 @@ function* entries(root: string): Generator<{ path: string; hash: string | null }
     top.closeSync();
   }
 }
+/** Acquisition-close failures also keep the original Profile EX, before a port can return. */
+function retainGcArtifact(profilePath: string, entry: { path: string; hash: string | null }) {
+  const release = retainMaintenanceResource({ path: entry.path });
+  try {
+    const artifact = retainWindowsGcArtifact(profilePath, entry.hash ?? basename(entry.path));
+    return {
+      artifact,
+      close() {
+        artifact.close();
+        release();
+      },
+    };
+  } catch (error) {
+    if (!(error instanceof WindowsGcArtifactAcquireUnknownError)) release();
+    preserveMaintenanceFailure(error);
+    throw error;
+  }
+}
+async function collectWindowsArtifact(
+  profilePath: string,
+  entry: { path: string; hash: string | null },
+  result: ProfileGarbageCollection,
+  now: number,
+  signal?: AbortSignal,
+): Promise<bigint> {
+  const held = retainGcArtifact(profilePath, entry);
+  try {
+    const before = held.artifact.metadata;
+    if (
+      before.ctimeMs > now - result.gracePeriodMs ||
+      before.mtimeMs > now - result.gracePeriodMs
+    ) {
+      result.retainedRecent++;
+      return 0n;
+    }
+    let work = 0;
+    for (const chunk of held.artifact.chunks()) {
+      signal?.throwIfAborted();
+      work += chunk.byteLength;
+      if (work >= 1048576) {
+        await checkpoint(signal);
+        work = 0;
+      }
+    }
+    held.artifact.verify();
+    signal?.throwIfAborted();
+    held.artifact.remove();
+    result.removedFiles++;
+    return before.size;
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
+  } finally {
+    held.close();
+  }
+}
 async function collectArtifacts(
   db: Database,
   profilePath: string,
@@ -96,6 +157,11 @@ async function collectArtifacts(
     result.scannedFiles++;
     if (entry.hash && referenced.get(entry.hash, entry.hash)) {
       result.retainedReferenced++;
+      continue;
+    }
+    if (process.platform === 'win32') {
+      removedBytes += await collectWindowsArtifact(profilePath, entry, result, now, signal);
+      await checkpoint(signal);
       continue;
     }
     const fd = openPrivate(entry.path, entry.hash !== null);
@@ -152,7 +218,7 @@ async function collectArtifacts(
 async function collectProfileGarbageOwned(
   input: CollectProfileGarbageInput,
 ): Promise<ProfileGarbageCollection> {
-  if (!['darwin', 'linux'].includes(process.platform))
+  if (!['darwin', 'linux', 'win32'].includes(process.platform))
     throw new MaintenanceError('maintenance_platform_unsupported');
   const gracePeriodMs = input.gracePeriodMs ?? 7 * 86400000;
   if (
@@ -218,7 +284,17 @@ async function collectProfileGarbageOwned(
       // The entire namespace is checked before either SQL bodies or artifact files are removed.
       for (const entry of entries(join(access.profilePath, 'blobs'))) {
         input.signal?.throwIfAborted();
-        closePrivate(openPrivate(entry.path, entry.hash !== null));
+        if (process.platform === 'win32') {
+          const held = retainGcArtifact(access.profilePath, entry);
+          try {
+            held.artifact.verify();
+          } catch (error) {
+            preserveMaintenanceFailure(error);
+            throw error;
+          } finally {
+            held.close();
+          }
+        } else closePrivate(openPrivate(entry.path, entry.hash !== null));
         await checkpoint(input.signal);
       }
       if (!plan.workspaces.length && !plan.sessionGroups.length && !plan.previouslyCollected)

@@ -55,7 +55,7 @@ selection EX、候选 use SH/EX 位于 prefix 外的稳定私有协调目录，�
 
 卸载在 selection EX 和全部候选 EX 下，以完整库存一次取得原 DELETE-purpose 对象，whole verifier 复用同一 owner，而不关闭后重开普通 scope；核 bootstrap、全部候选与原指针后按原对象逐叶删除，确认原根消失才释放。取得 DELETE owner 后清理未知或删除部分完成都保 EX 至准确收尾/宿主退出，没有递归路径删除兜底。安装与卸载不接收应用 data-root，因此原用户 DB/config 保留。损坏拒绝、版本切换和未知发布不自动选择恢复方向；本实现没有补造通用断电修复。
 
-Windows 原生 build/ACL/PE/安装链尚未执行。显式 [qualification 工具](../../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts)消费已构建候选，核前门、环境拒绝、真实 paired Run、A 保锁时发布 B／回退及冷读零重放、全部 EX 和卸载保数据。B 仅修改 manifest 版本标签，TUI 仅 help/version；它不代证跨代码、PTY、Daemon、Native、GC、完整维护或 RSS。release candidate 已接入该准确命令和先 MSVC 后 Terminal build 的顺序，按用户安排留到重构后 Actions 验证。本机依赖展开和 PE 字节测试只证各自断言；长期取舍及未完成验收见[安装提案](../../../.agents/notes/proposed/architecture/2026-10-10-windows-managed-terminal-frontdoor.md)。
+Windows 原生 build/ACL/PE/安装链尚未执行。显式 [qualification 工具](../../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts)消费已构建候选，核前门、环境拒绝、真实 paired Run、A 保锁时发布 B／回退及冷读零重放、全部 EX 和卸载保数据。新增真实 Run 期间 busy backup 拒绝，退出后以同一 `kite.exe` 完成 backup／inspect／status／restore／status／GC及新 Store 原完整历史冷读，核原媒体和 config／preferences 字节、旧 Store 拒绝与零重放。前门 GC 只核 referenced／recent保留，过宽限删除由维护 owner 的 Windows 公共用例单独验收。B 仅修改 manifest 版本标签，TUI 仅 help/version；它不代证跨代码、PTY、Daemon、Native、完整恢复发布窗口或 RSS。release candidate 已接入该准确命令和先 MSVC 后 Terminal build 的顺序，按用户安排留到重构后 Actions 验证。本机依赖展开和 PE 字节测试只证各自断言；长期取舍及未完成验收见[安装提案](../../../.agents/notes/proposed/architecture/2026-10-10-windows-managed-terminal-frontdoor.md)。
 
 ## 验证边界
 
