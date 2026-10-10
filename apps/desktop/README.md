@@ -366,11 +366,13 @@ renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后�
 
 原生窗口现通过 [main Context 观察与意图控制器](electron/context.ts) 和 [视图消费者](src/native-context.tsx) 读取公开所选上下文。消息与来源独立分页，固定原 selection/highWaterSeq；消息结束后保留 afterSeq=highWaterSeq，来源结束后保留实际末尾来源 ID，不重复第一页。该 Native 控制器不设历史总页数或 complete 边界总数量截断。页面超过原 4MiB IPC 回应预算时，仅以相同 selection、高水位和两个原游标缩小 GET 页；单项目仍无法传输时明确局部不可用，完整单条大正文传输不属于此入口的资格。
 
-显式 Rewind 只接收已读取的 complete 消息原 ID/seq 或空边界，完整 Tool 配对由 Core 核对。历史 suppressed Job 的 Include 原样传递共享面板点击时封存的 Store/Session/selection/targetRunId envelope；main 再读实际 view，核原 Workspace、当前 selection、准确活动 Run、Execution/resultRevision 与原 Store。缺准确目标或活动 Rewind 明确拒绝。accepted/result_queued 仅显示排队，原 Command 到 checkpoint 后 applied 才表示来源纳入；这两种操作都不创建新 Run 或重放 Job。
+显式 Rewind 只接收已读取的 complete 消息原 ID/seq 或空边界，完整 Tool 配对由 Core 核对。历史 suppressed Job 的 Include 原样传递共享面板点击时封存的当前 Store/Session/selection/targetRunId envelope；main 再读实际 view，核当前准入、Workspace、selection、准确活动 Run、原 Execution/resultRevision、出处存在和允许终态。明确备份恢复后，原 Job 出处可以是 A，新的上下文命令属于 B；Core 仍在写入事务核原 subject 与 delivery target Session，保存的完整结果来源保持 A。缺准确目标或活动 Rewind 明确拒绝。accepted/result_queued 仅显示排队，原 Command 到 checkpoint 后 applied 才表示来源纳入；idle Include 只保存后续来源，须用户明确新建 Run 才进入 Model。这两种操作都不创建新 Run、重放 Job 或恢复原自动交付，自动 consume 的当前 Store 限制保持。
 
 每项写入保存原 commandId 和身份，重复在途调用共享 Promise；最多 128 项原意图，超过时局部拒绝而不丢弃未知命令。未知回执只查询原 Command，不重发 POST。视图切换、刷新失败或观察流失效清除旧可写事实；旧读取不能覆盖新 Session。组件关闭只中止自己的 GET，不停止 Run 或所属 Service。SSE 刷新暂时清除 portable snapshot 时，读 scope 使用此前成功选定、按原 Session/选择代次封存的可信 Workspace 身份；写入仍须实际 view 复核，不靠该身份缓存批准。
 
 [main 回归](test/native-context.test.ts) 验证消息与来源交替结束、超过 200 条消息、固定高水位缩页、单项目拒绝、原命令未知查询、精确活动 Include、取消自身 GET 与封闭 IPC 的 scope/Decimal64；[DOM 回归](test/native-context-dom.test.tsx) 验证换视图迟到正文不覆盖，以及共享 Include 第二参数原样透传。[实际 Electron 回归](test/isolated/native-context-electron.test.ts) 在临时 SQLite、固定 Adapter、私有 Service 制品和真实窗口中，完成 idle Job→键盘 Rewind→suppressed 历史→活动 Include queued→下一 Model 完整结果和 exact sourceID；Rewind 已提交后物理 HTTP 回应 socket 丢失，只查询原 Command，POST 仅一次。外置效果账本始终一行，刷新不新增模型调用，退出核实原 Service PID 消失。该窗口含 15 条 Node 断言，证明 macOS 开发制品当前 Context 切片；不代表 Fork/压缩、完整安装、旧正式入口切换或 Linux/Windows 资格。
+
+[恢复后原入口整例](test/isolated/native-restored-context.test.tsx)以真实 Job、Rewind、公开 backup/restore A→B 和正式 NativeContextView 按钮，经有限 decoded bridge→Main→实际 SDK/Service/Core 保存新的 B Include，完整 source、原 result/revision/出处仍为 A。随后明确新 Run 的实际 Model request 按唯一 source ID 消费完整低信任 JSON；原 Job 与外置效果只执行一次，原公共 Execution 和 Command/Run 冷读保持，Core 仅准确接纳投影变化。该新例1pass/66Bun断言，相邻原完整作业合计26文件137pass/1337Bun断言；实际窗口仍保15Node断言与10/45/60秒预算。原键盘夹具曾在 disabled/busy 时按 Enter且零POST，现仅先核同按钮 actionability，再保原键盘动作和丢回执断言；真实失败保留。新恢复范围是实际 HTTP/Core 加 JSDOM/Main 的组合，不代证新增 installed Electron 恢复整窗口或整体退出；准确输入和剩余门禁归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-context-明确纳入原结果)。
 
 本 Context 与既有 Native/共享权限联合回归实测 19 文件、38 项、270 条 Bun 断言通过（约 70 秒）；实际 Context 窗口的 15 条 Node 断言包含在该回归中。Desktop 类型、11 个归属代码文件 Biome 和文档结构检查通过；未运行共享 dist 或全 workspace 构建。
 

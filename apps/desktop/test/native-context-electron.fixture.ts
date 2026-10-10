@@ -51,6 +51,9 @@ try {
   await app.evaluate(
     `(()=>{const original=globalThis.fetch;globalThis.__contextOriginal=original;globalThis.__contextPosts=0;globalThis.fetch=async(input,init)=>{const request=new Request(input,init);if(request.method!=='POST'||!new URL(request.url).pathname.endsWith('/sessions/s/context/select'))return original(input,init);globalThis.__contextPosts++;const body=Buffer.from(await request.arrayBuffer());const http=process.getBuiltinModule('node:http');return await new Promise((resolve,reject)=>{const outgoing=http.request(request.url,{method:'POST',headers:Object.fromEntries(request.headers)},response=>{response.destroy();outgoing.destroy();reject(new TypeError('owned_context_response_lost'));});outgoing.on('error',reject);outgoing.end(body);});};})()`,
   );
+  await selected
+    .getByRole('button', { name: 'Rewind to empty selected history' })
+    .click({ trial: true });
   await selected.getByRole('button', { name: 'Rewind to empty selected history' }).press('Enter');
   await context.getByText(/Context rewind unknown/).waitFor();
   assert.equal(await app.evaluate('globalThis.__contextPosts'), 1);

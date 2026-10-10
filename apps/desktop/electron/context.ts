@@ -311,7 +311,7 @@ export class NativeContext {
           );
         if (
           execution?.kind !== 'job' ||
-          execution.originStoreId !== frozen.storeId ||
+          !execution.originStoreId ||
           execution.delivery !== 'suppressed' ||
           !['succeeded', 'failed', 'cancelled'].includes(execution.status)
         )

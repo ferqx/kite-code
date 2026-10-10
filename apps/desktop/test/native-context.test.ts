@@ -381,3 +381,111 @@ test('Native Context IPC closes nested scope/boundary and exact decimal revision
   ])
     expect(() => decodeNativeRequest(value)).toThrow('invalid_native_request');
 });
+
+test('Native restored suppressed Job Include binds current Store command and rejects missing origin, wrong revision and old Store scope before POST', async () => {
+  const scope = {
+    generation: 1,
+    selection: 1,
+    storeId: 'restored-B',
+    sessionId: 's',
+    workspaceId: 'w',
+  };
+  const envelope = { storeId: scope.storeId, sessionId: 's', contextSelectionId: 'selection' };
+  let originStoreId: string | undefined = 'original-A';
+  const posts: {
+    sessionId: string;
+    executionId: string;
+    input: Parameters<AgentClient['includeResult']>[2];
+  }[] = [];
+  const client = {
+    serverInfo: { capabilities: ['context'] },
+    getContext: async () => page([], []),
+    getView: async () => ({
+      storeId: scope.storeId,
+      session: { id: 's', workspaceId: 'w', contextSelectionId: 'selection', deletedAt: null },
+      runs: [],
+      executions: [
+        {
+          id: 'original-job',
+          kind: 'job',
+          originStoreId,
+          resultRevision: '7',
+          delivery: 'suppressed',
+          status: 'succeeded',
+        },
+      ],
+    }),
+    async includeResult(
+      sessionId: string,
+      executionId: string,
+      input: Parameters<AgentClient['includeResult']>[2],
+    ) {
+      posts.push({ sessionId, executionId, input });
+      return {
+        command: {
+          id: input.commandId,
+          originStoreId: scope.storeId,
+          sessionId,
+          kind: 'result.include',
+          status: 'applied',
+          receipt: { outcome: 'result_included' },
+        },
+      };
+    },
+  } as unknown as AgentClient;
+  const host = () =>
+    new NativeContext(
+      client,
+      () => scope,
+      () => {},
+    );
+  const current = host(),
+    facts = await current.read('s');
+  const command = await current.include(facts.observationId, 'original-job', '7', envelope);
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({
+    sessionId: 's',
+    executionId: 'original-job',
+    input: {
+      expectedStoreId: 'restored-B',
+      expectedContextSelectionId: 'selection',
+      resultRevision: '7',
+    },
+  });
+  expect(posts[0]!.input.commandId).toBeTruthy();
+  expect(command).toMatchObject({
+    id: posts[0]!.input.commandId,
+    originStoreId: 'restored-B',
+    kind: 'result.include',
+    status: 'applied',
+  });
+  expect(current.submissions.at(-1)?.phase).toBe('applied');
+  posts.length = 0;
+  originStoreId = undefined;
+  const missing = host(),
+    missingFacts = await missing.read('s');
+  expect(
+    await code(missing.include(missingFacts.observationId, 'original-job', '7', envelope)),
+  ).toBe('historical_result_unavailable');
+  expect(posts).toHaveLength(0);
+  originStoreId = 'original-A';
+  const wrong = host(),
+    wrongFacts = await wrong.read('s');
+  expect(await code(wrong.include(wrongFacts.observationId, 'original-job', '8', envelope))).toBe(
+    'historical_result_unavailable',
+  );
+  expect(posts).toHaveLength(0);
+  const old = host(),
+    oldFacts = await old.read('s');
+  expect(
+    await code(
+      Promise.resolve().then(() =>
+        old.include(oldFacts.observationId, 'original-job', '7', {
+          ...envelope,
+          storeId: 'original-A',
+        }),
+      ),
+    ),
+  ).toBe('context_selection_changed');
+  expect(posts).toHaveLength(0);
+});

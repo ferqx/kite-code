@@ -3773,3 +3773,37 @@ Root以[实际页面](../../apps/web/src/page.tsx)、[Browser reader](../../pack
 合计6原作业／22唯一完整文件、122pass／1605Bun断言／0fail／0skip，darwin arm64／Bun1.4.2／Nodev22.21.1。两个最终green批次4275项仓库输入、Git及Bun/Node/Electron/TS/Biome资产前后全等，两批准确输入相同；此后只同步md／tsv文档，运行源码、测试、依赖、配置和生成源保持已验证字节。原page7例与63条expect全部保留，Root另核每个原完整test AST文本与原预算不变；新例仍按原完整作业执行。生产page SHA `fbfe520dcf76e4aedffc8a41fed94cafa831a9aa99362cf1e9c5dd0913daaba2`、page unit SHA `7ee87a53b026370a148fe1ad3d78663c917d6a1cee19b7c0ba0b3062e60c9515`、新真实整例 SHA `b10903a6bb91e31219d3dc6755bd640bdfe79388a3f3e99f259677a00eb77f93`。准确日志、冻结输入、断言保全及复用源码归 `/private/tmp/kite-v13-restored-web-model-verified-evidence-20261010.json`，SHA `81f73c15510fa2d0d379bcc3fdd8856df036383af96b82e5b54c52d537b9a632`。
 
 独立只读审查确认原reader证明和共享错源守卫保持，没有增加API；Root复核Native后台源码，原目录/输出/child已分别使用当前B准入和原A血缘，仅stop要求当前origin，renderer明确恢复历史只读。未找到同类新增源码缺口，不从缺一新窗口推导产品bug或新增矩阵。当前Web资格是实际Core/HTTP/Cookie与JSDOM正式页面组合，clipboard为内存端口，不代表新增原生浏览器或installed恢复整窗口。根与八workspace类型0，文档/影响/计划证据、边界/workspace/API、测试归属、Biome及正常本地提交门禁继续独立执行。产品手册、Web owner、shared active、既有恢复Note、tests、计划及四条能力证据同步；37能力仍partial。RSS原失败与观测缺项、P5完整消费者资格、P6资源/完整维护/平台/客户端依赖独立、§35独立审查/最终退役/阶段完整回归及适用P7责任保持。fullDefault=false／wholeV13=false／phaseExit=false；授权仅本地提交，无push/PR/发布/Actions dispatch。
+
+## 2026-10-10：恢复后 Native Context 明确纳入原结果
+
+前片Web恢复完整Model正文已正常本地提交 `b2652dafe2da0a79e4e207ecd25515f326881385`，切片结束。本轮继续按§30.2.16和实际能力映射推进完整用户能力。RSS和观测缺项仍约束P6及§35退出，不是独立安装、版本切换、离线维护及恢复后新明确上下文操作的实现前置；未重采RSS或重复参数对照。源码核对正式managed Terminal→registered-terminal→所选Native闭包、安装current/previous与登记、包内maintenance显式inspect/backup/status/restore/reconcile，未找到新生产缺口；`terminal-cli/tui`是显式候选leaf，不把其存在误称旧managed fallback。既有macOS有限安装/DB9真旧代码与installed rollback证据按未变范围复用，不能据控制流审查授新平台资格。
+
+当前只保四项依赖，每项对应实际用户入口、完整行为和验收；最高项直接实施，不将单个操作、journal或测试窗口独立为长期目标。
+
+| 顺序 | 用户入口与具体缺口 | 完整验收及当前结果 |
+| --- | --- | --- |
+| 1 | Native会话工具Context的“Include this exact historical result”；Main错误要求原Job出处等于当前Store | 真实Rewind suppressed Job→公开backup/restore B→按钮新Include B Command与原A完整source→随后明确新Run按唯一sourceId收到完整低信任结果→冷读保原身份、零Job重放。当前单行Main修复和真实整例已通过，准确scope/revision/subject/delivery target及自动消费限制保留。 |
+| 2 | 恢复后的活动压缩卡“查看此压缩的原模型输入”；`native-context.tsx`仍以原originStoreId等于当前Store隐藏同Session入口 | 原真实压缩→明确恢复→卡保原压缩/Model/Run身份，用户点击原入口并再次确认完整输入；关闭/切会话撤销读取，零Model重放。同Session scope保持，跨Session sealed来源不扩当前Inspector权限。本轮仅源码核实，尚未实施或取得业务红。 |
+| 3 | 正式安装与所选版本、包内维护恢复后继续使用原数据及普通Shell/child后台 | 所选实际闭包、原身份/完整结果/明确回退/零重放和准确所属资源退出；现行RSS32MiB增长、八outer/九点/斜率、activeResources/handles/完整Runtime后代，以及必要平台/维护/客户端依赖独立资格满足。有限macOS证据仍适用，剩余资格未闭；Win/Linux按用户顺序留重构后Actions，本地不dispatch。 |
+| 4 | 正式客户端完成全部映射能力，并最终停用旧业务路径 | 前序适用能力和资格满足后，§35独立迁移审查、最终legacy退役及阶段未过滤完整回归成立。首发前尚无适用新基线published样本不阻挡独立实现，T029/P7后续适用发布责任保留；本轮不退出阶段。 |
+
+[Main include](../../apps/desktop/electron/context.ts)原条件把旧Job origin A与新操作expectedStore B混合。Core现行合同已允许原主体在当前选择中明确Include恢复历史：事务核原Command subject、实际delivery target Session和精确revision，活动目标Run必须属于B且准确未停，保存新Command B和原result_ref出处A。自动consume才要求原execution来自当前Store，原owner/selection/stop资格保持。正式Native现在只核原出处存在，继续复核当前generation/Store/Session/Workspace/selection/未删除、准确活动Run、原Job/revision/suppressed与允许终态；不改Core、HTTP schema、SQL或私有格式，不增加停止旧Job或自动重做资格。
+
+Root先保生产原字节，以新[owner-local真实整例](../../apps/desktop/test/isolated/native-restored-context.test.tsx)核公开备份恢复、正式NativeContextView按钮、有限decodeNativeRequest bridge与实际Main/SDK/Service/Core。最终同字节业务red为actual1／1fail／18expects，明确 `historical_result_unavailable`、POST0，日志 `/private/tmp/kite-v13-native-include-final-business-red-20261010-apps_desktop_test_isolated_native-restored-context.test.tsx.log` SHA `0dc4177ac3a77e7c7f6130eb9afa6b81d0d10a7553e3ea5bfd00f8c6f2a39a38`。更早夹具将Core的resultAcceptance当公共DTO字段，真实失败5断言保留；修正为公共Execution全等和公开Store端口的完整原record／准确接纳投影分开核对，没有删业务断言。后续Model输入按现行完整低信任JSON合同逐字解码验证CRLF/Unicode/result/details，不把JSON转义误作正文截断。
+
+最终green1pass／66expects：原Action/Job及外置ledger仅一次；明确新B Include只POST1，原Job/result/revision/delivery保持，Core仅准确 `{runId:null,selectionId,sourceId,resultRevision}` 接纳投影变化。idle纳入尚无Model调用；随后用户明确新Run形成第二次POST及唯一新B Run，实际Model request以唯一sourceId收到完整原A结果和低信任标记。关闭后新冷Service只GET，完整Context/View、原Command/Run/公共Execution和Core准确投影保持，旧A准入拒绝、metadata/cursor不变；原/新/cold Model分别1/1/0，Job和ledger始终一次。新恢复整例使用真实HTTP/Core与JSDOM/Main有限bridge，不声称新增NativeCaller/preload/frame或installed恢复整窗口；原实际Electron窗口分别证明现行活动Include范围。
+
+| 原完整作业／范围 | pass | Bun断言 | fail/skip | 支持范围 |
+| --- | --- | --- | --- | --- |
+| 新 `isolated:native-restored-context.test.tsx` | 1 | 66 | 0/0 | 真实A→B、原DOM按钮、新B Include、完整原A结果进明确新Model及cold零重放 |
+| `apps/desktop:shard-2/4` 12完整文件 | 43 | 423 | 0/0 | Main原分页/未知/active/取消/IPC及新增原出处/错revision/旧Store拒绝，原Context DOM与邻接消费者 |
+| `packages/ui:shard-1/4` 10完整文件 | 79 | 630 | 0/0 | 原共享Context、active scope、桌面与TUI邻接全部断言 |
+| Core原 `context/store.test.ts` | 10 | 148 | 0/0 | 原subject/范围、事务回滚及历史显式Include／自动consume拒绝 |
+| Core原 `context/active-include.test.ts` | 3 | 66 | 0/0 | 原active目标、checkpoint/取消/审批与唯一来源，无原Tool重放 |
+| 原 `isolated:native-context-electron.test.ts` | 1 | 4 | 0/0 | 原键盘Rewind、物理丢回复只查原Command、active queued→下一Model、一次ledger与Service PID退出；另15Node断言 |
+
+最终合计六个唯一完整作业、26个文件、137pass／1337Bun断言／0fail／0skip。原Native unit前11854字节全部保持，仅尾追加一例。新unit改变动态分片后，Context与Context DOM归同一原shard，collector两次完整执行记录都保留，最终总数只计一次。原完整窗口首跑真实失败，10秒等待unknown超时；单次只读诊断证明按Enter时 `disabled:true/busy:1` 且POST0。最终fixture仅追加同原按钮actionability trial前置，再执行原Enter，不改变原丢响应实现、全部15Node/4Bun断言和10/45/60秒期限；完整原文件actual0／10.903秒。初次失败与诊断日志分别SHA `24efb3b01a95451beee3c8a3a77e0854f2eb15473008f48e9e9710755471c69c`、`c567b9a9bd86d030f66db3888b31fb762e3a9c6fe1bb94857cf2684161d93206`，保留且不排除原文件。
+
+所有collector的4276项仓库输入、Git及Bun/Node/Electron/TS/Biome资产运行前后全等。首次green与原邻接批次准确输入相同；随后只有所属窗口fixture增加必要readiness，单独复验该受影响原完整作业，其他已通过作业的源码/断言和相关输入保持。根与八workspace类型实际0，窗口fixture改后Desktop类型0；四TS Biome、文档/影响/计划证据、边界/workspace/API、测试归属及正常本地提交门禁独立强制。精确运行、源SHA、重复作业及真实失败保全归 `/private/tmp/kite-v13-native-include-verified-evidence-20261010.json`，SHA `0af89825f0b0e1d4c6e143840654d42c954f69d8fa9ec548ac605c953ebadfae`。独立只读审查确认新的明确Include与旧执行权限分界，无新增具体权限缺口。
+
+本轮新增闭合为恢复后Native明确纳入历史Job结果及随后新轮次完整使用的消费者拒绝缺口；正式Native调用者仍沿公共Client/Core，没有新宣称全局调用者切换或最终legacy退役。手册、Desktop owner、shared active、既有恢复Note、tests、计划及三条能力证据按实际diff同步；37能力status全部partial。压缩原输入shortcut、完整P5/P6消费者/安装/维护/平台/依赖独立、原RSS失败 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1` 及activeResources/handles/完整Runtime后代缺项、§35独立审查/最终退役/阶段完整回归与适用P7责任继续未闭。fullDefault=false／wholeV13=false／phaseExit=false；授权仅本地提交，无push/PR/发布/Actions dispatch。
