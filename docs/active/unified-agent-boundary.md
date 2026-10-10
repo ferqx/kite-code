@@ -127,6 +127,8 @@ Session rename/delete 为原 root creator 的 Decimal64 控制 CAS。原命令�
 
 Context 压缩为单选可信算法 slot，通过同一 Loop 的记录 Model Execution 保存完整输入、覆盖范围与摘要出处；提交前原上下文仍有效。后续输入使用带原 source ID 的低权限摘要，原历史、Model/Artifact 引用和 contextSelectionId 不因压缩改标。人工完成与摘要 publication 同一最终事务；自动失败保留旧选择，未变化的输入不立即无限重试。重置须由原 slot 对完整展开输入明确预检，缺少或拒绝预检保留活动点并且零 Provider。slot 的实际摘要校验、目录 fingerprint、来源新鲜度、取消与必要条件仍在发布前核对，不把结构完整当作已知模型窗口安全。HTTP/Client 只保存原受理意图，真实终态查原 Run；未知回执不重发。默认 pure 算法和实际 SDK 子场景见[Service owner](../../apps/service/README.md)。
 
+Native 同 Session 的压缩原输入入口沿当前准入 Store 读取准确原 Model Execution，恢复前后的 Store ID 不必相等；原压缩卡出处和 Core 的原 Execution／Run／Command／root-work 主体证明保持。实际父回调只选择原调用，敏感确认后由既有完整 reader 核 EOF／bytes／SHA 和当前选择；关闭或切换释放所属读取。跨 Session 封存卡不扩大当前 Inspector scope，压缩／重置与旧来源执行门禁不由阅读放宽；当前行为和证据归[Native owner](../../apps/desktop/README.md)。
+
 TUI 未提交文本由可信 CLI 宿主保存到所选 profile 的 `ui/tui.json`，共享 UI 仅通过有限 draft port 读写原身份文本。独立宿主 profile-use lease 持续至最后保存与UI关闭，Service死亡不释放；短写锁由 Agent/profile-access 固定用途提供。成功受理仅清除原编辑版本，CAS冲突/格式损坏保原磁盘与本地输入，正常退出保存失败保持编辑器。`/drafts`与`/draft <id>`只读原已保存记录，恢复后的旧Store草稿不重绑、不自动发送。
 
 [TUI 已加载文本导出](../../packages/ui/src/tui/export.ts)冻结当前原 Store/Session 与展示正文；完整正文只使用已经验证加载的内容，未读正文保预览并标明不完整，不额外读取或执行。可信 CLI 宿主从已选择 profile 推导配置目录，以0600独占创建唯一 Markdown 文件，UI 不提供路径；迟到结果不发布到新会话。

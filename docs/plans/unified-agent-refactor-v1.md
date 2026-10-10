@@ -2120,7 +2120,9 @@ Native恢复Files的Main消费者也已核真实原Run/Execution出处，完整�
 
 默认制品SHA保留小文件原读取，大文件复用buffer读至EOF；唯一核心图标包已内联原Desktop产物，保exports／CSS／React和准确许可，原内容核验及使用权保持。Native完整历史固定高水位发布，同次读取保有限页大小；正文同范围保留，范围变化仍清理。长普通文本采用相邻Text节点并保grapheme、全部字符和原排版，code／pre不改；临时IPC／DOM定位观察已退役。原完整Model／Fork及相邻调用者全部原断言和预算保留，具体实现边界归[Desktop owner](../../apps/desktop/README.md)与[UI owner](../../packages/ui/README.md)。37能力保持partial／wholeV13=false；Win／Linux仍依用户安排留重构后Actions，本地授权不扩至push／PR／发布。
 
-恢复后的Native Context明确Include也已接原Core合同：新的上下文Command绑定当前B，准确原Job/revision及完整result source保A，只有用户后续明确新Run才消费，旧Job不重放、自动consume守卫保持。真实公开A→B、正式Context DOM→有限bridge→Main→SDK/Core及cold核验，与原完整Main/shared/Core/活动Include窗口六作业26文件137项／1337Bun断言通过，原窗口另15Node；其disabled键盘失败仅补同预算actionability前置，原断言与期限保留。准确红绿、范围与四项依赖归[Include恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-context-明确纳入原结果)。恢复后的压缩原Model input阅读shortcut仍有原origin等式的具体源码缺口；它和其他独立恢复能力可继续实施，RSS/观测、完整P5/P6资格、§35审查/最终退役/阶段完整回归与适用P7责任仍未闭合，不提前退出。
+恢复后的Native Context明确Include也已接原Core合同：新的上下文Command绑定当前B，准确原Job/revision及完整result source保A，只有用户后续明确新Run才消费，旧Job不重放、自动consume守卫保持。真实公开A→B、正式Context DOM→有限bridge→Main→SDK/Core及cold核验，与原完整Main/shared/Core/活动Include窗口六作业26文件137项／1337Bun断言通过，原窗口另15Node；其disabled键盘失败仅补同预算actionability前置，原断言与期限保留。准确红绿、范围与当时四项依赖归[Include恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-context-明确纳入原结果)。
+
+同 Session 的恢复压缩原 Model input 快捷入口已移除错误 Store 等式，保原 Session scope。实际 NativeDesktop 父回调／NativeCaller／公开 Core，经真实压缩、A→B、确认后完整原输入及元数据、Close／迟到选择取消与两次冷建，五个唯一原完整作业28文件105项／1027Bun断言通过；原 Electron 压缩与 Model 输入窗口保原范围和预算。准确业务红及三项依赖归[压缩输入恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-压缩原输入入口)。这些具体恢复消费者缺口已闭合，RSS／观测、完整P5／P6安装／维护／平台／客户端独立资格、§35审查／最终退役／阶段完整回归与适用P7责任仍未闭合；不重新比较RSS参数或提前退出阶段。
 
 ### 30.3 第一条执行闭环
 

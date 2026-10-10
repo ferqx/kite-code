@@ -14,6 +14,8 @@ Status: implemented
 
 窗口/有效缩减不能由 Core 字节常数伪造，可信 validateSummary/validateExpanded 分别核真实输出与reset展开输入。没有窗口预检不能强reset。Fork只复制SQL封存的原summary链接，body读取仍原Store/Session/Model/Artifact scope，不复制执行资格。新 selection 不暗继承旧点；Query/cold readonly 不发Provider。
 
+同Session压缩卡的原输入快捷入口区分当前准入Store和原Model出处；显式恢复A→B不隐藏合法原调用，也不重标压缩／BodyRef。实际Native父回调仅选择准确ModelExecution，敏感确认后沿既有Main／Client／Core核当前B和原Execution／Run／Command／root-work主体血缘、完整EOF／bytes／SHA；关闭和切换释放所属读取。保originSession等于所选Session，跨Session封存压缩卡不扩大当前Inspector的scope。现行产品依据为[Native手册](../../../../docs/handbook/clients/desktop/README.md)，完整实现与真实A→B／两冷DOM及原窗口范围归[Native owner](../../../../apps/desktop/README.md)和[恢复整例](../../../../apps/desktop/test/isolated/native-restored-compression-input.test.tsx)；阅读不放宽原压缩／重置或旧工作执行门禁。
+
 ## Alternatives considered
 
 - 压缩扩展直接调用 Provider：丢失原 Execution、权限和usage链，未采用。

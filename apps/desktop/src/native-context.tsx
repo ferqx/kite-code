@@ -152,7 +152,6 @@ export function NativeContextView({
                 {facts.page.compression.trigger === 'manual' ? '人工请求' : '自动请求'}
               </p>
               {onInspectModel &&
-                facts.page.compression.originStoreId === selection.storeId &&
                 facts.page.compression.originSessionId === selection.session.id && (
                   <button
                     type="button"

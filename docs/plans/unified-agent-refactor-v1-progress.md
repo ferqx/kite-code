@@ -3807,3 +3807,35 @@ Root先保生产原字节，以新[owner-local真实整例](../../apps/desktop/t
 所有collector的4276项仓库输入、Git及Bun/Node/Electron/TS/Biome资产运行前后全等。首次green与原邻接批次准确输入相同；随后只有所属窗口fixture增加必要readiness，单独复验该受影响原完整作业，其他已通过作业的源码/断言和相关输入保持。根与八workspace类型实际0，窗口fixture改后Desktop类型0；四TS Biome、文档/影响/计划证据、边界/workspace/API、测试归属及正常本地提交门禁独立强制。精确运行、源SHA、重复作业及真实失败保全归 `/private/tmp/kite-v13-native-include-verified-evidence-20261010.json`，SHA `0af89825f0b0e1d4c6e143840654d42c954f69d8fa9ec548ac605c953ebadfae`。独立只读审查确认新的明确Include与旧执行权限分界，无新增具体权限缺口。
 
 本轮新增闭合为恢复后Native明确纳入历史Job结果及随后新轮次完整使用的消费者拒绝缺口；正式Native调用者仍沿公共Client/Core，没有新宣称全局调用者切换或最终legacy退役。手册、Desktop owner、shared active、既有恢复Note、tests、计划及三条能力证据按实际diff同步；37能力status全部partial。压缩原输入shortcut、完整P5/P6消费者/安装/维护/平台/依赖独立、原RSS失败 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1` 及activeResources/handles/完整Runtime后代缺项、§35独立审查/最终退役/阶段完整回归与适用P7责任继续未闭。fullDefault=false／wholeV13=false／phaseExit=false；授权仅本地提交，无push/PR/发布/Actions dispatch。
+
+## 2026-10-10：恢复后 Native 压缩原输入入口
+
+前片恢复后的Native明确Include已正常本地提交 `efc04f3044c0dbeb3c79b1317162e5831e1e0902`，切片结束。本轮继续按§30.2.16直接实施下一项源码缺口。RSS与观测不是独立安装、版本切换、离线维护或恢复读取实现前置；原真实失败和未知仍在P6／§35退出汇合，不重复参数对照，不重开已闭合Daemon、可选Terminal卸载升级、维护保锁、DB9旧代码拒绝及installed rollback矩阵。
+
+| 依赖顺序 | 实际用户入口与具体缺口 | 完整验收与本轮状态 |
+| --- | --- | --- |
+| 1 | Native“会话工具”读取活动压缩卡后“查看此压缩的原模型输入”；原Store等式错误隐藏恢复后同Session入口 | 真实压缩A→公开恢复B→准确原压缩／Model／Run保留→实际NativeDesktop父回调打开原Inspector→确认完整输入／元数据→Close／切Session取消→冷重新确认及GET零重放。本轮已实现并验证，同Session与原来源证明保持。 |
+| 2 | installed CLI／TUI／Native连续普通任务、Shell与child后台的资源资格 | 原RSS32MiB增长／斜率、八outer／九点及可信所属／全局观测和完整Runtime后代符合原条件。原RSS实际失败、activeResources／handles与后代缺项保留；本轮未重采。这是P6与最终退出门禁，不阻挡第1项。 |
+| 3 | 正式安装→所选版本→包内维护恢复→以原数据继续使用，并最终退出旧路径 | 支持范围必要平台／完整维护／客户端依赖独立及适用发布样本满足；随后§35独立完整迁移审查、最终legacy退役与阶段未过滤完整回归。既有macOS有限安装／版本／恢复证据按未变范围复用；Win／Linux仍按用户顺序留重构后Actions，本地不dispatch。首发前无适用新基线published样本不阻挡独立实现，T029／P7适用责任保留。 |
+
+实际问题仅在 [native-context.tsx](../../apps/desktop/src/native-context.tsx)：原压缩originStore A与当前准入B被当作相同才显示快捷入口。原Core一致读事务已分别核当前B、准确Session／主体及原Model Execution／Run／Command／root-work A血缘，Native有限reader仍绑定当前generation／viewSelection／Session／Execution并核完整body。Root只删除该Store等式；保 `originSessionId === selection.session.id`，跨Session封存压缩卡不扩大当前Inspector权限。不新增API、SQL／私有格式、Provider调用或旧任务控制资格；手动压缩／重置的当前Store／空闲／选择／观察门禁保持。
+
+[新增owner-local整例](../../apps/desktop/test/isolated/native-restored-compression-input.test.tsx)由真实普通Run与可信纯compressor驱动两次固定Model，保存完整Unicode／CRLF原历史和重点；原压缩Model工具为空，完整原请求大于一块64KiB。原Service严格关闭后公开backup／restore产生B。恢复后两次全新Store／Runtime／Service／Client／NativeCaller／完整NativeDesktop DOM，Sidebar真实选Session、打开会话工具、读取原Context并点击准确快捷入口。真实父回调只打开原敏感确认，确认前 `modelInput.open` 不增长、正文article为零；确认后透明decoded bridge与实际Main／SDK／Core核当前B、原Execution及完整request／metadata、当前Core cursor、每块≤65536bytes、连续offset、wireBytes／EOF／原bodyBytes与SHA。每条原message正文在DOM精确相等，System／Tools／冻结设置和来源分区保持。
+
+Close后正文撤除；另一读将实际Main已完成Core GET的open回复透明暂留，真实Sidebar切Session后原readId收到close，迟到回复不回挂Inspector、不读取该lease的chunk，也不在新Session显示原重点。这个例子证明Main open后／renderer接收前的选择取消，不冒称新网络中途取消资格。每次冷建仍须再次确认读取；当前Model0、原Model2，恢复后HTTP全GET，原compression／Execution／Run／Command完整相等、metadata change cursor不增长。新整例未打开Node私有UI库，实际 `draft_storage_unavailable` 告警逐次精确断言并点击原“确定”；没有模拟草稿成功。JSDOM只有布局／browser API替身，不证明新的Electron／preload／installed恢复整窗口或OS clipboard。
+
+最终同字节业务red为1fail／32expect，原压缩和Model／Run已存在而按钮 `undefined`，日志 `/private/tmp/kite-v13-compression-input-final-business-red-20261010-apps_desktop_test_isolated_native-restored-compression-input.test.tsx.log` SHA `7ce8f51867400165dc83e659cf165ea186be3d5209d6e5527ec6b881b6b5edbc`。该red→最终green只改生产一行，fixture字节相同。更早setup red保留29expect和Radix卸载后延迟focus事件类型错误，实际修正仅在释放browser globals前收束卸载timer；早期类型缺项也已补齐，未删业务断言、改预算或排除原文件。
+
+| 唯一原完整作业 | pass | Bun断言 | fail／skip | 准确范围 |
+| --- | --- | --- | --- | --- |
+| 新 `isolated:native-restored-compression-input.test.tsx` | 1 | 146 | 0／0 | 真实压缩／A→B／两冷actual page-parent-Main-Core／敏感确认／全文与原元数据／关闭与选择取消／零重放 |
+| 原 `apps/desktop:shard-4/4`，12完整文件 | 46 | 423 | 0／0 | 同Session shortcut及跨Session拒绝、完整17MiB reader／205真实请求目录、原Main／管理／权限等相邻守卫 |
+| 原 `apps/desktop:shard-2/4`，13完整文件 | 56 | 454 | 0／0 | 原手动压缩／当前选择／完整重点／未知GET查回、输入选择、Context／refresh／恢复等全部原断言 |
+| 原 `isolated:native-compression-electron.test.ts` | 1 | 3 | 0／0 | 原真实压缩／后继摘要／重置及冷读，另41Node断言、两个所属Service PID已退出 |
+| 原 `isolated:native-model-input-electron.test.ts` | 1 | 1 | 0／0 | 原实际Main／preload／renderer完整输入与原敏感／关闭范围，原文件与driver字节不变 |
+
+合计五个唯一原完整作业、28唯一完整文件、105pass／1027Bun断言／0fail／0skip，darwin arm64／Bun1.4.2／Nodev22.21.1。追加DOM例改变动态分片后，Context DOM与Model input都归同一原shard；六次实际作业记录完整保留，最终总数只计五个唯一label，不把重复执行加算。新DOM文件原4965bytes是完整未改前缀；原Electron两个test／fixture、实际NativeDesktop父链、Main／公共reader／Core source全部保HEAD字节和原期限。两个最终collector的4277项仓库输入、Git与运行资产前后全等，两批输入准确相同；此后只同步本轮md／tsv，生产／测试／依赖／配置／生成输入保持。
+
+根与八workspace类型实际0，三TS Biome0；文档／影响／计划证据、边界／workspace／API、测试归属及正常本地提交hook仍独立强制。独立只读审查确认真实父回调／原input proof和验收范围，没有新增实际生产缺口。准确红绿、所有实际尝试、源码SHA、原字节保全和复用范围归 `/private/tmp/kite-v13-compression-input-verified-evidence-20261010.json`，SHA `ca887a5dfc07ef8a5a3d7673d25d24c82b0ebf7b4368f2297bc58571edfb70e2`。
+
+本轮新增闭合的是恢复后同Session压缩原输入正式消费者入口；没有新增全局正式调用者切换或最终旧路径退役。手册、Desktop owner、shared active、原压缩Note、测试入口、主方案／进度和三条能力证据按实际diff同步，37能力status全部partial。原RSS失败 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1` 和观测／完整Runtime后代缺项、完整P5／P6安装／维护／平台／客户端独立、§35审查／最终退役／阶段完整回归及适用P7责任继续未闭；fullDefault=false／wholeV13=false／phaseExit=false。仅继续已授权本地提交，无push／PR／发布／Actions dispatch。
