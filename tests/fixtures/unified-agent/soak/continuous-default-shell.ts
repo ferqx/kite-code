@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
-  decodeShellProcessEvidence,
-  type ShellProcessEvidence,
+  decodeMacosShellProcessEvidence as decodeShellProcessEvidence,
+  type MacosShellProcessEvidence as ShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from '@kite-ai/agent/jobs/shell';
 import { selectProfile } from '@kite-ai/agent/profile';

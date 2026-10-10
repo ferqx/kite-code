@@ -507,15 +507,17 @@ export type HostStatus = {
     reason: 'diagnostic_source_unavailable' | null;
     sandbox:
       | { backend: 'none'; available: false; qualification: 'unqualified' }
-      | { backend: 'macos_seatbelt'; available: true; qualification: 'host_scope' };
+      | { backend: 'macos_seatbelt'; available: true; qualification: 'host_scope' }
+      | { backend: 'linux_bubblewrap'; available: true; qualification: 'host_scope_unqualified' };
     shell: {
       configured: boolean;
       available: boolean;
-      supervision: 'none' | 'posix_group' | 'macos_coalition';
+      supervision: 'none' | 'posix_group' | 'macos_coalition' | 'linux_pid_namespace';
       qualification:
         | 'not_configured'
         | 'darwin_supervision_only'
         | 'darwin_host_boundary'
+        | 'linux_host_boundary_unqualified'
         | 'unavailable';
       reason:
         | (

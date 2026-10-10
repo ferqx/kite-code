@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
-  decodeShellProcessEvidence,
-  type ShellProcessEvidence,
+  decodeMacosShellProcessEvidence as decodeShellProcessEvidence,
+  type MacosShellProcessEvidence as ShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from '@kite-ai/agent/jobs/shell';
 import {

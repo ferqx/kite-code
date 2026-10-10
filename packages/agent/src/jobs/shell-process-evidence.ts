@@ -3,8 +3,13 @@ import {
   isOwnedProcessIdentity,
   type OwnedProcessRecord,
 } from '../platform/process/owned-process-observation';
+import {
+  decodeLinuxShellProcessEvidence,
+  type LinuxShellProcessEvidence,
+  linuxShellProcessEvidenceEnded,
+} from './linux-shell-process-evidence';
 
-export interface ShellProcessEvidence {
+export interface MacosShellProcessEvidence {
   version: 1;
   coverage: 'shell-owned-coalition';
   binding: { sessionId: string; executionId: string; nonce: string };
@@ -24,6 +29,7 @@ export interface ShellProcessEvidence {
     registrationRemoved: boolean;
   };
 }
+export type ShellProcessEvidence = MacosShellProcessEvidence | LinuxShellProcessEvidence;
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') {
     for (const child of Object.values(value)) freeze(child);
@@ -31,7 +37,7 @@ function freeze<T>(value: T): T {
   }
   return value;
 }
-export function copyShellProcessEvidence(value: ShellProcessEvidence): ShellProcessEvidence {
+export function copyShellProcessEvidence<T extends ShellProcessEvidence>(value: T): T {
   return freeze(structuredClone(value));
 }
 /** Cold evidence is an observation of the original Job, never a live stop authority. */
@@ -40,9 +46,18 @@ export function decodeShellProcessEvidence(
   binding: ShellProcessEvidence['binding'],
   ownerPid?: number,
 ): ShellProcessEvidence | undefined {
+  return value && typeof value === 'object' && 'version' in value && value.version === 2
+    ? decodeLinuxShellProcessEvidence(value, binding, ownerPid)
+    : decodeMacosShellProcessEvidence(value, binding, ownerPid);
+}
+export function decodeMacosShellProcessEvidence(
+  value: unknown,
+  binding: MacosShellProcessEvidence['binding'],
+  ownerPid?: number,
+): MacosShellProcessEvidence | undefined {
   try {
     const exact = (row: object, keys: string) => Object.keys(row).sort().join(',') === keys;
-    const data = value as ShellProcessEvidence;
+    const data = value as MacosShellProcessEvidence;
     if (
       !data ||
       !exact(data, 'binding,broker,coalition,coverage,guardian,ownerPid,root,version') ||
@@ -169,6 +184,7 @@ export function decodeShellProcessEvidence(
   }
 }
 export function shellProcessEvidenceEnded(value: ShellProcessEvidence): boolean {
+  if (value.version === 2) return linuxShellProcessEvidenceEnded(value);
   return !!(
     value.broker.exit &&
     ['absent', 'reused'].includes(value.broker.kernelState) &&

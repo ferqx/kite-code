@@ -4,13 +4,17 @@ import { access, lstat, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { AgentError } from '@kite-ai/agent';
 import type { AuthorizationRequest, Extension, JobContext } from '@kite-ai/agent/extensions';
-import { createMacosHostShellJob, createShellJob } from '@kite-ai/agent/jobs/shell';
+import {
+  createLinuxHostShellJob,
+  createMacosHostShellJob,
+  createShellJob,
+} from '@kite-ai/agent/jobs/shell';
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { CapabilityEffect } from './permissions';
 
 export interface ShellConfigurationOptions {
-  /** Trusted macOS assembly; host selects the filesystem/network and coalition boundary. */
-  readonly platform: 'darwin';
+  /** Trusted platform assembly; command input cannot choose an OS boundary. */
+  readonly platform: 'darwin' | 'linux';
   readonly configurationId: string;
   readonly env: Readonly<Record<string, string>>;
   readonly supervisorPath: string;
@@ -18,7 +22,9 @@ export interface ShellConfigurationOptions {
   readonly shellExecutable: string;
   readonly graceMs?: number;
   readonly maxQueuedBytes?: number;
-  /** Default macOS host boundary; omission keeps explicit legacy group-only assembly. */
+  /** Linux supervisorPath is the packaged native init, plus this verified launcher. */
+  readonly linux?: { readonly bubblewrapPath: string };
+  /** Default host boundary; Linux requires it, explicit macOS legacy assembly may omit it. */
   readonly host?: {
     readonly controlBase: string;
     readonly protectedRoots: readonly string[];
@@ -28,7 +34,10 @@ export interface ShellConfigurationOptions {
 }
 export const shellToolIds = ['shell.launch', 'shell.read', 'shell.wait', 'shell.stop'] as const;
 /** Interpret only the original accepted default-policy tree, including delegated AND policies. */
-function hostFilesystemScope(context: JobContext): 'workspace_write' | 'full_access' {
+export function hostFilesystemScope(
+  context: JobContext,
+  definitionId = 'shell.command',
+): 'workspace_write' | 'full_access' {
   const authorization = context.dispatchAuthorization;
   const pending = [authorization?.snapshot];
   let scope: 'workspace_write' | 'full_access' = 'full_access';
@@ -79,7 +88,7 @@ function hostFilesystemScope(context: JobContext): 'workspace_write' | 'full_acc
       typeof capability !== 'object' ||
       Array.isArray(capability) ||
       capability.kind !== 'job' ||
-      capability.definitionId !== 'shell.command' ||
+      capability.definitionId !== definitionId ||
       capability.definitionVersion !== '1' ||
       capability.hardAllowed !== true
     )
@@ -89,16 +98,28 @@ function hostFilesystemScope(context: JobContext): 'workspace_write' | 'full_acc
   return scope;
 }
 /** Read-only verification of trusted supervision assets; does not create a Job or process. */
-export async function inspectShellAssets(options: ShellConfigurationOptions) {
+type ShellAsset = Awaited<ReturnType<typeof asset>>;
+export async function inspectShellAssets(
+  options: ShellConfigurationOptions,
+): Promise<
+  [ShellAsset, ShellAsset, ShellAsset] | [ShellAsset, ShellAsset, ShellAsset, ShellAsset]
+> {
   assertShellConfiguration(options);
-  return Promise.all([
-    asset(options.supervisorPath, false),
+  const [supervisor, bun, shell, bubblewrap] = await Promise.all([
+    asset(options.supervisorPath, options.platform === 'linux'),
     asset(options.bunExecutable, true),
     asset(options.shellExecutable, true),
+    options.linux ? asset(options.linux.bubblewrapPath, true) : Promise.resolve(undefined),
   ]);
+  return bubblewrap ? [supervisor, bun, shell, bubblewrap] : [supervisor, bun, shell];
 }
 function assertShellConfiguration(options: ShellConfigurationOptions) {
-  if (process.platform !== 'darwin' || options.platform !== 'darwin')
+  if (
+    process.platform !== options.platform ||
+    !['darwin', 'linux'].includes(options.platform) ||
+    (options.platform === 'linux' && (!options.host || !options.linux)) ||
+    (options.platform === 'darwin' && options.linux)
+  )
     throw new AgentError('shell_platform_unqualified');
   if (
     !/^[A-Za-z0-9_.-]{1,128}$/.test(options.configurationId) ||
@@ -143,7 +164,9 @@ export async function createShellConfiguration(input: {
   try {
     const cwd = await realpath(input.workspaceRoot);
     if (!(await lstat(cwd)).isDirectory()) throw new AgentError('shell_workspace_unavailable');
-    const [supervisor, bun, shell] = await inspectShellAssets(options);
+    const assets = await inspectShellAssets(options);
+    const [supervisor, bun, shell, bubblewrap] = assets;
+    if (!supervisor || !bun || !shell) throw new AgentError('shell_asset_unavailable');
     const jobOptions = {
       cwd,
       env: options.env,
@@ -152,25 +175,37 @@ export async function createShellConfiguration(input: {
       shellExecutable: shell.path,
       ...(options.graceMs !== undefined ? { graceMs: options.graceMs } : {}),
       ...(options.maxQueuedBytes !== undefined ? { maxQueuedBytes: options.maxQueuedBytes } : {}),
+      ...(bubblewrap
+        ? { linux: { bubblewrapPath: bubblewrap.path, initExecutable: supervisor.path } }
+        : {}),
     };
-    const job = options.host
-      ? createMacosHostShellJob({
-          ...jobOptions,
-          ...options.host,
-          filesystemScope: hostFilesystemScope,
-        })
-      : createShellJob(jobOptions);
+    const job =
+      options.platform === 'linux' && bubblewrap && options.host
+        ? createLinuxHostShellJob({
+            ...jobOptions,
+            ...options.host,
+            bubblewrapPath: bubblewrap.path,
+            filesystemScope: hostFilesystemScope,
+          })
+        : options.host
+          ? createMacosHostShellJob({
+              ...jobOptions,
+              ...options.host,
+              filesystemScope: hostFilesystemScope,
+            })
+          : createShellJob(jobOptions);
     const extension = createShellExtension({
       job: {
         ...job,
         async start(value, context) {
           context.signal.throwIfAborted();
           const actual = await Promise.all([
-            asset(supervisor.path, false),
+            asset(supervisor.path, options.platform === 'linux'),
             asset(bun.path, true),
             asset(shell.path, true),
+            ...(bubblewrap ? [asset(bubblewrap.path, true)] : []),
           ]);
-          if (actual.some((item, index) => item.digest !== [supervisor, bun, shell][index]!.digest))
+          if (actual.some((item, index) => item.digest !== assets[index]!.digest))
             throw new AgentError('shell_asset_changed');
           context.signal.throwIfAborted();
           try {
@@ -191,13 +226,16 @@ export async function createShellConfiguration(input: {
       extensions: [extension],
       snapshot: {
         available: true,
-        platform: 'darwin',
-        qualification: options.host
-          ? 'macos_launchd_coalition_seatbelt'
-          : 'posix_group_supervision_only',
+        platform: options.platform,
+        qualification:
+          options.platform === 'linux'
+            ? 'linux_owned_pid_namespace_bubblewrap'
+            : options.host
+              ? 'macos_launchd_coalition_seatbelt'
+              : 'posix_group_supervision_only',
         configurationId: options.configurationId,
         cwd,
-        assets: { supervisor, bun, shell },
+        assets: { supervisor, bun, shell, ...(bubblewrap ? { bubblewrap } : {}) },
         ...(options.host ? { host: options.host, scope: 'final_dispatch_authorization' } : {}),
         envKeys: Object.keys(options.env).sort(),
         tools: (extension.tools ?? [])
@@ -248,7 +286,7 @@ export async function createShellConfiguration(input: {
               cancellation: tool ? (value.cancellation ?? 'attached') : null,
               cwd,
               env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),
-              assets: [supervisor, bun, shell],
+              assets,
               ...(options.host ? { host: options.host } : {}),
               graceMs: options.graceMs ?? 200,
               maxQueuedBytes: options.maxQueuedBytes ?? 256 * 1024,

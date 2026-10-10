@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import { createShellJob, type ShellJobOptions } from '@kite-ai/agent/jobs/shell';
+import {
+  createLinuxHostShellJob,
+  createMacosHostShellJob,
+  createShellJob,
+  type MacosHostPaths,
+  type ShellJobOptions,
+} from '@kite-ai/agent/jobs/shell';
 import type { Extension, JobDefinition, JobHandle, Json } from '../../extensions';
 import { canonicalJson } from '../../json';
 import {
@@ -14,6 +20,7 @@ export interface SkillWorkflowVerifierOptions {
   readonly entries: readonly CompiledSkillWorkflow[];
   readonly resolveCapability?: (id: string) => WorkflowCapability | undefined;
   readonly shell: ShellJobOptions;
+  readonly host?: Omit<MacosHostPaths, 'cwd' | 'workspaceRoot'>;
 }
 const definitionId = 'skill.workflow.verify';
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -32,6 +39,8 @@ export function createSkillWorkflowVerifier(options: SkillWorkflowVerifierOption
   if (entries.size !== options.entries.length) throw new AgentError('workflow_duplicate_skill');
   const resolver = options.resolveCapability;
   const configuration = { ...options.shell, env: { ...options.shell.env } };
+  if (configuration.linux && (process.platform !== 'linux' || !options.host))
+    throw new AgentError('workflow_verifier_platform_unqualified');
   const live = new WeakMap<JobHandle, LiveVerification>();
   const get = (handle: JobHandle) => {
     const state = live.get(handle);
@@ -104,7 +113,18 @@ export function createSkillWorkflowVerifier(options: SkillWorkflowVerifierOption
       const timeout = contract.verification.timeoutMs ?? contract.execution.timeoutMs;
       if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2147483647)
         throw new AgentError('workflow_verifier_timeout_invalid');
-      const shell = createShellJob({ ...configuration, cwd: entry.sourceBinding.canonicalRoot });
+      const jobOptions = { ...configuration, cwd: entry.sourceBinding.canonicalRoot };
+      const host = options.host && { ...options.host, workspaceRoot: configuration.cwd };
+      const shell =
+        host && process.platform === 'linux' && configuration.linux
+          ? createLinuxHostShellJob({
+              ...jobOptions,
+              ...host,
+              bubblewrapPath: configuration.linux.bubblewrapPath,
+            })
+          : host && process.platform === 'darwin'
+            ? createMacosHostShellJob({ ...jobOptions, ...host })
+            : createShellJob(jobOptions);
       const controller = new AbortController();
       const abort = () => controller.abort(context.signal.reason);
       context.signal.addEventListener('abort', abort, { once: true });

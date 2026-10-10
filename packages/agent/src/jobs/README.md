@@ -1,8 +1,10 @@
 # Shell Job leaf
 
-本 leaf 提供普通 POSIX、固定 confined 和 macOS 宿主三个可信工厂。固定 confined 的 deny-fork 理由仍见[原决定](../../../../.agents/notes/implemented/architecture/2026-10-03-macos-confined-shell-refuses-fork-and-temp-exec.md)；默认宿主允许 fork 的完整后代方案见[新决定](../../../../.agents/notes/implemented/architecture/2026-10-07-macos-host-shell-owned-coalition.md)。
+本 leaf 提供显式 POSIX、macOS host/confined，以及 Linux host/confined 可信工厂。macOS confined 的 deny-fork 理由仍见[原决定](../../../../.agents/notes/implemented/architecture/2026-10-03-macos-confined-shell-refuses-fork-and-temp-exec.md)；允许 fork 的完整后代方案见[coalition 决定](../../../../.agents/notes/implemented/architecture/2026-10-07-macos-host-shell-owned-coalition.md)。Linux 的原 namespace／gated root 取舍保留在[部分实施提案](../../../../.agents/notes/proposed/architecture/2026-10-10-linux-shell-owned-pid-namespace.md)，原生资格仍 pending。
 
 [createShellJob](shell.ts) 保留显式 POSIX 装配。[createMacosHostShellJob](shell.ts) 由 macOS 默认 ProcessService 选择；factory/import 不启动进程，不读取旧数据。调用者明确选择 cwd/env，统一宿主负责命令、工作区权限与派发；Job input 仅包含 command，Model/HTTP 不能提供 launcher、路径范围或隔离声明。根 manifest 的 `./jobs/shell` 是公开 leaf 导出。
+
+Linux 默认 ProcessService 现选择 `createLinuxHostShellJob`，声明补偿选择 `createLinuxConfinedShellJob`。可信宿主必须提供已经封存的 Bubblewrap 与 native init；包内资产缺失或后端不满足契约时拒绝，没有普通进程组回退。源码、完整调用者接线与原生运行资格分别核验，具体见下节。
 
 命令通过独立 Bun [guardian](../platform/process/shell-supervisor.ts) 在新的 POSIX process group 内运行。私有 stdin 控制管道只承载本次启动/取消与真实父生命期：父 EOF 或强杀会让 guardian 清理整个命令组；HTTP/SSE 断线不影响该管道。正常 shell 退出也先清理仍在组内的后台后代。自然退出、cancel、EOF 和失败共用一次 closing；后到入口加入原清理，保留首个进入 closing 的终态事实，不重复 TERM/KILL、清理或发布 terminal。停止先 SIGTERM、有界等待，再必要时 SIGKILL；只有后端核实原组停止并完成原根收尾才报告 stopped/groupStopped，不把单个 pid 退出当停止确认。无法确认时返回 unknown 与 terminal supervision=unknown，不伪装成功；只有 groupStopped 的证明产生 supervision=ended。较晚停止证明只补充监督事实，不能把已记录的未知 effect 改为成功。调用 cancel/dispose 幂等，host 是唯一业务事件观察者。
 
@@ -52,4 +54,18 @@ Store output paging preserves the one MiB JSON/row-overhead budget independently
 
 此 factory **固定禁止 process-fork**。当前实际 macOS 资格确认 Bun JS 与线程正常运行，但 Bun.spawn、fork、libc daemon 和原 session-leader setsid 均被拒绝；same-sandbox signal 无权终止无关进程。需要子进程的脚本不在本 factory 支持范围，须如实失败，不借用户批准扩大权限。普通 createShellJob 仍保持 POSIX 监督契约：真实 allow-fork+setsid 反例证明原 process group 消失后仍可有活 daemon，因此普通 groupStopped 不代表任意已逃逸进程树消失，不能把它当完整进程隔离。confined factory 的 stopped 资格依赖固定 deny-fork 的实际 OS 边界；不开一个可选 allow-fork 模式并沿用同样证明。
 
-[真实 confined 测试](../../test/isolated/jobs/confined-shell.test.ts)覆盖原 allow-fork 逃逸反例、固定 fork/daemon/setsid/foreign signal 拒绝，Workspace/temp 写与 readonly/protected/外部/symlink 拒绝，TCP+Unix 零接收、temp native exec 拒绝、factory/guardian root/profile 漂移零启动、TERM 忽略强停、父 EOF/SIGKILL 与私有 temp 清理、完整公开 manifest 源码树外 guardian 定位及缺资产拒绝。普通 Shell 原后代/自然退出/输出预算测试同时复验。当前资格仅为 macOS；Linux/Windows confined factory 均明确拒绝，普通 Shell 的平台状态不因此改变。该基础不等于业务 compensation 已接入或所有补偿脚本都可运行。
+[真实 confined 测试](../../test/isolated/jobs/confined-shell.test.ts)覆盖原 allow-fork 逃逸反例、固定 fork/daemon/setsid/foreign signal 拒绝，Workspace/temp 写与 readonly/protected/外部/symlink 拒绝，TCP+Unix 零接收、temp native exec 拒绝、factory/guardian root/profile 漂移零启动、TERM 忽略强停、父 EOF/SIGKILL 与私有 temp 清理、完整公开 manifest 源码树外 guardian 定位及缺资产拒绝。普通 Shell 原后代/自然退出/输出预算测试同时复验。当前实际资格仅为 macOS；Linux 的独立 confined factory 已接源码但未执行原生资格，原 macOS factory 在其他平台仍拒绝，Windows 未提供后端。普通 Shell 的平台资格不因此改变。该基础不等于所有补偿脚本都可运行。
+
+## Linux 宿主与严格补偿源码
+
+[linux-preparation](linux-preparation.ts)捕获实际 cwd 与独立授权 Workspace、全部原保护根、固定解释器／Bun／init／Bubblewrap、runtimeAssets、运行根和 temp 的身份。host 保广泛读取、宿主 HOME 和最终派发的 Workspace／Full 写范围；confined 只暴露固定系统根、只读资产、Workspace 与私有 temp，拒网络及非线程 fork，要求 cwd 等于 Workspace。外层保护 mask 覆盖嵌套 coordination，原子目录身份仍逐项复验；实际 mount 与 native 协议共用可见最外层 mask。可执行证明只收已绑定的 canonical regular file，原 `/bin/sh` 等别名仍参与身份漂移检查。保护祖先自绑定阻止改名；未知子 mount 不猜成许可。confined 的 Workspace、私有 temp、只读数据目录及相关子挂载由 init 核 NOEXEC／NOSUID／NODEV，保留原只读 flags。
+
+[native init](../../native/linux-shell-init.c)为新 PID namespace 的 PID 1；[Service 内原 owner](../platform/process/linux-owned-shell.ts)在 namespace 外持原 ChildProcess、私有 SOCK_SEQPACKET、原 init/root pidfd 与 namespace FD。业务尚未创建时先交接 namespace 原对象和 kernel credentials，父端核实际 birth／parent／NSpid 后发 P；init 以 namespace 内唯一 CAP_SYS_ADMIN 封闭 mounts、清空 capabilities，再交接被 gate 阻住的原 root；父端接纳才发 G。init 的 DUMPABLE=0 阻断业务经 `/proc` 取得控制 FD，业务仅有 stdio 0/1/2。网络、namespace/mount、clone3 和 io_uring 的固定 syscall 门禁由原 C filter执行，不由 command JSON 配置。
+
+[普通 Linux Job](linux-shell.ts)持续排空真实双流，沿原输出预算保存 UTF-8、gap 和一个 terminal；公开输入仍只有 command。自然根的 WNOWAIT／准确 waitpid 后在本 namespace 内清理剩余后代直到 ECHILD。正常 ended 还须原 wrapper 实际 exit0／close、双流 EOF、两枚原 pidfd 死亡和每个原 FD 严格关闭，随后才能删除原 temp。`--die-with-parent` 只为 crash fallback，不能代正常证明。首个 unknown 保持不变；有效原 init pidfd可作一次清理，Close 未确认不重试，强持原对象。同步启动或准备清理未知通过原 facade／handle交回 Runtime，dispose继续失败，resource与binding lease不提前释放。
+
+[closed v2 冷证据](linux-shell-process-evidence.ts)使用 `shell-owned-pid-namespace`，绑定原 Session／Execution／nonce，保存原 wrapper、namespace、init/root birth／parent／localPid与原 wait receipt、EOF／FD关闭事实。公共 decoder按版本选择原 macOS v1 或 Linux v2，冷解码只读复制并冻结数据，不进行 native I/O、恢复进程控制或重跑；macOS continuous producer仍明确消费自身 v1，不产生新的 RSS 样本或资源资格。
+
+Linux [build-assets](build-assets.ts)在构建机器使用 C compiler生成 ELF64 native init，核对应 x64／arm64 machine、0755后纳入完整候选 inventory；已安装机器只定位包内 `platform/process/linux-shell-init`，不编译或退回 `.ts`。构建依赖 compiler、执行依赖 Bubblewrap及相应内核能力；缺依赖失败封闭，代码与静态检查不证明其存在。
+
+[准备层](../../test/isolated/jobs/linux-preparation.test.ts)、[原 owner mock](../../test/isolated/jobs/linux-owned-shell.test.ts)、[普通 Job 生命周期](../../test/isolated/jobs/linux-shell.test.ts)、[冷证据](../../test/isolated/jobs/linux-shell-process-evidence.test.ts)和[正式 Service 装配](../../../../apps/service/test/isolated/linux-shell-configuration.test.ts)已分别实际执行纯布局／身份、模拟内核交接、输出／取消／unknown、严格冷形状与真实配置接线；不执行 Linux 内核。[三个原生整例](../../test/isolated/jobs/linux-native-shell.test.ts)定义文件／网络／fork／temp exec、自然脱离后代和准确取消的验收；Linux缺工具／编译／执行失败直接失败，本机macOS的3个platform skip不计通过。Linux ABI／完整 installed用户链仍依用户安排留重构后Actions。Profile内Skill verifier还缺保原cwd且不揭露私有根的精确来源投影，Windows权限后端、RSS与完整Runtime观测仍保退出缺口。

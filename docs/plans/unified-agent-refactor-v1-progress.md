@@ -4169,3 +4169,41 @@ Root及八runtime workspace类型、八workspace构建实际0；最后只改Agen
 | 5 | 正式切换后的最终legacy退役及阶段收束 | 实际旧路径删除、未过滤完整回归、适用P7版本／发布责任通过；保D08首发后向后兼容 | 前四项；不以本片局部绿或首发前无T029样本宣布阶段退出，真实失败不能删断言／排除测试 |
 
 本轮新增闭合的是Windows stdio MCP的正式完整连接源码与资产／调用者接线，没有关闭Windows／Linux默认Shell、Linux stdio源码、实机安装维护资格、资源门禁或最终legacy删除。切片源码及文档正常本地提交`94b7864649ee8ec482ff6f23ceaf02a8fd184f55`，最终19文件HEAD／工作树字节核原收据一致、全部适用hook通过；后续只读核对据实际guard纠正上述Linux退出缺口，不重开安装／维护验证窗口。37能力partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active，授权仅本地stage／commit。
+
+## 2026-10-10Linux 正式 Shell／Task／Workflow 源码接线
+
+前述 Daemon、Native 安装与 Windows stdio 切片均已本地提交并结束。本轮沿实际默认装配的 Linux guard 实施完整 Shell 调用链，未重开 Daemon、安装维护或 RSS 参数对照。§30.2 的依赖保持：P5 的完整正式消费者不能由 leaf 通过代证；原 RSS +115.203125 MiB／32 MiB red、全部可信 Runtime 后代及 activeResources／handles 缺项直接阻 P6／§35／最终退役，却不是独立安装、版本选择、维护恢复或平台源码的前置。Linux 安装／rollback／uninstall／维护已有 POSIX owner 和适用历史证据，本轮只读核对没有发现可独立修复的新增源码缺陷，缺实机资格继续按原范围保留。
+
+### 正式入口、行为与仍缺的完整迁移
+
+已安装 CLI／TUI／Native 的普通 `shell.command@1`、调用它的 Task，以及 Workspace 来源的 `skill.workflow.verify@1` 和严格 `skill.workflow.compensate@1` 现经 [Service 装配](../../apps/service/src/process-service.ts)、[可信配置](../../apps/service/src/shell-configuration.ts)和[Workflow caller](../../apps/service/src/skill-workflow-configuration.ts)选择 Linux 公开 host／confined 工厂源码。ordinary／verify 最终 scope 核各自实际 definition 的派发快照；原 Skill cwd 与授权 Workspace 分别绑定，不以改变 cwd 扩大写范围。严格补偿仍沿独立 minimum:user、完整只读封存代码和固定 Workspace 执行，snapshot 标实际 `linux-bubblewrap-pid-namespace`；缺资产、错误平台、漂移或不可核实后端均拒绝，没有普通 group fallback。
+
+[Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)负责完整协议：namespace 外 Service 保原 wrapper、SOCK_SEQPACKET、init/root pidfd 与 namespace FD，固定 C PID 1 先交原内核身份，再按 P／gated root／G 封闭 mount、capabilities、seccomp 与业务归属。host 保 HOME、广泛读取及 Workspace／Full 实际写范围；整个 dataRoot／coordination 遮蔽、只读资产、祖先改名与 temp native exec 限制同时保留。strict 补偿没有 broad host read、网络或非线程 fork。原 root wait、namespace 内 ECHILD、原 pidfd 死亡、wrapper exit0／close、双流 EOF 与全部 FD 严格关闭共同决定 ended；准备／启动清理未知经原 facade 交回 Runtime 保 resource 与 binding lease，首次 unknown 不升级或按数字 PID 重建控制。closed v2 冷读仅复制原有限事实，原 macOS v1 不拓宽；continuous producer 的 type-only 明确化未生成新资源样本。
+
+Linux 构建生成准确 x64／arm64 ELF init，完整候选 inventory 封存后由安装机器直接使用，没有编译或 `.ts` fallback。源码审查修正了可见外层保护 mask 与 native 清单不一致、`/bin/sh` symlink 被 O_NOFOLLOW 当 regular file、独立 cwd／Workspace、准备清理未知丢失 owner、raw wait 状态额外高位、严格补偿祖先子挂载漏封以及内部 grace 与 native 的 5 秒上限不一致。新增断言仅对应这些真实协议缺口或原完整行为要求，没有延长原已有期限、删除断言或过滤真实失败。
+
+**尚未闭合完整 Workflow：** [Skill Source](../../apps/service/src/skill-workflow-configuration.ts)可提供 Profile Skill，但其原 canonical cwd 落在整个保护 dataRoot 中；Linux host 当前准确拒绝，保原 cwd 且只读暴露准确 Skill 来源的投影尚未实现。macOS 默认 verifier 保原显式 group 合同，没有因新增可选 host 配置转为全树后端。Windows Shell 仍缺真实读保护 ceiling，旧 WRITE_RESTRICTED／目录 HANDLE 不代内容隔离。不能把本片 Workspace verifier 接线宣布为所有 Skill／三平台完整能力迁移。
+
+### 本轮证据与边界
+
+最终四个 Linux 纯布局／mock／Job／冷解码完整文件实际 9 pass／71 Bun expect／0 fail：`/private/tmp/kite-linux-shell-protocol-final-20261011.log`；正式 Service caller 完整文件 1 pass／2 Bun expect／0 fail：`/private/tmp/kite-linux-shell-host-status-caller-20261011.log`。后者核准确 definition scope、原 Skill cwd／Workspace、四资产 SHA、漂移零启动及 host／compensator 选择，并核真实诊断 source 的 Linux 未获资格投影；没有执行 Linux native。C 私有声明适配的语法检查和 2260 项纯 BPF 符号检查仅证明其静态范围；本机直接 C 编译缺 Linux `sys/prctl.h` 的红仍保 `/private/tmp/kite-linux-shell-init-local-static-20261010.log`。新增 [三个真实 Linux 整例](../../packages/agent/test/isolated/jobs/linux-native-shell.test.ts)在本机是 0 pass／3 platform skip／0 fail；Linux 缺 compiler／Bubblewrap 或执行失败必须失败，不能 availability skip。
+
+实际 macOS 邻接七个完整文件合计 60 pass／652 Bun expect／0 fail，分别为 host Shell 11／145、公开 Shell 10／52、Workflow verify＋compensate 13／88、Service 配置与补偿 26／367；日志依次为 `/private/tmp/kite-linux-shell-macos-host-adjacent-native-20261011.log`、`/private/tmp/kite-linux-shell-public-leaf-native-20261011.log`、`/private/tmp/kite-linux-shell-workflow-adjacent-native-20261011.log` 和 `/private/tmp/kite-linux-shell-service-adjacent-native-20261011.log`。原普通 sandbox 的 launchd／listener／协议失败保 `/private/tmp/kite-linux-shell-macos-host-adjacent-20261011.log` 与 `/private/tmp/kite-linux-shell-workflow-adjacent-20261011.log`，仅为本次受影响原文件取得必要权限后完整复验。新 Job fixture 首次 mock live-binding 递归红与准备层 mode000 mask 红保原日志，修测试初始化和实际协议后全部原断言保持。前片未修改 Mac stdio 矩阵红及自动审批拒绝仍原样保留，没有由本片邻接绿替换。
+
+最终真实 caller 核对另发现 [HostStatus](../../apps/service/src/host-status.ts)把所有 host 配置误报成 macOS coalition。现沿原闭合 schema／生成 OpenAPI／Client 报告准确 `linux_pid_namespace/linux_host_boundary_unqualified` 和 `linux_bubblewrap/host_scope_unqualified`，available 仅为资产／配置可用，production:null 和真实执行门禁保持。原 Service HTTP 与 Client 两个完整文件实际 7 pass／111 Bun expect／0 fail，保默认 Mac／身份／Store／GET-only／零工作、SSE 游标和新增 Linux资格不能伪造提升断言；日志 `/private/tmp/kite-linux-shell-host-status-http-20261011.log`。TUI／Native 状态展示直接消费原同一投影，没有第二诊断 carrier。这是平台切换的实际消费者缺口，验证没有扩展成资源观测或长期故障目标。
+
+Root 与八 runtime workspace 类型和八 workspace 构建已通过；最后 Linux 协议／准备、HostStatus与生成的有限 API 输入改变，按受影响范围复验相关整文件、类型及构建，其余适用邻接证据复用。产品工具手册、Agent／Job／Workflow／Service／Client owner、执行 boundary／platform active 和 [proposed Note](../../.agents/notes/proposed/architecture/2026-10-10-linux-shell-owned-pid-namespace.md)同步具体当前边界。原生 Linux／Windows 的 namespace／pidfd／seccomp／mount、真实文件权限、安装资产与全部客户端执行仍依用户顺序留重构后的 Actions，本轮无环境安装、dispatch、push／PR／发布。正常本地提交独立执行强制 hook；阶段完整回归仍保实际收束点。
+
+最终当前 Root／八 workspace 类型、受影响 Agent／Service／Client build、28 个 TS／JSON 文件 Biome、boundary／runtime-package／生成 API／test-owner／docs／all docs-impact 实际通过，plan-evidence 原检查输入未变而复用本轮通过。Biome 首次只报告 constructor 排版和 import 空行，两项按原规则修正；没有改变运行断言。独立只读接线审查确认 scope／cwd／Profile 拒绝和 Mac 默认 verifier 保持，范围仅为本片，不代 §35 全能力独立审查。runtime-resilience active 与 tests 入口只消费原 Mac continuous 类型；其观测、阈值和阶段预算未变，核对后保留原文。
+
+### 最多五项剩余退出依赖
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与验收条件 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | installed 普通 Shell、调用 Shell 的 Task 和全部 Workflow 来源 | 补 Profile Skill 保原 cwd 的只读来源投影、macOS verifier 完整后端迁移和 Windows 实际权限 ceiling；最终 Workspace／Full、Profile／coordination、完整输出、精确取消／原全树结束、unknown fencing 与 cold 零重放均沿正式入口通过 | 本片关闭 Linux host／Workspace verifier／strict compensation 源码 guard；完整能力仍 partial，不以移除保护或回退旧 group 代实现，独立于 RSS |
+| 2 | Linux Profile／已批准 Workspace `mcp.json` 的本地 stdio MCP | 当前 port 仍拒 Linux；补原所属 owner／guardian／严格冷证据，验 Source→SQL connection Job→SDK Tool→完整原输出、准确取消／Service close／实际树与 FD 关闭、cold C／E 零 Provider／RPC | 原 Source／权限与公共业务合同已存在；新 native 所属能力可独立实施，不借普通 Shell 或 Windows Job 资格 |
+| 3 | Windows／Linux installed 安装、真实 A→B→A、维护恢复与各客户端普通使用 | 准确完整候选的 install／rollback／uninstall、真实跨代码、原 maintenance 新 Store 冷完整读取、Daemon／Native／真实 TUI PTY、common whole／always formal 均取得对应 OS 原生证据；保原断言／预算，标签 B 与 help 不代实际能力 | 安装／版本／维护源码已接且本轮无独立新增缺陷；前两项和其他实际平台源码须完整，实机依用户顺序留重构后 Actions，无 dispatch |
+| 4 | installed CLI／TUI／Native 持续普通任务、Shell 与 child 后台资源 | 原 RSS 增长／斜率、八轮／九点、全部可信 Runtime 后代和 activeResources／handles真实满足，原 red／unknown 不改阈值 | 直接阻 P6／§35／最终退役，不是前三项独立源码前置；不重复参数对照 |
+| 5 | 完整能力／正式 caller 的 §35 独立审查、最终旧路径退役与阶段收束 | 全部适用 37 能力及 T/E／兼容样本独立审查、实际 legacy 删除、未过滤完整回归与适用 P7 发布责任通过 | 依前四项完整资格；D08 首发前无适用新基线 published T029 样本不阻源码，局部通过不宣布阶段退出 |
+
+新增的是 Linux 正式 Shell／Task／Workspace Workflow 源码选择及独立严格补偿；尚未删除最终 legacy，也未取得完整 Linux 用户能力或平台资格。37 能力状态继续 partial，wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。授权仍仅本地 stage／commit。

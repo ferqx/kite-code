@@ -6,6 +6,8 @@
 
 当前统一链路的 macOS 默认 Shell 使用宿主工具链，允许命令派生子进程并保留宿主 HOME。非 Full 模式允许写当前 Workspace 和本次私有临时目录，允许 IP 网络，拒绝 Unix socket 的绑定及外连；Full 允许宿主权限内的外部写入及网络。两种范围都保护实际 Profile、协调目录和运行资产，不能通过移动它们的父目录绕过保护，私有临时目录中的 native 程序也不能直接执行或映射。缺可信资产、最终执行范围或可核实的监督后端时，该次调用失败，不切换到其他执行环境。Windows/Linux 的实际运行验证按当前重构计划在完成后交给 GitHub Actions，不由 macOS 结果推定。
 
+Linux 默认 Shell、调用 Shell 的 Task、Workspace Skill 验证和严格 Workflow 补偿已接入对应范围的源码后端，实际 Linux 运行资格仍待上述验证。验证脚本在原 Skill 目录执行，写范围仍受原 Workspace 授权约束；Profile 内 Skill 的只读来源投影尚未完成，当前该来源的脚本调用会拒绝。完整 Workflow 能力迁移仍未闭合，范围与证据见[实施进度](../../plans/unified-agent-refactor-v1-progress.md#2026-10-10linux-正式-shelltaskworkflow-源码接线)。
+
 Shell 启动、读取、等待和停止使用同一个持久 Job。提交停止只表示取消已受理；确认停止必须核实本次命令的完整后代，包括脱离原进程组的后代。Shell 自然退出和所属 Service 退出也执行这项清理。输出丢失区间和未知结果如实保存，冷读取不会重新运行旧命令。
 
 ## 权限模式

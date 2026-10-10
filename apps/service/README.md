@@ -243,6 +243,8 @@ Auto 分类只返回准确 invocation、effects 及可选只读 task/plan/拒绝
 
 macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 运行根装配可信 `shell.host`。[shell-configuration](src/shell-configuration.ts)为每个 Run 读取真实 Store Workspace，选择 `createMacosHostShellJob` 的 Seatbelt/launchd coalition 后端。JSONC 仅选择 `shell.launch/read/wait/stop@1`，不能提供 executor、cwd、env、保护路径或执行资格；缺 host、资产、正确版本或平台仍局部拒绝，没有另一进程 fallback。Win/Linux 默认后端尚未取得资格，实际验证依用户选择在重构完成后交给 GitHub Actions。
 
+Linux 正式装配已接 `createLinuxHostShellJob`：同一 ProcessService 定位已构建包内 native init及实际 Bubblewrap，固定解释器／env／原 runtimeAssets与保护根；四份可执行资产分别封存摘要，在普通派发前重核，最终根／Task父子AND策略按同一真实Job定义求交。缺 Bubblewrap、init或明确 host配置局部拒绝，无旧 group降级；其原 namespace所有权、完整输出和unknown fencing归[Linux Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。[纯正式调用者测试](test/isolated/linux-shell-configuration.test.ts)实际核配置、摘要、scope和Workflow接线，工厂start由spy接收，FFI0，不计Linux运行资格。Windows默认Shell仍缺真实权限ceiling；Linux实机、installed维护／版本链及全部资源门禁继续pending。
+
 可信 programmatic 宿主仍可显式传入 `shell:{platform:'darwin',configurationId,env,supervisorPath,bunExecutable,shellExecutable,graceMs?,maxQueuedBytes?,host?}`；省略 host 的原 options 保留 POSIX group 语义，不取得全树或 Seatbelt 资格。绑定封存 canonical cwd、资产 bytes hash、宿主身份和非秘密 env key 名，完整 env 只留可信 binding。factory/import 不启动进程；Job.start 重核资产、路径及最终范围。
 
 host Job.start 失败仅将固定非秘密适配器码交给原 Core outcome_unknown 合同；私有路径、native 错误正文和 guardian stderr 不进入业务输出。launchd 早期失败诊断留在受保护 control base，读取正文最多8192bytes，不据诊断宣称业务子树已停止。
@@ -374,11 +376,13 @@ Windows x64 已接当前SID私有pipe/record和准确kernel process HANDLE到同
 
 [host-status](src/host-status.ts) 由默认配置工厂的真实装配产生，经 process-service 单独传给 HTTP，不进入 Agent Runtime。`GET /v1/diagnostics/host-status` 的闭合 query 只接受已有 `workspaceId/sessionId`，主体由认证派生。响应固定实际 instance/build/API、profileAccessKey、Store 可用性及原 scope；可选 `host_status` 能力只能由实际 source 发布，普通 capabilities 数组不能自报。缺 Store 仍保留安全诊断，权限段明确 unavailable，不制造空业务对象。
 
-默认 source 只读当前主体的默认/Session 模式和真实 Workspace 信任。Shell 检查不创建 Job/进程/模型：选中可信 host 时报告 `macos_coalition/darwin_host_boundary` 与闭合 `macos_seatbelt/host_scope`，显式旧 options 报告 `posix_group` 与 `none/unqualified`。available 只表示当前资产及配置选择可用，不代表该请求已获准或 GET 已实际核验后代。自定义权限权威无法核实时明确 permission_source_unavailable。未绑定发行 manifest 保持 production:null/release_manifest_not_bound；无 exporter 保持 disabled/exporter_not_configured，不从 buildId、JSONC 或工具目录推导生产资格。
+默认 source 只读当前主体的默认/Session 模式和真实 Workspace 信任。Shell 检查不创建 Job/进程/模型：macOS 可信 host 报告 `macos_coalition/darwin_host_boundary` 与闭合 `macos_seatbelt/host_scope`，Linux 报告 `linux_pid_namespace/linux_host_boundary_unqualified` 与 `linux_bubblewrap/host_scope_unqualified`，显式旧 macOS options 报告 `posix_group` 与 `none/unqualified`。available 只表示当前资产及配置选择可用，不代表该请求已获准、GET 已实际核验后代或 Linux 原生资格通过。自定义权限权威无法核实时明确 permission_source_unavailable。未绑定发行 manifest 保持 production:null/release_manifest_not_bound；无 exporter 保持 disabled/exporter_not_configured，不从 buildId、JSONC 或工具目录推导生产资格。
 
 诊断不调用普通 Run resolver、凭据后端、Provider、MCP 或 Skill 扫描，不创建 Workspace/Session/Command/Run，也不修改 SSE 游标。公开 DTO 不包含凭据、路径、endpoint、环境变量、正文或内部 owner。CLI 显式信任的独立 mutation 与诊断 GET 分开；实际派发仍使用原权限和来源门禁。
 
 [真实HTTP诊断](test/isolated/host-status.test.ts)核默认装配、当前控制变化、坏配置、不可用Store、零业务写入/Provider/凭据访问与真实Shell资产；Shell共享检查另由[实际Shell回归](test/isolated/shell-configuration.test.ts)核正常派发不变。
+
+[Linux 配置整例](test/isolated/linux-shell-configuration.test.ts)仅运行纯调用者装配，核准确 namespace／Bubblewrap 未获资格投影、零启动／FFI与四资产；[Client 诊断整例](../../packages/client/test/host-status.test.ts)核该闭合响应接受和伪造提升资格拒绝。生成的 HTTP schema／OpenAPI／Client validator 同步有限 Linux 枚举，不改变执行授权或 production 门禁。
 
 ## 有条件 Skill Workflow
 
@@ -394,7 +398,9 @@ fork 从原 parent Execution 和封存 parent Run 选择可信角色与准确版
 
 脚本核验仅在可信已核准 Shell 装配下注册普通 `skill.workflow.verify@1`。实际资产与非秘密环境摘要封存，模型不能传 command/cwd/env/path；执行前再次核原资产。脚本从原 Skill root 执行，修改该目录内已封存文件会被来源复核拒绝。配置与发现本身不启动进程。核验与 fork 的失败、未知、必要审批和结果始终留在原 Run/Execution；冷 resolver 在读凭据前比较原 Workflow 快照，不偷换现在配置。
 
-声明补偿只在实际 macOS 合格 Shell 资产、trusted policy 与 Workspace 内原声明均可用时注册 `skill.workflow.compensate@1`。该独立 Job 始终 minimum:user，显式策略硬拒绝仍优先；最低审批不会借原 verifier 或普通 question 许可。工厂封存保护 Profile/coordination 的受限配置与资产摘要，guard 在普通派发前拒绝变更；固定 Bun 在原 Workspace 执行完整只读原资产，禁止网络和派生子进程，无跨平台或普通 Shell fallback。compensated 不满足原 verification，unknown 不豁免。 [真实默认 Service 补偿测试](test/isolated/skill-workflow-compensation.test.ts)使用实际 SDK/HTTP/SQLite、超过 300 KiB 的完整审批附件，核一次脚本效果、拒绝零效果、原 failed 保留、repair attempt 2 重验和准确 waiver；这不是全部平台或正式客户端资格。
+Linux verifier现使用host后端，原Skill cwd与授权Workspace分别捕获，scope核实际`skill.workflow.verify@1`最终policy，不能借`shell.command`的快照。Workspace来源已接该源码链；Profile内Skill的cwd仍落在保护dataRoot中，准确拒绝，保原cwd的只读来源投影仍是完整迁移缺口。macOS默认verifier继续原显式group合同，本轮未把它称为全树后端迁移；显式可信host装配仍可选择独立cwd／Workspace，保护根内cwd拒绝。
+
+声明补偿在实际macOS资产，或明确Linux native init／Bubblewrap资产、trusted policy与Workspace内原声明可用时注册`skill.workflow.compensate@1`。该独立Job始终minimum:user，显式策略硬拒绝仍优先；最低审批不会借原verifier或普通question许可。工厂封存保护整个dataRoot／coordination的受限配置与资产摘要，guard在普通派发前拒绝变更；固定Bun在原Workspace执行完整只读原资产，禁止网络和派生子进程，没有普通Shell fallback。Linux snapshot准确标`linux-bubblewrap-pid-namespace`，实际资格仍未执行；macOS标`macos-seatbelt`。compensated不满足原verification，unknown不豁免。[真实默认Service补偿测试](test/isolated/skill-workflow-compensation.test.ts)使用实际SDK/HTTP/SQLite、超过300KiB的完整审批附件，核一次脚本效果、拒绝零效果、原failed保留、repair attempt2重验和准确waiver；这是本机macOS范围，不是全部平台或正式客户端资格。
 
 [真实默认装配测试](test/isolated/skill-workflow-configuration.test.ts) 使用隔离 profile、固定 loopback 模型与所属 guardian，覆盖原意图/初始指令、schema完成、child能力缩小、审批中来源漂移和脚本核验。CLI/TUI 动态命令与恢复、受限补偿和未完成的正式切换/平台资格分别按[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)记录，不能以本接口替代未切换的客户端行为。
 

@@ -168,7 +168,7 @@ Native 的 `configuration_management` 通过公共 Client 固定原 Store/genera
 原根执行组的显式 `session.recover(decision:"interrupt")` 也只接受原 Store/Session、申请 ID 与认证主体。Service 读取当前或同 ID 原持久请求的内部 generation，Core 的原 OS 锁及 Store fencing 保持唯一权威；HTTP/SDK 不接收或返回 owner lease/generation。公开 Command 查询投影与写回执一致，只保留准确原 ID 集、partial 和 Decimal64 水位。可能产生效果的调用保持 unknown，不因 applied 回执获得重放或普通 owner 资格；GET 只读。真实 Tool/Model 强杀、原 ledger、同 ID 与物理丢回执证据归[Service](../../apps/service/README.md#显式遗留执行组中断)与[Client](../../packages/client/README.md)。
 
 
-宿主诊断由Service实际默认配置装配提供独立readonly source，process-service从Runtime参数拆出，通过闭合HostStatus HTTP/Client传递；不重建旧App Control/carrier。source与实际Shell资产检查共用真实校验；默认macOS可信host选择coalition/Seatbelt闭合tuple，显式POSIX仍报告group/none。诊断选择不冒称GET已执行全树验证，API注册不授授权。数据不可用仍可读安全身份，权限/信任只读当前主体的准确scope，缺权威局部unavailable。未绑定发行manifest保持production:null，未配置exporter保持禁用，不从buildId/JSONC推导。CLI状态保原Workspace信任检查，只有显式trust才独立mutation，诊断GET零业务写入；TUI保持HTTP与SSE独立状态和切换读取代次。当前scope归[Service](../../apps/service/README.md)、[Client](../../packages/client/README.md)、[CLI](../../apps/cli/README.md)与[TUI](../../packages/ui/src/tui/README.md)；正式制品资格仍由实际发布验证证明。
+宿主诊断由Service实际默认配置装配提供独立readonly source，process-service从Runtime参数拆出，通过闭合HostStatus HTTP/Client传递；不重建旧App Control/carrier。source与实际Shell资产检查共用真实校验；默认macOS可信host选择coalition/Seatbelt闭合tuple，Linux准确报告namespace／Bubblewrap及显式unqualified资格，显式POSIX仍报告group/none。诊断选择不冒称GET已执行全树验证，API注册不授授权。数据不可用仍可读安全身份，权限/信任只读当前主体的准确scope，缺权威局部unavailable。未绑定发行manifest保持production:null，未配置exporter保持禁用，不从buildId/JSONC推导。CLI状态保原Workspace信任检查，只有显式trust才独立mutation，诊断GET零业务写入；TUI保持HTTP与SSE独立状态和切换读取代次。当前scope归[Service](../../apps/service/README.md)、[Client](../../packages/client/README.md)、[CLI](../../apps/cli/README.md)与[TUI](../../packages/ui/src/tui/README.md)；正式制品资格仍由实际发布验证证明。
 
 有限诊断与执行授权分离的理由、接口闭合成本和当前资格见[宿主诊断Note](../../.agents/notes/implemented/architecture/2026-10-02-host-diagnostics-from-assembly.md)。
 
@@ -213,6 +213,8 @@ Native 原 Composer 的当前会话模式选择沿既有 permission observation�
 专用 profile `skill-workflow.jsonc` 默认关闭三项特性，纳入[维护原字节资产](../../packages/agent/src/maintenance/README.md)，不因恢复或缺文件自动启用。原 operation 等待超过有限观测窗口仍只查询原工作；没有隐藏重启器。声明补偿在原 Workspace 内契约、可信 policy 与实际 macOS confined 后端齐备时，使用独立 ordinary `skill.workflow.compensate@1`、原 accepted decision、一次 opening/operation 与 minimum:user 审批。完整原字节含二进制被封入只读副本，固定 Bun 在原 Workspace 执行，实际网络/fork/保护写拒绝；guardian 未确认仍保 unknown 和资产。compensated 不改 failed，也不替代新验证或准确 waiver。当前仅禁止子进程模式，完整恢复、正式入口和平台范围继续按[实施进度](../plans/unified-agent-refactor-v1-progress.md)闭合；取舍见[补偿记录](../../.agents/notes/implemented/architecture/2026-10-03-declared-workflow-compensation.md)。
 
 macOS 默认宿主、显式普通 POSIX 与严格 confined 沿用原 guardian/held-root 的唯一 closing和准确 reap。默认 ProcessService 已装配宿主后端，以原 resource coalition/内核 task count/pidversion 信号另核完整 setsid/orphan 后代；普通 POSIX 只证明原组，confined 仍固定 deny-fork。最终已接受的 dispatchAuthorization 快照在原 Store 派发事务之后交给 Job.start，只供可信宿主选择执行范围，不代替 grant、控制读集或取消。完整合同与当前 arm64 实测归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)和[Service](../../apps/service/README.md#默认-shell-装配)。冷读取/unknown不取得旧执行能力。
+
+Linux 默认 Shell、Workspace Skill verifier 与严格补偿现经正式 Service 选择[原 PID namespace 源码后端](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。每个 Job 消费自身定义的最终 scope，verifier 保原 Skill cwd 和独立授权 Workspace；冷 closed v2 不恢复 native 控制，清理未知继续保原 resource／binding lease。Profile Skill 来源投影、macOS verifier 全树迁移和 Linux 原生资格尚未闭合，实际跨包保护及平台门禁归[执行边界](execution-boundary.md#当前-v13-边界)与[平台范围](execution-platform-support.md#当前-v13-执行与发行)。Core／HTTP 公共业务合同及资源观测门禁保持。
 
 ## 新终端候选边界
 

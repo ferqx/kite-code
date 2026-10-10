@@ -18,8 +18,8 @@ import type { JobDefinition, JobEvent, JobHandle } from '../../../src/extensions
 import { launchIdentity } from '../../../src/jobs/launch-identity';
 import {
   createMacosHostShellJob,
-  decodeShellProcessEvidence,
-  type ShellProcessEvidence,
+  decodeMacosShellProcessEvidence as decodeShellProcessEvidence,
+  type MacosShellProcessEvidence as ShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from '../../../src/jobs/shell';
 import { removeLaunchdRegistration } from '../../../src/platform/process/darwin-launchd-supervisor';

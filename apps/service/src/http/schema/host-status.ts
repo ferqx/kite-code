@@ -37,15 +37,21 @@ export const HostStatusSchema = z.strictObject({
         available: z.literal(true),
         qualification: z.literal('host_scope'),
       }),
+      z.strictObject({
+        backend: z.literal('linux_bubblewrap'),
+        available: z.literal(true),
+        qualification: z.literal('host_scope_unqualified'),
+      }),
     ]),
     shell: z.strictObject({
       configured: z.boolean(),
       available: z.boolean(),
-      supervision: z.enum(['none', 'posix_group', 'macos_coalition']),
+      supervision: z.enum(['none', 'posix_group', 'macos_coalition', 'linux_pid_namespace']),
       qualification: z.enum([
         'not_configured',
         'darwin_supervision_only',
         'darwin_host_boundary',
+        'linux_host_boundary_unqualified',
         'unavailable',
       ]),
       reason: z

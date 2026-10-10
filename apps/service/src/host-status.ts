@@ -96,15 +96,29 @@ export function createDefaultHostStatusSource(options: {
           facts.execution.shell = {
             configured: true,
             available: true,
-            supervision: shell.host ? 'macos_coalition' : 'posix_group',
-            qualification: shell.host ? 'darwin_host_boundary' : 'darwin_supervision_only',
+            supervision:
+              shell.platform === 'linux'
+                ? 'linux_pid_namespace'
+                : shell.host
+                  ? 'macos_coalition'
+                  : 'posix_group',
+            qualification:
+              shell.platform === 'linux'
+                ? 'linux_host_boundary_unqualified'
+                : shell.host
+                  ? 'darwin_host_boundary'
+                  : 'darwin_supervision_only',
             reason: null,
           };
           if (shell.host)
             facts.execution.sandbox = {
-              backend: 'macos_seatbelt',
+              ...(shell.platform === 'linux'
+                ? {
+                    backend: 'linux_bubblewrap' as const,
+                    qualification: 'host_scope_unqualified' as const,
+                  }
+                : { backend: 'macos_seatbelt' as const, qualification: 'host_scope' as const }),
               available: true,
-              qualification: 'host_scope',
             };
         } catch (error) {
           const code = error instanceof AgentError ? error.code : 'shell_asset_unavailable';

@@ -9,6 +9,7 @@ import { SEATBELT_BASE_POLICY } from './seatbelt';
 
 export interface MacosHostPaths {
   readonly cwd: string;
+  readonly workspaceRoot?: string;
   readonly controlBase: string;
   readonly protectedRoots: readonly string[];
   readonly readonlyAssets?: readonly string[];
@@ -43,7 +44,8 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
     )
   )
     throw Error('host_shell_paths_invalid');
-  const workspace = launchIdentity(options.cwd);
+  const cwd = launchIdentity(options.cwd);
+  const workspace = launchIdentity(options.workspaceRoot ?? options.cwd);
   const control = launchIdentity(options.controlBase);
   const protectedRoots = [...new Set([options.controlBase, ...options.protectedRoots])].map(
     (path) => launchIdentity(path),
@@ -51,14 +53,17 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
   const tempBase = launchIdentity(options.temporaryRoot ?? tmpdir());
   if (
     within(workspace.canonical, tempBase.canonical) ||
-    protectedRoots.some((root) => within(root.canonical, workspace.canonical))
+    protectedRoots.some(
+      (root) =>
+        within(root.canonical, workspace.canonical) || within(root.canonical, cwd.canonical),
+    )
   )
     throw Error('host_shell_workspace_protected');
   const readonly = (options.runtimeReadOnlyRoots ?? []).map((path) => launchIdentity(path));
   const assets = [
     ...new Set([...binaries, '/usr/bin/sandbox-exec', ...(options.readonlyAssets ?? [])]),
   ].map((path) => launchIdentity(path, !lstatSync(realpathSync.native(path)).isDirectory()));
-  const bindings = [workspace, control, tempBase, ...protectedRoots, ...readonly, ...assets];
+  const bindings = [cwd, workspace, control, tempBase, ...protectedRoots, ...readonly, ...assets];
   if (bindings.length > 190) throw Error('host_shell_paths_invalid');
   // A protected child can live inside the Workspace. Protect its actual ancestor
   // identities from rename/unlink as well, without denying writes to siblings.
@@ -131,7 +136,7 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
       return {
         executable: '/usr/bin/sandbox-exec',
         argv: ['-p', profile, realpathSync.native(shell), '-c', command],
-        cwd: workspace.canonical,
+        cwd: cwd.canonical,
         temp,
         identities: [...bindings, runtimeTemp],
         runtimeTemp,

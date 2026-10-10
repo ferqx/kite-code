@@ -5651,6 +5651,25 @@
                     },
                     "required": ["backend", "available", "qualification"],
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "backend": {
+                        "type": "string",
+                        "const": "linux_bubblewrap"
+                      },
+                      "available": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "qualification": {
+                        "type": "string",
+                        "const": "host_scope_unqualified"
+                      }
+                    },
+                    "required": ["backend", "available", "qualification"],
+                    "additionalProperties": false
                   }
                 ]
               },
@@ -5665,7 +5684,7 @@
                   },
                   "supervision": {
                     "type": "string",
-                    "enum": ["none", "posix_group", "macos_coalition"]
+                    "enum": ["none", "posix_group", "macos_coalition", "linux_pid_namespace"]
                   },
                   "qualification": {
                     "type": "string",
@@ -5673,6 +5692,7 @@
                       "not_configured",
                       "darwin_supervision_only",
                       "darwin_host_boundary",
+                      "linux_host_boundary_unqualified",
                       "unavailable"
                     ]
                   },

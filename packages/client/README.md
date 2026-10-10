@@ -145,6 +145,8 @@ Settings 模型操作使用 `getModelSettings(scope,{storeId,workspaceId?})` 与
 
 [诊断Client测试](test/host-status.test.ts)核冻结query、显式undefined省略、原identity/Store/scope与局部取消，保持已有SSE/ACK。HostStatus采用有限闭合响应校验，额外字段或当前未定义资格只使本查询失败，不升级成其他业务失败，也不改变其他响应的既有可扩展读取策略。
 
+Linux Shell 的准确 `linux_pid_namespace/linux_host_boundary_unqualified` 与 `linux_bubblewrap/host_scope_unqualified` 已进入同一生成 schema。SDK 保留尚未取得原生资格的诊断，不把资产 available 当执行许可；将该 Linux backend 的 qualification 改为已验 host_scope 会被闭合校验拒绝。读取仍绑定原连接与 scope，不推进 SSE 游标或创建业务工作。
+
 `listSkills(workspaceId,{storeId,workflow?,afterId?,revision?,limit?,byteLimit?,signal?})` 读取实际 `skill_catalogue` metadata；`listAllSkills(workspaceId,{storeId,workflow?,signal?})` 在第一份revision下穷尽全部页，返回同一完整page形状（complete=true/nextAfterId=null）。SDK私有复制参数，核原Store/Workspace、state一致性、严格升序和末cursor、revision及原连接代次；失败/变更不重试或重新开始目录，更不创建任务。取消和迟到读取仅影响本调用，SSE和lastAppliedCursor保持。
 
 `SkillCataloguePage` 与HostStatus一样使用专门闭合响应schema，拒绝附加正文/路径/凭据字段；其他公共response的可扩展策略不变。available仅说明当前知识发现，不是Workflow activation、工具权限或未来版本预订；unavailable与有效空目录分别表达。单页字节预算不限制listAll的总条目数。

@@ -28,6 +28,8 @@ fork 使用普通 `operations.ensure` 的 Agent carrier 并等待原结果。完
 
 [脚本 verifier](verifier.ts) 接受可信已编译 entries 与 Shell 装配，普通 Job `skill.workflow.verify@1` 的闭合输入是 skillId/revision/activationId/attempt/outputDigest/output。start 重核正安全整数 attempt、完整 canonical output digest、原来源、依赖、输出和 script strategy，在原 canonical root 用固定 Bun 执行原 entrypoint，不接受模型提供 command/cwd/env/path。观察、取消和 dispose 复用原 Shell guardian；超时等待真实停止结果，未确认停止仍保 unknown。它不建立隐藏 Provider、Loop 或补偿调度器，也不把进程监督称为文件/网络沙箱。
 
+Linux正式Service verifier传入已封存host配置，执行cwd仍是原Skill根，写范围独立绑定原Workspace；最终scope核准确`skill.workflow.verify`策略。显式Linux配置缺host／错误平台拒绝，不能回落普通进程组。Profile内Skill的原cwd与整个dataRoot保护仍冲突，当前准确拒绝；保原cwd且不暴露其他Profile字节的来源投影尚未实现，不能宣称完整LinuxWorkflow迁移。macOS默认verifier保原显式group路径；可信显式host可选择macOS后端，但不从这些源码分支取得平台资格。
+
 verifier 从公开 `@kite-ai/agent/jobs/shell` leaf 取得进程实现。完整包构建保留该依赖边界，使 guardian 始终相对于所属公开 leaf 定位；不把带相对资产路径的实现复制到任意共享 chunk，也不回退源码或系统安装目录。
 
 anchor、head、opening、closed、operation、verification、decision 和 invalidated 都是本 namespace 的 executable records。条件读取包含 current head、原 attempt、原失败与用户决定，最终事务核原 Store/revision；replan 的新 opening 仍依赖原 accepted question。可信 child resolver 的 scoped record 读集由 Host 自动封存，并在新 carrier 创建及 child activation 的最终事务重核，不以进程预检替代 CAS。Run 私有记录在 Session fork 时明确 omit，不复制旧执行资格。
@@ -42,7 +44,7 @@ waiver 保存独立 immutable `user_decision` 和 head 指针，原 verification
 
 [声明补偿](compensator.ts) 是普通 `skill.workflow.compensate@1` Job。其八字段闭合输入绑定原 Skill/revision、activation/attempt、完整 output/digest、accepted decision key/digest；opening 在 ensure 前保存准确原父决定 Tool 与输入摘要。每个 attempt 只有一个 operation，重复选择与有限等待只查原 Job/result revision。dispatch condition 核实际原 planned Job 与准确父 Tool，第三项 unknown 或来源/head/决定漂移拒绝，最终通用安全 read-set 复算整个闭包。compensated、failed、cancelled、unknown 分别追加；原 failed 验证不改，完成仍须新尝试真实通过或准确 waiver。
 
-可信 factory 只在 macOS 的禁止子进程模式提供后端。start 重核原 canonical Workspace、保护目录、临时根与完整编译来源，将所有声明资产含二进制原字节封入 Workspace 外的独立只读副本，再由固定 Bun 在原 Workspace 执行声明脚本。环境只有固定 PATH/LANG，网络、fork、保护目录写和副本写由实际 Seatbelt 拒绝；模型不能传命令、环境或路径。独立 Job minimum:user 审批不能借 verifier 或 question 许可。只有真实停止证明才释放资产；guardian 丢失且子进程仍活着时保 unknown 与原副本，不伪称清理成功。需要派生子进程的脚本及其他平台当前不可用，无普通 Shell fallback。
+可信factory提供macOS Seatbelt与明确Linux native init／Bubblewrap的禁止子进程后端，Windows仍不可用。start重核原canonical Workspace、整个dataRoot／coordination保护目录、临时根与完整编译来源，将所有声明资产含二进制原字节封入Workspace外的独立只读副本，再由固定Bun在原Workspace执行声明脚本。环境只有固定PATH/LANG，网络、非线程fork、保护目录写和副本写由对应固定后端拒绝；Linux的NOEXEC／mount／seccomp与真实退出资格仍待原生验收，源码／callee装配不代运行通过。模型不能传命令、环境或路径。独立Job minimum:user审批不能借verifier或question许可。只有真实停止证明才释放资产；owner丢失且子进程仍活着时保unknown与原副本，不伪称清理成功。需要派生子进程的脚本当前不可用，无普通Shell fallback。
 
 ## 验证与当前范围
 

@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMacosConfinedShellJob, type ShellJobOptions } from '@kite-ai/agent/jobs/shell';
+import {
+  createLinuxConfinedShellJob,
+  createMacosConfinedShellJob,
+  type ShellJobOptions,
+} from '@kite-ai/agent/jobs/shell';
 import type { Extension, JobDefinition, JobHandle, Json } from '../../extensions';
 import { canonicalJson } from '../../json';
 import type { CompiledSkillWorkflow, WorkflowCapability } from '../../skills/workflow-contract';
@@ -34,7 +38,7 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const hash = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 /** Only ordinary Job start executes the exact declaration; unsupported confinement never falls back. */
 export function createSkillWorkflowCompensator(options: SkillWorkflowCompensatorOptions) {
-  if (process.platform !== 'darwin')
+  if (process.platform !== 'darwin' && !(process.platform === 'linux' && options.shell.linux))
     throw new AgentError('workflow_compensation_platform_unsupported');
   const entries = new Map(
     options.entries.map((entry) => [entry.descriptor.capabilityId, structuredClone(entry)]),
@@ -163,13 +167,20 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
       }
       let shell: JobDefinition;
       try {
-        shell = createMacosConfinedShellJob({
+        const confined = {
           ...configuration,
           cwd: workspace.canonical,
           protectedRoots: protectedPaths.map((path) => path.canonical),
           runtimeReadOnlyRoots: [assets.root],
           temporaryRoot: base.canonical,
-        });
+        };
+        shell =
+          process.platform === 'linux' && configuration.linux
+            ? createLinuxConfinedShellJob({
+                ...confined,
+                bubblewrapPath: configuration.linux.bubblewrapPath,
+              })
+            : createMacosConfinedShellJob(confined);
       } catch (error) {
         context.signal.removeEventListener('abort', abort);
         release();

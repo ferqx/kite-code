@@ -23,7 +23,11 @@ import {
   type WorkflowActivationInput,
   type WorkflowCapability,
 } from '@kite-ai/agent/skill-workflow';
-import { inspectShellAssets, type ShellConfigurationOptions } from './shell-configuration';
+import {
+  hostFilesystemScope,
+  inspectShellAssets,
+  type ShellConfigurationOptions,
+} from './shell-configuration';
 import { createConfiguredSkillSource } from './skill-source';
 
 export const workflowToolIds = [
@@ -216,7 +220,19 @@ export async function createWorkflowConfiguration(options: {
             shellExecutable: assets[2].path,
             graceMs: options.shell.graceMs,
             maxQueuedBytes: options.shell.maxQueuedBytes,
+            ...(options.shell.linux && assets[3]
+              ? { linux: { bubblewrapPath: assets[3].path, initExecutable: assets[0].path } }
+              : {}),
           },
+          ...(options.shell.platform === 'linux' && options.shell.host
+            ? {
+                host: {
+                  ...options.shell.host,
+                  filesystemScope: (context) =>
+                    hostFilesystemScope(context, 'skill.workflow.verify'),
+                },
+              }
+            : {}),
         })
       : undefined;
   const compensator =
@@ -237,12 +253,15 @@ export async function createWorkflowConfiguration(options: {
             supervisorPath: assets[0].path,
             bunExecutable: assets[1].path,
             shellExecutable: assets[2].path,
+            ...(options.shell.linux && assets[3]
+              ? { linux: { bubblewrapPath: assets[3].path, initExecutable: assets[0].path } }
+              : {}),
             ...(options.shell.graceMs === undefined ? {} : { graceMs: options.shell.graceMs }),
             ...(options.shell.maxQueuedBytes === undefined
               ? {}
               : { maxQueuedBytes: options.shell.maxQueuedBytes }),
           },
-          protectedRoots: [options.profile.profilePath, options.profile.coordinationPath],
+          protectedRoots: [options.profile.dataRoot, options.profile.coordinationPath],
         })
       : undefined;
   const rejectedStarts = new WeakSet<JobHandle>();
@@ -341,7 +360,10 @@ export async function createWorkflowConfiguration(options: {
       originalActivationIntent: inputs ?? null,
       compensator: compensator
         ? {
-            backend: 'macos-seatbelt',
+            backend:
+              options.shell?.platform === 'linux'
+                ? 'linux-bubblewrap-pid-namespace'
+                : 'macos-seatbelt',
             subprocesses: 'denied',
             definitionId: compensator.compensationJob.definitionId,
             definitionVersion: compensator.compensationJob.definitionVersion,

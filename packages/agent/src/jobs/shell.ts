@@ -18,15 +18,26 @@ import {
   captureConfinedLaunch,
 } from './confined-preparation';
 import { captureMacosHostLaunch, type MacosHostPaths } from './host-preparation';
+import type { LinuxPaths } from './linux-preparation';
+import { createLinuxShellJob } from './linux-shell';
+
 import {
   copyShellProcessEvidence,
-  decodeShellProcessEvidence,
-  type ShellProcessEvidence,
+  decodeMacosShellProcessEvidence as decodeShellProcessEvidence,
+  type MacosShellProcessEvidence as ShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from './shell-process-evidence';
 
+export type { MacosHostPaths } from './host-preparation';
+
 export {
+  decodeLinuxShellProcessEvidence,
+  type LinuxShellProcessEvidence,
+} from './linux-shell-process-evidence';
+export {
+  decodeMacosShellProcessEvidence,
   decodeShellProcessEvidence,
+  type MacosShellProcessEvidence,
   type ShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from './shell-process-evidence';
@@ -39,6 +50,8 @@ export interface ShellJobOptions {
   readonly shellExecutable?: string;
   readonly maxQueuedBytes?: number;
   readonly graceMs?: number;
+  /** Trusted Linux namespace assets, never command input or a source fallback. */
+  readonly linux?: { readonly bubblewrapPath: string; readonly initExecutable: string };
   /** Trusted macOS host only; never supplied by the command input. */
   readonly supervision?: { readonly kind: 'macos-launchd-coalition'; readonly controlBase: string };
 }
@@ -84,6 +97,12 @@ export function shellSupervisorAsset(): string {
   if (!existsSync(path)) throw new Error('shell_supervisor_asset_unavailable');
   return path;
 }
+export function linuxShellInitAsset(): string {
+  if (!import.meta.url.endsWith('.js')) throw Error('linux_shell_init_asset_unavailable');
+  const path = fileURLToPath(new URL('../platform/process/linux-shell-init', import.meta.url));
+  if (!existsSync(path)) throw Error('linux_shell_init_asset_unavailable');
+  return path;
+}
 function object(value: Json): Record<string, Json> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('invalid_shell_input');
@@ -121,6 +140,28 @@ export function createMacosHostShellJob(options: ShellJobOptions & MacosHostPath
     },
     prepare,
   );
+}
+
+export function createLinuxHostShellJob(
+  options: ShellJobOptions & Omit<LinuxPaths, 'mode'>,
+): JobDefinition {
+  return createLinuxShellJob({
+    ...options,
+    initExecutable: options.linux?.initExecutable ?? linuxShellInitAsset(),
+    mode: 'host',
+  });
+}
+
+/** Fixed compensation confinement; unavailable namespace/sealing never falls back. */
+export function createLinuxConfinedShellJob(
+  options: ShellJobOptions & ConfinedPaths & { readonly bubblewrapPath: string },
+): JobDefinition {
+  return createLinuxShellJob({
+    ...options,
+    initExecutable: options.linux?.initExecutable ?? linuxShellInitAsset(),
+    mode: 'confined',
+    filesystemScope: 'workspace_write',
+  });
 }
 
 function shellJob(

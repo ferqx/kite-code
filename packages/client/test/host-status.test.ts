@@ -205,3 +205,37 @@ test('admitted diagnostic data unavailable can read host facts without Store acc
     f.close();
   }
 });
+
+test('Linux namespace status preserves pending qualification and rejects a promoted sandbox claim', async () => {
+  const f = fixture();
+  const facts = status();
+  facts.execution.sandbox = {
+    backend: 'linux_bubblewrap',
+    available: true,
+    qualification: 'host_scope_unqualified',
+  };
+  facts.execution.shell = {
+    configured: true,
+    available: true,
+    supervision: 'linux_pid_namespace',
+    qualification: 'linux_host_boundary_unqualified',
+    reason: null,
+  };
+  try {
+    await f.client.connect();
+    f.set(facts);
+    expect(await f.client.getHostStatus()).toEqual(facts);
+    expect(f.client.lastAppliedCursor).toBeUndefined();
+    f.set({
+      ...facts,
+      execution: {
+        ...facts.execution,
+        sandbox: { ...facts.execution.sandbox, qualification: 'host_scope' },
+      },
+    } as unknown as HostStatus);
+    await expect(f.client.getHostStatus()).rejects.toMatchObject({ code: 'invalid_response' });
+    expect(f.queries).toHaveLength(2);
+  } finally {
+    f.close();
+  }
+});

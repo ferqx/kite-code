@@ -15,7 +15,9 @@ projection、release-controlled execution policy 或对应 feature flag 时。
 
 默认 guardian 的新独占 launchd resource coalition 覆盖 fork/exec/setsid/orphan 后代；原 pidversion audit-token 信号、原 guardian/内核 count=1、原根退出和准确回收共同证明全树停止。注册撤销本身不作停止证明，失联或不确定保持 unknown。真实输出/终态仍通过原 Job Store 持久化，冷 GET 不重建旧 handle、不重放。Files 保原 scope/read-set 与完整 Terminal/Native outer/inner 资产保护；附件完整读取不授副作用权限，坏身份、来源/控制漂移和 unknown 不能换 ID 绕过。
 
-显式 POSIX 与固定 confined 工厂分别保原组/deny-fork 合同。Win/Linux 当前默认 Shell 未取得运行资格；依用户最新选择，先交付 macOS，重构完成后由 GitHub Actions 验证这两个环境。实际 macOS 边界不外推三平台、全部资源指标或 production release qualification。
+Linux 默认 Service、调用 Shell 的 Task、Workspace Skill verifier 和严格补偿现接[原 PID namespace 后端](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)源码。最终权限仍绑定原 Workspace；verifier 单独保持原 Skill cwd，并核实际 verify 定义的最终策略。namespace 外的原 wrapper、内核 credentials、init/root pidfd 与 namespace FD 在业务执行前交接；只读资产、整个 dataRoot／coordination 遮蔽与祖先保护先封闭，再清 capabilities／设置 no_new_privs。正常结束同时核原根准确 wait、namespace 内空树、原 pidfd 死亡、wrapper 实际 exit/close、双流 EOF 与严格 FD 关闭；关闭未知保原资源及 binding lease，冷读不重建控制对象。
+
+Profile 内 Skill 的保 cwd 只读来源投影尚未实现，当前 Linux verifier 对该来源准确拒绝，完整 Workflow 迁移未闭合。macOS 默认 verifier 继续原显式 group 合同，本轮没有把它改称全树后端；显式 POSIX 与各固定 confined 工厂分别保各自合同。Win/Linux 当前默认 Shell 未取得运行资格；依用户最新选择，重构完成后由 GitHub Actions 验证这两个环境。实际 macOS 邻接、源码/mock 检查不外推三平台、全部资源指标或 production release qualification；RSS 与完整可信 Runtime 观测仍为独立未闭合门禁。
 
 [当前platform/execution workflow](../../tests/integration/scripts/unified-ci.test.ts)核新 owner paths、实际 source-free probe 与 formal verifier；不再调用下方旧 builtin/App 测试。当前宿主开放范围由上述实现和运行证据界定；下文保历史投影、威胁模型及仍适用的安全约束，未知/未完成范围继续拒绝。
 
