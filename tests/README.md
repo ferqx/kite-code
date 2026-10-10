@@ -4,6 +4,10 @@
 
 ## 环境基线与 owner
 
+[Windows installed TUI 完整调用者](fixtures/unified-agent/windows-installed-tui.qualification.ts)以 `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>` 消费同 release job 已构建的两种准确候选；actual win32/x64 required，无 backend availability skip。真实 80×24 ConPTY 先用独立 Terminal，再登记 Native 到同一稳定前门，每模式 120 秒、各 PTY 30 秒、写操作最多 10 秒，核提交／全文／思考／导出／精确取消／未提交草稿／普通退出／冷读零重放及最终卸载保数据。原 Job0／完整 EOF／strict Close 与未 Terminate 是成功条件，强制收尾不能改成通过；这条新 caller 不修改原 POSIX 窗口或默认 isolated 调度，也不代 Windows 真正跨代码／Shell／MCP／RSS／完整阶段资格。
+
+[Windows TUI 私有记录完整文件](../apps/cli/test/isolated/windows-tui-private-files.test.ts)归 CLI owner，九份 closed 文件、9 MiB 原记录／CAS、recovery 262144／config 8 MiB 边界和原 native hardlink／rebound 拒绝只能由实际 Windows 执行；本机另核非平台拒绝与验证期 Close mock，不能 availability skip 冒充通过。原九份 journal 单测和四份 Profile／路径邻接整文件分别保持原断言与预算。准确输入／日志与未执行范围见 [当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-installed-tui-私有持久化与正式调用者)；Win/Linux 实机按用户安排交后续 GitHub Actions。
+
 Required CI、release/platform 与正式 soak 固定 Bun 1.4.2。性能或稳定性结果只适用于准确代码、运行时和平台；workflow 定义不等于执行证据。
 
 | 目录 | 当前负责范围 |

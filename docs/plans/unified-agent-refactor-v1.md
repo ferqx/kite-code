@@ -2116,6 +2116,8 @@ Windows managed Terminal 的正式安装／版本选择及配对消费者已接�
 
 当前退出条件在P6／§35汇合：①默认installed CLI／TUI／Native的连续普通任务、Shell与child后台工作之原macOS RSS、八轮／九点和完整资源资格；②当前制品必要的平台／维护／已发布样本资格，包括新增DB9的适用旧代码实际拒绝；③前序满足后的§35独立迁移审查、最终旧路径退役及阶段完整回归。①的未闭合不构成②中独立安装、版本切换和离线维护实现的前置；按§30.2继续推进不受影响的完整用户能力，保原增长算法、真实失败和资源未知，不重复已闭合的参数对照。具体源码缺口、用户入口和验收归[当前进度](unified-agent-refactor-v1-progress.md)。回归只作相应能力和阶段收束门禁，不另列长期目标。
 
+Windows installed TUI 下一完整源码缺口已迁入 current-SID 私有记录端口：原九份数据与 codec／容量／冲突／零重放规则保持，验证探针和发布 Close 未确认保原 Profile SH／数据 EX。release job 的同一稳定前门现必须分别消费独立 Terminal／登记 Native，真实 ConPTY 核任务、全文／思考、导出、准确取消、草稿、正常退出、冷读及卸载保数据。源码／macOS 适用原测试／CI 守卫只闭合本片接线，不授原生或阶段资格；Windows/Linux 实机按用户安排交后续 GitHub Actions。准确范围及最多五项剩余依赖归 [TUI 进度](unified-agent-refactor-v1-progress.md#2026-10-11windows-installed-tui-私有持久化与正式调用者)。真正跨代码、Shell 原合同 guard、RSS／完整观测、§35／最终退役及阶段完整回归仍未闭合，37 partial／wholeV13／phaseExit=false。
+
 正常卸载可选Terminal后的Native升级与维护自身关闭未确认的保锁已按实际源码修复，正式安装和包内维护消费者沿原完整文件验收；具体五项依赖及本轮25整文件范围归[安装与维护进度](unified-agent-refactor-v1-progress.md#2026-10-10安装升级与维护关闭所有权)。DB9真实旧代码拒绝／当前原GET完整查回及installed明确rollback→Native原Store消费者已按原完整文件取得本机限定证据，原complete腿保留，准确输入与真实失败归[版本与恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10db9-版本切换与安装版维护恢复)。这两项不再列为当前macOS未实施缺口；原资源、P6平台／完整维护／依赖独立、§35审查／最终退役／阶段完整回归与P7适用发布责任门禁保持，不提前退出阶段。D08首发前仍无适用的新基线published样本，不把T029样本缺失作为上述独立实现的前置。
 
 恢复后TUI／Web完整Context正式读取已修正当前Store与历史出处的错误比较；实际A→B备份恢复后的首次／冷HTTP和Cookie读取保原完整结果、原ID／revision／出处，零Model／Job重放，当前Store／Session和分页守卫保持。原DOM／相邻开发PTY与真实恢复reader分别证明其范围，18项／350断言通过；准确生产红、修正和四项剩余依赖归[Context恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后完整-context-正式消费者)。此局部正式消费者交付不替代上述P6／§35／P7门禁或阶段完整回归。

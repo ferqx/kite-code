@@ -456,3 +456,66 @@ test('Windows Native release executes its complete installed caller after uncond
   ])
     expect(check(mutate(source)).some((v) => v.code === code)).toBe(true);
 });
+
+test('Windows installed TUI requires both admitted candidates and the preceding Native installed caller', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/release-candidate.yml'),
+    'utf8',
+  );
+  const path = 'tests/fixtures/unified-agent/windows-installed-tui.qualification.ts';
+  const nativePath = 'tests/fixtures/unified-agent/windows-native-installation.qualification.ts';
+  const command = `bun run ${path} "--terminal=\${{ github.workspace }}/dist/unified-terminal" "--native=\${{ github.workspace }}/dist/unified-native"`;
+  const lines = source.split('\n');
+  const commandIndex = lines.findIndex((line) => line.trim() === `run: ${command}`);
+  expect(commandIndex).toBeGreaterThan(0);
+  let start = commandIndex;
+  while (start > 0 && !lines[start]!.startsWith('      - ')) start--;
+  const block = lines.slice(start, commandIndex + 1).join('\n');
+  const prerequisites = [
+    'bun run release:build --directory dist/unified-terminal --archive dist/unified-terminal.tar.gz',
+    `bun run release:verify --directory dist/unified-terminal --source-commit "\${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true`,
+    'bun run release:smoke --directory dist/unified-terminal',
+    'bun run release:build --product native --directory dist/unified-native --terminal dist/unified-terminal --archive dist/unified-native.tar.gz',
+    `bun run release:verify --product native --directory dist/unified-native --source-commit "\${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true`,
+    'bun run release:smoke --product native --directory dist/unified-native',
+    `bun run ${nativePath} "--candidate=\${{ github.workspace }}/dist/unified-native"`,
+  ];
+  const code = 'formal-ci-windows-installed-tui-missing';
+  const check = (workflow: string, exists = true) => {
+    const root = fixture();
+    if (exists) put(root, path, 'export {};');
+    put(root, nativePath, 'export {};');
+    put(root, 'scripts/release/prepare-windows-native-ci.ts', 'export {};');
+    put(root, '.github/workflows/release-candidate.yml', workflow);
+    return checkUnifiedFormalConsumers(root).violations.filter((v) => v.code === code);
+  };
+  expect(check(source)).toEqual([]);
+  expect(check(source, false).some((v) => v.code === code)).toBe(true);
+  for (const mutate of [
+    (s: string) => s.replace(block, ''),
+    (s: string) => s.replace(block, block.replace("runner.os == 'Windows'", 'false')),
+    (s: string) =>
+      s.replace(block, block.replace("runner.os == 'Windows'", "runner.os == 'Linux'")),
+    (s: string) => s.replace(`run: ${command}`, `run: echo ${command}`),
+    (s: string) => s.replace(`run: ${command}`, `run: ${command} --test-name-pattern=never-match`),
+    (s: string) => s.replace(block, `${block}\n        continue-on-error: true`),
+    (s: string) => s.replace(`runs-on: \${{ matrix.os }}`, 'runs-on: ubuntu-latest'),
+    ...['terminal', 'native'].map(
+      (candidate) => (s: string) =>
+        s.replace(
+          `--${candidate}=\${{ github.workspace }}/dist/unified-${candidate}`,
+          `--${candidate}=dist/unified-${candidate}`,
+        ),
+    ),
+    ...prerequisites.map(
+      (prerequisite) => (s: string) =>
+        s.replace(`run: ${prerequisite}`, `run: echo ${prerequisite}`),
+    ),
+    ...[
+      '      - name: Build source-bound Terminal candidate and archive',
+      '      - name: Verify complete Native source and physical closure',
+      "      - if: runner.os == 'Windows'\n        name: Actual installed Windows Native windows, version selection and maintenance restore",
+    ].map((anchor) => (s: string) => s.replace(block, '').replace(anchor, `${block}\n${anchor}`)),
+  ])
+    expect(check(mutate(source)).some((v) => v.code === code)).toBe(true);
+});

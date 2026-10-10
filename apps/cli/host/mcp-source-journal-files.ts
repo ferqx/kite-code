@@ -5,6 +5,7 @@ import { assertProfileAccess, type ProfileAccess } from '@kite-ai/agent/profile-
 import { mcpCanonical } from './mcp-selection-intents';
 import type { McpSourceApprovalRecord } from './mcp-source-approval-intents';
 import type { McpSourceMutationRecord } from './mcp-source-mutation-intents';
+import { readWindowsTuiPrivateFile } from './windows-tui-private-files';
 
 type SourceRecord = McpSourceApprovalRecord | McpSourceMutationRecord;
 const present = (path: string) => {
@@ -24,6 +25,33 @@ export function readMcpSourceJournal<T extends SourceRecord>(
   unavailable: () => Error,
 ): { records: T[]; etag: string | null } {
   assertProfileAccess(access);
+  const decode = (bytes: Uint8Array) => {
+    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw unavailable();
+    const doc = value as Record<string, unknown>;
+    const keys = Object.keys(doc);
+    if (
+      keys.length !== 2 ||
+      !keys.includes('version') ||
+      !keys.includes('records') ||
+      doc.version !== 1 ||
+      !Array.isArray(doc.records) ||
+      doc.records.length > 128
+    )
+      throw unavailable();
+    const ids = new Set<string>();
+    const records = doc.records.map((raw) => {
+      const record = parseRecord(raw);
+      if (ids.has(record.intent.request.commandId)) throw unavailable();
+      ids.add(record.intent.request.commandId);
+      return record;
+    });
+    return { records, etag: createHash('sha256').update(bytes).digest('hex') };
+  };
+  if (process.platform === 'win32') {
+    const bytes = readWindowsTuiPrivateFile(access, filename);
+    return bytes === null ? { records: [] as T[], etag: null } : decode(bytes);
+  }
   const parent = join(access.profilePath, 'ui'),
     path = join(parent, filename);
   const privateStat = (name: string, directory = false) => {
@@ -73,27 +101,7 @@ export function readMcpSourceJournal<T extends SourceRecord>(
       named.size !== opened.size
     )
       throw unavailable();
-    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw unavailable();
-    const doc = value as Record<string, unknown>;
-    const keys = Object.keys(doc);
-    if (
-      keys.length !== 2 ||
-      !keys.includes('version') ||
-      !keys.includes('records') ||
-      doc.version !== 1 ||
-      !Array.isArray(doc.records) ||
-      doc.records.length > 128
-    )
-      throw unavailable();
-    const ids = new Set<string>();
-    const records = doc.records.map((raw) => {
-      const record = parseRecord(raw);
-      if (ids.has(record.intent.request.commandId)) throw unavailable();
-      ids.add(record.intent.request.commandId);
-      return record;
-    });
-    return { records, etag: createHash('sha256').update(bytes).digest('hex') };
+    return decode(bytes);
   } finally {
     closeSync(fd);
   }

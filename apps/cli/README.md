@@ -155,6 +155,14 @@ coverage 的 Desktop 支持版本为 DB1–8，并明确列出 `mcpSelectionInte
 
 [test/maintenance-arguments.test.ts](test/maintenance-arguments.test.ts) 核对闭合词汇；[真实离线 argv](test/isolated/maintenance.test.ts) 在源码树外临时 built workspace 包、真实 SQLite 与第二进程验证 create/inspect/restore、旧 Store 拒绝、冷读零 Run/Execution、busy、失败不建库及 exact journal complete/rollback。消费进程没有 Service 运行资产，未使用 source fallback、收费 Provider 或用户数据。此本机 macOS/Bun 证据不建立 Linux/Windows 或完整发行资格。
 
+## Windows TUI 私有持久化
+
+Windows x64 的正式 TUI 现通过 [固定私有文件 host](host/windows-tui-private-files.ts)读写原九份 `ui/*.json`：caller、recovery、draft、Files recovery、MCP selection／connection／reconnection／source approval／source mutation。各 journal 与两个跨 journal reader 继续拥有原完整 codec、请求身份、容量和冲突规则；Windows 分支先于 POSIX uid／mode／fsync 分支选择原生端口，不修改格式或用户按键。本页九份私有记录相关的 owner／mode、exclusive 0600、文件及目录 fsync 细节描述 POSIX 实现；Windows 的实际权限和发布屏障以本节及 [platform owner](../../packages/agent/src/platform/windows-path-security.README.md#tui-私有记录端口)为准。
+
+原生读取 pin 原文件和祖先 HANDLE，以当前 SID 私有 DACL、普通单链接、完整 EOF／size／身份复核代替 POSIX 位；八份文件保原 16 MiB，recovery 读上限仍为 262144 字节。写入使用原 `tui_private` EX、私有 CREATE_NEW temporary、完整短写／Flush、同步 owner recheck、原字节 SHA／etag CAS、同卷 write-through move 和完整读回。已确认未发布时只撤销本次核准的原 temporary，不按路径递归删除；创建或关闭未知不推定已清理，也不自动重试。最后一次复核与 move 不构成对不合作编辑器的原子 CAS，Windows 不声称目录 fsync 或断电持久性。
+
+Profile facade 先核原 authority 和短锁归属并挂资源 guard，再做可能打开探针的权限／活锁复核。读取关闭未知保原 Profile SH，写入关闭未知保同次原 SH／EX，保首次原因并拒绝锁交接；正常确认关闭才撤 guard。没有 HTTP／Model 指定路径、SID 或锁的通道。[私有文件完整测试](test/isolated/windows-tui-private-files.test.ts)的本机 mock／平台拒绝不代 Windows 原生资格；正式安装后提交、全文／思考、导出、精确取消、草稿与冷读完整调用者归 [Terminal owner](docs/terminal-release.md#windows-installed-tui-正式调用者)，实际 Win/Linux 验收按用户安排交后续 GitHub Actions。
+
 ## 开发 TUI 持久草稿
 
 [文件 owner](host/tui-drafts.ts) 和 [编辑接缝](host/tui-draft-port.ts) 只持久真实未提交文本，按原 Store、Workspace、Session 的完整身份隔离。编辑180ms合并保存，切换、EOF与正常退出先同步最后编辑；成功accepted/applied才以原编辑revision清除，迟到成功不能删除并发新输入（包括改动后又改回相同文本）。失败和unknown保原文；核实原Command后成功仍按原revision清除，不重发。没有持久主题、语言、队列、审批答案或执行意图。

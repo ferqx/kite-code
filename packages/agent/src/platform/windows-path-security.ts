@@ -5,13 +5,19 @@ import { retainWindowsCandidateFiles } from './windows-candidate-files';
 
 /** Fixed OS policy; no caller supplied SID, descriptor, DLL or privilege escalation. */
 let cached: NativeWindowsPathSecurity | undefined;
+const unclosedNativeOwners = new Set<object>();
 export interface WindowsPrivateRead {
   verify(): void;
   close(): void;
 }
+export interface WindowsPrivateRecordRead extends WindowsPrivateRead {
+  read(): Uint8Array;
+}
 export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
   verifyScopeDirectory(path: string): void;
   readScopeFile(path: string, maxBytes: number, privateFile?: boolean): Uint8Array | null;
+  retainPrivateRecordFile(path: string, maxBytes: number): WindowsPrivateRecordRead;
+  writePrivateRecordFile(path: string, bytes: Uint8Array): { remove(): void };
   writePrivateFile(path: string, bytes: Uint8Array): void;
   writePrivateArtifactFile(path: string, bytes: Uint8Array): void;
   copyPrivateFile(source: string, target: string): void;
@@ -71,6 +77,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     ReadFile: { args: ['u64', 'ptr', 'u32', 'ptr', 'ptr'], returns: 'bool' },
     WriteFile: { args: ['u64', 'ptr', 'u32', 'ptr', 'ptr'], returns: 'bool' },
     FlushFileBuffers: { args: ['u64'], returns: 'bool' },
+    SetFileInformationByHandle: { args: ['u64', 'u32', 'ptr', 'u32'], returns: 'bool' },
     MoveFileExW: { args: ['ptr', 'ptr', 'u32'], returns: 'bool' },
   });
   const system = new Uint16Array(32768);
@@ -95,6 +102,31 @@ function createNativeWindowsPathSecurity(): Implementation {
   });
   const fail = (): never => {
     throw Error('windows_path_security_denied');
+  };
+  const failedVerificationClose = (handle: bigint | number): never => {
+    unclosedNativeOwners.add({ kernel, adv, handle });
+    throw Error('windows_path_security_close_failed');
+  };
+  const closeVerification = (handle: bigint | number) => {
+    if (!kernel.symbols.CloseHandle(handle)) failedVerificationClose(handle);
+  };
+  const withVerification = <T>(handle: bigint | number, work: () => T): T => {
+    let result!: T;
+    let failure: unknown;
+    try {
+      result = work();
+    } catch (error) {
+      failure = error;
+    }
+    try {
+      closeVerification(handle);
+    } catch (cleanup) {
+      throw failure === undefined
+        ? cleanup
+        : new AggregateError([failure, cleanup], 'windows_path_security_close_failed');
+    }
+    if (failure !== undefined) throw failure;
+    return result;
   };
   const out = () => new BigUint64Array(1);
   const pointer = (value: bigint): import('bun:ffi').Pointer => {
@@ -127,7 +159,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     }
     if (!/^S-1-(?:\d+-)*\d+$/.test(sidText)) fail();
   } finally {
-    if (!kernel.symbols.CloseHandle(token[0]!)) fail();
+    closeVerification(token[0]!);
   }
   const descriptor = (directory: boolean) => {
     const value = out();
@@ -215,7 +247,6 @@ function createNativeWindowsPathSecurity(): Implementation {
       if (sd[0]) kernel.symbols.LocalFree(pointer(sd[0]));
     }
   };
-  const unclosedVerificationHandles = new Set<bigint | number>();
   const verifyHandle = (
     handle: bigint | number,
     path: string,
@@ -232,25 +263,15 @@ function createNativeWindowsPathSecurity(): Implementation {
       fail();
     if (privateObject) verifyAcl(handle, directory, readOnly);
     const current = open(path, false);
-    try {
+    withVerification(current, () => {
       if (identity(info(current)) !== identity(original)) fail();
       if (privateObject) verifyAcl(current, directory, readOnly);
-    } finally {
-      if (!kernel.symbols.CloseHandle(current)) {
-        unclosedVerificationHandles.add(current);
-        fail();
-      }
-      unclosedVerificationHandles.delete(current);
-    }
+    });
   };
   const verify = (path: string, directory: boolean, privateObject = true) => {
     api.verifyPath(path);
     const handle = open(path, false);
-    try {
-      verifyHandle(handle, path, directory, privateObject);
-    } finally {
-      if (!kernel.symbols.CloseHandle(handle)) fail();
-    }
+    withVerification(handle, () => verifyHandle(handle, path, directory, privateObject));
   };
   type Held = { path: string; handle: bigint | number; directory: boolean };
   const ownedTransfers = new Set<Held[]>();
@@ -282,7 +303,11 @@ function createNativeWindowsPathSecurity(): Implementation {
       }
     }
   };
-  const retain = (path: string, readOnly: boolean): WindowsPrivateRead => {
+  const retain = (
+    path: string,
+    readOnly: boolean,
+    recordLimit?: number,
+  ): WindowsPrivateRead | WindowsPrivateRecordRead => {
     path = resolve(path);
     api.verifyPath(path);
     api.verifyDirectory(dirname(path));
@@ -300,7 +325,51 @@ function createNativeWindowsPathSecurity(): Implementation {
       const stamp = (value: DataView) =>
         [0, 4, 8, 20, 24, 28, 32, 36, 40, 44, 48].map((offset) => value.getUint32(offset, true));
       const expected = stamp(original).join(':');
+      const verifyOriginal = () => {
+        if (!held.some((entry) => entry.handle === handle)) fail();
+        for (const entry of held)
+          verifyHandle(entry.handle, entry.path, entry.directory, !entry.directory, readOnly);
+        api.verifyDirectory(dirname(path));
+        if (stamp(info(handle)).join(':') !== expected) fail();
+      };
+      let consumed = false;
       return Object.freeze({
+        ...(recordLimit === undefined
+          ? {}
+          : {
+              read() {
+                if (consumed) throw Error('windows_private_record_read_consumed');
+                consumed = true;
+                verifyOriginal();
+                const size = original.getUint32(36, true);
+                if (original.getUint32(32, true) || size > recordLimit)
+                  throw Error('windows_path_size_limit');
+                const bytes = new Uint8Array(size + 1),
+                  count = new Uint32Array(1);
+                let total = 0;
+                for (;;) {
+                  const available = Math.min(65536, bytes.length - total);
+                  if (
+                    !available ||
+                    !kernel.symbols.ReadFile(
+                      handle,
+                      ptr(bytes.subarray(total)),
+                      available,
+                      ptr(count),
+                      null,
+                    )
+                  )
+                    fail();
+                  if (count[0]! > available) fail();
+                  if (!count[0]) break;
+                  total += count[0]!;
+                  if (total > size) fail();
+                }
+                if (total !== size) fail();
+                verifyOriginal();
+                return bytes.slice(0, total);
+              },
+            }),
         verify() {
           if (!held.some((entry) => entry.handle === handle)) fail();
           for (const entry of held)
@@ -378,11 +447,9 @@ function createNativeWindowsPathSecurity(): Implementation {
       for (;;) {
         if (existsSync(current)) {
           const handle = open(current, false);
-          try {
+          withVerification(handle, () => {
             if (info(handle).getUint32(0, true) & 0x400) fail();
-          } finally {
-            if (!kernel.symbols.CloseHandle(handle)) fail();
-          }
+          });
           if (lstatSync(current).isSymbolicLink()) fail();
         }
         const parent = dirname(current);
@@ -434,7 +501,7 @@ function createNativeWindowsPathSecurity(): Implementation {
         verifyHandle(handle, path, false, privateFile);
         return buffer.slice(0, total);
       } finally {
-        if (!kernel.symbols.CloseHandle(handle)) fail();
+        closeVerification(handle);
       }
     },
     writePrivateFile(path, bytes) {
@@ -520,6 +587,77 @@ function createNativeWindowsPathSecurity(): Implementation {
       verify(path, false);
     },
     verifyHandle,
+    retainPrivateRecordFile(path, maxBytes) {
+      if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 16 * 1024 * 1024) fail();
+      return retain(path, false, maxBytes) as WindowsPrivateRecordRead;
+    },
+    writePrivateRecordFile(path, bytes) {
+      if (!(bytes instanceof Uint8Array) || bytes.length > 16 * 1024 * 1024) fail();
+      path = resolve(path);
+      let expected = '';
+      const recordStamp = (value: DataView) =>
+        [0, 4, 8, 20, 24, 28, 32, 36, 40, 44, 48]
+          .map((offset) => value.getUint32(offset, true))
+          .join(':');
+      transfer(path, (handle) => {
+        writeChunks(handle, bytes);
+        const actual = info(handle);
+        if (actual.getUint32(32, true) || actual.getUint32(36, true) !== bytes.length) fail();
+        expected = recordStamp(actual);
+      });
+      const finalHandle = open(path, false);
+      withVerification(finalHandle, () => {
+        verifyHandle(finalHandle, path, false);
+        const finalStamp = recordStamp(info(finalHandle));
+        const originalFields = expected.split(':'),
+          finalFields = finalStamp.split(':');
+        // Original volume/file id and size must match; LastWrite can finalize on writer Close.
+        for (const index of [5, 6, 7, 8, 9, 10])
+          if (originalFields[index] !== finalFields[index]) fail();
+        expected = finalStamp;
+      });
+      // This capability names only our successful CREATE_NEW object. No caller supplies identity/HANDLE.
+      return Object.freeze({
+        remove() {
+          const held: Held[] = [];
+          ownedTransfers.add(held);
+          let failure: unknown;
+          try {
+            retainParents([path], held);
+            api.verifyDirectory(dirname(path));
+            if (!existsSync(path)) throw Error('windows_private_record_temp_missing');
+            const handle = open(path, false, undefined, 0x30080, false, 1);
+            held.push({ path, handle, directory: false });
+            verifyHandle(handle, path, false);
+            if (recordStamp(info(handle)) !== expected) fail();
+            for (const entry of held)
+              verifyHandle(entry.handle, entry.path, entry.directory, !entry.directory);
+            const disposition = new Uint8Array([1]);
+            if (
+              !kernel.symbols.SetFileInformationByHandle(
+                handle,
+                4,
+                ptr(disposition),
+                disposition.length,
+              )
+            )
+              fail();
+          } catch (error) {
+            failure = error;
+          }
+          try {
+            closeHeld(held);
+          } catch (cleanup) {
+            throw new AggregateError(
+              failure ? [failure, cleanup] : [cleanup],
+              'windows_path_security_close_failed',
+            );
+          }
+          if (failure) throw failure;
+          if (existsSync(path)) fail();
+        },
+      });
+    },
     retainPrivateFile(path) {
       return retain(path, false);
     },
@@ -534,7 +672,7 @@ function createNativeWindowsPathSecurity(): Implementation {
         if (!kernel.symbols.FlushFileBuffers(handle)) fail();
         verifyHandle(handle, path, false);
       } finally {
-        if (!kernel.symbols.CloseHandle(handle)) fail();
+        closeVerification(handle);
       }
     },
     movePrivateEntry(source, target, replace = false) {
@@ -593,7 +731,7 @@ function createNativeWindowsPathSecurity(): Implementation {
         try {
           verifyHandle(handle, path, false);
         } finally {
-          if (!kernel.symbols.CloseHandle(handle)) fail();
+          closeVerification(handle);
         }
       } finally {
         kernel.symbols.LocalFree(sd);

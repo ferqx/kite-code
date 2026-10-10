@@ -8,6 +8,8 @@
 
 ## 当前 V1.3 owner 与资格边界
 
+Windows installed TUI 源码现接独立 Terminal／登记 Native 的同一稳定前门与真实 ConPTY 完整用户链，当前合同归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-installed-tui-正式调用者)。原九份私有记录的 Profile guard 在权限探针之前登记操作；准确 Close 未确认保原 SH／EX 和首次错误，不释放锁或自动重试。PTY 在创建前纳入原 Job，普通退出另核产品／PTY／driver 与全部输出 EOF、Job0／wait／strict Close、未 Terminate 和安装 EX。原 Job 成员证明只覆盖这次用户链，不填补整个 Runtime census、activeResources／handles、原 RSS 红或八 outer／九点。Windows/Linux 实际执行交后续 GitHub Actions，本机 mock／适用原测试不代平台资格，不提前退出 P6／§35／最终退役。
+
 根默认八 workspace、fault/CI soak、stdio/transport 和真实 TUI runner 已使用新公共 Runtime/Client/Store；旧 `run-fault-soak.ts`、旧 State/Host/carrier 测试不参与正式/default/CI。当前负责入口是[新 runner](../../scripts/runtime/unified-soak.ts)、[报告/verifier](../../scripts/runtime/unified-soak-report.ts)和[实际测试](../../tests/isolated/unified-agent/unified-soak.test.ts)。下面旧阶段、场景和遥测实现只保历史依据；适用的 no-replay、原 scope、实际清理、资源增长和平台身份约束继续有效。
 
 当前 closed `unified-soak-v2` CI 固定七类：长历史/显式资源策略、子任务取消、Model传输、MCP churn、Runtime SIGKILL、SQLite/日志故障和真实TUI生命周期。当前enum图的源码外CLI实测66.894s，七类各两点passed且cleanup确认；报告digest87a6c8fd760930c09ca49cd490bdc06793286782a8466f26a2cfcabe66acf50a。完整Soak5文件52项298断言与Root native4项32断言分别通过，旧26/81及其他报告只属于各自源窗口。v2必须保存原probe/sampler SHA，TUI使用owned compiled sampler，不回退源码路径；具体冻结见[进度](../plans/unified-agent-refactor-v1-progress.md)。旧v1不得升级formal。persisted diagnostic退出0；同报告formal退出1，拒绝资源/完整后代、来源、点数/时长与连续负载缺资格。8外层、每类同一真实进程warmup0+measured1—8、每outer≥450s且总≥60分钟真实busy、168分钟全局上界和单point/operation180s仍强制；构建、固定sleep、collector等待及并行busy求和不能充数。

@@ -16,6 +16,10 @@ import { join } from 'node:path';
 import type { FileLock, ProfileAccess } from '@kite-ai/agent/profile-access';
 import type { TuiCallerIntent, TuiCallerRecord } from '@kite-ai/ui/tui';
 import { callerCanonical, parseCallerIntent } from './caller-intents';
+import {
+  publishWindowsTuiPrivateFile,
+  readWindowsTuiPrivateFile,
+} from './windows-tui-private-files';
 
 type RecoveryIntent = TuiCallerIntent;
 type RecoveryPhase = TuiCallerRecord['phase'];
@@ -87,6 +91,7 @@ function finite<T>(action: () => T): T {
       ].includes(error.message)
     )
       throw error;
+    if (process.platform === 'win32') throw new Error(unavailable().message, { cause: error });
     throw unavailable();
   }
 }
@@ -106,6 +111,14 @@ export function openCallerJournal(input: {
   let closed = false;
   const read = () => {
     if (closed) throw unavailable();
+    if (process.platform === 'win32') {
+      const bytes = readWindowsTuiPrivateFile(input.access, 'caller-intents.json');
+      if (bytes === null) return { records: [] as RecoveryRecord[], etag: null as string | null };
+      return {
+        records: parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))),
+        etag: hash(bytes),
+      };
+    }
     privateStat(input.access.profilePath, true);
     if (present(parent)) privateStat(parent, true);
     if (!present(path)) return { records: [] as RecoveryRecord[], etag: null as string | null };
@@ -142,6 +155,21 @@ export function openCallerJournal(input: {
   const mutate = <T>(change: (rows: RecoveryRecord[]) => { result: T; changed: boolean }) => {
     const lock = input.acquireWriteLock();
     let temporary: string | undefined;
+    let failure: unknown;
+    const releaseWindowsLock = () => {
+      try {
+        lock.release();
+      } catch (cleanupError) {
+        if (failure !== undefined)
+          throw new Error(
+            failure instanceof Error ? failure.message : 'tui_private_publication_unknown',
+            {
+              cause: new AggregateError([failure, cleanupError], 'tui_private_cleanup_unknown'),
+            },
+          );
+        throw cleanupError;
+      }
+    };
     try {
       const original = read(),
         rows = structuredClone(original.records),
@@ -149,6 +177,20 @@ export function openCallerJournal(input: {
       if (!next.changed) return next.result;
       const bytes = Buffer.from(`${JSON.stringify({ version: 1, records: rows })}\n`);
       if (bytes.length > 16 * 1024 * 1024) throw Error('caller_capacity_exceeded');
+      if (process.platform === 'win32') {
+        publishWindowsTuiPrivateFile({
+          access: input.access,
+          filename: 'caller-intents.json',
+          bytes,
+          writeLock: lock,
+          expectedEtag: original.etag,
+          recheck: () => {
+            if (read().etag !== original.etag) throw unavailable();
+          },
+        });
+        if (read().etag !== hash(bytes)) throw unavailable();
+        return next.result;
+      }
       mkdirSync(parent, { recursive: true, mode: 0o700 });
       privateStat(parent, true);
       temporary = join(parent, `.caller-intents-${randomUUID()}.tmp`);
@@ -182,9 +224,15 @@ export function openCallerJournal(input: {
       }
       if (read().etag !== hash(bytes)) throw unavailable();
       return next.result;
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      if (temporary) rmSync(temporary, { force: true });
-      lock.release();
+      if (process.platform === 'win32') releaseWindowsLock();
+      else {
+        if (temporary) rmSync(temporary, { force: true });
+        lock.release();
+      }
     }
   };
   return {

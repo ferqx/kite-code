@@ -75,6 +75,9 @@ jobs:
       - if: runner.os == 'Windows'
         name: Actual installed Windows Native windows, version selection and maintenance restore
         run: bun run tests/fixtures/unified-agent/windows-native-installation.qualification.ts "--candidate=${{ github.workspace }}/dist/unified-native"
+      - if: runner.os == 'Windows'
+        name: Actual installed Windows Terminal and Native complete TUI caller
+        run: bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts "--terminal=${{ github.workspace }}/dist/unified-terminal" "--native=${{ github.workspace }}/dist/unified-native"
       - if: runner.os == 'macOS'
         name: Actual source-free Native Main, upgrade, rollback, installed CLI and TUI
         run: >-

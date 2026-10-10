@@ -12,6 +12,16 @@ General configuration options expose the trusted host-only `windowsPathPolicy: '
 
 Neither handle verification nor the final byte check and rename forms an atomic compare-and-swap against non-cooperating editors. Path changes observed during a native read or at the final publication recheck fail locally; an editor racing after the last check can still conflict with publication. Filesystem and SQLite notification remain separate media; publication uncertainty must retain the original operation identity rather than automatically retrying.
 
+## TUI 私有记录端口
+
+`retainPrivateRecordFile(path,maxBytes)` 为可信 TUI host 提供 1—16 MiB 的原文件 pin／单次完整读取；`writePrivateRecordFile(path,bytes)` 仅新建最多 16 MiB 的私有记录。原 scope/config `readScopeFile`／`writePrivateFile` 的 8 MiB 和明确 artifact 的 1 GiB 合同保持，不能用扩大通用配置上限来容纳原 journal。CLI 仍拥有九份闭合文件名、codec、etag 和原容量，其中 recovery 读取仍限 262144 字节。
+
+读取用原只读 HANDLE 拒绝 write/delete sharing，祖先拒绝 delete sharing；完整 EOF、原 size、FileID／时间／nlink1／reparse／current-SID FA 及路径映射均复核。新写入采用 CREATE_NEW、private descriptor、有限块及短写循环、Flush 与严格 Close；既有 ACL 不修复。成功才返回撤销能力，撤销以本次已创建原对象的 DELETE HANDLE、祖先、原 FileID／stamp 和 disposition 删除并确认关闭／缺失。CREATE_NEW 失败不能撤销别人已存在的 temporary；写失败在未取得完整创建证据时可能留下私有未发布文件，不猜所有权清理。
+
+[CLI host](../../../../apps/cli/host/windows-tui-private-files.ts)在原短锁下核完整 temporary、同步 owner recheck、原字节 CAS、`movePrivateEntry` 和发布读回。可能打开探针的准入复核前，Profile facade 已把操作挂到原 SH／EX；严格 Close 未确认保原 region 与首次错误，不能让 finally 把未知当已交接。已确认未发布时才调用原撤销能力，无按路径删除兜底。该发布仍非不合作编辑器的原子 CAS，不提供目录 fsync／断电证明。
+
+[完整私有记录测试](../../../../apps/cli/test/isolated/windows-tui-private-files.test.ts)包含九份冷读、9 MiB 全文／CAS、原 recovery／config 上限及 hardlink／rebound 拒绝；只在 actual Windows 执行原生分支，无 backend availability skip。macOS 的非平台与验证期 Close mock 只证明对应控制流；Windows/Linux 实际资格留后续 Actions。
+
 ## 维护原文件与发布端口
 
 `retainPrivateFile` 返回不暴露 HANDLE 的 verify/close 能力：原文件持有 GENERIC_READ，允许 read sharing、拒绝 write/delete sharing；整条祖先链保留原 identity 并拒绝 delete sharing。普通文件仍核 current SID/FA；`retainReadOnlyFile` 单独要求 protected、无继承 flag 的精确 FR，供不可变 blob 使用，不放宽配置或协调锁政策。关闭失败仅移除成功关闭的 HANDLE，剩余对象可重试；verify 拒绝已关闭的原文件或身份/ACL/时间变化。[维护 FD 与 SQL owner](../maintenance/README.md#windows-维护文件端口与验收边界)负责将 pin 保留至实际读者关闭。

@@ -18,6 +18,8 @@ Node/Electron 宿主先打开自己的稳定锁 fd，再以 child stdio 映射�
 
 `assertProfileAccess(access)` 复用同一实际 authority、live shared lease、coordination、profile 路径和恢复 journal 检查，不创建短锁、不扩大权限。可信宿主在已有 configuration 文件锁下写终端偏好时，以它核实 profile 使用权仍有效；复制对象或释放后的 lease 不能继续读写。原 `acquireProfileDataLock` 使用同一检查，仍管理自己的固定短锁与父子释放顺序。
 
+Windows TUI 的 `retainProfileTuiPrivateOperation(access,writeLock?)` 只接受上述原 shared authority 和由其取得的原 `tui_private` EX。先通过 WeakMap 做无 I/O 归属检查、把操作挂到原锁 resource guard，再执行可能打开原生探针的 `assertProfileAccess`／live lock 复核；复制 authority 在文件验证前拒绝。普通失败撤销本次 state，准确 Close 未确认（包括嵌套 cause／AggregateError）保同次原 SH／EX 和首次原因，随后 release 拒绝交接，不重新取得数字 HANDLE。读取只保 SH，写入的 EX 关闭成功后仍遵守原父子关系；它不授任意路径或维护能力。原生记录与消费者分别归 [Windows leaf](windows-path-security.README.md#tui-私有记录端口)和 [CLI owner](../../../../apps/cli/README.md#windows-tui-私有持久化)，本机验证期 mock 不代实际 Windows 资格。
+
 ## 制品使用权
 
 显式宿主 leaf [artifact-access](../artifact-access.ts) 提供 `acquireArtifactAccess({root,mode})`，校验 canonical、owner 与不可被组/其他用户写入的目录；POSIX／非 managed candidate 在候选外的固定 sibling `.use-<basename>.lock` 上复用原 OS shared/exclusive 锁，Windows managed 规则见下方安装协调。import 不 acquire；它不授予 Profile、Store 或执行权限。CLI/TUI 与独立 Service 各持自己的 shared lease，卸载者必须取得每个候选的 exclusive lease；退出前不靠另一个进程代持。当前实际资格为 macOS，Linux 与 Windows 不由此推定通过；新 POSIX 安装器与独立 profile 生命周期见[终端 owner](../../../../apps/cli/docs/terminal-release.md)。

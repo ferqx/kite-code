@@ -4427,3 +4427,44 @@ Native／Agent platform／MCP owner、release 与 runtime-resilience active、te
 | 4 | §35 完整 37 能力／T/E 独立审查、最终旧路径退役与阶段收束 | 全部适用能力和样本、真实 legacy 删除、未过滤阶段完整回归及适用 P7 发布责任成立 | 前三项适用资格和剩余能力汇合；本机限定源码审查／局部通过不替代阶段出口，本轮不是收束点 |
 
 37 能力仍 partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。原 macOS stdio 红、RSS 红和完整观测未知不被新 fixture 或文档改写；本轮仅本地提交授权，无 push／PR／发布／平台安装／Actions。
+
+
+## 2026-10-11：Windows installed TUI 私有持久化与正式调用者
+
+前片正式 Windows Native 安装／版本选择／维护调用者已正常本地提交 `b91f9fd1f3e473741cf5d1c564258b4334cca09e`，切片结束。用户确认 Windows/Linux 实机后续由 GitHub Actions 处理，本轮 macOS 不寻找远程环境或 dispatch。按能力映射与实际源码，下一可独立实施的完整入口为 installed TUI：同一个稳定 `kite-tui.exe` 的独立 Terminal 与登记 Native。最初限定为正式 caller 源码缺口；进一步读取真实 host 发现九份私有记录仍强制 POSIX uid／mode／fsync，首个提交／草稿冷读本身会在 Windows 拒绝，因此本片同时修生产持久化，再接完整调用者，不能用模块或 journal 通过代称用户能力闭合。
+
+### 实际源码与正式调用者
+
+[固定 Windows 私有 host](../../apps/cli/host/windows-tui-private-files.ts)和九个原 journal／两个跨 journal reader 在 Windows 分支采用原 current-SID HANDLE 读取／CREATE_NEW／Flush／同卷 write-through／读回；原完整 codec、Store／Session／Workspace、intent／commandId、128项或草稿4096项、etag及未知冲突规则保持。独立 record 端口16MiB不扩大原config8MiB／artifact1GiB；recovery读262144字节不变。撤销只用本次成功创建且已核原对象能力，unknown不按路径删除／重试，写失败未取得完整创建证据时可能保私有未发布temporary。最终检查仍不是对不合作编辑器的原子CAS，也不宣称Windows目录fsync／断电持久性。
+
+Profile／数据锁 operation guard 先做无I/O原authority／短锁归属检查并挂原region，再做可能打开探针的权限／活锁验证。必要review修正了guard登记晚于探针的错误：准确Close未确认保原Profile SH／同次写EX与首次原因；普通policy拒绝撤本次state，forged authority零文件探针。新增一个独立subprocess mock只核这个真实错误，使用真实Profile／FileLock resource attachment与独立模拟region；不扩已闭合Job故障矩阵，不当Windows原生证明。
+
+[正式 TUI qualification](../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)只消费同job准确Terminal／Native候选，实际安装先独立Terminal，再登记Native到同一稳定前门；SQLite reader动态来自实际所选installed candidate。各选择真实键盘完成普通Model任务、Ctrl+O完整Unicode正文／tail、Ctrl+T思考显示／隐藏、实盘loaded Markdown导出、第二项原Command精确Ctrl+C、未提交完整草稿及Ctrl+Q普通退出。冷窗沿同会话核原Store／Run／Execution／Command、完整输出和原journal／draft／config／preferences／cursor，Provider不增长；两种选择共四次实际新Model。Native撤登记恢复独立前门，最终两种唯一卸载保原Store及私有数据。
+
+[ConPTY driver](../../tests/fixtures/unified-agent/windows-installed-tui-pty-driver.ts)由[父PTY owner](../../tests/fixtures/unified-agent/windows-installed-tui-pty.ts)通过创建前原Job启动，用准确candidate Bun与固定空配置创建80×24真实产品PTY；产品预加载／环境污染与driver分离。闭合nonce／有序frame／完整输出和EOF、产品／PTY／driver实际exit0、原Job0／wait／strict Close、未请求Terminate及全部安装EX才通过；强制收尾不能充普通退出，PID仅定位原成员HANDLE／FILETIME／准确映像。每选择独立120秒、各PTY30秒、写操作最多10秒，错误保首次原因与原owner。
+
+源码审查按真实TUI修正夹具预期：长正文前的reasoning在最新解析VT缓冲按原complete Message滚动核对，再回底部核当前Idle；Message.status不是Execution.succeeded。冷窗一次Ctrl+O只加载原已完成结果，另一已取消Model的合法未完成preview保留；原cancel receipt的affectedCount精确为1 Model＋1原Command＋1 Run＝3。这些是源码合同核对，不伪称Windows实际红绿。原PTY输出和原Core完整EOF/hash另行核，不能以历史stdout字串代当前画面。
+
+[release workflow](../../.github/workflows/release-candidate.yml)强制在双方完整build／verify／smoke及原Windows Native安装caller之后执行准确两参数TUI链；[正式守卫](../../scripts/check-unified-workspaces.ts)和[原CI整文件](../../tests/integration/scripts/unified-ci.test.ts)核缺fixture／删步骤／错平台候选／过滤或忽略失败／顺序。原13个case保持，新增有界22断言mutation case；原POSIX整例、default／formal列表和预算不变。本片无最终legacy删除，旧POSIX分支保原读写／finally／parse语义，Windows正式九文件消费者实际选新端口。
+
+### 有限验证与保留事实
+
+- 九份原journal整文件各独立Bun进程实际exit0，43pass／580expects／0fail／0skip，原测试字节不变。完整命令／日志与统计在`/private/tmp/kite-tui-journal-wholes-20261011/result.json`和`counts.json`；11消费者冻结SHA `/private/tmp/kite-tui-journal-sha-20261011.json`，旧POSIX读写／finally／codec／跨reader解析的AST逆向保全log `/private/tmp/kite-tui-journal-preservation-20261011.log`。当前共享平台Windows guard修正不改其macOS执行分支，按输入复用，无重复大正文／HTTP／资源矩阵。
+- 新私有文件完整文件实际exit0，2pass／5expects／2native平台skip，最终log `/private/tmp/kite-windows-tui-private-validation-guard-final-20261011.log`。四个相邻原完整文件data-lock／profile-access／default Windows policy／storage Profile各独立进程actual0，共8pass／121expects／5native平台skip，准确命令／log SHA归`/private/tmp/kite-windows-tui-private-adjacent-20261011-result.json`；五源码输入前后equal。macOS skip不算Windows/Linux资格，actual Windows分支不得availability skip。
+- 原CI完整文件最终actual0，14pass／103expects／0fail，log `/private/tmp/kite-windows-installed-tui-ci-whole-final-20261011.log` SHA `df320ff1bbeb2f48505fbd99d49f711001636da79e34e5c91bcfd05d63ec4ed2`。初次13pass／1fail／101expects在Root真实fixture尚未落盘时被guard拒绝，原log `/private/tmp/kite-windows-installed-tui-ci-whole-20261011.log`保留；没有空placeholder、删断言、过滤或改预算。WIP driver的Root类型诊断也保原log，实际修正表达式后完整类型通过。
+- PTY两leaf target=Node真实bundle／Node冷import及非Windows明确拒绝actual0；初次import.meta.main shim触发driver CLI的原失败log保留，修为实际argv文件路径入口guard。最终原输入／log SHA归`/private/tmp/kite-windows-installed-tui-pty-freeze-final-20261011.json`。Root qualifier冷import／非Win guard实际exit0，log `/private/tmp/kite-windows-installed-tui-qualification-cold-frozen-final-20261011.log`；这些不运行ConPTY、DACL／BunTerminal／嵌套Job或实际installed链，不授原生资格。
+- 最终Root／八workspace类型、受影响TS只读Biome及docs／all-impact／boundary／workspace／API／test ownership／plan-evidence按实际冻结输入收束；准确交付范围与日志SHA归`/private/tmp/kite-windows-installed-tui-source-freeze-20261011.json`，正常hooks仍独立执行。当前不是阶段退出点，局部通过不代未过滤完整阶段回归。
+
+CLI／platform／Terminal／Native owner、release／runtime-resilience active、tests、主计划和限定能力证据同步。手册三指南的原输入／草稿／完整阅读／导出／精确取消合同核对不变，未增加按键、格式、产品权限或安装范围，不制造手册diff。原路径与新ConPTY取舍Note保proposed，因为实际Windows未验。原Job／MCP已闭合控制流及两份历史6项红、RSS红和macOS stdio原2pass／5fail／21expects均按冻结证据保留，测试／默认调度字节未变，不重跑已闭合参数或恢复退役路径来制造绿。
+
+### 最多五项剩余退出缺口
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与明确验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed Terminal／Native的真正跨代码升级／冷回退调用者 | 各自原源码／原builder生成不同实际代码和candidate的A→B→A／再B；前门任务、完整原历史、当前Store／DB9拒绝或原查回、原进程固定／正常退出／EX及单次卸载保数据 | 当前Windows工具B仍为同代码标签，源码caller缺口可独立推进；不依赖RSS或Shell-only能力，也不由本TUI链代证 |
+| 2 | Windows installed Shell及用Shell的Task／Workflow | 原广泛HOME／宿主工具读取、Workspace／Full写求交、private无条件拒绝；完整Job输出／全树取消／unknown强持与cold零重放 | 用户已决定保原合同／guard／未闭合门禁；现有token和Job不足，不擅改产品行为或管理员／驱动／VM安装范围。独立源码gate |
+| 3 | installed混合持续任务／Shell／child／MCP的原RSS及完整观测 | 原8outer／各9点、busy≥450000ms／outer、总60—168分钟、32MiB增长／斜率、全Runtime原出生后代／activeResources／handles与真实资源退出 | 原`+115.203125MiB > 32MiB` red及观测缺项保留；阻P6／§35／最终退役及依赖其结果的P7，不阻独立安装／维护／caller源码，不重复参数对照 |
+| 4 | GitHub Actions上的Win/Linux实际完整安装、版本、TUI／Native、Files／维护恢复与适用MCP资格 | 准确当前candidate实际install／注册／版本选择／原历史、PTY／窗口、backup／restore新Store／GC、自然资源退出、零重放和保数据uninstall；实际失败保完整断言 | 已接无Shell子链可独立执行，真实跨代码项目依①、Shell场景依②；整体平台／资源出口按适用③汇合。用户已安排后续Actions，本机不替代或dispatch；原Mac stdio红另保 |
+| 5 | §35完整37能力／T/E独立审查、最终旧路径退役及阶段收束 | 全部适用完整能力与样本实证、真实legacy消费者清零／删除、未过滤完整阶段回归及适用P7发布责任 | 前四项适用门禁及剩余完整能力汇合；本片源码／局部测试不宣布整体完成 |
+
+37能力仍partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。本轮只结束当前完整TUI源码切片并作已授权本地提交，无push／PR／发布／平台安装或Actions dispatch；Windows/Linux原生验收按用户最新安排保留至后续GitHub Actions。

@@ -41,6 +41,8 @@ rollback 在发布前完整预检仍由原 nonce 持有的 Terminal；正常 Ter
 
 进程证据来自本次创建前原Job及成员原HANDLE／FILETIME／实际映像，PPID仅用于在已证成员中定位Main与Service；正常退出另要求 `terminationRequested=false`，防止fixture强制终止掩盖产品收尾失败。MCP公共v3语法保持原投影。源码／本机控制流通过不证明Windows UIA树、菜单、嵌套Job、两跳证书或维护正向运行；完整caller尚未在Windows执行，平台与阶段门禁继续保留。取舍与验收依赖见[Windows调用者提案](../../../.agents/notes/proposed/testing/2026-10-10-windows-native-installed-caller.md)，实际有限证据见[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-native-正式安装版本切换与维护调用者源码)。
 
+Windows 注册 CLI/TUI 另由 [完整 installed TUI caller](../../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)消费准确 Terminal／Native 候选：同一个独立稳定 `kite-tui.exe` 先用 Terminal，再用登记后的 Native 双层闭包；实际键盘任务、全文／思考、导出、准确取消、草稿及冷读零重放，正常退出须原 Job 未 Terminate／完整 EOF／Job0／双 EX，撤登记和最终卸载保原数据。此调用者已接 release job，但 Windows 实际运行尚未取得，按用户安排交后续 Actions；它不把窗口、真正跨代码切换、Shell／RSS 或阶段资格记为通过。完整合同及预算归 [Terminal owner](../../cli/docs/terminal-release.md#windows-installed-tui-正式调用者)。
+
 ## 完整身份与生命周期
 
 [Native verifier](../../service/src/native-runtime-assets.ts)核 outer 的准确普通文件、目录及受限相对框架链接，并独立完整核 inner Terminal。tar 只存普通字节和封闭链接声明；拒绝 traversal、真实 tar links、重复/PAX 冲突、外部 hardlink、篡改及未声明条目，物化后重新核两层。目录中的 Electron 空 locale 也必须在准确清单内。

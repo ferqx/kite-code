@@ -14,6 +14,10 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import type { FileLock, ProfileAccess } from '@kite-ai/agent/profile-access';
+import {
+  publishWindowsTuiPrivateFile,
+  readWindowsTuiPrivateFile,
+} from './windows-tui-private-files';
 
 export type TuiDraftScope = { storeId: string; workspaceId: string; sessionId: string };
 export type TuiStoredDraft = TuiDraftScope & { id: string; revision: string; text: string };
@@ -92,11 +96,13 @@ function finite<T>(operation: () => T): T {
     return operation();
   } catch (error) {
     if (error instanceof TuiDraftError) throw error;
-    throw new TuiDraftError(
+    const mapped = new TuiDraftError(
       (error as { code?: string })?.code === 'owner_busy'
         ? 'tui_draft_busy'
         : 'tui_draft_storage_unavailable',
     );
+    if (process.platform === 'win32') Object.defineProperty(mapped, 'cause', { value: error });
+    throw mapped;
   }
 }
 function privateStat(path: string, directory = false) {
@@ -123,6 +129,17 @@ export function openTuiDraftFile(input: {
   };
   const read = () => {
     active();
+    if (process.platform === 'win32') {
+      const bytes = readWindowsTuiPrivateFile(input.access, 'tui.json');
+      return bytes === null
+        ? { document: { version: 1, revision: '0', drafts: [] } as TuiDraftDocument, etag: null }
+        : {
+            document: parseTuiDraftDocument(
+              JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
+            ),
+            etag: digest(bytes),
+          };
+    }
     privateStat(input.access.profilePath, true);
     if (present(parent)) privateStat(parent, true);
     if (!present(path))
@@ -184,6 +201,23 @@ export function openTuiDraftFile(input: {
     if (typeof text !== 'string') throw new TuiDraftError('tui_draft_storage_unavailable');
     const lock = input.acquireWriteLock();
     let temporary: string | undefined;
+    let failure: unknown;
+    const releaseWindowsLock = () => {
+      try {
+        lock.release();
+      } catch (cleanupError) {
+        if (failure !== undefined) {
+          const combined = new TuiDraftError(
+            failure instanceof TuiDraftError ? failure.code : 'tui_draft_storage_unavailable',
+          );
+          Object.defineProperty(combined, 'cause', {
+            value: new AggregateError([failure, cleanupError], 'tui_private_cleanup_unknown'),
+          });
+          throw combined;
+        }
+        throw cleanupError;
+      }
+    };
     try {
       const original = read(),
         id = scopeId(selected),
@@ -201,6 +235,23 @@ export function openTuiDraftFile(input: {
           '\n',
       );
       if (bytes.length > limit) throw new TuiDraftError('tui_draft_capacity_exceeded');
+      if (process.platform === 'win32') {
+        publishWindowsTuiPrivateFile({
+          access: input.access,
+          filename: 'tui.json',
+          bytes,
+          writeLock: lock,
+          expectedEtag: original.etag,
+          recheck: () => {
+            active();
+            if (read().etag !== original.etag)
+              throw new TuiDraftError('tui_draft_revision_conflict');
+          },
+        });
+        if (read().etag !== digest(bytes))
+          throw new TuiDraftError('tui_draft_publication_uncertain');
+        return saved;
+      }
       mkdirSync(parent, { mode: 0o700, recursive: true });
       privateStat(parent, true);
       temporary = join(parent, `.tui-${randomUUID()}.tmp`);
@@ -234,9 +285,15 @@ export function openTuiDraftFile(input: {
       }
       if (read().etag !== digest(bytes)) throw new TuiDraftError('tui_draft_publication_uncertain');
       return saved;
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      if (temporary) rmSync(temporary, { force: true });
-      lock.release();
+      if (process.platform === 'win32') releaseWindowsLock();
+      else {
+        if (temporary) rmSync(temporary, { force: true });
+        lock.release();
+      }
     }
   };
   return {

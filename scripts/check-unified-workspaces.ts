@@ -344,6 +344,52 @@ export function checkUnifiedFormalConsumers(root: string): {
               )
             )
               add('formal-ci-windows-native-installation-missing', location, jobName);
+            const terminalCommands = [
+              'bun run release:build --directory dist/unified-terminal --archive dist/unified-terminal.tar.gz',
+              `bun run release:verify --directory dist/unified-terminal --source-commit "\${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true`,
+              'bun run release:smoke --directory dist/unified-terminal',
+            ];
+            const terminalPrerequisites = terminalCommands.map((command) =>
+              steps.findIndex(
+                (step) =>
+                  step.if === undefined &&
+                  typeof step.run === 'string' &&
+                  step.run.trim().replace(/\s+/g, ' ') === command &&
+                  (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+              ),
+            );
+            const tuiQualification = steps.findIndex(
+              (step) =>
+                step.if === "runner.os == 'Windows'" &&
+                typeof step.run === 'string' &&
+                step.run.trim().replace(/\s+/g, ' ') ===
+                  `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts "--terminal=\${{ github.workspace }}/dist/unified-terminal" "--native=\${{ github.workspace }}/dist/unified-native"` &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            const tuiPrerequisites = [...terminalPrerequisites, ...nativePrerequisites];
+            if (
+              !windowsRunner ||
+              tuiQualification < 0 ||
+              nativeQualification < 0 ||
+              nativeQualification >= tuiQualification ||
+              tuiPrerequisites.some((index) => index < 0 || index >= nativeQualification) ||
+              tuiPrerequisites.some(
+                (index, position) => position > 0 && index <= tuiPrerequisites[position - 1]!,
+              ) ||
+              !existsSync(
+                resolve(
+                  root,
+                  'tests/fixtures/unified-agent/windows-native-installation.qualification.ts',
+                ),
+              ) ||
+              !existsSync(
+                resolve(
+                  root,
+                  'tests/fixtures/unified-agent/windows-installed-tui.qualification.ts',
+                ),
+              )
+            )
+              add('formal-ci-windows-installed-tui-missing', location, jobName);
             for (const [platform, command, code] of [
               [
                 "runner.os == 'macOS' || runner.os == 'Linux'",

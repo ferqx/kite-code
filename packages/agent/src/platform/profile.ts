@@ -4,6 +4,7 @@ import {
   acquireFileLock,
   acquireInheritedSharedFileLock,
   assertLiveLock,
+  attachLockResource,
   type FileLock,
   retainLockOwner,
   type WindowsPathSecurity,
@@ -20,6 +21,8 @@ export interface ProfileOptions {
 export interface ProfileAccess extends ProfileSelection {
   readonly lock: FileLock;
 }
+const tuiDataAuthorities = new WeakMap<FileLock, ProfileAccess>();
+const privateOperations = new WeakMap<FileLock, Set<{ unknown?: unknown }>>();
 const profileAuthorities = new WeakMap<
   ProfileAccess,
   { paths: ProfileSelection; security?: WindowsPathSecurity }
@@ -44,6 +47,72 @@ export function assertProfileAccess(access: ProfileAccess): void {
     throw Error('restore_reconciliation_required');
   assertNoSymlinkPath(paths.profilePath);
 }
+/** Fixed TUI native-I/O lifetime, never a new path/lock authority. */
+export function retainProfileTuiPrivateOperation(
+  access: ProfileAccess,
+  writeLock?: FileLock,
+): {
+  release(): void;
+  keepUnknown(cause: unknown): void;
+} {
+  if (process.platform !== 'win32') throw Error('tui_private_operation_platform_unsupported');
+  // Original authority lookup is non-I/O. Install the dependent before any native probe.
+  if (!profileAuthorities.has(access)) throw Error('profile_access_authority_invalid');
+  if (writeLock && tuiDataAuthorities.get(writeLock) !== access)
+    throw Error('profile_data_lock_authority_invalid');
+  const closeUnknown = (error: unknown): boolean =>
+    error instanceof Error &&
+    (error.message === 'windows_path_security_close_failed' ||
+      error.message === 'tui_private_close_unknown' ||
+      (error instanceof AggregateError && error.errors.some(closeUnknown)) ||
+      (error.cause !== undefined && closeUnknown(error.cause)));
+  const state: { unknown?: unknown } = {};
+  const groups: Set<{ unknown?: unknown }>[] = [];
+  try {
+    for (const lock of writeLock ? [access.lock, writeLock] : [access.lock]) {
+      let operations = privateOperations.get(lock);
+      if (!operations) {
+        operations = new Set();
+        const owned = operations;
+        const verify = () => {
+          for (const operation of owned)
+            if ('unknown' in operation)
+              throw Error('tui_private_close_unknown', { cause: operation.unknown });
+        };
+        attachLockResource(lock, {
+          verify,
+          release() {
+            verify();
+            if (owned.size) throw Error('tui_private_operation_in_use');
+          },
+        });
+        privateOperations.set(lock, operations);
+      }
+      operations.add(state);
+      groups.push(operations);
+    }
+    assertProfileAccess(access);
+    if (writeLock)
+      assertLiveLock(writeLock, join(access.coordinationPath, 'tui-private.lock'), 'exclusive');
+  } catch (error) {
+    if (closeUnknown(error)) state.unknown = error;
+    else for (const group of groups) group.delete(state);
+    throw error;
+  }
+  let released = false;
+  return Object.freeze({
+    release() {
+      if (released) return;
+      if ('unknown' in state) throw Error('tui_private_close_unknown', { cause: state.unknown });
+      for (const group of groups) group.delete(state);
+      released = true;
+    },
+    keepUnknown(cause: unknown) {
+      if (released) throw Error('tui_private_operation_released');
+      if (!('unknown' in state)) state.unknown = cause;
+    },
+  });
+}
 /** Short host write exclusion; no arbitrary path or maintenance capability. */
 export function acquireProfileDataLock(access: ProfileAccess, purpose: 'tui_private'): FileLock {
   const original = profileAuthorities.get(access);
@@ -57,6 +126,7 @@ export function acquireProfileDataLock(access: ProfileAccess, purpose: 'tui_priv
   );
   try {
     retainLockOwner(access.lock, lock);
+    tuiDataAuthorities.set(lock, access);
     return lock;
   } catch (error) {
     lock.release();

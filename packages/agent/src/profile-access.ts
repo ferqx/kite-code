@@ -11,6 +11,7 @@ export {
   acquireInheritedProfileAccess,
   acquireProfileDataLock,
   assertProfileAccess,
+  retainProfileTuiPrivateOperation,
 } from './platform/profile';
 /** Normal host admission; maintenance-exclusive authority is not exposed by this leaf. */
 export function acquireProfileAccess(options: ProfileOptions): ProfileAccess {

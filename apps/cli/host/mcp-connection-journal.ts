@@ -28,6 +28,10 @@ import {
   assertMcpTransportJournalAvailable,
   readMcpTransportJournal,
 } from './mcp-transport-journal-files';
+import {
+  publishWindowsTuiPrivateFile,
+  readWindowsTuiPrivateFile,
+} from './windows-tui-private-files';
 export interface McpConnectionJournal {
   prepare(record: McpConnectionRecord): boolean;
   record(record: McpConnectionRecord, phase: McpConnectionRecord['phase']): void;
@@ -89,6 +93,7 @@ function finite<T>(action: () => T): T {
       ].includes(error.message)
     )
       throw error;
+    if (process.platform === 'win32') throw new Error(unavailable().message, { cause: error });
     throw unavailable();
   }
 }
@@ -103,6 +108,15 @@ export function openMcpConnectionJournal(input: {
   const read = () => {
     if (closed) throw unavailable();
     assertProfileAccess(input.access);
+    if (process.platform === 'win32') {
+      const bytes = readWindowsTuiPrivateFile(input.access, 'mcp-connection-intents.json');
+      if (bytes === null)
+        return { records: [] as McpConnectionRecord[], etag: null as string | null };
+      return {
+        records: parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))),
+        etag: hash(bytes),
+      };
+    }
     privateStat(input.access.profilePath, true);
     if (present(parent)) privateStat(parent, true);
     if (!present(path))
@@ -140,6 +154,21 @@ export function openMcpConnectionJournal(input: {
   const mutate = <T>(change: (rows: McpConnectionRecord[]) => { result: T; changed: boolean }) => {
     const lock = input.acquireWriteLock();
     let temporary: string | undefined;
+    let failure: unknown;
+    const releaseWindowsLock = () => {
+      try {
+        lock.release();
+      } catch (cleanupError) {
+        if (failure !== undefined)
+          throw new Error(
+            failure instanceof Error ? failure.message : 'tui_private_publication_unknown',
+            {
+              cause: new AggregateError([failure, cleanupError], 'tui_private_cleanup_unknown'),
+            },
+          );
+        throw cleanupError;
+      }
+    };
     try {
       const original = read(),
         rows = structuredClone(original.records),
@@ -147,6 +176,20 @@ export function openMcpConnectionJournal(input: {
       if (!next.changed) return next.result;
       const bytes = Buffer.from(`${JSON.stringify({ version: 1, records: rows })}\n`);
       if (bytes.length > 16 * 1024 * 1024) throw Error('mcp_connection_capacity_exceeded');
+      if (process.platform === 'win32') {
+        publishWindowsTuiPrivateFile({
+          access: input.access,
+          filename: 'mcp-connection-intents.json',
+          bytes,
+          writeLock: lock,
+          expectedEtag: original.etag,
+          recheck: () => {
+            if (read().etag !== original.etag) throw unavailable();
+          },
+        });
+        if (read().etag !== hash(bytes)) throw unavailable();
+        return next.result;
+      }
       mkdirSync(parent, { recursive: true, mode: 0o700 });
       privateStat(parent, true);
       temporary = join(parent, `.mcp-connection-intents-${randomUUID()}.tmp`);
@@ -180,11 +223,17 @@ export function openMcpConnectionJournal(input: {
       }
       if (read().etag !== hash(bytes)) throw unavailable();
       return next.result;
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      try {
-        if (temporary) rmSync(temporary, { force: true });
-      } finally {
-        lock.release();
+      if (process.platform === 'win32') releaseWindowsLock();
+      else {
+        try {
+          if (temporary) rmSync(temporary, { force: true });
+        } finally {
+          lock.release();
+        }
       }
     }
   };

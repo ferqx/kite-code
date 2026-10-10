@@ -14,6 +14,8 @@ Windows 的 POSIX mode 位不能证明 owner-only ACL。Profile、Store、协调
 
 代码已实现这些部分，POSIX 邻接已通过；本提案保持 proposed，因为实际 native Windows CI 场景尚未执行。本提案只负责 Profile/Workspace 分角色路径；Windows ArtifactStore 已有独立原生实现但尚未取得实际 Windows 资格，见[媒体发布提案](2026-10-04-windows-artifact-handle-publication.md)。Node/Electron 独立使用权正在实施，原因与资格边界见[各进程原生使用锁提案](2026-10-04-windows-node-owned-profile-and-artifact-leases.md)；maintenance 原生运行与完整安装器仍有独立未验或未实现范围。当前合同见 [Windows leaf](../../../../packages/agent/src/platform/windows-path-security.README.md)。
 
+TUI 原九份 `ui/*.json` 现沿闭合 host 的原生记录端口实现完整读写，原 codec／Store scope／etag／未知意图和格式不变。独立 record 端口允许 16 MiB，recovery 读取保 262144 字节；不扩大原通用 config 的 8 MiB，不借 artifact 1 GiB 端口绕过 journal 容量。Profile／短数据锁的 operation guard 先于可能打开探针的准入验证，准确 Close 未确认保原 SH／EX；撤销只使用本次成功新建 temporary 的原对象能力，创建未确认或 unknown 不按路径清理。当前事实归 [CLI owner](../../../../apps/cli/README.md#windows-tui-私有持久化)与 [Windows leaf](../../../../packages/agent/src/platform/windows-path-security.README.md#tui-私有记录端口)，完整 installed 调用者已接，实际 Windows 资格未执行。
+
 ## Alternatives considered
 
 - 在 Windows 继续使用 POSIX mode 检查：不能核实际 DACL，已有 `icacls` 反例计划要求真实权限拒绝。
@@ -21,6 +23,8 @@ Windows 的 POSIX mode 位不能证明 owner-only ACL。Profile、Store、协调
 - 自动修复既有 ACL：掩盖不安全或被替换的原对象，并改变用户 Workspace；拒绝且零 repair。
 - 私有策略通过配置字段或任意 SID/descriptor 注入：会把安全决策交给不可信声明；固定 current token 与 trusted host 选项。
 - 读取后只核 Node path：无法证明被读取的对象就是当前路径；采用原 HANDLE 和前后 identity 校验，保留非原子 publication 的真实限制。
+- 直接用原 8 MiB config read/write：会拒绝原 16 MiB journal 合同内的 9 MiB 记录；新 record 端口固定 16 MiB，上层各自保更小上限。复用 artifact 1 GiB 则扩大记录容量且角色不符，同样未采用。
+- 在权限复核后才登记原锁 guard：探针 Close 未确认时会先失去资源依赖；先做无 I/O authority／短锁归属检查并挂 guard，再复核原对象。普通 policy 拒绝仍能撤掉本次 state，不一律永久保锁。
 
 ## Acceptance criteria
 

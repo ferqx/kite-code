@@ -20,6 +20,10 @@ import {
   type FileRecoveryIntent,
   parseFileRecoveryIntent,
 } from '@kite-ai/client/file-recovery-intent';
+import {
+  publishWindowsTuiPrivateFile,
+  readWindowsTuiPrivateFile,
+} from './windows-tui-private-files';
 
 const unavailable = () => Error('file_recovery_journal_unavailable');
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -92,6 +96,15 @@ export function openFileRecoveryJournal(input: {
     return next;
   }
   const read = async () => {
+    if (process.platform === 'win32') {
+      if (closed) throw unavailable();
+      const bytes = readWindowsTuiPrivateFile(input.access, 'file-recovery-intents.json');
+      if (bytes === null)
+        return { records: [] as FileRecoveryIntent[], etag: null as string | null };
+      const records = await parse(bytes);
+      if (closed) throw unavailable();
+      return { records, etag: hash(bytes) };
+    }
     if (closed || typeof constants.O_NOFOLLOW !== 'number' || constants.O_NOFOLLOW === 0)
       throw unavailable();
     privateStat(input.access.profilePath, true);
@@ -139,6 +152,21 @@ export function openFileRecoveryJournal(input: {
     if (closed) throw unavailable();
     const lock = input.acquireWriteLock();
     let temporary: string | undefined;
+    let failure: unknown;
+    const releaseWindowsLock = () => {
+      try {
+        lock.release();
+      } catch (cleanupError) {
+        if (failure !== undefined)
+          throw new Error(
+            failure instanceof Error ? failure.message : 'tui_private_publication_unknown',
+            {
+              cause: new AggregateError([failure, cleanupError], 'tui_private_cleanup_unknown'),
+            },
+          );
+        throw cleanupError;
+      }
+    };
     try {
       const original = await read(),
         rows = structuredClone(original.records),
@@ -147,6 +175,21 @@ export function openFileRecoveryJournal(input: {
       const bytes = Buffer.from(`${JSON.stringify({ version: 1, records: rows })}\n`);
       if (bytes.length > 16 * 1024 * 1024) throw Error('file_recovery_journal_capacity');
       await parse(bytes);
+      if (process.platform === 'win32') {
+        if (closed || (await read()).etag !== original.etag) throw unavailable();
+        publishWindowsTuiPrivateFile({
+          access: input.access,
+          filename: 'file-recovery-intents.json',
+          bytes,
+          writeLock: lock,
+          expectedEtag: original.etag,
+          recheck: () => {
+            if (closed) throw unavailable();
+          },
+        });
+        if ((await read()).etag !== hash(bytes)) throw unavailable();
+        return next.result;
+      }
       mkdirSync(parent, { recursive: true, mode: 0o700 });
       privateStat(parent, true);
       temporary = join(parent, `.file-recovery-intents-${randomUUID()}.tmp`);
@@ -180,9 +223,15 @@ export function openFileRecoveryJournal(input: {
       }
       if ((await read()).etag !== hash(bytes)) throw unavailable();
       return next.result;
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      if (temporary) rmSync(temporary, { force: true });
-      lock.release();
+      if (process.platform === 'win32') releaseWindowsLock();
+      else {
+        if (temporary) rmSync(temporary, { force: true });
+        lock.release();
+      }
     }
   };
   return {

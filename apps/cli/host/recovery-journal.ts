@@ -20,6 +20,10 @@ import {
   type RecoveryJournal,
   type RecoveryPhase,
 } from '../src/recovery';
+import {
+  publishWindowsTuiPrivateFile,
+  readWindowsTuiPrivateFile,
+} from './windows-tui-private-files';
 export type RecoveryRecord = { intent: RecoveryIntent; phase: RecoveryPhase };
 const phases: RecoveryPhase[] = [
   'submitting',
@@ -91,6 +95,7 @@ function finite<T>(action: () => T): T {
       ].includes(error.message)
     )
       throw error;
+    if (process.platform === 'win32') throw new Error(unavailable().message, { cause: error });
     throw unavailable();
   }
 }
@@ -104,6 +109,14 @@ export function openRecoveryJournal(input: {
   let closed = false;
   const read = () => {
     if (closed) throw unavailable();
+    if (process.platform === 'win32') {
+      const bytes = readWindowsTuiPrivateFile(input.access, 'recovery.json', 262144);
+      if (bytes === null) return { records: [] as RecoveryRecord[], etag: null as string | null };
+      return {
+        records: parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))),
+        etag: hash(bytes),
+      };
+    }
     privateStat(input.access.profilePath, true);
     if (present(parent)) privateStat(parent, true);
     if (!present(path)) return { records: [] as RecoveryRecord[], etag: null as string | null };
@@ -140,6 +153,21 @@ export function openRecoveryJournal(input: {
   const mutate = <T>(change: (rows: RecoveryRecord[]) => { result: T; changed: boolean }) => {
     const lock = input.acquireWriteLock();
     let temporary: string | undefined;
+    let failure: unknown;
+    const releaseWindowsLock = () => {
+      try {
+        lock.release();
+      } catch (cleanupError) {
+        if (failure !== undefined)
+          throw new Error(
+            failure instanceof Error ? failure.message : 'tui_private_publication_unknown',
+            {
+              cause: new AggregateError([failure, cleanupError], 'tui_private_cleanup_unknown'),
+            },
+          );
+        throw cleanupError;
+      }
+    };
     try {
       const original = read(),
         rows = structuredClone(original.records),
@@ -147,6 +175,20 @@ export function openRecoveryJournal(input: {
       if (!next.changed) return next.result;
       const bytes = Buffer.from(JSON.stringify({ version: 1, records: rows }) + '\n');
       if (bytes.length > 262144) throw unavailable();
+      if (process.platform === 'win32') {
+        publishWindowsTuiPrivateFile({
+          access: input.access,
+          filename: 'recovery.json',
+          bytes,
+          writeLock: lock,
+          expectedEtag: original.etag,
+          recheck: () => {
+            if (read().etag !== original.etag) throw unavailable();
+          },
+        });
+        if (read().etag !== hash(bytes)) throw unavailable();
+        return next.result;
+      }
       mkdirSync(parent, { recursive: true, mode: 0o700 });
       privateStat(parent, true);
       temporary = join(parent, `.recovery-${randomUUID()}.tmp`);
@@ -180,9 +222,15 @@ export function openRecoveryJournal(input: {
       }
       if (read().etag !== hash(bytes)) throw unavailable();
       return next.result;
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      if (temporary) rmSync(temporary, { force: true });
-      lock.release();
+      if (process.platform === 'win32') releaseWindowsLock();
+      else {
+        if (temporary) rmSync(temporary, { force: true });
+        lock.release();
+      }
     }
   };
   return {

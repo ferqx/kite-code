@@ -19,6 +19,7 @@ import {
   mcpSourceMutationRecordIdentity,
   parseMcpSourceMutationRecord,
 } from './mcp-source-mutation-intents';
+import { publishWindowsTuiPrivateFile } from './windows-tui-private-files';
 export interface McpSourceMutationJournal {
   prepare(record: McpSourceMutationRecord): boolean;
   record(record: McpSourceMutationRecord, phase: McpSourceMutationRecord['phase']): void;
@@ -53,6 +54,7 @@ function finite<T>(action: () => T): T {
       ].includes(error.message)
     )
       throw error;
+    if (process.platform === 'win32') throw new Error(unavailable().message, { cause: error });
     throw unavailable();
   }
 }
@@ -78,6 +80,21 @@ export function openMcpSourceMutationJournal(input: {
   ) => {
     const lock = input.acquireWriteLock();
     let temporary: string | undefined;
+    let failure: unknown;
+    const releaseWindowsLock = () => {
+      try {
+        lock.release();
+      } catch (cleanupError) {
+        if (failure !== undefined)
+          throw new Error(
+            failure instanceof Error ? failure.message : 'tui_private_publication_unknown',
+            {
+              cause: new AggregateError([failure, cleanupError], 'tui_private_cleanup_unknown'),
+            },
+          );
+        throw cleanupError;
+      }
+    };
     try {
       const original = read(),
         rows = structuredClone(original.records),
@@ -85,6 +102,20 @@ export function openMcpSourceMutationJournal(input: {
       if (!next.changed) return next.result;
       const bytes = Buffer.from(`${JSON.stringify({ version: 1, records: rows })}\n`);
       if (bytes.length > 16 * 1024 * 1024) throw Error('mcp_source_mutation_capacity_exceeded');
+      if (process.platform === 'win32') {
+        publishWindowsTuiPrivateFile({
+          access: input.access,
+          filename: 'mcp-source-mutation-intents.json',
+          bytes,
+          writeLock: lock,
+          expectedEtag: original.etag,
+          recheck: () => {
+            if (read().etag !== original.etag) throw unavailable();
+          },
+        });
+        if (read().etag !== hash(bytes)) throw unavailable();
+        return next.result;
+      }
       mkdirSync(parent, { recursive: true, mode: 0o700 });
       privateStat(parent, true);
       temporary = join(parent, `.mcp-source-mutation-intents-${randomUUID()}.tmp`);
@@ -118,11 +149,17 @@ export function openMcpSourceMutationJournal(input: {
       }
       if (read().etag !== hash(bytes)) throw unavailable();
       return next.result;
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      try {
-        if (temporary) rmSync(temporary, { force: true });
-      } finally {
-        lock.release();
+      if (process.platform === 'win32') releaseWindowsLock();
+      else {
+        try {
+          if (temporary) rmSync(temporary, { force: true });
+        } finally {
+          lock.release();
+        }
       }
     }
   };
