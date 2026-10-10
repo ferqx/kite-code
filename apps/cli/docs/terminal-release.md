@@ -71,6 +71,14 @@ B仅修改manifest版本标签，TUI仅help/version；此工具即使通过也�
 
 运行命令为 `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>`；workflow 在双方完整 build／verify／smoke 后强制执行，守卫拒绝删步骤、错候选／平台、过滤、忽略失败和顺序错误。最后 Native 撤登记恢复独立前门，两者卸载保原 Store／配置／九份 TUI 私有数据。该链未切换两个真实代码候选，不代跨代码、Shell／MCP、完整恢复发布窗口、RSS／全资源或阶段门禁。当前 macOS 仅完成源码／CI／适用原测试，Win/Linux 实机按用户安排交后续 GitHub Actions；[持久取舍](../../../.agents/notes/proposed/testing/2026-10-11-windows-installed-tui-caller.md)与 [准确证据](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-installed-tui-私有持久化与正式调用者)保资格未闭合。
 
+## Windows 真实代码升级与冷回退调用者
+
+[统一调用者](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)消费同 release job 已 build／verify／smoke 的准确 Terminal／Native，两者 inner 身份必须一致。固定 [Windows 前驱](../../../tests/fixtures/unified-agent/windows-predecessor.ts)为原提交 `837a2b8cde946d70d00920941a1a3e5e7c684f5d`，11项锁定输入全部逐字相同、Core format1 SQL基线相同；没有 POSIX 前驱的两处清单例外。临时 clone 只物化验收输入，使用旧源码自己的两个 builder 和原 Windows Native build port，成功构建后删除旧源码，不修改 manifest、标签版本或生产 helper。两版保原 `0.1.0`，完整 candidate 身份和实际 Agent JS 字节必须不同。该前驱本身已支持 Native DB9，属于同格式跨代码兼容，不证明 DB9 旧代码拒绝或已发布 predecessor／T029。
+
+[Terminal 链](../../../tests/fixtures/unified-agent/windows-terminal-cross-version.qualification.ts)从稳定 `kite.exe` 执行 A 原任务，原 A paired CLI／Service 和使用锁仍 live 时选择 B，正常退出后 B 读取原历史并明确继续，再冷回退 A 读取 B、继续原会话，最终 B 冷读全部三任务。B 的352041 UTF-8字节完整 Unicode 正文必须实际进入回退后 A 的新 Provider 请求。各自安装候选的公开 Runtime 读取普通完整短正文及 sealed 长正文，核原 Store／Command／Run／Execution、完整 body／bytes／hash／出处及 readonly 游标；正式 `context read` 核完整原消息身份，不冒称该页面打印 sealed 全文。冷读零模型重放，指针切换不恢复数据；原 Job／HANDLE／FILETIME核进程，成功必须实际 exit0、双流 EOF、自然 Job0／未 Terminate、严格 Close、所有候选 EX及唯一卸载保原 DB／config。
+
+执行 `bun run tests/fixtures/unified-agent/windows-cross-version.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>`；统一绝对期限1140000ms，分别保物化180秒、Terminal360秒／每命令30秒、Native基础420秒和维护180秒，并包含收尾。原同代码安装120秒、TUI及POSIX调用者／预算／断言保持；新mandatory步骤位于三条原Windows caller之后，CI守卫核准确双输入、六个无条件 build／verify／smoke、真实 Windows matrix／MSVC和顺序。当前源码与macOS读取验证不授Windows原生资格；实际构建／安装／回退交后续GitHub Actions，原RSS／观测／Shell合同和完整阶段门禁保持。Native窗口与维护行为归[Native owner](../../desktop/docs/native-release.md#windows-managed-native-当前实现)，准确证据归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)。
+
 ## 验证边界
 
 完整选择器与独立 Service／Daemon 使用[同一 Terminal verifier](../../service/src/runtime-assets.ts)，普通资产完整 SHA 的大小文件分流与多块／短尾拒绝证据归[Service owner](../../service/README.md)。目录、链接、实际引擎与使用锁守卫保持；当前正式入口的分段时钟及完整默认结果归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。

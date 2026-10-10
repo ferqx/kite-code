@@ -4468,3 +4468,42 @@ CLI／platform／Terminal／Native owner、release／runtime-resilience active�
 | 5 | §35完整37能力／T/E独立审查、最终旧路径退役及阶段收束 | 全部适用完整能力与样本实证、真实legacy消费者清零／删除、未过滤完整阶段回归及适用P7发布责任 | 前四项适用门禁及剩余完整能力汇合；本片源码／局部测试不宣布整体完成 |
 
 37能力仍partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。本轮只结束当前完整TUI源码切片并作已授权本地提交，无push／PR／发布／平台安装或Actions dispatch；Windows/Linux原生验收按用户最新安排保留至后续GitHub Actions。
+
+## 2026-10-11：Windows 真实代码升级与冷回退正式调用者
+
+### 已收束切片与本轮能力边界
+
+前一TUI切片已在durable checkout本地提交`ae1842300c5034d8cc392d3fa6b2df0ead8e2702`，原必要验证、文档及正常七项hooks完成，不继续扩该journal／ConPTY故障矩阵。本轮直接实施其优先项“Windows完整真实代码安装／版本切换”，生产安装合同不变，新增正式qualification consumer接release job；Windows/Linux实际运行按用户最新安排交后续GitHub Actions，当前macOS不模拟或dispatch。
+
+[统一入口](../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)精确消费同job已build／verify／smoke的Terminal和Native，inner摘要必须一致。新[物化器](../../tests/fixtures/unified-agent/windows-predecessor.ts)固定原`837a2b8cde946d70d00920941a1a3e5e7c684f5d`，11项锁定输入全部原字节相同，Core format1 baseline SHA `92773869c4d4e68947e9721d5bb6d28e10567c6dc3a82b56726b1a0fb7adee42`保持；不采用POSIX前驱两处清单例外。准确输入审计`/private/tmp/kite-windows-predecessor-input-audit-20261011.json`与原冻结收据保留。临时clone只作构建输入，旧源码自己的Terminal／Native builders与原`windowsNativeCandidateBuildPort`生成两种候选，构建前后原source clean，成功后删除旧source再完整核候选。原productVersion0.1.0保持，actualAgent字节／candidate／clean source.commit须不同；旧源码、manifest、依赖或生产helper没有改写。原837已支持Native DB1–9，此组合只验同格式跨代码兼容，不能称DB9旧writer拒绝、已发布predecessor或T029。
+
+[Terminal真实链](../../tests/fixtures/unified-agent/windows-terminal-cross-version.qualification.ts)使用稳定`kite.exe`完成A原任务，在A原CLI／pairedService及use SH仍alive时升级B，普通退出后B冷读并明确新任务，回退A冷读完整B并继续原会话，最终B冷读全部三条原任务。B352041 UTF-8字节Unicode完整body必须真正进入回退A的下一Provider请求；SSE分块不切UTF-16代理对。正式context read核全部原消息身份，各自候选公开Runtime独立读原plain／sealed完整输出、Store／Command／Run／Execution／出处／bytes／hash／cursor，不把页面preview称全文。指针切换无数据restore；冷读Provider不增加，原Job成员HANDLE／FILETIME仅定位本次进程，成功需exit0／完整双EOF／自然Job0／未Terminate／strict Close／EX及唯一保数据卸载。
+
+[Native原caller](../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)保默认同代码A→B的120秒基础与180秒维护分支，新增显式predecessor的真实A→B→A→B四基础窗口／三次明确任务，后继真实请求含此前完整body，最终B的cold历史／cursor／Provider精确保持。随后B installed CLI沿原backup／inspect／restore新Store／status，再第五B冷窗口核全部原Command／Run／Execution／完整结果与原出处，Provider恰3；最终只卸载一次保Core／Native DB／config原字节。三份任务正文为完整短正文，普通`output=null`事实与sealed描述符分支分别核对，不冒称350KiB／17MiB窗口展示资格。所有原95条assert表达式保全，最终AST结果归`/private/tmp/windows-native-cross-code-asserts-20261011.log`，没有删断言或平台过滤换绿。
+
+统一入口1140000ms绝对期限含物化180秒、Terminal360秒／每命令30秒、Native基础420秒／每独立UIA45秒／launch、页面和退出10秒及维护180秒／CLI30秒／收尾，各阶段取原预算与同一整体截止的更小值。关闭未知保原owner，不通过第二清理者或数字PID改成成功；启动失败等待原cleanup，首次原因与收尾失败保留。原Windows同代码／TUI callers、原POSIX完整文件／默认计划源码和原30分钟release job／always formal门禁保持。
+
+[release workflow](../../.github/workflows/release-candidate.yml)新增mandatory真实跨代码步骤，在原Terminal、Native和installed TUI三caller之后；[现行守卫](../../scripts/check-unified-workspaces.ts)核actualWindows matrix／MSVC、六项无条件build／verify／smoke、原caller完整顺序、准确双输入和实际入口存在。[原CI整文件](../../tests/integration/scripts/unified-ci.test.ts)14个case保持，新增一项有界mutation覆盖删除、错平台／相对输入、echo／filter、忽略失败、缺fixture和前置错序。源码接线闭合，原生资格仍未闭合，当前无最终legacy删除。
+
+### 与真实缺口对应的验证和证据复用
+
+- 新[纯输入完整文件](../../tests/isolated/unified-agent/windows-predecessor-inputs.test.ts)actual0，3pass／38expects／0fail／0skip，最终完整log `/private/tmp/kite-windows-cross-code-inputs-whole-20261011.log`；核原11SHA、每项任意字节变化拒绝和非Win在路径／构建前拒绝。原物化器target=Node ESM／实际Node冷import的有限通过及冻结SHA仍复用，准确范围不含Windows MSVC／候选运行。
+- 原CI完整文件actual0，15pass／134expects／0fail，660ms，log `/private/tmp/kite-windows-cross-version-ci-whole-20261011.log` SHA `94b98ddff875ba5a8d9a5dfca1d4f727988fca6dec40f8630b465562ea7c3fb4`；原14case／103expect保留。守卫与脚本不授原生资格。
+- Root只读审查发现并修正真实源码错误：success必须先自然exit／双EOF再严格Close后检查closed；WindowsOwnedChildEvidence无io字段；rawStoredOutput原command来自identity；候选没有model-output.js公开leaf，普通complete短结果合法output=null。Terminal改用实际候选index.js公开Runtime，Native显式分支保普通完整输出，而不是修改候选或增大短正文绕过合同。WIP原类型失败log `/private/tmp/kite-windows-cross-code-root-types-20261011.log`和`/private/tmp/kite-windows-native-cross-code-fix-types-20261011.log`保留，修正后的根／八workspace完整类型actual0归`/private/tmp/kite-windows-cross-code-types-all-20261011.log`；最终输入按收据复核。
+- 原导出的reader字节SHA `a483bdf6d2d7477e6ca1b6443720564927d55c818baae18e0ae8f01a2e96d9bb`，在真实macOS Terminal临时候选完整冷执行actual0、stderr为空：正式builder／seed均0，普通37B的原output=null与sealed204033B，完整body／reasoning／toolCalls、原saved全对象、Store／Command／Run／Execution、bytes／SHA与独立warm事实一致，readonly metadata／cursor36保持。候选摘要`ef3b71853c8e4e240bb7960fab33c4a7cb775b2e4baea1f0952ef9ab2f48bd46`、六项相关生产输入及生成reader字节、原stdout／expected和日志SHA归`/private/tmp/kite-windows-reader-macos-7w6sz4h1/evidence.json`。只覆盖本次普通／sealed reader修复，不计Windows/Linux实机或跨版本资格；其生产输入和reader字节未变，后续fixture分块修正不重复该已闭合读取验证。
+- 新完整入口与Terminal function在macOS实际冷import／前置拒绝actual0，log `/private/tmp/kite-windows-cross-code-cold-check-20261011.log`；缺输入路径未创建。额外将整统一工具及所有npm拓扑target=Node bundle的尝试在可选react-devtools-core解析处实际exit1，原log `/private/tmp/kite-windows-cross-code-node-build-20261011.log`保留；该Windows caller正式运行Bun，不将这次额外构建计通过，不安装依赖或改产品闭包／正式断言来绕过。实际Bun入口和包内reader各自原始运行已验。
+- 受影响源码Biome、docs／all-impact／staged-impact、boundary／workspace／API／test ownership／plan-evidence及正常Git hooks按本地交付实际范围收束；最终source、复用输入、日志SHA和实际exit归`/private/tmp/kite-windows-cross-code-source-freeze-20261011.json`。原POSIX文件、默认调度、原Native95assert、原CI14case／workflow budget及新reader输入的保全归`/private/tmp/kite-windows-cross-code-preservation-20261011.json`。当前不是阶段退出点，不以局部通过代完整阶段回归。
+
+Terminal／Native owners、tests、release／resilience active、原前驱implemented Note的仍适用范围及Native caller proposed Note同步；后者保proposed，实际Windows验收未取得。手册安装／版本切换／普通任务与维护恢复合同未变化；没有新参数权限、自动restore、用户按键或安装范围，未制造手册diff。原Job、MCP已闭合控制流与九journal／TUI等冻结证据按未变化输入复用；原RSS失败、Mac stdio完整2pass／5fail／21expects、两项历史测试六红及原断言／默认调度保持，不重跑参数或旧路径制造绿。
+
+### 最多五项剩余退出缺口与依赖
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与明确验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed Shell与依赖它的Task／Workflow | 广泛HOME／宿主工具读取、Workspace／Full写求交和private无条件拒绝；完整Job输出／全树取消／unknown强持／cold零重放 | 用户已决定保原合同与guard。现有token／Job原语不足，不改产品或扩大管理员／驱动／VM安装；该独立源码门禁未闭合，不由本跨代码caller代证 |
+| 2 | macOS正式MCP stdio连接、工具工作和普通断连／退出 | 原SDK／Core durable准入后才spawn，RPC取消不停止整个连接、准确stop及父EOF结束所属后代，原registration移除／strict cleanup和cold零重放 | 原完整文件2pass／5fail保留，准确`mcp_stdio_ended`／`stdio_fixture_registration_cleanup_unconfirmed`／`shutdown_cleanup_unconfirmed`日志未闭合；须按原源码与日志修真实原因，不能删owner断言、改参数或恢复退役路径换绿。可独立核对，不依赖RSS收集 |
+| 3 | installed混合普通任务／Shell／child／MCP的资源出口 | 原8outer／各9点、每outer busy≥450000ms、总60—168分钟、32MiB增长／斜率、整个Runtime原出生后代／activeResources／handles与完整资源退出 | 原`+115.203125MiB >32MiB` red及观测缺项继续阻P6／§35／最终退役和依赖其结果的P7；不阻独立安装／版本／维护源码，不重复对照 |
+| 4 | GitHub Actions的Win／Linux完整安装、版本、TUI／Native及维护恢复／适用MCP | 当前准确候选实际安装／登记、完整原历史与继续任务、PTY／窗口、backup／restore新Store／GC、自然原owner退出与保数据卸载；真实跨代码及原生失败保全部断言 | 本片补足真实跨代码source caller，实际Win/Linux仍按用户安排后续Actions，不由Macmock／读取代证或本机dispatch；Shell场景依①、原MCP适用链依②、完整资源平台出口按适用③汇合 |
+| 5 | §35全能力／T/E独立审查与正式旧路径退役／阶段收束 | 全部适用完整37能力及样本实际证据、真实legacy调用者清零／删除、未过滤完整阶段回归及适用P7责任 | 前四项适用门禁和剩余完整能力汇合；新source caller／局部通过不宣布整体完成，回归属于收束验收而非独立长期目标 |
+
+37能力status仍partial；wholeDefault=false、wholeV13=false、phaseExit=false。当前只收束真实代码安装／版本／维护的完整源码调用者切片，继续原V1.3实施目标；只作已授权本地提交，无push／PR／发布／平台安装或Actions dispatch。

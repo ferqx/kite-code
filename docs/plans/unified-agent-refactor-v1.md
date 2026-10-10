@@ -2106,6 +2106,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+Windows真实跨代码安装／冷回退的下一源码缺口现已实施：同release job的准确Terminal／Native供统一caller，原837a2b8c源码自身两builder且11项锁输入／Core基线逐字相同，actualAgent／candidate／clean commit不同而同0.1.0。Terminal原A任务、live选择B、B新任务、冷回退A的完整B输入与继续原任务、最终B零重放；Native四基础窗口／三明确任务后从B installed CLI恢复新Store并第五窗口冷读／单次保数据卸载。原前驱已支持DB9，因此这条链不计DB9旧代码拒绝或已发布T029。原同代码、TUI／POSIX／默认计划和预算保持，新1140000ms统一绝对截止只对应完整用户链的物化／版本／维护／收尾，不形成独立长期测试目标。源码与本机公开Runtime plain／sealed完整读取、类型／CI守卫只闭合本片接线，Windows/Linux实际验收依用户安排交后续Actions；RSS／全观测／Shell原合同guard、§35／最终退役及阶段完整回归保持未闭合。准确源、原断言保全与最多五项剩余依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)，37partial、wholeDefault／wholeV13／phaseExit=false。
+
 Windows managed Native 的正式安装／版本选择／维护恢复源码缺口现已接入：四个稳定 C／compiled Bun 前门、closed marker 与双层完整使用权；C→Bun→Electron 两跳原创建证书和全部原文件准入先于 Main 窗口／Profile／SQLite／Service，登记调用以 expected candidate 拒绝版本漂移。原文件／private transfer／子进程关闭未知保同次调用使用权，双 prefix 登记保全部 EX；卸载删除管理树而保独立数据。真实 Windows 构建、窗口、原历史／普通任务、版本切换／新 Store 维护恢复，以及 Win/Linux 完整资格仍待重构后；原 RSS／完整观测直接阻 P6／§35，不是上述独立源码的前置。准确范围、真实失败、当前最多五项依赖与完整文件验证归[当前 Native 进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-managed-native-正式安装与可信启动源码)，37 能力仍 partial、wholeV13／phaseExit 仍 false。
 
 Windows 正式Daemon的下一源码缺口现已接入：当前SID私有pipe／原record与process HANDLE，正式`kite.exe server`及`--server`沿同一HTTP调用者；父与实际Daemon各持完整candidate使用权，未知native关闭保活。原安装qualification增加B启动／Web→回退A仍复用B→共享完整任务→busy拒绝／明确cancel→原实例实际dead／新A原完整冷结果→正常stop／双EX，保持原120秒、所有原断言和独立维护链。Windows native资格仍未执行，Native完整加载前准入源码已由上段接入，Shell-MCP／PTY及完整平台资格继续待实施或验收；原RSS／观测独立阻P6／§35，不作为这些源码实现的前置。最多五项入口／验收及准确验证范围归[当前Daemon进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-正式-daemon-与原实例版本交接源码)，37能力仍partial、wholeV13／phaseExit仍false。

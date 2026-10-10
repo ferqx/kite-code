@@ -390,6 +390,41 @@ export function checkUnifiedFormalConsumers(root: string): {
               )
             )
               add('formal-ci-windows-installed-tui-missing', location, jobName);
+            const crossVersionQualification = steps.findIndex(
+              (step) =>
+                step.if === "runner.os == 'Windows'" &&
+                typeof step.run === 'string' &&
+                step.run.trim().replace(/\s+/g, ' ') ===
+                  `bun run tests/fixtures/unified-agent/windows-cross-version.qualification.ts "--terminal=\${{ github.workspace }}/dist/unified-terminal" "--native=\${{ github.workspace }}/dist/unified-native"` &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            const crossVersionPrerequisites = [
+              prepare,
+              ...terminalPrerequisites,
+              qualify,
+              ...nativePrerequisites,
+              nativeQualification,
+              tuiQualification,
+            ];
+            if (
+              !windowsRunner ||
+              crossVersionQualification < 0 ||
+              crossVersionPrerequisites.some(
+                (index) => index < 0 || index >= crossVersionQualification,
+              ) ||
+              crossVersionPrerequisites.some(
+                (index, position) =>
+                  position > 0 && index <= crossVersionPrerequisites[position - 1]!,
+              ) ||
+              ![
+                'scripts/release/prepare-windows-native-ci.ts',
+                'tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts',
+                'tests/fixtures/unified-agent/windows-native-installation.qualification.ts',
+                'tests/fixtures/unified-agent/windows-installed-tui.qualification.ts',
+                'tests/fixtures/unified-agent/windows-cross-version.qualification.ts',
+              ].every((path) => existsSync(resolve(root, path)))
+            )
+              add('formal-ci-windows-real-code-missing', location, jobName);
             for (const [platform, command, code] of [
               [
                 "runner.os == 'macOS' || runner.os == 'Linux'",

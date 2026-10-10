@@ -16,6 +16,8 @@ Terminal与Native都要求包内Agent代码字节实际变化、候选身份不�
 
 Native使用候选manifest中的实际Electron入口、明确Node ESM、平台ps argv与准确父PID；四次窗口显式开启并检查Chromium sandbox。原360/420秒整例、30秒命令、120秒Native driver及15秒窗口上界保留。release candidate明确调用三项整文件命令：POSIX Terminal、macOS Native、Linux Xvfb Native；Required unit仍完整发现并有显示环境。guard拒绝关闭、错平台、echo、过滤和缺显示。
 
+Windows新增源码接线固定独立837a2b8c前驱，其11项锁输入全部原字节相同且已具Windows两类builder／DB9；不套用本Note的POSIX清单两处例外或DB7拒旧结论。原源码build port与自身builder生成两类输入，Windows安装／版本切换／维护完整调用者与平台未验范围归[现行提案](../../proposed/testing/2026-10-10-windows-native-installed-caller.md)和[Terminal owner](../../../../apps/cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)。本Note原POSIX决定／历史证据继续适用，Windows原生资格尚未取得，不能沿用历史Mac/Linux运行证据。
+
 ## Alternatives considered
 
 - 在Linux照搬3140前驱与当前官方Bun：原完整测试实际在sqlite_release_identity_invalid失败，不能启动兼容链。保留失败并选择原始、已准入Linux来源的固定前驱。

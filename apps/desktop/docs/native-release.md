@@ -43,6 +43,10 @@ rollback 在发布前完整预检仍由原 nonce 持有的 Terminal；正常 Ter
 
 Windows 注册 CLI/TUI 另由 [完整 installed TUI caller](../../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)消费准确 Terminal／Native 候选：同一个独立稳定 `kite-tui.exe` 先用 Terminal，再用登记后的 Native 双层闭包；实际键盘任务、全文／思考、导出、准确取消、草稿及冷读零重放，正常退出须原 Job 未 Terminate／完整 EOF／Job0／双 EX，撤登记和最终卸载保原数据。此调用者已接 release job，但 Windows 实际运行尚未取得，按用户安排交后续 Actions；它不把窗口、真正跨代码切换、Shell／RSS 或阶段资格记为通过。完整合同及预算归 [Terminal owner](../../cli/docs/terminal-release.md#windows-installed-tui-正式调用者)。
 
+同一安装调用者现支持显式 `--predecessor=<absolute-original-native>` 真代码分支，由 [统一入口](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)先调用原 `837a2b8c` 源码自己的 Terminal／Native builder；11项锁输入逐字相同，原两版 `0.1.0`、clean source且不同 commit、candidate 和实际 `agent/index.js` SHA均独立核对，不生成合成版本。前驱本身已支持DB9，不能称DB9旧writer拒绝；这条本地未发布比较只核同格式跨代码兼容。
+
+真分支从零参数稳定 `kite-desktop.exe` 完成 A任务／A原Main与Service alive、双SH时选B／B冷读并明确新任务／回退A冷读B并明确第三任务／最终B冷读全部原历史四窗口，后继真实Provider请求必须含此前完整正文，冷读游标／Provider保持。普通完整短结果与sealed描述符按实际存储分别核原身份／正文／bytes／hash，不要求短正文必须有sealed引用；三任务为完整固定短正文，不授350KiB或17MiB窗口展示资格。四窗原owner自然退出／未Terminate和双EX后，B installed CLI按原backup／inspect／restore新Store／status链执行，再从B第五冷窗口核全部原Command／Run／Execution及结果／出处，Provider恰3；最终只卸载一次并保Core／Native DB／config原字节。显式基础420秒、各独立UIA driver45秒／launch与页面及退出10秒、维护180秒／CLI30秒，取统一绝对期限的更小值，默认120秒／180秒及原95条断言保持。原生Windows整链尚未执行，资格保留；与Terminal共享物化、mandatory CI及真实输入边界归[Terminal owner](../../cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，准确本机修正与证据归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)。
+
 ## 完整身份与生命周期
 
 [Native verifier](../../service/src/native-runtime-assets.ts)核 outer 的准确普通文件、目录及受限相对框架链接，并独立完整核 inner Terminal。tar 只存普通字节和封闭链接声明；拒绝 traversal、真实 tar links、重复/PAX 冲突、外部 hardlink、篡改及未声明条目，物化后重新核两层。目录中的 Electron 空 locale 也必须在准确清单内。
