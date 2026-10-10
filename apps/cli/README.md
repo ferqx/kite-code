@@ -100,12 +100,14 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 [实际权限 PTY](test/isolated/tui-permissions-host.test.ts) 使用 built Service、可信显式 Shell 资产装配、固定本机 compatible SDK 与临时 SQLite/ledger，验证 mode/trust 确认、空 Enter 零批准、准确 Tool/Job 两张同命令授权、不同 operation key 相同执行语义再次执行免卡、清除后再审批及精确取消；不会从 JSONC 自授 Shell。与 [管理 PTY](test/isolated/tui-management-host.test.ts) 及共享 UI 原 child complete/EOF 配对合计 4 项／41 个断言通过。原 CLI host/参数、UI paired 与 permission API 基线组合 15 项／131 个断言通过，保留全文尾部、EOF 零批准与所属 PID 清理证据。
 
-SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基线，再完整读取目录及所选事实，使用 Client startAfter 作为读取起点；快照不推进 lastAppliedCursor。实际回调成功前 EOF 仍沿该起点，成功事件/checkpoint 才 ACK；Store 改变保失联，不重绑旧意图。[tui-observation.test.ts](test/tui-observation.test.ts) 核对顺序、无 ACK、wrong Store、失败与 abort。原正式 CLI/TUI 入口仍未切换；当前证据只支持本机 macOS 固定 SDK/PTY，不代表 Linux、Windows 或完整终端设置体验。
+SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基线，再完整读取目录及所选事实，使用 Client startAfter 作为读取起点；快照不推进 lastAppliedCursor。实际回调成功前 EOF 仍沿该起点，成功事件/checkpoint 才 ACK；Store 改变保失联，不重绑旧意图。[tui-observation.test.ts](test/tui-observation.test.ts) 核对顺序、无 ACK、wrong Store、失败与 abort。正式 CLI/TUI 现消费同一 host，前门选择和登记见[正式前门](#正式前门与-native-登记)；上述观察与 PTY 证据限本机 macOS 固定 SDK，不代表 Linux、Windows 或完整终端设置体验。
 
 
 开发 TUI `/export` 不带参数，导出当时已加载对话的 Markdown，而不是 raw Session backup。UI 只提供原 Store/Session/generation 与已加载文本；[宿主 exporter](host/tui-export.ts) 使用已选 profile 的用户配置目录（当前实际 `profilePath/config.jsonc` 所在目录），生成 `session-<时间>-<随机ID>.md`，以 exclusive 0600 写入，完整写入并关闭后才报告路径。renderer 和 Model 不能提供写路径。运行中冻结原文本，Tool 卡、审批、完整诊断不保证包含；未加载全文只保真实 preview 并明确说明，导出不发额外 body GET，不启动/重放任务。切换会话的迟到结果不报告到新会话；取消/失败移除本次不完整文件，显示 Export failed。
 
 [文件测试](test/isolated/tui-export.test.ts) 验证真实9MiB全文/reason尾部、0600、原Store/abort/写失败；共享 [纯serializer/controller测试](../../packages/ui/test/tui/export.test.ts) 验证准确loaded身份、未读正文0GET与late隔离。[实际标准80×24 PTY](test/isolated/tui-export-host.test.ts)使用完整本机 Terminal 候选包的正式 `entrypoints/tui.js`、包内 Bun/Service 和默认 Profile，从 checkout 外启动。它保原未读 preview、Ctrl+O 后9MiB完整正文、两次真实0600文件、新路径提示、固定模型精确2次调用和所属 Service 退出/冷重开；空 Enter 另核原尾部工具结果收起／展开后的原 Artifact refs，Ctrl+T 另核思考正文显示／隐藏及原 content 保持。新画面的判断等待切换后的明确提示，不能把上次残留 footer 当新代次；原30秒观察、30秒导出和90秒整例预算及业务断言保持。隐藏思考不从既有 loaded 输出删除原 reasoning，导出仍包含它。它不执行安装指针切换或 GUI 终端资格；准确当前结果归[阶段进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-的工具结果与思考查看)。大正文投影复用后，草稿和notice不再重复解析正文。正式 Terminal 已消费当前共享 TUI，完整能力及最后旧路径退役仍由整体门禁负责。
+
+恢复后的主会话与 sealed Fork 通过同一 [host 完整 reader](host/tui.tsx)读取原 Model，不再把原出处 Store 与当前连接 Store 等同。公共 Client/Core 证明原来源，TUI 独立核当前响应 Store、原 Session/Run/Execution 与完整摘要；Ctrl+O、Ctrl+T 首次读取和已加载导出均只消费原结果。[实际两次冷恢复整例](../../tests/isolated/unified-agent/restored-tui-model-output.test.tsx)核 Ink 按键、完整正文/思考/calls/metadata、当前 cursor、切换/卸载迟到取消与全 GET/零重放，透明 export port 仅核原 serializer；原正式 Terminal PTY 另核真实 9 MiB/0600 文件及自身正常退出。这些范围不合称 installed 恢复 PTY；准确资格与未闭门禁归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-完整-model-输出与导出)。
 
 ## TUI 原生滚动与清屏
 

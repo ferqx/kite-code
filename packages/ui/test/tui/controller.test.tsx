@@ -555,9 +555,11 @@ test('Ink actual keyboard session selection and full terminal-safe history prese
   c.dispose();
 });
 
-test('complete 201-message history and verified giant Fork output use observed origin; unsupported and late reads show no guessed body', async () => {
+test('complete 201-message history and verified giant Fork output preserve restored origin; unsupported and wrong current Store show no guessed body', async () => {
   const f = fixture();
   const base = snapshot('fork', false);
+  const body = `${'x'.repeat(17 * 1024 * 1024)}完整尾部`;
+  const contentBytes = String(Buffer.byteLength(body));
   const original = {
     ...base.messages[0]!,
     id: 'fork-message',
@@ -573,7 +575,7 @@ test('complete 201-message history and verified giant Fork output use observed o
       kind: 'model_output' as const,
       executionId: 'original-exec',
       complete: true,
-      contentBytes: '17825800',
+      contentBytes,
       reasoningBytes: '0',
       toolCallCount: 0,
     },
@@ -585,7 +587,6 @@ test('complete 201-message history and verified giant Fork output use observed o
     content: `message ${i} original full text`,
   }));
   f.port.readSession = async () => ({ ...base, messages });
-  const body = `${'x'.repeat(17 * 1024 * 1024)}完整尾部`;
   const reads: { sessionId: string; executionId: string }[] = [];
   f.port.readModelOutput = async (sessionId, executionId) => {
     reads.push({ sessionId, executionId });
@@ -601,8 +602,12 @@ test('complete 201-message history and verified giant Fork output use observed o
       attempt: 1,
       status: 'succeeded',
       bodyHash: 'verified-by-host',
-      bodyBytes: '17825800',
-      contentBytes: '17825800',
+      bodyBytes: String(
+        Buffer.byteLength(
+          JSON.stringify({ content: body, reasoning: '', toolCalls: [], complete: true }),
+        ),
+      ),
+      contentBytes,
       reasoningBytes: '0',
       snapshotCursor: '1',
       output: { content: body, reasoning: '', toolCalls: [], complete: true },
@@ -625,11 +630,21 @@ test('complete 201-message history and verified giant Fork output use observed o
   expect(reads).toHaveLength(1);
   expect(c.state.fullOutputs.size).toBe(0);
   const foreign = { ...original, originMessage: { ...original.originMessage, storeId: 'foreign' } };
+  const reader = f.port.readModelOutput;
   f.port.readSession = async () => ({ ...base, messages: [foreign] });
+  f.port.readModelOutput = async (...args) => ({ ...(await reader(...args)), storeId: 'foreign' });
   await c.select('fork');
   await c.loadOutput(foreign);
-  expect(reads).toHaveLength(1);
-  expect(c.state.error).toBe('tui_origin_store_unavailable');
+  expect(reads).toHaveLength(2);
+  expect(c.state.error).toBe('tui_output_identity_mismatch');
+  expect(c.state.fullOutputs.size).toBe(0);
+  f.port.readModelOutput = reader;
+  await c.select('fork');
+  await c.loadOutput(foreign);
+  expect(reads).toHaveLength(3);
+  expect(c.state.fullOutputs.get('fork-message')).toBe(body);
+  expect(c.state.snapshot?.messages[0]?.originMessage).toEqual(foreign.originMessage);
+  expect(c.state.error).toBeUndefined();
   c.dispose();
 });
 

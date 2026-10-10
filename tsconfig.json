@@ -68,6 +68,7 @@
     "tests/fixtures/extensions/mini-review/**/*.ts",
     "tests/fixtures/extensions/upgrade/**/*.ts",
     "tests/isolated/unified-agent/**/*.ts",
+    "tests/isolated/unified-agent/**/*.tsx",
     "tests/integration/docs-structure.test.ts",
     "tests/integration/document-sync-skill.test.ts",
     "tests/integration/scripts/check-test-ownership.test.ts",

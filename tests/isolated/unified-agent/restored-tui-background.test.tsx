@@ -332,11 +332,11 @@ test('restored TUI background directory and complete output/child readers preser
         jobOrigins: controller.state.snapshot?.view.executions
           .filter((execution) => execution.kind === 'job')
           .map((execution) => execution.originStoreId),
-        listed: app.lastFrame().includes(savedJob.definitionId),
+        listed: app.lastFrame()!.includes(savedJob.definitionId),
       });
       expect(app.lastFrame()).toContain(savedJob.definitionId);
       expect(app.lastFrame()).toContain(savedCarrier.definitionId);
-      const directory = app.lastFrame().split('Original background Jobs · Session')[1] ?? '';
+      const directory = app.lastFrame()!.split('Original background Jobs · Session')[1] ?? '';
       expect(directory).toContain(savedJob.definitionId);
       expect(directory).toContain(savedCarrier.definitionId);
       expect(directory).toContain(jobId);

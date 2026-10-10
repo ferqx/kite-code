@@ -3839,3 +3839,40 @@ Close后正文撤除；另一读将实际Main已完成Core GET的open回复透�
 根与八workspace类型实际0，三TS Biome0；文档／影响／计划证据、边界／workspace／API、测试归属及正常本地提交hook仍独立强制。独立只读审查确认真实父回调／原input proof和验收范围，没有新增实际生产缺口。准确红绿、所有实际尝试、源码SHA、原字节保全和复用范围归 `/private/tmp/kite-v13-compression-input-verified-evidence-20261010.json`，SHA `ca887a5dfc07ef8a5a3d7673d25d24c82b0ebf7b4368f2297bc58571edfb70e2`。
 
 本轮新增闭合的是恢复后同Session压缩原输入正式消费者入口；没有新增全局正式调用者切换或最终旧路径退役。手册、Desktop owner、shared active、原压缩Note、测试入口、主方案／进度和三条能力证据按实际diff同步，37能力status全部partial。原RSS失败 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1` 和观测／完整Runtime后代缺项、完整P5／P6安装／维护／平台／客户端独立、§35审查／最终退役／阶段完整回归及适用P7责任继续未闭；fullDefault=false／wholeV13=false／phaseExit=false。仅继续已授权本地提交，无push／PR／发布／Actions dispatch。
+
+## 2026-10-10：恢复后 TUI 完整 Model 输出与导出
+
+前片 Native 压缩原输入已正常本地提交 `95daa70d8b12d123b43900a5855ed222664b0896`，切片结束。本轮只读核正式安装→current/previous→Native 自带与 registered Terminal 前门→所选闭包维护→保 Profile 卸载，以及六个公共维护动作和原恢复来源，未发现此前已闭合安装/版本/恢复控制流的新缺项；原 macOS 有限证据继续按未变范围复用，不新增故障矩阵。RSS/观测仍在 P6/§35 汇合，不阻挡独立能力实施，不再采参数对照。
+
+源码发现正式主会话 Ctrl+O/Ctrl+T 仍因 `originMessage.storeId=A !== port.storeId=B` 拒绝完整 Model 读取，随后又把公开 snapshot 的当前 B 与原 A 比较；这与已闭合 `/background` child reader 是不同实际入口。正式 [host](../../apps/cli/host/tui.tsx)已接公共 Client/Core；Core 从真实 Model/Run/Command/root-work/subject及原 Artifact 链证明 A，snapshot 标当前 B。Root 修复 [controller](../../packages/ui/src/tui/controller.ts) 的这两处比较，保当前 snapshot 原 Message id/seq替换、当前 Session、原 source Session/Run/Execution、unsupported、generation/abort；并绑定 Message 摘要和输出 complete/status、完整 content/reasoning UTF-8 字节、ToolCall 数。原 Run 为 null 不发猜测 GET，未完成 prefix不伪造完整 calls。没有新 API、SQL/维护格式、Provider调用、来源改标或旧工作执行权。
+
+[公开恢复整例](../../tests/isolated/unified-agent/restored-tui-model-output.test.tsx)实际生成 Model→Tool→后继 Model及sealed Fork，保存大正文、思考、原 calls和全部 Model/Execution/Run/Command。公开 backup/restore A→B 后，两次新 Store/Runtime/Service/Client通过实际共享 TuiSession 的 Ink键盘：plain以Ctrl+O首次读、sealed以Ctrl+T从未读首次读，完整正文/思考/calls及原 DTO、当前独立metadata.lastChangeCursor全等；隐藏/再次显示思考复用loaded缓存且零再GET。实际 `/export` 未读时保 preview-only，加载后沿原serializer保完整正文/思考且零额外读取。这里 exporter 为透明内存保存，不代证实盘或 installed 恢复PTY；原正式 Terminal整例另核其自己的9MiB/0600文件及退出。
+
+另一读取在真实 Core已验全文后透明暂留回复，实际切Session或卸载/dispose使原signal aborted，迟到交接不发布原正文/思考到新scope。此为完成Core读后的交接边界，不冒称新网络中途取消资格。每个冷周期Store metadata/cursor、原Execution/Run/Command完整保持，HTTP全GET、cold Model0、原Model2和Tool1不重放；旧来源仍只读。新夹具创建冷Store/Runtime后立即登记，Service启动失败也有关闭owner；各关闭独立尝试，未确认Runtime不直接关Store，实际清理未确认时保root及原业务/清理错误，不掩盖原红。
+
+原giant Fork单元中的“foreign来源一律不可读”改为错误当前snapshot Store必须拒绝，随后核合法原foreign/当前Store响应可读且origin保持；不是删去来源隔离断言。17MiB/201条原历史、unsupported/迟到取消及原全部业务断言保留。原9MiB export mock补准确完整DTO、字节和canonical hash，不改变正文/思考、零额外GET或失败断言。根类型发现原集成只包含TS未包含TSX；现纳入本目录两TSX整例，实际首次类型红保留，旧后台两处及新整例帧观察只补必要非空类型标注，不排除测试或变更断言/预算。
+
+最终同字节夹具/原已提交生产guard对照为1fail/44expect，准确 `tui_origin_store_unavailable`，日志 `/private/tmp/kite-v13-tui-model-output-final-business-red-20261010-tests_isolated_unified-agent_restored-tui-model-output.test.tsx.log` SHA `0a459322a21dfe521532b056be3a654a8d3dd813843bdd4c5f887768c35327e8`；finally已按原字节还原修复controller。早期同一业务red与首次TSX类型red均保留，没有删断言/改预算/排除文件。
+
+| 唯一原完整作业 | pass | Bun断言 | fail/skip | 准确范围 |
+| --- | --- | --- | --- | --- |
+| 新 `isolated:restored-tui-model-output.test.tsx` | 1 | 162 | 0/0 | 实际A→B/两冷HTTP/Ink，Ctrl+O和Ctrl+T首次全文、完整原元数据/current cursor、loaded export、切换/dispose、全GET/零重放 |
+| 原 `packages/ui:shard-1/4`，10完整文件 | 71 | 564 | 0/0 | 17MiB/201条原Fork、错误当前Store/unsupported/late、原controller及相邻UI全部断言 |
+| 原 `packages/ui:shard-3/4`，11完整文件 | 96 | 566 | 0/0 | loaded-only export、原ModelOutput/完整prefix守卫与相邻公共UI |
+| 原 `packages/ui:shard-4/4`，10完整文件 | 60 | 935 | 0/0 | 原Ctrl+T显示/隐藏、滚动/清屏/选择、管理及相邻守卫 |
+| 原 `exclusive:tui-export-host.test.ts` | 1 | 17 | 0/0 | 正式Terminal候选/包内Bun和Service、真实9MiB/思考/0600导出、冷重开及所属退出，原90秒整例/30秒步骤保持 |
+| 原 `isolated:restored-tui-background.test.tsx` | 1 | 68 | 0/0 | 只补类型标注后复验真实原Job/child完整恢复读、原身份/只读/零重放，原业务断言/20秒保持 |
+
+合计六个唯一原完整作业、34唯一文件、230pass/2312Bun断言/0fail/0skip。首次五作业通过后，新fixture owner和TSX类型同步仅重跑两受影响原整文件，未变的四UI/PTY作业证据复用；九次实际语义作业（七green、两business red）保留，合计只计唯一green标签。两个green collector各4278项输入、Git和运行资产前后全等；它们仅三个输入不同：root TSX include、新fixture关闭归属/帧类型标注、原后台帧类型标注，全部生产/依赖/编译选项/host/PTY文件保持。最终新fixture SHA `96f38f59e7d1893aca4c96e2245969ecfb503cba4955f8fcc12799a0659c91fe`，原PTY test/driver保HEAD字节；后续只同步本轮md/tsv。darwin arm64/Bun1.4.2/Nodev22.21.1；root与八workspace types0，最终含TSX root types另0。文档/影响/计划、边界/workspace/API/测试归属、Biome/diff及正常hook分别保强制门禁；最终可核证据归 `/private/tmp/kite-v13-tui-model-output-verified-evidence-20261010.json`。
+
+侧聊补充数天自主任务场景后，主Agent独立核[现行执行手册](../handbook/features/execution.md)、[默认装配](../../apps/service/src/assembly.ts)、[Runtime来源请求](../../packages/agent/src/runtime.ts)及[Run恢复](../../packages/agent/src/storage/sqlite/run-resume-operations.ts)：主Run本应无累计额度，默认sources实际装配；同Run sourceRequests含model且按不同Tool参数永久累加，达到256直接拒绝，resume继续合并原请求；显式resume以全部原Execution（含terminal）LIMIT4097/超过4096拒绝。两项是源码可证的累计边界，不是新的数天负载证据。子Agent每个新Run仍从激活重新计时30分钟；原after_turn沿已有授权截止不代表所有新turn累计期限，保持原权限/取消/容量规则。临时传输/长度结束/诊断候选本轮未据泛化异常推定具体生产缺口，也不增加盲重试。
+
+| 后续依赖顺序 | 实际用户入口/具体剩余缺口 | 完整行为与明确验收 |
+| --- | --- | --- |
+| 1 | CLI/TUI/Native一次输入后的长主Run及显式恢复；来源请求256与全部历史Execution4096把合法累计工作变成准入拒绝 | 区分当前必要来源与历史provenance，保完整项目指令/来源/定义/权限/read-set。连续超过累计256个不同请求仍可继续；大量terminal历史后从支持的安全planned边界恢复准确原ID，完整结果保持、已完成Tool零重放，真正unknown/活动child/不明效果仍拒绝。先核方案与真实反例；不把单Run 30min期限或新Run累计时长列为缺口，不以LRU丢必要来源或直接删除安全断言。当前输出切片先提交，随后优先本项。 |
+| 2 | 正式TUI `/context` 的I键明确Include；controller仍把原Job originStore当当前Store | 准确当前B view/Session/selection/原Execution/revision的新Command明确纳入原A终态结果，idle须用户另开新Run才消费，活动时准确targetRun；错误当前Store/Session/revision/未准入目标零POST，原stop/自动消费守卫不放宽。Native相同Core合同证据仅证明其自身消费者，不代TUI。 |
+| 3 | installed CLI/TUI/Native连续普通任务、Shell和child后台的资源退出资格 | 原RSS32MiB增长/斜率、八outer/九点及可信全资源/Runtime后代满足原条件；原真实RSS红 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1`、activeResources/handles与完整后代缺项保持。本轮未采样/参数对照，是P6/§35门禁而非前两项的实现前置。 |
+| 4 | 正式安装→版本选择→包内维护恢复→原数据继续使用 | 当前支持范围必要平台、完整维护和客户端依赖独立有真实资格；原macOS已闭安装/DB9/rollback等有限证据按准确scope复用。Win/Linux仍依原顺序留重构后Actions，本地不dispatch；D08首发前无适用published样本不阻挡独立实现，T029/P7后续适用责任保留。 |
+| 5 | 前序满足后，所有正式客户端完整迁移与旧路径退出 | §35独立完整能力/真实正式调用者审查，证实无遗留正式business carrier及最后legacy退役，阶段未过滤完整回归实际通过；局部绿色不拼成当前wholeDefault或wholeV13，也不删真实失败/排除原作业。依赖第1–4项必要结果与§35完整标准，不新增长期单操作/journal/测试窗口目标。 |
+
+本轮新增闭合的能力是恢复后正式TUI主会话/Fork完整正文、思考与已加载导出；没有新增全局caller切换或最终旧路径退役。手册/UI与CLI owner/shared active/tests/主方案/进度和三条cap证据按实际diff同步，37条status仍全部partial；原安装/版本/维护源码核对未伪称新增资格。RSS/观测、长Run、安全明确恢复、完整P5/P6/平台/维护/依赖独立、§35审查/退役/阶段完整回归及适用P7仍未闭，wholeDefault=false/wholeV13=false/phaseExit=false，Goal active。本轮只按已授权本地提交交付，无push/PR/发布/Actions dispatch。

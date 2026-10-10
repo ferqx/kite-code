@@ -2124,6 +2124,10 @@ Native恢复Files的Main消费者也已核真实原Run/Execution出处，完整�
 
 同 Session 的恢复压缩原 Model input 快捷入口已移除错误 Store 等式，保原 Session scope。实际 NativeDesktop 父回调／NativeCaller／公开 Core，经真实压缩、A→B、确认后完整原输入及元数据、Close／迟到选择取消与两次冷建，五个唯一原完整作业28文件105项／1027Bun断言通过；原 Electron 压缩与 Model 输入窗口保原范围和预算。准确业务红及三项依赖归[压缩输入恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-压缩原输入入口)。这些具体恢复消费者缺口已闭合，RSS／观测、完整P5／P6安装／维护／平台／客户端独立资格、§35审查／最终退役／阶段完整回归与适用P7责任仍未闭合；不重新比较RSS参数或提前退出阶段。
 
+恢复后的正式 TUI 主会话与 sealed Fork 完整 Model 读取/思考/已加载导出也已移除当前 Store 与原出处的错误等式；实际公开 A→B、两次冷 Service/Client、Ink Ctrl+O/Ctrl+T 及原正式 Terminal 大正文 PTY 各取得对应证据。六个唯一原完整作业34文件230项/2312Bun断言，Root TSX 与八 workspace 类型门禁保留；没有据局部结果退出阶段，准确红绿/清理及复用范围见[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-完整-model-输出与导出)。
+
+长自主任务按现行[执行手册](../handbook/features/execution.md)核对主 Run 无累计额度，子 Agent 每个新 Run 仍从自身激活重新计时 30 分钟，原 after_turn 授权截止不递归延长。实际默认装配的同主 Run 来源请求 Map 累计 256，以及显式 resume 把全部历史 Execution 累计到 4096 后拒绝，仍与该承诺不符；本轮仅取得源码证据，尚未实现或运行长任务反例。当前输出切片提交后，优先以完整连续任务/安全明确恢复能力解决这两项依赖，区分当前必要来源及历史 provenance，保完整指令、原权限/定义/read-set、取消及 unknown 效果守卫；不把单回合 30 分钟或新一轮累计时长列为缺口，不增加自动网络重试/外部效果重放。其后正式 TUI Context 明确 Include、原 RSS/观测、P6 必要发行/完整维护资格及前序满足后的 §35 独立审查/最终退役/阶段完整回归继续保留；最多五项的用户入口/完整行为/验收见同一进度。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

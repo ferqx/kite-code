@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import type { Message, ModelOutputSnapshot, SessionView } from '@kite-ai/client';
+import { createHash } from 'node:crypto';
+import {
+  canonicalModelBody,
+  type Message,
+  type ModelOutputSnapshot,
+  type SessionView,
+} from '@kite-ai/client';
 import {
   parseTuiCommand,
   serializeLoadedText,
@@ -11,6 +17,10 @@ import {
 function setup() {
   let reads = 0;
   const saved: TuiLoadedTextExport[] = [];
+  const content = `${'中'.repeat(3 * 1024 * 1024)}FULL_TAIL`;
+  const reasoning = 'reason\nREASON_TAIL';
+  const contentBytes = String(Buffer.byteLength(content));
+  const reasoningBytes = String(Buffer.byteLength(reasoning));
   const message: Message = {
     id: 'assistant',
     sessionId: 'a',
@@ -23,8 +33,8 @@ function setup() {
       kind: 'model_output',
       executionId: 'exec',
       complete: true,
-      contentBytes: '9',
-      reasoningBytes: '6',
+      contentBytes,
+      reasoningBytes,
       toolCallCount: 0,
     },
   };
@@ -67,18 +77,31 @@ function setup() {
     }),
     readModelOutput: async () => {
       reads++;
+      const output: ModelOutputSnapshot['output'] = {
+        content,
+        reasoning,
+        toolCalls: [],
+        complete: true,
+      };
+      const body = Buffer.from(canonicalModelBody(output));
       return {
         storeId: 'store',
         sessionId: 'a',
+        rootSessionId: 'a',
         runId: 'run',
         executionId: 'exec',
-        output: {
-          content: `${'中'.repeat(3 * 1024 * 1024)}FULL_TAIL`,
-          reasoning: 'reason\nREASON_TAIL',
-          toolCalls: [],
-          complete: true,
-        },
-      } as unknown as ModelOutputSnapshot;
+        originCommandId: 'original-work',
+        rootWorkCommandId: 'original-work',
+        rootWorkSeq: '1',
+        attempt: 1,
+        status: 'succeeded',
+        bodyHash: createHash('sha256').update(body).digest('hex'),
+        bodyBytes: String(body.byteLength),
+        contentBytes,
+        reasoningBytes,
+        snapshotCursor: '1',
+        output,
+      };
     },
     submit: async () => {
       throw Error('no Model');

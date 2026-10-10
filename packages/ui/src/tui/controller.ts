@@ -150,6 +150,7 @@ export interface TuiPort {
   nextCommandId(): string;
   listSessions(signal: AbortSignal): Promise<readonly { id: string; title: string }[]>;
   readSession(sessionId: string, signal: AbortSignal): Promise<TuiSnapshot>;
+  /** Public EOF/hash reader must prove the saved Model scope under the current admitted Store. */
   readModelOutput?(
     sessionId: string,
     executionId: string,
@@ -4298,9 +4299,8 @@ export class TuiController {
       return;
     const originalSession = message.originMessage?.sessionId ?? message.sessionId;
     const originalRun = message.originMessage ? message.originMessage.runId : message.runId;
-    const originalStore = message.originMessage?.storeId ?? this.port.storeId;
-    if (originalStore !== this.port.storeId) {
-      this.publish({ error: 'tui_origin_store_unavailable' });
+    if (!originalRun) {
+      this.publish({ error: 'tui_output_identity_mismatch' });
       return;
     }
     const generation = this.generation,
@@ -4309,11 +4309,22 @@ export class TuiController {
       const output = await reader(originalSession, message.outputBody.executionId, read.signal);
       if (read.signal.aborted || generation !== this.generation) return;
       if (
-        output.storeId !== originalStore ||
+        // The current Store admits this read; the host/Core reader proves the saved origin.
+        output.storeId !== this.port.storeId ||
         output.sessionId !== originalSession ||
         output.executionId !== message.outputBody.executionId ||
         output.runId !== originalRun ||
-        output.output.complete !== message.outputBody.complete
+        output.output.complete !== message.outputBody.complete ||
+        output.output.complete !== (output.status === 'succeeded') ||
+        output.contentBytes !== message.outputBody.contentBytes ||
+        output.reasoningBytes !== message.outputBody.reasoningBytes ||
+        String(new TextEncoder().encode(output.output.content).byteLength) !==
+          message.outputBody.contentBytes ||
+        String(new TextEncoder().encode(output.output.reasoning).byteLength) !==
+          message.outputBody.reasoningBytes ||
+        (message.outputBody.complete
+          ? output.output.toolCalls.length !== message.outputBody.toolCallCount
+          : output.output.toolCalls.length !== 0)
       )
         throw new Error('tui_output_identity_mismatch');
       this.publish({
