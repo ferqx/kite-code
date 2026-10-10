@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import {
   type TerminalBundleManifest,
   terminalHostEntrypoints,
+  windowsTerminalFrontdoorFiles,
+  windowsTerminalRuntimeConfigFiles,
 } from '@kite-ai/service/runtime-assets';
 import {
   reviewedSqliteSources,
@@ -24,6 +26,15 @@ export function fixtureTerminalSqlite(
     writeFileSync(join(root, path), bytes, { mode: 0o644 });
     chmodSync(join(root, path), 0o644);
     files.push({ path, size: bytes.length, sha256: sha(bytes), mode: 420 });
+  }
+  if (process.platform === 'win32') {
+    for (const path of [...windowsTerminalFrontdoorFiles, ...windowsTerminalRuntimeConfigFiles]) {
+      const bytes = Buffer.from(`integrity-only inert Windows asset ${path}`);
+      mkdirSync(join(root, path, '..'), { recursive: true, mode: 0o700 });
+      const mode = path.endsWith('.exe') ? 493 : 420;
+      writeFileSync(join(root, path), bytes, { mode });
+      files.push({ path, size: bytes.length, sha256: sha(bytes), mode });
+    }
   }
   const sqlite = { version: '3.51.3', sourceId: reviewedSqliteSources['3.51.3'] };
   const library = Buffer.from('integrity-only fake SQLite library');

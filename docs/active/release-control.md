@@ -24,7 +24,9 @@ Windows Native 构建与 transport 原生后端测试在消费编译器前调用
 
 ## 安装、登记与使用权
 
-明确 archive/prefix、managed marker、独立安装 EX、不可变 releases 和两行 active/current/previous 约束保持。prefix 不能是根目录、用户 home、repo root、symlink/reparse 或未标记的内容。物化与指针发布经完整校验、fsync/rename；不原地覆盖已存在候选，不替换用户 Profile 或数据。四个 Node/Bun/Electron 注入环境键在固定入口清除。
+Windows managed Terminal 新实现先以 [MSVC 准备](../../scripts/release/prepare-windows-native-ci.ts) 构建原生前门及独立 verifier，再固定候选 Bun 的新 PE 副本，原 Bun 不修改。release candidate 把准备放在 Terminal build 前，并接显式 [Windows qualification](../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts) 的准确绝对候选参数；[守卫](../../scripts/check-unified-workspaces.ts)核顺序、Windows predicate、完整消费与禁止静默失败。该工具覆盖安装/实际 paired Run/指针切换/冷读/保数据卸载，标签 B 与 TUI help 不替代跨代码或 PTY。现有 common whole、Native 和 always formal verifier 保持，Windows 原 POSIX fixture 合同及 Native 未资格仍可能实际失败，不排除或削弱它们。原生执行按用户顺序留重构后 Actions，未 dispatch；完整源码与待验范围归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-managed-terminal-当前实现)。
+
+明确 archive/prefix、managed marker、独立安装 EX、不可变 releases 和两行 active/current/previous 约束保持。prefix 不能是根目录、用户 home、repo root、symlink/reparse 或未标记的内容。物化与指针发布经完整校验和各平台实际发布屏障；POSIX 使用 fsync/rename，Windows 使用原私有 HANDLE/Flush 和同卷 write-through。不原地覆盖已存在候选，不替换用户 Profile 或数据。POSIX 的四个 Node/Bun/Electron 注入环境键在固定入口清除；Windows 原生前门另在 Bun 初始化前清除 BUN_BE_BUN。
 
 每个运行者持准确原 candidate SH，Service/daemon 独立保活。完整 Native 的私有保护只允许已核 inner 清单中的 service/daemon 两种服务入口，并核同一 Native build、outer digest 和包内 Bun；不从 CLI、Electron 或任意邻接入口推造服务身份。Node Native Main 同时持 outer/inner，继承 helper 仅关闭副本；清理失败保原事实/lease。更新只影响后续启动，回滚只交换代码指针。卸载完整枚举管理树并持所有候选 EX；任何 live lease 都 busy，不猜 PID 或强杀。未知条目、坏 active、坏候选和损坏登记均拒绝。
 
@@ -56,7 +58,7 @@ WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多
 
 ## 平台与完成约束
 
-G0 需要当前产品正确性、安全、安装/取消/恢复的实际证据；G1 仍要求 GitHub-hosted macOS、Ubuntu、Windows 原生 build/install/process/PTY。workflow 定义、artifact 上传或本机单平台结果不能替代三平台通过。当前 POSIX 安装/继承使用锁保原本机 macOS 资格，Linux 当前 Terminal 安装维护链已取得 Ubuntu x64 用户空间在 Apple Silicon Docker VM 仿真的有限实测；准确范围归 [Terminal owner](../../apps/cli/docs/terminal-release.md#linux-当前引擎与安装维护链)，原生 Ubuntu CI 仍未验。Linux arm64 的完整 Native 安装文件也已在 Docker VM 原生 CPU/Xvfb 下实测，保 Chromium sandbox、两层 lease 和原预算；有限范围归[Native owner](../../apps/desktop/docs/native-release.md#linux-arm64-安装生命周期)，不替代原生 Ubuntu x64 CI 或全部 Native/维护资格。Windows Profile/Store/配置原生场景已实现但未本机运行；维护 Bun x64 文件端口已接入原 API 和开发 CLI，实际 DACL/HANDLE、媒体、journal 与恢复原生验收尚未取得，Windows 制品安装、标准 PATH 和 Native 加载前身份仍有独立缺口。准确范围归[maintenance owner](../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
+G0 需要当前产品正确性、安全、安装/取消/恢复的实际证据；G1 仍要求 GitHub-hosted macOS、Ubuntu、Windows 原生 build/install/process/PTY。workflow 定义、artifact 上传或本机单平台结果不能替代三平台通过。当前 POSIX 安装/继承使用锁保原本机 macOS 资格，Linux 当前 Terminal 安装维护链已取得 Ubuntu x64 用户空间在 Apple Silicon Docker VM 仿真的有限实测；准确范围归 [Terminal owner](../../apps/cli/docs/terminal-release.md#linux-当前引擎与安装维护链)，原生 Ubuntu CI 仍未验。Linux arm64 的完整 Native 安装文件也已在 Docker VM 原生 CPU/Xvfb 下实测，保 Chromium sandbox、两层 lease 和原预算；有限范围归[Native owner](../../apps/desktop/docs/native-release.md#linux-arm64-安装生命周期)，不替代原生 Ubuntu x64 CI 或全部 Native/维护资格。Windows Profile/Store/配置原生场景已实现但未本机运行；维护 Bun x64 文件端口已接入原 API 和开发 CLI，实际 DACL/HANDLE、媒体、journal 与恢复原生验收尚未取得，Windows managed Terminal 安装/切换源码现已接入但原生资格未验；标准 PATH 不由安装器修改，Native 加载前身份、Daemon、PTY、GC 和完整安装版维护仍有独立缺口。准确范围归[maintenance owner](../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
 
 平台 workflow 的源码外 Files/资产/SQLite/锁及 macOS 默认 Shell 诊断只证明报告范围；formal verifier 仍拒完整 effectful platform 缺资格。正式 soak 保固定8外层/≥60分钟/168分钟上界、混合场景、资源观测与后代身份要求；单次 macOS 450秒默认 continuous 组件不能代替整体资格。V1.3 D17 退役旧隐式累计预算，实际显式并发、取消和输出策略场景不重建旧资金账本。runner 保闭合 v2 七类 CI；当前 continuous 的实际默认 producer/时长证据与剩余资源条件归[韧性 owner](runtime-resilience-qualification.md)。失败及未知清理保原证据。
 

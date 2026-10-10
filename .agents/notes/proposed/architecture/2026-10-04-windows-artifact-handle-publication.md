@@ -18,6 +18,8 @@ reader 完成 EOF 时核完整 size/hash、原 HANDLE/路径 volume-file identit
 
 ## Alternatives considered
 
+Windows managed Terminal 的安装/卸载使用独立完整 candidate 与 DELETE-purpose owner，见 [安装提案](2026-10-10-windows-managed-terminal-frontdoor.md)。本篇 immutable blob 的 FR 发布与 SQL reference 理由仍适用，不将普通安装对象混用为媒体权限或补齐原生资格，继续 proposed。
+
 - 去掉 Windows guard 后复用 POSIX chmod/hardlink：不能核实际只读 DACL、原生 HANDLE和目录身份，未采用。
 - 放宽原私有 FA verifier 接受任意“只读”对象：会改变 Profile/config安全政策并接受不明确的权限组合；最终 blob使用独立精确 FR政策。
 - 将既有 blob的ACL修复为当前 SID：会改变原不安全对象、掩盖内容与路径替换；只核验、拒绝且不修复。

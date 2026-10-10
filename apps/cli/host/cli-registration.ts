@@ -1,5 +1,7 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
+import { readWindowsTerminalInstallation } from './windows-terminal-installation';
 
 export const CLI_REGISTRATION_FILE = '.kite-cli-registration.json';
 export const OWNED_CLI_REGISTRATION_FILE = '.cli-registration.json';
@@ -82,6 +84,10 @@ export function sameCLIRegistration(
   );
 }
 export function assertManagedCLIPrefix(prefix: string, native = false): void {
+  if (process.platform === 'win32' && !native) {
+    readWindowsTerminalInstallation(prefix);
+    return;
+  }
   const directory = lstatSync(prefix);
   if (
     !directory.isDirectory() ||
@@ -118,6 +124,19 @@ export function assertManagedCLIPrefix(prefix: string, native = false): void {
 export function readManagedCLIActive(prefix: string): string {
   const path = join(prefix, 'active'),
     stat = lstatSync(path);
+  if (process.platform === 'win32') {
+    const bytes = defaultWindowsPathSecurity()!.readScopeFile(path, 256, true);
+    if (!bytes) throw Error('cli_registration_active_invalid');
+    const lines = new TextDecoder('utf-8', { fatal: true }).decode(bytes).split('\n');
+    if (
+      lines.length !== 3 ||
+      lines[2] !== '' ||
+      !/^[a-f0-9]{64}$/.test(lines[0]!) ||
+      (lines[1] !== '' && !/^[a-f0-9]{64}$/.test(lines[1]!))
+    )
+      throw Error('cli_registration_active_invalid');
+    return lines[0]!;
+  }
   if (
     !stat.isFile() ||
     stat.isSymbolicLink() ||

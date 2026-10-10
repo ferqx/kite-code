@@ -140,7 +140,15 @@ export function copyTerminalDependencies(input: {
   repositoryRoot: string;
   destination: string;
   workspacePackages: readonly TerminalWorkspacePackage[];
+  /** Build-only layout; ordinary POSIX candidates retain the original linked graph. */
+  dependencyLayout?: 'linked' | 'materialized';
 }): TerminalDependencyCopy {
+  if (
+    input.dependencyLayout !== undefined &&
+    input.dependencyLayout !== 'linked' &&
+    input.dependencyLayout !== 'materialized'
+  )
+    fail('layout_invalid');
   const repository = realpathSync(input.repositoryRoot),
     destination = realpathSync(input.destination);
   if (inside(repository, destination) && inside(join(repository, 'node_modules'), destination))
@@ -268,6 +276,90 @@ export function copyTerminalDependencies(input: {
       chmodSync(target, stat.mode & 0o777);
     } else fail('asset_invalid');
   };
+  if (input.dependencyLayout === 'materialized') {
+    type Placement = { node: Node; target: string };
+    const outer = new Map<string, Placement>();
+    for (const [name, node] of workspaces) {
+      // This namespace must describe actual Node lookup locations, not desired edges.
+      if (node.destination !== join(destination, name)) fail('workspace_destination_invalid');
+      outer.set(name, { node, target: node.destination });
+    }
+    const materialize = (
+      node: Node,
+      target: string,
+      available: ReadonlyMap<string, Placement>,
+      ancestors: ReadonlySet<string>,
+    ) => {
+      const children: Placement[] = [];
+      const resolved = new Map<string, Placement>();
+      for (const [name, child] of node.edges) {
+        const nearest = available.get(name);
+        if (nearest?.node === child) {
+          resolved.set(name, nearest);
+          continue;
+        }
+        const placement = { node: child, target: join(target, 'node_modules', name) };
+        resolved.set(name, placement);
+        children.push(placement);
+      }
+      const state = JSON.stringify([
+        node.source,
+        [...available].map(([name, placement]) => [name, placement.node.source]).sort(),
+      ]);
+      // A shadowing cycle with a repeated resolution state cannot be represented by
+      // finite physical ancestry. Reject it rather than changing a version or making links.
+      if (children.length && ancestors.has(state)) fail('materialization_cycle');
+      const nextAncestors = new Set(ancestors);
+      nextAncestors.add(state);
+      const nextAvailable = new Map(available);
+      // Place every local edge before descending, so peers and cycles see real siblings.
+      for (const [name, placement] of resolved) {
+        if (available.get(name) === placement) continue;
+        if (!inside(destination, placement.target) || existsSync(placement.target))
+          fail('destination_exists');
+        copy(placement.node.source, placement.target, placement.node.source, new Set());
+        if (!readFileSync(join(placement.target, 'package.json')).equals(placement.node.bytes))
+          fail('content_changed');
+        result.packages.push({
+          name: placement.node.manifest.name,
+          version: placement.node.manifest.version,
+          source: placement.node.source,
+          destination: relative(destination, placement.target).split(sep).join('/'),
+        });
+        nextAvailable.set(name, placement);
+      }
+      // npm's derived .bin shims are not consumed by the fixed product frontdoors.
+      // Keep the original bin validation and package-local entry bytes, without links
+      // or copied shims that would change require.main, argv or relative imports.
+      const bins = new Map<string, string>();
+      for (const placement of resolved.values()) {
+        const declared =
+          typeof placement.node.manifest.bin === 'string'
+            ? { [placement.node.manifest.name.split('/').at(-1)!]: placement.node.manifest.bin }
+            : (placement.node.manifest.bin ?? {});
+        for (const [bin, path] of Object.entries(declared)) {
+          if (
+            !/^[A-Za-z0-9_.-]+$/.test(bin) ||
+            bin === '.' ||
+            bin === '..' ||
+            typeof path !== 'string' ||
+            isAbsolute(path) ||
+            !inside(placement.target, resolve(placement.target, path))
+          )
+            fail('bin_invalid');
+          const entry = resolve(placement.target, path);
+          if (!existsSync(entry) || !lstatSync(entry).isFile()) fail('bin_invalid');
+          if (bins.has(bin) && bins.get(bin) !== entry) fail('bin_conflict');
+          bins.set(bin, entry);
+        }
+      }
+      for (const placement of children)
+        materialize(placement.node, placement.target, nextAvailable, nextAncestors);
+    };
+    for (const node of workspaces.values()) materialize(node, node.destination, outer, new Set());
+    result.packages.sort((a, b) => a.destination.localeCompare(b.destination));
+    return result;
+  }
   for (const node of pending) {
     if (workspaces.get(node.manifest.name) === node) continue;
     if (existsSync(node.destination)) fail('destination_exists');

@@ -16,6 +16,8 @@ metadata 的 GENERIC_WRITE HANDLE执行 FlushFileBuffers；ready/journal/Profile
 
 ## Alternatives considered
 
+Windows managed Terminal 的原生前门、外置安装协调及版本选择现另接入源码，见 [安装提案](2026-10-10-windows-managed-terminal-frontdoor.md)。安装源码不替代本篇维护/恢复合同、完整 GC 或原生验收，本篇继续 proposed。
+
 - 去掉平台 guard 后继续用 chmod和目录 fsync：不能证明 Windows 权限和发布屏障；保实际 native文件角色和单独资格。
 - 复用 bounded scope reader：会截断或拒绝合法8–16MiB caller元数据；使用原HANDLE pin与完整FD读取，维持现有业务上限。
 - 放宽 private FA verifier接纳FR或为既有文件修ACL：会混淆metadata与不可变media，掩盖原不安全对象；FR独立且仅新媒体temporary可减权。

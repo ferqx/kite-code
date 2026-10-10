@@ -38,6 +38,9 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - if: runner.os == 'Windows'
+        name: Prepare installed Windows x64 Native compiler
+        run: bun run scripts/release/prepare-windows-native-ci.ts
       - name: Current immutable artifact and installer contracts
         run: >-
           bun test --parallel=1 --max-concurrency=1
@@ -61,8 +64,8 @@ jobs:
         name: Actual installed Terminal real code upgrade and cold rollback
         run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-cross-version.test.ts
       - if: runner.os == 'Windows'
-        name: Prepare installed Windows x64 Native compiler
-        run: bun run scripts/release/prepare-windows-native-ci.ts
+        name: Actual installed Windows Terminal paired version selection and data retention
+        run: bun run tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts "--candidate=${{ github.workspace }}/dist/unified-terminal"
       - name: Build complete Native candidate and archive
         run: bun run release:build --product native --directory dist/unified-native --terminal dist/unified-terminal --archive dist/unified-native.tar.gz
       - name: Verify complete Native source and physical closure

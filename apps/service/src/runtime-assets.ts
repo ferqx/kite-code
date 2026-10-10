@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
+import type { WindowsInstallationRemoval } from '@kite-ai/agent/artifact-access';
 import { verifySqliteEngineAsset } from '@kite-ai/agent/sqlite-engine';
 import { createAssetFileHasher } from './asset-file-hash';
 import {
@@ -69,6 +70,26 @@ export const terminalHostEntrypoints = Object.freeze([
   'entrypoints/native-cli.js',
   'entrypoints/native-tui.js',
 ]);
+export const windowsTerminalFrontdoorFiles = Object.freeze([
+  'windows-frontdoor/kite.exe',
+  'windows-frontdoor/kite-tui.exe',
+  'windows-frontdoor/terminal-verifier.exe',
+]);
+export const windowsTerminalRuntimeConfigFiles = Object.freeze([
+  'runtime/windows-bunfig.toml',
+  'runtime/windows-tsconfig.json',
+]);
+/** Fixed candidate config prevents working-directory preloads, aliases and implicit installs. */
+export function windowsTerminalRuntimeArguments(root: string): readonly string[] {
+  return Object.freeze([
+    '--no-env-file',
+    '--no-install',
+    '--config',
+    join(root, windowsTerminalRuntimeConfigFiles[0]!),
+    '--tsconfig-override',
+    join(root, windowsTerminalRuntimeConfigFiles[1]!),
+  ]);
+}
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 function fail(code: string): never {
   throw new TerminalRuntimeAssetError(code);
@@ -199,6 +220,18 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
   )
     fail('terminal_manifest_invalid');
   if (
+    value.target.platform === 'win32' &&
+    (value.target.arch !== 'x64' ||
+      value.links.length !== 0 ||
+      windowsTerminalFrontdoorFiles.some(
+        (path) => !files.some((item) => item.path === path && item.mode === 493),
+      ) ||
+      windowsTerminalRuntimeConfigFiles.some(
+        (path) => !files.some((item) => item.path === path && item.mode === 420),
+      ))
+  )
+    fail('terminal_manifest_invalid');
+  if (
     !['engine-selection.json', 'engine-manifest.json'].every((name) =>
       files.some(
         (item) => item.path === `${terminalSqliteEngineRoot}/${name}` && item.mode === 420,
@@ -225,8 +258,53 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
     links: Object.freeze(value.links.map((item) => Object.freeze({ ...item }))),
   }) as TerminalBundleManifest;
 }
+/** Exact native file ownership, independently retained by each actual Windows consumer. */
+export function retainWindowsTerminalRuntimeFiles(root: string): {
+  verify(): void;
+  release(): void;
+} {
+  if (process.platform !== 'win32') fail('terminal_target_mismatch');
+  // Node/Electron also imports the pure verifier on POSIX. Native Bun ownership
+  // loads only at this explicit Windows boundary, never during metadata parsing.
+  const { retainWindowsCandidateFiles } =
+    require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+  const pins: ReturnType<typeof retainWindowsCandidateFiles>[] = [];
+  const release = () => {
+    while (pins.length) {
+      pins.at(-1)!.release();
+      pins.pop();
+    }
+  };
+  try {
+    pins.push(retainWindowsCandidateFiles(root, ['terminal-manifest.json']));
+    const manifest = parseTerminalBundleManifest(
+      JSON.parse(readFileSync(join(root, 'terminal-manifest.json'), 'utf8')),
+    );
+    if (manifest.target.platform !== 'win32' || manifest.target.arch !== process.arch)
+      fail('terminal_target_mismatch');
+    pins.push(
+      retainWindowsCandidateFiles(
+        root,
+        manifest.files.map((file) => file.path),
+      ),
+    );
+    const verify = () => {
+      for (const pin of pins) pin.verify();
+      if (!pins.length) fail('terminal_bundle_unavailable');
+    };
+    verify();
+    return Object.freeze({ verify, release });
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
 /** Verify the entire installed closure at its canonical startup root; no global executable fallback. */
-export function verifyTerminalRuntimeBundle(bundleRoot: string): VerifiedTerminalRuntimeBundle {
+export function verifyTerminalRuntimeBundle(
+  bundleRoot: string,
+  removal?: WindowsInstallationRemoval,
+): VerifiedTerminalRuntimeBundle {
+  let windowsFiles: ReturnType<typeof retainWindowsTerminalRuntimeFiles> | undefined;
   try {
     const root = realpathSync(bundleRoot);
     if (!lstatSync(root).isDirectory()) fail('terminal_bundle_unavailable');
@@ -237,6 +315,12 @@ export function verifyTerminalRuntimeBundle(bundleRoot: string): VerifiedTermina
       lstatSync(manifestPath).nlink !== 1
     )
       fail('terminal_bundle_unavailable');
+    if (removal) {
+      if (process.platform !== 'win32') fail('terminal_target_mismatch');
+      const { assertWindowsInstallationRemoval } =
+        require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+      assertWindowsInstallationRemoval(removal, root);
+    } else if (process.platform === 'win32') windowsFiles = retainWindowsTerminalRuntimeFiles(root);
     const bytes = readFileSync(manifestPath);
     let json: unknown;
     try {
@@ -287,7 +371,7 @@ export function verifyTerminalRuntimeBundle(bundleRoot: string): VerifiedTermina
             !file ||
             stat.nlink !== 1 ||
             stat.size !== file.size ||
-            (stat.mode & 0o777) !== file.mode ||
+            (process.platform !== 'win32' && (stat.mode & 0o777) !== file.mode) ||
             realpathSync(absolute) !== absolute ||
             fileHash(absolute, stat.size) !== file.sha256
           )
@@ -324,10 +408,18 @@ export function verifyTerminalRuntimeBundle(bundleRoot: string): VerifiedTermina
         manifest.sqlite.linkage
     )
       fail('terminal_sqlite_engine_mismatch');
+    windowsFiles?.verify();
+    if (removal) {
+      const { assertWindowsInstallationRemoval } =
+        require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+      assertWindowsInstallationRemoval(removal, root);
+    }
     return Object.freeze({ root, manifest, digest: digest(bytes) });
   } catch (error) {
     if (error instanceof TerminalRuntimeAssetError) throw error;
-    fail('terminal_bundle_unavailable');
+    return fail('terminal_bundle_unavailable');
+  } finally {
+    windowsFiles?.release();
   }
 }
 /** Host-only deny metadata. Parsing performs no filesystem or package access. */

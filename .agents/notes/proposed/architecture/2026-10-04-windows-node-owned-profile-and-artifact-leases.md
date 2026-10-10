@@ -34,6 +34,8 @@ Windows transport的五个mandatory backend cases与release Native build已接�
 
 ## Alternatives considered
 
+Windows managed Terminal 的原生前门、外置安装协调与同一 DELETE-purpose owner 现另接入源码，见 [安装提案](2026-10-10-windows-managed-terminal-frontdoor.md)。它只处理 Terminal Bun 消费者，不能充当 Main 的 Node 加载前身份或独立 SH；本篇理由和原生验收保持，继续 proposed。
+
 - 复用一次性 Bun helper 加继承/DuplicateHandle：不是 Windows Main 自己取得的 LockFileEx 权威，无法提供所需的进程独立生命周期。
 - 常驻锁 broker：需要新增独立权威、通信和失败清理；当前既有 Main/Service 生命周期已能表达两个 holder，不为这个有限需求增加第三个常驻进程。
 - JS marker、PID 文件或独占创建锁文件：不能证明原 OS 锁仍由准确进程持有，且退出和维护竞争不能复用现有排他检查。

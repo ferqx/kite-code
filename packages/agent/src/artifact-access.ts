@@ -1,5 +1,5 @@
 /** Explicit host artifact lifetime; never grants profile or execution authority. */
-import { closeSync, lstatSync, realpathSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import {
   acquireFileLock,
@@ -8,6 +8,10 @@ import {
   type FileLock,
 } from './platform/locks';
 import { retainWindowsArtifactScope } from './platform/windows-artifact-scope';
+import { windowsInstallationCoordination } from './platform/windows-installation-coordination';
+
+/** Failed admissions keep their exact resources until native closure is confirmed. */
+const pendingArtifactAcquisitions = new Set<() => void>();
 
 /** Fixed sibling lock remains outside the immutable bundle's integrity-checked file inventory. */
 export function acquireArtifactAccess(input: {
@@ -17,17 +21,55 @@ export function acquireArtifactAccess(input: {
   if (!['shared', 'exclusive'].includes(input.mode)) throw Error('artifact_access_invalid');
   const path = artifactLockPath(input.root);
   if (process.platform !== 'win32') return acquireFileLock(path, input.mode);
-  const scope = retainWindowsArtifactScope(input.root);
+  // Installed Terminal use locks survive removal of the install tree. Every actual
+  // consumer and the installer derive the same namespace; source bundles keep their
+  // existing sibling lock contract.
+  const prefix = dirname(dirname(input.root));
+  const coordination =
+    basename(dirname(input.root)) === 'releases' &&
+    /^[a-f0-9]{64}$/.test(basename(input.root)) &&
+    existsSync(join(prefix, '.kite-terminal-install.json'))
+      ? windowsInstallationCoordination(prefix)
+      : undefined;
+  let scope: ReturnType<typeof retainWindowsArtifactScope> | undefined;
   let lock: FileLock | undefined;
+  let attached = false;
   try {
-    lock = acquireFileLock(path, input.mode);
-    attachLockResource(lock, scope);
+    scope = retainWindowsArtifactScope(input.root);
+    const retained = scope;
+    lock = acquireFileLock(
+      coordination?.candidateLockPath(basename(input.root)) ?? path,
+      input.mode,
+    );
+    attachLockResource(lock, {
+      verify() {
+        coordination?.verify();
+        retained.verify();
+      },
+      release() {
+        retained.release();
+        coordination?.release();
+      },
+    });
+    attached = true;
     return lock;
   } catch (error) {
+    const release = () => {
+      if (attached) lock!.release();
+      else {
+        // Attachment verification can reject before the actual lock owns the scope.
+        // Keep the original lock region until both original resource owners close.
+        scope?.release();
+        coordination?.release();
+        lock?.release();
+      }
+    };
+    pendingArtifactAcquisitions.add(release);
     try {
-      lock?.release();
-    } finally {
-      scope.release();
+      release();
+      pendingArtifactAcquisitions.delete(release);
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], 'artifact_access_acquire_close_unknown');
     }
     throw error;
   }
@@ -70,3 +112,10 @@ export function acquireInheritedArtifactAccess(input: { root: string; fd: number
     throw error;
   }
 }
+
+/** Explicit host pin after complete candidate manifest verification. */
+export { retainWindowsCandidateFiles } from './platform/windows-candidate-files';
+export {
+  assertWindowsInstallationRemoval,
+  type WindowsInstallationRemoval,
+} from './platform/windows-installation-removal';

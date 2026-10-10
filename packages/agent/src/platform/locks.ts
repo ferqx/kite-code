@@ -180,42 +180,33 @@ function acquireWindowsLock(
     let released = false;
     let nativeClosed = false;
     let apiClosed = false;
+    let attachmentClosed = false;
     const lock: FileLock = Object.freeze({
       path,
       mode,
       release() {
         if (released) return;
         beforeRelease(lock);
-        if (!attachments.has(lock)) {
-          const unlocked = api.symbols.UnlockFileEx(handle, 0, 1, 0, ptr(overlapped));
-          const closed = api.symbols.CloseHandle(handle);
-          api.close();
-          if (!unlocked || !closed) throw new Error('Lock release failed.');
-          released = true;
-          live.delete(lock);
-          afterRelease(lock);
-          return;
+        // Keep the real region while scope/namespace cleanup remains unconfirmed.
+        // A successful CloseHandle itself unlocks; explicit Unlock before a failed
+        // close would surrender authority while retaining an unknown native owner.
+        if (!attachmentClosed) {
+          attachments.get(lock)?.release();
+          attachmentClosed = true;
         }
-        let unlockFailed = false;
         if (!nativeClosed) {
-          const unlocked = api.symbols.UnlockFileEx(handle, 0, 1, 0, ptr(overlapped));
           const closed = api.symbols.CloseHandle(handle);
           if (!closed) throw new Error('Lock release failed.');
           nativeClosed = true;
-          unlockFailed = !unlocked;
         }
         if (!apiClosed) {
           api.close();
           apiClosed = true;
         }
-        // Native close releases the region even if explicit Unlock failed. Scope cleanup is
-        // retryable; a failed directory close never reports a fully released lifetime.
-        attachments.get(lock)?.release();
         attachments.delete(lock);
         released = true;
         live.delete(lock);
         afterRelease(lock);
-        if (unlockFailed) throw new Error('Lock release failed.');
       },
     });
     validators.set(lock, () => {

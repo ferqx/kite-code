@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -12,6 +12,7 @@ import { readSessionLogs } from '@kite-ai/agent/storage';
 import { type ConfigureProcessHost, type PrivateStartup, privateStartupSchema } from './bootstrap';
 import { createDefaultProcessConfiguration, type ShellConfigurationOptions } from './configuration';
 import { startService } from './index';
+import { retainWindowsTerminalRuntimeFiles } from './runtime-assets';
 import { runtimeProtectionRoots, verifyRuntimeProtection } from './runtime-protection';
 import { encodeServiceStartupDiagnostic } from './startup-diagnostic';
 
@@ -83,8 +84,13 @@ export async function assembleProcessService(
   let runtimeAssets = entrypoint && isAbsolute(entrypoint) ? [entrypoint] : [];
   if (startup.runtimeProtection) {
     const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
+    const windowsFiles: ReturnType<typeof retainWindowsTerminalRuntimeFiles>[] = [];
     runtimeAssetAccess = {
       release() {
+        while (windowsFiles.length) {
+          windowsFiles.at(-1)!.release();
+          windowsFiles.pop();
+        }
         for (;;) {
           const lease = leases.at(-1);
           if (!lease) return;
@@ -96,6 +102,14 @@ export async function assembleProcessService(
     try {
       for (const root of runtimeProtectionRoots(startup.runtimeProtection))
         leases.push(acquireArtifactAccess({ root: realpathSync(root), mode: 'shared' }));
+      if (process.platform === 'win32')
+        windowsFiles.push(
+          retainWindowsTerminalRuntimeFiles(
+            startup.runtimeProtection.kind === 'native.candidate'
+              ? join(startup.runtimeProtection.root, 'terminal')
+              : startup.runtimeProtection.root,
+          ),
+        );
       runtimeAssets = [
         ...verifyRuntimeProtection(startup.runtimeProtection, {
           entrypoint: entrypoint ?? '',

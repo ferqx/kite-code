@@ -24,7 +24,7 @@ Node/Electron 宿主先打开自己的稳定锁 fd，再以 child stdio 映射�
 
 Windows Bun 使用独立的 [public candidate scope](windows-artifact-scope.ts)，不把 POSIX mode/uid 当作原生权限证据。候选 root 与 parent 的原 HANDLE owner 必须是当前 Token SID；普通继承读/执行 ACE 可保留，写入、删除、修改权限/owner 和 directory delete-child 仅允许当前 SID、SYSTEM 与 Administrators。未知 ACE 类型、其他主体的写 grant、null DACL、reparse 与不一致的 volume/file identity 拒绝；deny ACE 不抵消不可信 allow，inherit-only grant 也不能把不可信写权交给后续子对象。它不要求私有 Profile 的精确 protected/current-SID-only FA，不修改候选、Workspace 或已有目录的 ACL。
 
-scope 保留已核验的整个原目录祖先链 HANDLE，允许 read/write sharing、拒绝 delete sharing，直到该候选的原 shared/exclusive lease 结束；root/parent 另外复核 owner/DACL。既有固定 sibling lock 仍使用 private 文件策略与真实 LockFileEx。内部 attachment 保留原 FileLock 对象和 live authority；失败只清理自己已经打开的句柄，scope 关闭失败不报告完整释放，后续 release 重试未关闭的资源。原 Profile 父子锁及无 attachment 的 OS 锁释放合同保持。scope 不验证 immutable inventory 或授予执行权限，完整制品校验仍由消费 owner 负责。
+scope 保留已核验的整个原目录祖先链 HANDLE，允许 read/write sharing、拒绝 delete sharing，直到该候选的原 shared/exclusive lease 结束；root/parent 另外复核 owner/DACL。既有固定 sibling lock 仍使用 private 文件策略与真实 LockFileEx。内部 attachment 保留原 FileLock 对象和 live authority；失败只清理自己已经打开的句柄，scope 关闭失败不报告完整释放，后续 release 重试未关闭的资源。原 Profile 父子锁依赖保持；Windows 严格关闭顺序见下文。scope 不验证 immutable inventory 或授予执行权限，完整制品校验仍由消费 owner 负责。
 
 本机 [Windows scope 测试](../../test/isolated/artifact-access/windows-scope.test.ts)仅实测 POSIX/Node 惰性 import 与伪造 attachment 拒绝；实际 Windows 的普通读 ACL、原 ancestry rename 阻止、宽写/错 owner/junction/hardlink 拒绝、双独立 Bun holder 生命周期必须在 Windows 执行，不能因 backend 缺失跳过。此 candidate scope 不补齐 Windows installer 或 Node/Electron inherited 使用权；维护 private 文件端口由其 owner 独立核验。原生权限与共享模式依据 [Microsoft 文件安全与访问权](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)、[CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)和 [ACCESS_MASK](https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask)。
 
@@ -37,6 +37,16 @@ Node/Electron 宿主以 no-follow 打开准确 sibling fd，通过 child stdio �
 
 
 Windows 维护使用独立的 private Profile 文件政策和原稳定排他锁，已接入原文件/祖先 pin、FA metadata 与 FR media 分角色验证、GENERIC_WRITE flush 与 same-volume write-through move；它不借 public candidate scope 授权。完整行为、SQL/FD 生命周期和原生未验范围归[maintenance owner](../maintenance/README.md#windows-维护文件端口与验收边界)；当前 macOS 类型与邻接通过不能证明 Windows 运行或安装资格。
+
+[Windows 安装协调](windows-installation-coordination.ts)为正式 Terminal prefix 在安装树外建立稳定私有 sibling namespace，selection 锁与每个 64 字符十六进制 candidate ID 的 use 锁从同一已核 marker 派生。managed candidate 的 `acquireArtifactAccess` 取得这个外部 use 锁，同时保留原候选 scope；卸载不能通过关闭重开普通 scope 借出删除权限。删除专用端口与安装选择归 release／CLI owner，外部 namespace 不随安装树删除，Profile 数据不由制品使用锁管理。
+
+显式 [完整文件 pin](windows-candidate-files.ts) `retainWindowsCandidateFiles(root, relativeFiles)` 接受消费 owner 从已验 closed manifest 取得的路径；不自动把所有 artifact lease 扩成全树 pin。它复用上述 public candidate ACL，拒绝 reparse、hardlink、别名与非法 relative 路径，沿原 HANDLE 保留所有 nested 目录与每个普通文件，share READ only、拒绝 WRITE／DELETE。复核 volume／FileID、creation／LastWrite、size／link 与路径映射；LastAccessTime 不作为不可变字段，因为读取可改变它。关闭成功才移除所属记录，失败的原 HANDLE 保留，不以 JS 对象或目录存在代替关闭事实。
+
+Windows 的 attached 与无 attachment 锁都只在原 `CloseHandle` 成功后结束实际 region：attachment 必须先确认完整关闭，不先执行 `UnlockFileEx`；scope 失败保留 region，原 HANDLE 关闭失败也保留同一 HANDLE 与 DLL 供重试，已成功关闭的 attachment 不重复关闭。原 Profile 父子释放约束与 POSIX 锁合同保持。[原 Windows scope 测试](../../test/isolated/artifact-access/windows-scope.test.ts)新增隔离 FFI mock，核 scope／原 HANDLE 关闭失败时模拟 region 仍拒绝竞争 EX、同原 HANDLE 重试及幂等；mock 不替代原生 Windows 句柄与 ACL 证据。
+
+[Windows 私有路径端口](windows-path-security.ts)的 `copyPrivateFile` 从原只读 HANDLE 读到 EOF 并复核完整原 size／身份，source 可采用上述 public ACL，不修权限；target 以当前 Token SID 的 protected DACL 和 CREATE_NEW 原 HANDLE 创建。`writePrivateArtifactFile` 接受最多 1 GiB 的明确制品字节，普通 `writePrivateFile` 的原 8 MiB 边界不变。复制与写入使用有限块及短写循环、FlushFileBuffers、原对象／parents 复核和严格关闭，完整内容 SHA 仍由制品消费 owner 核对。`movePrivateEntry` 保留原 source 身份，在同卷通过同步 write-through 原生 move 发布，不采用跨卷 copy 或按 POSIX mode 假验证权限。
+
+这些端口与源码／mock 邻接验证只是当前实现边界，不能声明原生 Windows 安装或完整资源退出资格；Windows Native、Daemon、GC、PTY 及跨代码版本完整链仍待对应原生验收。metadata 的纯 Node／POSIX 读取与显式 Windows acquire 分离，Windows 系统 DLL 在实际端口调用时才加载。
 
 ## Shell guardian 与 macOS confinement
 

@@ -234,3 +234,109 @@ test.skipIf(!windows)(
   },
   15000,
 );
+
+test('Windows attached lock keeps its original region through scope and native close failures', () => {
+  const lockModule = fileURLToPath(new URL('../../../src/platform/locks.ts', import.meta.url));
+  const securityModule = fileURLToPath(
+    new URL('../../../src/platform/windows-path-security.ts', import.meta.url),
+  );
+  const code = `
+import { mock } from 'bun:test';
+import assert from 'node:assert/strict';
+import * as nativeFFI from 'bun:ffi';
+Object.defineProperty(process, 'platform', { value: 'win32' });
+let nextHandle = 1n, region, failClose = false, failScope = true;
+const handles = new Map(), calls = [];
+mock.module('bun:ffi', () => ({
+  ...nativeFFI,
+  ptr: value => value,
+  dlopen() {
+    return {
+      close() { calls.push('dll-close'); },
+      symbols: {
+        CreateFileW() { const handle = nextHandle++; handles.set(handle, true); return handle; },
+        GetFileInformationByHandle(_handle, bytes) {
+          new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(40, 1, true);
+          return true;
+        },
+        LockFileEx(handle, flags) {
+          if ((flags & 2) && region !== undefined) return false;
+          region = handle;
+          return true;
+        },
+        UnlockFileEx(handle) { calls.push('unlock'); if (region === handle) region = undefined; return true; },
+        CloseHandle(handle) {
+          calls.push('close:' + handle);
+          if (failClose && handle === region) { failClose = false; return false; }
+          handles.delete(handle);
+          if (region === handle) region = undefined;
+          return true;
+        },
+      },
+    };
+  },
+}));
+const security = { verifyPath() {}, createFile() {}, verifyFile() {}, verifyHandle() {} };
+mock.module(${JSON.stringify(securityModule)}, () => ({ defaultWindowsPathSecurity: () => security }));
+const { acquireFileLock, attachLockResource, assertLiveLock } = await import(${JSON.stringify(lockModule)});
+const lock = acquireFileLock('owned-mock-lock', 'shared', security);
+const original = region;
+let scopeAttempts = 0;
+attachLockResource(lock, {
+  verify() {},
+  release() {
+    calls.push('scope'); scopeAttempts++;
+    assert.equal(region, original);
+    if (failScope) throw Error('scope_close_unknown');
+  },
+});
+assert.throws(() => lock.release(), /scope_close_unknown/);
+assert.deepEqual(calls, ['scope']);
+assert.equal(region, original);
+assertLiveLock(lock, lock.path, 'shared');
+assert.throws(() => acquireFileLock('owned-mock-lock', 'exclusive', security), /Lock is busy/);
+failScope = false; failClose = true; calls.length = 0;
+assert.throws(() => lock.release(), /Lock release failed/);
+assert.deepEqual(calls, ['scope', 'close:' + original]);
+assert.equal(region, original);
+assert.equal(handles.has(original), true);
+assert.throws(() => acquireFileLock('owned-mock-lock', 'exclusive', security), /Lock is busy/);
+calls.length = 0;
+lock.release();
+assert.deepEqual(calls, ['close:' + original, 'dll-close']);
+assert.equal(scopeAttempts, 2);
+assert.equal(region, undefined);
+assert.equal(handles.has(original), false);
+assert.throws(() => assertLiveLock(lock, lock.path, 'shared'), /released lock authority/);
+lock.release();
+assert.deepEqual(calls, ['close:' + original, 'dll-close']);
+const replacement = acquireFileLock('owned-mock-lock', 'exclusive', security);
+const replacementHandle = region;
+failClose = true; calls.length = 0;
+assert.throws(() => replacement.release(), /Lock release failed/);
+assert.deepEqual(calls, ['close:' + replacementHandle]);
+assert.equal(region, replacementHandle);
+assert.equal(handles.has(replacementHandle), true);
+assertLiveLock(replacement, replacement.path, 'exclusive');
+assert.throws(() => acquireFileLock('owned-mock-lock', 'exclusive', security), /Lock is busy/);
+calls.length = 0;
+replacement.release();
+assert.deepEqual(calls, ['close:' + replacementHandle, 'dll-close']);
+assert.equal(region, undefined);
+assert.throws(() => assertLiveLock(replacement, replacement.path, 'exclusive'), /released lock authority/);
+replacement.release();
+assert.deepEqual(calls, ['close:' + replacementHandle, 'dll-close']);
+assert.equal(handles.size, 0);
+console.log('attached-original-close-confirmed');
+`;
+  const child = spawnSync(process.execPath, ['-e', code], {
+    encoding: 'utf8',
+    timeout: 4000,
+  });
+  if (child.error || child.status !== 0)
+    process.stderr.write(child.stderr || `${String(child.error ?? child.signal)}\n`);
+  expect(child.error).toBeUndefined();
+  expect(child.status).toBe(0);
+  expect(child.stderr).toBe('');
+  expect(child.stdout).toBe('attached-original-close-confirmed\n');
+});

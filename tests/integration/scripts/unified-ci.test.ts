@@ -350,3 +350,60 @@ test('CI working-directory and command indirection cannot resolve an undeclared 
     ),
   ).toBe(true);
 });
+
+test('Windows release must prepare the compiler before building and execute the exact installed paired consumer qualification', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/release-candidate.yml'),
+    'utf8',
+  );
+  const prepare =
+    "- if: runner.os == 'Windows'\n        name: Prepare installed Windows x64 Native compiler\n        run: bun run scripts/release/prepare-windows-native-ci.ts";
+  const step =
+    "- if: runner.os == 'Windows'\n        name: Actual installed Windows Terminal paired version selection and data retention";
+  const command = `bun run tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts "--candidate=\${{ github.workspace }}/dist/unified-terminal"`;
+  const build =
+    'bun run release:build --directory dist/unified-terminal --archive dist/unified-terminal.tar.gz';
+  const codes = [
+    'formal-ci-windows-terminal-installation-missing',
+    'formal-ci-windows-terminal-build-environment-missing',
+  ];
+  const original = fixture();
+  put(original, 'scripts/release/prepare-windows-native-ci.ts', 'export {};');
+  put(original, '.github/workflows/release-candidate.yml', source);
+  expect(
+    checkUnifiedFormalConsumers(original).violations.filter((v) => codes.includes(v.code)),
+  ).toEqual([]);
+  for (const mutate of [
+    (s: string) => s.replace(step, step.replace("runner.os == 'Windows'", 'false')),
+    (s: string) => s.replace(step, step.replace("runner.os == 'Windows'", "runner.os == 'Linux'")),
+    (s: string) => s.replace(`run: ${command}`, `run: echo ${command}`),
+    (s: string) => s.replace(`run: ${command}`, `run: ${command} --test-name-pattern=never-match`),
+    (s: string) =>
+      s.replace(
+        `run: ${command}`,
+        `run: ${command.replace(`\${{ github.workspace }}/dist/unified-terminal`, 'dist/unified-terminal')}`,
+      ),
+    (s: string) =>
+      s.replace(
+        `run: ${command}`,
+        `run: ${command.replace('dist/unified-terminal', 'dist/another-candidate')}`,
+      ),
+    (s: string) => s.replace(step, `${step}\n        continue-on-error: true`),
+    (s: string) =>
+      s.replace(prepare, prepare.replace("runner.os == 'Windows'", "runner.os == 'Linux'")),
+    (s: string) =>
+      s.replace(prepare, '').replace(`run: ${build}`, `run: ${build}\n      ${prepare}`),
+    (s: string) => s.replace(`run: ${build}`, 'run: echo build-terminal'),
+    (s: string) =>
+      s
+        .replace(`run: ${command}`, '')
+        .replace(`run: ${build}`, `run: ${command}\n      - run: ${build}`),
+  ]) {
+    const root = fixture();
+    put(root, 'scripts/release/prepare-windows-native-ci.ts', 'export {};');
+    put(root, '.github/workflows/release-candidate.yml', mutate(source));
+    expect(checkUnifiedFormalConsumers(root).violations.some((v) => codes.includes(v.code))).toBe(
+      true,
+    );
+  }
+});

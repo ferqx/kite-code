@@ -268,6 +268,36 @@ export function checkUnifiedFormalConsumers(root: string): {
           )
             add('formal-ci-linux-native-lifecycle-missing', location, jobName);
           if (name === 'release-candidate.yml') {
+            const prepare = steps.findIndex(
+              (step) =>
+                step.if === "runner.os == 'Windows'" &&
+                step.run === 'bun run scripts/release/prepare-windows-native-ci.ts' &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            const build = steps.findIndex(
+              (step) =>
+                step.if === undefined &&
+                typeof step.run === 'string' &&
+                step.run.trim().replace(/\s+/g, ' ') ===
+                  'bun run release:build --directory dist/unified-terminal --archive dist/unified-terminal.tar.gz' &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            const qualify = steps.findIndex(
+              (step) =>
+                step.if === "runner.os == 'Windows'" &&
+                typeof step.run === 'string' &&
+                step.run.trim().replace(/\s+/g, ' ') ===
+                  `bun run tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts "--candidate=\${{ github.workspace }}/dist/unified-terminal"` &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            if (qualify < 0 || build < 0 || qualify <= build)
+              add('formal-ci-windows-terminal-installation-missing', location, jobName);
+            if (
+              prepare < 0 ||
+              build <= prepare ||
+              !existsSync(resolve(root, 'scripts/release/prepare-windows-native-ci.ts'))
+            )
+              add('formal-ci-windows-terminal-build-environment-missing', location, jobName);
             for (const [platform, command, code] of [
               [
                 "runner.os == 'macOS' || runner.os == 'Linux'",

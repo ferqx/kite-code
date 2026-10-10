@@ -1,4 +1,4 @@
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 export interface WindowsArtifactScope {
   verify(): void;
@@ -6,20 +6,36 @@ export interface WindowsArtifactScope {
 }
 
 /** Public candidate directories are readable assets, not private Profile objects. */
-let backend: ((root: string) => WindowsArtifactScope) | undefined;
+let backend:
+  | ((root: string, relativeFiles?: readonly string[]) => WindowsArtifactScope)
+  | undefined;
 export function retainWindowsArtifactScope(root: string): WindowsArtifactScope {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw Error('artifact_scope_platform_unsupported');
   backend ??= createBackend();
   return backend(root);
 }
-function createBackend(): (root: string) => WindowsArtifactScope {
+/** Internal shared native policy; callers must supply canonical manifest-relative paths. */
+export function retainWindowsArtifactObjects(
+  root: string,
+  relativeFiles: readonly string[],
+): WindowsArtifactScope {
+  if (process.platform !== 'win32' || process.arch !== 'x64')
+    throw Error('artifact_scope_platform_unsupported');
+  backend ??= createBackend();
+  return backend(root, relativeFiles);
+}
+function createBackend(): (
+  root: string,
+  relativeFiles?: readonly string[],
+) => WindowsArtifactScope {
   const { dlopen, ptr, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetCurrentProcess: { args: [], returns: 'u64' },
     GetSystemDirectoryW: { args: ['ptr', 'u32'], returns: 'u32' },
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },
+    GetFinalPathNameByHandleW: { args: ['u64', 'ptr', 'u32', 'u32'], returns: 'u32' },
     CloseHandle: { args: ['u64'], returns: 'bool' },
     LocalFree: { args: ['ptr'], returns: 'ptr' },
   });
@@ -73,12 +89,12 @@ function createBackend(): (root: string) => WindowsArtifactScope {
     } finally {
       if (!kernel.symbols.CloseHandle(token[0]!)) fail();
     }
-    const open = (path: string): bigint | number => {
+    const open = (path: string, strict = false): bigint | number => {
       // READ_CONTROL | FILE_READ_ATTRIBUTES; deny delete sharing through the whole ancestry.
       const handle = kernel.symbols.CreateFileW(
         ptr(wide(path)),
         0x20080,
-        3,
+        strict ? 1 : 3,
         null,
         3,
         0x02200000,
@@ -87,11 +103,16 @@ function createBackend(): (root: string) => WindowsArtifactScope {
       if (!handle || BigInt(handle) === 18446744073709551615n) fail();
       return handle;
     };
-    const info = (handle: bigint | number) => {
+    const info = (handle: bigint | number, file = false, full = false) => {
       const bytes = new Uint8Array(52);
       if (!kernel.symbols.GetFileInformationByHandle(handle, ptr(bytes))) fail();
       const value = new DataView(bytes.buffer);
-      if (!(value.getUint32(0, true) & 0x10) || value.getUint32(0, true) & 0x400) fail();
+      const attributes = value.getUint32(0, true);
+      if (attributes & 0x400 || !!(attributes & 0x10) === file) fail();
+      if (file && value.getUint32(40, true) !== 1) fail();
+      // LastAccessTime (12..19) may change during legitimate code reads.
+      // Attributes, creation/write times, volume, size, link count and FileID remain pinned.
+      if (full) return Buffer.concat([bytes.subarray(0, 12), bytes.subarray(20)]).toString('hex');
       return `${value.getUint32(28, true)}:${value.getUint32(44, true)}:${value.getUint32(48, true)}`;
     };
     const acl = (handle: bigint | number) => {
@@ -165,13 +186,19 @@ function createBackend(): (root: string) => WindowsArtifactScope {
         if (descriptor[0]) kernel.symbols.LocalFree(pointer(descriptor[0]));
       }
     };
-    return (root) => {
+    // Failed CloseHandle retains the owned collection for retry/diagnosis; DLLs remain live.
+    const owned = new Set<object>();
+    return (root, relativeFiles) => {
       const entries: {
         path: string;
         handle: bigint | number;
         identity: string;
         closed: boolean;
+        file?: boolean;
+        strict?: boolean;
+        checked?: boolean;
       }[] = [];
+      if (relativeFiles) owned.add(entries);
       const close = () => {
         let failure = false;
         for (const entry of [...entries].reverse()) {
@@ -180,6 +207,7 @@ function createBackend(): (root: string) => WindowsArtifactScope {
           else failure = true;
         }
         if (failure) throw Error('artifact_scope_release_failed');
+        owned.delete(entries);
       };
       try {
         let path = resolve(root);
@@ -194,6 +222,56 @@ function createBackend(): (root: string) => WindowsArtifactScope {
           if (parent === path) break;
           path = parent;
         }
+        if (relativeFiles) {
+          const paths = new Map<string, boolean>([[root, false]]);
+          for (const relativeFile of relativeFiles) {
+            const file = join(root, ...relativeFile.split('/'));
+            const parents: string[] = [];
+            for (
+              let directory = dirname(file);
+              directory !== root;
+              directory = dirname(directory)
+            ) {
+              if (directory === dirname(directory)) fail();
+              parents.push(directory);
+            }
+            for (const directory of parents.reverse()) paths.set(directory, false);
+            if (paths.has(file)) fail();
+            paths.set(file, true);
+          }
+          // Root and all descendants deny WRITE and DELETE sharing. Original ancestry
+          // handles keep the existing directory policy and prevent rename/reparse races.
+          for (const [path, file] of paths) {
+            const handle = open(path, true);
+            const entry = {
+              path,
+              handle,
+              identity: '',
+              closed: false,
+              file,
+              strict: true,
+              checked: true,
+            };
+            entries.push(entry);
+            entry.identity = info(handle, file, true);
+            acl(handle);
+            const mapped = new Uint16Array(32768);
+            const length = kernel.symbols.GetFinalPathNameByHandleW(
+              handle,
+              ptr(mapped),
+              mapped.length,
+              0,
+            );
+            if (!length || length >= mapped.length) fail();
+            const actual = Buffer.from(mapped.buffer, 0, length * 2).toString('utf16le');
+            const normalized = actual.startsWith('\\\\?\\UNC\\')
+              ? `\\\\${actual.slice(8)}`
+              : actual.startsWith('\\\\?\\')
+                ? actual.slice(4)
+                : actual;
+            if (normalized !== path) fail();
+          }
+        }
         let released = false;
         const scope: WindowsArtifactScope = {
           verify() {
@@ -201,16 +279,21 @@ function createBackend(): (root: string) => WindowsArtifactScope {
             // Keep TOKEN_USER backing storage alive while EqualSid uses its pointer.
             if (!user.byteLength) fail();
             for (const [index, entry] of entries.entries()) {
-              if (entry.closed || info(entry.handle) !== entry.identity) fail();
-              const current = open(entry.path);
+              if (entry.closed || info(entry.handle, entry.file, entry.strict) !== entry.identity)
+                fail();
+              const current = open(entry.path, entry.strict);
               try {
-                if (info(current) !== entry.identity) fail();
-                if (index < 2) {
+                if (info(current, entry.file, entry.strict) !== entry.identity) fail();
+                if (index < 2 || entry.checked) {
                   acl(entry.handle);
                   acl(current);
                 }
               } finally {
-                if (!kernel.symbols.CloseHandle(current)) fail();
+                if (!kernel.symbols.CloseHandle(current)) {
+                  // The verification probe is still ours; release must retry its real HANDLE.
+                  entries.push({ ...entry, handle: current, closed: false });
+                  fail();
+                }
               }
             }
           },
@@ -223,7 +306,13 @@ function createBackend(): (root: string) => WindowsArtifactScope {
         scope.verify();
         return Object.freeze(scope);
       } catch (error) {
-        close();
+        if (relativeFiles) {
+          try {
+            close();
+          } catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], 'artifact_scope_release_failed');
+          }
+        } else close();
         throw error;
       }
     };

@@ -3979,3 +3979,43 @@ Store逐行验证和流式摘要全部原Execution/Interaction，保持原canoni
 | 3 | 前序齐全后的正式调用者完整迁移、最后旧路径退役和阶段退出 | §35独立全能力/正式caller审查，最后legacy实际退役，阶段未过滤完整回归通过及适用P7发布/兼容责任 | 依赖前两项和其它原T/E，不以局部绿色退出 |
 
 新增闭合的是TUI恢复后明确纳入原结果的正式消费者能力；没有新增全局caller切换或最终legacy退役。手册、UI owner、shared active、tests入口、主方案/进度与对应两条cap证据同步，37能力全部partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。RSS/观测未重跑，原真实失败保留；仅继续已授权本地stage/commit，无push/PR/发布/Actions dispatch。
+
+## 2026-10-10Windows managed Terminal 安装与版本切换源码
+
+前一TUI恢复Include切片已按正常hook本地提交 `4df5260c142036bef023f1f92c17c342a01909e4`，四原完整作业13文件96pass/728expect及强制门禁仅证明其冻结范围。本轮按用户恢复Goal的顺序，先核RSS/观测与真实阶段依赖，然后实施不受其阻塞的Windows正式安装/版本选择源码。原 `arena-zero` 九点RSS +115.203125MiB高于原32MiB仍为真实红；activeResources/handles和全部Runtime descendants未具备，继续P6/§35门禁，没有重复参数对照。
+
+### 新接入的完整安装能力与正式消费者
+
+Windows x64 的原 build/pack/install/rollback/uninstall 接入普通文件闭包和新私有对象。format=2 marker固定原bootstrap三前门文件，current/previous发布只改变后续选择，原候选不覆盖。协调键与selection/use原锁位于prefix外，stage按本调用有限库存清理，保同卷Flush/write-through和读回。卸载先所有EX，再取得完整库存原DELETE-purpose owner；whole verifier复用同一对象，逐叶删除并确认根消失，未知关闭/部分删除保真实EX。独立data-root没有进入删除树。当前负责实现和边界归[Terminal owner](../../apps/cli/docs/terminal-release.md#windows-managed-terminal-当前实现)。
+
+`kite.exe`/`kite-tui.exe` native第一阶段在Bun初始化前删除五环境键（含BUN_BE_BUN），保原模块/祖先/helper对象，SHA绑定独立compiled verifier。helper关闭四种配置自动加载，selection SH内验证bootstrap/current、候选SH和所有文件，再启动固定Bun/配置/标准入口。父paired CLI与实际Service各取得自己的SH/完整pin，真实child退出后才严格交锁。新PE副本只封闭现存LoadConfig的静态系统DLL搜索字段，原Bun不改，Windows10 RS1+及未验loader边界保持。[长期提案](../../.agents/notes/proposed/architecture/2026-10-10-windows-managed-terminal-frontdoor.md)继续proposed；原Native Node加载前拒绝没有删除。
+
+Windows dependency layout保全部普通文件、真实包内解析边/资源/许可，无symlink/junction/hardlink或另造.bin；同版本循环复用原祖先，不可有限展开的遮蔽循环明确拒绝。POSIX默认linked、mode/fsync/shell入口保持。本机真实六workspace锁定图有限核对为1096物理placements/358实际source节点/36890文件/258327638字节、2345真实解析边保全部原字节；搬迁后1958可加载root/productionSDKsubpath实际解析，380原包根本不可加载入口如实记录，不删依赖。原输入18821项前后全等；原脚本 `/private/tmp/kite-terminal-real-materialization-20261010.ts` 及最终 `/private/tmp/kite-terminal-real-materialization-o6wJA1/{result,report,inputs}.json` 留存。这只证明macOS/Bun1.4.2布局，不计Windows资格。
+
+### 新发现问题、必要验证与边界
+
+最终只读审查发现三处关闭unknown可能提前交锁：selection EX先于coordination关闭；DELETE acquisition已保原HANDLE但caller尚未收到port时释放全部EX；artifact attachment verify失败且scope关闭unknown时先交SH。已按原控制流修正：coord先确认再selection Close，准确AcquireUnknownError保全EX，failed admission强保资源并聚合首错。新增三个独立subprocess mock沿实际公开rollback/uninstall/acquireArtifactAccess核这些分支，对照普通拒绝确认释放；原Windows scope全部nativecases、平台skips与新Close-only原HANDLE/region重试保持，不以mock证明syscall。
+
+release candidate已接MSVC→Terminal build→明确absolute candidate Windows qualification，原CI guard核11个mutation负例；common whole、Native与always formal仍强制。Windows显式工具保120秒整链/30秒命令，消费已构建候选，核真实paired Run A保锁时发布B/rollback、实际退出/双EOF、B冷读原完整结果且零Model、全EX与卸载保DB/config。工具B仅manifest版本标签、TUI仅help/version；Windows编译/ACL/PE/实际installed、跨代码、PTY、Daemon、Native、GC和完整维护均未运行，按用户安排留重构后Actions，本地没有dispatch。原common中的POSIX平台fixture和未资格guard真实失败不排除。
+
+本机独立compiled argv及实际verifier编译探针仅核Bun参数保原Unicode/空格/引号、bundle成功和非Windows明确拒绝，证据 `/private/tmp/kite-windows-verifier-compile-xRCpqj/result.json`；不代WinPE加载。
+
+当前HEAD `4df5260c142036bef023f1f92c17c342a01909e4`、macOS arm64/Bun1.4.2的最终受影响范围是22个唯一原完整job/22文件、99pass/6554Bun断言/0fail/3原Windows native平台skip，归 `/private/tmp/kite-v13-windows-terminal-verified-evidence-20261010.json`。原预算/完整文件/断言/maxConcurrency保持，无名称过滤。原Terminal installed整链1pass/3845expect/56.02s、Native installed1pass/34expect/105.62s和登记前门1pass/65expect/78.41s均通过，原Native driver的业务/冷读/双锁/卸载断言继续实际执行；这些只计当前macOS资格。
+
+最终两组freeze各保4299 tracked/untracked输入、Git与实际Bun/Node/Electron/TS/Biome资产前后全等：`final-2`前三个新完整文件7pass/729expect复用，之后只改Windows-scope新增mock，该文件不属这三个job，生产/配置/依赖/资产未变；`final-3`原其余19完整job92pass/5825expect/3原平台skip/278.62s actual0。合并收据逐项核所有原log SHA和当前输入，不将失败job或重复文件计绿/重复计数。完整真实锁定图18821项原输入也与当前全等，前述布局证据复用，没有重做参数对照。
+
+两次新增mock真实红保留：`final`首个整文件2pass/1fail/10expect，其artifact scope替身漏了静态重导出的 `retainWindowsArtifactObjects`；`final-2`原Windows-scope整文件1pass/1fail/3skip/8expect，其替身未先初始化Bun builtin FFI而调用了实际kernel32.dll。独立诊断日志分别 `/private/tmp/kite-v13-windows-terminal-mock-diagnostic-20261010.log`、`/private/tmp/kite-v13-windows-scope-mock-diagnostic-20261010.log`，只补准确mock导出/初始化与失败原stderr透明输出，所有断言与4秒子/默认5秒预算不变。原scope测试8859byte完整prefix逐字保持。没有删断言、排除测试或把平台skip算通过。
+
+Root及八runtime workspace类型、边界/API/原CI消费者/测试归属、docs/docs-impact/plan-evidence按本次diff通过；docs-impact提示的共享authority、旧架构和历史release范围保持，由当前Terminal/Service/platform及release-control负责新增平台事实，不制造无行为变化diff。后续仅同步证据文字并执行本地stage/commit正常hook。有限独立审查只闭合本片控制流，不替代§35完整迁移审查；wholeDefault/wholeV13/phaseExit仍false。
+
+### 五项剩余阻塞与验收（按依赖）
+
+| 顺序 | 实际用户入口与缺口 | 完整行为/验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed Terminal：安装→标准.exe前门→普通Run→版本选择/回退→保数据卸载 | 源码已接；实际Windows同一候选pack/unpack/install，五环境键/preload/未资格Native登记拒绝，真实A使用中B发布/rollback不替换原执行，实际child退出/双EOF后全EX，B原完整冷读零Model，DB/config原字节保留 | 原生资格未验；RSS不是实现前置。标签B不计跨代码，help不计PTY |
+| 2 | installed Windows `kite maintenance backup/inspect/restore/status`和明确GC | GC源码仍拒绝Windows；沿现有维护owner补原对象删除/严格SQLite close/EX、journal与fencing，未知保锁/自有scratch，实际完整备份恢复/冷读零重放及保来源/原请求 | 可独立实施；复用不变macOS DB9/rollback/严格close证据，不重复旧修复 |
+| 3 | Windows `server start/stop`、`kite-desktop`和真实TUI交互 | Daemon endpoint仍拒绝；Native保加载前guard。完成各真实transport/身份、Node加载前准确handoff/自身SH和原PTY全部用户操作、精确取消/退出/冷读 | 依赖正式安装准入并各自完整owner；不能以paired/help或helper代持放行 |
+| 4 | installed普通任务持续工作之RSS和完整资源生命周期 | 原八outer/九点/增长与斜率门禁、全部可信Runtime后代/activeResources/handles完整观测实际满足；原formal拒绝保持 | P6/§35强制门禁，与前三项独立实现可并行；不重复参数对照，不计FD/listener替代 |
+| 5 | 支持范围原生资格→§35独立完整能力/正式caller审查→最终旧路径退役/阶段完整回归及适用P7 | 原生build/install/process/PTY/维护及相关T/E真实通过，再审查、实际退役和未过滤完整回归；保common/native/always formal真实失败 | Win/Linux按用户顺序留重构后Actions，未dispatch。D08首发前没有适用新基线published样本，T029不阻独立实现；首发后责任保持 |
+
+当前新增的是Windows安装/正式paired使用权/版本选择的源码接线及上述关闭缺口修正；平台完整能力未闭合，没有宣布全局caller迁移或最终legacy退役。手册、技术owner、active、Notes、tests与主计划/对应cap证据同步。37能力全部partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active，授权仍仅本地stage/commit，无push/PR/发布。

@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import type { WindowsPathSecurity } from './locks';
+import { retainWindowsCandidateFiles } from './windows-candidate-files';
 
 /** Fixed OS policy; no caller supplied SID, descriptor, DLL or privilege escalation. */
 let cached: NativeWindowsPathSecurity | undefined;
@@ -12,6 +13,8 @@ export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
   verifyScopeDirectory(path: string): void;
   readScopeFile(path: string, maxBytes: number, privateFile?: boolean): Uint8Array | null;
   writePrivateFile(path: string, bytes: Uint8Array): void;
+  writePrivateArtifactFile(path: string, bytes: Uint8Array): void;
+  copyPrivateFile(source: string, target: string): void;
   createDirectory(path: string): void;
   createFile(path: string): void;
   verifyPath(path: string): void;
@@ -212,6 +215,7 @@ function createNativeWindowsPathSecurity(): Implementation {
       if (sd[0]) kernel.symbols.LocalFree(pointer(sd[0]));
     }
   };
+  const unclosedVerificationHandles = new Set<bigint | number>();
   const verifyHandle = (
     handle: bigint | number,
     path: string,
@@ -232,7 +236,11 @@ function createNativeWindowsPathSecurity(): Implementation {
       if (identity(info(current)) !== identity(original)) fail();
       if (privateObject) verifyAcl(current, directory, readOnly);
     } finally {
-      if (!kernel.symbols.CloseHandle(current)) fail();
+      if (!kernel.symbols.CloseHandle(current)) {
+        unclosedVerificationHandles.add(current);
+        fail();
+      }
+      unclosedVerificationHandles.delete(current);
     }
   };
   const verify = (path: string, directory: boolean, privateObject = true) => {
@@ -245,6 +253,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     }
   };
   type Held = { path: string; handle: bigint | number; directory: boolean };
+  const ownedTransfers = new Set<Held[]>();
   const closeHeld = (held: Held[]) => {
     let error: unknown;
     for (let index = held.length - 1; index >= 0; index--) {
@@ -252,6 +261,7 @@ function createNativeWindowsPathSecurity(): Implementation {
       else error ??= Error('windows_path_security_close_failed');
     }
     if (error) throw error;
+    ownedTransfers.delete(held);
   };
   const retainParents = (paths: string[], held: Held[]) => {
     const parents = new Set<string>();
@@ -277,6 +287,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     api.verifyPath(path);
     api.verifyDirectory(dirname(path));
     const held: Held[] = [];
+    ownedTransfers.add(held);
     const close = () => closeHeld(held);
     try {
       retainParents([path], held);
@@ -307,6 +318,59 @@ function createNativeWindowsPathSecurity(): Implementation {
       }
       throw error;
     }
+  };
+  const writeChunks = (handle: bigint | number, bytes: Uint8Array) => {
+    const count = new Uint32Array(1);
+    let total = 0;
+    while (total < bytes.length) {
+      const chunk = bytes.subarray(total, Math.min(bytes.length, total + 65536));
+      if (
+        !kernel.symbols.WriteFile(handle, ptr(chunk), chunk.length, ptr(count), null) ||
+        !count[0] ||
+        count[0] > chunk.length
+      )
+        fail();
+      total += count[0]!;
+    }
+  };
+  const transfer = (target: string, provide: (handle: bigint | number, held: Held[]) => void) => {
+    target = resolve(target);
+    api.verifyPath(target);
+    api.verifyDirectory(dirname(target));
+    const held: Held[] = [];
+    ownedTransfers.add(held);
+    let failure: unknown;
+    try {
+      retainParents([target], held);
+      const sd = descriptor(false);
+      let handle: bigint | number;
+      try {
+        handle = open(target, true, sd, 0x40020080, false, 1);
+      } finally {
+        kernel.symbols.LocalFree(sd);
+      }
+      held.push({ path: target, handle, directory: false });
+      verifyHandle(handle, target, false);
+      const original = identity(info(handle));
+      provide(handle, held);
+      if (!kernel.symbols.FlushFileBuffers(handle)) fail();
+      if (identity(info(handle)) !== original) fail();
+      verifyHandle(handle, target, false);
+      api.verifyDirectory(dirname(target));
+      for (const parent of held.filter((entry) => entry.directory))
+        verifyHandle(parent.handle, parent.path, true, false);
+    } catch (error) {
+      failure = error;
+    }
+    try {
+      closeHeld(held);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        failure ? [failure, cleanupError] : [cleanupError],
+        'windows_path_security_close_failed',
+      );
+    }
+    if (failure) throw failure;
   };
   const api: Implementation = {
     verifyPath(path) {
@@ -375,36 +439,75 @@ function createNativeWindowsPathSecurity(): Implementation {
     },
     writePrivateFile(path, bytes) {
       if (!(bytes instanceof Uint8Array) || bytes.length > 8388608) fail();
-      api.verifyPath(path);
-      const sd = descriptor(false);
+      transfer(path, (handle) => {
+        writeChunks(handle, bytes);
+        const actual = info(handle);
+        if (actual.getUint32(32, true) || actual.getUint32(36, true) !== bytes.length) fail();
+      });
+    },
+    writePrivateArtifactFile(path, bytes) {
+      if (!(bytes instanceof Uint8Array) || bytes.length > 1024 * 1024 * 1024) fail();
+      transfer(path, (handle) => {
+        writeChunks(handle, bytes);
+        const actual = info(handle);
+        if (actual.getUint32(32, true) || actual.getUint32(36, true) !== bytes.length) fail();
+      });
+    },
+    copyPrivateFile(source, target) {
+      source = resolve(source);
+      target = resolve(target);
+      if (source === target) fail();
+      const sourcePin = retainWindowsCandidateFiles(dirname(source), [basename(source)]);
+      let failure: unknown;
       try {
-        const handle = open(path, true, sd, 0x40020000, false);
-        try {
-          const count = new Uint32Array(1);
-          let total = 0;
-          while (total < bytes.length) {
+        transfer(target, (output, held) => {
+          retainParents([source], held);
+          const input = open(source, false, undefined, 0x80020080, false, 1);
+          held.push({ path: source, handle: input, directory: false });
+          verifyHandle(input, source, false, false);
+          const before = info(input);
+          const stamp = (value: DataView) =>
+            [0, 4, 8, 20, 24, 28, 32, 36, 40, 44, 48]
+              .map((offset) => value.getUint32(offset, true))
+              .join(':');
+          const original = stamp(before);
+          const expected =
+            (BigInt(before.getUint32(32, true)) << 32n) | BigInt(before.getUint32(36, true));
+          const bytes = new Uint8Array(65536),
+            count = new Uint32Array(1);
+          let total = 0n;
+          for (;;) {
             if (
-              !kernel.symbols.WriteFile(
-                handle,
-                ptr(bytes.subarray(total)),
-                bytes.length - total,
-                ptr(count),
-                null,
-              ) ||
-              !count[0] ||
-              count[0] > bytes.length - total
+              !kernel.symbols.ReadFile(input, ptr(bytes), bytes.length, ptr(count), null) ||
+              count[0]! > bytes.length
             )
               fail();
-            total += count[0]!;
+            if (!count[0]) break;
+            writeChunks(output, bytes.subarray(0, count[0]));
+            total += BigInt(count[0]);
           }
-          if (!kernel.symbols.FlushFileBuffers(handle)) fail();
-          verifyHandle(handle, path, false);
-        } finally {
-          if (!kernel.symbols.CloseHandle(handle)) fail();
-        }
-      } finally {
-        kernel.symbols.LocalFree(sd);
+          if (total !== expected || stamp(info(input)) !== original) fail();
+          const written = info(output);
+          if (
+            ((BigInt(written.getUint32(32, true)) << 32n) | BigInt(written.getUint32(36, true))) !==
+            expected
+          )
+            fail();
+          verifyHandle(input, source, false, false);
+          sourcePin.verify();
+        });
+      } catch (error) {
+        failure = error;
       }
+      try {
+        sourcePin.release();
+      } catch (cleanupError) {
+        throw new AggregateError(
+          failure ? [failure, cleanupError] : [cleanupError],
+          'windows_path_security_close_failed',
+        );
+      }
+      if (failure) throw failure;
     },
     verifyDirectory(path) {
       verify(path, true);
@@ -440,6 +543,7 @@ function createNativeWindowsPathSecurity(): Implementation {
       api.verifyPath(source);
       api.verifyPath(target);
       const held: Held[] = [];
+      ownedTransfers.add(held);
       try {
         retainParents([source, target], held);
         api.verifyDirectory(dirname(source));

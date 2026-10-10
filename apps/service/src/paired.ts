@@ -12,6 +12,7 @@ import {
 import { schemas } from './http/schema';
 import type { RuntimeProtection } from './runtime-protection';
 import { parseServiceStartupDiagnostic, type ServiceStartupDiagnostic } from './startup-diagnostic';
+import type { retainWindowsPairedArtifact } from './windows-paired-artifact';
 
 export { formatServiceStartupReport, type ServiceStartupDiagnostic } from './startup-diagnostic';
 
@@ -128,13 +129,58 @@ export async function launchPairedService(options: PairedServiceOptions) {
   const encoded = `${JSON.stringify(startup)}\n`;
   if (Buffer.byteLength(encoded) > startupLimitBytes)
     throw new PairedServiceError('startup_too_large');
-  const command = [options.executable ?? process.execPath, options.entrypoint];
+  const executable = options.executable ?? process.execPath;
+  let artifact: ReturnType<typeof retainWindowsPairedArtifact> | undefined;
+  if (process.platform === 'win32' && options.runtimeProtection) {
+    try {
+      const windows = await import('./windows-paired-artifact');
+      artifact = windows.retainWindowsPairedArtifact(options.runtimeProtection, {
+        entrypoint: options.entrypoint,
+        executable,
+        buildId: options.buildId,
+      });
+    } catch (error) {
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? String(error.code)
+          : 'paired_artifact_admission_failed';
+      throw Object.assign(new PairedServiceError(code), { cause: error });
+    }
+  }
+  const command = [executable, ...(artifact?.arguments ?? []), options.entrypoint];
   // Private startup configuration is sent only through stdin, never inherited
   // from model credential environment variables or an endpoint query string.
   const env = { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' };
-  const child: PairedServiceChild = options.spawnChild
-    ? options.spawnChild(command, { env })
-    : Bun.spawn(command, { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env });
+  let child: PairedServiceChild;
+  try {
+    child = options.spawnChild
+      ? options.spawnChild(command, { env })
+      : Bun.spawn(command, { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env });
+  } catch (error) {
+    try {
+      artifact?.release();
+    } catch (cleanupError) {
+      throw Object.assign(new PairedServiceError('paired_artifact_close_unknown'), {
+        cause: new AggregateError([error, cleanupError]),
+      });
+    }
+    throw error;
+  }
+  // Only the original child's fulfilled exit establishes that its parent pins can close.
+  const retainedArtifact = artifact;
+  const exited = retainedArtifact
+    ? child.exited.then((code) => {
+        try {
+          retainedArtifact.release();
+        } catch (error) {
+          throw Object.assign(new PairedServiceError('paired_artifact_close_unknown'), {
+            cause: error,
+          });
+        }
+        return code;
+      })
+    : child.exited;
+  void exited.catch(() => {});
   const stdout = child.stdout.getReader();
   let stderr = '';
   const diagnostics = () =>
@@ -168,6 +214,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
       reader.releaseLock();
     }
   })();
+  void stderrTask.catch(() => {});
   let closing: Promise<void> | undefined;
   let client: ReturnType<typeof createClient> | undefined;
   const close = () => {
@@ -186,12 +233,31 @@ export async function launchPairedService(options: PairedServiceOptions) {
         child.kill('SIGKILL');
         await child.exited;
       }
-      await stderrTask;
-      try {
-        await stdout.cancel();
-      } catch {
-        /* Already consumed/closed. */
+      if (!retainedArtifact) {
+        await stderrTask;
+        try {
+          await stdout.cancel();
+        } catch {
+          /* Already consumed/closed. */
+        }
+        return;
       }
+      // Stream cleanup must still run if closing the native artifact handle fails.
+      const completed = await Promise.allSettled([
+        exited,
+        stderrTask,
+        stdout.cancel().catch(() => {
+          /* Already consumed/closed. */
+        }),
+      ]);
+      const failures = completed.filter(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      );
+      if (failures.length === 1) throw failures[0]!.reason;
+      if (failures.length > 1)
+        throw Object.assign(new PairedServiceError('paired_close_failed'), {
+          cause: new AggregateError(failures.map((failure) => failure.reason)),
+        });
     })();
     return closing;
   };
@@ -247,7 +313,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
       client,
       bootstrap,
       pid: child.pid,
-      exited: child.exited,
+      exited,
       get diagnostics() {
         return diagnostics();
       },
@@ -257,7 +323,18 @@ export async function launchPairedService(options: PairedServiceOptions) {
       close,
     };
   } catch (error) {
-    await close();
+    if (!retainedArtifact) await close();
+    else {
+      try {
+        await close();
+      } catch (cleanupError) {
+        const code =
+          cleanupError instanceof PairedServiceError ? cleanupError.code : 'paired_close_failed';
+        throw Object.assign(new PairedServiceError(code, parseServiceStartupDiagnostic(stderr)), {
+          cause: new AggregateError([error, cleanupError]),
+        });
+      }
+    }
     const startupDiagnostic = parseServiceStartupDiagnostic(stderr);
     if (error instanceof PairedServiceError)
       throw new PairedServiceError(error.code, startupDiagnostic);

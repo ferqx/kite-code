@@ -2132,6 +2132,8 @@ Native恢复Files的Main消费者也已核真实原Run/Execution出处，完整�
 
 正式Native回退的登记一致性缺口已独立修复：双prefix EX内先完整预检仍由原nonce持有的既存Terminal，再发布active；已知损坏保三份原选择／登记字节，修复后原前门可继续读取并明确回退。两个原完整文件11项／137断言通过；有限fixture不冒称真实损坏窗口或跨prefix崩溃原子性，缺失目标独立回退和其他Native归属保持。长Run真实失败、最多五项依赖及本地提交范围归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-10-native-回退发布前校验)。原P6／§35资源与完整维护／平台／独立审查／最终退役／阶段完整回归、适用P7门禁保持。
 
+Windows managed Terminal 的独立安装、current/previous切换、rollback和保数据uninstall现已按实际源码接入：native前门在Bun初始化前清五环境键，固定compiled verifier及全候选原对象；paired父/实际Service各持自己的SH与文件pin，外置selection/use协调保过卸载/重装，删除whole verify沿同一DELETE-purpose owner。原bootstrap A保留，B仅变指针；物理依赖展开保真实解析边，原Bun不改，新PE副本只封闭已有loader字段。源码和本机控制流/布局邻接不计Windows原生通过；未验MSVC/ACL/PE/实际安装、完整维护GC、Daemon/Native/PTY/跨代码及原RSS/观测门禁保持。最多五项用户能力与真实依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-managed-terminal-安装与版本切换源码)。37能力partial、wholeV13/phaseExit仍false；Win/Linux按用户顺序留重构后Actions，本地不dispatch。必要阶段完整回归在真实收束点执行，不把本片测试或操作列成长期目标。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

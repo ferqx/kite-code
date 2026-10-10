@@ -18,6 +18,10 @@ import {
   parseTerminalBundleManifest,
   verifyTerminalBundle,
 } from '../../apps/cli/host/terminal-artifact';
+import {
+  defaultWindowsPathSecurity,
+  privateDirectory,
+} from '../../packages/agent/src/platform/windows-path-security';
 import { rejectBundleOutput } from './terminal-paths';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -140,7 +144,8 @@ export async function packTerminalBundle(input: { bundleRoot: string; archivePat
     if (bytes.length !== file.size || hash(bytes) !== file.sha256) fail();
     files[file.path] = bytes;
   }
-  mkdirSync(dirname(archivePath), { recursive: true, mode: 0o700 });
+  if (process.platform === 'win32') privateDirectory(dirname(archivePath));
+  else mkdirSync(dirname(archivePath), { recursive: true, mode: 0o700 });
   const bytes = await new Bun.Archive(files, { compress: 'gzip', level: 6 }).bytes();
   const sha256 = hash(bytes);
   const created: string[] = [];
@@ -149,6 +154,15 @@ export async function packTerminalBundle(input: { bundleRoot: string; archivePat
       [archivePath, bytes],
       [checksumPath, `${sha256}  ${basename(archivePath)}\n`],
     ] as const) {
+      if (process.platform === 'win32') {
+        defaultWindowsPathSecurity()!.writePrivateArtifactFile(
+          path,
+          typeof content === 'string' ? new TextEncoder().encode(content) : content,
+        );
+        created.push(path);
+        defaultWindowsPathSecurity()!.syncPrivateFile(path);
+        continue;
+      }
       const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
       created.push(path);
       try {
@@ -158,11 +172,13 @@ export async function packTerminalBundle(input: { bundleRoot: string; archivePat
         closeSync(fd);
       }
     }
-    const directory = openSync(dirname(archivePath), constants.O_RDONLY | constants.O_DIRECTORY);
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
+    if (process.platform !== 'win32') {
+      const directory = openSync(dirname(archivePath), constants.O_RDONLY | constants.O_DIRECTORY);
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
     }
     return { archivePath, sha256, candidateId: bundle.candidateId };
   } catch (error) {
@@ -188,6 +204,7 @@ export function unpackTerminalBundle(input: {
     const content = files.get(file.path);
     if (!content || content.length !== file.size || hash(content) !== file.sha256) fail();
   }
+  if (process.platform === 'win32' && manifest.links.length) fail();
   const links = new Set(manifest.links.map((link) => link.path));
   for (const path of [...files.keys(), ...links]) {
     let parent = dirname(path);
@@ -196,11 +213,20 @@ export function unpackTerminalBundle(input: {
       parent = dirname(parent);
     }
   }
-  mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
-  mkdirSync(destination, { mode: 0o700 });
+  if (process.platform === 'win32') privateDirectory(destination);
+  else {
+    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+    mkdirSync(destination, { mode: 0o700 });
+  }
   try {
     for (const [path, content] of files) {
       const target = join(destination, path);
+      if (process.platform === 'win32') {
+        privateDirectory(dirname(target));
+        defaultWindowsPathSecurity()!.writePrivateArtifactFile(target, content);
+        defaultWindowsPathSecurity()!.syncPrivateFile(target);
+        continue;
+      }
       mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
       const mode = manifest.files.find((file) => file.path === path)?.mode ?? 0o644;
       const fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, mode);

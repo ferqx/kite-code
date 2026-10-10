@@ -30,10 +30,24 @@ import {
 import { createTrustedAssets } from '../../apps/web/src/assets';
 import { acquireArtifactAccess } from '../../packages/agent/src/artifact-access';
 import { acquireFileLock } from '../../packages/agent/src/platform/locks';
+import { retainWindowsArtifactScope } from '../../packages/agent/src/platform/windows-artifact-scope';
+import {
+  defaultWindowsPathSecurity,
+  privateDirectory,
+} from '../../packages/agent/src/platform/windows-path-security';
 import { desktopBundledDependencies } from '../../packages/ui/scripts/bundled-dependencies';
+import {
+  buildWindowsTerminalLauncher,
+  copyWindowsSystemExecutable,
+} from './build-windows-terminal-launcher';
 import { buildTerminalSqliteEngine } from './sqlite-engine';
 import { copyTerminalDependencies } from './terminal-dependencies';
 import { rejectBundleOutput } from './terminal-paths';
+import {
+  installWindowsTerminalBundle,
+  rollbackWindowsTerminalBundle,
+  uninstallWindowsTerminalBundle,
+} from './windows-terminal-install';
 
 export { verifyTerminalBundle };
 
@@ -64,10 +78,15 @@ function ownedDirectory(path: string) {
     !stat.isDirectory() ||
     stat.isSymbolicLink() ||
     realpathSync(path) !== path ||
-    (stat.mode & 0o022) !== 0 ||
+    (process.platform !== 'win32' && (stat.mode & 0o022) !== 0) ||
     (process.getuid && stat.uid !== process.getuid())
   )
     error('directory_unsafe');
+  if (process.platform === 'win32') {
+    const scope = retainWindowsArtifactScope(path);
+    scope.verify();
+    scope.release();
+  }
 }
 async function run(executable: string, args: string[], cwd: string): Promise<string> {
   const child = Bun.spawn([executable, ...args], {
@@ -152,7 +171,14 @@ function inventory(root: string) {
       if (stat.isSymbolicLink()) links.push({ path: item, target: readlinkSync(path) });
       else if (stat.isDirectory()) walk(path);
       else if (stat.isFile()) {
-        const mode = stat.mode & 0o111 ? 493 : 420;
+        const mode =
+          process.platform === 'win32'
+            ? path.endsWith('.exe')
+              ? 493
+              : 420
+            : stat.mode & 0o111
+              ? 493
+              : 420;
         chmodSync(path, mode);
         const bytes = readFileSync(path);
         files.push({ path: item, size: bytes.length, sha256: sha(bytes), mode });
@@ -199,7 +225,8 @@ export async function buildTerminalBundle(input: {
   const runtime = realpathSync(input.bunExecutable ?? process.execPath);
   const bunVersion = await run(runtime, ['--version'], repository);
   if (bunVersion !== Bun.version) error('runtime_version_mismatch');
-  mkdirSync(destination, { mode: 0o700 });
+  if (process.platform === 'win32') privateDirectory(destination);
+  else mkdirSync(destination, { mode: 0o700 });
   try {
     const root = realpathSync(destination),
       entries = terminalBundleEntries(process.platform);
@@ -320,9 +347,23 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
       repositoryRoot: repository,
       destination: join(root, 'node_modules'),
       workspacePackages: packages,
+      ...(process.platform === 'win32' ? { dependencyLayout: 'materialized' as const } : {}),
     });
-    mkdirSync(join(root, 'runtime'), { mode: 0o700 });
-    copyFileSync(runtime, join(root, entries.runtime));
+    if (process.platform === 'win32') {
+      privateDirectory(join(root, 'runtime'));
+      copyWindowsSystemExecutable(runtime, join(root, entries.runtime));
+      defaultWindowsPathSecurity()!.writePrivateFile(
+        join(root, 'runtime/windows-bunfig.toml'),
+        Buffer.from('preload = []\n'),
+      );
+      defaultWindowsPathSecurity()!.writePrivateFile(
+        join(root, 'runtime/windows-tsconfig.json'),
+        Buffer.from('{"compilerOptions":{"paths":{}}}\n'),
+      );
+    } else {
+      mkdirSync(join(root, 'runtime'), { mode: 0o700 });
+      copyFileSync(runtime, join(root, entries.runtime));
+    }
     chmodSync(join(root, entries.runtime), 0o755);
     const sqlite = await buildTerminalSqliteEngine({
       root,
@@ -349,6 +390,44 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
         naming: `${name}.js`,
       });
       if (!build.success) throw new AggregateError(build.logs, 'terminal_entrypoint_build_failed');
+    }
+    if (process.platform === 'win32') {
+      const folder = join(root, 'windows-frontdoor');
+      privateDirectory(folder);
+      const verifierPath = join(folder, 'terminal-verifier.exe');
+      const compileRoot = join(root, `.windows-verifier-${randomUUID()}`);
+      privateDirectory(compileRoot);
+      const compiledPath = join(compileRoot, 'terminal-verifier.exe');
+      const compiled = await Bun.build({
+        entrypoints: [join(repository, 'scripts/release/entrypoints/windows-terminal-verifier.ts')],
+        target: 'bun',
+        packages: 'bundle',
+        compile: {
+          executablePath: runtime,
+          outfile: compiledPath,
+          autoloadDotenv: false,
+          autoloadBunfig: false,
+          autoloadTsconfig: false,
+          autoloadPackageJson: false,
+        },
+      });
+      if (!compiled.success)
+        throw new AggregateError(compiled.logs, 'terminal_windows_verifier_build_failed');
+      copyWindowsSystemExecutable(compiledPath, verifierPath);
+      rmSync(compileRoot, { recursive: true, force: false });
+      const bytes = readFileSync(verifierPath);
+      const launchers = await buildWindowsTerminalLauncher({
+        outdir: join(root, `.windows-launcher-${randomUUID()}`),
+        verifierPath,
+        verifierSha256: sha(bytes),
+        verifierSize: bytes.length,
+      });
+      for (const name of launchers.launchers)
+        defaultWindowsPathSecurity()!.copyPrivateFile(
+          join(launchers.root, name),
+          join(folder, name),
+        );
+      rmSync(launchers.root, { recursive: true, force: false });
     }
     const web = await Bun.build({
       entrypoints: [join(repository, 'apps/web/src/browser.tsx')],
@@ -470,6 +549,7 @@ export function installTerminalBundle(input: {
   bundleRoot: string;
   prefix: string;
 }): InstalledTerminalBundle {
+  if (process.platform === 'win32') return installWindowsTerminalBundle(input);
   if (!['darwin', 'linux'].includes(process.platform)) error('install_platform_unsupported');
   const bundle = verifyTerminalBundle(input.bundleRoot),
     requested = resolve(input.prefix);
@@ -531,6 +611,7 @@ export function installTerminalBundle(input: {
   }
 }
 export function rollbackTerminalBundle(prefix: string): InstalledTerminalBundle {
+  if (process.platform === 'win32') return rollbackWindowsTerminalBundle(prefix);
   const root = resolve(prefix);
   installed(root);
   const lock = acquireFileLock(join(root, '.install.lock'), 'exclusive');
@@ -555,6 +636,7 @@ export function rollbackTerminalBundle(prefix: string): InstalledTerminalBundle 
 }
 /** Uninstall refuses any live candidate use, then removes only this managed artifact root. */
 export function uninstallTerminalBundle(prefix: string) {
+  if (process.platform === 'win32') return uninstallWindowsTerminalBundle(prefix);
   const root = resolve(prefix);
   installed(root);
   const lock = acquireFileLock(join(root, '.install.lock'), 'exclusive'),

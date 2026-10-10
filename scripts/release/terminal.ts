@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { privateDirectory } from '../../packages/agent/src/platform/windows-path-security';
 import { packTerminalBundle, unpackTerminalBundle } from './terminal-archive';
 import {
   buildTerminalBundle,
@@ -75,7 +77,11 @@ export async function runTerminalRelease(args: string[]): Promise<unknown> {
       return { root: bundle.root, candidateId: bundle.candidateId, manifest: bundle.manifest };
     }
     case 'install': {
-      const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-unpack-')));
+      const scratch =
+        process.platform === 'win32'
+          ? join(realpathSync(tmpdir()), `kite-terminal-unpack-${randomUUID()}`)
+          : realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-unpack-')));
+      if (process.platform === 'win32') privateDirectory(scratch);
       try {
         const bundle = unpackTerminalBundle({
           archivePath: value('archive'),
