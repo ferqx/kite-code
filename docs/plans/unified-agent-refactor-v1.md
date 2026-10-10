@@ -2106,6 +2106,12 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+最新实际 macOS MCP 失败定位到正式停止结果消费者：原 owned stdio 已停、Job终态保存，但新增观察字段被 rigid 两字段检查拒绝，原重连因而 unknown／新连接未尝试。现重连执行与冷 Query 共用原 v1—v4 closed codec，严格绑定原身份／结果版本／摘要，观察 unavailable 保原固定原因，远端停止和资源资格不扩大。完整17项重连及源码外 Native 全连接／刷新／重连／下一Model独立Tool审批／一次效果／正常退出／冷GET通过；其他真实默认失败只修正夹具的准确终态或审批交接，历史退出超时保留有限观察和原预算。原失败与未筛选完整集成结果归[当前回归进度](unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)，RSS／完整观测、Windows Shell原合同与后续Actions、§35／最终退役／阶段资格仍独立保留。
+
+当前输入第五次未筛选完整默认实际exit1／307.66s，122任务启动、121通过、Native长历史1失败、453未开始；上述MCP消费者及相邻完整用户链在该计划通过，不代wholeDefault。历史业务完整后原75秒driver余2.784秒，未取得自然退出终态；独立自然退出4.217秒和业务耗时差不能证明该红已修复。仅封存有限观察，不放宽预算或删断言。该已验证MCP切片按现有授权本地交付，Native完整集成与wholeDefault／wholeV13／phaseExit保持未闭合，最多五项实际入口／验收和依赖归上述进度。
+
+MCP 与 Web 切片后已按原默认计划进入本机集成收束验证。实际三个 planned Task 场景暴露夹具的父任务提前完成与单槽 Provider 循环等待；只在真实 SQLite 计划登记后、取得 Model 槽前协调原父子时序。下一次完整默认又发现 Native Plan driver 将已 accepted、尚未退出 pending 的原 Files 卡交给严格 Planning helper；当前加强原等待，核同一审批 ID 的接纳和视图交接。第三次真实失败确认原 parent/child fixture 把 `task_wait/interaction` 早返回当成 child 完成；现同样在槽外等准确原 carrier Command 终态。生产来源／审批／资源守卫、全部原断言和预算保持。准确失败、完整默认结果和依赖归[当前回归进度](unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)；该验证不代未闭合资源、平台、完整能力审查或阶段退出。
+
 macOS MCP切片收束后，实际源码核对发现Web正式目录仍调用旧身份便利reader，不能消费已提供的activity，也未兑现时间排序／完整详情／键盘浏览。当前已切到原完整Browser activity reader并复用原公共Tooltip，保原Cookie身份、全页快照、只读及取消／迟到隔离，完整工作区／会话目录用户链按本机DOM／实际Core与冷恢复HTTP／IAB证据收束。准确原失败、原断言保全、14完整文件84项及最多五项依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11web-完整工作区与会话目录)。新消费者不依赖RSS或Win/Linux才能实施；原Windows Shell合同guard、RSS／完整观测、后续Actions平台实证及§35审查／最终退役／阶段完整回归继续未闭合，37partial、wholeDefault／wholeV13／phaseExit=false。
 
 macOS 正式 MCP stdio 的原真实失败优先切片现按源码修复启动准备收尾：控制关闭、零 bootstrap attempt 的原目录清理，以及 bootstrap 已 attempt 但回复未确认的准确标签撤销保首因与 unknown。原七整例、共享 Shell 和独立 installed 默认 Source／SDK Tool／取消／Service退出／维护恢复的完整用户链按本机证据收束，旧 negative-PGID 退役保持。准确原失败、必要新回归、正式隔离调度与最多五项剩余依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)。它不依赖 RSS 收集即可实施，但不解除 RSS／全观测、Win／Linux实机、Windows Shell原合同guard、§35独立审查／最终退役／完整阶段回归门禁；37partial、wholeDefault／wholeV13／phaseExit=false。

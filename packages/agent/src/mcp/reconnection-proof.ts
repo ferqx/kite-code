@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ExtensionRecord, Json, PublicExecution, ReadContext } from '../extensions';
 import { canonicalJson } from '../json';
 import type { McpReconnectionInput } from './reconnection-types';
+import { decodeMcpStdioProcessEvidence } from './stdio-process-evidence';
 
 export const reconnectionType = 'builtin.mcp.reconnection';
 export const reconnectionId = 'mcp.reconnect';
@@ -239,6 +240,24 @@ export async function confirmedStop(
   const job = await context.getExecution(input.target.connectionExecutionId);
   const result = object(job?.result),
     details = object(result.details);
+  const fields = Object.keys(details).sort().join(',');
+  // Owned evidence is observational: preserve old transports and the original cold owner.
+  // Decode its exact binding without reopening processes or requiring the reader's PID.
+  const detailsValid =
+    fields === 'remoteToolStopConfirmed,transportStopped' ||
+    (fields === 'ownedProcessesUnavailable,remoteToolStopConfirmed,transportStopped' &&
+      details.ownedProcessesUnavailable === 'mcp_owned_process_evidence_unavailable') ||
+    (fields === 'ownedProcesses,remoteToolStopConfirmed,transportStopped' &&
+      !!job &&
+      typeof job.originStoreId === 'string' &&
+      !!decodeMcpStdioProcessEvidence(details.ownedProcesses, {
+        originalStoreId: job.originStoreId,
+        sessionId: job.sessionId,
+        executionId: job.id,
+        serverId: input.serverId,
+        scopeId: JSON.stringify([job.originStoreId, job.sessionId, input.serverId]),
+        configDigest: input.target.configDigest,
+      }));
   if (
     !decimal64(proof.resultRevision) ||
     !job ||
@@ -248,7 +267,7 @@ export async function confirmedStop(
     job.originCommandId !== input.target.operationRef.commandId ||
     !['cancelled', 'failed', 'succeeded'].includes(job.status) ||
     !['cancelled', 'failed', 'succeeded'].includes(String(result.outcome)) ||
-    Object.keys(details).length !== 2 ||
+    !detailsValid ||
     details.transportStopped !== true ||
     details.remoteToolStopConfirmed !== false ||
     job.resultRevision !== proof.resultRevision ||

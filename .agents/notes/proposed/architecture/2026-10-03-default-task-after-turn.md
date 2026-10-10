@@ -34,6 +34,8 @@ required/background/普通Shell不产生自动报告。unknown、取消/删除�
 
 当前提案继续proposed：完整默认冷报告强杀/丢回执、多层和全部正式客户端/平台接受标准尚未合并资格。已有源码外1/164或Service组合不代替这些场景。
 
+2026-10-11 原完整默认发现三个 planned 场景的夹具时序失败。两槽场景在独立 carrier 审批后让父先完成，原当前来源的 approval 因父 inactive 变 null，真实 freshness 因而在 child adapter 前拒绝；单槽场景在 Provider 内等待父继续，持有唯一 Model 槽，却等子 Model 完成才释放，构成循环等待。当前仅在真实 SQLite `planExecution` 后、取得 Model 槽前协调原父 Model：先等实际原 child Provider 进入，再允许父更新计划；单槽原父完成等待也移到该边界。实际持久结果和授权仍由原 Core 决定，不保留 inactive 批准、不修改 Model 资源或 source guard。原 11 例、全部断言与预算保持，完整文件 11pass/104expects；准确红绿与默认回归范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)，提案状态仍为 proposed。
+
 ## Acceptance criteria
 
 真实无child/afterTurn注入的默认factory及源码外default进程：Task/独立carrier各审批、父先或子先完成均准确一次报告Model采用原低信任完整结果；required/background/Shell零报告；失败如实汇报而unknown/cancel不报告。原control/source/Planning在request/apply/final SQL漂移拒绝，无新授权和外部重做；报告不递归after_turn，nested不新建deadline。SIGKILL冷读零Model，显式原恢复与丢回执原GET保持一次消费。当前正式入口/平台资格单独记录。

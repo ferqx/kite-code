@@ -516,6 +516,9 @@ try {
       (value) =>
         value.interactionSubmissions.some(
           (row) => row.interaction.id === approval.id && row.phase === 'accepted',
+        ) &&
+        !value.selection!.interactions.some(
+          (row) => row.id === approval.id && row.state === 'pending',
         ),
       'original Files approval not accepted',
     );

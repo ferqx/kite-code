@@ -293,6 +293,10 @@ async function fixture(
   const parentGate = new Promise<void>((resolve) => {
     releaseParent = resolve;
   });
+  let childStarted!: () => void;
+  const childStartedGate = new Promise<void>((resolve) => {
+    childStarted = resolve;
+  });
   let currentRevision = 'original',
     trusted = true,
     normalParent = 0,
@@ -322,11 +326,11 @@ async function fixture(
       if (!review) calls.push(body);
       if (child) {
         childCalls++;
+        childStarted();
         await gate;
       }
       if (report) reports++;
       const parentIndex = !review && !child && !report ? normalParent++ : -1;
-      if (planning && singleSlot && parentIndex === 4) await parentGate;
       const call =
         !review &&
         !child &&
@@ -492,9 +496,30 @@ async function fixture(
     }
     return null;
   };
+  const coordinatedStore = new Proxy(store, {
+    get(target, property) {
+      if (property !== 'planExecution') return Reflect.get(target, property);
+      return async (input: Parameters<typeof store.planExecution>[0]) => {
+        const execution = await store.planExecution(input);
+        if (
+          planning &&
+          input.kind === 'model' &&
+          input.sessionId === 's' &&
+          input.originCommandId === 'work'
+        ) {
+          // Hold the parent's next request before it acquires a Model slot.
+          // Its original approved source must remain live until the child starts.
+          if (normalParent === 3) await childStartedGate;
+          // A Provider response holds the sole slot and cannot wait for the child.
+          if (singleSlot && normalParent === 4) await parentGate;
+        }
+        return execution;
+      };
+    },
+  });
   const runtime = createRuntime({
     ...host,
-    store,
+    store: coordinatedStore,
     permissions: host.permissions!,
     modelConcurrency: planning && !singleSlot ? 2 : 1,
   });
@@ -640,6 +665,7 @@ async function fixture(
     async close() {
       release();
       releaseParent();
+      childStarted();
       await service.close();
       provider.stop(true);
       rmSync(root, { recursive: true, force: true });

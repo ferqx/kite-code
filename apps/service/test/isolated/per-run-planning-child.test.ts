@@ -225,6 +225,42 @@ async function fixture(
   let casExecutionId: string | null = null;
   const observedStore = new Proxy(store, {
     get(target, property) {
+      if (property === 'planExecution') {
+        return async (input: Parameters<typeof store.planExecution>[0]) => {
+          const execution = await store.planExecution(input);
+          if (
+            (scenario === 'ask' || scenario === 'untrusted') &&
+            input.kind === 'model' &&
+            input.definitionId === 'parent' &&
+            input.sessionId === 's' &&
+            input.originCommandId === workId &&
+            modelSteps.get('parent') === 4
+          ) {
+            // task_wait returns on an interaction, before the child is terminal.
+            // Keep the original approval live without holding the sole Model slot.
+            const executions = await store.listExecutions('s');
+            const task = executions.find(
+              (e) =>
+                e.kind === 'tool' &&
+                e.definitionId === 'task' &&
+                e.originStoreId === expectedStoreId &&
+                e.originCommandId === workId &&
+                e.runId === execution.runId,
+            )!;
+            const carrier = executions.find(
+              (e) =>
+                e.kind === 'job' &&
+                e.definitionId === 'agent/worker' &&
+                e.originStoreId === expectedStoreId &&
+                e.parentExecutionId === task.id &&
+                e.rootWorkCommandId === workId &&
+                e.childSessionId !== null,
+            )!;
+            await runtime.waitForCommand(carrier.originCommandId, { timeoutMs: 8000 });
+          }
+          return execution;
+        };
+      }
       if (property !== 'markDispatching') return Reflect.get(target, property);
       return async (input: Parameters<typeof store.markDispatching>[0]) => {
         const actual = await store.getExecution(input.executionId);

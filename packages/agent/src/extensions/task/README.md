@@ -62,3 +62,5 @@ Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 
 显式 `resumeJobReport` 为根 Session 的冷报告重建提供独立入口：新 `job.report.resume` 申请绑定准确原 `job.report` 和原父配置，不能提交任意上下文或替换模型。宿主使用专门 `resolveRecoveryRunConfiguration` 恢复原定义，Core 核完整模型/工具/扩展/reviewer manifest；没有该能力时动态配置不能退回普通新 Run resolver，静态宿主也必须精确复现原manifest。恢复工厂前先通过只读Store检查root创建主体、报告主体与合法恢复来源；应用继续复核原策略、取消、selection和来源，允许的新报告仍使用唯一Loop及原来源的新Run，旧父Run不复活。
 
 重复原恢复申请直接查回；不同申请对已应用报告仅记录原事实，不再执行已有Run。`applyJobReport.started` 只表示本次事务新建报告Run，不能以返回了某个历史Run推导应调用模型。恢复准入及模型执行都计入Runtime生命周期；准备可被关闭中止，绑定交给实际Run后由后代lease负责最后释放。准备disposer失败保留cleanup与profile使用锁，shutdown明确未确认，不自动重试失败disposer。原报告suppressed/rejected不作为重新执行资格，备份恢复换Store也不能改标原报告。该有限入口不提供任意Run重试、外部Job reconcile或嵌套child公开恢复。
+
+[冷报告完整恢复文件](../../../test/isolated/recovery/job-report-resume-runtime.test.ts)保原十二模式、断言及5／15秒预算；fixture 只有准确 carrier 真正终态后，才由其固定 `resultRevision` 查原报告 ID。running 的 revision 0 不代表后来报告，`listPendingJobReports` 也不列 needs_review。该时序修正后12项200断言通过，生产恢复／审批／取消合同未改；原完整默认红与集成结果归[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)。

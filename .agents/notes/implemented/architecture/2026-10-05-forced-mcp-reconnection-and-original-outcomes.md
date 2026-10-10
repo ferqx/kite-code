@@ -18,6 +18,8 @@ static仅接受factory固定注册、digest与可信port；source独立捕获当
 
 独立record保存完整原input及有限stop/new-ref/catalogue索引，阶段CAS失败不继续下一副作用。Query只读真实Execution/result/ref与stage完整inputDigest；ready、live、旧stop分别证明。停止旧连接后新来源漂移或新建立被拒绝，保持旧已停、新未建立，不自动恢复旧holder。缺回执或实际权限/取消证明不足保unknown。
 
+2026-10-11补充：正式 macOS Native 窗口证明，旧连接已停止且持久终态合法，但停止结果新增 `ownedProcesses` 后，原消费者的 rigid 两字段检查拒绝新连接。现保原两字段分支，准确第三字段沿已有 v1—v4 closed codec 核原六字段 binding；观察不可用只接受固定原因，未知或额外字段不接受。重连执行和冷 Query 共用该 decoder，不要求冷 reader 的当前 PID，不重开 OS owner。只投影停止回执的原观测，不从它授远端停止、全 Runtime 监督或资源资格；否则删除观察或依据当前 PID 重建证明会丢原事实或拒绝合法冷读取。原完整重连断言与超时保持，新增消费者契约及实际 Native 原整窗口验证范围归总体进度。
+
 2026-10-06补充：默认Source新Job在实际来源漂移时，Entry.ready先拒绝，Core随后才提交真实Job失败结果；父R立即读一次终态会把已确认停止的新建立误记unknown。现在仅在新建立/preflight失败或Entry已ended的收尾路径沿准确原newOperationRef、原signal和既有timeout等待，再核原完整Job/ref/input/parent/Store/root-work与严格stopped/unopened证明。局部状态仅决定等待路径，不代替持久停止证明。新holder仍live但ready阶段或发布持久化失败时保原unknown/quarantine；有界等待失败同样保unknown，Job后来结算不追改原R。实际消费者为默认Service/CLI强制重连，未新增Core、Query、恢复许可或私有协议。真实SQLite提交屏障、两秒等待超时及原发布故障已核，当前13受影响任务73例2120断言与具体SHA归总体进度；最新完整默认第十九轮失败不由有限绿替代。
 
 新目录 staged ready 与普通Action结果持久成功分开。publishing ticket保留到完整原R succeeded/result/inputDigest/catalogue、新N parent/ref及当前Entry/config/epoch均证明；Step、Tool/Task最后wire、warm connect、后续R、refresh/Resource/Prompt同核。Query先读完整成功事实，再await精确holder发布确认；它不凭阶段清票、不补回执。回调在holder上保留以继续拒绝后来的证明漂移。

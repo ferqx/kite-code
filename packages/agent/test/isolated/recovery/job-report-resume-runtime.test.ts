@@ -297,7 +297,8 @@ for (const mode of [
         if (!reportId) {
           const commands = (await store.getView('root')).executions;
           const carrier = commands.find((e) => e.kind === 'job' && e.childSessionId);
-          if (carrier) {
+          // Only settlement fixes the report revision. Pending listings omit needs_review.
+          if (carrier && ['succeeded', 'failed', 'cancelled'].includes(carrier.status)) {
             const { semanticDigest } = await import('../../../src/json');
             reportId = `report-${await semanticDigest([storeId, carrier.id, carrier.resultRevision])}`;
           }

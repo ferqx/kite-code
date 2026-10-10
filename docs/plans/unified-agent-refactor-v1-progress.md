@@ -4596,3 +4596,81 @@ Root 曾把两个 installed isolated 文件放入同一个 Bun 宿主，实际1p
 | 4 | §35完整37能力／T/E独立审查、真实legacy消费者清零／删除及未过滤完整阶段回归、适用P7责任 | ①—③及其余完整能力／必要平台资格汇合，本片14文件和本机browser不能宣布完整default／P5／P6／V1.3退出 |
 
 本轮仅收束完整Web目录消费者，37能力status保持partial；wholeDefault=false、wholeV13=false、phaseExit=false，Goal继续active。已授权本地提交范围保持，无push／PR／发布／平台安装或Actions dispatch。
+
+## 2026-10-11：默认 Task 完整回归的父子时序
+
+从干净 durable checkout `4a20cc998042618b0633683b73d7482ddbf615c4` 继续原 Goal。MCP 与 Web 两个完整用户链已在前片本地提交，本轮先只读核实际依赖：安装／版本选择／维护恢复、CLI/TUI 和 Native 阅读／Context 链没有发现新的独立源码缺口。Native 外部未知 Job 的完整核实仍缺默认可靠原 adapter、专用授权与原配置恢复装配，现行手册只列开发 CLI；公共 API 存在不代默认安装资格，不拆成单独 UI 按钮。RSS 和完整观测只阻相应 P6／§35／最终退役，不作为这些独立源码的前置。
+
+### 原完整默认的真实失败
+
+以 Bun1.4.2／macOS arm64 正常宿主权限执行准确 `bun run test`，保原八 workspace、全部 714 文件发现、parallelism4 和 575 个调度任务（167 parallel 文件／541 isolated／6 exclusive）；未传用例筛选、超时或调度覆盖。第一次实际 exit1，47 个任务已启动、46 个通过，原 failure/drain 后未开始的其余部分不能宣称通过。三个 planned Task 整例均在原 `until(childCalls===1)` 8 秒等待失败；原日志 `/private/tmp/kite-v13-macos-default-20261011.log` 保留。4386 个 tracked 输入与 Git 状态全过程一致，收据 `/private/tmp/kite-v13-macos-default-source-freeze-20261011.json`；没有用当前局部结果回填已中止的完整默认。
+
+仅为该未解决失败，在同一完整原文件的原等待处采集真实事实；临时诊断完整复验仍为 8pass／3fail／71expects／27.03s，`/private/tmp/kite-default-after-turn-original-diagnostic-20261011.log` 保留。两槽父先完成场景的原 carrier 是 `failed/context_refresh_required/adapterAttempted:false`，child Run 和 Provider 均零，原父及失败结果报告已 completed；当前 Plan source 在原父 inactive 后不含 approval，冻结 child 决策的新鲜度因而实际拒绝。单槽场景则父 active、carrier running、child Run 已建立但 Provider 零；父 Provider 在 parentIndex4 持唯一 Model slot 等待 parentGate，测试又等 child Provider／终态才释放该 gate，形成夹具循环等待。两种失败分开说明，不能推成统一生产死锁或修改 freshness 迎合测试。
+
+### 原完整用户链的修正与验收
+
+仅改 `apps/service/test/isolated/default-after-turn.test.ts` 的 fixture 协调。在实际 SQLite `planExecution` 已持久保存原父 Model 后、UnifiedExecution 取得 Model slot 前，只对 `planning/model/Session s/originCommandId work` 等待原 child Provider 实际进入；单槽的父完成等待同样在槽外。实际 child 仍独立审批、真正调用 Provider、保存原结果；authorization.review 与 report 原命令不受该等待影响。普通关闭释放所属三个 gate。没有修改生产权限、source capture/freshness、inactive approval、Model 资源或报告调度，临时诊断也未成为额外用例。
+
+完整原 11 项最终为 **11pass／104expects／0fail／3.36s**，日志 `/private/tmp/kite-default-after-turn-coordinated-whole-20261011.log`。仍核原 Plan review、Task／carrier 独立 Ask、不同 Execution、一次 child、父完成与唯一 report；单槽 child 先完成时父 active、报告 accepted/deferred 且零 Model，父完成后才一次汇报。原 control/source/head 漂移、required/background 零报告、原 requirements／receipt／完整结果及非递归断言全部保留，8 秒等待和三个 25 秒整例预算不变。未参与实现的 Agent 独立只读审查原持久步骤、Model slot 顺序、准确命令过滤、收尾和全部原断言，无必要修改；此明确时序资格不承诺生产调度总以同顺序发生。
+
+Service owner、现有 proposed 默认 Task Note 与主计划同步该测试边界；产品行为未变，核对恢复／工具手册后不制造用户行为 diff。强制文档／对应 impact／plan、受影响类型与格式和正常 Git hooks仍独立执行。原默认因真实失败中止，修正后必须重跑准确完整计划；其最终结果在本节按实际记录，当前不凭 11 项宣布完整 default 或阶段退出。
+
+### Native Plan 原审批交接的真实失败
+
+修正 Task 后继续准确未筛选 `bun run test`，第二次实际 exit1／176.74s，43 个任务已启动、42 个通过；原 Task 11 项、macOS MCP stdio 整文件及其余已运行文件通过，但 Native Plan 原整窗口失败。原 driver 的 `only exact Planning management approvals may be handled here` 断言读到独立 Files 卡；第一次完整默认的同一窗口曾 1pass／262expects，不能因不稳定而排除。原第二次日志 `/private/tmp/kite-v13-macos-default-final-20261011.log`、准确 tracked 输入和 failure/drain 范围仍保存在上述 freeze 收据。
+
+实际原 Files submission 已 accepted，Main 在 `viewLoading` 期间仍可能返回旧 `lastView`，其中同一原卡尚 pending。原 `toolApproval` 只等 accepted，后续 Planning helper 因而抢在原视图交接前读取。仅在该原 until 谓词追加同一审批 ID 不再 pending，保 accepted、原 Run／definition／execution／commandId、独立审批及完整正文和效果核对；严格 Planning 断言、15 秒等待、driver 与整文件预算全部不变。没有重答、过滤未知审批或修改生产 Main 状态。独立只读审查确认未 accepted 或原卡持续 pending 仍真实失败。
+
+原完整 `apps/desktop/test/isolated/native-plan-review-bundle.test.ts` 修正后为 **1pass／262expects／0fail／38.85s**，日志 `/private/tmp/kite-native-plan-original-approval-whole-20261011.log`。真实搬迁且删除构建源的默认 Service／compatible Provider 窗口仍完成原反馈 v2、Auto／Accept Edits、两项独立 Files 审批、拒绝、取消、所属 Electron／Service 退出及冷 Store。Desktop owner 同步回执接纳与视图交接的测试边界；该整窗口结果仍不代未筛选默认、三平台或 P5 退出。
+
+### 原 Task wait 的交互早返回
+
+第三次准确 `bun run test` 实际 exit1／253.88s，91 个调度任务已启动、90 个通过。上述 Task 11 项、Native Plan 原窗口、macOS MCP stdio、Native background／Shell／history 整例已通过；新的 `per-run-planning-child.test.ts` 原完整五例为 4pass／1fail／47expects，Ask 子写入在原人工批准后仍没有物理文件。原日志 `/private/tmp/kite-v13-macos-default-qualified-20261011.log` 与 `/private/tmp/kite-v13-macos-default-qualified-source-freeze-20261011.json` 保留，4386 tracked 输入全程未变。原独立完整复验仍 4pass／1fail／47expects／4.14s，日志 `/private/tmp/kite-per-run-planning-child-original-20261011.log`；不能以扩大等待预算或排除该文件解除完整默认失败。
+
+同一原整文件的临时实际诊断仍 4pass／1fail／47expects／3.79s，`/private/tmp/kite-per-run-planning-child-diagnostic-20261011.log` 保留。准确父 Run 为 failed／necessary_condition_unsatisfied／inactive，原 `task_wait` 已 succeeded，返回 `reason:interaction/timedOut:false`，carrier 仍 running；独立 Files 卡 answered，但原 child Run 仍 waiting_interaction、files.write planned，原时点文件 false。这是 Task wait 的正常交互早返回，不是 4000ms 超时或策略拒绝等待。原父脚本随后返回 finished，提前丢失当前 Plan approval；父 Command 终态不证明 child 已完成，原 source guard 保持。
+
+只在该 fixture 已有 observed Store Proxy 中，在真实 SQLite `planExecution` 完成后、取得唯一 Model 槽前，对 Ask／untrusted 的原父第五次 Model 等待准确 carrier Command 终态。读取同一 Store 的原父 Run→原 Task→对应 child Job、父 Execution、root work 和 child Session，不用目录中首个同名 Job；child Model、人工审批、当前 mode／trust 和其他漂移案例保持原路径。实际 Job 的 `waitForCommand` 核真正 terminal，不以 Command applied 替代；等待失败原样传播。临时诊断已移除，没有更改生产 `task_wait`、inactive approval、资源或授权。
+
+最终准确绑定的原完整文件 **5pass／52expects／0fail／4.40s**，日志 `/private/tmp/kite-per-run-planning-child-bound-whole-20261011.log`。原 5 个 case body／32 个 expect 表达式／script／until／原等待完全保全，新 carrier wait 保原 8000ms cap，Task wait 4000ms 和各整例预算不变，收据 `/private/tmp/kite-per-run-planning-child-preservation-20261011.json`。前述 Task 11 例／55 个 expect 表达式以及 Native driver 81 个 assert、12 个 until、原数字预算与 Bun 整文件也逐一核 AST 保全，收据 `/private/tmp/kite-default-after-turn-preservation-20261011.json`、`/private/tmp/kite-native-plan-preservation-20261011.json`；统计只覆盖各原冻结文件。独立只读核真实交互合同、Model prepare-before-acquire 和原 carrier terminal 语义；Service owner 同步测试边界，未改变用户行为或把测试窗口建成独立能力目标。第四次未筛选默认仍须实际完整收束。
+
+### 正式 macOS MCP 停止结果消费者的真实缺口
+
+第四次准确未筛选 `bun run test` 实际 exit1／315.21s，121个任务已启动、118通过、3失败：Native MCP 重连、冷报告恢复及 Native 历史退出。原日志 `/private/tmp/kite-v13-macos-default-final-all-20261011.log` 和 `/private/tmp/kite-v13-macos-default-final-all-source-freeze-20261011.json` 保存4386 tracked输入全程无变化及failure/drain范围；前三项夹具修正、原macOS stdio整文件继续通过。未开始的其余任务不计通过，真实失败不通过排除、删断言或扩大预算解除。
+
+MCP 原现场 `/private/tmp/kite-native-mcp-bundle-O2zINH` 中，stdio 初次ready、刷新和248180字节descriptor读取成功，旧connection实际cancelled／resultRevision1，transportStopped=true且原broker／server reap、coalition stopped／准确登记删除已保存。正式 `confirmedStop` 却限定details恰两字段，拒绝lifecycle合法新增的第三字段ownedProcesses；原R持久outcome_unknown／newConnectionAttempted=false，没有错误重发。该真实正式调用者缺口独立于RSS、全Runtime观测和Win/Linux，按用户优先级直接实施。
+
+`packages/agent/src/mcp/reconnection-proof.ts` 保原两字段停止证明；准确第三字段ownedProcesses沿现有v1—v4 closed codec核原Store／Session／Job／server／scope／configDigest，unavailable只接受固定有限原因，额外字段／双观察字段／坏binding继续拒绝。原operation ref、Job终态、definition/version、resultRevision和完整resultDigest保持；冷reader不比较当前PID、不加载OS owner或新增I/O。该观察不补授远端Tool已停、全树或全Runtime资源资格，停止未知及发布fence仍保持。重连执行及原结果冷Query完成同一消费者迁移，原stdio negative-PGID退役不回退。
+
+原完整重连文件新增一个必要消费者契约，旧guard实际16pass／1fail／339expects，修后 **17pass／0fail／349expects／9.74s**；日志 `/private/tmp/kite-mcp-stop-result-business-red-20261011.log`、`/private/tmp/kite-mcp-stop-result-green-20261011.log`。原16运行项、172个expect表达式／181个await、11个静态test声明及全部预算保全，收据 `/private/tmp/kite-mcp-stop-preservation-20261011.json`；synthetic null-process观察只证明decoder合同，不冒充原生监督资格。
+
+原 `apps/desktop/test/isolated/native-mcp-bundle.test.ts` 未改，正常宿主权限的源码外完整窗口 **1pass／0fail／18expects／54.14s**，日志 `/private/tmp/kite-native-mcp-stop-consumer-whole-20261011.log`，源／日志SHA及观察归 `/private/tmp/kite-native-mcp-stop-consumer-source-freeze-20261011.json`。两范围Source、默认OS准确测试引用bind/revoke、stdio／HTTP独立审批、ready／刷新／原全文零额外RPC、真实旧stop／新连接、下一Model原schema／独立Tool Ask／一次物理效果、冷原GET一次／POST零均按原断言通过。原Service PID36556／36895正常退出，所属进程cleanup observed／forced／remaining均空，准确测试凭据freshAbsent=true。该候选保原trusted-loopback限制，不充作生产网络／OAuth／外部账号或跨平台资格；前片七完整文件41项732断言及installed Source／Tool／Session cancel／Service退出／维护恢复的冻结证据在未变范围继续复用。
+
+### 冷报告终态与原历史退出门禁
+
+原冷报告文件十二模式中十一项在原5秒deadline找不到needs_review报告，独立完整诊断仍1pass／11fail／11expects／56.26s，`/private/tmp/kite-report-resume-diagnostic-red-20261011.log`保留。fixture 在carrier尚running时把resultRevision0派生的报告ID永久固定；真实终态报告使用revision1，pending列表不含needs_review，实际applyJobReport的原正确ID也不能修正该错引用。只把fallback派生限制到准确carrier真正succeeded／failed／cancelled，未改生产报告／恢复／审批合同。原完整文件 **12pass／0fail／200expects／1.59s**，日志 `/private/tmp/kite-report-resume-fixed-whole-20261011.log`；原十二模式、117条expect／rejects节点及5／15秒预算保全，收据 `/private/tmp/kite-report-resume-preservation-20261011.json`、`/private/tmp/kite-report-resume-ast-preservation-20261011.json`。
+
+原历史窗口完成5051条／超过8MiB正文、两次真实SSE缺口恢复及live rename、Provider0后，等待Electron退出触发native_fixture_timeout，整文件79.95s。仅为这项未解决红，在原fixture加所属进程／Playwright close及Main quit的有限时间观察，原110个await、36个eq、75秒driver和90秒父deadline不变。正常宿主完整复验1pass／6expects／45条Node断言／70.74s，日志 `/private/tmp/kite-native-history-exit-observation-host-whole-20261011.log`；实际close需4.217秒，code0／无signal，原Service dead及双EOF成立，而此前退出开始时75秒预算仅余2.396秒。这支持退出余量不足的解释，不证明旧现场内部owner相同或超时已修复。最后仅将两个事件注册改为准确literal以通过Electron类型，原整窗口tested SHA与最终SHA分开保存于 `/private/tmp/kite-native-history-exit-observation-preservation-20261011.json`；当前未筛选集成将验证最终字节，不扩大窗口矩阵或生产关闭合同。
+
+根及八workspace类型、对应边界／workspace／公共API、test ownership已通过。MCP owner及既有implemented重连Note、Task恢复owner、Desktop owner与主计划同步；手册承诺、公共API及跨包执行／恢复权限未变，相关Agent总owner和active核对后不制造diff。当前修正后的必要局部证据仍不代完整默认；以下集成门禁待原全部计划实际收束。
+
+### 本次完整集成结果与本地交付范围
+
+修正上述源码和夹具后第五次准确 `bun run test` 仍 **exit1／307.66s**，原714文件／575任务／parallelism4保持。实际122个任务启动并结束，121通过、Native历史1失败，453个未开始任务不能记绿。原MCP17项、冷报告12模式、Native MCP原18断言窗口、Task／Plan及macOS stdio、installed Profile MCP维护恢复和packaged默认Source消费者均在本次完整调度中通过；日志 `/private/tmp/kite-v13-macos-default-integrated-20261011.log`、收据 `/private/tmp/kite-v13-macos-default-integrated-source-freeze-20261011.json` 保存4386 tracked输入及Git状态全程全等、实际failure/drain范围和SHA。wholeDefault=false，未再盲目重跑或排除历史窗口。
+
+对这次唯一未解决红的有限只读核对：原driver开始后初始全文6.929s、reload16.981s、held切回33.737s、第一SSE完整重读44.324s、第二SSE63.143s、live rename完整断言72.164s，开始close72.216s，原75秒预算仅余2.784s。独立whole绿对应close63.116s、余11.884s、自然退出4.217s。两次Main before-quit不是两套关闭：真实quitting守卫使第二次请求不重复cleanup；本次没有自然exit／close观察，父级随后核五个绑定PID清理及双EOF，不能算正常退出成功。业务阶段累计差约9.1s，尚无证据确定具体资源竞争、生产close错误或可安全删除的读取。metadata消息可原seq更新，不能凭nextSeq相等跳过完整读取。该真实失败继续阻正式Native长历史完整集成及阶段回归；原75／90秒、全部断言和安全守卫保持。
+
+默认中止前尚未运行的两份相邻原MCP只读文件另按完整文件补验，`reconnection-proof.test.ts` 与 `connection-query.test.ts` 为 **6pass／0fail／128expects／0.533s**，日志 `/private/tmp/kite-mcp-stop-consumer-readers-whole-20261011.log`；这是本次消费者的协议／查询验证，不扩大故障矩阵。独立只读审查再核lifecycle现场PID绑定与冷decoder原六项binding、严格fields及原result/ref/version，不需追加修改。类型、格式、架构／workspace／公共API、test ownership和文档门禁均按当前范围通过，计划治理83completed／25superseded仅表示该检查范围，不代V1.3资格。
+
+本地交付只闭合正式macOS MCP停止结果消费者，以及完整回归暴露的准确父子／审批／报告夹具交接；保留历史退出的必要观察和未闭合红。现有本地提交授权可用于这一已验证切片，完整默认、Native完整资格、P5／P6／§35与整体阶段仍未退出。正式旧stdio negative-PGID保持退役，本轮无新增最终legacy删除。之后的文档结果同步不改冻结的生产／测试输入，stage／commit继续独立执行正常hooks。
+
+### 最多五项退出依赖
+
+| 顺序 | 实际用户入口／完整验收 | 当前范围与真实依赖 |
+| --- | --- | --- |
+| 1 | 正式Native长会话阅读／网络恢复／正常退出：5051条及超过8MiB全文、失败保正文与禁写、迟到切换、两次SSE缺口重读／live rename、原Service自然停止及零Provider | MCP最高独立源码项已闭合；当前完整默认仍在此用户链退出超时，原75／90秒、断言与红保持。需查明可复核原因并按原完整准入收束，独立窗口绿不代P5／完整集成 |
+| 2 | Windows installed Shell／Task／Workflow：广泛 HOME／工具读取、Workspace／Full 写求交、private 无条件拒绝、完整输出和全树取消 | 用户已决定保原合同和 guard；可靠后端仍缺，不扩大管理员／驱动／VM安装范围 |
+| 3 | installed 普通任务／Shell／child／MCP：原八 outer／各九点、每轮≥450000ms busy、32MiB增长／斜率、全 Runtime 原出生后代／activeResources／handles及正常退出 | 原 RSS `+115.203125MiB >32MiB` 与观测缺项保留；直接阻 P6／§35／最终退役及依赖其结果的 P7，不重复参数对照 |
+| 4 | 后续 Actions 的 Win/Linux 完整安装／登记、跨代码切换／冷回退、MCP／PTY／Native、backup／restore 新 Store／GC和保数据卸载 | 已接源码不代实机资格，依用户安排后续 GitHub Actions；相关 Shell 场景依②，资源按适用③汇合，本机不 dispatch |
+| 5 | §35 完整能力与适用 T/E 独立审查、可靠原 adapter 的完整未知 Job 核实、正式 legacy 清零／删除及阶段收束、适用 P7责任 | 前述资格及其余完整能力汇合；缺可靠 adapter 时保持未知／拒绝，不补授权；完整默认通过也不能代完整迁移／平台／退役 |
+
+37 能力 status 仍 partial，wholeDefault／wholeV13／phaseExit=false，Goal保持 active；只在现有本地提交授权内交付，不 push、PR、发布或执行平台 Actions。

@@ -42,6 +42,24 @@ const app = await _electron.launch({
   env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
   timeout: 10000,
 });
+const exitObservation = (event: string, code: number | null, signal: string | null) =>
+  console.log(
+    JSON.stringify({
+      stage: 'native_history_exit_observation',
+      event,
+      at: Date.now(),
+      monotonicMs: performance.now(),
+      code,
+      signal,
+    }),
+  );
+app.process().once('exit', (code, signal) => exitObservation('process_exit', code, signal));
+app.process().once('close', (code, signal) => exitObservation('process_close', code, signal));
+app.once('close', () => exitObservation('playwright_app_close', null, null));
+app.on('console', (message) => {
+  const text = message.text();
+  if (text.startsWith('NATIVE_HISTORY_MAIN_EXIT ')) console.log(text);
+});
 console.log(
   JSON.stringify({
     stage: 'native_history_phase',
@@ -338,7 +356,16 @@ try {
   const pid = Number(line?.trim().split(/\s+/)[0]);
   eq(pid > 0, true);
   phase('app_quit_begin');
-  await app.evaluate(({ app }) => app.quit());
+  await app.evaluate(({ app }) => {
+    const observe = (event: string) =>
+      console.log(
+        'NATIVE_HISTORY_MAIN_EXIT ' +
+          JSON.stringify({ event, at: Date.now(), monotonicMs: performance.now() }),
+      );
+    app.on('before-quit', () => observe('before-quit'));
+    app.on('will-quit', () => observe('will-quit'));
+    app.quit();
+  });
   phase('app_quit_complete');
   phase('app_close_begin');
   await app.close();

@@ -4,8 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpSourceReadSet } from '../../../src/config/mcp-sources';
-import type { AuthorizationRequest, Json, ToolContext } from '../../../src/extensions';
+import type {
+  AuthorizationRequest,
+  Json,
+  PublicExecution,
+  ReadContext,
+  ToolContext,
+} from '../../../src/extensions';
 import { createMcpLifecycle, type McpReconnectionInput } from '../../../src/mcp';
+import { confirmedStop, hash, object } from '../../../src/mcp/reconnection-proof';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -1006,3 +1013,82 @@ for (const afterCommit of [false, true]) {
     }
   }, 30000);
 }
+
+test('original stop proof accepts closed owned evidence and unavailable observation without changing cold ownership', async () => {
+  const f = await fixture();
+  try {
+    const connected = await f.invoke('owned_stop', 'mcp.connect', {
+      serverId: 'local',
+      key: 'owned_stop',
+    });
+    const warm = await f.connection(connected.id, 'owned_stop');
+    const input = f.input(warm, 'replacement');
+    await f.closeFactory();
+    const original = await f.store.getExecution(input.target.connectionExecutionId);
+    expect(original).not.toBeNull();
+    expect(['cancelled', 'failed', 'succeeded']).toContain(original!.status);
+    const binding = {
+      originalStoreId: original!.originStoreId,
+      sessionId: original!.sessionId,
+      executionId: original!.id,
+      serverId: input.serverId,
+      scopeId: JSON.stringify([original!.originStoreId, original!.sessionId, input.serverId]),
+      configDigest: input.target.configDigest,
+    };
+    // Synthetic observation shape only: null processes do not claim native stop qualification.
+    // A cold reader must preserve the original owner rather than require its current PID.
+    const evidence = {
+      version: 2,
+      coverage: 'mcp-owned-coalition',
+      binding,
+      ownerPid: 2147483647,
+      broker: null,
+      guardian: null,
+      server: null,
+      coalition: null,
+    };
+    let details: Record<string, Json> = {
+      transportStopped: true,
+      remoteToolStopConfirmed: false,
+      ownedProcesses: evidence as unknown as Json,
+    };
+    const execution = () =>
+      ({
+        ...original!,
+        result: { ...object(original!.result), details },
+      }) as unknown as PublicExecution;
+    const context = {
+      sessionId: original!.sessionId,
+      getExecution: async () => execution(),
+    } as unknown as ReadContext;
+    const proof = () => ({
+      connectionExecutionId: original!.id,
+      resultRevision: original!.resultRevision,
+      resultDigest: hash(execution().result),
+    });
+    expect(await confirmedStop(context, input, proof())).toEqual(execution());
+    details = {
+      transportStopped: true,
+      remoteToolStopConfirmed: false,
+      ownedProcessesUnavailable: 'mcp_owned_process_evidence_unavailable',
+    };
+    expect(await confirmedStop(context, input, proof())).toEqual(execution());
+    for (const invalid of [
+      { ownedProcesses: { ...evidence, binding: { ...binding, executionId: 'foreign' } } },
+      { ownedProcesses: { ...evidence, command: 'must-not-be-exposed' } },
+      { ownedProcessesUnavailable: 'arbitrary_reason' },
+      { extra: true },
+    ]) {
+      details = {
+        transportStopped: true,
+        remoteToolStopConfirmed: false,
+        ...invalid,
+      } as unknown as Record<string, Json>;
+      const error = await confirmedStop(context, input, proof()).catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe('mcp_reconnection_stop_unconfirmed');
+    }
+  } finally {
+    await f.close();
+  }
+});
