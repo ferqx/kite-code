@@ -4321,3 +4321,39 @@ Windows／Linux实际native和installed资格未运行，依用户顺序留重�
 | 5 | §35完整能力／正式caller审查、最终旧路径退役与阶段收束 | 所有适用37能力及完整T/E／兼容样本独立核验、实际legacy删除、未过滤完整回归及适用P7责任取得真实证据 | 前四项适用资格，首发前D08暂无适用新基线published T029样本不阻独立源码；局部绿不退出阶段 |
 
 本轮新增的是三平台正式MCP连续任务调用者源码、非macOS直接stdio诊断路径退役和准确native／cold交接／清理事实门禁；本机有限证据不证明两平台运行或完整资源资格。37能力仍partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active，仅已授权本地正常stage／commit，无push／PR／发布。
+
+## 2026-10-10：Linux 持续普通任务的正式调用者迁移
+
+本轮关闭上一轮最高可独立实施源码缺口：正式default continuous不再仅接Darwin coalition，Linux沿同一source-free候选的两默认Service／20原Session／Files.write／required Task／detached Shell／wait完整链消费自己的原Job namespace证明。未增加configure、自定义Tool／Job／permission adapter或诊断回退。它是普通Shell／child能力的正式调用者迁移，不建立持续测试窗口或单份收据的独立目标。
+
+### 原资源与各阶段退出的真实依赖
+
+核对§30.1／30.2、§33.3、§35和当前`qualificationMissing`：P1公共执行／新Store、P2 HTTP／双Service以及独立安装／真实代码切换／维护新Store的源码实施，不以未闭合RSS和Bun观测为前置。P3适用Shell／Task／Workflow必须先有真实权限、原Job输出／取消／恢复合同；P4/P5相应正式消费者仍须完整迁移，不能以字段或静态装配代替用户行为。P6要求三平台适用制品／真实升级降级恢复、长时故障负载和最终旧路径删除，原RSS red、activeResources／handles及全部Runtime后代缺项直接阻止其退出，并阻§35和依赖其结果的P7。首发前D08无适用新基线已发布T029样本，不反向阻独立源码实施。
+
+原RSS `+115.203125MiB > 32MiB`失败、八outer／各九点、真实busy≥450000ms／outer与总60—168分钟、原180s操作预算、未完成全局指标和无条件descendant qualification拒绝全部保留。本轮没有参数对照、450秒采集、RSS实验、Linux／Windows安装、Actions或新平台环境；仅运行与改动相应的有限完整文件，局部通过不退出任何阶段。
+
+### 完整行为与验收
+
+`continuous-default-shell.ts`与正式schedule选择macOS continuous v2／Linux v3。原65536次64KiB SHA工作量、同一实际输出nonce／时间／digest／完整SHA、40 Command短整例、slow SSE／peer及原cursor重连保持。Linux warm原candidate readonly Store取得持久Job完整ready reference；terminal取同原Execution result。v3核原Session／Execution／nonce／Service owner、wrapper／namespace devino／init-root原PID／birth／parent／localPid连续，ready明确尚未结束；terminal实际业务wait0／raw0、空树、两pidfd死亡、wrapper真实exit0／reap／close、双EOF及全部原FD关闭。namespace inode可重用，不凭数字重建控制权。
+
+原服务严格关闭后，新readonly reader核完整reference／result／output、Command applied、Store／Session／cursor和Provider零新增。读取、owner、输出或清理失败均保失败。Linux continuous v3必需独立两Service资源v2：持原proc目录FD，以boot UUID／start ticks／PPID前后包围有界VmRSS和FD枚举，严格关闭未知为null／unavailable；原spawn→READY→preclose出生一致、实际退出0／reap／absence或reuse及cold一致才通过。Mac原continuous v2／资源v1和历史缺字段语义保持，报告显式传实际平台；两Service／每Job有限证明不代全Runtime观测。
+
+### 限定验证与保留失败
+
+- 原默认continuous完整短文件在本机macOS经必要权限实际exit0，1pass／25expects／69.92s；两cycle／40Command、busy54215ms，candidate `b8ce3dc2b8d93985057273047a13974bb8a55041209fdc0df7d47b51571aee83`。原25条断言与两处180000预算保持，短busy不授450秒formal资格。原sandbox实际exit1／0pass／1fail／2expects／9.53s，collector loopback监听失败、尚未启动Service；准确log和私有失败root保留。同whole权限复验不删除或过滤断言。
+- Native与两Service资源两个完整文件实际exit0，7pass／68expects；原Mac实际断言保，Linux固定原FDmock／纯parser和严格v2 packet只证明有限合同。本次异常路径真实暴露局部TDZ，修正后复验；原红log保留。Linux实际syscall／namespace／ELF／installed资格仍未运行。
+- 受影响continuous与report两个完整文件实际exit0，51pass／206expects／0fail／48.06s；原v1／v2、source-free两点七类CI、blocked完整收集合约、growth／时间／SIGKILL及全部formal拒绝断言保持。新增Linux v3纯契约核原身份、ready提前结束、错nonce、实际非零业务退出、close unknown、错误平台／旧coalition及Service／cold不闭合拒绝，只证明checker，不计Linux内核运行。
+- Root与精确八workspace typecheck、十个TS文件只读Biome、docs／all-impact、boundary／workspace／API／test ownership／plan-evidence均实际exit0。独立readonly审查核完整原ready→terminal及cleanup／cold，没有新增必要修改。迭代／stage／commit按document-before-commit核实际diff；hook继续正常执行，局部门禁不充作阶段完整默认回归。
+
+短整例13相关输入前后SHA一致，`changed=[]`；freeze在`/private/tmp/kite-linux-continuous-owned-final-freeze-20261011.json`，whole log `/private/tmp/kite-linux-continuous-short-native-20261011.log` SHA `626aef9e64da4e4492dc4bb0b32b94a177889bee67e00ac5db7acc10860eb3aa`，原红 `/private/tmp/kite-linux-continuous-short-sandbox-20261011.log`。资源整文件log `/private/tmp/kite-linux-paired-boundary-whole-frozen-20261010.log`，continuous／report完整log `/private/tmp/kite-linux-continuous-report-whole-final-20261011.log`；本轮准确本地交付输入核对在`/private/tmp/kite-linux-continuous-verified-inputs-20261011.json`。这些本机证据不记为Linux运行通过；原Mac stdio红、原RSS与完整资源缺项不改写。
+
+### 最多五项剩余退出缺口
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与明确验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed普通Shell与调用Shell的Task／Workflow仍缺完整文件权限后端 | Workspace／Full最终授权求交、广泛HOME读取、无条件private／runtime／祖先保护，完整输出、准确全树取消、unknown保原资源和cold零重放；同正式Service／installed用户链真实证明 | 已有Job归属与stdio owner不足以解除Shell guard；WRITE_RESTRICTED写限制／Full token／目录HANDLE／AppContainer参考尚未组成完整合同。独立于RSS，下一最高源码项 |
+| 2 | Win/Linux正式CLI／TUI／Daemon／Native安装、真实跨代码A→B→A、维护恢复新Store及全部正式消费者的原生资格 | 实际候选install／switch／rollback／uninstall、真实PTY／窗口、backup／restore／GC及恢复历史完整原result／cursor／零重放，所有适用Shell／Workflow／MCP行为真实执行 | 当前限定源码审查未发现独立安装／版本／维护缺口；适用前项权限与实际OS／资产仍需完整验收，Linux正式continuous源码现已接入。依用户顺序重构后Actions，无dispatch |
+| 3 | installed混合持续任务、Shell／child／MCP的原资源资格 | 原RSS增长／斜率、八outer／九点、全部可信Runtime后代／activeResources／handles满足原强制门槛，全部适用平台原正式producer实际运行 | 原失败与未知直接阻P6／§35／最终退役；本轮有限Job和两Service证据不补全census，不阻独立安装／维护源码实现 |
+| 4 | §35完整37能力／T/E／正式caller独立审查、最终legacy退役及阶段收束 | 全部适用能力与兼容样本实证、实际删除旧路径、未过滤阶段完整回归以及适用P7责任完整成立 | 前三项适用资格及剩余能力；首发前无适用published新基线样本不阻源码。本片不是阶段收束点，局部绿不能退出 |
+
+Jobs owner、Runtime resilience active、测试入口、Linux proposed Note、能力映射与计划同步实际caller边界；Note保proposed，手册普通执行／取消／恢复承诺不变，当前平台资格仍按实际来源核。37能力partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。只交付已授权正常本地stage／commit，hook和CI强制要求保持，无push／PR／发布。

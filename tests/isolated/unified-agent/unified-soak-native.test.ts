@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +9,7 @@ import {
   observeOwnedProcessExit,
   observeProcessListeners,
   parseLinuxProcessStat,
+  parseLinuxResidentBytes,
   sameNativeProcess,
 } from '../../../scripts/runtime/unified-soak-native';
 
@@ -146,10 +148,10 @@ test('native owned child start identity is observed while alive and never replac
       expect(resources.rssBytes).toBeGreaterThan(0);
       expect(resources.fileDescriptors).toBe(resources.after.fileDescriptors);
     } else {
-      // This collector has no Linux RSS implementation; unknown is not supported zero.
-      expect(resources.rssBytes).toBeNull();
-      expect(resources.fileDescriptors).toBeNull();
-      expect(resources.unavailable).toEqual(['native_process_rss_unavailable']);
+      expect(resources.version).toBe(2);
+      expect(resources.unavailable).toEqual([]);
+      expect(resources.rssBytes).toBeGreaterThan(0);
+      expect(resources.fileDescriptors).toBe(resources.after.fileDescriptors);
     }
     child.stdin.end();
     expect(await child.exited).toBe(0);
@@ -166,3 +168,46 @@ test('native owned child start identity is observed while alive and never replac
     await output.cancel();
   }
 }, 10000);
+
+test('Linux resident bytes require a single complete bounded KiB field', () => {
+  expect(parseLinuxResidentBytes('Name:\towned\nVmRSS:\t1234 kB\n')).toBe(1234 * 1024);
+  expect(parseLinuxResidentBytes('VmRSS: 0 kB\n')).toBe(0);
+  for (const text of [
+    'Name: owned\n',
+    'VmRSS: 1 kB\nVmRSS: 2 kB\n',
+    'VmRSS: -1 kB\n',
+    'VmRSS: 1 MB\n',
+    'VmRSS: 9007199254740992 kB\n',
+    `VmRSS: 1 kB\n${'x'.repeat(65536)}`,
+  ])
+    expect(() => parseLinuxResidentBytes(text)).toThrow('native_process_rss_invalid');
+});
+
+test('Linux resource sampling brackets RSS and FD reads in one original proc directory and rejects uncertain close', () => {
+  const modulePath = new URL('../../../scripts/runtime/unified-soak-native.ts', import.meta.url)
+    .pathname;
+  const source = `
+import assert from 'node:assert/strict';
+import {mock} from 'bun:test';
+import * as fs from 'node:fs';
+Object.defineProperty(process,'platform',{value:'linux'});
+let closeUnknown=false, changed=false, next=10, statReads=0;
+const paths=new Map(), offsets=new Map(), opened=[], closed=[];
+const fields=()=>['S','50',...Array(17).fill('0'),String(changed&&statReads>1?124:123),'0','7'].join(' ');
+mock.module('node:fs',()=>({...fs,
+ openSync(path){opened.push(path);if(path==='/proc/60')return 7;const fd=next++;paths.set(fd,path);offsets.set(fd,0);return fd;},
+ readSync(fd,bytes,offset,length){const path=paths.get(fd);let text;if(path==='/proc/sys/kernel/random/boot_id')text='12345678-1234-1234-1234-123456789abc\\n';else if(path==='/proc/self/fd/7/stat'){if(offsets.get(fd)===0)statReads++;text='60 (owned) '+fields();}else if(path==='/proc/self/fd/7/status')text='VmRSS: 1234 kB\\n';else throw Error('path replaced');const at=offsets.get(fd);const value=Buffer.from(text);const count=Math.min(length,value.length-at);value.copy(bytes,offset,at,at+count);offsets.set(fd,at+count);return count;},
+ opendirSync(path){assert.equal(path,'/proc/self/fd/7/fd');let i=0;return{readSync(){return i++<4?{name:String(i)}:null;},closeSync(){}};},
+ closeSync(fd){closed.push(fd);if(fd===7&&closeUnknown)throw Error('original_close_unknown');}
+}));
+const {observeNativeProcessResources}=await import(${JSON.stringify(modulePath)});
+let observed=observeNativeProcessResources(60);assert.equal(observed.version,2);assert.equal(observed.rssBytes,1234*1024);assert.equal(observed.fileDescriptors,4);assert.equal(observed.before.startIdentity.value,'12345678-1234-1234-1234-123456789abc:123');assert.deepEqual(observed.unavailable,[]);assert.equal(opened.filter(path=>path==='/proc/60').length,1);assert.equal(closed.filter(fd=>fd===7).length,1);
+closeUnknown=true;observed=observeNativeProcessResources(60);assert.equal(observed.rssBytes,null);assert.equal(observed.fileDescriptors,null);assert.ok(observed.unavailable.length);closeUnknown=false;changed=true;statReads=0;observed=observeNativeProcessResources(60);assert.equal(observed.rssBytes,null);assert.ok(observed.unavailable.length);
+`;
+  const result = spawnSync(process.execPath, ['--eval', source], {
+    encoding: 'utf8',
+    timeout: 4000,
+  });
+  expect(result.error).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+});

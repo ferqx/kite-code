@@ -1,4 +1,12 @@
-import { closeSync, constants, openSync, readdirSync, readFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  opendirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+} from 'node:fs';
 
 /** Diagnostic native observation only; callers supply their already-owned process IDs. */
 export interface NativeProcessObservation {
@@ -185,7 +193,7 @@ export function observeProcessListeners(): { listeners: number | null; unavailab
 
 /** Independent v1 observation. This does not change the persisted NativeProcessObservation. */
 export interface NativeProcessResources {
-  version: 1;
+  version: 1 | 2;
   pid: number;
   observedAt: number;
   before: NativeProcessObservation;
@@ -196,6 +204,112 @@ export interface NativeProcessResources {
   handles: null;
   unsupported: ['activeResources', 'handles'];
   unavailable: string[];
+}
+/** Strict Linux status parser: exactly one bounded decimal KiB value, never a default zero. */
+export function parseLinuxResidentBytes(text: string): number {
+  if (text.length > 65536) throw Error('native_process_rss_invalid');
+  const rows = text.split('\n').filter((row) => row.startsWith('VmRSS:'));
+  if (rows.length !== 1) throw Error('native_process_rss_invalid');
+  const match = /^VmRSS:[ \t]+(0|[1-9][0-9]*)[ \t]+kB[ \t]*$/.exec(rows[0]!);
+  if (!match) throw Error('native_process_rss_invalid');
+  const bytes = BigInt(match[1]!) * 1024n;
+  if (bytes > BigInt(Number.MAX_SAFE_INTEGER)) throw Error('native_process_rss_invalid');
+  return Number(bytes);
+}
+// Observation never retries an ambiguously closed numeric FD. Keep its original
+// resource metadata alive and reject the sample until this observer process exits.
+const uncertainObservationResources = new Set<unknown>();
+function closeObservedFd(fd: number): void {
+  try {
+    closeSync(fd);
+  } catch (error) {
+    uncertainObservationResources.add({ fd, error });
+    throw error;
+  }
+}
+function closeObservedDirectory(directory: ReturnType<typeof opendirSync>): void {
+  try {
+    directory.closeSync();
+  } catch (error) {
+    uncertainObservationResources.add(directory);
+    throw error;
+  }
+}
+function boundedProcText(path: string, maximum: number): string {
+  const fd = openSync(path, constants.O_RDONLY);
+  try {
+    const bytes = Buffer.alloc(maximum + 1);
+    let size = 0;
+    for (;;) {
+      const count = readSync(fd, bytes, size, bytes.length - size, null);
+      if (!count) return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, size));
+      size += count;
+      if (size > maximum) throw Error('native_process_read_limit');
+    }
+  } finally {
+    closeObservedFd(fd);
+  }
+}
+function linuxResources(pid: number): NativeProcessResources {
+  const directory = openSync(
+    `/proc/${pid}`,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    const path = `/proc/self/fd/${directory}`;
+    const boot = () => {
+      const value = boundedProcText('/proc/sys/kernel/random/boot_id', 128).trim();
+      if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value))
+        throw Error('native_process_boot_invalid');
+      return value;
+    };
+    const bootId = boot();
+    const beforeStat = parseLinuxProcessStat(boundedProcText(`${path}/stat`, 16384), pid);
+    const rssBytes = parseLinuxResidentBytes(boundedProcText(`${path}/status`, 65536));
+    const entries = opendirSync(`${path}/fd`);
+    const files = new Set<string>();
+    try {
+      for (;;) {
+        const entry = entries.readSync();
+        if (!entry) break;
+        if (files.size >= 131072 || !/^(0|[1-9][0-9]*)$/.test(entry.name) || files.has(entry.name))
+          throw Error('native_process_fds_invalid');
+        files.add(entry.name);
+      }
+    } finally {
+      closeObservedDirectory(entries);
+    }
+    const afterStat = parseLinuxProcessStat(boundedProcText(`${path}/stat`, 16384), pid);
+    if (
+      bootId !== boot() ||
+      beforeStat.startTicks !== afterStat.startTicks ||
+      beforeStat.parentPid !== afterStat.parentPid
+    )
+      throw Error('native_process_identity_changed');
+    const observation = (stat: typeof beforeStat): NativeProcessObservation => ({
+      collector: 'linux-procfs',
+      pid,
+      parentPid: stat.parentPid,
+      startIdentity: { kind: 'linux-boot-start-ticks', value: `${bootId}:${stat.startTicks}` },
+      fileDescriptors: files.size,
+      unavailable: [],
+    });
+    return {
+      version: 2,
+      pid,
+      observedAt: Date.now(),
+      before: observation(beforeStat),
+      after: observation(afterStat),
+      rssBytes,
+      fileDescriptors: files.size,
+      activeResources: null,
+      handles: null,
+      unsupported: ['activeResources', 'handles'],
+      unavailable: [],
+    };
+  } finally {
+    closeObservedFd(directory);
+  }
 }
 let darwinResources: ReturnType<typeof createDarwinResourceCollector> | undefined;
 function createDarwinResourceCollector() {
@@ -216,16 +330,36 @@ function createDarwinResourceCollector() {
 /** Only an explicitly already-owned PID; not a tree, VM, handles or heap census. */
 export function observeNativeProcessResources(pid: number): NativeProcessResources {
   validPid(pid);
+  if (process.platform === 'linux') {
+    try {
+      return linuxResources(pid);
+    } catch {
+      const observation = unavailable(pid, 'native_process_observation_unavailable');
+      return {
+        version: 2,
+        pid,
+        observedAt: Date.now(),
+        before: observation,
+        after: observation,
+        rssBytes: null,
+        fileDescriptors: null,
+        activeResources: null,
+        handles: null,
+        unsupported: ['activeResources', 'handles'],
+        unavailable: ['native_process_resource_observation_unavailable'],
+      };
+    }
+  }
   const before = observeNativeProcess(pid);
   let rssBytes: number | null = null;
-  const unavailable: string[] = [];
+  const resourceUnavailable: string[] = [];
   try {
     if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(process.arch))
       throw Error('native_process_rss_platform_unsupported');
     darwinResources ??= createDarwinResourceCollector();
     rssBytes = darwinResources(pid);
   } catch {
-    unavailable.push('native_process_rss_unavailable');
+    resourceUnavailable.push('native_process_rss_unavailable');
   }
   const after = observeNativeProcess(pid);
   if (
@@ -235,7 +369,7 @@ export function observeNativeProcessResources(pid: number): NativeProcessResourc
     after.unavailable.length
   ) {
     rssBytes = null;
-    unavailable.push('native_process_resource_identity_unavailable');
+    resourceUnavailable.push('native_process_resource_identity_unavailable');
   }
   return {
     version: 1,
@@ -244,11 +378,11 @@ export function observeNativeProcessResources(pid: number): NativeProcessResourc
     before,
     after,
     rssBytes,
-    fileDescriptors: unavailable.length ? null : after.fileDescriptors,
+    fileDescriptors: resourceUnavailable.length ? null : after.fileDescriptors,
     activeResources: null,
     handles: null,
     unsupported: ['activeResources', 'handles'],
-    unavailable,
+    unavailable: resourceUnavailable,
   };
 }
 /** An unavailable native query is never an exit proof. No signals are sent. */

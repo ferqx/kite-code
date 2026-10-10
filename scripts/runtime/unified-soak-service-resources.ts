@@ -3,7 +3,7 @@ import { sameNativeProcess } from './unified-soak-native';
 
 /** Boundary evidence only; never substitutes the original nine-point resource qualification. */
 export interface PairedServiceResources {
-  version: 1;
+  version: 1 | 2;
   coverage: 'paired-services-only';
   storeId: string;
   candidateDigest: string;
@@ -38,7 +38,7 @@ const keys = (value: unknown, expected: string[]) =>
   );
 const integer = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) >= 0;
-function native(value: NativeProcessObservation) {
+function native(value: NativeProcessObservation, version: 1 | 2) {
   return (
     keys(value, [
       'collector',
@@ -48,19 +48,23 @@ function native(value: NativeProcessObservation) {
       'fileDescriptors',
       'unavailable',
     ]) &&
-    value.collector === 'darwin-libproc' &&
+    value.collector === (version === 1 ? 'darwin-libproc' : 'linux-procfs') &&
     integer(value.pid) &&
     value.pid > 0 &&
     integer(value.parentPid) &&
     integer(value.fileDescriptors) &&
     keys(value.startIdentity, ['kind', 'value']) &&
-    value.startIdentity?.kind === 'darwin-start-time' &&
-    /^[1-9][0-9]*:(?:0|[1-9][0-9]{0,5})$/.test(value.startIdentity.value) &&
+    value.startIdentity?.kind ===
+      (version === 1 ? 'darwin-start-time' : 'linux-boot-start-ticks') &&
+    (version === 1
+      ? /^[1-9][0-9]*:(?:0|[1-9][0-9]{0,5})$/
+      : /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}:[1-9][0-9]*$/
+    ).test(value.startIdentity.value) &&
     Array.isArray(value.unavailable) &&
     value.unavailable.length === 0
   );
 }
-function sample(value: NativeProcessResources, pid: number, ownerPid: number) {
+function sample(value: NativeProcessResources, pid: number, ownerPid: number, version: 1 | 2) {
   return (
     keys(value, [
       'version',
@@ -75,7 +79,7 @@ function sample(value: NativeProcessResources, pid: number, ownerPid: number) {
       'unsupported',
       'unavailable',
     ]) &&
-    value.version === 1 &&
+    value.version === version &&
     value.pid === pid &&
     integer(value.observedAt) &&
     value.observedAt > 0 &&
@@ -87,8 +91,8 @@ function sample(value: NativeProcessResources, pid: number, ownerPid: number) {
     value.unsupported.join(',') === 'activeResources,handles' &&
     Array.isArray(value.unavailable) &&
     value.unavailable.length === 0 &&
-    native(value.before) &&
-    native(value.after) &&
+    native(value.before, version) &&
+    native(value.after, version) &&
     value.before.pid === pid &&
     value.after.pid === pid &&
     value.before.parentPid === ownerPid &&
@@ -105,9 +109,11 @@ export function verifyPairedServiceResources(
     candidateDigest: string;
     instanceIds: string[];
     coldRead: boolean;
+    platform?: string;
   },
 ): string[] {
   try {
+    const version = expected.platform === 'linux' ? 2 : 1;
     if (
       !keys(value, [
         'version',
@@ -118,7 +124,8 @@ export function verifyPairedServiceResources(
         'services',
         'cold',
       ]) ||
-      value.version !== 1 ||
+      value.version !== version ||
+      !['darwin', 'linux'].includes(expected.platform ?? 'darwin') ||
       value.coverage !== 'paired-services-only' ||
       value.storeId !== expected.storeId ||
       value.candidateDigest !== expected.candidateDigest ||
@@ -134,12 +141,12 @@ export function verifyPairedServiceResources(
           !integer(row.pid) ||
           row.pid < 1 ||
           !row.spawn ||
-          !native(row.spawn) ||
+          !native(row.spawn, version) ||
           row.spawn.parentPid !== value.ownerPid ||
           !sameNativeProcess(row.spawn, row.ready.before) ||
-          !sample(row.ready, row.pid, value.ownerPid) ||
+          !sample(row.ready, row.pid, value.ownerPid, version) ||
           !row.preclose ||
-          !sample(row.preclose, row.pid, value.ownerPid) ||
+          !sample(row.preclose, row.pid, value.ownerPid, version) ||
           !sameNativeProcess(row.ready.before, row.preclose.after) ||
           row.preclose.observedAt < row.ready.observedAt ||
           !keys(row.exit, ['exitCode', 'originalExited', 'reaped', 'kernelState']) ||

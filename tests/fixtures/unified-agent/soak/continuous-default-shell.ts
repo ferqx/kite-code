@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
+  decodeLinuxShellProcessEvidence,
   decodeMacosShellProcessEvidence as decodeShellProcessEvidence,
+  type LinuxShellProcessEvidence,
   type MacosShellProcessEvidence as ShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from '@kite-ai/agent/jobs/shell';
@@ -22,6 +24,7 @@ import {
   CONTINUOUS_OPERATION_MS,
   CONTINUOUS_SHELL_SOURCE,
   type ContinuousEvidence,
+  type ContinuousLinuxShellEvidence,
   type ContinuousShellEvidence,
 } from '../../../../scripts/runtime/unified-soak-continuous';
 
@@ -42,14 +45,16 @@ interface Operation {
   admissionMs?: number;
   durationMs?: number;
   childId?: string;
-  shell?: ContinuousShellEvidence['jobs'][number];
+  shell?: ContinuousShellEvidence['jobs'][number] | ContinuousLinuxShellEvidence['jobs'][number];
+  reference?: unknown;
   output?: unknown;
   result?: unknown;
 }
 
 /** Two source-free default Services. No configure hook, custom Tool, Job or permission adapter. */
 export async function openDefaultShellContinuousFixture(root: string, candidateRoot?: string) {
-  if (process.platform !== 'darwin') throw Error('continuous_qualified_background_shell_required');
+  if (!['darwin', 'linux'].includes(process.platform))
+    throw Error('continuous_qualified_background_shell_required');
   const cleanup: (() => Promise<unknown>)[] = [];
   let closing: Promise<void> | undefined;
   const close = () => {
@@ -239,6 +244,19 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
     const clients = services.map((service) => service.client);
     const storeId = services[0]!.bootstrap.storeId!;
     if (services[1]!.bootstrap.storeId !== storeId) throw Error('continuous_peer_store_mismatch');
+    let originalReader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+    if (process.platform === 'linux') {
+      initializeSqliteEngine({
+        root: join(candidate.root, 'node_modules/@kite-ai/agent/storage/engine'),
+        manifestSha256: candidate.manifest.sqlite.manifestSha256,
+      });
+      originalReader = await openSqliteStore({
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        mode: 'readonly',
+      });
+      cleanup.push(() => originalReader!.close());
+    }
     await clients[0]!.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
@@ -442,41 +460,88 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
                   };
                   const details = (
                     job.result as {
-                      details?: { coalitionId?: string; ownedProcesses?: ShellProcessEvidence };
+                      details?: {
+                        coalitionId?: string;
+                        ownedProcesses?: ShellProcessEvidence | LinuxShellProcessEvidence;
+                      };
                     } | null
                   )?.details;
-                  if (fact.nonce !== operation.commandId || !details?.coalitionId)
+                  if (fact.nonce !== operation.commandId)
                     throw Error('continuous_original_shell_identity_failed');
-                  const proof = details.ownedProcesses;
-                  const originalProcesses =
-                    proof &&
-                    decodeShellProcessEvidence(proof, {
-                      sessionId,
-                      executionId: job.id,
-                      nonce: proof.binding?.nonce,
-                    });
-                  if (
-                    !originalProcesses ||
-                    !shellProcessEvidenceEnded(originalProcesses) ||
-                    !services.some((service) => service.pid === originalProcesses.ownerPid) ||
-                    originalProcesses.coalition.id !== details.coalitionId
-                  )
-                    throw Error('continuous_original_shell_process_handoff_failed');
-                  operation.result = structuredClone(job.result);
-                  operation.childId = child.id;
-                  operation.shell = {
+                  const proof = details?.ownedProcesses;
+                  const common = {
                     commandId: operation.commandId,
                     sessionId,
                     executionId: job.id,
-                    coalitionId: details.coalitionId,
                     startedAt: fact.startedAt,
                     endedAt: fact.endedAt,
                     units: fact.units,
                     digest: fact.digest,
-                    processTreeStopped: true,
+                    processTreeStopped: true as const,
                     stdoutSha256: hash(stdout),
-                    ownedProcesses: originalProcesses,
                   };
+                  if (process.platform === 'linux') {
+                    const terminal =
+                      proof &&
+                      decodeLinuxShellProcessEvidence(proof, {
+                        sessionId,
+                        executionId: job.id,
+                        nonce: proof.binding?.nonce,
+                      });
+                    const original = await originalReader!.getExecution(job.id);
+                    const reference = original?.reference as {
+                      ownedProcesses?: unknown;
+                      nonce?: string;
+                    } | null;
+                    const startup =
+                      terminal &&
+                      decodeLinuxShellProcessEvidence(
+                        reference?.ownedProcesses,
+                        terminal.binding,
+                        terminal.owner.ownerPid,
+                      );
+                    if (
+                      !terminal ||
+                      !shellProcessEvidenceEnded(terminal) ||
+                      !startup ||
+                      startup.owner.phase !== 'ready' ||
+                      !services.some((service) => service.pid === terminal.owner.ownerPid) ||
+                      reference?.nonce !== terminal.binding.nonce ||
+                      original?.originStoreId !== storeId ||
+                      original.sessionId !== sessionId ||
+                      JSON.stringify(original.result) !== JSON.stringify(job.result)
+                    )
+                      throw Error('continuous_original_shell_process_handoff_failed');
+                    operation.reference = structuredClone(original.reference);
+                    operation.shell = {
+                      ...common,
+                      ownedProcesses: terminal,
+                      startupProcesses: startup,
+                    };
+                  } else {
+                    const originalProcesses =
+                      proof &&
+                      decodeShellProcessEvidence(proof, {
+                        sessionId,
+                        executionId: job.id,
+                        nonce: proof.binding?.nonce,
+                      });
+                    if (
+                      !details?.coalitionId ||
+                      !originalProcesses ||
+                      !shellProcessEvidenceEnded(originalProcesses) ||
+                      !services.some((service) => service.pid === originalProcesses.ownerPid) ||
+                      originalProcesses.coalition.id !== details.coalitionId
+                    )
+                      throw Error('continuous_original_shell_process_handoff_failed');
+                    operation.shell = {
+                      ...common,
+                      coalitionId: details.coalitionId,
+                      ownedProcesses: originalProcesses,
+                    };
+                  }
+                  operation.result = structuredClone(job.result);
+                  operation.childId = child.id;
                   operation.output = output;
                   operation.durationMs = performance.now() - operation.began;
                   if (operation.durationMs > CONTINUOUS_OPERATION_MS)
@@ -516,8 +581,44 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         const busyIntervals = jobs.map(
           (job) => [job.startedAt - wallStartedAt, job.endedAt - wallStartedAt] as [number, number],
         );
+        const shellCommon = {
+          candidateDigest: candidate.digest,
+          sourceSha256: hash(CONTINUOUS_SHELL_SOURCE),
+          wallStartedAt,
+          coldRead,
+          noReplay: coldRead,
+          serviceResources: {
+            version: process.platform === 'linux' ? (2 as const) : (1 as const),
+            coverage: 'paired-services-only' as const,
+            storeId,
+            candidateDigest: candidate.digest,
+            ownerPid: process.pid,
+            services: resourceServices,
+            cold: resourceCold,
+          },
+        };
+        const shell =
+          process.platform === 'linux'
+            ? {
+                ...shellCommon,
+                backend: 'linux-pid-namespace' as const,
+                jobs: jobs.map((job) => {
+                  if (!('startupProcesses' in job))
+                    throw Error('continuous_original_shell_process_handoff_failed');
+                  return job;
+                }),
+              }
+            : {
+                ...shellCommon,
+                backend: 'macos-launchd-coalition' as const,
+                jobs: jobs.map((job) => {
+                  if (!('coalitionId' in job))
+                    throw Error('continuous_original_shell_process_handoff_failed');
+                  return job;
+                }),
+              };
         return {
-          version: 2,
+          version: process.platform === 'linux' ? 3 : 2,
           mode: 'formal',
           status: 'passed',
           storeId,
@@ -538,24 +639,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
           admissionLatencyMs: operations.map((row) => row.admissionMs!),
           cleanupConfirmed: coldRead,
           missing: [],
-          shell: {
-            backend: 'macos-launchd-coalition',
-            candidateDigest: candidate.digest,
-            sourceSha256: hash(CONTINUOUS_SHELL_SOURCE),
-            wallStartedAt,
-            jobs,
-            coldRead,
-            noReplay: coldRead,
-            serviceResources: {
-              version: 1,
-              coverage: 'paired-services-only',
-              storeId,
-              candidateDigest: candidate.digest,
-              ownerPid: process.pid,
-              services: resourceServices,
-              cold: resourceCold,
-            },
-          },
+          shell,
         };
       },
       async confirmCold() {
@@ -582,41 +666,73 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
               afterSeq: '0',
               limit: 200,
             });
-            const terminal = operation.shell!.ownedProcesses!;
-            const reference = job?.reference as { ownedProcesses?: unknown; nonce?: string } | null;
-            const ready = decodeShellProcessEvidence(
-              reference?.ownedProcesses,
-              terminal.binding,
-              terminal.ownerPid,
-            );
-            const identity = (row: ShellProcessEvidence['broker']) => ({
-              pid: row.pid,
-              parentPid: row.parentPid,
-              birth: row.birth,
-              unavailable: row.unavailable,
-            });
-            if (
-              job?.status !== 'succeeded' ||
-              JSON.stringify(job.result) !== JSON.stringify(operation.result) ||
-              !ready ||
-              reference?.nonce !== terminal.binding.nonce ||
-              job.originStoreId !== storeId ||
-              job.sessionId !== operation.sessionId ||
-              JSON.stringify(identity(ready.broker)) !==
-                JSON.stringify(identity(terminal.broker)) ||
-              JSON.stringify(identity(ready.guardian)) !==
-                JSON.stringify(identity(terminal.guardian)) ||
-              JSON.stringify(ready.root.identity) !== JSON.stringify(terminal.root.identity) ||
-              ready.coalition.id !== terminal.coalition.id ||
-              ready.coalition.guardianUniqueId !== terminal.coalition.guardianUniqueId ||
-              ready.coalition.guardianPidVersion !== terminal.coalition.guardianPidVersion ||
-              ready.coalition.label !== terminal.coalition.label ||
-              ready.coalition.domain !== terminal.coalition.domain ||
-              !JSON.stringify(job.result).includes('"processTreeStopped":true') ||
-              JSON.stringify(output) !== JSON.stringify(operation.output) ||
-              (await reader.getCommand(operation.commandId))?.status !== 'applied'
-            )
-              throw Error('continuous_cold_original_facts_changed');
+            if (operation.shell && 'startupProcesses' in operation.shell) {
+              const terminal = operation.shell.ownedProcesses;
+              const reference = job?.reference as {
+                ownedProcesses?: unknown;
+                nonce?: string;
+              } | null;
+              const ready = decodeLinuxShellProcessEvidence(
+                reference?.ownedProcesses,
+                terminal.binding,
+                terminal.owner.ownerPid,
+              );
+              if (
+                job?.status !== 'succeeded' ||
+                JSON.stringify(job.result) !== JSON.stringify(operation.result) ||
+                JSON.stringify(job.reference) !== JSON.stringify(operation.reference) ||
+                !ready ||
+                JSON.stringify(ready) !== JSON.stringify(operation.shell.startupProcesses) ||
+                reference?.nonce !== terminal.binding.nonce ||
+                job.originStoreId !== storeId ||
+                job.sessionId !== operation.sessionId ||
+                !JSON.stringify(job.result).includes('"processTreeStopped":true') ||
+                JSON.stringify(output) !== JSON.stringify(operation.output) ||
+                (await reader.getCommand(operation.commandId))?.status !== 'applied'
+              )
+                throw Error('continuous_cold_original_facts_changed');
+            } else {
+              const terminal = operation.shell!.ownedProcesses!;
+              if (terminal.coverage !== 'shell-owned-coalition')
+                throw Error('continuous_cold_original_facts_changed');
+              const reference = job?.reference as {
+                ownedProcesses?: unknown;
+                nonce?: string;
+              } | null;
+              const ready = decodeShellProcessEvidence(
+                reference?.ownedProcesses,
+                terminal.binding,
+                terminal.ownerPid,
+              );
+              const identity = (row: ShellProcessEvidence['broker']) => ({
+                pid: row.pid,
+                parentPid: row.parentPid,
+                birth: row.birth,
+                unavailable: row.unavailable,
+              });
+              if (
+                job?.status !== 'succeeded' ||
+                JSON.stringify(job.result) !== JSON.stringify(operation.result) ||
+                !ready ||
+                reference?.nonce !== terminal.binding.nonce ||
+                job.originStoreId !== storeId ||
+                job.sessionId !== operation.sessionId ||
+                JSON.stringify(identity(ready.broker)) !==
+                  JSON.stringify(identity(terminal.broker)) ||
+                JSON.stringify(identity(ready.guardian)) !==
+                  JSON.stringify(identity(terminal.guardian)) ||
+                JSON.stringify(ready.root.identity) !== JSON.stringify(terminal.root.identity) ||
+                ready.coalition.id !== terminal.coalition.id ||
+                ready.coalition.guardianUniqueId !== terminal.coalition.guardianUniqueId ||
+                ready.coalition.guardianPidVersion !== terminal.coalition.guardianPidVersion ||
+                ready.coalition.label !== terminal.coalition.label ||
+                ready.coalition.domain !== terminal.coalition.domain ||
+                !JSON.stringify(job.result).includes('"processTreeStopped":true') ||
+                JSON.stringify(output) !== JSON.stringify(operation.output) ||
+                (await reader.getCommand(operation.commandId))?.status !== 'applied'
+              )
+                throw Error('continuous_cold_original_facts_changed');
+            }
           }
           if (
             (await reader.getMetadata()).lastChangeCursor !== metadata.lastChangeCursor ||

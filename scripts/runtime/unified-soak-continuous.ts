@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
+  decodeLinuxShellProcessEvidence,
   decodeMacosShellProcessEvidence as decodeShellProcessEvidence,
+  type LinuxShellProcessEvidence,
   type MacosShellProcessEvidence as ShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from '@kite-ai/agent/jobs/shell';
@@ -41,8 +43,32 @@ export interface ContinuousShellEvidence {
   /** Optional independently versioned Service boundary observation; not whole resource qualification. */
   serviceResources?: PairedServiceResources;
 }
+export interface ContinuousLinuxShellEvidence {
+  backend: 'linux-pid-namespace';
+  candidateDigest: string;
+  sourceSha256: string;
+  wallStartedAt: number;
+  jobs: {
+    commandId: string;
+    sessionId: string;
+    executionId: string;
+    startedAt: number;
+    endedAt: number;
+    units: number;
+    digest: string;
+    processTreeStopped: true;
+    stdoutSha256: string;
+    /** Original persisted ready reference and terminal result; never reconstructed control. */
+    startupProcesses: LinuxShellProcessEvidence;
+    ownedProcesses: LinuxShellProcessEvidence;
+  }[];
+  coldRead: boolean;
+  noReplay: boolean;
+  serviceResources: PairedServiceResources;
+}
+export type ContinuousOwnedShellEvidence = ContinuousShellEvidence | ContinuousLinuxShellEvidence;
 export interface ContinuousEvidence {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   mode: 'diagnostic' | 'formal';
   status: 'passed' | 'failed';
   storeId: string;
@@ -63,8 +89,8 @@ export interface ContinuousEvidence {
   admissionLatencyMs: number[];
   cleanupConfirmed: boolean;
   missing: string[];
-  /** v2 only: actual default packaged Service producer, never a diagnostic claim. */
-  shell?: ContinuousShellEvidence;
+  /** v2 Mac / v3 Linux: actual default packaged Service producer. */
+  shell?: ContinuousOwnedShellEvidence;
 }
 export function unionBusyIntervals(intervals: readonly (readonly [number, number])[]) {
   const ordered = [...intervals].sort((a, b) => a[0] - b[0]);
@@ -81,7 +107,70 @@ export function unionBusyIntervals(intervals: readonly (readonly [number, number
 export function busyDuration(intervals: readonly (readonly [number, number])[]) {
   return unionBusyIntervals(intervals).reduce((sum, [start, end]) => sum + end - start, 0);
 }
-export function verifyContinuousEvidence(value: ContinuousEvidence, formal: boolean) {
+function linuxOwnershipIdentity(proof: LinuxShellProcessEvidence) {
+  const owner = proof.owner,
+    ns = owner.namespace!,
+    root = ns.root!;
+  return JSON.stringify({
+    ownerPid: owner.ownerPid,
+    mode: owner.admission.mode,
+    wrapper: [owner.wrapper.pid, owner.wrapper.parentPid, owner.wrapper.birth],
+    namespace: [ns.dev, ns.ino],
+    init: [ns.init.pid, ns.init.parentPid, ns.init.birth, ns.init.localPid],
+    root: [root.pid, root.parentPid, root.birth, root.localPid],
+  });
+}
+function originalLinuxHandoff(
+  job: ContinuousLinuxShellEvidence['jobs'][number],
+  resources: PairedServiceResources,
+) {
+  const proof = job.ownedProcesses;
+  const terminal =
+    proof &&
+    decodeLinuxShellProcessEvidence(proof, {
+      sessionId: job.sessionId,
+      executionId: job.executionId,
+      nonce: proof.binding?.nonce,
+    });
+  const ready =
+    terminal &&
+    decodeLinuxShellProcessEvidence(
+      job.startupProcesses,
+      terminal.binding,
+      terminal.owner.ownerPid,
+    );
+  if (!terminal || !shellProcessEvidenceEnded(terminal) || !ready) return false;
+  const owner = ready.owner,
+    ns = owner.namespace,
+    root = ns?.root,
+    wait = terminal.owner.namespace?.root?.waitReceipt;
+  return !!(
+    owner.phase === 'ready' &&
+    !owner.fdClosed &&
+    !owner.closeUnknown &&
+    owner.wrapper.exit === null &&
+    !owner.wrapper.closed &&
+    !owner.wrapper.stdoutEof &&
+    !owner.wrapper.stderrEof &&
+    ns &&
+    !ns.treeStopped &&
+    !ns.init.dead &&
+    root &&
+    !root.dead &&
+    root.waitReceipt === null &&
+    wait?.code === 0 &&
+    wait.signal === null &&
+    wait.rawStatus === 0 &&
+    Array.isArray(resources?.services) &&
+    resources.services.some((service) => service?.pid === owner.ownerPid) &&
+    linuxOwnershipIdentity(ready) === linuxOwnershipIdentity(terminal)
+  );
+}
+export function verifyContinuousEvidence(
+  value: ContinuousEvidence,
+  formal: boolean,
+  platform?: string,
+) {
   const expected = [
     'version',
     'mode',
@@ -104,7 +193,7 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
     'admissionLatencyMs',
     'cleanupConfirmed',
     'missing',
-    ...(value?.version === 2 ? ['shell'] : []),
+    ...(value?.version === 2 || value?.version === 3 ? ['shell'] : []),
   ];
   if (
     !value ||
@@ -119,7 +208,7 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
     new Set(values).size === values.length &&
     values.every((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id));
   if (
-    ![1, 2].includes(value.version) ||
+    ![1, 2, 3].includes(value.version) ||
     !['diagnostic', 'formal'].includes(value.mode) ||
     value.status !== 'passed' ||
     !ids([value.storeId], 1) ||
@@ -206,6 +295,7 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
           .sort()
           .join(',') ||
       shell.backend !== 'macos-launchd-coalition' ||
+      (platform !== undefined && platform !== 'darwin') ||
       !hash(shell.candidateDigest) ||
       shell.sourceSha256 !== createHash('sha256').update(CONTINUOUS_SHELL_SOURCE).digest('hex') ||
       !Number.isSafeInteger(shell.wallStartedAt) ||
@@ -276,12 +366,71 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
         return ['continuous_shell_process_handoff_invalid'];
     }
   }
-  if (value.version === 2 && value.shell && Object.hasOwn(value.shell, 'serviceResources')) {
+  if (value.version === 3) {
+    const shell = value.shell;
+    const hash = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+    const bytes = Buffer.alloc(65536, 16);
+    bytes.writeUInt32LE(CONTINUOUS_SHELL_UNITS - 1);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    if (
+      !shell ||
+      Object.keys(shell).sort().join(',') !==
+        'backend,candidateDigest,coldRead,jobs,noReplay,serviceResources,sourceSha256,wallStartedAt' ||
+      shell.backend !== 'linux-pid-namespace' ||
+      (platform !== undefined && platform !== 'linux') ||
+      !hash(shell.candidateDigest) ||
+      shell.sourceSha256 !== createHash('sha256').update(CONTINUOUS_SHELL_SOURCE).digest('hex') ||
+      !Number.isSafeInteger(shell.wallStartedAt) ||
+      shell.wallStartedAt <= 0 ||
+      shell.coldRead !== true ||
+      shell.noReplay !== true ||
+      shell.serviceResources?.version !== 2 ||
+      !Array.isArray(shell.jobs) ||
+      shell.jobs.length !== value.commandIds.length ||
+      !ids(shell.jobs.map((job) => job?.executionId)) ||
+      shell.jobs.some(
+        (job, index) =>
+          !job ||
+          Object.keys(job).sort().join(',') !==
+            'commandId,digest,endedAt,executionId,ownedProcesses,processTreeStopped,sessionId,startedAt,startupProcesses,stdoutSha256,units' ||
+          job.commandId !== value.commandIds[index] ||
+          !value.sessionIds.includes(job.sessionId) ||
+          !Number.isSafeInteger(job.startedAt) ||
+          !Number.isSafeInteger(job.endedAt) ||
+          job.endedAt <= job.startedAt ||
+          job.units !== CONTINUOUS_SHELL_UNITS ||
+          job.digest !== digest ||
+          job.processTreeStopped !== true ||
+          !hash(job.stdoutSha256) ||
+          job.stdoutSha256 !==
+            createHash('sha256')
+              .update(
+                `${JSON.stringify({ nonce: job.commandId, startedAt: job.startedAt, endedAt: job.endedAt, units: job.units, digest: job.digest })}\n`,
+              )
+              .digest('hex') ||
+          job.startedAt - shell.wallStartedAt !== value.busyIntervals[index]![0] ||
+          job.endedAt - shell.wallStartedAt !== value.busyIntervals[index]![1],
+      )
+    )
+      return ['continuous_background_shell_invalid'];
+    if (
+      shell.jobs.some((job) => !originalLinuxHandoff(job, shell.serviceResources)) ||
+      new Set(shell.jobs.map((job) => linuxOwnershipIdentity(job.ownedProcesses))).size !==
+        shell.jobs.length
+    )
+      return ['continuous_shell_process_handoff_invalid'];
+  }
+  if (
+    (value.version === 2 || value.version === 3) &&
+    value.shell &&
+    Object.hasOwn(value.shell, 'serviceResources')
+  ) {
     const resourceErrors = verifyPairedServiceResources(value.shell.serviceResources!, {
       storeId: value.storeId,
       candidateDigest: value.shell.candidateDigest,
       instanceIds: value.serviceInstanceIds,
       coldRead: value.shell.coldRead,
+      platform: platform ?? (value.version === 3 ? 'linux' : 'darwin'),
     });
     if (resourceErrors.length) return resourceErrors;
   }
@@ -292,6 +441,6 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
       value.activeWorkloadDurationMs < CONTINUOUS_MINIMUM_BUSY_MS)
   )
     return ['continuous_formal_unqualified'];
-  if (formal && value.version !== 2) return ['continuous_background_shell_unqualified'];
+  if (formal && value.version === 1) return ['continuous_background_shell_unqualified'];
   return [];
 }

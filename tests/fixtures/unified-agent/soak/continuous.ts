@@ -347,7 +347,7 @@ export async function openContinuousFixture(root: string) {
   }
 }
 
-/** Diagnostic adapters stay v1. Formal macOS uses the actual default packaged producer. */
+/** Diagnostic adapters stay v1. Supported formal platforms use the actual default packaged producer. */
 export async function runContinuousSchedule(
   root: string,
   mode: 'diagnostic' | 'formal',
@@ -356,7 +356,7 @@ export async function runContinuousSchedule(
 ): Promise<ContinuousEvidence> {
   if (signal?.aborted) throw Error('continuous_schedule_stopped');
   if (mode === 'formal') {
-    if (process.platform !== 'darwin')
+    if (!['darwin', 'linux'].includes(process.platform))
       throw Error('continuous_qualified_background_shell_required');
     const { openDefaultShellContinuousFixture } = await import('./continuous-default-shell');
     const fixture = await openDefaultShellContinuousFixture(root, candidateRoot);
@@ -369,7 +369,7 @@ export async function runContinuousSchedule(
       );
       await fixture.confirmCold();
       const evidence = fixture.evidence();
-      if (verifyContinuousEvidence(evidence, true).length)
+      if (verifyContinuousEvidence(evidence, true, process.platform).length)
         throw Error('continuous_default_formal_evidence_invalid');
       return evidence;
     } finally {

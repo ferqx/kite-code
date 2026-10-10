@@ -1,9 +1,22 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { verifyContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
+import type { LinuxShellProcessEvidence } from '@kite-ai/agent/jobs/shell';
+import {
+  CONTINUOUS_SHELL_SOURCE,
+  CONTINUOUS_SHELL_UNITS,
+  type ContinuousEvidence,
+  type ContinuousLinuxShellEvidence,
+  verifyContinuousEvidence,
+} from '../../../scripts/runtime/unified-soak-continuous';
+import type {
+  NativeProcessObservation,
+  NativeProcessResources,
+} from '../../../scripts/runtime/unified-soak-native';
+import type { PairedServiceResources } from '../../../scripts/runtime/unified-soak-service-resources';
 import {
   activeDuration,
   openContinuousFixture,
@@ -94,6 +107,234 @@ test('bounded continuous load uses two real Services, twenty original Sessions a
   }
 }, 180000);
 
+function linuxContinuousPacket() {
+  const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
+  const bytes = Buffer.alloc(65536, 16);
+  bytes.writeUInt32LE(CONTINUOUS_SHELL_UNITS - 1);
+  const digest = hash(bytes),
+    wallStartedAt = 10000;
+  const sessionIds = Array.from({ length: 20 }, (_, index) => `session-${index}`),
+    commandIds = Array.from({ length: 40 }, (_, index) => `command-${index}`);
+  const services: PairedServiceResources['services'] = [60, 61].map((pid, index) => {
+    const spawn: NativeProcessObservation = {
+      collector: 'linux-procfs',
+      pid,
+      parentPid: 50,
+      startIdentity: {
+        kind: 'linux-boot-start-ticks',
+        value: `12345678-1234-1234-1234-123456789abc:${pid}`,
+      },
+      fileDescriptors: 4,
+      unavailable: [],
+    };
+    const sample = (observedAt: number): NativeProcessResources => ({
+      version: 2 as const,
+      pid,
+      observedAt,
+      before: structuredClone(spawn),
+      after: structuredClone(spawn),
+      rssBytes: 1024,
+      fileDescriptors: 4,
+      activeResources: null,
+      handles: null,
+      unsupported: ['activeResources', 'handles'],
+      unavailable: [],
+    });
+    return {
+      instanceId: `service-${index}`,
+      pid,
+      spawn,
+      ready: sample(100),
+      preclose: sample(200),
+      exit: { exitCode: 0, originalExited: true, reaped: true, kernelState: 'absent' },
+    };
+  });
+  const shell: ContinuousLinuxShellEvidence = {
+    backend: 'linux-pid-namespace',
+    candidateDigest: 'a'.repeat(64),
+    sourceSha256: hash(CONTINUOUS_SHELL_SOURCE),
+    wallStartedAt,
+    coldRead: true,
+    noReplay: true,
+    serviceResources: {
+      version: 2,
+      coverage: 'paired-services-only',
+      storeId: 'original-store',
+      candidateDigest: 'a'.repeat(64),
+      ownerPid: 50,
+      services,
+      cold: {
+        storeId: 'original-store',
+        cursor: '123',
+        unchanged: true,
+        providerCallsBefore: 80,
+        providerCallsAfter: 80,
+      },
+    },
+    jobs: commandIds.map((commandId, index) => {
+      const ownerPid = 60 + (index % 2),
+        wrapperPid = 100 + index * 3,
+        startedAt = wallStartedAt + index * 10,
+        endedAt = startedAt + 10;
+      const startupProcesses: LinuxShellProcessEvidence = {
+        version: 2,
+        coverage: 'shell-owned-pid-namespace',
+        binding: {
+          sessionId: sessionIds[index % 20]!,
+          executionId: `job-${index}`,
+          nonce: `nonce-${index}`,
+        },
+        owner: {
+          version: 1,
+          coverage: 'linux-pid-namespace',
+          admission: { mode: 'full', nonce: `nonce-${index}` },
+          ownerPid,
+          phase: 'ready',
+          fdClosed: false,
+          closeUnknown: false,
+          wrapper: {
+            pid: wrapperPid,
+            parentPid: ownerPid,
+            birth: String(1000 + index * 3),
+            exit: null,
+            closed: false,
+            stdoutEof: false,
+            stderrEof: false,
+          },
+          namespace: {
+            dev: '4',
+            // A closed namespace inode may be reused; original process births differ.
+            ino: '5',
+            init: {
+              pid: wrapperPid + 1,
+              parentPid: wrapperPid,
+              birth: String(1001 + index * 3),
+              localPid: 1,
+              dead: false,
+            },
+            root: {
+              pid: wrapperPid + 2,
+              parentPid: wrapperPid + 1,
+              birth: String(1002 + index * 3),
+              localPid: 2,
+              dead: false,
+              waitReceipt: null,
+            },
+            treeStopped: false,
+          },
+        },
+      };
+      const ownedProcesses = structuredClone(startupProcesses),
+        owner = ownedProcesses.owner;
+      owner.phase = 'terminal';
+      owner.fdClosed = true;
+      Object.assign(owner.wrapper, {
+        exit: { code: 0, signal: null, reaped: true },
+        closed: true,
+        stdoutEof: true,
+        stderrEof: true,
+      });
+      owner.namespace!.treeStopped = true;
+      owner.namespace!.init.dead = true;
+      Object.assign(owner.namespace!.root!, {
+        dead: true,
+        waitReceipt: {
+          localPid: 2,
+          code: 0,
+          signal: null,
+          rawStatus: 0,
+          waitConfirmed: true,
+          reaped: true,
+        },
+      });
+      return {
+        commandId,
+        sessionId: sessionIds[index % 20]!,
+        executionId: `job-${index}`,
+        startedAt,
+        endedAt,
+        units: CONTINUOUS_SHELL_UNITS,
+        digest,
+        processTreeStopped: true,
+        stdoutSha256: hash(
+          `${JSON.stringify({ nonce: commandId, startedAt, endedAt, units: CONTINUOUS_SHELL_UNITS, digest })}\n`,
+        ),
+        startupProcesses,
+        ownedProcesses,
+      };
+    }),
+  };
+  const evidence: ContinuousEvidence = {
+    version: 3,
+    mode: 'diagnostic',
+    status: 'passed',
+    storeId: 'original-store',
+    serviceInstanceIds: ['service-0', 'service-1'],
+    sessionIds,
+    commandIds,
+    childExecutionIds: commandIds.map((id) => `child-${id}`),
+    synchronousEffects: 40,
+    childCalls: 40,
+    slowEntered: true,
+    peerEvents: 1,
+    reconnects: 2,
+    completedCycles: 2,
+    wallDurationMs: 401,
+    activeWorkloadDurationMs: 400,
+    busyIntervals: commandIds.map((_, index) => [index * 10, (index + 1) * 10]),
+    operationDurationMs: commandIds.map(() => 10),
+    admissionLatencyMs: commandIds.map(() => 1),
+    cleanupConfirmed: true,
+    missing: [],
+    shell,
+  };
+  return { evidence, shell };
+}
+
+test('Linux continuous v3 binds original ready and ended namespace owners and keeps formal and resource gates', () => {
+  const { evidence } = linuxContinuousPacket();
+  expect(verifyContinuousEvidence(evidence, false, 'linux')).toEqual([]);
+  expect(verifyContinuousEvidence(evidence, false, 'darwin')).toContain(
+    'continuous_background_shell_invalid',
+  );
+  expect(verifyContinuousEvidence({ ...evidence, mode: 'formal' }, true, 'linux')).toContain(
+    'continuous_formal_unqualified',
+  );
+  const reject = (
+    change: (shell: ContinuousLinuxShellEvidence) => void,
+    error = 'continuous_shell_process_handoff_invalid',
+  ) => {
+    const { evidence, shell } = linuxContinuousPacket();
+    change(shell);
+    expect(verifyContinuousEvidence(evidence, false, 'linux')).toContain(error);
+  };
+  reject((shell) => {
+    shell.jobs[0]!.startupProcesses.owner.namespace!.root!.birth += '1';
+  });
+  reject((shell) => {
+    shell.jobs[0]!.startupProcesses.owner.namespace!.root!.dead = true;
+  });
+  reject((shell) => {
+    shell.jobs[0]!.startupProcesses.binding.nonce = 'foreign';
+  });
+  reject((shell) => {
+    shell.jobs[0]!.ownedProcesses.owner.namespace!.root!.waitReceipt!.code = 7;
+    shell.jobs[0]!.ownedProcesses.owner.namespace!.root!.waitReceipt!.rawStatus = 1792;
+  });
+  reject((shell) => {
+    shell.jobs[0]!.ownedProcesses.owner.closeUnknown = true;
+  });
+  reject((shell) => {
+    Object.assign(shell.jobs[0]!, { coalitionId: '123' });
+  }, 'continuous_background_shell_invalid');
+  reject((shell) => {
+    shell.serviceResources.services[0]!.exit!.reaped = false;
+  }, 'continuous_service_resources_unqualified');
+  reject((shell) => {
+    shell.serviceResources.cold!.providerCallsAfter++;
+  }, 'continuous_service_resources_unqualified');
+});
+
 test('schedule refuses pre-stopped work and unsupported formal before Profile I/O', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-soak-continuous-refuse-'));
   try {
@@ -102,10 +343,10 @@ test('schedule refuses pre-stopped work and unsupported formal before Profile I/
       runContinuousSchedule(
         formalRoot,
         'formal',
-        process.platform === 'darwin' ? AbortSignal.abort() : undefined,
+        ['darwin', 'linux'].includes(process.platform) ? AbortSignal.abort() : undefined,
       ),
     ).rejects.toThrow(
-      process.platform === 'darwin'
+      ['darwin', 'linux'].includes(process.platform)
         ? 'continuous_schedule_stopped'
         : 'continuous_qualified_background_shell_required',
     );

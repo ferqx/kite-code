@@ -18,6 +18,8 @@ Workspace 与 Full 从最终派发授权的所有 leaf 求交，保宿主 HOME �
 
 Profile Skill 的[准确原来源交接](../../implemented/architecture/2026-10-10-profile-workflow-read-only-original-source.md)已接源码：每级独立私有tmpfs scaffold在业务尚未创建时以0700打开原DIR FD，核每级只有唯一下级和来源原dev／ino／RO，再改0111并逐项封RO／NOEXEC／NOSUID／NODEV；持原FD复核内部身份、闭合子项并严格关闭。准确原Skill树ro-bind保原cwd，来源内未声明子mount拒绝。其他保护mask保持000，不由该投影暴露其他Profile／coordination。显式协议把source与scaffold区别于mask，全部路径共用原200上界。
 
+正式默认连续任务caller现使用独立continuous v3，消费同候选原Job的ready reference与terminal proof，不再依赖Darwin-only coalition字段。公开Execution终态不暴露控制reference，因此warm原candidate readonly Store保存原reference，原服务严格关闭后再以新readonly reader核完整相等和零重放。ready／terminal的nonce、wrapper／namespace／init／root原出生及父子身份必须连续，实际业务wait0与严格资源结束均成立；namespace inode不要求跨Job永久唯一。两Service procfs／RSS／FD边界收据另为v2，不代全部Runtime census或原RSS稳定性，Linux native／installed资格仍未取得。
+
 ## Alternatives considered
 
 - 复用旧 Linux detached PGID：不能核完整脱离后代，不满足自然退出与 Service 退出契约。

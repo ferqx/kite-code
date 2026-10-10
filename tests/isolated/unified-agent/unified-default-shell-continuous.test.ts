@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { shellProcessEvidenceEnded } from '@kite-ai/agent/jobs/shell';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
@@ -15,10 +16,17 @@ import type { ContinuousEvidence } from '../../../scripts/runtime/unified-soak-c
 import { verifyContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyPairedServiceResources } from '../../../scripts/runtime/unified-soak-service-resources';
 
-test.skipIf(process.platform !== 'darwin')(
+test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   'two default packaged Services run twenty original Sessions with real Files, child Agents and Shell work; cold facts cannot qualify padded elapsed time',
   async () => {
-    const root = realpathSync.native(mkdtempSync('/private/tmp/kite-default-shell-continuous-'));
+    const root = realpathSync.native(
+      mkdtempSync(
+        join(
+          process.platform === 'darwin' ? '/private/tmp' : tmpdir(),
+          'kite-default-shell-continuous-',
+        ),
+      ),
+    );
     const candidate = await buildTerminalBundle({ destination: join(root, 'candidate') });
     symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'), 'dir');
     const workload = join(root, 'workload'),
@@ -72,9 +80,13 @@ finally {await fixture.close();}`,
       expect(evidence.shell!.candidateDigest).toBe(candidate.digest);
       const serviceResources = evidence.shell!.serviceResources;
       expect(serviceResources).toBeDefined();
-      expect(serviceResources).toMatchObject({ version: 1, coverage: 'paired-services-only' });
+      expect(serviceResources).toMatchObject({
+        version: process.platform === 'linux' ? 2 : 1,
+        coverage: 'paired-services-only',
+      });
       expect(
         verifyPairedServiceResources(serviceResources!, {
+          platform: process.platform,
           storeId: evidence.storeId,
           candidateDigest: candidate.digest,
           instanceIds: evidence.serviceInstanceIds,
@@ -82,6 +94,7 @@ finally {await fixture.close();}`,
         }),
       ).toEqual([]);
       const resourceExpected = {
+        platform: process.platform,
         storeId: evidence.storeId,
         candidateDigest: candidate.digest,
         instanceIds: evidence.serviceInstanceIds,
@@ -98,7 +111,7 @@ finally {await fixture.close();}`,
         'continuous_service_resources_unqualified',
       );
       expect(existsSync(join(workload, 'candidate'))).toBe(false);
-      expect(verifyContinuousEvidence(evidence, false)).toEqual([]);
+      expect(verifyContinuousEvidence(evidence, false, process.platform)).toEqual([]);
       expect(evidence.sessionIds).toHaveLength(20);
       expect(evidence.serviceInstanceIds).toHaveLength(2);
       expect(evidence.commandIds).toHaveLength(40);
@@ -106,22 +119,28 @@ finally {await fixture.close();}`,
       expect(evidence.childCalls).toBe(40);
       expect(evidence.shell!.jobs).toHaveLength(40);
       expect(
-        evidence.shell!.jobs.every(
-          (job) =>
-            job.ownedProcesses?.coverage === 'shell-owned-coalition' &&
-            shellProcessEvidenceEnded(job.ownedProcesses),
+        evidence.shell!.jobs.every((job) =>
+          process.platform === 'linux'
+            ? job.ownedProcesses?.coverage === 'shell-owned-pid-namespace' &&
+              shellProcessEvidenceEnded(job.ownedProcesses)
+            : job.ownedProcesses?.coverage === 'shell-owned-coalition' &&
+              shellProcessEvidenceEnded(job.ownedProcesses),
         ),
       ).toBe(true);
       const unreaped = structuredClone(evidence);
-      unreaped.shell!.jobs[0]!.ownedProcesses!.broker.exit = null;
-      expect(verifyContinuousEvidence(unreaped, false)).toContain(
+      const proof = unreaped.shell!.jobs[0]!.ownedProcesses!;
+      if (proof.coverage === 'shell-owned-pid-namespace') proof.owner.wrapper.exit = null;
+      else proof.broker.exit = null;
+      expect(verifyContinuousEvidence(unreaped, false, process.platform)).toContain(
         'continuous_shell_process_handoff_invalid',
       );
       expect(evidence.shell).toMatchObject({ coldRead: true, noReplay: true });
       expect(evidence.slowEntered).toBe(true);
       expect(evidence.peerEvents).toBeGreaterThan(0);
       expect(evidence.reconnects).toBe(2);
-      expect(verifyContinuousEvidence(evidence, true)).toContain('continuous_formal_unqualified');
+      expect(verifyContinuousEvidence(evidence, true, process.platform)).toContain(
+        'continuous_formal_unqualified',
+      );
       expect(
         verifyContinuousEvidence(
           {
@@ -130,13 +149,14 @@ finally {await fixture.close();}`,
             activeWorkloadDurationMs: 450000,
           },
           true,
+          process.platform,
         ),
       ).toContain('continuous_busy_union_invalid');
-      const jobs = structuredClone(evidence.shell!.jobs);
-      jobs[0]!.processTreeStopped = false as true;
-      expect(
-        verifyContinuousEvidence({ ...evidence, shell: { ...evidence.shell!, jobs } }, false),
-      ).toContain('continuous_background_shell_invalid');
+      const stoppedTree = structuredClone(evidence);
+      stoppedTree.shell!.jobs[0]!.processTreeStopped = false as true;
+      expect(verifyContinuousEvidence(stoppedTree, false, process.platform)).toContain(
+        'continuous_background_shell_invalid',
+      );
       console.log(
         JSON.stringify({
           caseId: 'default_shell_continuous_short',

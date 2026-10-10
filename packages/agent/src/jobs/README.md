@@ -72,7 +72,7 @@ macOS host在读取deny中精确减去该子树及必要祖先metadata，单独�
 
 [普通 Linux Job](linux-shell.ts)持续排空真实双流，沿原输出预算保存 UTF-8、gap 和一个 terminal；公开输入仍只有 command。自然根的 WNOWAIT／准确 waitpid 后在本 namespace 内清理剩余后代直到 ECHILD。正常 ended 还须原 wrapper 实际 exit0／close、双流 EOF、两枚原 pidfd 死亡和每个原 FD 严格关闭，随后才能删除原 temp。`--die-with-parent` 只为 crash fallback，不能代正常证明。首个 unknown 保持不变；有效原 init pidfd可作一次清理，Close 未确认不重试，强持原对象。同步启动或准备清理未知通过原 facade／handle交回 Runtime，dispose继续失败，resource与binding lease不提前释放。
 
-[closed v2 冷证据](linux-shell-process-evidence.ts)使用 `shell-owned-pid-namespace`，绑定原 Session／Execution／nonce，保存原 wrapper、namespace、init/root birth／parent／localPid与原 wait receipt、EOF／FD关闭事实。公共 decoder按版本选择原 macOS v1 或 Linux v2，冷解码只读复制并冻结数据，不进行 native I/O、恢复进程控制或重跑；macOS continuous producer仍明确消费自身 v1，不产生新的 RSS 样本或资源资格。
+[closed v2 冷证据](linux-shell-process-evidence.ts)使用 `shell-owned-pid-namespace`，绑定原 Session／Execution／nonce，保存原 wrapper、namespace、init/root birth／parent／localPid与原 wait receipt、EOF／FD关闭事实。公共 decoder按版本选择原 macOS v1 或 Linux v2，冷解码只读复制并冻结数据，不进行 native I/O、恢复进程控制或重跑。Linux[默认连续任务调用者](../../../../tests/fixtures/unified-agent/soak/continuous-default-shell.ts)现以独立continuous v3消费同候选的原ready reference及终态证明，核完整原身份、业务wait0／raw0和严格结束；cold完整reference／result／output／Command／cursor及Provider零重放保持。Mac continuous v2仍消费自身v1；两Service有限资源收据与全部Runtime／RSS资格各自独立，Linux原生和installed资格尚未取得，详见[韧性合同](../../../../docs/active/runtime-resilience-qualification.md)。
 
 Linux [build-assets](build-assets.ts)在构建机器使用 C compiler生成 ELF64 native init，核对应 x64／arm64 machine、0755后纳入完整候选 inventory；已安装机器只定位包内 `platform/process/linux-shell-init`，不编译或退回 `.ts`。构建依赖 compiler、执行依赖 Bubblewrap及相应内核能力；缺依赖失败封闭，代码与静态检查不证明其存在。
 

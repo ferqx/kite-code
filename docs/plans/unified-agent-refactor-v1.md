@@ -2148,6 +2148,8 @@ Linux正式Source stdio的独立direct-program／namespace owner、真实SDK tra
 
 上述非macOS正式MCP Soak调用者源码现已迁入同一Source／SQL connection Job／SDK和cold原结果，直接stdio adapter诊断回退删除。原v2合取保持，v3／v4核同平台和完整原native身份连续性、原root实际exit7、严格树／资源关闭及原C／E／Run／output／reference／cursor／零Provider；formal缺交接拒绝，原生unknown不被相邻fixture清理改写。本机完整文件与准确失败归[当前调用者进度](unified-agent-refactor-v1-progress.md#2026-10-10三平台-mcp-正式-soak-调用者迁移)；Win/Linux原生／installed、原RSS／完整Runtime观测、§35审查／最终退役／阶段完整回归与适用P7仍未闭合，37partial、wholeV13／phaseExit=false。本片不重复参数或资源实验，不dispatch或扩大本地提交授权。
 
+Linux持续普通任务的正式default caller现已从Darwin-only限制迁出，沿同候选的两Service／20Session／Files／required Task／detached Shell完整链，以closed continuous v3严格消费原ready reference与terminal namespace proof及两Service有限v2资源收据。Mac v2与原工作量／取消／冷读零重放及450秒／八outer／九点门禁保持；Linux内核／installed完整用户链仍pending，不能据此解除P6或§35／最终退役。源码、限定本机验证与最多五项下一退出依赖归[当前进度](unified-agent-refactor-v1-progress.md#2026-10-10linux-持续普通任务的正式调用者迁移)；安装／真实版本切换／维护恢复仍按实际源码独立推进，原RSS与观测缺项不成为这些源码实施的前置审批或重复实验目标。37partial、wholeDefault／wholeV13／phaseExit=false。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

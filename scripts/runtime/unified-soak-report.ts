@@ -379,7 +379,10 @@ function verifyReport(
     if (value.version === 2) {
       if (!Array.isArray(attempt.cases) || attempt.cases.length !== 7)
         return ['case_matrix_missing'];
-      if (attempt.continuous) errors.push(...verifyContinuousEvidence(attempt.continuous, formal));
+      if (attempt.continuous)
+        errors.push(
+          ...verifyContinuousEvidence(attempt.continuous, formal, value.environment.platform),
+        );
       else if (formal) errors.push('continuous_workload_missing');
       for (const [caseIndex, item] of attempt.cases.entries()) {
         if (
