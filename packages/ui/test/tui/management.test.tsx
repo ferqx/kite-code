@@ -294,3 +294,69 @@ test('ordinary input during observed compression queues exact follow-up instead 
   });
   expect(f.writes).toHaveLength(0);
 });
+
+test('restored Include keeps the original result provenance and writes only the current admission and exact target', async () => {
+  for (const active of [false, true]) {
+    const f = fixture(active);
+    f.port.readSession = async (id) => {
+      const current = snapshot(id, active);
+      return {
+        ...current,
+        view: {
+          ...current.view,
+          executions: current.view.executions.map((execution) => ({
+            ...execution,
+            originStoreId: 'original-store',
+          })),
+        },
+      };
+    };
+    await f.controller.select('a');
+    await f.controller.includeExecution('result');
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toEqual({
+      kind: 'result.include',
+      sessionId: 'a',
+      executionId: 'result',
+      request: {
+        expectedStoreId: 'store',
+        commandId: 'id-1',
+        expectedContextSelectionId: 'selected',
+        resultRevision: '3',
+        ...(active ? { targetRunId: 'actual-run' } : {}),
+      },
+    });
+    expect(f.controller.state.snapshot!.view.executions[0]!.originStoreId).toBe('original-store');
+    expect(f.models).toBe(0);
+    expect(f.lookups).toBe(0);
+    f.controller.dispose();
+  }
+});
+
+test('Include refuses a changed current admission or mismatched result Session without a write', async () => {
+  for (const wrongAdmission of [false, true]) {
+    const f = fixture();
+    f.port.readSession = async (id) => {
+      const current = snapshot(id);
+      return {
+        ...current,
+        view: {
+          ...current.view,
+          executions: current.view.executions.map((execution) => ({
+            ...execution,
+            originStoreId: 'original-store',
+            sessionId: wrongAdmission ? id : 'foreign-session',
+          })),
+        },
+      };
+    };
+    await f.controller.select('a');
+    if (wrongAdmission) Object.assign(f.port, { storeId: 'different-current-store' });
+    await f.controller.includeExecution('result');
+    expect(f.writes).toHaveLength(0);
+    expect(f.controller.state.error).toBe('result_identity_unavailable');
+    expect(f.models).toBe(0);
+    expect(f.lookups).toBe(0);
+    f.controller.dispose();
+  }
+});

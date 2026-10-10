@@ -43,6 +43,10 @@
 
 Context 有独立读取取消域、固定选择与双游标，明确是当前投影而非历史 Model 输入。面板关闭只 abort 读取；实际 Fork 选择真实消息 ID/seq 或 `0` 空边界，`/rewind` 三范围 Files 端口与操作见下文，Include 仅引用已观测原 Execution/result revision，活动时封存准确 Run ID。压缩 Command 受理不等于完成，reset 前读取原 compression ID；缺可信 preflight 失败不改旧点。delete_requested 说明 stop 未确认，成功 Fork 明示 omitted extension state；未确认创建/失败不猜新 Session。普通维护期间输入保存为准确原 afterRunId 的 follow-up。实际效果和终态仍由宿主公共 Client/Core 决定。
 
+恢复后的 `/context` 上下选择与 `i` 仍调用原 `includeExecution`：snapshot 和 view 核宿主当前 Store、所选 Session，原结果保非空 originStore、准确 Session/revision 与终态，不把旧出处要求为当前准入。新的 Include Command 绑定当前 Store/selection；idle 不带 targetRun，不创建 Run，后续明确新任务才消费；active 继续封存准确原 Run 并由 Core 等待安全检查点。管理 root/未知原查询、stop 与自动消费边界保持。
+
+[真实恢复 Include](../../../../tests/isolated/unified-agent/restored-tui-context-include.test.tsx)使用公开 A→B 备份恢复、实际 Ink `/context`/`i`、CLI 正式 `includeHistoricalResult` 和真实 Service/Core，核一次新 Command 与完整原 source、idle 零 Model、明确新 Run 的唯一低信任结果、两次冷只读及旧效果一次。新增单元核 idle/active 准确 envelope、当前准入和错误 Session 零写；原完整管理分片与 Core active Include 文件保断言/预算。当前证据及 installed PTY/阶段资格限制归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-context-明确纳入原结果)。
+
 [management.test.tsx](../../test/tui/management.test.tsx) 核对原版本/active include、late Fork、关闭读取、未知容量与维护 follow-up；实际开发 PTY 由 [CLI owner](../../../../apps/cli/README.md) 记录。新增有限 Context/Session slash 不改变正文控制字符转义、完整原输出 reader、EOF/审批或 observer 生命周期边界。
 
 正式 `/resume` 与 Ctrl+R 使用 [session-chooser.tsx](session-chooser.tsx)：按原完整目录的名称/ID 本地过滤，搜索复用 Composer 的字素编辑和 literal paste，五行可见窗口保原 ID；Esc 清搜索／返回列表／关闭，Ctrl+C 只关闭本地面板。空搜索且列表聚焦时 D 先经可选 `readSessionControl` 读取目标 root 的公共控制元数据，不切换当前 Session。controller 复核同一 Store/Workspace、准确 root、未删除和当前视图可用后，默认保留；明确确认才封存该目标控制 revision 与原删除 ID。关闭或切换使迟到读取失效。未知结果保留原意图，R 只查询原 Command，重开不 POST；当前目标删除受理或原查询确认后，新建回调最多执行一次，其他目标删除只刷新目录。当前进程的意图沿既有 128 项管理 map 保存，不新增冷启动 journal 或持久 DTO。

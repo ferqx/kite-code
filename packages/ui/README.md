@@ -89,6 +89,8 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 独立 [终端消费者](src/tui/README.md) 从 `@kite-ai/ui/tui` 导出 Ink 组件与固定原身份的 port/controller，终端正文与 DOM 分开渲染。当前正式 Terminal 已消费此入口，提供会话选择、原 active Run 输入、原卡回答、精确取消及 MCP 目录/启停、来源决定、连接/强制重连、条目增删与HTTP认证的独立原申请；完整主屏、全部手册面板与跨平台资格仍按实际证据核对。
 
+恢复后 Context 的明确 Include 同样由[终端 owner](src/tui/README.md)维护：当前 snapshot/view 准入与原结果出处分别核对，新申请保准确 selection/revision/活动目标，idle 保存来源后仍须用户明确新任务；实际 Ink/HTTP 恢复证据不替代 installed 终端或整体退出资格。
+
 共享 `ModelOutputMessage` 的 Fork 正文读取使用公开 sealed `Message.originMessage` 原 Session/Run，复核准确 Store/Execution；foreign Store 不发正文 GET，未来 `contentFormat` 或 `outputBody.readAvailability:unsupported` 保留预览并禁用完整读取。该新增作用域路径由共享 DOM 5 项、31 个断言以及实际 HTTP Fork 17 MiB 1 项、38 个断言验证，不据此声明全量 Fork/平台产品已收束。独立 TUI 同样保留原 Session/Run/Execution 来源；恢复到新 Store 后由宿主公共 Core reader证明原出处，controller核当前准入 Store及完整消息摘要，不把 Fork的新身份冒充原输出。实际 Ctrl+O/Ctrl+T 与已加载导出范围由[TUI owner](src/tui/README.md)维护。
 
 通用 TUI `Ctrl+B` 使用宿主完整分页的 pending 目录选择独立卡，打开时冻结原 Store/来源 Session/展示 Session/cardId/revision，刷新变更不把原行指向后来卡。每卡分别保留答案草稿与明确 grant 选择，revision 变化清旧草稿；已完整读取的附件按相同身份保留，提交另核公共完整 review reference 的原 identity，不能借用另一张卡或旧正文。Session 切换与未知答复仍走原 controller 查询，不重发。选择器不提供父批准替代 child/Job 许可。

@@ -3946,3 +3946,36 @@ Store逐行验证和流式摘要全部原Execution/Interaction，保持原canoni
 | 4 | 前序齐全后的正式调用者完整迁移、最后旧路径退役和阶段退出 | §35独立全能力/正式caller审查，实际最终legacy退役，阶段未过滤完整回归及适用P7发布/兼容责任 | 依赖1–3和其它原T/E；局部通过不退出 |
 
 37能力仍partial；wholeDefault=false（本轮仅受影响原完整文件）、wholeV13=false、phaseExit=false、Goal active。RSS/观测未重跑，真实失败未删除；本地授权仍只含stage/commit，不扩大到push/PR/发布/Actions dispatch。
+
+## 2026-10-10恢复后 TUI Context 明确纳入原结果
+
+长Run/原任务安全接续已按正常hook本地提交 `5425be3cd5a6f38d2c257f49738c49088f616709`，切片结束：19个唯一完整文件90pass/7222expect及强制store-format-lock原整文件13pass/52expect通过，Root与八runtime workspace类型、文档/边界/格式等门禁actual0。提交收据归 `/private/tmp/kite-v13-long-run-local-commit-receipt-20261010.json`，不把它称为当前全量默认或资源资格。
+
+本轮接续最高优先级独立缺口：正式TUI `/context` 上下选择恢复后的原结果、按 `i` 明确Include。旧controller把原Execution出处A等同当前准入B而拒绝；当前同时核snapshot/view Store、所选Session、原Execution Session/终态/revision及非空出处，新的管理意图绑定当前B和准确selection，活动时保准确targetRun。正式host仍调用既有 `includeHistoricalResult`，Core再核主体/delivery Session/selection/revision/活动目标与取消边界；没有新增HTTP/Store格式或另一个权威。
+
+公开Job/Rewind/backup-restore A→B、真实Ink面板与 `i`、有限port的正式CLI helper→SDK/Service/Core实际完成一次新Include：Command保B，完整原source/Execution/revision保A，原delivery/result不变，私有接纳投影只增加准确source。idle零Model，用户在主输入明确新开Run后，唯一source进入完整低信任请求；原Job/ledger效果仍一次。第二次cold Service/Client/Ink只读，原Command/Run/结果/出处及元数据保持。新增单元另核idle/active envelope与错当前准入/Session零写，原Core active文件复验准确目标、安全checkpoint与取消；新A→B整例不冒称活动后端变更或installed恢复PTY。
+
+### 原失败与有限证据
+
+最终同一整例仅还原原controller叶子时，按真实Ink `i` 在第19断言失败于 `result_identity_unavailable`，零意图/零POST；0pass/1fail/19expect，finally精确还原固定SHA。准确输入和还原归 `/private/tmp/kite-v13-tui-include-original-red-3-20261010-restoration.json`，原第二次业务红也保留。首次fixture没有等待Ink消费已更新draft，13断言时未进入面板；补同预算render交接后才取得业务红。首次修复整例34断言后，fixture在HTTP接纳前发布本地提交观测，真实 `waitForCommand` 报 `command_not_found`；改为等待实际 `startRun` 回执后记录，全部业务断言及15秒整例/5秒等待期限保持。原失败分别保留在 `/private/tmp/kite-v13-tui-include-original-red-20261010-result.json` 和 `/private/tmp/kite-v13-tui-include-final-20261010-result.json`，没有删断言、排除作业或把失败计绿。
+
+起点HEAD `5425be3cd5a6f38d2c257f49738c49088f616709`，macOS arm64/Bun1.4.2 `(744846f84)`持久checkout。最终四个统一计划原完整job、原文件列表/并发和预算，无名称过滤；4285 tracked/untracked输入、Git与实际运行资产前后冻结保持，四作业13个唯一完整文件96pass/728expect/0fail/0skip，归 `/private/tmp/kite-v13-tui-include-final-2-20261010-result.json`：
+
+| 完整原范围 | 实际结果 |
+| --- | --- |
+| 新公开A→B/Ink/Include/明确新任务/冷只读 | 1 file，1pass/62expect |
+| 原UI管理所属完整分片（含Context、MCP、权限、Files、question和chooser） | 10 files，90pass/536expect |
+| 原公开Context caller | 1 file，2pass/64expect |
+| 原Core活动Include/checkpoint/取消 | 1 file，3pass/66expect |
+
+原management测试文件全部字节仍为最终文件前缀，仅追加两例；原Core/helper/host与其它既存测试不改。Root最终TSX类型、UI类型、相关边界/ownership/格式门禁actual0；随后只同步文档，正常stage/commit仍保独立hook。有限只读复核串联实际Ink→controller→正式host→SDK/Core，没有发现新的正确性阻塞；不替代§35独立完整能力审查。现有Profile restore Note的当前准入/原出处分离理由继续适用，本次是遵守该合同的消费者修复，不新建独立设计或操作目标。
+
+### 三项剩余阻塞与验收（按依赖）
+
+| 顺序 | 实际用户入口与具体缺口 | 完整行为/验收 | 依赖 |
+| --- | --- | --- | --- |
+| 1 | 正式安装→版本选择→包内维护恢复→原数据继续使用的剩余支持范围 | 必要平台、完整维护及客户端依赖独立资格齐全；已闭macOS安装/DB9拒绝/切回当前原GET/installed restore与登记Terminal rollback按原scope复用，Windows可信launcher→加载前pin→Main独立使用权→installed整链保持完整准入 | RSS不阻独立实现；Win/Linux按用户原安排留重构后Actions，本地不dispatch。D08首个新基线published样本尚无适用T029，不成为独立实现前置 |
+| 2 | 默认installed CLI/TUI/Native连续普通任务、Shell和child后台的原RSS与全资源观察 | 原八outer/九点/增长与斜率门禁实际满足，owned全部Runtime descendants、activeResources/handles可信完整观察 | P6/§35强制门禁；原arena-zero +115.203125MiB高于原32MiB，handles/resources与完整后代未知保持，不重比参数 |
+| 3 | 前序齐全后的正式调用者完整迁移、最后旧路径退役和阶段退出 | §35独立全能力/正式caller审查，最后legacy实际退役，阶段未过滤完整回归通过及适用P7发布/兼容责任 | 依赖前两项和其它原T/E，不以局部绿色退出 |
+
+新增闭合的是TUI恢复后明确纳入原结果的正式消费者能力；没有新增全局caller切换或最终legacy退役。手册、UI owner、shared active、tests入口、主方案/进度与对应两条cap证据同步，37能力全部partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。RSS/观测未重跑，原真实失败保留；仅继续已授权本地stage/commit，无push/PR/发布/Actions dispatch。

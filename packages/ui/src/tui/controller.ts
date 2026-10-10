@@ -1968,7 +1968,11 @@ export class TuiController {
       run = snapshot.view.runs.find((r) => r.isActive);
     if (
       !execution ||
-      execution.originStoreId !== this.port.storeId ||
+      snapshot.storeId !== this.port.storeId ||
+      snapshot.view.storeId !== this.port.storeId ||
+      snapshot.view.session.id !== this.value.sessionId ||
+      // Current admission and the restored result's original Store are separate identities.
+      !execution.originStoreId ||
       execution.sessionId !== snapshot.view.session.id ||
       !execution.resultRevision ||
       !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status) ||
