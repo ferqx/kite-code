@@ -49,9 +49,15 @@ test.skipIf(process.platform !== 'darwin')(
       installedCLI = '',
       originalStoreId = '',
       preservedDirectory = '',
+      rollbackCandidateDirectory = '',
       journal: { journal: ProfileRestoreJournal; digest: string } | undefined,
       providerCalls = 0,
-      completed = false;
+      completed = false,
+      rollbackDone = false;
+    let prepareNextRestore: (() => Promise<void>) | undefined;
+    const nativeRoots: string[] = [];
+    let rollbackCandidateCore: Buffer<ArrayBuffer> | undefined,
+      rollbackCandidateConfig: Buffer<ArrayBuffer> | undefined;
     const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
     const identity = () => {
       const stat = lstatSync(join(profile.coordinationPath, 'profile-use.lock'));
@@ -115,8 +121,82 @@ test.skipIf(process.platform !== 'darwin')(
           expect(existsSync(profile.profilePath)).toBe(false);
           return Response.json({ ...journal, lockIdentity: identity() });
         }
+        if (path === '/prepare-complete' && request.method === 'POST') {
+          expect(rollbackDone).toBe(true);
+          expect(providerCalls).toBe(0);
+          expect(identity()).toEqual(lockIdentity);
+          expect(readFileSync(profile.databasePath)).toEqual(preservedCore);
+          expect(readFileSync(join(profile.profilePath, 'config.jsonc'))).toEqual(preservedConfig);
+          const use = acquireProfileAccess(
+            { dataRoot: profile.dataRoot, profile: profile.profile },
+            'exclusive',
+          );
+          use.lock.release();
+          for (const lease of leases.splice(0).reverse()) lease.release();
+          for (const path of nativeRoots) {
+            const lease = acquireArtifactAccess({ root: path, mode: 'exclusive' });
+            lease.release();
+          }
+          for (const path of nativeRoots)
+            leases.push(acquireArtifactAccess({ root: path, mode: 'shared' }));
+          await prepareNextRestore!();
+          return Response.json({ prepared: true, lockIdentity: identity() });
+        }
         if (path === '/reconcile' && request.method === 'POST') {
           const input = await request.json();
+          if (!rollbackDone) {
+            expect(input).toEqual({
+              restoreId: journal!.journal.restoreId,
+              digest: journal!.digest,
+              decision: 'rollback',
+            });
+            const candidateDirectory = join(profile.dataRoot, journal!.journal.stagingName);
+            rollbackCandidateDirectory = candidateDirectory;
+            rollbackCandidateCore = readFileSync(join(candidateDirectory, 'core.db'));
+            rollbackCandidateConfig = readFileSync(join(candidateDirectory, 'config.jsonc'));
+            const result = await maintenance([
+              'reconcile',
+              ...profileArguments,
+              '--restore-id',
+              input.restoreId,
+              '--journal-digest',
+              input.digest,
+              '--decision',
+              input.decision,
+              '--confirm-data-loss',
+            ]);
+            expect(result.status).toBe('rolled_back');
+            expect(result.restoreId).toBe(input.restoreId);
+            expect(result.storeId).toBe(originalStoreId);
+            expect(result.preservedDirectory).toBe(candidateDirectory);
+            expect(result.preservedDirectoryRole).toBe('restore_candidate');
+            expect((await maintenance(['status', ...profileArguments])).restore).toBeNull();
+            expect(identity()).toEqual(lockIdentity);
+            expect(readFileSync(profile.databasePath)).toEqual(preservedCore);
+            expect(readFileSync(join(profile.profilePath, 'config.jsonc'))).toEqual(
+              preservedConfig,
+            );
+            expect(readFileSync(join(candidateDirectory, 'core.db'))).toEqual(
+              rollbackCandidateCore,
+            );
+            expect(readFileSync(join(candidateDirectory, 'config.jsonc'))).toEqual(
+              rollbackCandidateConfig,
+            );
+            const current = await openSqliteStore({
+              dataRoot: profile.dataRoot,
+              profile: profile.profile,
+              mode: 'readonly',
+            });
+            try {
+              expect((await current.getMetadata()).storeId).toBe(originalStoreId);
+              expect((await current.getSession('s'))!.title).toBe('Later current session');
+              expect(await current.getCommand('rename-after-backup')).not.toBeNull();
+            } finally {
+              await current.close();
+            }
+            rollbackDone = true;
+            return Response.json({ storeId: result.storeId, lockIdentity: identity() });
+          }
           expect(input).toEqual({
             restoreId: journal!.journal.restoreId,
             digest: journal!.digest,
@@ -157,6 +237,7 @@ test.skipIf(process.platform !== 'darwin')(
       rmSync(terminal.root, { recursive: true, force: true });
       const installation = installNativeBundle({ bundleRoot: join(root, 'relocated'), prefix }),
         candidate = verifyNativeRuntimeBundle(installation.releaseRoot);
+      nativeRoots.push(candidate.root, candidate.terminal.root);
       expect(candidate.digest).toBe(built.digest);
       expect(existsSync(built.root)).toBe(false);
       expect(existsSync(terminal.root)).toBe(false);
@@ -265,6 +346,41 @@ test.skipIf(process.platform !== 'darwin')(
       journal = status.restore;
       preservedDirectory = join(profile.dataRoot, journal!.journal.preservedName);
       expect(existsSync(profile.profilePath)).toBe(false);
+      prepareNextRestore = async () => {
+        holder = Bun.spawn([join(candidate.terminal.root, 'runtime/bun'), holderEntry], {
+          cwd: home,
+          env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+          stdin: 'ignore',
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        holderError = new Response(holder.stderr).text();
+        const reader = holder.stdout.getReader(),
+          timer = setTimeout(() => holder!.kill('SIGKILL'), 15000);
+        try {
+          expect(new TextDecoder().decode((await reader.read()).value)).toContain(
+            'old_directory_moved',
+          );
+        } finally {
+          clearTimeout(timer);
+          reader.releaseLock();
+        }
+        holderOutput = (async () => {
+          const remainder = holder!.stdout.getReader();
+          try {
+            while (!(await remainder.read()).done) {
+              // The phase line was consumed above; drain the same owned pipe through EOF.
+            }
+            return 'old_directory_moved';
+          } finally {
+            remainder.releaseLock();
+          }
+        })();
+        const status = await maintenance(['status', ...profileArguments]);
+        journal = status.restore;
+        preservedDirectory = join(profile.dataRoot, journal!.journal.preservedName);
+        expect(existsSync(profile.profilePath)).toBe(false);
+      };
       const other = await openSqliteStore({ dataRoot: profile.dataRoot, profile: 'other' });
       await other.close();
       symlinkSync(join(candidate.terminal.root, 'node_modules'), join(root, 'node_modules'));
@@ -308,6 +424,7 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         clearTimeout(deadline);
       }
+      expect(rollbackDone).toBe(true);
       expect(providerCalls).toBe(0);
       expect(identity()).toEqual(lockIdentity);
       expect(readFileSync(join(preservedDirectory, 'core.db'))).toEqual(preservedCore);
@@ -334,6 +451,14 @@ test.skipIf(process.platform !== 'darwin')(
         const lease = acquireArtifactAccess({ root: path, mode: 'exclusive' });
         lease.release();
       }
+      if (!rollbackCandidateCore || !rollbackCandidateConfig)
+        throw Error('rollback_candidate_not_observed');
+      expect(readFileSync(join(rollbackCandidateDirectory, 'core.db'))).toEqual(
+        rollbackCandidateCore,
+      );
+      expect(readFileSync(join(rollbackCandidateDirectory, 'config.jsonc'))).toEqual(
+        rollbackCandidateConfig,
+      );
       const coreBytes = readFileSync(profile.databasePath);
       uninstallNativeBundle(prefix);
       expect(readFileSync(profile.databasePath)).toEqual(coreBytes);

@@ -3607,3 +3607,32 @@ GC只扩原业务case：同一真实child连接alive时同Profile backup返回ow
 Root沿原 `unifiedTestPlan`／`runTestJob` 的完整单文件任务、原分类／maxConcurrency／独立HOME与预算核验25文件：两份有限文件准确结果复用，剩余23原文件顺序执行；合计111pass／1992条Bun断言／2原Windows skip，全部actual0。本机darwin arm64／Bun1.4.2／Node22.21.1，4269个仓库输入及Bun／Node／Electron等运行资产前后全等，Git状态／源码diff全等。首轮Native整文件因沙箱loopback端口0返回EADDRINUSE，最小原监听同样失败、授权环境同监听成功；首轮实际失败完整保留，之后在允许本地监听／Electron的授权环境沿原任务执行，未改断言、清单、预算或产品环境参数。初始记录 `/private/tmp/kite-v13-installed-maintenance-20261010-result.json`，完整授权记录 `/private/tmp/kite-v13-installed-maintenance-allowed-20261010-result.json`；逐文件actual退出码与log SHA、输入和范围汇总 `/private/tmp/kite-v13-install-maintenance-verified-evidence-20261010.json` SHA `3dab297f0259f681712041209c21efed4d18ec8f2734086b3abb74bf3503e2d0`，明确fullDefault=false／wholeV13=false。
 
 本轮正式维护消费者已进入上述实际资源owner；没有新增旧路径最终退役结果。Daemon／MCP／Shell／OAuth与旧Worker关闭47整例按未改变且仍适用的范围复用，仅重跑与本轮backup相邻的Service关闭整文件1／18；没有围绕它们扩故障矩阵。手册、Native／maintenance／Agent owner、release active、两个既有Note及能力映射同步，release.lifecycle与maintenance.backup_restore保持partial。Root及八workspace类型、11个TS文件Biome、边界／workspace／API、测试归属已通过；文档、plan-evidence和正常本地commit hooks仍独立强制。阶段收束时才运行未过滤完整默认，本轮25文件不能覆盖当时661／522结果或宣布阶段退出。
+
+## 2026-10-10：DB9 版本切换与安装版维护恢复
+
+继续§30.2.16的真实依赖顺序：RSS与完整观测只在P6／最终退出汇合，不阻塞独立安装／代码选择／离线维护实施。前片两个生产缺口已在本地 `39b3867cc85e22cd3be8348324346f69ecc03418` 提交；本片补原五项中的③DB9真实旧代码消费者及④installed明确rollback，没有重开Daemon、资源参数对照或独立journal目标，也没有新的旧路径最终退役结果。
+
+正式用户链为当前Native“会话工具→扩展能力”的Analyze／原命令查询，以及包内maintenance status／明确 `reconcile --decision rollback --confirm-data-loss` 后的Native重新加载。DB9链复用原四窗口A→B→A→B和两个cold窗口：先实际捕获DB8私有字节，再唯一扩展POST成功回复丢失→DB9 unknown／原Core Job完成。首个finding与独立保存的原B Model Execution完整result、原run／execution／revision及sealed引用准确绑定，已有真实352041B全文读取证明引用内容，Model preview不冒称全文。B候选明确选择reference host测试装配，mini-review不注册为默认产品。
+
+普通退出后实际installed bin的backup核DB9／v18／原Store，inspect核准确返回备份目录及完整对象；原私有bytes／inode／config保持。原DB7 a2b6441f实际拒绝DB9私有操作，兼容Core三条原历史仍完整GET；切回B保两类unknown的原ID／完整request-body，明确GET查回原Workspace receipt与扩展Command／Execution／完整finding／reference，零新POST／Model、Provider仍3、业务事实和读游标保持。六个Service普通退出、原candidate双EX与最终唯一卸载保数据；此前DB8拒绝结果仅保其原冻结范围，当前链不宣称旧writer支持DB9或自动数据降级。
+
+恢复链复用原 `old_directory_moved` source观察点及候选内Bun，不修改installed Main／Service或维护字节。同一备份先真实持锁／SIGKILL拒开且不建空Profile，包内CLI绑定准确restoreId／digest明确rollback；Native reload读回current Store／后来保存Session，公开readonly核原Command、Core／config和保留候选字节。实际Service退出、Profile及双artifact EX取得后才再次准备同点，并完整保留原complete腿的新Store／备份Session／后来Command不存在／普通退出／卸载。Provider0；新增窗口只核上述Session／Command／bytes，不重复声称已另验完整Model／问答展示，其原相邻证据按未变范围复用。
+
+四次真实失败均保留。第一次原整文件在 `packages/agent/package.json` input守卫失败：e587a2a9仅加入process-observation export／build source-entry。当前仍固定原a2b6441f自己的builder，10项输入raw byteequal；唯一Agent清单从旧raw bytes核两个准确anchor和完整expected，新unit核依赖、额外export、build target及缺任一增量均拒绝，旧源码／清单未重写，原闭包／锁／SQL／clean来源守卫保持。原SHA `c903f7fd9e8d8c6b4cb96f32c40842da46e24d412c71a017b1924892bafcfe43`、当前SHA `04e6ded336ad8c621a95f7260c1f68ec6e81963c3ef950af1bf73a34278c86ee`和精确match纳入provenance；旧候选支持7，不能称8。
+
+第二次原整文件189612.585ms／0pass／1fail／342expect：扩展仍写入时新增观察错误调用稳定Core probe，原 `native_version_read_changed_store` 断言正确拒绝。修正为先从Native状态等准确原Job终态，再一次稳定probe核原Command／Execution／finding，没有删断言、忽略500或加期限。第三次192658.622ms／0pass／1fail／423expect：backup的verified／v18／DB9／Store已过，新增inspect误传destination父目录而返回 `backup_not_ready`；只改为backup返回的唯一目录，保完整inspection对象相等。第四次223088.171ms／0pass／1fail／592expect：公开GET Execution误与带input／decisionSource等私有字段的Core全记录直接比较。源码合同 `schemas.Execution`只保公开字段，另有optional authorization；该Job无review／human，原Core不提供它，本Job实际16字段。既有deepEqual改为全部实际公开字段逐一绑定原Core、完整result直接用原值，冷Core全记录与Command、finding全对象比较不变，不删assert或只比冷前后。最终均按原完整文件复验，不过滤case。
+
+Root沿原unifiedTestPlan／runTestJob的单完整文件、原exclusive或isolated分类／maxConcurrency=1／独立HOME／预算执行；最终两份版本完整作业输入4270项及Git／运行资产前后全等。已通过restore两源和所有生产／builder／依赖／运行资产未变，其后只有DB9两测试、共享前驱fixture及新unit四个非消费者输入变化，准确restore结果可复用；unit使用的helper和清单输入亦未变。原Native420／120／60／15秒、Terminal360／30秒、restore180／同driver45／窗口10秒保持；AST审计保原parent／driver全部assert、SQL及原timer；restore另核原await按序保留。下表是原完整作业墙钟与Bun断言，另有实际Node driver断言，未把Bun计数充当全部断言：
+
+| 完整文件 | pass | Bun expect | actual exit | Root作业ms |
+| --- | --- | --- | --- | --- |
+| `terminal-predecessor-inputs.test.ts` | 2 | 13 | 0 | 339.729 |
+| `native-cross-version.test.ts` | 1 | 643 | 0 | 234736.334 |
+| `terminal-cross-version.test.ts` | 1 | 336 | 0 | 126184.209 |
+| `native-restore-interruption.test.ts` | 1 | 104 | 0 | 73327.728 |
+
+合计5pass／1096条Bun断言／0fail／0skip，fullDefault=false／wholeV13=false。本机darwin arm64／Bun1.4.2／Nodev22.21.1；原日志、四次真实失败、输入／资产SHA及assert保全归 `/private/tmp/kite-v13-version-recovery-verified-evidence-20261010.json`，SHA `30c8b06e9677803a497dd92e9090dd80987a21e09c55da1ab0623ccdc0bdf76f`。当前候选仍为HEAD加dirty本地输入，不是clean或published资格；原默认661文件／522作业只保其当时冻结范围。
+
+原五项当前结果为①正常Terminal卸载后Native升级与②维护own-close保锁已生产提交；③DB9真实旧代码拒绝／当前完整查询及④installed明确rollback消费者取得上述macOS限定资格；⑤P6／最终退出汇合仍受阻。依赖顺序保留原RSS九点／八outer／增长算法真实失败及Bun activeResources／handles／完整Runtime后代观测缺项，随后是当前制品完整维护／平台／客户端依赖独立，再是§35独立迁移审查、必要legacy最终退役和阶段未过滤完整回归。D08首发前没有适用的新基线published前版，T029不成为上述独立实现的前置；P7首发后兼容和适用样本责任保持。Win／Linux依用户顺序留重构后Actions，37能力partial、不提前退出阶段，本地授权不扩至dispatch／push／PR／发布。
+
+本片没有改变产品行为，核对Desktop扩展与CLI明确恢复手册，操作和失败承诺保持；负责Native／Terminal／维护文档、release active、原前驱Note、tests及能力映射同步。Root／八workspace类型、7个TS只读Biome、边界／API／workspace及测试归属已在相应输入通过；文档、plan-evidence和正常本地提交门禁独立强制，实际Git交付另留原receipt。

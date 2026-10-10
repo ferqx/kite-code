@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
-import type { ModelOutputSnapshot } from '@kite-ai/client';
+import type { Command, Execution, ModelOutputSnapshot } from '@kite-ai/client';
 import { inspectProcess } from '@kite-ai/service/daemon';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
@@ -50,7 +50,8 @@ type StoredFacts = {
   runs: { id: string; status: string; originCommandId: string }[];
   commands: { id: string; status: string; originStoreId: string }[];
   messages: { id: string }[];
-  executions: { id: string; kind: string }[];
+  executions: Execution[];
+  extensionCommands: Command[];
   outputs: { identity: { executionId: string }; snapshotCursor: string }[];
 };
 async function execute(argv: string[], cwd: string, home: string, timeoutMs = 30000) {
@@ -116,6 +117,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           nativeInode: number;
         }
       | undefined;
+    let db9CurrentPrivate: { bytes: Buffer<ArrayBuffer>; inode: number } | undefined;
     let db8Private:
       | { bytes: Buffer<ArrayBuffer>; inode: number; config: Buffer<ArrayBuffer> }
       | undefined;
@@ -145,6 +147,9 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         destination: join(root, 'current-terminal'),
         repositoryRoot,
         bunExecutable: process.execPath,
+        ...(process.platform === 'darwin'
+          ? { processHostFixture: 'native-extension-reference' as const }
+          : {}),
       });
       const current = await buildNativeCandidate({
         terminalRoot: terminal.root,
@@ -258,6 +263,28 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           const url = new URL(request.url),
             path = url.pathname;
           try {
+            if (path === '/db8-capture') {
+              expect(readFileSync(privatePath).readUInt32BE(60)).toBe(8);
+              db8Private = {
+                bytes: readFileSync(privatePath),
+                inode: lstatSync(privatePath).ino,
+                config: readFileSync(configurationPath),
+              };
+              return Response.json({ version: 8 });
+            }
+            if (path === '/db9-current-private') {
+              db9CurrentPrivate = {
+                bytes: readFileSync(privatePath),
+                inode: lstatSync(privatePath).ino,
+              };
+              return Response.json({ captured: true });
+            }
+            if (path === '/db9-private') {
+              expect(db9CurrentPrivate).toBeDefined();
+              expect(readFileSync(privatePath)).toEqual(db9CurrentPrivate!.bytes);
+              expect(lstatSync(privatePath).ino).toBe(db9CurrentPrivate!.inode);
+              return Response.json({ unchanged: true });
+            }
             if (path === '/db8-private') {
               expect(db8Private).toBeDefined();
               expect(readFileSync(privatePath)).toEqual(db8Private!.bytes);
@@ -495,12 +522,47 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         expect(verifyNativeRuntimeBundle(candidate.root).digest).toBe(candidate.digest);
       let db8Rollback: unknown;
       if (process.platform === 'darwin') {
-        expect(readFileSync(privatePath).readUInt32BE(60)).toBe(8);
+        expect(db8Private!.bytes.readUInt32BE(60)).toBe(8);
+        expect(readFileSync(privatePath).readUInt32BE(60)).toBe(9);
         db8Private = {
           bytes: readFileSync(privatePath),
           inode: lstatSync(privatePath).ino,
           config: readFileSync(configurationPath),
         };
+        const backupRoot = join(root, 'db9-backup');
+        const maintenance = JSON.parse(
+          await execute(
+            [
+              join(prefix, 'bin/kite'),
+              'maintenance',
+              'backup',
+              '--data-root',
+              profile.dataRoot,
+              '--profile',
+              profile.profile,
+              '--destination',
+              backupRoot,
+            ],
+            home,
+            home,
+          ),
+        );
+        expect(maintenance.kind).toBe('offline_maintenance');
+        expect(maintenance.status).toBe('verified');
+        expect(maintenance.backup.manifest.version).toBe(18);
+        expect(maintenance.backup.manifest.assets.desktopUi.format.userVersion).toBe(9);
+        expect(maintenance.backup.manifest.source.storeId).toBe(originalStoreId);
+        const inspection = JSON.parse(
+          await execute(
+            [join(prefix, 'bin/kite'), 'maintenance', 'inspect', maintenance.backup.directory],
+            home,
+            home,
+          ),
+        );
+        expect(inspection.backup).toEqual(maintenance.backup);
+        expect(readFileSync(privatePath)).toEqual(db8Private.bytes);
+        expect(lstatSync(privatePath).ino).toBe(db8Private.inode);
+        expect(readFileSync(configurationPath)).toEqual(db8Private.config);
         await execute(
           [
             realpathSync(Bun.which('node')!),
@@ -548,6 +610,9 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           'original DB8 project bytes',
         );
         db8Rollback = {
+          actualPrivateFormatRejected: 9,
+          observedPriorPrivateFormatBeforeExtension: 8,
+          maintenanceManifestVersion: 18,
           oldPrivateError: report.rejected,
           originalCommandId: report.saved.commandId,
           owned: report.owned,
@@ -558,7 +623,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           currentVersionOriginalLookup: true,
           uninstalled: true,
         };
-        console.log(`NATIVE_DB8_REAL_CODE_ROLLBACK ${JSON.stringify(db8Rollback)}`);
+        console.log(`NATIVE_DB9_REAL_CODE_ROLLBACK ${JSON.stringify(db8Rollback)}`);
       }
       expect(uninstalled).toBe(true);
       expect(existsSync(prefix)).toBe(false);

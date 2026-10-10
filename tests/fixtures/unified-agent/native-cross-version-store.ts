@@ -55,6 +55,19 @@ try {
             }),
           ),
       ),
+      extensionCommands = await Promise.all(
+        [
+          ...new Set(
+            executions
+              .filter(
+                (item) =>
+                  item.kind === 'job' &&
+                  item.definitionId === 'fixture.mini-review/fixture.mini-review.analyze',
+              )
+              .map((item) => item.originCommandId),
+          ),
+        ].map((id) => store.getCommand(id)),
+      ),
       after = await store.getMetadata();
     if (before.storeId !== after.storeId || before.lastChangeCursor !== after.lastChangeCursor)
       throw Error('native_version_read_changed_store');
@@ -69,6 +82,7 @@ try {
         executions,
         commands,
         outputs,
+        extensionCommands,
       }),
     );
   }

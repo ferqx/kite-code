@@ -90,6 +90,51 @@ process.on('SIGTERM', () => {
   process.exitCode = 1;
 });
 try {
+  // The rollback leg admits the actual installed PC only after explicit reconcile.
+  app = await _electron.launch({
+    executablePath: launcher,
+    args: [`--user-data-dir=${join(home, 'electron-data')}`],
+    cwd: home,
+    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    timeout: 10000,
+    chromiumSandbox: true,
+  });
+  page = await app.firstWindow();
+  await page.bringToFront();
+  page.setDefaultTimeout(10000);
+  await page.getByText('启动未完成：required_capability_missing', { exact: true }).waitFor();
+  assert.equal(children().length, 0);
+  const rollbackHeld = await query('snapshot');
+  assert.equal(rollbackHeld.profileExists, false);
+  assert.equal(rollbackHeld.coreExists, false);
+  const rollbackKilled = await query('kill', {});
+  assert.deepEqual(rollbackKilled.lockIdentity, rollbackHeld.lockIdentity);
+  const rolledBack = await query('reconcile', {
+    restoreId: rollbackKilled.journal.restoreId,
+    digest: rollbackKilled.digest,
+    decision: 'rollback',
+  });
+  assert.equal(rolledBack.storeId, originalStoreId);
+  assert.deepEqual(rolledBack.lockIdentity, rollbackHeld.lockIdentity);
+  await page.reload();
+  await page.getByRole('button', { name: 'Later current session', exact: true }).click();
+  const rollbackState = (await page.evaluate(
+    async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
+  )) as NativeState;
+  assert.equal(rollbackState.selection?.storeId, originalStoreId);
+  assert.equal(rollbackState.selection?.session.id, 's');
+  assert.equal(rollbackState.selection?.session.title, 'Later current session');
+  const rollbackLive = children();
+  assert.equal(rollbackLive.length, 1);
+  servicePid = Number(rollbackLive[0]![0]);
+  await app.close();
+  app = undefined;
+  assert.throws(() => process.kill(servicePid!, 0));
+  servicePid = undefined;
+  // Only after actual Service exit may the parent take EX and start the next restore.
+  const prepared = await query('prepare-complete', {});
+  assert.equal(prepared.prepared, true);
+  assert.deepEqual(prepared.lockIdentity, rollbackHeld.lockIdentity);
   app = await _electron.launch({
     executablePath: launcher,
     args: [`--user-data-dir=${join(home, 'electron-data')}`],

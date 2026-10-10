@@ -2110,7 +2110,7 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 当前退出条件在P6／§35汇合：①默认installed CLI／TUI／Native的连续普通任务、Shell与child后台工作之原macOS RSS、八轮／九点和完整资源资格；②当前制品必要的平台／维护／已发布样本资格，包括新增DB9的适用旧代码实际拒绝；③前序满足后的§35独立迁移审查、最终旧路径退役及阶段完整回归。①的未闭合不构成②中独立安装、版本切换和离线维护实现的前置；按§30.2继续推进不受影响的完整用户能力，保原增长算法、真实失败和资源未知，不重复已闭合的参数对照。具体源码缺口、用户入口和验收归[当前进度](unified-agent-refactor-v1-progress.md)。回归只作相应能力和阶段收束门禁，不另列长期目标。
 
-正常卸载可选Terminal后的Native升级与维护自身关闭未确认的保锁已按实际源码修复，正式安装和包内维护消费者沿原完整文件验收；具体五项依赖及本轮25整文件范围归[安装与维护进度](unified-agent-refactor-v1-progress.md#2026-10-10安装升级与维护关闭所有权)。DB9真实旧代码拒绝及installed明确rollback消费者仍pending；原资源、P6平台／退役和P7适用发布责任门禁保留，不提前退出阶段。
+正常卸载可选Terminal后的Native升级与维护自身关闭未确认的保锁已按实际源码修复，正式安装和包内维护消费者沿原完整文件验收；具体五项依赖及本轮25整文件范围归[安装与维护进度](unified-agent-refactor-v1-progress.md#2026-10-10安装升级与维护关闭所有权)。DB9真实旧代码拒绝／当前原GET完整查回及installed明确rollback→Native原Store消费者已按原完整文件取得本机限定证据，原complete腿保留，准确输入与真实失败归[版本与恢复进度](unified-agent-refactor-v1-progress.md#2026-10-10db9-版本切换与安装版维护恢复)。这两项不再列为当前macOS未实施缺口；原资源、P6平台／完整维护／依赖独立、§35审查／最终退役／阶段完整回归与P7适用发布责任门禁保持，不提前退出阶段。D08首发前仍无适用的新基线published样本，不把T029样本缺失作为上述独立实现的前置。
 
 默认制品SHA保留小文件原读取，大文件复用buffer读至EOF；唯一核心图标包已内联原Desktop产物，保exports／CSS／React和准确许可，原内容核验及使用权保持。Native完整历史固定高水位发布，同次读取保有限页大小；正文同范围保留，范围变化仍清理。长普通文本采用相邻Text节点并保grapheme、全部字符和原排版，code／pre不改；临时IPC／DOM定位观察已退役。原完整Model／Fork及相邻调用者全部原断言和预算保留，具体实现边界归[Desktop owner](../../apps/desktop/README.md)与[UI owner](../../packages/ui/README.md)。37能力保持partial／wholeV13=false；Win／Linux仍依用户安排留重构后Actions，本地授权不扩至push／PR／发布。
 

@@ -4,10 +4,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import type { ModelOutputSnapshot, ServerInfo } from '@kite-ai/client';
 import type { WebPreferences } from 'electron';
 import type { ElectronApplication, Page } from 'playwright';
 import type {
+  NativeCallerMetadata,
   NativeModelOutputChunk,
   NativeModelOutputOpen,
   NativeState,
@@ -35,6 +37,7 @@ type Physical = {
   query: string;
   body?: string;
   output?: ModelOutputSnapshot;
+  json?: unknown;
 };
 type Globals = typeof globalThis & {
   versionPhysical: Physical[];
@@ -45,7 +48,8 @@ type Facts = {
   storeId: string;
   runs: { id: string; originCommandId: string; status: string }[];
   commands: { id: string; status: string; originStoreId: string }[];
-  executions: { id: string; kind: string }[];
+  executions: ExecutionRecord[];
+  extensionCommands: { id: string; status: string }[];
   providerCalls: number;
 };
 const started = Date.now();
@@ -71,6 +75,50 @@ const state = async (page: Page) =>
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
   );
+async function readCallerBody(page: Page, row: NativeCallerMetadata): Promise<string> {
+  return await page.evaluate(async (row) => {
+    const readId = crypto.randomUUID();
+    let offset = 0,
+      body = '';
+    try {
+      for (;;) {
+        const chunk = await window.kiteNative!.request({
+          method: 'caller.body',
+          generation: 1,
+          commandId: row.request.commandId,
+          readId,
+          offset,
+          limit: 65536,
+        });
+        if (
+          !chunk ||
+          !('readId' in chunk) ||
+          chunk.kind !== 'caller.body' ||
+          chunk.commandId !== row.request.commandId ||
+          chunk.readId !== readId ||
+          chunk.offset !== offset ||
+          chunk.bodyDigest !== row.bodyDigest
+        )
+          throw Error('db9_original_body_identity');
+        body += chunk.data;
+        if (chunk.eof) {
+          const bytes = new TextEncoder().encode(body);
+          const digest = Array.from(
+            new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
+            (value) => value.toString(16).padStart(2, '0'),
+          ).join('');
+          if (bytes.length !== chunk.bodyBytes || digest !== row.bodyDigest)
+            throw Error('db9_original_body_integrity');
+          return body;
+        }
+        if (chunk.nextOffset <= offset) throw Error('db9_original_body_gap');
+        offset = chunk.nextOffset;
+      }
+    } finally {
+      await window.kiteNative!.request({ method: 'caller.close', generation: 1, readId });
+    }
+  }, row);
+}
 async function waitState(page: Page, predicate: (value: NativeState) => boolean) {
   const deadline = Date.now() + 15000;
   for (;;) {
@@ -165,6 +213,12 @@ async function launch(index: number) {
       const response = await original(...args);
       if (response.ok && /\/model-output$/.test(url.pathname))
         row.output = (await response.clone().json()) as ModelOutputSnapshot;
+      if (
+        response.ok &&
+        row.method === 'GET' &&
+        (/\/executions\//.test(url.pathname) || /\/queries\//.test(url.pathname))
+      )
+        row.json = await response.clone().json();
       return response;
     }) as typeof fetch;
   });
@@ -362,6 +416,13 @@ try {
     const saved = JSON.parse(
       readFileSync(join(home!, 'native-db8-intent.json'), 'utf8'),
     ) as NativeWorkspaceRemoval;
+    const db9 = JSON.parse(readFileSync(join(home!, 'native-db9-intent.json'), 'utf8')) as {
+      intent: NativeCallerMetadata;
+      body: string;
+      execution: Facts['executions'][number];
+      command: Facts['extensionCommands'][number];
+      finding: unknown;
+    };
     assert.equal(
       (await query<{ candidateId: string }>('rollback')).candidateId,
       expected.candidates[0]!.id,
@@ -422,13 +483,119 @@ try {
           row.query === `?storeId=${saved.storeId}`,
       ),
     );
+
+    await query('db9-current-private');
+    const coldIntent = (await state(cold.page)).callerSubmissions!.find(
+      (row) => row.request.commandId === db9.intent.request.commandId,
+    )!;
+    assert.deepEqual(coldIntent, db9.intent);
+    assert.equal(await readCallerBody(cold.page, coldIntent), db9.body);
+    const beforeExtension = await query<Facts>('snapshot');
+    assert.deepEqual(
+      beforeExtension.executions.find((row) => row.id === db9.execution.id),
+      db9.execution,
+    );
+    assert.deepEqual(
+      beforeExtension.extensionCommands.find((row) => row.id === db9.command.id),
+      db9.command,
+    );
+    await openSessionTools(cold.page);
+    const panel = cold.page.locator('details[aria-label="扩展能力"]');
+    await panel.locator('summary').click();
+    await panel.getByRole('heading', { name: 'fixture.mini-review · 1', exact: true }).waitFor();
+    assert.equal((await query<{ unchanged: boolean }>('db9-private')).unchanged, true);
+    await app!.evaluate(() => {
+      (globalThis as Globals).versionPhysical = [];
+    });
+    const originalRow = panel.locator('p').filter({ hasText: db9.intent.request.commandId });
+    await originalRow.getByRole('button', { name: '查询原命令', exact: true }).click();
+    await panel
+      .getByRole('status')
+      .getByText(`原命令 ${db9.intent.request.commandId}：succeeded`, { exact: true })
+      .waitFor();
+    const lookedUpExtension = (await state(cold.page)).callerSubmissions!.find(
+      (row) => row.request.commandId === db9.intent.request.commandId,
+    )!;
+    assert.deepEqual(lookedUpExtension.request, db9.intent.request);
+    assert.deepEqual(lookedUpExtension.scope, db9.intent.scope);
+    assert.deepEqual(lookedUpExtension.target, db9.intent.target);
+    const queryForm = panel
+      .locator('div')
+      .filter({
+        has: cold.page.getByRole('heading', {
+          name: 'Read saved results with a generic public presentation',
+          exact: true,
+        }),
+      })
+      .first();
+    await queryForm.getByRole('button', { name: '读取结果', exact: true }).click();
+    await panel.getByText('Review db9-real-code-original: unmarked', { exact: true }).waitFor();
+    const extensionPhysical = await app!.evaluate(() => (globalThis as Globals).versionPhysical);
+    assert.ok(
+      extensionPhysical.length > 0 && extensionPhysical.every((row) => row.method === 'GET'),
+    );
+    assert.ok(
+      extensionPhysical.some((row) =>
+        row.path.endsWith(`/commands/${db9.intent.request.commandId}`),
+      ),
+    );
+    assert.ok(
+      extensionPhysical.some((row) => row.path.endsWith(`/executions/${db9.execution.id}`)),
+    );
+    assert.deepEqual(
+      extensionPhysical.find((row) => row.path.endsWith(`/executions/${db9.execution.id}`))!.json,
+      // GET /executions/:id uses the complete public Execution schema, not the Core record.
+      {
+        id: db9.execution.id,
+        originStoreId: db9.execution.originStoreId,
+        childSessionId: db9.execution.childSessionId,
+        parentExecutionId: db9.execution.parentExecutionId,
+        cancelWithParent: db9.execution.cancelWithParent,
+        sessionId: db9.execution.sessionId,
+        runId: db9.execution.runId,
+        kind: db9.execution.kind,
+        definitionId: db9.execution.definitionId,
+        definitionVersion: db9.execution.definitionVersion,
+        status: db9.execution.status,
+        result: db9.execution.result,
+        resultRevision: db9.execution.resultRevision,
+        cancelRequestedAt: db9.execution.cancelRequestedAt,
+        delivery: db9.execution.delivery,
+        deliveryReason: db9.execution.deliveryReason,
+      },
+    );
+    assert.deepEqual(
+      extensionPhysical.find((row) => row.path.endsWith('/queries/fixture.mini-review.results'))!
+        .json,
+      db9.finding,
+    );
+    const afterExtension = await query<Facts>('snapshot');
+    assert.deepEqual(afterExtension, beforeExtension);
+    assert.equal(afterExtension.providerCalls, 3);
+    assert.equal(await readCallerBody(cold.page, lookedUpExtension), db9.body);
     await close(5);
     assert.equal((await query<{ removed: boolean }>('uninstall')).removed, true);
     writeFileSync(
       join(home!, 'native-db8-report.json'),
-      JSON.stringify({ owned, saved, rejected, applied, oldPhysical, physical }),
+      JSON.stringify({
+        owned,
+        saved,
+        rejected,
+        applied,
+        oldPhysical,
+        physical,
+        db9: {
+          original: db9,
+          lookedUp: lookedUpExtension,
+          extensionPhysical,
+          after: afterExtension,
+        },
+      }),
     );
-    stage('db8_cold_complete', {
+    stage('db9_cold_complete', {
+      privateFormat: 9,
+      extensionCommandId: db9.intent.request.commandId,
+      originalBodyHash: db9.intent.bodyDigest,
       normalExits: 2,
       oldPrivateError: rejected,
       originalCommandId: saved.commandId,
@@ -572,6 +739,210 @@ try {
       });
       writeFileSync(join(home!, 'native-db8-intent.json'), JSON.stringify(saved));
       stage('db8_original_sidebar_unknown', { commandId: saved.commandId, singlePost: true });
+      await openSessionTools(launched.page);
+      const permissions = launched.page.getByRole('region', {
+        name: '权限与工作区信任',
+        exact: true,
+      });
+      await permissions
+        .getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围', exact: true })
+        .check();
+      await permissions.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
+      await permissions
+        .getByText(/^工作区：native-version-workspace；信任状态：trusted；版本：/)
+        .waitFor();
+      await permissions.getByRole('radio', { name: 'Full', exact: true }).check();
+      await permissions.getByRole('button', { name: '保存模式选择', exact: true }).click();
+      await permissions.getByText(/^当前模式：full；默认模式：/).waitFor();
+      assert.equal((await query<{ version: number }>('db8-capture')).version, 8);
+      const sourceFacts = await state(launched.page);
+      const sourceModel = sourceFacts.selection!.executions.find(
+        (value) =>
+          value.kind === 'model' &&
+          value.status === 'succeeded' &&
+          value.id === final[1]!.executionId,
+      )!;
+      assert.ok(sourceModel);
+      const originalFacts = await query<Facts>('snapshot');
+      const sourceOriginal = originalFacts.executions.find((row) => row.id === sourceModel.id);
+      const panel = launched.page.locator('details[aria-label="扩展能力"]');
+      await panel.locator('summary').click();
+      const extension = panel.locator('section').filter({
+        has: launched.page.getByRole('heading', { name: 'fixture.mini-review · 1', exact: true }),
+      });
+      await extension.waitFor();
+      const analyze = extension
+        .locator('div')
+        .filter({
+          has: launched.page.getByRole('heading', {
+            name: 'Analyze one authorized source result using a new explicit business identity',
+            exact: true,
+          }),
+        })
+        .first();
+      await analyze
+        .getByRole('textbox', { name: 'businessKey', exact: true })
+        .fill('db9-real-code-original');
+      await analyze
+        .getByRole('textbox', { name: 'sourceRunId', exact: true })
+        .fill(sourceModel.runId!);
+      await analyze
+        .getByRole('textbox', { name: 'sourceExecutionId', exact: true })
+        .fill(sourceModel.id);
+      await app!.evaluate(() => {
+        const original = globalThis.fetch;
+        let drop = true;
+        (globalThis as Globals).versionPhysical = [];
+        globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+          const response = await original(...args);
+          if (
+            drop &&
+            args[1]?.method === 'POST' &&
+            new URL(String(args[0])).pathname.endsWith('/commands') &&
+            typeof args[1]?.body === 'string' &&
+            JSON.parse(args[1].body).kind === 'extension.invoke' &&
+            response.ok
+          ) {
+            drop = false;
+            throw Error('owned_db9_original_lost_reply');
+          }
+          return response;
+        }) as typeof fetch;
+      });
+      await analyze.getByRole('button', { name: '执行动作', exact: true }).click();
+      const extensionState = await waitState(
+        launched.page,
+        (value) =>
+          value.callerSubmissions?.some(
+            (row) => row.request.kind === 'extension.invoke' && row.phase === 'unknown',
+          ) === true,
+      );
+      const intent = extensionState.callerSubmissions!.find(
+        (row) => row.request.kind === 'extension.invoke',
+      )!;
+      assert.equal(intent.scope.storeId, expected.storeId);
+      assert.equal(intent.scope.sessionId, expected.sessionId);
+      const completionDeadline = Date.now() + 10000;
+      const existingExecutions = new Set(originalFacts.executions.map((row) => row.id));
+      let terminalId = '';
+      for (;;) {
+        const current = await state(launched.page);
+        const selected = current.selection;
+        const terminal = selected?.executions.find(
+          (row) =>
+            row.kind === 'job' &&
+            !existingExecutions.has(row.id) &&
+            row.definitionId === 'fixture.mini-review/fixture.mini-review.analyze' &&
+            row.definitionVersion === '1' &&
+            row.runId === null &&
+            row.parentExecutionId === null,
+        );
+        if (
+          selected?.storeId === intent.scope.storeId &&
+          selected.session.id === intent.scope.sessionId &&
+          selected.session.workspaceId === intent.scope.workspaceId &&
+          terminal?.originStoreId === intent.scope.storeId &&
+          terminal.sessionId === intent.scope.sessionId &&
+          terminal.status === 'succeeded'
+        ) {
+          terminalId = terminal.id;
+          break;
+        }
+        if (Date.now() >= completionDeadline) throw Error('db9_original_action_not_complete');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const terminalFacts = await query<Facts>('snapshot');
+      const execution = terminalFacts.executions.find(
+        (row) => row.kind === 'job' && row.originCommandId === intent.request.commandId,
+      )!;
+      const command = terminalFacts.extensionCommands.find(
+        (row) => row.id === intent.request.commandId,
+      )!;
+      assert.equal(execution.id, terminalId);
+      assert.equal(execution.originCommandId, intent.request.commandId);
+      assert.equal(execution.status, 'succeeded');
+      assert.equal(command.status, 'applied');
+      const queryForm = extension
+        .locator('div')
+        .filter({
+          has: launched.page.getByRole('heading', {
+            name: 'Read saved results with a generic public presentation',
+            exact: true,
+          }),
+        })
+        .first();
+      await queryForm.getByRole('button', { name: '读取结果', exact: true }).click();
+      await panel.getByText('Review db9-real-code-original: unmarked', { exact: true }).waitFor();
+      const physical = await app!.evaluate(() => (globalThis as Globals).versionPhysical);
+      const extensionPosts = physical.filter((row) => row.method === 'POST');
+      assert.equal(extensionPosts.length, 1);
+      assert.deepEqual(JSON.parse(extensionPosts[0]!.body!), {
+        kind: 'extension.invoke',
+        expectedStoreId: expected.storeId,
+        extensionId: 'fixture.mini-review',
+        commandId: intent.request.commandId,
+        actionId: 'fixture.mini-review.analyze',
+        definitionVersion: '1',
+        input: {
+          businessKey: 'db9-real-code-original',
+          sourceRunId: sourceModel.runId,
+          sourceExecutionId: sourceModel.id,
+        },
+      });
+      assert.deepEqual(
+        JSON.parse(await readCallerBody(launched.page, intent)),
+        JSON.parse(extensionPosts[0]!.body!),
+      );
+      const finding = physical.find((row) =>
+        row.path.endsWith('/queries/fixture.mini-review.results'),
+      )!.json;
+      assert.ok(Array.isArray(finding) && finding.length === 1);
+      assert.ok(sourceOriginal);
+      assert.equal(sourceOriginal.runId, sourceModel.runId);
+      assert.equal(sourceOriginal.resultRevision, sourceModel.resultRevision);
+      assert.deepEqual(finding[0].payload, {
+        businessKey: 'db9-real-code-original',
+        source: {
+          runId: sourceModel.runId,
+          executionId: sourceModel.id,
+          resultRevision: sourceModel.resultRevision,
+          result: sourceOriginal.result,
+        },
+        findings: ['Check the saved source result.'],
+        marked: false,
+      });
+      const sourceResult = sourceOriginal.result as {
+        content: string;
+        reasoning: string;
+        modelOutput: { complete: boolean; contentBytes: string; reasoningBytes: string };
+      };
+      assert.ok(expected.bodies[1]!.startsWith(sourceResult.content));
+      assert.equal(sourceResult.modelOutput.complete, true);
+      assert.equal(
+        sourceResult.modelOutput.contentBytes,
+        String(Buffer.byteLength(expected.bodies[1]!)),
+      );
+      assert.equal(sourceResult.modelOutput.reasoningBytes, final[1]!.reasoningBytes);
+      assert.equal(final[1]!.output.content, expected.bodies[1]);
+      assert.equal(final[1]!.output.reasoning, '');
+      assert.equal(sourceResult.reasoning, final[1]!.output.reasoning);
+
+      assert.equal(terminalFacts.providerCalls, 3);
+      writeFileSync(
+        join(home!, 'native-db9-intent.json'),
+        JSON.stringify({
+          intent,
+          body: await readCallerBody(launched.page, intent),
+          execution,
+          command,
+          finding,
+        }),
+      );
+      stage('db9_original_action_unknown_complete', {
+        commandId: intent.request.commandId,
+        executionId: execution.id,
+        singlePost: true,
+      });
     }
     await close(3);
     // macOS keeps these same installed candidates for the separate bounded DB8 cold
