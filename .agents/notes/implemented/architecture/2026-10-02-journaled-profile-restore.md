@@ -22,6 +22,8 @@ Context完整读取同样区分当前准入和原结果出处。Core按当前Sto
 
 TUI后台读取也沿同一合同：目标分别封存当前准入Store及原Job出处/definition/version，原child父链与Message/Model Execution/Run证明历史来源，公共snapshot仍使用当前Store。历史目录可读且明确只读，面板和controller停止都要求当前出处；移除错误来源等式不移除身份证明、不改变后台活动计数或恢复旧执行资格。现行依据为[TUI后台手册](../../../../docs/handbook/clients/tui/guides/tools-and-subagents.md#查看后台任务与恢复历史)及[TUI owner](../../../../packages/ui/src/tui/README.md)，正式host接真实公开getRun。
 
+Web恢复后完整Model正文沿同一读取合同：当前Cookie／页面／Browser准入仍绑定新Store，Core的一致读事务已从真实Execution核原Run／Command／rootWork、原Model Message与private output head，再核原scope完整正文。正式Web只为具备这个公开reader的Model输出提供共享恢复来源资格，不增加getExecution查询或从有限View猜历史血缘；共享组件仍核准确原Session／Run／Execution、UTF-8长度、完整性与Tool数量。关闭／隐藏／切换清当前视图全文和复制内容，缺省foreign拒绝保持；现行依据为[Web阅读手册](../../../../docs/handbook/clients/web/guides/conversation.md)及[Web owner](../../../../apps/web/README.md#原-model-输出全文)。
+
 ## Alternatives considered
 
 - 先删除当前 profile 再复制：失败或崩溃会丢失当前数据，不采用。
@@ -30,6 +32,8 @@ TUI后台读取也沿同一合同：目标分别封存当前准入Store及原Job
 - 只凭 journal 阶段或目录存在完成/回退：无法核实相邻文件改名与 journal 更新窗口，不采用。
 - 一般忽略所有 cross-Store outcome_unknown：会放宽原同 Store recovery 门禁；仅使用原 root 创建来源范围，不新增持久 eligibility bit 或表。
 - 读取时要求每个结果origin等于当前Store：2026-10-10真实备份恢复中，Core已核准原出处，两端仍错误拒绝合法完整历史。移除该等式，保当前Store准入、准确Session／Execution／revision／origin和分页守卫；不改标旧引用。 TUI Job目录/输出/child也真实复现该错误；其修正另封原definition/version并以真实Model/Run证明来源，历史读取不授停止权。
+
+- 放宽共享foreign缺省，或为Web新增来源查询：前者把未提供来源证明的宿主也放行，后者重复Core现有准确读事务且有限View不能证明任意长历史；Web沿已核实Core／Browser reader提供限定资格，其他宿主缺省限制继续适用。
 
 ## Consequences
 
@@ -40,3 +44,5 @@ restore 是明确数据回退，不能代替无损代码降级或外部效果回
 2026-10-10[真实Context恢复消费者](../../../../tests/isolated/unified-agent/restored-context.test.ts)保相同测试字节复现两端生产错误，修正后实际A→B、两次冷HTTP／Cookie读取完整原结果、全GET／Model0新增／原Job只启动一次通过。相关六完整文件18项／350条Bun断言通过；原当前Store、来源Session及DOM／分页守卫保持。准确红绿及输入归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后完整-context-正式消费者)，该范围不证明installed恢复PTY、实际浏览器、全维护平台或整体V1.3退出。
 
 2026-10-10[真实TUI后台恢复消费者](../../../../tests/isolated/unified-agent/restored-tui-background.test.tsx)核实际A→B与两次冷HTTP/Ink、220项跨页输出/gap、完整child Model原文、原身份/metadata/Command保持、全GET及零重放/零历史停止申请。两个原完整PTY测试字节及预算保持，fixture只接真实getRun；六完整文件65项/613断言通过，原child多页资格由原PTY分别证明。准确业务red、原标签换行观察失败与SHA归[后台恢复进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-后台任务完整读取)，不授installed恢复PTY、完整P5/P6或V1.3退出。
+
+2026-10-10[真实Web恢复页面](../../../../tests/isolated/unified-agent/restored-web-model-output.test.ts)用公开Fork／backup／restore A→B与两次冷Cookie HTTP挂载正式mountWebPage，核plain/sealed正文、inline回答、原Tool call、Copy／Close／切换及错源拒绝，原Message／Run／Command／Execution／metadata保持、全GET及Model2／Tool效果1／coldModel0。共享缺省foreign与原取消/字节守卫继续通过，22整文件122项／1605Bun断言的准确红绿与输入归[正文恢复进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-web-完整-model-正文)；JSDOM与内存clipboard不提供原生浏览器或installed恢复整窗口资格，P5/P6和整体退出保持未闭。

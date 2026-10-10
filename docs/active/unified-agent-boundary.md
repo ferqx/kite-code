@@ -26,7 +26,7 @@ Native 的原轮次 UI 消费准确公共 Run，不从 Message complete 推最�
 
 读取时机：修改新 Agent 的 Store/执行/模型接口、目标 HTTP schema、跨包依赖或过渡调用者时。
 
-Native 原大Model正文将当前连接Store与封存出处分别核实。Service从真实sealed Message的私有output head保原Store；Main只接已观察Message的原Model／Session／Run／originStoreId，所属GET核准确Execution后再读Core完整snapshot，以当前Store验证原链、完整性与字节数。该资格不从renderer字段、来源Run后来状态或Store ID相等推导，不重绑origin、不补发旧工作。共享组件只有具备此reader的Native提供 `canReadRestoredOrigin`；其他宿主缺省限制保持。Core／API schema／持久格式不变，准确范围归[Native owner](../../apps/desktop/README.md#恢复后封存-model-正文)。
+Native 原大Model正文将当前连接Store与封存出处分别核实。Service从真实sealed Message的私有output head保原Store；Main只接已观察Message的原Model／Session／Run／originStoreId，所属GET核准确Execution后再读Core完整snapshot，以当前Store验证原链、完整性与字节数。该资格不从renderer字段、来源Run后来状态或Store ID相等推导，不重绑origin、不补发旧工作。共享组件由具备原来源证明的Native和Web提供 `canReadRestoredOrigin`，缺省foreign限制保持。Web现有Cookie/Core reader在一致读事务核原Execution/Run/Command/rootWork/Model Message和private output head，Browser核当前准入及完整EOF/hash；页面仍核准确封存Session/Run/Execution/UTF-8长度与完整性，不从有限View猜来源或新增普通查询权限。Core／API schema／持久格式不变，准确范围归[Native owner](../../apps/desktop/README.md#恢复后封存-model-正文)及[Web owner](../../apps/web/README.md#原-model-输出全文)。
 
 验证：`bun run test:unified-agent`、`bun run check:unified-agent-boundary`，实际运行范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 

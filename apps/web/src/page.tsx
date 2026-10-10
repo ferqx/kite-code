@@ -193,6 +193,8 @@ export function WebPage({
     visibleOutput.current.clear();
     outputTarget.current = outputIdentity;
   }
+  // The Cookie/Core reader proves the original Execution chain under the current
+  // admitted Store. A restored origin remains read-only and keeps its original IDs.
   const readModelOutput = useCallback(
     ({
       sessionId,
@@ -557,6 +559,9 @@ export function WebPage({
                               message={message}
                               storeId={snapshot.view.storeId}
                               suspended={suspended || !pageVisible}
+                              canReadRestoredOrigin={client.serverInfo?.capabilities?.includes(
+                                'model_outputs',
+                              )}
                               onRead={
                                 client.serverInfo?.capabilities?.includes('model_outputs')
                                   ? readModelOutput

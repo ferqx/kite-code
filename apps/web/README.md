@@ -1,8 +1,8 @@
 # Web 只读调用者
 
-`apps/web` 是新 HTTP 公共契约的浏览器观察 owner，交付[条件读取控制器](src/controller.ts)、[React 只读页面](src/page.tsx)与[同源 mount](src/mount.tsx)。Service 宿主可装配实际可信资产，正式旧 Web launcher 尚未切换。产品预期见 [Web 手册](../../docs/handbook/clients/web/README.md)，当前差距继续由[统一进度](../../docs/plans/unified-agent-refactor-v1-progress.md)登记，不能以本切片冒称完整产品。
+`apps/web` 是新 HTTP 公共契约的浏览器观察 owner，交付[条件读取控制器](src/controller.ts)、[React 只读页面](src/page.tsx)与[同源 mount](src/mount.tsx)。正式根 `server` 经[已选 Terminal 入口](../../scripts/development/ensure-web.ts)先启动新 Daemon，再执行 `web`；源码入口使用校验过的 `dist/unified-terminal`，安装 CLI 的 [web host](../cli/host/daemon.ts)查询同一已准入 Daemon 的 Browser URL。[Daemon main](../service/src/daemon-main.ts)装配本包可信资产与 Cookie Gateway。此调用链已在当前源码切换，完整能力与最终旧路径退役仍按[统一进度](../../docs/plans/unified-agent-refactor-v1-progress.md)核实。产品预期见 [Web 手册](../../docs/handbook/clients/web/README.md)。
 
-浏览器使用 [Client Browser 子入口](../../packages/client/src/browser.ts)，同源 HttpOnly/SameSite cookie 与固定页面身份。Native bearer/profile 路径不进入浏览器。开发 Service 的[有限只读 Gateway](../service/src/development-web.ts)拥有 listener 和可读投影；只转发目录、所选会话状态、分页 History、当前选择 Context、准确 Job output 和原 Model input，写入、审批、取消、SSE、配置/凭据与任意路径不转发。关闭页面或观察器只释放读取和浏览器访问，不取消 Session，也不关闭执行 Service。
+浏览器使用 [Client Browser 子入口](../../packages/client/src/browser.ts)，同源 HttpOnly/SameSite cookie 与固定页面身份。Native bearer/profile 路径不进入浏览器。Service 的[有限只读 Gateway](../service/src/development-web.ts)拥有 listener 和可读投影；转发具名目录、所选会话状态、分页 History、当前选择 Context、准确 Job output、原 Model input/output、Runtime logs 与恢复点 metadata，写入、审批、取消、SSE、配置/凭据与任意路径不转发。关闭页面或观察器只释放读取和浏览器访问，不取消 Session，也不关闭执行 Service。
 
 `WebController` 仅轮询可见的所选活动会话，默认 2000ms，同一次读取为 single flight。切换 Session 和 document 可见性取消所属读取，迟到 success/error 不能覆盖新选择。失败保留同一选择的完整旧 snapshot 并标 stale；首次失败显示 error，不能伪装为空历史。状态依据真实 `Run.isActive`，不从字符串标签猜运行权。
 
@@ -12,7 +12,7 @@
 
 页面只在 cookie 身份准入成功后读取目录。工作区展开时读取所属根会话，默认显示 5 条，再显示 10 条；不补造服务没有给出的排序字段或活动状态。会话路由使用 `/sessions/<id>`，popstate 与直接链接由当前 controller 读取；回到根目录会清除选择及轮询。document visibilitychange 实际连接 controller，可见且实际 isActive 才定时读。页面卸载只释放所属观察器/目录请求；pagehide 另显式清理 browser cookie session，仍不取消 Runtime。续建和每读一次重试由 Browser SDK 处理，不从 UI 定时器补发。
 
-消息按准确 seq 平铺为可选中的安全 Markdown，HTML/脚本不执行；incomplete、取消、失败与 unknown 保持各自实际状态，不推断最终回复或思考。目录宽度与窄屏行为见下方布局小节；Runtime logs 的按需 metadata 观察见下方独立入口，恢复点只读 metadata 观察见下方独立入口，仍无恢复操作；API Docs 由所属 Service Gateway 提供，见下文；原 Model input 检查器见下方独立入口，其正文读取仍独立确认。这些手册承诺仍待正式调用者迁移闭合，不能通过本 README 改写为已完成或永久删除。
+消息按准确 seq 平铺为可选中的安全 Markdown，HTML/脚本不执行；incomplete、取消、失败与 unknown 保持各自实际状态，不推断最终回复或思考。目录宽度与窄屏行为见下方布局小节；Runtime logs 的按需 metadata 观察见下方独立入口，恢复点只读 metadata 观察见下方独立入口，仍无恢复操作；API Docs 由所属 Service Gateway 提供，见下文；原 Model input 检查器见下方独立入口，其正文读取仍独立确认。正式启动路由已使用此 owner；手册承诺的完整客户端、安装平台与退出资格继续按实际能力验证。
 
 ## 目录布局
 
@@ -30,7 +30,7 @@
 
 [制品测试](test/isolated/assets.test.ts)实际执行完整 build，将 assets module 复制到没有源码的临时目录后动态 import，按 manifest 核对固定路径、hash、metadata，并拒绝额外路径、内容损坏及重复项。构建不连接 Provider，不携带 cookie、Native token 或配置路径。Service library 不必依赖 Web runtime；Root 的显式开发入口决定何时 build/load 和装配。
 
-验证入口：`bun run --cwd apps/web typecheck`、`bun run --cwd apps/web build`、`bun test apps/web/test`。新源文件加入[依赖边界检查](../../scripts/check-unified-agent-boundary.ts)、统一测试与 workspace build/typecheck。正式旧 Web 仍由 `apps/kite-web` 提供，退役条件未闭合。
+验证入口：`bun run --cwd apps/web typecheck`、`bun run --cwd apps/web build`、`bun test apps/web/test`。新源文件加入[依赖边界检查](../../scripts/check-unified-agent-boundary.ts)、统一测试与 workspace build/typecheck。正式入口装配本包；仓库中的 `apps/kite-web` 旧源码仍待完整迁移审查与最终退役，不能把保留目录当作现行正式启动路由。
 
 2026-10-02 在 macOS 的实际 Codex In-app Browser 中用[本机预览夹具](../../tests/fixtures/unified-agent/web-preview.ts)复核了编译资产、真实 Service/SQLite、Cookie 准入、目录与直接会话链接、有效 GFM 表格与无脚本/自动图片、完整正文复制和 Cmd+A 的历史范围。A→B→A 恢复原 scrollTop，追加一条真实消息并显式刷新后仍保留该位置；原 Context 与 Job 三种输出均按需显示。首次现场发现运行时 AJV 编译被严格 CSP 拒绝，已改为构建时静态校验器并实际重验。该证据覆盖本机默认窄视口，不能代替其他浏览器、尺寸矩阵、Electron 或正式 launcher 资格。
 
@@ -65,7 +65,7 @@ bfcache 的 `pagehide.persisted` 保留现有 React document、选择和阅读 m
 
 缺省选择独立的 `.kite-code/unified-development` dataRoot 和 `development` profile，不读取旧 profile。唯一可选参数为 `--data-root <absolute-path>`；不接收 token、任意 entrypoint、环境权限或 Provider 配置参数。启动选择先固定 profile/API/capabilities/instance；buildId 是所选 Service entry 文件字节的 SHA256，仅代表开发 entry 身份，不代表完整发行 candidate 身份。Native bearer 只走 paired 私有 bootstrap，stdout 仅一行 Browser endpoint，错误只输出有限错误码；不会打印 token 或 profile 路径。
 
-浏览器关闭只释放其访问；前台宿主的 stdin EOF、SIGINT 或 SIGTERM 则关闭自己拥有的 Gateway 和 paired Service。stdin 是存活信号，不接受凭据或指令。Service 意外退出也关闭 Gateway，不保留指向旧身份的 listener。该入口没有 detach、旧 daemon 发现或正式安装生命周期；`server`、`kite web`、TUI、Electron 与旧发行入口继续由各自原 owner 维护，不能以此声明它们已迁移或退役。
+浏览器关闭只释放其访问；前台宿主的 stdin EOF、SIGINT 或 SIGTERM 则关闭自己拥有的 Gateway 和 paired Service。stdin 是存活信号，不接受凭据或指令。Service 意外退出也关闭 Gateway，不保留指向旧身份的 listener。这个独立开发前台没有 detach 或正式安装生命周期；正式 `server`／`kite web` 由新 Terminal／Daemon owner维护，TUI／Native与发行各自的完整资格仍独立核实。
 
 [隔离 launcher 测试](../../tests/isolated/unified-agent/web-launcher.test.ts) 在临时 profile 使用真实 paired Service、SQLite、固定 Model、Cookie Gateway 与外部宿主进程，证明错误资产启动前拒绝、零启动 Model、浏览器关闭时原工作继续、EOF/信号准确清理所属 PID/listener和 endpoint-only stdout。2026-10-02 macOS 本机 loopback 实测 4 tests / 46 assertions；不连接付费 Provider。该测试使用已有构建资产，不代替 Root 的统一构建、源码树外制品或安装平台资格。
 
@@ -75,20 +75,24 @@ bfcache 的 `pagehide.persisted` 保留现有 React document、选择和阅读 m
 
 正文使用公共 `getModelInput` 的完整 EOF/hash/准确身份验证结果，未完整成功不显示前缀；模型成功未确认时明确标 unconfirmed，不能据此声称 Provider 已收到请求。每次调用有封存 metadata 时显示实际 Adapter/Provider family/model、受支持 settings、准确 Extension/Tool namespace 和版本、来源 ID/digest、转换标识及最终授权 revision/controlReads；中立 policy 解释按原 JSON 展示，不从当前配置取值。opaque Adapter/Provider、未记录或未来静态版本、未派发授权分别明确 unavailable；已知派发事实不会因 policy 解释缺失而丢失。不显示凭据、endpoint、内部 Artifact 元数据或 Provider 响应，也不声称已经完整记录私有传输配置。关闭、隐藏、会话切换与 bfcache 暂停 abort 面板所属读取并清除正文，迟到响应不能覆盖新调用；只保留打开面板的本地目录身份，不持久缓存正文，不取消 Runtime。恢复可见后须再次明确读取，不后台轮询 Model 输入。
 
-[test/model-input.test.tsx](test/model-input.test.tsx) 使用生成的公共 DTO、Browser port 与 React/JSDOM，验证 201 项目录、超过 17MiB 的完整正文尾部/System/Schema、确认门禁、single flight、scope/游标冲突、失败零前缀与关闭/隐藏/跨会话 late 隔离，以及封存 settings/装配/来源/授权在确认前不公开、确认后不被当前配置替代。这证明便携数据与 DOM 行为，不代替 Root 的真实 Service/Client 全文链路、原生浏览器布局或安装资格。Runtime logs 仅使用公共条目的准确 `modelExecutionId` 进入此检查器，仍需第二次确认才读取正文；本入口不宣称正式旧 launcher、TUI 或 Electron 完成迁移。
+[test/model-input.test.tsx](test/model-input.test.tsx) 使用生成的公共 DTO、Browser port 与 React/JSDOM，验证 201 项目录、超过 17MiB 的完整正文尾部/System/Schema、确认门禁、single flight、scope/游标冲突、失败零前缀与关闭/隐藏/跨会话 late 隔离，以及封存 settings/装配/来源/授权在确认前不公开、确认后不被当前配置替代。这证明便携数据与 DOM 行为，不代替 Root 的真实 Service/Client 全文链路、原生浏览器布局或安装资格。Runtime logs 仅使用公共条目的准确 `modelExecutionId` 进入此检查器，仍需第二次确认才读取正文；TUI／Native和完整发行资格仍由各 owner核实。
 
 ## 原 Model 输出全文
 
 History 的公开 `outputBody` 只表示原输出身份与完整性/长度，默认正文明确标为预览。具备 `model_outputs` 能力时可显式读取原 Session/Execution 的完整已记录正文；Browser Client 验证完整传输和正文后，共享 `ModelOutputMessage` 再核对当前消息身份。成功输出显示完整正文；失败或取消的输出只能显示完整已记录的不完整前缀，不能借前缀批准 Tool calls。完整调用放在可展开区域；会话阅读按手册不展示原 reasoning 正文，全文读取仍校验其原长度。
 
+明确 profile restore 后当前 Store B只负责 Cookie/页面准入，原会话及 sealed Fork正文保持 Store A出处。[Core Model snapshot](../../packages/agent/src/storage/sqlite/model-output.ts)在一致读事务核真实 Execution／Run／Command／rootWork、原 Model Message与private output head，再核原 scope完整 Artifact；[Browser reader](../../packages/client/src/browser.ts)核当前 Store、准确 source Session／Execution与完整 EOF/hash。Web只在此 `model_outputs` reader具备时提供共享组件的 `canReadRestoredOrigin`，沿 sealed originMessage原 Session/Run读取，不从有限View目录推导原来源。组件仍核当前 Store、原 Session／Run／Execution、状态、完整性、实际 UTF-8 content/reasoning长度与 Tool数量；未具备该证明的共享宿主缺省拒绝foreign origin。没有新增 Core/API、重标原来源或旧工作的执行权。
+
 关闭、页面隐藏、bfcache 暂停或会话切换释放所属读取与当前视图全文，迟到响应不得覆盖新选择，不关闭 Runtime。全文不进入阅读位置记忆或跨会话缓存；Copy conversation 使用当前已显示的正文，关闭全文后回到明确预览，不将 4096 字符预览冒充全文。缺能力保留可读预览和禁用按钮。[页面 DOM 测试](test/page.test.tsx) 覆盖显式读取、全文复制、关闭与跨会话清除；共享 [Model output 测试](../../packages/ui/test/model-output.test.tsx) 另覆盖超过 17 MiB 正文、迟到/隐藏/身份失败。这些 DOM 证据不替代实际 Browser、Native bridge 或完整发行入口资格。
+
+[真实恢复页面整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)通过公开 Fork、backup/restore A→B、两次全新 Service与实际 Cookie BrowserClient挂载正式 `mountWebPage`。原会话／sealed大正文、inline小回答、原完整 Tool call、全文 Copy／Close／切换与错误源读取分别核实；原 Message/sourceIds/originMessage、Run、Command、Execution与 metadata准确相等，读取全GET、Model保持2次、Tool效果保持1次、cold Model新增0。页面为JSDOM、clipboard为内存端口；实际Core/HTTP与DOM组合不代证新的原生浏览器或installed窗口。准确红绿、22完整文件／122项／1605Bun断言及复用范围归[恢复正文进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-web-完整-model-正文)。
 
 目录读取现使用 Browser `listAllWorkspaces/listAllSessions`，穷尽固定首分配上界的所有具名页后再发布结果。workspace 过滤在服务端分页前执行，不能在首页 100 项之后过滤而遗漏后续会话；新增晚项目不混入原上界。切换、隐藏或 dispose 使用所属 AbortSignal，失败保留准确错误而不发布不完整目录前缀。分配上界不冻结后续标题/删除变化；当前开发页按实际分配顺序展示，不冒称手册要求的更新时间排序/5+10分批展示已迁移。
 
 
 ## API Docs 导航
 
-页面 header 的 `/api-docs` 是同源只读文档导航。新 Service Gateway 从本构建的生成规范提供路径/方法、可展开完整 JSON 与 `/openapi.json`，无在线调用、凭据或外部文档加载；paired开发Web与显式daemon共用这一提供者。浏览器访问文档仍受原Gateway Host/Origin与关闭准入约束，关闭页面不停止Service。真实编译daemon测试已核返回规范与该构建生成JSON一致且不含Native token；此切片不完成旧正式Web迁移。
+页面 header 的 `/api-docs` 是同源只读文档导航。新 Service Gateway 从本构建的生成规范提供路径/方法、可展开完整 JSON 与 `/openapi.json`，无在线调用、凭据或外部文档加载；paired开发Web与显式daemon共用这一提供者。浏览器访问文档仍受原Gateway Host/Origin与关闭准入约束，关闭页面不停止Service。真实编译daemon测试已核返回规范与该构建生成JSON一致且不含Native token；该有限接口不代替完整客户端与发行退出资格。
 
 ## 按需 Runtime logs
 
@@ -98,7 +102,7 @@ History 的公开 `outputBody` 只表示原输出身份与完整性/长度，默
 
 关闭、隐藏、页面暂停、切换 Session 或读取消只 abort 所属读取，迟到响应不能覆盖新目标，也不取消 Runtime。准确 `modelExecutionId` 的条目可进入既有 Model inspector，Session/Execution 绑定原日志，确认前不读正文；普通摘要不能推导 Model ID。宽度、目录与原 History/Context/Job 面板保持各自状态。此面板没有业务 POST、Provider、ACK、审批或恢复动作。
 
-[Runtime logs DOM 测试](test/runtime-logs.test.tsx) 使用公共 Browser port，验证冻结上界、NULL metadata、错 scope/重复 cursor/closed details、stale 保留、取消/隐藏/暂停/迟到隔离、准确 Model 目标与第二次确认以及缓存预算。fake port 与 JSDOM 只证明控制器/DOM 行为，实际 Cookie Service/SDK 证据由公共接口所属资格独立核对，不代表原生浏览器或正式 launcher 已迁移。
+[Runtime logs DOM 测试](test/runtime-logs.test.tsx) 使用公共 Browser port，验证冻结上界、NULL metadata、错 scope/重复 cursor/closed details、stale 保留、取消/隐藏/暂停/迟到隔离、准确 Model 目标与第二次确认以及缓存预算。fake port 与 JSDOM 只证明控制器/DOM 行为，实际 Cookie Service/SDK 证据由公共接口所属资格独立核对，不代表原生浏览器或完整安装资格；正式启动路由按本页入口调用链核实。
 
 2026-10-03 本机 Codex In-app Browser 使用实际编译 Web、Cookie Gateway、Service/SQLite 与[所属预览夹具](../../tests/fixtures/unified-agent/web-preview.ts)复核日志和目录交互。新增真实事实使 cursor 从 36 到 46，已冻结日志仍保持 36，显式刷新后才显示新增项。实际 pointer/键盘调整、重载偏好、折叠恢复，以及 620×800 窄屏顶栏焦点的 Escape 均核对；首轮现场失败促成这一 Escape 修复，三文件 17/192 邻接通过。
 

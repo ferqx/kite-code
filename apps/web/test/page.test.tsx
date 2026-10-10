@@ -71,7 +71,12 @@ async function settle(check: () => boolean) {
   }
 }
 async function fixture(
-  options: { active?: boolean; wrongIdentity?: boolean; modelOutput?: boolean } = {},
+  options: {
+    active?: boolean;
+    wrongIdentity?: boolean;
+    modelOutput?: boolean;
+    restoredOutput?: boolean;
+  } = {},
 ) {
   const dom = new JSDOM(
     '<!doctype html><html><head><meta name="kite-web-identity" content="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"></head><body><div id="root"></div></body></html>',
@@ -102,7 +107,9 @@ async function fixture(
     extra: false,
     copied: '',
     outputReads: 0,
+    outputRequest: undefined as { sessionId: string; executionId: string } | undefined,
     outputBody: 'FULL RECORDED ANSWER exact tail',
+    wrongOutputSession: false,
   };
   Object.defineProperty(dom.window.navigator, 'clipboard', {
     configurable: true,
@@ -113,13 +120,16 @@ async function fixture(
     },
   });
   const client = {
-    serverInfo: { storeId: 'store', capabilities: options.modelOutput ? ['model_outputs'] : [] },
+    serverInfo: {
+      storeId: options.restoredOutput ? 'restored-store' : 'store',
+      capabilities: options.modelOutput ? ['model_outputs'] : [],
+    },
     async connect() {
       state.connections++;
       if (state.connections > 1 && state.resumeGate) await state.resumeGate;
       if (state.resumeIdentityFailure) throw new ClientError('browser_identity_mismatch');
       if (options.wrongIdentity) throw new ClientError('browser_identity_mismatch');
-      return { storeId: 'store' };
+      return { storeId: options.restoredOutput ? 'restored-store' : 'store' };
     },
     async listAllWorkspaces() {
       return [{ id: 'w', name: 'Workspace' }];
@@ -132,6 +142,7 @@ async function fixture(
       if (id === 'a' && state.held) await state.held;
       if (state.fail) throw new ClientError('browser_read_unavailable');
       const result = view(id, state.active);
+      if (options.restoredOutput) result.storeId = 'restored-store';
       if (state.extra) result.session.nextSeq = '202';
       return result;
     },
@@ -144,6 +155,17 @@ async function fixture(
               ...(options.modelOutput
                 ? {
                     content: 'OUTPUT PREVIEW',
+                    ...(options.restoredOutput
+                      ? {
+                          runId: null,
+                          originMessage: {
+                            storeId: 'store',
+                            sessionId: 'source-session',
+                            messageId: 'source-message',
+                            runId: 'source-run',
+                          },
+                        }
+                      : {}),
                     outputBody: {
                       kind: 'model_output' as const,
                       executionId: 'model',
@@ -164,11 +186,12 @@ async function fixture(
     },
     async getModelOutput(id: string, executionId: string) {
       state.outputReads++;
+      state.outputRequest = { sessionId: id, executionId };
       return {
-        storeId: 'store',
-        sessionId: id,
+        storeId: options.restoredOutput ? 'restored-store' : 'store',
+        sessionId: state.wrongOutputSession ? 'foreign-session' : id,
         rootSessionId: id,
-        runId: `run-${id}`,
+        runId: options.restoredOutput ? 'source-run' : `run-${id}`,
         executionId,
         originCommandId: 'command',
         rootWorkCommandId: 'command',
@@ -543,6 +566,39 @@ test('Web copies loaded full Model output only while visible, closes to preview 
     await settle(() => f.dom.window.document.querySelector('h1')?.textContent === 'Session a');
     expect(f.dom.window.document.body.textContent).not.toContain(f.state.outputBody);
     expect(f.state.closed).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Web restored Fork Model body uses admitted Store and original source; Copy and Close follow only the visible verified body', async () => {
+  const f = await fixture({ modelOutput: true, restoredOutput: true });
+  try {
+    await f.click(f.button('Workspace'));
+    await settle(() => !!f.dom.window.document.querySelector('a[href="/sessions/a"]'));
+    await f.choose('a');
+    await settle(() => f.dom.window.document.querySelectorAll('[data-message-id]').length === 201);
+    expect(f.dom.window.document.body.textContent).toContain('OUTPUT PREVIEW');
+    expect(f.state.outputReads).toBe(0);
+    await f.click(f.button('Read complete recorded Model output'));
+    await settle(() => f.dom.window.document.body.textContent!.includes(f.state.outputBody));
+    expect(f.state.outputRequest).toEqual({ sessionId: 'source-session', executionId: 'model' });
+    await f.click(f.button('Copy conversation'));
+    expect(f.state.copied).toContain(f.state.outputBody);
+    expect(f.state.copied).not.toContain('OUTPUT PREVIEW');
+    await f.click(f.button('Close full Model output'));
+    await f.click(f.button('Copy conversation'));
+    expect(f.state.copied).toContain('OUTPUT PREVIEW');
+    expect(f.state.copied).not.toContain(f.state.outputBody);
+    f.state.wrongOutputSession = true;
+    await f.click(f.button('Read complete recorded Model output'));
+    await settle(() =>
+      f.dom.window.document.body.textContent!.includes('model_output_identity_conflict'),
+    );
+    expect(f.dom.window.document.body.textContent).not.toContain(f.state.outputBody);
+    await f.click(f.button('Copy conversation'));
+    expect(f.state.copied).toContain('OUTPUT PREVIEW');
+    expect(f.state.copied).not.toContain(f.state.outputBody);
   } finally {
     await f.close();
   }

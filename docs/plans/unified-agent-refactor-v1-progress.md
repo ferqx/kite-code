@@ -3737,3 +3737,39 @@ Main现通过公共Client的真实getRun/getExecution核原Run/Session/Store，s
 合计110pass/998条Bun断言/0fail/0skip，darwin arm64/Bun1.4.2/Nodev22.21.1。两个最终collector的4274项仓库输入、Git/资产前后全等且两批准确输入相同；初版完整结果身份的green单独保留，不将其字节冒称摘要最终资格。Root与八workspace类型、四TS Biome实际0；文档/影响/计划证据、边界/API/workspace、测试归属及正常本地提交hooks独立强制。原真实Files producer、editor/IPC/Caller与原源码外窗口文件字节保持，原窗口/frame证据按其范围复用；新driver从真实HTTP建立已观察scope并直接消费同Main owner，没有新跑恢复后的NativeCaller→IPC→renderer点击链，opener callback不证明OS编辑器窗口。准确原失败、最终日志SHA、断言保全及源码/运行资产归 `/private/tmp/kite-v13-restored-native-files-verified-evidence-20261010.json`，SHA `8d5c2e26c5bf5bddc93051e423474b7d20ef289c0d8769d7ba745ce4f89db11b`。
 
 本轮新增闭合的是恢复后Native文件历史/路径的具体Main消费者拒读缺口，正式调用者继续沿公开Client真实来源证明；没有新增旧路径最终退役。产品手册、Desktop owner、共享active、既有Files Note、测试入口、计划与四条能力证据同步；37能力status仍partial。Web恢复封存Model、P6资源/完整维护/平台/依赖独立、§35独立审查/最终退役/阶段完整回归及适用P7责任仍未闭。原RSS失败 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1`、activeResources/handles和完整Runtime后代缺项保留，未重复参数或重采；fullDefault=false/wholeV13=false/phaseExit=false。仅继续已授权本地提交，无push/PR/发布/Actions dispatch。
+
+## 2026-10-10：恢复后 Web 完整 Model 正文
+
+前片Native恢复Files已正常本地提交 `626f99891c419b13ae6571fdbb251863255908ee`，切片结束。本轮按§30.2.16继续完整用户能力迁移，直接实施下一项真实源码缺口：正式Web页面恢复后拒绝封存Fork的完整Model正文。RSS与观测继续只作为相应P6／§35退出门禁，不重新比较参数，不成为独立安装、版本切换和维护恢复能力实现的前置。
+
+当前依赖限定为四项；第一项为本轮闭合的消费者缺口，其余保留准确用户入口和完整验收，不把单个操作、journal或测试窗口另列长期目标。
+
+| 顺序 | 用户入口与当前缺口 | 完整验收及本轮状态 |
+| --- | --- | --- |
+| 1 | Web恢复原会话／封存Fork的“Read complete recorded Model output”、复制及关闭；page未提供已核实原来源资格 | 当前B准入与原A的Model/Run/Command/Message来源分别证明，完整EOF/hash/实际UTF-8正文、原Tool call、inline小回答保持；Copy只用当前全文，Close/切换回预览，错源拒绝、cold零重放。本轮实现并实际A→B／两冷Cookie＋正式mountWebPage通过；不据JSDOM宣布全部客户端或installed窗口资格。 |
+| 2 | installed CLI／TUI／Native普通任务与Shell/child后台持续使用的全局资源资格 | 原八outer／九点、RSS32MiB增长及原斜率门槛、FD/listener与可信activeResources/handles/完整Runtime后代收尾满足。原RSS真实失败、Bun观测null与完整后代缺项保持；未重采或改参数。它约束P6及最终退出，独立恢复读取仍可推进。 |
+| 3 | 正式安装→版本选择→包内backup/inspect/restore/status→用原数据继续阅读的完整生命周期 | 原数据/身份/明确回退/零重放、所选实际引擎/制品、保数据卸载及各客户端依赖独立，支持范围的必要维护与三平台资格成立。macOS既有可选Terminal升级、保锁、DB9真旧代码拒绝和installed rollback资格按未变范围复用；完整资格仍未闭。Win/Linux按用户顺序留到重构后Actions，不在本地授权内dispatch。首发前无适用新基线published样本不阻止独立实现，T029/P7适用责任保留。 |
+| 4 | 用户从正式客户端完整使用全部已映射能力，最后停止旧业务路径 | 前序适用能力和资格齐全后，§35独立完整迁移审查、必要legacy最终退役及阶段未过滤完整回归成立；当前37能力仍partial，P5/P6／整个V1.3均不退出。完整回归是阶段收束门禁，不是独立产品目标。 |
+
+Root以[实际页面](../../apps/web/src/page.tsx)、[Browser reader](../../packages/client/src/browser.ts)、[Gateway](../../apps/service/src/development-web.ts)及Core Model snapshot／identity源码核实：公开reader已经在当前Store读事务证明原Execution/Run/Command/rootWork、原成功Model Message及private output head，原scope完整Artifact保持A出处；Browser核当前B、source Session/Execution与完整EOF/hash。因此无需新增Browser getExecution/getRun、HTTP query/schema，也不以有限View的最近Execution目录猜任意长历史来源。page在实际`model_outputs`能力存在时给共享ModelOutputMessage提供限定`canReadRestoredOrigin`，与原onRead的能力条件一致；共享foreign缺省、原nullable来源、准确Run/Session/Execution/状态/长度/完整性/Tool数量守卫保留。关闭、隐藏和切换仍只撤销所属GET与当前显示/复制，不停止Runtime、不重标来源、不授权旧工作。
+
+正式入口也以实际调用链核对：根`server`→ensure-web→已选SourceTerminal CLI先`server start`再`web`，installed `kite web`由新daemon host读取已准入bootstrap.webOrigin，daemon-main装配本包可信资产与Cookie Gateway。该生产路由早已切换，本轮修正Web owner仍称旧launcher／apps/kite-web提供正式入口的滞后描述；不把文档核对计为新的正式调用者切换或旧目录最终删除。相关入口源码、原正式Terminal整文件及既有有限资格字节保持，未重跑已闭合安装／Daemon矩阵。
+
+[真实恢复页面整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)由实际普通Run生成原大正文、reasoning及完整Tool call，Tool效果1次后原第二次Model生成inline小回答；公开Fork封存原历史，实际Service关闭后公开backup/restore产生新StoreB。两次全新Service、实际Cookie与BrowserClient挂载公共`mountWebPage`，source与sealed页面通过原按钮读取全文、Copy、Close、切换；ordinary reasoning不出现在页面或复制中。直接用sealed Session请求source Execution仍被Core拒绝。原所有Message/sourceIds/originMessage、三个Execution、Run、三个Command及当前metadata/cursor完整相等；全请求GET、Model保持2次／Tool效果1次、coldModel0、Client未新增应用游标，证明本次阅读零重放。
+
+实际失败分别保留：最初夹具假定所有Model回复都有outputBody，小回复本来inline，整例1fail/1expect保在`-red-20261010-result.json`；按真实合同用两个listModelInputs保全两次Model断言，另核inline小回答后取得实际业务red。首次页面修复已读完整正文，但样本文字换行前空格被正常Markdown处理，原DOM严格原文断言失败，日志保在`-first-green-20261010-result.json`；只修正样本文字构造，不改产品渲染、不删除或弱化正文／Copy断言。最终同字节fixture在旧页面上仍真实`model_output_identity_conflict`、正文GET0，1fail/28expect；日志 `/private/tmp/kite-v13-restored-web-model-final-business-red-20261010-tests_isolated_unified-agent_restored-web-model-output.test.ts.log` SHA `6677d588285b19e53601a28849bb2f11c3891090d6b278fd57260759df975b10`。该最终业务red→green只有page资格发生字节变化，新fixture完全相同。
+
+最终沿原`unifiedTestPlan`／`runTestJob`执行完整作业，不过滤case，不改原分类、断言与预算：
+
+| 原作业／完整文件 | 实际结果 | 准确范围 |
+| --- | --- | --- |
+| 新`restored-web-model-output.test.ts` | 1pass／105Bun断言 | 公开Fork与A→B、两冷真实Cookie/Core/HTTP＋正式页面、完整正文/复制/关闭/切换/错源/原身份/零重放 |
+| 原`apps/web`（7完整文件） | 52pass／475 | 原全部controller/诊断/恢复点/Model输入/目录/页面/日志；新增恢复正文unit的原source请求、Close/Copy和错误Session仍拒绝 |
+| 原`packages/ui:shard-4/4`（11完整文件） | 57pass／895 | 含原共享大Model正文、foreign缺省、原取消/迟到/隐藏/字节守卫和原相邻UI；没有把单文件过滤替代原作业 |
+| 原Client `model-output.test.ts` | 4pass／34 | 原完整传输、scope/hash/非法元数据与owned取消 |
+| 原Service `development-web.test.ts` | 7pass／86 | 真实Cookie只读准入、原工作存续、关闭与生命周期 |
+| 原Web `assets.test.ts` | 1pass／10 | 实际新页面build、可信有限manifest、源码外module与错误资产拒绝 |
+
+合计6原作业／22唯一完整文件、122pass／1605Bun断言／0fail／0skip，darwin arm64／Bun1.4.2／Nodev22.21.1。两个最终green批次4275项仓库输入、Git及Bun/Node/Electron/TS/Biome资产前后全等，两批准确输入相同；此后只同步md／tsv文档，运行源码、测试、依赖、配置和生成源保持已验证字节。原page7例与63条expect全部保留，Root另核每个原完整test AST文本与原预算不变；新例仍按原完整作业执行。生产page SHA `fbfe520dcf76e4aedffc8a41fed94cafa831a9aa99362cf1e9c5dd0913daaba2`、page unit SHA `7ee87a53b026370a148fe1ad3d78663c917d6a1cee19b7c0ba0b3062e60c9515`、新真实整例 SHA `b10903a6bb91e31219d3dc6755bd640bdfe79388a3f3e99f259677a00eb77f93`。准确日志、冻结输入、断言保全及复用源码归 `/private/tmp/kite-v13-restored-web-model-verified-evidence-20261010.json`，SHA `81f73c15510fa2d0d379bcc3fdd8856df036383af96b82e5b54c52d537b9a632`。
+
+独立只读审查确认原reader证明和共享错源守卫保持，没有增加API；Root复核Native后台源码，原目录/输出/child已分别使用当前B准入和原A血缘，仅stop要求当前origin，renderer明确恢复历史只读。未找到同类新增源码缺口，不从缺一新窗口推导产品bug或新增矩阵。当前Web资格是实际Core/HTTP/Cookie与JSDOM正式页面组合，clipboard为内存端口，不代表新增原生浏览器或installed恢复整窗口。根与八workspace类型0，文档/影响/计划证据、边界/workspace/API、测试归属、Biome及正常本地提交门禁继续独立执行。产品手册、Web owner、shared active、既有恢复Note、tests、计划及四条能力证据同步；37能力仍partial。RSS原失败与观测缺项、P5完整消费者资格、P6资源/完整维护/平台/客户端依赖独立、§35独立审查/最终退役/阶段完整回归及适用P7责任保持。fullDefault=false／wholeV13=false／phaseExit=false；授权仅本地提交，无push/PR/发布/Actions dispatch。
