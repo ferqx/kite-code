@@ -34,6 +34,8 @@ Native 可显式向合法独立 Terminal prefix 注册完整 CLI/TUI 闭包。�
 
 正常卸载独立 Terminal 不阻止 Native 自带入口及后续升级。隐式历史登记目标已不存在时，升级仅锁 Native，并保留历史反向登记；不重建前门或自动重新登记。显式目标与仍存在的隐式目标保持原完整验证、双 prefix 锁和 nonce CAS。
 
+Native 回退在双 prefix EX 内固定仍由原 nonce 持有的既存 Terminal，完整预检先于 active 发布，随后只更新该固定目标。已知损坏拒绝且 active／双方登记原字节保持；目标缺失时独立回退、其他 Native 归属及登记最终复核保持。该顺序只封闭发布前可发现的损坏，不提供跨 prefix 崩溃原子性；实际实现与有限反例归[Native owner](../../apps/desktop/docs/native-release.md#标准命令登记与卸载恢复)。
+
 正式 CLI／Native 离线维护使用同一调用内资源 owner；SQLite strict-close 或原句柄关闭未确认时保留原资源、Profile EX 与相关临时目录至实际宿主退出。正常关闭才允许清理和交出维护权，错误返回不充当关闭证明。恢复 journal、新 Store及来源 fencing保持；维护owner和平台验收边界见[维护合同](../../packages/agent/src/maintenance/README.md)。
 
 Terminal 已有本机真实跨代码版本冷回退资格：固定新基线旧提交由其原 builder 构建，与当前代码保持相同依赖输入及 format=1 SQL 基线；经源码外安装前门 A→B→A→B 四个冷实例核原 Store、原任务身份、B 新完整正文和后续真实工作。回退仅交换候选指针，数据库未恢复；正常 stop 核准确进程退出和所有候选 EX，卸载保独立 Profile。完整测试与范围由[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)维护；本地代码比较不等于已发布 predecessor、Native 或三平台资格。Required 默认测试 checkout 保完整历史，以读取固定真实旧提交，缺旧对象直接失败。

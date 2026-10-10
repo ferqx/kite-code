@@ -18,6 +18,8 @@ Native 安装可显式向合法独立 Terminal prefix 登记。两个 prefix 以
 
 更新/回滚只修改自己仍持有的登记，卸载以原 nonce CAS 撤销；另一个 Native 后写的登记不能被旧卸载删除。撤销后仍存在的独立前门恢复 Terminal。显式 source/candidate 选择不读取登记，也不重新绑定冷原意图或活动 Run。
 
+回退沿同一双 EX 固定仍存在且原 nonce 相同的 Terminal，完整预检必须先于 Native active 发布；最终登记仍独立复核。原先先切 active、再核目标会在预先损坏时留下 active 与双方登记失配，即使修好字节也使原前门拒绝。前置预检保三份原字节和原选择，修复后用户可先沿原前门读取，再明确回退。缺失目标的独立回退和其他 Native 的 nonce 归属保持；这不替代多文件发布中断的恢复，也不承诺跨 prefix 崩溃原子性。实际合同及有限损坏反例归[Native owner](../../../../apps/desktop/docs/native-release.md#标准命令登记与卸载恢复)。
+
 独立 Terminal 正常卸载后，反向登记只保留历史归属，不成为 Native 后续升级的必需安装依赖。省略 cliPrefix 时只在历史目标实际存在的情况下锁定、核验并按原 nonce 更新；缺失时仅持 Native 安装 EX，继续原候选核验和 active 发布。该次锁定目标固定用于最终写入，避免缺失后重建的目录未经锁定获得自动登记。显式目标、仍存在的隐式目标和悬空链接继续原拒绝／核验路径；需要独立前门时明确重新安装并登记。保留反向记录可核原归属，不授予后来目录新的写权限。
 
 真实代码兼容验收使用固定旧源码的原 Terminal/Native builder；不把当前 builder 配旧 inner、改 productVersion 或当前代码自造旧库当两版 Native。旧 Native 构建须在旧源码删除前完成；打包后产品只能使用物化候选的闭包。2026-10-07 已沿正式 installed 窗口完成本机 A→B→A→B，原 Core format 1/Native DB7 与数据保留、完整 B 正文和后续实际工作分别证明。该选择补齐兼容验证输入，不改变安装、回退或 trust 语义，也不把冷 caller 记录提升为新的进程内输入绑定。

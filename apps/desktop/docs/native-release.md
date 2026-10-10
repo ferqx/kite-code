@@ -41,6 +41,8 @@ Native 自带 `bin/kite`、`bin/kite-tui`、`bin/kite-desktop`；独立 Terminal
 
 独立 Terminal 正常卸载后，Native 的反向登记只保留历史归属。省略 `--cli-prefix` 的升级在旧目标已不存在时仅持 Native 安装 EX，继续完整核候选和发布 active；不会锁定或重建旧 Terminal，也不会自动登记后来重建的目录。仍存在的隐式目标以及所有显式目标继续完整验证、固定顺序持锁和 nonce CAS；无效目标拒绝，不能据目录缺失放宽明确登记。Native 回退和卸载保留同一可选前门边界。
 
+回退在双 prefix EX 内固定仍存在且由原 nonce 持有的 Terminal 目标，先完整核其候选与登记身份，再发布 Native active 并更新该目标。已知损坏在发布前拒绝，Native active、反向登记和独立前门登记均保原字节；修复候选后原前门仍可读取原选择，再明确回退。目标已正常卸载时仍可独立回退，后来其他 Native 的 nonce 不被夺回。这一预检不增加跨 prefix 崩溃原子性保证。[登记完整文件](../../../tests/isolated/unified-agent/cli-registration.test.ts)新增真实字节损坏反例并保原五项；有限候选只核安装格式与选择合同，不能代替真实代码升级、窗口或平台资格。
+
 macOS 的[登记完整文件](../../../tests/isolated/unified-agent/cli-registration.test.ts)及[原安装窗口](../../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)已验证这一正常卸载后升级链：原两个真实窗口保完整任务、冷读、Provider恰1、Store metadata／View、回退、双lease退出及卸载保数据。原120秒整例／45秒driver不变；两个候选是同源码版本标记差异，只证明安装选择与当前消费者，不充当真实旧代码兼容、DB9或已发布样本。准确输入和实际失败归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10安装升级与维护关闭所有权)。
 
 ## macOS 安装版离线维护

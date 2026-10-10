@@ -3876,3 +3876,28 @@ Close后正文撤除；另一读将实际Main已完成Core GET的open回复透�
 | 5 | 前序满足后，所有正式客户端完整迁移与旧路径退出 | §35独立完整能力/真实正式调用者审查，证实无遗留正式business carrier及最后legacy退役，阶段未过滤完整回归实际通过；局部绿色不拼成当前wholeDefault或wholeV13，也不删真实失败/排除原作业。依赖第1–4项必要结果与§35完整标准，不新增长期单操作/journal/测试窗口目标。 |
 
 本轮新增闭合的能力是恢复后正式TUI主会话/Fork完整正文、思考与已加载导出；没有新增全局caller切换或最终旧路径退役。手册/UI与CLI owner/shared active/tests/主方案/进度和三条cap证据按实际diff同步，37条status仍全部partial；原安装/版本/维护源码核对未伪称新增资格。RSS/观测、长Run、安全明确恢复、完整P5/P6/平台/维护/依赖独立、§35审查/退役/阶段完整回归及适用P7仍未闭，wholeDefault=false/wholeV13=false/phaseExit=false，Goal active。本轮只按已授权本地提交交付，无push/PR/发布/Actions dispatch。
+
+
+## 2026-10-10 Native 回退发布前校验
+
+恢复 Goal 后先核主方案 §30.2.16 与 §35 的真实依赖：原 RSS 增长和 activeResources／handles／完整 Runtime 后代观测缺项在 P6／§35 汇合，不构成独立安装、代码版本切换与离线维护实现的前置。本轮未采样 RSS、未重复参数对照；原 `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1` 的 +115.203125MiB 对原32MiB增长门禁失败和观测未知保持。此前安装版 DB9、明确维护 rollback／complete、真代码冷回退和正常卸载 Terminal 后升级的有限证据按原范围复用，不重复建立同名操作目标。
+
+源码新增缺口位于 `rollbackNativeBundle`：仍由自己 nonce 持有的独立 Terminal 已损坏时，原实现先发布 Native active，再由登记函数完整核目标并抛错，留下 active 与双方登记失配。修好候选字节仍无法沿原标准前门读取。现在双 prefix EX 内先固定存在且 same nonce 的目标、完整预检，再发布 Native active，并只更新该固定目标；最终登记复核保留。目标正常卸载后仍可独立回退，其他 Native 的 nonce 不被接管，数据与旧进程使用权保持。发布前可发现的损坏拒绝不等于跨 prefix 崩溃原子性。
+
+原 `cli-registration.test.ts` 的五个 case 逐字保留，增加完整反例：两个合法有限候选→登记第二版→真实改动独立 Terminal CLI asset 的一个字节→回退拒绝且 active／反向登记／前门登记三份原bytes及数据保持→修复asset后原前门仍选择第二版→lease阻止卸载→正常回退第一版且双登记一致→卸载恢复独立Terminal并保数据。有限fixture的Bun/Electron不执行，不冒称真实代码或窗口。首次新夹具错误访问不存在的 manifest 字段，5pass／1fail／70expect，是测试装配失败；修正为原完整verifier后，原生产5pass／1fail／72expect准确失败在active字节变化，业务红归 `/private/tmp/kite-v13-native-rollback-baseline-red-2-20261010-result.json`。生产修正后两个原完整文件实际通过：登记6pass／86expect，安装守卫5pass／51expect，0fail／0skip；输入4283项、Git及运行资产前后全等，结果归 `/private/tmp/kite-v13-native-rollback-final-20261010-result.json`。
+
+原 installed Native lifecycle 在升级前卸载独立 Terminal，rollback走target missing，不能用它代证新增still-owned preflight。原真实跨代码及登记CLI／TUI证据仅复用未变owner范围；本轮没有新增全局正式caller切换、真实损坏目标窗口资格或最终legacy退役。当前同步Native／Terminal release owner、release-control与既有登记Note；release.lifecycle只追加限定证据，37条状态仍partial。
+
+同时保留尚未收束的长 Run 工作树：默认Service同主Run的257次真实Files读取、18个原Model输入／请求、完整输出和两次冷只读历史取得1pass／2943expect；来源目录原整文件7pass／34expect，历史分页／完整canonical CAS原整例1pass／3123expect。扩展批量新例初始化key修正为原run namespace后，原context／恢复／Worker／配置／规划／MCP共12整文件73pass／950expect通过，原拒绝与断言保持。完整证据分别归 `/private/tmp/kite-v13-long-run-core-final-3-20261010-result.json` 与 `/private/tmp/kite-v13-long-run-neighbors-final-20261010-result.json`；前者仍含新扩展fixture修正前1fail，不能称collector整体通过。
+
+4096次真实效果后的公开冷接续尚未取得验收：新整例三次在原120秒hot准备期限失败，尚未进入冷接续。第二次保留root `kite-long-run-resume-VBwJC6`，2432个真实Tool效果／20Model；第三次去掉测试每Tool额外getExecution后保留root `kite-long-run-resume-nfcFlJ`，2560个真实Tool效果／21Model，Run仍running；原180秒整例、4096效果、原ID／完整正文／零重放断言保持，没有延长、排除或计绿。失败根与准确输入归 `/private/tmp/kite-v13-long-run-resume-final-2-20261010-result.json`、`/private/tmp/kite-v13-long-run-resume-final-3-20261010-result.json`。该结果不是RSS证据，也未证明新的生产O(n²)；长Run／resume生产及测试留在持久工作树，必要验证未齐，不并入本次Native提交或宣布切片完成。
+
+| 剩余依赖顺序 | 实际用户入口与具体缺口 | 完整行为和验收 |
+| --- | --- | --- |
+| 1 | CLI／TUI／Native连续长主Run与显式原Run恢复；累计256／4096的源码修复已在工作树，但4096真实效果冷接续整例未通过 | 连续完整指令与结果保持，支持安全planned边界准确接续原ID／attempt，完整历史与原来源重建，已完成Tool零重放；真实unknown／活动child／半初始化仍拒绝。查清当前失败并完成必要验证、文档和本地提交，不把测试窗口另列长期目标。 |
+| 2 | 正式TUI `/context` I键明确Include；原Job originStore仍被当作当前准入Store | 新Command绑定当前B，准确原A Job／Execution／revision和完整结果保持；idle只在用户另开新Run后消费，活动时准确targetRun，错身份零POST，stop／自动消费守卫保持。Native相同Core合同不代证TUI消费者。 |
+| 3 | installed普通任务／Shell／child的P6资源资格 | 原RSS32MiB／斜率、八outer／九点及可信完整资源／Runtime后代满足原门禁；真实红和观测缺项保留。它不阻断第1／2或独立安装／维护代码实现。 |
+| 4 | 正式安装→版本选择→包内维护恢复→原数据继续使用的剩余支持范围 | 必要平台、完整维护及客户端依赖独立资格齐全；本机macOS已闭结果按准确scope复用。Windows installer及加载前bootstrap有真实源码前置；Win／Linux依原安排留重构后Actions，本地不dispatch。 |
+| 5 | 前序必要结果齐全后的P5／P6退出及适用P7责任 | §35独立完整能力／正式caller审查，最后legacy退役与阶段未过滤完整回归实际通过；P7新基线发布后的适用T029／兼容样本责任保留，D08首发前无适用published样本不挡独立实现。 |
+
+本轮新增闭合的是正式登记前门的版本回退一致性与修复后继续使用；没有新增全局caller切换或最终退役。Root／workspace类型证据按实际输入核对，文档／staged影响／边界／workspace／API／测试归属与正常hook仍为本地提交门禁。wholeDefault=false／wholeV13=false／phaseExit=false，Goal active；本轮只提交有证据的Native范围，RSS、观测和长Run真实失败均保留，不扩至push／PR／发布／Actions dispatch。

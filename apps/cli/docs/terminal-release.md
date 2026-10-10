@@ -78,6 +78,8 @@ Terminal manifest 的 `sqlite` 固定 driver、linkage、实际 version/sourceId
 
 标准安装前门可显式登记完整 Native 闭包。双方 prefix 的 nonce/active/managed marker 与完整 manifest 必须一致；坏登记直接拒绝。升级/回滚仅更新自己仍拥有的登记，卸载仅以原 nonce 撤销，不删除另一安装后写入的登记。已有进程保持原候选与使用锁。源码/显式 candidate 不参与自动登记选择。操作与恢复限制见[Native owner](../../desktop/docs/native-release.md)。
 
+Native 明确回退时，仍由其 nonce 持有的既存 Terminal 必须在 Native active 发布前通过双 EX 内的完整预检；损坏拒绝且双方登记及原选择保持。修复后原独立前门继续可用，再明确回退更新选择。正常卸载目标和其他 Native 的登记仍按原归属处理，验证范围见同一 owner。
+
 真实当前引擎测试覆盖 source-free 默认 sidecar、两个 Worker、24 次并发 WAL 写、准确备份/恢复至新 Store 和 cold readonly/preflight。新注册资格使用 fresh 完整候选与 80×24 TUI，Provider 3，三条原 Command→Run 均 completed；损坏 nonce、运行中卸载 busy、cold 原 scope/bytes/cursor 与卸载恢复分别核实。旧源码 Apple SQLite 3.51.0 读取该 WAL 的真实 `SQLITE_CANTOPEN` 已保留，未通过删除 WAL 或改 journal mode 掩盖；该源码引擎不属于正式候选资格。
 
 包内选择、准确 sourceId 与 Worker 不重复设置 loader 的原因见[SQLite 引擎决定](../../../.agents/notes/implemented/architecture/2026-10-04-selected-sqlite-engine-and-worker-identity.md)。Windows private Profile 与普通 Workspace scope 的实现/待验边界见[路径策略提案](../../../.agents/notes/proposed/architecture/2026-10-04-windows-private-and-workspace-scope-paths.md)，不能据 POSIX 邻接放行 Windows 制品。

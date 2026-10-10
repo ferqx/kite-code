@@ -313,17 +313,20 @@ export function rollbackNativeBundle(prefix: string): InstalledNativeBundle {
   try {
     if (!sameCLIRegistration(owned, readCLIRegistration(root, true)))
       throw Error('cli_registration_changed');
+    const registrationTarget =
+      owned &&
+      present(owned.terminalPrefix) &&
+      sameCLIRegistration(owned, readCLIRegistration(owned.terminalPrefix))
+        ? owned.terminalPrefix
+        : undefined;
+    if (registrationTarget) verifyCLIRegistrationTargetWhileLocked(registrationTarget, locks);
     const { selection } = inventory(root);
     if (!selection.previous) fail('previous_unavailable');
     const releaseRoot = join(root, 'releases', selection.previous);
     durable(join(root, 'active'), `${selection.previous}\n${selection.current}\n`);
-    if (
-      owned &&
-      present(owned.terminalPrefix) &&
-      sameCLIRegistration(owned, readCLIRegistration(owned.terminalPrefix))
-    )
+    if (registrationTarget)
       registerNativeCLIWhileLocked(
-        { nativePrefix: root, terminalPrefix: owned.terminalPrefix },
+        { nativePrefix: root, terminalPrefix: registrationTarget },
         locks,
       );
     return {

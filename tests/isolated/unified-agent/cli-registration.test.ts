@@ -32,6 +32,7 @@ import {
 import {
   installTerminalBundle,
   uninstallTerminalBundle,
+  verifyTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
 import { finiteNativeFixture } from '../../fixtures/unified-agent/native-artifact-fixture';
 
@@ -299,6 +300,78 @@ test.skipIf(process.platform === 'win32')(
       expect(existsSync(f.nativePrefix)).toBe(false);
       expect(existsSync(f.terminal.root)).toBe(false);
       expect(readFileSync(f.original, 'utf8')).toBe('ORIGINAL UTF8 草稿');
+    } finally {
+      f.close();
+    }
+  },
+);
+
+test.skipIf(process.platform === 'win32')(
+  'registered Native rollback rejects a damaged Terminal before selection changes, then repair preserves the original frontdoor and permits normal rollback',
+  () => {
+    const f = fixture();
+    try {
+      const first = installNativeBundle({
+        bundleRoot: f.source,
+        prefix: f.nativePrefix,
+        cliPrefix: f.terminal.root,
+      });
+      const next = join(f.root, 'next-rollback-preflight');
+      cpSync(f.source, next, { recursive: true, verbatimSymlinks: true });
+      const manifestPath = join(next, 'native-manifest.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      const innerPath = join(next, 'terminal/terminal-manifest.json');
+      const inner = JSON.parse(readFileSync(innerPath, 'utf8'));
+      inner.productVersion = '0.1.1';
+      const innerBytes = Buffer.from(JSON.stringify(inner));
+      writeFileSync(innerPath, innerBytes);
+      manifest.terminalManifestSha256 = createHash('sha256').update(innerBytes).digest('hex');
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      const second = installNativeBundle({ bundleRoot: next, prefix: f.nativePrefix });
+      const selectedPaths = [
+        join(f.nativePrefix, 'active'),
+        join(f.nativePrefix, OWNED_CLI_REGISTRATION_FILE),
+        join(f.terminal.root, CLI_REGISTRATION_FILE),
+      ];
+      const before = selectedPaths.map((path) => readFileSync(path));
+      const data = readFileSync(f.original);
+      const asset = join(
+        f.terminal.releaseRoot,
+        verifyTerminalBundle(f.terminal.releaseRoot).manifest.entries.cli,
+      );
+      const original = readFileSync(asset);
+      const damaged = Buffer.from(original);
+      damaged[0] = damaged[0]! ^ 1;
+      writeFileSync(asset, damaged);
+      expect(() => rollbackNativeBundle(f.nativePrefix)).toThrow();
+      for (const [index, path] of selectedPaths.entries())
+        expect(readFileSync(path)).toEqual(before[index]!);
+      expect(readFileSync(f.original)).toEqual(data);
+      writeFileSync(asset, original);
+      const unchanged = acquireRegisteredTerminalSelection(f.terminal.releaseRoot);
+      try {
+        expect(unchanged.artifact.buildId).toBe(`native-${second.candidateId}`);
+        expect(() => uninstallNativeBundle(f.nativePrefix)).toThrow('Lock is busy');
+        for (const [index, path] of selectedPaths.entries())
+          expect(readFileSync(path)).toEqual(before[index]!);
+      } finally {
+        unchanged.close();
+      }
+      const rolled = rollbackNativeBundle(f.nativePrefix);
+      expect(rolled.candidateId).toBe(first.candidateId);
+      const registration = readCLIRegistration(f.terminal.root)!;
+      expect(registration.candidateId).toBe(first.candidateId);
+      expect(readCLIRegistration(f.nativePrefix, true)).toEqual(registration);
+      const selected = acquireRegisteredTerminalSelection(f.terminal.releaseRoot);
+      try {
+        expect(selected.artifact.buildId).toBe(`native-${first.candidateId}`);
+      } finally {
+        selected.close();
+      }
+      uninstallNativeBundle(f.nativePrefix);
+      expect(readCLIRegistration(f.terminal.root)).toBeUndefined();
+      uninstallTerminalBundle(f.terminal.root);
+      expect(readFileSync(f.original)).toEqual(data);
     } finally {
       f.close();
     }
