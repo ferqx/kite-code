@@ -36,10 +36,153 @@ const id = (value: unknown): value is string =>
 const counter = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) >= 0;
 
+/** The original port supplies native observations; this checks their ready-to-exit continuity. */
+function ownedExitValid(
+  ready: McpStdioProcessEvidence,
+  terminal: McpStdioProcessEvidence,
+): boolean {
+  if (ready.version === 3 && terminal.version === 3) {
+    const firstGuardian = ready.guardian,
+      lastGuardian = terminal.guardian,
+      firstServer = ready.server,
+      lastServer = terminal.server;
+    return !!(
+      firstGuardian &&
+      lastGuardian &&
+      firstServer &&
+      lastServer &&
+      !ready.closed &&
+      !ready.closeUnknown &&
+      firstGuardian.kernelState === 'alive' &&
+      firstGuardian.exit === null &&
+      !firstGuardian.observationClosed &&
+      firstServer.exitCode === null &&
+      !firstServer.waitConfirmed &&
+      ready.job &&
+      !ready.job.treeStopped &&
+      ready.job.activeProcesses !== 0 &&
+      firstGuardian.pid === lastGuardian.pid &&
+      firstGuardian.parentPid === lastGuardian.parentPid &&
+      firstGuardian.creationTime === lastGuardian.creationTime &&
+      firstServer.pid === lastServer.pid &&
+      firstServer.creationTime === lastServer.creationTime &&
+      terminal.closed &&
+      !terminal.closeUnknown &&
+      lastGuardian.kernelState === 'dead' &&
+      lastGuardian.observationClosed &&
+      lastGuardian.exit?.reaped &&
+      lastGuardian.exit.code === 0 &&
+      lastGuardian.exit.signal === null &&
+      lastServer.waitConfirmed &&
+      lastServer.exitCode === 7 &&
+      terminal.job?.treeStopped &&
+      terminal.job.activeProcesses === 0
+    );
+  }
+  if (ready.version === 4 && terminal.version === 4) {
+    const first = ready.process,
+      last = terminal.process,
+      firstNamespace = first.namespace,
+      lastNamespace = last.namespace,
+      firstRoot = firstNamespace?.root,
+      lastRoot = lastNamespace?.root;
+    return !!(
+      firstNamespace &&
+      lastNamespace &&
+      firstRoot &&
+      lastRoot &&
+      first.phase === 'ready' &&
+      !first.fdClosed &&
+      !first.closeUnknown &&
+      first.wrapper.exit === null &&
+      !first.wrapper.closed &&
+      !first.wrapper.stdoutEof &&
+      !first.wrapper.stderrEof &&
+      !firstNamespace.treeStopped &&
+      !firstNamespace.init.dead &&
+      !firstRoot.dead &&
+      firstRoot.waitReceipt === null &&
+      first.admission.nonce === last.admission.nonce &&
+      (['pid', 'parentPid', 'birth'] as const).every(
+        (key) => first.wrapper[key] === last.wrapper[key],
+      ) &&
+      firstNamespace.dev === lastNamespace.dev &&
+      firstNamespace.ino === lastNamespace.ino &&
+      (['pid', 'parentPid', 'birth', 'localPid'] as const).every(
+        (key) =>
+          firstNamespace.init[key] === lastNamespace.init[key] && firstRoot[key] === lastRoot[key],
+      ) &&
+      last.phase === 'terminal' &&
+      last.fdClosed &&
+      !last.closeUnknown &&
+      last.wrapper.exit?.reaped &&
+      last.wrapper.exit.code === 0 &&
+      last.wrapper.exit.signal === null &&
+      last.wrapper.closed &&
+      last.wrapper.stdoutEof &&
+      last.wrapper.stderrEof &&
+      lastNamespace.treeStopped &&
+      lastNamespace.init.dead &&
+      lastRoot.dead &&
+      lastRoot.waitReceipt?.waitConfirmed &&
+      lastRoot.waitReceipt.reaped &&
+      lastRoot.waitReceipt.code === 7 &&
+      lastRoot.waitReceipt.signal === null &&
+      lastRoot.waitReceipt.rawStatus === 7 * 256
+    );
+  }
+  if (ready.version !== 2 || terminal.version !== 2) return false;
+  for (const role of ['broker', 'guardian', 'server'] as const) {
+    const before = ready[role],
+      after = terminal[role];
+    if (
+      !before?.birth ||
+      !after?.birth ||
+      before.exit !== null ||
+      before.kernelState !== 'alive' ||
+      !['absent', 'reused'].includes(after.kernelState) ||
+      before.unavailable.length ||
+      after.unavailable.length ||
+      before.pid !== after.pid ||
+      before.parentPid !== after.parentPid ||
+      before.birth.seconds !== after.birth.seconds ||
+      before.birth.microseconds !== after.birth.microseconds ||
+      BigInt(before.birth.seconds) > 18446744073709551615n
+    )
+      return false;
+  }
+  const first = ready.coalition,
+    last = terminal.coalition;
+  return !(
+    !first ||
+    !last ||
+    first.processTreeStopped ||
+    first.registrationRemoved ||
+    first.terminalTaskCount !== null ||
+    !last.processTreeStopped ||
+    !last.registrationRemoved ||
+    last.terminalTaskCount !== 1 ||
+    !terminal.broker?.exit ||
+    terminal.broker.exit.code !== 0 ||
+    !terminal.server?.exit ||
+    terminal.server.exit.code !== 7 ||
+    terminal.guardian?.exit !== null ||
+    BigInt(first.id) > 18446744073709551615n ||
+    BigInt(first.guardianUniqueId) > 18446744073709551615n ||
+    (
+      ['id', 'guardianUniqueId', 'guardianPidVersion', 'claimTaskCount', 'label', 'domain'] as const
+    ).some((key) => first[key] !== last[key])
+  );
+}
+
 /** Pure cold decoder. Original native/reap observations remain the owning port's facts. */
 export function verifyMcpStdioJobHandoff(
   value: McpStdioJobHandoff,
-  expected: { ownerPid: number; identities: NonNullable<CaseEvidence['identities']> },
+  expected: {
+    ownerPid: number;
+    identities: NonNullable<CaseEvidence['identities']>;
+    platform?: string;
+  },
 ): string[] {
   try {
     if (
@@ -95,55 +238,13 @@ export function verifyMcpStdioJobHandoff(
       return ['mcp_stdio_handoff_invalid'];
     const ready = decodeMcpStdioProcessEvidence(value.ready, value.binding, value.ownerPid);
     const terminal = decodeMcpStdioProcessEvidence(value.terminal, value.binding, value.ownerPid);
-    if (!ready || !terminal || ready.version !== 2 || terminal.version !== 2)
-      return ['mcp_stdio_handoff_invalid'];
-    for (const role of ['broker', 'guardian', 'server'] as const) {
-      const before = ready[role],
-        after = terminal[role];
-      if (
-        !before?.birth ||
-        !after?.birth ||
-        before.exit !== null ||
-        before.kernelState !== 'alive' ||
-        !['absent', 'reused'].includes(after.kernelState) ||
-        before.unavailable.length ||
-        after.unavailable.length ||
-        before.pid !== after.pid ||
-        before.parentPid !== after.parentPid ||
-        before.birth.seconds !== after.birth.seconds ||
-        before.birth.microseconds !== after.birth.microseconds ||
-        BigInt(before.birth.seconds) > 18446744073709551615n
-      )
-        return ['mcp_stdio_handoff_invalid'];
-    }
-    const first = ready.coalition,
-      last = terminal.coalition;
+    const platformVersion = { darwin: 2, win32: 3, linux: 4 };
     if (
-      !first ||
-      !last ||
-      first.processTreeStopped ||
-      first.registrationRemoved ||
-      first.terminalTaskCount !== null ||
-      !last.processTreeStopped ||
-      !last.registrationRemoved ||
-      last.terminalTaskCount !== 1 ||
-      !terminal.broker?.exit ||
-      terminal.broker.exit.code !== 0 ||
-      !terminal.server?.exit ||
-      terminal.server.exit.code !== 7 ||
-      terminal.guardian?.exit !== null ||
-      BigInt(first.id) > 18446744073709551615n ||
-      BigInt(first.guardianUniqueId) > 18446744073709551615n ||
-      (
-        [
-          'id',
-          'guardianUniqueId',
-          'guardianPidVersion',
-          'claimTaskCount',
-          'label',
-          'domain',
-        ] as const
-      ).some((key) => first[key] !== last[key])
+      !ready ||
+      !terminal ||
+      (expected.platform !== undefined &&
+        ready.version !== platformVersion[expected.platform as keyof typeof platformVersion]) ||
+      !ownedExitValid(ready, terminal)
     )
       return ['mcp_stdio_handoff_invalid'];
     for (const [executionId, commandId, runId] of [
@@ -185,7 +286,7 @@ export function verifyMcpStdioJobHandoff(
       cold.originalOutputUnchanged !== true ||
       cold.originalCommandUnchanged !== true ||
       cold.originalRunUnchanged !== true ||
-      JSON.stringify(value).length > 256 * 1024
+      Buffer.byteLength(JSON.stringify(value)) > 256 * 1024
     )
       return ['mcp_stdio_handoff_cold_invalid'];
     return [];

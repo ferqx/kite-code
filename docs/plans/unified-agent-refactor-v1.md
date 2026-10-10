@@ -2146,6 +2146,8 @@ Profile Workflow 的原目录只读投影及正式 verifier 接线已沿源码�
 
 Linux正式Source stdio的独立direct-program／namespace owner、真实SDK transport、closed v4及默认Service调用者已接源码，原声明／审批／SQL／完整结果与cold不重放合同保持；新wire等待竞态、取消业务写错误和原seal FD unknown关闭门禁已按必要审查闭合。本机控制流六项／47断言、原封装独立整文件一项／60断言及相邻原生命周期通过仅证明其范围；Linuxnative／installed／全部消费者、非macOS正式Soak、原RSS／观测及§35／最终退役／阶段完整回归仍未闭合。最多四项依赖及全部原红绿归[当前Linux MCP进度](unified-agent-refactor-v1-progress.md#2026-10-10linux-正式-stdio-mcp-完整连接源码)，37能力partial、wholeDefault／wholeV13／phaseExit=false，Win/Linux按用户顺序重构后Actions，本机无dispatch。
 
+上述非macOS正式MCP Soak调用者源码现已迁入同一Source／SQL connection Job／SDK和cold原结果，直接stdio adapter诊断回退删除。原v2合取保持，v3／v4核同平台和完整原native身份连续性、原root实际exit7、严格树／资源关闭及原C／E／Run／output／reference／cursor／零Provider；formal缺交接拒绝，原生unknown不被相邻fixture清理改写。本机完整文件与准确失败归[当前调用者进度](unified-agent-refactor-v1-progress.md#2026-10-10三平台-mcp-正式-soak-调用者迁移)；Win/Linux原生／installed、原RSS／完整Runtime观测、§35审查／最终退役／阶段完整回归与适用P7仍未闭合，37partial、wholeV13／phaseExit=false。本片不重复参数或资源实验，不dispatch或扩大本地提交授权。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

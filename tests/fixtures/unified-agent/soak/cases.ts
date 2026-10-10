@@ -510,7 +510,8 @@ async function modelFault(root: string, e: CaseEvidence) {
 }
 async function mcpChurn(root: string, e: CaseEvidence, stdioAssets?: McpSoakStdioAssets) {
   let changed = false,
-    calls = 0;
+    calls = 0,
+    ownedMcpCompleted = false;
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -598,15 +599,14 @@ async function mcpChurn(root: string, e: CaseEvidence, stdioAssets?: McpSoakStdi
       rejected = true;
     }
     check(e.assertions, 'released_scope_rejected', rejected, true);
-    if (process.platform === 'darwin') {
-      if (!stdioAssets) throw Error('mcp_stdio_owned_assets_missing');
-      await runOwnedMcpStdio(root, e, stdioAssets);
-    } else await stdioProtocolDiagnostic(root, e);
+    if (!stdioAssets) throw Error('mcp_stdio_owned_assets_missing');
+    await runOwnedMcpStdio(root, e, stdioAssets);
+    ownedMcpCompleted = true;
   } finally {
     await f.close();
     await adapter.close();
     server.stop(true);
-    e.cleanupConfirmed = true;
+    e.cleanupConfirmed = ownedMcpCompleted;
   }
 }
 async function storageFault(root: string, e: CaseEvidence) {
@@ -703,66 +703,5 @@ async function storageFault(root: string, e: CaseEvidence) {
     db.close();
     await f.close();
     e.cleanupConfirmed = true;
-  }
-}
-
-/** Optional public-adapter protocol diagnostic; no formal process-owner receipt. */
-async function stdioProtocolDiagnostic(root: string, e: CaseEvidence) {
-  const directory = join(root, 'stdio');
-  mkdirSync(directory, { mode: 0o700 });
-  const marker = join(directory, 'wire');
-  const script = join(directory, 'server.js');
-  writeFileSync(
-    script,
-    `import {writeFileSync} from 'node:fs';let buffer='';process.stdin.on('data',data=>{buffer+=data;for(;;){const at=buffer.indexOf('\\n');if(at<0)break;const line=buffer.slice(0,at);buffer=buffer.slice(at+1);const rpc=JSON.parse(line);if(rpc.id===undefined)continue;let result;if(rpc.method==='initialize')result={protocolVersion:'2024-11-05',serverInfo:{name:'owned',version:'1'},capabilities:{tools:{}}};else if(rpc.method==='tools/list')result={tools:[{name:'exit',description:'owned crash before reply',inputSchema:{type:'object'}}]};else{writeFileSync(${JSON.stringify(marker)},'one actual call',{mode:0o600});process.exit(7);}process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}});`,
-    { mode: 0o600 },
-  );
-  const adapter = createMcpAdapter({
-    id: 'stdio',
-    transport: {
-      type: 'stdio',
-      command: process.execPath,
-      args: [script],
-      cwd: directory,
-      env: {},
-    },
-    limits: { timeoutMs: 3000 },
-  });
-  const scope = adapter.scope('owned-stdio');
-  const tools = await scope.snapshotTools();
-  const f = await fixture(directory, {
-    modelId: 'fixed',
-    model: {
-      async *stream(request) {
-        if (request.messages.at(-1)?.role === 'user') {
-          yield { type: 'tool_call', id: 'stdio-call', name: tools[0]!.id, arguments: '{}' };
-          yield { ...finish, reason: 'tool_calls' };
-        } else {
-          yield finish;
-        }
-      },
-    },
-    extensions: [{ id: 'stdio', version: '1', apiMajor: 1, tools }],
-  });
-  try {
-    const s = await f.session('stdio');
-    const work = await f.start(s, 'actual stdio exit');
-    await f.finish(work.runId);
-    const tool = (await f.store.getView(s)).executions.find((v) => v.kind === 'tool');
-    check(e.assertions, 'stdio_exit_unknown', tool?.status ?? 'missing', 'outcome_unknown');
-    check(e.assertions, 'stdio_actual_wire', readFileSync(marker, 'utf8'), 'one actual call');
-    const before = (await f.store.getMetadata()).lastChangeCursor;
-    const original = await f.client.getCommand(work.commandId);
-    check(e.assertions, 'stdio_original_receipt', original?.id ?? 'missing', work.commandId);
-    check(
-      e.assertions,
-      'stdio_readonly_zero_write',
-      (await f.store.getMetadata()).lastChangeCursor,
-      before,
-    );
-  } finally {
-    await f.close();
-    await scope.release();
-    await adapter.close();
   }
 }

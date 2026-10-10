@@ -540,6 +540,7 @@ function verifyReport(
                 ...verifyMcpStdioJobHandoff(point.mcpStdioHandoff!, {
                   ownerPid: item.pid,
                   identities: point.identities ?? [],
+                  platform: value.environment.platform,
                 }),
               );
             }
@@ -589,10 +590,13 @@ function verifyReport(
             ...verifyMcpStdioJobHandoff(item.mcpStdioHandoff!, {
               ownerPid: item.pid,
               identities: item.identities ?? [],
+              platform: value.environment.platform,
             }),
           );
         } else if (item.points?.some((point) => Object.hasOwn(point, 'mcpStdioHandoff')))
           return ['mcp_stdio_handoff_invalid'];
+        if (formal && item.caseId === 'mcp_churn' && !Object.hasOwn(item, 'mcpStdioHandoff'))
+          errors.push('mcp_stdio_handoff_missing');
         if (
           formal &&
           item.caseId === 'runtime_sigkill_recovery' &&

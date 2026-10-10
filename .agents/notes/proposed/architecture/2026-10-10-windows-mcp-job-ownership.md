@@ -16,6 +16,8 @@ closed v3 明确 coverage=windows-job-members，保存有限原出生、退出�
 
 本提案保留 proposed：完整源码和本机控制流验证不替代实际 Windows Job／pipe／HANDLE、正式安装与维护恢复资格。当前事实归[MCP owner](../../../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)。
 
+原[Soak stdio调用者](../../../../tests/fixtures/unified-agent/soak/mcp-owned-stdio.ts)已切到同一Source／SQL Job／SDK和cold原结果，非macOS直接adapter回退删除。[纯交接校验](../../../../scripts/runtime/unified-soak-mcp-handoff.ts)按实际平台核原v3 FILETIME与ready→terminal连续性、root实际exit7、Job0、guardian实际exit0／reap／观察关闭及全部cold身份；formal缺交接拒绝。Windows ready尚未采样的activeProcesses:null不充作0。该调用者迁移源码不代Windows实际运行或全Runtime资源资格。
+
 ## Alternatives considered
 
 - 直接 Bun／Node spawn 后按 PID 归 Job：业务可在 assignment 前派生或退出，无法证明归属；采用 suspended 原 HANDLE assignment 后 resume。

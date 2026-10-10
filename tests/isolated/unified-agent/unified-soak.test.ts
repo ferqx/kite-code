@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
 import {
   parseUnifiedSoakArgs,
   prepareUnifiedSoakReportPath,
@@ -28,6 +29,10 @@ import {
   CONTINUOUS_SHELL_UNITS,
   type ContinuousEvidence,
 } from '../../../scripts/runtime/unified-soak-continuous';
+import {
+  type McpStdioJobHandoff,
+  verifyMcpStdioJobHandoff,
+} from '../../../scripts/runtime/unified-soak-mcp-handoff';
 import {
   FORMAL_DURATION_MS,
   GLOBAL_DEADLINE_MS,
@@ -253,7 +258,7 @@ test.skipIf(process.platform === 'win32')(
       expect(verifyUnifiedSoakReport(report, report.source, true)).toContain(
         'formal_duration_invalid',
       );
-      if (process.platform === 'darwin') {
+      if (['darwin', 'linux'].includes(process.platform)) {
         const mcp = report.attempts[0]!.cases!.find((item) => item.caseId === 'mcp_churn')!;
         expect(
           mcp.points!.every(
@@ -488,7 +493,252 @@ test('v2 matrix has fixed nested seven cases; legacy diagnostic never upgrades t
   expect(verifyUnifiedSoakReport(matrixPacket(), null, false)).toEqual([]);
   expect(verifyUnifiedSoakReport(packet(), null, true)).toContain('legacy_report_not_formal');
   expect(QUALIFICATION_MISSING.some((reason) => reason.includes('budget'))).toBe(false);
+  expect(verifyUnifiedSoakReport(matrixPacket(), null, true)).toContain(
+    'mcp_stdio_handoff_missing',
+  );
 });
+
+/** Synthetic port snapshots exercise cold checking, never native execution or qualification. */
+function nativeMcpHandoff(version: 2 | 3 | 4, ownerPid: number) {
+  const binding = {
+    originalStoreId: 'store',
+    sessionId: 'session',
+    executionId: 'connection-job',
+    serverId: 'server',
+    scopeId: JSON.stringify(['store', 'session', 'server']),
+    configDigest: 'a'.repeat(64),
+  };
+  let ready: McpStdioProcessEvidence;
+  let terminal: typeof ready;
+  if (version === 2) {
+    const record = (pid: number, parentPid: number) => ({
+      pid,
+      parentPid,
+      birth: { seconds: '100', microseconds: 1 },
+      exit: null,
+      kernelState: 'alive' as const,
+      unavailable: [],
+    });
+    ready = {
+      version: 2,
+      coverage: 'mcp-owned-coalition',
+      binding,
+      ownerPid,
+      broker: record(ownerPid + 1, ownerPid),
+      guardian: record(ownerPid + 2, 1),
+      server: record(ownerPid + 3, ownerPid + 2),
+      coalition: {
+        id: '1',
+        guardianUniqueId: '2',
+        guardianPidVersion: 1,
+        claimTaskCount: 1,
+        terminalTaskCount: null,
+        processTreeStopped: false,
+        label: 'com.kitecode.mcp.00000000-0000-0000-0000-000000000000',
+        domain: 'user/501',
+        registrationRemoved: false,
+      },
+    };
+    terminal = structuredClone(ready);
+    for (const role of ['broker', 'guardian', 'server'] as const)
+      terminal[role]!.kernelState = 'absent';
+    terminal.broker!.exit = { code: 0, signal: null, reaped: true };
+    terminal.server!.exit = { code: 7, signal: null, reaped: true };
+    Object.assign(terminal.coalition!, {
+      terminalTaskCount: 1,
+      processTreeStopped: true,
+      registrationRemoved: true,
+    });
+  } else if (version === 3) {
+    ready = {
+      version: 3,
+      coverage: 'windows-job-members',
+      binding,
+      ownerPid,
+      guardian: {
+        pid: ownerPid + 1,
+        parentPid: ownerPid,
+        creationTime: '100',
+        exit: null,
+        kernelState: 'alive',
+        observationClosed: false,
+      },
+      server: { pid: ownerPid + 2, creationTime: '101', exitCode: null, waitConfirmed: false },
+      job: { activeProcesses: null, treeStopped: false },
+      closed: false,
+      closeUnknown: false,
+    };
+    terminal = structuredClone(ready);
+    Object.assign(terminal.guardian!, {
+      exit: { code: 0, signal: null, reaped: true },
+      kernelState: 'dead',
+      observationClosed: true,
+    });
+    Object.assign(terminal.server!, { exitCode: 7, waitConfirmed: true });
+    terminal.job = { activeProcesses: 0, treeStopped: true };
+    terminal.closed = true;
+  } else {
+    ready = {
+      version: 4,
+      coverage: 'mcp-owned-pid-namespace',
+      binding,
+      ownerPid,
+      process: {
+        version: 1,
+        coverage: 'linux-pid-namespace',
+        ownerPid,
+        admission: { nonce: 'original-stdio-nonce', purpose: 'stdio' },
+        wrapper: {
+          pid: ownerPid + 1,
+          parentPid: ownerPid,
+          birth: '100',
+          exit: null,
+          closed: false,
+          stdoutEof: false,
+          stderrEof: false,
+        },
+        namespace: {
+          dev: '0',
+          ino: '400',
+          init: {
+            pid: ownerPid + 2,
+            parentPid: ownerPid + 1,
+            birth: '101',
+            localPid: 1,
+            dead: false,
+          },
+          root: {
+            pid: ownerPid + 3,
+            parentPid: ownerPid + 2,
+            birth: '102',
+            localPid: 2,
+            dead: false,
+            waitReceipt: null,
+          },
+          treeStopped: false,
+        },
+        phase: 'ready',
+        fdClosed: false,
+        closeUnknown: false,
+      },
+    };
+    terminal = structuredClone(ready);
+    terminal.process.phase = 'terminal';
+    terminal.process.fdClosed = true;
+    Object.assign(terminal.process.wrapper, {
+      exit: { code: 0, signal: null, reaped: true },
+      closed: true,
+      stdoutEof: true,
+      stderrEof: true,
+    });
+    terminal.process.namespace!.treeStopped = true;
+    terminal.process.namespace!.init.dead = true;
+    Object.assign(terminal.process.namespace!.root!, {
+      dead: true,
+      waitReceipt: {
+        localPid: 2,
+        code: 7,
+        signal: null,
+        rawStatus: 1792,
+        waitConfirmed: true,
+        reaped: true,
+      },
+    });
+  }
+  const handoff: McpStdioJobHandoff = {
+    version: 1,
+    coverage: 'original-mcp-stdio-job',
+    binding,
+    ownerPid,
+    connectionCommandId: 'connection-command',
+    runCommandId: 'run-command',
+    runId: 'run',
+    connectExecutionId: 'connect-tool',
+    callExecutionId: 'call-tool',
+    ready,
+    terminal,
+    cold: {
+      storeId: 'store',
+      cursor: '99',
+      unchanged: true,
+      providerCallsBefore: 4,
+      providerCallsAfter: 4,
+      originalResultUnchanged: true,
+      originalOutputUnchanged: true,
+      originalCommandUnchanged: true,
+      originalRunUnchanged: true,
+    },
+  };
+  const identities = (
+    [
+      ['connection-job', 'connection-command', null],
+      ['connect-tool', 'run-command', 'run'],
+      ['call-tool', 'run-command', 'run'],
+    ] as const
+  ).map(([executionId, commandId, runId]) => ({
+    storeId: 'store',
+    sessionId: 'session',
+    executionId,
+    commandId,
+    runId,
+  }));
+  return { handoff, identities };
+}
+
+for (const [platform, version] of [
+  ['win32', 3],
+  ['linux', 4],
+] as const)
+  test(`formal MCP handoff preserves ${platform} original owner and cold result`, () => {
+    const { handoff, identities } = nativeMcpHandoff(version, 13);
+    const expected = { ownerPid: 13, identities, platform };
+    expect(verifyMcpStdioJobHandoff(handoff, expected)).toEqual([]);
+    expect(verifyMcpStdioJobHandoff(handoff, { ...expected, platform: 'darwin' })).toContain(
+      'mcp_stdio_handoff_invalid',
+    );
+    const substituted = structuredClone(handoff),
+      unclosed = structuredClone(handoff),
+      wrongExit = structuredClone(handoff);
+    if (
+      substituted.terminal.version === 3 &&
+      unclosed.terminal.version === 3 &&
+      wrongExit.terminal.version === 3
+    ) {
+      substituted.terminal.server!.creationTime = '999';
+      unclosed.terminal.guardian!.observationClosed = false;
+      wrongExit.terminal.server!.exitCode = 0;
+    } else if (
+      substituted.terminal.version === 4 &&
+      unclosed.terminal.version === 4 &&
+      wrongExit.terminal.version === 4
+    ) {
+      substituted.terminal.process.namespace!.ino = '999';
+      unclosed.terminal.process.phase = 'unknown';
+      unclosed.terminal.process.fdClosed = false;
+      wrongExit.terminal.process.namespace!.root!.waitReceipt!.code = 0;
+      wrongExit.terminal.process.namespace!.root!.waitReceipt!.rawStatus = 0;
+    } else throw Error('synthetic_mcp_version_invalid');
+    for (const invalid of [substituted, unclosed, wrongExit])
+      expect(verifyMcpStdioJobHandoff(invalid, expected)).toContain('mcp_stdio_handoff_invalid');
+    const changedCold = structuredClone(handoff);
+    Object.assign(changedCold.cold, { originalOutputUnchanged: false });
+    expect(verifyMcpStdioJobHandoff(changedCold, expected)).toContain(
+      'mcp_stdio_handoff_cold_invalid',
+    );
+    const report = matrixPacket(),
+      item = report.attempts[0]!.cases!.find((row) => row.caseId === 'mcp_churn')!;
+    report.environment.platform = platform;
+    item.pid = 13;
+    item.identities = identities;
+    item.mcpStdioHandoff = handoff;
+    for (const point of item.points!)
+      Object.assign(point, { identities, mcpStdioHandoff: handoff });
+    expect(verifyUnifiedSoakReport(reseal(report), null, false)).toEqual([]);
+    delete item.points![1]!.mcpStdioHandoff;
+    expect(verifyUnifiedSoakReport(reseal(report), null, false)).toContain(
+      'mcp_stdio_handoff_invalid',
+    );
+  });
 for (const mode of [
   'missing',
   'duplicate',
@@ -642,6 +892,13 @@ function blockedCollectionPacket() {
           }
         : {}),
     }));
+    if (item.caseId === 'mcp_churn') {
+      const { handoff, identities } = nativeMcpHandoff(2, item.pid);
+      item.identities = identities;
+      item.mcpStdioHandoff = handoff;
+      for (const point of item.points)
+        Object.assign(point, { identities, mcpStdioHandoff: handoff });
+    }
   }
   const hash = (text: string | Uint8Array) => createHash('sha256').update(text).digest('hex');
   const bytes = Buffer.alloc(65536, 16);

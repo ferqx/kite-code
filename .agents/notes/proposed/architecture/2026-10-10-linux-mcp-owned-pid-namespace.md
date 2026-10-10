@@ -20,6 +20,8 @@ Profile 或已批准 Workspace 的本地 MCP 声明需要通过正式 Service、
 
 完整源码已接正式消费者，本机 mock、纯 codec 与 macOS 封装邻接只证明其实际范围；Linux 原生与 installed 资格尚未交付，故保留 proposed。当前事实归[MCP owner](../../../../packages/agent/src/mcp/README.md#linux-stdio-所属-namespace)与[Service owner](../../../../apps/service/README.md)。
 
+原[Soak stdio调用者](../../../../tests/fixtures/unified-agent/soak/mcp-owned-stdio.ts)现也从同候选built leaf取得init，沿同一Source／SQL Job／SDK→实际exit7→完整cold原结果；非macOS直接adapter回退删除。[纯交接校验](../../../../scripts/runtime/unified-soak-mcp-handoff.ts)按实际平台核原v4 nonce／wrapper／namespace devino／init-root birth及localPid连续性、root wait7／raw1792、wrapper实际exit0／双EOF／FD全闭；formal缺交接拒绝。原Source关闭unknown保cleanup false，不由相邻fixture关闭覆盖。这份原Job证据不代Linux实际运行或全Runtime资源资格。
+
 ## Alternatives considered
 
 - 复用旧 POSIX PGID／按 PPID 枚举和数值 kill：不能证明转组、reparent 或重用后的完整归属，采用原 namespace／pidfd 和 init 的真实空树证明。

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
-import { mcpStdioGuardianAsset } from '@kite-ai/agent/mcp';
+import { mcpStdioGuardianAsset, mcpStdioLinuxAssets } from '@kite-ai/agent/mcp';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { CLIServiceArtifact } from '@kite-ai/cli/host';
 import { createClient } from '@kite-ai/client';
@@ -383,6 +383,7 @@ export async function runCaseMatrix(root: string, cycles: number, artifact: CLIS
             ? {
                 guardianPath: mcpStdioGuardianAsset(),
                 bunExecutable: artifact.executable,
+                ...(process.platform === 'linux' ? { linux: mcpStdioLinuxAssets() } : {}),
               }
             : undefined,
         );

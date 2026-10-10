@@ -4283,3 +4283,41 @@ Agent构建及公开built-leaf locator实际通过，Root与八runtime workspace
 | 4 | 完整能力和正式caller的§35审查、最终旧路径退役及阶段收束 | 所有适用37能力、T/E和兼容样本独立核验，实际legacy删除、未过滤完整回归及适用P7发布责任取得真实结果 | 前三项完整资格；D08首发前暂无适用新基线published T029样本不阻独立源码，局部绿不退出阶段 |
 
 新增闭合的是Linux正式Source连接的完整owner／SDK／cold源码与最后wire／资源关闭缺口；本机限定证据已取得，Linux真实用户能力资格仍pending。37能力继续partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。本轮仅已授权正常本地stage／commit，无push／PR／发布。
+
+## 2026-10-10：三平台 MCP 正式 Soak 调用者迁移
+
+基于本地 `bc88b30f7ff366a3e8ac7aa744551b6c7db5b320`／干净durable checkout继续原V1.3目标。先核真实阶段依赖与安装、版本、维护源码：Terminal install／rollback／uninstall沿 `terminal-bundle.ts` 552／614／639分派Windows owner，Native沿 `native-install.ts` 232／311／351及正式前门；maintenance backup／restore／GC保公共原resource收束和Windows分支。限定审查未发现新的独立完整安装／维护源码缺口；已有源码不代各系统实机资格。原RSS +115.203125MiB／32MiB red、八outer／九点、全部可信Runtime后代／activeResources／handles缺项仍直接阻P6／§35／最终退役，不是独立安装／版本／维护／连接实现的前置。本轮不重开已结束Daemon切片，不再参数或资源归因实验。
+
+### 实际用户入口、正式迁移与退役
+
+连续普通任务通过Profile／已批准Workspace的本地MCP声明取得工具。原[完整mcp_churn调用者](../../tests/fixtures/unified-agent/soak/cases.ts)先保原HTTP catalogue／drift／release，stdio部分现于三平台统一沿[默认Source夹具](../../tests/fixtures/unified-agent/soak/mcp-owned-stdio.ts)的 `mcp.json` →sources.list→mcp.connect→SQL connection Job→实际SDK发现→原远端Tool→真实server exit7→原Tool outcome_unknown→完整原Command／Run／Execution／output／View／reference和cursor冷读零Provider重放。非macOS原 `stdioProtocolDiagnostic` 直接adapter回退已实际删除；四项原行为断言归入同一正式链，未删assertion／case或放宽预算。正式owner失败、缺资产或后端不转诊断，不availability skip。
+
+[compiled probe](../../scripts/runtime/unified-soak-probe.ts)以父runner同candidate的原Bun与public built-leaf guardian／Linux init定位资产，包外probe仍packages:external且node_modules指向准确原candidate，没有源码／现场build fallback。源码整文件仅Linux MCP case显式载入实际dist leaf helper，不以 `.ts` helper猜路径。未变的Source许可、SQL／public DTO、SDK完整结果、Linux／Windows native owner及安装／维护算法继续使用上一提交证据；产品入口与行为未变，手册Extensions核对后不制造diff。
+
+[纯原Job交接校验](../../scripts/runtime/unified-soak-mcp-handoff.ts)保持closed v1 handoff格式和六binding／原三个Execution与独立operation Command关系；Mac v2全部原ready→terminal三角色、birth／实际reap与coalition条件原样抽分支。新增Win v3核同guardian／server PID及FILETIME、ready真实alive而非ended、root实际exit7／wait、Job0／全闭和guardian实际exit0／reap／原观察关闭。ready的Job active未采样时可null，不把null当0；terminal须实际0。Linux v4核同nonce、wrapper原PID／父链／birth、namespace devino、init／root birth／host与localPID连续性，ready全未结束，terminal原root wait7／raw1792、原wrapper实际exit0／close／双EOF、两原pidfd死亡／空树／原FD全闭。纯decode不取得新HANDLE／pidfd、控制权或RPC。
+
+[报告](../../scripts/runtime/unified-soak-report.ts)对top和每个point传实际platform，错平台不能借另一版本；全部point必须有同本点原identity，top只重复首point，formal缺原Job交接拒绝。旧无字段CI保原diagnostic范围，旧v1不升级formal；synthetic v2／v3／v4只证明cold verifier，不当native运行。独立审查还发现新的调用者清理事实错误：原native owner失败后，旧mock fixture关闭会无条件写cleanupConfirmed=true；现仅原Source完整返回、相邻资源也正常关闭后保true，unknown不被旧adapter关闭覆盖，真实失败及清理错误保持。该有限原MCP Job交接不补全Runtime census，不改RSS／资源阈值、点数、时长或formal其他门禁。
+
+### 必要验证与证据范围
+
+原五类完整场景 `bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/unified-soak-cases.test.ts` 最终实际 **5 pass／22 expect／0 fail／4.79s**，MCP582ms，日志 `/private/tmp/kite-mcp-soak-caller-cleanup-final-20261011.log`，SHA `827f4e29fe860a7d0477b3d95a784743c7e38dfdeae73f81bab3a679f35c8809`。原全部check labels、六个expect语句及180000ms每例预算保持，`/private/tmp/kite-mcp-soak-caller-final-freeze-20261011.json`记录最终四caller输入与各原log SHA。轻修前同whole5／22两次绿仅属各自输入，不重复为新增能力。普通sandbox首轮真实0pass／5fail均在loopback listen0准入前失败，日志 `/private/tmp/kite-mcp-soak-caller-whole-sandbox-20261011.log`保留；仅这份完整文件按必要本机loopback／原ownedlaunchd权限复验，没有扩大旧故障矩阵。
+
+受影响报告整文件 `bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/unified-soak.test.ts` 经必要本机权限最终actual0，**46 pass／157 expect／0 fail／50.27s**，日志 `/private/tmp/kite-mcp-soak-report-whole-native-20261011.log`。包含原完整source-free候选、全部七类两点CI及原有界qualification拒绝／SIGKILL恢复、全部原报告断言；原180秒整例／150秒runner deadline不变。新增两个synthetic平台整例核原身份替换／strict close／错exit7／错平台／cold输出和point遗漏，原blocked-collection synthetic补准确v2交接以满足新的必要formal gate，原断言全保、不改RSS阈值／增长算法或资格过滤集。Root新platform接口初次types真实两处TS2552未定义局部变量已准确修正，日志 `/private/tmp/kite-mcp-soak-root-types-first-20261011.log`；正常Root＋八workspace final types actual0，日志 `/private/tmp/kite-mcp-soak-root-eight-types-20261011.log`，七TS只读Biome／docs／all-impact／boundary／workspace／API／test-owner／plan门禁均实际通过。
+
+普通sandbox报告整文件先收束actual1，**44 pass／2 fail／135 expect／302.87s**，两条原source-free链在约150秒runner deadline保failed且attempts为空，日志 `/private/tmp/kite-mcp-soak-report-whole-sandbox-20261011.log`；准确失败candidate `c6006eeebf2ec96e7de5cde26320303242439091c172141277ab39f2774354b0`、两probe SHA和sealed report digest留原log。第一链执行期间相邻caller清理字段仍在修正，两个原probe SHA不同；该红不宣称最终freeze输入，不改写为绿。确认原exec实际exit1后，仅同一未过滤报告文件取得loopback／私有原candidate／所属launchd权限复验，无修改原断言、deadline、业务配置或runner算法。最终绿只覆盖准确最终输入及本机范围；旧Mac stdio2pass／5fail保留、不重开故障矩阵。两份完整文件共51项／179Bun expect也不拼作wholeDefault。
+
+Windows／Linux实际native和installed资格未运行，依用户顺序留重构后Actions，本机不安装环境或dispatch。原RSS／参数对照、8outer／九点full资源采集未运行；原bounded报告完整文件只因本片caller和verifier变化而复验，qualification仍真实拒绝完整资源资格。阶段收束点未到，不把局部整文件通过拼为wholeDefault／wholeV13。正常本地stage／commit及独立hooks仍执行，输入和原失败日志保留。
+
+当前owner、Runtime resilience active、测试入口、Linux／Windows proposed Note、能力映射及本计划同步调用者现状；两平台Note保proposed，Mac原旧stdio红与前轮自动审批拒绝不由本片改写。边界／API／workspace未变，核对相应合同后不制造额外diff。
+
+### 最多五项剩余阶段退出依赖
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与明确验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Linux installed持续普通任务／Shell／child的正式default producer仍Darwin-only | 保原两Service、父子Run／真实Shell完整Command与输出、准确取消、相同Store原result／startup reference／cursor冷读零重放；新增严格独立namespace receipt消费，原忙碌工作量和预算不减 | `continuous.ts` 359–360及 `continuous-default-shell.ts` 52仍拒非Mac，producer／continuous decoder只读coalition；已实现Linux正式Shell owner可独立接入，不依赖Windows permissions／RSS。下一最高可实施项 |
+| 2 | Windows installed普通Shell及调用Shell的Task／Workflow | 原Workspace／Full读写、广泛HOME读取与无条件private内容deny／runtime资产和祖先保护，完整输出、准确全树取消与unknown保资源、cold原结果零重放 | 真实完整权限后端仍缺，既有WRITE_RESTRICTED／Full token与目录HANDLE／AppContainer参考不足以组成该完整合同；guard保留、不改产品读范围；独立于RSS |
+| 3 | Win/Linux正式installed CLI／TUI／Daemon／Native安装、真实跨代码A→B→A、维护新Store与MCP完整消费者 | 原准确候选install／rollback／uninstall、真实PTY／窗口、backup／restore／GC与新Store完整原结果／cursor零重放、实际Source SDK／cancel／close沿完整common与formal用例 | 当前限定源码审查未发现独立安装／版本／维护缺口；仍需前两项适用源码及对应OS真实资产／运行和全部正式消费者，依用户顺序重构后Actions，无dispatch |
+| 4 | installed持续普通任务／Shell／child／MCP资源资格 | 原RSS增长／斜率、八outer／九点、全部可信Runtime后代／activeResources／handles真实满足；本轮Source Job caller在对应系统真实运行 | 正式MCP caller源码缺口已迁入原Job，native资格仍pending；有限Job证明不代全Runtime census，原资源red／unknown直接阻P6／§35／最终退役，不阻独立安装／维护实现 |
+| 5 | §35完整能力／正式caller审查、最终旧路径退役与阶段收束 | 所有适用37能力及完整T/E／兼容样本独立核验、实际legacy删除、未过滤完整回归及适用P7责任取得真实证据 | 前四项适用资格，首发前D08暂无适用新基线published T029样本不阻独立源码；局部绿不退出阶段 |
+
+本轮新增的是三平台正式MCP连续任务调用者源码、非macOS直接stdio诊断路径退役和准确native／cold交接／清理事实门禁；本机有限证据不证明两平台运行或完整资源资格。37能力仍partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active，仅已授权本地正常stage／commit，无push／PR／发布。

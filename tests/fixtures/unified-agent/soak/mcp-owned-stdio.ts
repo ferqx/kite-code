@@ -10,12 +10,14 @@ import { type AgentClient, createClient, ExecutionOutputPages } from '@kite-ai/c
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import type { CaseEvidence } from '../../../../scripts/runtime/unified-soak-cases';
+import { verifyMcpStdioJobHandoff } from '../../../../scripts/runtime/unified-soak-mcp-handoff';
 import { check, until } from './common';
 
 /** Trusted original artifact assets; there is deliberately no source/build fallback. */
 export interface McpSoakStdioAssets {
   guardianPath: string;
   bunExecutable: string;
+  linux?: { initExecutable: string; bubblewrapPath: string };
 }
 async function output(client: AgentClient, executionId: string) {
   const pages = new ExecutionOutputPages(executionId);
@@ -40,6 +42,18 @@ const object = (value: unknown): Record<string, unknown> =>
 
 export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: McpSoakStdioAssets) {
   if (![assets.guardianPath, assets.bunExecutable].every(isAbsolute))
+    throw Error('mcp_stdio_owned_assets_invalid');
+  const expectedVersion =
+    process.platform === 'darwin'
+      ? 2
+      : process.platform === 'win32'
+        ? 3
+        : process.platform === 'linux'
+          ? 4
+          : 0;
+  if (!expectedVersion || (expectedVersion === 4 && !assets.linux))
+    throw Error('mcp_stdio_owned_assets_missing');
+  if (assets.linux && !Object.values(assets.linux).every(isAbsolute))
     throw Error('mcp_stdio_owned_assets_invalid');
   const directory = join(root, 'stdio');
   mkdirSync(directory, { mode: 0o700 });
@@ -259,7 +273,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
               binding,
               process.pid,
             );
-            if (evidence?.version === 2) return evidence;
+            if (evidence?.version === expectedVersion) return evidence;
           }
           return undefined;
         },
@@ -279,8 +293,8 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
         binding,
         process.pid,
       );
-      check(e.assertions, 'stdio_terminal_owned_receipt', terminal?.version ?? 0, 2);
-      if (!ready || !terminal || terminal.version !== 2)
+      check(e.assertions, 'stdio_terminal_owned_receipt', terminal?.version ?? 0, expectedVersion);
+      if (!ready || !terminal || terminal.version !== expectedVersion)
         throw Error('mcp_stdio_owned_receipt_missing');
       const complete = await client.getView(sessionId);
       const connect = complete.executions.find((row) => row.id === job.parentExecutionId);
@@ -428,6 +442,16 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
             originalRunUnchanged: true,
           },
         };
+        check(
+          e.assertions,
+          'stdio_original_complete_handoff',
+          verifyMcpStdioJobHandoff(e.mcpStdioHandoff, {
+            ownerPid: process.pid,
+            platform: process.platform,
+            identities: e.identities,
+          }).length,
+          0,
+        );
       } catch (error) {
         coldErrors.push(error);
       } finally {
