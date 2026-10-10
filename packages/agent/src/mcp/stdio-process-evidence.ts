@@ -17,7 +17,7 @@ export {
 export type { McpStdioLinuxEvidence } from './linux-stdio-process-evidence';
 export type McpStdioProcessIdentity = OwnedProcessIdentity;
 export type McpStdioProcessRecord = OwnedProcessRecord;
-export interface McpStdioProcessEvidenceV1 {
+export interface McpStdioGuardianServerEvidence {
   version: 1;
   coverage: 'guardian-and-server-only';
   binding: {
@@ -43,10 +43,10 @@ export interface McpStdioCoalitionEvidence {
   domain: string;
   registrationRemoved: boolean;
 }
-export interface McpStdioProcessEvidenceV2 {
+export interface McpStdioOwnedCoalitionEvidence {
   version: 2;
   coverage: 'mcp-owned-coalition';
-  binding: McpStdioProcessEvidenceV1['binding'];
+  binding: McpStdioGuardianServerEvidence['binding'];
   ownerPid: number;
   broker: McpStdioProcessRecord | null;
   /** launchd owns this process; its disappearance is not a parent-observed reap. */
@@ -57,7 +57,7 @@ export interface McpStdioProcessEvidenceV2 {
 export interface McpStdioWindowsEvidence {
   version: 3;
   coverage: 'windows-job-members';
-  binding: McpStdioProcessEvidenceV1['binding'];
+  binding: McpStdioGuardianServerEvidence['binding'];
   ownerPid: number;
   guardian: {
     pid: number;
@@ -78,15 +78,15 @@ export interface McpStdioWindowsEvidence {
   closeUnknown: boolean;
 }
 export type McpStdioProcessEvidence =
-  | McpStdioProcessEvidenceV1
-  | McpStdioProcessEvidenceV2
+  | McpStdioGuardianServerEvidence
+  | McpStdioOwnedCoalitionEvidence
   | McpStdioWindowsEvidence
   | McpStdioLinuxEvidence;
 
 /** Closed Windows receipt; never reconstructs a process or Job HANDLE on cold read. */
 function decodeWindowsEvidence(
   value: McpStdioWindowsEvidence,
-  binding: McpStdioProcessEvidenceV1['binding'],
+  binding: McpStdioGuardianServerEvidence['binding'],
   ownerPid?: number,
 ): McpStdioWindowsEvidence | undefined {
   const exact = (row: object, fields: string) => Object.keys(row).sort().join(',') === fields;
@@ -199,7 +199,7 @@ export function decodeMcpStdioProcessEvidence(
       return decodeMcpStdioLinuxEvidence(value, binding, ownerPid);
     if ((value as { version?: unknown } | null)?.version === 3)
       return decodeWindowsEvidence(value as McpStdioWindowsEvidence, binding, ownerPid);
-    const data = value as McpStdioProcessEvidenceV1 | McpStdioProcessEvidenceV2;
+    const data = value as McpStdioGuardianServerEvidence | McpStdioOwnedCoalitionEvidence;
     if (
       !data ||
       !(

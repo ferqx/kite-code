@@ -25,15 +25,43 @@ const workspaces = [
 ] as const;
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-/** Verify the one source entry added after this predecessor; never rewrite its manifest. */
+/** Verify exact source entries added after this predecessor; never rewrite its manifests. */
 export function matchTerminalPredecessorInput(
   path: string,
   previous: Uint8Array,
   current: Uint8Array,
-): 'identical' | 'process_observation_source_entry' | undefined {
+):
+  | 'identical'
+  | 'process_observation_source_entry'
+  | 'windows_native_bootstrap_source_entry'
+  | undefined {
   const oldBytes = Buffer.from(previous),
     currentBytes = Buffer.from(current);
   if (oldBytes.equals(currentBytes)) return 'identical';
+  if (path === 'apps/service/package.json') {
+    const original = oldBytes.toString('utf8'),
+      exportAnchor = '    "./native-runtime-assets": "./src/native-runtime-assets.ts",\n',
+      buildAnchor = ' ./src/native-runtime-assets.ts ./src/runtime-protection.ts ';
+    if (
+      original.includes('windows-native-bootstrap') ||
+      original.split(exportAnchor).length !== 2 ||
+      original.split(buildAnchor).length !== 2
+    )
+      return undefined;
+    // 21eb43d8 added exactly this export/build pair; dependency and other bytes stay exact.
+    const expected = original
+      .replace(
+        exportAnchor,
+        `${exportAnchor}    "./windows-native-bootstrap": "./src/windows-native-bootstrap.ts",\n`,
+      )
+      .replace(
+        buildAnchor,
+        ' ./src/native-runtime-assets.ts ./src/windows-native-bootstrap.ts ./src/runtime-protection.ts ',
+      );
+    return Buffer.from(expected).equals(currentBytes)
+      ? 'windows_native_bootstrap_source_entry'
+      : undefined;
+  }
   if (path !== 'packages/agent/package.json') return undefined;
   const original = oldBytes.toString('utf8'),
     exportAnchor = '    "./resources": "./src/resources.ts",\n',
@@ -155,7 +183,10 @@ export async function materializeTerminalPredecessor(input: {
     path: string;
     sha256: string;
     currentSha256: string;
-    match: 'identical' | 'process_observation_source_entry';
+    match:
+      | 'identical'
+      | 'process_observation_source_entry'
+      | 'windows_native_bootstrap_source_entry';
   }[] = [];
   for (const path of inputs) {
     if (!inside(repository, resolve(repository, path)))

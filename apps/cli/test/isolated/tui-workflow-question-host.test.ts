@@ -84,10 +84,18 @@ await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned'
       const detail = 'original explicit user instruction';
       const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b''
-def wait(text):
+def latest_answer_ready(text):
+ start=buffer.rfind(b'\\x1b[?2026h')
+ if start<0:return False
+ end=buffer.find(b'\\x1b[?2026l',start)
+ if end<0:return False
+ frame=re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer[start:end].decode(errors='replace'))
+ lines=[line.strip() for line in frame.splitlines()]
+ return 'Session s · Waiting for answer' in lines and 'Question 2/2' in lines and 'Answer > '+text in lines
+def wait(text,latest_ready=False):
  global buffer
  deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
+ while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))) or (latest_ready and not latest_answer_ready(text)):
   if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
   if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
 def key(value):
@@ -135,7 +143,7 @@ try:
   if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
  key(b'\\x11')`
      : `card('question');wait('Question 1/2 · Selection: No selection (Enter has no answer)');key(b'\\x1b[B' * ${decision === 'replan' ? 1 : 2});wait('Question 1/2 · Selection: ${decision === 'replan' ? 1 : 2}');key(b'\\r')
- wait('Question 2/2');key(${JSON.stringify(detail)}.encode());wait(${JSON.stringify(detail)});key(b'\\r');wait('interaction.answer: unknown')
+ wait('Question 2/2');key(${JSON.stringify(detail)}.encode());wait(${JSON.stringify(detail)},latest_ready=True);key(b'\\r');wait('interaction.answer: unknown')
  key(b'\\x0c');deadline=time.monotonic()+10
  while not os.path.exists(${JSON.stringify(join(f.root, 'first-get-lost'))}):
   if time.monotonic()>deadline:raise RuntimeError('original question answer GET loss not confirmed')

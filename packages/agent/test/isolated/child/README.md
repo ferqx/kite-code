@@ -14,6 +14,6 @@
 
 绑定切片不声明默认 Service child 配置或 task 满容量立即失败已实现；也不把固定模型断言当作真实付费 Provider 或 SIGKILL reviewer 资格。
 
-[deadline-store.test.ts](deadline-store.test.ts)与 [deadline-runtime.test.ts](deadline-runtime.test.ts)验证后续已实现的 child 持久固定 30 分钟期限、只读重开、最终派发拒绝与实际 macOS 取消；夹具只在私有库成对调整激活/期限，不给生产期限加公开短配置。真实等待 30 分钟的资格未运行，Store/Core 的期限边界见 [owner 说明](../../../src/storage/sqlite/child/README.md)。
+[deadline-store.test.ts](deadline-store.test.ts)与 [deadline-runtime.test.ts](deadline-runtime.test.ts)验证后续已实现的 child 持久固定 30 分钟期限、只读重开、最终派发拒绝与实际 macOS 取消；夹具只在私有库成对调整激活/期限，不给生产期限加公开短配置。这份默认短窗口不代完整30分钟资格，Store/Core 的期限边界及既有独立长窗口见 [owner 说明](../../../src/storage/sqlite/child/README.md)。第二私有SQLite写连接采用正式writer已有的native busy_timeout=1000，仅等待原paired UPDATE的短WAL竞争；原Date.now()+500仍在UPDATE前计算，等待计入期限，不扩5秒整例／fact预算、不重发activation。2026-10-11原三整例3pass／26expects／1.285s与真实SQLITE_BUSY／unknown现场归[本轮进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，生产取消及未确认清理合同不变。
 
 显式完整 30 分钟资格脚本为 [child-deadline-soak.ts](../../../../../tests/fixtures/unified-agent/child-deadline-soak.ts)，用 `bun tests/fixtures/unified-agent/child-deadline-soak.ts` 单独启动，不进入默认 suite。它不改 deadline/Date.now 或公开短配置：固定 child 的第二次实际 Model 保存 partial 后等待真实 signal，attached/detached 无害 Job 验证取消域，root Run 已完成且 deadline 为 null。进程向私有临时目录 report.json 写有限启动/终态事实，完成后准确清理自身 Job 并关闭 Runtime；必须读取最终报告和退出码才能声明本机完整期限资格，waiting 不等于 passed。

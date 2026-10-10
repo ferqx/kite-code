@@ -138,35 +138,45 @@ export function createArtifactStore(options: {
       );
       const digest = createHash('sha256');
       let size = 0n;
+      let writerClosed = false;
+      let temporaryExists = true;
       try {
-        for await (const chunk of content) {
-          signal?.throwIfAborted();
-          if (!(chunk instanceof Uint8Array)) throw new AgentError('artifact_chunk_invalid');
-          for (let start = 0; start < chunk.byteLength; start += artifactChunkBytes) {
+        try {
+          for await (const chunk of content) {
             signal?.throwIfAborted();
-            const part = Uint8Array.from(chunk.subarray(start, start + artifactChunkBytes));
-            size += BigInt(part.byteLength);
-            if (size > 9223372036854775807n) throw new AgentError('artifact_size_invalid');
-            digest.update(part);
-            let offset = 0;
-            while (offset < part.byteLength) {
-              const written = writeSync(fd, part, offset, part.byteLength - offset);
-              if (!written) throw new AgentError('artifact_write_incomplete');
-              offset += written;
+            if (!(chunk instanceof Uint8Array)) throw new AgentError('artifact_chunk_invalid');
+            for (let start = 0; start < chunk.byteLength; start += artifactChunkBytes) {
+              signal?.throwIfAborted();
+              const part = Uint8Array.from(chunk.subarray(start, start + artifactChunkBytes));
+              size += BigInt(part.byteLength);
+              if (size > 9223372036854775807n) throw new AgentError('artifact_size_invalid');
+              digest.update(part);
+              let offset = 0;
+              while (offset < part.byteLength) {
+                const written = writeSync(fd, part, offset, part.byteLength - offset);
+                if (!written) throw new AgentError('artifact_write_incomplete');
+                offset += written;
+              }
             }
           }
+          signal?.throwIfAborted();
+          fchmodSync(fd, 0o400);
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+          writerClosed = true;
         }
-        signal?.throwIfAborted();
         const hash = digest.digest('hex');
         const target = artifactPath(access.profilePath, hash);
         privateDirectory(dirname(target));
-        fchmodSync(fd, 0o400);
-        fsyncSync(fd);
         try {
           linkSync(temp, target);
         } catch (error) {
           if ((error as { code?: string }).code !== 'EEXIST') throw error;
         }
+        // Removing the same-inode temporary changes ctime; finish it before verification/registration.
+        unlinkSync(temp);
+        temporaryExists = false;
         verifyPublishedArtifact(access.profilePath, hash, String(size));
         const directory = openSync(
           dirname(target),
@@ -179,8 +189,7 @@ export function createArtifactStore(options: {
         }
         return await options.store.registerArtifact({ ...sealed, hash, size: String(size) });
       } finally {
-        closeSync(fd);
-        unlinkSync(temp);
+        if (writerClosed && temporaryExists) unlinkSync(temp);
       }
     });
   }

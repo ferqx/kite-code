@@ -1,10 +1,10 @@
 import type { LinuxOwnedProgramEvidence } from '../platform/process/linux-owned-program';
-import type { McpStdioProcessEvidenceV1 } from './stdio-process-evidence';
+import type { McpStdioGuardianServerEvidence } from './stdio-process-evidence';
 
 export interface McpStdioLinuxEvidence {
   version: 4;
   coverage: 'mcp-owned-pid-namespace';
-  binding: McpStdioProcessEvidenceV1['binding'];
+  binding: McpStdioGuardianServerEvidence['binding'];
   ownerPid: number;
   process: LinuxOwnedProgramEvidence;
 }

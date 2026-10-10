@@ -67,7 +67,11 @@ mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-ins
 }));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-path-security.ts'))}, () => ({
   privateDirectory() {},
-  defaultWindowsPathSecurity() { return { verifyDirectory() {}, readScopeFile() { return Buffer.from(a + '\\n' + b + '\\n'); } }; },
+  defaultWindowsPathSecurity() { return { verifyDirectory() {}, readScopeFile(filename) {
+    if (filename.endsWith('/active')) return Buffer.from(a + '\\n' + b + '\\n');
+    if (filename.endsWith('/.kite-cli-registration.json')) return null;
+    throw Error('unexpected-scope-read:' + filename);
+  } }; },
 }));
 mock.module(${JSON.stringify(modulePath('apps/cli/host/windows-terminal-installation.ts'))}, () => ({
   readWindowsTerminalInstallation(root) { return { root, bootstrap: { candidateId: a, files: [] } }; },
@@ -119,7 +123,7 @@ mock.module('node:path', () => ({ ...path, ...path.posix }));
 const id = 'a'.repeat(64), regions = new Set(), events = [];
 let failScope = true;
 const original = Error('original-attachment-rejected'), cleanup = Error('original-scope-close-unknown');
-mock.module('node:fs', () => ({ ...fs, existsSync: () => true, realpathSync: value => value,
+mock.module('node:fs', () => ({ ...fs, existsSync: value => !value.endsWith('/.kite-native-install.json'), realpathSync: value => value,
   lstatSync() { return { isDirectory: () => true, isSymbolicLink: () => false }; },
 }));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/locks.ts'))}, () => ({
@@ -134,7 +138,9 @@ mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-art
   retainWindowsArtifactScope() { return { verify() { throw original; }, release() { events.push('scope-close'); if (failScope) throw cleanup; } }; },
   retainWindowsArtifactObjects() { throw Error('unexpected-full-file-pin'); },
 }));
+const { deriveNativeWindowsUseKeys } = await import(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-coordination.ts'))});
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-coordination.ts'))}, () => ({
+  deriveNativeWindowsUseKeys,
   windowsInstallationCoordination(prefix) { return { candidateLockPath: value => prefix + '-use-' + value, verify() {}, release() { events.push('coord-close'); } }; },
 }));
 const { acquireArtifactAccess } = await import(${JSON.stringify(modulePath('packages/agent/src/artifact-access.ts'))});

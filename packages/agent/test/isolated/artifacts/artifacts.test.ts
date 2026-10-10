@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -408,4 +409,78 @@ test('Artifact host admission is bounded and close drains accepted publications 
   await closing;
   expect(await f.store.getArtifactReference({ ...common, refId: 'refused' })).toBeNull();
   expect(await f.store.getArtifactReference({ ...common, refId: 'bound-7' })).not.toBeNull();
+});
+
+test('a committed reference keeps its full stream identity when a delayed publication reply completes', async () => {
+  const f = await fixture();
+  const originalRegister = f.store.registerArtifact;
+  let returnReply!: () => void;
+  const reply = new Promise<void>((resolve) => {
+    returnReply = resolve;
+  });
+  let committed!: (ref: Awaited<ReturnType<Store['registerArtifact']>>) => void;
+  const registration = new Promise<Awaited<ReturnType<Store['registerArtifact']>>>((resolve) => {
+    committed = resolve;
+  });
+  f.store.registerArtifact = async (input) => {
+    const ref = await originalRegister.call(f.store, input);
+    committed(ref);
+    await reply;
+    return ref;
+  };
+  const input = {
+    expectedStoreId: f.expectedStoreId,
+    sessionId: 's',
+    subjectId: 'owner',
+    scope: f.scope,
+    refId: 'delayed-publication',
+    content: Buffer.alloc(128 * 1024 + 23, 0x61),
+    mediaType: 'application/octet-stream',
+  };
+  const publishing = f.artifact.publish(input);
+  let reader: AsyncIterator<Uint8Array> | undefined;
+  try {
+    const ref = await Promise.race([registration, publishing]);
+    reader = f.artifact.readStream(input)[Symbol.asyncIterator]();
+    const first = await reader.next();
+    expect(first.done).toBe(false);
+    expect(first.value?.byteLength).toBe(64 * 1024);
+    const path = artifactPath(f.profilePath, ref.hash);
+    const opened = lstatSync(path, { bigint: true });
+    returnReply();
+    expect(await publishing).toEqual(ref);
+    const after = lstatSync(path, { bigint: true });
+    const identity = (stat: typeof opened) =>
+      Object.fromEntries(
+        ['dev', 'ino', 'size', 'ctimeNs', 'mtimeNs', 'mode', 'nlink'].map((key) => [
+          key,
+          String(stat[key as keyof typeof stat]),
+        ]),
+      );
+    console.log(
+      'ARTIFACT_PUBLICATION_REPLY_IDENTITY',
+      JSON.stringify({ opened: identity(opened), after: identity(after), hash: ref.hash }),
+    );
+    const chunks = [first.value!];
+    while (true) {
+      const next = await reader.next();
+      if (next.done) break;
+      chunks.push(next.value);
+    }
+    const bytes = Buffer.concat(chunks);
+    expect(bytes).toEqual(input.content);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(ref.hash);
+    expect(after.dev).toBe(opened.dev);
+    expect(after.ino).toBe(opened.ino);
+    expect(after.ctimeNs).toBe(opened.ctimeNs);
+    expect(after.nlink).toBe(1n);
+    expect(
+      readdirSync(join(f.profilePath, 'blobs')).some((name) => name.startsWith('.publish-')),
+    ).toBe(false);
+  } finally {
+    returnReply();
+    await Promise.allSettled([publishing]);
+    await reader?.return?.();
+    f.store.registerArtifact = originalRegister;
+  }
 });

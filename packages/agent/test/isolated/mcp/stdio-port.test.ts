@@ -746,8 +746,8 @@ macTest(
     const asset = join(bootstrap.root, 'stdio-guardian.js');
     writeFileSync(
       asset,
-      `import {writeFileSync as writeBootstrap,existsSync as gateExists} from 'node:fs';
-if(process.argv[2]==='--launchd-owned'){writeBootstrap(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,root:process.argv[3]}));while(!gateExists(${JSON.stringify(gate)}))await Bun.sleep(5);}
+      `import {writeFileSync as writeBootstrap,renameSync as publishBootstrap,existsSync as gateExists} from 'node:fs';
+if(process.argv[2]==='--launchd-owned'){writeBootstrap(${JSON.stringify(`${marker}.writing`)},JSON.stringify({pid:process.pid,root:process.argv[3]}));publishBootstrap(${JSON.stringify(`${marker}.writing`)},${JSON.stringify(marker)});while(!gateExists(${JSON.stringify(gate)}))await Bun.sleep(5);}
 ${readFileSync(asset, 'utf8')}`,
     );
     const pending = await bootstrap

@@ -158,8 +158,20 @@ async function pumpUntil(commandId: string, deny = false) {
                 (await client.getExecution(executionId)).status,
               )
             : true
-      )
-        return command;
+      ) {
+        // Execution may have completed after the earlier Command snapshot was read.
+        const completed = await client.getCommand(commandId);
+        const completedReceipt = completed.receipt as {
+          executionId?: string;
+          preparingNextAttempt?: boolean;
+        } | null;
+        if (
+          !executionId ||
+          (completedReceipt?.executionId === executionId &&
+            completedReceipt.preparingNextAttempt !== true)
+        )
+          return completed;
+      }
     }
     await answerPending(deny);
     if (Date.now() > deadline) throw Error(`actual_command_deadline:${commandId}`);

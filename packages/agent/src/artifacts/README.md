@@ -1,6 +1,6 @@
 # 不可变 Artifact leaf
 
-公开 `@kite-ai/agent/artifacts` import 不打开资源。宿主显式选择 profile、Store 与读写范围；知道 hash 或文件路径不能取得引用授权。发布按照临时私有文件、完整 hash/size、必要同步、不覆盖的不可变文件发布、完整内容复核和 Store 登记的顺序进行。POSIX 保留原 hardlink 分支。失败可能留下孤立已发布字节，不能成功引用缺失内容。MIME 属于准确引用，同字节多 MIME 引用共享一个物理 Blob，原引用 metadata 不可更改。
+公开 `@kite-ai/agent/artifacts` import 不打开资源。宿主显式选择 profile、Store 与读写范围；知道 hash 或文件路径不能取得引用授权。发布按照临时私有文件、完整 hash/size、必要同步、不覆盖的不可变文件发布、完整内容复核和 Store 登记的顺序进行。POSIX 保留原 hardlink 分支；原 writer 在减权与 file fsync 后只关闭一次，再不覆盖发布并同步移除 temp，随后才做完整复核、目录 fsync 与 Store 登记。临时别名清理会改变同 inode 的 ctime，不能留到登记 await 后，否则已登记读流或另一次 Worker 复核可能因宿主自己的清理被拒绝。writer 关闭抛错时不重试数字 fd，也不删除未确认关闭的临时路径，保持原异常顺序。失败可能留下孤立已发布字节，不能成功引用缺失内容。MIME 属于准确引用，同字节多 MIME 引用共享一个物理 Blob，原引用 metadata 不可更改。
 
 `publishStream` 接受具 scope 的发布 metadata 和 Iterable/AsyncIterable<Uint8Array>；每次移交块在写入前复制为最多 64 KiB 的工作块。总大小使用 Decimal64，限制只来自 SQLite signed integer 表示资格与真实 IO，不设旧 16 MiB 或累计产物额度。source 异常、取消或非法 chunk 会清理临时文件且不登记引用。`publish(Uint8Array)` 是完整 bytes 的便利入口，会复制调用时数据，受真实内存能力影响。
 
@@ -20,6 +20,6 @@ temporary 在 rename 前后通过原 writer HANDLE FlushFileBuffers，关闭 wri
 
 [Windows 专项](../../test/isolated/artifacts/windows.test.ts)在 actual win32 必须执行原生正文/取消/close drain、SQL失败 orphan、错误 hash、hardlink/宽 ACL/junction和进程强杀；没有 backend availability skip。源码树外编译公共 Store/Artifact 两进程同 hash与冷只读在本机也运行，Node/POSIX import 验证不加载 DLL。Windows 原生场景未在本机运行，不能把本机非 Windows skip 当资格；实际 Windows CI结果仍须独立提供。强杀第二窗口准确是内部 native publication 后、SQL reference 提交前，不冒充已成功的公共发布。
 
-验证位于 [scope/发布回归](../../test/isolated/artifacts/artifacts.test.ts)、[大流式正文](../../test/isolated/artifacts/stream.test.ts)及[真实 Core Files 大正文](../../test/isolated/files/large.test.ts)。流式 Artifact、完整文件产物与模型实际正文输入是不同事实；[Runtime 正文交接](../model-body/README.md)用准确原 scope 验证和实际 Model 回执分别证明后者，引用自身不代替全文。
+验证位于 [scope/发布回归](../../test/isolated/artifacts/artifacts.test.ts)、[大流式正文](../../test/isolated/artifacts/stream.test.ts)及[真实 Core Files 大正文](../../test/isolated/files/large.test.ts)。发布回归保原八路接纳／busy／关闭排空和真实双进程，新增一例只延迟真实 Worker 已提交的登记回执：公开读流取首块后让原发布完成，再完整读取 EOF，核完整正文／hash与目标 inode／ctime保持。这证明本宿主登记后的延迟清理竞争修复，不把 POSIX link→unlink 的跨进程两 syscall短可见窗口称为已消除；原完整 hash／size／mode／inode／ctime守卫不放宽。准确原红、完整回归与资格范围归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。流式 Artifact、完整文件产物与模型实际正文输入是不同事实；[Runtime 正文交接](../model-body/README.md)用准确原 scope 验证和实际 Model 回执分别证明后者，引用自身不代替全文。
 
 恢复后的 `expectedStoreId` 只校验当前连接准入；返回引用的 `storeId` 保留真实 `blob_ref.origin_store_id`。执行 scope 另核引用出处与原 Execution/Command 一致，Session、subject、准确 scope 校验不变。旧引用不能在新 Store 重新登记或重绑定；发布、执行和 owner 资格仍要求当前 Store。实际恢复读、新 Run 展开与跨出处拒绝见[恢复正文回归](../../test/isolated/restored-media/read.test.ts)。

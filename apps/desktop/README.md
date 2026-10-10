@@ -384,6 +384,8 @@ Native 有独立分页 Context reader，因此仅此宿主以 `readContextOnSele
 
 [管理 main 测试](test/native-sessions.test.ts)、[原 scope 输出测试](test/native-sessions-output.test.ts) 和 [实际 DOM 测试](test/native-sessions-dom.test.tsx) 覆盖原身份、CAS、未知查询、重复与迟到视图；[刷新回归](test/native-refresh.test.ts) 覆盖通知积压的单在途读取和加载期间撤除写资格。[真实隔离窗口](test/isolated/native-sessions-electron.test.ts) 使用本机假兼容模型、临时 SQLite 与私有 Service 制品：原 Fork POST 提交后物理回应丢失，只查询原命令；分叉后读取 >17MiB 原作用域正文，在同 Fork 的管理读取、真实竞争 rename 和成功 rename/SSE 更新后仍显示完整尾部；冲突不重试，未知 delete 只查原 ID，Provider 始终一次，退出核实所属 PID 消失。该场景独立通过 18 条实际 Node 断言，仍属于 macOS 开发窗口资格，不代表正式旧入口切换、完整安装或 Linux/Windows。
 
+该原会话窗口的初始权限准备现沿正式Panel核所显示范围并信任，再明确Full保存；默认Auto保持。原直接mode→refresh→trust在自动观察后被Main旧观察守卫拒绝，只有mode一次POST、trust零POST，尚未进入正文。生产观察／CAS／消费与跨选择拒绝保持，夹具不重试mutation；全部后续业务字节、22条assert语句及45／60／10／30秒原预算未改。修正后的原完整窗口1pass／3Bun expects／18.75s，各一次trust与mode、>17MiB完整正文及六个准确所属进程普通退出通过；原红及冻结输入、当前完整默认结论归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。
+
 真实子进程、Electron 与私有文件测试统一位于 [test/isolated](test/isolated)；fixture 留在 `test/`，迁位后修正实际入口相对路径，原断言保留。未以 checker 例外替代进程隔离归属。
 
 本次管理、刷新与迁位后的完整 Native/共享权限组合实测 24 文件、45 项、308 条 Bun 断言全通过（约 70 秒）；新管理窗口的 18 条 Node 断言、一次 Provider 和所属 PID 消失包括在其中。Desktop 类型、局部 Biome、文档结构与测试归属检查通过；未运行共享 dist 或全 workspace 构建。相同窗口的暂时加载仅保留只读观察，真实刷新失败仍清除可写事实；此区分同时覆盖原授权目录和 Context 消费者。
@@ -405,6 +407,8 @@ Native 有独立分页 Context reader，因此仅此宿主以 `readContextOnSele
 [Main](electron/native-caller.ts) 每页仍执行 4MiB IPC 预算及公开回应校验，过大时只在原游标和高水位缩小 GET 页；已通过校验的页大小仅在同一 generation／selection／Session／Store／highWater／readId 内单调保留，后页仍重新读取和校验全部正文。范围变化、取消、关闭或新读取重置该限制；单项目无法传输时明确未完成。切换只关闭自己的读取，迟到旧页不能进入新会话，也不取消业务执行。取舍与既有观察刷新共同归[完整正文刷新决定](../../.agents/notes/implemented/bug-fix/2026-10-08-native-observation-output-refresh.md)。
 
 观察流缺口使旧操作事实失效。main 在原 Store 先读取全局目录基线，再重读目录、当前 view 与完整历史，随后用公开 `startAfter` 重开观察；该起点不成为已应用游标。经公开 Client 校验的 `onReady` 仅确认观察就绪，历史完成与当前事实共同恢复操作资格，不要求产生额外业务事件。历史暂时 loading 保留只读 Context/授权事实；实际失败才清除相应事实。
+
+历史校准的 loading／complete 继续撤销／恢复消息文件入口；共享 [MessageContent](../../packages/ui/src/desktop/MessageContent.tsx)现通过私有 Context 只更新链接能力，未变化的完整正文不重新解析 Markdown。原 Main 的当前 scope／消息／路径准入、完整历史重读、固定高水位与 EOF、发送门禁均保持。原 Markdown 与相邻完整 reader／transcript 文件保所有断言；原 75秒 driver／90秒整例的真实 Native 窗口核5051条及超过8MiB全文、失败保正文与禁写、迟到切换、两次物理SSE缺口、live rename、Provider0和所属Service自然退出。当前准确范围与默认集成结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)；不跳过 metadata 原seq更新，也不据局部窗口关闭资源、平台或阶段门禁。
 
 [历史 reader](test/native-history.test.ts)、[main 原游标缩页](test/native-caller.test.ts)、[ready-only 恢复](test/native-refresh.test.ts)首次组合为 13 项、81 条断言；[实际长历史窗口](test/isolated/native-history-electron.test.ts)读取 5001 条显式隔离库历史记录和额外超过 8MiB 的多消息正文，验证完整尾部、失败保正文与禁用发送、重新读取及迟到切换，Model 调用为零，首次另有 13 条 Node 断言与所属 PID 清理。记录通过 fixture 直接存入隔离库，未伪造 5001 次 Provider 执行。原 Context 窗口复验保留全部 15 条 Node 断言；压缩窗口在真实可操作门禁就绪后继续键盘 Enter，保留全部 33 条 Node 断言与四次兼容 SDK 调用，两个所属 Service PID 已停止。这些证据仍是 macOS 开发窗口切片。
 

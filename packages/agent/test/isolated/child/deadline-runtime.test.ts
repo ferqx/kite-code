@@ -27,6 +27,8 @@ async function fixture(remainingMs: number, child: ModelAdapter, effect?: ToolDe
     profile = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(profile),
     db = new Database(join(profile.dataRoot, 'new', 'core.db'));
+  // The private deadline writer competes with the real Worker; use its native busy handler.
+  db.run('PRAGMA busy_timeout=1000');
   const activate = store.activateChildRun.bind(store);
   store.activateChildRun = async (input) => {
     const actual = await activate(input);

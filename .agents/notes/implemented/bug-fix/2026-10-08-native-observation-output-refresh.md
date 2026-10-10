@@ -16,7 +16,7 @@ reset仍先重新读取原事实和完整历史；ready高水位等于重新读�
 
 [NativeHistory](../../../../apps/desktop/src/native-history.ts)继续逐页核固定高水位、原 Session、序号与游标，合并全部合法记录；仅在本次扫描 EOF 或实际失败时发布阅读快照。后台扫描期间展示上次已发布正文，切换缓存和同会话新 scope 复用也只取 state.messages，避免未发布前缀经切走／切回提前展示。实际失败仍发布已合法读到的前缀。Main 只在同一 generation／selection／Session／Store／highWater／readId 内保留经过原身份和 4MiB IPC 校验的有效 limit，后页仍完整 GET 及全部校验；学习值单调缩小，旧或取消读取不能回写，范围变化、关闭和新读取重置。不新增正文缓存或协议字段。
 
-共享 [MessageContent](../../../../packages/ui/src/desktop/MessageContent.tsx)在 layout effect 更新当前已提交的宿主文件回调，稳定派发函数读取该值，内层 Markdown 只在正文或回调能力有无变化时重渲染。宿主回调引用变化不重新解析同一正文；撤销和卸载清回调，能力撤销仍改变链接展示。该优化不改变原路径判断、外链、HTML和图片规则，也不取得文件操作权限。
+共享 [MessageContent](../../../../packages/ui/src/desktop/MessageContent.tsx)在 layout effect 更新当前已提交的宿主文件回调，稳定派发函数读取该值，内层 Markdown 仅在正文变化时重渲染。私有 Context 将当前回调能力交给独立链接组件，历史校准的撤销／恢复不重新解析未变化正文；Context 更新仍穿过正文 memo，即时改变链接展示。撤销和卸载清回调，普通回调更新使用最新已提交值。该优化不改变原路径判断、外链、HTML和图片规则，也不取得文件操作权限。
 
 共享 MessageContent 在完整 Markdown 转换树中把超长普通文本组织为相邻 Text 节点，继续原 GFM、消息列和所有字符，不增元素或换行；非ASCII沿 grapheme 边界，单一长 grapheme 保完整，code／pre不拆。完整宿主 EOF／SHA／UTF-8／scope 与复制原正文仍是前置，稳定回调和能力撤销门禁不变。该决定针对实际全文到达后原尾部可见性仍超时的正文布局工作，不是传输裁剪、虚拟化或固定内存 streaming。
 
@@ -31,7 +31,8 @@ reset仍先重新读取原事实和完整历史；ready高水位等于重新读�
 - 只移除逐页发布但缓存内部 entries：独立审查与切换回归证明未完成前缀仍可经缓存展示；缓存只持有已发布快照。
 - 每页忘记已验证 limit 后重新尝试 200 条：原完整窗口与 Main 原 adaptive 回归显示重复 oversized 工作；只复用同次范围的有限页大小，不复用回应或跳过验证。
 
-- 在 memo 比较器中忽略文件回调变化：会保留旧 scope 闭包，不能证明使用当前权限；采用提交阶段更新的回调 ref 与稳定派发，正文 memo 仍区分能力有无。
+- 在 memo 比较器中忽略文件回调变化：会保留旧 scope 闭包，不能证明使用当前权限；采用提交阶段更新的回调 ref 与稳定派发，独立链接经私有 Context 消费当前能力。
+- 继续把能力有无交给整个 Markdown 解析层：2026-10-11 原完整默认的长历史校准会在 loading／complete 两次解析相同大正文；将能力更新限定在链接，完整 EOF 与原读取仍保持。该源码重复工作可以直接修复，但不能仅据源码认定它是原 75 秒超时的唯一原因。
 
 - 单改大正文段落 width:auto或局部长词CSS：原完整窗口仍实际超时，候选逐字节撤回。
 - 以 content-visibility 跳过未显示布局：尾部可见后原 `main.innerText >17MiB` 断言失败，不能证明完整正文用户能力；候选撤回，保原断言。
@@ -45,3 +46,5 @@ reset仍先重新读取原事实和完整历史；ready高水位等于重新读�
 原完整 Markdown 文件 2 项／23 条断言通过实际 DOM 点击核最新回调、撤销及恢复、原路径解码、外链和正文更新；原 matcher 均保留，DOM 环境在 finally 恢复。独立审查核 StrictMode 与提交／卸载边界，这些源码结论不冒充专门并发运行证据。该优化当次历史窗口仍实际红，不能把重复工作减少等同原10秒重载验收；后续实际结果按上述原历史范围记录。
 
 长文本节点实现后，原完整Model／Fork文件分别actual0／27643ms与38014ms，4251 regular输入及Git前后全等；Fork原 `main.innerText >17MiB`、全文尾部／关联与rename／unknown原查询保持，两份各六个准确所属PID正常退出confirmedtrue。原Markdown两测试逐字保留，本轮同一完整文件3pass／44断言／336ms另核组合字符和ZWJ边界；临时IPC／DOM定位观察已退役，全部原业务断言和期限、100处Model业务await及准确进程owner保全。有限phase只供原阶段捕获；进程owner的未知身份、正常残留与共享截止规则归 [Desktop owner](../../../../apps/desktop/README.md)。随后本轮未过滤完整默认actual0／1658975ms，原661文件／522唯一主任务含6exclusive全部通过，4251 regular输入与Git前后全等；同图Model全文28633ms、Fork全文40178ms及原完整历史75513ms实际通过。原RSS／八outer／全资源和整体退出保持原门禁，准确结果归[普通启动进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。
+
+2026-10-11 当前正式长历史校准的能力撤销／恢复改为私有 Context 更新独立链接，避免重做未变化 Markdown；原完整 Markdown 3项44断言、相邻三个完整 reader／transcript文件15项142断言通过，原真实 Native窗口1项6Bun／45Node断言35.94s通过。5051条／超过8MiB、失败保正文与禁写、迟到切换、两次物理SSE缺口、live rename、Provider0与Electron／Service自然退出保持；原75／90秒及所有测试字节未改。确切冻结输入与当前未筛选集成结论归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，该限定能力不关闭RSS／全资源、平台或整体阶段。

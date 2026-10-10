@@ -99,6 +99,8 @@ R 重新读取、K 查询原 mutation、Esc 放弃确认或关闭。提交封存
 
 原答案提交独立封存 presentation Session、Interaction ID、原决定 revision 和完整 Answer request；成功只接纳准确 `interaction.answer`、原 Store/Session/Command 与 `applied/answer_saved` 回执，并核对决定 revision 为原版本加一。身份错误、仅 accepted 或丢回执保持 unknown，未知时仅 GET 原 Command，零重复 POST；同一原卡版本已保存后不再次答复。取消回执不会覆盖未知原答案的恢复意图，其他未知命令仍保留各自查询身份。Ctrl+L 先核实未知原答案，即使原 work 已结束或视图已切到其他 Session，再在选择未变时刷新当前快照。它不从 saved 推导 Core 已接受决定或工具已派发。
 
+[四张待决卡的原PTY整文件](../../test/isolated/tui/pending-cards.test.ts)按root-first／job-first分别核独立完整附件、原未知答案零重发、四次准确POST／两次原GET及最终Core完成。完成Model正文沿已有完整终端材料出口观察，已写入Static历史的正文不要求在后来最新动态帧重复出现；交互选择与提交回执仍核当前帧。原两场景、全部断言和8秒等待／30秒整例保持，当前完整结果与默认集成红归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，生产卡片和Static实现未改。
+
 [controller 测试](../../test/tui/controller.test.tsx)补充 kind、Store、Session、Command、Interaction、决定 revision、outcome 和仅 accepted 八类反例，核对原请求冻结、取消去重与准确原 work、切会话/终态后的原 GET、实际 Ink Ctrl+L 查询与刷新顺序。当前组合回归为 9 文件、63 测试、528 条断言；这是 controller/Ink 资格，不替代真实 Workflow 问题的 HTTP/PTY 或全平台资格。
 
 `/recovery` 打开独立的显式冷恢复面板；输入 `run <original Run ID>`、`report <original report Command ID>`，或 `interrupt confirm` 明确确认原根 Session orphan 执行组。组件只消费 [TuiRecoveryPort](recovery.ts) 的有限公共 DTO，不获得 profile、SQL、token 或运行权限。原 ID 必须明确输入，不从当前 active Run、有限 view 或 pending input 猜报告。port 缺失、child 身份、stale 观察、未明确确认或已有 submitting/accepted/unknown 原申请时局部拒绝提交。

@@ -43,29 +43,15 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
-  await page.evaluate(async () => {
-    const state = (await window.kiteNative!.request({
-      method: 'state',
-      generation: 1,
-    })) as NativeState;
-    await window.kiteNative!.request({
-      method: 'permission.mode',
-      generation: 1,
-      observationId: state.selection!.permissions!.observationId,
-      mode: 'full',
-      makeDefault: false,
-    });
-    const updated = (await window.kiteNative!.request({
-      method: 'permission.refresh',
-      generation: 1,
-    })) as NativeState;
-    await window.kiteNative!.request({
-      method: 'permission.trust',
-      generation: 1,
-      observationId: updated.selection!.permissions!.observationId,
-      trusted: true,
-    });
-  });
+  const permissions = page.getByRole('region', { name: '权限与工作区信任', exact: true });
+  await permissions
+    .getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围', exact: true })
+    .check();
+  await permissions.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
+  await permissions.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
+  await permissions.getByRole('radio', { name: 'Full', exact: true }).check();
+  await permissions.getByRole('button', { name: '保存模式选择', exact: true }).click();
+  await permissions.getByText('当前模式：full；默认模式：auto', { exact: true }).waitFor();
   phase('run_begin');
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('one harmless local Model');
   await page.getByRole('button', { name: '发送明确的新轮次' }).press('Enter');

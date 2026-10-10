@@ -1,4 +1,12 @@
-import { memo, useCallback, useLayoutEffect, useRef } from 'react';
+import {
+  createContext,
+  memo,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useRef,
+} from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -40,6 +48,38 @@ function segmentLongTextNodes() {
   };
 }
 
+const FileLinkContext = createContext<((path: string) => void) | undefined>(undefined);
+
+function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const openFile = useContext(FileLinkContext);
+  if (!href) return <span>{children}</span>;
+  if (/^https?:\/\//i.test(href))
+    return (
+      <a href={href} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    );
+  if (!openFile || href.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(href))
+    return <span>{children}</span>;
+  return (
+    <button
+      type="button"
+      className="file-link"
+      onClick={() => {
+        let path = href;
+        try {
+          path = decodeURIComponent(href);
+        } catch {
+          /* Native validation still applies. */
+        }
+        openFile(path);
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export const MessageContent = memo(function MessageContent({
   text,
   openFile,
@@ -55,16 +95,14 @@ export const MessageContent = memo(function MessageContent({
     };
   }, [openFile]);
   const dispatchOpenFile = useCallback((path: string) => currentOpenFile.current?.(path), []);
-  return <MarkdownContent text={text} openFile={openFile ? dispatchOpenFile : undefined} />;
+  return (
+    <FileLinkContext.Provider value={openFile ? dispatchOpenFile : undefined}>
+      <MarkdownContent text={text} />
+    </FileLinkContext.Provider>
+  );
 });
 
-const MarkdownContent = memo(function MarkdownContent({
-  text,
-  openFile,
-}: {
-  text: string;
-  openFile?: (path: string) => void;
-}) {
+const MarkdownContent = memo(function MarkdownContent({ text }: { text: string }) {
   return (
     <div className="typeset typeset-chat">
       <Markdown
@@ -72,34 +110,7 @@ const MarkdownContent = memo(function MarkdownContent({
         rehypePlugins={[segmentLongTextNodes]}
         skipHtml
         components={{
-          a: ({ href, children }) => {
-            if (!href) return <span>{children}</span>;
-            if (/^https?:\/\//i.test(href))
-              return (
-                <a href={href} target="_blank" rel="noreferrer">
-                  {children}
-                </a>
-              );
-            if (!openFile || href.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(href))
-              return <span>{children}</span>;
-            return (
-              <button
-                type="button"
-                className="file-link"
-                onClick={() => {
-                  let path = href;
-                  try {
-                    path = decodeURIComponent(href);
-                  } catch {
-                    /* Native validation still applies. */
-                  }
-                  openFile(path);
-                }}
-              >
-                {children}
-              </button>
-            );
-          },
+          a: MarkdownLink,
           // Message bodies must not fetch remote images or interpret local paths as web assets.
           img: ({ alt }) => (
             <span className="image-description">{alt ? `图片：${alt}` : '图片'}</span>

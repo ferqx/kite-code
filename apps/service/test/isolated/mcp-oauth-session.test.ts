@@ -167,12 +167,14 @@ function sessionOptions(
               process.execPath,
               '-e',
               'const response=await fetch(process.argv[1]);if(response.status!==200)process.exit(2);',
-              callback!.href,
+              new URL('/.well-known/oauth-protected-resource', f.url).href,
             ],
             spawnOptions,
           ),
         );
         await browser(url, signal, observe);
+        // The owned launcher exits before the external browser submits the actual callback.
+        expect((await fetch(callback)).status).toBe(200);
       } else expect((await fetch(callback)).status).toBe(200);
     },
   };

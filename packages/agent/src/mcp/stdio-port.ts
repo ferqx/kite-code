@@ -12,7 +12,7 @@ import {
   copyMcpStdioEvidence,
   decodeMcpStdioProcessEvidence,
   isMcpStdioIdentity,
-  type McpStdioProcessEvidenceV2,
+  type McpStdioOwnedCoalitionEvidence,
   type McpStdioWindowsEvidence,
   mcpStdioKernelState,
 } from './stdio-process-evidence';
@@ -205,7 +205,7 @@ export function createMcpStdioTransportPort(
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-      const processEvidence: McpStdioProcessEvidenceV2 = {
+      const processEvidence: McpStdioOwnedCoalitionEvidence = {
         version: 2,
         coverage: 'mcp-owned-coalition',
         ownerPid: process.pid,

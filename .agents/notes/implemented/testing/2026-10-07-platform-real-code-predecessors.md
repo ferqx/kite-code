@@ -4,13 +4,13 @@ Status: implemented
 
 ## Problem
 
-真实升级与冷回退必须让两个原始源码各用自己的 builder 生成可启动候选，并通过已安装入口继续原数据。早期固定 macOS 前驱的原 SQLite 来源集合只有3.51.3/3.53.4；Linux Bun1.4.2实测 builtin3.53.2，原 builder 在任何业务派发前准确拒绝。复用 PC 展示层后 bun.lock 已变化，原 macOS 3140／Linux 1b796 输入不再满足相同依赖守卫，Mac 原作业实际在 bun.lock 被拒绝；旧资格不能沿用到变化后的输入。改写旧来源检查会使“原始前驱”失真；只改版本文字又无法证明实际代码兼容。2026-10-10原完整版本作业又在Agent清单被准确拒绝：`e587a2a9`仅加入process-observation export／build source-entry，依赖与锁文件没有变化；这两处来源入口增量需与任意清单差异区分，不能宣称全部11项当前仍raw byteequal。
+真实升级与冷回退必须让两个原始源码各用自己的 builder 生成可启动候选，并通过已安装入口继续原数据。早期固定 macOS 前驱的原 SQLite 来源集合只有3.51.3/3.53.4；Linux Bun1.4.2实测 builtin3.53.2，原 builder 在任何业务派发前准确拒绝。复用 PC 展示层后 bun.lock 已变化，原 macOS 3140／Linux 1b796 输入不再满足相同依赖守卫，Mac 原作业实际在 bun.lock 被拒绝；旧资格不能沿用到变化后的输入。改写旧来源检查会使“原始前驱”失真；只改版本文字又无法证明实际代码兼容。2026-10-10原完整版本作业又在Agent清单被准确拒绝：`e587a2a9`仅加入process-observation export／build source-entry，依赖与锁文件没有变化。2026-10-11完整默认实际又在Service清单被拒绝：`21eb43d8`只新增windows-native-bootstrap export／build source-entry，其他字节与原前驱相同。这些准确来源入口增量需与任意清单差异区分，不能宣称全部11项当前仍raw byteequal。
 
 当前要求和完整合同归[Terminal owner](../../../../apps/cli/docs/terminal-release.md#验证边界)、[Native owner](../../../../apps/desktop/docs/native-release.md#linux-真代码升级与冷回退)与[发行约束](../../../../docs/active/release-control.md)。本决定只管理本地比较输入，不改变产品的宿主Shell、安装、信任或回退行为。
 
 ## Decision
 
-[物化夹具](../../../../tests/fixtures/unified-agent/terminal-predecessor.ts)当前固定复用原 PC 展示层后的 DB7 原提交 a2b6441fde28d9c0f895a26e6a9d2471d2b1b242，不开放调用者任意选择前驱。macOS 的3140fe6d37131050033c66ffd9637fe7cd967da9与Linux首次接受准确3.53.2的1b796e30ab0f3638767095d86d4afd374eae662a仍保历史输入和拒绝理由。当前前驱核11项锁输入中的10项完整字节相同；Agent清单只允许 `e587a2a9` 相对原前驱的准确 process-observation export／build source-entry 两处增量。matcher从原bytes按两个唯一anchor生成完整expected并与当前整份bytes比较，任何其他依赖／脚本／metadata／格式差异仍拒绝，保存原SHA与currentSHA及准确match。相同bun.lock、其余workspace清单、补丁、Core format1 SQL与所有原始来源守卫保持，不修改旧源码或其清单；依赖镜像保准确已安装字节与原workspace源码，旧builder仍核闭包。原源码构建前后必须干净；旧Terminal/Native都在删除旧源码前完成，成功后搬迁并删除全部原输出。准确commit/platform/来源/候选/hash随实际结果登记。
+[物化夹具](../../../../tests/fixtures/unified-agent/terminal-predecessor.ts)当前固定复用原 PC 展示层后的 DB7 原提交 a2b6441fde28d9c0f895a26e6a9d2471d2b1b242，不开放调用者任意选择前驱。macOS 的3140fe6d37131050033c66ffd9637fe7cd967da9与Linux首次接受准确3.53.2的1b796e30ab0f3638767095d86d4afd374eae662a仍保历史输入和拒绝理由。当前前驱核11项锁输入中的9项完整字节相同；Agent清单只允许 `e587a2a9` 相对原前驱的准确 process-observation export／build source-entry 增量，Service清单只允许 `21eb43d8` 的准确 windows-native-bootstrap export／build source-entry 增量。两个path专用分支各从原bytes按两个唯一anchor生成完整expected并与当前整份bytes比较，任何其他依赖／脚本／metadata／格式差异仍拒绝，保存原SHA与currentSHA及独立match。此前10项同字节加Agent例外只属当时输入；不追认后来的Service变化为同字节。相同bun.lock、其余workspace清单、补丁、Core format1 SQL与所有原始来源守卫保持，不修改旧源码或其清单；依赖镜像保准确已安装字节与原workspace源码，旧builder仍核闭包。原源码构建前后必须干净；旧Terminal/Native都在删除旧源码前完成，成功后搬迁并删除全部原输出。准确commit/platform/来源/候选/hash随实际结果登记。
 
 Terminal与Native都要求包内Agent代码字节实际变化、候选身份不同和完整已安装A→B→A→B数据链。macOS的两个原Main/renderer差异断言保留。历史Linux 1b796组合的生产变化为Agent worker原生写锁等待；当时Main制品hash不同、renderer相同，只记录实际关系，不造假前端变化。当前a2b6441f的Linux组合尚未执行，依用户顺序在重构完成后由GitHub Actions验证；历史结果不为它授予资格。
 
@@ -25,7 +25,7 @@ Windows新增源码接线固定独立837a2b8c前驱，其11项锁输入全部原
 - 只换旧官方Bun以保3140来源集合：明确试验的官方Bun1.3.12内置3.51.2，也不在旧集合；没有持续版本猜测或修改根运行时/依赖。保当前1.4.2和准确已准入原源码。
 - 只改productVersion或给当前Native配旧inner：只能证明指针或混合闭包，不能证明两份原始代码；保原两层builder与实际Agent差异。
 - 为沿用历史提交而忽略新的锁文件，或给旧源码注入当前页面：会使两个候选混入不同依赖或改写历史输入。选择真正已提交、锁依赖相同的PC展示层后DB7源码，当前只识别上述准确来源入口增量，其余守卫保持。
-- 泛化忽略exports／scripts、只比dependencies字段或给旧源码补当前入口：会接纳未审查构建变化或改写原始输入；仅接受已知两处原字节转换，变更依赖／额外export／build target／缺任一增量的实际unit均拒绝。
+- 泛化忽略exports／scripts、只比dependencies字段或给旧源码补当前入口：会接纳未审查构建变化或改写原始输入；仅接受对应path已知export/build原字节转换，变更依赖／额外export／build target／metadata／错path／缺任一增量的实际unit均拒绝。
 - 删除Mac前端差异断言或给Linux造假renderer变化：缩减既有Mac资格或虚构演进；仅新增Linux范围，记录实际字节关系。
 - 把Docker验证容器接入默认Shell：用户明确保留macOS宿主工具链和广泛只读宿主视图，容器仅作独立验证。
 
@@ -36,6 +36,8 @@ Windows新增源码接线固定独立837a2b8c前驱，其11项锁输入全部原
 此前DB8冻结范围的macOS a2b6441f组合完整Terminal文件actual0／1pass／336断言／249.85秒，完整Native文件actual0／1pass／513条Bun及driver断言／320.79秒。第四B窗口原侧栏惰性产生DB8 unknown申请，原四窗口于94.968秒内完成；随后同一已安装候选再完成两个独立冷窗口。旧DB7 Native明确拒绝私有操作且保原bytes／inode，兼容Core三条历史仍完整GET；切回当前版才明确原GET查回，Provider仍3，六Service普通退出、双EX及最终卸载保数据。私有原字节在明确查询前保持，查询只保存原申请结果；不自动恢复数据。原420／120／15秒定义保持，新冷段独立60秒；两段最终只卸载一次。原锁输入、页面标记、重复安装导致整例超时及跨桥Error属性的真实失败均保留，准确范围归[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08native-db8-真实代码回退)。
 
 2026-10-10当前macOS组合沿原四窗口和两cold窗口补实际DB9拒绝／原Command完整查询、installed v18 backup／inspect，并沿原目录缺失点补明确rollback的Native消费者与保留complete腿。新增观察先从Native状态等准确Job终态，稳定Core probe仍保原读取期间字节不变断言；inspect选择实际backup返回目录。该Job公开Execution按正式schema的全部实际16字段与独立原Core记录比较，完整result、冷Core原记录和finding全对象比较均保留。四次真实失败、最终完整作业和准确输入归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10db9-版本切换与安装版维护恢复)；仍只证明本地两个原代码候选及限定维护消费者，当前a2b6441f Linux组合尚未执行。
+
+2026-10-11Service来源入口修复后的两个原macOS完整文件再次实际运行：Terminal1pass／336断言／118.88秒，Native1pass／643Bun断言／221.20秒及原driver断言。各4386tracked regular输入与Git状态全程不变；准确9+2分类、原代码／候选身份、三任务冷链、DB9私有拒绝／原结果查回、installed backup／inspect、普通退出／EX及卸载保数据均按各自原范围登记于[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。该Service例外本身不授予DB兼容能力，仍由原完整Native链证明。
 
 本地比较使用HEAD加当前dirty实现，不是clean发布或已发布predecessor/T029；manifest/archive SHA仅证明完整性。Docker VM原生arm64结果不替代GitHub-hosted Ubuntu x64、Windows、四Auth/Vault、默认宿主Shell、正式持续负载或完整§35/T/E。此前只读Agent被线程上限拒绝的片段未取得整片独立审查，root自检不替代它；本轮边界只读审查已完成，仍不替代§35独立迁移审查。37能力保持partial、wholeV13=false，完整默认回归及正常Git门禁在实际交付范围另行登记。
 

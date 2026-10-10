@@ -2106,9 +2106,33 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+当前本片收束为第十七次准确未筛选 `bun run test` actual0／1406.045s：原714文件、575正式作业／parallelism4不变，全部启动／完成／通过，零失败／未开始，六独占导出／登记／Native跨代码／安装／恢复中断／Terminal包原整例全部通过。4386tracked regular输入与Git全程全等；日志SHA `54f76a3fb79c5c8387ec5b26bbc711255179d8837deab69f352f1c07b975a8e8` 和实际收据归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。wholeDefault=true仅覆盖当前macOS冻结输入，下方各原红及其当时待收束状态保留；未放宽原断言／期限／强制门禁或排除测试。MCP正式停止消费者与完整连接／Tool／取消／正常退出、独立安装版本和维护恢复按本片结束；余下最多五项依赖为Windows原合同后端、RSS／全Runtime观测、后续Actions平台实证、完整37能力／适用T/E独立审查、最终旧authority退役及阶段收束，37partial／wholeV13=false／phaseExit=false。结果文档补记不改变source／依赖／测试输入，复用本次完整回归并按既有授权仅本地交付。
+
+正式 MCP 停止结果消费者已按现有授权提交 `0477677a`，连接／刷新／重连／下一 Model 独立 Tool 审批／一次效果／取消及正常退出的 macOS 证据保留。其后原Native长历史的未变化全文改为memo只按text，私有Context更新独立文件链接并保当前回调和撤销；完整读取／EOF／准入、全部原断言和75／90秒保持。原5051条／超过8MiB、两次物理SSE缺口、live rename、Provider0和自然退出已在独立窗口及第六／七次未筛选默认通过。第六次新TUI Workflow question红只改原10秒内最新完整答复帧准入，原未知→两次明确GET含首回复丢失、完整答案及取消均保断言／40秒，并在第七次默认通过。
+
+第七次完整默认实际exit1／393.916s，168作业通过、Terminal跨代码前驱在Service清单拒绝、406未开始。真实11输入为9项同字节、原Agent入口增量及Service已提交windows-native-bootstrap入口增量；当前只补Service对应path两个唯一锚点生成后的全字节匹配并保存双方SHA与独立match，固定原a2／旧源码与builder／依赖／基线／引擎和实际代码差异守卫保持。原Terminal跨代码整文件1pass／336断言／118.88s，原Native1pass／643Bun断言／221.20s，完整安装切换／冷回退／DB9拒旧与查回／backup-inspect／正常退出和卸载保数据按各自原范围通过。新冻结输入仍须未筛选完整默认收束；源码、真实红及证据归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，RSS／全观测、Windows原合同guard、后续Actions、§35／最终退役和整体阶段门禁保持。
+
+第八次完整默认实际exit1／653.307s，原575正式作业中373启动且排空、372通过、四pending卡PTY一个作业两场景红、202未开始。Native长历史／TUI Workflow／Native MCP和Terminal真实版本链在本轮通过。两PTY各已输出一次原完成Model正文，夹具最后却只看最新动态状态帧；只把原最终文本等待接已有完整终端材料出口，原完整两场景2pass／116expects／12.77s，全部审批／原未知零重发／四POST两GET／完整附件／Core完成及8／30秒保持。原日志和红保留，不改生产Static／卡片或删断言；当前新输入仍须未筛选完整默认，整体阶段保持未退出。
+
+第九次完整默认实际exit1／644.624s，342正式作业启动且排空、341通过、Native会话初始权限观察拒绝一作业红、233未开始；四pending卡及Native跨代码exclusive本次未开始。原直接mode→refresh→trust跳过正式Panel未信任模式只读顺序，mode已一次POST成功、trust零POST，不能归因于大正文。只把夹具准备迁到核范围并信任→当前trusted→Full保存，原默认Auto、全部后续业务／断言及45／60／10／30秒预算保持，生产观察／CAS／消费守卫不变。原完整会话1pass／3Bun expects及原Node断言／18.75s，实际各一次trust／mode、完整Fork／>17MiB／CAS／unknown查询／Provider1与六所属进程普通退出通过；准确红与新冻结默认状态归同一[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，整体阶段仍未退出。
+
+第十次完整默认实际exit1／700.729s，405正式作业启动且排空、404通过、Windows安装关闭控制流mock一作业三场景红、170未开始；上述六条本机用户链在本轮通过。新红未到原故障点：前两例缺可选CLI登记的准确absence，第三例缺新增纯derive export且误报Native marker存在。只补原mock准备，生产parser／关闭守卫和全部原错误对象／保锁／顺序／4秒与默认5秒均不改，原完整文件3pass／12expects／61ms；该本机逻辑结果不授Windows原生资格。准确输入及新默认收束归同一进度，资源／平台／完整阶段门禁保持。
+
+第十一次完整默认实际exit1／467.685s，232正式作业启动且排空、231通过、原Artifact八路并发发布一作业红、343未开始。真实登记后的公开读流新增确定性回归在旧实现观察同inode临时链接删除的nlink2→1／ctime变化及EOF拒绝；原七例／断言／预算保持。POSIX仍保hardlink不覆盖、完整hash／size／mode／inode／ctime守卫，只将writer一次关闭与temp移除置于首次验证／登记之前，并保原close失败不删temp顺序。首轮原七例加新增一例8pass／74expects，相邻原流／scope／真实恢复七例131expects通过；跨进程两syscall短可见窗口不称消除。最终仍须新冻结未筛选默认收束，准确原红与范围归同一[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，不独立扩展故障矩阵或提前退出阶段。
+
+第十二次完整默认实际exit1／105.564s，34正式作业启动且排空、33通过、原macOS stdio bootstrap marker JSON未写完即parse一作业红、541未开始。只将真实guardian的该夹具marker改完整temp→rename，父读取、原七例／99源码expect／6秒轮询／20秒整例与实际EOF／SIGKILL／出生身份／全树停止／无关进程及unknown门禁全保，生产port／guardian／公开合同不变。原整文件7pass／118expects／5.64s，原完整默认红和未开始范围仍保留；新冻结完整默认仍须收束，不扩相邻未证故障矩阵或外推阶段资格。
+
+第十三次完整默认实际exit1／242.520s，80正式作业启动且排空、79通过、MCP OAuth Session的自然launcher exit0断言实际收到SIGTERM一作业红、495未开始。原ownedLauncher夹具把有效callback放进尚存活launcher，登录finally local.abort可以先于exited；只改实际child先读已有AS metadata并自然退出，再由external browser fixture提交原callback，原全部九例／断言／HTTP200脚本／PKCE／冷链／alive child清理未知和预算保持，生产取消／unknown策略不改。原整文件9pass／124expects／4.88s；准确红及新冻结完整默认收束归同一进度，不授外部AS／系统浏览器或阶段资格。
+
+第十四次完整默认实际exit1／461.369s，213正式作业启动且排空、212通过、未见扩展Action终态回执一作业红、362未开始。夹具在GET Execution终态后返回较早的Command快照；正式finishAction同事务提交两者，生产语义不改。只重新GET准确原Command并核同executionId／非preparingNextAttempt，原五例／全部88源码expect与30／20／10／5秒、5毫秒预算逐字保持；原完整五例5pass／356expects／3.85s，fixture types／Biome与独立只读审查通过。当前新冻结输入仍须未筛选完整默认，局部绿不追认原红或退出阶段；准确证据归同一[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。
+
+第十五次完整默认实际exit1／701.996s，410正式作业启动且排空、409通过、child期限一作业原5秒红、165未开始。准确节点观测证实已激活后夹具第二SQLite连接的private UPDATE抛SQLITE_BUSY，尚无handle／Loop／timer，生产unknown／清理拒绝保持。只给该写连接使用正式已有native busy_timeout=1000，原Date.now()+500仍先计算、锁等待计入期限，原全部三例／24源码expect／30分钟断言与5秒预算逐字保持；完整3pass／26expects／1.285s。runtime／execution／事务未改，未重复30分钟或资源参数窗口；新冻结未筛选完整默认仍须收束，准确原红与证据归同一[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。
+
+第十六次完整默认实际exit1／791.367s，原575正式作业中522启动且排空、521通过、原架构策略一作业红、53未开始／六exclusive未启动，原child期限和此前修复范围通过各自作业。runner自测重复使用已完成Terminal的原label，初始523／522统计已只读校准522／521，raw日志与原收据不变。仅将三处MCP证据内部类型按准确coverage改语义名，去两标识符替换即逐字恢复原三文件；持久v1—v4 wire／严格decode／公共union／原策略及原断言全保，不新增策略例外。原完整策略文件6pass／45expects／1.238s、根及Agent types／Biome和独立审查通过，复用原stdio语义证据；新冻结完整默认仍须收束，准确红和统计保全归同一[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。
+
 最新实际 macOS MCP 失败定位到正式停止结果消费者：原 owned stdio 已停、Job终态保存，但新增观察字段被 rigid 两字段检查拒绝，原重连因而 unknown／新连接未尝试。现重连执行与冷 Query 共用原 v1—v4 closed codec，严格绑定原身份／结果版本／摘要，观察 unavailable 保原固定原因，远端停止和资源资格不扩大。完整17项重连及源码外 Native 全连接／刷新／重连／下一Model独立Tool审批／一次效果／正常退出／冷GET通过；其他真实默认失败只修正夹具的准确终态或审批交接，历史退出超时保留有限观察和原预算。原失败与未筛选完整集成结果归[当前回归进度](unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)，RSS／完整观测、Windows Shell原合同与后续Actions、§35／最终退役／阶段资格仍独立保留。
 
-当前输入第五次未筛选完整默认实际exit1／307.66s，122任务启动、121通过、Native长历史1失败、453未开始；上述MCP消费者及相邻完整用户链在该计划通过，不代wholeDefault。历史业务完整后原75秒driver余2.784秒，未取得自然退出终态；独立自然退出4.217秒和业务耗时差不能证明该红已修复。仅封存有限观察，不放宽预算或删断言。该已验证MCP切片按现有授权本地交付，Native完整集成与wholeDefault／wholeV13／phaseExit保持未闭合，最多五项实际入口／验收和依赖归上述进度。
+前一切片的冻结输入第五次未筛选完整默认实际exit1／307.66s，122任务启动、121通过、Native长历史1失败、453未开始；上述MCP消费者及相邻完整用户链在该计划通过，不代wholeDefault。该次历史业务完整后原75秒driver余2.784秒，未取得自然退出终态；独立自然退出4.217秒和业务耗时差不能证明该红已修复。有限观察与原红保留，不放宽预算或删断言。该已验证MCP切片已按现有授权本地交付，之后历史重复解析修正与当前集成状态见本节首段，整体阶段门禁未闭合。
 
 MCP 与 Web 切片后已按原默认计划进入本机集成收束验证。实际三个 planned Task 场景暴露夹具的父任务提前完成与单槽 Provider 循环等待；只在真实 SQLite 计划登记后、取得 Model 槽前协调原父子时序。下一次完整默认又发现 Native Plan driver 将已 accepted、尚未退出 pending 的原 Files 卡交给严格 Planning helper；当前加强原等待，核同一审批 ID 的接纳和视图交接。第三次真实失败确认原 parent/child fixture 把 `task_wait/interaction` 早返回当成 child 完成；现同样在槽外等准确原 carrier Command 终态。生产来源／审批／资源守卫、全部原断言和预算保持。准确失败、完整默认结果和依赖归[当前回归进度](unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)；该验证不代未闭合资源、平台、完整能力审查或阶段退出。
 

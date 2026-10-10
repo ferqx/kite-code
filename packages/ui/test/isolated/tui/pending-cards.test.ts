@@ -67,7 +67,7 @@ try:
    wait('interaction.answer: unknown');before=open(wire).read().count('"method":"POST"');choose(next(c for c in cards() if c['id']!=card['id']));key(b'\\r');assert open(wire).read().count('"method":"POST"')==before
    key(b'\\x0c');wait('interaction.answer: unknown');key(b'\\x0c');wait('interaction.answer: applied')
   waitcards(3-i)
- wait('MULTI_CARD_DONE');os.kill(p.pid,signal.SIGTERM)
+ wait('MULTI_CARD_DONE',material=True);os.kill(p.pid,signal.SIGTERM)
  deadline=time.monotonic()+5
  while p.poll() is None and time.monotonic()<deadline:pump()
  p.wait(timeout=3);print('SAFE_FACTS '+open(facts).read());print('WIRE_FACTS '+json.dumps([json.loads(line) for line in open(wire)]));print('PTY_COMPLETE_BYTES '+str(len(full)))

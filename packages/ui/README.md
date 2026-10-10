@@ -14,7 +14,7 @@
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
 
-`MessageContent` 的宿主文件回调在 layout effect 取得当前已提交值，稳定派发函数只调用这一值；正文解析组件按原 text 与回调能力有无保持 memo。普通状态更新替换回调引用不重做相同 Markdown，实际撤销回调仍把文件按钮改为不可点击文本，重新提供及正文变化正常更新。[原 Markdown 测试](test/markdown.test.tsx)通过实际 DOM 点击核最新回调、撤销／恢复、解码路径、外链和正文更新；不使用忽略回调的比较器保留旧宿主权限。
+`MessageContent` 的宿主文件回调在 layout effect 取得当前已提交值，稳定派发函数只调用这一值；正文解析组件只按原 text 保持 memo。私有 Context 将当前回调能力交给独立 Markdown 链接，能力撤销仍立即把文件按钮改为不可点击文本，重新提供及正文变化正常更新；普通回调更新与历史校准的撤销／恢复都不重新解析未变化正文。[原 Markdown 测试](test/markdown.test.tsx)通过实际 DOM 点击核最新回调、撤销／恢复、解码路径、外链和正文更新；不使用忽略回调的比较器保留旧宿主权限。实际 Native 完整历史与退出证据归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，不据解析复用提升读取或阶段资格。
 
 长普通文本在 Markdown 转换后的树中拆成相邻 Text 节点，不增加包装元素、换行或省略内容，继续沿原消息列和 GFM 展示完整正文；code／pre 保原结构。超过4096个字符串单位的文本按约2048单位组织，非ASCII沿 grapheme 边界，单一更长 grapheme 仍完整保留。原文字、标题、链接、表格、图片替代文字及 HTML 处理保持；全文仍先经宿主完整 EOF／SHA／UTF-8／scope 核验，复制使用原正文，不增加读取或文件权限。[原 Markdown 文件](test/markdown.test.tsx)保全部原断言并核实际 DOM 的完整长文本与 Unicode 边界；实际 Electron 可见性与全文资格归 Desktop owner 和[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)，不据此承诺固定内存或所有设备的延迟。
 

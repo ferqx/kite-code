@@ -472,6 +472,8 @@ Native `file_recovery` 仅在实际唯一 `builtin.files` 登记 `files.checkpoi
 
 Remove在准确原scope预检availability/presence、声明发表后local clear；清理失败M仍applied、E unknown，Source result.saved保声明证明，credentialCleanup独立。manual共享refs保留，不默认remote revoke。原 Login 的系统 launcher 由 [browser owner](src/mcp-oauth-browser.ts)沿真实 Bun child 启动／exited 和原清理期限观察。有限 `ownedLauncher` 固定原 Auth 全 binding／owner／PPID／birth、实际退出状态和 reap，范围为 `oauth-launcher-only`、浏览器本体为 external；URL／code／state／PKCE／tokens／argv／env 不进入事实。原 [cold codec](src/mcp-oauth-launcher-evidence.ts)和 `mcp.auth.result` 核完整 finalization digest、旧六字段或严格新字段；公开 Auth Query 九字段 payload 保持，完整 proof 沿原 Execution GET 读取，不重启 launcher 或连接；无 launcher 的 refresh／clear／revoke 没有伪造记录，观察不足不改认证效果。实际协议由[Source集成](test/isolated/mcp-source-oauth-integration.test.ts)、[callback](test/isolated/mcp-oauth-session.test.ts)、[原Actions](test/isolated/mcp-oauth-actions.test.ts)和[owned bind](test/isolated/mcp-http-oauth-ownership.test.ts)分别验证；当前默认图/历史红见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。本机临时backend/AS不证明外部AS、OS浏览器、OAuth PTY或三平台资格。
 
+原Session夹具的自然exit0资格按同一职责顺序：真实Bun launcher只GET既有受控AS元数据，正式helper等待其自然退出后，fixture外部浏览器角色才提交原有效callback；原HTTP200脚本、PPID／birth／reap、DCR／PKCE／冷恢复与所有预算保持。把有效callback放进仍存活launcher会与登录finally的合法local.abort竞争，不能据收到SIGTERM修改原自然退出断言或生产清理。独立“callback后launcher仍存活且kill失败”的unknown场景保持原脚本。准确默认失败与原九整例结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，该准备校准不授外部AS／系统浏览器资格。
+
 ## 正式制品、SQLite 与配置路径策略
 
 根八 workspace 的默认 build/typecheck/test 已使用新公开闭包，CLI/TUI/Native 与 Service 以私有 bootstrap 固定配套实例，业务只经 Client HTTP/SSE。旧 carrier、Host/Kernel/State writer 不参与正式/default/CI 调度，历史测试不提供新平台资格。
