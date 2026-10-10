@@ -4162,10 +4162,10 @@ Root及八runtime workspace类型、八workspace构建实际0；最后只改Agen
 
 | 顺序 | 实际用户入口／具体缺口 | 完整行为与验收条件 | 真实依赖 |
 | --- | --- | --- | --- |
-| 1 | Windows 普通 Shell及调用它的后台 Agent／Workflow | 真实 Full／Workspace权限 ceiling保护 Profile／coordination内容、Runtime只读与祖先delete-chain；固定原解释器／网络语义，创建前归属、完整输出、精确取消、全原资源关闭或unknown fencing，cold原结果零重放 | MCP原Job可复用资源原语，但不提供权限；先补实际安全后端，不能先删guard |
-| 2 | installed Windows／Linux的完整客户端、A→B→A和维护恢复 | 原生完整候选／MSVC／PE／DACL／pipe／HANDLE／ABI／Native窗口／真实TUI；原完整common／always formal及新Store原完整历史冷读，跨代码不以标签B替代，help不代PTY | 对应平台源码及前项；按用户顺序重构后Actions，本轮不dispatch；MCP源码不等于平台资格 |
+| 1 | Windows／Linux installed普通Shell及调用它的后台Agent／Workflow | 当前[默认装配](../../apps/service/src/process-service.ts)和[可信配置](../../apps/service/src/shell-configuration.ts)仍仅Darwin；补真实Full／Workspace权限ceiling、Profile／coordination内容保护、Runtime只读与祖先delete-chain，固定原解释器／网络语义、创建前归属、完整输出、精确取消、全原资源关闭或unknown fencing、cold原结果零重放；verifier及严格compensation按各自实际范围接入 | Windows原Job只供资源原语、不提供权限；Linux显式进程组不能证明setsid／orphan完整退出；先补各平台权限及owner，不能先删guard或回旧Host |
+| 2 | Linux本地stdio MCP及installed三平台完整客户端、A→B→A和维护恢复 | 当前[stdio port](../../packages/agent/src/mcp/stdio-port.ts)仍拒Linux；补原所属backend／guardian／closed冷证据，再验Source→SQL connection Job→远端Tool→原完整输出／准确取消／冷C／E零重放；所有平台完整候选、Native窗口／真实TUI、原完整common／always formal及新Store冷读另取准确原生资格，跨代码不以标签B替代、help不代PTY | Linux安装／rollback／uninstall／维护已有POSIX owner及适用历史证据，本轮只读未发现独立源码缺陷，不把pending资格改称实现缺失；MCP新owner可独立推进，实机按用户顺序重构后Actions、不dispatch |
 | 3 | installed CLI／TUI／Native持续普通任务及后台资源 | 原RSS增长／斜率、八轮／九点、全部可信Runtime后代及activeResources／handles真实满足，原red／unknown不改阈值 | 直接阻P6／§35；不是独立安装／维护或stdio源码前置，仍未闭合 |
 | 4 | §35完整能力与正式caller独立审查 | 按实际手册／37能力映射核完整适用T/E、参考功能、兼容样本及正式入口；独立审查保每项准确资格 | 前序完整用户能力／平台资格；本次leaf审查只审四文件接线，不代整片迁移审查 |
 | 5 | 正式切换后的最终legacy退役及阶段收束 | 实际旧路径删除、未过滤完整回归、适用P7版本／发布责任通过；保D08首发后向后兼容 | 前四项；不以本片局部绿或首发前无T029样本宣布阶段退出，真实失败不能删断言／排除测试 |
 
-本轮新增闭合的是Windows stdio MCP的正式完整连接源码与资产／调用者接线，没有关闭Windows Shell、实机安装维护资格、资源门禁或最终legacy删除。37能力partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active，授权仅本地stage／commit。
+本轮新增闭合的是Windows stdio MCP的正式完整连接源码与资产／调用者接线，没有关闭Windows／Linux默认Shell、Linux stdio源码、实机安装维护资格、资源门禁或最终legacy删除。切片源码及文档正常本地提交`94b7864649ee8ec482ff6f23ceaf02a8fd184f55`，最终19文件HEAD／工作树字节核原收据一致、全部适用hook通过；后续只读核对据实际guard纠正上述Linux退出缺口，不重开安装／维护验证窗口。37能力partial、wholeDefault=false、wholeV13=false、phaseExit=false、Goal active，授权仅本地stage／commit。
