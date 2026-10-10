@@ -2144,6 +2144,8 @@ Windows stdio MCP 的当前源码缺口已沿同一正式 Source／SQL connectio
 
 Profile Workflow 的原目录只读投影及正式 verifier 接线已沿源码缺口完成：准确 Profile 来源保 canonical cwd 和完整相对依赖／忽略资源，原 Workspace 独立决定写范围；macOS 默认 verifier 迁入完整 coalition，Linux 使用准确私有祖先链／只读来源及 gate 前严格封存源码。原 private／coordination、来源写入／改名／native exec-map 保护保持，普通 Shell 与固定补偿不取得该例外。真实 macOS leaf、正式 Service 及受影响八个完整文件66项／770断言通过；Linux 内核／installed资格仍未取得，37能力 partial、wholeDefault／wholeV13／phaseExit=false。准确红绿、边界和最多五项下一退出依赖归[当前 Workflow 进度](unified-agent-refactor-v1-progress.md#2026-10-10profile-workflow-原来源与正式-verifier-迁移)，RSS／观测不重测、不阻独立源码实现，仍直接阻P6／§35／最终退役。
 
+Linux正式Source stdio的独立direct-program／namespace owner、真实SDK transport、closed v4及默认Service调用者已接源码，原声明／审批／SQL／完整结果与cold不重放合同保持；新wire等待竞态、取消业务写错误和原seal FD unknown关闭门禁已按必要审查闭合。本机控制流六项／47断言、原封装独立整文件一项／60断言及相邻原生命周期通过仅证明其范围；Linuxnative／installed／全部消费者、非macOS正式Soak、原RSS／观测及§35／最终退役／阶段完整回归仍未闭合。最多四项依赖及全部原红绿归[当前Linux MCP进度](unified-agent-refactor-v1-progress.md#2026-10-10linux-正式-stdio-mcp-完整连接源码)，37能力partial、wholeDefault／wholeV13／phaseExit=false，Win/Linux按用户顺序重构后Actions，本机无dispatch。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

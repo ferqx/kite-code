@@ -110,7 +110,7 @@ root 原字节 SHA 即 indexDigest，节点不含自身 digest。Entry 的 label
 
 ## 显式 stdio guardian port
 
-公共 MCP leaf 导出 [createMcpStdioTransportPort](stdio-port.ts)、`McpStdioPortOptions`、`McpStdioPortError` 和 `mcpStdioGuardianAsset()`，只读类型另含 `McpStdioWindowsEvidence`。宿主固定完整 server 配置、绝对 Bun/command/cwd、env 名单与必要的 `admit(binding,{signal})`；import/factory 不读取文件或 spawn。`open` 在真实 Job 派发后核实原 Store/Session/execution/configDigest/scope，并调用可信最后准入，之后才启动本平台私有 guardian。该 port 不自动发现用户凭据或继承环境；秘密、proxy、loader 和 runtime 注入 env 名称被拒绝。准入回调仍须核实实际 SQL Job identity、当前授权及宿主执行资格。
+公共 MCP leaf 导出 [createMcpStdioTransportPort](stdio-port.ts)、`McpStdioPortOptions`、`McpStdioPortError`、`mcpStdioGuardianAsset()` 和显式 `mcpStdioLinuxAssets()`，只读类型另含 `McpStdioWindowsEvidence`／`McpStdioLinuxEvidence`。宿主固定完整 server 配置、绝对 Bun/command/cwd、env 名单与必要的 `admit(binding,{signal})`；import/factory 不读取文件或 spawn，显式资产 locator 只定位构建资产。`open` 在真实 Job 派发后核实原 Store/Session/execution/configDigest/scope，并调用可信最后准入，之后才启动本平台私有 owner。该 port 不自动发现用户凭据或继承环境；秘密、proxy、loader 和 runtime 注入 env 名称被拒绝。准入回调仍须核实实际 SQL Job identity、当前授权及宿主执行资格。
 
 guardian 使用有界 JSON-RPC frame、控制队列、排队写和 stderr 排空。macOS 的正式 port 以 Service 直接 ChildProcess 作为 broker，经[私有 launchd 通道](../platform/process/darwin-launchd-supervisor.ts)启动新的 guardian；可信宿主可选绝对 `controlBase`，默认 Service 固定选原 Profile coordination，未指定的独立装配使用系统 temp base。每次创建原0700目录、固定 `com.kitecode.mcp.<UUID>` 标签及本用户 domain；秘密握手核准确 guardian PID 后才派发业务配置，command／args／env 不进入 argv。该后端独立取得[原 guardian 的 exclusive resource coalition](../platform/process/darwin-owned-coalition.ts)，不借用 Shell 的权限或 coalition，也不增加文件／网络沙箱。fork／exec／setsid／orphan 后代在本次所有权内。
 
@@ -135,6 +135,18 @@ Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)生成 `di
 closed v3／`windows-job-members` 保原六字段 binding、owner、guardian 原出生／reap／观察关闭、server 原 wait 和 Job 空树；不存 native HANDLE、command、env、路径或 secret。旧 Darwin v1／v2 严格分支未拓宽，纯 decoder 与 cold GET 不加载 FFI、不构建 owner、不重连。v3 的 `closed` 只描述 guardian 内 business owner，parent 原观察对象另由 `observationClosed` 明确表达，不能只凭前者宣称 transport 完成。
 
 [有限 owner 控制流](../../test/isolated/jobs/windows-owned-child.test.ts)与[port／codec](../../test/isolated/mcp/windows-stdio-port.test.ts)在本机验证 private ABI mock、原 binding、startup／cancel／closeUnknown；真实 Windows 用例保原平台 skip，尚未执行。[正式封装消费者](../../../../apps/service/test/isolated/mcp-source-packaged-default.test.ts)核两个 guardian 进入完整候选、默认 Profile 来源→原 SQL Job→Tool→Session cancel→cold 原 C／E／完整 output 零 Provider／RPC，并在 Windows 分支要求 v3／原 FILETIME／空树／observationClosed。本机实际 macOS 成功只证明该邻接与封装消费，Windows Job／HANDLE／pipe、installed 版本切换／维护恢复和全部正式客户端资格仍待既定实机验证，当前不得宣布平台或阶段退出。持久取舍归[Windows Note](../../../../.agents/notes/proposed/architecture/2026-10-10-windows-mcp-job-ownership.md)。
+
+## Linux stdio 所属 namespace
+
+[Linux transport](linux-stdio-port.ts)使用独立[direct-program owner](../platform/process/linux-owned-program.ts)和固定[原生 init](../../native/linux-stdio-init.c)。可信 Bubblewrap 建立 user／PID namespace、init为PID1，原宿主文件与设备、网络保持；原 command／argv／cwd／env直接execve，MCP不消费Shellmode／`-c`／文件或网络沙箱规则。fd0为真实业务stdin，fd3为私有控制，fd4以`KITEMCP1`交接完整配置，字段／严格UTF-8／NUL／EOF／原close有界核验；配置、环境和路径不入argv或冷证据。业务只继承0／1／2，清capability后执行。
+
+Service持原wrapper、SCM credentials、init／root pidfd和namespace FD，以原birth／父链／NSpid映射核namespace→P→held root→G交接。stdout按SDK帧完整UTF-8解析，stderr、启动队列和pending write保持既有有限预算。`writeStdin(bytes,beforeWrite?)`在ready等待之后同步执行可信来源／原binding／signal复核，随后直接入队，中间零await；失效保零RPC。cancel使用独立控制，不等待业务写；取消诱发的合法EPIPE／stream-close仍使原write拒绝，由严格停止合取决定owner结果。
+
+只有原root WNOWAIT／waitpid／raw status一致、namespace ECHILD、init／root原pidfd死亡、wrapper实际exit0／close／双EOF、stdin及配置真实关闭、pending write收束和全部原FD确认关闭才`ended`。启动清理unknown交回原facade，首unknown强持owner与证据、迟到terminal不升级。closed v4／`mcp-owned-pid-namespace`核原六字段scope和这些有限事实；[纯decoder](linux-stdio-process-evidence.ts)不加载FFI／读`/proc`／重开FD／连接，旧v1／v2／v3语义保持。
+
+Linux构建脚本生成并核x64／arm64 ELF `dist/mcp/linux-stdio-init`；显式`mcpStdioLinuxAssets()`定位本包原资产及canonical Bubblewrap，没有源码或安装机编译fallback。正式[Service assembler](../../../../apps/service/src/process-service.ts)沿原Source选择它；[来源工厂](../../../../apps/service/src/mcp-source-configuration.ts)在明确资产装配、resolve／admit／最后wire边界核原完整字节／EOF／devino／mode／mtime／ctime。原资产FD关闭unknown保首错与原对象、不重试，内部Profile门禁接现有装配cleanup及beforeResourceClose，阻正常Store／Profile／candidate释放，cleanup不依赖freshness。
+
+[owner整文件](../../test/isolated/mcp/linux-owned-program.test.ts)、[SDK／cold整文件](../../test/isolated/mcp/linux-stdio-port.test.ts)和[Service新FD整文件](../../../../apps/service/test/isolated/mcp-linux-source-assets.test.ts)仅证明本机private ABI mock、完整原RPC、wire漂移零入队、取消写错误及关闭／unknown控制流。[正式封装整例](../../../../apps/service/test/isolated/mcp-source-packaged-default.test.ts)保原180s／12s、Mac／Windows断言，Linux分支要求真正构建资产、原namespace host身份、完整终态和cold原C／E／output／cursor、零Provider／RPC。Linux native owner和正式整链缺compiler／Bubblewrap或真实失败必须失败；只有非Linux条件skip。实际Linux、installed版本／维护及全部客户端资格仍待重构后验收，本机macOS邻接不代其资格；持久边界归[Linux MCP提案](../../../../.agents/notes/proposed/architecture/2026-10-10-linux-mcp-owned-pid-namespace.md)。
 
 [Service HTTP port](../../../../apps/service/src/mcp-http-port.ts)提供另一显式 trusted transport：完整 DNS 候选核验、socket 地址 pinning、原 Host/TLS servername、禁止 redirect/proxy 继承和有界取消/关闭。秘密 headers 由宿主注入，不进入 lifecycle 固定配置或目录；仍必须提供真实 Job 准入。它与 stdio port 的资格分别验证，不能由低层 adapter 的默认 fetch 推导。
 
@@ -213,7 +225,7 @@ Service 的显式 host 工厂 [createMcpManagement](../../../../apps/service/src
 
 [私有来源 leaf](../config/mcp-sources.ts)读取选定 Profile 的 `mcp.json` 和实际 canonical Workspace 的 `.kite-code/mcp.json`；[配置 owner](../config/README.md)定义完整 ETag、项目遮蔽、可信变量、approval/auth binding metadata 与锁内 CAS。MCP Runtime 不读旧 home，不使用 ambient env，不接受 raw 配置中的自报授权。raw、归一化 transport 和安全 registry 摘要独立保存；`source.admitted` 只表示来源装配资格。
 
-[Service source factory](../../../../apps/service/src/mcp-source-configuration.ts)构造时零 IO，以晚绑定的实际 Runtime 读取 Store/Session/Workspace/Execution。Host 的一般 JSONC 命名选择只收窄已 admitted 来源；字段 absent 默认选 raw enabled 来源，显式空集合选择零项。静态 programmatic registration 保持原 Job；动态来源统一使用 `mcp.source.connection@1`，避免与合法 programmatic ID `source` 对应的 `mcp.connection.source` 冲突。持久 Job input 只含 safe server/config/capture digest、原 Store、key、bootstrap ID、实际父 Execution ID/input digest，不含 URL、command/env、Bearer ref 或 private source。
+[Service source factory](../../../../apps/service/src/mcp-source-configuration.ts)以晚绑定的实际 Runtime 读取 Store/Session/Workspace/Execution；仅明确注入的Linux原生资产在装配时核完整只读seal，用户来源／凭据与transport仍不在构造时读取或执行。Host 的一般 JSONC 命名选择只收窄已 admitted 来源；字段 absent 默认选 raw enabled 来源，显式空集合选择零项。静态 programmatic registration 保持原 Job；动态来源统一使用 `mcp.source.connection@1`，避免与合法 programmatic ID `source` 对应的 `mcp.connection.source` 冲突。持久 Job input 只含 safe server/config/capture digest、原 Store、key、bootstrap ID、实际父 Execution ID/input digest，不含 URL、command/env、Bearer ref 或 private source。
 
 `builtin.mcp.sources` 注册一次。普通 `mcp.sources.list` Tool 和只读 `mcp.sources` Query 公开分页 safe ID/name/transport/摘要及局部 unavailable code，不连接、不取凭据；目录不是 grant。Host 可将原 Run 冻结 selected metadata 作为低信任 user ContextSources 贡献，首次 Model 可见 safe ID，而实际 list/connect/Job/wire 仍独立检查原 capture。未 bind Runtime 的 standalone 装配使用纯 `unboundSelection`：原实际 command/session/workspace 形成零 selected、`readSet:null`，不读文件、不猜原 source 或 granted 权限。坏 source、热漂移或 unavailable Query 不启动恢复；无 selected source 的普通 Model 没有 raw MCP 文件恢复依赖。
 

@@ -36,13 +36,15 @@ function alive(pid: number) {
 test('sealed default process discovers and executes owned stdio sources using persistent SDK policy, then stops without cold respawn', async () => {
   const root = realpathSync(
     mkdtempSync(
-      join(process.platform === 'win32' ? tmpdir() : '/private/tmp', 'kite-packaged-default-mcp-'),
+      join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'kite-packaged-default-mcp-'),
     ),
   );
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');
   mkdirSync(workspace);
   mkdirSync(home);
+  if (process.platform === 'linux' && (!Bun.which('cc') || !Bun.which('bwrap')))
+    throw Error('linux_mcp_qualification_dependencies_unavailable');
   const { buildTerminalBundle } = await import('../../../../scripts/release/terminal-bundle');
   const built = await buildTerminalBundle({
     destination: join(root, 'bundle'),
@@ -56,6 +58,7 @@ test('sealed default process discovers and executes owned stdio sources using pe
     'node_modules/@kite-ai/agent/mcp/stdio-guardian.js',
     'node_modules/@kite-ai/agent/mcp/windows-stdio-guardian.js',
     'node_modules/@kite-ai/agent/storage/worker/main.js',
+    ...(process.platform === 'linux' ? ['node_modules/@kite-ai/agent/mcp/linux-stdio-init'] : []),
   ]) {
     expect(built.manifest.files.some((file) => file.path === asset)).toBe(true);
   }
@@ -255,7 +258,7 @@ test('sealed default process discovers and executes owned stdio sources using pe
     expect(JSON.stringify(bodies)).not.toContain('PRIVATE_RAW_SOURCE_SENTINEL');
     expect(JSON.stringify(bodies)).not.toContain(serverPath);
     expect(JSON.stringify(bodies)).not.toContain('PRIVATE_OWNED_ENV_SENTINEL');
-    const owned = JSON.parse(readFileSync(`${ledger}.pid`, 'utf8')) as {
+    let owned = JSON.parse(readFileSync(`${ledger}.pid`, 'utf8')) as {
       server: number;
       guardian: number;
       visible: string;
@@ -269,6 +272,51 @@ test('sealed default process discovers and executes owned stdio sources using pe
       readyOutput.items.find((row) => row.stream === 'progress')!.content,
     ) as { ready: boolean; ownedProcesses: McpStdioProcessEvidence };
     expect(ready.ready).toBe(true);
+    if (process.platform === 'linux') {
+      if (ready.ownedProcesses.version !== 4)
+        throw Error('packaged_linux_namespace_evidence_required');
+      const processEvidence = ready.ownedProcesses.process;
+      if (!processEvidence.namespace?.root) throw Error('packaged_linux_original_root_required');
+      // The server's actual process.pid/ppid are namespace-local; host liveness
+      // is anchored only by the port's original SCM credentials and pidfds.
+      expect(owned.server).toBe(processEvidence.namespace.root.localPid);
+      expect(owned.guardian).toBe(1);
+      owned = {
+        ...owned,
+        server: processEvidence.namespace.root.pid,
+        guardian: processEvidence.namespace.init.pid,
+      };
+      expect(ready.ownedProcesses).toMatchObject({
+        version: 4,
+        coverage: 'mcp-owned-pid-namespace',
+        ownerPid: child.pid,
+        binding: { originalStoreId: expectedStoreId, sessionId: 's', executionId: connectionId },
+        process: {
+          version: 1,
+          coverage: 'linux-pid-namespace',
+          ownerPid: child.pid,
+          admission: { purpose: 'stdio' },
+          phase: 'ready',
+          fdClosed: false,
+          closeUnknown: false,
+          wrapper: {
+            parentPid: child.pid,
+            exit: null,
+            closed: false,
+            stdoutEof: false,
+            stderrEof: false,
+          },
+          namespace: {
+            init: { pid: owned.guardian, localPid: 1, dead: false },
+            root: { pid: owned.server, parentPid: owned.guardian, dead: false, waitReceipt: null },
+            treeStopped: false,
+          },
+        },
+      });
+      expect(processEvidence.wrapper.birth).toMatch(/^[1-9][0-9]*$/);
+      expect(processEvidence.namespace.init.birth).toMatch(/^[1-9][0-9]*$/);
+      expect(processEvidence.namespace.root.birth).toMatch(/^[1-9][0-9]*$/);
+    }
     if (process.platform === 'win32') {
       expect(ready.ownedProcesses).toMatchObject({
         version: 3,
@@ -333,6 +381,44 @@ test('sealed default process discovers and executes owned stdio sources using pe
         closeUnknown: false,
       });
     }
+    if (process.platform === 'linux') {
+      if (ready.ownedProcesses.version !== 4 || terminal.details.ownedProcesses.version !== 4)
+        throw Error('packaged_linux_namespace_evidence_required');
+      const original = ready.ownedProcesses.process.namespace;
+      if (!original?.root) throw Error('packaged_linux_original_root_required');
+      expect(terminal.details.ownedProcesses).toMatchObject({
+        version: 4,
+        coverage: 'mcp-owned-pid-namespace',
+        ownerPid: child.pid,
+        process: {
+          phase: 'terminal',
+          fdClosed: true,
+          closeUnknown: false,
+          wrapper: {
+            pid: ready.ownedProcesses.process.wrapper.pid,
+            birth: ready.ownedProcesses.process.wrapper.birth,
+            exit: { code: 0, signal: null, reaped: true },
+            closed: true,
+            stdoutEof: true,
+            stderrEof: true,
+          },
+          namespace: {
+            dev: original.dev,
+            ino: original.ino,
+            treeStopped: true,
+            init: { pid: original.init.pid, birth: original.init.birth, localPid: 1, dead: true },
+            root: {
+              pid: original.root.pid,
+              birth: original.root.birth,
+              parentPid: original.init.pid,
+              localPid: original.root.localPid,
+              dead: true,
+              waitReceipt: { localPid: original.root.localPid, waitConfirmed: true, reaped: true },
+            },
+          },
+        },
+      });
+    }
     const stoppedOutput = await client.listExecutionOutput(connectionId);
     expect(stoppedOutput).toEqual(readyOutput);
     const originalCommand = await client.getCommand('work');
@@ -386,11 +472,13 @@ test('sealed default process discovers and executes owned stdio sources using pe
     const stoppedPidLedger = readFileSync(`${ledger}.pid`, 'utf8');
     const providerBeforeCold = bodies.length;
     child = await launch('packaged-cold');
+    const coldCursor = (await child.client.getView('s')).snapshotCursor;
     expect(await child.client.getCommand('work')).toEqual(originalCommand);
     expect(await child.client.getExecution(connectionId)).toEqual(stopped);
     expect(await child.client.listExecutionOutput(connectionId)).toEqual(stoppedOutput);
     await child.client.queryExtension('s', 'builtin.mcp.sources', 'mcp.sources', {});
     await child.client.queryExtension('s', 'builtin.mcp', 'mcp.catalogue', {});
+    expect((await child.client.getView('s')).snapshotCursor).toBe(coldCursor);
     expect(bodies.length).toBe(providerBeforeCold);
     expect(readFileSync(ledger, 'utf8')).toBe(stoppedRpc);
     expect(readFileSync(`${ledger}.pid`, 'utf8')).toBe(stoppedPidLedger);

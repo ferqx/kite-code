@@ -4,7 +4,7 @@ import { AgentError, createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { linuxShellInitAsset, shellSupervisorAsset } from '@kite-ai/agent/jobs/shell';
-import { McpStdioPortError, mcpStdioGuardianAsset } from '@kite-ai/agent/mcp';
+import { McpStdioPortError, mcpStdioGuardianAsset, mcpStdioLinuxAssets } from '@kite-ai/agent/mcp';
 import { type ProfileSelection, selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -12,6 +12,7 @@ import { readSessionLogs } from '@kite-ai/agent/storage';
 import { type ConfigureProcessHost, type PrivateStartup, privateStartupSchema } from './bootstrap';
 import { createDefaultProcessConfiguration, type ShellConfigurationOptions } from './configuration';
 import { startService } from './index';
+import { assertMcpSourceStdioAssetsClosed } from './mcp-source-configuration';
 import {
   retainWindowsNativeRuntimeFiles,
   windowsRuntimePinCloseUnknown,
@@ -153,6 +154,7 @@ export async function assembleProcessService(
         });
   } catch (error) {
     try {
+      assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
       runtimeAssetAccess?.release();
     } catch (cleanupError) {
       throw new ProcessServiceCleanupError('runtime_assembly', error, cleanupError, {
@@ -213,6 +215,7 @@ export async function assembleProcessService(
       });
     } catch (error) {
       try {
+        assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
         await workspaceSerialLocks?.close();
         await artifacts?.close();
         await store.close();
@@ -233,6 +236,7 @@ export async function assembleProcessService(
       subjectId,
       runtime,
       beforeResourceClose: async () => {
+        assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
         await beforeResourceClose?.();
         await workspaceSerialLocks?.close();
       },
@@ -258,6 +262,7 @@ export async function assembleProcessService(
     });
   } catch (error) {
     try {
+      assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
       await runtime?.close();
       await workspaceSerialLocks?.close();
       runtimeAssetAccess?.release();
@@ -277,7 +282,13 @@ export async function assembleProcessService(
 /** Process assembly selects only this built package's finite assets; no .ts fallback. */
 function packagedMcpSourceAssets() {
   try {
-    return { stdio: { guardianPath: mcpStdioGuardianAsset(), bunExecutable: process.execPath } };
+    return {
+      stdio: {
+        guardianPath: mcpStdioGuardianAsset(),
+        bunExecutable: process.execPath,
+        ...(process.platform === 'linux' ? { linux: mcpStdioLinuxAssets() } : {}),
+      },
+    };
   } catch (error) {
     if (!(error instanceof McpStdioPortError) || error.code !== 'mcp_stdio_asset_unavailable')
       throw error;

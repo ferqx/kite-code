@@ -17,6 +17,8 @@ MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.2`�
 
 Windows stdio 源码沿同一 Source／SQL connection Job／最终 wire 准入，独立 guardian 使用创建前归属的原 Job 和 process HANDLE。closed v3 只描述原 Job 成员、FILETIME、root wait、空树、guardian 实际 reap 与原观察 HANDLE 关闭；旧 Darwin v1／v2 严格合同保持，冷读取不创建 HANDLE。它不借用旧 Host／Rust carrier，不授 Shell filesystem／network ceiling，不证明外部 broker 工作或远端 Tool 停止。当前实现与验收范围归[MCP owner](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)，实际 Windows 资格仍待验证。
 
+Linux stdio 同一 caller 已接原 PID namespace／direct-exec 源码，MCP 保原 command／args／cwd／env、文件／设备与网络；独立 fd3 控制及 fd4 有界配置不进入业务 argv。实际 stdin 入队前在 ready await 后同步复核原来源和 signal；取消控制不排在业务写后，写失败仍失败，停止由原 wait／ECHILD／pidfd死亡／wrapper exit-close／EOF／全部 FD 关闭合取裁决。closed v4 纯读原六身份和 namespace receipt，保旧版本严格分支；Linux 资产关闭 unknown 阻正常 Profile／Store／candidate 释放。完整合同与本机／待验范围归[MCP owner](../../packages/agent/src/mcp/README.md#linux-stdio-所属-namespace)，不能由源码或 macOS 邻接宣布 Linux 原生、资源或阶段资格。
+
 下列Manager/Supervisor/provider/control snapshot名称与旧workspace路径记录历史装配和仍需核对的理由，不能作为当前owner、正式运行或测试调度入口。认证、旧policy替代、远端取消、持续Soak与三平台尚有未闭合范围，按[总体进度](../plans/unified-agent-refactor-v1-progress.md)核对，不从旧Note implemented状态推定新功能已交付。
 
 ## 唯一 owner 与 binding

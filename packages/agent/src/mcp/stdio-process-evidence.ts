@@ -4,12 +4,17 @@ import {
   type OwnedProcessIdentity,
   type OwnedProcessRecord,
 } from '../platform/process/owned-process-observation';
+import {
+  decodeMcpStdioLinuxEvidence,
+  type McpStdioLinuxEvidence,
+} from './linux-stdio-process-evidence';
 
 export {
   isOwnedProcessIdentity as isMcpStdioIdentity,
   observeOwnedProcessIdentity as observeMcpStdioIdentity,
   ownedProcessKernelState as mcpStdioKernelState,
 } from '../platform/process/owned-process-observation';
+export type { McpStdioLinuxEvidence } from './linux-stdio-process-evidence';
 export type McpStdioProcessIdentity = OwnedProcessIdentity;
 export type McpStdioProcessRecord = OwnedProcessRecord;
 export interface McpStdioProcessEvidenceV1 {
@@ -75,7 +80,8 @@ export interface McpStdioWindowsEvidence {
 export type McpStdioProcessEvidence =
   | McpStdioProcessEvidenceV1
   | McpStdioProcessEvidenceV2
-  | McpStdioWindowsEvidence;
+  | McpStdioWindowsEvidence
+  | McpStdioLinuxEvidence;
 
 /** Closed Windows receipt; never reconstructs a process or Job HANDLE on cold read. */
 function decodeWindowsEvidence(
@@ -189,6 +195,8 @@ export function decodeMcpStdioProcessEvidence(
 ): McpStdioProcessEvidence | undefined {
   try {
     const exact = (row: object, fields: string) => Object.keys(row).sort().join(',') === fields;
+    if ((value as { version?: unknown } | null)?.version === 4)
+      return decodeMcpStdioLinuxEvidence(value, binding, ownerPid);
     if ((value as { version?: unknown } | null)?.version === 3)
       return decodeWindowsEvidence(value as McpStdioWindowsEvidence, binding, ownerPid);
     const data = value as McpStdioProcessEvidenceV1 | McpStdioProcessEvidenceV2;

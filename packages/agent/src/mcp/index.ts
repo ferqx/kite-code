@@ -917,9 +917,11 @@ export {
   McpStdioPortError,
   type McpStdioPortOptions,
   mcpStdioGuardianAsset,
+  mcpStdioLinuxAssets,
 } from './stdio-port';
 export {
   decodeMcpStdioProcessEvidence,
+  type McpStdioLinuxEvidence,
   type McpStdioProcessEvidence,
   type McpStdioWindowsEvidence,
 } from './stdio-process-evidence';

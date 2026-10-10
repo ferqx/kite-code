@@ -397,7 +397,9 @@ process.stdin.resume();process.stdin.once('end',()=>{child.once('close',()=>proc
         version: 2,
         coalition: { terminalTaskCount: 1, processTreeStopped: true, registrationRemoved: true },
       });
-      expect(owned.readProcessEvidence!().server).toMatchObject({
+      const stoppedEvidence = owned.readProcessEvidence!();
+      if (stoppedEvidence.version !== 2) throw Error('mcp_coalition_terminal_required');
+      expect(stoppedEvidence.server).toMatchObject({
         exit: { code: 0, signal: null, reaped: true },
         kernelState: 'absent',
       });

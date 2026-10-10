@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, realpathSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
@@ -189,7 +197,10 @@ export interface McpSourceConfigurationOptions {
     'resolveAddresses' | 'allowLoopbackForTests' | 'trustedTestCertificate' | 'limits'
   >;
   /** Trusted packaged manifest assets supplied by the host; never source fallback. */
-  stdio?: Pick<McpStdioPortOptions, 'guardianPath' | 'bunExecutable' | 'limits' | 'controlBase'>;
+  stdio?: Pick<
+    McpStdioPortOptions,
+    'guardianPath' | 'bunExecutable' | 'limits' | 'controlBase' | 'linux'
+  >;
   oauth?: Partial<
     Pick<McpOAuthSessionOptions, 'openBrowser' | 'network' | 'callbackTimeoutMs' | 'now'>
   > & {
@@ -238,8 +249,93 @@ const readSetSchema = {
   },
 };
 
-/** Late host composition; construction performs no filesystem, vault or transport operation. */
+/** A per-assembly Linux asset seal. Every freshness boundary rereads all bytes;
+ * this is neither a stat cache nor a replacement for the candidate's use lease. */
+const unclosedStdioAssets = new Map<
+  string,
+  { readonly fd: number; readonly error: AggregateError }[]
+>();
+/** Internal Service drain fence; never retries an uncertain descriptor number. */
+export function assertMcpSourceStdioAssetsClosed(profileAccessKey: string): void {
+  const pending = unclosedStdioAssets.get(profileAccessKey);
+  if (pending?.length) throw pending[0]!.error;
+}
+function linuxStdioAsset(profileAccessKey: string, path: string) {
+  assertMcpSourceStdioAssetsClosed(profileAccessKey);
+  const canonical = realpathSync(path);
+  if (canonical !== path) throw new McpAdapterError('mcp_stdio_asset_unavailable');
+  const before = lstatSync(path, { bigint: true });
+  if (
+    !before.isFile() ||
+    before.isSymbolicLink() ||
+    before.nlink !== 1n ||
+    !(before.mode & 0o111n) ||
+    before.size < 1n ||
+    before.size > 256n * 1024n * 1024n
+  )
+    throw new McpAdapterError('mcp_stdio_asset_unavailable');
+  const stamp = (stat: typeof before) =>
+    [stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  let failure: unknown;
+  let result: { path: string; identity: string; sha256: string } | undefined;
+  try {
+    if (stamp(fstatSync(fd, { bigint: true })) !== stamp(before))
+      throw new McpAdapterError('mcp_stdio_asset_changed');
+    const digest = createHash('sha256'),
+      scratch = Buffer.allocUnsafe(1024 * 1024);
+    let count = 0;
+    for (;;) {
+      const read = readSync(fd, scratch, 0, scratch.length, null);
+      if (!read) break;
+      count += read;
+      if (BigInt(count) > before.size) throw new McpAdapterError('mcp_stdio_asset_changed');
+      digest.update(scratch.subarray(0, read));
+    }
+    if (
+      BigInt(count) !== before.size ||
+      realpathSync(path) !== canonical ||
+      stamp(fstatSync(fd, { bigint: true })) !== stamp(before) ||
+      stamp(lstatSync(path, { bigint: true })) !== stamp(before)
+    )
+      throw new McpAdapterError('mcp_stdio_asset_changed');
+    result = { path: canonical, identity: stamp(before), sha256: digest.digest('hex') };
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    closeSync(fd);
+  } catch (error) {
+    const unknown = new AggregateError(
+      failure ? [failure, error] : [error],
+      'mcp_stdio_asset_close_unknown',
+    );
+    const retained = Object.freeze({ fd, error: unknown });
+    const pending = unclosedStdioAssets.get(profileAccessKey) ?? [];
+    pending.push(retained);
+    unclosedStdioAssets.set(profileAccessKey, pending);
+    throw unknown;
+  }
+  if (failure) throw failure;
+  return result!;
+}
+/** Late host composition: only explicitly supplied Linux assets are read here; sources, vault and transport remain lazy. */
 export function createMcpSourceConfiguration(options: McpSourceConfigurationOptions) {
+  const linuxAssets =
+    options.stdio?.linux && process.platform === 'linux'
+      ? [options.stdio.linux.initExecutable, options.stdio.linux.bubblewrapPath].map((path) =>
+          linuxStdioAsset(options.profile.profileAccessKey, path),
+        )
+      : undefined;
+  const assertLinuxAssets = () => {
+    if (!linuxAssets) return;
+    for (const original of linuxAssets) {
+      const current = linuxStdioAsset(options.profile.profileAccessKey, original.path);
+      if (mcpCanonical(current) !== mcpCanonical(original))
+        throw new McpAdapterError('mcp_stdio_asset_changed');
+    }
+  };
+
   const runtime = options.runtime;
   const profile = Object.freeze({ ...options.profile });
   const broker = createMcpCredentialBroker({
@@ -1448,6 +1544,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       });
     } else {
       if (!options.stdio) throw new McpAdapterError('mcp_stdio_asset_unavailable');
+      assertLinuxAssets();
       port = createMcpStdioTransportPort({
         ...options.stdio,
         controlBase: options.stdio.controlBase ?? profile.coordinationPath,
@@ -1458,8 +1555,14 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
           },
         ],
         allowedEnvNames: Object.keys(transport.env),
-        admit,
-        assertFresh: (_binding, { signal }) => fresh({ signal }),
+        async admit(binding, options) {
+          await admit(binding, options);
+          assertLinuxAssets();
+        },
+        assertFresh: (_binding, { signal }) => {
+          fresh({ signal });
+          assertLinuxAssets();
+        },
       });
     }
     if (replacement) {

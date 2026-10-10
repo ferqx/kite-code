@@ -23,6 +23,8 @@ Node/Electron Main 的有限独立使用权及 managed Native 加载前源码已
 
 Windows stdio MCP 同一正式 Source／connection Job／Tool caller 已接[独立原 Job 后端](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)源码和 closed v3。绝对 native executable、创建前 Job 归属、原 HANDLE／FILETIME／空树和实际关闭是其准确合同；它不提供 Shell 文件／网络隔离、不覆盖外部系统 broker 代启动，也不计为全部 Runtime 后代观测。本机 ABI mock、macOS 封装消费者及静态构建不代 Windows native资格，Windows Shell 的真实权限后端缺口和原实机／RSS／完整观测门禁继续保留。
 
+Linux stdio MCP 的同一正式 Source／connection Job／SDK Tool 已接[独立原 namespace 后端](../../packages/agent/src/mcp/README.md#linux-stdio-所属-namespace)与 closed v4 源码，直接执行原程序，保原 host 文件／设备／网络及完整 stdout／stdin。构建生成封存 ELF，正式资产最后 wire 复核及 unknown Profile 关闭门禁已有接线；原树 wait／ECHILD、pidfd 死亡、wrapper 实际关闭与全部 FD 证明仍须对应 Linux 原生验收。本机控制流、macOS 封装邻接与冷纯解码不计平台支持、全部 Runtime 观测或阶段退出；RSS／观测及原 formal 拒绝继续保留。
+
 [transport workflow](../../.github/workflows/runtime-transport-qualification.yml)已接入这五项强制后端案例，并与 release 共用[预装 MSVC/SDK 准备](../../scripts/release/prepare-windows-native-ci.ts)；准确 source head、固定 x64 编译器、环境字节及准备早于消费由[CI反例](../../tests/integration/scripts/unified-ci.test.ts)和[纯准备合同](../../tests/isolated/unified-agent/windows-native-ci.test.ts)核验。缺后端、编译器或 ABI 在 Windows 上失败，只有非 Windows 平台条件才跳过其原生案例。这是接线与本机负例证据，仍不宣称实际 Windows syscall、Native 启动或三平台资格。
 
 ## 历史实现与仍适用的安全约束

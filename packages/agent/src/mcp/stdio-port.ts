@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { type JSONRPCMessage, JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpAdapter, type McpLifecycleTransportPort } from './index';
+import { McpStdioPortError } from './stdio-error';
 import {
   copyMcpStdioEvidence,
   decodeMcpStdioProcessEvidence,
@@ -16,13 +17,7 @@ import {
   mcpStdioKernelState,
 } from './stdio-process-evidence';
 
-export class McpStdioPortError extends Error {
-  readonly code: string;
-  constructor(code: string) {
-    super(code);
-    this.code = code;
-  }
-}
+export { McpStdioPortError } from './stdio-error';
 /** Built leaf resolves only its packaged guardian; source callers must select a built asset. */
 export function mcpStdioGuardianAsset(): string {
   if (!import.meta.url.endsWith('.js')) throw new McpStdioPortError('mcp_stdio_asset_unavailable');
@@ -34,6 +29,16 @@ export function mcpStdioGuardianAsset(): string {
   );
   if (!existsSync(path)) throw new McpStdioPortError('mcp_stdio_asset_unavailable');
   return path;
+}
+/** Installed Linux connections execute the sealed native owner; never a source or compiler fallback. */
+export function mcpStdioLinuxAssets(): { initExecutable: string; bubblewrapPath: string } {
+  if (process.platform !== 'linux' || !import.meta.url.endsWith('.js'))
+    throw new McpStdioPortError('mcp_stdio_asset_unavailable');
+  const initExecutable = fileURLToPath(new URL('./linux-stdio-init', import.meta.url));
+  const bubblewrap = Bun.which('bwrap');
+  if (!existsSync(initExecutable) || !bubblewrap)
+    throw new McpStdioPortError('mcp_stdio_asset_unavailable');
+  return { initExecutable, bubblewrapPath: realpathSync.native(bubblewrap) };
 }
 type Binding = Parameters<McpLifecycleTransportPort['open']>[0];
 type Configuration = {
@@ -47,6 +52,8 @@ export interface McpStdioPortOptions {
   servers: readonly { id: string; configuration: Configuration }[];
   guardianPath: string;
   bunExecutable: string;
+  /** Original host permissions and network; the PID namespace owns connection descendants. */
+  linux?: { initExecutable: string; bubblewrapPath: string };
   /** Trusted private host base; the broker creates and removes its own 0700 directory. */
   controlBase?: string;
   allowedEnvNames: readonly string[];
@@ -70,6 +77,8 @@ export function createMcpStdioTransportPort(
   if (
     ![guardianPath, bun, options.controlBase ?? tmpdir()].every(isAbsolute) ||
     !guardianPath.endsWith('.js') ||
+    (options.linux !== undefined &&
+      ![options.linux.initExecutable, options.linux.bubblewrapPath].every(isAbsolute)) ||
     [maximum, stderrMaximum, timeout].some((n) => !Number.isSafeInteger(n) || n < 1) ||
     maximum > 1024 * 1024 ||
     stderrMaximum > 16 * 1024 * 1024 ||
@@ -120,7 +129,7 @@ export function createMcpStdioTransportPort(
     throw new McpStdioPortError('mcp_stdio_configuration_invalid');
   return {
     async open(binding, { signal }) {
-      if (process.platform !== 'darwin' && process.platform !== 'win32')
+      if (!['darwin', 'win32', 'linux'].includes(process.platform))
         throw new McpStdioPortError('mcp_stdio_platform_unsupported');
       const server = servers.get(binding.serverId);
       if (
@@ -165,6 +174,20 @@ export function createMcpStdioTransportPort(
         )
       )
         throw new McpStdioPortError('mcp_stdio_asset_unavailable');
+      if (process.platform === 'linux') {
+        if (
+          !options.linux ||
+          ![options.linux.initExecutable, options.linux.bubblewrapPath].every(existsSync)
+        )
+          throw new McpStdioPortError('mcp_stdio_asset_unavailable');
+        const { openLinuxStdio } = await import('./linux-stdio-port');
+        return openLinuxStdio(binding, signal, server.configuration, options, {
+          maximum,
+          stderrMaximum,
+          timeout,
+          grace,
+        });
+      }
       if (process.platform === 'win32') {
         // No ambient COMSPEC or .cmd fallback: the configured native executable is explicit.
         if (!/\.exe$/i.test(server.configuration.command))
