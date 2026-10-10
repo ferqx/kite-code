@@ -72,6 +72,9 @@ jobs:
         run: bun run release:verify --product native --directory dist/unified-native --source-commit "${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true
       - name: Verify embedded Electron and independent SQLite engine
         run: bun run release:smoke --product native --directory dist/unified-native
+      - if: runner.os == 'Windows'
+        name: Actual installed Windows Native windows, version selection and maintenance restore
+        run: bun run tests/fixtures/unified-agent/windows-native-installation.qualification.ts "--candidate=${{ github.workspace }}/dist/unified-native"
       - if: runner.os == 'macOS'
         name: Actual source-free Native Main, upgrade, rollback, installed CLI and TUI
         run: >-

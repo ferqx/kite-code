@@ -4391,3 +4391,39 @@ Windows Shell 的 Job owner 可复用，现有 token机制却不能同时满足�
 | 4 | §35完整37能力／T/E独立审查、最终legacy退役及阶段收束 | 全部适用能力与兼容样本实证、真实旧路径删除、未过滤阶段完整回归及适用P7责任完整成立 | 前三项适用资格及剩余能力，限定源码／局部通过不代整体退出。本片非阶段收束点，不运行完整回归制造阶段通过 |
 
 37能力仍partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。本轮仅已授权本地提交，无push／PR／发布／平台安装／Actions；原Mac stdio红、RSS红和所有缺资格门禁不被文档或POSIX结果覆盖。
+
+## 2026-10-10：Windows Native 正式安装版本切换与维护调用者源码
+
+前片 Windows Files 后端已正常本地提交 `81ae4f447c0a1edf7c20ff7bccc42703454412e0`，切片结束。本轮按 §30.2.16、能力映射和实际源码核下一独立完整用户链：Windows managed Native 的生产安装／可信启动已接，但 release matrix 只有 build／verify／smoke，真实安装窗口整例仅 POSIX；原 Playwright launcher 添加 user-data-dir，无法进入拒绝所有附加用户参数的 Windows 稳定前门。最高可独立实施的缺口是正式安装／版本选择／维护恢复调用者，不是再扩资源或 journal 窗口。RSS 与观测依旧在 P6／§35 汇合，不是该源码前置；Windows Shell 按用户决定保原合同、guard 和未闭合门禁。
+
+### 完整行为与调用者接线
+
+[正式 Windows qualification](../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)消费 workflow 的准确绝对 Native 候选；只归档／解包自己的副本并删除自有构建副本，保 workflow 原输入。安装 A 后，稳定 `kite-desktop.exe` 零参数启动，真实页面在私有 Profile 的准确原会话完成一次普通 Model 任务。运行中安装 B 只改变后续选择，原 A Main／Service 仍实际 alive，持原双层使用权并读原完整结果；普通菜单退出后才启动 B 冷读，再明确 rollback A、A 冷读。B 只修改私有副本 manifest 的版本／内层摘要，全部运行代码字节相同，明确 `selectionOnly:true／crossCodeQualified:false`，不冒充真实跨代码兼容。
+
+各窗口普通退出后，原安装版 `kite.exe` 执行 backup／inspect／restore 新 Store／status，核 v18／DB9、原配置／Native 私有库 proof、原目录保留与只读零重放。恢复后再次从稳定前门启动 A、读取完整原结果，再普通退出、取得 A／B outer+inner EX，最后唯一卸载保 Core／Native DB／config 完整字节。Core reader 动态来自实际安装候选，独立只读核原 Command／Run／Execution／Message／完整 ModelOutput head、blob EOF/hash 和出处；只允许恢复后的当前 Store 与独立读取 cursor 改变，Provider 恰 1，旧任务不重做。短固定结果只证明本链，不代大正文或任意工作负载。
+
+[系统 UIAutomation driver](../../tests/fixtures/unified-agent/windows-native-uia.ts)使用固定系统 PowerShell 5.1、UTF-8 BOM [脚本](../../tests/fixtures/unified-agent/windows-native-uia.ps1)，只操作已核原 Main 的 HWND／辅助功能树，不向产品加调试参数。页面完整 Text／Value 读取不能用截短 Name 代替；缺树、歧义、不可操作或超预算实际失败。正常退出沿实际 File→Quit，候选先核可操作并按实际 AutomationElement 去重，不同同名元素仍拒绝。基本链 120 秒与独立维护链 180 秒、各 driver 45 秒／操作 10 秒保持，最终清理也不得使成功越过整体期限。
+
+私有 [Windows Job owner](../../packages/agent/src/platform/process/windows-owned-child.ts)新增同原 Job 的有界完整成员观察：原 HANDLE、FILETIME、Job 成员关系和完整映像证明 Main／Service，Toolhelp PPID 只定位已证成员，不能授权数字 PID 控制。失败或 Close 未确认保原 owner；实际 TerminateJobObject 请求另记事实。每个自然退出必须原 root exit0／双流 EOF、原 Main／Service HANDLE dead、Job0／严格 closed、双 EX 且 `terminationRequested=false`，fixture 强制收尾不会变成正常通过。MCP guardian 显式投影原 v1 字段，closed v3 公共语法不扩展。局部 Store 清理保首业务错与 close 错聚合，阶段记录不覆盖原失败。
+
+[release workflow](../../.github/workflows/release-candidate.yml)在 unconditional Native build→verify→smoke 后强制该 Windows 完整调用者；[正式消费者守卫](../../scripts/check-unified-workspaces.ts)和原 [CI 整文件](../../tests/integration/scripts/unified-ci.test.ts)拒绝缺 fixture、删除步骤、错平台／候选、过滤／echo、忽略错误及提前执行。原 POSIX 窗口、真实跨代码、common whole 和 always formal 门禁保持；没有新增最终 legacy 删除或把原资源失败排除。
+
+### 限定验证与保留失败
+
+- 当前 CI 守卫完整文件实际 exit0，13pass／81expects／0fail，log `/private/tmp/kite-windows-native-installed-ci-whole.log`。原 Job 控制流完整文件实际 exit0，2pass／5Bun expects／1 Windows 显式平台 skip；原 mock 的 74 条 Node 断言保持原序，当前 95 条，原 5 秒 subprocess／10 秒 whole 预算保持。MCP 原完整文件实际 exit0，2pass／20expects／1 Windows 平台 skip，closed 公共投影断言保持。两个 owner 输入未变，按 SHA 复用，不再扩 fault matrix。
+- macOS 显式 qualification 平台守卫在候选、Profile 和子进程前拒绝，实际 exit0；它不运行 Windows UIA／DACL／PE／嵌套 Job／安装／维护，不授平台资格。PowerShell BOM／固定 API／PS5.1 语法和实际元素选择只静态核，原生执行仍 pending。UIA 最终脚本 SHA `edb9611a7e8ee51891c6b9fa8ddfafba1ac6c0b6542afe8133e2cf1e0d010efd`，冻结收据 `/private/tmp/kite-windows-native-uia-quit-freeze-20261011.json`。
+- 新 fixture 初次类型检查因 `.candidateId`／`.state` 与现有 `.digest`／`.status` 合同不符实际 exit2，准确原 log `/private/tmp/kite-windows-native-installed-types.log` 保留；修正属性没有删业务断言。最终 Root／八 workspace 类型与七 TS 只读 Biome、对应文档／all-impact／边界／workspace／API／测试归属／plan-evidence 均实际 exit0，类型 log `/private/tmp/kite-windows-native-installed-types-final-frozen-20261011.log`。原 Job／MCP／driver TS 输入逐一核 SHA 未变，复用证据保持原覆盖范围；独立只读审查发现的 Store 清理首错覆盖已修。19 文件交付冻结收据 `/private/tmp/kite-windows-native-installed-source-freeze-20261011.json`，正常本地 hooks 仍独立执行，不代阶段完整回归。
+- 额外两个历史整文件真实失败保留：`tests/release/supply-chain-workflow.test.ts` 实际 4pass／3fail／44expects；`tests/integration/scripts/ci-bun-baseline.test.ts` 实际 3pass／3fail／116expects。其首个失败分别要求退役 verify 命令／Rust Windows 构建／旧 keyring 或 protected-path 路径／旧 20 分钟预算；这些期望与 HEAD 现行配置已不符。本轮没有修改这两份测试或原默认调度，两者在本轮之前即不属于 `unified-test-plan.ts` 的 formal root scripts，后续未到的断言不记通过。原红 log 分别为 `/private/tmp/kite-windows-native-installed-supply-chain-whole.log` 与 `/private/tmp/kite-windows-native-installed-baseline-whole.log`；保全收据 `/private/tmp/kite-windows-native-installed-preservation-final-20261011.json` 核它们、原 POSIX 窗口／真实跨代码整例和调度字节均等 HEAD。
+
+Native／Agent platform／MCP owner、release 与 runtime-resilience active、tests、主计划及 release.lifecycle 限定证据同步；产品手册的 Windows 未资格、版本只改变后续启动和恢复零重放合同核对不变，不制造产品行为 diff。[持久取舍 Note](../../.agents/notes/proposed/testing/2026-10-10-windows-native-installed-caller.md)仍 proposed，因 Windows 实际整链尚未执行。本片闭合正式调用者源码缺口，不闭合 Windows 完整用户能力或 §35。
+
+### 最多五项剩余退出缺口
+
+| 顺序 | 实际用户入口／具体缺口 | 完整行为与明确验收 | 真实依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows installed 普通 Shell 及调用 Shell 的 Task／Workflow | 原 Workspace／Full 权限求交、广泛 HOME／工具读取和无条件 private 保护；完整 Job 输出、全树取消、unknown 保原资源和 cold 零重放，由正式 Service／installed 用户链实证 | 文件权限后端仍缺，用户已决定保原合同／guard／门禁；不以 Job 或 Files 后端解除 Shell 拒绝。独立于 RSS；继续其他独立能力 |
+| 2 | Win/Linux 正式安装、真实代码版本切换、六 Files、PTY／Native 窗口和维护恢复完整资格 | 精确当前资产实际 install／A→B→A／rollback／uninstall，普通任务完整历史、backup／restore 新 Store／GC、准确进程资源关闭与零重放；真实跨代码与相应平台证据分别成立 | 本片只补 Windows Native 正式调用者源码。原生／交互桌面／完整消费者未验，适用 Shell 工作仍依赖①；按用户顺序重构后 Actions，无 dispatch |
+| 3 | installed 混合持续任务／Shell／child／MCP 的原 RSS 和完整资源资格 | 原八 outer／各九点、busy≥450000ms／outer、总 60—168 分钟和原增长／斜率门槛；全部可信 Runtime 后代、activeResources／handles 与最终资源退出 | 原 `+115.203125MiB > 32MiB` red 和观测缺项保持，不重复参数对照；阻 P6／§35／最终退役，不阻独立安装／维护源码 |
+| 4 | §35 完整 37 能力／T/E 独立审查、最终旧路径退役与阶段收束 | 全部适用能力和样本、真实 legacy 删除、未过滤阶段完整回归及适用 P7 发布责任成立 | 前三项适用资格和剩余能力汇合；本机限定源码审查／局部通过不替代阶段出口，本轮不是收束点 |
+
+37 能力仍 partial；wholeDefault=false、wholeV13=false、phaseExit=false、Goal active。原 macOS stdio 红、RSS 红和完整观测未知不被新 fixture 或文档改写；本轮仅本地提交授权，无 push／PR／发布／平台安装／Actions。

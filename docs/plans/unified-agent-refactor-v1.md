@@ -2150,6 +2150,8 @@ Linux正式Source stdio的独立direct-program／namespace owner、真实SDK tra
 
 Linux持续普通任务的正式default caller现已从Darwin-only限制迁出，沿同候选的两Service／20Session／Files／required Task／detached Shell完整链，以closed continuous v3严格消费原ready reference与terminal namespace proof及两Service有限v2资源收据。Mac v2与原工作量／取消／冷读零重放及450秒／八outer／九点门禁保持；Linux内核／installed完整用户链仍pending，不能据此解除P6或§35／最终退役。源码、限定本机验证与最多五项下一退出依赖归[当前进度](unified-agent-refactor-v1-progress.md#2026-10-10linux-持续普通任务的正式调用者迁移)；安装／真实版本切换／维护恢复仍按实际源码独立推进，原RSS与观测缺项不成为这些源码实施的前置审批或重复实验目标。37partial、wholeDefault／wholeV13／phaseExit=false。
 
+Windows Native 的完整安装用户链现已补正式 release 调用者源码：准确候选先完整 build／verify／smoke，再零参数稳定前门运行真实页面任务，A 存活时选择 B 保原版本，普通菜单退出后 B 冷读、rollback A 冷读，包内 CLI 恢复新 Store 后再次 Native 冷读及保数据卸载。原 Job 成员 HANDLE／FILETIME、实际 Main／Service 退出、未请求 Terminate 与双层 EX 均为必需；系统 UIAutomation 不增加产品调试参数。合成 B 只核同代码选择，Windows 原生／真实跨代码及 Win/Linux 完整资格仍未执行。当前完整源码／有限验证、保留的原失败和最多四项依赖归[安装调用者进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-native-正式安装版本切换与维护调用者源码)；RSS／观测、Shell 原合同门禁、§35／最终退役和阶段完整回归保持，37 partial／wholeV13／phaseExit=false。
+
 ### 30.3 第一条执行闭环
 
 原会话工具的通用交互只读历史已沿原公共页和原卡组件接入，历史附件不取得当前审批资格；当前职责归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)，准确窗口与读取证据归[历史进度](unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。这不提升完整 PC、全部恢复、资源退出、独立审查和最终退役的状态；37能力仍partial。

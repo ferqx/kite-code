@@ -56,6 +56,8 @@ top仅重复首point，不能借另一点身份或遗漏其余point收据。出�
 
 Native Main 的普通用户 Git 查询／切换和编辑器 launcher 已沿同一 [Caller owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)封闭退出准入，保存首次失败并等待直接 ChildProcess 的实际 close；原15秒／10秒操作期限与20秒退出等待保持。该直接 handle 证明只覆盖所属 helper，外部编辑器、任意后代树及整个 Runtime 的资源观测不因此闭合；原 RSS 失败、八outer／九点、activeResources／handles和全报告 descendant 拒绝继续保持。必要 Node／原完整窗口证据归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-10native-普通用户操作的所属-helper-收尾)。
 
+Windows installed Native正式caller现接同job准确候选、零参数稳定前门和真实窗口／维护完整链，边界归[Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。私有Job成员原HANDLE观察只证明本次原Job归属，普通退出必须另核原Main／Service wait、Job空树、完整close及未请求强制终止；公共MCP v3投影保持。这份源码与本机mock不填补完整Runtime census或RSS／activeResources／handles，Windows原生正向执行与P6／§35／最终退役资格仍未闭合；按用户顺序在重构后执行平台验收，本轮不dispatch或重复参数实验。
+
 每cycle固定两Service/20原Session，slowSSE实际阻塞、peer事件及原cursor重连，busy仅取实际Shell计算区间并集。独立[短验收](../../tests/isolated/unified-agent/unified-default-shell-continuous.test.ts)做两cycle/40Command并cold核原Job/输出/Command、游标和Provider零重放；它本身不满足450000ms。formal组件须实际并集≥450000ms，每个operation/admission≤180000ms，固定两Service/20Session/≥2cycle，完整source hash/工作量/原IDs/输出/stop/cold proof均成立；延长wall、并行求和或伪造busy不能通过。macOS／Linux以外的平台与预取消在Profile I/O前拒绝，未知效果或清理失败保原证据；Linux源码准入不解除required-platform qualification缺项。原注册unknown与之后子策略接入后的两次启动unknown保留；当前带有界诊断的producer正式组件14cycle/280Command、busy并集482073ms、wall570070ms及完整cold/零重放实际通过，原两次启动unknown的准确原因仍未确认。准确代码、原失败与修正证据归[当前进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-07macos-默认宿主-shell-与持续负载)。单个macOS组件不等于8outer/60分钟、全局资源、T110三平台或发布资格；Win/Linux依用户选择在重构完成后由GitHub Actions另验。
 
 

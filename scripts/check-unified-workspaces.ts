@@ -298,6 +298,52 @@ export function checkUnifiedFormalConsumers(root: string): {
               !existsSync(resolve(root, 'scripts/release/prepare-windows-native-ci.ts'))
             )
               add('formal-ci-windows-terminal-build-environment-missing', location, jobName);
+            const nativeCommands = [
+              'bun run release:build --product native --directory dist/unified-native --terminal dist/unified-terminal --archive dist/unified-native.tar.gz',
+              `bun run release:verify --product native --directory dist/unified-native --source-commit "\${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true`,
+              'bun run release:smoke --product native --directory dist/unified-native',
+            ];
+            const nativePrerequisites = nativeCommands.map((command) =>
+              steps.findIndex(
+                (step) =>
+                  step.if === undefined &&
+                  typeof step.run === 'string' &&
+                  step.run.trim().replace(/\s+/g, ' ') === command &&
+                  (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+              ),
+            );
+            const nativeQualification = steps.findIndex(
+              (step) =>
+                step.if === "runner.os == 'Windows'" &&
+                typeof step.run === 'string' &&
+                step.run.trim().replace(/\s+/g, ' ') ===
+                  `bun run tests/fixtures/unified-agent/windows-native-installation.qualification.ts "--candidate=\${{ github.workspace }}/dist/unified-native"` &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            const windowsRunner =
+              job['runs-on'] === `\${{ matrix.os }}` &&
+              [
+                ...(Array.isArray(matrix?.os) ? matrix.os : []),
+                ...(Array.isArray(matrix?.include)
+                  ? matrix.include.map((row) => (row as { os?: unknown }).os)
+                  : []),
+              ].some((os) => typeof os === 'string' && /^windows(?:-|$)/.test(os));
+            if (
+              !windowsRunner ||
+              nativeQualification < 0 ||
+              nativePrerequisites.some((index) => index < 0 || index >= nativeQualification) ||
+              !(
+                nativePrerequisites[0]! < nativePrerequisites[1]! &&
+                nativePrerequisites[1]! < nativePrerequisites[2]!
+              ) ||
+              !existsSync(
+                resolve(
+                  root,
+                  'tests/fixtures/unified-agent/windows-native-installation.qualification.ts',
+                ),
+              )
+            )
+              add('formal-ci-windows-native-installation-missing', location, jobName);
             for (const [platform, command, code] of [
               [
                 "runner.os == 'macOS' || runner.os == 'Linux'",

@@ -132,6 +132,8 @@ Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)生成 `di
 
 自然根退出、cancel、parent EOF 共用准确 closing。只有原 root 实际 wait／exit code、原 Job ActiveProcesses=0、所有 I/O completion 与原 pipe／thread／process／Job HANDLE 确认关闭才报告业务资源关闭。开始已创建资源后失败返回 `WindowsOwnedChildStartError.cleanup`，guardian 先等原 cleanup，unknown 时保 native owner／keeper，不把同步 throw 当成零资源。parent 另外用实际 spawn PID 的原 observation HANDLE／FILETIME 绑定 ready 自报出生；实际 guardian exit＋close、原对象 dead 和 `observationClosed=true` 都确认后才 `ended`。原 startup 和 grace＋4000ms stop 预算保持，超时保存首个 unknown，迟到证明不改写为成功。
 
+私有Job owner新增成员只读观察与 `terminationRequested` 后，guardian的ready／terminal显式投影原v1 owner结构和job两字段；公共closed v3严格语法、Soak交接及cold证据不接收该私有新增字段。原完整port／codec文件保所有断言，本机有限结果仍不代Windows原生资格。
+
 closed v3／`windows-job-members` 保原六字段 binding、owner、guardian 原出生／reap／观察关闭、server 原 wait 和 Job 空树；不存 native HANDLE、command、env、路径或 secret。旧 Darwin v1／v2 严格分支未拓宽，纯 decoder 与 cold GET 不加载 FFI、不构建 owner、不重连。v3 的 `closed` 只描述 guardian 内 business owner，parent 原观察对象另由 `observationClosed` 明确表达，不能只凭前者宣称 transport 完成。
 
 [有限 owner 控制流](../../test/isolated/jobs/windows-owned-child.test.ts)与[port／codec](../../test/isolated/mcp/windows-stdio-port.test.ts)在本机验证 private ABI mock、原 binding、startup／cancel／closeUnknown；真实 Windows 用例保原平台 skip，尚未执行。[正式封装消费者](../../../../apps/service/test/isolated/mcp-source-packaged-default.test.ts)核两个 guardian 进入完整候选、默认 Profile 来源→原 SQL Job→Tool→Session cancel→cold 原 C／E／完整 output 零 Provider／RPC，并在 Windows 分支要求 v3／原 FILETIME／空树／observationClosed。本机实际 macOS 成功只证明该邻接与封装消费，Windows Job／HANDLE／pipe、installed 版本切换／维护恢复和全部正式客户端资格仍待既定实机验证，当前不得宣布平台或阶段退出。持久取舍归[Windows Note](../../../../.agents/notes/proposed/architecture/2026-10-10-windows-mcp-job-ownership.md)。

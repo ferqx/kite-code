@@ -81,7 +81,7 @@ function stop(): Promise<void> {
     await send({
       type: 'terminal',
       guardian: self?.creationTime ? guardian() : null,
-      evidence: child?.readEvidence() ?? null,
+      evidence: processEvidence(),
       treeStopped: confirmed,
     });
     if (confirmed) {
@@ -98,6 +98,20 @@ function stop(): Promise<void> {
   })();
   return closing;
 }
+// The MCP v1 private wire remains closed; Native qualification consumes the
+// richer owner getter directly, including whether termination was requested.
+function processEvidence() {
+  const proof = child?.readEvidence();
+  if (!proof) return null;
+  return {
+    version: proof.version,
+    coverage: proof.coverage,
+    root: proof.root,
+    job: { activeProcesses: proof.job.activeProcesses, treeStopped: proof.job.treeStopped },
+    closed: proof.closed,
+    closeUnknown: proof.closeUnknown,
+  };
+}
 async function run() {
   try {
     self = retainWindowsOwnedProcessObservation(process.pid);
@@ -110,7 +124,7 @@ async function run() {
       env: input.env,
       stdin: 'pipe',
     });
-    await send({ type: 'ready', guardian: guardian(), evidence: child.readEvidence() });
+    await send({ type: 'ready', guardian: guardian(), evidence: processEvidence() });
     if (closing || parentGone) {
       await stop();
       return;

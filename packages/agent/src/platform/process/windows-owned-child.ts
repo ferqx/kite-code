@@ -10,9 +10,21 @@ export interface WindowsOwnedChildEvidence {
     readonly exitCode: number | null;
     readonly waitConfirmed: boolean;
   };
-  readonly job: { readonly activeProcesses: number | null; readonly treeStopped: boolean };
+  readonly job: {
+    readonly activeProcesses: number | null;
+    readonly treeStopped: boolean;
+    readonly terminationRequested: boolean;
+  };
   readonly closed: boolean;
   readonly closeUnknown: boolean;
+}
+export interface WindowsOwnedJobMember {
+  readonly pid: number;
+  readonly parentPid: number;
+  readonly creationTime: string;
+  readonly executablePath: string;
+  inspect(): 'alive' | 'dead' | 'uncertain';
+  close(): void;
 }
 export interface WindowsOwnedChild {
   readonly pid: number;
@@ -25,6 +37,7 @@ export interface WindowsOwnedChild {
   stop(options: { graceMs: number }): Promise<WindowsOwnedChildEvidence>;
   close(): Promise<void>;
   readEvidence(): WindowsOwnedChildEvidence;
+  retainMembers(): readonly WindowsOwnedJobMember[];
 }
 /** A failed start may already own native resources; consumers must await cleanup before exiting. */
 export class WindowsOwnedChildStartError extends Error {
@@ -46,6 +59,7 @@ export interface WindowsOwnedProcessObservation {
 
 const INVALID = 0xffffffffffffffffn;
 const retained = new Set<object>();
+const borrowedMemory = new Set<object>();
 const delay = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
 const wide = (value: string) => Buffer.from(`${value}\0`, 'utf16le');
 const validPid = (pid: number) => Number.isSafeInteger(pid) && pid > 0 && pid <= 0xffffffff;
@@ -81,6 +95,11 @@ function native() {
     GetProcessId: { args: ['u64'], returns: 'u32' },
     GetProcessTimes: { args: ['u64', 'ptr', 'ptr', 'ptr', 'ptr'], returns: 'bool' },
     OpenProcess: { args: ['u32', 'bool', 'u32'], returns: 'u64' },
+    CreateToolhelp32Snapshot: { args: ['u32', 'u32'], returns: 'u64' },
+    Process32FirstW: { args: ['u64', 'ptr'], returns: 'bool' },
+    Process32NextW: { args: ['u64', 'ptr'], returns: 'bool' },
+    IsProcessInJob: { args: ['u64', 'u64', 'ptr'], returns: 'bool' },
+    QueryFullProcessImageNameW: { args: ['u64', 'u32', 'ptr', 'ptr'], returns: 'bool' },
     TerminateProcess: { args: ['u64', 'u32'], returns: 'bool' },
     CloseHandle: { args: ['u64'], returns: 'bool' },
     GetLastError: { args: [], returns: 'u32' },
@@ -108,6 +127,8 @@ function native() {
     CreateJobObjectW: (...args: Parameters<typeof raw.CreateJobObjectW>) =>
       BigInt(raw.CreateJobObjectW(...args)),
     OpenProcess: (...args: Parameters<typeof raw.OpenProcess>) => BigInt(raw.OpenProcess(...args)),
+    CreateToolhelp32Snapshot: (...args: Parameters<typeof raw.CreateToolhelp32Snapshot>) =>
+      BigInt(raw.CreateToolhelp32Snapshot(...args)),
     CreateNamedPipeW: (...args: Parameters<typeof raw.CreateNamedPipeW>) =>
       BigInt(raw.CreateNamedPipeW(...args)),
     CreateFileW: (...args: Parameters<typeof raw.CreateFileW>) => BigInt(raw.CreateFileW(...args)),
@@ -125,13 +146,19 @@ function creation(system: Native, handle: bigint, pid: number): string {
     kernel = new BigUint64Array(1),
     user = new BigUint64Array(1);
   const { api, ptr } = system;
-  if (
-    api.GetProcessId(handle) !== pid ||
-    !api.GetProcessTimes(handle, ptr(start), ptr(exit), ptr(kernel), ptr(user)) ||
-    start[0] === 0n
-  )
-    throw failure('identity_unknown', api.GetLastError());
-  return start[0]!.toString();
+  const borrowed = [start, exit, kernel, user];
+  borrowedMemory.add(borrowed);
+  try {
+    if (
+      api.GetProcessId(handle) !== pid ||
+      !api.GetProcessTimes(handle, ptr(start), ptr(exit), ptr(kernel), ptr(user)) ||
+      start[0] === 0n
+    )
+      throw failure('identity_unknown', api.GetLastError());
+    return start[0]!.toString();
+  } finally {
+    borrowedMemory.delete(borrowed);
+  }
 }
 
 /** Read-only original process object; OpenProcess failure is never absence. */
@@ -254,6 +281,7 @@ export function startWindowsOwnedChild(input: {
     waited = false;
   let active: number | null = null,
     stopped = false,
+    terminationRequested = false,
     closed = false,
     closeUnknown = false;
   let admissionClosed = false,
@@ -289,18 +317,20 @@ export function startWindowsOwnedChild(input: {
   };
   const closeHandle = (handle: bigint) => {
     if (!handles.has(handle)) return;
-    if (!api.CloseHandle(handle)) {
+    try {
+      if (!api.CloseHandle(handle)) throw failure('close_unknown', api.GetLastError());
+      handles.delete(handle);
+    } catch (error) {
       closeUnknown = true;
-      throw failure('close_unknown', api.GetLastError());
+      throw error;
     }
-    handles.delete(handle);
   };
   const snapshot = (): WindowsOwnedChildEvidence =>
     Object.freeze({
       version: 1,
       coverage: 'windows-job-members',
       root: Object.freeze({ pid, creationTime: born, exitCode, waitConfirmed: waited }),
-      job: Object.freeze({ activeProcesses: active, treeStopped: stopped }),
+      job: Object.freeze({ activeProcesses: active, treeStopped: stopped, terminationRequested }),
       closed,
       closeUnknown,
     });
@@ -341,7 +371,10 @@ export function startWindowsOwnedChild(input: {
       // force targets only this retained Job, never a console broadcast or numeric PID.
       const grace = Date.now() + options.graceMs;
       while (Date.now() < grace && !rootExit()) await delay();
-      if (!jobEmpty()) check('terminate_unknown', api.TerminateJobObject(job, 1));
+      if (!jobEmpty()) {
+        terminationRequested = true;
+        check('terminate_unknown', api.TerminateJobObject(job, 1));
+      }
       const deadline = Date.now() + 5000;
       while (!rootExit() || !jobEmpty()) {
         if (Date.now() >= deadline) throw failure('stop_unknown');
@@ -376,6 +409,151 @@ export function startWindowsOwnedChild(input: {
         await delay();
       }
     }
+  };
+  // Enumeration grants only observation of original objects in this retained Job.
+  // No numeric PID stop operation is exposed, and partial acquisitions stay owned.
+  const retainMembers = (): readonly WindowsOwnedJobMember[] => {
+    if (admissionClosed || closed || closeUnknown) throw failure('members_unknown');
+    const borrow = <T>(memory: unknown[], call: () => T): T => {
+      owner.memory.push(...memory);
+      try {
+        return call();
+      } finally {
+        for (const value of memory) {
+          const index = owner.memory.indexOf(value);
+          if (index !== -1) owner.memory.splice(index, 1);
+        }
+      }
+    };
+    let ids: number[] | undefined;
+    for (let capacity = 128; capacity <= 16384; capacity *= 2) {
+      const list = Buffer.alloc(8 + capacity * 8),
+        length = new Uint32Array(1);
+      const success = borrow([list, length], () =>
+        api.QueryInformationJobObject(job, 3, ptr(list), list.length, ptr(length)),
+      );
+      const assigned = list.readUInt32LE(0),
+        count = list.readUInt32LE(4);
+      if (!success) {
+        if (api.GetLastError() === 234) continue;
+        throw failure('members_unknown', api.GetLastError());
+      }
+      if (
+        assigned !== count ||
+        count > capacity ||
+        length[0]! < 8 + count * 8 ||
+        length[0]! > list.length
+      )
+        throw failure('members_unknown');
+      ids = [];
+      for (let index = 0; index < count; index++) {
+        const value = list.readBigUInt64LE(8 + index * 8);
+        if (value > 0xffffffffn || !validPid(Number(value)) || ids.includes(Number(value)))
+          throw failure('members_unknown');
+        ids.push(Number(value));
+      }
+      break;
+    }
+    if (!ids) throw failure('members_unknown');
+    const members: WindowsOwnedJobMember[] = [];
+    for (const memberPid of ids) {
+      const handle = take('member_open_unknown', api.OpenProcess(0x101000, false, memberPid));
+      const start = new BigUint64Array(1),
+        exit = new BigUint64Array(1),
+        kernel = new BigUint64Array(1),
+        user = new BigUint64Array(1),
+        inJob = new Int32Array(1),
+        image = new Uint16Array(32768),
+        size = new Uint32Array([32768]);
+      const memberBirth = borrow([start, exit, kernel, user, inJob, image, size], () => {
+        check('member_identity_unknown', api.GetProcessId(handle) === memberPid);
+        check(
+          'member_identity_unknown',
+          api.GetProcessTimes(handle, ptr(start), ptr(exit), ptr(kernel), ptr(user)),
+        );
+        check('member_membership_unknown', api.IsProcessInJob(handle, job, ptr(inJob)));
+        check('member_membership_unknown', inJob[0] === 1 && start[0] !== 0n);
+        check(
+          'member_image_unknown',
+          api.QueryFullProcessImageNameW(handle, 0, ptr(image), ptr(size)),
+        );
+        return start[0]!.toString();
+      });
+      // Toolhelp PPID is only a locator within the already-authorized Job.
+      // Hold the original process alive across this snapshot, excluding PID reuse.
+      if (api.WaitForSingleObject(handle, 0) !== 258) throw failure('member_parent_unknown');
+      const processSnapshot = take('member_snapshot_unknown', api.CreateToolhelp32Snapshot(2, 0));
+      let parentPid: number | undefined;
+      let snapshotFailure: unknown;
+      try {
+        const entry = Buffer.alloc(568);
+        entry.writeUInt32LE(568, 0);
+        borrow([entry], () => {
+          let more = api.Process32FirstW(processSnapshot, ptr(entry));
+          for (let count = 0; more; count++) {
+            if (count >= 131072) throw failure('member_snapshot_unknown');
+            if (entry.readUInt32LE(8) === memberPid) {
+              if (parentPid !== undefined) throw failure('member_parent_unknown');
+              parentPid = entry.readUInt32LE(32);
+            }
+            more = api.Process32NextW(processSnapshot, ptr(entry));
+          }
+          if (api.GetLastError() !== 18)
+            throw failure('member_snapshot_unknown', api.GetLastError());
+        });
+        if (
+          parentPid === undefined ||
+          api.WaitForSingleObject(handle, 0) !== 258 ||
+          creation(system, handle, memberPid) !== memberBirth
+        )
+          throw failure('member_parent_unknown');
+      } catch (error) {
+        snapshotFailure = error;
+      }
+      try {
+        closeHandle(processSnapshot);
+      } catch (error) {
+        if (snapshotFailure !== undefined)
+          throw new AggregateError(
+            [snapshotFailure, error],
+            'windows_owned_child_member_snapshot_close_unknown',
+            { cause: snapshotFailure },
+          );
+        throw error;
+      }
+      if (snapshotFailure !== undefined) throw snapshotFailure;
+      if (!size[0] || size[0] >= image.length) throw failure('member_image_unknown');
+      const executablePath = Buffer.from(image.buffer, 0, size[0] * 2).toString('utf16le');
+      if (!win32.isAbsolute(executablePath) || executablePath.includes('\0'))
+        throw failure('member_image_unknown');
+      let memberClosed = false;
+      const member: WindowsOwnedJobMember = Object.freeze({
+        pid: memberPid,
+        parentPid: parentPid!,
+        creationTime: memberBirth,
+        executablePath,
+        inspect() {
+          if (closed || closeUnknown || memberClosed || !handles.has(handle)) return 'uncertain';
+          try {
+            if (creation(system, handle, memberPid) !== memberBirth) return 'uncertain';
+            const wait = api.WaitForSingleObject(handle, 0);
+            return wait === 0 ? 'dead' : wait === 258 ? 'alive' : 'uncertain';
+          } catch {
+            return 'uncertain';
+          }
+        },
+        close() {
+          if (memberClosed || closed || !handles.has(handle)) {
+            memberClosed = true;
+            return;
+          }
+          closeHandle(handle);
+          memberClosed = true;
+        },
+      });
+      members.push(member);
+    }
+    return Object.freeze(members);
   };
   const close = (): Promise<void> => {
     admissionClosed = true;
@@ -682,7 +860,10 @@ export function startWindowsOwnedChild(input: {
         }
       }
       if (job) {
-        if (!jobEmpty()) api.TerminateJobObject(job, 1);
+        if (!jobEmpty()) {
+          terminationRequested = true;
+          check('terminate_unknown', api.TerminateJobObject(job, 1));
+        }
         const deadline = Date.now() + 5000;
         while (!jobEmpty()) {
           if (Date.now() >= deadline) throw failure('start_close_unknown');
@@ -721,6 +902,7 @@ export function startWindowsOwnedChild(input: {
     stderr: output(stderrHandle),
     exited,
     readEvidence: snapshot,
+    retainMembers,
     stop,
     close,
     writeStdin(bytes: Uint8Array) {

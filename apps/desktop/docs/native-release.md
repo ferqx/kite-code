@@ -35,6 +35,12 @@ rollback 在发布前完整预检仍由原 nonce 持有的 Terminal；正常 Ter
 
 本机必要证据覆盖闭合 marker、版本/登记控制流、原关闭未知、完整 archive/POSIX 邻接和真实 owned builder child 退出；这些不等于 Windows C/MSVC、DACL、pipe、Electron／Service 或 installed 维护恢复资格。Windows/Linux 原生执行按用户顺序留到重构后，当前不 dispatch。raw `release:native launch --directory` 的 Windows 限制保持，正式 Windows 入口是已安装的稳定前门；desktop 前门当前只接受无附加用户参数的启动。完整用户链必须在 Windows 核普通任务／历史、A→B→A、维护新 Store 原完整结果冷读零重放、准确退出、双 EX 及卸载保数据，才能关闭该平台能力。
 
+[Windows 安装正式调用者](../../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)现已接入 release-candidate 的 Windows build／verify／smoke 后；[现行 CI 守卫](../../../scripts/check-unified-workspaces.ts)拒绝缺失、错平台、忽略错误、命令替代及前置顺序错误。该 caller 以同一个已核候选归档／解包并删除自己的构建副本，零参数启动稳定 `kite-desktop.exe`，由系统 [UIAutomation driver](../../../tests/fixtures/unified-agent/windows-native-uia.ts)操作实际会话输入、提交、完整回复和默认应用菜单退出，不增加产品调试参数或假创建证书。窗口关闭只隐藏，不能代替退出。
+
+验收源码保基础安装120秒、driver45秒、窗口／操作10秒和独立维护180秒预算。A任务完成后运行中选择同代码合成版本B，原A Main／Service与双SH继续固定；退出后冷启动B、rollback再冷启动A。全部原进程退出、两候选双EX可取得后，从 installed `kite.exe maintenance` backup／inspect／restore／status 恢复新Store，第四个新窗口冷读原完整结果；准确原Command／Run／Execution、sealed输出和Provider恰1独立核对，最后唯一卸载保Core／Native DB／config原字节。该B只改变未发布见证manifest，不计真实跨代码兼容。
+
+进程证据来自本次创建前原Job及成员原HANDLE／FILETIME／实际映像，PPID仅用于在已证成员中定位Main与Service；正常退出另要求 `terminationRequested=false`，防止fixture强制终止掩盖产品收尾失败。MCP公共v3语法保持原投影。源码／本机控制流通过不证明Windows UIA树、菜单、嵌套Job、两跳证书或维护正向运行；完整caller尚未在Windows执行，平台与阶段门禁继续保留。取舍与验收依赖见[Windows调用者提案](../../../.agents/notes/proposed/testing/2026-10-10-windows-native-installed-caller.md)，实际有限证据见[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-native-正式安装版本切换与维护调用者源码)。
+
 ## 完整身份与生命周期
 
 [Native verifier](../../service/src/native-runtime-assets.ts)核 outer 的准确普通文件、目录及受限相对框架链接，并独立完整核 inner Terminal。tar 只存普通字节和封闭链接声明；拒绝 traversal、真实 tar links、重复/PAX 冲突、外部 hardlink、篡改及未声明条目，物化后重新核两层。目录中的 Electron 空 locale 也必须在准确清单内。

@@ -407,3 +407,52 @@ test('Windows release must prepare the compiler before building and execute the 
     );
   }
 });
+
+test('Windows Native release executes its complete installed caller after unconditional build verify and smoke', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/release-candidate.yml'),
+    'utf8',
+  );
+  const path = 'tests/fixtures/unified-agent/windows-native-installation.qualification.ts';
+  const command = `bun run ${path} "--candidate=\${{ github.workspace }}/dist/unified-native"`;
+  const lines = source.split('\n');
+  const commandIndex = lines.findIndex((line) => line.trim() === `run: ${command}`);
+  expect(commandIndex).toBeGreaterThan(0);
+  let start = commandIndex;
+  while (start > 0 && !lines[start]!.startsWith('      - ')) start--;
+  const block = lines.slice(start, commandIndex + 1).join('\n');
+  const anchors = [
+    '      - name: Build complete Native candidate and archive',
+    '      - name: Verify complete Native source and physical closure',
+    '      - name: Verify embedded Electron and independent SQLite engine',
+  ];
+  const code = 'formal-ci-windows-native-installation-missing';
+  const check = (workflow: string, exists = true) => {
+    const root = fixture();
+    if (exists) put(root, path, 'export {};');
+    put(root, 'scripts/release/prepare-windows-native-ci.ts', 'export {};');
+    put(root, '.github/workflows/release-candidate.yml', workflow);
+    return checkUnifiedFormalConsumers(root).violations.filter((v) => v.code === code);
+  };
+  expect(check(source)).toEqual([]);
+  expect(check(source, false).some((v) => v.code === code)).toBe(true);
+  for (const mutate of [
+    (s: string) => s.replace(block, ''),
+    (s: string) =>
+      s.replace(block, block.replace("runner.os == 'Windows'", "runner.os == 'Linux'")),
+    (s: string) => s.replace(block, block.replace("runner.os == 'Windows'", 'false')),
+    (s: string) => s.replace(`run: ${command}`, `run: echo ${command}`),
+    (s: string) => s.replace(`run: ${command}`, `run: ${command} --test-name-pattern=never-match`),
+    (s: string) => s.replace(block, `${block}\n        continue-on-error: true`),
+    (s: string) =>
+      s.replace(
+        `run: ${command}`,
+        `run: ${command.replace('dist/unified-native', 'dist/unified-terminal')}`,
+      ),
+    (s: string) => s.replace(`runs-on: \${{ matrix.os }}`, 'runs-on: ubuntu-latest'),
+    ...anchors.map(
+      (anchor) => (s: string) => s.replace(block, '').replace(anchor, `${block}\n${anchor}`),
+    ),
+  ])
+    expect(check(mutate(source)).some((v) => v.code === code)).toBe(true);
+});

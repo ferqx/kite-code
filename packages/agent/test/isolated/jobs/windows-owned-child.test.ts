@@ -27,7 +27,7 @@ assert.equal(typeof require('bun:ffi').dlopen,'function');
 Object.defineProperty(process,'platform',{value:'win32'});
 Object.defineProperty(process,'arch',{value:'x64'});
 let error=0, next=1n, address=4096, loads=0, assigned=false, resumed=false;
-let failClose, failAssign=false, blockedWrite=false, currentRoot;
+let failClose, failAssign=false, blockedWrite=false, failMembership=false, currentRoot;
 const handles=new Map(), memory=new Map(), calls=[], writes=[];
 const ptr=value=>{const key=address;address+=65536;memory.set(key,value);return key;};
 const bytes=value=>memory.get(Number(value));
@@ -38,7 +38,7 @@ const kernel={
  GetLastError:()=>error,
  CreateJobObjectW(sa,name){assert.equal(sa,null);assert.equal(name,null);assigned=false;resumed=false;calls.push('job');return Number(take({kind:'job',active:0}));},
  SetInformationJobObject(h,kind,value,size){assert.equal(kind,9);assert.equal(size,144);assert.equal(bytes(value).readUInt32LE(16),0x2000);calls.push('limits');return true;},
- QueryInformationJobObject(h,kind,value,size){assert.equal(kind,1);assert.equal(size,48);bytes(value).writeUInt32LE(handles.get(h).active,40);return true;},
+ QueryInformationJobObject(h,kind,value,size,length){if(kind===3){const p=bytes(value);p.writeUInt32LE(1,0);p.writeUInt32LE(1,4);p.writeBigUInt64LE(123n,8);bytes(length)[0]=16;return true;}assert.equal(kind,1);assert.equal(size,48);bytes(value).writeUInt32LE(handles.get(h).active,40);return true;},
  AssignProcessToJobObject(job,process){calls.push('assign');assert.equal(resumed,false);if(failAssign){error=5;return false;}assigned=true;handles.get(job).active=1;handles.get(process).job=job;return true;},
  TerminateJobObject(job){calls.push('terminate');handles.get(job).active=0;currentRoot.wait=0;return true;},
  InitializeProcThreadAttributeList(list,count,flags,size){assert.equal(count,1);bytes(size)[0]=64n;return list!==null;},
@@ -51,7 +51,7 @@ const kernel={
   assert.equal(bytes(env).toString('utf16le'),'EMPTY=\\0SELECTED=original\\0\\0');
   assert.equal(bytes(cwd).toString('utf16le'),'C:\\\\work\\0');
   calls.push('create_suspended');currentRoot={pid:123,birth:134123456789012999n,wait:258,code:23};
-  const root=take(currentRoot),thread=take({kind:'thread'});const p=bytes(info);p.writeBigUInt64LE(root,0);p.writeBigUInt64LE(thread,8);p.writeUInt32LE(123,16);return true;
+  processes.set(123,currentRoot);const root=take(currentRoot),thread=take({kind:'thread'});const p=bytes(info);p.writeBigUInt64LE(root,0);p.writeBigUInt64LE(thread,8);p.writeUInt32LE(123,16);return true;
  },
  ResumeThread(){assert.equal(assigned,true);resumed=true;calls.push('resume');return 1;},
  GetProcessId:h=>handles.get(h).pid,
@@ -59,6 +59,11 @@ const kernel={
  WaitForSingleObject(h){const v=handles.get(h);return v.kind==='event'?(v.done?0:258):v.wait;},
  GetExitCodeProcess(h,code){assert.equal(handles.get(h).wait,0);bytes(code)[0]=handles.get(h).code;return true;},
  OpenProcess(access,inherit,pid){assert.equal(access,0x101000);assert.equal(inherit,false);return processes.has(pid)?Number(take(processes.get(pid))):0;},
+ CreateToolhelp32Snapshot(flags,pid){assert.equal(flags,2);assert.equal(pid,0);return Number(take({kind:'snapshot'}));},
+ Process32FirstW(h,entry){assert.equal(handles.get(h).kind,'snapshot');assert.equal(bytes(entry).readUInt32LE(0),568);bytes(entry).writeUInt32LE(123,8);bytes(entry).writeUInt32LE(100,32);return true;},
+ Process32NextW(){error=18;return false;},
+ IsProcessInJob(h,job,result){bytes(result)[0]=!failMembership&&handles.get(h).job===job?1:0;return true;},
+ QueryFullProcessImageNameW(h,flags,out,size){const image=Buffer.from('C:\\\\trusted\\\\child.exe','utf16le');image.copy(Buffer.from(bytes(out).buffer));bytes(size)[0]=image.length/2;return true;},
  TerminateProcess(h){handles.get(h).wait=0;return true;},
  CloseHandle(h){calls.push(['close',h]);if(h===failClose){error=5;return false;}assert.ok(handles.delete(h));return true;},
  CreatePipe(read,write,sa){const pair={data:Buffer.from('完整尾部'),offset:0};bytes(read)[0]=take({kind:'read',pair,inherit:true});bytes(write)[0]=take({kind:'write',pair,inherit:true});return true;},
@@ -91,17 +96,24 @@ assert.deepEqual(calls.filter(x=>typeof x==='string').slice(0,5),['job','limits'
 assert.equal(child.pid,123);assert.equal(child.rootCreationTime,'134123456789012999');
 assert.equal(child.readEvidence().root.exitCode,null);assert.equal(child.readEvidence().job.treeStopped,false);
 assert.ok(Object.isFrozen(child.readEvidence().root));
+assert.equal(child.readEvidence().job.terminationRequested,false);
+failMembership=true;const priorHandles=handles.size;assert.throws(()=>child.retainMembers(),/member_membership_unknown/);assert.equal(handles.size,priorHandles+1);failMembership=false;
+const members=child.retainMembers();assert.equal(members.length,1);assert.ok(Object.isFrozen(members));
+const member=members[0];assert.equal(member.pid,123);assert.equal(member.parentPid,100);assert.equal(member.creationTime,child.rootCreationTime);assert.equal(member.executablePath,input.executable);assert.equal(member.inspect(),'alive');
 await child.writeStdin(Buffer.from('original input'));assert.equal(Buffer.concat(writes).toString(),'original input');
 const drain=async stream=>{const chunks=[];for await(const chunk of stream)chunks.push(Buffer.from(chunk));return Buffer.concat(chunks).toString();};
 assert.equal(await drain(child.stdout),'完整尾部');assert.equal(await drain(child.stderr),'完整尾部');
 await assert.rejects(drain(child.stdout),/output_consumer_conflict/);
 blockedWrite=true;const pending=child.writeStdin(Buffer.from('cancel this'));const rejected=pending.catch(e=>e);
 await new Promise(r=>setTimeout(r,10));
-const proof=await child.stop({graceMs:0});assert.equal(proof.root.waitConfirmed,true);assert.equal(proof.root.exitCode,23);assert.equal(proof.job.activeProcesses,0);assert.equal(proof.job.treeStopped,true);
+const proof=await child.stop({graceMs:0});assert.equal(proof.root.waitConfirmed,true);assert.equal(proof.root.exitCode,23);assert.equal(proof.job.activeProcesses,0);assert.equal(proof.job.treeStopped,true);assert.equal(proof.job.terminationRequested,true);assert.equal(member.inspect(),'dead');
 assert.match((await rejected).message,/stdin_write/);assert.ok(calls.includes('cancel_io'));assert.equal(await child.exited,23);
-const job=[...handles].find(([,v])=>v.kind==='job')[0];const read=[...handles].find(([,v])=>v.kind==='read')[0];failClose=read;
+const job=[...handles].find(([,v])=>v.kind==='job')[0];
+const memberHandle=[...handles].filter(([,v])=>v===currentRoot).at(-1)[0];
+failClose=memberHandle;assert.throws(()=>member.close(),/close_unknown/);assert.ok(handles.has(memberHandle));assert.ok(handles.has(job));assert.equal(member.inspect(),'uncertain');failClose=undefined;member.close();
+const read=[...handles].find(([,v])=>v.kind==='read')[0];failClose=read;
 await assert.rejects(child.close(),/close_unknown/);assert.ok(handles.has(job));assert.equal(child.readEvidence().closed,false);assert.equal(child.readEvidence().closeUnknown,true);
-failClose=undefined;await child.close();await child.close();assert.equal(child.readEvidence().closed,true);assert.equal(handles.size,0);
+failClose=undefined;await child.close();assert.equal(member.inspect(),'uncertain');member.close();await child.close();assert.equal(child.readEvidence().closed,true);assert.equal(handles.size,0);
 const owner=retainWindowsOwnedProcessObservation(42);assert.equal(owner.creationTime,'134123456789012345');assert.equal(owner.inspect(),'alive');
 const first=processes.get(42);processes.set(42,{pid:42,birth:134123456789012346n,wait:258});assert.equal(owner.inspect(),'alive');first.wait=0;assert.equal(owner.inspect(),'dead');owner.close();assert.equal(owner.inspect(),'uncertain');
 const unavailable=retainWindowsOwnedProcessObservation(99);assert.equal(unavailable.creationTime,undefined);assert.equal(unavailable.inspect(),'uncertain');unavailable.close();
@@ -119,3 +131,60 @@ console.log('windows_owned_child_contract_passed');
   expect(result.stderr).toBe('');
   expect(result.stdout.trim()).toBe('windows_owned_child_contract_passed');
 }, 10000);
+
+test.skipIf(process.platform !== 'win32')(
+  'Windows native original Job members exit naturally without force',
+  async () => {
+    const script = `const c=Bun.spawn([process.execPath,'-e','await Bun.stdin.text()'],{stdin:'pipe',stdout:'ignore',stderr:'ignore'});console.log(JSON.stringify({pid:c.pid}));await Bun.stdin.text();c.stdin.end();if(await c.exited!==0)process.exit(2);`;
+    const child = startWindowsOwnedChild({
+      executable: process.execPath,
+      argv: ['-e', script],
+      cwd: process.cwd(),
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
+      stdin: 'pipe',
+    });
+    let output = '';
+    const stdout = (async () => {
+      for await (const chunk of child.stdout) output += Buffer.from(chunk).toString();
+    })();
+    const stderr = (async () => {
+      for await (const _chunk of child.stderr) {
+      }
+    })();
+    try {
+      const deadline = Date.now() + 5000;
+      while (!output.includes('\n') && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      const descendant = JSON.parse(output.trim()) as { pid: number };
+      const members = child.retainMembers();
+      expect(members.map((member) => member.pid).sort()).toEqual(
+        [child.pid, descendant.pid].sort(),
+      );
+      for (const member of members) {
+        expect(member.parentPid).toBe(member.pid === child.pid ? process.pid : child.pid);
+        expect(member.creationTime).toMatch(/^[1-9][0-9]*$/);
+        expect(member.executablePath.toLowerCase()).toBe(process.execPath.toLowerCase());
+        expect(member.inspect()).toBe('alive');
+      }
+      await child.endStdin();
+      expect(await child.exited).toBe(0);
+      const proof = await child.stop({ graceMs: 0 });
+      expect(proof.root.waitConfirmed).toBe(true);
+      expect(proof.job.activeProcesses).toBe(0);
+      expect(proof.job.terminationRequested).toBe(false);
+      await Promise.all([stdout, stderr]);
+      for (const member of members) expect(member.inspect()).toBe('dead');
+      await child.close();
+      for (const member of members) expect(member.inspect()).toBe('uncertain');
+      expect(child.readEvidence().closed).toBe(true);
+    } finally {
+      await child.close();
+      await Promise.all([stdout, stderr]);
+    }
+  },
+  10000,
+);
