@@ -20,13 +20,16 @@ import { readProcessStartIdentity } from './process-identity';
 import {
   assertPrivateDirectory,
   type DaemonEndpoint,
+  DaemonEndpointCleanupError,
   type DaemonProfile,
   daemonError,
+  endpointCleanupUnknown,
   fileIdentity,
   readReservationDetails,
   removeExactEndpoint,
   reservationSchema,
 } from './reservation';
+import { reserveWindowsEndpoint, selectWindowsEndpoint } from './windows-endpoint';
 
 export { requestDaemonBootstrap } from './bootstrap';
 export type { DaemonEndpoint, DaemonProfile, DaemonReservation } from './reservation';
@@ -41,6 +44,7 @@ export function selectDaemonEndpoint(input: {
 }): DaemonEndpoint {
   const platform = input.platform ?? process.platform,
     uid = input.uid ?? process.getuid?.();
+  if (platform === 'win32') return selectWindowsEndpoint(input);
   if (platform !== 'darwin' && platform !== 'linux')
     throw daemonError('daemon_platform_unsupported');
   if (
@@ -137,8 +141,10 @@ export async function reserveDaemonEndpoint(
   identity: { profile: DaemonProfile; instanceId: string; buildId: string; workspace: string },
 ) {
   try {
+    if (process.platform === 'win32') return await reserveWindowsEndpoint(endpoint, identity);
     return await reserveEndpoint(endpoint, identity);
   } catch (error) {
+    if (endpointCleanupUnknown(error)) throw new DaemonEndpointCleanupError(error);
     if (
       typeof (error as { code?: unknown }).code === 'string' &&
       String((error as { code: string }).code).startsWith('daemon_')

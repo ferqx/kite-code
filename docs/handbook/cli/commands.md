@@ -37,6 +37,8 @@ JSON 管理入口只接受相应 DTO 的闭合字段。命令回执 applied 不�
 
 开发入口支持 `bun run cli:dev run --task <文字> --data-root <绝对根路径> --server <本地socket>`；`resume --thread <原会话ID> --task <文字>` 可使用同样的连接参数。先显式启动同一 data root 的开发 daemon，具体命令见[服务生命周期](../server/lifecycle.md#通用-agent-开发生命周期)。这些命令不读取配套 Service 制品、不启动替代实例，正式 Terminal 也使用同一新业务调用者；三平台与完整能力资格仍按当前进度核对。
 
+Windows 正式安装版的同一 `--server` 入口已接私有 named pipe 源码，地址从同一 profile 的 `kite.exe server status --json` 读取；只连接该原实例，版本选择或客户端关闭不会替换它。平台允许的地址和安装／开发限制见[服务生命周期](../server/lifecycle.md)。Windows 原生整链尚未验收，当前本机 macOS 证据不计三平台资格。
+
 连接核对所选 profile、原实例及必需接口。省略 `--workspace` 使用 daemon 启动时的工作区，不按客户端当前目录新建工作区；显式工作区不同或原会话属于其他工作区时直接拒绝。兼容 daemon 的 build 可以与客户端安装版本不同。缺席、不兼容或数据不可用时明确失败，不显示空业务列表，也不切换 profile。
 
 共享客户端正常结束或收到宿主退出信号只断开自己的网络，不停止 daemon 或其他工作；Ctrl+C 仍只请求取消当前原 Command。人工问题遇到 EOF 或无有效答案时，返回等待状态与退出码 3；结果未知返回 2，保留输出中的原身份，不重新提交。服务失联不代表原任务已取消或完成。

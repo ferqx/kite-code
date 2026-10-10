@@ -9,6 +9,7 @@ export {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from './daemon/endpoint';
-export { inspectProcess } from './daemon/process-identity';
+export { inspectProcess, retainProcessObservation } from './daemon/process-identity';
 export { type DaemonWebSelection, loadDaemonWebAssets } from './daemon/web-assets';
 export { type DaemonStartup, daemonPreflightSchema, daemonStartupSchema } from './daemon-startup';
+export { retainWindowsPairedArtifact as retainWindowsDaemonArtifact } from './windows-paired-artifact';

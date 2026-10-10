@@ -11,6 +11,8 @@ import {
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { inspectProcess } from './process-identity';
+import { windowsPipeExists } from './windows-pipe';
+import { readWindowsDaemonRecord, removeWindowsDaemonRecord } from './windows-record';
 
 export type DaemonErrorCode =
   | 'daemon_absent'
@@ -19,6 +21,7 @@ export type DaemonErrorCode =
   | 'daemon_endpoint_busy'
   | 'daemon_endpoint_drift'
   | 'daemon_endpoint_state'
+  | 'daemon_endpoint_close_unknown'
   | 'daemon_endpoint_unsafe'
   | 'daemon_identity_mismatch'
   | 'daemon_identity_unavailable'
@@ -37,6 +40,30 @@ export type DaemonErrorCode =
 export function daemonError(code: DaemonErrorCode) {
   return Object.assign(new Error(code), { code });
 }
+/** Trusted native cleanup marker; the cause retains owners and is never serialized. */
+export class DaemonEndpointCleanupError extends Error {
+  readonly code = 'daemon_endpoint_close_unknown';
+  readonly phase = 'daemon_endpoint';
+  constructor(error: unknown, resources?: unknown) {
+    super('daemon_endpoint_close_unknown', { cause: { error, resources } });
+  }
+}
+export function endpointCleanupUnknown(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (
+    error instanceof DaemonEndpointCleanupError ||
+    [
+      'daemon_endpoint_close_unknown',
+      'daemon_record_close_unknown',
+      'daemon_record_unlock_unknown',
+      'daemon_security_close_unknown',
+      'windows_process_close_unknown',
+    ].includes(error.message)
+  )
+    return true;
+  return error instanceof AggregateError && error.errors.some(endpointCleanupUnknown);
+}
+export const windowsPipePattern = /^\\\\\.\\pipe\\kite-daemon-[a-z0-9-]+$/;
 export const profileSchema = z.strictObject({
   dataRoot: z.string().min(1).max(4096).refine(isAbsolute),
   name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
@@ -58,6 +85,7 @@ export const reservationSchema = z.strictObject({
   socket: z
     .strictObject({ dev: z.string().regex(/^\d+$/), ino: z.string().regex(/^\d+$/) })
     .optional(),
+  pipe: z.string().max(256).regex(windowsPipePattern).optional(),
 });
 export type DaemonProfile = z.infer<typeof profileSchema>;
 export type DaemonReservation = z.infer<typeof reservationSchema>;
@@ -66,6 +94,7 @@ export interface DaemonEndpoint {
   readonly socket: string;
   readonly record: string;
   readonly profileAccessKey: string;
+  readonly transport?: 'windows-pipe';
   readonly defaultParent?: string;
   readonly privateParents?: readonly string[];
 }
@@ -91,6 +120,35 @@ export function sameIdentity(a: { dev: string; ino: string }, b: { dev: string; 
   return a.dev === b.dev && a.ino === b.ino;
 }
 export function readReservationDetails(endpoint: DaemonEndpoint) {
+  if (endpoint.transport === 'windows-pipe') {
+    try {
+      const native = readWindowsDaemonRecord(endpoint.record);
+      if (!native) {
+        if (windowsPipeExists(endpoint.socket)) throw daemonError('daemon_identity_unknown');
+        return;
+      }
+      const record = reservationSchema.parse(
+        JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(native.bytes)),
+      );
+      if (
+        record.profile.accessKey !== endpoint.profileAccessKey ||
+        record.socket ||
+        (record.pipe !== undefined && record.pipe !== endpoint.socket)
+      )
+        throw daemonError('daemon_identity_mismatch');
+      return { record, identity: native.identity };
+    } catch (error) {
+      if (endpointCleanupUnknown(error)) throw new DaemonEndpointCleanupError(error);
+      if (error instanceof z.ZodError || error instanceof SyntaxError || error instanceof TypeError)
+        throw daemonError('daemon_reservation_invalid');
+      if (
+        typeof (error as { code?: unknown }).code === 'string' &&
+        String((error as { code: string }).code).startsWith('daemon_')
+      )
+        throw error;
+      throw daemonError('daemon_reservation_unsafe');
+    }
+  }
   try {
     assertPrivateDirectory(endpoint.root);
   } catch (error) {
@@ -112,6 +170,7 @@ export function readReservationDetails(endpoint: DaemonEndpoint) {
     )
       throw daemonError('daemon_reservation_unsafe');
     const record = reservationSchema.parse(JSON.parse(readFileSync(fd, 'utf8')));
+    if (record.pipe !== undefined) throw daemonError('daemon_reservation_invalid');
     if (record.profile.accessKey !== endpoint.profileAccessKey)
       throw daemonError('daemon_identity_mismatch');
     const identity = { dev: String(stat.dev), ino: String(stat.ino) };
@@ -150,7 +209,8 @@ export function removeExactEndpoint(
   let current: ReturnType<typeof readReservationDetails>;
   try {
     current = readReservationDetails(endpoint);
-  } catch {
+  } catch (error) {
+    if (endpointCleanupUnknown(error)) throw error;
     throw daemonError('daemon_endpoint_drift');
   }
   if (
@@ -159,6 +219,21 @@ export function removeExactEndpoint(
     !sameIdentity(current.identity, recordIdentity)
   )
     throw daemonError('daemon_endpoint_drift');
+  if (endpoint.transport === 'windows-pipe') {
+    // A dead record never grants authority over an existing pipe, including a foreign replacement.
+    if (windowsPipeExists(endpoint.socket)) throw daemonError('daemon_endpoint_drift');
+    try {
+      removeWindowsDaemonRecord(
+        endpoint.record,
+        Buffer.from(`${JSON.stringify(expected)}\n`),
+        recordIdentity,
+      );
+    } catch (error) {
+      if (endpointCleanupUnknown(error)) throw new DaemonEndpointCleanupError(error);
+      throw error;
+    }
+    return;
+  }
   if (expected.socket) {
     let stat: ReturnType<typeof lstatSync> | undefined;
     try {

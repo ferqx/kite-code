@@ -9,6 +9,7 @@ import type {
   ProfileGarbageCollection,
 } from '../../../packages/agent/src/maintenance';
 import type { SessionRecord } from '../../../packages/agent/src/storage/types';
+import { qualifyInstalledWindowsDaemon } from './windows-daemon-qualification';
 
 /** Explicit native Windows qualification, never a default availability-skipped test.
  * B differs only in manifest version: this proves selection, not cross-code compatibility.
@@ -512,6 +513,27 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     assert.equal(gcHistory.metadata.lastChangeCursor, beforeGcCursor);
     assert.deepEqual(gcHistory, restoredHistory);
     assert.equal(providerCalls, 1);
+    const daemonEvidence = await qualifyInstalledWindowsDaemon({
+      cli,
+      prefix,
+      dataRoot,
+      workspace,
+      candidateA: {
+        releaseRoot: installed.releaseRoot,
+        candidateId: built.candidateId,
+        buildId: built.buildId,
+      },
+      candidateB: {
+        releaseRoot: selectedB.releaseRoot,
+        candidateId: b.candidateId,
+        buildId: b.buildId,
+      },
+      execute,
+      deadline: workDeadline,
+      rollback: () => rollbackTerminalBundle(prefix),
+      selectB: () => installTerminalBundle({ bundleRoot: upgrade, prefix }),
+    });
+    assert.equal(providerCalls, 1, 'original_paired_provider_count_preserved_after_daemon');
     const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
     try {
       for (const id of [built.candidateId, b.candidateId])
@@ -538,8 +560,8 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
       crossCode: false,
       tuiPty: false,
       native: false,
-      daemon: false,
-      daemonPlatformQualification: 'pending',
+      daemon: daemonEvidence,
+      daemonPlatformQualification: 'qualified',
       candidateA: built.candidateId,
       candidateB: b.candidateId,
       providerCalls,

@@ -14,7 +14,9 @@ Status: implemented
 
 POSIX listener使用预先bind的原文件描述符，再交给`net.listen({fd})`。实际macOS Node22.21.1/Bun1.4.2探针证明：按pathname listen时，原socket被rename并放入替换文件后，`server.close()`会自动删除替换文件；预bind fd方式保留替换文件，并由net关闭所属fd。因此路径清理只能由原owner在核对准确inode后执行，不能把手动unlink前的检查当成runtime自动清理的保证。
 
-macOS进程身份使用本机SDK已核实的libproc `proc_pidinfo(PROC_PIDTBSDINFO)`，核真实PID以及秒/微秒启动时间；不回退秒精度`ps lstart`。Linux使用boot ID和proc start ticks，Windows需独立当前用户pipe安全实现与平台证据；没有DACL/remote拒绝证明时明确不开放，不能继承旧`server.listen(pipeName)`就宣称安全。
+macOS进程身份使用本机SDK已核实的libproc `proc_pidinfo(PROC_PIDTBSDINFO)`，核真实PID以及秒/微秒启动时间；不回退秒精度`ps lstart`。Linux使用boot ID和proc start ticks。Windows x64现有独立源码leaf，以当前Token SID和OS KnownFolder确定私有记录目录，原protected DACL／非继承HANDLE与REJECT_REMOTE pipe拒绝外来访问；不复用旧`server.listen(pipeName)`。进程身份为原creation FILETIME，明确stop持同一process HANDLE；cold查询只有完整kernel观察可证明dead，失败保uncertain。实际Windows ABI／ACL／pipe／前门尚未运行，源码接入不能放行平台资格。
+
+2026-10-10补充：Windows reservation保完整父链和原record HANDLE／FileID；只私有直接父目录需要删除权限，公共祖先只读pin。publish前原FIRST pipe已取得且有限overlapped listener已接入；记录无token。客户端核原pipe server PID和held process birth，再走同一公共HTTP Client；回复写完后仍在原deadline内等客户端关闭，避免[DisconnectNamedPipe丢弃未读数据](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-disconnectnamedpipe)。所有原I/O／event／pipe／record关闭必须确认；未知强持原owner与资源，daemon沿有限marker和ref计时器保活，不能被身份／漂移错误改写或释放候选使用权。严格自有pipe词汇及平台验收归[Daemon owner](../../../../apps/service/src/daemon/README.md)。
 
 配对与daemon共用一次Service装配，保持唯一Runtime/Loop；父EOF只用于配对策略。daemon固定原Web资产，并在最终资源关闭阶段封Browser入口、撤销Cookie和排空原请求，随后关闭Store、Native HTTP和所属endpoint。关闭失败保留真实诊断与资源。CLI restart先验证目标制品/资产和可安全检查的Store格式，再向原实例发一次if_idle/cancel关闭；普通start允许坏Store保留安全诊断服务。确认原PID/start退出后才启动新目标，超时不强杀、不偷偷启动替代。
 
@@ -35,9 +37,11 @@ macOS进程身份使用本机SDK已核实的libproc `proc_pidinfo(PROC_PIDTBSDIN
 
 ## Consequences
 
-该决定已用于开发daemon的平台leaf、共用装配、CLI编排及资产接入。macOS实际进程已验证socket竞争/漂移、默认与显式endpoint、父EOF差异、Web排空、原实例busy/cancel及预检失败保留旧服务。装配与清理双失败没有HTTP handle时，通过有限marker强持原资源并用ref计时器保持进程存活，daemon reservation不释放；不能把未resolved Promise本身当作进程保活。错误输出只保code/phase，内部cause不序列化。独立编译子进程已验证断开父管道仍alive、原Store使用锁busy及第二启动被原reservation拒绝。
+该决定已用于正式Terminal和开发daemon的平台leaf、共用装配、CLI编排及资产接入。macOS实际进程已验证socket竞争/漂移、默认与显式endpoint、父EOF差异、Web排空、原实例busy/cancel及预检失败保留旧服务。装配与清理双失败没有HTTP handle时，通过有限marker强持原资源并用ref计时器保持进程存活，daemon reservation不释放；不能把未resolved Promise本身当作进程保活。错误输出只保code/phase，内部cause不序列化。独立编译子进程已验证断开父管道仍alive、原Store使用锁busy及第二启动被原reservation拒绝。
 
-这些是本机macOS开发证据，开发共享任务/TUI接缝不代表Linux/Windows、正式入口切换或发行资格；默认与显式socket选择必须完整保留，不能将默认地址作为显式字符串重算而改变record位置。启动前的独立只读Store预检不创建Runtime，失败保旧进程；未知关闭只观察原实例，不重新POST。总体状态与完整缺口见[实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
+Windows正式父launcher在spawn前验证完整candidate并持自身SH／原文件pins，固定Bun关闭ambient env/install/bunfig/tsconfig；实际Daemon在endpoint／Store／preflight之前取得自己的candidate使用权，Service装配仍保独立准入。成功准确handoff或原子进程真实退出后父权才释放；初始artifact获取关闭未知也走保活。安装qualification以原总期限要求B daemon→回退A仍复用B→A公共共享任务→busy拒绝／明确cancel→原HANDLE dead／新A完整冷结果→正常stop／双EX；B标签变化不冒称跨代码升级。实际Windows资格与Native／PTY／Shell／MCP范围仍独立待验。
+
+这些macOS进程证据与后来正式Terminal实际完整安装证据分别保持原范围，不代表Linux/Windows或完整发行资格；默认与显式socket选择必须完整保留，不能将默认地址作为显式字符串重算而改变record位置。启动前的独立只读Store预检不创建Runtime，失败保旧进程；未知关闭只观察原实例，不重新POST。总体状态与完整缺口见[实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 ## Verification and limits
 

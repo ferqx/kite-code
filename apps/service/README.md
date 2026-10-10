@@ -325,13 +325,15 @@ Settings 模型业务端口为 `GET /v1/config/{scope}/models?storeId=...&worksp
 装配清理回归使用真实隔离 SQLite/Worker：管理工厂故障后实际 Runtime 最终 hook 失败，原 metadata 仍可读且维护返回 `owner_busy`；清理成功保留原错误对象并允许实际备份取得维护锁。Runtime 构造的重复定义错误也验证原 Artifact/Store 成功释放。构造失败后 Artifact/Store 自身 close 再失败的标记分支已实现，本切片未单独注入该底层失败，也未为它增加生产 FactoryPort。
 
 
-## 显式开发 daemon
+## 显式 daemon
 
 [daemon-main](src/daemon-main.ts) 与 paired [main](src/main.ts) 共用 [process-service](src/process-service.ts) 的一次 Store/Runtime/HTTP 装配。daemon 的启动 stdin 是有限单帧，EOF 不代表退出；原 profile、canonical Workspace、build 和 native owner 在首次启动固定。[私有 daemon 叶子](src/daemon/README.md)只作发现与准确资源所有权，业务仍走公共 Client。默认 endpoint 与显式 socket 保留各自原 record 路径，不把默认地址重新解释成显式地址。
 
 启动前以 [web-assets](src/daemon/web-assets.ts) 校验所选三个 Web 文件及闭合 manifest，不执行宿主提供的 assets 模块；restart 的[预检](../../packages/agent/src/sqlite.ts)在目标子进程只读检查已有 Store，零 Runtime/Model。普通 start 直接进入正常装配，Store 打开失败仍保留安全身份与 HTTP 诊断，不把格式预检变为全局 ready 门槛。有限 preflight 回复经闭合 schema 核对原 profile/instance/build；预检不免除随后正常启动准入。Web Gateway 固定封装本构建的 [API Docs](src/api-docs.ts)与完整 OpenAPI，纳入页面内容身份，不接受外部文档覆盖，也不携带认证信息。
 
 最终关闭先封 HTTP 新准入，再关闭 Gateway、abort 并等待所属请求/正文读取，最后关闭 Runtime/Store 与原 native endpoint。装配与清理双失败通过有限 marker 保留资源；[process-failure](src/process-failure.ts)明确保持原进程存活，daemon 不移除 reservation。该分支没有成功 HTTP handle，不能宣称已有诊断 listener 或成功关闭；它只输出 code/phase，不输出原错误、token或资源。
+
+Windows x64 已接当前SID私有pipe/record和准确kernel process HANDLE到同一正式用户链，原16KiB/64连接/5秒bootstrap及HTTP准入保持。候选Daemon和只读preflight在endpoint/Store前取得自身SH/完整文件pin，正常endpoint收尾后才释放；配套Service仍取得独立使用权。原pipe I/O、record或候选Close未确认时，trusted native marker保活并强持原owner；safe漂移拒绝则完成可确认的原HANDLE关闭并保留未知对象。具体安全策略和测试归[Daemon leaf owner](src/daemon/README.md)，[安装版资格链](../../tests/fixtures/unified-agent/windows-daemon-qualification.ts)必须经原kite.exe完成reuse、current切换、真实共享Model、busy/明确cancel、实际原birth退出、冷历史和最终EX。Windows原生尚未执行，Shell/stdio MCP、Native与TUI PTY仍各自独立未闭。
 
 [真实 daemon](test/isolated/daemon-process.test.ts)在临时目录构建所有公开 manifest entry，再运行编译子进程，验证父 EOF 存活、原身份、Cookie Web/API Docs、busy/cancel真实停止、坏 Web/未来 Store 预检保原服务与数据库字节。[装配失败进程](test/isolated/process-cleanup-retention.test.ts)验证双失败后断开父管道仍保活、原锁busy与reservation保留。CLI 的实际编排证据归 [CLI owner](../cli/README.md)。当前本机 macOS 证据不等于 Linux/Windows 或正式发行资格；设计理由见[私有 bootstrap Note](../../.agents/notes/implemented/architecture/2026-10-02-daemon-private-bootstrap.md)。
 

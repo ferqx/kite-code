@@ -108,6 +108,7 @@ async function launch(
     bootstrapSchema,
     inspectProcess,
     requestDaemonBootstrap,
+    retainWindowsDaemonArtifact,
   } = await import('@kite-ai/service/daemon');
   signal?.throwIfAborted();
   const instanceId = crypto.randomUUID(),
@@ -129,11 +130,35 @@ async function launch(
       ...(artifact.runtimeProtection ? { runtimeProtection: artifact.runtimeProtection } : {}),
     },
   });
-  const child = spawn(artifact.executable, [artifact.daemon.entrypoint], {
-    detached: operation === 'start',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' },
-  });
+  if (process.platform === 'win32' && !artifact.runtimeProtection)
+    throw new CLIHostError('daemon_artifact_unqualified');
+  const artifactAccess =
+    process.platform === 'win32' && artifact.runtimeProtection
+      ? retainWindowsDaemonArtifact(artifact.runtimeProtection, {
+          entrypoint: artifact.daemon.entrypoint,
+          executable: artifact.executable,
+          buildId: artifact.buildId,
+        })
+      : undefined;
+  let child: ReturnType<typeof spawn> & {
+    stdin: NonNullable<ReturnType<typeof spawn>['stdin']>;
+    stdout: NonNullable<ReturnType<typeof spawn>['stdout']>;
+    stderr: NonNullable<ReturnType<typeof spawn>['stderr']>;
+  };
+  try {
+    child = spawn(
+      artifact.executable,
+      [...(artifactAccess?.arguments ?? []), artifact.daemon.entrypoint],
+      {
+        detached: operation === 'start',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' },
+      },
+    );
+  } catch (error) {
+    artifactAccess?.release();
+    throw error;
+  }
   const exited = new Promise<number | null>((done, reject) => {
     child.once('exit', done);
     child.once('error', reject);
@@ -167,6 +192,7 @@ async function launch(
   child.stderr.resume();
   child.stdin.on('error', () => {});
   child.stdin.end(`${JSON.stringify(input)}\n`);
+  let handedOff = false;
   try {
     const value = await frame;
     if (operation === 'preflight') {
@@ -189,6 +215,7 @@ async function launch(
         }),
       ]);
       if (exitCode !== 0) throw new CLIHostError('daemon_preflight_failed');
+      handedOff = true;
       return;
     }
     const bootstrap = bootstrapSchema.parse(value);
@@ -210,6 +237,7 @@ async function launch(
       actual.httpEndpoint !== bootstrap.httpEndpoint
     )
       throw new CLIHostError('daemon_startup_identity_mismatch');
+    handedOff = true;
     return bootstrap;
   } finally {
     clearTimeout(timer);
@@ -218,6 +246,14 @@ async function launch(
     child.stdout.destroy();
     child.stderr.destroy();
     child.unref();
+    if (handedOff || child.exitCode !== null) artifactAccess?.release();
+    else if (artifactAccess)
+      void exited
+        .then(() => artifactAccess.release())
+        .catch(() => {
+          // The original holder remains strong in the native admission module on failed close.
+          process.stderr.write(`${JSON.stringify({ code: 'daemon_artifact_close_unknown' })}\n`);
+        });
   }
 }
 async function stopOriginal(
@@ -226,7 +262,11 @@ async function stopOriginal(
   signal?: AbortSignal,
 ) {
   signal?.throwIfAborted();
-  const { inspectProcess } = await import('@kite-ai/service/daemon');
+  const { retainProcessObservation } = await import('@kite-ai/service/daemon');
+  const original = retainProcessObservation(
+    observed.record.pid,
+    observed.record.processStartIdentity,
+  );
   const client = lifecycleClient(observed.bootstrap);
   try {
     try {
@@ -244,7 +284,7 @@ async function stopOriginal(
     }
     const end = Date.now() + 15000;
     for (;;) {
-      const state = inspectProcess(observed.record.pid, observed.record.processStartIdentity);
+      const state = original.inspect();
       if (state === 'dead') return;
       const status = await client
         .getStatus({ signal: AbortSignal.timeout(1000) })
@@ -258,6 +298,7 @@ async function stopOriginal(
     }
   } finally {
     client.disposeNetwork();
+    original.close();
   }
 }
 function report(observation: Observation, selected: Selected, targetBuildId: string | null) {

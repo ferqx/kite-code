@@ -5,11 +5,60 @@ import { createClient } from '@kite-ai/client';
 import { type ConfigureProcessHost, startupLimitBytes } from './bootstrap';
 import { bootstrapSchema } from './daemon/bootstrap';
 import { reserveDaemonEndpoint, selectDaemonEndpoint } from './daemon/endpoint';
+import { DaemonEndpointCleanupError, endpointCleanupUnknown } from './daemon/reservation';
 import { loadDaemonWebAssets } from './daemon/web-assets';
 import { type DaemonStartup, daemonPreflightSchema, daemonStartupSchema } from './daemon-startup';
 import { startDevelopmentWeb } from './development-web';
 import { retainFailedProcess } from './process-failure';
 import { assembleProcessService, ProcessServiceCleanupError } from './process-service';
+import { retainWindowsPairedArtifact } from './windows-paired-artifact';
+
+export async function runDaemonProcess(options: { configure?: ConfigureProcessHost } = {}) {
+  let artifact: ReturnType<typeof retainWindowsPairedArtifact> | undefined;
+  try {
+    return await runDaemonProcessInner(options, (startup) => {
+      if (process.platform === 'win32' && startup.runtimeProtection)
+        artifact = retainWindowsPairedArtifact(startup.runtimeProtection, {
+          entrypoint: process.argv[1] ?? '',
+          executable: process.execPath,
+          buildId: startup.buildId,
+        });
+    });
+  } catch (error) {
+    if (
+      process.platform === 'win32' &&
+      error instanceof Error &&
+      [
+        'paired_artifact_close_unknown',
+        'artifact_access_acquire_close_unknown',
+        'artifact_scope_release_failed',
+        'windows_installation_coordination_close_failed',
+      ].includes(error.message)
+    )
+      await retainFailedProcess({
+        code: 'daemon_artifact_close_unknown',
+        phase: 'daemon_artifact',
+        cause: { error, artifact },
+      });
+    if (endpointCleanupUnknown(error))
+      await retainFailedProcess(
+        error instanceof DaemonEndpointCleanupError
+          ? error
+          : new DaemonEndpointCleanupError(error, { artifact }),
+      );
+    throw error;
+  } finally {
+    try {
+      artifact?.release();
+    } catch (error) {
+      await retainFailedProcess({
+        code: 'daemon_artifact_close_unknown',
+        phase: 'daemon_artifact',
+        cause: { error, artifact },
+      });
+    }
+  }
+}
 
 async function readStartup(): Promise<DaemonStartup> {
   const reader = Bun.stdin.stream().getReader();
@@ -36,12 +85,17 @@ async function readStartup(): Promise<DaemonStartup> {
 }
 
 /** Explicit shared process. Parent EOF only ends private startup; it is never daemon shutdown. */
-export async function runDaemonProcess(options: { configure?: ConfigureProcessHost } = {}) {
+async function runDaemonProcessInner(
+  options: { configure?: ConfigureProcessHost },
+  admit: (startup: DaemonStartup['startup']) => void,
+) {
   // A launcher may leave after the private handoff. Broken diagnostic pipes must not kill work.
   process.stderr.on('error', () => {});
   process.stdout.on('error', () => {});
   const input = await readStartup();
   const { startup } = input;
+  // A preflight/endpoint failure must not drop the selected candidate's usage protection.
+  admit(startup);
   const selected = selectProfile({
     dataRoot: startup.profile.dataRoot,
     profile: startup.profile.profile,

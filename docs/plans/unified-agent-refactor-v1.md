@@ -2106,6 +2106,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+Windows 正式Daemon的下一源码缺口现已接入：当前SID私有pipe／原record与process HANDLE，正式`kite.exe server`及`--server`沿同一HTTP调用者；父与实际Daemon各持完整candidate使用权，未知native关闭保活。原安装qualification增加B启动／Web→回退A仍复用B→共享完整任务→busy拒绝／明确cancel→原实例实际dead／新A原完整冷结果→正常stop／双EX，保持原120秒、所有原断言和独立维护链。Windows native资格仍未执行，Native加载前guard／Shell-MCP／PTY及完整平台资格继续待实施或验收；原RSS／观测独立阻P6／§35，不作为这些源码实现的前置。最多五项入口／验收及准确验证范围归[当前Daemon进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-正式-daemon-与原实例版本交接源码)，37能力仍partial、wholeV13／phaseExit仍false。
+
 Windows managed Terminal 的正式安装／版本选择及配对消费者已接源码后，当前独立维护缺口继续沿原 owner 实施：GC已接原 READ/DELETE HANDLE、完整 EOF/hash／实际双时间、精确 FR/FA、原对象删除及 strict Close 保 Profile EX；正式 `kite.exe` qualification要求 busy→backup/inspect/status/restore/status/GC→新 Store 原完整冷读零重放。前门只核近期／引用保留，过宽限删除由公共 Windows维护用例只推进维护时钟；原生尚未执行，不提前退出P6／§35。完整验收与不超过五项实际依赖见[当前维护进度](unified-agent-refactor-v1-progress.md#2026-10-10windows-安装版离线维护与-gc-源码)。
 
 正式Native的公共扩展完整动作／查询／通用结果／再次操作消费者已沿§14.6／§26.7进入“会话工具→扩展能力”，复用公共schema表单、PublicView、原持久caller和DB9／v18兼容。真实HTTP、原组件、Node维护与安装版原页面取得对应证据；此前普通启动／任务、完整正文／历史／后台与相邻正式调用者的未过滤完整默认actual0，原661文件／522唯一主任务全部通过，包括6项exclusive，4251 regular输入与Git前后全等。准确原失败、修正和收束证据归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-10普通任务完整默认收束与剩余退出依赖)。该结果只闭合当时冻结范围的能力集成回归，不充当后来改动的完整默认或整体V1.3退出。

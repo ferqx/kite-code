@@ -4055,3 +4055,39 @@ Root及八runtime workspace类型、最终Agent与CLI受影响类型、边界／
 | 5 | §35独立完整能力／正式caller审查→最终旧路径退役→阶段完整回归及P7适用责任 | 前序资格满足后完整审查、实际退役和未过滤回归，随后按适用T/E发布责任收束 | 原37能力仍partial，局部修复／静态守卫不触发阶段退出 |
 
 本轮推进的是Windows完整离线维护的正式消费者接线与GC原对象源码缺口，没有新增全局caller迁移或最终legacy退役。wholeDefault=false、wholeV13=false、phaseExit=false、Goal active；仅已授权本地stage/commit，无push/PR／发布。
+
+## 2026-10-10Windows 正式 Daemon 与原实例版本交接源码
+
+上一完整离线维护／GC切片已本地提交 `91b9ddc15be016cae72c5ba33716bc3faa4111b0`，其六原作业证据保原范围。本轮先核退出真实依赖：原 `arena-zero` 九点RSS增长 +115.203125MiB仍大于32MiB，八轮／完整Runtime descendants与activeResources/handles缺项保P6／§35／最终退役门禁；它们不阻Windows安装／版本选择／独立维护／Daemon源码实施，没有再次参数对照。
+
+### 实际用户入口与完整接线
+
+正式 `kite.exe server start/status/web/stop/restart [--cancel]` 和 CLI／TUI显式 `--server` 的Windows源码现沿独立private bootstrap接入同一公共HTTP Client，业务没有第二carrier。当前Token SID、OS LocalAppData KnownFolder和准确profile key确定默认pipe／record；显式只接受闭合自有 `\\.\pipe\kite-daemon-[a-z0-9-]+`，不信环境HOME／TEMP，不接受HTTP／remote或隐式fallback。缺席选择与status不建profile／Store；默认地址作为显式值仍映射原record。
+
+原record在Store之前CREATE_NEW，完整父链／原FileID及private protected DACL、原SH／EX LockFileEx保准确字节读取／发布／删除；公共系统祖先只READ_CONTROL／READ_ATTRIBUTES，只有需要删除的私有直接父目录增加DELETE_CHILD。原FIRST pipe、非继承／REJECT_REMOTE、有限overlapped操作保实际对象；客户端以有限read/write权限及SQOS IDENTIFICATION核原server PID、creation FILETIME及同一process HANDLE，bootstrap严格单帧且记录无token。回复写完后在原deadline内等客户端关闭，避免Disconnect丢未读bytes；关闭先封门／取消并核原I/O实际完成，再严格关闭event／pipe／record，不按CancelIoEx受理推定关闭。任何真实关闭未知保原owner／资源和有限诊断，Main ref计时器保活，candidate使用权不先释放。
+
+父Daemon launcher完整验证所选candidate并持自己的SH／文件pins，再用原固定Bun参数spawn；实际Daemon在endpoint／Store／preflight之前另持自己的candidate，Service装配仍独立准入。成功准确handoff或原child真实退出才释放父权；初始artifact acquisition cleanup未知也保活。stop在发原HTTP shutdown之前持原process observation，沿原15秒检查／单次POST／busy或明确cancel，只有原HANDLE实际dead才启动新目标；workspace、原instance、目标／运行build与未知不重放保持。裸Windows开发Daemon无runtimeProtection明确拒绝，不称安装资格。
+
+同一[Windows安装qualification](../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts)新增必须执行的[Daemon helper](../../tests/fixtures/unified-agent/windows-daemon-qualification.ts)：installed B start/status/Web及完整app.js SHA；rollback A只变选择、仍复用原B，B SH阻EX／卸载；A前门共享完整普通Model与live B冷SQLite原事实；Client dispose只detach；busy restart保原实例；明确cancel后原held HANDLE实际dead、新A启动、准确原任务取消、完整原Execution／Model正文及来源冷读零重放；正常stop／record缺席／双candidate EX／恢复原raw config，再走原保数据卸载。Model用独立Session／Provider计数2，旧paired provider仍1。B只标签变化，明确不计cross-code、Native、TUI PTY、Shell／stdio MCP或持续资源。
+
+### 验证边界与真实失败
+
+现有qualification的109个assertion和34个await均按AST子序列保留，当前110／35；原120秒整链、110秒工作窗、30秒命令和10秒清理预留保持，静态收据 `/private/tmp/kite-windows-daemon-qualification-preservation-20261010.json`。真实Windows MSVC／PE／DACL／pipe／ABI／console／安装整链尚未执行，按用户顺序留重构后Actions，本地不dispatch；不据mock或macOS原完整作业放行Windows资格。
+
+五个新增原完整文件分别核SID／KnownFolder／精确ACL、原process／FILETIME／完整kernel absent、pipe原overlapped生命周期／peer-close、record完整原HANDLE字节／同对象删除／strict close，以及完整endpoint／bootstrap／关闭未知和初始artifact准入接线；native case在本机按原platform skip保留。连同共享／POSIX／Daemon／paired／原failed-process retention／正式Terminal，共14唯一原完整job／22完整文件，74pass／4663Bun expect／0fail／3个原Windows native skip。`final-2`十一job的4311输入／Git／六真实Bun/Node/Electron/TS/Biome资产前后全等；`final`前三已绿job相关输入未变而准确复用。合并收据 `/private/tmp/kite-v13-windows-daemon-verified-evidence-20261010.json` 核完整原job／文件／并发与log SHA，保first batch真实record红。CLI为当前原9文件shard，正式Terminal原exclusive整例1pass／3845expect／54.02s，全部原断言／期限保持。本轮不据旧完整默认充当当前整轮回归，实际阶段收束时仍保未过滤完整回归。
+
+有限只读审查确认并修正三项具体源码问题：公共祖先多要DELETE_CHILD；bootstrap再读／准确dead清理把record Close未知改写成普通identity／drift；初始artifact factory cleanup未知未进入Main保活。沿已有完整文件补实际原异常传播和准入边界断言，没有建立长期故障矩阵。新增record权限断言初次误将先前readonly记录查询计为create权限，原日志 `/private/tmp/kite-windows-daemon-review-fixes-20261010.log` 为2pass／1fail／10expect，保留；fixture先划定真实create调用起点，随后冻结原作业仍发现把只读verify probe计为原目录pin：前三文件绿、record为0pass／1fail／2expect，4311输入／Git／六资产前后全等，原final收据保留。最终断言绑定仍持有的准确目录HANDLE，保原read权限断言、生产权限／Close守卫及预算；前三job相关source／test／依赖／config／资产未变，按原范围复用。先前endpoint fixture的temp路径canonical红、record／pipe mock初始化与peer-close调试红也保原日志，不删除业务断言或过滤实际case。
+
+Root及八runtime workspace类型实际0，20个受影响TS文件Biome actual0；boundary／runtime packages／API／test-owner、docs／all docs-impact和plan-evidence均0。文档核对修正了shared active仍称仅开发socket的旧说明，产品手册／Daemon owner／CLI owner／release active及原Note现按正式socket／Windows pipe与各自待验范围同步；无API／Core业务合同改写。
+
+### 五项剩余退出依赖
+
+| 顺序 | 实际用户入口／具体剩余缺口 | 完整行为和验收 | 依赖 |
+| --- | --- | --- | --- |
+| 1 | Windows正式Native安装后启动／普通任务／版本选择／维护恢复；[installer](../../scripts/release/native-install.ts)仍拒绝Windows／只产POSIX前门，[Main](../../apps/desktop/electron/main.ts)仍 `native_windows_bootstrap_unqualified`，[加载端口](../../apps/desktop/electron/windows-access.ts)尚未绑原文件 | Node／Electron加载前原candidate完整身份、原SH／文件pin handoff与Service独立使用权；实际UI完整普通Model／历史、B指针不替换原A、准确关闭及新Store冷完整结果零重放 | 正式Terminal准入已接，Native自身source guard与加载前边界仍需实施；独立于RSS |
+| 2 | Windows普通Shell与child后台任务、stdio MCP完整调用 | 原操作实际启动／完整输出／独立授权／精确取消和原owned进程树退出；cold读原结果零重放，未知保fencing；不能以普通Model或help代证 | native OS监督／runtime Shell／stdio平台端口仍有guard；各owner实施后才能放行完整用户能力 |
+| 3 | Windows／Linux正式安装、版本切换、全维护恢复、Daemon／Native／真实TUI交互和跨代码资格 | 重构后Actions实际跑原common whole／native／always formal及准确candidate完整链，保全部原assertion／deadline，真实失败不得过滤；当前新Daemon源码必须取得实际pipe／ACL／HANDLE／安装入口证据 | 前两项源码与各平台实现；无本地dispatch，标签B不计跨代码，D08首发前无适用新基线前版不阻独立源码 |
+| 4 | installed CLI／TUI／Native持续普通任务及Shell／child后台资源生命周期 | 原RSS增长／斜率、八轮／九点和完整可信Runtime descendants、activeResources/handles实际满足 | 直接阻P6／§35，保原真实red和观测unknown；不重复参数对照、不阻上述独立实现 |
+| 5 | §35完整能力／正式caller独立审查→最终旧路径退役→阶段完整回归及适用P7责任 | 前序满足后完整审查、实际退役、未过滤完整回归；适用版本／发布样本及T/E责任按真实发布事实验收 | 前四项资格，37能力仍partial；局部source／mock／静态guard不触发阶段退出 |
+
+新增闭合的是Windows正式Daemon与安装版原实例版本交接的源码缺口；正式server／显式共享caller已复用公共HTTP业务边界，实际Windows资格仍未闭合，没有宣称全平台能力或最终legacy退役。手册、owner、active、原设计Note、主计划和三条直接能力证据同步。wholeDefault=false、wholeV13=false、phaseExit=false、Goal active；授权仅本地stage／commit，无push／PR／发布。

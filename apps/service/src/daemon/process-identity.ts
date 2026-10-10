@@ -1,5 +1,10 @@
 import { dlopen, ptr } from 'bun:ffi';
 import { readFileSync } from 'node:fs';
+import {
+  inspectWindowsProcess,
+  readWindowsProcessStartIdentity,
+  retainWindowsProcess,
+} from './windows-process';
 
 let darwin: ReturnType<typeof openDarwin> | undefined;
 function openDarwin() {
@@ -10,6 +15,7 @@ function openDarwin() {
 /** Kernel start identity only; no ps/timeOrigin fallback. SDK proc_bsdinfo: size136, pid12, start120/128. */
 export function readProcessStartIdentity(pid: number): string | undefined {
   if (!Number.isSafeInteger(pid) || pid < 1 || pid > 2147483647) return;
+  if (process.platform === 'win32') return readWindowsProcessStartIdentity(pid);
   try {
     if (process.platform === 'darwin') {
       darwin ??= openDarwin();
@@ -39,6 +45,13 @@ export function readProcessStartIdentity(pid: number): string | undefined {
   return undefined;
 }
 export function inspectProcess(pid: number, expectedStart: string): 'alive' | 'dead' | 'uncertain' {
+  if (process.platform === 'win32') {
+    try {
+      return inspectWindowsProcess(pid, expectedStart);
+    } catch {
+      return 'uncertain';
+    }
+  }
   const actual = readProcessStartIdentity(pid);
   if (actual !== undefined) return actual === expectedStart ? 'alive' : 'dead';
   try {
@@ -47,4 +60,9 @@ export function inspectProcess(pid: number, expectedStart: string): 'alive' | 'd
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'uncertain';
   }
+}
+/** Windows keeps the original kernel object through shutdown; POSIX retains its birth contract. */
+export function retainProcessObservation(pid: number, expectedStart: string) {
+  if (process.platform === 'win32') return retainWindowsProcess(pid, expectedStart);
+  return { inspect: () => inspectProcess(pid, expectedStart), close() {} };
 }

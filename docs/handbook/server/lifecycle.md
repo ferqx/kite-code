@@ -47,7 +47,9 @@ restart 先校验资源和可检查的存储格式，再请求停止旧实例。
 
 开发CLI任务与TUI可显式连接这个socket，操作分别见[CLI共享连接](../cli/commands.md#通用开发入口连接共享服务)和[TUI共享连接](../clients/tui/getting-started.md#通用开发-tui-的共享连接)。省略共享客户端的工作区参数沿用daemon原工作区，显式不一致则拒绝。
 
-私有 socket 只交付原身份与 HTTP 连接信息，业务和关闭使用公共 Client。父启动客户端退出不会停止 daemon。正常 stop 等待原 PID/启动身份实际退出；关闭后身份暂不可读时继续核对原进程，不能据此宣称已经退出。持续无法确认会返回身份不明错误，清理失败保留原资源；不会重复关闭、强杀或启动替代实例。当前真实验证限 macOS；Linux 未完成平台资格，Windows 明确拒绝，不能声称已实现 named pipe/DACL。
+私有端口只交付原身份与 HTTP 连接信息，业务和关闭使用公共 Client。父启动客户端退出不会停止 daemon。正常 stop 等待原 PID/启动身份实际退出；关闭后身份暂不可读时继续核对原进程，不能据此宣称已经退出。持续无法确认会返回身份不明错误，清理失败保留原资源；不会重复关闭、强杀或启动替代实例。当前真实完整验证限 macOS；Linux/Windows 尚未取得完整平台资格。
+
+Windows x64 正式安装入口的Daemon源码现已接本机当前用户私有 named pipe。默认地址按真实SID和原profile固定，status JSON的endpoint可直接用于共享CLI/TUI的 `--server`；显式地址只接受 `\\.\pipe\kite-daemon-<小写字母、数字或连字符>`，不接受远端pipe、HTTP URL或自动改投。相同默认/显式地址指向同一记录，absent状态不建目录。正式启动及restart预检使用所选候选的固定Bun配置和独立使用权；未具备候选证明的Windows开发制品明确返回 `daemon_artifact_unqualified`。运行中的旧候选继续固定原实例，安装指针切换只影响后续启动；stop以原kernel进程HANDLE确认退出。源码和有限mock不证明实际Windows安全、detach或完整用户链，原生资格按[发布边界](../../active/release-control.md)保留。
 
 空闲关闭在服务内重新检查：运行、审批等待、后台工作、写入准备或清理中都会返回 busy，保留原服务。明确取消关闭只处理该实例拥有的工作；同 profile 的另一服务及其已接管命令不会因本实例退出被取消。普通历史读取不等于忙碌任务，但关闭会等待已有读取结束再释放数据库。
 

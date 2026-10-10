@@ -172,7 +172,9 @@ daemon 制品选择固定 `apps/service/dist/daemon-main.js` 与 `apps/web/dist/
 [development-cli.test.ts](../../tests/isolated/unified-agent/development-cli.test.ts)保留实际配对构建、完整原任务输出与一次本地模型请求，并补纯只读零资产选择、惰性启动失败、真实原实例兼容复用零目标构建、entry/manifest 字节变更及链接拒绝。此开发入口适配不代表正式发行 CLI/daemon 切换或三平台资格。
 
 
-[host/daemon.ts](host/daemon.ts)通过私有 socket 核原 reservation/PID 启动身份，随后只用公共 Lifecycle Client 查询与关闭。start兼容复用不替换build；restart先核目标资产并运行目标只读Store预检，再一次if_idle或明确cancel。未确认原PID退出不启动替代，不以超时强杀；start不自动删除dead/未知endpoint。workspace省略沿用原实例，显式不一致拒绝。status输出分开记录running/target build；未选择目标构建时target为null，不能编造当前安装版本。
+[host/daemon.ts](host/daemon.ts)通过私有 socket／Windows pipe 核原 reservation/PID 启动身份，随后只用公共 Lifecycle Client 查询与关闭。start兼容复用不替换build；restart先核目标资产并运行目标只读Store预检，再一次if_idle或明确cancel。未确认原PID退出不启动替代，不以超时强杀；start不自动删除dead/未知endpoint。workspace省略沿用原实例，显式不一致拒绝。status输出分开记录running/target build；未选择目标构建时target为null，不能编造当前安装版本。
+
+Windows installed `kite.exe server start/status/web/stop/restart` 和显式共享 `--server` 已接同一正式调用者源码。父launcher先完整candidate SH／原文件pin、固定Bun参数，实际Daemon在endpoint／Store前取得自己的使用权；stop沿原process HANDLE确认准确birth退出，原实例未知时保记录与使用权。裸开发Daemon缺少runtimeProtection会明确拒绝，完整安装qualification要求B运行／A回退仍复用原B、共享普通Model、busy／明确cancel、新A原完整结果冷读和正常退出／双EX；真实Windows原生执行尚未验收。严格pipe词汇、安全与本机mock限度见[Daemon owner](../service/src/daemon/README.md)，正式安装链归[Terminal release](docs/terminal-release.md)。
 
 一次原shutdown之后，启动身份暂不可读仍按既有15秒检查窗口只读观察原PID/start；后来的真实dead证明才允许成功，持续uncertain到检查点仍 `daemon_identity_uncertain`，drain_failed仍保资源。HTTP观察最多单次一秒，末次等待和调度可越过检查点，不承诺硬15秒退出；不新增POST、信号、清理或替代启动。最初发现与dead endpoint清理继续使用原严格身份规则。[真实原Job核实](test/isolated/job-reconcile-host.test.ts)保paired/shared、同原请求及一次外部效果；受控一次观察故障后成功，持续故障后失败，两次明确关闭分别POST=1，fixture清理另核真实kernel原身份退出。当前1例43断言、19.12s；原含daemon-host的10文件默认shard另33例297断言通过，具体冻结输入与自然/受控红见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。观察故障注入不等于真实kernel窄窗或安装/其他平台资格。
 

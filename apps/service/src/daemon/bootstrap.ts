@@ -7,9 +7,12 @@ import {
   type DaemonProfile,
   type DaemonReservation,
   daemonError,
+  endpointCleanupUnknown,
   profileSchema,
   readDaemonReservation,
+  sameRecord,
 } from './reservation';
+import { requestWindowsDaemonPipe } from './windows-pipe';
 
 export const bootstrapMaxBytes = 16384;
 const origin = z
@@ -55,6 +58,23 @@ export const bootstrapSchema = z.strictObject({
 export type DaemonBootstrap = z.infer<typeof bootstrapSchema>;
 function decodeFrame(bytes: Buffer) {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+}
+/** Exactly the same single bootstrap request and response on either local transport. */
+export function bootstrapResponse(
+  bytes: Uint8Array,
+  value: Omit<DaemonBootstrap, 'requestId'>,
+): Buffer | null {
+  try {
+    const frame = Buffer.from(bytes);
+    if (frame.length > bootstrapMaxBytes || frame.indexOf(10) !== frame.length - 1) return null;
+    const input = bootstrapRequestSchema.parse(decodeFrame(frame.subarray(0, -1)));
+    const response = Buffer.from(
+      `${JSON.stringify(bootstrapSchema.parse({ ...value, requestId: input.requestId }))}\n`,
+    );
+    return response.length <= bootstrapMaxBytes ? response : null;
+  } catch {
+    return null;
+  }
 }
 export function handleBootstrapConnection(
   socket: Socket,
@@ -102,6 +122,37 @@ export async function requestDaemonBootstrap(
     record = readDaemonReservation(endpoint);
   if (!record) throw daemonError('daemon_absent');
   if (!sameProfile(record.profile, expected)) throw daemonError('daemon_identity_mismatch');
+  if (endpoint.transport === 'windows-pipe') {
+    if (!record.pipe) throw daemonError('daemon_not_ready');
+    if (record.pipe !== endpoint.socket) throw daemonError('daemon_endpoint_drift');
+    const id = randomUUID();
+    const bytes = await requestWindowsDaemonPipe(
+      endpoint.socket,
+      record,
+      Buffer.from(
+        `${JSON.stringify(bootstrapRequestSchema.parse({ requestVersion: 1, requestId: id, operation: 'bootstrap' }))}\n`,
+      ),
+    );
+    try {
+      const frame = Buffer.from(bytes);
+      if (frame.length > bootstrapMaxBytes || frame.indexOf(10) !== frame.length - 1)
+        throw Error('invalid_frame');
+      const value = bootstrapSchema.parse(decodeFrame(frame.subarray(0, -1)));
+      const after = readDaemonReservation(endpoint);
+      if (
+        value.requestId !== id ||
+        !sameProfile(value.profile, expected) ||
+        !after ||
+        !sameOwner(value, record) ||
+        !sameRecord(after, record)
+      )
+        throw Error('identity_mismatch');
+      return value;
+    } catch (error) {
+      if (endpointCleanupUnknown(error)) throw error;
+      throw daemonError('daemon_identity_mismatch');
+    }
+  }
   if (!record.socket) throw daemonError('daemon_not_ready');
   const stat = lstatSync(endpoint.socket, { bigint: true });
   if (
