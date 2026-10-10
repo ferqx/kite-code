@@ -1,9 +1,17 @@
-import { type BrowserSessionList, type BrowserWorkspaceList, ClientError } from '@kite-ai/client';
+import { type BrowserWorkspaceList, ClientError } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { ConnectionNotice, ModelOutputMessage, SafeMessageMarkdown } from '@kite-ai/ui';
+import { TooltipProvider } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { WebController, type WebUpdate } from './controller';
 import { Diagnostics } from './diagnostics';
+import {
+  DirectoryItem,
+  type DirectorySession,
+  directoryCSS,
+  rootSessionDirectory,
+  SessionDetails,
+} from './directory';
 import { FileCheckpoints } from './file-checkpoints';
 import { ModelInputs } from './model-input';
 import { navigationCSS, useNavigation } from './navigation';
@@ -23,7 +31,7 @@ export interface WebPageOptions {
   readonly suspended?: boolean;
 }
 
-/** Read-only presentation. Execution facts come only from the one selected controller. */
+/** Read-only presentation. Directory and selected history have separate owned readers. */
 export function WebPage({
   client,
   window: browser,
@@ -38,7 +46,7 @@ export function WebPage({
   paused.current = suspended;
   const wasPaused = useRef(false);
   const [workspaces, setWorkspaces] = useState<BrowserWorkspaceList>();
-  const [sessions, setSessions] = useState<Record<string, BrowserSessionList>>({});
+  const [sessions, setSessions] = useState<Record<string, DirectorySession[]>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [shown, setShown] = useState<Record<string, number>>({});
   const [directoryError, setDirectoryError] = useState<string>();
@@ -88,50 +96,75 @@ export function WebPage({
     [client, browser, pollIntervalMs],
   );
 
+  const canPublishDirectory = useCallback(
+    (read: AbortController) =>
+      !read.signal.aborted &&
+      mounted.current &&
+      !paused.current &&
+      browser.document.visibilityState !== 'hidden',
+    [browser],
+  );
   const loadDirectory = useCallback(async () => {
-    if (paused.current) return;
+    if (paused.current || browser.document.visibilityState === 'hidden') return;
     directoryRead.current?.abort();
     const read = new AbortController();
     directoryRead.current = read;
     setDirectoryLoading(true);
     try {
       const items = await client.listAllWorkspaces({ signal: read.signal });
-      if (!read.signal.aborted && mounted.current) {
+      if (canPublishDirectory(read)) {
         setWorkspaces(items);
         setDirectoryError(undefined);
       }
     } catch (error) {
-      if (!read.signal.aborted && mounted.current) setDirectoryError(code(error));
+      if (canPublishDirectory(read)) setDirectoryError(code(error));
     } finally {
-      if (!read.signal.aborted && mounted.current) setDirectoryLoading(false);
+      if (canPublishDirectory(read)) setDirectoryLoading(false);
     }
-  }, [client]);
-  async function loadSessions(workspaceId: string) {
-    if (paused.current) return;
-    sessionReads.current.get(workspaceId)?.abort();
-    const read = new AbortController();
-    sessionReads.current.set(workspaceId, read);
-    setLoadingSessions((previous) => ({ ...previous, [workspaceId]: true }));
-    try {
-      const list = await client.listAllSessions({ workspaceId, signal: read.signal });
-      if (!read.signal.aborted && mounted.current) {
-        setSessions((previous) => ({
-          ...previous,
-          [workspaceId]: list.filter(
-            (session) => session.parentSessionId === null && session.workspaceId === workspaceId,
-          ),
-        }));
-        setSessionErrors((previous) => ({ ...previous, [workspaceId]: '' }));
+  }, [client, browser, canPublishDirectory]);
+  const loadSessions = useCallback(
+    async (workspaceId: string) => {
+      if (paused.current || browser.document.visibilityState === 'hidden') return;
+      sessionReads.current.get(workspaceId)?.abort();
+      const read = new AbortController();
+      sessionReads.current.set(workspaceId, read);
+      setLoadingSessions((previous) => ({ ...previous, [workspaceId]: true }));
+      try {
+        const list = await client.listAllSessionDirectory({ workspaceId, signal: read.signal });
+        if (canPublishDirectory(read)) {
+          const complete = rootSessionDirectory(list, workspaceId);
+          setSessions((previous) => ({
+            ...previous,
+            [workspaceId]: complete,
+          }));
+          setSessionErrors((previous) => ({ ...previous, [workspaceId]: '' }));
+        }
+      } catch (error) {
+        if (canPublishDirectory(read))
+          setSessionErrors((previous) => ({ ...previous, [workspaceId]: code(error) }));
+      } finally {
+        if (sessionReads.current.get(workspaceId) === read)
+          sessionReads.current.delete(workspaceId);
+        if (canPublishDirectory(read))
+          setLoadingSessions((previous) => ({ ...previous, [workspaceId]: false }));
       }
-    } catch (error) {
-      if (!read.signal.aborted && mounted.current)
-        setSessionErrors((previous) => ({ ...previous, [workspaceId]: code(error) }));
-    } finally {
-      if (sessionReads.current.get(workspaceId) === read) sessionReads.current.delete(workspaceId);
-      if (!read.signal.aborted && mounted.current)
-        setLoadingSessions((previous) => ({ ...previous, [workspaceId]: false }));
-    }
-  }
+    },
+    [client, browser, canPublishDirectory],
+  );
+  const expandedDirectory = useRef(expanded);
+  expandedDirectory.current = expanded;
+  const refreshDirectory = useCallback(() => {
+    void loadDirectory();
+    for (const [workspaceId, open] of Object.entries(expandedDirectory.current))
+      if (open) void loadSessions(workspaceId);
+  }, [loadDirectory, loadSessions]);
+  const abortDirectory = useCallback(() => {
+    directoryRead.current?.abort();
+    for (const read of sessionReads.current.values()) read.abort();
+    sessionReads.current.clear();
+    setDirectoryLoading(false);
+    setLoadingSessions({});
+  }, []);
   const choose = useCallback(
     (sessionId: string | undefined, navigate = true) => {
       if (paused.current) return;
@@ -159,6 +192,8 @@ export function WebPage({
       const visible = browser.document.visibilityState !== 'hidden';
       setPageVisible(visible);
       controller.setVisible(!paused.current && visible);
+      if (!visible) abortDirectory();
+      else if (!paused.current) refreshDirectory();
     };
     const navigation = () => choose(selectedPath(browser.location.pathname), false);
     browser.document.addEventListener('visibilitychange', visibility);
@@ -172,21 +207,19 @@ export function WebPage({
       browser.document.removeEventListener('visibilitychange', visibility);
       browser.removeEventListener('popstate', navigation);
     };
-  }, [controller, browser, choose, loadDirectory]);
+  }, [controller, browser, choose, loadDirectory, abortDirectory, refreshDirectory]);
   useEffect(() => {
     if (suspended) {
       saveReading();
       controller.setVisible(false);
-      directoryRead.current?.abort();
-      for (const read of sessionReads.current.values()) read.abort();
-      sessionReads.current.clear();
+      abortDirectory();
     } else if (wasPaused.current) {
-      void loadDirectory();
+      refreshDirectory();
       controller.setVisible(browser.document.visibilityState !== 'hidden');
       if (browser.document.visibilityState !== 'hidden') void controller.refresh().catch(() => {});
     }
     wasPaused.current = suspended;
-  }, [suspended, browser, controller, loadDirectory, saveReading]);
+  }, [suspended, browser, controller, refreshDirectory, abortDirectory, saveReading]);
   const snapshot = update?.snapshot;
   const outputIdentity = JSON.stringify([client.serverInfo?.storeId, update?.sessionId]);
   if (outputTarget.current !== outputIdentity) {
@@ -261,7 +294,7 @@ export function WebPage({
     update?.phase === 'stale';
   return (
     <div className="web-page" data-theme={dark ? 'dark' : 'light'} inert={suspended}>
-      <style>{navigationCSS}</style>
+      <style>{navigationCSS + directoryCSS}</style>
       <header>
         <button
           type="button"
@@ -313,14 +346,33 @@ export function WebPage({
           inert={!navigation.open}
           aria-label="Workspaces and sessions"
           onKeyDown={(event) => {
+            if (event.defaultPrevented || suspended) return;
             if (event.key === 'Escape' && navigation.narrow) {
               event.preventDefault();
               navigation.close();
+              return;
             }
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+            const rows = Array.from(
+              event.currentTarget.querySelectorAll<HTMLElement>('[data-directory-row]'),
+            );
+            const index = rows.indexOf(browser.document.activeElement as HTMLElement);
+            if (index < 0) return;
+            const next =
+              event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? rows.length - 1
+                  : Math.max(
+                      0,
+                      Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)),
+                    );
+            event.preventDefault();
+            rows[next]?.focus();
           }}
         >
           <h2>Workspaces</h2>
-          <button type="button" onClick={() => void loadDirectory()}>
+          <button type="button" onClick={refreshDirectory}>
             Refresh directory
           </button>
           {directoryLoading && <p role="status">Loading directory</p>}
@@ -333,61 +385,107 @@ export function WebPage({
             />
           )}
           {workspaces?.length === 0 && <p>No workspaces</p>}
-          {workspaces?.map((workspace) => (
-            <section key={workspace.id}>
-              <button
-                type="button"
-                aria-expanded={!!expanded[workspace.id]}
-                onClick={() => {
-                  const opening = !expanded[workspace.id];
-                  setExpanded((previous) => ({ ...previous, [workspace.id]: opening }));
-                  setShown((previous) => ({ ...previous, [workspace.id]: 5 }));
-                  if (opening) void loadSessions(workspace.id);
-                }}
-              >
-                {workspace.name}
-              </button>
-              {expanded[workspace.id] && (
-                <div>
-                  {loadingSessions[workspace.id] && <p role="status">Loading sessions</p>}
-                  {sessionErrors[workspace.id] && (
-                    <p role="alert">Sessions unavailable: {sessionErrors[workspace.id]}</p>
-                  )}
-                  {sessions[workspace.id]?.length === 0 && <p>No sessions</p>}
-                  <ul>
-                    {sessions[workspace.id]?.slice(0, shown[workspace.id] ?? 5).map((session) => (
-                      <li key={session.id}>
-                        <a
-                          href={`/sessions/${encodeURIComponent(session.id)}`}
-                          aria-current={update?.sessionId === session.id ? 'page' : undefined}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            choose(session.id);
-                            if (navigation.narrow) navigation.close();
-                          }}
-                        >
-                          {session.title}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                  {(sessions[workspace.id]?.length ?? 0) > (shown[workspace.id] ?? 5) && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShown((previous) => ({
-                          ...previous,
-                          [workspace.id]: (previous[workspace.id] ?? 5) + 10,
-                        }))
-                      }
-                    >
-                      Show more
-                    </button>
-                  )}
-                </div>
-              )}
-            </section>
-          ))}
+          <TooltipProvider delayDuration={500} skipDelayDuration={300}>
+            {workspaces?.map((workspace) => (
+              <section key={workspace.id}>
+                <DirectoryItem
+                  available={!suspended && pageVisible && navigation.open}
+                  dark={dark}
+                  details={
+                    <>
+                      <strong>{workspace.name}</strong>
+                      <dl>
+                        <dt>Sessions</dt>
+                        <dd>{sessions[workspace.id]?.length ?? 'Not loaded'}</dd>
+                      </dl>
+                      {loadingSessions[workspace.id] && <p>Loading sessions</p>}
+                      {sessionErrors[workspace.id] && (
+                        <p>
+                          Sessions unavailable: {sessionErrors[workspace.id]}. Previously read
+                          entries remain visible.
+                        </p>
+                      )}
+                    </>
+                  }
+                >
+                  <button
+                    type="button"
+                    data-directory-row=""
+                    aria-expanded={!!expanded[workspace.id]}
+                    onClick={() => {
+                      const opening = !expanded[workspace.id];
+                      setExpanded((previous) => ({ ...previous, [workspace.id]: opening }));
+                      setShown((previous) => ({ ...previous, [workspace.id]: 5 }));
+                      if (opening) void loadSessions(workspace.id);
+                    }}
+                  >
+                    {workspace.name}
+                  </button>
+                </DirectoryItem>
+                {expanded[workspace.id] && (
+                  <div>
+                    {loadingSessions[workspace.id] && <p role="status">Loading sessions</p>}
+                    {sessionErrors[workspace.id] && (
+                      <p role="alert">Sessions unavailable: {sessionErrors[workspace.id]}</p>
+                    )}
+                    {sessions[workspace.id]?.length === 0 && <p>No sessions</p>}
+                    <ul>
+                      {sessions[workspace.id]?.slice(0, shown[workspace.id] ?? 5).map((item) => {
+                        const { session } = item;
+                        return (
+                          <li key={session.id}>
+                            <DirectoryItem
+                              available={!suspended && pageVisible && navigation.open}
+                              dark={dark}
+                              details={
+                                <>
+                                  <SessionDetails item={item} />
+                                  {sessionErrors[workspace.id] && (
+                                    <p>
+                                      Previously read entry; current sessions unavailable:{' '}
+                                      {sessionErrors[workspace.id]}
+                                    </p>
+                                  )}
+                                </>
+                              }
+                            >
+                              <a
+                                data-directory-row=""
+                                href={`/sessions/${encodeURIComponent(session.id)}`}
+                                aria-current={update?.sessionId === session.id ? 'page' : undefined}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  choose(session.id);
+                                  if (navigation.narrow) navigation.close();
+                                }}
+                              >
+                                {session.title}
+                              </a>
+                            </DirectoryItem>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {(sessions[workspace.id]?.length ?? 0) > (shown[workspace.id] ?? 5) && (
+                      <button
+                        type="button"
+                        data-directory-row=""
+                        className="directory-more"
+                        onClick={() =>
+                          setShown((previous) => ({
+                            ...previous,
+                            [workspace.id]: (previous[workspace.id] ?? 5) + 10,
+                          }))
+                        }
+                      >
+                        Show more
+                      </button>
+                    )}
+                  </div>
+                )}
+              </section>
+            ))}
+          </TooltipProvider>
         </nav>
         {!navigation.narrow && navigation.open && (
           <hr

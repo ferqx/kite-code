@@ -14,6 +14,8 @@ Status: implemented
 
 正式 Native 复用原 Sidebar 的排序、时间格式与提示，不复制展示组件。Main 的全局目录读取与选中 view 分别持有生命周期，SSE ready/change 合并触发 GET；断线/reset/读取失败保上次事实并撤去当前活动标记，迟到读取按 attach／Store／epoch 拒绝。切换会话不停止原任务，detach 只停止所属读取。
 
+正式 Web 同样复用完整 Browser activity reader及公共UI的原Tooltip。只排序已封存事件时间、null置后、tie保分配顺序；完整已读集合按5／+10展示。目录与选择正文分别读取，显式刷新／可见性恢复重读已展开空间；失败标明原事实、隐藏／已核bfcache暂停释放所属GET，发布另核同步暂停与实际可见性。缺能力或摘要明确失败，不以旧身份reader、所选view或当前clock补齐。该消费者迁移不改变上面的Core／SDK／存储决定。
+
 ## Alternatives considered
 
 - 只映射当前选择的 view：不能表示其他会话的运行或待输入；以同快照公共目录提供全局事实。
@@ -26,4 +28,4 @@ Status: implemented
 
 没有第二个执行索引或新增 I/O clock。旧历史缺少时间时不承诺可恢复；将来若实施事件物理清理，必须保留活 Session 最后更新时间依据或明确缺席，不能在清理后改用当前时钟。目录只提供元数据，完整输出／取消／审批仍沿原身份端口。
 
-当前实际 SQLite／HTTP、Native／Browser SDK、原 Sidebar DOM 与源码外 macOS Native 窗口已经验证，准确输入、原失败及资格边界归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-全局会话状态与时间排序)。这项决定不证明完整 PC／installed／跨平台或 V1.3 退出。当前实现由[Store owner](../../../../packages/agent/src/storage/README.md#目录分页)、[Client owner](../../../../packages/client/README.md#完整目录读取)和[Native owner](../../../../apps/desktop/README.md#native-项目会话目录)维护。
+当前实际 SQLite／HTTP、Native／Browser SDK、原 Sidebar DOM 与源码外 macOS Native 窗口已经验证，准确输入、原失败及资格边界归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-全局会话状态与时间排序)；Web完整目录及本机IAB的限定证据归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11web-完整工作区与会话目录)。这项决定不证明完整 PC／installed／跨平台或 V1.3 退出。当前实现由[Store owner](../../../../packages/agent/src/storage/README.md#目录分页)、[Client owner](../../../../packages/client/README.md#完整目录读取)、[Native owner](../../../../apps/desktop/README.md#native-项目会话目录)与[Web owner](../../../../apps/web/README.md)维护。

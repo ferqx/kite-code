@@ -2106,6 +2106,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+macOS MCP切片收束后，实际源码核对发现Web正式目录仍调用旧身份便利reader，不能消费已提供的activity，也未兑现时间排序／完整详情／键盘浏览。当前已切到原完整Browser activity reader并复用原公共Tooltip，保原Cookie身份、全页快照、只读及取消／迟到隔离，完整工作区／会话目录用户链按本机DOM／实际Core与冷恢复HTTP／IAB证据收束。准确原失败、原断言保全、14完整文件84项及最多五项依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11web-完整工作区与会话目录)。新消费者不依赖RSS或Win/Linux才能实施；原Windows Shell合同guard、RSS／完整观测、后续Actions平台实证及§35审查／最终退役／阶段完整回归继续未闭合，37partial、wholeDefault／wholeV13／phaseExit=false。
+
 macOS 正式 MCP stdio 的原真实失败优先切片现按源码修复启动准备收尾：控制关闭、零 bootstrap attempt 的原目录清理，以及 bootstrap 已 attempt 但回复未确认的准确标签撤销保首因与 unknown。原七整例、共享 Shell 和独立 installed 默认 Source／SDK Tool／取消／Service退出／维护恢复的完整用户链按本机证据收束，旧 negative-PGID 退役保持。准确原失败、必要新回归、正式隔离调度与最多五项剩余依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)。它不依赖 RSS 收集即可实施，但不解除 RSS／全观测、Win／Linux实机、Windows Shell原合同guard、§35独立审查／最终退役／完整阶段回归门禁；37partial、wholeDefault／wholeV13／phaseExit=false。
 
 Windows真实跨代码安装／冷回退的下一源码缺口现已实施：同release job的准确Terminal／Native供统一caller，原837a2b8c源码自身两builder且11项锁输入／Core基线逐字相同，actualAgent／candidate／clean commit不同而同0.1.0。Terminal原A任务、live选择B、B新任务、冷回退A的完整B输入与继续原任务、最终B零重放；Native四基础窗口／三明确任务后从B installed CLI恢复新Store并第五窗口冷读／单次保数据卸载。原前驱已支持DB9，因此这条链不计DB9旧代码拒绝或已发布T029。原同代码、TUI／POSIX／默认计划和预算保持，新1140000ms统一绝对截止只对应完整用户链的物化／版本／维护／收尾，不形成独立长期测试目标。源码与本机公开Runtime plain／sealed完整读取、类型／CI守卫只闭合本片接线，Windows/Linux实际验收依用户安排交后续Actions；RSS／全观测／Shell原合同guard、§35／最终退役及阶段完整回归保持未闭合。准确源、原断言保全与最多五项剩余依赖归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)，37partial、wholeDefault／wholeV13／phaseExit=false。

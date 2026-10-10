@@ -4549,3 +4549,50 @@ Root 曾把两个 installed isolated 文件放入同一个 Bun 宿主，实际1p
 | 4 | §35完整37能力／T/E独立审查、最终旧路径退役与阶段收束 | 全部适用完整用户能力及样本实证、真实legacy消费者清零／删除、未过滤完整阶段回归及适用P7责任 | ①—③适用门禁与其余完整能力汇合；本机MCP七文件通过不能宣布whole graph、MCP全部场景或V1.3完成 |
 
 当前完整macOS stdio用户链切片收束，新增正式caller验证结果已归位，未新增最终legacy删除；原negative-PGID退役持续保持。37能力status仍partial；wholeDefault=false、wholeV13=false、phaseExit=false，Goal未完成。本轮仅已授权本地提交，无push／PR／发布／平台安装或Actions dispatch，RSS与观测缺项继续保留。
+
+## 2026-10-11：Web 完整工作区与会话目录
+
+### 实际用户缺口、依赖与交付
+
+本轮基线为durable checkout `35dd67dafb56dea741e60ef67712115138e790f7`，macOS arm64／Bun1.4.2。前轮MCP真实启动／完整连接／Tool／取消／正常退出已按原切片结束，不继续扩该矩阵。核对现能力映射、手册和正式源码后，独立最高优先缺口是浏览器根页→空间展开→完整会话目录→详情／焦点→准确会话历史：`apps/web/src/page.tsx`仍用仅身份便利reader，源码没有activity消费、更新时间排序、详情或方向键浏览；其依赖Core／Browser严格完整摘要已经实施，不受RSS或Windows Shell前置阻塞。
+
+本轮最多五项排序为：①上述Web完整目录消费者，验收是完整同snapshot摘要排序后5／+10、实际状态／时间详情、hover／focus／Escape／Enter及只读迟到隔离；②Windows installed Shell原合同；③installed普通任务／Shell／child／MCP的完整资源出口；④后续Actions的Win/Linux安装／版本／维护及适用完整客户端；⑤§35全能力审查／最终旧路径退役和阶段收束。②③是独立门禁，④的Shell／完整资源按适用②③汇合，⑤在①—④和其他适用资格后汇合；不把回归文件或单操作列长期目标。
+
+正式Web现切到原 `BrowserClient.listAllSessionDirectory`：完整同upper／snapshotCursor读取后才发布，按原封存event `updatedAt`降序，null置后、tie保原分配顺序；每空间5条／每次+10／折叠重开回5。数量只取完整根集合，未读明确Not loaded；Session详情显示准确Run状态／isActive／必需结果等待／queued／pending数量和原毫秒时区时间。缺能力或activity保持实际错误，不用当前选中View、Run起止时间或读取clock补造。原Cookie／Store／主体、分页与SDK冲突重扫保持；没有修改Core／生成HTTP／SQL／Store格式。
+
+`@kite-ai/ui/desktop`只公开原Tooltip四exports，Web复用同一Radix及500ms／300ms Provider。目录行继续仅name／title；focus立即显示，Escape先关详情，不误关窄屏侧栏；上下／Home／End只移可见行焦点，Enter沿原链接直接选择。Refresh读取工作区和各已展开集合，失败保完整旧事实并标明。document隐藏／bfcache暂停释放所属GET，发布数据／错误／完成前再核原signal、mounted、同步paused和实际visibility；可见或原身份恢复后重读已展开集合，不增加业务写或取消Runtime。原身份集合reader保兼容用途，正式Web活动目录已退出该消费路径；没有新增最终legacy目录删除。
+
+### 原失败、必要验证与证据
+
+新增目录整文件在旧生产实际3fail／3expects，`/private/tmp/kite-web-directory-business-red-20261011.log`；原便利reader造成`browser_read_unavailable`，无法取得所需目录和详情。生产切换后的fixture曾因Bun／JSDOM不同CustomEvent realm、Radix在安装document前静态导入选空layout effect及不完整pointer离开事件失败，原日志保留；修正仅是保存／恢复必要DOM globals、先安装document再加载真实组件，以及真实pointerleave／document pointermove，不模拟timer或扩大预算。新增准确选择断言核全部非空GET都指向原s15，不以单次HTTP假设替代原controller的校准读取。原page／navigation／runtime-logs共18case、160原断言表达式和228原await全部保全，AST `missing=[]`，收据 `/private/tmp/kite-web-directory-preservation-20261011.json`；原case、预算和默认计划保持。
+
+针对性只读审查发现render同步暂停与effect实际abort间有旧promise发布窗口，已把同步paused／实际可见性加入所有目录发布门禁；此改动后只复验实际page消费者和可信新build，不重复不变Core／SDK／Gateway。第一轮395输入中仅page变动的收据保留；最终page／directory／UIexport及相关原接口输入全等。原真实HTTP完整目录／Gateway在普通工具sandbox的loopback listen红分别保留，允许正常本机listener后同一原文件通过，不过滤业务断言。
+
+最终14个唯一完整文件实际0fail／0skip、84pass／972条Bun expects；isolated文件各自独立Bun进程，遵守正式test plan。该范围是完整目录及受影响owner／真实只读链，没有拼为全default：
+
+| 完整文件范围 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 新Web session-directory一文件 | 3pass／56expects，2.51s | `/private/tmp/kite-web-directory-new-final-whole-2-20261011.log` |
+| 原Web page／navigation／runtime-logs，各独立文件 | 18pass／202expects | `/private/tmp/kite-web-directory-{page,navigation,runtime-logs}-whole-20261011.log` |
+| 原Web controller／diagnostics／file-checkpoints／model-input、SDK directory、UI desktop-page六文件 | 51pass／452expects，1.118s | `/private/tmp/kite-web-directory-adjacent-whole-20261011.log` |
+| 原实际SQLite／HTTP／Cookie／Browser directory一文件 | 3pass／61expects，478ms | `/private/tmp/kite-web-directory-real-core-whole-20261011.log` |
+| 原实际Gateway development-web一文件 | 7pass／86expects，3.94s | `/private/tmp/kite-web-directory-gateway-whole-20261011.log` |
+| 原恢复Web plain／sealed Model正文一文件 | 1pass／105expects，1.317s | `/private/tmp/kite-web-directory-restored-consumer-final-whole-20261011.log` |
+| 原Web assets可信build一文件 | 1pass／10expects，152ms | `/private/tmp/kite-web-directory-assets-final-whole-20261011.log` |
+
+实际目录核超过200项、Browser与Native原摘要相等、完整upper／snapshot／Store／subject、原queued／active／rename事件和未知时间，cold零写／Model0。原恢复consumer仍通过实际A→B两冷Service／Cookie／`mountWebPage`读取全部plain／sealed正文、Copy／Close／切换及零重放；该DOM不代真实browser。assets实际build产出固定三资产及source-independent模块，hash／manifest与原拒绝门禁保持。
+
+本机实际Codex In-app Browser另用原公开无害 `web-preview.ts`、隔离临时SQLite、真实Service／Cookie与上述可信编译资产核：根页的方向键只focus／展示真实详情，Escape保持根路径并关详情，Enter直接进入准确`/sessions/qa-markdown`和完整History、无alert。原time为`2026-10-10T18:30:59.938Z`，本地显示同毫秒／GMT+8，未推读取时间；fixture初／末固定Model调用均3，未追加任务。页面已关闭、原stop正常exit0、临时Profile已按原finally释放。DOM与截图归 `/private/tmp/kite-web-directory-browser-20261011.json`、`.jpg`；这只证明本机默认宽度该完整入口，不外推其他浏览器／触控或Win/Linux。
+
+产品手册、Web／UI owners、unified boundary active、原implemented directory Note、主计划和history.read evidence同步。完整根＋八workspace类型、只读Biome、docs／实际scope docs-impact、boundary／八workspace／API／test ownership及plan-evidence按本片执行；正常Git hooks独立运行，不使用no-verify。最终输入／全部日志SHA、断言保全、强制门禁和提交范围归 `/private/tmp/kite-web-directory-source-freeze-20261011.json`。
+
+### 剩余退出阻塞
+
+| 顺序 | 实际用户入口／完整验收 | 真实依赖和未闭合范围 |
+| --- | --- | --- |
+| 1 | Windows installed Shell及Task／Workflow：广泛HOME／宿主工具读取、Workspace／Full写求交、private无条件拒绝、完整输出／全树取消／unknown强持／cold零重放 | 用户决定保原合同与guard，现有原语仍不足；Web／macOS MCP不代该门禁，不扩大管理员／驱动／VM安装 |
+| 2 | installed普通任务／Shell／child／MCP资源出口：原8outer／各9点、每outer≥450000ms真实busy、原32MiB增长／斜率、整个Runtime原出生后代／activeResources／handles及正常退出 | 原RSS `+115.203125MiB >32MiB` red与观测缺项仍阻P6／§35／最终退役及依赖P6的P7；不阻本片独立消费者实施，不重复参数对照 |
+| 3 | 后续Actions的Win/Linux完整安装／登记、跨代码版本／完整原任务继续／冷回退、适用MCP／PTY／Native、backup／restore新Store／GC及保数据卸载 | 源码caller已按前轮接线，实际平台仍按用户安排后续GitHub Actions；Shell场景依①，完整资源按适用②汇合，本机不dispatch或mock代证 |
+| 4 | §35完整37能力／T/E独立审查、真实legacy消费者清零／删除及未过滤完整阶段回归、适用P7责任 | ①—③及其余完整能力／必要平台资格汇合，本片14文件和本机browser不能宣布完整default／P5／P6／V1.3退出 |
+
+本轮仅收束完整Web目录消费者，37能力status保持partial；wholeDefault=false、wholeV13=false、phaseExit=false，Goal继续active。已授权本地提交范围保持，无push／PR／发布／平台安装或Actions dispatch。

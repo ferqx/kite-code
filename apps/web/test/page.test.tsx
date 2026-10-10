@@ -3,7 +3,6 @@ import { type BrowserView, ClientError, type Message } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { mountWebPage } from '../src/mount';
 
 function view(id: string, active = false): BrowserView {
   return {
@@ -87,11 +86,24 @@ async function fixture(
     window: dom.window,
     document: dom.window.document,
     HTMLElement: dom.window.HTMLElement,
+    Element: dom.window.Element,
+    CustomEvent: dom.window.CustomEvent,
+    Node: dom.window.Node,
+    MutationObserver: dom.window.MutationObserver,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+    ResizeObserver: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
+  const { mountWebPage } = await import('../src/mount');
   const state = {
     fail: false,
     connections: 0,
@@ -134,8 +146,12 @@ async function fixture(
     async listAllWorkspaces() {
       return [{ id: 'w', name: 'Workspace' }];
     },
-    async listAllSessions() {
-      return [view('a').session, view('b').session];
+    async listAllSessionDirectory() {
+      return [view('a').session, view('b').session].map((session, index) => ({
+        seq: String(index + 1),
+        session,
+        activity: { updatedAt: null, run: null, queued: false, pendingInteractions: 0 },
+      }));
     },
     async getView(id: string) {
       state.reads++;

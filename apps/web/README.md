@@ -10,7 +10,11 @@
 
 [控制器测试](test/controller.test.ts)使用 fake Browser 公共 port，验证 200+1 完整页、最后分配序号、scope/快照冲突、可见性/活动/单飞、迟到身份和 stale；[DOM 页面测试](test/page.test.tsx)通过 React/JSDOM 验证目录导航、全部历史、真实 cancelled/outcome_unknown、旧快照保留、页面可见性、后退/根导航、迟到响应与拒绝身份。它们不是原生浏览器资格。[真实 Service 测试](../service/test/isolated/development-web.test.ts)使用固定 Model、临时 SQLite、真实 partial、Cookie Gateway 与 HTTP，验证零业务写和页面关闭时原工作继续。当前为本机 macOS 证据，不代表安装或三平台发行。
 
-页面只在 cookie 身份准入成功后读取目录。工作区展开时读取所属根会话，默认显示 5 条，再显示 10 条；不补造服务没有给出的排序字段或活动状态。会话路由使用 `/sessions/<id>`，popstate 与直接链接由当前 controller 读取；回到根目录会清除选择及轮询。document visibilitychange 实际连接 controller，可见且实际 isActive 才定时读。页面卸载只释放所属观察器/目录请求；pagehide 另显式清理 browser cookie session，仍不取消 Runtime。续建和每读一次重试由 Browser SDK 处理，不从 UI 定时器补发。
+页面只在 cookie 身份准入成功后读取目录。工作区展开时使用原 Browser `listAllSessionDirectory`，只有完整同 snapshot 的根会话与 activity 才交给私有[目录展示](src/directory.tsx)。按已封存 `updatedAt` 降序排列，null 置后、同时间保原分配顺序；各空间独立显示 5 条，再显示 10 条，收起重开回 5 条。旧身份便利入口保留兼容用途，正式 Web 已不再用它读取活动目录。会话路由使用 `/sessions/<id>`，popstate 与直接链接由当前 controller 读取；回到根目录会清除选择及轮询。document visibilitychange 实际连接 controller，可见且实际 isActive 才定时读。页面卸载只释放所属观察器/目录请求；pagehide 另显式清理 browser cookie session，仍不取消 Runtime。续建和每读一次重试由 Browser SDK 处理，不从 UI 定时器补发。
+
+目录行只显示 name/title，详情复用公共 UI desktop 的原 Tooltip，首次悬停500ms／快速切换300ms、focus与Escape由原组件处理。空间数量来自完整已读根集合，Session状态只映射其原 activity：原Run状态、isActive、必需结果等待、queued和pending数量；事件时间显示原毫秒精度与时区，缺席保持Unknown，不借当前所选View或读取时钟。上下／Home／End移动可见目录行焦点，Enter沿原链接直接选择。Refresh directory读取工作区及各已展开根集合；失败保完整旧集合和明确错误，旧详情标明上次读取。隐藏／bfcache暂停同步撤销所属读取，发布前再核原signal、mounted、paused和实际可见性，恢复准入后重读已展开集合；关闭导航只关闭详情，不取消业务。
+
+[完整目录DOM文件](test/isolated/session-directory.test.tsx)通过实际WebPage公共port与原Radix核排序／分批／完整metadata、500/300ms时序、焦点／Escape、刷新／隐藏／暂停及迟到隔离。原page／navigation／runtime-logs断言保留，fixture只接新的正式reader与必要DOM装配；原[真实目录](../../tests/isolated/unified-agent/directory.test.ts)证明SQLite／Cookie HTTP／Browser完整分页和活动事实，原[恢复页面](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)证明此consumer仍沿实际冷恢复GET读取。当前本机IAB另核编译资产、焦点详情、Escape和Enter准确进入，完整84项／14文件范围与限制归[目录进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11web-完整工作区与会话目录)。这些证据不代原生多浏览器、Win/Linux或阶段完整回归。
 
 消息按准确 seq 平铺为可选中的安全 Markdown，HTML/脚本不执行；incomplete、取消、失败与 unknown 保持各自实际状态，不推断最终回复或思考。目录宽度与窄屏行为见下方布局小节；Runtime logs 的按需 metadata 观察见下方独立入口，恢复点只读 metadata 观察见下方独立入口，仍无恢复操作；API Docs 由所属 Service Gateway 提供，见下文；原 Model input 检查器见下方独立入口，其正文读取仍独立确认。正式启动路由已使用此 owner；手册承诺的完整客户端、安装平台与退出资格继续按实际能力验证。
 
@@ -87,7 +91,7 @@ History 的公开 `outputBody` 只表示原输出身份与完整性/长度，默
 
 [真实恢复页面整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)通过公开 Fork、backup/restore A→B、两次全新 Service与实际 Cookie BrowserClient挂载正式 `mountWebPage`。原会话／sealed大正文、inline小回答、原完整 Tool call、全文 Copy／Close／切换与错误源读取分别核实；原 Message/sourceIds/originMessage、Run、Command、Execution与 metadata准确相等，读取全GET、Model保持2次、Tool效果保持1次、cold Model新增0。页面为JSDOM、clipboard为内存端口；实际Core/HTTP与DOM组合不代证新的原生浏览器或installed窗口。准确红绿、22完整文件／122项／1605Bun断言及复用范围归[恢复正文进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-web-完整-model-正文)。
 
-目录读取现使用 Browser `listAllWorkspaces/listAllSessions`，穷尽固定首分配上界的所有具名页后再发布结果。workspace 过滤在服务端分页前执行，不能在首页 100 项之后过滤而遗漏后续会话；新增晚项目不混入原上界。切换、隐藏或 dispose 使用所属 AbortSignal，失败保留准确错误而不发布不完整目录前缀。分配上界不冻结后续标题/删除变化；当前开发页按实际分配顺序展示，不冒称手册要求的更新时间排序/5+10分批展示已迁移。
+目录读取使用 Browser `listAllWorkspaces/listAllSessionDirectory`，workspace过滤在服务端分页前执行，穷尽固定首分配上界的所有具名页后再发布结果；新增晚项目不混入原上界。Session摘要额外固定原snapshotCursor，变化由SDK丢弃全部前缀并有限重扫，持续变化明确失败。缺activity capability或摘要也明确失败，不降级生成状态。该完整观察不ACK、恢复、取消或授予执行权，Client／Core／HTTP及Store格式没有本轮改动。
 
 
 ## API Docs 导航

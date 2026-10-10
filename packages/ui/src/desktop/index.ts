@@ -51,6 +51,12 @@ export {
   SheetTitle,
   SheetTrigger,
 } from './components/ui/sheet';
+export {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from './components/ui/tooltip';
 export { FileChanges, FileDiff } from './FileChanges';
 export { MessageContent } from './MessageContent';
 export {
