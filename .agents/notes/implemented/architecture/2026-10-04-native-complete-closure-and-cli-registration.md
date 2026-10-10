@@ -18,6 +18,8 @@ Native 安装可显式向合法独立 Terminal prefix 登记。两个 prefix 以
 
 更新/回滚只修改自己仍持有的登记，卸载以原 nonce CAS 撤销；另一个 Native 后写的登记不能被旧卸载删除。撤销后仍存在的独立前门恢复 Terminal。显式 source/candidate 选择不读取登记，也不重新绑定冷原意图或活动 Run。
 
+独立 Terminal 正常卸载后，反向登记只保留历史归属，不成为 Native 后续升级的必需安装依赖。省略 cliPrefix 时只在历史目标实际存在的情况下锁定、核验并按原 nonce 更新；缺失时仅持 Native 安装 EX，继续原候选核验和 active 发布。该次锁定目标固定用于最终写入，避免缺失后重建的目录未经锁定获得自动登记。显式目标、仍存在的隐式目标和悬空链接继续原拒绝／核验路径；需要独立前门时明确重新安装并登记。保留反向记录可核原归属，不授予后来目录新的写权限。
+
 真实代码兼容验收使用固定旧源码的原 Terminal/Native builder；不把当前 builder 配旧 inner、改 productVersion 或当前代码自造旧库当两版 Native。旧 Native 构建须在旧源码删除前完成；打包后产品只能使用物化候选的闭包。2026-10-07 已沿正式 installed 窗口完成本机 A→B→A→B，原 Core format 1/Native DB7 与数据保留、完整 B 正文和后续实际工作分别证明。该选择补齐兼容验证输入，不改变安装、回退或 trust 语义，也不把冷 caller 记录提升为新的进程内输入绑定。
 
 普通文件完整 SHA 现由 Service 的同步 file-hash leaf按原匹配大小读取：不超过64KiB的文件保留原readFileSync全文SHA，较大文件逐块读至EOF，每次完整核验按需分配并复用一个1MiB buffer；manifest原字节摘要、完整inventory和内容身份继续执行。Main初次核验不持SH，取得双SH后必须重新完整核内容；Service仍以自己的双SH独立核完整候选。缓冲区减少大资产整份读取分配，不构成路径／mtime缓存，也不复用跨租约或跨进程的内容准入；对绕过SH的同用户并发写者不增加原子读取或绝对内存上限保证。当前实现和必要多块／短尾、两层同大小末字节拒绝证据归 [Service owner](../../../../apps/service/README.md)，实际启动与完整默认结果归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。

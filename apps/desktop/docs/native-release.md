@@ -39,6 +39,10 @@ Node main 持 outer/inner 两个 SH，继承 Bun helper 只关闭副本，不对
 
 Native 自带 `bin/kite`、`bin/kite-tui`、`bin/kite-desktop`；独立 Terminal 前门也可选择该 Native。安装更新只更新自己仍拥有的登记，卸载以 nonce CAS 撤销，不能抹掉后来另一个 Native 的登记。独立前门仍存在时，标准命令恢复该 Terminal。若父 shell 已缓存 Native-bin-first 的路径，删除后该缓存真实返回 127；用户执行 `hash -r` 或打开新 shell 后恢复 PATH 查找。安装器无法清除父 shell 缓存，不留未经用户授权的 stub，不修改 PATH/RC。
 
+独立 Terminal 正常卸载后，Native 的反向登记只保留历史归属。省略 `--cli-prefix` 的升级在旧目标已不存在时仅持 Native 安装 EX，继续完整核候选和发布 active；不会锁定或重建旧 Terminal，也不会自动登记后来重建的目录。仍存在的隐式目标以及所有显式目标继续完整验证、固定顺序持锁和 nonce CAS；无效目标拒绝，不能据目录缺失放宽明确登记。Native 回退和卸载保留同一可选前门边界。
+
+macOS 的[登记完整文件](../../../tests/isolated/unified-agent/cli-registration.test.ts)及[原安装窗口](../../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)已验证这一正常卸载后升级链：原两个真实窗口保完整任务、冷读、Provider恰1、Store metadata／View、回退、双lease退出及卸载保数据。原120秒整例／45秒driver不变；两个候选是同源码版本标记差异，只证明安装选择与当前消费者，不充当真实旧代码兼容、DB9或已发布样本。准确输入和实际失败归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10安装升级与维护关闭所有权)。
+
 ## macOS 安装版离线维护
 
 Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先核完整候选、持原使用权，再调用同一[离线维护 leaf](../../cli/host/maintenance.ts)。明确的 data root/profile 与制品目录分开；维护不连接 Service 或 Provider。macOS 的[原 PC 窗口用例](../test/isolated/native-background-bundle.test.ts)在原三次普通窗口退出后，用实际 installer API 安装完整 Native 和独立 Terminal 并登记，实际 `bin/kite` 执行 backup、inspect、真实时钟下的 GC、restore 和 status。DB8 备份为 manifest v17；最近删除仍保留宽限。过期清理由候选内 Bun 执行外部夹具，调用安装包的公开 `runNativeTerminalCLI` 选择器，仅推进夹具时钟，不修改原时间戳或回执，也不新增生产时钟选项；这一步不冒称实际 bin 等待了七天。

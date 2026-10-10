@@ -19,6 +19,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import { readCLIRegistration } from '../../../apps/cli/host/cli-registration';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { packNativeBundle, unpackNativeBundle } from '../../../scripts/release/native-archive';
 import {
@@ -26,7 +27,11 @@ import {
   rollbackNativeBundle,
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
-import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import {
+  buildTerminalBundle,
+  installTerminalBundle,
+  uninstallTerminalBundle,
+} from '../../../scripts/release/terminal-bundle';
 import { hash } from '../../fixtures/unified-agent/native-artifact-fixture';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
@@ -41,7 +46,8 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         dataRoot: join(home, '.kite-code/unified-agent'),
         profile: 'default',
       }),
-      prefix = join(root, 'installed');
+      prefix = join(root, 'installed'),
+      terminalPrefix = join(root, 'standalone');
     let providerCalls = 0,
       firstRoot = '',
       firstId = '',
@@ -50,6 +56,13 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       released = false,
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let preserved: { core: string; native: string; config: string } | undefined;
+    let originalRegistration: ReturnType<typeof readCLIRegistration>;
+    let savedWork:
+      | {
+          metadata: Awaited<ReturnType<Awaited<ReturnType<typeof openSqliteStore>>['getMetadata']>>;
+          view: Awaited<ReturnType<Awaited<ReturnType<typeof openSqliteStore>>['getView']>>;
+        }
+      | undefined;
     const releaseOperation = <T>(operation: string, run: () => T): T => {
       const started = Date.now();
       try {
@@ -119,12 +132,30 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           }
           return Response.json(value);
         }
-        if (path === '/upgrade')
-          return Response.json(
-            releaseOperation('upgrade', () =>
-              installNativeBundle({ bundleRoot: secondRoot, prefix }),
-            ),
+        if (path === '/upgrade') {
+          const original = await openSqliteStore({
+            dataRoot: profile.dataRoot,
+            profile: profile.profile,
+            mode: 'readonly',
+          });
+          try {
+            savedWork = {
+              metadata: await original.getMetadata(),
+              view: await original.getView('s'),
+            };
+          } finally {
+            await original.close();
+          }
+          releaseOperation('standalone_uninstall', () => uninstallTerminalBundle(terminalPrefix));
+          expect(existsSync(terminalPrefix)).toBe(false);
+          expect(readCLIRegistration(prefix, true)).toEqual(originalRegistration);
+          const upgraded = releaseOperation('upgrade', () =>
+            installNativeBundle({ bundleRoot: secondRoot, prefix }),
           );
+          expect(existsSync(terminalPrefix)).toBe(false);
+          expect(readCLIRegistration(prefix, true)).toEqual(originalRegistration);
+          return Response.json(upgraded);
+        }
         if (path === '/rollback')
           return Response.json(releaseOperation('rollback', () => rollbackNativeBundle(prefix)));
         if (path === '/uninstall') {
@@ -271,9 +302,14 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       secondRoot = second.root;
       secondId = second.digest;
       expect(secondId).not.toBe(built.digest);
-      const installed = await prep('first_install', () =>
-        installNativeBundle({ bundleRoot: relocated.root, prefix }),
+      await prep('standalone_install', () =>
+        installTerminalBundle({ bundleRoot: relocated.terminal.root, prefix: terminalPrefix }),
       );
+      const installed = await prep('first_install', () =>
+        installNativeBundle({ bundleRoot: relocated.root, prefix, cliPrefix: terminalPrefix }),
+      );
+      originalRegistration = readCLIRegistration(prefix, true);
+      expect(originalRegistration).toEqual(readCLIRegistration(terminalPrefix));
       firstRoot = installed.releaseRoot;
       firstId = installed.candidateId;
       expect(firstId).toBe(built.digest);
@@ -360,6 +396,8 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       expect(released).toBe(true);
       expect(existsSync(prefix)).toBe(false);
       expect(providerCalls).toBe(1);
+      expect(existsSync(terminalPrefix)).toBe(false);
+      expect(savedWork).toBeDefined();
       expect(preserved).toBeDefined();
       expect(hash(readFileSync(profile.databasePath))).toBe(preserved!.core);
       expect(hash(readFileSync(join(profile.profilePath, 'desktop-private/data.sqlite')))).toBe(
@@ -373,6 +411,8 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       });
       try {
         expect((await actual.getMetadata()).storeId).toBe(storeId);
+        expect(await actual.getMetadata()).toEqual(savedWork!.metadata);
+        expect(await actual.getView('s')).toEqual(savedWork!.view);
         expect((await actual.getSession('s'))?.workspaceId).toBe('w');
         const executions = await actual.listExecutions('s');
         expect(executions).toHaveLength(1);

@@ -1,4 +1,4 @@
-import { Database, constants as sqlConstants } from 'bun:sqlite';
+import { type Database, constants as sqlConstants } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, fstatSync, lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -19,6 +19,7 @@ import {
   copyAssetFile,
   fingerprint,
   openPrivate,
+  preserveMaintenanceFailure,
   privateDirectory,
   syncDirectory,
   syncFile,
@@ -29,7 +30,7 @@ import { verifyMcpReconnectionIntentsDocument } from './mcp-reconnection-intents
 import { verifyMcpSelectionIntentsDocument } from './mcp-selection-intents';
 import { verifyMcpSourceApprovalIntentsDocument } from './mcp-source-approval-intents';
 import { verifyMcpSourceMutationIntentsDocument } from './mcp-source-mutation-intents';
-import { openPrivateDatabase } from './sqlite';
+import { createMaintenanceDatabase, openPrivateDatabase } from './sqlite';
 import { verifyTuiDocument } from './tui';
 import { type BackupManifest, type CapturedAsset, MaintenanceError } from './types';
 
@@ -406,7 +407,7 @@ export async function captureAssets(
     );
     chmodSync(destination, 0o600);
     initializeDefaultSqliteEngine();
-    const normalize = new Database(
+    const normalize = createMaintenanceDatabase(
       destination,
       sqlConstants.SQLITE_OPEN_READWRITE | sqlConstants.SQLITE_OPEN_NOFOLLOW,
     );
@@ -416,6 +417,9 @@ export async function captureAssets(
           ?.journal_mode !== 'delete'
       )
         throw new MaintenanceError('backup_ui_invalid');
+    } catch (error) {
+      preserveMaintenanceFailure(error);
+      throw error;
     } finally {
       normalize.close(true);
     }

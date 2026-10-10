@@ -20,6 +20,10 @@ Service 显式 Workflow flags 的 `skill-workflow.jsonc` 是独立受控资产�
 
 `@kite-ai/agent/maintenance` 的 [createProfileBackup / inspectProfileBackup](index.ts) 是宿主明确调用的维护入口，导入不打开资源。创建只接收明确 profile 和目标目录，不借用已打开 Store 的 shared 权限。它取得 profile 外部稳定 `profile-use.lock` 的 exclusive 权限；busy 立即返回，不强杀 Service，不升级现有共享锁。未完成恢复 journal 和 SQLite rollback journal 均拒绝开始。目标禁止落在原 profile 或 `.coordination` 内。
 
+backup、inspect、restore／reconcile 和 GC 在各自调用的资源 owner 内执行。所有维护 SQLite 连接沿实际 `close(true)` 确认后才解除占用；原文件描述符、目录句柄、Windows 私有 pin 与临时发布句柄也只在实际关闭成功后解除。关闭未确认时，owner 强引用未关闭对象及原 Profile EX，保留相关 staging／scratch，直到实际宿主退出；失败返回不等于允许另一个维护者接入。文件描述符先确认关闭，再释放相应 Windows pin；已关闭的 fd 不保留旧映射，防止复用时误关联。SQL／文件处理与其原关闭同时失败时保留最初处理错误和关闭错误，原多项关闭仍全部尝试；这不宣称所有外层目录删除与 lease release 的组合错误均已覆盖。资源 owner 不修改备份格式、SQL、恢复四阶段、新 Store／来源 fencing 或任务重放边界；Windows 实现接入仍不代表原生平台资格。
+
+[原GC文件](../../test/isolated/maintenance/gc.test.ts)的有限子进程用例确认实际连接仍可查询时同Profile backup返回busy、另一Profile可用；原宿主实际退出后备份与冷读原Store／Session／Command和媒体恢复，原Core字节保持。原全部断言／预算、46段SQL和四阶段协议保持。2026-10-10受影响的19份维护完整文件与正式安装／包内维护链已按原默认任务验证，Windows原两例按原定义跳过；准确范围见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10安装升级与维护关闭所有权)，不提升平台或整个W19／V1.3状态。
+
 [backup.ts](backup.ts) 在原 profile-use 排他锁内，先由 [files.ts](files.ts) 将完整 Core DB 与实际存在的 WAL 配对复制到本次私有 scratch，只打开该副本，核原 schema/capture 后执行 `VACUUM INTO` 生成一致候选。原 DB/WAL 的完整字节、存在状态及 dev/ino/ctime/size/mode/uid/nlink 在配对采集、每次复制之后和 SQL 回调前后重新核对；缺失 WAL 不创建替代，原 SHM 不复制，任何变化均拒绝发布。SQL 不打开原库，因此关闭后没有副文件的原 Profile 不会因只读 SQLite 连接而新建 WAL/SHM。scratch 在后续候选验证和发布前删除，不进入备份树。
 
 候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配当前基线 schema/checksum，通过 integrity/FK 检查；清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。

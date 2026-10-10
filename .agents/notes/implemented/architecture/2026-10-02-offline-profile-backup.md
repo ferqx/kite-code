@@ -12,6 +12,8 @@ Status: implemented
 
 Core与Desktop现在在同一稳定排他权内，先完整复制原DB与实际存在WAL到本次私有scratch，SQL只打开该副本作原schema/capture/VACUUM。原配对的presence、完整bytes/SHA与dev/ino/ctime/size/mode/uid/nlink在采集、每个文件复制之后及SQL回调前后核对；缺失WAL保持缺失，SHM不复制，scratch在后续验证和发布前删除。该边界不取代原Store/Node严格关闭或Profile排他权，不放宽原全部指纹、格式与ready守卫。
 
+维护自身的 strict-close 也必须确认，不能因为错误已返回就交出 Profile EX 或删除仍被打开的 scratch。backup／inspect／restore／reconcile／GC 共用每次调用内的资源 owner，登记原 SQLite、fd、Dir、Windows pin 和临时发布句柄；只有实际关闭成功才解除 pending。未关闭对象与原 EX 保强引用至实际宿主退出，另一 Profile 不受这次维护权阻塞。Windows fd先确认关闭并删除旧映射，再关闭 pin，避免 fd复用错误；原多个 closer仍全部尝试，处理与关闭双错保留原出处。该 owner不改变SQL、清单、restore journal和新Store／来源边界，也不构成Windows原生资格。
+
 原 Store、origin、业务 ID 与序列不修改；VACUUM 物理 rowid 不被承诺为业务身份。v2 清单分别采集现有 config.jsonc 原字节、desktop-private/data.sqlite 一致副本与 TUI owner 的 ui/tui.json，独立记录采集时间、存在状态和完整摘要，不声称跨介质同时原子。Desktop 验证原 application ID、版本、闭合 schema 与 integrity；保留原草稿/创建身份。TUI 文件验证闭合 version 1、原 Store/Workspace/Session 和由原 scope 计算的 ID、Decimal64 revision 与完整原文；缺文件如实记录 absent，不创建示意内容。清单排除独立凭据 vault、未采集宿主私有文件、coordination 和 locks；配置原文可能包含敏感内容，因此仍是私有0600数据，不将原文备份误称为脱敏。备份 leaf 不派发活动任务，也不增加运行期循环或 Store。
 
 后续 DB5 人类答案随整份一致私有 SQLite 纳入 closed v7，独立行验证与冷查询边界见[原答案资产决定](2026-10-04-original-human-answer-intent-assets.md)。 实际存在独立 MCP 选择 journal 时使用 closed v8，原完整元数据与字节保留、旧格式白名单不扩大；独立 codec 和新 Store 冷 reader 的证据边界见[原 MCP 资产决定](2026-10-04-original-mcp-selection-intent-assets.md)。本页 v2 原始决定及稳定维护锁、vault 排除、跨介质采集限制仍适用；新格式不把旧行重标成新 Store authority。
@@ -26,7 +28,7 @@ Core与Desktop现在在同一稳定排他权内，先完整复制原DB与实际�
 
 ## Consequences
 
-一次备份要完整读取数据库与引用媒体，期间相关profile保持离线排他权。私有DB/WAL副本增加暂存空间与完整读取成本，原完整指纹与实体核对不为节省I/O省略。取消在DB/WAL及媒体64KiB异步复制检查点响应；VACUUM是同步命令，不能声称逐指令可取消。失败只删除本次staging/scratch，源profile不修改。完整媒体SHA/hash验证使用固定分块内存；前后观察不能声称阻止所有不合作外部writer。
+一次备份要完整读取数据库与引用媒体，期间相关profile保持离线排他权。私有DB/WAL副本增加暂存空间与完整读取成本，原完整指纹与实体核对不为节省I/O省略。取消在DB/WAL及媒体64KiB异步复制检查点响应；VACUUM是同步命令，不能声称逐指令可取消。全部原资源确认关闭后，失败只删除本次staging/scratch；未确认时保留临时目录和维护权至实际宿主退出，源profile不修改。完整媒体SHA/hash验证使用固定分块内存；前后观察不能声称阻止所有不合作外部writer。
 
 [实际测试](../../../../packages/agent/test/isolated/maintenance/backup.test.ts) 在 macOS/Bun 1.4.2 通过 SQLite/WAL、17MiB 原媒体、大整数/未知原文、第二进程占锁、journal 拒绝、篡改/取消无 ready、源码树外临时 bundle 的实际 create/inspect；严格关闭和失败预检回归也已加入。备份/恢复/recovery/取消最终组合通过 28 项、306 个断言。它不证明 GC、平台发行、断电或完整 W19。
 

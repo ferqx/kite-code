@@ -13,7 +13,7 @@
 - [Store 端口](src/storage/port.ts)：宿主使用的具名查询和事务；[记录](src/storage/types.ts)保存业务事实，非完整内存 State。
 - [上下文选择与结果](src/storage/sqlite/context/README.md)：当前选择、完整历史和准确结果引用分开保存；双游标读取固定同一选择与顺序上界。
 - [Profile 入口](src/profile.ts)：`selectProfile({dataRoot, profile})` 只读确定规范 data-root、逻辑名称与稳定 `profileAccessKey`，供 launcher 在启动前固定目标；import 与选择均不创建目录、取得锁或打开数据库。
-- [离线维护入口](src/maintenance/README.md)：显式备份／恢复、DB9公共扩展申请的v18及DB8原Workspace申请的v17资产，以及持准确Store排他权的空间／单会话历史与无引用附件GC；安装维护和完整平台资格按实施进度记录。
+- [离线维护入口](src/maintenance/README.md)：显式备份／恢复、DB9公共扩展申请的v18及DB8原Workspace申请的v17资产，以及持准确Store排他权的空间／单会话历史与无引用附件GC；维护自身连接／句柄关闭未确认时保原资源、临时目录及Profile排他权至实际宿主退出，安装维护和完整平台资格按实施进度记录。
 - [Profile 使用权入口](src/platform/README.md)：`@kite-ai/agent/profile-access` 供 Bun 宿主显式取得共享使用权，可信一次性 helper 可取得继承 fd 的同一锁；纯 Node 身份入口不引入 FFI 或 acquire。
 - [制品使用权入口](src/artifact-access.ts)：显式候选 shared/exclusive OS 使用锁，import 不 acquire，不授予 Profile/Store/执行权限；终端安装器与运行中的宿主共享此协议。
 - [资源入口](src/resources.ts)：`createWorkspaceSerialLocks(profile)` 显式建立同 profile/Workspace 的共享 OS 串行键后端，宿主注入 Runtime；import 不打开资源，普通扩展不取得锁对象。

@@ -32,6 +32,10 @@ Native 卸载在安装 EX 内先核封闭结构和两层真实目录，再取得
 
 Native 可显式向合法独立 Terminal prefix 注册完整 CLI/TUI 闭包。双方闭合 nonce/active 与完整物理树复核，standard 前门实际 spawn Native 内 Bun/CLI/TUI/Service；升级/回滚只更新原持有者登记，卸载以原 nonce CAS 撤销。独立前门恢复 Terminal；已缓存且删除的 Native-bin 路径需要父 shell 的 hash刷新/新 shell。详见[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
 
+正常卸载独立 Terminal 不阻止 Native 自带入口及后续升级。隐式历史登记目标已不存在时，升级仅锁 Native，并保留历史反向登记；不重建前门或自动重新登记。显式目标与仍存在的隐式目标保持原完整验证、双 prefix 锁和 nonce CAS。
+
+正式 CLI／Native 离线维护使用同一调用内资源 owner；SQLite strict-close 或原句柄关闭未确认时保留原资源、Profile EX 与相关临时目录至实际宿主退出。正常关闭才允许清理和交出维护权，错误返回不充当关闭证明。恢复 journal、新 Store及来源 fencing保持；维护owner和平台验收边界见[维护合同](../../packages/agent/src/maintenance/README.md)。
+
 Terminal 已有本机真实跨代码版本冷回退资格：固定新基线旧提交由其原 builder 构建，与当前代码保持相同依赖输入及 format=1 SQL 基线；经源码外安装前门 A→B→A→B 四个冷实例核原 Store、原任务身份、B 新完整正文和后续真实工作。回退仅交换候选指针，数据库未恢复；正常 stop 核准确进程退出和所有候选 EX，卸载保独立 Profile。完整测试与范围由[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)维护；本地代码比较不等于已发布 predecessor、Native 或三平台资格。Required 默认测试 checkout 保完整历史，以读取固定真实旧提交，缺旧对象直接失败。
 
 Native 的本机真实跨代码组合也已沿 installed `bin/kite-desktop` 核对：旧源码使用自己的两层builder，当前macOS固定复用PC展示层后的DB7原提交a2b6441f，并核11项依赖输入及Main／renderer／inner字节变化。历史Linux1b796组合核真实Agent变化，当时renderer相同；其证据只适用于当时源码和锁输入，当前a2b6441f组合由重构后的Actions验证。四次默认窗口和配对Service普通退出，原数据、完整正文/hash/ref、持久caller及回退后的新工作保持正确。指针操作保Core/Native私有数据库inode/bytes和配置，不恢复数据；运行中的旧窗口保持原闭包。准确资格及限制归[Native owner](../../apps/desktop/docs/native-release.md#linux-真代码升级与冷回退)与[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)。本机macOS与历史Docker VM原生arm64 Linux两项本地代码比较各有其准确版本范围，均不替代已发布predecessor/T029、任意版本或其他平台的实际证据。

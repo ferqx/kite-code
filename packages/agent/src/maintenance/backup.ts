@@ -1,4 +1,4 @@
-import { Database, constants as sqliteConstants } from 'bun:sqlite';
+import { type Database, constants as sqliteConstants } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -6,8 +6,6 @@ import {
   existsSync,
   fchmodSync,
   fsyncSync,
-  opendirSync,
-  openSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -21,21 +19,28 @@ import { captureAssets, verifyAssets } from './assets';
 import { verifyCallerIntentsDocument } from './caller-intents';
 import {
   checkpoint,
+  closeMaintenanceResources,
   closePrivate as closeSync,
   contains,
   copyWindowsMedia,
   decimal,
   fingerprint,
+  maintenanceResourcesClosed,
   movePrivateEntry,
+  openMaintenanceDirectory,
+  openMaintenanceFile,
   openPrivate,
+  preserveMaintenanceFailure,
   privateDirectory,
+  retainMaintenanceLease,
   syncDirectory,
   syncFile,
+  withMaintenanceResources,
   withPrivateDatabaseSnapshot,
   writeAll,
 } from './files';
 import { excluded, mediaLines, parseManifest, readManifest } from './manifest';
-import { capture, mediaRows, openBackupDatabase } from './sqlite';
+import { capture, createMaintenanceDatabase, mediaRows, openBackupDatabase } from './sqlite';
 import {
   type BackupManifest,
   type CreateProfileBackupInput,
@@ -67,7 +72,7 @@ async function copyMedia(
   closeSync(openPrivate(artifactPath(source, hash)));
   const path = artifactPath(target, hash);
   privateDirectory(dirname(path), true);
-  const fd = openSync(
+  const fd = openMaintenanceFile(
     path,
     constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
     0o600,
@@ -85,13 +90,16 @@ async function copyMedia(
     }
     fchmodSync(fd, 0o400);
     fsyncSync(fd);
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     closeSync(fd);
   }
   syncDirectory(dirname(path));
 }
 function exactTree(directory: string, database: Database, manifest: BackupManifest): void {
-  const top = opendirSync(directory);
+  const top = openMaintenanceDirectory(directory);
   try {
     for (let item = top.readSync(); item; item = top.readSync()) {
       if (
@@ -123,7 +131,7 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
         throw new MaintenanceError('backup_unexpected_asset');
       if (item.name === 'desktop-private' || item.name === 'ui') {
         privateDirectory(join(directory, item.name));
-        const children = opendirSync(join(directory, item.name));
+        const children = openMaintenanceDirectory(join(directory, item.name));
         try {
           for (let child = children.readSync(); child; child = children.readSync())
             if (
@@ -158,6 +166,9 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
               ).includes(child.name)
             )
               throw new MaintenanceError('backup_unexpected_asset');
+        } catch (error) {
+          preserveMaintenanceFailure(error);
+          throw error;
         } finally {
           children.closeSync();
         }
@@ -165,14 +176,14 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
       if (item.name === 'blobs') {
         const blobs = join(directory, 'blobs');
         privateDirectory(blobs);
-        const prefixes = opendirSync(blobs);
+        const prefixes = openMaintenanceDirectory(blobs);
         try {
           for (let prefix = prefixes.readSync(); prefix; prefix = prefixes.readSync()) {
             if (!/^[a-f0-9]{2}$/.test(prefix.name))
               throw new MaintenanceError('backup_unexpected_asset');
             const path = join(blobs, prefix.name);
             privateDirectory(path);
-            const files = opendirSync(path);
+            const files = openMaintenanceDirectory(path);
             try {
               for (let file = files.readSync(); file; file = files.readSync()) {
                 if (
@@ -182,15 +193,24 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
                 )
                   throw new MaintenanceError('backup_unexpected_asset');
               }
+            } catch (error) {
+              preserveMaintenanceFailure(error);
+              throw error;
             } finally {
               files.closeSync();
             }
           }
+        } catch (error) {
+          preserveMaintenanceFailure(error);
+          throw error;
         } finally {
           prefixes.closeSync();
         }
       }
     }
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     top.closeSync();
   }
@@ -270,6 +290,9 @@ async function verify(
         manifest.version === 18,
     );
     exactTree(directory, database, manifest);
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     database.close(true);
   }
@@ -286,7 +309,7 @@ async function verify(
 }
 
 /** Only this invocation's private staging is removed on failure. Source files are never modified. */
-export async function createProfileBackup(input: CreateProfileBackupInput): Promise<ProfileBackup> {
+async function createProfileBackupOwned(input: CreateProfileBackupInput): Promise<ProfileBackup> {
   initializeDefaultSqliteEngine();
   platform();
   input.signal?.throwIfAborted();
@@ -300,6 +323,7 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     throw new MaintenanceError('backup_destination_invalid');
   // The same stable OS object is held before inspecting the replaceable profile.
   const access = acquireProfileAccess(input.profile, 'exclusive');
+  retainMaintenanceLease(access.lock);
   let staging: string | undefined;
   let published = false;
   try {
@@ -330,6 +354,9 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
           if (canonicalJson(capture(source)) !== canonicalJson(sourceCapture))
             throw new MaintenanceError('backup_source_changed');
           return { sourceCapture, engine };
+        } catch (error) {
+          preserveMaintenanceFailure(error);
+          throw error;
         } finally {
           source.close(true);
         }
@@ -338,7 +365,7 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     );
     chmodSync(candidatePath, 0o600);
     initializeDefaultSqliteEngine();
-    const normalize = new Database(
+    const normalize = createMaintenanceDatabase(
       candidatePath,
       sqliteConstants.SQLITE_OPEN_READWRITE | sqliteConstants.SQLITE_OPEN_NOFOLLOW,
     );
@@ -348,6 +375,9 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
         .get();
       if (journal?.journal_mode.toLowerCase() !== 'delete')
         throw new MaintenanceError('backup_database_invalid');
+    } catch (error) {
+      preserveMaintenanceFailure(error);
+      throw error;
     } finally {
       normalize.close(true);
     }
@@ -356,7 +386,7 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     let blobs = 0n,
       refs = 0n;
     const inventoryPath = join(staging, 'media.jsonl');
-    const inventory = openSync(
+    const inventory = openMaintenanceFile(
       inventoryPath,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
       0o600,
@@ -375,9 +405,14 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
         await checkpoint(input.signal);
       }
       fsyncSync(inventory);
+    } catch (error) {
+      preserveMaintenanceFailure(error);
+      throw error;
     } finally {
-      closeSync(inventory);
-      candidate.close(true);
+      closeMaintenanceResources(
+        () => closeSync(inventory),
+        () => candidate.close(true),
+      );
     }
     const assets = await captureAssets(access.profilePath, staging, input.signal);
     const manifest = parseManifest({
@@ -450,16 +485,15 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     return { directory, manifest };
   } finally {
     try {
-      if (staging && !published) rmSync(staging, { recursive: true, force: true });
+      if (staging && !published && maintenanceResourcesClosed())
+        rmSync(staging, { recursive: true, force: true });
     } finally {
-      access.lock.release();
+      if (maintenanceResourcesClosed()) access.lock.release();
     }
   }
 }
 /** Reads only this selected immutable backup. A ready marker alone is never sufficient. */
-export async function inspectProfileBackup(
-  input: InspectProfileBackupInput,
-): Promise<ProfileBackup> {
+async function inspectProfileBackupOwned(input: InspectProfileBackupInput): Promise<ProfileBackup> {
   platform();
   input.signal?.throwIfAborted();
   const directory = privateDirectory(input.directory);
@@ -470,4 +504,16 @@ export async function inspectProfileBackup(
   if (canonicalJson(manifest as never) !== canonicalJson(after as never))
     throw new MaintenanceError('backup_content_changed');
   return { directory, manifest };
+}
+
+export function createProfileBackup(
+  ...args: Parameters<typeof createProfileBackupOwned>
+): ReturnType<typeof createProfileBackupOwned> {
+  return withMaintenanceResources(() => createProfileBackupOwned(...args));
+}
+
+export function inspectProfileBackup(
+  ...args: Parameters<typeof inspectProfileBackupOwned>
+): ReturnType<typeof inspectProfileBackupOwned> {
+  return withMaintenanceResources(() => inspectProfileBackupOwned(...args));
 }

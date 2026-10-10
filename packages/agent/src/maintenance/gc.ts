@@ -1,16 +1,21 @@
 import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
-import { existsSync, fstatSync, lstatSync, opendirSync, unlinkSync } from 'node:fs';
+import { existsSync, fstatSync, lstatSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readPublishedArtifactChunks } from '../artifacts-files';
 import { acquireProfileAccess, type ProfileOptions } from '../platform/profile';
 import {
   checkpoint,
   closePrivate,
+  maintenanceResourcesClosed,
+  openMaintenanceDirectory,
   openPrivate,
+  preserveMaintenanceFailure,
   privateDirectory,
+  retainMaintenanceLease,
   syncDirectory,
   syncFile,
+  withMaintenanceResources,
   withPrivateDatabaseSnapshot,
 } from './files';
 import { collectHistory, planHistoryCollection } from './gc-history';
@@ -44,7 +49,7 @@ export interface ProfileGarbageCollection {
 function* entries(root: string): Generator<{ path: string; hash: string | null }> {
   if (!existsSync(root)) return;
   privateDirectory(root);
-  const top = opendirSync(root);
+  const top = openMaintenanceDirectory(root);
   try {
     for (let entry = top.readSync(); entry; entry = top.readSync()) {
       if (/^\.publish-[a-f0-9-]{36}$/.test(entry.name)) {
@@ -53,17 +58,23 @@ function* entries(root: string): Generator<{ path: string; hash: string | null }
       }
       if (!/^[a-f0-9]{2}$/.test(entry.name)) throw new MaintenanceError('gc_unexpected_asset');
       const directory = privateDirectory(join(root, entry.name)),
-        children = opendirSync(directory);
+        children = openMaintenanceDirectory(directory);
       try {
         for (let child = children.readSync(); child; child = children.readSync()) {
           if (!/^[a-f0-9]{64}$/.test(child.name) || !child.name.startsWith(entry.name))
             throw new MaintenanceError('gc_unexpected_asset');
           yield { path: join(directory, child.name), hash: child.name };
         }
+      } catch (error) {
+        preserveMaintenanceFailure(error);
+        throw error;
       } finally {
         children.closeSync();
       }
     }
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     top.closeSync();
   }
@@ -126,6 +137,9 @@ async function collectArtifacts(
       syncDirectory(dirname(entry.path));
       result.removedFiles++;
       removedBytes += before.size;
+    } catch (error) {
+      preserveMaintenanceFailure(error);
+      throw error;
     } finally {
       closePrivate(fd);
     }
@@ -135,7 +149,7 @@ async function collectArtifacts(
   return result;
 }
 /** Explicit offline collection; unresolved work and immutable safety facts are never expired. */
-export async function collectProfileGarbage(
+async function collectProfileGarbageOwned(
   input: CollectProfileGarbageInput,
 ): Promise<ProfileGarbageCollection> {
   if (!['darwin', 'linux'].includes(process.platform))
@@ -151,6 +165,7 @@ export async function collectProfileGarbage(
     throw new MaintenanceError('gc_invalid_request');
   input.signal?.throwIfAborted();
   const access = acquireProfileAccess(input.profile, 'exclusive');
+  retainMaintenanceLease(access.lock);
   try {
     privateDirectory(access.profilePath);
     if (existsSync(`${access.databasePath}-journal`))
@@ -184,6 +199,9 @@ export async function collectProfileGarbage(
             if (capture(db).storeId !== input.expectedStoreId)
               throw new MaintenanceError('store_identity_mismatch');
             return await read(db);
+          } catch (error) {
+            preserveMaintenanceFailure(error);
+            throw error;
           } finally {
             db.close(true);
           }
@@ -224,6 +242,9 @@ export async function collectProfileGarbage(
           (n, w) => n + w.sessions,
           0,
         );
+      } catch (error) {
+        preserveMaintenanceFailure(error);
+        throw error;
       } finally {
         db.close(true);
       }
@@ -234,6 +255,12 @@ export async function collectProfileGarbage(
     }
     return result;
   } finally {
-    access.lock.release();
+    if (maintenanceResourcesClosed()) access.lock.release();
   }
+}
+
+export function collectProfileGarbage(
+  ...args: Parameters<typeof collectProfileGarbageOwned>
+): ReturnType<typeof collectProfileGarbageOwned> {
+  return withMaintenanceResources(() => collectProfileGarbageOwned(...args));
 }

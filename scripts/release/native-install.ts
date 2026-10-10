@@ -240,11 +240,16 @@ export function installNativeBundle(input: {
       fail('install_not_empty');
     const owned = existing ? readCLIRegistration(root, true) : undefined;
     const cliPrefix = input.cliPrefix ? realpathSync(input.cliPrefix) : owned?.terminalPrefix;
-    const locks = acquireCLIRegistrationLocks([root, ...(cliPrefix ? [cliPrefix] : [])]);
+    const registrationTarget =
+      cliPrefix && (input.cliPrefix || present(cliPrefix)) ? cliPrefix : undefined;
+    const locks = acquireCLIRegistrationLocks([
+      root,
+      ...(registrationTarget ? [registrationTarget] : []),
+    ]);
     try {
       if (owned && cliPrefix !== owned.terminalPrefix)
         throw Error('cli_registration_already_owned');
-      if (cliPrefix) verifyCLIRegistrationTargetWhileLocked(cliPrefix, locks);
+      if (registrationTarget) verifyCLIRegistrationTargetWhileLocked(registrationTarget, locks);
       if (!sameCLIRegistration(owned, existing ? readCLIRegistration(root, true) : undefined))
         throw Error('cli_registration_changed');
       const previous = existing ? inventory(root).selection : undefined;
@@ -280,10 +285,13 @@ export function installNativeBundle(input: {
         previous?.current === bundle.digest ? previous.previous : (previous?.current ?? null);
       durable(join(root, 'active'), `${bundle.digest}\n${previousCandidateId ?? ''}\n`);
       if (
-        cliPrefix &&
-        (input.cliPrefix || sameCLIRegistration(owned, readCLIRegistration(cliPrefix)))
+        registrationTarget &&
+        (input.cliPrefix || sameCLIRegistration(owned, readCLIRegistration(registrationTarget)))
       )
-        registerNativeCLIWhileLocked({ nativePrefix: root, terminalPrefix: cliPrefix }, locks);
+        registerNativeCLIWhileLocked(
+          { nativePrefix: root, terminalPrefix: registrationTarget },
+          locks,
+        );
       return { root, candidateId: bundle.digest, releaseRoot, previousCandidateId };
     } finally {
       if (stage) rmSync(stage, { recursive: true, force: true });

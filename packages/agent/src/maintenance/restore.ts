@@ -1,4 +1,4 @@
-import { Database, constants as sqliteConstants } from 'bun:sqlite';
+import { constants as sqliteConstants } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -6,8 +6,6 @@ import {
   existsSync,
   fsyncSync,
   lstatSync,
-  opendirSync,
-  openSync,
   readSync,
   rmSync,
   writeFileSync,
@@ -26,18 +24,25 @@ import { restoreAssets } from './assets';
 import { inspectProfileBackup } from './backup';
 import {
   checkpoint,
+  closeMaintenanceResources,
   closePrivate as closeSync,
   copyWindowsMedia,
   fingerprint,
+  maintenanceResourcesClosed,
   movePrivateEntry,
+  openMaintenanceDirectory,
+  openMaintenanceFile,
   openPrivate,
+  preserveMaintenanceFailure,
   privateDirectory,
+  retainMaintenanceLease,
   syncDirectory,
   syncFile,
+  withMaintenanceResources,
   writeAll,
 } from './files';
 import { parseManifest } from './manifest';
-import { capture, mediaRows, openBackupDatabase } from './sqlite';
+import { capture, createMaintenanceDatabase, mediaRows, openBackupDatabase } from './sqlite';
 import {
   MaintenanceError,
   type ProfileRestoreJournal,
@@ -53,11 +58,14 @@ function digestTree(directory: string): string {
   privateDirectory(directory);
   const digest = createHash('sha256');
   function visit(path: string, relative: string) {
-    const entries = opendirSync(path);
+    const entries = openMaintenanceDirectory(path);
     const names: string[] = [];
     try {
       for (let entry = entries.readSync(); entry; entry = entries.readSync())
         names.push(entry.name);
+    } catch (error) {
+      preserveMaintenanceFailure(error);
+      throw error;
     } finally {
       entries.closeSync();
     }
@@ -95,7 +103,7 @@ async function copyFile(source: string, destination: string, signal?: AbortSigna
   const input = openPrivate(source);
   let output: number | undefined;
   try {
-    output = openSync(
+    output = openMaintenanceFile(
       destination,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
       0o600,
@@ -114,12 +122,16 @@ async function copyFile(source: string, destination: string, signal?: AbortSigna
       }
     }
     fsyncSync(output);
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
-    try {
-      if (output !== undefined) closeSync(output);
-    } finally {
-      closeSync(input);
-    }
+    closeMaintenanceResources(
+      () => {
+        if (output !== undefined) closeSync(output);
+      },
+      () => closeSync(input),
+    );
   }
   if (process.platform === 'win32') syncFile(destination);
 }
@@ -147,6 +159,9 @@ function readJournal(profile: ReturnType<typeof selectProfile>): ProfileRestoreJ
       if (offset > 32768) throw new MaintenanceError('restore_invalid_journal');
     }
     value = JSON.parse(bytes.subarray(0, offset).toString('utf8'));
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     closeSync(fd);
   }
@@ -191,6 +206,9 @@ function storeId(path: string) {
   const db = openBackupDatabase(join(path, 'core.db'));
   try {
     return capture(db).storeId;
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     db.close(true);
   }
@@ -207,7 +225,7 @@ function journalDigest(journal: ProfileRestoreJournal) {
     .update(canonicalJson(journal as unknown as Json))
     .digest('hex');
 }
-export function inspectProfileRestore(input: {
+function inspectProfileRestoreOwned(input: {
   profile: ProfileOptions;
 }): { journal: ProfileRestoreJournal; digest: string } | null {
   supported();
@@ -215,7 +233,7 @@ export function inspectProfileRestore(input: {
   return journal ? { journal, digest: journalDigest(journal) } : null;
 }
 /** Internal deterministic fault-injection seam; public API has no callback or environment bypass. */
-export async function runProfileRestore(
+async function runProfileRestoreOwned(
   input: RestoreProfileBackupInput,
   observe?: (point: string) => Promise<void>,
 ): Promise<ProfileRestoreResult> {
@@ -232,6 +250,7 @@ export async function runProfileRestore(
   };
   initializeDefaultSqliteEngine();
   const access = acquireProfileMaintenanceAccess(input.profile);
+  retainMaintenanceLease(access.lock);
   let staging: string | undefined,
     journalWritten = false;
   try {
@@ -271,6 +290,9 @@ export async function runProfileRestore(
         syncFile(artifactPath(staging, row.hash));
         syncDirectory(prefix);
       }
+    } catch (error) {
+      preserveMaintenanceFailure(error);
+      throw error;
     } finally {
       db.close(true);
     }
@@ -285,11 +307,14 @@ export async function runProfileRestore(
       for (const row of mediaRows(copied))
         if (fingerprint(artifactPath(staging, row.hash), undefined, true).sha256 !== row.hash)
           throw new MaintenanceError('backup_content_changed');
+    } catch (error) {
+      preserveMaintenanceFailure(error);
+      throw error;
     } finally {
       copied.close(true);
     }
     initializeDefaultSqliteEngine();
-    const candidate = new Database(
+    const candidate = createMaintenanceDatabase(
       join(staging, 'core.db'),
       sqliteConstants.SQLITE_OPEN_READWRITE | sqliteConstants.SQLITE_OPEN_NOFOLLOW,
     );
@@ -318,6 +343,7 @@ export async function runProfileRestore(
       candidate.run('UPDATE session SET owner_instance=NULL,owner_generation=owner_generation+1');
       candidate.run('COMMIT');
     } catch (error) {
+      preserveMaintenanceFailure(error);
       try {
         candidate.run('ROLLBACK');
       } catch {}
@@ -369,14 +395,15 @@ export async function runProfileRestore(
     staging = undefined;
     return { restoreId, storeId: newStoreId, preservedDirectory: preserved, outcome: 'restored' };
   } finally {
-    if (staging && !journalWritten) rmSync(staging, { recursive: true });
-    access.lock.release();
+    if (staging && !journalWritten && maintenanceResourcesClosed())
+      rmSync(staging, { recursive: true });
+    if (maintenanceResourcesClosed()) access.lock.release();
   }
 }
 export function restoreProfileBackup(input: RestoreProfileBackupInput) {
   return runProfileRestore(input);
 }
-export async function reconcileProfileRestore(input: {
+async function reconcileProfileRestoreOwned(input: {
   profile: ProfileOptions;
   restoreId: string;
   expectedJournalDigest: string;
@@ -387,6 +414,7 @@ export async function reconcileProfileRestore(input: {
     throw new MaintenanceError('restore_decision_required');
   const profile = selectProfile(input.profile),
     access = acquireProfileMaintenanceAccess(input.profile);
+  retainMaintenanceLease(access.lock);
   try {
     const journal = readJournal(profile);
     if (
@@ -451,6 +479,24 @@ export async function reconcileProfileRestore(input: {
       outcome: 'rolled_back',
     };
   } finally {
-    access.lock.release();
+    if (maintenanceResourcesClosed()) access.lock.release();
   }
+}
+
+export function runProfileRestore(
+  ...args: Parameters<typeof runProfileRestoreOwned>
+): ReturnType<typeof runProfileRestoreOwned> {
+  return withMaintenanceResources(() => runProfileRestoreOwned(...args));
+}
+
+export function reconcileProfileRestore(
+  ...args: Parameters<typeof reconcileProfileRestoreOwned>
+): ReturnType<typeof reconcileProfileRestoreOwned> {
+  return withMaintenanceResources(() => reconcileProfileRestoreOwned(...args));
+}
+
+export function inspectProfileRestore(
+  ...args: Parameters<typeof inspectProfileRestoreOwned>
+): ReturnType<typeof inspectProfileRestoreOwned> {
+  return withMaintenanceResources(() => inspectProfileRestoreOwned(...args));
 }

@@ -3580,3 +3580,30 @@ Store／Runtime生命周期／Service owner与active资格同步实际diff；手
 | 1 | installed CLI／TUI／Native普通任务执行、准确取消、完整输出、cold只读与退出 | 保原身份／完整原结果／零重放和实际所属资源退出，原全部资源门禁。原RSS真实失败仍在；唯一reserve0启动控制也失败且不采用，具体allocator驻留归属／回收未闭，八outer／九点、activeResources／handles及全Runtime后代资格仍缺。 |
 | 2 | 正式安装／版本切换／维护恢复与文件编辑器交付 | 原数据身份、准确已发布baseline、DB9适用旧代码实际拒绝、完整原结果／零重放与卸载保数据。真实OS编辑器准确文件、Win／Linux正式stdio及平台证据仍有缺口；原macOS维护／冷回退证据复用。 |
 | 3 | CLI／TUI／Native／只读Web正式caller与发行闭包最终退役 | 前两项满足后，§35独立全图迁移审查、旧engine／carrier／builddeps实际退役，阶段未过滤完整默认与强制门禁通过。当前归因不改变37partial／wholeV13=false。 |
+
+
+## 2026-10-10：安装升级与维护关闭所有权
+
+按用户恢复实施的指令，先核对§30.2／§35与实际源码。P5是完整既有客户端／管理能力迁移；P6汇合真制品升级／降级／恢复、长时故障、三平台资格、客户端依赖独立及旧路径退役；P7收束适用T/E、发布基线与兼容责任。原RSS失败及完整观测缺项保持P6／最终退出门禁，不是可独立安装、代码选择或离线维护实现的前置。已发布predecessor／T029依准确新基线的适用发布责任核验，本地候选不充当published证据；本轮没有参数对照、运行时切换、负载重采或对外动作。
+
+源码缺口按实际依赖限定为五项；前两项本轮修复，其余仍阻止相应完整能力或最终退出。每项属于完整用户入口，不把某次关闭、journal或窗口另设长期目标：
+
+| 顺序 | 用户入口与完整行为 | 明确验收及当前结果 |
+| --- | --- | --- |
+| 1 | 正式Native安装／登记→普通任务→正常卸载可选Terminal→Native升级／冷读→回退／卸载 | 缺失隐式目标不阻断Native；不重建或自动登记，显式／现存非法目标仍拒绝。原Store metadata／cursor、完整View与正文、Provider恰1及实际双lease退出、卸载保数据。本轮有限与原真实两窗口通过；同源码版本标记只证明指针链，完整release能力仍partial。 |
+| 2 | 正式CLI／Native包内backup／inspect／GC／restore／status／reconcile及失败后的维护恢复 | 维护自己的SQLite／原句柄未确认关闭时保同Profile EX和scratch；其他Profile可用。实际拥有连接的宿主退出后才能再次备份／冷读，原数据与恢复四阶段、新Store／来源和零重放守卫保持。本轮真实关闭失败业务红→绿与原19维护文件、安装版原五动作通过；完整W19和Windows原生资格仍partial。 |
+| 3 | 当前Native实际扩展动作→代码回退→切回当前冷查询原申请 | 必须由真实动作产生DB9／manifest v18；不支持该格式的真实旧代码明确拒绝，私有完整bytes／inode不变；切回后原ID／完整结果／reference查回、零新POST／Provider、实际退出与卸载保数据。原DB7↔DB8及DB9资产有限证据可复用，当前跨代码installed文件仍为DB8对象，未补齐这一消费者链。 |
+| 4 | 包内maintenance status／明确reconcile rollback→Native首次及冷读 | 绑定原restoreId／digest，目录缺失时先拒绝准入，明确rollback后准确旧Store／原记录及后来数据保留，完整Model／问答／配置只读、零重放，所属退出后维护EX恢复。Core原七窗口与installed complete证据复用，installed rollback消费者仍缺；不扩整套窗口矩阵。 |
+| 5 | CLI／TUI／Native／只读Web完整正式能力、发行闭包及旧路径最终退役 | P6资源／平台资格和必要维护链、适用P7发布样本、§35独立迁移审查满足后，才退役必要legacy并运行阶段未过滤完整回归。原RSS、八outer／九点、Bun activeResources／handles／全Runtime后代、当前Win／Linux正式证据与T029仍未闭；当前§35／退役／wholeV13不通过。Win／Linux按用户顺序留重构后Actions，本地授权不扩至dispatch、push、PR或发布。 |
+
+第①项的原生产完整登记文件红为 `/private/tmp/kite-native-missing-terminal-registration-red-20261010.log`：4pass／1fail／57断言，新增正常卸载后省略cliPrefix升级在旧Terminal prefix的lstat处ENOENT。`scripts/release/native-install.ts`只固定本次 `registrationTarget`：显式目标继续realpath，现存隐式目标继续完整验证与双prefix锁，缺失隐式历史目标仅锁Native并保原反向归属。最终写入复用同一锁定目标，保原nonce／active／完整候选守卫，不接管后来重建的目录。原四个有限case逐字节保留，新文件最终5pass／70断言；原安装有限文件5pass／51断言。
+
+真实原 `native-install-lifecycle.test.ts`复用两个窗口，不修改driver。先安装实际独立Terminal并登记Native A，原普通任务完成后保存真实只读Store metadata／View、正常卸载Terminal，再省略目标升级B；冷窗口读取原完整结果，无新业务调用，原Provider恰1，回退与最终卸载保原Core／私有UI／config字节、完整metadata／View。actual0／1pass／34条Bun断言及原driver断言，Root整文件100736.279ms，driver完成于38178ms；原120秒整例／45秒driver／10秒窗口不变。候选A/B仍为同源码版本标记差异，不称真实旧代码或DB9演进资格。相邻原标准登记CLI／TUI／Service完整生命周期actual0／1pass／65断言／75202.170ms。
+
+第②项原生产GC业务红为 `/private/tmp/kite-maintenance-close-ex-red-20261010.log`：5pass／1fail／97断言，child抛出strict-close未确认后真实SQLite仍能查询，parent同Profile backup却成功；原快照finally还无条件删除scratch。现有六个维护源文件接入每次调用的资源owner，登记实际SQLite、fd、Dir、Windows pin与临时publisher；只在原close成功后解除pending。未关闭对象与原Profile EX保强引用至实际宿主退出，外层相关scratch／staging不删除。fd关闭确认后删除旧fd映射，再释放Windows pin；原多项close仍全部尝试，紧随处理的关闭双错保原出处。Root独立复核并补三处原处理错误登记，原46段SQL、所有恢复阶段／新Store／fencing保持；这是实际维护调用链owner，不是任意work的泄漏检测器，所有外层目录删除与lease release组合错误未据此宣称覆盖。
+
+GC只扩原业务case：同一真实child连接alive时同Profile backup返回owner_busy且scratch存在，另一Profile可取EX；stdin结束后await原child实际exited=0并收完输出，再backup／cold核原Store、Session、Command、Core字节和引用媒体。原断言和await按序全保留，默认业务预算不变；生产没有全局prototype补丁、测试关闭ACK或新debug参数。原installed `native-background-bundle.test.ts`另按原完整文件验证包内实际bin的backup／inspect／真实宽限GC／restore／status；过期GC继续由安装host selector与既有外部夹具时钟核实，不能冒称bin等待七天。actual0／1pass／119断言／93496.344ms，原3Service普通退出、准确所属树空、双EX恢复，Provider不因维护增加；对象仍为DB8／v17，不补DB9真旧代码、installed rollback或全部W19。
+
+Root沿原 `unifiedTestPlan`／`runTestJob` 的完整单文件任务、原分类／maxConcurrency／独立HOME与预算核验25文件：两份有限文件准确结果复用，剩余23原文件顺序执行；合计111pass／1992条Bun断言／2原Windows skip，全部actual0。本机darwin arm64／Bun1.4.2／Node22.21.1，4269个仓库输入及Bun／Node／Electron等运行资产前后全等，Git状态／源码diff全等。首轮Native整文件因沙箱loopback端口0返回EADDRINUSE，最小原监听同样失败、授权环境同监听成功；首轮实际失败完整保留，之后在允许本地监听／Electron的授权环境沿原任务执行，未改断言、清单、预算或产品环境参数。初始记录 `/private/tmp/kite-v13-installed-maintenance-20261010-result.json`，完整授权记录 `/private/tmp/kite-v13-installed-maintenance-allowed-20261010-result.json`；逐文件actual退出码与log SHA、输入和范围汇总 `/private/tmp/kite-v13-install-maintenance-verified-evidence-20261010.json` SHA `3dab297f0259f681712041209c21efed4d18ec8f2734086b3abb74bf3503e2d0`，明确fullDefault=false／wholeV13=false。
+
+本轮正式维护消费者已进入上述实际资源owner；没有新增旧路径最终退役结果。Daemon／MCP／Shell／OAuth与旧Worker关闭47整例按未改变且仍适用的范围复用，仅重跑与本轮backup相邻的Service关闭整文件1／18；没有围绕它们扩故障矩阵。手册、Native／maintenance／Agent owner、release active、两个既有Note及能力映射同步，release.lifecycle与maintenance.backup_restore保持partial。Root及八workspace类型、11个TS文件Biome、边界／workspace／API、测试归属已通过；文档、plan-evidence和正常本地commit hooks仍独立强制。阶段收束时才运行未过滤完整默认，本轮25文件不能覆盖当时661／522结果或宣布阶段退出。

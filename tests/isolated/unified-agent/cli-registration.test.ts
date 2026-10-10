@@ -235,3 +235,72 @@ test.skipIf(process.platform === 'win32')(
     }
   },
 );
+
+test.skipIf(process.platform === 'win32')(
+  'normal standalone Terminal uninstall leaves Native independently upgradeable without recreating or registering the missing target',
+  () => {
+    const f = fixture();
+    try {
+      const first = installNativeBundle({
+        bundleRoot: f.source,
+        prefix: f.nativePrefix,
+        cliPrefix: f.terminal.root,
+      });
+      const owned = readCLIRegistration(f.nativePrefix, true)!;
+      const activePath = join(f.nativePrefix, 'active');
+      const originalActive = readFileSync(activePath);
+      uninstallTerminalBundle(f.terminal.root);
+      expect(existsSync(f.terminal.root)).toBe(false);
+      expect(readCLIRegistration(f.nativePrefix, true)).toEqual(owned);
+      const next = join(f.root, 'next-independent');
+      cpSync(f.source, next, { recursive: true, verbatimSymlinks: true });
+      const path = join(next, 'native-manifest.json');
+      const manifest = JSON.parse(readFileSync(path, 'utf8'));
+      const innerPath = join(next, 'terminal/terminal-manifest.json');
+      const inner = JSON.parse(readFileSync(innerPath, 'utf8'));
+      inner.productVersion = '0.1.1';
+      const innerBytes = Buffer.from(JSON.stringify(inner));
+      writeFileSync(innerPath, innerBytes);
+      manifest.terminalManifestSha256 = createHash('sha256').update(innerBytes).digest('hex');
+      writeFileSync(path, JSON.stringify(manifest));
+      expect(() =>
+        installNativeBundle({
+          bundleRoot: next,
+          prefix: f.nativePrefix,
+          cliPrefix: f.terminal.root,
+        }),
+      ).toThrow();
+      expect(readFileSync(activePath)).toEqual(originalActive);
+      const invalid = join(f.root, 'unmanaged-explicit');
+      mkdirSync(invalid);
+      writeFileSync(join(invalid, 'keep'), 'unrelated original');
+      expect(() =>
+        installNativeBundle({ bundleRoot: next, prefix: f.nativePrefix, cliPrefix: invalid }),
+      ).toThrow();
+      expect(readFileSync(activePath)).toEqual(originalActive);
+      expect(readFileSync(join(invalid, 'keep'), 'utf8')).toBe('unrelated original');
+      const second = installNativeBundle({ bundleRoot: next, prefix: f.nativePrefix });
+      expect(second.candidateId).not.toBe(first.candidateId);
+      expect(second.previousCandidateId).toBe(first.candidateId);
+      expect(readFileSync(activePath, 'utf8')).toBe(
+        `${second.candidateId}\n${first.candidateId}\n`,
+      );
+      expect(existsSync(f.terminal.root)).toBe(false);
+      expect(readCLIRegistration(f.nativePrefix, true)).toEqual(owned);
+      const rolled = rollbackNativeBundle(f.nativePrefix);
+      expect(rolled.candidateId).toBe(first.candidateId);
+      expect(readFileSync(activePath, 'utf8')).toBe(
+        `${first.candidateId}\n${second.candidateId}\n`,
+      );
+      expect(existsSync(f.terminal.root)).toBe(false);
+      expect(readCLIRegistration(f.nativePrefix, true)).toEqual(owned);
+      expect(readFileSync(f.original, 'utf8')).toBe('ORIGINAL UTF8 草稿');
+      uninstallNativeBundle(f.nativePrefix);
+      expect(existsSync(f.nativePrefix)).toBe(false);
+      expect(existsSync(f.terminal.root)).toBe(false);
+      expect(readFileSync(f.original, 'utf8')).toBe('ORIGINAL UTF8 草稿');
+    } finally {
+      f.close();
+    }
+  },
+);

@@ -84,6 +84,8 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 `maintenance --help` 不触碰 profile。未知、重复、缺值、相对路径及缺少恢复确认的参数直接非零失败。成功输出 JSON，失败输出有限错误码；busy 不杀进程、不升级共享锁，不改变当前数据。只读 status 在没有 journal 时输出 null，不创建空 profile。未完成 journal 阻止普通开库；调用者核对 status 的准确 restoreId/digest，再明确选择 complete 或 rollback，入口不会自动选择。
 
+维护报告数据库或句柄关闭失败时，同一 Profile 继续保持忙碌，相关临时目录保留，直到实际维护宿主退出。先确认该宿主已退出，再按原 Store／备份和恢复观察重新核实；不要依据失败回复启动并行维护或手动清除锁。关闭失败不会自动重做原任务。
+
 GC 默认宽限7天，可显式设为1–365天。先普通退出使用该Profile的客户端，再明确调用；运行中的客户端会使维护返回busy。已移除且所有任务结束的空间可清理历史正文和其附件，原删除边界、申请去重摘要与回执保留。活动任务、未知执行结果或待核对申请保留原证据，JSON中的 `retainedUnsettledWorkspaces` 给出数量；最近空间以 `retainedRecentWorkspaces` 给出数量。空间外的历史来源依赖会明确拒绝。单独删除的完整根会话执行组按相同条件清理；存活Fork及其他未清理会话依赖的来源保留，最后一个依赖删除并符合条件后可一起清理。对应 `retainedRecentSessionGroups`、`retainedUnsettledSessionGroups`、`retainedReferencedSessionGroups` 说明留存原因。未发送草稿、项目文件和独立备份保留。无引用附件须过宽限并完整核SHA及原实体才删除。本机macOS已验证，Windows该GC端口尚未支持。
 
 恢复表示明确回退到选定备份内容；必须提供当前原 StoreId，错误身份拒绝，成功后产生新 Store，旧写身份继续拒绝。原历史 ID 与来源身份保留，旧目录单独保存，路径在结果中输出。恢复不会自动重做旧工作或模型请求。
@@ -133,3 +135,5 @@ Windows Bun x64 的开发维护入口已接入同一备份、检查、恢复和�
 ## 安装 Native 与标准命令恢复
 
 独立 Terminal 安装的标准前门可以显式登记 Native。登记后实际 CLI/TUI、Bun 与配套 Service 均来自完整 Native；源码或明确 candidate 选择不参与登记。Native 卸载以原 nonce 撤销自己仍拥有的登记，独立前门恢复 Terminal，不改变业务 Profile 或当前 Run。若父 shell 缓存的是已删除 Native-bin 路径，执行 `hash -r` 或使用新 shell 后恢复 PATH 查找。安装器不修改 PATH/RC，也不能清除父 shell 缓存。当前操作及平台限制见[Native owner](../../../apps/desktop/docs/native-release.md)。
+
+独立 Terminal 正常卸载后，Native 可继续通过自己的入口使用和升级。省略 `--cli-prefix` 的升级不会重建已删除的 Terminal 或自动重新登记。明确指定的登记目标仍必须是合法安装；重新使用独立前门时，先安装 Terminal，再明确登记。

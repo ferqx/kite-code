@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import {
   closeSync as closeDescriptor,
@@ -6,6 +7,7 @@ import {
   fsyncSync,
   lstatSync,
   mkdirSync,
+  opendirSync,
   openSync,
   readSync,
   realpathSync,
@@ -24,6 +26,94 @@ import {
   type WindowsPrivateRead,
 } from '../platform/windows-path-security';
 import { MaintenanceError } from './types';
+
+type MaintenanceResources = { pending: Set<object>; leases: Set<object>; firstFailure?: unknown };
+const maintenanceResources = new AsyncLocalStorage<MaintenanceResources>();
+// A failed close must retain its original handles and lease until this host really exits.
+const retainedResources = new Set<MaintenanceResources>();
+export function withMaintenanceResources<T>(work: () => T): T {
+  if (maintenanceResources.getStore()) return work();
+  const owner: MaintenanceResources = { pending: new Set(), leases: new Set() };
+  const finish = () => {
+    if (owner.pending.size) retainedResources.add(owner);
+    else owner.leases.clear();
+  };
+  return maintenanceResources.run(owner, () => {
+    try {
+      const result = work();
+      if (result instanceof Promise)
+        return result
+          .catch((error) => {
+            throw maintenanceFailure(error, owner);
+          })
+          .finally(finish) as T;
+      finish();
+      return result;
+    } catch (error) {
+      finish();
+      throw maintenanceFailure(error, owner);
+    }
+  });
+}
+export function preserveMaintenanceFailure(error: unknown): void {
+  const owner = maintenanceResources.getStore();
+  if (owner && owner.firstFailure === undefined) owner.firstFailure = error;
+}
+function maintenanceFailure(error: unknown, owner: MaintenanceResources): unknown {
+  return owner.firstFailure !== undefined && owner.firstFailure !== error
+    ? new AggregateError([owner.firstFailure, error], 'maintenance_cleanup_failed')
+    : error;
+}
+
+/** Attempt every original close, preserving the first failure if several closes fail. */
+export function closeMaintenanceResources(...closes: (() => void)[]): void {
+  const errors: unknown[] = [];
+  for (const close of closes) {
+    try {
+      close();
+    } catch (error) {
+      errors.push(error);
+      preserveMaintenanceFailure(error);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'maintenance_cleanup_failed');
+}
+
+export function retainMaintenanceResource(resource: object): () => void {
+  const owner = maintenanceResources.getStore();
+  owner?.pending.add(resource);
+  return () => {
+    owner?.pending.delete(resource);
+  };
+}
+export function retainMaintenanceLease(lease: object): void {
+  maintenanceResources.getStore()?.leases.add(lease);
+}
+export function maintenanceResourcesClosed(): boolean {
+  return !maintenanceResources.getStore()?.pending.size;
+}
+const descriptors = new Map<number, () => void>();
+export function openMaintenanceFile(...args: Parameters<typeof openSync>): number {
+  const fd = openSync(...args);
+  descriptors.set(fd, retainMaintenanceResource({ fd }));
+  return fd;
+}
+export function openMaintenanceDirectory(...args: Parameters<typeof opendirSync>) {
+  const directory = opendirSync(...args);
+  const release = retainMaintenanceResource(directory);
+  const close = directory.closeSync.bind(directory);
+  directory.closeSync = () => {
+    close();
+    release();
+  };
+  return directory;
+}
+
+function releaseDescriptor(fd: number): void {
+  descriptors.get(fd)?.();
+  descriptors.delete(fd);
+}
 
 export const maximumInteger = 9223372036854775807n;
 export function decimal(value: unknown): string {
@@ -55,6 +145,7 @@ export function privateDirectory(path: string, create = false): string {
   return realpathSync(resolve(path));
 }
 const reads = new Map<number, WindowsPrivateRead>();
+const pins = new Map<WindowsPrivateRead, () => void>();
 /** Release the same native pin only after all descriptor consumers have finished. */
 export function closePrivate(fd: number): void {
   const held = reads.get(fd);
@@ -65,23 +156,29 @@ export function closePrivate(fd: number): void {
     } catch (caught) {
       error = caught;
     }
-    // Failed native close keeps the still-open descriptor and its original pin available.
-    held.close();
+    if (error) preserveMaintenanceFailure(error);
+    // The pin remains owned until its descriptor consumer has really closed.
     closeDescriptor(fd);
+    releaseDescriptor(fd);
     reads.delete(fd);
+    held.close();
+    pins.get(held)?.();
+    pins.delete(held);
     if (error) throw error;
     return;
   }
   closeDescriptor(fd);
+  releaseDescriptor(fd);
 }
 export function openPrivate(path: string, readOnly = false): number {
   if (process.platform === 'win32') {
     const native = defaultWindowsPathSecurity()!;
     const held = readOnly ? native.retainReadOnlyFile(path) : native.retainPrivateFile(path);
+    pins.set(held, retainMaintenanceResource(held));
     let fd: number | undefined;
     try {
       const before = lstatSync(path, { bigint: true });
-      fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+      fd = openMaintenanceFile(path, constants.O_RDONLY | constants.O_NONBLOCK);
       const opened = fstatSync(fd, { bigint: true });
       held.verify();
       if (
@@ -95,11 +192,17 @@ export function openPrivate(path: string, readOnly = false): number {
       reads.set(fd, held);
       return fd;
     } catch (error) {
-      try {
-        held.close();
-      } finally {
-        if (fd !== undefined) closeDescriptor(fd);
+      preserveMaintenanceFailure(error);
+      // A descriptor-close failure retains both identities. Once closed, its key
+      // must not outlive the descriptor: a later open can reuse this fd number.
+      if (fd !== undefined) {
+        closeDescriptor(fd);
+        releaseDescriptor(fd);
+        reads.delete(fd);
       }
+      held.close();
+      pins.get(held)?.();
+      pins.delete(held);
       throw error;
     }
   }
@@ -113,13 +216,17 @@ export function openPrivate(path: string, readOnly = false): number {
     (process.getuid && before.uid !== BigInt(process.getuid()))
   )
     throw new MaintenanceError('backup_access_denied');
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const fd = openMaintenanceFile(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
   try {
     const opened = fstatSync(fd, { bigint: true });
     if (opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size)
       throw new MaintenanceError('backup_content_changed');
     return fd;
   } catch (error) {
+    preserveMaintenanceFailure(error);
     closePrivate(fd);
     throw error;
   }
@@ -142,6 +249,9 @@ export function fingerprint(path: string, signal?: AbortSignal, readOnly = false
     if (bytes !== before.size || before.ctimeNs !== after.ctimeNs || before.size !== after.size)
       throw new MaintenanceError('backup_content_changed');
     return { sha256: hash.digest('hex'), byteLength: decimal(String(bytes)) };
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     closePrivate(fd);
   }
@@ -154,6 +264,9 @@ export function syncFile(path: string): void {
   const fd = openPrivate(path);
   try {
     fsyncSync(fd);
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     closePrivate(fd);
   }
@@ -163,9 +276,15 @@ export function syncDirectory(path: string): void {
   // Windows publication uses explicit write-through file flushes and same-volume moves.
   // It has no POSIX directory-fsync operation; this call verifies its private directory.
   if (process.platform === 'win32') return;
-  const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  const fd = openMaintenanceFile(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
   try {
     fsyncSync(fd);
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     closePrivate(fd);
   }
@@ -187,6 +306,7 @@ export async function copyWindowsMedia(
 ): Promise<void> {
   if (process.platform !== 'win32') throw new MaintenanceError('maintenance_platform_unsupported');
   const output = createWindowsArtifactTemporary(target);
+  const releaseOutput = retainMaintenanceResource(output);
   try {
     let sinceYield = 0;
     for (const chunk of readPublishedArtifactChunks(source, hash, size)) {
@@ -200,8 +320,12 @@ export async function copyWindowsMedia(
     }
     signal?.throwIfAborted();
     output.publish(hash, size);
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
     output.close();
+    releaseOutput();
   }
 }
 export function writeAll(fd: number, bytes: Uint8Array): void {
@@ -238,7 +362,7 @@ export async function copyAssetFile(source: string, target: string, signal?: Abo
       initial.nlink !== entity.nlink
     )
       throw new MaintenanceError('backup_content_changed');
-    writer = openSync(
+    writer = openMaintenanceFile(
       target,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
       0o600,
@@ -279,12 +403,16 @@ export async function copyAssetFile(source: string, target: string, signal?: Abo
     )
       throw new MaintenanceError('backup_content_changed');
     fsyncSync(writer);
+  } catch (error) {
+    preserveMaintenanceFailure(error);
+    throw error;
   } finally {
-    try {
-      closePrivate(reader);
-    } finally {
-      if (writer !== undefined) closePrivate(writer);
-    }
+    closeMaintenanceResources(
+      () => closePrivate(reader),
+      () => {
+        if (writer !== undefined) closePrivate(writer);
+      },
+    );
   }
   if (
     canonicalJson(fingerprint(source, signal)) !== canonicalJson(before) ||
@@ -316,6 +444,9 @@ export async function withPrivateDatabaseSnapshot<T>(
         uid: String(stat.uid),
         nlink: String(stat.nlink),
       };
+    } catch (error) {
+      preserveMaintenanceFailure(error);
+      throw error;
     } finally {
       closePrivate(fd);
     }
@@ -369,7 +500,7 @@ export async function withPrivateDatabaseSnapshot<T>(
     outcome = { ok: false, error };
   } finally {
     try {
-      rmSync(scratch, { recursive: true });
+      if (maintenanceResourcesClosed()) rmSync(scratch, { recursive: true });
     } catch (error) {
       cleanupError = error;
     }

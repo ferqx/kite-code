@@ -19,7 +19,7 @@ import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/uni
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { collectProfileGarbage, createProfileBackup } from '../../../src/maintenance';
-import { selectProfile } from '../../../src/platform/profile';
+import { acquireProfileAccess, selectProfile } from '../../../src/platform/profile';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -126,6 +126,60 @@ test.skipIf(process.platform === 'win32')(
         f.referenced.bytes,
       );
       expect(readFileSync(join(f.path, 'core.db'))).toEqual(core);
+      const child = Bun.spawn(
+        [process.execPath, join(import.meta.dir, 'gc-close-owner.fixture.ts')],
+        {
+          env: {
+            ...process.env,
+            KITE_MAINTENANCE_ENGINE: JSON.stringify(selected.engine.selection),
+            KITE_MAINTENANCE_PROFILE: JSON.stringify(f.profile),
+            KITE_MAINTENANCE_STORE: f.storeId,
+          },
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
+      const stderr = new Response(child.stderr).text();
+      const reader = child.stdout.getReader();
+      try {
+        const ready = await reader.read();
+        const observed = JSON.parse(new TextDecoder().decode(ready.value));
+        expect(observed.failure).toBe('maintenance_fixture_close_unconfirmed');
+        expect(observed.connectionAlive).toBe(true);
+        await expect(
+          createProfileBackup({ profile: f.profile, destinationRoot: join(f.root, 'blocked') }),
+        ).rejects.toMatchObject({ code: 'owner_busy' });
+        expect(existsSync(observed.path)).toBe(true);
+        const other = acquireProfileAccess(
+          { dataRoot: f.profile.dataRoot, profile: 'other' },
+          'exclusive',
+        );
+        other.lock.release();
+      } finally {
+        child.stdin.end();
+        expect(await child.exited).toBe(0);
+        while (!(await reader.read()).done) {}
+        reader.releaseLock();
+        expect(await stderr).toBe('');
+      }
+      const recovered = await createProfileBackup({
+        profile: f.profile,
+        destinationRoot: join(f.root, 'after-exit'),
+      });
+      expect(readFileSync(artifactPath(recovered.directory, f.referenced.hash))).toEqual(
+        f.referenced.bytes,
+      );
+      expect(recovered.manifest.source.storeId).toBe(f.storeId);
+      expect(readFileSync(join(f.path, 'core.db'))).toEqual(core);
+      const cold = await openSqliteStore(f.profile);
+      try {
+        expect((await cold.getMetadata()).storeId).toBe(f.storeId);
+        expect((await cold.getSession('s'))!.title).toBe('s');
+        expect(await cold.getCommand('create')).toBeDefined();
+      } finally {
+        await cold.close();
+      }
     } finally {
       Date.now = originalNow;
       await f.store.close();
