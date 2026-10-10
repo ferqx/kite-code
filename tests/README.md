@@ -21,6 +21,8 @@ Required CI、release/platform 与正式 soak 固定 Bun 1.4.2。性能或稳定
 
 Owner-local tests 可读自己非公开源码；root integration 使用公开 package exports 或明确 App surface。root 不通过相对 deep-import 另建生产语义，不仅为测试便利扩大 production export。fixtures/helpers 不自动拥有测试；根不保存散落测试或第二通用 `tests/runtime/` owner。
 
+[恢复后完整Context消费者](isolated/unified-agent/restored-context.test.ts)属于跨workspace隔离集成：实际Service／SQLite、公开backup／restore及两个冷Service，通过正式CLI和Web App reader核HTTP／Cookie完整原结果与出处、当前Store守卫及零重放。owner-local分页／DOM整文件保各自守卫，原TUI管理PTY另核实际开发入口；不把这些范围合称installed恢复PTY、实际浏览器或阶段完整默认。真实红与准确冻结证据见[Context恢复进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后完整-context-正式消费者)。
+
 原[默认装配HTTP](../apps/service/test/isolated/assembly-http.test.ts)在同一授权放行前后核source freshness和已受理Run的原能力绑定。[所属Service夹具](../apps/service/test/fixtures/assembled-child.ts)用可取消的文件存在等待消费原release，timer／abort listener均清理，不依赖目录通知；原5秒期限和全部断言保持。失败观察复用原Command／View读取，不增加GET或修改生产权限。原Native基本文件的第三诊断driver阶段通过stdout单次透明读取转发，原字节仍交完整输出断言；观察不抵消真实超时，准确原红与复验归[制品收束进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
 
 [PC 文件变更迁移](../apps/desktop/README.md#原文件变更面板与编辑器)沿原完整 Native 窗口夹具新增文件侧栏、编辑器选择、关闭与冷读断言；默认 Service 真实 Files 回执来自原本机 Provider fixture，不替换 Main/preload/renderer。另由 Files 的 change-preview、Native 的 file-changes 端口和隔离 DOM 文件验证实际 pre/post、精确关联、原 UI 入口与读取释放；端口 callback 不冒充 OS 编辑器窗口，窗口按钮不冒充完整安装／跨平台资格。实际运行与失败归同一[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原文件变更与编辑器入口迁入)。

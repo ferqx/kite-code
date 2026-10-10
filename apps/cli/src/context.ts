@@ -250,11 +250,8 @@ export async function getCompleteContext(
     }
     if (!sourceDone) {
       for (const source of page.resultSources) {
-        if (
-          source.sessionId !== sessionId ||
-          source.originStoreId !== query.storeId ||
-          sourceIds.has(source.id)
-        )
+        // Current Store admits this read; restored sources retain their original Store.
+        if (source.sessionId !== sessionId || sourceIds.has(source.id))
           throw new ClientError('context_source_identity_mismatch');
         sourceIds.add(source.id);
         frozen.resultSources.push(source);

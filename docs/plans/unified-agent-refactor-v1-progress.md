@@ -3636,3 +3636,35 @@ Root沿原unifiedTestPlan／runTestJob的单完整文件、原exclusive或isolat
 原五项当前结果为①正常Terminal卸载后Native升级与②维护own-close保锁已生产提交；③DB9真实旧代码拒绝／当前完整查询及④installed明确rollback消费者取得上述macOS限定资格；⑤P6／最终退出汇合仍受阻。依赖顺序保留原RSS九点／八outer／增长算法真实失败及Bun activeResources／handles／完整Runtime后代观测缺项，随后是当前制品完整维护／平台／客户端依赖独立，再是§35独立迁移审查、必要legacy最终退役和阶段未过滤完整回归。D08首发前没有适用的新基线published前版，T029不成为上述独立实现的前置；P7首发后兼容和适用样本责任保持。Win／Linux依用户顺序留重构后Actions，37能力partial、不提前退出阶段，本地授权不扩至dispatch／push／PR／发布。
 
 本片没有改变产品行为，核对Desktop扩展与CLI明确恢复手册，操作和失败承诺保持；负责Native／Terminal／维护文档、release active、原前驱Note、tests及能力映射同步。Root／八workspace类型、7个TS只读Biome、边界／API／workspace及测试归属已在相应输入通过；文档、plan-evidence和正常本地提交门禁独立强制，实际Git交付另留原receipt。
+
+## 2026-10-10：恢复后完整 Context 正式消费者
+
+前两片安装／维护生产修复与DB9版本／installed rollback消费者已正常本地提交 `39b3867cc85e22cd3be8348324346f69ecc03418`、`0dad6e2cb6505399c7940b92a2f96d4cc7466784`，相应切片结束。本轮继续按§30.2.16核能力映射和实际源码，没有重开Daemon或RSS参数对照。P5完整客户端能力要求恢复历史可读；P6资源／完整维护／平台与§35最终退出汇合，未闭合资源条件不阻止下面的独立消费者修复。
+
+当前缺口按实际依赖限定为四项；第一项本轮闭合其正式读取行为，其余保持未闭，不把单个操作或测试窗口另设目标：
+
+| 顺序 | 实际用户入口与完整行为 | 明确验收及剩余范围 |
+| --- | --- | --- |
+| 1 | 明确备份恢复后，TUI `/context`／会话管理读取和Web “Read current selected context” | 当前Store准入，完整消息／原结果、原Execution／revision／出处和原Command保持，首次及冷读零Model／Job重放，错误当前Store／Session仍拒绝。本轮两端错误比较已修正；真实HTTP／Cookie与原DOM／相邻PTY证据分别保范围，不冒称installed恢复PTY或实际浏览器。 |
+| 2 | installed CLI／TUI／Native连续普通任务、Shell／child后台工作、准确取消与退出 | 原身份／完整输出／零重放及所有所属资源退出；原RSS增长、八outer／九点、Bun activeResources／handles和完整Runtime后代资格仍未闭。保留真实失败，不改变算法、断言或以参数对照代替交付。 |
+| 3 | 正式安装／升级／代码回退与包内维护恢复后继续使用原数据 | 已提交的可选Terminal卸载后升级、维护own-close保锁、真实DB9旧代码拒绝／当前完整查询、installed rollback与原complete链按冻结范围复用；当前制品完整维护、三平台及客户端依赖独立资格仍不足。Win／Linux依用户顺序留重构后Actions，不扩大本地授权。 |
+| 4 | CLI／TUI／Native／只读Web正式入口及发行闭包最终退役 | 前序适用条件满足后，§35独立全图迁移审查、必要legacy最终退役、强制检查及阶段未过滤完整回归通过。P7适用发布／兼容责任仍在，首发前缺少新基线published前版不阻塞上述独立实现。当前37能力partial／wholeV13=false，不退出阶段。 |
+
+实际生产错误位于 [CLI完整Context聚合](../../apps/cli/src/context.ts) 和 [Web诊断聚合](../../apps/web/src/diagnostics.tsx)：两端将 `resultSources.originStoreId` 错误要求为当前请求Store。真实维护A→B保留原Execution／结果来源A，公共 `getContext` 已正确核当前B并返回完整原结果，两端却分别报 `context_source_identity_mismatch`／`diagnostic_page_conflict`。新[真实恢复整文件](../../tests/isolated/unified-agent/restored-context.test.ts)在未改生产时actual1／0pass／1fail／12expect，同时记录两个实际错误；其完整测试字节在修正前后相同，没有用删断言、排除测试或改数据出处绕过失败。
+
+修正只移除两端的错误出处等式。Service传当前请求Store给Core，Core在同一读事务核当前Store／Session／selection／高水位，并从真实Execution核原revision／origin；Cookie Gateway注入实际已准入Store，BrowserClient保页面／连接身份。两端继续核其他Session、重复来源、选择／上界漂移和独立游标；Web原abort／迟到发布守卫保持。原负例保拒绝断言，改用真正错误的来源Session，另增两页旧出处／完整结果正例。Native及共享压缩消费者已采用出处与准入分开核对，本轮核对未改；API／SQL／维护格式、执行资格和Runtime参数保持。
+
+真实恢复文件先实际Model及Job生成完整Unicode结果、明确选入并保存原Command／Execution，实际关闭Service后公开backup／restore得到新B。两个真实冷Service分别通过public HTTP的正式TUI reader和Cookie的正式Web reader取得完整同一Context，原A出处／ID／revision不改标、两游标结束，所有恢复读取均GET；Model新增0、原Job只启动1次、原Provider只请求1次。错误A当前准入继续 `store_identity_mismatch`；Cookie页面Store错误在本地拒绝且不新增请求。原业务记录／View／cursor保持。
+
+| 完整文件 | pass | Bun expect | actual exit | 实际范围 |
+| --- | --- | --- | --- | --- |
+| `tests/isolated/unified-agent/restored-context.test.ts` | 1 | 53 | 0 | 真实备份恢复、两次冷HTTP／Cookie正式reader |
+| `tests/isolated/unified-agent/client-context.test.ts` | 2 | 64 | 0 | 原Context HTTP完整文件 |
+| `apps/cli/test/isolated/session-context-management.test.ts` | 1 | 130 | 0 | 原会话管理完整文件 |
+| `apps/cli/test/isolated/tui-management-host.test.ts` | 1 | 19 | 0 | 原开发PTY完整入口，未在此PTY恢复Profile |
+| `apps/cli/test/context-pagination.test.ts` | 3 | 16 | 0 | CLI双游标与准确来源Session守卫 |
+| `apps/web/test/diagnostics.test.tsx` | 10 | 68 | 0 | Web分页及原DOM／取消／迟到守卫 |
+
+合计18pass／350条Bun断言／0fail／0skip；原整文件分类、独立HOME和期限保持。Root沿原 `unifiedTestPlan`／`runTestJob` 执行隔离文件，没有过滤case；green及相邻PTY的4271项输入、Git和运行资产在各自测试前后全等，两批冻结输入相同，代码五个SHA与单元AST保全记录相符。文档在测试全部退出后收尾，不升级旧默认661文件／522作业为本轮完整默认。darwin arm64／Bun1.4.2／Nodev22.21.1；原红、green日志、输入／资产SHA和保全证据归 `/private/tmp/kite-v13-restored-context-verified-evidence-20261010.json`，SHA `f008518338263c038d2eb3cc4d1c7838bffc31db09bfc28324ea39d5e98ef7b8`。Root／八workspace类型实际0；文档、边界／API／测试归属及正常提交hooks独立执行。
+
+本轮新增闭合为恢复后的完整Context正式读取，两个正式调用者遵守现有Core来源合同；没有新增legacy最终退役或整体迁移完成。手册、CLI／Web owner、共享active、维护读取说明、现有恢复Note、tests与能力映射同步。RSS／观测、当前制品完整维护／平台／依赖独立、§35审查／最终退役／阶段完整回归及适用P7责任保持未闭，fullDefault=false／wholeV13=false／phaseExit=false；只执行已授权本地提交，无push、PR、发布或Actions dispatch。

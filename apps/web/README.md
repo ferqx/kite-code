@@ -44,6 +44,10 @@ DOM 测试验证 Markdown 安全与完整文本、复制范围、键盘范围、
 
 ## 按需只读诊断
 
+“Read current selected context” 沿 [diagnostics reader](src/diagnostics.tsx) 固定当前已准入的 Store／Session、selection 与高水位，读完消息和结果两条独立游标后发布。明确备份恢复生成新 Store 时，已授权来源仍显示原 Store、Execution／revision 和完整结果；原出处与当前连接身份分别核对，不改标来源或取得执行权限。Gateway 从实际连接注入当前 Store，Core 核来源与真实 Execution 的出处／revision；其他 Session、错误当前连接及分页漂移仍拒绝。
+
+[真实恢复消费者](../../tests/isolated/unified-agent/restored-context.test.ts)使用实际 Service／SQLite、备份恢复和 Cookie BrowserClient核首次及冷读、原完整结果和零业务重放；[诊断整文件](test/diagnostics.test.tsx)保分页、来源 Session 和原 DOM 取消／迟到守卫。HTTP 与 DOM 分别证明数据边界和展示行为，不冒称本轮实际浏览器或安装制品资格；准确失败及范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后完整-context-正式消费者)。
+
 [Diagnostics](src/diagnostics.tsx) 只接收主 WebController 已选择的 view，不另行读取或猜测当前 Session。一个活动面板只保存同目标最后一次完整 snapshot；打开、显式刷新才读取，不后台轮询。缺 context/execution_output capability 时入口禁用，原 Store 与页面身份不匹配在本地拒绝。关闭、隐藏、切换 Session/selection 或卸载 abort 面板所属请求，既不关闭共享 Client，也不取消 Runtime。
 
 Current selected context 显示当前选择、完整消息与原 result source 身份；它不是一次 Model 实际输入 Inspector。首次响应封存 highWaterSeq 和 selection，两条 cursor 独立穷尽，全部成功才发布；结束的消息流固定 afterSeq=upper，来源流保最后真实 ID。现公共接口没有禁用已结束 stream 的字段，后续页面可能仍读取其空投影；本地不重新追加该流，不承诺服务器停止扫描。selection/scope/重复或不前进游标冲突不会发布部分结果。

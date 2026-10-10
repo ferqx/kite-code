@@ -140,13 +140,13 @@ test('context reads both finite cursors independently and never restarts the end
   expect(other[1]).toMatchObject({ afterSeq: '9', upperSeq: '9', afterSourceId: 'source1' });
 });
 
-test('context scope, frozen selection/highwater and non-progress conflict never produce a partial snapshot', async () => {
+test('context and source Session scope, frozen selection/highwater and non-progress conflict never produce a partial snapshot', async () => {
   for (const mutate of [
     (p: SelectedContextPage) => {
       p.selection.sessionId = 'foreign';
     },
     (p: SelectedContextPage) => {
-      p.resultSources[0]!.originStoreId = 'foreign';
+      p.resultSources[0]!.sessionId = 'foreign';
     },
     (p: SelectedContextPage) => {
       p.nextAfterSeq = '0';
@@ -626,4 +626,40 @@ test('DOM preserves normal other-stream content inside a gap and overlapping cro
   } finally {
     await f.close();
   }
+});
+
+test('restored context keeps complete original Store sources across independent pages', async () => {
+  const first = page([1], ['source1'], null, 'source1'),
+    last = page([], ['source2']);
+  const sources = [...first.resultSources, ...last.resultSources];
+  for (const source of sources) {
+    source.originStoreId = 'original-store';
+    source.result = {
+      outcome: 'succeeded',
+      content: `完整原结果 ${source.id} 雪🙂`,
+      details: { original: source.id },
+    };
+  }
+  const queries: unknown[] = [];
+  const result = await readContext(
+    port({
+      async getContext(_session, query) {
+        queries.push(query);
+        return queries.length === 1 ? first : last;
+      },
+    }),
+    view(),
+    new AbortController().signal,
+  );
+  expect(result.resultSources).toEqual(sources);
+  expect(result.messages).toEqual(first.messages);
+  expect(result.nextAfterSeq).toBeNull();
+  expect(result.nextAfterSourceId).toBeNull();
+  expect(queries).toHaveLength(2);
+  expect(queries[1]).toMatchObject({
+    contextSelectionId: 'selection',
+    upperSeq: '9',
+    afterSeq: '9',
+    afterSourceId: 'source1',
+  });
 });

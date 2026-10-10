@@ -68,6 +68,8 @@ SQLite 的[只读 WAL 说明](https://www.sqlite.org/wal.html#read_only_database
 
 候选生成新 Store ID，并将 replayFloor 移到其现有最后 cursor，所有旧 expectedStoreId 写入失效。旧 accepted Command 改为 needs_review；活动 Run 中断并清除 is_active；旧 planned/dispatching/running Execution 保守标为 outcome_unknown；pending interaction 取消。已完成 receipt、原业务 ID、来源 Store 和 namespace 原文保持不变，owner 解除并增加 generation。原副本 planned 不证明外部效果从未派发，不能改为未执行成功。旧来源 Execution 不取得新 Store 执行资格；当前 Store 的 outcome_unknown 仍阻止取得新 owner。
 
+恢复后的Context读取仍按新Store准入，已保存结果来源保原Execution／revision／origin；消费者不能把原出处不等于当前Store当作非法来源。Core核当前Session／selection与准确原Execution，正式TUI／Web完整读取的修正及真实HTTP／Cookie冷读范围归[CLI owner](../../../../apps/cli/README.md)和[Web owner](../../../../apps/web/README.md#按需只读诊断)，不改维护格式或授予旧工作执行权。
+
 owner 门禁只在 root `session.create` 来源与当前 Store 不同的准确恢复根范围内，将旧来源 Execution 作为只读历史；这不构成一般 cross-Store 豁免。普通同 Store 创建的根经显式 recovery 后，跨来源 outcome_unknown 仍阻止 owner；恢复后的新 Store Execution 产生 unknown 也仍阻止 owner。三种情况均有独立断言。
 
 维护 journal 只有 `prepared → old_moved → published → verified` 四个持久步骤，不是运行期执行状态机。它记录原/new Store、稳定 profileAccessKey、选定备份清单、准确生成目录名以及原目录/候选全内容和权限摘要。每步写入、改名与父目录均同步。普通 `openSqliteStore` 见 journal 拒绝打开或初始化；维护专用取得函数只用于同一外部锁内核实它。

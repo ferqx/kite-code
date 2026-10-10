@@ -9,6 +9,8 @@
 可用分区包括 Overview、System prompt、Messages、Tools 和 Request settings。它帮助解释“这次模型看到了什么”，不能证明模型一定正确理解或遵守这些内容。
 内容较多时检查器会继续读取后续片段，再显示完整结果；System prompt、消息正文、工具描述和Schema不会因为累计大小或超过200项而静默截断。关闭检查器或切换会话会取消当前读取。
 
+“Read current selected context” 阅读当前选择的完整消息与结果来源。明确备份恢复为新 Store 后，已保存结果仍保留原 Store、执行和版本出处，不因出处属于恢复前的 Store 而拒绝合法历史。当前连接、会话或分页范围不符时仍报错；查看不重新调用模型、工具或纳入结果，也不能据历史来源执行旧任务。
+
 ## 范围与敏感性
 
 这是敏感的本机诊断内容。界面不展示凭据、Provider endpoint、内部 Artifact 标识或 Provider 原始响应。关闭后不将正文缓存为持久浏览器状态。

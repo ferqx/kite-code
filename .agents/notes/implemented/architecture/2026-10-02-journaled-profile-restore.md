@@ -18,6 +18,8 @@ journal 仅有 prepared/old_moved/published/verified 四个持久步骤，记录
 
 当前 Store 准入与历史原出处分别核实。目录和原始导出保留原 root，Model input/output 私有 snapshot 从真实 Execution 链取得 origin，公开 snapshot 仍表示当前 Store。正文先按当前 Store 查询准确原 ref/session/subject/scope，再核原 Execution/Run/Command/rootWork/child carrier 来源一致和完整 hash/size；旧引用不改标。Artifact 发布仍要求当前来源，不能向旧 Execution 登记新 Store 引用。Fork、压缩和新明确 Run 可以读取原历史，但不由此取得旧工作执行资格。
 
+Context完整读取同样区分当前准入和原结果出处。Core按当前Store／Session／selection读取，再核来源真实Execution的revision／origin；[TUI聚合](../../../../apps/cli/src/context.ts)与[Web聚合](../../../../apps/web/src/diagnostics.tsx)保完整原结果，不能另要求原出处等于当前Store。该消费者修正沿现有恢复身份合同，不增加写入资格；当前边界归[CLI owner](../../../../apps/cli/README.md)和[Web owner](../../../../apps/web/README.md#按需只读诊断)。
+
 ## Alternatives considered
 
 - 先删除当前 profile 再复制：失败或崩溃会丢失当前数据，不采用。
@@ -25,9 +27,12 @@ journal 仅有 prepared/old_moved/published/verified 四个持久步骤，记录
 - 复原旧 Store ID、批量改标 Command/Execution/namespace origin：会给旧副本工作新的执行资格或接受丢失事实的重试，不采用。
 - 只凭 journal 阶段或目录存在完成/回退：无法核实相邻文件改名与 journal 更新窗口，不采用。
 - 一般忽略所有 cross-Store outcome_unknown：会放宽原同 Store recovery 门禁；仅使用原 root 创建来源范围，不新增持久 eligibility bit 或表。
+- 读取时要求每个结果origin等于当前Store：2026-10-10真实备份恢复中，Core已核准原出处，两端仍错误拒绝合法完整历史。移除该等式，保当前Store准入、准确Session／Execution／revision／origin和分页守卫；不改标旧引用。
 
 ## Consequences
 
 restore 是明确数据回退，不能代替无损代码降级或外部效果回滚。当前v2候选包含数据库、引用媒体和明确采集的原config/Desktop UI/TUI JSON；旧目录整体仍保留。UI草稿和creation原Store、ID、scope及phase不改标，cold只读不自动提交。TUI 原 Decimal64 revision、完整文本和原 scope ID 逐字节保留，恢复后的新 Store 不获得旧草稿的发送资格。未采集的私有文件和独立凭据vault仍不迁入，完整客户端与发行平台资格仍需后续完整目标交付；离线 CLI 已要求准确原 Store、备份及明确数据回退确认，journal 核实也绑定原观察摘要，本 Note 不宣称完整 W19 恢复已经完成。
 
 [恢复测试](../../../../packages/agent/test/isolated/maintenance/restore.test.ts) 实际第二进程/SIGKILL覆盖持久 prepared、旧目录移出与 journal 更新前后、候选发布与 journal 更新前后、verified 和 journal 删除后仍持锁的窗口。普通入口先 busy、强杀后未完 journal 拒开；完成后取得完整新 Store。篡改原目录、错观察摘要均无法核实通过。冷读无 Model，旧 origin/缺 key 不执行，新明确工作完成；备份后真实 Tool 写外置 ledger 一次，恢复后旧 Store 重试未增加计数。备份/恢复/同 Store recovery/取消组合 28 项、306 断言通过。后续恢复读取、child、完整媒体、导出、压缩和维护恢复组合 67 项、887 断言通过；最终发布守卫收紧后受影响 14 项、189 断言复验通过。源码树外完整 manifest 1/48 通过，实际 HTTP 在新 Store 读取原媒体，冷读不调用 Model。类型、边界、文档与测试归属通过。后续v2配置/UI资产以实际Node私有库和七个携资产的强杀窗口验证；跨媒质电源故障、安装与三平台结果仍未证明。
+
+2026-10-10[真实Context恢复消费者](../../../../tests/isolated/unified-agent/restored-context.test.ts)保相同测试字节复现两端生产错误，修正后实际A→B、两次冷HTTP／Cookie读取完整原结果、全GET／Model0新增／原Job只启动一次通过。相关六完整文件18项／350条Bun断言通过；原当前Store、来源Session及DOM／分页守卫保持。准确红绿及输入归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后完整-context-正式消费者)，该范围不证明installed恢复PTY、实际浏览器、全维护平台或整体V1.3退出。

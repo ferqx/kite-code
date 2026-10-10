@@ -106,6 +106,8 @@ Interaction 只有实际发起 Session 的权威请求，父展示与回答引�
 
 steer 定位原活动 Run 的安全检查点，follow-up 保留独立命令及原前驱；已派发调用不会因新输入而改写原决策。模型输入取当前上下文选择，分别穷尽消息与结果引用的固定上界分页。合法 pending delivery 仅由原执行 owner 在准备模型请求时消费，完成游标保存在执行事实中，不依赖可裁剪通知。idle 或只读查询不创建模型请求。Rewind 核实整个执行组，原子隔离旧 pending 并保留历史；显式 include 只增加准确原来源，不重跑、不恢复旧交付。子内部结果与父 carrier 结果保持各自 Session 范围，实际模型请求记录准确 source IDs。
 
+Context 只读准入核当前 Store，`resultSources.originStoreId` 则保留真实原 Execution 的出处，离线恢复后两者可以不同。Core 在同一读事务核当前 Session／selection／高水位，再核来源的准确 Execution／revision／origin；TUI 与 Web 聚合沿这个合同保留完整结果，不重标来源或扩大执行权。原双游标、其他 Session、重复记录和选择／上界漂移守卫保持，真实恢复与消费者范围见 [CLI owner](../../apps/cli/README.md)和[Web owner](../../apps/web/README.md#按需只读诊断)。
+
 
 活动结果 include 固定原 Store/selection/targetRunId/Execution/resultRevision，accepted/result_queued 只表示等待原 checkpoint。checkpoint 与 steer 同序原子保存完整 source/message/receipt，新 publication seq 使原冻结 upper 不获得后来隐藏来源；旧已派发 Model 不改写，未派发旧计划/审批失效，取消保持零纳入。任务 wait-any可因新输入早醒，普通 operation wait仍等终态；只读目录与来源不触发执行。
 

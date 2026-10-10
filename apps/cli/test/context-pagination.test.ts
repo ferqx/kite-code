@@ -74,10 +74,10 @@ test('complete Context freezes water and selection while messages and sources fi
   });
   expect(result.snapshotCursor).toBe('2');
 });
-test('nonprogress, foreign source and changed snapshot fail without returning a successful prefix', async () => {
+test('nonprogress, foreign source Session and changed snapshot fail without returning a successful prefix', async () => {
   for (const pages of [
     [{ ...base, nextAfterSeq: '0' }],
-    [{ ...base, resultSources: [{ ...source('a'), originStoreId: 'foreign' }] }],
+    [{ ...base, resultSources: [{ ...source('a'), sessionId: 'foreign' }] }],
     [
       { ...base, resultSources: [source('a')], nextAfterSourceId: 'a' },
       { ...base, highWaterSeq: '11' },
@@ -87,4 +87,28 @@ test('nonprogress, foreign source and changed snapshot fail without returning a 
     await expect(getCompleteContext('s', { storeId: 'store' }, f)).rejects.toThrow();
     expect(f.queries.length).toBeLessThanOrEqual(2);
   }
+});
+
+test('complete Context retains original Store provenance and full results across restored source pages', async () => {
+  const sources = ['a', 'b'].map((id) => ({
+    ...source(id),
+    originStoreId: 'original-store',
+    result: { outcome: 'succeeded', content: `完整原结果 ${id} 雪🙂`, details: { original: id } },
+  }));
+  const f = fixture([
+    { ...base, resultSources: [sources[0]!], nextAfterSourceId: 'a' },
+    { ...base, snapshotCursor: '2', resultSources: [sources[1]!] },
+  ]);
+  const result = await getCompleteContext('s', { storeId: 'store' }, f);
+  expect(result.resultSources).toEqual(sources);
+  expect(result.nextAfterSeq).toBeNull();
+  expect(result.nextAfterSourceId).toBeNull();
+  expect(f.queries).toHaveLength(2);
+  expect(f.queries[1]).toMatchObject({
+    storeId: 'store',
+    contextSelectionId: 'selection',
+    upperSeq: '10',
+    afterSeq: '10',
+    afterSourceId: 'a',
+  });
 });

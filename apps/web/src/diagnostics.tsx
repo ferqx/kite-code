@@ -90,10 +90,10 @@ export async function readContext(
     }
     let previousId = afterSourceId ?? '';
     for (const source of page.resultSources) {
+      // Current Store admits this read; restored sources retain their original Store.
       if (
         sourcesDone ||
         source.sessionId !== view.session.id ||
-        source.originStoreId !== view.storeId ||
         source.id <= previousId ||
         decimal(source.seq) > decimal(page.highWaterSeq) ||
         sources.has(source.id)
