@@ -7,6 +7,11 @@ import type { ConfinedLaunch } from './confined-preparation';
 import { launchIdentity, removeRuntimeTemp, verifyLaunchIdentities } from './launch-identity';
 import { captureReadOnlySource } from './read-only-source';
 import { SEATBELT_BASE_POLICY } from './seatbelt';
+import {
+  type HostShellExecutionScope,
+  type HostShellExecutionScopeResolver,
+  resolveHostShellExecutionScope,
+} from './shell-scope';
 
 export interface MacosHostPaths {
   readonly cwd: string;
@@ -19,6 +24,7 @@ export interface MacosHostPaths {
   readonly runtimeReadOnlyRoots?: readonly string[];
   readonly temporaryRoot?: string;
   /** Trusted host selection from the actual dispatched authorization, never command JSON. */
+  readonly executionScope?: HostShellExecutionScope | HostShellExecutionScopeResolver;
   readonly filesystemScope:
     | 'workspace_write'
     | 'full_access'
@@ -124,12 +130,12 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
     .map((path) => realpathSync.native(path));
   return (command: string, shell: string, context: JobContext): ConfinedLaunch => {
     verifyLaunchIdentities(bindings);
-    const filesystem =
-      typeof options.filesystemScope === 'function'
-        ? options.filesystemScope(context)
-        : options.filesystemScope;
-    if (filesystem !== 'workspace_write' && filesystem !== 'full_access')
-      throw Error('host_shell_scope_unavailable');
+    const scope = resolveHostShellExecutionScope(
+      options.executionScope,
+      options.filesystemScope,
+      context,
+    );
+    const filesystem = scope.filesystem;
     const temp = realpathSync.native(mkdtempSync(join(tempBase.canonical, 'kite-host-job-')));
     chmodSync(temp, 0o700);
     const runtimeTemp = launchIdentity(temp);
@@ -168,7 +174,7 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
         `(deny process-exec file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${protectedRoots.map((root) => subpath(root.canonical)).join(' ')})`,
         `(deny file-write-unlink ${renameProtected.map(literal).join(' ')})`,
         `(deny process-exec file-map-executable ${subpath(temp)})`,
-        '(allow network*)',
+        scope.network === 'internet' ? '(allow network*)' : '(deny network*)',
         ...(filesystem === 'full_access'
           ? []
           : [

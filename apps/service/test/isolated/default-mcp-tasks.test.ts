@@ -249,7 +249,7 @@ async function fixture() {
       readPolicy: (request) => ({
         mode:
           askTask && request.kind === 'job' && request.definitionId.endsWith('.task')
-            ? 'ask'
+            ? 'accept_edits'
             : 'full',
         workspaceTrust: true,
         revision: 'trusted-fixture-1',
@@ -420,7 +420,7 @@ test('default Ask requires independent Task Job approval after Full connection/T
       (e) => e.kind === 'tool' && e.definitionId.startsWith('mcp.local.'),
     );
     expect(tool?.status).toBe('succeeded');
-    expect(card.request).toMatchObject({ policy: { mode: 'ask', effects: ['unknown'] } });
+    expect(card.request).toMatchObject({ policy: { mode: 'accept_edits', effects: ['unknown'] } });
     await f.runtime.cancelExecution({
       expectedStoreId: f.storeId,
       sessionId: 'a',

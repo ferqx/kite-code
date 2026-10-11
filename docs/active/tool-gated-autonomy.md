@@ -4,13 +4,19 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test packages/agent-kernel/test packages/runtime-spi/test packages/runtime-host/test packages/builtin-runtime/test tests/runtime tests/sandbox`、`bun run typecheck`。
+验证：当前正式链路使用 `bun test apps/service/test/isolated/permissions.test.ts apps/service/test/isolated/shell-scoped-permissions.test.ts apps/service/test/isolated/web-permissions.test.ts packages/agent/test/isolated/execution/authorization-review.test.ts`、`bun run typecheck`；下面历史 Kernel/SAQ 使用 `bun test packages/agent-kernel/test packages/runtime-spi/test packages/runtime-host/test packages/builtin-runtime/test tests/runtime tests/sandbox`。
 
 附加验证：`bun run check:core-boundary`、`bun run check:runtime-packages`。
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、[Agent Note 0007](../../.agents/notes/implemented/architecture/2026-07-14-capability-bindings.md)、[Agent Note 0008](../../.agents/notes/implemented/testing/2026-07-14-verification-completion-semantics.md)、[Agent Note 0042](../../.agents/notes/implemented/feature/2026-07-25-file-tool-semantics-and-write-safety.md)、[Agent Note 0048](../../.agents/notes/implemented/bug-fix/2026-07-29-durable-user-turn-cancellation.md)、[Agent Note 0049](../../.agents/notes/implemented/bug-fix/2026-07-30-effect-aware-read-scheduling.md)、[Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)、[Agent Note 0111](../../.agents/notes/implemented/feature/2026-08-18-governed-local-provider-seams.md)、[Agent Note 0114](../../.agents/notes/implemented/testing/2026-08-18-stable-subagent-actor-identity-for-strict-replay.md)、[Agent Note 0115](../../.agents/notes/implemented/process/2026-08-18-ps03-deterministic-synthetic-replay-qualification.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)。
 
-## 统一执行链路
+## 当前 V1.3 正式工具授权
+
+正式 CLI/TUI/Native、Service 和唯一 Agent 使用请求批准（`accept_edits`）、自动审核（`auto`）、完全访问（`full`）三策略，旧 raw `ask` 输入与持久控制明确拒绝。Shell 的单次 filesystem/network 请求由最终接纳的权限快照决定实际范围；未知脚本不取得“已证明只读”资格，默认范围由 OS 拦截越界，失败不自动扩权重放。Auto 的 `ask_user` 是审核决定中的人工回退，普通 `ask_user` 工具仍只提供信息，不构成第四种权限。
+
+当前行为与验证归[工具手册](../handbook/features/tools-and-approvals.md)、[Service](../../apps/service/README.md#默认-shell-装配)、[Jobs](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)和[授权溯源](authorization.md#当前-v13-正式授权)。下面保留旧 Kernel/SAQ 的机制与仍适用理由；其中旧 phase、`uncertainEffects` 与 Full 人工确认矩阵不用于推导新正式 Shell 权限，平台与资源门禁保持独立。
+
+## 历史统一执行链路
 
 ```text
 模型 tool call

@@ -498,8 +498,8 @@ test('required validation saves an exact user waiver; a later Run cannot reuse i
   }
 }, 15000);
 
-test('global exact Planning Action uses trusted Ask/Accept Edits record approval, Full bypass, and untrusted denial without any Model', async () => {
-  for (const mode of ['ask', 'accept_edits', 'full'] as const) {
+test('global exact Planning Action uses trusted Request Approval/unqualified Auto record approval, Full bypass, and untrusted denial without any Model', async () => {
+  for (const mode of ['auto', 'accept_edits', 'full'] as const) {
     const f = await fixture({}, [], async () => null, { mode });
     try {
       await f.runtime.submitCommand({
@@ -683,7 +683,7 @@ test('record-write permission approval does not answer the separate exact valida
             },
           }
         : null,
-    { mode: 'ask' },
+    { mode: 'accept_edits' },
   );
   try {
     await f.submit();

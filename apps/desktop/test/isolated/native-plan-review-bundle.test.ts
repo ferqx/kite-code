@@ -21,7 +21,7 @@ import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'relocated source-free Native Plan reviews preserve exact feedback, independent Ask approval, real Files progress and cold Store proofs',
+  'relocated source-free Native Plan reviews preserve exact feedback, independent user approval, real Files progress and cold Store proofs',
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-plan-review-bundle-'));
     const home = join(root, 'home'),
@@ -37,6 +37,8 @@ test.skipIf(process.platform !== 'darwin')(
       tools?: { function: { name: string } }[];
       messages: { role: string; content?: unknown }[];
     }[] = [];
+    const businessBodies: (typeof bodies)[number][] = [];
+    let authorizationReviewCalls = 0;
     const questionsReady = new Map<number, () => void>();
     let provider: ReturnType<typeof Bun.serve> | undefined;
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
@@ -101,7 +103,7 @@ test.skipIf(process.platform !== 'darwin')(
         port: 0,
         async fetch(request) {
           const url = new URL(request.url);
-          if (url.pathname === '/count') return new Response(String(bodies.length));
+          if (url.pathname === '/count') return new Response(String(businessBodies.length));
           if (url.pathname === '/metadata') return Response.json({ feedback, bodyText });
           if (url.pathname === '/quit-facts') {
             const reader = await openSqliteStore({
@@ -163,7 +165,38 @@ test.skipIf(process.platform !== 'darwin')(
           }
           const body = (await request.json()) as (typeof bodies)[number];
           bodies.push(body);
-          const serial = bodies.length;
+          const authorizationReviews = body.messages.flatMap((message) => {
+            if (message.role !== 'user' || typeof message.content !== 'string') return [];
+            try {
+              const payload = JSON.parse(message.content);
+              return payload?.purpose === 'authorization_review' ? [payload] : [];
+            } catch {
+              return [];
+            }
+          });
+          if (authorizationReviews.length) {
+            expect(authorizationReviews).toHaveLength(1);
+            expect(body.tools ?? []).toEqual([]);
+            authorizationReviewCalls++;
+            const frame = (delta: unknown, reason: string | null) =>
+              `data: ${JSON.stringify({ id: `authorization-${authorizationReviewCalls}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+            return new Response(
+              frame(
+                {
+                  content: JSON.stringify({
+                    decision: 'ask_user',
+                    reason: 'Original target requires independent user decision',
+                  }),
+                },
+                null,
+              ) +
+                frame({}, 'stop') +
+                'data: [DONE]\n\n',
+              { headers: { 'content-type': 'text/event-stream' } },
+            );
+          }
+          businessBodies.push(body);
+          const serial = businessBodies.length;
           const frame = (delta: unknown, reason: string | null) =>
             `data: ${JSON.stringify({ id: `plan-${serial}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
           if (
@@ -548,13 +581,20 @@ test.skipIf(process.platform !== 'darwin')(
           const review = reviews[0] as (typeof reviewRequests)[number];
           expect(review.reviewer.id).toBe('builtin.auto');
           expect(review.reviewer.modelId).toBe('fixed');
-          expect(review.originCommandRequest.content).toBe('NATIVE_PLAN_A exact original task');
-          expect(review.rootWorkRequest.content).toBe('NATIVE_PLAN_A exact original task');
+          expect(review.originCommandRequest.content).toBe(
+            `NATIVE_PLAN_${review.target.sessionId.toUpperCase()} exact original task`,
+          );
+          expect(review.rootWorkRequest.content).toBe(review.originCommandRequest.content);
           expect(review.target.originStoreId).toBe(storeId);
-          expect(review.target.sessionId).toBe('a');
-          expect(review.target.definitionId).toBe('files.write');
-          expect(review.target.definitionVersion).toBe('2');
-          expect(review.target.input.path).toBe('effect-a.txt');
+          expect(['a', 'b', 'd', 'c']).toContain(review.target.sessionId);
+          expect(['planning.write', 'planning.update', 'planning.review', 'files.write']).toContain(
+            review.target.definitionId,
+          );
+          expect(review.target.definitionVersion).toBe(
+            review.target.definitionId === 'files.write' ? '2' : '1',
+          );
+          if (review.target.definitionId === 'files.write')
+            expect(review.target.input.path).toBe(`effect-${review.target.sessionId}.txt`);
           reviewRequests.push(review);
           console.log(
             'provider_actual_authorization_review',
@@ -566,7 +606,8 @@ test.skipIf(process.platform !== 'darwin')(
         )
           expect(body.tools?.some((tool) => tool.function.name === 'planning.write')).toBe(true);
       }
-      expect(reviewRequests).toHaveLength(1);
+      expect(reviewRequests).toHaveLength(authorizationReviewCalls);
+      expect(bodies).toHaveLength(businessBodies.length + authorizationReviewCalls);
       const report = JSON.parse(readFileSync(join(home, 'plan-review-report.json'), 'utf8')) as {
         cards: {
           id: string;
@@ -608,7 +649,7 @@ test.skipIf(process.platform !== 'darwin')(
         providerRequestsBeforeCancel: number;
         exitChoice: { calls: number; response: number; via: string; options: unknown };
       };
-      expect(report.providerRequestsBeforeCancel).toBe(bodies.length);
+      expect(report.providerRequestsBeforeCancel).toBe(businessBodies.length);
       expect(report.exitChoice).toEqual({
         calls: 1,
         response: 1,
@@ -623,8 +664,15 @@ test.skipIf(process.platform !== 'darwin')(
       });
       expect(report.filesApprovals).toHaveLength(2);
       const reviewedFile = report.filesApprovals.find((approval) => approval.sessionId === 'a')!;
-      expect(reviewRequests[0]!.target.executionId).toBe(reviewedFile.executionId);
-      expect(reviewRequests[0]!.target.runId).toBe(reviewedFile.runId);
+      const originalFileReviews = reviewRequests.filter(
+        (review) => review.target.executionId === reviewedFile.executionId,
+      );
+      expect(originalFileReviews).toHaveLength(1);
+      expect(originalFileReviews[0]!.target.runId).toBe(reviewedFile.runId);
+      expect(originalFileReviews[0]!.target.sessionId).toBe('a');
+      expect(originalFileReviews[0]!.target.definitionId).toBe('files.write');
+      expect(originalFileReviews[0]!.target.input.path).toBe('effect-a.txt');
+      expect(reviewRequests).toHaveLength(report.management.length + report.filesApprovals.length);
       expect(report.expectedPosts).toBe(
         report.management.length + 4 + report.filesApprovals.length,
       );
@@ -649,6 +697,25 @@ test.skipIf(process.platform !== 'darwin')(
         });
         const cursor = (await cold.getMetadata()).lastChangeCursor;
         expect((await cold.getMetadata()).storeId).toBe(storeId);
+        for (const review of reviewRequests) {
+          const target = await cold.getExecution(review.target.executionId);
+          expect(target).toMatchObject({
+            id: review.target.executionId,
+            runId: review.target.runId,
+            sessionId: review.target.sessionId,
+            originStoreId: review.target.originStoreId,
+            definitionId: review.target.definitionId,
+            definitionVersion: review.target.definitionVersion,
+            input: review.target.input,
+            authorization: {
+              review: { status: 'succeeded', decision: 'ask_user' },
+              human: { accepted: true, state: 'answered', decision: 'approve' },
+            },
+          });
+          expect(target?.authorization?.review?.executionId).toBeDefined();
+          const child = await cold.getExecution(target!.authorization!.review!.executionId);
+          expect(child).toMatchObject({ status: 'succeeded', originStoreId: storeId });
+        }
         for (const original of report.management) {
           const card = (
             await cold.listInteractions({ expectedStoreId: storeId, sessionId: original.sessionId })

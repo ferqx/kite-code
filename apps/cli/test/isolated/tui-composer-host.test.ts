@@ -28,7 +28,7 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
         workspaceId: 'w',
         title: 'Composer',
       });
-      const reader = createStdioPermissionReader(Readable.from(['ask\n']));
+      const reader = createStdioPermissionReader(Readable.from(['auto\n']));
       try {
         await promptPermissionMode('composer', f.storeId, reader, {
           client: preparation.client,
@@ -173,7 +173,11 @@ finally:
       expectedStoreId: f.storeId,
       content: expected,
     });
-    expect(f.rows('SELECT origin_command_id,status FROM run ORDER BY started_at')).toEqual([
+    expect(
+      f.rows(
+        "SELECT origin_command_id,status FROM run WHERE session_id IN ('s','composer') ORDER BY started_at",
+      ),
+    ).toEqual([
       { origin_command_id: 'work', status: 'interrupted' },
       { origin_command_id: writes[0].body.commandId, status: 'completed' },
     ]);
@@ -200,6 +204,11 @@ finally:
       { storeId: f.storeId, workspaceId: 'w', sessionId: 's', text: 'ORIGINAL_SCOPE_TEXT' },
     ]);
     expect(f.calls()).toBe(3);
+    expect(f.reviews).toHaveLength(2);
+    expect(f.reviews.map((review) => review.body.tools ?? [])).toEqual([[], []]);
+    expect(
+      f.reviewProof().map(({ state, outcome, decision }) => ({ state, outcome, decision })),
+    ).toEqual(Array(2).fill({ state: 'succeeded', outcome: 'succeeded', decision: 'ask_user' }));
   } finally {
     if (python && python.exitCode === null) {
       python.kill('SIGKILL');

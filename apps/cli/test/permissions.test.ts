@@ -87,18 +87,23 @@ test('explicit CLI stdio controls actual paired production mode/default and trus
     lines: string[] = [];
   const options = { client: f.client, write: (line: string) => lines.push(line) };
   try {
-    const modeReader = createStdioPermissionReader(Readable.from(['ask default\n']));
+    const modeReader = createStdioPermissionReader(Readable.from(['accept_edits default\n']));
     const mode = await promptPermissionMode('s', f.storeId, modeReader, options);
     modeReader.dispose();
     expect(mode).toMatchObject({ status: 'applied', exitCode: 0 });
     expect(mode.intent).toMatchObject({
       kind: 'permission.mode',
       sessionId: 's',
-      request: { expectedStoreId: f.storeId, mode: 'ask', makeDefault: true, ifRevision: '0' },
+      request: {
+        expectedStoreId: f.storeId,
+        mode: 'accept_edits',
+        makeDefault: true,
+        ifRevision: '0',
+      },
     });
     expect(await f.client.getPermissionMode('s', { storeId: f.storeId })).toMatchObject({
-      mode: 'ask',
-      defaultMode: 'ask',
+      mode: 'accept_edits',
+      defaultMode: 'accept_edits',
     });
     for (const [line, trusted] of [
       ['trust\n', true],
@@ -130,7 +135,9 @@ test('CLI EOF, unfinished/invalid/over-budget UTF-8 and absent choices leave the
     const inputs = [
       '',
       '\n',
-      'ask',
+      'accept_edits',
+      'ask\n',
+      'ask default\n',
       'cancel\n',
       'full default extra\n',
       'trust\n',
@@ -185,7 +192,7 @@ test('a competing mode writer rejects the original prompt CAS and retains its or
       makeDefault: false,
       ifDefaultRevision: initial.defaultRevision,
     });
-    answer('ask default');
+    answer('accept_edits default');
     const result = await pending;
     expect(result).toMatchObject({
       status: 'failed',
@@ -196,7 +203,7 @@ test('a competing mode writer rejects the original prompt CAS and retains its or
       sessionId: 's',
       request: {
         expectedStoreId: f.storeId,
-        mode: 'ask',
+        mode: 'accept_edits',
         ifRevision: '0',
         ifDefaultRevision: '0',
         makeDefault: true,
@@ -420,7 +427,7 @@ test('a physically lost actual committed CLI permission response causes one POST
     const request = {
       expectedStoreId: f.storeId,
       commandId: 'lost-original',
-      mode: 'ask' as const,
+      mode: 'accept_edits' as const,
       ifRevision: observed.revision,
       makeDefault: true,
       ifDefaultRevision: observed.defaultRevision,

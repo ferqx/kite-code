@@ -6,7 +6,7 @@ const scopeId = z
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9_-]+$/);
-const mode = z.enum(['ask', 'auto', 'accept_edits', 'full']).nullable();
+const mode = z.enum(['accept_edits', 'auto', 'full']).nullable();
 const state = z.enum(['available', 'unavailable']);
 export const HostStatusQuerySchema = z.strictObject({
   workspaceId: scopeId.optional(),

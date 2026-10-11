@@ -51,6 +51,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
   let mode: PermissionMode = 'full';
   let trusted = true;
   let revision = 0;
+  let reviewDecision: 'approve_once' | 'ask_user' = 'approve_once';
   let credentialReads = 0;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -90,7 +91,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
                 }
               : {
                   content: review
-                    ? JSON.stringify({ decision: 'approve_once', reason: 'exact fixture call' })
+                    ? JSON.stringify({ decision: reviewDecision, reason: 'exact fixture call' })
                     : 'finished',
                 },
             finish_reason: null,
@@ -224,6 +225,9 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
     },
     get credentialReads() {
       return credentialReads;
+    },
+    reviewDecision(next: 'approve_once' | 'ask_user') {
+      reviewDecision = next;
     },
     policy(nextMode: PermissionMode, nextTrust = true) {
       mode = nextMode;
@@ -457,7 +461,7 @@ test('chosen Auto remains a ceiling over Full; actual compatible reviewer runs f
   }
 }, 20000);
 
-test('plan approval never overrides newly current Ask or trust denial', async () => {
+test('plan approval never overrides newly current Auto human decision or trust denial', async () => {
   let release!: () => void;
   const barrier = new Promise<void>((resolve) => {
     release = resolve;
@@ -474,7 +478,8 @@ test('plan approval never overrides newly current Ask or trust denial', async ()
     await f.submit();
     await f.approvePlan('accept_edits');
     await until(async () => (entered ? true : null));
-    f.policy('ask');
+    f.reviewDecision('ask_user');
+    f.policy('auto');
     release();
     const card = await f.card('approval');
     expect(card.definitionId).toBe('files.write');
@@ -488,7 +493,9 @@ test('plan approval never overrides newly current Ask or trust denial', async ()
     });
     expect((await f.done()).status).toBe('failed');
     expect(existsSync(join(f.workspace, 'after.txt'))).toBe(false);
-    expect(f.reviews).toHaveLength(0);
+    expect(f.reviews).toHaveLength(1);
+    const payload = JSON.parse((f.reviews[0]!.messages as { content: string }[])[0]!.content);
+    expect(payload.target.definitionId).toBe('files.write');
   } finally {
     release();
     await f.close();

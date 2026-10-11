@@ -10,7 +10,8 @@ import {
   createShellJob,
 } from '@kite-ai/agent/jobs/shell';
 import { createShellExtension } from '@kite-ai/agent/shell';
-import type { CapabilityEffect } from './permissions';
+import type { CapabilityDescription, CapabilityEffect } from './permissions';
+import { createShellCommandPolicy } from './shell-command-policy';
 
 export interface ShellConfigurationOptions {
   /** Trusted platform assembly; command input cannot choose an OS boundary. */
@@ -34,13 +35,10 @@ export interface ShellConfigurationOptions {
 }
 export const shellToolIds = ['shell.launch', 'shell.read', 'shell.wait', 'shell.stop'] as const;
 /** Interpret only the original accepted default-policy tree, including delegated AND policies. */
-export function hostFilesystemScope(
-  context: JobContext,
-  definitionId = 'shell.command',
-): 'workspace_write' | 'full_access' {
+function acceptedScopeLeaves(context: JobContext, definitionId: string) {
   const authorization = context.dispatchAuthorization;
   const pending = [authorization?.snapshot];
-  let scope: 'workspace_write' | 'full_access' = 'full_access';
+  const leaves: { mode: string; executionScope: unknown }[] = [];
   let count = 0;
   if (!authorization?.revision) throw new AgentError('shell_dispatch_scope_unavailable');
   while (pending.length) {
@@ -83,7 +81,7 @@ export function hostFilesystemScope(
       snapshot.namespace !== 'builtin.permissions' ||
       data.workspaceTrust !== true ||
       typeof data.mode !== 'string' ||
-      !['ask', 'accept_edits', 'auto', 'full'].includes(data.mode) ||
+      !['accept_edits', 'auto', 'full'].includes(data.mode) ||
       !capability ||
       typeof capability !== 'object' ||
       Array.isArray(capability) ||
@@ -93,9 +91,107 @@ export function hostFilesystemScope(
       capability.hardAllowed !== true
     )
       throw new AgentError('shell_dispatch_scope_unavailable');
-    if (data.mode !== 'full') scope = 'workspace_write';
+    leaves.push({ mode: data.mode, executionScope: capability.executionScope });
   }
-  return scope;
+  return leaves;
+}
+export function hostFilesystemScope(
+  context: JobContext,
+  definitionId = 'shell.command',
+): 'workspace_write' | 'full_access' {
+  return acceptedScopeLeaves(context, definitionId).every((leaf) => leaf.mode === 'full')
+    ? 'full_access'
+    : 'workspace_write';
+}
+/** Read only the final accepted proof, intersecting independent filesystem and network grants. */
+export function hostExecutionScope(context: JobContext, definitionId = 'shell.command') {
+  let filesystem: 'workspace_write' | 'full_access' = 'full_access';
+  let network: 'none' | 'internet' = 'internet';
+  for (const leaf of acceptedScopeLeaves(context, definitionId)) {
+    // Older trusted adapter proofs never contained a per-call escalation. Keep
+    // their mode ceiling; a missing field cannot widen an approved call.
+    const scope = leaf.executionScope ?? {
+      filesystem: leaf.mode === 'full' ? 'full_access' : 'workspace_write',
+      network: leaf.mode === 'full' ? 'internet' : 'none',
+    };
+    if (
+      !scope ||
+      typeof scope !== 'object' ||
+      Array.isArray(scope) ||
+      Object.keys(scope).some((key) => !['filesystem', 'network'].includes(key)) ||
+      !('filesystem' in scope) ||
+      !['workspace_write', 'full_access'].includes(String(scope.filesystem)) ||
+      !('network' in scope) ||
+      !['none', 'internet'].includes(String(scope.network))
+    )
+      throw new AgentError('shell_dispatch_scope_unavailable');
+    if (scope.filesystem === 'workspace_write') filesystem = 'workspace_write';
+    if (scope.network === 'none') network = 'none';
+  }
+  return { filesystem, network };
+}
+const permissionsSchema = {
+  type: 'object',
+  properties: {
+    filesystem: { enum: ['workspace_write', 'full_access'] },
+    network: { enum: ['none', 'internet'] },
+  },
+  required: ['filesystem', 'network'],
+  additionalProperties: false,
+};
+function commandRequest(request: AuthorizationRequest, scoped: boolean) {
+  const tool =
+    request.kind === 'tool' &&
+    request.definitionId === 'shell.launch' &&
+    request.definitionVersion === '1';
+  const job =
+    request.kind === 'job' &&
+    request.definitionId === 'shell.command' &&
+    request.definitionVersion === '1';
+  const value = request.input;
+  if (
+    (!tool && !job) ||
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    typeof value.command !== 'string' ||
+    !value.command ||
+    value.command.length > 262144 ||
+    Object.keys(value).some(
+      (key) =>
+        !(
+          tool
+            ? ['key', 'command', 'cancellation', ...(scoped ? ['permissions'] : [])]
+            : ['command', ...(scoped ? ['permissions'] : [])]
+        ).includes(key),
+    ) ||
+    (tool &&
+      value.cancellation !== undefined &&
+      !['attached', 'detached'].includes(String(value.cancellation)))
+  )
+    return undefined;
+  const scope = value.permissions;
+  if (
+    scope !== undefined &&
+    (!scope ||
+      typeof scope !== 'object' ||
+      Array.isArray(scope) ||
+      Object.keys(scope).some((key) => !['filesystem', 'network'].includes(key)) ||
+      !['workspace_write', 'full_access'].includes(String(scope.filesystem)) ||
+      !['none', 'internet'].includes(String(scope.network)))
+  )
+    return undefined;
+  return {
+    command: value.command,
+    cancellation: tool ? (value.cancellation ?? 'attached') : null,
+    executionScope:
+      scope === undefined
+        ? { filesystem: 'workspace_write' as const, network: 'none' as const }
+        : {
+            filesystem: scope.filesystem as 'workspace_write' | 'full_access',
+            network: scope.network as 'none' | 'internet',
+          },
+  };
 }
 /** Read-only verification of trusted supervision assets; does not create a Job or process. */
 type ShellAsset = Awaited<ReturnType<typeof asset>>;
@@ -156,6 +252,9 @@ export async function createShellConfiguration(input: {
       extensions: [] as Extension[],
       snapshot: { available: false, tools: [] as { id: string; definitionVersion: string }[] },
       describe,
+      describeRequest: async (
+        _request: AuthorizationRequest,
+      ): Promise<Partial<CapabilityDescription> | undefined> => undefined,
       commandDigest: (_request: AuthorizationRequest): string | undefined => undefined,
     };
   if (!input.options) throw new AgentError('shell_unavailable');
@@ -167,6 +266,14 @@ export async function createShellConfiguration(input: {
     const assets = await inspectShellAssets(options);
     const [supervisor, bun, shell, bubblewrap] = assets;
     if (!supervisor || !bun || !shell) throw new AgentError('shell_asset_unavailable');
+    const commandPolicy = await createShellCommandPolicy({ cwd, shellExecutable: shell.path });
+    const host = options.host && {
+      ...options.host,
+      readonlyAssets: [
+        ...options.host.readonlyAssets,
+        ...commandPolicy.assets.map((item) => item.path),
+      ],
+    };
     const jobOptions = {
       cwd,
       env: options.env,
@@ -180,23 +287,39 @@ export async function createShellConfiguration(input: {
         : {}),
     };
     const job =
-      options.platform === 'linux' && bubblewrap && options.host
+      options.platform === 'linux' && bubblewrap && host
         ? createLinuxHostShellJob({
             ...jobOptions,
-            ...options.host,
+            ...host,
             bubblewrapPath: bubblewrap.path,
             filesystemScope: hostFilesystemScope,
+            executionScope: hostExecutionScope,
           })
-        : options.host
+        : host
           ? createMacosHostShellJob({
               ...jobOptions,
-              ...options.host,
+              ...host,
               filesystemScope: hostFilesystemScope,
+              executionScope: hostExecutionScope,
             })
           : createShellJob(jobOptions);
     const extension = createShellExtension({
+      ...(host ? { permissionsSchema } : {}),
       job: {
         ...job,
+        ...(host
+          ? {
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  command: { type: 'string', minLength: 1, maxLength: 262144 },
+                  permissions: permissionsSchema,
+                },
+                required: ['command'],
+                additionalProperties: false,
+              },
+            }
+          : {}),
         async start(value, context) {
           context.signal.throwIfAborted();
           const actual = await Promise.all([
@@ -208,8 +331,15 @@ export async function createShellConfiguration(input: {
           if (actual.some((item, index) => item.digest !== assets[index]!.digest))
             throw new AgentError('shell_asset_changed');
           context.signal.throwIfAborted();
+          const command =
+            value && typeof value === 'object' && !Array.isArray(value) ? value.command : undefined;
+          if (typeof command !== 'string') throw new AgentError('invalid_shell_arguments');
+          const classified = await commandPolicy.classify(command);
+          if (classified.hardDenied)
+            throw new AgentError('shell_command_hard_denied', classified.hardDenied);
+          context.signal.throwIfAborted();
           try {
-            return await job.start(value, context);
+            return await job.start({ command }, context);
           } catch (error) {
             if (!options.host || error instanceof AgentError) throw error;
             // Only a fixed non-secret adapter code crosses the ordinary Job
@@ -230,12 +360,18 @@ export async function createShellConfiguration(input: {
         qualification:
           options.platform === 'linux'
             ? 'linux_owned_pid_namespace_bubblewrap'
-            : options.host
+            : host
               ? 'macos_launchd_coalition_seatbelt'
               : 'posix_group_supervision_only',
         configurationId: options.configurationId,
         cwd,
-        assets: { supervisor, bun, shell, ...(bubblewrap ? { bubblewrap } : {}) },
+        assets: {
+          supervisor,
+          bun,
+          shell,
+          ...(bubblewrap ? { bubblewrap } : {}),
+          parser: [...commandPolicy.assets],
+        },
         ...(options.host ? { host: options.host, scope: 'final_dispatch_authorization' } : {}),
         envKeys: Object.keys(options.env).sort(),
         tools: (extension.tools ?? [])
@@ -244,33 +380,22 @@ export async function createShellConfiguration(input: {
         job: { id: job.id, definitionVersion: job.version },
       },
       describe,
+      async describeRequest(
+        request: AuthorizationRequest,
+      ): Promise<Partial<CapabilityDescription> | undefined> {
+        if (!['shell.launch', 'shell.command'].includes(request.definitionId)) return undefined;
+        const value = commandRequest(request, !!host);
+        if (!value) return { hardAllowed: false, denialReason: 'invalid_shell_arguments' };
+        const classified = await commandPolicy.classify(value.command);
+        return {
+          ...(host ? { executionScope: value.executionScope } : {}),
+          hardAllowed: classified.hardDenied === null,
+          ...(classified.hardDenied ? { denialReason: 'shell_command_hard_denied' } : {}),
+        };
+      },
       commandDigest(request: AuthorizationRequest): string | undefined {
-        const tool =
-          request.kind === 'tool' &&
-          request.definitionId === 'shell.launch' &&
-          request.definitionVersion === '1';
-        const jobRequest =
-          request.kind === 'job' &&
-          request.definitionId === job.id &&
-          request.definitionVersion === job.version;
-        const value = request.input;
-        if (
-          (!tool && !jobRequest) ||
-          !value ||
-          typeof value !== 'object' ||
-          Array.isArray(value) ||
-          typeof value.command !== 'string' ||
-          !value.command ||
-          value.command.length > 262144 ||
-          Object.keys(value).some(
-            (key) => !(tool ? ['key', 'command', 'cancellation'] : ['command']).includes(key),
-          ) ||
-          (tool &&
-            value.cancellation !== undefined &&
-            value.cancellation !== 'attached' &&
-            value.cancellation !== 'detached')
-        )
-          return undefined;
+        const value = commandRequest(request, !!host);
+        if (!value) return undefined;
         // A logical ensure key selects a new operation; it does not change this command's
         // authority. All execution semantics and private environment values remain hashed.
         return createHash('sha256')
@@ -283,10 +408,12 @@ export async function createShellConfiguration(input: {
               definitionVersion: request.definitionVersion,
               configurationId: options.configurationId,
               command: value.command,
-              cancellation: tool ? (value.cancellation ?? 'attached') : null,
+              cancellation: value.cancellation,
+              executionScope: host ? value.executionScope : null,
               cwd,
               env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),
               assets,
+              parserAssets: commandPolicy.assets,
               ...(options.host ? { host: options.host } : {}),
               graceMs: options.graceMs ?? 200,
               maxQueuedBytes: options.maxQueuedBytes ?? 256 * 1024,

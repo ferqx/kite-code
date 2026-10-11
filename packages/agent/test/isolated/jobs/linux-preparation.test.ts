@@ -266,3 +266,38 @@ test('trusted Profile Skill projection retains canonical cwd while exposing only
     mkdirSync(skill);
     expect(() => prepare('unused', shell, context)).toThrow('confined_launch_changed');
   }));
+
+test('explicit filesystem and network scopes are independent in the trusted Linux layout', () =>
+  fixture((options, shell) => {
+    for (const filesystem of ['workspace_write', 'full_access'] as const)
+      for (const network of ['none', 'internet'] as const) {
+        let reads = 0;
+        const launch = captureLinuxLaunch(
+          {
+            ...options,
+            executionScope: () => {
+              reads++;
+              return { filesystem, network };
+            },
+            filesystemScope: () => {
+              throw Error('legacy scope must not be read');
+            },
+          },
+          [shell],
+        )('unused', shell, context);
+        try {
+          expect(reads).toBe(1);
+          expect(launch.mode).toBe(filesystem === 'full_access' ? 'full' : 'workspace');
+          expect(launch.networkScope).toBe(network);
+          expect(launch.bubblewrapArgs.includes('--unshare-net')).toBe(network === 'none');
+          expect(
+            mount(launch, filesystem === 'full_access' ? '--bind' : '--ro-bind', '/', '/'),
+          ).toBe(true);
+          expect(mount(launch, '--bind', options.workspaceRoot!, options.workspaceRoot!)).toBe(
+            true,
+          );
+        } finally {
+          launch.cleanup();
+        }
+      }
+  }));

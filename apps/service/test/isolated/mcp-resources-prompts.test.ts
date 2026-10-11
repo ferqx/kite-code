@@ -345,7 +345,7 @@ async function fixture(
     mcp: { servers: [{ id: 'local', transport: configuration }], transportPort: port },
     permissionPolicy: {
       readPolicy: (request) => ({
-        mode: ask ? 'ask' : 'full',
+        mode: ask ? 'accept_edits' : 'full',
         workspaceTrust: true,
         revision: 'fixture',
         allowed: denied.has(request.definitionId)

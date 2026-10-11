@@ -550,7 +550,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   }
   if (
     method === 'permission.mode' &&
-    (!['ask', 'accept_edits', 'auto', 'full'].includes(String(input.mode)) ||
+    (!['accept_edits', 'auto', 'full'].includes(String(input.mode)) ||
       typeof input.makeDefault !== 'boolean')
   )
     throw Error('invalid_native_request');
@@ -569,7 +569,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       typeof creation.title !== 'string' ||
       Buffer.byteLength(creation.title) > 8192 ||
       (input.permissionMode !== undefined &&
-        !['ask', 'accept_edits', 'auto', 'full'].includes(String(input.permissionMode))) ||
+        !['accept_edits', 'auto', 'full'].includes(String(input.permissionMode))) ||
       (input.targetBranch !== undefined &&
         (typeof input.targetBranch !== 'string' ||
           !input.targetBranch.length ||

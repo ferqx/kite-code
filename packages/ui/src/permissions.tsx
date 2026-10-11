@@ -1,6 +1,10 @@
 import type { PermissionModeState, WorkspaceTrustState } from '@kite-ai/client';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 
+function permissionLabel(mode: PermissionModeState['mode']) {
+  return { accept_edits: '请求批准', auto: '自动审核', full: '完全访问' }[mode];
+}
+
 function keyboardClick(event: KeyboardEvent<HTMLButtonElement>) {
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault();
@@ -90,15 +94,16 @@ function PermissionChoices({
         >
           <fieldset disabled={disabled}>
             <legend>明确选择权限模式</legend>
-            {(['ask', 'accept_edits', 'auto', 'full'] as const).map((value) => (
+            {(['accept_edits', 'auto', 'full'] as const).map((value) => (
               <label key={value}>
                 <input
                   type="radio"
                   name="permission-mode"
+                  value={value}
                   checked={mode === value}
                   onChange={() => setMode(value)}
                 />
-                {{ ask: 'Ask', accept_edits: 'Accept Edits', auto: 'Auto', full: 'Full' }[value]}
+                {permissionLabel(value)}
               </label>
             ))}
             <label>

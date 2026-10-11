@@ -26,7 +26,11 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, originals);
 bootstrap.window.close();
 
-function fixture(withPermissions = false, trusted = true) {
+function fixture(
+  withPermissions = false,
+  trusted = true,
+  initialMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
+) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -64,8 +68,8 @@ function fixture(withPermissions = false, trusted = true) {
     contextSelectionId: 'context',
   });
   const sessions = [session('a'), session('b')];
-  const modes = new Map<string, 'ask' | 'auto' | 'full'>([
-    ['a', 'ask'],
+  const modes = new Map<string, 'accept_edits' | 'auto' | 'full'>([
+    ['a', initialMode],
     ['b', 'auto'],
   ]);
   let selected = 'a',
@@ -136,7 +140,7 @@ function fixture(withPermissions = false, trusted = true) {
       if (input.method === 'permission.mode') {
         expect(input.observationId).toBe(selected === 'a' ? 1 : 2);
         expect(input.makeDefault).toBe(false);
-        modes.set(selected, input.mode as 'ask' | 'auto' | 'full');
+        modes.set(selected, input.mode as 'accept_edits' | 'auto' | 'full');
         return {
           commandId: `mode-${calls.length}`,
           kind: 'permission.mode',
@@ -337,7 +341,7 @@ test('original current-Session permission menu uses the observed command, preser
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
     await f.edit('retained current draft 雪🙂', '当前会话私有草稿');
-    expect(permission().getAttribute('aria-label')).toBe('Permission: Ask');
+    expect(permission().getAttribute('aria-label')).toBe('Permission: Request Approval');
     expect(permission().disabled).toBe(true);
     expect(mutations()).toHaveLength(0);
     const tools = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
@@ -356,7 +360,7 @@ test('original current-Session permission menu uses the observed command, preser
     await f.click('Other B');
     await f.click('Original A');
     expect(permission().disabled).toBe(false);
-    expect(f.host.querySelectorAll('input[name="permission-mode"]')).toHaveLength(4);
+    expect(f.host.querySelectorAll('input[name="permission-mode"]')).toHaveLength(3);
     await choose(1);
     expect(permission().getAttribute('aria-label')).toBe('Permission: Auto');
     expect(mutations()).toHaveLength(1);
@@ -616,3 +620,37 @@ test('a lost retry response restores original text and prevents a second input P
     await f.close();
   }
 });
+
+test('Auto changes to Request Approval only through an explicit current Session choice', async () => {
+  const f = fixture(true, true, 'auto');
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    const permission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!;
+    expect(permission.getAttribute('aria-label')).toBe('Permission: Auto');
+    expect(f.calls.filter((call) => call.method === 'permission.mode')).toHaveLength(0);
+    await act(async () => {
+      permission.focus();
+      permission.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await act(async () => {
+      const choices = f.host.querySelectorAll<HTMLElement>('[role="menuitemradio"]');
+      expect(choices).toHaveLength(3);
+      choices[0]!.click();
+    });
+    expect(f.calls.filter((call) => call.method === 'permission.mode')).toEqual([
+      expect.objectContaining({
+        mode: 'accept_edits',
+        makeDefault: false,
+        generation: 1,
+        observationId: 1,
+      }),
+    ]);
+    expect(permission.getAttribute('aria-label')).toBe('Permission: Request Approval');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+}, 20000);

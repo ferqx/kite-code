@@ -47,19 +47,19 @@ const permissionCopy = {
     heading: '如何处理操作请求？',
     helper: '为当前对话选择审批方式',
     accept_edits: {
-      label: '询问',
-      menuLabel: '需要时询问我',
-      detail: '需批准的操作会暂停，等待你确认',
+      label: '请求批准',
+      menuLabel: '请求批准',
+      detail: '允许工作区写入；外部写入和联网须批准',
     },
     auto: {
-      label: '自动',
-      menuLabel: '自动审查',
-      detail: '审批模型先判断命令，必要时再询问',
+      label: '自动审核',
+      menuLabel: '自动审核',
+      detail: '模型审核安全性；明确拒绝不会执行并说明原因',
     },
     full: {
-      label: '完全',
-      menuLabel: '完全权限',
-      detail: '跳过常规审批，改动可能难以撤销',
+      label: '完全访问',
+      menuLabel: '完全访问',
+      detail: '允许外部写入和联网；极危险操作仍拒绝',
     },
     fullWarning: {
       title: '要开启完全权限吗？',
@@ -77,19 +77,19 @@ const permissionCopy = {
     heading: 'How should actions be approved?',
     helper: 'Choose an approval mode for this conversation',
     accept_edits: {
-      label: 'Ask',
-      menuLabel: 'Ask me when needed',
-      detail: 'Pause for your approval when required',
+      label: 'Request Approval',
+      menuLabel: 'Request Approval',
+      detail: 'Allow workspace writes; approve external writes and internet access',
     },
     auto: {
       label: 'Auto',
       menuLabel: 'Automatic review',
-      detail: 'Review commands first; ask when needed',
+      detail: 'Review safety; rejected actions do not execute and include a reason',
     },
     full: {
       label: 'Full',
       menuLabel: 'Full permission',
-      detail: 'Skip routine approvals; changes may be hard to undo',
+      detail: 'Allow external writes and internet access; extreme dangers remain denied',
     },
     fullWarning: {
       title: 'Enable Full permission?',
@@ -149,6 +149,7 @@ export function Composer(props: ComposerProps) {
       ? 'zh'
       : 'en';
   const permissionText = permissionCopy[permissionLanguage];
+  const permissionLabel = props.permission ? permissionText[props.permission].label : '';
   const cacheTokenTotal =
     (props.cacheMetrics?.cacheHitTokens ?? 0) + (props.cacheMetrics?.cacheMissTokens ?? 0);
   const cacheHitPercentage =
@@ -239,14 +240,14 @@ export function Composer(props: ComposerProps) {
                       props.permission === 'full' && 'permission-trigger-danger',
                     )}
                     data-permission-trigger
-                    aria-label={`${permissionText.name}${permissionLanguage === 'zh' ? '：' : ': '}${permissionText[props.permission].label}${props.permissionPending ? (permissionLanguage === 'zh' ? '，切换中' : ', changing') : ''}`}
+                    aria-label={`${permissionText.name}${permissionLanguage === 'zh' ? '：' : ': '}${permissionLabel}${props.permissionPending ? (permissionLanguage === 'zh' ? '，切换中' : ', changing') : ''}`}
                     disabled={props.permissionDisabled}
                   >
                     <HugeiconsIcon
                       data-icon="inline-start"
                       icon={permissionModes.find((mode) => mode.value === props.permission)!.icon}
                     />
-                    <span>{permissionText[props.permission].label}</span>
+                    <span>{permissionLabel}</span>
                     <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
                   </ShadcnButton>
                 </DropdownMenuTrigger>

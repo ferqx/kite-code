@@ -16,6 +16,8 @@
 
 ## 已实施方案的剩余资格
 
+[Shell 与联网的三策略接线](shell-permission-scopes.md)：macOS 独立写入/联网范围、三策略消费者、旧严格入口退役与真实 Auto 冷恢复已实施并通过原完整默认；Linux 原生资格、Windows 正式 Shell 后端及原 RSS/观测门禁仍保留，不宣布 V1.3 阶段退出。
+
 [会话存储兼容性与连续性 V1](session-store-compatibility-and-continuity.md)：本次约定的唯一正式入口、已验证格式转换、历史来源归并与原会话保留已实施；Linux 产品入口与 Windows 原生迁移资格仍待单独核对，不能据 macOS 和容器测试推定通过。历史用户库恢复与未来版本兼容分别判断。
 
 ## 待核实问题

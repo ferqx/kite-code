@@ -11,7 +11,7 @@ projection、release-controlled execution policy 或对应 feature flag 时。
 
 新正式/default/CI经八workspace的公共Runtime/Client/Store，旧`ExecutionBoundary`、State/Host writer和carrier不再被调度。原计划保留普通权限、取消/no-replay和实际资源责任，退役旧预算/State证明链；不能从旧实现推导当前新运行前提。
 
-当前 macOS 默认 ProcessService 装配宿主 Shell，保宿主工具链、HOME 和广泛只读视图；普通 Tool/Job 分别授权。Job.start 的范围仅来自最终 markDispatching 事务已接受的根及子 Agent 父子交集快照，人工及自动批准均保原 snapshot。Service 有界核全部 builtin.permissions 叶，只有全部 Full 才选宿主写范围，其余可用 mode 取 Workspace/私有 temp 写，未知或缺失策略拒绝；实际 Profile/coordination 拒读写映射、runtimeAssets 只读及准确祖先 unlink 拒绝覆盖两种范围。非 Full 允许 IP、拒 Unix bind/outbound，Full 允许宿主网络；temp 原生 exec/map 拒绝。完整路径事实与实际边界归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)。
+当前 macOS 默认 ProcessService 装配宿主 Shell，保宿主工具链、HOME 和广泛读取；普通 Tool/Job 分别授权。正式 Shell 默认 Workspace 写/无网络，请求明确的外部写或联网后经三策略授权。Job.start 的独立 filesystem/network 范围仅来自最终 markDispatching 接受的根/子 Agent 快照，父子逐维取更窄值；Full 也先执行固定危险拒绝。实际 Profile/coordination 拒读写映射、runtimeAssets/解析资产只读及保护祖先 unlink 拒绝保持；network=none 拒绝 IP/Unix，Workspace+Internet 仍拒 Unix bind/outbound，temp native exec/map 拒绝。未知脚本只在实际批准范围执行，不因失败扩权重放。完整路径和边界归[Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)，调用者及审核归[Service owner](../../apps/service/README.md#默认-shell-装配)。
 
 默认 guardian 的新独占 launchd resource coalition 覆盖 fork/exec/setsid/orphan 后代；原 pidversion audit-token 信号、原 guardian/内核 count=1、原根退出和准确回收共同证明全树停止。注册撤销本身不作停止证明，失联或不确定保持 unknown。真实输出/终态仍通过原 Job Store 持久化，冷 GET 不重建旧 handle、不重放。Files 保原 scope/read-set 与完整 Terminal/Native outer/inner 资产保护；附件完整读取不授副作用权限，坏身份、来源/控制漂移和 unknown 不能换 ID 绕过。
 

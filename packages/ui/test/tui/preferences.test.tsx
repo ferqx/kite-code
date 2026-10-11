@@ -384,7 +384,7 @@ test('populated model, permission and Skill panels translate owned instructions 
     },
     permissions: {
       mode: {
-        mode: 'ask',
+        mode: 'accept_edits',
         revision: '1',
         scopeSessionId: 'a',
         defaultMode: 'auto',
@@ -436,7 +436,7 @@ test('populated model, permission and Skill panels translate owned instructions 
     [
       TuiPermissionPanel,
       ['以后会话默认值：', '已保存 same_command 授权：', '信任不代表批准所有 Tool'],
-      ['ask', 'auto', 'untrusted', '/Original/English/path', '"definitionId":"Models"'],
+      ['accept_edits', 'auto', 'untrusted', '/Original/English/path', '"definitionId":"Models"'],
     ],
     [
       TuiSkillsPanel,

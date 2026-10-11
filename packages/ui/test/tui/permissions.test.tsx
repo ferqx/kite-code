@@ -13,7 +13,7 @@ const observed = (id = 'a'): TuiPermissionSnapshot => ({
     storeId: 'store',
     sessionId: id,
     scopeSessionId: id,
-    mode: 'ask',
+    mode: 'accept_edits',
     revision: '3',
     defaultMode: 'auto',
     defaultRevision: '2',

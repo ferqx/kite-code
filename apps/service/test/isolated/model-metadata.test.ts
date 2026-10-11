@@ -162,7 +162,7 @@ test('production paired Service freezes actual SDK settings and dispatch control
     await client.setPermissionMode('s', {
       expectedStoreId: storeId,
       commandId: 'mode-after',
-      mode: 'ask',
+      mode: 'accept_edits',
       ifRevision: current.revision,
       makeDefault: false,
       ifDefaultRevision: current.defaultRevision,
@@ -189,7 +189,7 @@ test('production paired Service freezes actual SDK settings and dispatch control
     const next = await client.getModelInput('s', second.executionId);
     expect(next.metadata).toMatchObject({
       adapter: { provider: { modelId: 'remote-b' }, settings: { temperature: 0.75 } },
-      authorization: { policy: { data: { mode: 'ask', workspaceTrust: true } } },
+      authorization: { policy: { data: { mode: 'accept_edits', workspaceTrust: true } } },
     });
     expect(requests).toHaveLength(2);
     expect(requests[1]).toMatchObject({ model: 'remote-b', temperature: 0.75 });

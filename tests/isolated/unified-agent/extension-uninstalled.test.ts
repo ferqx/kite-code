@@ -73,6 +73,7 @@ test('removing a trusted extension assembly preserves its original records and p
       const view = await host!.client.getView('s');
       if (
         command.status !== 'accepted' &&
+        view.runs.every((row) => !row.isActive) &&
         view.executions.every((row) => !['planned', 'dispatching', 'running'].includes(row.status))
       )
         return command;

@@ -189,7 +189,7 @@ test('real default HTTP status reads current controls and host facts without cre
       ...identity,
       sessionId: 's',
       commandId: 'ask-default',
-      mode: 'ask',
+      mode: 'accept_edits',
       ifRevision: mode.revision,
       makeDefault: true,
       ifDefaultRevision: mode.defaultRevision,
@@ -207,8 +207,12 @@ test('real default HTTP status reads current controls and host facts without cre
     const afterControls = await runtime.getChanges({ after: '0' });
     expect(
       (await client.getHostStatus({ sessionId: 's', workspaceId: 'w' })).execution.permissions,
-    ).toMatchObject({ mode: 'ask', defaultMode: 'ask', workspaceTrust: 'trusted' });
-    expect((await client.getHostStatus()).execution.permissions.defaultMode).toBe('ask');
+    ).toMatchObject({
+      mode: 'accept_edits',
+      defaultMode: 'accept_edits',
+      workspaceTrust: 'trusted',
+    });
+    expect((await client.getHostStatus()).execution.permissions.defaultMode).toBe('accept_edits');
     writeFileSync(join(profile.profilePath, 'userconfig.jsonc'), '{ broken config');
     expect((await client.getHostStatus({ sessionId: 's', workspaceId: 'w' })).release.reason).toBe(
       'release_manifest_not_bound',

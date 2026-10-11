@@ -307,7 +307,7 @@ const result=await fetch(callback);if(result.status!==200)process.exit(3);`,
       },
       permissionPolicy: {
         readPolicy: (request) => ({
-          mode: options.ask ? 'ask' : 'full',
+          mode: options.ask ? 'accept_edits' : 'full',
           workspaceTrust: true,
           revision: 'owned-oauth-integration',
           allowed: [

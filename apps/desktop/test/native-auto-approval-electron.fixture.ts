@@ -96,16 +96,16 @@ try {
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
   assert.equal(await page.locator('[data-permission-trigger]').isDisabled(), false);
   await mode(0);
-  await modeRead('ask');
+  await modeRead('accept_edits');
   await mode(2);
   const full = page.getByRole('alertdialog');
   await full.getByRole('button', { name: /^(Cancel|取消)$/ }).click();
-  await modeRead('ask');
+  await modeRead('accept_edits');
   await mode(2);
   await full.getByRole('button', { name: /^(Enable Full|启用完全权限)$/ }).click();
   await modeRead('full');
   await mode(0);
-  await modeRead('ask');
+  await modeRead('accept_edits');
   assert.equal(await (await fetch(`${control}/count`)).text(), '0');
   await app!.evaluate(() => {
     const target = globalThis as typeof globalThis & { autoAnswerPosts: number };

@@ -105,13 +105,13 @@ async function fixture() {
     },
   };
 }
-test('actual default host/HTTP/SQL explicit four modes and displayed trust scopes persist without any Run or execution', async () => {
+test('actual default host/HTTP/SQL explicit three modes and displayed trust scopes persist without any Run or execution', async () => {
   const f = await fixture();
   try {
     expect(f.desktop.snapshot!.permissions!.trust.readScopes).toEqual(
       (await f.client.getWorkspaceTrust('w', { storeId: f.storeId })).readScopes,
     );
-    for (const mode of ['ask', 'accept_edits', 'auto', 'full'] as const) {
+    for (const mode of ['accept_edits', 'auto', 'full'] as const) {
       const facts = f.desktop.snapshot!.permissions!;
       const result = await f.desktop.setPermissionMode(mode, mode === 'auto', facts.observationId);
       expect(result.state).toBe('applied');
@@ -138,7 +138,7 @@ test('actual default host/HTTP/SQL explicit four modes and displayed trust scope
     expect((await f.client.getWorkspaceTrust('w', { storeId: f.storeId })).trusted).toBe(false);
     expect((await f.store.getView('s')).runs).toEqual([]);
     expect(await f.store.listExecutions('s')).toEqual([]);
-    expect(f.desktop.permissionSubmissions).toHaveLength(6);
+    expect(f.desktop.permissionSubmissions).toHaveLength(5);
   } finally {
     await f.close();
   }
@@ -164,7 +164,9 @@ test('in-flight duplicate shares one exact intent; late lost receipt only looks 
     await f.desktop.selectSession('other');
     const other = f.desktop.snapshot!;
     expect(
-      await errorCode(f.desktop.setPermissionMode('ask', false, other.permissions!.observationId)),
+      await errorCode(
+        f.desktop.setPermissionMode('accept_edits', false, other.permissions!.observationId),
+      ),
     ).toBe('permission_intent_pending');
     barrier.release();
     expect(await outcome).toBe('network_outcome_unknown');
@@ -209,12 +211,12 @@ test('real competing CAS retains failed choice and requires re-read and a fresh 
     const saved = f.desktop.permissionSubmissions[0]!;
     expect(saved.phase).toBe('failed');
     expect(saved.intent).toMatchObject({ mode: 'full', ifRevision: original.mode.revision });
-    expect(await errorCode(f.desktop.setPermissionMode('ask', false, original.observationId))).toBe(
-      'permission_observation_consumed',
-    );
+    expect(
+      await errorCode(f.desktop.setPermissionMode('accept_edits', false, original.observationId)),
+    ).toBe('permission_observation_consumed');
     await f.desktop.refreshPermissions();
     const newResult = await f.desktop.setPermissionMode(
-      'ask',
+      'accept_edits',
       false,
       f.desktop.snapshot!.permissions!.observationId,
     );
@@ -252,9 +254,9 @@ test('capability absent is local read-only; actual child root projection denies 
       storeId: 'store',
       sessionId: 'child',
       scopeSessionId: 'root',
-      mode: 'ask',
+      mode: 'accept_edits',
       revision: '0',
-      defaultMode: 'ask',
+      defaultMode: 'accept_edits',
       defaultRevision: '0',
     }),
     getWorkspaceTrust: async () => ({
@@ -317,9 +319,9 @@ test('bounded saved intents reject the 129th choice; disposal before queued tran
       storeId: 'store',
       sessionId: 's',
       scopeSessionId: 's',
-      mode: 'ask',
+      mode: 'accept_edits',
       revision: String(writes),
-      defaultMode: 'ask',
+      defaultMode: 'accept_edits',
       defaultRevision: '0',
     }),
     getWorkspaceTrust: async () => ({
@@ -334,7 +336,7 @@ test('bounded saved intents reject the 129th choice; disposal before queued tran
     }),
     async setPermissionMode(
       _session: string,
-      input: { commandId: string; mode: 'ask'; makeDefault: boolean },
+      input: { commandId: string; mode: 'accept_edits'; makeDefault: boolean },
     ) {
       writes++;
       return {
@@ -366,13 +368,21 @@ test('bounded saved intents reject the 129th choice; disposal before queued tran
   });
   await desktop.selectSession('s');
   for (let index = 0; index < 128; index++) {
-    await desktop.setPermissionMode('ask', false, desktop.snapshot!.permissions!.observationId);
+    await desktop.setPermissionMode(
+      'accept_edits',
+      false,
+      desktop.snapshot!.permissions!.observationId,
+    );
     await desktop.refreshPermissions();
   }
   expect(desktop.permissionSubmissions).toHaveLength(128);
   expect(
     await errorCode(
-      desktop.setPermissionMode('ask', false, desktop.snapshot!.permissions!.observationId),
+      desktop.setPermissionMode(
+        'accept_edits',
+        false,
+        desktop.snapshot!.permissions!.observationId,
+      ),
     ),
   ).toBe('permission_intent_limit');
   expect(writes).toBe(128);
@@ -384,7 +394,11 @@ test('bounded saved intents reject the 129th choice; disposal before queued tran
     },
   });
   await fresh.selectSession('s');
-  const queued = fresh.setPermissionMode('ask', false, fresh.snapshot!.permissions!.observationId);
+  const queued = fresh.setPermissionMode(
+    'accept_edits',
+    false,
+    fresh.snapshot!.permissions!.observationId,
+  );
   const result = errorCode(queued);
   fresh.disposeNetwork();
   expect(await result).toBe('controller_disposed');

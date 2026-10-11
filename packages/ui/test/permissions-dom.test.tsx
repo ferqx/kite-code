@@ -9,7 +9,7 @@ const facts = (sessionId = 'root'): PermissionFacts => ({
     storeId: 'store',
     sessionId,
     scopeSessionId: 'root',
-    mode: 'ask',
+    mode: 'accept_edits',
     revision: '11',
     defaultMode: 'auto',
     defaultRevision: '9',
@@ -78,9 +78,10 @@ test('actual React DOM keyboard makes one explicit mode/default choice; old late
     expect(host.textContent).toContain('scope_changed');
     await render(facts());
     expect(button('保存模式选择').disabled).toBe(true);
-    const radios = host.querySelectorAll<HTMLInputElement>('input[type=radio]');
+    const full = host.querySelector<HTMLInputElement>('input[name=permission-mode][value=full]')!;
+    expect(host.querySelectorAll('input[name=permission-mode]')).toHaveLength(3);
     await act(async () => {
-      radios[3]!.click();
+      full.click();
       host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click();
     });
     await act(async () => {

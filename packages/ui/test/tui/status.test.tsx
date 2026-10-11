@@ -28,8 +28,8 @@ const facts = (sessionId = 'a'): HostStatus => ({
     permissions: {
       state: 'available',
       scope: 'session',
-      mode: 'ask',
-      defaultMode: 'ask',
+      mode: 'accept_edits',
+      defaultMode: 'accept_edits',
       workspaceTrust: 'untrusted',
       reason: null,
     },

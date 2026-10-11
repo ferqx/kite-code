@@ -195,7 +195,7 @@ console.log('original verifier full output');\n`;
       ];
       const permissions = createPermissionPolicy({
         readPolicy: () => ({
-          mode: 'ask',
+          mode: 'accept_edits',
           workspaceTrust: true,
           revision: 'original-policy',
           allowed: identities,

@@ -242,8 +242,8 @@ static void deny_syscall(struct filter_builder *b, uint32_t number) {
   jump(b, BPF_JMP | BPF_JEQ | BPF_K, number, 0, 1);
   stmt(b, BPF_RET | BPF_K, DENIED);
 }
-static void socket_filter(struct filter_builder *b, uint32_t number, int mode) {
-  if (mode == 2) { deny_syscall(b, number); return; }
+static void socket_filter(struct filter_builder *b, uint32_t number, int mode, int internet) {
+  if (mode == 2 || !internet) { deny_syscall(b, number); return; }
   jump(b, BPF_JMP | BPF_JEQ | BPF_K, number, 0, mode == 1 ? 6 : 5);
   stmt(b, BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0]));
   jump(b, BPF_JMP | BPF_JEQ | BPF_K, AF_INET, mode == 1 ? 3 : 2, 0);
@@ -252,7 +252,7 @@ static void socket_filter(struct filter_builder *b, uint32_t number, int mode) {
   stmt(b, BPF_RET | BPF_K, DENIED);
   stmt(b, BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
 }
-static int install_filter(int mode) {
+static int install_filter(int mode, int internet) {
   int confined = mode == 2;
   struct filter_builder b = { .length = 0 };
   stmt(&b, BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch));
@@ -321,14 +321,14 @@ static int install_filter(int mode) {
   stmt(&b, BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
   /* Reload syscall nr after the clone block for its nonmatching path. */
   stmt(&b, BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr));
-  socket_filter(&b, SYS_socket, mode);
-  socket_filter(&b, SYS_socketpair, mode);
+  socket_filter(&b, SYS_socket, mode, internet);
+  socket_filter(&b, SYS_socketpair, mode, internet);
   stmt(&b, BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
   struct sock_fprog program = { .len = (unsigned short)b.length, .filter = b.items };
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) return -1;
   return prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &program);
 }
-static void shell_child(int gate, const char *shell, const char *command, int mode) {
+static void shell_child(int gate, const char *shell, const char *command, int mode, int internet) {
   if (configure_signals(1) != 0) _exit(126);
   char value = 0;
   ssize_t n;
@@ -339,7 +339,7 @@ static void shell_child(int gate, const char *shell, const char *command, int mo
       fcntl(STDIN_FILENO, F_SETFD, 0) != 0) _exit(126);
   /* Do not silently run with a leaked socket on older unsupported kernels. */
   if (syscall(SYS_close_range, 3U, UINT_MAX, 0U) != 0) _exit(126);
-  if (install_filter(mode) != 0) _exit(126);
+  if (install_filter(mode, internet) != 0) _exit(126);
   execl(shell, shell, "-c", command, (char *)NULL);
   _exit(127);
 }
@@ -654,12 +654,13 @@ static int absolute_path(const char *path) {
 }
 int main(int argc, char **argv) {
   int grace = 0;
-  if (argc < 9 || argc > 213 || !valid_nonce(argv[1]) || parse_grace(argv[2], &grace) != 0 ||
+  if (argc < 9 || argc > 215 || !valid_nonce(argv[1]) || parse_grace(argv[2], &grace) != 0 ||
       !absolute_path(argv[3]) || !absolute_path(argv[6]) ||
       strnlen(argv[4], 1048577) > 1048576 ||
       (strcmp(argv[5], "workspace") && strcmp(argv[5], "full") && strcmp(argv[5], "confined")) || getpid() != 1)
     return 125; /* No owned child exists before these checks. */
   int confined = !strcmp(argv[5], "confined");
+  int internet = !confined, network_scope_seen = 0;
   int section = 0;
   size_t argument_bytes = 0, path_count = 0;
   for (int i = 1; i < argc; i++) {
@@ -668,6 +669,15 @@ int main(int argc, char **argv) {
     argument_bytes += size + 1;
   }
   for (int i = 6; i < argc; i++) {
+    if (!strcmp(argv[i], "--network-scope")) {
+      if (i != 7 || section != 0 || network_scope_seen || i + 1 >= argc) return 125;
+      const char *value = argv[++i];
+      if (strcmp(value, "none") && strcmp(value, "internet")) return 125;
+      internet = !strcmp(value, "internet");
+      if (confined && internet) return 125;
+      network_scope_seen = 1;
+      continue;
+    }
     if (!strcmp(argv[i], "--source-projection")) {
       if (section != 2 || confined || source_root || i + 4 >= argc) return 125;
       source_root = argv[++i];
@@ -760,7 +770,7 @@ int main(int argc, char **argv) {
   if (root < 0) retain_unknown();
   if (root == 0) {
     if (close(gate[1]) != 0) _exit(126);
-    shell_child(gate[0], argv[3], argv[4], !strcmp(argv[5], "confined") ? 2 : !strcmp(argv[5], "full") ? 1 : 0);
+    shell_child(gate[0], argv[3], argv[4], !strcmp(argv[5], "confined") ? 2 : !strcmp(argv[5], "full") ? 1 : 0, internet);
     _exit(126);
   }
   close_owned(&gate[0]);

@@ -5,6 +5,10 @@ Status: implemented
 ## Problem
 [Agent Note 0160](2026-09-01-uncertain-shell-requires-exact-approval.md) 将无法证明只读或完整副作用的 Shell 固定路由到人工审批，包括 Auto 模式。实际会话中的 `unzip -p` 读取工作簿部件因此直接请求了两次人工审批，自动审批模型未参与。用户确认 Auto 模式下此类待审批操作应先经过审批模型。
 
+## 当前适用范围
+
+V1.3 正式 CLI/TUI/Native/Service 的模式矩阵、未知 Shell 一律人工和批准后不得开放请求范围的结论，已由[按单次审批绑定独立写入/网络范围](../architecture/2026-10-11-shell-per-call-permission-scopes.md)部分替代。当前仅有请求批准、Auto 与 Full；不透明工作区命令使用实际无网络沙箱，外部写入及联网须取得对应准确范围的批准，Auto 仍走真实三态审核。以下旧决定只保历史 Kernel 语境及仍适用的准确调用身份、硬拒绝、持久队列、恢复零重放和实际沙箱约束，不能用于恢复第四种正式权限模式。
+
 ## Decision
 1. Shell Policy 继续把此类命令编译为 `uncertainEffects`、`requiresApproval=true`，保留原有 sealed sandbox scope，不因模型批准扩大网络、文件系统或 Full authority。
 2. Auto 模式中的 `uncertainEffects` 走现有自动审查队列，由审批模型批准单次执行、拒绝或请求人工审批。此前审查触发熔断也不得使新的 Shell 命令跳过模型；模型调用故障或无效响应才升级人工。

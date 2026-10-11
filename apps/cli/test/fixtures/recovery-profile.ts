@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -29,7 +30,7 @@ export async function untilRecovery(check: () => Promise<boolean>) {
   }
 }
 
-/** Default compatible SDK, actual original Ask card, real SIGKILL and owned SQLite. */
+/** Default compatible SDK, actual original Auto ask_user card, real SIGKILL and owned SQLite. */
 export async function recoveryProfile() {
   const root = realpathSync(mkdtempSync('/private/tmp/kite-client-recovery-')),
     workspace = join(root, 'workspace'),
@@ -41,39 +42,59 @@ export async function recoveryProfile() {
   });
   const ledger = join(root, 'model-ledger');
   let calls = 0;
+  const reviews: { body: Record<string, unknown>; input: Record<string, unknown> }[] = [];
   const provider = (() => {
     try {
       return Bun.serve({
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
-          const body = (await request.json()) as { messages: { role: string }[] };
-          calls++;
-          const complete = body.messages.at(-1)?.role === 'tool';
-          appendFileSync(ledger, complete ? 'completion\n' : 'decision\n');
-          const delta = complete
-            ? { content: 'RECOVERED_ORIGINAL_DONE' }
-            : {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: 'original-file',
-                    type: 'function',
-                    function: {
-                      name: 'files.write',
-                      arguments: JSON.stringify({
-                        path: 'effect',
-                        content: 'ORIGINAL_EFFECT_ONCE',
-                        base: null,
-                      }),
+          const body = (await request.json()) as Record<string, unknown>;
+          const messages = body.messages as { role: string; content: string }[];
+          let input: Record<string, unknown> | undefined;
+          try {
+            const candidate = JSON.parse(
+              messages
+                .slice()
+                .reverse()
+                .find((message) => message.role === 'user')?.content ?? '',
+            );
+            if (candidate.purpose === 'authorization_review') input = candidate;
+          } catch {}
+          if (input) reviews.push({ body, input });
+          else calls++;
+          const complete = messages.at(-1)?.role === 'tool';
+          if (!input) appendFileSync(ledger, complete ? 'completion\n' : 'decision\n');
+          const delta = input
+            ? {
+                content: JSON.stringify({
+                  decision: 'ask_user',
+                  reason: 'Confirm the exact original recovery file edit',
+                }),
+              }
+            : complete
+              ? { content: 'RECOVERED_ORIGINAL_DONE' }
+              : {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'original-file',
+                      type: 'function',
+                      function: {
+                        name: 'files.write',
+                        arguments: JSON.stringify({
+                          path: 'effect',
+                          content: 'ORIGINAL_EFFECT_ONCE',
+                          base: null,
+                        }),
+                      },
                     },
-                  },
-                ],
-              };
+                  ],
+                };
           const frame = (delta: unknown, reason: string | null) =>
             `data: ${JSON.stringify({ id: 'fixed', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
           return new Response(
-            `${frame(delta, null)}${frame({}, complete ? 'stop' : 'tool_calls')}data: [DONE]\n\n`,
+            `${frame(delta, null)}${frame({}, input || complete ? 'stop' : 'tool_calls')}data: [DONE]\n\n`,
             { headers: { 'content-type': 'text/event-stream' } },
           );
         },
@@ -145,7 +166,7 @@ export async function recoveryProfile() {
     });
     for (const [line, invoke] of [
       ['trust\n', promptWorkspaceTrust],
-      ['ask\n', promptPermissionMode],
+      ['auto\n', promptPermissionMode],
     ] as const) {
       const reader = createStdioPermissionReader(Readable.from([line]));
       try {
@@ -169,6 +190,46 @@ export async function recoveryProfile() {
     if (card.definitionId !== 'files.write' || calls !== 1)
       throw Error('original_tool_card_not_ready');
     const run = (await client.getView('s')).runs.find((run) => run.isActive)!;
+    const rows = (sql: string) => {
+      const db = new Database(profile.databasePath, { readonly: true });
+      try {
+        return db.query(sql).all();
+      } finally {
+        db.close();
+      }
+    };
+    const reviewProof = () =>
+      rows(
+        "SELECT e.state,json_extract(e.result_json,'$.outcome') AS outcome,json_extract(json_extract(e.result_json,'$.content'),'$.decision') AS decision,e.parent_execution_id AS target FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review'",
+      ) as { state: string; outcome: string | null; decision: string | null; target: string }[];
+    if (
+      reviews.length !== 1 ||
+      JSON.stringify(reviews[0]!.body.tools ?? []) !== '[]' ||
+      existsSync(join(workspace, 'effect')) ||
+      readFileSync(ledger, 'utf8') !== 'decision\n'
+    )
+      throw Error('original_actual_review_not_ready');
+    const target = reviews[0]!.input.target as {
+      executionId: string;
+      sessionId: string;
+      runId: string;
+      originCommandId: string;
+    };
+    if (
+      target.sessionId !== 's' ||
+      target.runId !== run.id ||
+      target.originCommandId !== 'work' ||
+      JSON.stringify(reviewProof()) !==
+        JSON.stringify([
+          {
+            state: 'succeeded',
+            outcome: 'succeeded',
+            decision: 'ask_user',
+            target: target.executionId,
+          },
+        ])
+    )
+      throw Error('original_actual_review_proof_invalid');
     process.kill(warm.pid, 'SIGKILL');
     await warm.exited;
     warm.client.disposeNetwork();
@@ -185,14 +246,9 @@ export async function recoveryProfile() {
       ledger,
       launch,
       calls: () => calls,
-      rows(sql: string) {
-        const db = new Database(profile.databasePath, { readonly: true });
-        try {
-          return db.query(sql).all();
-        } finally {
-          db.close();
-        }
-      },
+      rows,
+      reviews,
+      reviewProof,
       close() {
         if (closed) return;
         closed = true;
@@ -202,12 +258,7 @@ export async function recoveryProfile() {
     };
   } catch (error) {
     if (warm) {
-      console.error(
-        'original crash preparation',
-        JSON.stringify(await warm.client.getView('s').catch(() => null)),
-        'modelCalls',
-        calls,
-      );
+      console.error('original crash preparation', String(error), 'modelCalls', calls);
       await warm.close().catch(() => {});
     }
     provider.stop(true);

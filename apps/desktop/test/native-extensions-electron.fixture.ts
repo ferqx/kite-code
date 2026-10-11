@@ -139,7 +139,7 @@ try {
     .check();
   await permissions.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
   await permissions.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
-  await permissions.getByRole('radio', { name: 'Full', exact: true }).check();
+  await permissions.locator('input[name="permission-mode"][value="full"]').check();
   await permissions.getByRole('button', { name: '保存模式选择', exact: true }).click();
   await permissions.getByText(/^当前模式：full；默认模式：/).waitFor();
   await page

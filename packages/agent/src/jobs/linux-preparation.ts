@@ -10,6 +10,11 @@ import {
   verifyLaunchIdentities,
 } from './launch-identity';
 import { captureReadOnlySource } from './read-only-source';
+import {
+  type HostShellExecutionScope,
+  type HostShellExecutionScopeResolver,
+  resolveHostShellExecutionScope,
+} from './shell-scope';
 
 export interface LinuxPaths {
   readonly cwd: string;
@@ -21,6 +26,7 @@ export interface LinuxPaths {
   readonly readonlyAssets?: readonly string[];
   readonly runtimeReadOnlyRoots?: readonly string[];
   readonly temporaryRoot?: string;
+  readonly executionScope?: HostShellExecutionScope | HostShellExecutionScopeResolver;
   readonly filesystemScope:
     | 'workspace_write'
     | 'full_access'
@@ -42,6 +48,7 @@ export interface LinuxLaunch {
   profileDigest: string;
   preserveHostHome: boolean;
   mode: 'workspace' | 'full' | 'confined';
+  networkScope: 'none' | 'internet';
   bubblewrapArgs: string[];
   noExecPaths: string[];
   bubblewrapPath: string;
@@ -196,14 +203,18 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
       )
     )
       throw Error('linux_shell_executable_unbound');
-    const scope =
-      typeof options.filesystemScope === 'function'
-        ? options.filesystemScope(context)
-        : options.filesystemScope;
-    if (scope !== 'workspace_write' && scope !== 'full_access')
-      throw Error('linux_shell_scope_unavailable');
+    const scope = resolveHostShellExecutionScope(
+      options.executionScope,
+      options.filesystemScope,
+      context,
+    );
     const mode =
-      options.mode === 'confined' ? 'confined' : scope === 'full_access' ? 'full' : 'workspace';
+      options.mode === 'confined'
+        ? 'confined'
+        : scope.filesystem === 'full_access'
+          ? 'full'
+          : 'workspace';
+    const networkScope = mode === 'confined' ? 'none' : scope.network;
     const temp = realpathSync.native(mkdtempSync(join(tempBase.canonical, 'kite-linux-job-')));
     chmodSync(temp, 0o700);
     const runtimeTemp = launchIdentity(temp);
@@ -219,6 +230,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
         .update(
           JSON.stringify({
             mode,
+            networkScope,
             args,
             noExecPaths,
             trustedExecutableFiles,
@@ -230,6 +242,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
         .digest('hex'),
       preserveHostHome: mode !== 'confined',
       mode,
+      networkScope,
       bubblewrapArgs: [...args],
       noExecPaths: [...noExecPaths],
       bubblewrapPath: launcher.canonical,
@@ -255,7 +268,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
         '--cap-add',
         'CAP_SYS_ADMIN',
       ];
-      if (mode === 'confined') args.push('--unshare-net');
+      if (networkScope === 'none') args.push('--unshare-net');
       if (mode !== 'confined') {
         args.push(mode === 'full' ? '--bind' : '--ro-bind', '/', '/');
         // Separate mountpoints prevent deleting/renaming protected ancestors without making sibling trees readonly in Full.

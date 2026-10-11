@@ -186,7 +186,7 @@ async function fixture(ask = false) {
       },
       permissionPolicy: {
         readPolicy: (request) => ({
-          mode: ask ? 'ask' : 'full',
+          mode: ask ? 'accept_edits' : 'full',
           workspaceTrust: true,
           revision: 'owned-policy',
           allowed: [

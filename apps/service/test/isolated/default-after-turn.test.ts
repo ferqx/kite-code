@@ -415,7 +415,7 @@ async function fixture(
       : {
           async readPolicy() {
             return {
-              mode: planning ? 'full' : 'ask',
+              mode: planning ? 'full' : 'accept_edits',
               workspaceTrust: trusted,
               revision: currentRevision,
               allowed: [
@@ -566,7 +566,7 @@ async function fixture(
     await client.setPermissionMode('s', {
       expectedStoreId,
       commandId: 'mode',
-      mode: 'ask',
+      mode: 'accept_edits',
       ifRevision: mode.revision,
       ifDefaultRevision: mode.defaultRevision,
       makeDefault: false,

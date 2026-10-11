@@ -164,7 +164,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     },
     permissionPolicy: {
       readPolicy: (request) => ({
-        mode: ask ? 'ask' : 'full',
+        mode: ask ? 'accept_edits' : 'full',
         workspaceTrust: true,
         revision: 'fixture-host',
         allowed: [

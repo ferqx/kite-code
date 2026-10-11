@@ -13,6 +13,7 @@ import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { AuthorizationRequest, JobContext, JobEvent } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -31,8 +32,20 @@ async function until<T>(read: () => Promise<T | undefined>) {
     await Bun.sleep(5);
   }
 }
-function endpoint(command: string, stop = false, background = false, child = false) {
+type RequestedScope = {
+  filesystem: 'workspace_write' | 'full_access';
+  network: 'none' | 'internet';
+};
+function endpoint(
+  command: string,
+  stop = false,
+  background = false,
+  child = false,
+  review?: 'approve_once' | 'reject' | 'ask_user',
+) {
   let actualCommand = command;
+  let permissions: RequestedScope | undefined;
+  const reviews: Record<string, unknown>[] = [];
   let beforeStop: (() => Promise<void>) | undefined;
   const requests: Record<string, unknown>[] = [];
   const server = Bun.serve({
@@ -42,6 +55,18 @@ function endpoint(command: string, stop = false, background = false, child = fal
       const body = (await request.json()) as Record<string, unknown>;
       requests.push(body);
       const messages = body.messages as { role: string; content: string }[];
+      let reviewPayload: Record<string, unknown> | undefined;
+      if (review) {
+        try {
+          const parsed = JSON.parse(
+            messages.filter((row) => row.role === 'user').at(-1)?.content ?? '',
+          ) as Record<string, unknown>;
+          if (parsed.purpose === 'authorization_review') {
+            reviewPayload = parsed;
+            reviews.push(parsed);
+          }
+        } catch {}
+      }
       const last = messages.reduce(
         (v, m, i) =>
           m.role === 'user' &&
@@ -71,7 +96,12 @@ function endpoint(command: string, stop = false, background = false, child = fal
           : [
               {
                 name: 'shell.launch',
-                input: { key, command: actualCommand, cancellation: 'detached' },
+                input: {
+                  key,
+                  command: actualCommand,
+                  cancellation: 'detached',
+                  ...(permissions ? { permissions } : {}),
+                },
               },
               {
                 name: stop ? 'shell.stop' : 'shell.wait',
@@ -82,7 +112,8 @@ function endpoint(command: string, stop = false, background = false, child = fal
               { name: 'shell.wait', input: { shellId: key, timeoutMs: 4000 } },
               { name: 'shell.read', input: { shellId: key, afterSeq: '0', limit: 200 } },
             ];
-      const call = background && results.length > 0 ? undefined : calls[results.length];
+      const call =
+        reviewPayload || (background && results.length > 0) ? undefined : calls[results.length];
       if (call?.name === 'shell.stop') await beforeStop?.();
       const chunk = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
@@ -99,7 +130,11 @@ function endpoint(command: string, stop = false, background = false, child = fal
                   },
                 ],
               }
-            : { content: 'supervised Shell facts' },
+            : {
+                content: reviewPayload
+                  ? JSON.stringify({ decision: review, reason: 'scope rejected by reviewer' })
+                  : 'supervised Shell facts',
+              },
           null,
         ) +
           chunk({}, call ? 'tool_calls' : 'stop') +
@@ -110,6 +145,10 @@ function endpoint(command: string, stop = false, background = false, child = fal
   });
   return {
     requests,
+    reviews,
+    permissions(value?: RequestedScope) {
+      permissions = value;
+    },
     beforeStop(callback: () => Promise<void>) {
       beforeStop = callback;
     },
@@ -122,7 +161,8 @@ function endpoint(command: string, stop = false, background = false, child = fal
 }
 async function fixture(
   options: {
-    mode?: 'full' | 'ask';
+    mode?: 'full' | 'accept_edits' | 'auto';
+    review?: 'approve_once' | 'reject' | 'ask_user';
     deny?: 'tool' | 'job';
     missing?: boolean;
     badAsset?: boolean;
@@ -155,7 +195,7 @@ async function fixture(
     options.command ??
     // biome-ignore lint/suspicious/noTemplateCurlyInString: actual POSIX parameter expansion, not JavaScript
     'printf \'%s|%s|%s\' "$PWD" "$FIXED_VALUE" "${HOME-unset}"; printf once >> effect';
-  const a = endpoint(command, options.stop, options.background, options.child),
+  const a = endpoint(command, options.stop, options.background, options.child, options.review),
     b = endpoint('printf next >> effect');
   const configuration = {
     modelId: 'model',
@@ -237,6 +277,7 @@ async function fixture(
     permissions: host.permissions!,
     modelConcurrency: 1,
     processConcurrency: 1,
+    ...(options.review ? { artifacts: createArtifactStore({ profile, store }) } : {}),
   });
   const expectedStoreId = (await store.getMetadata()).storeId;
   const base = { expectedStoreId, sessionId: 's', subjectId: 'user' };
@@ -252,8 +293,8 @@ async function fixture(
     const initial = await permissionManagement.readMode(base);
     await permissionManagement.setMode({
       ...base,
-      commandId: 'set-ask',
-      mode: 'ask',
+      commandId: 'set-mode',
+      mode: options.mode ?? 'accept_edits',
       ifRevision: initial.revision,
       makeDefault: false,
       ifDefaultRevision: initial.defaultRevision,
@@ -328,9 +369,14 @@ async function fixture(
   };
 }
 nativeTest(
-  'default delegated Shell preserves accepted parent/child policy snapshots for Full and approved Ask',
+  'default delegated Shell preserves accepted parent/child policy snapshots for Full and Auto human fallback',
   async () => {
-    const f = await fixture({ hostBoundary: true, persistentPermissions: true, child: true });
+    const f = await fixture({
+      hostBoundary: true,
+      persistentPermissions: true,
+      child: true,
+      review: 'ask_user',
+    });
     const outside = join(f.root, 'child-outside-effect');
     const dispatch = f.store.markDispatching.bind(f.store);
     const snapshots: unknown[] = [];
@@ -340,7 +386,7 @@ nativeTest(
         snapshots.push(structuredClone(input.authorization.snapshot));
       return result;
     };
-    const setMode = async (mode: 'full' | 'ask', commandId: string) => {
+    const setMode = async (mode: 'full' | 'auto', commandId: string) => {
       const current = await f.permissionManagement.readMode(f.base);
       await f.permissionManagement.setMode({
         ...f.base,
@@ -354,7 +400,7 @@ nativeTest(
     const childJob = () =>
       until(async () => {
         const child = (await f.store.listExecutions('s'))
-          .filter((row) => row.childSessionId)
+          .filter((row) => row.childSessionId && row.definitionId === 'agent/worker')
           .at(-1);
         if (!child?.childSessionId) return undefined;
         const job = (await f.store.listExecutions(child.childSessionId)).find(
@@ -373,7 +419,7 @@ nativeTest(
       });
       expect(readFileSync(outside, 'utf8')).toBe('full');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('full');
-      await setMode('ask', 'child-ask');
+      await setMode('auto', 'child-auto');
       f.a.command(`printf denied > '${outside}'; printf ask >> effect`);
       await f.submit('grant-child');
       await f.approve('task', 'child-approve-task');
@@ -392,7 +438,7 @@ nativeTest(
       expect(readFileSync(outside, 'utf8')).toBe('full');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('fullask');
       expect(snapshots).toEqual(
-        ['full', 'ask'].map((mode) =>
+        ['full', 'auto'].map((mode) =>
           expect.objectContaining({
             namespace: 'agent.permission-intersection',
             version: '1',
@@ -430,7 +476,7 @@ nativeTest(
   async () => {
     const f = await fixture({ hostBoundary: true });
     const outside = join(f.root, 'nested-outside-effect');
-    const leaf = (mode: 'full' | 'ask') => ({
+    const leaf = (mode: 'full' | 'accept_edits') => ({
       namespace: 'builtin.permissions',
       version: '1',
       data: {
@@ -485,7 +531,7 @@ nativeTest(
         signal: new AbortController().signal,
         dispatchAuthorization: {
           revision: 'owned-final-acceptance',
-          snapshot: intersect([intersect([leaf('full')]), leaf('ask')]),
+          snapshot: intersect([intersect([leaf('full')]), leaf('accept_edits')]),
         },
       };
       const handle = await job.start(
@@ -536,6 +582,7 @@ nativeTest(
       hostBoundary: true,
       persistentPermissions: true,
       background: true,
+      review: 'ask_user',
     });
     const outside = join(f.root, 'outside-effect');
     const dispatch = f.store.markDispatching.bind(f.store);
@@ -546,7 +593,7 @@ nativeTest(
         snapshots.push(structuredClone(input.authorization.snapshot));
       return result;
     };
-    const setMode = async (mode: 'full' | 'ask', commandId: string) => {
+    const setMode = async (mode: 'full' | 'auto', commandId: string) => {
       const current = await f.permissionManagement.readMode(f.base);
       await f.permissionManagement.setMode({
         ...f.base,
@@ -577,7 +624,7 @@ nativeTest(
         result: { details: { processTreeStopped: true } },
       });
       expect(readFileSync(outside, 'utf8')).toBe('full');
-      await setMode('ask', 'host-ask');
+      await setMode('auto', 'host-auto');
       f.a.command(`printf denied > '${outside}'; printf workspace >> effect`);
       await f.submit('grant-workspace');
       await f.approve('shell.launch', 'host-approve-tool');
@@ -605,7 +652,7 @@ nativeTest(
         expect.objectContaining({
           namespace: 'builtin.permissions',
           version: '1',
-          data: expect.objectContaining({ mode: 'ask', workspaceTrust: true }),
+          data: expect.objectContaining({ mode: 'auto', workspaceTrust: true }),
         }),
       ]);
     } catch (error) {
@@ -772,9 +819,9 @@ nativeTest(
   15000,
 );
 nativeTest(
-  'Ask launch approval precedes a separate exact Shell Job approval and any process effect',
+  'Request Approval launch approval precedes a separate exact Shell Job approval and any process effect',
   async () => {
-    const f = await fixture({ mode: 'ask' });
+    const f = await fixture({ mode: 'accept_edits' });
     try {
       await f.submit();
       const tool = await f.card('shell.launch');
@@ -1260,6 +1307,202 @@ nativeTest(
       expect((await f.store.getView('s')).runs[0]?.status).toBe('completed');
     } finally {
       await f.close();
+    }
+  },
+  15000,
+);
+
+nativeTest(
+  'formal Request Approval runs opaque Workspace Shell once and independently approves outside writes and Internet',
+  async () => {
+    const f = await fixture({ mode: 'accept_edits', hostBoundary: true });
+    let connections = 0;
+    const server = createServer((_request, response) => {
+      connections++;
+      response.end('okay');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const outside = join(f.root, 'outside-approved');
+    const port = (server.address() as { port: number }).port;
+    const curl = `/usr/bin/curl --connect-timeout 1 --max-time 1 -s http://127.0.0.1:${port}/`;
+    const latestJob = async () =>
+      (await f.store.listExecutions('s'))
+        .filter((row) => row.definitionId === 'shell.command')
+        .at(-1)!;
+    const approveBoth = async (prefix: string) => {
+      await f.approve('shell.launch', `${prefix}-tool`);
+      const card = await f.card('shell.command');
+      expect((await f.store.getExecution(card.executionId))?.status).toBe('planned');
+      await f.approve('shell.command', `${prefix}-job`);
+    };
+    try {
+      f.a.command(
+        `printf begin >> effect; printf blocked > '${outside}'; ${curl}; printf end >> effect`,
+      );
+      await f.submit();
+      await f.done();
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('beginend');
+      expect(existsSync(outside)).toBe(false);
+      expect(connections).toBe(0);
+      expect(
+        (await f.store.listInteractions({ ...f.base, state: 'pending' })).interactions,
+      ).toHaveLength(0);
+      expect(await latestJob()).toMatchObject({
+        status: 'succeeded',
+        result: { details: { processTreeStopped: true } },
+      });
+      expect(
+        (await f.store.listExecutions('s')).filter((row) => row.definitionId === 'shell.command'),
+      ).toHaveLength(1);
+
+      f.a.permissions({ filesystem: 'full_access', network: 'none' });
+      f.a.command(`printf granted > '${outside}'; ${curl}; printf outside >> effect`);
+      await f.submit('grant-outside');
+      const card = await f.card('shell.launch');
+      expect(card.request).toMatchObject({
+        policy: { executionScope: { filesystem: 'full_access', network: 'none' } },
+      });
+      expect(existsSync(outside)).toBe(false);
+      await approveBoth('outside');
+      await f.done('grant-outside');
+      expect(readFileSync(outside, 'utf8')).toBe('granted');
+      expect(connections).toBe(0);
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('beginendoutside');
+
+      f.a.permissions({ filesystem: 'workspace_write', network: 'internet' });
+      f.a.command(`printf blocked > '${outside}'; ${curl}; printf network >> effect`);
+      await f.submit('grant-network-denied');
+      const deny = await f.card('shell.launch');
+      expect(connections).toBe(0);
+      await f.runtime.answerInteraction({
+        ...f.base,
+        presentationSessionId: 's',
+        commandId: 'network-deny',
+        interactionId: deny.id,
+        expectedRevision: deny.revision,
+        answer: { kind: 'approval', decision: 'deny' },
+      });
+      await f.done('grant-network-denied');
+      expect(connections).toBe(0);
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('beginendoutside');
+
+      await f.submit('grant-network');
+      await approveBoth('network');
+      await f.done('grant-network');
+      expect(connections).toBe(1);
+      expect(readFileSync(outside, 'utf8')).toBe('granted');
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('beginendoutsidenetwork');
+      expect(await latestJob()).toMatchObject({
+        status: 'succeeded',
+        result: { details: { processTreeStopped: true } },
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await f.close();
+    }
+  },
+  20000,
+);
+
+nativeTest(
+  'formal Auto uses actual Model review for Shell scope and explicit rejection has zero effect and visible reason',
+  async () => {
+    for (const decision of ['approve_once', 'reject'] as const) {
+      const f = await fixture({
+        mode: 'auto',
+        hostBoundary: true,
+        review: decision,
+        command: 'printf reviewed >> effect',
+      });
+      try {
+        await f.submit();
+        await f.done();
+        expect(f.a.reviews.length).toBeGreaterThan(0);
+        expect(
+          (await f.store.listInteractions({ ...f.base, state: 'pending' })).interactions,
+        ).toHaveLength(0);
+        if (decision === 'approve_once') {
+          expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('reviewed');
+          expect(
+            (await f.store.listExecutions('s')).find((row) => row.definitionId === 'shell.command'),
+          ).toMatchObject({
+            status: 'succeeded',
+            result: { details: { processTreeStopped: true } },
+          });
+        } else {
+          expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
+          expect(
+            (await f.store.listExecutions('s')).find((row) => row.definitionId === 'shell.launch'),
+          ).toMatchObject({
+            status: 'failed',
+            result: { details: { reason: 'scope rejected by reviewer' } },
+            authorization: {
+              dispatched: false,
+              review: { decision: 'reject', reason: 'scope rejected by reviewer' },
+            },
+          });
+          expect((await f.store.getView('s')).runs.at(-1)?.status).toBe('cancelled');
+          expect(
+            (await f.store.listExecutions('s')).filter(
+              (row) => row.definitionId === 'shell.command',
+            ),
+          ).toHaveLength(0);
+        }
+      } finally {
+        await f.close();
+      }
+    }
+  },
+  15000,
+);
+
+nativeTest(
+  'formal extreme dangerous literal command is refused before approval or Job effects under all three policies',
+  async () => {
+    for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+      for (const command of [
+        'rm -rf /; printf unsafe > effect',
+        'printf unsafe > effect; cd /etc; rm -rf ./kite-fixed-guard-never-created',
+      ]) {
+        const f = await fixture({
+          mode,
+          hostBoundary: true,
+          review: 'approve_once',
+          command,
+        });
+        try {
+          await f.submit();
+          await f.done();
+          expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
+          expect(f.a.reviews).toHaveLength(0);
+          expect(
+            (await f.store.listInteractions({ ...f.base, state: 'pending' })).interactions,
+          ).toHaveLength(0);
+          expect(
+            (await f.store.listExecutions('s')).filter(
+              (row) => row.definitionId === 'shell.command',
+            ),
+          ).toHaveLength(0);
+          expect(
+            await f.runtime.getExecution(
+              (await f.store.listExecutions('s')).find(
+                (row) => row.definitionId === 'shell.launch',
+              )!.id,
+            ),
+          ).toMatchObject({
+            result: {
+              content: 'permission_denied',
+              details: {
+                reason: 'shell_command_hard_denied',
+                adapterAttempted: false,
+                dispatchCommitted: false,
+              },
+            },
+          });
+        } finally {
+          await f.close();
+        }
+      }
     }
   },
   15000,

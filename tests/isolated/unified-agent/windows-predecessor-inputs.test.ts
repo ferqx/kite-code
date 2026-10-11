@@ -49,7 +49,7 @@ test('real Windows predecessor retains exactly its original eleven locked input 
   }
 });
 
-test('current Windows inputs retain all original bytes except the exact CI stdio script increment', () => {
+test('current Windows inputs retain all original bytes except the exact CI stdio and locked parser increments', () => {
   for (const [path, expected] of Object.entries(previousInputs)) {
     const original = Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
       cwd: root,
@@ -62,8 +62,17 @@ test('current Windows inputs retain all original bytes except the exact CI stdio
       currentSha256:
         path === 'package.json'
           ? '3743d37499030ce97f727b5a72e9c84d59d6a6a6ad41f8708530d661f899ba2a'
-          : expected,
-      match: path === 'package.json' ? 'runtime_stdio_validation_script_increment' : 'identical',
+          : path === 'bun.lock'
+            ? 'a16f113d4924eb1f2c56b87fa92b1124ff107a432eb7336ee9b8c9dcdc199b88'
+            : path === 'apps/service/package.json'
+              ? '3924deb4c17cf2795d03767abe0e42cbd7cffdfe8efe05d7d615dd257815ade1'
+              : expected,
+      match:
+        path === 'package.json'
+          ? 'runtime_stdio_validation_script_increment'
+          : path === 'bun.lock' || path === 'apps/service/package.json'
+            ? 'shell_parser_locked_dependency_increment'
+            : 'identical',
     });
     if (path === 'package.json') {
       expect(() =>

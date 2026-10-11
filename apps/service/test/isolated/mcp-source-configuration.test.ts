@@ -208,7 +208,7 @@ async function fixture(
     permissions: safePolicy
       ? createPermissionPolicy({
           readPolicy: () => ({
-            mode: 'ask',
+            mode: 'accept_edits',
             workspaceTrust: true,
             revision: 'source-default-policy',
             allowed: [

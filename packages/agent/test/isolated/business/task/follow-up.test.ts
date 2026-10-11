@@ -268,7 +268,34 @@ test.each([
       commandId: 'work',
       request: { kind: 'run.start', content: 'delegate twice' },
     });
-    await runtime.waitForCommand('work', { timeoutMs: 8000 });
+    try {
+      await runtime.waitForCommand('work', { timeoutMs: 8000 });
+    } catch (error) {
+      try {
+        console.error(
+          JSON.stringify({
+            stage: 'original_follow_up_wait_rejected',
+            mode,
+            calls,
+            requests: requests.length,
+            childStreams,
+            maxForeground,
+            old,
+            command: await store.getCommand('work'),
+            root: await store.getView('root'),
+            child: old ? await store.getView(old.childSessionId) : null,
+            records: await store.listExtensionRecords({
+              extensionId: 'builtin.task',
+              sessionId: 'root',
+              limit: 200,
+            }),
+          }),
+        );
+      } catch (diagnosticError) {
+        console.error('original_follow_up_snapshot_failed', diagnosticError);
+      }
+      throw error;
+    }
     const root = await store.getView('root');
     if (mode === 'root-delete') {
       expect(requests).toHaveLength(1);

@@ -221,6 +221,7 @@ export function createLinuxShellJob(
             graceMs: grace,
             temp: launch.temp,
             mode: launch.mode,
+            networkScope: launch.networkScope,
             noExecPaths: launch.noExecPaths,
             trustedExecutableFiles: launch.trustedExecutableFiles,
             maskedRoots: launch.maskedRoots,

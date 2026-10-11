@@ -236,7 +236,7 @@ async function fixture(scenario: Scenario) {
       await client.setPermissionMode('parent', {
         expectedStoreId,
         commandId: 'ask',
-        mode: 'ask',
+        mode: 'accept_edits',
         ifRevision: mode.revision,
         makeDefault: true,
         ifDefaultRevision: mode.defaultRevision,

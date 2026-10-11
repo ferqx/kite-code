@@ -135,10 +135,40 @@ try {
   // Closing and switching abort only a pending page query, including a late response.
   for (const change of ['close', 'switch'] as const) {
     await request({ method: 'select', generation: 1, sessionId: 's' });
+    const enteredDeadline = Date.now() + 10000;
+    let prepared: { key: string; at: number } | undefined;
+    while (true) {
+      const observed = await state();
+      const selection = observed.selection;
+      if (
+        observed.generation !== 1 ||
+        selection?.storeId !== storeId ||
+        selection?.session.id !== 's' ||
+        selection.session.workspaceId !== 'w' ||
+        selection.interactionsAfterId === null
+      )
+        throw Error('interaction_pages_read_scope_changed');
+      if (
+        !selection.viewLoading &&
+        !selection.permissionUnavailable &&
+        selection.executions.some(
+          (execution) => execution.id === original.executionId && execution.status === 'succeeded',
+        ) &&
+        readFileSync(join(root!, 'ledger'), 'utf8').trim().split('\n').length === 1
+      ) {
+        const key = JSON.stringify([observed.environmentRevision, selection.viewGeneration]);
+        if (prepared?.key !== key) prepared = { key, at: Date.now() };
+        else if (Date.now() - prepared.at >= 250) {
+          console.error('pages_read_prepared', JSON.stringify({ change, key, effects: 1 }));
+          break;
+        }
+      } else prepared = undefined;
+      if (Date.now() >= enteredDeadline) throw Error('interaction_pages_read_prepare_timeout');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     await app.evaluate(
       `(()=>{globalThis.__pagesFetch=globalThis.fetch;globalThis.__pagesReadEntered=false;globalThis.__pagesReadAborted=false;const gate=new Promise(r=>globalThis.__pagesRelease=r);globalThis.fetch=async(input,init)=>{const r=new Request(input,init);if(r.method==='GET'&&new URL(r.url).searchParams.has('afterId')&&new URL(r.url).pathname.endsWith('/interactions')){globalThis.__pagesReadEntered=true;r.signal.addEventListener('abort',()=>globalThis.__pagesReadAborted=true,{once:true});await gate;}return globalThis.__pagesFetch(input,init);};})()`,
     );
-    const enteredDeadline = Date.now() + 10000;
     let current = await state();
     let pending: Promise<{ value: unknown } | { error: unknown }> | undefined;
     let entered = false;

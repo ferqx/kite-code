@@ -21,7 +21,10 @@ async function until<T>(read: () => Promise<T | null>) {
     await Bun.sleep(10);
   }
 }
-async function fixture(mode: PermissionPolicySnapshot['mode'] = 'ask', toolId = 'fixture.effect') {
+async function fixture(
+  mode: PermissionPolicySnapshot['mode'] = 'accept_edits',
+  toolId = 'fixture.effect',
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-permission-policy-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -51,7 +54,7 @@ async function fixture(mode: PermissionPolicySnapshot['mode'] = 'ask', toolId = 
     definitionId: toolId,
     definitionVersion: '1',
     revision: 'registration-1',
-    effects: ['workspace_write'],
+    effects: ['external'],
     hardAllowed: true,
     safeRead: false,
   };
@@ -179,7 +182,7 @@ async function fixture(mode: PermissionPolicySnapshot['mode'] = 'ask', toolId = 
   };
 }
 
-test('Ask exact Core card approval grants one original invocation, preserves parameters and duplicate work performs no effect', async () => {
+test('Request Approval exact Core card approval grants one original invocation, preserves parameters and duplicate work performs no effect', async () => {
   const f = await fixture();
   try {
     await f.submit();
@@ -188,7 +191,7 @@ test('Ask exact Core card approval grants one original invocation, preserves par
       definitionId: 'fixture.effect',
       definitionVersion: '1',
       input: { path: 'file', value: 'exact' },
-      policy: { mode: 'ask', effects: ['workspace_write'] },
+      policy: { mode: 'accept_edits', effects: ['external'] },
     });
     expect(f.effects).toBe(0);
     const answer = await f.approve(card);
@@ -245,11 +248,12 @@ test('policy trust, allowlist, registration or mode changes while human waits ne
   }
 });
 
-test('trusted Accept Edits and safe Ask reads execute without a card; Full bypasses ordinary unknown effect classification', async () => {
-  for (const mode of ['accept_edits', 'ask', 'full'] as const) {
+test('trusted Accept Edits workspace writes and safe Auto reads execute without a card; Full bypasses ordinary unknown effect classification', async () => {
+  for (const mode of ['accept_edits', 'auto', 'full'] as const) {
     const f = await fixture(mode);
     try {
-      if (mode === 'ask') f.capability = { ...f.capability, effects: ['read'], safeRead: true };
+      if (mode === 'accept_edits') f.capability = { ...f.capability, effects: ['workspace_write'] };
+      if (mode === 'auto') f.capability = { ...f.capability, effects: ['read'], safeRead: true };
       if (mode === 'full')
         f.capability = { ...f.capability, effects: ['unknown'], safeRead: false };
       await f.submit();
@@ -319,7 +323,7 @@ test('policy finite validation and aborted request never manufacture approval au
     readPolicy() {
       reads++;
       return {
-        mode: 'ask',
+        mode: 'accept_edits',
         workspaceTrust: true,
         revision: '1',
         allowed: Array.from({ length: 513 }, () => ({
@@ -373,8 +377,8 @@ test('Full preserves hard capability, current Workspace trust and exact register
   }
 });
 
-test('record_write stays outside Accept Edits; Ask and unqualified Auto require exact approval while Full uses trusted allowed metadata', async () => {
-  for (const mode of ['ask', 'accept_edits', 'auto', 'full'] as const) {
+test('record_write stays outside Accept Edits; Request Approval and unqualified Auto require exact approval while Full uses trusted allowed metadata', async () => {
+  for (const mode of ['accept_edits', 'auto', 'full'] as const) {
     const f = await fixture(mode);
     try {
       f.capability = { ...f.capability, effects: ['record_write'], safeRead: false };

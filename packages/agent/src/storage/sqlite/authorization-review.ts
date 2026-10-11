@@ -219,6 +219,84 @@ function decisionContext(
     ? { modelExecutionId: source.modelExecutionId, modelInput: intent }
     : { modelExecutionId: source.modelExecutionId, messages: intent.messages! };
 }
+/** Transfer only settled review fencing in the same transaction as its undispatched target. */
+export function transferAuthorizationReviewOwnership(
+  db: SqliteOperations,
+  target: Row,
+  originalGeneration: string,
+  generation: string,
+): void {
+  if (target.kind !== 'tool') return;
+  if (
+    target.state !== 'planned' ||
+    target.dispatched ||
+    String(target.owner_generation) !== originalGeneration
+  )
+    throw new AgentError('authorization_review_unverifiable');
+  const carriers = db.rows(
+    "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review' AND e.parent_execution_id=? AND e.state IN('succeeded','failed')",
+    target.id!,
+  );
+  for (const carrier of carriers) {
+    // Invalid or obsolete proposals stay invalid; this handoff does not approve them.
+    if (authorizationReviewSourceTarget(db, carrier)?.id !== target.id) continue;
+    const runs = db.rows('SELECT * FROM run WHERE session_id=?', carrier.child_session_id!);
+    if (runs.length > 1 || (carrier.state === 'succeeded' && runs.length !== 1))
+      throw new AgentError('authorization_review_unverifiable');
+    if (runs.length) {
+      const run = runs[0]!;
+      const origin = db.row('SELECT * FROM command WHERE id=?', run.origin_command_id!);
+      const original = db.row('SELECT * FROM command WHERE id=?', target.origin_command_id!);
+      if (
+        run.is_active ||
+        !['completed', 'failed', 'cancelled', 'interrupted'].includes(String(run.status)) ||
+        (carrier.state === 'succeeded' && run.status !== 'completed') ||
+        run.origin_store_id !== target.origin_store_id ||
+        run.root_work_command_id !== target.root_work_command_id ||
+        run.root_work_seq !== target.root_work_seq ||
+        origin?.kind !== 'child.start' ||
+        origin.cancelled ||
+        origin.session_id !== carrier.child_session_id ||
+        origin.subject_id !== original?.subject_id ||
+        origin.origin_store_id !== target.origin_store_id ||
+        origin.root_work_command_id !== target.root_work_command_id ||
+        origin.root_work_seq !== target.root_work_seq ||
+        object(JSON.parse(String(origin.request_json))).parentExecutionId !== carrier.id
+      )
+        throw new AgentError('authorization_review_unverifiable');
+      const models = db.rows('SELECT * FROM execution WHERE run_id=?', run.id!);
+      if (models.length > 1 || (carrier.state === 'succeeded' && models.length !== 1))
+        throw new AgentError('authorization_review_unverifiable');
+      for (const model of models) {
+        if (
+          model.kind !== 'model' ||
+          !['succeeded', 'failed', 'cancelled'].includes(String(model.state)) ||
+          (carrier.state === 'succeeded' && model.state !== 'succeeded') ||
+          model.session_id !== carrier.child_session_id ||
+          model.parent_execution_id !== carrier.id ||
+          model.origin_command_id !== origin.id ||
+          model.origin_store_id !== target.origin_store_id ||
+          model.root_session_id !== target.root_session_id ||
+          model.root_work_command_id !== target.root_work_command_id ||
+          model.root_work_seq !== target.root_work_seq ||
+          String(model.owner_generation) !== originalGeneration
+        )
+          throw new AgentError('authorization_review_unverifiable');
+        const changed = db.db.run(
+          'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=? AND parent_execution_id=?',
+          [BigInt(generation), model.id!, BigInt(originalGeneration), model.state!, carrier.id!],
+        );
+        if (Number(changed.changes) !== 1)
+          throw new AgentError('authorization_review_unverifiable');
+      }
+    }
+    const changed = db.db.run(
+      'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=? AND parent_execution_id=?',
+      [BigInt(generation), carrier.id!, BigInt(originalGeneration), carrier.state!, target.id!],
+    );
+    if (Number(changed.changes) !== 1) throw new AgentError('authorization_review_unverifiable');
+  }
+}
 export function ensureAuthorizationReview(
   db: SqliteOperations,
   input: EnsureAuthorizationReviewInput,

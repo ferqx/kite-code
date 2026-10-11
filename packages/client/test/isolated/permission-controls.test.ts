@@ -23,7 +23,7 @@ const large = '9007199254740993';
 const choice: SetPermissionModeRequest = {
   expectedStoreId: 'store',
   commandId: 'mode',
-  mode: 'ask',
+  mode: 'accept_edits',
   ifRevision: large,
   makeDefault: true,
   ifDefaultRevision: '0',
@@ -34,7 +34,7 @@ const applied: PermissionMutation = {
   state: 'applied',
   receipt: {
     status: 'applied',
-    mode: 'ask',
+    mode: 'accept_edits',
     revision: '9007199254740994',
     makeDefault: true,
     defaultRevision: '9007199254740994',
@@ -115,6 +115,13 @@ test('permission operations need admission/capability/original Store and validat
         ...choice,
         allowed: true,
       } as SetPermissionModeRequest),
+      'invalid_request',
+    );
+    await rejected(
+      supported.client.setPermissionMode('s', {
+        ...choice,
+        mode: 'ask',
+      } as unknown as SetPermissionModeRequest),
       'invalid_request',
     );
     expect(supported.requests).toHaveLength(1);

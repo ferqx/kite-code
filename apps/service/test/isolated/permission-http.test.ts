@@ -129,7 +129,7 @@ test('actual default host, SQL, HTTP and Native Client preserve explicit mode/tr
     const choice = {
       expectedStoreId: storeId,
       commandId: 'mode',
-      mode: 'ask' as const,
+      mode: 'accept_edits' as const,
       ifRevision: initial.revision,
       makeDefault: true,
       ifDefaultRevision: initial.defaultRevision,
@@ -139,7 +139,7 @@ test('actual default host, SQL, HTTP and Native Client preserve explicit mode/tr
       commandId: 'mode',
       kind: 'permission.mode',
       state: 'applied',
-      receipt: { status: 'applied', mode: 'ask', makeDefault: true },
+      receipt: { status: 'applied', mode: 'accept_edits', makeDefault: true },
     });
     expect(await client.setPermissionMode('s', choice)).toEqual(mode);
     expect(await client.getPermissionMutation('mode', { storeId })).toEqual(mode);
@@ -168,7 +168,7 @@ test('actual default host, SQL, HTTP and Native Client preserve explicit mode/tr
     const trusted = await client.getWorkspaceTrust('w', { storeId });
     expect(trusted).toMatchObject({ trusted: true, status: 'trusted' });
     const current = await client.getPermissionMode('s', { storeId });
-    expect(current).toMatchObject({ mode: 'ask', defaultMode: 'ask' });
+    expect(current).toMatchObject({ mode: 'accept_edits', defaultMode: 'accept_edits' });
     expect((await server.runtime.getView('s'))!.executions).toHaveLength(0);
     await server.close();
     server = await f.open();
@@ -184,9 +184,9 @@ test('actual default host, SQL, HTTP and Native Client preserve explicit mode/tr
       title: 'Next',
     });
     expect(await server.client.getPermissionMode('next', { storeId })).toMatchObject({
-      mode: 'ask',
+      mode: 'accept_edits',
       revision: '0',
-      defaultMode: 'ask',
+      defaultMode: 'accept_edits',
       defaultRevision: current.defaultRevision,
     });
     const revoked = await server.client.setWorkspaceTrust('w', {
@@ -256,6 +256,24 @@ test('permission API rejects foreign Store, hidden authority fields, duplicate q
       makeDefault: false,
       ifDefaultRevision: '0',
     };
+    const beforeRemovedMode = (await server.store.getMetadata()).lastChangeCursor;
+    expect(
+      (
+        await server.request('/v1/sessions/s/permission-mode', {
+          ...choice,
+          commandId: 'removed-strict-mode',
+          mode: 'ask',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      await server.runtime.getHostMutation({
+        expectedStoreId: storeId,
+        subjectId: 'owner',
+        commandId: 'removed-strict-mode',
+      }),
+    ).toBeNull();
+    expect((await server.store.getMetadata()).lastChangeCursor).toBe(beforeRemovedMode);
     expect(
       (await server.request('/v1/sessions/s/permission-mode', { ...choice, subjectId: 'intruder' }))
         .status,

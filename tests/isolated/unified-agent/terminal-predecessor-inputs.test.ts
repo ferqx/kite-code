@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -52,7 +53,7 @@ test('predecessor accepts only the exact Windows Native bootstrap source entry i
     'identical',
   );
   expect(matchTerminalPredecessorInput(servicePath, previousService, currentService)).toBe(
-    'windows_native_bootstrap_source_entry',
+    'windows_native_bootstrap_and_shell_parser_increment',
   );
   expect(
     matchTerminalPredecessorInput('bun.lock', previousService, currentService),
@@ -99,5 +100,47 @@ test('the root input permits only the exact committed stdio CI script increment'
   ]) {
     expect(changed).not.toBe(text);
     expect(matchTerminalPredecessorInput(path, previous, bytes(changed))).toBeUndefined();
+  }
+});
+
+test('predecessor permits only the exact parser declarations and pinned complete lock closure', () => {
+  for (const path of ['bun.lock', 'apps/service/package.json']) {
+    const prior = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+      cwd: repository,
+    });
+    expect(prior.exitCode).toBe(0);
+    const current = readFileSync(resolve(repository, path));
+    expect(createHash('sha256').update(current).digest('hex')).toBe(
+      path === 'bun.lock'
+        ? 'a16f113d4924eb1f2c56b87fa92b1124ff107a432eb7336ee9b8c9dcdc199b88'
+        : '3924deb4c17cf2795d03767abe0e42cbd7cffdfe8efe05d7d615dd257815ade1',
+    );
+    expect(matchTerminalPredecessorInput(path, prior.stdout, current)).toBe(
+      path === 'bun.lock'
+        ? 'shell_parser_locked_dependency_increment'
+        : 'windows_native_bootstrap_and_shell_parser_increment',
+    );
+    const text = current.toString();
+    const changes = [
+      text.replace('"tree-sitter-bash": "0.25.1"', '"tree-sitter-bash": "0.25.2"'),
+      text.replace('"web-tree-sitter": "0.25.10"', '"web-tree-sitter": "0.25.11"'),
+      text.replace('"hono": "4.13.12"', '"hono": "4.13.13"'),
+      text + '\n',
+    ];
+    if (path === 'bun.lock')
+      changes.push(
+        text.replace('node-addon-api@8.9.2', 'node-addon-api@8.9.3'),
+        text.replace('node-gyp-build@4.8.4', 'node-gyp-build@4.8.5'),
+        text.replace('"optionalPeers": ["tree-sitter"]', '"optionalPeers": []'),
+        text.replace('sha512-Y09sF44/', 'sha512-X09sF44/'),
+        text.replace(
+          '    "webidl-conversions": [',
+          '    "unrecognized": ["unrecognized@1.0.0", "", {}, "sha512-x"],\n\n    "webidl-conversions": [',
+        ),
+      );
+    for (const changed of changes) {
+      expect(changed).not.toBe(text);
+      expect(matchTerminalPredecessorInput(path, prior.stdout, bytes(changed))).toBeUndefined();
+    }
   }
 });

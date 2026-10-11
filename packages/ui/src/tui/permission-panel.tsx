@@ -4,7 +4,12 @@ import { type TuiController, terminalText } from './controller';
 import type { TuiPermissionSnapshot } from './permissions';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 
-const modes = ['ask', 'accept_edits', 'auto', 'full'] as const;
+const modes = ['accept_edits', 'auto', 'full'] as const;
+const modeLabels = {
+  accept_edits: '请求批准',
+  auto: '自动审核',
+  full: '完全访问',
+} as const;
 type Choice =
   | { kind: 'mode'; mode: (typeof modes)[number]; makeDefault: boolean }
   | { kind: 'trust'; trusted: boolean }
@@ -40,8 +45,8 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
       }
       return;
     }
-    if (key.upArrow) setIndex((i) => (i + 3) % 4);
-    else if (key.downArrow) setIndex((i) => (i + 1) % 4);
+    if (key.upArrow) setIndex((i) => (i + modes.length - 1) % modes.length);
+    else if (key.downArrow) setIndex((i) => (i + 1) % modes.length);
     else if (input === 'd') setDefault((v) => !v);
     else if (input === 't' || input === 'u')
       setPending({ choice: { kind: 'trust', trusted: input === 't' }, observed });
@@ -59,13 +64,14 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
       ) : (
         <>
           <Text>
-            {t('Mode')} {observed.mode.mode} {t('revision')} {observed.mode.revision} {t('· scope')}{' '}
-            {terminalText(observed.mode.scopeSessionId)} {t('· default')}{' '}
-            {observed.mode.defaultMode} {t('revision')} {observed.mode.defaultRevision}
+            {t('Mode')} {modeLabels[observed.mode.mode]} ({observed.mode.mode}) {t('revision')}{' '}
+            {observed.mode.revision} {t('· scope')} {terminalText(observed.mode.scopeSessionId)}{' '}
+            {t('· default')} {modeLabels[observed.mode.defaultMode]} ({observed.mode.defaultMode}){' '}
+            {t('revision')} {observed.mode.defaultRevision}
           </Text>
           {modes.map((mode, i) => (
             <Text key={mode}>
-              {i === index ? '›' : ' '} {mode}
+              {i === index ? '›' : ' '} {modeLabels[mode]}
             </Text>
           ))}
           <Text>

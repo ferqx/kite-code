@@ -92,7 +92,7 @@ function endpoint() {
   };
 }
 async function fixture(
-  options: { roles?: boolean; mode?: 'full' | 'ask'; deny?: 'task' | 'carrier' } = {},
+  options: { roles?: boolean; mode?: 'full' | 'accept_edits'; deny?: 'task' | 'carrier' } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-default-task-'));
   const workspace = join(root, 'workspace');
@@ -292,7 +292,7 @@ test('default Task uses one global factory and the actual shared Loop/model slot
 }, 15000);
 
 test('Task Tool approval does not authorize its exact child carrier Job; both ordinary cards retain real effects and once-only dispatch', async () => {
-  const f = await fixture({ mode: 'ask' });
+  const f = await fixture({ mode: 'accept_edits' });
   try {
     await f.submit();
     const tool = await f.approve('task', 'approve-tool');

@@ -125,7 +125,7 @@ test('two Workers commit only one observed mode/default revision; pending has no
   const peer = await openSqliteStore(f.profile);
   try {
     expect(await f.read('permission.mode', 'session:s')).toEqual({ revision: '0', record: null });
-    const a = await f.mode('mode-a', { mode: 'ask', makeDefault: true });
+    const a = await f.mode('mode-a', { mode: 'accept_edits', makeDefault: true });
     const b = await f.mode('mode-b', { mode: 'full', makeDefault: true });
     await Promise.all([f.store.beginHostMutation(a), peer.beginHostMutation(b)]);
     expect(await f.read('permission.mode', 'session:s')).toEqual({ revision: '0', record: null });
@@ -302,6 +302,55 @@ test('cold readonly control facts preserve exact revisions; restored Store never
     await rejected(
       reader.getHostMutation({ ...f.base, expectedStoreId: restoredId, commandId: mode.commandId }),
       'host_mutation_scope_denied',
+    );
+    expect(f.db.query('SELECT count(*) AS count FROM execution').get()).toEqual({ count: 0 });
+  } finally {
+    await reader?.close();
+    await f.close();
+  }
+});
+
+test('removed strict Ask cannot create a mutation or become live authority from an existing control record', async () => {
+  const f = await fixture();
+  let reader: Store | undefined;
+  try {
+    const initialCursor = (await f.store.getMetadata()).lastChangeCursor;
+    const invalid = await f.mode('removed-ask', { mode: 'ask', makeDefault: true });
+    await rejected(f.store.beginHostMutation(invalid), 'invalid_host_mutation');
+    expect(await f.store.getHostMutation({ ...f.base, commandId: invalid.commandId })).toBeNull();
+    expect(f.db.query('SELECT count(*) AS count FROM host_mutation').get()).toEqual({ count: 0 });
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(initialCursor);
+    expect(await f.read('permission.mode', 'session:s')).toEqual({ revision: '0', record: null });
+    expect(await f.read('permission.mode', 'user')).toEqual({ revision: '0', record: null });
+
+    const valid = await f.mode('valid-control', { mode: 'accept_edits', makeDefault: true });
+    await f.store.beginHostMutation(valid);
+    await f.finish(valid);
+    const original = f.db.query('SELECT * FROM host_mutation WHERE id=?').get(valid.commandId);
+    expect(original).not.toBeNull();
+    const obsolete = JSON.stringify({ ...valid.safeRequest, mode: 'ask' });
+    f.db.run('UPDATE host_mutation SET safe_request_json=? WHERE id=?', [
+      obsolete,
+      valid.commandId,
+    ]);
+    const frozenRow = f.db.query('SELECT * FROM host_mutation WHERE id=?').get(valid.commandId);
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    for (const scope of ['session:s', 'user'])
+      await rejected(f.read('permission.mode', scope), 'invalid_host_control');
+    await rejected(
+      f.store.getHostMutation({ ...f.base, commandId: valid.commandId }),
+      'invalid_host_control',
+    );
+    expect(f.db.query('SELECT * FROM host_mutation WHERE id=?').get(valid.commandId)).toEqual(
+      frozenRow,
+    );
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    await f.store.close();
+    reader = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    await rejected(f.read('permission.mode', 'session:s', reader), 'invalid_host_control');
+    expect((await reader.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(f.db.query('SELECT * FROM host_mutation WHERE id=?').get(valid.commandId)).toEqual(
+      frozenRow,
     );
     expect(f.db.query('SELECT count(*) AS count FROM execution').get()).toEqual({ count: 0 });
   } finally {

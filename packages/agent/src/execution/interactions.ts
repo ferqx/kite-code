@@ -16,6 +16,15 @@ import {
   type RequirementRef,
 } from '../storage/types';
 
+/** Public authorization reasons are distinct from private adapter errors. */
+export class AuthorizationDeniedError extends AgentError {
+  readonly reason: string;
+  constructor(code: 'permission_denied' | 'approval_denied', reason: string) {
+    super(code, reason);
+    this.reason = reason;
+  }
+}
+
 export interface InteractionScope {
   final?: boolean;
   previousReview?: ReadAuthorizationReviewInput;
@@ -175,7 +184,7 @@ export class InteractionGate {
             targetCommandId: command.id,
             subjectId: command.subjectId,
           });
-          throw new AgentError('approval_denied');
+          throw new AuthorizationDeniedError('approval_denied', reviewed.reason);
         }
         if (scope.final && !reviewedGrant && !execution.interactionBinding)
           throw new AgentError('authorization_refresh_required');
@@ -208,7 +217,10 @@ export class InteractionGate {
       !decision.approval &&
       !(decision.review && execution.interactionBinding)
     )
-      throw new AgentError('permission_denied', decision.reason);
+      throw new AuthorizationDeniedError(
+        'permission_denied',
+        decision.reason ?? 'permission_denied',
+      );
     if (scope.final && !execution.interactionBinding)
       throw new AgentError('authorization_refresh_required');
     const inputDigest = await semanticDigest(request.input);

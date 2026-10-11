@@ -413,7 +413,7 @@ test('original metadata renders frozen settings/assembly/source/policy, never la
       policy: {
         namespace: 'builtin.permissions',
         version: '1',
-        data: { mode: 'ask', workspaceTrust: true },
+        data: { mode: 'accept_edits', workspaceTrust: true },
       },
     },
   };
@@ -439,7 +439,7 @@ test('original metadata renders frozen settings/assembly/source/policy, never la
     expect(text).toContain('original-source');
     expect(text).toContain('original-digest');
     expect(text).toContain('original-policy');
-    expect(text).toContain('"mode": "ask"');
+    expect(text).toContain('"mode": "accept_edits"');
     expect(text).toContain('"revision": "7"');
     expect(text).toContain('Current configuration is not substituted');
     expect(reads).toBe(1);

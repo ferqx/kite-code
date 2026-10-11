@@ -2,10 +2,18 @@
 
 状态：active
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
-验证：`bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/policies`
+验证：`bun test apps/service/test/isolated/permissions.test.ts apps/service/test/isolated/shell-configuration.test.ts apps/service/test/isolated/web-permissions.test.ts packages/agent/test/isolated/execution/authorization-review.test.ts`；旧 Kernel/SAQ 对应验证继续保留 `bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/policies`
 
 相关：[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)、[Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)、[Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)、[Agent Note 0189](../../.agents/notes/implemented/bug-fix/2026-09-17-auto-review-uncertain-shell.md)、
 `tool-gated-autonomy.md`、`cancel-resume-cleanup.md`、`plan-mode-implementation.md`。
+
+## 当前 V1.3 正式授权
+
+正式 Service/Client 经唯一 Agent 的原权限、人工/模型交互和最终 dispatch 事务执行。界面三策略为 `accept_edits` 请求批准、`auto` 自动审核、`full` 完全访问；正式类型、HTTP/IPC、持久控制和调用者均已退役 raw `ask`，旧输入/控制记录失败关闭，不映射为其他模式。正式 Shell 的范围请求与 `web_fetch` network 描述均经该链，固定危险拒绝先于所有模式；Scope 来自可信宿主描述与最终接纳快照，调用输入不能签发 grant。原审核拒绝原因由公共 Execution 的 authorization.review 与 Tool result.details.reason 保存，TUI 结果读取和 Native 原回执可展示，私有适配器错误正文不进入该 reason。实际产品、owner 与验证归[手册](../handbook/features/tools-and-approvals.md)、[Service](../../apps/service/README.md#默认-shell-装配)与[切片](../plans/shell-permission-scopes.md)。
+
+准确同 Store 原 Run 显式接续中，可核实的已结算私有审核 fencing 与零派发目标在同一事务交接；原回执、请求、输出凭据和独立人工审批保持，不生成新授权或重复审核。目标、carrier、唯一 child Model 的代次相等和当前权限仍是派发门禁，身份失真整项回滚；边界归[Store owner](../../packages/agent/src/storage/README.md#原-active-run-的显式恢复)。
+
+下面保留旧 Kernel/SAQ 实现及仍适用理由，不据旧模式/State 推导新正式执行范围。RSS、完整观测、Windows Shell 及平台资格未因本次迁移退出。
 
 ## 概述
 

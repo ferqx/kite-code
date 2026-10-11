@@ -48,6 +48,8 @@ test.skipIf(process.platform !== 'darwin')(
     let provider: ReturnType<typeof Bun.serve> | undefined,
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let requests = 0;
+    let authorizationReviewCalls = 0;
+    let physicalRequests = 0;
     try {
       const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile }),
         storeId = (await store.getMetadata()).storeId;
@@ -114,7 +116,49 @@ test.skipIf(process.platform !== 'darwin')(
             }
             return Response.json(state);
           }
-          await request.json();
+          const body = (await request.json()) as {
+            tools?: unknown[];
+            messages: { role: string; content?: unknown }[];
+          };
+          physicalRequests++;
+          const reviews = body.messages.flatMap((message) => {
+            if (message.role !== 'user' || typeof message.content !== 'string') return [];
+            try {
+              const value = JSON.parse(message.content);
+              return value?.purpose === 'authorization_review' ? [value] : [];
+            } catch {
+              return [];
+            }
+          });
+          if (reviews.length) {
+            expect(reviews).toHaveLength(1);
+            expect(body.tools ?? []).toEqual([]);
+            expect(reviews[0].target).toMatchObject({
+              originStoreId: storeId,
+              definitionId: 'files.write',
+              definitionVersion: '2',
+              input: { path: 'bundled.txt', base: null, content: 'actual bundled bytes\r\n' },
+            });
+            expect(reviews[0].target.executionId).toBeString();
+            expect(reviews[0].target.runId).toBeString();
+            authorizationReviewCalls++;
+            const frame = (delta: unknown, finish_reason: string | null) =>
+              `data: ${JSON.stringify({ id: `native-review-${authorizationReviewCalls}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+            return new Response(
+              frame(
+                {
+                  content: JSON.stringify({
+                    decision: 'ask_user',
+                    reason: 'Exact original Files write needs user decision',
+                  }),
+                },
+                null,
+              ) +
+                frame({}, 'stop') +
+                'data: [DONE]\n\n',
+              { headers: { 'content-type': 'text/event-stream' } },
+            );
+          }
           requests++;
           const call = requests === 1;
           const read = requests === 2;
@@ -261,6 +305,8 @@ test.skipIf(process.platform !== 'darwin')(
         clearTimeout(timer);
       }
       expect(requests).toBe(3);
+      expect(authorizationReviewCalls).toBe(1);
+      expect(physicalRequests).toBe(requests + authorizationReviewCalls);
       const quitFixture = join(root, 'quit-driver.ts');
       writeFileSync(
         quitFixture,
@@ -327,6 +373,8 @@ test.skipIf(process.platform !== 'darwin')(
         clearTimeout(quitTimer);
       }
       expect(requests).toBe(3);
+      expect(authorizationReviewCalls).toBe(1);
+      expect(physicalRequests).toBe(requests + authorizationReviewCalls);
       expect(readFileSync(join(home, 'old-user-data/old-database'), 'utf8')).toBe(
         'must remain independent',
       );
@@ -475,6 +523,8 @@ test.skipIf(process.platform !== 'darwin')(
         clearTimeout(diagnosticTimer);
       }
       expect(requests).toBe(3);
+      expect(authorizationReviewCalls).toBe(1);
+      expect(physicalRequests).toBe(requests + authorizationReviewCalls);
       expect(verifyNativeRuntimeBundle(moved).digest).toBe(built.digest);
     } finally {
       observe('finally_begin');

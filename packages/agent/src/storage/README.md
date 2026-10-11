@@ -105,6 +105,8 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 
 begin 先取得真实 root OS 锁，事务复核后递增 generation、登记 accepted/null 与私有 `RunResumeLease`。这个 lease 只进入 facade 的 recovery map，不能投影为普通 `OwnerRef` 进行 plan、dispatch 或 finish。可信恢复 binding 准备完成后，commit 同事务再核准确 lease、原配置 canonical 等值、checkpoint、selection、主体、取消与原出处，仅重绑准确的零派发 planned Model/Tool generation，随后登记 applied `run_resumed` 回执并转入普通 owner map。原 Run/Execution ID、attempt、成功结果、原 Interaction 和已保存答案保持；后续派发仍检查当前权限、原审批与取消。
 
+零派发 Tool 已有结算的私有 Auto 审核时，同一 commit 先完整核原 purpose、封存请求、准确来源与 child 关系，再把原 reviewer carrier 和唯一终态 child Model 的 fencing generation 与目标一并交接。原审核 Command、配置、输入、结果、完整输出凭据、ID 和 attempt 不改，不重新调用模型或签发新 grant。active、unknown、取消或来源无法证明的审核不取得交接资格；child Model 身份/代次失真时整项事务回滚。原 `fact` 的目标/carrier/child Model 代次相等及当前授权校验继续执行；审核失败仍按原 unavailable 决定回退人工。真实 CLI/TUI 冷恢复保留原审批与零重放，Store 验证见[原审核交接回归](../../test/isolated/recovery/run-resume-review-ownership.test.ts)。
+
 所有四处具名 Run 创建事务捕获 `context_selection_id`；当前 selection 漂移拒绝恢复。`initialization_state` 持久区分 unstarted／started／completed：任何初始化回调前先登记 started，注册 requirement 结果与 completed 同事务提交，空 refs 也必须完成封存。恢复 completed 复用原 refs，不重跑回调；started 拒绝重放半执行的闭包；unstarted 只有零 Execution 时可进入原初始化入口。
 
 独立 accepted `run.resume` 不进入普通 accepted 队列，不阻挡普通 owner release，也不被 Session interrupt 改成 needs_review。准备期取消或删除为新申请记录取消事实、保持 accepted/null，commit 随后拒绝；applied 回执保留已恢复事实，停止原执行仍使用准确原 Run 控制。Runtime 关闭等待准备和 binding 清理；未确认清理时不能宣称 lease 与资源已释放。
@@ -163,3 +165,7 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 首页 `snapshotCursor` 与 items 来自同一事务；续页带该游标时，metadata 改变返回 `directory_changed`，不修改业务、ACK或输出。HTTP/SDK 完整扫描在此冲突时丢弃前缀并从头重读，保当前 Store/subject 准入。[实际 SQLite/HTTP 测试](../../../../tests/isolated/unified-agent/background-directory.test.ts)覆盖超200条、nested child、后来无关 child Run、fixed upper、主体/删除过滤、公开物理恢复与只读计数。此 API 证据不替代 Native 实际窗口资格。
 
 [取消操作](sqlite/cancel-operations.ts)在首写前解析完整目标、attached 扩展、准确 child Run／Command 及待取消输入，并要求每个 effect 的 Execution／Run／source 属于当前 Store。新取消命令不能修改旧来源历史；范围混有旧来源时整项拒绝，零部分写入，期间新工作可按准确当前目标停止。既有原取消回执的相同请求仍只返回原记录，不重做效果。
+
+## 持久权限模式
+
+`permission.mode` 控制只接受 `accept_edits`、`auto`、`full`。写入校验发生在创建 mutation 之前；读出既有控制、幂等回执和冷只读路径同样验证模式。旧 `ask` 记录以 `invalid_host_control` 拒绝，原行和 cursor 保持，不静默改为其他策略。`getHostMutation` 在只读事务提交前解码，保留原拒绝原因。完整 [控制测试](../../test/isolated/storage/host-controls.test.ts)与[派发测试](../../test/isolated/storage/host-control-dispatch.test.ts)核验三策略、CAS、幂等、旧模式拒绝与零 Tool 效果；用户策略由 Service 负责。

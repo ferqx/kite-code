@@ -161,7 +161,7 @@ test('actual SQLite mode CAS/default/duplicate survive reopening and remain exac
       ...f.identity,
       sessionId: 's',
       commandId: 'mode',
-      mode: 'ask' as const,
+      mode: 'accept_edits' as const,
       ifRevision: initial.revision,
       makeDefault: true,
       ifDefaultRevision: initial.defaultRevision,
@@ -169,15 +169,21 @@ test('actual SQLite mode CAS/default/duplicate survive reopening and remain exac
     const saved = await f.management.setMode(request);
 
     expect(saved.state).toBe('applied');
-    expect(saved.receipt).toMatchObject({ status: 'applied', mode: 'ask', makeDefault: true });
+    expect(saved.receipt).toMatchObject({
+      status: 'applied',
+      mode: 'accept_edits',
+      makeDefault: true,
+    });
     expect(await f.management.setMode(request)).toEqual(saved);
 
     const state = await f.management.readMode({ ...f.identity, sessionId: 's' });
 
-    expect(state.mode).toBe('ask');
+    expect(state.mode).toBe('accept_edits');
     expect(state.revision).not.toBe('0');
     expect(state.defaultRevision).toBe(state.revision);
-    expect((await f.management.readMode({ ...f.identity, sessionId: 'second' })).mode).toBe('ask');
+    expect((await f.management.readMode({ ...f.identity, sessionId: 'second' })).mode).toBe(
+      'accept_edits',
+    );
 
     expect(
       (await f.management.readMode({ ...f.identity, subjectId: 'other', sessionId: 'other' }))
@@ -208,15 +214,15 @@ test('actual SQLite mode CAS/default/duplicate survive reopening and remain exac
 
     expect(await f.management.getMutation({ ...f.identity, commandId: 'mode' })).toEqual(saved);
     expect((await f.management.readMode({ ...f.identity, sessionId: 'second' })).defaultMode).toBe(
-      'ask',
+      'accept_edits',
     );
     const current = await f.management.readMode({ ...f.identity, sessionId: 's' });
     const results = await Promise.allSettled(
-      ['accept_edits', 'full'].map((mode, i) =>
+      ['auto', 'full'].map((mode, i) =>
         f.management.setMode({
           ...request,
           commandId: `concurrent-${i}`,
-          mode: mode as 'accept_edits' | 'full',
+          mode: mode as 'auto' | 'full',
           makeDefault: false,
           ifRevision: current.revision,
           ifDefaultRevision: current.defaultRevision,
@@ -225,7 +231,9 @@ test('actual SQLite mode CAS/default/duplicate survive reopening and remain exac
     );
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
-    expect((await f.management.readMode({ ...f.identity, sessionId: 's' })).mode).not.toBe('ask');
+    expect((await f.management.readMode({ ...f.identity, sessionId: 's' })).mode).not.toBe(
+      'accept_edits',
+    );
   } finally {
     await f.close();
   }
@@ -313,7 +321,7 @@ test('an actual same-Loop child reads its root mode but cannot mutate the root c
       ...f.identity,
       sessionId: 's',
       commandId: 'root-mode',
-      mode: 'ask',
+      mode: 'accept_edits',
       ifRevision: current.revision,
       makeDefault: false,
       ifDefaultRevision: current.defaultRevision,
@@ -331,7 +339,7 @@ test('an actual same-Loop child reads its root mode but cannot mutate the root c
     expect(child).toMatchObject({
       sessionId: f.childSessionId,
       scopeSessionId: 's',
-      mode: 'ask',
+      mode: 'accept_edits',
       revision: root.revision,
     });
     await expectCode(
@@ -347,7 +355,9 @@ test('an actual same-Loop child reads its root mode but cannot mutate the root c
       'group_root_required',
     );
     expect(await f.management.getMutation({ ...f.identity, commandId: 'child-mode' })).toBeNull();
-    expect((await f.management.readMode({ ...f.identity, sessionId: 's' })).mode).toBe('ask');
+    expect((await f.management.readMode({ ...f.identity, sessionId: 's' })).mode).toBe(
+      'accept_edits',
+    );
   } finally {
     await f.close();
   }

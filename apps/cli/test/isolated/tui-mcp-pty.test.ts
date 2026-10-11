@@ -39,13 +39,37 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+  let reviewCalls = 0;
   let calls = 0,
     rpc = 0;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
-      await request.json();
+      const body = (await request.json()) as {
+        messages: { role: string; content: string | null }[];
+      };
+      const review = body.messages.some((message) => {
+        if (message.role !== 'user' || !message.content) return false;
+        try {
+          return JSON.parse(message.content).purpose === 'authorization_review';
+        } catch {
+          return false;
+        }
+      });
+      if (review) {
+        reviewCalls++;
+        const delta = {
+          content: JSON.stringify({
+            decision: 'ask_user',
+            reason: 'explicit original operation approval',
+          }),
+        };
+        return new Response(
+          `data: ${JSON.stringify({ id: 'review', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       calls++;
       const delta =
         calls === 1 || calls === 3
@@ -185,7 +209,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
         expectedStoreId: storeId,
         commandId: 'ask',
         ifRevision: mode.revision,
-        mode: 'ask',
+        mode: 'auto',
         makeDefault: false,
         ifDefaultRevision: mode.defaultRevision,
       });
@@ -519,6 +543,7 @@ finally:
     expect(receipts.some((row) => row.stage === '/clear')).toBe(true);
     expect(receipts.some((row) => row.stage === '/draft-clear')).toBe(true);
     expect(calls).toBe(4);
+    expect(reviewCalls).toBe(2);
     expect(rpc).toBe(0);
     expect(readFileSync(join(workspace, 'effect.txt'), 'utf8')).toBe(
       'owned authorized file effect',
@@ -562,6 +587,7 @@ finally:
         expect.arrayContaining(historyIds),
       );
       expect(calls).toBe(4);
+      expect(reviewCalls).toBe(2);
     } finally {
       await reopened.close();
     }

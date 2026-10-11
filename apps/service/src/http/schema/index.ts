@@ -282,7 +282,7 @@ const modelInputMetadata = z.union([
     authorization: modelAuthorizationMetadata,
   }),
 ]);
-const permissionMode = z.enum(['ask', 'accept_edits', 'auto', 'full']);
+const permissionMode = z.enum(['accept_edits', 'auto', 'full']);
 const permissionFailure = z.strictObject({
   status: z.enum(['failed', 'outcome_unknown']),
   code: z

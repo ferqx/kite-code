@@ -122,6 +122,7 @@ export interface LinuxOwnedShellOptions {
   graceMs: number;
   temp: string;
   mode: LinuxShellMode;
+  networkScope?: 'none' | 'internet';
   noExecPaths: readonly string[];
   trustedExecutableFiles: readonly string[];
   maskedRoots: readonly string[];
@@ -399,6 +400,9 @@ export function startLinuxOwnedShell(options: LinuxOwnedShellOptions): LinuxOwne
     options.graceMs < 0 ||
     options.graceMs > 5000 ||
     !['workspace', 'full', 'confined'].includes(options.mode) ||
+    (options.networkScope !== undefined && !['none', 'internet'].includes(options.networkScope)) ||
+    (options.mode === 'confined' && options.networkScope === 'internet') ||
+    (options.networkScope === 'none' && !options.bubblewrapArgs.includes('--unshare-net')) ||
     [
       options.bubblewrapPath,
       options.initExecutable,
@@ -440,6 +444,7 @@ export function startLinuxOwnedShell(options: LinuxOwnedShellOptions): LinuxOwne
         options.command,
         options.mode,
         options.temp,
+        ...(options.networkScope ? ['--network-scope', options.networkScope] : []),
         ...options.noExecPaths.filter((path) => path !== options.temp),
         '--exec-assets',
         ...options.trustedExecutableFiles,

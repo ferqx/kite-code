@@ -593,3 +593,69 @@ for (const mode of ['eof', 'kill'] as const)
       }
     },
   );
+
+macTest(
+  'explicit per-launch filesystem and network grants enforce independent real effects',
+  async () => {
+    let tcpAccepted = 0,
+      unixAccepted = 0;
+    const tcp = createServer((socket) => {
+      tcpAccepted++;
+      socket.end();
+    });
+    const unix = createServer((socket) => {
+      unixAccepted++;
+      socket.end();
+    });
+    const socketPath = join(root, 'explicit-scope.sock');
+    await new Promise<void>((resolve) => tcp.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) => unix.listen(socketPath, resolve));
+    try {
+      const address = tcp.address();
+      if (!address || typeof address === 'string') throw Error('test_tcp_address');
+      for (const filesystem of ['workspace_write', 'full_access'] as const) {
+        for (const network of ['none', 'internet'] as const) {
+          const marker = `${filesystem}-${network}`;
+          const external = join(root, `explicit-${marker}`);
+          const script = `import{createConnection}from'node:net';const connect=target=>new Promise(r=>{const c=createConnection(target);c.setTimeout(1000);c.on('connect',()=>{console.log('CONNECTED');c.end()});c.on('end',r);c.on('error',e=>{console.log('DENIED:'+e.code);r()});c.on('timeout',()=>{c.destroy();r()})});await connect({host:'127.0.0.1',port:${address.port}});await connect(${JSON.stringify(socketPath)})`;
+          const events = await run(
+            createMacosHostShellJob({
+              ...options(),
+              executionScope: { filesystem, network },
+            }),
+            `printf workspace > ${quote(`explicit-${marker}`)}; if printf external > ${quote(external)}; then printf EXTERNAL_ALLOWED; else printf EXTERNAL_DENIED; fi; ${quote(process.execPath)} -e ${quote(script)}`,
+          );
+          terminal(events);
+          const output = events
+            .filter((event) => event.type === 'output')
+            .map((event) => event.content)
+            .join('');
+          expect(readFileSync(join(workspace, `explicit-${marker}`), 'utf8')).toBe('workspace');
+          expect(existsSync(external)).toBe(filesystem === 'full_access');
+          expect(output).toContain(
+            filesystem === 'full_access' ? 'EXTERNAL_ALLOWED' : 'EXTERNAL_DENIED',
+          );
+          if (filesystem === 'full_access') expect(readFileSync(external, 'utf8')).toBe('external');
+          expect(tcpAccepted).toBe(
+            network === 'internet'
+              ? filesystem === 'full_access'
+                ? 2
+                : 1
+              : filesystem === 'full_access'
+                ? 1
+                : 0,
+          );
+          expect(unixAccepted).toBe(filesystem === 'full_access' && network === 'internet' ? 1 : 0);
+          expect(readdirSync(control)).toEqual([]);
+          expect(readdirSync(tempBase)).toEqual([]);
+        }
+      }
+    } finally {
+      await Promise.all([
+        new Promise<void>((resolve) => tcp.close(() => resolve())),
+        new Promise<void>((resolve) => unix.close(() => resolve())),
+      ]);
+    }
+  },
+  20_000,
+);

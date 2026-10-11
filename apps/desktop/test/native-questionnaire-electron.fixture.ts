@@ -125,7 +125,13 @@ try {
           try {
             await window.kiteNative!.request(
               kind === 'permission.mode'
-                ? { method: kind, generation, observationId, mode: 'ask', makeDefault: false }
+                ? {
+                    method: kind,
+                    generation,
+                    observationId,
+                    mode: 'accept_edits',
+                    makeDefault: false,
+                  }
                 : { method: kind, generation, observationId, trusted: true },
             );
             console.error(
@@ -154,7 +160,7 @@ try {
     { generation: 1, storeId: storeId, sessionId: 'a', workspaceId: 'w' },
   );
   // Main completion precedes the renderer's watch publication and history read.
-  await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
+  await page.getByText('当前模式：accept_edits；默认模式：auto', { exact: true }).waitFor();
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
   // Observe actual HTTP submissions without changing their responses or authority.
   await app.evaluate(() => {

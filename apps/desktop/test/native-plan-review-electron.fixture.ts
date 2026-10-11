@@ -161,16 +161,16 @@ try {
     feedback: string;
     bodyText: string;
   };
-  // Establish workspace trust and then Ask using the actual forms before any Model request.
+  // Establish workspace trust and then Auto using the actual forms before any Model request.
   await openSessionTools(page);
   await page
     .getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围', exact: true })
     .check();
   await page.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
-  await page.getByRole('radio', { name: 'Ask', exact: true }).check();
+  await page.locator('input[type=radio][value=auto]').check();
   await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
-  await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
+  await page.getByText('当前模式：auto；默认模式：auto', { exact: true }).waitFor();
   async function approvePlanningManagement(expectedRunId?: string) {
     const current = await state();
     const card = current.selection!.interactions.find(
@@ -251,9 +251,15 @@ try {
         return current;
       },
       (value) =>
-        value.selection!.interactions.some(
+        value.selection?.storeId === storeId &&
+        !value.selection.viewLoading &&
+        !value.selection.permissionUnavailable &&
+        value.selection.interactions.some(
           (card) =>
-            card.kind === 'plan_review' && card.state === 'pending' && card.id !== excludedId,
+            card.kind === 'plan_review' &&
+            card.state === 'pending' &&
+            card.id !== excludedId &&
+            (!expectedRunId || card.runId === expectedRunId),
         ),
       'exact original Plan review missing',
     );
@@ -272,9 +278,9 @@ try {
     stage('start_enter', { sessionId: id });
     await select(id);
     if (id !== 'a') {
-      await page.getByRole('radio', { name: 'Ask', exact: true }).check();
+      await page.locator('input[type=radio][value=auto]').check();
       await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
-      await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
+      await page.getByText('当前模式：auto；默认模式：auto', { exact: true }).waitFor();
     }
     if (id === 'b') {
       const parentCount = Number(await (await fetch(`${control}/count`)).text());

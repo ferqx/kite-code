@@ -180,14 +180,21 @@ test.skipIf(process.platform !== 'darwin')(
       },
     });
     const bunExecutable = realpathSync(process.execPath),
-      serviceEntrypoint = join(root, 'service.js'),
+      serviceEntrypoint = join(root, 'apps/service/dist/service.js'),
       outdir = join(root, 'app');
+    const serviceOutdir = join(root, 'apps/service/dist');
+    mkdirSync(serviceOutdir, { recursive: true });
+    symlinkSync(
+      resolve(import.meta.dir, '../../../service/node_modules'),
+      join(root, 'apps/service/node_modules'),
+      'dir',
+    );
     const service = await Bun.build({
       entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
       target: 'bun',
       format: 'esm',
       packages: 'external',
-      outdir: root,
+      outdir: serviceOutdir,
       naming: 'service.js',
     });
     if (!service.success) throw new AggregateError(service.logs, 'private_service_build_failed');

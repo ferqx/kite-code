@@ -470,7 +470,7 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
   if (model === 'child') {
     if (step === 0) return { name: 'files.read', input: { path: 'original.txt' } };
     if (step === 1) {
-      if (['ask', 'head_drift', 'proof_drift'].includes(f.scenario)) f.policy('ask');
+      if (['ask', 'head_drift', 'proof_drift'].includes(f.scenario)) f.policy('auto');
       if (f.scenario === 'untrusted') f.policy('full', false);
       return {
         name: 'files.write',

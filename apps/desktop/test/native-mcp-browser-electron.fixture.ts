@@ -200,9 +200,9 @@ try {
     .check();
   await page.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
-  await page.getByRole('radio', { name: 'Ask', exact: true }).check();
+  await page.locator('input[type=radio][value=accept_edits]').check();
   await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
-  await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
+  await page.getByText('当前模式：accept_edits；默认模式：auto', { exact: true }).waitFor();
   await settings();
   await panel()
     .getByRole('button', { name: `Select user ${serverId}: enable`, exact: true })

@@ -225,7 +225,7 @@ function fixture() {
       modelId: 'model',
       reasoningEffort: 'high',
     },
-    permissionMode: 'ask',
+    permissionMode: 'accept_edits',
   };
   return {
     caller,

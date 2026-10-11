@@ -74,11 +74,20 @@ finally:
         rows.filter((row) => row.path === `/v1/commands/${id}` && row.method === 'GET').length,
       ).toBeGreaterThanOrEqual(2);
       expect(rows.filter((row) => row.body?.kind === 'command.cancel')).toHaveLength(0);
-      expect(f.rows('SELECT id,origin_command_id,status FROM run')).toEqual([
+      expect(f.rows("SELECT id,origin_command_id,status FROM run WHERE session_id='s'")).toEqual([
         {
           id: f.run.id,
           origin_command_id: 'work',
           status: mode === 'run' ? 'completed' : 'interrupted',
+        },
+      ]);
+      expect(f.reviews).toHaveLength(1);
+      expect(f.reviewProof()).toEqual([
+        {
+          state: 'succeeded',
+          outcome: 'succeeded',
+          decision: 'ask_user',
+          target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
         },
       ]);
       if (mode === 'run') {
@@ -160,10 +169,19 @@ finally:
       if (code !== 0) console.error(err);
       expect(code).toBe(0);
       expect(out).toContain('COLD_ORIGINAL_JOURNAL_ONLY_GET');
-      expect(f.rows('SELECT id,origin_command_id FROM run')).toEqual([
+      expect(f.rows("SELECT id,origin_command_id FROM run WHERE session_id='s'")).toEqual([
         { id: f.run.id, origin_command_id: 'work' },
       ]);
       expect(f.calls()).toBe(1);
+      expect(f.reviews).toHaveLength(1);
+      expect(f.reviewProof()).toEqual([
+        {
+          state: 'succeeded',
+          outcome: 'succeeded',
+          decision: 'ask_user',
+          target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
+        },
+      ]);
       expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
       expect(f.rows("SELECT kind FROM command WHERE kind='command.cancel'")).toEqual([]);
       const journal = JSON.parse(

@@ -9,6 +9,7 @@ import {
   type RunResumeLease,
   type RunResumeState,
 } from '../types';
+import { transferAuthorizationReviewOwnership } from './authorization-review';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { identity as modelIdentity, sessionScope } from './model-input-operations';
 import type { SqliteOperations } from './operations';
@@ -400,12 +401,14 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
     )
       throw new AgentError('run_resume_checkpoint_changed');
     for (const e of s.executions)
-      if (e.state === 'planned')
-        db.run(
-          "UPDATE execution SET owner_generation=? WHERE id=? AND state='planned' AND dispatched=0",
-          BigInt(lease.generation),
-          e.id!,
+      if (e.state === 'planned') {
+        transferAuthorizationReviewOwnership(db, e, String(e.owner_generation), lease.generation);
+        const changed = db.db.run(
+          "UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state='planned' AND dispatched=0",
+          [BigInt(lease.generation), e.id!, e.owner_generation!],
         );
+        if (Number(changed.changes) !== 1) throw new AgentError('run_resume_checkpoint_changed');
+      }
     const receipt: Json = {
       outcome: 'run_resumed',
       runId: lease.runId,

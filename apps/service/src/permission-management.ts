@@ -69,7 +69,7 @@ export interface PermissionManagementPort {
   ): Promise<PermissionMutation>;
   getMutation(input: Identity & { commandId: string }): Promise<PermissionMutation | null>;
 }
-const modes = new Set<PermissionMode>(['ask', 'accept_edits', 'auto', 'full']);
+const modes = new Set<PermissionMode>(['accept_edits', 'auto', 'full']);
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 const canonical = (value: unknown): string =>
   Array.isArray(value)

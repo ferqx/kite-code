@@ -77,10 +77,31 @@ finally:
     expect(f.rows(`SELECT state FROM execution WHERE id='${f.card.executionId}'`)).toEqual([
       { state: 'cancelled' },
     ]);
-    expect(f.rows('SELECT origin_command_id,status FROM run ORDER BY started_at')).toMatchObject([
+    const businessRuns = f.rows(
+      "SELECT origin_command_id,status FROM run WHERE session_id='s' ORDER BY started_at",
+    ) as { origin_command_id: string; status: string }[];
+    expect(businessRuns).toMatchObject([
       { origin_command_id: 'work', status: 'interrupted' },
       { status: 'completed' },
     ]);
+    expect(f.rows('SELECT count(*) AS n FROM run')).toEqual([{ n: 4 }]);
+    expect(f.reviews).toHaveLength(2);
+    expect(f.reviews.map((review) => review.body.tools ?? [])).toEqual([[], []]);
+    expect(f.reviewProof().sort((a, b) => a.target.localeCompare(b.target))).toEqual(
+      f.reviews
+        .map((review) => ({
+          state: 'succeeded',
+          outcome: 'succeeded',
+          decision: 'ask_user',
+          target: (review.input.target as { executionId: string }).executionId,
+        }))
+        .sort((a, b) => a.target.localeCompare(b.target)),
+    );
+    for (const [index, review] of f.reviews.entries())
+      expect(review.input.target).toMatchObject({
+        sessionId: 's',
+        originCommandId: businessRuns[index]!.origin_command_id,
+      });
     const rows = readFileSync(network, 'utf8')
       .trim()
       .split('\n')

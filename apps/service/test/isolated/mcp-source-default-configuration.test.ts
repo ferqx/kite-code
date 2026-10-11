@@ -225,7 +225,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
     },
     permissionPolicy: {
       readPolicy: (request) => ({
-        mode: options.ask ? 'ask' : 'full',
+        mode: options.ask ? 'accept_edits' : 'full',
         workspaceTrust: true,
         revision: 'owned-host-policy',
         allowed: [

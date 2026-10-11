@@ -6,7 +6,7 @@ Source 审批 Host、完整安全分页和跨 Session 原申请 journal 已接�
 
 权限控制的薄入口位于 [permissions.ts](src/permissions.ts)。`getPermissionMode/getWorkspaceTrust` 只读显示当前事实；`setPermissionMode/setWorkspaceTrust` 接收明确原 Store、目标、commandId、观察 revision 及模式/default 或信任摘要的封存请求。`runNonInteractive` 支持 `permission-mode <session> {"storeId":...}`、`workspace-trust <workspace> {"storeId":...}`、`set-permission-mode <root-session> <request-json>` 和 `set-workspace-trust <workspace> <request-json>`，只接受该三项参数及生成契约中的闭合 JSON。保存成功的退出码 0 只证明控制事务已 applied，不表示创建或完成了 Run。失败为 1，结果未知为 2。
 
-显式前台调用可使用 `createStdioPermissionReader(input?)` 配合 `promptPermissionMode/promptWorkspaceTrust`，导入或创建 reader 不读取输入。提示先显示准确原身份、CAS 版本与实际读取范围，再接受一行明确选择；模式可输入 `ask/accept_edits/auto/full`，加 ` default` 才修改用户默认值，信任使用 `trust/untrust`。子会话只读展示继承的根模式；需要明确选根才能保存。EOF、空行、未完成行、无效 UTF-8、超过 256 字节或未提供的选项均返回 not_submitted/3；Ctrl+C 返回 130，`dispose()` 释放本地监听，均不创建控制意图或取消工作。响应丢失只用原 commandId/Store 查询 `lookupPermissionOutcome`，不重发、不刷新授权后换版本提交。CAS 冲突保留原选择与请求，下一次选择须由用户明确发起。
+显式前台调用可使用 `createStdioPermissionReader(input?)` 配合 `promptPermissionMode/promptWorkspaceTrust`，导入或创建 reader 不读取输入。提示先显示准确原身份、CAS 版本与实际读取范围，再接受一行明确选择；模式可输入 `accept_edits/auto/full`（请求批准／自动审核／完全访问），加 ` default` 才修改用户默认值，信任使用 `trust/untrust`。子会话只读展示继承的根模式；需要明确选根才能保存。EOF、空行、未完成行、无效 UTF-8、超过 256 字节或未提供的选项均返回 not_submitted/3；Ctrl+C 返回 130，`dispose()` 释放本地监听，均不创建控制意图或取消工作。响应丢失只用原 commandId/Store 查询 `lookupPermissionOutcome`，不重发、不刷新授权后换版本提交。CAS 冲突保留原选择与请求，下一次选择须由用户明确发起。
 
 [permissions.test.ts](test/permissions.test.ts) 启动公开 production `Service main` 的真实 paired 子进程与临时 SQLite，验证默认保存、信任/撤销、竞争 CAS、EOF/取消/输入边界及严格非交互参数，Run/Execution 数量始终为零。实际写入提交后强制关闭自有 socket，CLI 仅查回原回执，数据库只保留一次控制写入；与 HTTP/Native Client 三文件组合 12 tests、113 assertions 通过。此可调用接口尚未切换正式 CLI/TUI 命令或构成 PTY/三平台终端资格。
 

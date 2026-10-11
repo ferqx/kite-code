@@ -532,8 +532,8 @@ export type HostStatus = {
     permissions: {
       state: 'available' | 'unbound' | 'unavailable';
       scope: 'default' | 'session' | 'unbound';
-      mode: ('ask' | 'auto' | 'accept_edits' | 'full') | null;
-      defaultMode: ('ask' | 'auto' | 'accept_edits' | 'full') | null;
+      mode: ('accept_edits' | 'auto' | 'full') | null;
+      defaultMode: ('accept_edits' | 'auto' | 'full') | null;
       workspaceTrust: 'trusted' | 'untrusted' | 'scope_changed' | 'unbound' | 'unavailable';
       reason: ('data_unavailable' | 'permission_source_unavailable') | null;
     };
@@ -646,9 +646,9 @@ export type PermissionModeState = {
   storeId: string;
   sessionId: string;
   scopeSessionId: string;
-  mode: 'ask' | 'accept_edits' | 'auto' | 'full';
+  mode: 'accept_edits' | 'auto' | 'full';
   revision: string;
-  defaultMode: 'ask' | 'accept_edits' | 'auto' | 'full';
+  defaultMode: 'accept_edits' | 'auto' | 'full';
   defaultRevision: string;
 };
 export type WorkspaceTrustState = {
@@ -664,7 +664,7 @@ export type WorkspaceTrustState = {
 export type SetPermissionModeRequest = {
   expectedStoreId: string;
   commandId: string;
-  mode: 'ask' | 'accept_edits' | 'auto' | 'full';
+  mode: 'accept_edits' | 'auto' | 'full';
   ifRevision: string;
   makeDefault: boolean;
   ifDefaultRevision: string;
@@ -728,7 +728,7 @@ export type PermissionMutation =
           state: 'applied';
           receipt: {
             status: 'applied';
-            mode: 'ask' | 'accept_edits' | 'auto' | 'full';
+            mode: 'accept_edits' | 'auto' | 'full';
             revision: string;
             makeDefault: boolean;
             defaultRevision: string;

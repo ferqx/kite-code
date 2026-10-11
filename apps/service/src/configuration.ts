@@ -1086,13 +1086,17 @@ export function createDefaultProcessConfiguration(options: {
                     subjectId: command.subjectId,
                   },
                 )),
-            describeCapability: (request) => {
+            describeCapability: async (request) => {
               const description = actual.get(
                 key(request.kind, request.definitionId, request.definitionVersion),
               );
               const commandDigest = shell.commandDigest(request);
               return description
-                ? { ...description, ...(commandDigest ? { commandDigest } : {}) }
+                ? {
+                    ...description,
+                    ...(await shell.describeRequest(request)),
+                    ...(commandDigest ? { commandDigest } : {}),
+                  }
                 : (mcpSources.describe(request) ?? selectedMcp.describe(request));
             },
           });
@@ -1125,7 +1129,10 @@ export function createDefaultProcessConfiguration(options: {
             );
             const commandDigest = shell.commandDigest(request);
             return description
-              ? { ...description, ...(commandDigest ? { commandDigest } : {}) }
+              ? {
+                  ...description,
+                  ...(commandDigest ? { commandDigest } : {}),
+                }
               : (mcpSources.describe(request) ?? selectedMcp.describe(request));
           },
         });

@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -40,6 +41,7 @@ async function fixture(
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   const requests: Record<string, unknown>[] = [];
+  const authReviews: Record<string, unknown>[] = [];
   const calls: ({ name: string; input: unknown } | undefined)[] = [
     { name: 'files.write', input: { path: 'output.txt', content: 'exact first', base: null } },
     undefined,
@@ -48,8 +50,21 @@ async function fixture(
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
-      requests.push((await request.json()) as Record<string, unknown>);
-      const call = calls[requests.length - 1];
+      const body = (await request.json()) as Record<string, unknown>;
+      const messages = body.messages as { role: string; content: string }[];
+      let reviewing = false;
+      try {
+        const input = JSON.parse(
+          messages
+            .slice()
+            .reverse()
+            .find((message) => message.role === 'user')?.content ?? '',
+        );
+        reviewing = input.purpose === 'authorization_review';
+      } catch {}
+      if (reviewing) authReviews.push(body);
+      else requests.push(body);
+      const call = reviewing ? undefined : calls[requests.length - 1];
       const payload = {
         id: 'response',
         object: 'chat.completion.chunk',
@@ -69,7 +84,14 @@ async function fixture(
                     },
                   ],
                 }
-              : { content: 'done' },
+              : {
+                  content: reviewing
+                    ? JSON.stringify({
+                        decision: 'ask_user',
+                        reason: 'Human confirmation required for this exact file edit',
+                      })
+                    : 'done',
+                },
             finish_reason: null,
           },
         ],
@@ -99,7 +121,7 @@ async function fixture(
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
   let policy: PermissionPolicySnapshot = {
-    mode: mode ?? 'ask',
+    mode: mode ?? 'auto',
     workspaceTrust: trusted,
     revision: 'host-1',
     allowed: [
@@ -135,6 +157,7 @@ async function fixture(
   const workspaceSerialLocks = createWorkspaceSerialLocks(profile);
   const runtime = createRuntime({
     store,
+    artifacts: createArtifactStore({ profile, store }),
     extensions: host.extensions,
     workspaceSerialLocks,
     permissions: host.permissions!,
@@ -202,6 +225,7 @@ async function fixture(
     client,
     expectedStoreId,
     requests,
+    authReviews,
     calls,
     management,
     get policy() {
@@ -247,22 +271,24 @@ async function fixture(
   };
 }
 
-test('actual default-compatible Model file call uses Ask exact card/once or trusted Accept Edits; Full/default untrusted cannot be approved past trust', async () => {
-  for (const mode of ['ask', 'accept_edits', 'full', null] as const) {
+test('actual default-compatible Model file call uses actual Auto ask_user exact card/once or trusted Accept Edits; Full/default untrusted cannot be approved past trust', async () => {
+  for (const mode of ['auto', 'accept_edits', 'full', null] as const) {
     const f = await fixture(mode, mode !== 'full');
     try {
       await f.run();
-      if (mode === 'ask') {
+      if (mode === 'auto') {
         const card = await f.pending();
         expect(card.request).toMatchObject({
           input: { path: 'output.txt', content: 'exact first', base: null },
-          policy: { mode: 'ask', effects: ['workspace_write'] },
+          policy: { mode: 'auto', effects: ['workspace_write'] },
         });
         expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
+        expect(f.authReviews).toHaveLength(1);
+        expect(f.authReviews[0]!.tools ?? []).toEqual([]);
         await f.approve(card);
       }
       await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
-      const allowed = mode === 'ask' || mode === 'accept_edits';
+      const allowed = mode === 'auto' || mode === 'accept_edits';
       expect(existsSync(join(f.workspace, 'output.txt'))).toBe(allowed);
       if (allowed)
         expect(readFileSync(join(f.workspace, 'output.txt'), 'utf8')).toBe('exact first');
@@ -277,8 +303,10 @@ test('actual default-compatible Model file call uses Ask exact card/once or trus
           .interactions,
       ).toHaveLength(0);
       const original = await f.client.getCommand('work');
+      const reviewCount = f.authReviews.length;
       expect(await f.run()).toEqual(original);
       expect(f.requests).toHaveLength(2);
+      expect(f.authReviews).toHaveLength(reviewCount);
     } finally {
       await f.close();
     }
@@ -287,10 +315,11 @@ test('actual default-compatible Model file call uses Ask exact card/once or trus
 
 test('old default Run keeps actual selected definitions across JSONC disable, while current programmatic policy narrowing blocks its old card', async () => {
   for (const revoke of [false, true]) {
-    const f = await fixture('ask');
+    const f = await fixture('auto');
     try {
       await f.run();
       const card = await f.pending();
+      expect(f.authReviews).toHaveLength(1);
       writeFileSync(f.configurationPath, JSON.stringify({ ...f.configuration, tools: [] }));
       if (revoke) f.policy = { ...f.policy, workspaceTrust: false };
       await f.approve(card);
@@ -330,7 +359,7 @@ test('old default Run keeps actual selected definitions across JSONC disable, wh
 }, 15000);
 
 test('explicit trusted Permissions remains prior to new policy; actual builtin versions reject bad new configuration before Provider IO', async () => {
-  const explicit = await fixture('ask', false, true);
+  const explicit = await fixture('accept_edits', false, true);
   try {
     await explicit.run();
     await explicit.runtime.waitForCommand('work', { timeoutMs: 5000 });
@@ -421,12 +450,13 @@ test('default Runtime freshly reads durable Accept Edits and actual trusted scop
   }
 }, 15000);
 
-test('durable trust revocation invalidates old Ask card and explicit host policy cannot be rewritten through management', async () => {
+test('durable trust revocation invalidates old Auto ask_user card and explicit host policy cannot be rewritten through management', async () => {
   const f = await fixture(null);
   try {
-    const identity = await setManaged(f, 'ask');
+    const identity = await setManaged(f, 'auto');
     await f.run();
     const card = await f.pending();
+    expect(f.authReviews).toHaveLength(1);
     expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
     const trust = await f.management.readTrust({ ...identity, workspaceId: 'w' });
     await f.management.setTrust({
@@ -471,7 +501,7 @@ test('durable trust revocation invalidates old Ask card and explicit host policy
           subjectId: 'owner',
           sessionId: 's',
           commandId: 'external-write',
-          mode: 'ask',
+          mode: 'accept_edits',
           makeDefault: false,
           ifRevision: state.revision,
           ifDefaultRevision: state.defaultRevision,

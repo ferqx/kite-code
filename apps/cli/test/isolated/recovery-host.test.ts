@@ -82,10 +82,19 @@ for (const mode of ['run', 'interrupt'] as const)
       expect(posts).toBe(1);
       expect(gets).toBe(2);
       expect(recovered.command?.id).toBe('original-recovery');
-      expect(f.rows('SELECT id,origin_command_id FROM run')).toEqual([
+      expect(f.rows("SELECT id,origin_command_id FROM run WHERE session_id='s'")).toEqual([
         { id: f.run.id, origin_command_id: 'work' },
       ]);
       expect(f.calls()).toBe(1);
+      expect(f.reviews).toHaveLength(1);
+      expect(f.reviewProof()).toEqual([
+        {
+          state: 'succeeded',
+          outcome: 'succeeded',
+          decision: 'ask_user',
+          target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
+        },
+      ]);
       expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
       if (mode === 'run') {
         expect(recovered.run?.id).toBe(f.run.id);
@@ -298,7 +307,7 @@ for (const mode of ['paired', 'shared'] as const)
                 row.method === 'GET' && row.path === '/v1/commands/' + intent.request.commandId,
             ).length,
           ).toBeGreaterThanOrEqual(2);
-          expect(f.rows('SELECT id,status FROM run')).toEqual([
+          expect(f.rows("SELECT id,status FROM run WHERE session_id='s'")).toEqual([
             { id: f.run.id, status: operation === 'run' ? 'completed' : 'interrupted' },
           ]);
           const kind = operation === 'run' ? 'run.resume' : 'session.recover';
@@ -335,6 +344,15 @@ for (const mode of ['paired', 'shared'] as const)
           }
 
           expect(f.calls()).toBe(operation === 'run' ? 2 : 1);
+          expect(f.reviews).toHaveLength(1);
+          expect(f.reviewProof()).toEqual([
+            {
+              state: 'succeeded',
+              outcome: 'succeeded',
+              decision: 'ask_user',
+              target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
+            },
+          ]);
           expect(existsSync(join(f.workspace, 'effect'))).toBe(operation === 'run');
         } finally {
           if (started) await daemon('stop');
@@ -395,6 +413,15 @@ test('actual recovered Run observation abort releases original approval wait wit
     ).toEqual([{ state: 'pending', accepted_decision_revision: null }]);
     expect((await service.client.getRun(f.run.id)).isActive).toBe(true);
     expect(f.calls()).toBe(1);
+    expect(f.reviews).toHaveLength(1);
+    expect(f.reviewProof()).toEqual([
+      {
+        state: 'succeeded',
+        outcome: 'succeeded',
+        decision: 'ask_user',
+        target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
+      },
+    ]);
     expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
   } finally {
     await service.close();

@@ -211,6 +211,7 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
       if (mode === 'apply_fault') {
         const database = new Database(join(directory, 'data', 'test', 'core.db'));
         try {
+          database.run('PRAGMA busy_timeout=1000');
           database.run(
             "CREATE TRIGGER nested_report_fault BEFORE INSERT ON run WHEN (SELECT kind FROM command WHERE id=NEW.origin_command_id)='job.report' BEGIN SELECT RAISE(ABORT,'nested report rollback'); END",
           );

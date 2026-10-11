@@ -128,7 +128,14 @@ async function fixture(
         { mode: 0o600 },
       );
   }
-  const service = join(root, 'service.js');
+  const outdir = join(root, 'apps/service/dist');
+  mkdirSync(outdir, { recursive: true });
+  const service = join(outdir, 'service.js');
+  symlinkSync(
+    join(import.meta.dir, '../../../service/node_modules'),
+    join(root, 'apps/service/node_modules'),
+    'dir',
+  );
   symlinkSync(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'), 'dir');
   const result = await Bun.build({
     entrypoints: [
@@ -138,7 +145,7 @@ async function fixture(
     ],
     target: 'bun',
     packages: 'external',
-    outdir: root,
+    outdir,
     naming: 'service.js',
   });
   if (!result.success) throw new Error('fixture_build_failed');

@@ -38,7 +38,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
   }
 }
 
-async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: string } = {}) {
+async function fixture(options: { mode?: 'full' | 'auto' | 'deny'; observer?: string } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-source-entry-')));
   chmodSync(root, 0o700);
   const workspace = join(root, 'workspace');
@@ -90,7 +90,7 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
       : {
           permissionPolicy: {
             readPolicy: (request) => ({
-              mode: options.mode === 'ask' ? 'ask' : 'full',
+              mode: options.mode === 'auto' ? 'auto' : 'full',
               workspaceTrust: true,
               revision: 'owned-entry-policy',
               allowed: [
@@ -228,7 +228,7 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
     });
   }
   async function card() {
-    return until(
+    const interaction = await until(
       async () =>
         (
           await store.listInteractions({
@@ -238,6 +238,13 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
           })
         ).interactions[0] ?? null,
     );
+    // This ordinary Action fixture has no Model or reviewer registered. Keep
+    // the real Auto fallback challenge without introducing Model I/O.
+    if (options.mode === 'auto')
+      expect(interaction.request).toMatchObject({
+        policy: { mode: 'auto', reason: 'auto_review_unavailable' },
+      });
+    return interaction;
   }
   async function answer(decision: 'approve_once' | 'deny') {
     const interaction = await card();
@@ -310,7 +317,7 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
 }
 
 test('default ordinary Add and Remove have independent Ask and exact shadow preview, no Question or execution grant', async () => {
-  const f = await fixture({ mode: 'ask' });
+  const f = await fixture({ mode: 'auto' });
   try {
     await f.add();
     const before = readFileSync(f.project);
@@ -395,7 +402,7 @@ test('basic user STDIO Add stores a declaration without launch and same-layer du
 
 for (const mode of ['deny', 'ask', 'cancel'] as const)
   test(`ordinary ${mode} before publication leaves no Source mutation or Question`, async () => {
-    const f = await fixture({ mode: mode === 'deny' ? 'deny' : 'ask' });
+    const f = await fixture({ mode: mode === 'deny' ? 'deny' : 'auto' });
     try {
       const before = readFileSync(f.project);
       await f.add();
@@ -431,7 +438,7 @@ for (const mode of ['deny', 'ask', 'cancel'] as const)
 
 for (const drift of ['user', 'workspace', 'approval', 'binding', 'variables', 'root'] as const)
   test(`Ask preserves complete ${drift} freshness before source publication`, async () => {
-    const f = await fixture({ mode: 'ask' });
+    const f = await fixture({ mode: 'auto' });
     try {
       await f.add();
       await f.card();

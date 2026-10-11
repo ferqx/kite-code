@@ -20,7 +20,7 @@ test('bad submitted permission response reads original mutation once; duplicate 
         state: 'applied',
         receipt: {
           status: 'applied',
-          mode: 'ask',
+          mode: 'accept_edits',
           makeDefault: false,
           revision: '4',
           defaultRevision: '0',
@@ -31,7 +31,7 @@ test('bad submitted permission response reads original mutation once; duplicate 
   const request = {
     expectedStoreId: 'store',
     commandId: 'original',
-    mode: 'ask' as const,
+    mode: 'accept_edits' as const,
     ifRevision: '3',
     makeDefault: false,
     ifDefaultRevision: '0',

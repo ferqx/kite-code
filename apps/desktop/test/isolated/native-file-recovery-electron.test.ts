@@ -249,17 +249,24 @@ test.skipIf(process.platform !== 'darwin')(
         join(root, 'node_modules'),
         'dir',
       );
+      const serviceOutdir = join(root, 'apps/service/dist');
+      mkdirSync(serviceOutdir, { recursive: true });
+      symlinkSync(
+        resolve(import.meta.dir, '../../../service/node_modules'),
+        join(root, 'apps/service/node_modules'),
+        'dir',
+      );
       const built = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
         target: 'bun',
         format: 'esm',
         packages: 'external',
-        outdir: root,
+        outdir: serviceOutdir,
         naming: 'service.js',
       });
       expect(built.success).toBe(true);
       const bun = realpathSync(process.execPath),
-        service = join(root, 'service.js'),
+        service = join(root, 'apps/service/dist/service.js'),
         outdir = join(root, 'app');
       await buildNativeDesktop(
         {

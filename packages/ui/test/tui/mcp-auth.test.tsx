@@ -487,3 +487,48 @@ test('Chinese Ink authentication confirms explicitly and checks the second cold 
     cold.controller.dispose();
   }
 }, 5000);
+
+test('same Session event refresh preserves authentication loading until the actual status read finishes', async () => {
+  const f = fixture([intent('original')]);
+  await open(f);
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: (value: Awaited<ReturnType<NonNullable<TuiPort['mcpAuth']>['read']>>) => void;
+  f.port.mcpAuth!.read = async () => {
+    entered();
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  };
+  const reading = f.controller.openMcpAuth(serverId);
+  await started;
+  try {
+    expect(f.controller.state.mcpAuthReading).toBe(true);
+    expect(f.controller.state.mcpAuthStatus).toBeUndefined();
+    await f.controller.select('a', { preserveReconnectionReview: true });
+    expect(f.controller.state.mcpAuthOpen).toBe(true);
+    expect(f.controller.state.mcpAuthReading).toBe(true);
+    expect(f.controller.state.mcpAuthStatus).toBeUndefined();
+    expect(f.sent).toHaveLength(0);
+    release({
+      serverId,
+      workspaceId: 'w',
+      loginAllowed: true,
+      policy: 'oauth',
+      status: 'available',
+      credentialPresent: false,
+    });
+    await reading;
+    expect(f.controller.state.mcpAuthReading).toBe(false);
+    expect(f.controller.state.mcpAuthStatus).toMatchObject({
+      status: 'available',
+      credentialPresent: false,
+    });
+    expect(f.sent).toHaveLength(0);
+    expect(f.counts()).toEqual({ minted: 0, business: 0 });
+  } finally {
+    f.controller.dispose();
+  }
+});

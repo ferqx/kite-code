@@ -18,6 +18,7 @@ for (const mode of ['complete'] as readonly string[]) {
     mkdirSync(workspace, { mode: 0o700 });
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'default' });
     let calls = 0;
+    let reviewCalls = 0;
     let completeSource = false;
     const sourceTail = 'ORIGINAL_SOURCE_NINE_MIB_TAIL';
     if (mode === 'complete')
@@ -28,7 +29,27 @@ for (const mode of ['complete'] as readonly string[]) {
       port: 0,
       maxRequestBodySize: 64 * 1024 * 1024,
       async fetch(request) {
-        const actual = JSON.stringify(await request.json());
+        const body = (await request.json()) as {
+          messages: { role: string; content: string | null }[];
+        };
+        const review = body.messages.some((message) => {
+          if (message.role !== 'user' || !message.content) return false;
+          try {
+            return JSON.parse(message.content).purpose === 'authorization_review';
+          } catch {
+            return false;
+          }
+        });
+        if (review) {
+          reviewCalls++;
+          const chunk = (delta: unknown, finish: string | null) =>
+            `data: ${JSON.stringify({ id: 'review', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+          return new Response(
+            `${chunk({ content: JSON.stringify({ decision: 'ask_user', reason: 'original workspace write requires explicit fixture review' }) }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`,
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
+        const actual = JSON.stringify(body);
         calls++;
         if (calls > 1 && actual.includes(sourceTail)) completeSource = true;
         const delta =
@@ -153,7 +174,7 @@ for (const mode of ['complete'] as readonly string[]) {
         await seed.client.setPermissionMode('a', {
           expectedStoreId: storeId,
           commandId: 'ask',
-          mode: 'ask',
+          mode: mode === 'complete' ? 'accept_edits' : 'auto',
           ifRevision: policy.revision,
           makeDefault: false,
           ifDefaultRevision: policy.defaultRevision,
@@ -217,7 +238,7 @@ try:
  files=glob.glob(${JSON.stringify(join(profile.profilePath, 'session-*.md'))});assert len(files)==2, ('second export paths',files);newest=max(files,key=os.path.getmtime);wait(os.path.basename(newest));full=max((open(f,encoding='utf8').read() for f in files),key=len);assert len(full.encode('utf8'))>8*1024*1024 and '${tail}' in full and '> ACTUAL_LOADED_REASON_TAIL' in full;assert all(os.stat(f).st_mode&0o777==0o600 for f in files);print('EXPORT_FULL_TAIL_REASON_0600');os.write(master,b'\\x11')`
      : mode === 'cancel'
        ? `wait('approval [');buffer=b'';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle');os.write(master,b'\\x11')`
-       : `wait('approval [');os.close(master);master=-1;time.sleep(.3);assert p.poll() is None;db=sqlite3.connect('file:'+${JSON.stringify(profile.databasePath)}+'?mode=ro',uri=True);assert db.execute('SELECT status FROM run').fetchall()==[('waiting_interaction',)];assert db.execute("SELECT count(*) FROM interaction WHERE state='accepted'").fetchone()[0]==0;db.close();print('EOF_WAITING_ZERO_APPROVAL');os.kill(p.pid,signal.SIGTERM)`
+       : `wait('approval [');os.close(master);master=-1;time.sleep(.3);assert p.poll() is None;db=sqlite3.connect('file:'+${JSON.stringify(profile.databasePath)}+'?mode=ro',uri=True);assert db.execute("SELECT status FROM run WHERE session_id='a'").fetchall()==[('waiting_interaction',)];assert db.execute("SELECT count(*) FROM interaction WHERE state='accepted'").fetchone()[0]==0;db.close();print('EOF_WAITING_ZERO_APPROVAL');os.kill(p.pid,signal.SIGTERM)`
 }
  deadline=time.monotonic()+6
  while master>=0 and p.poll() is None and time.monotonic()<deadline:
@@ -249,9 +270,13 @@ finally:
       if (mode === 'eof') expect(out).toContain('EOF_WAITING_ZERO_APPROVAL');
       expect(existsSync(join(workspace, 'effect.txt'))).toBe(false);
       expect(calls).toBe(mode === 'complete' ? 2 : 1);
+      expect(reviewCalls).toBe(mode === 'complete' ? 0 : 1);
       const database = new Database(profile.databasePath, { readonly: true });
       try {
-        const runs = database.query('SELECT status FROM run').all();
+        const runs = database.query("SELECT status FROM run WHERE session_id='a'").all();
+        expect(database.query("SELECT status FROM run WHERE session_id<>'a'").all()).toEqual(
+          mode === 'complete' ? [] : [{ status: 'completed' }],
+        );
         expect(runs).toEqual([
           {
             status: mode === 'complete' ? 'completed' : 'cancelled',
@@ -285,6 +310,7 @@ finally:
       });
       await reopened.close();
       expect(calls).toBe(mode === 'complete' ? 2 : 1);
+      expect(reviewCalls).toBe(mode === 'complete' ? 0 : 1);
     } finally {
       provider.stop(true);
       rmSync(root, { recursive: true, force: true });

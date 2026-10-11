@@ -32,7 +32,7 @@ const questions = {
 };
 async function fixture(
   input: {
-    mode?: 'ask' | 'auto' | 'full';
+    mode?: 'accept_edits' | 'auto' | 'full';
     planning?: boolean;
     tools?: unknown[];
     child?: boolean;
@@ -221,9 +221,9 @@ async function start(f: Awaited<ReturnType<typeof fixture>>) {
     content: 'Ask exact questions',
   });
 }
-for (const mode of ['ask', 'auto', 'full'] as const)
+for (const mode of ['accept_edits', 'auto', 'full'] as const)
   test(`default ask_user uses actual compatible schema and public answer in ${mode}`, async () => {
-    const f = await fixture({ mode, planning: mode === 'ask' });
+    const f = await fixture({ mode, planning: mode === 'accept_edits' });
     try {
       await start(f);
       let card:
@@ -266,7 +266,7 @@ for (const mode of ['ask', 'auto', 'full'] as const)
       expect((await f.client.getExecution(card.executionId!)).status).toBe('succeeded');
       const run = (await f.client.getView('s')).runs[0]!;
       // Required planning can still reject completion; it did not block the question.
-      expect(run.status).toBe(mode === 'ask' ? 'failed' : 'completed');
+      expect(run.status).toBe(mode === 'accept_edits' ? 'failed' : 'completed');
       expect(
         (await f.client.listPermissionGrants('s', { storeId: f.expectedStoreId })).items,
       ).toHaveLength(0);
@@ -365,8 +365,8 @@ for (const explicitChild of [false, true])
     }
   }, 15000);
 
-test('zero-effect host facts do not approve unknown or effectful definitions', async () => {
-  for (const mode of ['ask', 'auto'] as const)
+test('zero-effect host facts do not approve unknown definitions; Request Approval permits trusted workspace writes', async () => {
+  for (const mode of ['accept_edits', 'auto'] as const)
     for (const effect of [[], ['unknown'], ['workspace_write']] as const) {
       const policy = createPermissionPolicy({
         readPolicy: () => ({
@@ -398,7 +398,7 @@ test('zero-effect host facts do not approve unknown or effectful definitions', a
             signal: new AbortController().signal,
           })
         ).allowed,
-      ).toBe(effect.length === 0);
+      ).toBe(effect.length === 0 || (mode === 'accept_edits' && effect[0] === 'workspace_write'));
       expect(
         (
           await policy.authorize({

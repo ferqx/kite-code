@@ -35,7 +35,11 @@ import {
   type RunRecord,
   type ToolCall,
 } from '../storage/types';
-import { type AcceptedAuthorization, InteractionGate } from './interactions';
+import {
+  type AcceptedAuthorization,
+  AuthorizationDeniedError,
+  InteractionGate,
+} from './interactions';
 import { createProgressWriter } from './progress';
 import type { ExecutionResources } from './resources';
 
@@ -960,6 +964,7 @@ export class UnifiedExecution {
           code: error instanceof AgentError ? error.code : 'tool_failed',
           dispatchCommitted: dispatched,
           adapterAttempted: attempted,
+          ...(error instanceof AuthorizationDeniedError ? { reason: error.reason } : {}),
         },
       };
     }

@@ -497,7 +497,13 @@ try {
           try {
             await window.kiteNative!.request(
               kind === 'permission.mode'
-                ? { method: kind, generation, observationId, mode: 'ask', makeDefault: false }
+                ? {
+                    method: kind,
+                    generation,
+                    observationId,
+                    mode: 'auto',
+                    makeDefault: false,
+                  }
                 : { method: kind, generation, observationId, trusted: true },
             );
             console.error(
@@ -526,7 +532,7 @@ try {
     { generation: 1, storeId: storeId, sessionId: 's', workspaceId: 'w' },
   );
   // Wait for the actual rendered original scope, not merely the Main reply.
-  await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
+  await page.getByText('当前模式：auto；默认模式：auto', { exact: true }).waitFor();
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })

@@ -192,7 +192,7 @@ test('actual SQL mode/trust CAS after authorization rejects stale dispatch atomi
     const f = await fixture();
     try {
       const dispatch = await f.plan();
-      await f.control(kind, kind === 'permission.mode' ? 'ask' : false);
+      await f.control(kind, kind === 'permission.mode' ? 'accept_edits' : false);
       const cursor = (await f.store.getMetadata()).lastChangeCursor;
       expect(await code(f.store.markDispatching(dispatch))).toBe('permission_control_changed');
       expect((await f.store.getExecution('effect'))?.status).toBe('planned');
@@ -252,7 +252,7 @@ test('user default is checked across roots; foreign-origin control cannot relabe
   const f = await fixture();
   try {
     const dispatch = await f.plan();
-    await f.control('permission.mode', 'ask', true, 'other');
+    await f.control('permission.mode', 'accept_edits', true, 'other');
     expect(await code(f.store.markDispatching(dispatch))).toBe('permission_control_changed');
     dispatch.authorization.controlReads = await f.reads();
     await f.store.markDispatching(dispatch);
@@ -371,7 +371,7 @@ test('actual final authorization proof reaches SQL through trusted Store barrier
       }
       await bounded(barrier.entered);
       expect(proof?.length).toBe(3);
-      await f.control(kind, kind === 'permission.mode' ? 'ask' : false);
+      await f.control(kind, kind === 'permission.mode' ? 'accept_edits' : false);
       barrier.release();
       await runtime.waitForCommand('actual', { timeoutMs: 5000 });
       expect(effects).toBe(0);
@@ -604,7 +604,7 @@ test('restored root creator history does not block new current-Store command and
   const f = await fixture();
   try {
     f.db.query("UPDATE command SET origin_store_id='historical-store' WHERE id='create-s'").run();
-    await f.control('permission.mode', 'ask');
+    await f.control('permission.mode', 'accept_edits');
     const dispatch = await f.plan();
     await f.store.markDispatching(dispatch);
     expect(f.dispatched('effect')).toBe(true);

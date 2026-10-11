@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
 
 // Original committed PC UI with current locked inputs and DB7. Earlier comparisons
@@ -26,7 +27,7 @@ const workspaces = [
 ] as const;
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-/** Verify exact source entries added after this predecessor; never rewrite its manifests. */
+/** Verify exact source and dependency increments; never rewrite predecessor manifests or locks. */
 export function matchTerminalPredecessorInput(
   path: string,
   previous: Uint8Array,
@@ -36,10 +37,13 @@ export function matchTerminalPredecessorInput(
   | 'process_observation_source_entry'
   | 'windows_native_bootstrap_source_entry'
   | 'runtime_stdio_validation_script_increment'
+  | 'shell_parser_locked_dependency_increment'
+  | 'windows_native_bootstrap_and_shell_parser_increment'
   | undefined {
   const oldBytes = Buffer.from(previous),
     currentBytes = Buffer.from(current);
   if (oldBytes.equals(currentBytes)) return 'identical';
+  if (path === 'bun.lock') return matchPredecessorShellParserInput(path, previous, current);
   if (path === 'package.json') return matchPredecessorStdioInput(path, previous, current);
   if (path === 'apps/service/package.json') {
     const original = oldBytes.toString('utf8'),
@@ -61,8 +65,9 @@ export function matchTerminalPredecessorInput(
         buildAnchor,
         ' ./src/native-runtime-assets.ts ./src/windows-native-bootstrap.ts ./src/runtime-protection.ts ',
       );
-    return Buffer.from(expected).equals(currentBytes)
-      ? 'windows_native_bootstrap_source_entry'
+    if (Buffer.from(expected).equals(currentBytes)) return 'windows_native_bootstrap_source_entry';
+    return matchPredecessorShellParserInput(path, Buffer.from(expected), current)
+      ? 'windows_native_bootstrap_and_shell_parser_increment'
       : undefined;
   }
   if (path !== 'packages/agent/package.json') return undefined;
@@ -190,7 +195,9 @@ export async function materializeTerminalPredecessor(input: {
       | 'identical'
       | 'process_observation_source_entry'
       | 'windows_native_bootstrap_source_entry'
-      | 'runtime_stdio_validation_script_increment';
+      | 'runtime_stdio_validation_script_increment'
+      | 'shell_parser_locked_dependency_increment'
+      | 'windows_native_bootstrap_and_shell_parser_increment';
   }[] = [];
   for (const path of inputs) {
     if (!inside(repository, resolve(repository, path)))

@@ -387,7 +387,7 @@ export async function reconnectionHostFixture(ask = false, many = false) {
       },
       permissionPolicy: {
         readPolicy: (request) => ({
-          mode: ask ? 'ask' : 'full',
+          mode: ask ? 'accept_edits' : 'full',
           workspaceTrust: true,
           revision: 'owned-reconnection-policy',
           allowed: [

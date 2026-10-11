@@ -21377,16 +21377,10 @@ var schema38 = {
             state: { type: 'string', enum: ['available', 'unbound', 'unavailable'] },
             scope: { type: 'string', enum: ['default', 'session', 'unbound'] },
             mode: {
-              anyOf: [
-                { type: 'string', enum: ['ask', 'auto', 'accept_edits', 'full'] },
-                { type: 'null' },
-              ],
+              anyOf: [{ type: 'string', enum: ['accept_edits', 'auto', 'full'] }, { type: 'null' }],
             },
             defaultMode: {
-              anyOf: [
-                { type: 'string', enum: ['ask', 'auto', 'accept_edits', 'full'] },
-                { type: 'null' },
-              ],
+              anyOf: [{ type: 'string', enum: ['accept_edits', 'auto', 'full'] }, { type: 'null' }],
             },
             workspaceTrust: {
               type: 'string',
@@ -23598,9 +23592,8 @@ function validate27(
                                                   }
                                                   if (
                                                     !(
-                                                      data33 === 'ask' ||
-                                                      data33 === 'auto' ||
                                                       data33 === 'accept_edits' ||
+                                                      data33 === 'auto' ||
                                                       data33 === 'full'
                                                     )
                                                   ) {
@@ -23710,9 +23703,8 @@ function validate27(
                                                     }
                                                     if (
                                                       !(
-                                                        data34 === 'ask' ||
-                                                        data34 === 'auto' ||
                                                         data34 === 'accept_edits' ||
+                                                        data34 === 'auto' ||
                                                         data34 === 'full'
                                                       )
                                                     ) {
@@ -51499,9 +51491,9 @@ var schema55 = {
     storeId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
     sessionId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
     scopeSessionId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
-    mode: { type: 'string', enum: ['ask', 'accept_edits', 'auto', 'full'] },
+    mode: { type: 'string', enum: ['accept_edits', 'auto', 'full'] },
     revision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
-    defaultMode: { type: 'string', enum: ['ask', 'accept_edits', 'auto', 'full'] },
+    defaultMode: { type: 'string', enum: ['accept_edits', 'auto', 'full'] },
     defaultRevision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
   },
   required: [
@@ -51749,14 +51741,7 @@ function validate48(
                   ];
                   return false;
                 }
-                if (
-                  !(
-                    data3 === 'ask' ||
-                    data3 === 'accept_edits' ||
-                    data3 === 'auto' ||
-                    data3 === 'full'
-                  )
-                ) {
+                if (!(data3 === 'accept_edits' || data3 === 'auto' || data3 === 'full')) {
                   validate48.errors = [
                     {
                       instancePath: instancePath + '/mode',
@@ -51823,14 +51808,7 @@ function validate48(
                       ];
                       return false;
                     }
-                    if (
-                      !(
-                        data5 === 'ask' ||
-                        data5 === 'accept_edits' ||
-                        data5 === 'auto' ||
-                        data5 === 'full'
-                      )
-                    ) {
+                    if (!(data5 === 'accept_edits' || data5 === 'auto' || data5 === 'full')) {
                       validate48.errors = [
                         {
                           instancePath: instancePath + '/defaultMode',
@@ -52562,7 +52540,7 @@ var schema57 = {
               type: 'object',
               properties: {
                 status: { type: 'string', const: 'applied' },
-                mode: { type: 'string', enum: ['ask', 'accept_edits', 'auto', 'full'] },
+                mode: { type: 'string', enum: ['accept_edits', 'auto', 'full'] },
                 revision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
                 makeDefault: { type: 'boolean' },
                 defaultRevision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
@@ -53327,14 +53305,7 @@ function validate50(
                             }
                             errors++;
                           }
-                          if (
-                            !(
-                              data9 === 'ask' ||
-                              data9 === 'accept_edits' ||
-                              data9 === 'auto' ||
-                              data9 === 'full'
-                            )
-                          ) {
+                          if (!(data9 === 'accept_edits' || data9 === 'auto' || data9 === 'full')) {
                             const err24 = {
                               instancePath: instancePath + '/receipt/mode',
                               schemaPath:
@@ -146353,7 +146324,7 @@ var schema152 = {
   properties: {
     expectedStoreId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
     commandId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
-    mode: { type: 'string', enum: ['ask', 'accept_edits', 'auto', 'full'] },
+    mode: { type: 'string', enum: ['accept_edits', 'auto', 'full'] },
     ifRevision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
     makeDefault: { type: 'boolean' },
     ifDefaultRevision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
@@ -146566,14 +146537,7 @@ function validate177(
                   ];
                   return false;
                 }
-                if (
-                  !(
-                    data2 === 'ask' ||
-                    data2 === 'accept_edits' ||
-                    data2 === 'auto' ||
-                    data2 === 'full'
-                  )
-                ) {
+                if (!(data2 === 'accept_edits' || data2 === 'auto' || data2 === 'full')) {
                   validate177.errors = [
                     {
                       instancePath: instancePath + '/mode',

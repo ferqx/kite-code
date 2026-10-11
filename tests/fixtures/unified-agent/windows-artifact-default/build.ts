@@ -80,6 +80,7 @@ export async function buildOwnedDefaultArtifactConsumer(root: string) {
   for (const dependency of dependencies) {
     const installed = [
       join(repository, 'node_modules', dependency),
+      join(repository, 'apps/service/node_modules', dependency),
       join(repository, 'packages/agent/node_modules', dependency),
       join(repository, 'packages/ai/node_modules', dependency),
     ].find(existsSync);

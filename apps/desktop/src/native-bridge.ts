@@ -451,7 +451,7 @@ export type NativeRequest =
       generation: number;
       creation: NativeCreation['input'];
       intent: StartCommandRequest;
-      permissionMode?: 'ask' | 'accept_edits' | 'auto' | 'full';
+      permissionMode?: 'accept_edits' | 'auto' | 'full';
       targetBranch?: string;
     }
   | { method: 'conversation.lookup'; generation: number; commandId: string }
@@ -687,7 +687,7 @@ export type NativeRequest =
       method: 'permission.mode';
       generation: number;
       observationId: number;
-      mode: 'ask' | 'accept_edits' | 'auto' | 'full';
+      mode: 'accept_edits' | 'auto' | 'full';
       makeDefault: boolean;
     }
   | { method: 'permission.trust'; generation: number; observationId: number; trusted: boolean }

@@ -8,6 +8,7 @@ import {
   type WindowsOwnedChild,
   WindowsOwnedChildStartError,
 } from '../../../packages/agent/src/platform/process/windows-owned-child';
+import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
 
 export const WINDOWS_PREDECESSOR_COMMIT = '837a2b8cde946d70d00920941a1a3e5e7c684f5d';
@@ -43,7 +44,9 @@ export function assertWindowsPredecessorLockedInput(
   previous: Uint8Array,
   current: Uint8Array,
 ) {
-  const match = matchPredecessorStdioInput(path, previous, current);
+  const match =
+    matchPredecessorStdioInput(path, previous, current) ??
+    matchPredecessorShellParserInput(path, previous, current);
   if (!match) throw Error(`windows_predecessor_dependency_input_changed:${path}`);
   return { path, sha256: sha(previous), currentSha256: sha(current), match };
 }

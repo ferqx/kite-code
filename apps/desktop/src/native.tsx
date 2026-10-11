@@ -110,7 +110,7 @@ function NativeDesktopContent({
   const [newBranch, setNewBranch] = useState<NativeBranchFacts>();
   const [targetBranch, setTargetBranch] = useState<string>();
   const [contextBusy, setContextBusy] = useState(false);
-  const [newPermission, setNewPermission] = useState<'ask' | 'accept_edits' | 'auto' | 'full'>();
+  const [newPermission, setNewPermission] = useState<'accept_edits' | 'auto' | 'full'>();
   const [newPlanMode, setNewPlanMode] = useState(false);
   const [newChoice, setNewChoice] = useState<NativeModelChoice>({});
   const [newModelReady, setNewModelReady] = useState<{
@@ -123,7 +123,7 @@ function NativeDesktopContent({
     text: string;
     choice: NativeModelChoice;
     plan: boolean;
-    permissionMode: 'ask' | 'accept_edits' | 'auto' | 'full';
+    permissionMode: 'accept_edits' | 'auto' | 'full';
     result?: NativeConversationResult;
   }>();
   const firstRef = useRef(firstSubmission);
@@ -603,10 +603,7 @@ function NativeDesktopContent({
       await report(refresh, false);
     }
   }
-  async function setPermissionMode(
-    mode: 'ask' | 'accept_edits' | 'auto' | 'full',
-    makeDefault: boolean,
-  ) {
+  async function setPermissionMode(mode: 'accept_edits' | 'auto' | 'full', makeDefault: boolean) {
     if (!bridge || !selection?.permissions || !state) throw Error('permission_facts_unavailable');
     if (!selection.permissions.trust.trusted) throw Error('workspace_untrusted');
     const sessionId = selection.session.id;
@@ -2417,10 +2414,9 @@ function NativeDesktopContent({
                   firstSubmission?.result?.phase === 'unknown',
                 inputLabel: '新对话草稿',
                 sendLabel: '发送首条消息',
-                permission: preparedPermission === 'ask' ? 'accept_edits' : preparedPermission,
+                permission: preparedPermission,
                 fullPermissionScope: JSON.stringify([directory.storeId, 'new-conversation']),
-                onPermissionChange: (mode) =>
-                  setNewPermission(mode === 'accept_edits' ? 'ask' : mode),
+                onPermissionChange: (mode) => setNewPermission(mode),
                 permissionDisabled: pending,
                 options: (
                   <>
@@ -2475,10 +2471,7 @@ function NativeDesktopContent({
                     ),
                   disabled: pending,
                   sending: pending,
-                  permission:
-                    selection.permissions?.mode.mode === 'ask'
-                      ? 'accept_edits'
-                      : selection.permissions?.mode.mode,
+                  permission: selection.permissions?.mode.mode,
                   fullPermissionScope: JSON.stringify([
                     state.generation,
                     selection.storeId,
@@ -2500,10 +2493,7 @@ function NativeDesktopContent({
                       value.sessionId === selection.session.id &&
                       ['saved', 'submitting', 'unknown'].includes(value.phase),
                   ),
-                  onPermissionChange: (mode) =>
-                    void write(() =>
-                      setPermissionMode(mode === 'accept_edits' ? 'ask' : mode, false),
-                    ),
+                  onPermissionChange: (mode) => void write(() => setPermissionMode(mode, false)),
                   sendDisabled:
                     historyState.phase !== 'complete' ||
                     selection.permissionUnavailable ||

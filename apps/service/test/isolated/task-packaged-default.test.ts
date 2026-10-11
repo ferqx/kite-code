@@ -231,7 +231,7 @@ test('source-free default Task preserves full child result and emits exactly one
           await client.setPermissionMode(sessionId, {
             expectedStoreId,
             commandId: `ask-${scenario}`,
-            mode: 'ask',
+            mode: 'accept_edits',
             ifRevision: mode.revision,
             ifDefaultRevision: mode.defaultRevision,
             makeDefault: false,

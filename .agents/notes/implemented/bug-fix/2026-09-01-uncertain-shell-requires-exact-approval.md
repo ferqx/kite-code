@@ -12,6 +12,10 @@ hard deny 没有被结构化区分。
 产品同时要求模型发出的 Git、构建、测试、package-manager、project script 与其他脚本命令统一经过
 `shell_execute`；typed Git broker可以继续作为Runtime内部机制，但不能构成第二个模型命令入口。
 
+## 当前适用范围
+
+V1.3 正式 CLI/TUI/Native/Service 的模式矩阵、未知 Shell 一律人工和批准后不得开放请求范围的结论，已由[按单次审批绑定独立写入/网络范围](../architecture/2026-10-11-shell-per-call-permission-scopes.md)部分替代。当前仅有请求批准、Auto 与 Full；不透明工作区命令使用实际无网络沙箱，外部写入及联网须取得对应准确范围的批准，Auto 仍走真实三态审核。以下旧决定只保历史 Kernel 语境及仍适用的准确调用身份、硬拒绝、持久队列、恢复零重放和实际沙箱约束，不能用于恢复第四种正式权限模式。
+
 ## Decision
 1. Shell Policy区分`proven_read_only`、已知effects、`uncertainEffects`与明确hard deny。没有通过只读grammar且无法
    完整确定effects的调用必须编译为`decision=ask + requiresApproval=true`，在Accept Edits、Auto与Full中都请求

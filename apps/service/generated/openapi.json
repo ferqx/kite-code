@@ -5732,7 +5732,7 @@
                     "anyOf": [
                       {
                         "type": "string",
-                        "enum": ["ask", "auto", "accept_edits", "full"]
+                        "enum": ["accept_edits", "auto", "full"]
                       },
                       {
                         "type": "null"
@@ -5743,7 +5743,7 @@
                     "anyOf": [
                       {
                         "type": "string",
-                        "enum": ["ask", "auto", "accept_edits", "full"]
+                        "enum": ["accept_edits", "auto", "full"]
                       },
                       {
                         "type": "null"
@@ -6366,7 +6366,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["ask", "accept_edits", "auto", "full"]
+            "enum": ["accept_edits", "auto", "full"]
           },
           "revision": {
             "type": "string",
@@ -6374,7 +6374,7 @@
           },
           "defaultMode": {
             "type": "string",
-            "enum": ["ask", "accept_edits", "auto", "full"]
+            "enum": ["accept_edits", "auto", "full"]
           },
           "defaultRevision": {
             "type": "string",
@@ -6481,7 +6481,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["ask", "accept_edits", "auto", "full"]
+            "enum": ["accept_edits", "auto", "full"]
           },
           "ifRevision": {
             "type": "string",
@@ -6807,7 +6807,7 @@
                       },
                       "mode": {
                         "type": "string",
-                        "enum": ["ask", "accept_edits", "auto", "full"]
+                        "enum": ["accept_edits", "auto", "full"]
                       },
                       "revision": {
                         "type": "string",

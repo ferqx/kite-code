@@ -5,6 +5,16 @@ import type { SqliteOperations } from './operations';
 
 type Row = Record<string, string | number | bigint | null>;
 function record(row: Row): HostMutationRecord {
+  const safeRequest = JSON.parse(String(row.safe_request_json)) as Json;
+  if (
+    row.kind === 'permission.mode' &&
+    (!safeRequest ||
+      typeof safeRequest !== 'object' ||
+      Array.isArray(safeRequest) ||
+      typeof safeRequest.mode !== 'string' ||
+      !modes.has(safeRequest.mode))
+  )
+    throw new AgentError('invalid_host_control');
   return {
     id: String(row.id),
     originStoreId: String(row.origin_store_id),
@@ -12,7 +22,7 @@ function record(row: Row): HostMutationRecord {
     kind: row.kind as HostMutationRecord['kind'],
     scope: String(row.scope),
     requestDigest: String(row.request_digest),
-    safeRequest: JSON.parse(String(row.safe_request_json)) as Json,
+    safeRequest,
     state: row.state as HostMutationRecord['state'],
     receipt: JSON.parse(String(row.receipt_json)) as Json,
   };
@@ -26,7 +36,7 @@ function identity(input: { commandId: string; subjectId: string }): void {
     throw new AgentError('invalid_host_mutation');
 }
 const controlKinds = new Set(['permission.mode', 'workspace.trust']);
-const modes = new Set(['ask', 'accept_edits', 'auto', 'full']);
+const modes = new Set(['accept_edits', 'auto', 'full']);
 function sequence(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -428,8 +438,9 @@ export function callHostMutation(
         (row.subject_id !== input.subjectId || row.origin_store_id !== input.expectedStoreId)
       )
         throw new AgentError('host_mutation_scope_denied');
+      const result = row ? record(row) : null;
       db.db.run('COMMIT');
-      return row ? record(row) : null;
+      return result;
     } catch (error) {
       db.db.run('ROLLBACK');
       throw error;

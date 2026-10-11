@@ -170,15 +170,22 @@ test.skipIf(process.platform !== 'darwin')(
         ],
       }),
     );
-    const serviceEntrypoint = join(root, 'service.js'),
+    const serviceEntrypoint = join(root, 'apps/service/dist/service.js'),
       bunExecutable = realpathSync(process.execPath),
       outdir = join(root, 'app');
+    const serviceOutdir = join(root, 'apps/service/dist');
+    mkdirSync(serviceOutdir, { recursive: true });
+    symlinkSync(
+      resolve(import.meta.dir, '../../../service/node_modules'),
+      join(root, 'apps/service/node_modules'),
+      'dir',
+    );
     const serviceBuild = await Bun.build({
       entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
       target: 'bun',
       format: 'esm',
       packages: 'external',
-      outdir: root,
+      outdir: serviceOutdir,
       naming: 'service.js',
     });
     if (!serviceBuild.success)

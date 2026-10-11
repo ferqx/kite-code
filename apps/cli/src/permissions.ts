@@ -292,11 +292,11 @@ export async function promptPermissionMode(
     return unresolved(options);
   }
   options.write(
-    'Choose ask, accept_edits, auto or full. Append " default" to also save the user default. Enter cancel to leave unchanged.',
+    'Choose accept_edits (请求批准), auto (自动审核) or full (完全访问). Append " default" to also save the user default. Enter cancel to leave unchanged.',
   );
   const line = await reader.readLine(options.signal);
   if (options.signal?.aborted || !line || line === 'cancel') return unresolved(options);
-  const choice = /^(ask|accept_edits|auto|full)( default)?$/.exec(line);
+  const choice = /^(accept_edits|auto|full)( default)?$/.exec(line);
   if (!choice) return unresolved(options);
   return setPermissionMode(
     sessionId,

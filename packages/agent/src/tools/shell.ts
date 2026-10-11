@@ -11,6 +11,8 @@ import { AgentError } from '../storage/types';
 
 export interface ShellToolsOptions {
   readonly job: JobDefinition;
+  /** Only trusted scope-aware host assembly registers this optional request. */
+  readonly permissionsSchema?: Json;
 }
 const idSchema = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$' };
 const decimal = { type: 'string', pattern: '^(0|[1-9][0-9]{0,18})$' };
@@ -60,12 +62,13 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       {
         id: 'shell.launch',
         version: '1',
-        description: 'Start one exact supervised Shell Job. Acceptance is not completion.',
+        description: `Start one exact supervised Shell Job. Acceptance is not completion.${options.permissionsSchema ? ' Default: workspace writes, no network. Request permissions explicitly for outside writes or Internet; the request still requires policy authorization. A failed command is never automatically rerun with wider permissions.' : ''}`,
         inputSchema: object(
           {
             key: idSchema,
             command: { type: 'string', minLength: 1, maxLength: 262144 },
             cancellation: { enum: ['attached', 'detached'] },
+            ...(options.permissionsSchema ? { permissions: options.permissionsSchema } : {}),
           },
           ['key', 'command'],
         ),
@@ -78,7 +81,12 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
               kind: 'job',
               definitionId: job.id,
               definitionVersion: job.version,
-              input: { command: text(inputArgs, 'command') },
+              input: {
+                command: text(inputArgs, 'command'),
+                ...(options.permissionsSchema && inputArgs.permissions !== undefined
+                  ? { permissions: inputArgs.permissions }
+                  : {}),
+              },
             },
             cancellation: inputArgs.cancellation === 'detached' ? 'detached' : 'attached',
           });

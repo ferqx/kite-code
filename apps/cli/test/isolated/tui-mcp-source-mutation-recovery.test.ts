@@ -100,7 +100,7 @@ async function fixture(many: boolean) {
     },
     permissionPolicy: {
       readPolicy: (request) => ({
-        mode: 'ask',
+        mode: 'auto',
         workspaceTrust: true,
         revision: 'owned-mutation',
         allowed: [

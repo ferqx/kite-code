@@ -273,6 +273,11 @@ test('actual CLI development argv runs one paired built Service with the selecte
     const outdir = join(root, 'apps/service/dist');
     mkdirSync(outdir, { recursive: true });
     symlinkSync(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'), 'dir');
+    symlinkSync(
+      join(repositoryRoot, 'apps/service/node_modules'),
+      join(root, 'apps/service/node_modules'),
+      'dir',
+    );
     const build = await Bun.build({
       entrypoints: [join(repositoryRoot, 'apps/service/src/main.ts')],
       target: 'bun',
@@ -517,6 +522,11 @@ test('actual development wrapper new argv binds original Work, cold caller, File
     const outdir = join(root, 'apps/service/dist');
     mkdirSync(outdir, { recursive: true });
     symlinkSync(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'), 'dir');
+    symlinkSync(
+      join(repositoryRoot, 'apps/service/node_modules'),
+      join(root, 'apps/service/node_modules'),
+      'dir',
+    );
     const build = await Bun.build({
       entrypoints: [join(repositoryRoot, 'apps/service/src/main.ts')],
       target: 'bun',

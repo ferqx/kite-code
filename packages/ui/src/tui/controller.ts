@@ -888,7 +888,7 @@ export class TuiController {
       mcpAuthServerId: same ? this.value.mcpAuthServerId : undefined,
       mcpAuthStatus: same ? this.value.mcpAuthStatus : undefined,
       mcpAuthOutcome: same ? this.value.mcpAuthOutcome : undefined,
-      mcpAuthReading: false,
+      mcpAuthReading: same ? this.value.mcpAuthReading : false,
       mcpAuthError: undefined,
       mcpSourceOpen: same ? this.value.mcpSourceOpen : false,
       mcpSource: same ? this.value.mcpSource : undefined,

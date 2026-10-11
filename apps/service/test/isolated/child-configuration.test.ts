@@ -578,7 +578,7 @@ test('trusted role carrier is an independent exact unknown-effect Job: Ask appro
     const f = await fixture({
       permissionPolicy: {
         readPolicy: () => ({
-          mode: 'ask',
+          mode: 'accept_edits',
           workspaceTrust: mode !== 'untrusted',
           revision: 'trusted-role-policy',
           allowed: [
@@ -611,7 +611,7 @@ test('trusted role carrier is an independent exact unknown-effect Job: Ask appro
           definitionId: 'agent/worker',
           definitionVersion: '7',
           input: { content: 'actual child input' },
-          policy: { effects: ['unknown'], mode: 'ask' },
+          policy: { effects: ['unknown'], mode: 'accept_edits' },
         });
         expect(f.a.requests.filter((request) => request.model !== 'parent')).toHaveLength(0);
         await f.runtime.answerInteraction({

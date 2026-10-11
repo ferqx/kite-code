@@ -794,7 +794,7 @@ try {
       await permissions
         .getByText(/^工作区：native-version-workspace；信任状态：trusted；版本：/)
         .waitFor();
-      await permissions.getByRole('radio', { name: 'Full', exact: true }).check();
+      await permissions.locator('input[name="permission-mode"][value="full"]').check();
       await permissions.getByRole('button', { name: '保存模式选择', exact: true }).click();
       await permissions.getByText(/^当前模式：full；默认模式：/).waitFor();
       assert.equal((await query<{ version: number }>('db8-capture')).version, 8);
