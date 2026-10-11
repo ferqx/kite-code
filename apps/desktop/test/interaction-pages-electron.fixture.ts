@@ -134,25 +134,69 @@ try {
   await app.evaluate('globalThis.fetch=globalThis.__pagesFetch');
   // Closing and switching abort only a pending page query, including a late response.
   for (const change of ['close', 'switch'] as const) {
-    const current = (await request({
-      method: 'select',
-      generation: 1,
-      sessionId: 's',
-    })) as NativeState;
+    await request({ method: 'select', generation: 1, sessionId: 's' });
     await app.evaluate(
       `(()=>{globalThis.__pagesFetch=globalThis.fetch;globalThis.__pagesReadEntered=false;globalThis.__pagesReadAborted=false;const gate=new Promise(r=>globalThis.__pagesRelease=r);globalThis.fetch=async(input,init)=>{const r=new Request(input,init);if(r.method==='GET'&&new URL(r.url).searchParams.has('afterId')&&new URL(r.url).pathname.endsWith('/interactions')){globalThis.__pagesReadEntered=true;r.signal.addEventListener('abort',()=>globalThis.__pagesReadAborted=true,{once:true});await gate;}return globalThis.__pagesFetch(input,init);};})()`,
     );
-    const pending = request({
-      method: 'interactions.next',
-      generation: 1,
-      viewGeneration: current.selection!.viewGeneration,
-      afterId: current.selection!.interactionsAfterId!,
-    }).catch(() => null);
-    await page.waitForFunction(
-      async () =>
-        await window.kiteNative!.request({ method: 'state', generation: 1 }).then(() => true),
-    );
+    const enteredDeadline = Date.now() + 10000;
+    let current = await state();
+    let pending: Promise<{ value: unknown } | { error: unknown }> | undefined;
+    let entered = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (
+        current.generation !== 1 ||
+        current.selection?.storeId !== storeId ||
+        current.selection?.session.id !== 's' ||
+        current.selection.session.workspaceId !== 'w' ||
+        current.selection.interactionsAfterId === null
+      )
+        throw Error('interaction_pages_read_scope_changed');
+      let pendingSettled = false;
+      pending = request({
+        method: 'interactions.next',
+        generation: 1,
+        viewGeneration: current.selection.viewGeneration,
+        afterId: current.selection.interactionsAfterId,
+      }).then(
+        (value) => {
+          pendingSettled = true;
+          return { value };
+        },
+        (error: unknown) => {
+          pendingSettled = true;
+          return { error };
+        },
+      );
+      while (!(await app.evaluate('globalThis.__pagesReadEntered'))) {
+        if (pendingSettled) break;
+        if (Date.now() >= enteredDeadline) throw Error('interaction_pages_read_enter_timeout');
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      entered = (await app.evaluate('globalThis.__pagesReadEntered')) as boolean;
+      if (entered) {
+        console.error('pages_read_attempt', JSON.stringify({ change, attempt, phase: 'entered' }));
+        break;
+      }
+      const result = await pending;
+      if (
+        !('error' in result) ||
+        !(result.error instanceof Error) ||
+        result.error.message !== 'interaction_page_observation_changed'
+      ) {
+        if ('error' in result) throw result.error;
+        throw Error('interaction_pages_read_settled_before_enter');
+      }
+      console.error(
+        'pages_read_attempt',
+        JSON.stringify({ change, attempt, phase: 'before_fetch_rejected' }),
+      );
+      if (attempt === 3) throw result.error;
+      if (Date.now() >= enteredDeadline) throw Error('interaction_pages_read_enter_timeout');
+      current = await state();
+    }
+    if (!entered || !pending) throw Error('interaction_pages_read_not_entered');
     assert.equal(await app.evaluate('globalThis.__pagesReadEntered'), true);
+    assert.equal(await app.evaluate('globalThis.__pagesReadAborted'), false);
     if (change === 'close')
       await request({
         method: 'interactions.close',
@@ -162,7 +206,8 @@ try {
     else await request({ method: 'select', generation: 1, sessionId: 'other' });
     assert.equal(await app.evaluate('globalThis.__pagesReadAborted'), true);
     await app.evaluate('globalThis.__pagesRelease();globalThis.fetch=globalThis.__pagesFetch');
-    await pending;
+    const result = await pending;
+    if ('error' in result) throw result.error;
     const after = await state();
     assert.equal(after.selection?.session.id, change === 'close' ? 's' : 'other');
     assert.equal(

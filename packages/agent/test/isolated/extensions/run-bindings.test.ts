@@ -568,3 +568,182 @@ test('ordinary background Job retains dynamic Run binding beyond parent completi
   expect(bindingDisposals).toEqual([1, 1]);
   expect(jobDisposals).toEqual([1, 1]);
 });
+
+test('a failing trusted initializer disposes only its resolved binding while an initialized ordinary Tool stays usable and cold facts never replay', async () => {
+  const { AgentError } = await import('../../../src');
+  const entered = gate(),
+    release = gate(),
+    healthyDisposed = gate(),
+    failedDisposed = gate();
+  const failedModel = createFixedModel([[finish]]);
+  const healthyModel = createFixedModel([call(), [finish]]);
+  const events: string[] = [];
+  let healthyOpen = false,
+    failedOpen = false,
+    healthyInitializations = 0,
+    failedInitializations = 0,
+    healthyDisposals = 0,
+    failedDisposals = 0,
+    effects = 0,
+    resolutions = 0;
+  const healthyTool: ToolDefinition = {
+    id: 'fixture.tool',
+    version: '1',
+    description: 'Original successfully initialized capability',
+    inputSchema: { type: 'object' },
+    async execute() {
+      expect(healthyOpen).toBe(true);
+      events.push('healthy-entered');
+      entered.release();
+      await release.promise;
+      expect(healthyOpen).toBe(true);
+      expect(failedOpen).toBe(false);
+      effects++;
+      events.push('healthy-effect');
+      return { outcome: 'succeeded', content: 'original healthy capability remained usable' };
+    },
+  };
+  const f = await fixture({
+    permissions,
+    modelConcurrency: 2,
+    async resolveRunConfiguration({ command }) {
+      resolutions++;
+      if (command.id === 'fails-initialize') {
+        failedOpen = true;
+        return {
+          model: failedModel,
+          modelId: 'never-called-failed-initializer-model',
+          extensions: [{ id: 'failed', version: '1', apiMajor: 1 }],
+          snapshot: { original: 'failed-binding' },
+          async initializeRequirements() {
+            failedInitializations++;
+            expect(failedOpen).toBe(true);
+            expect(healthyOpen).toBe(true);
+            expect(healthyDisposals).toBe(0);
+            events.push('failed-initialize');
+            throw new AgentError('fixture_initialization_failed');
+          },
+          async dispose() {
+            failedDisposals++;
+            failedOpen = false;
+            events.push('failed-disposed');
+            failedDisposed.release();
+          },
+        };
+      }
+      healthyOpen = true;
+      return {
+        model: healthyModel,
+        modelId: 'original-healthy-model',
+        extensions: [extension(healthyTool)],
+        snapshot: { original: 'healthy-binding' },
+        async initializeRequirements() {
+          healthyInitializations++;
+          events.push('healthy-initialize');
+          return [];
+        },
+        async dispose() {
+          healthyDisposals++;
+          healthyOpen = false;
+          events.push('healthy-disposed');
+          healthyDisposed.release();
+        },
+      };
+    },
+  });
+  try {
+    await f.create('failed-session');
+    await f.submit('healthy-original');
+    await entered.promise;
+    expect(healthyInitializations).toBe(1);
+    await f.submit('fails-initialize', 'failed-session');
+    const failed = await f.done('fails-initialize');
+    await failedDisposed.promise;
+    expect(failed.command.status).toBe('applied');
+    expect(failed.run).toMatchObject({
+      sessionId: 'failed-session',
+      originCommandId: 'fails-initialize',
+      originStoreId: f.expectedStoreId,
+      status: 'failed',
+      isActive: false,
+      reason: 'fixture_initialization_failed',
+      requirements: [],
+    });
+    expect(failed.run?.configuration).toMatchObject({
+      modelId: 'never-called-failed-initializer-model',
+      snapshot: { original: 'failed-binding' },
+    });
+    expect(failedModel.requests).toHaveLength(0);
+    expect(await f.store.listExecutions('failed-session', 100)).toEqual([]);
+    expect(failedInitializations).toBe(1);
+    expect(failedDisposals).toBe(1);
+    expect(failedOpen).toBe(false);
+    expect(healthyOpen).toBe(true);
+    expect(healthyDisposals).toBe(0);
+    const original = await f.store.getCommand('healthy-original');
+    const originalRunId = (original!.receipt as { runId: string }).runId;
+    expect(await f.store.getRun(originalRunId)).toMatchObject({
+      status: 'running',
+      isActive: true,
+      originCommandId: 'healthy-original',
+    });
+    release.release();
+    const healthy = await f.done('healthy-original');
+    await healthyDisposed.promise;
+    expect(healthy.run?.status).toBe('completed');
+    expect(healthyModel.requests).toHaveLength(2);
+    const healthyExecutions = await f.store.listExecutions('s', 100);
+    expect(healthyExecutions.filter((row) => row.kind === 'tool')).toHaveLength(1);
+    expect(healthyExecutions.find((row) => row.kind === 'tool')).toMatchObject({
+      status: 'succeeded',
+      result: { content: 'original healthy capability remained usable' },
+    });
+    expect(effects).toBe(1);
+    expect(events).toEqual([
+      'healthy-initialize',
+      'healthy-entered',
+      'failed-initialize',
+      'failed-disposed',
+      'healthy-effect',
+      'healthy-disposed',
+    ]);
+    const warmHealthy = await f.runtime.getView('s');
+    const warmFailed = await f.runtime.getView('failed-session');
+    await f.runtime.close();
+    expect(healthyDisposals).toBe(1);
+    expect(failedDisposals).toBe(1);
+    expect(healthyOpen).toBe(false);
+    const coldStore = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    let coldResolutions = 0;
+    const coldRuntime = createRuntime({
+      store: coldStore,
+      permissions,
+      async resolveRunConfiguration() {
+        coldResolutions++;
+        throw new Error('cold history must not initialize any binding');
+      },
+    });
+    try {
+      expect((await coldRuntime.getMetadata()).storeId).toBe(f.expectedStoreId);
+      expect(await coldRuntime.getView('s')).toEqual(warmHealthy);
+      expect(await coldRuntime.getView('failed-session')).toEqual(warmFailed);
+      expect(await coldStore.getCommand('fails-initialize')).toEqual(failed.command);
+      expect(await coldStore.getRun(failed.run!.id)).toEqual(failed.run);
+      expect(await coldStore.listExecutions('s', 100)).toEqual(healthyExecutions);
+      expect(await coldStore.listExecutions('failed-session', 100)).toEqual([]);
+      expect(coldResolutions).toBe(0);
+      expect(resolutions).toBe(2);
+      expect(failedModel.requests).toHaveLength(0);
+      expect(effects).toBe(1);
+      expect(healthyInitializations).toBe(1);
+      expect(failedInitializations).toBe(1);
+    } finally {
+      await coldRuntime.close();
+    }
+    expect(healthyDisposals).toBe(1);
+    expect(failedDisposals).toBe(1);
+  } finally {
+    release.release();
+    await f.close();
+  }
+});

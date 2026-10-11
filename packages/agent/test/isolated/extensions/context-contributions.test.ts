@@ -187,7 +187,17 @@ test('scoped business context reaches Model as user data; same-decision record c
   };
   const peer: Extension = { id: 'peer', version: '1', apiMajor: 1, records };
   const f = await fixture(
-    [ext, peer],
+    [
+      {
+        ...ext,
+        // This case requires the source write before the dependent dispatch.
+        tools: ext.tools!.map((tool) => ({
+          ...tool,
+          resources: { serial: { scope: 'session' as const, key: 'business-context' } },
+        })),
+      },
+      peer,
+    ],
     [[finish], calls('fixture.writer', 'fixture.effect'), [finish]],
     {
       async initializeRunRequirements(input) {
@@ -469,7 +479,16 @@ test('checkpoint batches preserve distinct Tool inputs and refreshed business fa
     },
   };
   const f = await fixture(
-    [ext],
+    [
+      {
+        ...ext,
+        // This case requires the source write before the dependent dispatch.
+        tools: ext.tools!.map((tool) => ({
+          ...tool,
+          resources: { serial: { scope: 'session' as const, key: 'business-context' } },
+        })),
+      },
+    ],
     [
       [
         ...[1, 2].map((ordinal) => ({

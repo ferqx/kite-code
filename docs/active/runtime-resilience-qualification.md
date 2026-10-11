@@ -8,9 +8,13 @@
 
 ## 当前 V1.3 owner 与资格边界
 
-macOS MCP stdio 的原启动失败已按准备清理缺口修复，原连接／Tool／RPC取消与准确 owned stop、正常退出、源码树外默认 Source 和维护后 cold 原结果的完整文件证据归[当前进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)。启动与停止合同仍归[MCP owner](../../packages/agent/src/mcp/README.md#显式-stdio-guardian-port)和共享 platform；本轮只闭合该完整用户链的本机缺口。原 RSS 红、activeResources／handles、全 Runtime 出生后代观测和八 outer／九点仍阻 P6／§35／最终退役；Win／Linux实机交后续 GitHub Actions，不以这些局部结果宣布阶段退出。
+按用户2026-10-11最新安排，当前优先闭合 macOS 可独立完成的能力，Windows/Linux 实际验证后置，Windows 由用户后续独立验证；已有 Actions 接线保留，本轮不触发。此前“交后续 GitHub Actions”的平台安排由此调整，任何 macOS 结果仍不授 Win/Linux 资格。
 
-Windows installed TUI 源码现接独立 Terminal／登记 Native 的同一稳定前门与真实 ConPTY 完整用户链，当前合同归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-installed-tui-正式调用者)。原九份私有记录的 Profile guard 在权限探针之前登记操作；准确 Close 未确认保原 SH／EX 和首次错误，不释放锁或自动重试。PTY 在创建前纳入原 Job，普通退出另核产品／PTY／driver 与全部输出 EOF、Job0／wait／strict Close、未 Terminate 和安装 EX。原 Job 成员证明只覆盖这次用户链，不填补整个 Runtime census、activeResources／handles、原 RSS 红或八 outer／九点。Windows/Linux 实际执行交后续 GitHub Actions，本机 mock／适用原测试不代平台资格，不提前退出 P6／§35／最终退役。
+原 macOS RSS `+115.203125MiB >32MiB` 仍为真实失败。一次有界的 JS heap 持有链诊断没有定位可据此修复的业务持有链：root 可达字节略降，Worker 增长主要落在 JSC FunctionCodeBlock；快照引入 full GC、停顿和分配，且候选不是当前输入，不能替代原 RSS 证据。native live allocation owner 尚未确定，不再重复参数对照。全 Runtime 出生后代可靠 producer、Bun activeResources/handles 仍缺失，formal verifier 的原拒绝保持；准确诊断输入和限制归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-独立能力与并行工具完整行为)。
+
+macOS MCP stdio 的原启动失败已按准备清理缺口修复，原连接／Tool／RPC取消与准确 owned stop、正常退出、源码树外默认 Source 和维护后 cold 原结果的完整文件证据归[当前进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)。启动与停止合同仍归[MCP owner](../../packages/agent/src/mcp/README.md#显式-stdio-guardian-port)和共享 platform；本轮只闭合该完整用户链的本机缺口。原 RSS 红、activeResources／handles、全 Runtime 出生后代观测和八 outer／九点仍阻 P6／§35／最终退役；Win／Linux实机按上述用户安排后置，不以这些局部结果宣布阶段退出。
+
+Windows installed TUI 源码现接独立 Terminal／登记 Native 的同一稳定前门与真实 ConPTY 完整用户链，当前合同归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-installed-tui-正式调用者)。原九份私有记录的 Profile guard 在权限探针之前登记操作；准确 Close 未确认保原 SH／EX 和首次错误，不释放锁或自动重试。PTY 在创建前纳入原 Job，普通退出另核产品／PTY／driver 与全部输出 EOF、Job0／wait／strict Close、未 Terminate 和安装 EX。原 Job 成员证明只覆盖这次用户链，不填补整个 Runtime census、activeResources／handles、原 RSS 红或八 outer／九点。Windows/Linux 实际执行按上述用户安排后置，本机 mock／适用原测试不代平台资格，不提前退出 P6／§35／最终退役。
 
 根默认八 workspace、fault/CI soak、stdio/transport 和真实 TUI runner 已使用新公共 Runtime/Client/Store；旧 `run-fault-soak.ts`、旧 State/Host/carrier 测试不参与正式/default/CI。当前负责入口是[新 runner](../../scripts/runtime/unified-soak.ts)、[报告/verifier](../../scripts/runtime/unified-soak-report.ts)和[实际测试](../../tests/isolated/unified-agent/unified-soak.test.ts)。下面旧阶段、场景和遥测实现只保历史依据；适用的 no-replay、原 scope、实际清理、资源增长和平台身份约束继续有效。
 

@@ -238,6 +238,8 @@ test.skipIf(process.platform !== 'darwin')(
         const code = await driver.exited,
           stdout = await out,
           stderr = await err;
+        for (const line of stderr.split('\n'))
+          if (line.startsWith('native_permission_attempt ')) console.error(line);
         if (code)
           console.error({
             stdout,

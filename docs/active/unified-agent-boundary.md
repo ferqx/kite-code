@@ -32,11 +32,15 @@ Native 原大Model正文将当前连接Store与封存出处分别核实。Servic
 
 总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确八个新 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。旧源码与历史测试保留作参考，不进入正式产物或默认调度。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
 
+单一 Loop 的完整 Model 工具批次沿现有资源并行调度，每项原输入、权限和决策来源独立核实；Run 结束与 lease release 等待全部已启动调用，后发持久化失败保留原错误。物理历史保留实际完成顺序，仅下一 Model 的同批结果按原调用顺序投影；显式接续可复用非前缀的已结算结果，live/unknown 边界仍拒绝。当前实现与定向验证归[Agent owner](../../packages/agent/README.md#同一-step-的并行工具批次)，HTTP、公共 Client 和 SQL 格式不变。
+
 [`ai`](../../packages/ai/README.md)拥有中立模型协议与独立 SDK 适配 leaf；[`agent`](../../packages/agent/README.md)拥有单一 Loop、具名 Store 操作、执行意图/派发/回执、精确取消与显式本地中断。普通扩展只得到受范围限制的调用身份、自有记录和有限 operations，不能写 SQL、owner 或 Runtime 完成事实。Store 是宿主边界，不能作为便利对象传入扩展。Action 不虚构模型 Run，Query 不触发模型、工具或恢复。
 
 HTTP Change 的 `objectId` 读取契约与 Store 事件生产者一致：不透明通知标识上界385字符，覆盖128字符扩展 namespace、分隔符和256字符自有 key，包括点号、斜线和 Unicode。它不解释为路径或执行身份，普通 Store/Session/Command ID 约束不变。Service schema、生成 Client validator 与 OpenAPI 同源；[真实回归](../../apps/service/test/isolated/extension-changes.test.ts)核持久事件逐条抵达、ready 不 ACK、最终原水位 ACK、零 reset 与零额外执行。
 
 SQLite Worker 持有唯一所属连接；业务事实和变化通知同事务。profile/Session 协调锁位于可替换 profile 外，取得 OS 锁后更新 owner generation，正常释放先复查并清空持久 owner。无损 64 位游标与消息顺序不使用 JS Number。未知外部效果不自动重放；失败取消请求不能停止未经授权的对象，真实存储故障只允许对本 owner 已核实句柄执行收缩性停止。
+
+Store 在原条数与完整 frame 字节上限内投递，容量不足时调用方先等待，关键控制预留与 Worker 公平调度保持；等待后重核 owner/lease，不自动重投未知写入。关闭同步封门并排空此前调用。Operation 唤醒仍最多 64 个活动登记，容量等待使用原绝对期限、准确 abort 和关闭拒绝。具体容量与[验收](../../packages/agent/README.md#同一-step-的并行工具批次)归 Agent owner；生产者等待不代替整个 Runtime 的 RSS 或完整资源门禁。
 
 正常空闲交接使用原 owner 的有限 dispatch 观察，核 Store、instance/generation、准确 Session 并与 acquire/release 共用组阻塞条件。旧空列表与释放之间新接受的本 Session 工作，没有未结算执行时沿同一 generation 继续；已取消工作有限释放后退出，其他 Session 保持原调度。真实 unknown/cold active 不借 accepted 新命令解除，观察不取得 owner 或恢复权。[Store owner](../../packages/agent/src/storage/README.md)与[确定性交接测试](../../packages/agent/test/isolated/execution/owner-handoff.test.ts)负责准确范围。
 

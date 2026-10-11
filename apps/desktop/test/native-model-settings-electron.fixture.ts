@@ -27,7 +27,7 @@ async function openSessionTools(page: import('playwright').Page) {
 }
 
 const [outdir, root, _dataRoot, storeId, _endpoint, electronExecutable, control, bunExecutable] =
-  process.argv.slice(2) as string[];
+  process.argv.slice(2) as [string, string, string, string, string, string, string, string];
 const launch = () =>
   _electron.launch({
     executablePath: electronExecutable,
@@ -158,29 +158,67 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
-  await page.evaluate(async () => {
-    const initial = (await window.kiteNative!.request({
-      method: 'state',
-      generation: 1,
-    })) as NativeState;
-    await window.kiteNative!.request({
-      method: 'permission.mode',
-      generation: 1,
-      observationId: initial.selection!.permissions!.observationId,
-      mode: 'full',
-      makeDefault: false,
-    });
-    const refreshed = (await window.kiteNative!.request({
-      method: 'permission.refresh',
-      generation: 1,
-    })) as NativeState;
-    await window.kiteNative!.request({
-      method: 'permission.trust',
-      generation: 1,
-      observationId: refreshed.selection!.permissions!.observationId,
-      trusted: true,
-    });
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text.startsWith('native_permission_attempt ')) console.error(text);
   });
+  await page.evaluate(
+    async ({ generation, storeId, sessionId, workspaceId }) => {
+      const identity = (state: NativeState) => {
+        if (
+          state.generation !== generation ||
+          state.selection?.storeId !== storeId ||
+          state.selection.session.id !== sessionId ||
+          state.selection.session.workspaceId !== workspaceId
+        )
+          throw Error('permission_fixture_identity_changed');
+      };
+      const intentIds = (state: NativeState) =>
+        JSON.stringify(state.permissionSubmissions.map((row) => row.intent.commandId).sort());
+      for (const kind of ['permission.mode', 'permission.trust'] as const) {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const fresh = (await window.kiteNative!.request({
+            method: 'permission.refresh',
+            generation,
+          })) as NativeState;
+          identity(fresh);
+          const observationId = fresh.selection!.permissions!.observationId;
+          const before = intentIds(fresh);
+          console.error(
+            'native_permission_attempt ' +
+              JSON.stringify({ kind, attempt, observationId, phase: 'choice' }),
+          );
+          try {
+            await window.kiteNative!.request(
+              kind === 'permission.mode'
+                ? { method: kind, generation, observationId, mode: 'full', makeDefault: false }
+                : { method: kind, generation, observationId, trusted: true },
+            );
+            console.error(
+              'native_permission_attempt ' +
+                JSON.stringify({ kind, attempt, observationId, phase: 'success' }),
+            );
+            break;
+          } catch (error) {
+            if (!(error instanceof Error) || error.message !== 'permission_observation_changed')
+              throw error;
+            const after = (await window.kiteNative!.request({
+              method: 'state',
+              generation,
+            })) as NativeState;
+            identity(after);
+            if (intentIds(after) !== before) throw Error('permission_fixture_intent_changed');
+            console.error(
+              'native_permission_attempt ' +
+                JSON.stringify({ kind, attempt, observationId, phase: 'pre_intent_rejected' }),
+            );
+            if (attempt === 3) throw error;
+          }
+        }
+      }
+    },
+    { generation: 1, storeId: storeId, sessionId: 's', workspaceId: 'w' },
+  );
   await page.evaluate(() => {
     const events: Record<string, unknown>[] = [];
     Object.defineProperty(window, '__settingsInputEvents', { value: events });

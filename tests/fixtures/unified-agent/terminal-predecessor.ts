@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import { matchPredecessorStdioInput } from './predecessor-stdio-input';
 
 // Original committed PC UI with current locked inputs and DB7. Earlier comparisons
 // used 3140 (macOS) / 1b796 (Linux); their locks predate the PC presentation migration.
@@ -34,10 +35,12 @@ export function matchTerminalPredecessorInput(
   | 'identical'
   | 'process_observation_source_entry'
   | 'windows_native_bootstrap_source_entry'
+  | 'runtime_stdio_validation_script_increment'
   | undefined {
   const oldBytes = Buffer.from(previous),
     currentBytes = Buffer.from(current);
   if (oldBytes.equals(currentBytes)) return 'identical';
+  if (path === 'package.json') return matchPredecessorStdioInput(path, previous, current);
   if (path === 'apps/service/package.json') {
     const original = oldBytes.toString('utf8'),
       exportAnchor = '    "./native-runtime-assets": "./src/native-runtime-assets.ts",\n',
@@ -129,12 +132,12 @@ async function command(argv: string[], cwd: string, timeoutMs: number): Promise<
       clearTimeout(timer);
       reject(error);
     });
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       clearTimeout(timer);
       if (timedOut || code !== 0 || bytes > 8 * 1024 * 1024)
         reject(
           Error(
-            `terminal_predecessor_command_failed:${argv[0]}:${argv[1]}:${code}:timeout=${timedOut}:${stderr}`,
+            `terminal_predecessor_command_failed:${argv[0]}:${argv[1]}:${code}:signal=${signal ?? 'none'}:timeout=${timedOut}:${stderr}`,
           ),
         );
       else accept(Buffer.concat(stdout));
@@ -186,7 +189,8 @@ export async function materializeTerminalPredecessor(input: {
     match:
       | 'identical'
       | 'process_observation_source_entry'
-      | 'windows_native_bootstrap_source_entry';
+      | 'windows_native_bootstrap_source_entry'
+      | 'runtime_stdio_validation_script_increment';
   }[] = [];
   for (const path of inputs) {
     if (!inside(repository, resolve(repository, path)))

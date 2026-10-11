@@ -14,7 +14,7 @@ def pump():
   except OSError: pass
 def current_frame():
  text=buffer.decode(errors='replace');frames=re.findall(r'\\x1b\\[\\?2026h(.*?)\\x1b\\[\\?2026l',text,re.S)
- return frames[-1] if frames else text
+ return frames[-1] if frames else ''
 def visible(text):return re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',text))
 def wait(text,material=False,ready=False):
  deadline=time.monotonic()+8

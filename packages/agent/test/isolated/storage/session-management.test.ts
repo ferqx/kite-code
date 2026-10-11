@@ -539,3 +539,125 @@ for (const deletionScope of ['session', 'workspace'] as const)
       rmSync(f.root, { recursive: true, force: true });
     }
   });
+test('a narrow title mutation preserves future content and fields byte-for-byte without changing the storage schema', async () => {
+  const f = await fixture();
+  const physical = new Database(join(f.profile.dataRoot, f.profile.profile, 'core.db'));
+  const future = '{  "futureMetadata": {"version":901,"opaque":[true,null,"原文😀"]}  }';
+  try {
+    physical.run(
+      "INSERT INTO extension_record(extension_id,scope_kind,scope_id,key,revision,content_type,content_version,origin_store_id,json) VALUES('future.extension','session','s','preserved',7,'future.content',901,?,?)",
+      [f.storeId, future],
+    );
+    const record = () =>
+      physical.query("SELECT * FROM extension_record WHERE extension_id='future.extension'").get();
+    const schema = () =>
+      physical
+        .query(
+          "SELECT type,name,sql FROM sqlite_master WHERE type IN('table','index') ORDER BY type,name",
+        )
+        .all();
+    const before = record(),
+      beforeSchema = schema(),
+      beforeMetadata = await f.store.getMetadata();
+    const renamed = await f.store.renameSession({
+      ...f.base,
+      commandId: 'narrow-title',
+      ifRevision: '0',
+      title: 'Explicit new title 😀',
+    });
+    expect(renamed.session.title).toBe('Explicit new title 😀');
+    expect(renamed.session.controlRevision).toBe('1');
+    expect(record()).toEqual(before);
+    expect(schema()).toEqual(beforeSchema);
+    expect((await f.store.getMetadata()).storeId).toBe(beforeMetadata.storeId);
+    expect(
+      await f.store.getExtensionRecord({
+        extensionId: 'future.extension',
+        sessionId: 's',
+        key: 'preserved',
+      }),
+    ).toMatchObject({
+      contentType: 'future.content',
+      contentVersion: 901,
+      revision: '7',
+      value: JSON.parse(future),
+    });
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect(
+      await f.store.renameSession({
+        ...f.base,
+        commandId: 'narrow-title',
+        ifRevision: '0',
+        title: 'Explicit new title 😀',
+      }),
+    ).toEqual(renamed);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    await f.store.close();
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      expect((await cold.getSession('s'))!.title).toBe('Explicit new title 😀');
+      expect((await cold.getMetadata()).storeId).toBe(f.storeId);
+      expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect(
+        await cold.getExtensionRecord({
+          extensionId: 'future.extension',
+          sessionId: 's',
+          key: 'preserved',
+        }),
+      ).toMatchObject({ value: JSON.parse(future) });
+      expect(record()).toEqual(before);
+      expect(schema()).toEqual(beforeSchema);
+    } finally {
+      await cold.close();
+    }
+  } finally {
+    physical.close(true);
+    await f.store.close();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('corrupt extension JSON is an honest local read failure with original bytes intact and unrelated history still readable', async () => {
+  const f = await fixture();
+  const physical = new Database(join(f.profile.dataRoot, f.profile.profile, 'core.db'));
+  const corrupt = '{"original": ["truncated';
+  try {
+    await f.store.createSession({
+      ...f.base,
+      commandId: 'create-other',
+      sessionId: 'other',
+      workspaceId: 'w',
+      title: 'Unrelated readable history',
+    });
+    physical.run(
+      "INSERT INTO extension_record(extension_id,scope_kind,scope_id,key,revision,content_type,content_version,origin_store_id,json) VALUES('future.extension','session','s','corrupt',1,'future.content',901,?,?)",
+      [f.storeId, corrupt],
+    );
+    const metadata = await f.store.getMetadata(),
+      other = await f.store.getView('other');
+    const error = await f.store
+      .getExtensionRecord({
+        extensionId: 'future.extension',
+        sessionId: 's',
+        key: 'corrupt',
+      })
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({ code: 'storage_error', retryable: false });
+    expect(
+      physical
+        .query(
+          "SELECT json FROM extension_record WHERE extension_id='future.extension' AND key='corrupt'",
+        )
+        .get(),
+    ).toEqual({ json: corrupt });
+    expect(await f.store.getView('other')).toEqual(other);
+    expect(await f.store.listMessages('other')).toEqual([]);
+    expect(await f.store.getMetadata()).toEqual(metadata);
+    expect((await f.store.getSession('other'))!.title).toBe('Unrelated readable history');
+  } finally {
+    physical.close(true);
+    await f.store.close();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});

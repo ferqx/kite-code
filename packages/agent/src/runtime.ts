@@ -2399,7 +2399,6 @@ export class AgentRuntime {
     }
     const tools = new Map<string, ExecutionRecord>();
     const settled: { callId: string; result: import('./extensions').ToolResult }[] = [];
-    let incomplete = false;
     const callIds = new Set<string>();
     for (const call of output.toolCalls) {
       if (callIds.has(call.id)) throw new AgentError('resume_checkpoint_unavailable');
@@ -2407,10 +2406,7 @@ export class AgentRuntime {
       const matching = candidates.get(call.id) ?? [];
       if (matching.length > 1) throw new AgentError('resume_checkpoint_unavailable');
       const existing = matching[0];
-      if (!existing) {
-        incomplete = true;
-        continue;
-      }
+      if (!existing) continue;
       const decision = existing.decisionSource as Record<string, Json>;
       let originalInput: Json = null;
       try {
@@ -2423,9 +2419,8 @@ export class AgentRuntime {
       if (canonicalJson(originalInput) !== canonicalJson(existing.input))
         throw new AgentError('resume_checkpoint_unavailable');
       if (existing.status === 'planned') {
-        incomplete = true;
         tools.set(call.id, existing);
-      } else if (['succeeded', 'failed', 'cancelled'].includes(existing.status) && !incomplete)
+      } else if (['succeeded', 'failed', 'cancelled'].includes(existing.status))
         settled.push({
           callId: call.id,
           result: existing.result as unknown as import('./extensions').ToolResult,
@@ -4220,23 +4215,15 @@ export class AgentRuntime {
             description: tool.description,
             inputSchema: tool.inputSchema,
           }));
-      const loopContext: LoopContext = {
-        checkpoint: resumed?.loop,
-        modelId,
-        signal: controller.signal,
-        getMessages: messages,
-        getTools: modelTools,
-        restoreToolCall: async (call) => {
-          if (
-            !configuredSources &&
-            !scope.bindings.extensions.some((extension) => extension.context)
-          )
-            return;
+      const registerToolRequests = async (calls: readonly import('./storage/types').ToolCall[]) => {
+        if (!configuredSources && !scope.bindings.extensions.some((extension) => extension.context))
+          return;
+        for (const call of calls) {
           let input: Json = null;
           try {
             input = JSON.parse(call.arguments) as Json;
           } catch {
-            /* Known invalid original input. */
+            /* UnifiedExecution records invalid parameters. */
           }
           sourceRequests.set(`${call.name}:${await semanticDigest(input)}`, {
             sessionId: session.id,
@@ -4244,7 +4231,15 @@ export class AgentRuntime {
             definitionId: call.name,
             input,
           });
-        },
+        }
+      };
+      const loopContext: LoopContext = {
+        checkpoint: resumed?.loop,
+        modelId,
+        signal: controller.signal,
+        getMessages: messages,
+        getTools: modelTools,
+        prepareToolCalls: registerToolRequests,
         executeModel: async (request, stepId) => {
           if (resumed?.plannedModel?.id === request.requestId)
             return this.execution.model(
@@ -4291,25 +4286,7 @@ export class AgentRuntime {
             }
           }
         },
-        executeTool: async (call, stepId, source) => {
-          let input: Json = null;
-          try {
-            input = JSON.parse(call.arguments) as Json;
-          } catch {
-            /* UnifiedExecution records invalid parameters. */
-          }
-          if (
-            configuredSources ||
-            scope.bindings.extensions.some((extension) => extension.context)
-          ) {
-            const key = `${call.name}:${await semanticDigest(input)}`;
-            sourceRequests.set(key, {
-              sessionId: session.id,
-              workspaceId: session.workspaceId,
-              definitionId: call.name,
-              input,
-            });
-          }
+        executeTool: async (call, stepId, source, signal) => {
           const decisionSources = structuredClone(captured);
           const decisionRequests = structuredClone([...sourceRequests.values()]);
           const decisionInputVersion = capturedInputVersion;
@@ -4331,6 +4308,7 @@ export class AgentRuntime {
           return this.execution.tool(
             {
               ...scope,
+              signal,
               bindings: decisionBindings,
               decisionSources,
               checkFreshness: checkToolDecision,
@@ -4759,7 +4737,21 @@ export class AgentRuntime {
         }
       }
     } catch (error) {
-      if (error instanceof AgentError && error.code === 'child_deadline_exceeded') await expire();
+      const errors: unknown[] = error instanceof AggregateError ? error.errors : [error];
+      if (
+        errors.some(
+          (cause) => cause instanceof AgentError && cause.code === 'child_deadline_exceeded',
+        )
+      )
+        await expire();
+      // A later independent failure to persist a sibling's result must remain visible even
+      // when the first batch failure was an ordinary denial or unknown outcome.
+      const failure =
+        errors.find(
+          (cause) =>
+            cause instanceof AgentError &&
+            !(error instanceof AggregateError && cause === error.cause),
+        ) ?? errors.find((cause) => cause instanceof AgentError);
       await this.options.store.finishRun({
         expectedStoreId: command.originStoreId,
         owner,
@@ -4769,9 +4761,11 @@ export class AgentRuntime {
           controller.signal.reason instanceof AgentError &&
           controller.signal.reason.code === 'child_deadline_exceeded'
             ? 'child_deadline_exceeded'
-            : error instanceof AgentError
-              ? error.code
-              : 'execution_failed',
+            : failure instanceof AgentError
+              ? failure.code
+              : error instanceof AggregateError
+                ? 'tool_batch_failed'
+                : 'execution_failed',
         requirements: [],
       });
     } finally {
@@ -5721,11 +5715,13 @@ export class AgentRuntime {
         });
       }
       if (page.nextAfterSeq === null && page.nextAfterSourceId === null)
-        return [...result.values()]
-          .sort((a, b) =>
-            BigInt(a.seq) < BigInt(b.seq) ? -1 : BigInt(a.seq) > BigInt(b.seq) ? 1 : 0,
-          )
-          .map((value) => value.message);
+        return orderModelToolResults(
+          [...result.values()]
+            .sort((a, b) =>
+              BigInt(a.seq) < BigInt(b.seq) ? -1 : BigInt(a.seq) > BigInt(b.seq) ? 1 : 0,
+            )
+            .map((value) => value.message),
+        );
       const nextSeq = page.nextAfterSeq ?? upperSeq;
       const nextSourceId = page.nextAfterSourceId ?? page.resultSources.at(-1)?.id ?? afterSourceId;
       if (nextSeq === afterSeq && nextSourceId === afterSourceId)
@@ -5734,6 +5730,29 @@ export class AgentRuntime {
       afterSourceId = nextSourceId;
     }
   }
+}
+
+/** History retains completion seq; each Model sees its paired results in original call order. */
+function orderModelToolResults(messages: ModelMessage[]): ModelMessage[] {
+  const ordered = [...messages];
+  for (let index = 0; index < ordered.length; index++) {
+    const assistant = ordered[index]!;
+    if (assistant.role !== 'assistant' || !assistant.toolCalls?.length) continue;
+    const calls = new Map(assistant.toolCalls.map((call, position) => [call.id, position]));
+    const positions: number[] = [];
+    for (let next = index + 1; next < ordered.length; next++) {
+      const message = ordered[next]!;
+      if (message.role === 'assistant') break;
+      if (message.role === 'tool' && message.toolCallId && calls.has(message.toolCallId))
+        positions.push(next);
+    }
+    const results = positions
+      .map((position) => ordered[position]!)
+      .sort((a, b) => calls.get(a.toolCallId!)! - calls.get(b.toolCallId!)!);
+    for (let position = 0; position < positions.length; position++)
+      ordered[positions[position]!] = results[position]!;
+  }
+  return ordered;
 }
 
 export function createRuntime(options: RuntimeOptions): AgentRuntime {

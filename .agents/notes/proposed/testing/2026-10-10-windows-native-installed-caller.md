@@ -10,7 +10,7 @@ Windows managed Native已实现稳定前门、实际创建证书和完整候选�
 
 当前已接[正式caller](../../../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)和mandatory CI步骤，实际Windows资格尚未取得，因此保proposed。只使用已核候选和零参数 `kite-desktop.exe`，Windows系统UIAutomation操作真实页面／默认菜单；原Job成员HANDLE／FILETIME／完整映像核Main／Service归属和实际退出，PPID只是已证成员的定位信息。fixture清理不得冒充普通退出，要求原Job未请求Terminate。公共MCP语法继续投影原字段。
 
-2026-10-11扩展真实代码分支，由[统一入口](../../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)一次物化原837a2b8c源码的两类候选，供独立Terminal与Native用户链；来源决定补充[平台前驱Note](../../implemented/testing/2026-10-07-platform-real-code-predecessors.md)，不替换其POSIX原输入／守卫。Windows前驱已具原安装builder与DB9，11项锁输入及Core baseline全部逐字相同，无清单例外。两版保原0.1.0但actualAgent字节与candidate不同，旧source自身build port参与自己的builder；不修改旧代码／manifest或注入当前产品helper。
+2026-10-11扩展真实代码分支，由[统一入口](../../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)一次物化原837a2b8c源码的两类候选，供独立Terminal与Native用户链；来源决定补充[平台前驱Note](../../implemented/testing/2026-10-07-platform-real-code-predecessors.md)，不替换其POSIX原输入／守卫。Windows前驱已具原安装builder与DB9，当前11项锁输入中10项逐字相同，根清单只接受已提交 stdio CI 脚本准确单行增量并保存双方SHA；Core baseline逐字相同，不套用POSIX source-entry例外。两版保原0.1.0但actualAgent字节与candidate不同，旧source自身build port参与自己的builder；不修改旧代码／manifest或注入当前产品helper。
 
 ## Alternatives considered
 
@@ -19,7 +19,7 @@ Windows managed Native已实现稳定前门、实际创建证书和完整候选�
 - 系统UIAutomation与原Job观察：使用现有稳定前门，不扩大产品启动参数；代价是辅助功能树、菜单pattern和实际交互桌面必须由Windows运行证实，缺失时失败而不availability skip。
 
 - 将原同代码标签B计为跨代码完成：只覆盖版本指针，保其独立默认链和原断言，新分支使用两份原代码。
-- 将POSIX DB7前驱及两处清单例外直接套Windows：原输入不具完整Windows builder／安装能力；选择确有原实现且11项锁定输入逐字相同的837a2b8c。代价是该前驱已支持DB9，不能取得DB9拒旧样本资格。
+- 将POSIX DB7前驱及两处清单例外直接套Windows：原输入不具完整Windows builder／安装能力；选择确有原实现、当时11项锁定输入逐字相同的837a2b8c；后来CI脚本的准确增量由共享纯matcher识别，其他输入保持。代价是该前驱已支持DB9，不能取得DB9拒旧样本资格。
 - 向旧制品补当前model-output模块，或增大所有短正文以强制sealed：会改写候选或绕过普通完整结果。Terminal通过候选公开Runtime读取完整plain／sealed，Native按原Store事实分别核完整短正文或原sealed引用；不添加产品导出。
 
 ## Acceptance criteria

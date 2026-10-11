@@ -304,8 +304,6 @@ const port: TuiPort = {
     const interactions = (
       await client.listInteractions(id, { storeId, limit: 100, state: 'pending' }, { signal })
     ).interactions;
-    if (process.env.KITE_TUI_CARDS)
-      writeFileSync(process.env.KITE_TUI_CARDS, JSON.stringify(interactions), { mode: 0o600 });
     return { storeId, view, messages, interactions };
   },
   readAttachment: async (card, signal) => {
@@ -356,9 +354,18 @@ const port: TuiPort = {
 };
 const controller = new TuiController(port);
 await controller.select('a');
+if (process.env.KITE_TUI_CARDS)
+  writeFileSync(
+    process.env.KITE_TUI_CARDS,
+    JSON.stringify(controller.state.snapshot!.interactions),
+    {
+      mode: 0o600,
+    },
+  );
 process.stdin.setRawMode(true);
 const terminal = render(<TuiSession controller={controller} />, { exitOnCtrlC: false });
 let updating = false;
+const refreshRead = new AbortController();
 const timer = setInterval(() => {
   if (updating || controller.state.fullOutputs.size) return;
   if (process.env.KITE_TUI_REVIEWS)
@@ -373,13 +380,31 @@ const timer = setInterval(() => {
       { mode: 0o600 },
     );
   updating = true;
-  void controller.select('a').finally(() => {
-    updating = false;
-  });
+  void (async () => {
+    const snapshot = await port.readSession('a', refreshRead.signal);
+    if (
+      !refreshRead.signal.aborted &&
+      JSON.stringify(snapshot) !== JSON.stringify(controller.state.snapshot)
+    )
+      await controller.select('a');
+    if (!refreshRead.signal.aborted && process.env.KITE_TUI_CARDS)
+      writeFileSync(
+        process.env.KITE_TUI_CARDS,
+        JSON.stringify(controller.state.snapshot!.interactions),
+        { mode: 0o600 },
+      );
+  })()
+    .catch((error) => {
+      if (!refreshRead.signal.aborted) throw error;
+    })
+    .finally(() => {
+      updating = false;
+    });
 }, 80);
 const endInput = () => {
   inputEnded = true;
   clearInterval(timer);
+  refreshRead.abort();
   controller.dispose();
 };
 process.stdin.once('end', endInput);
@@ -392,6 +417,7 @@ process.once('SIGTERM', resolve);
 process.once('SIGHUP', resolve);
 await stop;
 clearInterval(timer);
+refreshRead.abort();
 controller.dispose();
 if (!inputEnded) terminal.unmount();
 const view = await runtime.getView('a');

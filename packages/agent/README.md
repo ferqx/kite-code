@@ -113,6 +113,22 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 可选 `Extension.context.captureBatch` 接收该检查点同一 Session 的全部完整请求及一个只读 context；全部 Session scope 在贡献回调前核实，返回最多 128 个自有 namespace 来源，Core 强制 `user` 并核总唯一来源。未选择批量回调的扩展保持逐项捕获；Planning 的批量贡献只在当前检查点读取一次真实计划，不跨检查点缓存。[扩展回归](test/isolated/extensions/context-contributions.test.ts)核完整不同输入、下一检查点刷新、scope/namespace/数量和冲突拒绝，原单项贡献合同保持。
 
+## 同一 Step 的并行工具批次
+
+[唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行；没有新增工具数量或累计预算。拒绝或未知结果停止该批，已启动的调用全部结束后才允许 Run 终结和 binding release。独立的后发持久化失败保留真实错误，不能被首个业务失败覆盖；同一 abort reason 的传播不虚构第二次独立失败。
+
+Message 和 Execution 保留实际保存顺序。`modelMessages` 只在同一 assistant 的工具结果位置按其原 call ID 顺序配对完整结果，不重排其他消息或改变持久 seq。`prepareRunCheckpoint` 核全部原 Model/step/definition/input 后允许 planned A 与 settled B 的组合；B 不重放，A 保留原身份和审批，并重新核当前权限。dispatching/running/outcome_unknown 等边界仍拒绝恢复。
+
+原模型声明顺序不建立工具之间的执行依赖。同一串行键保护共享业务登记/证据与派发，按实际取得许可的队列互斥，不承诺按模型声明顺序取得许可；确需因果先后时先等待登记落定，再发依赖调用。后来新增义务只加强未来边界，不能倒溯修改已合法派发的效果。最终派发仍重读当前持久 refs，并由 SQL 复核全部已登记义务。[原义务整文件](test/isolated/execution/requirements.test.ts)为这两个相同准入路径的依赖工具声明同一 Session key，保留原拒绝/waiver/准确来源断言。
+
+业务来源同样以实际派发边界为准。[原来源整文件](test/isolated/extensions/context-contributions.test.ts)中两例要求先更新自有记录，再阻止旧模型决策的依赖效果；这些共享记录的工具明确声明同一 Session key，freshness 在取得资源后重新捕获并比较原完整来源。精确 Store 时序已证明无资源声明时效果派发和回调先于记录写入提交，不能倒溯把它定为漏读更新。原 scope/namespace、不同输入、完整来源、拒绝效果和冷读零回调断言保持。
+
+[并行整例](test/isolated/execution/parallel-tools.test.ts)覆盖真实乱序完成、原审批拒绝与持有清理、后发 SQLite 终态保存失败；[真实强杀接续](test/isolated/recovery/parallel-resume-runtime.test.ts)核混合检查点的原 Run、原审批、完整结果和冷读取零重放。持久取舍见[并行工具决定](../../.agents/notes/implemented/architecture/2026-10-11-parallel-tool-batches-and-result-order.md)。这些局部能力不替代完整 Runtime 资源或平台资格。
+
+SQLite Store 在投递 Worker 前等待原容量，普通请求最多 224 条/14 MiB，必要控制和终态最多 256 条/16 MiB，按完整 frame 计字节；单个超限请求仍明确拒绝。等待只登记 FIFO ticket及字节元数据，参数留在调用方，不另建正文队列；两类都可准入时，连续最多4次关键请求后给普通请求一次机会，各类保持FIFO。等待后重核本机 owner/recovery lease，关键控制预留和 Worker 的控制/正文/查询调度保持。ACK 释放容量，投递失败归还槽位，Worker 失败拒绝已投递与等待调用；已投递写入不自动重试。close 同步封住新调用，排空此前进入 Store 的调用后才关闭连接。[真实 Worker 背压验证](test/isolated/storage/backpressure.test.ts)与[原 Worker 硬门禁](test/isolated/storage/queue.test.ts)分别覆盖宿主准入和 Worker 容量边界。
+
+Operation 等待共享持久变化水位，最多 64 个活动 wake registration，额外调用先 FIFO 等待容量；从原调用开始的绝对超时覆盖排队与活动期，取消保留准确原因，close 拒绝两类等待。每次 poll 只读当前登记快照的一页最多 200 条通知，新获槽位由下一页核实，通知不替代 Job 终态。[原 201 Tool/101 detached Job 整例](test/isolated/context/selection-runtime.test.ts)保全部结果、selection/rewind 与零重放断言，[容量等待验证](test/isolated/execution/change-waits.test.ts)核上限、进度和收尾。生产者等待仍占其调用内存，这些边界不授整个 Runtime 内存或资源观测资格。
+
 ## 验证
 
 可信宿主的有限 Runtime 生命周期入口见[lifecycle owner](src/lifecycle.README.md)：同步实际 busy 检查与 `if_idle` 封门、原实例取消/drain、同一关闭完成 Promise，以及 Service 在最终资源关闭前的排空回调。纯观察不制造 busy；未确认 Job 或清理失败保留真实 handle/permit 与 Store/profile 资源，不宣称成功退出。该入口不实现 daemon 发现或第二个任务管理器。

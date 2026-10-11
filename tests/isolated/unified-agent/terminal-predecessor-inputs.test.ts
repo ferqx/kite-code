@@ -71,3 +71,33 @@ test('predecessor accepts only the exact Windows Native bootstrap source entry i
     ).toBeUndefined();
   }
 });
+
+test('the root input permits only the exact committed stdio CI script increment', () => {
+  const path = 'package.json',
+    original = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+      cwd: repository,
+    });
+  expect(original.exitCode).toBe(0);
+  const previous = original.stdout,
+    current = readFileSync(resolve(repository, path)),
+    text = current.toString('utf8');
+  expect(matchTerminalPredecessorInput(path, previous, previous)).toBe('identical');
+  expect(matchTerminalPredecessorInput(path, previous, current)).toBe(
+    'runtime_stdio_validation_script_increment',
+  );
+  expect(matchTerminalPredecessorInput('bun.lock', previous, current)).toBeUndefined();
+  for (const changed of [
+    text.replace(' packages/agent/test/isolated/mcp/linux-stdio-port.test.ts', ''),
+    text.replace(' packages/agent/test/isolated/mcp/linux-owned-program.test.ts', ''),
+    text.replace(' packages/agent/test/isolated/mcp/windows-stdio-port.test.ts', ''),
+    text.replace(' && bun test --parallel=1 --max-concurrency=1', ''),
+    text.replace('"typecheck": "tsc --noEmit', '"typecheck": "echo tsc --noEmit'),
+    text.replace('"version": "0.1.0"', '"version": "0.1.1"'),
+    text.replace('"@napi-rs/keyring": "1.3.0"', '"@napi-rs/keyring": "1.3.1"'),
+    text.replace('    "packages/ai",\n', ''),
+    text.replace('"patches/ink-virtual-list@0.2.3.patch"', '"patches/unknown.patch"'),
+  ]) {
+    expect(changed).not.toBe(text);
+    expect(matchTerminalPredecessorInput(path, previous, bytes(changed))).toBeUndefined();
+  }
+});

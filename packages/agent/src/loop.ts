@@ -9,7 +9,13 @@ export interface LoopContext {
   getMessages(): Promise<ModelMessage[]>;
   getTools(): readonly ModelTool[];
   executeModel(request: ModelRequest, stepId: string): Promise<ModelResponse>;
-  executeTool(call: ToolCall, stepId: string, sourceExecutionId: string): Promise<ToolResult>;
+  prepareToolCalls?(calls: readonly ToolCall[]): Promise<void>;
+  executeTool(
+    call: ToolCall,
+    stepId: string,
+    sourceExecutionId: string,
+    signal: AbortSignal,
+  ): Promise<ToolResult>;
   restoreToolCall?(call: ToolCall): void | Promise<void>;
   /** A verified durable boundary, consumed once before the ordinary loop proceeds. */
   checkpoint?:
@@ -46,19 +52,55 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
             stepId,
           );
     if (!response.toolCalls.length) return;
-    for (const call of response.toolCalls) {
-      context.signal.throwIfAborted();
-      const settled =
-        initial?.kind === 'response'
-          ? initial.settledCalls.find((candidate) => candidate.callId === call.id)
-          : undefined;
-      const result =
-        settled?.result ?? (await context.executeTool(call, stepId, response.executionId));
-      if (settled) await context.restoreToolCall?.(call);
-      if (result.content === 'approval_denied' && result.outcome === 'failed')
-        throw new AgentError('approval_denied');
-      if (result.outcome === 'outcome_unknown')
-        throw new Error('Execution outcome requires reconciliation.');
+    await context.prepareToolCalls?.(response.toolCalls);
+    const batch = new AbortController();
+    const abort = () => batch.abort(context.signal.reason);
+    context.signal.addEventListener('abort', abort, { once: true });
+    if (context.signal.aborted) abort();
+    let failed = false,
+      failure: unknown;
+    let outcomes: PromiseSettledResult<void>[] = [];
+    try {
+      // Every started call reaches its durable boundary before the next Model, Run terminal or
+      // binding release. A batch error stops siblings without rewriting the Run as user-cancelled.
+      outcomes = await Promise.allSettled(
+        response.toolCalls.map(async (call) => {
+          try {
+            batch.signal.throwIfAborted();
+            const settled =
+              initial?.kind === 'response'
+                ? initial.settledCalls.find((candidate) => candidate.callId === call.id)
+                : undefined;
+            const result =
+              settled?.result ??
+              (await context.executeTool(call, stepId, response.executionId, batch.signal));
+            if (settled) await context.restoreToolCall?.(call);
+            if (result.content === 'approval_denied' && result.outcome === 'failed')
+              throw new AgentError('approval_denied');
+            if (result.outcome === 'outcome_unknown')
+              throw new Error('Execution outcome requires reconciliation.');
+          } catch (error) {
+            if (!failed) {
+              failed = true;
+              failure = error;
+              batch.abort(error);
+            }
+            throw error;
+          }
+        }),
+      );
+    } finally {
+      context.signal.removeEventListener('abort', abort);
+    }
+    if (failed) {
+      const failures = [
+        ...new Set(
+          outcomes.flatMap((outcome) => (outcome.status === 'rejected' ? [outcome.reason] : [])),
+        ),
+      ];
+      if (failures.length > 1)
+        throw new AggregateError(failures, 'tool_batch_failed', { cause: failure });
+      throw failure;
     }
   }
 }

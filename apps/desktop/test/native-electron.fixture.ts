@@ -73,7 +73,11 @@ application.process().stderr?.on('data', (chunk) => diagnostics.push(String(chun
 try {
   const page = await application.firstWindow();
   page.setDefaultTimeout(10000);
-  page.on('console', (message) => console.error('renderer', message.text().slice(0, 300)));
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text.startsWith('native_permission_attempt ')) console.error(text);
+    else console.error('renderer', text.slice(0, 300));
+  });
   page.on('pageerror', (error) => console.error('renderer_error', error.message.slice(0, 300)));
   await page.getByRole('button', { name: 'Native A', exact: true }).waitFor();
   await openSessionTools(page);
@@ -135,35 +139,62 @@ try {
     generation,
   );
   expect(selected.selection!.storeId).toBe(storeId);
-  const mode = selected.selection!.permissions!;
   await page.evaluate(
-    async ({ generation, mode }) =>
-      await window.kiteNative!.request({
-        method: 'permission.mode',
-        generation,
-        observationId: mode.observationId,
-        mode: 'full',
-        makeDefault: false,
-      }),
-    { generation, mode },
-  );
-  const refreshed = await page.evaluate(
-    async (generation) =>
-      (await window.kiteNative!.request({
-        method: 'permission.refresh',
-        generation,
-      })) as NativeState,
-    generation,
-  );
-  await page.evaluate(
-    async ({ generation, observationId }) =>
-      await window.kiteNative!.request({
-        method: 'permission.trust',
-        generation,
-        observationId,
-        trusted: true,
-      }),
-    { generation, observationId: refreshed.selection!.permissions!.observationId },
+    async ({ generation, storeId }) => {
+      const identity = (state: NativeState) => {
+        if (
+          state.generation !== generation ||
+          state.selection?.storeId !== storeId ||
+          state.selection.session.id !== 's' ||
+          state.selection.session.workspaceId !== 'w'
+        )
+          throw Error('permission_fixture_identity_changed');
+      };
+      const intentIds = (state: NativeState) =>
+        JSON.stringify(state.permissionSubmissions.map((row) => row.intent.commandId).sort());
+      for (const kind of ['permission.mode', 'permission.trust'] as const) {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const fresh = (await window.kiteNative!.request({
+            method: 'permission.refresh',
+            generation,
+          })) as NativeState;
+          identity(fresh);
+          const observationId = fresh.selection!.permissions!.observationId;
+          const before = intentIds(fresh);
+          console.error(
+            'native_permission_attempt ' +
+              JSON.stringify({ kind, attempt, observationId, phase: 'choice' }),
+          );
+          try {
+            await window.kiteNative!.request(
+              kind === 'permission.mode'
+                ? { method: kind, generation, observationId, mode: 'full', makeDefault: false }
+                : { method: kind, generation, observationId, trusted: true },
+            );
+            console.error(
+              'native_permission_attempt ' +
+                JSON.stringify({ kind, attempt, observationId, phase: 'success' }),
+            );
+            break;
+          } catch (error) {
+            if (!(error instanceof Error) || error.message !== 'permission_observation_changed')
+              throw error;
+            const after = (await window.kiteNative!.request({
+              method: 'state',
+              generation,
+            })) as NativeState;
+            identity(after);
+            if (intentIds(after) !== before) throw Error('permission_fixture_intent_changed');
+            console.error(
+              'native_permission_attempt ' +
+                JSON.stringify({ kind, attempt, observationId, phase: 'pre_intent_rejected' }),
+            );
+            if (attempt === 3) throw error;
+          }
+        }
+      }
+    },
+    { generation, storeId },
   );
   await page.evaluate(
     async (generation) =>

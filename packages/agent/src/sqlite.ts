@@ -95,13 +95,31 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
   let queuedBytes = 0;
   let closed = false;
   let failed = false;
+  let failure: Error | undefined;
   let closing = false;
   let closePromise: Promise<void> | undefined;
+  let activeRequests = 0;
+  let drained: (() => void) | undefined;
+  const waiting = { ordinary: new Map<number, number>(), critical: new Map<number, number>() };
+  let criticalAdmissions = 0;
+  let capacityChanged: () => void;
+  let capacity = new Promise<void>((resolve) => {
+    capacityChanged = resolve;
+  });
+  const wakeCapacity = () => {
+    const wake = capacityChanged;
+    capacity = new Promise<void>((resolve) => {
+      capacityChanged = resolve;
+    });
+    wake();
+  };
   const rejectAll = (error: Error) => {
     failed = true;
+    failure = error;
     for (const item of pending.values()) item.reject(error);
     pending.clear();
     queuedBytes = 0;
+    wakeCapacity();
   };
   worker.onmessage = (
     event: MessageEvent<{
@@ -115,6 +133,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
     if (!item) return;
     pending.delete(event.data.id);
     queuedBytes -= item.bytes;
+    wakeCapacity();
     if (event.data.error)
       item.reject(new AgentError(event.data.error.code, event.data.error.message));
     else item.resolve(event.data.result);
@@ -133,15 +152,9 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         'Database Worker failed; unacknowledged writes require lookup.',
       ),
     );
-  const request = (method: string, args: unknown[]): Promise<unknown> => {
-    if (
-      method !== 'open' &&
-      method !== 'getRecoveryReceipt' &&
-      !storeMethods.includes(method as keyof Store)
-    )
-      return Promise.reject(new AgentError('unsupported_store_operation'));
-    if (closed || failed || (closing && method !== 'close'))
-      return Promise.reject(new AgentError('store_closed'));
+  const validateIdentity = (args: unknown[]): void => {
+    if (failed) throw failure!;
+    if (closed) throw new AgentError('store_closed');
     const recovery = args[0] as { lease?: JobRecoveryLease | RunResumeLease } | undefined;
     if (recovery?.lease) {
       const held = recoveryLeases.get(recovery.lease.sessionId);
@@ -150,7 +163,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         canonicalJson(held.lease as unknown as Json) !==
           canonicalJson(recovery.lease as unknown as Json)
       )
-        return Promise.reject(new AgentError('recovery_lease_changed'));
+        throw new AgentError('recovery_lease_changed');
     }
     const owned = args[0] as { owner?: OwnerRef } | undefined;
     if (owned?.owner) {
@@ -160,9 +173,22 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         held.owner.instanceId !== owned.owner.instanceId ||
         held.owner.generation !== owned.owner.generation
       )
-        return Promise.reject(new AgentError('owner_changed'));
+        throw new AgentError('owner_changed');
     }
-    const bytes = new TextEncoder().encode(JSON.stringify(args)).byteLength;
+  };
+  const request = async (method: string, args: unknown[]): Promise<unknown> => {
+    if (
+      method !== 'open' &&
+      method !== 'getRecoveryReceipt' &&
+      !storeMethods.includes(method as keyof Store)
+    )
+      throw new AgentError('unsupported_store_operation');
+    if (closing && method !== 'close') throw new AgentError('store_closed');
+    validateIdentity(args);
+    const id = ++sequence;
+    const message = { id, method, args };
+    const encoder = new TextEncoder();
+    let bytes = encoder.encode(JSON.stringify(message)).byteLength;
     const critical = [
       'close',
       'cancelCommand',
@@ -176,19 +202,62 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       'recoverSession',
       'stopActionPreparation',
     ].includes(method);
-    if (
-      pending.size >= (critical ? 256 : 224) ||
-      queuedBytes + bytes > (critical ? 16 * 1024 * 1024 : 14 * 1024 * 1024)
-    )
-      return Promise.reject(
-        new AgentError('storage_queue_full', 'Database queue capacity reached.', true),
-      );
-    const id = ++sequence;
-    queuedBytes += bytes;
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject, bytes });
-      worker.postMessage({ id, method, args });
-    });
+    const byteLimit = (critical ? 16 : 14) * 1024 * 1024;
+    if (bytes > byteLimit)
+      throw new AgentError('storage_queue_full', 'Database request exceeds queue capacity.', true);
+    const tickets = critical ? waiting.critical : waiting.ordinary;
+    activeRequests++;
+    tickets.set(id, bytes);
+    try {
+      // Producers retain their arguments; only ticket identities wait here. Capacity covers
+      // complete posted frames, with the original reservation for necessary control facts.
+      for (;;) {
+        validateIdentity(args);
+        const ordinary = waiting.ordinary.entries().next().value;
+        const control = waiting.critical.entries().next().value;
+        const ordinaryReady =
+          !!ordinary && pending.size < 224 && queuedBytes + ordinary[1] <= 14 * 1024 * 1024;
+        const controlReady =
+          !!control && pending.size < 256 && queuedBytes + control[1] <= 16 * 1024 * 1024;
+        if (
+          tickets.keys().next().value === id &&
+          (critical
+            ? !ordinaryReady || criticalAdmissions < 4
+            : !controlReady || criticalAdmissions >= 4) &&
+          pending.size < (critical ? 256 : 224) &&
+          queuedBytes + bytes <= byteLimit
+        )
+          break;
+        await capacity;
+        bytes = encoder.encode(JSON.stringify(message)).byteLength;
+        if (bytes > byteLimit)
+          throw new AgentError(
+            'storage_queue_full',
+            'Database request exceeds queue capacity.',
+            true,
+          );
+        tickets.set(id, bytes);
+      }
+      tickets.delete(id);
+      criticalAdmissions = critical ? Math.min(4, criticalAdmissions + 1) : 0;
+      queuedBytes += bytes;
+      // No await between capacity reservation and posting, and no retry after posting.
+      return await new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject, bytes });
+        try {
+          worker.postMessage(message);
+        } catch (error) {
+          pending.delete(id);
+          queuedBytes -= bytes;
+          reject(error);
+        }
+        wakeCapacity();
+      });
+    } finally {
+      tickets.delete(id);
+      wakeCapacity();
+      if (--activeRequests === 0) drained?.();
+    }
   };
   let migration: FileLock | undefined;
   try {
@@ -385,6 +454,11 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       closePromise = (async () => {
         let acknowledged = false;
         try {
+          // The seal rejects new calls, but pre-seal producers still drain before close.
+          if (activeRequests)
+            await new Promise<void>((resolve) => {
+              drained = resolve;
+            });
           await request('close', []);
           acknowledged = true;
         } finally {

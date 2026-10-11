@@ -26,7 +26,7 @@ const previousInputs = {
   'patches/ink-virtual-list@0.2.3.patch':
     '1fe91aea8095e410a360b4ce9e0c0019fc927c879c2044d5ec9711dfbd03bbdf',
 };
-test('real Windows predecessor has exactly the current eleven locked input bytes', () => {
+test('real Windows predecessor retains exactly its original eleven locked input bytes', () => {
   expect(WINDOWS_PREDECESSOR_COMMIT).toBe('837a2b8cde946d70d00920941a1a3e5e7c684f5d');
   const paths = windowsPredecessorLockedInputPaths(
     JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')),
@@ -34,7 +34,11 @@ test('real Windows predecessor has exactly the current eleven locked input bytes
   expect(paths).toEqual(Object.keys(previousInputs));
   expect(paths).toHaveLength(11);
   for (const [path, expected] of Object.entries(previousInputs)) {
-    const bytes = readFileSync(resolve(root, path));
+    const original = Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
+      cwd: root,
+    });
+    expect(original.exitCode).toBe(0);
+    const bytes = original.stdout;
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(expected);
     expect(assertWindowsPredecessorLockedInput(path, bytes, bytes)).toEqual({
       path,
@@ -42,6 +46,37 @@ test('real Windows predecessor has exactly the current eleven locked input bytes
       currentSha256: expected,
       match: 'identical',
     });
+  }
+});
+
+test('current Windows inputs retain all original bytes except the exact CI stdio script increment', () => {
+  for (const [path, expected] of Object.entries(previousInputs)) {
+    const original = Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
+      cwd: root,
+    });
+    expect(original.exitCode).toBe(0);
+    const current = readFileSync(resolve(root, path));
+    expect(assertWindowsPredecessorLockedInput(path, original.stdout, current)).toEqual({
+      path,
+      sha256: expected,
+      currentSha256:
+        path === 'package.json'
+          ? '3743d37499030ce97f727b5a72e9c84d59d6a6a6ad41f8708530d661f899ba2a'
+          : expected,
+      match: path === 'package.json' ? 'runtime_stdio_validation_script_increment' : 'identical',
+    });
+    if (path === 'package.json') {
+      expect(() =>
+        assertWindowsPredecessorLockedInput('bun.lock', original.stdout, current),
+      ).toThrow('windows_predecessor_dependency_input_changed:bun.lock');
+      expect(() =>
+        assertWindowsPredecessorLockedInput(
+          path,
+          original.stdout,
+          Buffer.concat([current, Buffer.from('x')]),
+        ),
+      ).toThrow(`windows_predecessor_dependency_input_changed:${path}`);
+    }
   }
 });
 test('locked inputs reject every changed byte and patch traversal without source exceptions', () => {

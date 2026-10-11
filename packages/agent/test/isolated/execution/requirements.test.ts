@@ -299,7 +299,14 @@ test('same Model decision cannot bypass new dispatch obligations; exact business
       }),
     ]);
     const f = await fixture(
-      ext,
+      {
+        ...ext,
+        // This case requires registration and evidence before the dependent dispatch.
+        tools: ext.tools!.map((definition) => ({
+          ...definition,
+          resources: { serial: { scope: 'session' as const, key: 'registered-evidence' } },
+        })),
+      },
       [calls('fixture.register', 'fixture.effect'), [finish], calls('fixture.register'), [finish]],
       (store) => ({
         conditions: {

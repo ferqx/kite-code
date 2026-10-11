@@ -8,15 +8,19 @@ Status: implemented
 
 当前要求和完整合同归[Terminal owner](../../../../apps/cli/docs/terminal-release.md#验证边界)、[Native owner](../../../../apps/desktop/docs/native-release.md#linux-真代码升级与冷回退)与[发行约束](../../../../docs/active/release-control.md)。本决定只管理本地比较输入，不改变产品的宿主Shell、安装、信任或回退行为。
 
+2026-10-11完整默认又在根清单被准确拒绝：已提交 `b16412a0` 只扩展 `test:runtime:stdio` 的正式CI覆盖，原六文件保留、追加平台stdio文件及独立进程的packaged-default文件，其他字节、依赖、锁与补丁不变。这也使Windows纯输入的历史SHA断言误把当前根清单当作原前驱；固定历史SHA需核实际Git原字节，当前输入另核准确映射，不能只改expected SHA或泛化忽略scripts。
+
 ## Decision
 
-[物化夹具](../../../../tests/fixtures/unified-agent/terminal-predecessor.ts)当前固定复用原 PC 展示层后的 DB7 原提交 a2b6441fde28d9c0f895a26e6a9d2471d2b1b242，不开放调用者任意选择前驱。macOS 的3140fe6d37131050033c66ffd9637fe7cd967da9与Linux首次接受准确3.53.2的1b796e30ab0f3638767095d86d4afd374eae662a仍保历史输入和拒绝理由。当前前驱核11项锁输入中的9项完整字节相同；Agent清单只允许 `e587a2a9` 相对原前驱的准确 process-observation export／build source-entry 增量，Service清单只允许 `21eb43d8` 的准确 windows-native-bootstrap export／build source-entry 增量。两个path专用分支各从原bytes按两个唯一anchor生成完整expected并与当前整份bytes比较，任何其他依赖／脚本／metadata／格式差异仍拒绝，保存原SHA与currentSHA及独立match。此前10项同字节加Agent例外只属当时输入；不追认后来的Service变化为同字节。相同bun.lock、其余workspace清单、补丁、Core format1 SQL与所有原始来源守卫保持，不修改旧源码或其清单；依赖镜像保准确已安装字节与原workspace源码，旧builder仍核闭包。原源码构建前后必须干净；旧Terminal/Native都在删除旧源码前完成，成功后搬迁并删除全部原输出。准确commit/platform/来源/候选/hash随实际结果登记。
+[物化夹具](../../../../tests/fixtures/unified-agent/terminal-predecessor.ts)当前固定复用原 PC 展示层后的 DB7 原提交 a2b6441fde28d9c0f895a26e6a9d2471d2b1b242，不开放调用者任意选择前驱。macOS 的3140fe6d37131050033c66ffd9637fe7cd967da9与Linux首次接受准确3.53.2的1b796e30ab0f3638767095d86d4afd374eae662a仍保历史输入和拒绝理由。当前前驱核11项锁输入中的8项完整字节相同；Agent清单只允许 `e587a2a9` 相对原前驱的准确 process-observation export／build source-entry 增量，Service清单只允许 `21eb43d8` 的准确 windows-native-bootstrap export／build source-entry 增量。根清单只接受 `b16412a0` 的准确 stdio CI 完整脚本行增量，用原唯一行构造预期；两个source-entry path分支各用两个唯一anchor，所有分支从原bytes生成完整expected并与当前整份bytes比较，任何其他依赖／脚本／metadata／格式差异仍拒绝，保存原SHA与currentSHA及独立match。此前10项同字节加Agent例外只属当时输入；不追认后来的Service变化为同字节。相同bun.lock、其余workspace清单、补丁、Core format1 SQL与所有原始来源守卫保持，不修改旧源码或其清单；依赖镜像保准确已安装字节与原workspace源码，旧builder仍核闭包。原源码构建前后必须干净；旧Terminal/Native都在删除旧源码前完成，成功后搬迁并删除全部原输出。准确commit/platform/来源/候选/hash随实际结果登记。
 
 Terminal与Native都要求包内Agent代码字节实际变化、候选身份不同和完整已安装A→B→A→B数据链。macOS的两个原Main/renderer差异断言保留。历史Linux 1b796组合的生产变化为Agent worker原生写锁等待；当时Main制品hash不同、renderer相同，只记录实际关系，不造假前端变化。当前a2b6441f的Linux组合尚未执行，依用户顺序在重构完成后由GitHub Actions验证；历史结果不为它授予资格。
 
 Native使用候选manifest中的实际Electron入口、明确Node ESM、平台ps argv与准确父PID；四次窗口显式开启并检查Chromium sandbox。原360/420秒整例、30秒命令、120秒Native driver及15秒窗口上界保留。release candidate明确调用三项整文件命令：POSIX Terminal、macOS Native、Linux Xvfb Native；Required unit仍完整发现并有显示环境。guard拒绝关闭、错平台、echo、过滤和缺显示。
 
-Windows新增源码接线固定独立837a2b8c前驱，其11项锁输入全部原字节相同且已具Windows两类builder／DB9；不套用本Note的POSIX清单两处例外或DB7拒旧结论。原源码build port与自身builder生成两类输入，Windows安装／版本切换／维护完整调用者与平台未验范围归[现行提案](../../proposed/testing/2026-10-10-windows-native-installed-caller.md)和[Terminal owner](../../../../apps/cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)。本Note原POSIX决定／历史证据继续适用，Windows原生资格尚未取得，不能沿用历史Mac/Linux运行证据。
+Windows新增源码接线固定独立837a2b8c前驱，其当前11项锁输入中10项原字节相同，根清单只接受与POSIX共享的已知 stdio CI 脚本准确增量，保存双方SHA；已具Windows两类builder／DB9；不套用本Note的POSIX清单两处例外或DB7拒旧结论。原源码build port与自身builder生成两类输入，Windows安装／版本切换／维护完整调用者与平台未验范围归[现行提案](../../proposed/testing/2026-10-10-windows-native-installed-caller.md)和[Terminal owner](../../../../apps/cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)。本Note原POSIX决定／历史证据继续适用，Windows原生资格尚未取得，不能沿用历史Mac/Linux运行证据。
+
+共享[纯stdio输入matcher](../../../../tests/fixtures/unified-agent/predecessor-stdio-input.ts)只识别同字节或根清单唯一原完整脚本行的确定增量，然后全字节比较。Windows不复用POSIX两个source-entry例外。原历史SHA表、固定commit、十一项路径、原identical/changed-byte/平台断言保留；原字节从Git只读取得，新增完整当前十一项映射、原/当前SHA和未解释差异拒绝。两纯输入整文件8pass/124assert；macOS原Terminal360秒整例actual0/336断言/134.010秒、全输入与Git不变。准确本轮证据归[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-独立能力与并行工具完整行为)，不授Windows原生或发布资格。
 
 ## Alternatives considered
 

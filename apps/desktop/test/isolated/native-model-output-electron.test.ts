@@ -250,7 +250,9 @@ test.skipIf(process.platform !== 'darwin')(
         if (index < parts.length - 1 || flush) {
           if (
             observedLines < 64 &&
-            /^(?:native_model_output_phase|native_model_output_error) /.test(pendingLine)
+            /^(?:native_model_output_phase|native_model_output_error|native_permission_attempt) /.test(
+              pendingLine,
+            )
           ) {
             console.error(pendingLine);
             const phase = pendingLine.match(/^native_model_output_phase (\w+)/)?.[1];

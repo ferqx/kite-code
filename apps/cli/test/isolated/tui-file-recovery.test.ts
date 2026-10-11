@@ -19,7 +19,7 @@ test('80x24 actual TUI Files directory both independent Ask and explicit second 
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(f.root, 'tui.js'))}],stdin=slave,stdout=slave,stderr=slave,cwd=${JSON.stringify(f.workspace)},env={**os.environ,'HOME':${JSON.stringify(f.home)}},start_new_session=True);os.close(slave);buffer=b'';full=b''
 def current_frame():
  text=buffer.decode(errors='replace');frames=re.findall(r'\\x1b\\[\\?2026h(.*?)\\x1b\\[\\?2026l',text,re.S)
- return frames[-1] if frames else text
+ return frames[-1] if frames else ''
 def wait(text,approval=False,material=False):
  global buffer,full
  end=time.monotonic()+20

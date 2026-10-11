@@ -241,6 +241,8 @@ test.skipIf(process.platform !== 'darwin')(
           return value;
         }),
         err = new Response(driver.stderr).text().then((value) => {
+          for (const line of value.split('\n'))
+            if (line.startsWith('native_permission_attempt ')) console.error(line);
           observe('primary_stderr_eof');
           return value;
         }),
