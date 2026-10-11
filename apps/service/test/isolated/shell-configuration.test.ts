@@ -15,12 +15,12 @@ import { dirname, join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { AuthorizationRequest, JobContext, JobEvent } from '@kite-ai/agent/extensions';
+import { createShellConfiguration } from '@kite-ai/agent/permissions/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
-import { createShellConfiguration } from '../../src/shell-configuration';
 
 const nativeTest = process.platform === 'darwin' ? test : test.skip;
 async function until<T>(read: () => Promise<T | undefined>) {

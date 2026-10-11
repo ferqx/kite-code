@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
+import { createPermissionPolicy } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { startService } from '../../src';
-import { createPermissionPolicy } from '../../src/permissions';
 
 const questions = {
   questions: [

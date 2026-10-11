@@ -1,11 +1,11 @@
 import type { AgentRuntime } from '@kite-ai/agent';
+import { createPermissionPolicy } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { ConfigureProcessHost } from '@kite-ai/service/bootstrap';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { runServiceProcess as runDefaultServiceProcess } from '@kite-ai/service/main';
 import { runtimeProtectionRoots } from '@kite-ai/service/runtime-protection';
 import type { PermissionManagementPort } from '../../../apps/service/src/permission-management';
-import { createPermissionPolicy } from '../../../apps/service/src/permissions';
 import { createMiniReview } from '../extensions/mini-review/src';
 
 /** Explicit immutable test composition with trusted classification for the reference definitions. */

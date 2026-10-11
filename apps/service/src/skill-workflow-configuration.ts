@@ -10,6 +10,11 @@ import type {
   JobHandle,
   Json,
 } from '@kite-ai/agent/extensions';
+import {
+  hostFilesystemScope,
+  inspectShellAssets,
+  type ShellConfigurationOptions,
+} from '@kite-ai/agent/permissions/shell';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import {
   type CompiledSkillWorkflow,
@@ -23,11 +28,6 @@ import {
   type WorkflowActivationInput,
   type WorkflowCapability,
 } from '@kite-ai/agent/skill-workflow';
-import {
-  hostFilesystemScope,
-  inspectShellAssets,
-  type ShellConfigurationOptions,
-} from './shell-configuration';
 import { createConfiguredSkillSource } from './skill-source';
 
 export const workflowToolIds = [

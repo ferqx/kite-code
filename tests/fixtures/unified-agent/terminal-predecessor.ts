@@ -38,7 +38,7 @@ export function matchTerminalPredecessorInput(
   | 'windows_native_bootstrap_source_entry'
   | 'runtime_stdio_validation_script_increment'
   | 'shell_parser_locked_dependency_increment'
-  | 'windows_native_bootstrap_and_shell_parser_increment'
+  | 'process_observation_and_shell_parser_increment'
   | undefined {
   const oldBytes = Buffer.from(previous),
     currentBytes = Buffer.from(current);
@@ -66,9 +66,7 @@ export function matchTerminalPredecessorInput(
         ' ./src/native-runtime-assets.ts ./src/windows-native-bootstrap.ts ./src/runtime-protection.ts ',
       );
     if (Buffer.from(expected).equals(currentBytes)) return 'windows_native_bootstrap_source_entry';
-    return matchPredecessorShellParserInput(path, Buffer.from(expected), current)
-      ? 'windows_native_bootstrap_and_shell_parser_increment'
-      : undefined;
+    return undefined;
   }
   if (path !== 'packages/agent/package.json') return undefined;
   const original = oldBytes.toString('utf8'),
@@ -80,16 +78,17 @@ export function matchTerminalPredecessorInput(
     original.split(buildAnchor).length !== 2
   )
     return undefined;
-  // e587a2a9 added exactly these export/build bytes. All dependency declarations,
-  // other source entries, metadata and formatting must still be byte-identical.
+  // e587a2a9 added exactly these export/build bytes. The dedicated matcher below
+  // additionally admits only the current Agent permissions entry/parser closure.
   const expected = original
     .replace(
       exportAnchor,
       `${exportAnchor}    "./process-observation": "./src/process-observation.ts",\n`,
     )
     .replace(buildAnchor, ' ./src/resources.ts ./src/process-observation.ts ./src/jobs/shell.ts ');
-  return Buffer.from(expected).equals(currentBytes)
-    ? 'process_observation_source_entry'
+  if (Buffer.from(expected).equals(currentBytes)) return 'process_observation_source_entry';
+  return matchPredecessorShellParserInput(path, Buffer.from(expected), current)
+    ? 'process_observation_and_shell_parser_increment'
     : undefined;
 }
 function inside(root: string, path: string) {
@@ -197,7 +196,7 @@ export async function materializeTerminalPredecessor(input: {
       | 'windows_native_bootstrap_source_entry'
       | 'runtime_stdio_validation_script_increment'
       | 'shell_parser_locked_dependency_increment'
-      | 'windows_native_bootstrap_and_shell_parser_increment';
+      | 'process_observation_and_shell_parser_increment';
   }[] = [];
   for (const path of inputs) {
     if (!inside(repository, resolve(repository, path)))

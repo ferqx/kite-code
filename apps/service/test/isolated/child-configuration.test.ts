@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import type { Extension, OperationRef, Permissions } from '@kite-ai/agent/extensions';
+import type { PermissionPolicyOptions } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { type ChildRole, createChildConfiguration } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
-import type { PermissionPolicyOptions } from '../../src/permissions';
 
 function gate() {
   let resolve!: () => void;

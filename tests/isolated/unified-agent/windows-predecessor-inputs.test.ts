@@ -63,17 +63,36 @@ test('current Windows inputs retain all original bytes except the exact CI stdio
         path === 'package.json'
           ? '3743d37499030ce97f727b5a72e9c84d59d6a6a6ad41f8708530d661f899ba2a'
           : path === 'bun.lock'
-            ? 'a16f113d4924eb1f2c56b87fa92b1124ff107a432eb7336ee9b8c9dcdc199b88'
-            : path === 'apps/service/package.json'
-              ? '3924deb4c17cf2795d03767abe0e42cbd7cffdfe8efe05d7d615dd257815ade1'
+            ? '748e6ff66e8d3ca2ab4f27b83c9105aae05dc45cdca14edf6560200d5dcb1f91'
+            : path === 'packages/agent/package.json'
+              ? 'fdb805e391c6772a2b8e8217a31f17ec14949e084e343287634a0976ff783cc2'
               : expected,
       match:
         path === 'package.json'
           ? 'runtime_stdio_validation_script_increment'
-          : path === 'bun.lock' || path === 'apps/service/package.json'
+          : path === 'bun.lock' || path === 'packages/agent/package.json'
             ? 'shell_parser_locked_dependency_increment'
             : 'identical',
     });
+    if (path === 'packages/agent/package.json') {
+      const text = current.toString('utf8');
+      for (const changed of [
+        text.replace('"tree-sitter-bash": "0.25.1"', '"tree-sitter-bash": "0.25.2"'),
+        text.replace('"web-tree-sitter": "0.25.10"', '"web-tree-sitter": "0.25.11"'),
+        text.replace('"@napi-rs/keyring": "1.3.0"', '"@napi-rs/keyring": "1.3.1"'),
+        text.replace('    "./permissions": "./src/permissions/index.ts",\n', ''),
+        text.replace('    "./permissions/shell": "./src/permissions/shell.ts",\n', ''),
+        text.replace(' ./src/permissions/index.ts ', ' '),
+        text.replace(' ./src/permissions/shell.ts ', ' '),
+        text.replace('"exports": {', '"exports": {\n    "./unknown": "./src/unknown.ts",'),
+        text.replace('--target=bun', '--target=node'),
+      ]) {
+        expect(changed).not.toBe(text);
+        expect(() =>
+          assertWindowsPredecessorLockedInput(path, original.stdout, Buffer.from(changed)),
+        ).toThrow(`windows_predecessor_dependency_input_changed:${path}`);
+      }
+    }
     if (path === 'package.json') {
       expect(() =>
         assertWindowsPredecessorLockedInput('bun.lock', original.stdout, current),

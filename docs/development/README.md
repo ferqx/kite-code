@@ -7,7 +7,7 @@
 | 模块 | 职责与入口 |
 | --- | --- |
 | [AI](../../packages/ai/README.md) | 中立模型流与明确 SDK adapter |
-| [Agent](../../packages/agent/README.md) | 唯一 Loop、Execution/Job、业务记录、扩展及 I/O owner leaves |
+| [Agent](../../packages/agent/README.md) | 唯一 Loop、Execution/Job、[独立权限模块](../../packages/agent/src/permissions/README.md)、业务记录、扩展及 I/O owner leaves |
 | [Client](../../packages/client/README.md) | 公开 HTTP/SSE 准入、原身份与未知回执查询 |
 | [UI](../../packages/ui/README.md) | 便携显示、公共表单与 TUI 组件 |
 | [Service](../../apps/service/README.md) | 默认可信装配、HTTP/SSE、paired/daemon 与只读 gateway |

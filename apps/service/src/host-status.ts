@@ -1,9 +1,12 @@
 import type { AgentRuntime } from '@kite-ai/agent';
 import { AgentError } from '@kite-ai/agent';
+import {
+  inspectShellAssets,
+  type ShellConfigurationOptions,
+} from '@kite-ai/agent/permissions/shell';
 import type { z } from 'zod';
 import type { HostStatusSchema } from './http/schema/host-status';
 import type { PermissionManagementPort } from './permission-management';
-import { inspectShellAssets, type ShellConfigurationOptions } from './shell-configuration';
 
 export type HostStatus = z.infer<typeof HostStatusSchema>;
 export interface HostStatusContext {

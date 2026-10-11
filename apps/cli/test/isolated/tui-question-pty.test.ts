@@ -89,7 +89,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
         'apps/service/src/configuration-defaults.ts',
         'apps/service/src/configuration-management.ts',
         'apps/service/src/assembly.ts',
-        'apps/service/src/permissions.ts',
+        'packages/agent/src/permissions/index.ts',
         'packages/agent/src/storage/sqlite/interaction-operations.ts',
         'packages/ui/src/tui/index.tsx',
         'packages/ui/src/tui/question.ts',

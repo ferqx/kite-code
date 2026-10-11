@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import type { PermissionMode } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
-import type { PermissionMode } from '../../src/permissions';
 
 const reviewReason = 'Exact requested destination rejected by the safety reviewer';
 async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 'off' | 'ssrf') {

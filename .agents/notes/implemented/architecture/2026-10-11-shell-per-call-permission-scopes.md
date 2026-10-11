@@ -10,7 +10,7 @@ Status: implemented
 
 参考 Codex CLI 固定源码 [Bash 解析](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/shell-command/src/bash.rs)、[执行策略](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/core/src/exec_policy.rs)与[Seatbelt](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/sandboxing/src/seatbelt.rs)的分工。有限字面量 Bash AST 和固定危险扫描分开；复杂命令不取得“已证明只读”资格。危险扫描按源序保留字面量 `cd` 的可能目录，内部 subshell 不把目录变化传给外层；条件或失败不能丢弃原目录，末尾 pipeline 保留父 Shell 执行的可能性。超过分析预算直接失败关闭。OS 执行范围负责未知后代的实际越界拦截，不按失败后扩大权限重放。
 
-正式 `shell.launch` 的可选 `permissions` 只请求独立的 filesystem/network tuple，同一请求传到普通 `shell.command`。Core 原人工/模型决定和最终 SQL 接纳保持唯一 authority；Service 仅从最终接受快照读取 scope，父子逐维求交。摘要绑定命令、范围、环境、执行/解析资产及配置；Full 先核固定拒绝，再取得普通 host 范围。正式权限从类型、HTTP/IPC、持久控制、Client 和用户入口统一为三选一，退役第四种 raw `ask`；旧输入和旧控制记录失败关闭，不按兼容映射扩大权限。旧严格模式的独立审批/零效果场景迁到真正 Auto 审核的 `ask_user` 决定或确实需要人工审批的请求批准调用。`web_fetch` 消费原 network 能力的同一授权流程，原网络政策与 SSRF guard 保留。
+正式 `shell.launch` 的可选 `permissions` 只请求独立的 filesystem/network tuple，同一请求传到普通 `shell.command`。Core 原人工/模型决定和最终 SQL 接纳保持唯一 authority；Agent 独立权限模块仅从最终接受快照读取 scope，父子逐维求交；Service 只注入已校验宿主事实。摘要绑定命令、范围、环境、执行/解析资产及配置；Full 先核固定拒绝，再取得普通 host 范围。正式权限从类型、HTTP/IPC、持久控制、Client 和用户入口统一为三选一，退役第四种 raw `ask`；旧输入和旧控制记录失败关闭，不按兼容映射扩大权限。旧严格模式的独立审批/零效果场景迁到真正 Auto 审核的 `ask_user` 决定或确实需要人工审批的请求批准调用。`web_fetch` 消费原 network 能力的同一授权流程，原网络政策与 SSRF guard 保留。
 
 冷恢复沿原 Store 的同一提交事务移交待派发目标、其已终结的审核承载记录及唯一审核 Model 的 owner generation。移交前核原 purpose、source/input/request/digest、子 Run/Command、Store/root-work 与原代次，逐条 CAS；任何失配使整个事务回滚。审核身份、正文/hash、原结果与决定保持，不增加 grant、不重跑 Provider，也不放宽最终 generation 相等校验。这是从旧严格测试迁入真实 Auto 后暴露的实际恢复缺口；已失败审核仍保原 unavailable 与独立人工决定。
 
@@ -26,6 +26,8 @@ Status: implemented
 - 用 Bash AST 验证 Windows 原生命令：语法与后端实际不满足，继续失败关闭和原门禁。
 
 ## Consequences
+
+权限与 Shell 分析的模块归属已按用户确认迁到 [Agent 独立模块](../../../../packages/agent/src/permissions/README.md)，Service 仅接口、身份校验和装配；本 Note 的三策略、单次范围、危险拒绝与恢复理由保持，归属理由见[独立权限模块决定](2026-10-11-agent-permissions-module.md)。
 
 macOS 正式入口已验证工作区写入无人工卡、外部写入与联网独立批准/拒绝且审批前零效果、真实 Auto 拒绝与公开原因、三策略的固定危险拒绝及 Full 普通范围。正式权限类型、HTTP/IPC、持久控制、Client 和 CLI/TUI/Native 调用者只保三种策略；原严格场景迁到真实 Auto 的 ask_user 或确有人工要求的请求批准调用，安全断言保持。
 

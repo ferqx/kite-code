@@ -2,15 +2,15 @@ import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
 import { access, lstat, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
-import { AgentError } from '@kite-ai/agent';
-import type { AuthorizationRequest, Extension, JobContext } from '@kite-ai/agent/extensions';
 import {
   createLinuxHostShellJob,
   createMacosHostShellJob,
   createShellJob,
 } from '@kite-ai/agent/jobs/shell';
 import { createShellExtension } from '@kite-ai/agent/shell';
-import type { CapabilityDescription, CapabilityEffect } from './permissions';
+import type { AuthorizationRequest, Extension, JobContext } from '../extensions';
+import { AgentError } from '../storage/types';
+import type { CapabilityDescription, CapabilityEffect } from './index';
 import { createShellCommandPolicy } from './shell-command-policy';
 
 export interface ShellConfigurationOptions {
@@ -433,3 +433,5 @@ function describe(id: string): { effects: readonly CapabilityEffect[]; safeRead:
     return { effects: ['process', 'unknown', 'record_write'], safeRead: false };
   return { effects: ['process', 'unknown'], safeRead: false };
 }
+
+export { createShellCommandPolicy } from './shell-command-policy';

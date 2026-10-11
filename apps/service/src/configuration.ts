@@ -24,6 +24,23 @@ import {
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import type { McpLifecycleOptions } from '@kite-ai/agent/mcp';
+import {
+  builtinToolEffect,
+  type CapabilityDescription,
+  type CapabilityIdentity,
+  createPermissionPolicy,
+  hostReadOnlyTool,
+  type PermissionPolicyOptions,
+  type PermissionPolicySnapshot,
+  planningEffect,
+  requireFileRestoreApproval,
+  requireWorkflowApproval,
+} from '@kite-ai/agent/permissions';
+import {
+  createShellConfiguration,
+  type ShellConfigurationOptions,
+  shellToolIds,
+} from '@kite-ai/agent/permissions/shell';
 import { createPlanningValidation, type PlanningOptions } from '@kite-ai/agent/planning';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
@@ -58,25 +75,12 @@ import {
 import { isSupportedModelProvider, supportsReasoningEffort } from './model-providers';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import {
-  type CapabilityDescription,
-  type CapabilityEffect,
-  type CapabilityIdentity,
-  createPermissionPolicy,
-  type PermissionPolicyOptions,
-  type PermissionPolicySnapshot,
-} from './permissions';
-import {
   createPlanningPermissionCeiling,
   planningSnapshotDigest,
   readBoundJobReportParent,
   readBusinessRunInputs,
   readPlanningIntent,
 } from './planning-configuration';
-import {
-  createShellConfiguration,
-  type ShellConfigurationOptions,
-  shellToolIds,
-} from './shell-configuration';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
 import {
   assertWorkflowForkCurrent,
@@ -94,6 +98,7 @@ import {
   type WebFetchConfigurationOptions,
 } from './web-fetch-configuration';
 
+export type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
 export type { ChildRole } from './child-configuration';
 export type { SummaryCompressionOptions } from './compression-configuration';
 export { createSummaryCompressor } from './compression-configuration';
@@ -109,7 +114,6 @@ export type {
   PermissionMutation,
   TrustState,
 } from './permission-management';
-export type { ShellConfigurationOptions } from './shell-configuration';
 export type { WebFetchConfigurationOptions } from './web-fetch-configuration';
 
 const assemblyKeys = ['modelId', 'models', 'tools', 'skills', 'mcp'];
@@ -182,34 +186,6 @@ export function parseModelPreset(value: Json | undefined): SdkModelPreset {
     ...(topP === undefined ? {} : { topP }),
     ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
   });
-}
-const planningRecordWrites = new Set([
-  'planning.write',
-  'planning.update',
-  'planning.review',
-  'validation.define',
-  'validation.check',
-  'validation.auto_check',
-  'validation.rebind',
-  'validation.request_waiver',
-  'validation.waive',
-]);
-function planningEffect(id: string): CapabilityEffect {
-  return id === 'planning.read'
-    ? 'read'
-    : planningRecordWrites.has(id)
-      ? 'record_write'
-      : 'unknown';
-}
-function hostReadOnlyTool(extensionId: string, toolId: string) {
-  return (
-    (extensionId === 'builtin.files' &&
-      ['files.read', 'files.list', 'files.glob', 'files.search'].includes(toolId)) ||
-    (extensionId === 'builtin.skills' && ['skills.load', 'skills.resource'].includes(toolId)) ||
-    (extensionId === 'builtin.mcp.sources' && toolId === 'mcp.sources.list') ||
-    (extensionId === 'builtin.planning' && toolId === 'planning.read') ||
-    (extensionId === 'builtin.ask-user' && toolId === 'ask_user')
-  );
 }
 export type McpHostFactory = (host: {
   readonly profile: ProfileSelection;
@@ -982,17 +958,7 @@ export function createDefaultProcessConfiguration(options: {
           for (const tool of extension.tools ?? []) {
             if (!assembly.toolIds.includes(tool.id)) continue;
             const read = hostReadOnlyTool(extension.id, tool.id);
-            const write =
-              extension.id === 'builtin.files' &&
-              ['files.write', 'files.edit', 'files.mkdir'].includes(tool.id);
-            const effect: CapabilityEffect =
-              extension.id === planning.extension.id
-                ? planningEffect(tool.id)
-                : read
-                  ? 'read'
-                  : write
-                    ? 'workspace_write'
-                    : 'unknown';
+            const effect = builtinToolEffect(extension.id, tool.id, planning.extension.id);
             actual.set(key('tool', tool.id, tool.version), {
               kind: 'tool',
               definitionId: tool.id,
@@ -1257,22 +1223,7 @@ export function createDefaultProcessConfiguration(options: {
                   ? 'user'
                   : entry.contract.effectiveMinimumApproval;
             }
-            if (
-              minimum &&
-              minimum !== 'none' &&
-              (decision.allowed || decision.approval || decision.review)
-            ) {
-              return {
-                ...decision,
-                allowed: false,
-                review: decision.review ? { ...decision.review, requireApproval: true } : undefined,
-                approval: decision.approval ?? {
-                  request: { reason: 'workflow_minimum_approval', minimum },
-                },
-                reason: 'workflow_minimum_approval',
-              };
-            }
-            return decision;
+            return requireWorkflowApproval(decision, minimum);
           },
         };
         return {
@@ -1834,30 +1785,7 @@ export function createDefaultProcessConfiguration(options: {
           if (error) return { allowed: false, revision: 'mcp-selected-server-1', reason: error };
         }
         const decision = await (options.permissions ?? globalDefaultPolicy).authorize(request);
-        // Restoring files is an explicit human decision, independent of Model/reviewer authority.
-        if (
-          !options.permissions &&
-          request.kind === 'job' &&
-          request.definitionId === 'builtin.files/files.checkpoint.restore' &&
-          request.definitionVersion === '1' &&
-          (decision.allowed || decision.approval || decision.review)
-        ) {
-          return {
-            allowed: false,
-            reason: 'approval_required',
-            revision: createHash('sha256')
-              .update(decision.revision)
-              .update('files-human-restore-1')
-              .digest('hex'),
-            ...(decision.controlReads ? { controlReads: decision.controlReads } : {}),
-            ...(decision.snapshot ? { snapshot: decision.snapshot } : {}),
-            approval: {
-              grants: ['approve_once'],
-              request: { reason: 'explicit_file_restore', effects: ['workspace_write'] },
-            },
-          };
-        }
-        return decision;
+        return options.permissions ? decision : requireFileRestoreApproval(request, decision);
       },
     },
   };

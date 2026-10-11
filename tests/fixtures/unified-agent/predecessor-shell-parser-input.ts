@@ -2,7 +2,7 @@ const shellParserDeclarations =
   '    "tree-sitter-bash": "0.25.1",\n    "web-tree-sitter": "0.25.10",\n';
 /** Exact new parser closure only; these are retained as bytes, never normalized JSON. */
 function shellParserLockIncrement(original: string): string | undefined {
-  const declarationAnchor = '        "hono": "4.13.12",\n        "zod": "4.3.6",\n';
+  const declarationAnchor = '        "turndown": "7.2.4",\n        "yaml": "2.9.0",\n';
   const additions: readonly [string, string][] = [
     [
       '    "node-releases": [',
@@ -25,9 +25,10 @@ function shellParserLockIncrement(original: string): string | undefined {
     return undefined;
   let expected = original.replace(
     declarationAnchor,
-    '        "hono": "4.13.12",\n' +
-      shellParserDeclarations.replaceAll('    "', '        "') +
-      '        "zod": "4.3.6",\n',
+    '        "tree-sitter-bash": "0.25.1",\n' +
+      '        "turndown": "7.2.4",\n' +
+      '        "web-tree-sitter": "0.25.10",\n' +
+      '        "yaml": "2.9.0",\n',
   );
   for (const [anchor, addition] of additions) {
     if (expected.split(anchor).length !== 2) return undefined;
@@ -36,7 +37,7 @@ function shellParserLockIncrement(original: string): string | undefined {
   return expected;
 }
 
-/** Only the pinned Service parser declarations and their four exact lock records may differ. */
+/** Exact Agent permissions exports/build entries and pinned parser owner only. */
 export function matchPredecessorShellParserInput(
   path: string,
   previous: Uint8Array,
@@ -45,15 +46,32 @@ export function matchPredecessorShellParserInput(
   const original = Buffer.from(previous).toString('utf8');
   let expected: string | undefined;
   if (path === 'bun.lock') expected = shellParserLockIncrement(original);
-  else if (path === 'apps/service/package.json') {
-    const anchor = '    "hono": "4.13.12",\n';
+  else if (path === 'packages/agent/package.json') {
+    const exportAnchor = '    "./extensions": "./src/extensions/index.ts",\n',
+      buildAnchor = ' ./src/extensions/index.ts ./src/storage/index.ts ',
+      dependencyAnchor = '    "turndown": "7.2.4",\n';
     if (
-      original.split(anchor).length !== 2 ||
+      [exportAnchor, buildAnchor, dependencyAnchor].some(
+        (anchor) => original.split(anchor).length !== 2,
+      ) ||
       original.includes('"tree-sitter-bash"') ||
-      original.includes('"web-tree-sitter"')
+      original.includes('"web-tree-sitter"') ||
+      original.includes('"./permissions"') ||
+      original.includes('"./permissions/shell"')
     )
       return undefined;
-    expected = original.replace(anchor, anchor + shellParserDeclarations);
+    expected = original
+      .replace(
+        exportAnchor,
+        exportAnchor +
+          '    "./permissions": "./src/permissions/index.ts",\n' +
+          '    "./permissions/shell": "./src/permissions/shell.ts",\n',
+      )
+      .replace(
+        buildAnchor,
+        ' ./src/extensions/index.ts ./src/permissions/index.ts ./src/permissions/shell.ts ./src/storage/index.ts ',
+      )
+      .replace(dependencyAnchor, dependencyAnchor + shellParserDeclarations);
   }
   return expected && Buffer.from(expected).equals(Buffer.from(current))
     ? 'shell_parser_locked_dependency_increment'

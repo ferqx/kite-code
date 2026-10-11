@@ -1,10 +1,10 @@
+import type { CapabilityDescription } from '@kite-ai/agent/permissions';
 import {
   createPinnedWebNetworkPort,
   createWebFetchExtension,
   type PinnedWebNetworkOptions,
   type WebExtractor,
 } from '@kite-ai/agent/web-fetch';
-import type { CapabilityDescription } from './permissions';
 
 export interface WebFetchConfigurationOptions {
   /** Trusted resource policy/admission only; never populated from JSONC/Tool input. */

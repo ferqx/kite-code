@@ -7,6 +7,7 @@ import {
   readConfigurationFile,
   resolveConfiguration,
 } from '@kite-ai/agent/config';
+import { inspectShellAssets } from '@kite-ai/agent/permissions/shell';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { validateWorkflowArguments } from '@kite-ai/agent/skill-workflow';
 import type { z } from 'zod';
@@ -17,7 +18,6 @@ import {
   skillUnavailableReasons,
 } from './http/schema/skill-catalogue';
 import type { PermissionManagementPort } from './permission-management';
-import { inspectShellAssets } from './shell-configuration';
 import { createConfiguredSkillSource } from './skill-source';
 import {
   compileConfiguredWorkflows,

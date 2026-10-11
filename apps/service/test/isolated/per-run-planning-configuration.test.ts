@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
+import type { PermissionMode } from '@kite-ai/agent/permissions';
 import { planningExtensionId } from '@kite-ai/agent/planning';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
@@ -19,7 +20,6 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
-import type { PermissionMode } from '../../src/permissions';
 import { readBusinessRunInputs } from '../../src/planning-configuration';
 
 const intent = {

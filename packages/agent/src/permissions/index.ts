@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
-import type {
-  AuthorizationRequest,
-  PermissionDecision,
-  Permissions,
-} from '@kite-ai/agent/extensions';
-import type { Json } from '@kite-ai/agent/storage';
+import type { AuthorizationRequest, PermissionDecision, Permissions } from '../extensions';
+import type { Json } from '../storage';
 
 export type PermissionMode = 'accept_edits' | 'auto' | 'full';
 export type CapabilityEffect =
@@ -306,3 +302,16 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
     },
   };
 }
+
+export {
+  builtinToolEffect,
+  createMcpSourceCapabilityDescription,
+  hostReadOnlyTool,
+  planningEffect,
+  taskToolCapability,
+} from './capabilities';
+export {
+  createPlanningPermissionPolicy,
+  requireFileRestoreApproval,
+  requireWorkflowApproval,
+} from './constraints';

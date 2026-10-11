@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 // The subprocess isolates both platform selection and public factory spies.
 // Actual Linux namespace/seccomp/FFI execution belongs to native qualification.
 test('Linux Service Shell and Workflow bind verified assets, final policy and distinct Skill/Workspace scopes without group fallback', () => {
-  const shell = fileURLToPath(new URL('../../src/shell-configuration.ts', import.meta.url));
+  const shell = fileURLToPath(import.meta.resolve('@kite-ai/agent/permissions/shell'));
   const workflow = fileURLToPath(
     new URL('../../src/skill-workflow-configuration.ts', import.meta.url),
   );

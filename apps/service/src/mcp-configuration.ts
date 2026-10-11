@@ -6,7 +6,7 @@ import {
   type McpLifecycleOptions,
   mcpSourceConnectionJobId,
 } from '@kite-ai/agent/mcp';
-import type { CapabilityDescription } from './permissions';
+import type { CapabilityDescription } from '@kite-ai/agent/permissions';
 
 const key = (kind: string, id: string, version: string) => JSON.stringify([kind, id, version]);
 /** Programmatic allowlist and lifecycle only; neither construction nor selection opens a transport. */

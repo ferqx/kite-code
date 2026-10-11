@@ -10,7 +10,7 @@ Shell Tool 将同一请求传到普通 Job；最终 Store 接纳的授权快照�
 
 解析使用固定版本 Bash Tree-sitter 的有限字面量 AST；复杂表达式保留为不透明命令，不能证明只读、联网或写入效果。固定危险拒绝扫描与安全证明分开。不透明命令在请求批准的默认范围运行，由 OS 拦截越界；不在失败后自动扩大范围重放，避免部分效果重复。`web_fetch` 继续使用正式 network 能力描述、相同审批/审核入口和原 SSRF 限制。
 
-负责模块为 Service 权限与 Shell 装配、Agent Shell Tool/Job 和平台准备、共享客户端权限入口。macOS 验收真实工作区写入、外部写入/网络独立批准与拒绝、Auto 审核拒绝零效果、Full 固定危险拒绝、正常完成与清理；保留旧断言，收束时完整回归。Linux 采用同一范围并接到 bubblewrap 与 seccomp，Windows 缺正式 Shell 后端继续失败关闭；实际 Win/Linux 执行交后续 Actions，本地不 dispatch。
+负责模块为 Agent 独立权限与 Shell 分析/工厂、Shell Tool/Job 和平台准备，Service 仅接口、身份校验与事实装配；共享客户端权限入口保持。macOS 验收真实工作区写入、外部写入/网络独立批准与拒绝、Auto 审核拒绝零效果、Full 固定危险拒绝、正常完成与清理；保留旧断言，收束时完整回归。Linux 采用同一范围并接到 bubblewrap 与 seccomp，Windows 缺正式 Shell 后端继续失败关闭；实际 Win/Linux 执行交后续 Actions，本地不 dispatch。
 
 原 RSS 超阈值、完整观测缺项、Windows Shell 合同与平台资格仍为未闭合门禁。必要验证对应当前错误与上述验收；本切片不重复已闭合故障矩阵或参数对照，不 push、PR 或发布。
 

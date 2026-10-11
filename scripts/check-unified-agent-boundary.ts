@@ -33,6 +33,14 @@ const serverDependency =
   /^(?:bun:sqlite|drizzle-orm(?:\/|$)|hono(?:\/|$)|@kite-ai\/agent(?:\/|$)|@ai-sdk\/|node:(?:fs|child_process|worker_threads|net|http|https)(?:\/|$))/;
 const nativeDependency =
   /^(?:node:|bun(?::|$)|(?:fs|path|os|process|http|https|net|tls|child_process|worker_threads|sqlite3|better-sqlite3|electron|openai|@anthropic-ai\/sdk|@google\/genai|@modelcontextprotocol\/sdk|@libsql\/client|@kite-ai\/service)(?:\/|$))/;
+const servicePermissionImplementations = new Set([
+  'createPermissionPolicy',
+  'createShellCommandPolicy',
+  'createShellConfiguration',
+  'hostExecutionScope',
+  'hostFilesystemScope',
+]);
+const shellParserDependency = /^(?:web-tree-sitter|tree-sitter-bash)(?:\/|$)/;
 const infrastructure =
   /^(?:bun:sqlite|drizzle-orm(?:\/|$)|hono(?:\/|$)|node:(?:fs|child_process|worker_threads|net|http|https)(?:\/|$))/;
 
@@ -183,6 +191,16 @@ export function checkUnifiedAgentBoundary(
     );
     const visit = (node: ts.Node): void => {
       const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+      if (
+        path.startsWith('apps/service/') &&
+        (ts.isFunctionDeclaration(node) ||
+          ts.isVariableDeclaration(node) ||
+          ts.isClassDeclaration(node)) &&
+        node.name &&
+        ts.isIdentifier(node.name) &&
+        servicePermissionImplementations.has(node.name.text)
+      )
+        add(file, line, 'service-no-permission-implementation', node.name.text);
       let specifier: ts.Node | undefined;
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
         specifier = node.moduleSpecifier;
@@ -237,7 +255,14 @@ export function checkUnifiedAgentBoundary(
   for (const file of sourceFiles) scan(file);
   const closure = (
     entry: string,
-    policy: 'loop' | 'ai' | 'portable' | 'host' | 'test-consumer',
+    policy:
+      | 'loop'
+      | 'ai'
+      | 'portable'
+      | 'host'
+      | 'test-consumer'
+      | 'permissions'
+      | 'service-assembly',
   ): void => {
     const visited = new Set<string>();
     const queue = [entry];
@@ -268,32 +293,40 @@ export function checkUnifiedAgentBoundary(
           continue;
         }
         const invalid =
-          policy === 'host' || policy === 'test-consumer'
-            ? false
-            : policy === 'loop'
-              ? infrastructure.test(ref.specifier) ||
-                /packages\/agent\/src\/(?:tools|skills|mcp|platform|storage\/(?:sqlite|worker))\//.test(
-                  targetPath,
-                ) ||
-                /^@kite-ai\/agent\/(?:sqlite|tools)/.test(ref.specifier)
-              : policy === 'ai'
-                ? /^@kite-ai\/(?:agent|client|ui)(?:\/|$)/.test(ref.specifier) ||
-                  /packages\/(?:agent|client|ui)\//.test(targetPath) ||
-                  /(?:^|\/)session(?:\/|$)/.test(targetPath)
-                : (/^@kite-ai\//.test(ref.specifier) &&
-                    !/^@kite-ai\/(?:client|ui)(?:\/|$)/.test(ref.specifier)) ||
-                  serverDependency.test(ref.specifier) ||
-                  (nativeDependency.test(ref.specifier) &&
-                    !(
-                      relative(normalizedRoot, entry)
-                        .replaceAll('\\', '/')
-                        .startsWith('apps/cli/src/') &&
-                      ['node:process', 'process'].includes(ref.specifier)
-                    )) ||
-                  /^(?:ai|@kite-ai\/ai)(?:\/|$)/.test(ref.specifier) ||
-                  /(?:packages\/(?:agent|ai)\/|apps\/(?:service|kite-service)\/|native\/)/.test(
-                    targetPath,
-                  );
+          policy === 'permissions'
+            ? /^@kite-ai\/service(?:\/|$)/.test(ref.specifier) ||
+              targets.some((value) =>
+                relative(normalizedRoot, value).replaceAll('\\', '/').startsWith('apps/service/'),
+              )
+            : policy === 'service-assembly'
+              ? shellParserDependency.test(ref.specifier) &&
+                !relative(normalizedRoot, file).replaceAll('\\', '/').startsWith('packages/agent/')
+              : policy === 'host' || policy === 'test-consumer'
+                ? false
+                : policy === 'loop'
+                  ? infrastructure.test(ref.specifier) ||
+                    /packages\/agent\/src\/(?:tools|skills|mcp|platform|storage\/(?:sqlite|worker))\//.test(
+                      targetPath,
+                    ) ||
+                    /^@kite-ai\/agent\/(?:sqlite|tools)/.test(ref.specifier)
+                  : policy === 'ai'
+                    ? /^@kite-ai\/(?:agent|client|ui)(?:\/|$)/.test(ref.specifier) ||
+                      /packages\/(?:agent|client|ui)\//.test(targetPath) ||
+                      /(?:^|\/)session(?:\/|$)/.test(targetPath)
+                    : (/^@kite-ai\//.test(ref.specifier) &&
+                        !/^@kite-ai\/(?:client|ui)(?:\/|$)/.test(ref.specifier)) ||
+                      serverDependency.test(ref.specifier) ||
+                      (nativeDependency.test(ref.specifier) &&
+                        !(
+                          relative(normalizedRoot, entry)
+                            .replaceAll('\\', '/')
+                            .startsWith('apps/cli/src/') &&
+                          ['node:process', 'process'].includes(ref.specifier)
+                        )) ||
+                      /^(?:ai|@kite-ai\/ai)(?:\/|$)/.test(ref.specifier) ||
+                      /(?:packages\/(?:agent|ai)\/|apps\/(?:service|kite-service)\/|native\/)/.test(
+                        targetPath,
+                      );
         if (invalid)
           add(
             file,
@@ -307,7 +340,9 @@ export function checkUnifiedAgentBoundary(
   };
   for (const file of sourceFiles) {
     const path = relative(normalizedRoot, file).replaceAll('\\', '/');
-    if (/^packages\/agent\/src\/loop(?:\.|\/)/.test(path)) closure(file, 'loop');
+    if (/^packages\/agent\/src\/permissions(?:\.|\/)/.test(path)) closure(file, 'permissions');
+    else if (path.startsWith('apps/service/src/')) closure(file, 'service-assembly');
+    else if (/^packages\/agent\/src\/loop(?:\.|\/)/.test(path)) closure(file, 'loop');
     else if (/^(?:tests\/|(?:packages|apps)\/[^/]+\/test\/)/.test(path))
       closure(file, 'test-consumer');
     else if (path.startsWith('packages/ai/')) closure(file, 'ai');

@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import type { AuthorizationRequest } from '@kite-ai/agent/extensions';
-import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { createFixedModel } from '@kite-ai/ai';
 import {
   type CapabilityDescription,
   createPermissionPolicy,
   type PermissionPolicySnapshot,
-} from '../../src/permissions';
+} from '@kite-ai/agent/permissions';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { createFixedModel } from '@kite-ai/ai';
 
 async function until<T>(read: () => Promise<T | null>) {
   const deadline = Date.now() + 5000;

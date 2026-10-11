@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
+import type { PermissionMode } from '@kite-ai/agent/permissions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import type { HostMutationRecord, PermissionGrantPage } from '@kite-ai/agent/storage';
-import type { PermissionMode } from './permissions';
 
 interface Identity {
   expectedStoreId: string;

@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
+import { createPermissionPolicy } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import {
@@ -19,7 +20,6 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
-import { createPermissionPolicy } from '../../src/permissions';
 import { createWorkflowConfiguration } from '../../src/skill-workflow-configuration';
 
 const native = process.platform === 'darwin' || process.platform === 'linux' ? test : test.skip;

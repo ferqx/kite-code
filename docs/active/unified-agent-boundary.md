@@ -2,6 +2,8 @@
 
 状态：active
 
+[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一默认三策略、builtin effect 分类、计划/Workflow/恢复审批约束，以及 Shell 命令分析、摘要和最终批准范围。Service 只装配可信事实与执行工厂、处理公开接口和身份；原 Loop/Execution 接口与审批生命周期保持。静态边界检查沿真实 export/barrel 拒绝权限模块反向依赖 Service，并拒绝 Service 自有解析依赖和原策略/范围工厂实现；正式制品仍须验证独立 Agent entry 与 WASM 闭包。
+
 Native累计缓存用量沿已观察Message的原Model Execution只读取得：成功结果、准确原Session／Run／content、实际cached字段及token范围须核实；封存副本按原Store／Execution去重，不查询来源Run后来状态。恢复在当前Store的旧Store结果仅接纳终态出处，foreign active拒绝。有限IPC只收已观察Message ID与阅读scope，关闭／切会话只释放所属GET；用量不成为权限、执行状态或完整正文证明。组件继续复用原Composer，当前实现与证据归[Native owner](../../apps/desktop/README.md#原输入区累计缓存命中率)，Core／生成HTTP／持久格式保持。
 
 必要业务义务通过[范围登记与最终 read-set 核对](../../packages/agent/src/storage/sqlite/requirements/README.md)实现。可信 initializer 在首个 Execution 前只创建当前 Run namespace 的不可变 executable 元数据；普通 Tool 追加义务，不得撤回已封存 refs。当前 boundary 和只读关联记录由 Core 提供，派发/完成事务核对准确原 Store、revision 和 related-record CAS，缺实现或未知判定值拒绝。已创建 Job 继续使用原 refs 与原配置 lease。

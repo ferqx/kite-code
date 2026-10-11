@@ -4,7 +4,7 @@ import {
   type CapabilityDescription,
   createPermissionPolicy,
   type PermissionPolicySnapshot,
-} from '../../src/permissions';
+} from '@kite-ai/agent/permissions';
 
 type Scope = { filesystem: 'workspace_write' | 'full_access'; network: 'none' | 'internet' };
 const baseline: Scope = { filesystem: 'workspace_write', network: 'none' };

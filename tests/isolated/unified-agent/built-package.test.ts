@@ -150,6 +150,8 @@ nativeTest(
       expect(exports).toEqual({
         '.': './index.js',
         './extensions': './extensions/index.js',
+        './permissions': './permissions/index.js',
+        './permissions/shell': './permissions/shell.js',
         './storage': './storage/index.js',
         './sqlite': './sqlite.js',
         './sources': './sources.js',
@@ -232,6 +234,8 @@ const {selectProfile}=await import('@kite-ai/agent/profile');
 const {createArtifactStore}=await import('@kite-ai/agent/artifacts');
 const {createProfileBackup,inspectProfileBackup,restoreProfileBackup,inspectProfileRestore}=await import('@kite-ai/agent/maintenance');
 const {createDefaultProcessConfiguration}=await import('@kite-ai/service/configuration');
+const {createPermissionPolicy}=await import('@kite-ai/agent/permissions');
+const {createShellCommandPolicy}=await import('@kite-ai/agent/permissions/shell');
 const {createMcpAdapter,createMcpLifecycle,createMcpStdioTransportPort,mcpStdioGuardianAsset}=await import('@kite-ai/agent/mcp');
 const {createFixedModel}=await import('@kite-ai/ai');
 const {startService}=await import('@kite-ai/service');
@@ -241,6 +245,20 @@ const {createBrowserClient}=await import('@kite-ai/client/browser');
 const {launchPairedService}=await import('@kite-ai/service/paired');
 const {startDevelopmentWeb}=await import('@kite-ai/service/development-web');
 const working=join(base,'working');mkdirSync(working);
+const shellPolicy=await createShellCommandPolicy({cwd:working,shellExecutable:'/bin/sh'});
+assert.deepEqual((await shellPolicy.classify('printf packaged')).plainCommands,[['printf','packaged']]);
+assert.equal((await shellPolicy.classify('rm -rf /')).hardDenied,'shell_critical_system_removal');
+assert.equal(shellPolicy.assets.length,2);
+for(const asset of shellPolicy.assets)assert.equal(asset.digest,createHash('sha256').update(readFileSync(asset.path)).digest('hex'));
+const permissionRequest={kind:'tool',sessionId:'packaged',runId:'packaged-run',executionId:'packaged-execution',definitionId:'shell.launch',definitionVersion:'1',input:{command:'printf packaged'},signal:new AbortController().signal};
+const requestedScope={filesystem:'workspace_write',network:'internet'};
+const permissionPolicy=createPermissionPolicy({
+ readPolicy:()=>({mode:'accept_edits',workspaceTrust:true,revision:'packaged-policy',allowed:[{kind:'tool',definitionId:'shell.launch',definitionVersion:'1'}]}),
+ describeCapability:()=>({kind:'tool',definitionId:'shell.launch',definitionVersion:'1',revision:'packaged-shell',effects:['process','unknown','record_write'],safeRead:false,hardAllowed:true,executionScope:requestedScope})
+});
+const packagedDecision=await permissionPolicy.authorize(permissionRequest);
+assert.equal(packagedDecision.allowed,false);assert.equal(packagedDecision.reason,'approval_required');
+assert.deepEqual(packagedDecision.approval.request.executionScope,requestedScope);
 writeFileSync(join(working,'packaged.ts'),'one\\ntwo\\n');
 const files=createWorkspaceFiles({root:working});const filePage=await files.read('packaged.ts',{offset:2,limit:1});assert.equal(filePage.content,'two\\n');assert.equal(filePage.baseline.size,8);assert.deepEqual((await files.glob({pattern:'**/*.ts'})).paths,['packaged.ts']);
 const skills=join(working,'knowledge');mkdirSync(skills);writeFileSync(join(skills,'SKILL.md'),'---\\nname: packaged\\ndescription: artifact knowledge\\n---\\nRead [note](note.txt)');writeFileSync(join(skills,'note.txt'),'packaged reference');

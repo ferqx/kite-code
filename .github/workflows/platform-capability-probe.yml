@@ -73,12 +73,12 @@ jobs:
           packages/agent/test/isolated/execution/owner-handoff.test.ts
           apps/service/test/isolated/shell-configuration.test.ts
           apps/service/test/isolated/linux-shell-configuration.test.ts
-          apps/service/test/isolated/permissions.test.ts
+          packages/agent/test/isolated/permissions/policy.test.ts
           apps/service/test/isolated/permission-schema.test.ts
           packages/agent/test/isolated/storage/host-controls.test.ts
           packages/client/test/isolated/permission-controls.test.ts
-          apps/service/test/isolated/shell-command-policy.test.ts
-          apps/service/test/isolated/shell-scoped-permissions.test.ts
+          packages/agent/test/isolated/permissions/shell-command-policy.test.ts
+          packages/agent/test/isolated/permissions/shell-scoped-permissions.test.ts
           apps/service/test/isolated/web-permissions.test.ts
           tests/isolated/unified-agent/unified-platform.test.ts
       - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"

@@ -20,8 +20,8 @@ import type {
   ReadContext,
   ToolResult,
 } from '@kite-ai/agent/extensions';
+import type { CapabilityDescription } from '@kite-ai/agent/permissions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
-import type { CapabilityDescription } from './permissions';
 
 export const mcpManagementExtensionId = 'builtin.mcp.management';
 const actionId = 'mcp.server.select';

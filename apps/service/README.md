@@ -205,13 +205,15 @@ R10 公共上下文使用 `GET /v1/sessions/{id}/context?storeId=&contextSelecti
 [公共上下文集成测试](../../tests/isolated/unified-agent/client-context.test.ts) 使用真实 Service、SQLite Worker、固定 Model 与普通 Action/Job 证明空闲选择、原回执幂等、分页、历史不删除、活 Job 拒绝选择、终态结果被 rewind 抑制后明确 include，以及错误身份/revision/context 的局部拒绝。实际新模型请求排除 rewind 前旧消息，按准确 source ID 纳入显式结果并保存原 Store/execution/revision/inclusion；held Model 期间新的 include 返回 input_busy，零命令、零 Job 重放。合法 1 MiB 追加输入的最坏转义正文在 8 MiB context 页与实际新 Model 中完整保留，较小显式预算准确报超限。活动 Run 中显式 include 的 steer 整合不在本切片。
 
 
-默认权限迁移的独立 leaf 位于 [permissions.ts](src/permissions.ts)：`createPermissionPolicy({readPolicy,describeCapability,readReviewContext?})` 返回 Core 的 `Permissions`。每次调用读取宿主当前策略 `{mode:accept_edits|auto|full,workspaceTrust,revision,allowed}` 与真实已注册 capability 的 kind/definition/version/revision/effects/hardAllowed/safeRead；Tool 描述或远端文本不是能力依据。策略与能力语义的稳定摘要共同成为 approval policy revision，即使宿主忘记增加显式 revision，实际 trust/模式/allowlist/能力变化也使旧批准失效。构造及 import 不执行 I/O。
+Service 的权限职责限于 HTTP 接口与主体/Store/Session 身份校验、当前控制事实读取和可信能力装配。三策略分类、已知 builtin effects（含 Task 与 MCP source/auth 固定分类）、计划权限交集、Workflow 最低审批和明确文件恢复审批规则由 Agent 权限模块实现；Shell 的输入解释、命令摘要、危险拒绝与最终 scope 读取也由同一模块负责。宿主只注入当前模式/trust/revision、真实已注册能力和 transport 可用性、平台资产路径及环境，Core 保留审核/人工接纳及最终派发事务。
+
+默认权限规则位于 [Agent 独立权限模块](../../packages/agent/src/permissions/README.md)，通过 `@kite-ai/agent/permissions` 装配：`createPermissionPolicy({readPolicy,describeCapability,readReviewContext?})` 返回 Core 的 `Permissions`。每次调用读取宿主当前策略 `{mode:accept_edits|auto|full,workspaceTrust,revision,allowed}` 与真实已注册 capability 的 kind/definition/version/revision/effects/hardAllowed/safeRead；Tool 描述或远端文本不是能力依据。策略与能力语义的稳定摘要共同成为 approval policy revision，即使宿主忘记增加显式 revision，实际 trust/模式/allowlist/能力变化也使旧批准失效。构造及 import 不执行 I/O。
 
 Model 必须有准确 kind 的允许项，不给同名 Tool 授权。所有非 Model 操作先核对当前 Workspace trust、准确注册版本、allowlist 与硬可用性，失败不会生成可扩大该边界的人工卡。请求批准允许可信 Workspace 内的 read/edit；正式 Shell 使用 Workspace 可写且无网络的默认范围，外部写入或联网请求分别取得准确单次审批。Full 跳过普通逐项风险审批，但不跳过这些硬约束或取消；不确定 effect 仍由真实宿主执行能力限制。所有审批的最终参数、执行身份和重新校验由现有 Core Interaction/UnifiedExecution 负责。
 
 Auto 分类只返回准确 invocation、effects 及可选只读 task/plan/拒绝理由，不执行 Provider。Core 使用实际 `authorizationReview` 建立持久 child/carrier，经同一 Loop 的唯一无 Tool Model 取得闭合单次决定与准确 proof；失败或 ask_user 返回原调用的真实人工卡，reject 结束原工作。默认每 Run reviewer 使用该 Run 已封存的 SDK route/options 与绑定版本；宿主可显式覆盖，独立无 Run Action 没有默认 SDK reviewer 时仍准确人工回退。大请求由[通用 Model 正文](../../packages/agent/src/model-body/README.md)完整封存和展开，真实 Model input hash 参与最终证明，公开文字不能自报 Execution 或签发永久许可。准确 `same_command` 会话授权与正式客户端的三策略/trust 设置由下文当前授权目录及持久控制入口负责；不借旧会话批准开放新的调用范围。
 
-[真实权限测试](test/isolated/permissions.test.ts) 用临时 SQLite Worker、同 Core Loop 和固定 Model 验证：准确单次批准与原命令重复零重放；等待中 trust/allowlist/注册可用性/模式变化后的旧批准零 Tool 效果；可信 read/edit 与 Full 普通风险跳过；同名 Model/Tool 隔离；Full 硬约束和版本拒绝；未装配 Core reviewer 时 Auto 准确人工回退；默认 SDK reviewer 的真实证据见下段。有限无 I/O 校验另验证 capability 数量和取消，不以策略真值表代替派发证据。
+[真实权限测试](../../packages/agent/test/isolated/permissions/policy.test.ts) 用临时 SQLite Worker、同 Core Loop 和固定 Model 验证：准确单次批准与原命令重复零重放；等待中 trust/allowlist/注册可用性/模式变化后的旧批准零 Tool 效果；可信 read/edit 与 Full 普通风险跳过；同名 Model/Tool 隔离；Full 硬约束和版本拒绝；未装配 Core reviewer 时 Auto 准确人工回退；默认 SDK reviewer 的真实证据见下段。有限无 I/O 校验另验证 capability 数量和取消，不以策略真值表代替派发证据。
 
 
 `createDefaultProcessConfiguration({profile,permissions?,permissionPolicy?:{readPolicy},...})` 为每个新 Run 返回其实际 `permissions`。显式 `permissions` 始终优先，保持可信测试/宿主装配；否则 programmatic `readPolicy` 每次派发与审批接纳前重读。没有两者时，`permissionManagement(runtime)` 将默认装配绑定到真实 Runtime，默认读取当前 Store 的持久模式与信任。新用户/尚无模式记录的 Session 默认 Auto，Workspace 缺持久确认时未信任；仍允许本 Run 准确 kind/model ID/version 的实际 Model，Tool 不会通过单次审批越过 trust。直接测试宿主尚未绑定 Runtime 时保持 Auto/untrusted 的安全只读默认。权限模式、trust 或 allowlist 不能从 JSONC、MCP 描述或 Skill 元数据生成。
@@ -247,7 +249,7 @@ Auto 分类只返回准确 invocation、effects 及可选只读 task/plan/拒绝
 
 ## 默认 Shell 装配
 
-macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 运行根装配可信 `shell.host`。[shell-configuration](src/shell-configuration.ts)为每个 Run 读取真实 Store Workspace，选择 `createMacosHostShellJob` 的 Seatbelt/launchd coalition 后端。JSONC 仅选择 `shell.launch/read/wait/stop@1`，不能提供 executor、cwd、env、保护路径或执行资格；缺 host、资产、正确版本或平台仍局部拒绝，没有另一进程 fallback。Win/Linux 默认后端尚未取得资格，实际验证依用户选择在重构完成后交给 GitHub Actions。
+macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 运行根装配可信 `shell.host`。[Agent Shell 工厂](../../packages/agent/src/permissions/shell.ts)为每个 Run 读取真实 Store Workspace，选择 `createMacosHostShellJob` 的 Seatbelt/launchd coalition 后端。JSONC 仅选择 `shell.launch/read/wait/stop@1`，不能提供 executor、cwd、env、保护路径或执行资格；缺 host、资产、正确版本或平台仍局部拒绝，没有另一进程 fallback。Win/Linux 默认后端尚未取得资格，实际验证依用户选择在重构完成后交给 GitHub Actions。
 
 Linux 正式装配已接 `createLinuxHostShellJob`：同一 ProcessService 定位已构建包内 native init及实际 Bubblewrap，固定解释器／env／原 runtimeAssets与保护根；四份可执行资产及独立解析资产分别封存摘要，在普通派发前重核，最终根／Task父子AND策略按同一真实Job定义求交。缺 Bubblewrap、init或明确 host配置局部拒绝，无旧 group降级；其原 namespace所有权、完整输出和unknown fencing归[Linux Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。[纯正式调用者测试](test/isolated/linux-shell-configuration.test.ts)实际核配置、摘要、scope和Workflow接线，工厂start由spy接收，FFI0，不计Linux运行资格。Windows默认Shell仍缺真实权限ceiling；Linux实机、installed维护／版本链及全部资源门禁继续pending。
 
@@ -257,7 +259,7 @@ host Job.start 失败仅将固定非秘密适配器码交给原 Core outcome_unk
 
 Shell Extension 属于每 Run 的真实绑定：`shell.launch` 经普通 Tool 派发再 `operations.ensure` 创建准确 `shell.command@1`，Tool 批准不授权 Job，Job 独立复核、持久派发并取得原 supervision。正式 host 的可选 `permissions:{filesystem:'workspace_write'|'full_access',network:'none'|'internet'}` 是准确本次范围请求，省略时为 Workspace/无网络；Tool 原样传 Job，低层 Job 仍只消费 `{command}`。请求批准可直接派发默认范围的不透明 Shell，外部写入/网络由人工审批；Auto 使用原真实 reviewer，Full 普通范围为 Full/Internet，固定危险拒绝先执行。Core `markDispatching` 接受权限/controlReads 后传原 `dispatchAuthorization`；Service 从 `builtin.permissions@1` 的可信 executionScope 逐维求父子交集。旧可信无 scope 叶只保 mode ceiling：Full 为 Full/Internet，其他为 Workspace/无网络，不据人类批准扩大旧调用。空、未知或损坏策略拒绝。原 allowed=false 可表示最终接纳的审批挑战，快照本身不能签发授权。
 
-[shell-command-policy](src/shell-command-policy.ts) 使用固定官方 `web-tree-sitter`/`tree-sitter-bash` WASM，只接受有限字面量 AST；不透明命令不证明安全。独立扫描原关键系统删除/Git 固定拒绝，语法错误后仍扫描前面的字面量命令，未知参数保原位置；不声称识别全部动态危险程序或 Windows 原生语法。解析资产 canonical path/SHA 进入配置与 command digest，每次授权和真正 Job.start 重核，并加入只读资产。相同命令授权还绑定准确 scope、cwd/env、配置、执行资产和现行控制读集；失败不自动扩大范围重放。原 explicit 无 host 工厂继续原 POSIX 语义，不取得正式范围资格。
+[Agent Shell 命令分析](../../packages/agent/src/permissions/shell-command-policy.ts) 使用固定官方 `web-tree-sitter`/`tree-sitter-bash` WASM，只接受有限字面量 AST；不透明命令不证明安全。独立扫描原关键系统删除/Git 固定拒绝，语法错误后仍扫描前面的字面量命令，未知参数保原位置；不声称识别全部动态危险程序或 Windows 原生语法。解析资产 canonical path/SHA 进入配置与 command digest，每次授权和真正 Job.start 重核，并加入只读资产。相同命令授权还绑定准确 scope、cwd/env、配置、执行资产和现行控制读集；失败不自动扩大范围重放。原 explicit 无 host 工厂继续原 POSIX 语义，不取得正式范围资格。
 
 read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时不停止。stop 只提交原取消，默认 macOS 使用真实 coalition 全树停止证明，显式 POSIX 仍只用原组证明；unknown 不改写成功。原 Command 重试不启动新进程，新父 Execution 不能重绑同 key。后台原 binding 的 Core lease 保持到监督收尾，后续配置/新 Run 不覆盖原快照；cold GET 保持原输出与终态且不启动旧 handle。
 

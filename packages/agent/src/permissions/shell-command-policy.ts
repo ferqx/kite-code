@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AgentError } from '@kite-ai/agent';
 import { Language, type Node, Parser } from 'web-tree-sitter';
+import { AgentError } from '../storage/types';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 let initialization: Promise<void> | undefined;

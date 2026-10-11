@@ -45,6 +45,115 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+test('Agent permission closure rejects Service through barrels and every public export branch', () => {
+  const root = fixture({
+    'packages/agent/src/permissions/index.ts': 'export * from "../permission-barrel";',
+    'packages/agent/src/permission-barrel.ts':
+      'type Host = import("@kite-ai/service/paired").Host;',
+    'apps/service/package.json': JSON.stringify({
+      name: '@kite-ai/service',
+      exports: {
+        './paired': { types: './private/types.ts', default: './private/runtime.ts' },
+      },
+    }),
+    'apps/service/private/types.ts': 'export interface Host {}',
+    'apps/service/private/runtime.ts': 'export const Host = true;',
+  });
+  expect(
+    checkUnifiedAgentBoundary(root).violations.some(
+      (item) =>
+        item.rule === 'permissions-dependency' && item.file.endsWith('permission-barrel.ts'),
+    ),
+  ).toBe(true);
+  writeFileSync(
+    resolve(root, 'packages/agent/src/permission-barrel.ts'),
+    'export * from "./paired";',
+  );
+  writeFileSync(
+    resolve(root, 'packages/agent/src/paired.ts'),
+    'export * from "../../../apps/service/private/runtime";',
+  );
+  expect(
+    checkUnifiedAgentBoundary(root).violations.some(
+      (item) => item.rule === 'permissions-dependency' && item.file.endsWith('paired.ts'),
+    ),
+  ).toBe(true);
+  writeFileSync(
+    resolve(root, 'packages/agent/src/permission-barrel.ts'),
+    'export * from "@kite-ai/agent/paired";',
+  );
+  writeFileSync(
+    resolve(root, 'packages/agent/package.json'),
+    JSON.stringify({
+      name: '@kite-ai/agent',
+      exports: {
+        './paired': {
+          types: './src/paired.ts',
+          default: './private/paired.ts',
+        },
+      },
+    }),
+  );
+  writeFileSync(resolve(root, 'packages/agent/src/paired.ts'), 'export interface Host {}');
+  mkdirSync(resolve(root, 'packages/agent/private'), { recursive: true });
+  writeFileSync(
+    resolve(root, 'packages/agent/private/paired.ts'),
+    'export * from "../../../apps/service/private/runtime";',
+  );
+  expect(
+    checkUnifiedAgentBoundary(root).violations.some(
+      (item) => item.rule === 'permissions-dependency' && item.file.endsWith('private/paired.ts'),
+    ),
+  ).toBe(true);
+});
+
+test('Service assembly permits Agent permission factories but rejects parser ownership through a barrel', () => {
+  const root = fixture({
+    'apps/service/src/configuration.ts':
+      'import { createPermissionPolicy } from "@kite-ai/agent/permissions"; createPermissionPolicy({});',
+    'packages/agent/package.json': JSON.stringify({
+      name: '@kite-ai/agent',
+      exports: { './permissions': './src/permissions/index.ts' },
+    }),
+    'packages/agent/src/permissions/index.ts':
+      'import { Parser } from "web-tree-sitter"; export function createPermissionPolicy() {}',
+  });
+  expect(checkUnifiedAgentBoundary(root).violations).toEqual([]);
+  writeFileSync(
+    resolve(root, 'apps/service/src/configuration.ts'),
+    'export * from "../../../shared/parser";',
+  );
+  mkdirSync(resolve(root, 'shared'), { recursive: true });
+  for (const source of [
+    'export * from "web-tree-sitter";',
+    'const grammar = require("tree-sitter-bash/package.json");',
+  ]) {
+    writeFileSync(resolve(root, 'shared/parser.ts'), source);
+    expect(
+      checkUnifiedAgentBoundary(root).violations.some(
+        (item) => item.rule === 'service-assembly-dependency' && item.file === 'shared/parser.ts',
+      ),
+    ).toBe(true);
+  }
+});
+
+test('Service cannot redeclare retired permission factories or accepted Shell scope interpreters', () => {
+  for (const source of [
+    'export function createPermissionPolicy() {}',
+    'export const createShellCommandPolicy = () => {};',
+    'export function createShellConfiguration() {}',
+    'function hostExecutionScope() {}',
+    'const hostFilesystemScope = () => {};',
+  ]) {
+    const root = fixture({ 'apps/service/src/permissions.ts': source });
+    expect(
+      checkUnifiedAgentBoundary(root).violations.some(
+        (item) => item.rule === 'service-no-permission-implementation',
+      ),
+    ).toBe(true);
+  }
+});
+
 test('absent target source and legacy retirement remain pending', () => {
   const root = fixture({ 'packages/runtime-host/src/index.ts': 'export class OldHost {}' });
   const report = checkUnifiedAgentBoundary(root);

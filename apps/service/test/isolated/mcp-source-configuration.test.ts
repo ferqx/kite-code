@@ -15,6 +15,7 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import { createMcpLifecycle } from '@kite-ai/agent/mcp';
+import { createPermissionPolicy } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
@@ -24,7 +25,6 @@ import {
   createMcpSourceConfiguration,
   type McpSourceSelectionInput,
 } from '../../src/mcp-source-configuration';
-import { createPermissionPolicy } from '../../src/permissions';
 
 const object = (value: unknown) => value as Record<string, Json>;
 async function until<T>(read: () => Promise<T | null>) {

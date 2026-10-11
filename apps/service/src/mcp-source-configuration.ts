@@ -49,6 +49,7 @@ import {
   type McpTransportConfiguration,
   mcpSourceConnectionJobId,
 } from '@kite-ai/agent/mcp';
+import { createMcpSourceCapabilityDescription } from '@kite-ai/agent/permissions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import type { WorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import type { ContextSources } from '@kite-ai/agent/sources';
@@ -69,7 +70,6 @@ import {
 } from './mcp-oauth-session';
 import { createMcpSourceEntryMutations } from './mcp-source-entry-mutations';
 import { createMcpSourceResultQuery } from './mcp-source-result';
-import type { CapabilityDescription } from './permissions';
 
 export const mcpSourcesExtensionId = 'builtin.mcp.sources';
 export const mcpSourcesDirectoryToolId = 'mcp.sources.list';
@@ -2132,76 +2132,11 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       },
     ],
   };
-  const describe = (request: AuthorizationRequest): CapabilityDescription | null => {
-    if (
-      request.kind === 'job' &&
-      ['login', 'refresh', 'clear', 'revoke'].some(
-        (action) => request.definitionId === `${mcpSourcesExtensionId}/mcp.auth.${action}`,
-      ) &&
-      request.definitionVersion === '1'
-    )
-      return {
-        kind: 'job',
-        definitionId: request.definitionId,
-        definitionVersion: '1',
-        revision: 'builtin.mcp.sources:1',
-        effects: request.definitionId.endsWith('/mcp.auth.clear')
-          ? ['external']
-          : ['network', 'external'],
-        hardAllowed: true,
-        safeRead: false,
-      };
-    if (
-      request.kind === 'tool' &&
-      request.definitionId === mcpSourcesDirectoryToolId &&
-      request.definitionVersion === '1'
-    )
-      return {
-        kind: 'tool',
-        definitionId: request.definitionId,
-        definitionVersion: '1',
-        revision: 'builtin.mcp.sources:1',
-        effects: ['read'],
-        hardAllowed: true,
-        safeRead: true,
-      };
-    if (
-      request.kind === 'job' &&
-      request.definitionId === mcpSourceConnectionJobId &&
-      request.definitionVersion === '1'
-    )
-      return {
-        kind: 'job',
-        definitionId: request.definitionId,
-        definitionVersion: '1',
-        revision: 'builtin.mcp.sources:1',
-        effects: ['unknown'],
-        hardAllowed: true,
-        safeRead: false,
-      };
-    if (
-      request.kind === 'job' &&
-      [
-        `${mcpSourcesExtensionId}/mcp.source.approve`,
-        `${mcpSourcesExtensionId}/mcp.credential.bind`,
-        `${mcpSourcesExtensionId}/mcp.source.add`,
-        `${mcpSourcesExtensionId}/mcp.source.remove`,
-      ].includes(request.definitionId) &&
-      request.definitionVersion === '1'
-    )
-      return {
-        kind: 'job',
-        definitionId: request.definitionId,
-        definitionVersion: '1',
-        revision: 'builtin.mcp.sources:1',
-        effects: request.definitionId.endsWith('/mcp.source.remove')
-          ? ['workspace_write', 'external']
-          : ['workspace_write'],
-        hardAllowed: true,
-        safeRead: false,
-      };
-    return null;
-  };
+  const describe = createMcpSourceCapabilityDescription({
+    extensionId: mcpSourcesExtensionId,
+    directoryToolId: mcpSourcesDirectoryToolId,
+    connectionJobId: mcpSourceConnectionJobId,
+  });
   function unboundSelection(
     input: {
       command: Pick<CommandRecord, 'originStoreId' | 'sessionId'>;

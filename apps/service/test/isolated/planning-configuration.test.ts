@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
+import type { PermissionMode } from '@kite-ai/agent/permissions';
 import { type PlanningOptions, planningExtensionId } from '@kite-ai/agent/planning';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
-import type { PermissionMode } from '../../src/permissions';
 
 type Call = { name: string; input: Json } | null;
 async function until<T>(read: () => Promise<T | null>) {

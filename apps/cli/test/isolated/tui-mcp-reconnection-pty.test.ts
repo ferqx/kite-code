@@ -985,8 +985,18 @@ def start(phase):
  os.close(slave);buffer=''
  with open(${JSON.stringify(join(evidence, 'pty-owned.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'pid':p.pid})+'\\n');log.flush();os.fsync(log.fileno())
  wait('New Run >')
-def choose(label,top='Project sources'):
+def choose(label,top='Project sources',settle_mcp=False):
  deadline=time.monotonic()+10
+ if settle_mcp:
+  # New server facts invalidate selection; navigate only after this read settles.
+  # Share the existing navigation budget, including the cold unavailable case.
+  while True:
+   drain(deadline)
+   frame=normalized()
+   if 'Server list ready' in frame or 'Server list unknown; refresh to verify' in frame:break
+   if time.monotonic()>deadline:raise RuntimeError('owned_navigation_read_deadline:'+label)
+   receive()
+  note('mcp-navigation-read-settled',frame=frame[-32768:])
  if ('› '+label) in normalized():return
  if ('› '+top) not in normalized():
   key(b'\\x1b[A'*64)
@@ -1014,7 +1024,7 @@ def request_connection():
 def check_connection():
  choose('Check original connection');key(b'\\r');wait('Original catalogue ready')
 def reconnections():
- mcp();choose('Forced reconnects');key(b'\\r');wait('Selecting an original ID does not query, reconnect or authorize tools.')
+ mcp();choose('Forced reconnects',settle_mcp=True);key(b'\\r');wait('Selecting an original ID does not query, reconnect or authorize tools.')
 def leave_reconnections(pending=False,parentTitle='MCP · w'):
  # Child close only returns to the real parent MCP panel; observe that frame before a second close.
  key(b'\\x03');wait(parentTitle);note('parent-mcp-after-child-close',expectedTitle=parentTitle,frame=normalized()[-32768:]);key(b'\\x03');wait('Ctrl+B pending cards' if pending else 'New Run >');note('main-after-parent-close',pending=pending,frame=normalized()[-32768:])

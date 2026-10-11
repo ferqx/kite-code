@@ -17,10 +17,10 @@ const previous = original.stdout,
   current = readFileSync(resolve(repository, path)),
   bytes = (text: string) => Buffer.from(text);
 
-test('predecessor accepts identical inputs and the exact owned-process source entry increment', () => {
+test('predecessor accepts identical inputs and the exact owned-process and permissions increments', () => {
   expect(matchTerminalPredecessorInput(path, previous, previous)).toBe('identical');
   expect(matchTerminalPredecessorInput(path, previous, current)).toBe(
-    'process_observation_source_entry',
+    'process_observation_and_shell_parser_increment',
   );
   expect(matchTerminalPredecessorInput('bun.lock', previous, current)).toBeUndefined();
 });
@@ -31,6 +31,10 @@ test('the source increment never permits dependency, extra export, or other buil
     text.replace('"@napi-rs/keyring": "1.3.0"', '"@napi-rs/keyring": "1.3.1"'),
     text.replace('"exports": {', '"exports": {\n    "./unknown": "./src/unknown.ts",'),
     text.replace('--target=bun', '--target=node'),
+    text.replace('    "./permissions": "./src/permissions/index.ts",\n', ''),
+    text.replace('    "./permissions/shell": "./src/permissions/shell.ts",\n', ''),
+    text.replace(' ./src/permissions/index.ts ', ' '),
+    text.replace(' ./src/permissions/shell.ts ', ' '),
     text.replace('"./process-observation": "./src/process-observation.ts",\n', ''),
     text.replace(' ./src/process-observation.ts ', ' '),
   ]) {
@@ -53,7 +57,7 @@ test('predecessor accepts only the exact Windows Native bootstrap source entry i
     'identical',
   );
   expect(matchTerminalPredecessorInput(servicePath, previousService, currentService)).toBe(
-    'windows_native_bootstrap_and_shell_parser_increment',
+    'windows_native_bootstrap_source_entry',
   );
   expect(
     matchTerminalPredecessorInput('bun.lock', previousService, currentService),
@@ -104,7 +108,7 @@ test('the root input permits only the exact committed stdio CI script increment'
 });
 
 test('predecessor permits only the exact parser declarations and pinned complete lock closure', () => {
-  for (const path of ['bun.lock', 'apps/service/package.json']) {
+  for (const path of ['bun.lock', 'packages/agent/package.json']) {
     const prior = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
       cwd: repository,
     });
@@ -112,19 +116,19 @@ test('predecessor permits only the exact parser declarations and pinned complete
     const current = readFileSync(resolve(repository, path));
     expect(createHash('sha256').update(current).digest('hex')).toBe(
       path === 'bun.lock'
-        ? 'a16f113d4924eb1f2c56b87fa92b1124ff107a432eb7336ee9b8c9dcdc199b88'
-        : '3924deb4c17cf2795d03767abe0e42cbd7cffdfe8efe05d7d615dd257815ade1',
+        ? '748e6ff66e8d3ca2ab4f27b83c9105aae05dc45cdca14edf6560200d5dcb1f91'
+        : 'fdb805e391c6772a2b8e8217a31f17ec14949e084e343287634a0976ff783cc2',
     );
     expect(matchTerminalPredecessorInput(path, prior.stdout, current)).toBe(
       path === 'bun.lock'
         ? 'shell_parser_locked_dependency_increment'
-        : 'windows_native_bootstrap_and_shell_parser_increment',
+        : 'process_observation_and_shell_parser_increment',
     );
     const text = current.toString();
     const changes = [
       text.replace('"tree-sitter-bash": "0.25.1"', '"tree-sitter-bash": "0.25.2"'),
       text.replace('"web-tree-sitter": "0.25.10"', '"web-tree-sitter": "0.25.11"'),
-      text.replace('"hono": "4.13.12"', '"hono": "4.13.13"'),
+      text.replace('"@napi-rs/keyring": "1.3.0"', '"@napi-rs/keyring": "1.3.1"'),
       text + '\n',
     ];
     if (path === 'bun.lock')

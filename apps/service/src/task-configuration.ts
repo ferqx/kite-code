@@ -1,7 +1,7 @@
 import { AgentError } from '@kite-ai/agent';
+import { taskToolCapability } from '@kite-ai/agent/permissions';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ChildRole } from './child-configuration';
-import type { CapabilityEffect } from './permissions';
 
 const taskIds = new Set([
   'task',
@@ -50,12 +50,6 @@ export function createTaskConfiguration(
       if (!extension && ids.some((id) => taskIds.has(id)))
         throw new AgentError('task_role_unavailable');
     },
-    describe(id: string): { effects: readonly CapabilityEffect[]; safeRead: boolean } {
-      if (['task_read', 'task_wait', 'list_agents', 'wait_agents', 'wait_agent'].includes(id))
-        return { effects: ['read'], safeRead: true };
-      if (id === 'task' || id === 'send_message' || id === 'followup_task')
-        return { effects: ['unknown', 'record_write'], safeRead: false };
-      return { effects: ['unknown'], safeRead: false };
-    },
+    describe: taskToolCapability,
   };
 }

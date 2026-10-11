@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createShellCommandPolicy } from '../../src/shell-command-policy';
+import { createShellCommandPolicy } from '@kite-ai/agent/permissions/shell';
 
 test('loads the real packaged Bash WASM and accepts only literal argv sequences', async () => {
   const policy = await createShellCommandPolicy({
@@ -153,12 +153,14 @@ test('rejects changed original parser assets without touching installed dependen
     );
     cpSync(packageRoot('tree-sitter-bash'), join(modules, 'tree-sitter-bash'), { recursive: true });
     symlinkSync(
-      realpathSync(fileURLToPath(new URL('../../../../packages/agent', import.meta.url))),
+      realpathSync(fileURLToPath(new URL('../../../', import.meta.url))),
       join(modules, '@kite-ai/agent'),
       'dir',
     );
     const result = await Bun.build({
-      entrypoints: [fileURLToPath(new URL('../../src/shell-command-policy.ts', import.meta.url))],
+      entrypoints: [
+        fileURLToPath(new URL('../../../src/permissions/shell-command-policy.ts', import.meta.url)),
+      ],
       target: 'bun',
       packages: 'external',
       outdir: root,
