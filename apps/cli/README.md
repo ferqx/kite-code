@@ -173,6 +173,8 @@ Profile facade 先核原 authority 和短锁归属并挂资源 guard，再做可
 
 [真实文件/CAS测试](test/tui-drafts.test.ts) 验证9MiB完整尾部、100次快速编辑仅一次文件发布、冲突/坏格式/权限/软硬链接及明确容量失败；[UI测试](../../packages/ui/test/tui/drafts.test.ts) 核对冷scope、迟到成功、ABA、原目录只读与unknown。[源码树外built PTY](test/isolated/tui-drafts-host.test.ts) 使用自有临时profile和固定loopback模型，验证冷重开最后编辑、Service SIGKILL后仍持共享lease/维护busy、新Store恢复原文不改标及零Provider调用。此资格限本机macOS，不完成正式旧TUI切换或三平台发行。
 
+该 PTY 复用[现有 TUI 夹具编译](test/fixtures/file-recovery-profile.ts)的 Ink/React 依赖接线，保留已安装 npm 模块边界，避免 bundle 将可选 DevTools 变成顶层导入；启动时禁止 Bun 自动安装。原等待预算和全部业务断言保持，下载缓存不作为依赖闭包证据。
+
 开发 `cli:dev server start|restart` 由 [unified-cli selector](../../scripts/development/unified-cli.ts)提供私有 `resolveArtifact` 回调，只有真正启动或重启预检时才读取目标构建。`server status/stop`、`web` 和已经兼容的 `server start` 复用不依赖目标资产存在；absent 状态查询/停止不创建 profile、启动 Service 或调用 Provider。该回调属于可信宿主，不进入 argv 或公共业务 schema。
 
 daemon 制品选择固定 `apps/service/dist/daemon-main.js` 与 `apps/web/dist/manifest.json`，核真实常规文件和 canonical Web 目录、准确字节 SHA；buildId 同时绑定 paired entry 摘要、daemon entry 摘要和 Web manifest 摘要。manifest 内容的有限资产资格仍由实际 daemon preflight 校验，不把摘要当目录授权。缺失/链接资产在需要 launch 时明确失败，不读取源码 fallback。默认 run/resume 及 session/context 的 paired selector 保持原 entry/executable 准入与 buildId；显式共享 run/resume 不选择配套资产。

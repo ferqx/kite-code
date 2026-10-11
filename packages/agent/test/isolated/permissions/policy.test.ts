@@ -5,12 +5,57 @@ import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import type { AuthorizationRequest } from '@kite-ai/agent/extensions';
 import {
+  builtinCapability,
   type CapabilityDescription,
   createPermissionPolicy,
   type PermissionPolicySnapshot,
+  workflowCapabilityDescription,
 } from '@kite-ai/agent/permissions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+
+test('shared builtin facts do not grant a namesake extension or relax Workflow Job ceilings', async () => {
+  for (const extensionId of ['builtin.files', 'untrusted.namesake']) {
+    const f = await fixture('accept_edits', 'files.read');
+    try {
+      f.capability = {
+        ...f.capability,
+        ...builtinCapability(extensionId, 'files.read', 'tool', 'builtin.planning'),
+      };
+      const workflow = workflowCapabilityDescription({
+        ...f.capability,
+        kind: 'tool',
+        extensionId,
+      });
+      await f.submit();
+      if (extensionId === 'untrusted.namesake') {
+        const card = await f.pending();
+        expect(f.effects).toBe(0);
+        expect(card.request).toMatchObject({ policy: { effects: ['unknown'] } });
+        expect(workflow.capability.policy.minimumApproval).toBe('user');
+        await f.approve(card);
+      } else {
+        expect(workflow.capability.effectiveEffects).toEqual({
+          filesystem: 'read',
+          network: 'none',
+          externalState: 'none',
+        });
+        expect(workflow.capability.policy.minimumApproval).toBe('none');
+      }
+      await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      expect(f.effects).toBe(1);
+      const job = workflowCapabilityDescription({ ...f.capability, kind: 'job' });
+      expect(job.capability.effectiveEffects).toEqual({
+        filesystem: 'unknown',
+        network: 'unknown',
+        externalState: 'unknown',
+      });
+      expect(job.capability.policy.minimumApproval).toBe('user');
+    } finally {
+      await f.close();
+    }
+  }
+});
 
 async function until<T>(read: () => Promise<T | null>) {
   const deadline = Date.now() + 5000;

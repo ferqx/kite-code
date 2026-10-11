@@ -40,6 +40,8 @@ MCP强制重连的建立失败收尾由[MCP leaf](src/mcp/README.md#强制重连
 
 ## 当前执行与恢复边界
 
+Runtime 的公共 admission 方法由同一个 `accountEntry` 同步封门并计入关闭等待；方法体不重复同一首行 `runtime_draining`。异步等待后的复核、控制与只读入口、私有回调及不同错误码保持各自职责。原生命周期、Fork 和恢复验收及保留理由见[默认主链精简决定](../../.agents/notes/implemented/simplification/2026-10-11-service-agent-default-composition.md)。
+
 创建与命令写入核对原 `expectedStoreId`，同一 ID/语义返回原事实，内容冲突拒绝。统一执行先保存意图和派发依据，再调用真实适配器；权限、取消与必要依据在派发边界复查。已派发工具没有可核实结果时保留 `outcome_unknown`，不以普通异常推断没有外部效果。模型不完整响应不能启动工具。
 
 `run.start` 与公开 `input.follow_up` 的可选 `selectedSkills` 保存原有限数组并进入请求摘要，Core 不解析名称或读取 Skill 文件。宿主须同时提供 `resolveRunConfiguration` 和显式 `supportsSelectedSkills:true`；未支持时原 Command 持久拒绝，零 resolver/Model/Tool，历史同 ID 仍先核原摘要。省略与空数组是不同意图，活动 steer 不能改变此项。默认 Service 的目录解析、子任务实际 ID 继承与快照由 [Service owner](../../apps/service/README.md)负责。

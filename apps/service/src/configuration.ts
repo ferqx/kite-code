@@ -19,22 +19,23 @@ import {
   createOsCredentialBackend,
   type JsonObject,
   type McpRegistry,
+  type NamedConfiguration,
   readConfigurationFile,
   resolveConfiguration,
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import type { McpLifecycleOptions } from '@kite-ai/agent/mcp';
 import {
-  builtinToolEffect,
+  builtinCapability,
   type CapabilityDescription,
   type CapabilityIdentity,
   createPermissionPolicy,
   hostReadOnlyTool,
   type PermissionPolicyOptions,
   type PermissionPolicySnapshot,
-  planningEffect,
   requireFileRestoreApproval,
   requireWorkflowApproval,
+  workflowCapabilityDescription,
 } from '@kite-ai/agent/permissions';
 import {
   createShellConfiguration,
@@ -117,6 +118,29 @@ export type {
 export type { WebFetchConfigurationOptions } from './web-fetch-configuration';
 
 const assemblyKeys = ['modelId', 'models', 'tools', 'skills', 'mcp'];
+function assertSelectedToolVersions(
+  toolIds: readonly string[],
+  configurations: readonly NamedConfiguration[] | undefined,
+  registrations: readonly Iterable<{ readonly id: string; readonly version: string }>[],
+) {
+  const tools = registrations.flatMap((definitions) => [...definitions]);
+  for (const selected of configurations ?? []) {
+    if (!toolIds.includes(selected.id)) continue;
+    if (
+      workflowToolIds.includes(selected.id) &&
+      selected.definitionVersion !== undefined &&
+      selected.definitionVersion !== '1'
+    )
+      throw new AgentError('tool_definition_version_unavailable');
+    const actual = tools.find((tool) => tool.id === selected.id);
+    if (
+      actual &&
+      selected.definitionVersion !== undefined &&
+      selected.definitionVersion !== actual.version
+    )
+      throw new AgentError('tool_definition_version_unavailable');
+  }
+}
 function explicitConfiguration(value: Json | undefined): JsonObject {
   if (value === undefined) return {};
   if (
@@ -353,6 +377,12 @@ export function createDefaultProcessConfiguration(options: {
     },
   });
   const fileTools = new Map(files.tools.map((tool) => [tool.id, tool]));
+  const builtinExtensions = [
+    askUser,
+    planning.extension,
+    files.extension,
+    ...(task.extension ? [task.extension] : []),
+  ];
   const sourceOptions = options.mcpSources;
   let oauthSerialLocks: NonNullable<RuntimeOptions['workspaceSerialLocks']> | undefined;
   const mcpSources = createMcpSourceConfiguration({
@@ -531,30 +561,25 @@ export function createDefaultProcessConfiguration(options: {
   }
   const businessTools = new Map((planning.extension.tools ?? []).map((tool) => [tool.id, tool]));
   const globalCapabilities = new Map<string, CapabilityDescription>();
-  for (const action of planning.extension.actions ?? []) {
-    const definitionId = `${planning.extension.id}/${action.id}`;
-    globalCapabilities.set(JSON.stringify(['job', definitionId, action.version]), {
-      kind: 'job',
-      definitionId,
-      definitionVersion: action.version,
-      revision: `${planning.extension.id}:${planning.extension.version}:${action.version}`,
-      effects: [planningEffect(action.id)],
-      hardAllowed: true,
-      safeRead: false,
-    });
-  }
-  for (const action of files.extension.actions ?? []) {
-    const definitionId = `${files.extension.id}/${action.id}`;
-    globalCapabilities.set(JSON.stringify(['job', definitionId, action.version]), {
-      kind: 'job',
-      definitionId,
-      definitionVersion: action.version,
-      revision: `${files.extension.id}:${files.extension.version}:${action.version}`,
-      effects: ['workspace_write'],
-      hardAllowed: true,
-      safeRead: false,
-    });
-  }
+  for (const extension of [planning.extension, files.extension])
+    for (const action of extension.actions ?? []) {
+      const definitionId = `${extension.id}/${action.id}`;
+      const capability = builtinCapability(
+        extension.id,
+        action.id,
+        'action',
+        planning.extension.id,
+      );
+      globalCapabilities.set(JSON.stringify(['job', definitionId, action.version]), {
+        kind: 'job',
+        definitionId,
+        definitionVersion: action.version,
+        revision: `${extension.id}:${extension.version}:${action.version}`,
+        effects: capability.effects,
+        hardAllowed: true,
+        safeRead: capability.safeRead,
+      });
+    }
   const globalDefaultPolicy = createPermissionPolicy({
     readPolicy:
       options.permissionPolicy?.readPolicy ??
@@ -730,29 +755,15 @@ export function createDefaultProcessConfiguration(options: {
           (extension.tools ?? []).map((tool) => [tool.id, tool] as const),
         ),
       );
-      for (const selectedTool of effective.tools ?? []) {
-        if (!toolIds.includes(selectedTool.id)) continue;
-        if (
-          workflowToolIds.includes(selectedTool.id) &&
-          selectedTool.definitionVersion !== undefined &&
-          selectedTool.definitionVersion !== '1'
-        )
-          throw new AgentError('tool_definition_version_unavailable');
-        const actualTool =
-          askUserTools.get(selectedTool.id) ??
-          businessTools.get(selectedTool.id) ??
-          fileTools.get(selectedTool.id) ??
-          task.tools.get(selectedTool.id) ??
-          shellTools.get(selectedTool.id) ??
-          webTools.get(selectedTool.id) ??
-          mcp.tools.get(selectedTool.id);
-        if (
-          actualTool &&
-          selectedTool.definitionVersion !== undefined &&
-          selectedTool.definitionVersion !== actualTool.version
-        )
-          throw new AgentError('tool_definition_version_unavailable');
-      }
+      assertSelectedToolVersions(toolIds, effective.tools, [
+        askUserTools.values(),
+        businessTools.values(),
+        fileTools.values(),
+        task.tools.values(),
+        shellTools.values(),
+        webTools.values(),
+        mcp.tools.values(),
+      ]);
       const assembly = await createWorkspaceAssembly({
         workspaceRoot: root,
         profile: options.profile,
@@ -778,7 +789,7 @@ export function createDefaultProcessConfiguration(options: {
       assembly.extensions.push(...shell.extensions);
       if (toolIds.some((id) => webTools.has(id))) assembly.extensions.push(web.extension);
       try {
-        const workflowCapabilities = workflowCapabilitiesFor(assembly, shell);
+        const workflowCapabilities = workflowCapabilitiesFor(assembly);
         const workflow = await createWorkflowConfiguration({
           profile: options.profile,
           workspaceRoot: root,
@@ -820,13 +831,7 @@ export function createDefaultProcessConfiguration(options: {
           ...effective,
           skills: assembly.skillConfigurations,
         });
-        const runExtensions = [
-          askUser,
-          planning.extension,
-          files.extension,
-          ...(task.extension ? [task.extension] : []),
-          ...assembly.extensions,
-        ];
+        const runExtensions = [...builtinExtensions, ...assembly.extensions];
         const readOnlyDefinitions = [...runExtensions, mcpSources.extension].flatMap((extension) =>
           (extension.tools ?? [])
             .filter(
@@ -957,39 +962,37 @@ export function createDefaultProcessConfiguration(options: {
         for (const extension of runExtensions) {
           for (const tool of extension.tools ?? []) {
             if (!assembly.toolIds.includes(tool.id)) continue;
-            const read = hostReadOnlyTool(extension.id, tool.id);
-            const effect = builtinToolEffect(extension.id, tool.id, planning.extension.id);
+            const capability = builtinCapability(
+              extension.id,
+              tool.id,
+              'tool',
+              planning.extension.id,
+            );
             actual.set(key('tool', tool.id, tool.version), {
               kind: 'tool',
               definitionId: tool.id,
               definitionVersion: tool.version,
               revision: `${extension.id}:${extension.version}:${tool.version}`,
-              effects:
-                extension.id === task.extension?.id
-                  ? task.describe(tool.id).effects
-                  : extension.id === 'builtin.shell'
-                    ? shell.describe(tool.id).effects
-                    : extension.id === askUser.id
-                      ? []
-                      : [effect],
+              effects: capability.effects,
               hardAllowed: true,
-              safeRead:
-                extension.id === task.extension?.id
-                  ? task.describe(tool.id).safeRead
-                  : extension.id === 'builtin.shell'
-                    ? shell.describe(tool.id).safeRead
-                    : read,
+              safeRead: capability.safeRead,
             });
           }
           for (const job of extension.jobs ?? []) {
+            const capability = builtinCapability(
+              extension.id,
+              job.id,
+              'job',
+              planning.extension.id,
+            );
             actual.set(key('job', job.id, job.version), {
               kind: 'job',
               definitionId: job.id,
               definitionVersion: job.version,
               revision: `${extension.id}:${extension.version}:${job.version}`,
-              effects: extension.id === 'builtin.shell' ? ['process', 'unknown'] : ['unknown'],
+              effects: capability.effects,
               hardAllowed: true,
-              safeRead: false,
+              safeRead: capability.safeRead,
             });
           }
         }
@@ -1395,83 +1398,32 @@ export function createDefaultProcessConfiguration(options: {
       );
     }
   };
-  function workflowCapabilitiesFor(
-    assembly: Awaited<ReturnType<typeof createWorkspaceAssembly>>,
-    shell: Awaited<ReturnType<typeof createShellConfiguration>>,
-  ) {
+  function workflowCapabilitiesFor(assembly: Awaited<ReturnType<typeof createWorkspaceAssembly>>) {
+    const extensions = [...builtinExtensions, ...assembly.extensions];
     const workflowCapabilities: Parameters<
       typeof createWorkflowConfiguration
-    >[0]['capabilities'][number][] = [
-      askUser,
-      planning.extension,
-      files.extension,
-      ...(task.extension ? [task.extension] : []),
-      ...assembly.extensions,
-    ].flatMap((extension) =>
+    >[0]['capabilities'][number][] = extensions.flatMap((extension) =>
       (extension.tools ?? [])
         .filter((tool) => assembly.toolIds.includes(tool.id))
         .map((tool) => {
           const effects =
-            extension.id === askUser.id
-              ? []
-              : extension.id === task.extension?.id
-                ? task.describe(tool.id).effects
-                : extension.id === 'builtin.shell'
-                  ? shell.describe(tool.id).effects
-                  : extension.id === 'builtin.files'
-                    ? ['files.read', 'files.list', 'files.glob', 'files.search'].includes(tool.id)
-                      ? ['read']
-                      : ['workspace_write']
-                    : extension.id === planning.extension.id
-                      ? [planningEffect(tool.id)]
-                      : extension.id === 'builtin.skills' &&
-                          ['skills.load', 'skills.resource'].includes(tool.id)
-                        ? ['read']
-                        : (web.capabilities.find(
-                            (capability) =>
-                              capability.definitionId === tool.id &&
-                              capability.definitionVersion === tool.version,
-                          )?.effects ?? ['unknown']);
-          return {
-            kind: 'tool' as const,
+            web.capabilities.find(
+              (capability) =>
+                capability.definitionId === tool.id &&
+                capability.definitionVersion === tool.version,
+            )?.effects ??
+            builtinCapability(extension.id, tool.id, 'tool', planning.extension.id).effects;
+          return workflowCapabilityDescription({
+            kind: 'tool',
             definitionId: tool.id,
             definitionVersion: tool.version,
-            capability: {
-              capabilityId: tool.id,
-              revision: `${extension.id}:${extension.version}:${tool.version}`,
-              availability: 'available' as const,
-              effectiveEffects: {
-                filesystem:
-                  effects.length === 0
-                    ? ('none' as const)
-                    : effects.includes('workspace_write')
-                      ? ('write' as const)
-                      : effects.every((effect) => effect === 'read')
-                        ? ('read' as const)
-                        : ('unknown' as const),
-                network: effects.includes('network') ? ('unknown' as const) : ('none' as const),
-                externalState: effects.some((effect) =>
-                  ['external', 'process', 'unknown'].includes(effect),
-                )
-                  ? ('unknown' as const)
-                  : ('none' as const),
-              },
-              policy: {
-                minimumApproval: effects.every((effect) => effect === 'read')
-                  ? ('none' as const)
-                  : ('user' as const),
-              },
-            },
-          };
+            revision: `${extension.id}:${extension.version}:${tool.version}`,
+            extensionId: extension.id,
+            effects,
+          });
         }),
     );
-    const registeredJobs = [
-      askUser,
-      planning.extension,
-      files.extension,
-      ...(task.extension ? [task.extension] : []),
-      ...assembly.extensions,
-    ].flatMap((extension) => [
+    const registeredJobs = extensions.flatMap((extension) => [
       ...(extension.jobs ?? []).map((job) => ({
         id: job.id,
         version: job.version,
@@ -1491,22 +1443,15 @@ export function createDefaultProcessConfiguration(options: {
       })),
     );
     workflowCapabilities.push(
-      ...registeredJobs.map((job) => ({
-        kind: 'job' as const,
-        definitionId: job.id,
-        definitionVersion: job.version,
-        capability: {
-          capabilityId: job.id,
+      ...registeredJobs.map((job) =>
+        workflowCapabilityDescription({
+          kind: 'job',
+          definitionId: job.id,
+          definitionVersion: job.version,
           revision: job.revision,
-          availability: 'available' as const,
-          effectiveEffects: {
-            filesystem: 'unknown' as const,
-            network: 'unknown' as const,
-            externalState: 'unknown' as const,
-          },
-          policy: { minimumApproval: 'user' as const },
-        },
-      })),
+          effects: ['unknown'],
+        }),
+      ),
     );
     return workflowCapabilities;
   }
@@ -1647,32 +1592,16 @@ export function createDefaultProcessConfiguration(options: {
         try {
           assembly.extensions.push(...shell.extensions);
           if (toolIds.some((id) => webTools.has(id))) assembly.extensions.push(web.extension);
-          for (const selected of effective.tools ?? []) {
-            if (!toolIds.includes(selected.id)) continue;
-            if (
-              workflowToolIds.includes(selected.id) &&
-              selected.definitionVersion !== undefined &&
-              selected.definitionVersion !== '1'
-            )
-              throw new AgentError('tool_definition_version_unavailable');
-            const actual =
-              askUserTools.get(selected.id) ??
-              businessTools.get(selected.id) ??
-              fileTools.get(selected.id) ??
-              task.tools.get(selected.id) ??
-              assembly.extensions
-                .flatMap((extension) => extension.tools ?? [])
-                .find((tool) => tool.id === selected.id) ??
-              mcp.tools.get(selected.id);
-            if (
-              selected.definitionVersion !== undefined &&
-              actual &&
-              selected.definitionVersion !== actual.version
-            )
-              throw new AgentError('tool_definition_version_unavailable');
-          }
+          assertSelectedToolVersions(toolIds, effective.tools, [
+            askUserTools.values(),
+            businessTools.values(),
+            fileTools.values(),
+            task.tools.values(),
+            ...assembly.extensions.map((extension) => extension.tools ?? []),
+            mcp.tools.values(),
+          ]);
           return {
-            capabilities: workflowCapabilitiesFor(assembly, shell),
+            capabilities: workflowCapabilitiesFor(assembly),
             forkConfigurations: childRoles.map((role) => ({
               agent: role.id,
               configurationId: role.id,
@@ -1692,10 +1621,7 @@ export function createDefaultProcessConfiguration(options: {
     supportsSelectedSkills: true,
     supportsExtensionInputs: true,
     extensions: [
-      askUser,
-      planning.extension,
-      files.extension,
-      ...(task.extension ? [task.extension] : []),
+      ...builtinExtensions,
       ...(mcp.extension ? [mcp.extension] : []),
       mcpManagement.extension,
       mcpSources.extension,

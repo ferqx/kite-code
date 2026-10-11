@@ -8,6 +8,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { openTuiDraftFile } from '../../host/tui-drafts';
+import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 
 const repository = resolve(import.meta.dir, '../../../..');
 test('source-tree-external built PTY cold draft, Service SIGKILL holds host lease, final input flush and restored original remain read-only', async () => {
@@ -83,15 +84,12 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
     } finally {
       await seed.close();
     }
-    const build = await Bun.build({
-      entrypoints: [join(import.meta.dir, 'tui-drafts.fixture.ts')],
-      target: 'bun',
-      packages: 'bundle',
-      external: ['react-devtools-core'],
-      outdir: root,
-      naming: 'host.js',
-    });
+    const build = await compileFileRecoveryTUI(
+      root,
+      join(import.meta.dir, 'tui-drafts.fixture.ts'),
+    );
     if (!build.success) throw new AggregateError(build.logs, 'owned host build');
+    const hostPath = join(root, 'tui-drafts.fixture.js');
     const pidPath = join(root, 'service.pid'),
       input = join(root, 'input.json');
     writeFileSync(
@@ -102,7 +100,7 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
     const path = join(profile.profilePath, 'ui', 'tui.json');
     let newStoreId: string | undefined;
     const run = async (mode: string) => {
-      const program = `import os,pty,subprocess,select,time,signal,re,json,sys\nmaster,slave=pty.openpty()\np=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(root, 'host.js'))},${JSON.stringify(input)}],cwd=${JSON.stringify(root)},stdin=slave,stdout=slave,stderr=slave,start_new_session=True)\nos.close(slave);buffer=b''\ndef wait(text):\n global buffer\n deadline=time.monotonic()+12\n while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):\n  if time.monotonic()>deadline: raise RuntimeError('expected '+text+' tail='+buffer[-2500:].decode(errors='replace'))\n  if select.select([master],[],[],.05)[0]:\n   try: buffer+=os.read(master,65536)\n   except OSError: raise RuntimeError('host ended')\ndef command(expected):\n if not select.select([sys.stdin],[],[],12)[0]: raise RuntimeError('protocol timeout')\n assert input()==expected\ntry:\n wait('New Run')\n ${mode === 'first' ? `os.write(master,b'cold original');wait('cold original');os.write(master,b'\\x11')` : mode === 'crash' ? `wait('cold original');os.kill(int(open(${JSON.stringify(pidPath)}).read()),signal.SIGKILL);assert p.poll() is None;os.write(master,b' last edit');wait('cold original last edit');print('HELD',flush=True);command('quit');os.write(master,b'\\x11')` : mode === 'conflict' ? `wait('/drafts');os.write(master,b' local conflict');wait('/drafts local conflict');print('EDITED',flush=True);command('quit');os.write(master,b'\\x11');wait('exit_blocked');assert p.poll() is None;print('BLOCKED',flush=True);command('force');os.kill(p.pid,signal.SIGTERM)` : `assert 'cold original last edit' not in buffer.decode(errors='replace');os.write(master,b'/drafts');wait('/drafts');os.write(master,b'\\r');wait('Store ${storeId}');os.write(master,b'\\x11')`}\n deadline=time.monotonic()+8\n while p.poll() is None and time.monotonic()<deadline:\n  if select.select([master],[],[],.05)[0]:\n   try:buffer+=os.read(master,65536)\n   except OSError:break\n p.wait(timeout=5);assert p.returncode==${mode === 'conflict' ? 1 : 0};print('HOST_EXIT_${mode === 'conflict' ? 1 : 0}',flush=True)\nfinally:\n if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()\n os.close(master)\n`;
+      const program = `import os,pty,subprocess,select,time,signal,re,json,sys\nmaster,slave=pty.openpty()\np=subprocess.Popen([${JSON.stringify(process.execPath)},'--no-install',${JSON.stringify(hostPath)},${JSON.stringify(input)}],cwd=${JSON.stringify(root)},stdin=slave,stdout=slave,stderr=slave,start_new_session=True)\nos.close(slave);buffer=b''\ndef wait(text):\n global buffer\n deadline=time.monotonic()+12\n while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):\n  if time.monotonic()>deadline: raise RuntimeError('expected '+text+' tail='+buffer[-2500:].decode(errors='replace'))\n  if select.select([master],[],[],.05)[0]:\n   try: buffer+=os.read(master,65536)\n   except OSError: raise RuntimeError('host ended')\ndef command(expected):\n if not select.select([sys.stdin],[],[],12)[0]: raise RuntimeError('protocol timeout')\n assert input()==expected\ntry:\n wait('New Run')\n ${mode === 'first' ? `os.write(master,b'cold original');wait('cold original');os.write(master,b'\\x11')` : mode === 'crash' ? `wait('cold original');os.kill(int(open(${JSON.stringify(pidPath)}).read()),signal.SIGKILL);assert p.poll() is None;os.write(master,b' last edit');wait('cold original last edit');print('HELD',flush=True);command('quit');os.write(master,b'\\x11')` : mode === 'conflict' ? `wait('/drafts');os.write(master,b' local conflict');wait('/drafts local conflict');print('EDITED',flush=True);command('quit');os.write(master,b'\\x11');wait('exit_blocked');assert p.poll() is None;print('BLOCKED',flush=True);command('force');os.kill(p.pid,signal.SIGTERM)` : `assert 'cold original last edit' not in buffer.decode(errors='replace');os.write(master,b'/drafts');wait('/drafts');os.write(master,b'\\r');wait('Store ${storeId}');os.write(master,b'\\x11')`}\n deadline=time.monotonic()+8\n while p.poll() is None and time.monotonic()<deadline:\n  if select.select([master],[],[],.05)[0]:\n   try:buffer+=os.read(master,65536)\n   except OSError:break\n p.wait(timeout=5);assert p.returncode==${mode === 'conflict' ? 1 : 0};print('HOST_EXIT_${mode === 'conflict' ? 1 : 0}',flush=True)\nfinally:\n if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()\n os.close(master)\n`;
       const child = Bun.spawn(['python3', '-c', program], {
         stdin: 'pipe',
         stdout: 'pipe',

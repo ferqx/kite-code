@@ -1,4 +1,5 @@
 import type { AuthorizationRequest } from '../extensions';
+import type { WorkflowCapability } from '../skills/workflow-contract';
 import type { CapabilityDescription, CapabilityEffect } from './index';
 
 const planningRecordWrites = new Set([
@@ -58,6 +59,99 @@ export function taskToolCapability(id: string): {
   if (id === 'task' || id === 'send_message' || id === 'followup_task')
     return { effects: ['unknown', 'record_write'], safeRead: false };
   return { effects: ['unknown'], safeRead: false };
+}
+
+export function shellToolCapability(id: string): {
+  effects: readonly CapabilityEffect[];
+  safeRead: boolean;
+} {
+  if (id === 'shell.read' || id === 'shell.wait') return { effects: ['read'], safeRead: true };
+  if (id === 'shell.launch')
+    return { effects: ['process', 'unknown', 'record_write'], safeRead: false };
+  return { effects: ['process', 'unknown'], safeRead: false };
+}
+
+/** Classify the actual registered Tool, Job or Action; an Action dispatches as a Job. */
+export function builtinCapability(
+  extensionId: string,
+  definitionId: string,
+  kind: 'tool' | 'job' | 'action',
+  planningId: string,
+): { effects: readonly CapabilityEffect[]; safeRead: boolean } {
+  if (kind === 'action' && extensionId === planningId)
+    return { effects: [planningEffect(definitionId)], safeRead: false };
+  if (kind === 'action' && extensionId === 'builtin.files')
+    return { effects: ['workspace_write'], safeRead: false };
+  if (kind !== 'tool')
+    return {
+      effects: extensionId === 'builtin.shell' ? ['process', 'unknown'] : ['unknown'],
+      safeRead: false,
+    };
+  const toolId = definitionId;
+  if (extensionId === 'builtin.task') return taskToolCapability(toolId);
+  if (extensionId === 'builtin.shell') return shellToolCapability(toolId);
+  return {
+    effects:
+      extensionId === 'builtin.ask-user'
+        ? []
+        : [builtinToolEffect(extensionId, toolId, planningId)],
+    safeRead: hostReadOnlyTool(extensionId, toolId),
+  };
+}
+
+/** Workflow keeps its original conservative Job and unknown-file ceilings. */
+export function workflowCapabilityDescription(
+  description: Pick<
+    CapabilityDescription,
+    'definitionId' | 'definitionVersion' | 'revision' | 'effects'
+  > & { kind: 'tool' | 'job'; extensionId?: string },
+): {
+  kind: 'tool' | 'job';
+  definitionId: string;
+  definitionVersion: string;
+  capability: WorkflowCapability;
+} {
+  const { kind, definitionId, definitionVersion, revision } = description;
+  // Permission classification treats an unknown Files tool as unknown; the existing
+  // Workflow contract conservatively reserves workspace writes for that projection.
+  const effects: readonly CapabilityEffect[] =
+    kind === 'tool' &&
+    description.extensionId === 'builtin.files' &&
+    description.effects.includes('unknown')
+      ? (['workspace_write'] as const)
+      : description.effects;
+  return {
+    kind,
+    definitionId,
+    definitionVersion,
+    capability: {
+      capabilityId: definitionId,
+      revision,
+      availability: 'available',
+      effectiveEffects: {
+        filesystem:
+          kind === 'job'
+            ? 'unknown'
+            : effects.length === 0
+              ? 'none'
+              : effects.includes('workspace_write')
+                ? 'write'
+                : effects.every((effect) => effect === 'read')
+                  ? 'read'
+                  : 'unknown',
+        network: kind === 'job' || effects.includes('network') ? 'unknown' : 'none',
+        externalState:
+          kind === 'job' ||
+          effects.some((effect) => ['external', 'process', 'unknown'].includes(effect))
+            ? 'unknown'
+            : 'none',
+      },
+      policy: {
+        minimumApproval:
+          kind === 'tool' && effects.every((effect) => effect === 'read') ? 'none' : 'user',
+      },
+    },
+  };
 }
 
 /** Fixed source capability rules; the host supplies trusted registered definition IDs. */

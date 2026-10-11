@@ -5041,3 +5041,17 @@ PTY实录显示首次替换连接已ready、原RPC四次、Model零调用，但�
 六个原独占整例全部通过：TUI export 53859ms、CLI安装登记76507ms、Native真实代码版本切换233961ms、Native正式安装105407ms、Native恢复中断75942ms、Terminal bundle54866ms。正式用户调用者沿原Service/Client/唯一Agent、MCP连接/调用/取消/退出、Shell实际范围与恢复合同继续验证；本轮闭合独立权限owner和正式装配切换，退役原Service三个实现及测试owner路径，parser依赖固定版本转到Agent。最终根与八workspace types/build均actual0，日志 `/private/tmp/kite-agent-permissions-module-final-typecheck.log` 与 `-build.log`；静态边界、workspace、公共API、ownership及文档/影响门禁通过。wholeDefault=true仅指本次冻结macOS默认，其他阶段门禁不据此放宽；本地提交hooks继续独立执行。
 
 产品手册已核对，用户行为/公开HTTP/持久格式/快照与摘要语义保持，只有实现owner变化。Win/Linux后置且未dispatch，Windows正式Shell缺口、RSS九采样+115.203125MiB>32MiB真实红和完整Runtime观测缺项保留；37能力仍partial，wholeV13=false/phaseExit=false，无push/PR/发布。
+
+## 2026-10-11：默认 Service 与 Agent 主链精简
+
+按用户指定的 code-simplification 技能核对八个 workspace 的入口与依赖、Service 默认装配和 Agent Runtime/Loop/Execution/ExtensionHost/Store 主链。正式 Run、恢复绑定和 Skill 目录共用内建注册集合与工具版本校验，保留各分支原注册优先级和校验时刻；权限装配、Workflow 投影及 Shell 工厂消费 Agent 的同一份固定能力分类，退役 Service 的重复效果规则和 Workflow 投影实现。Runtime 删除十处与既有 `accountEntry` 同错误、同时间的首行检查，异步复核、控制、取消与恢复检查保持。当前职责归[Service](../../apps/service/README.md)、[Agent 权限模块](../../packages/agent/src/permissions/README.md)和[实施决定](../../.agents/notes/implemented/simplification/2026-10-11-service-agent-default-composition.md)；没有据此宣称全部存储、平台、OAuth、UI 和维护叶子均已精简。
+
+原 Service/权限七整文件基线41pass/568expects；Runtime 生命周期、Fork、Job恢复三整文件改前与改后均36pass/558expects。最终受影响十三整文件78pass/1075expects/actual0，日志 `/private/tmp/kite-architecture-simplification-final-targeted.log`。原策略用例正文和断言逐字保持，只新增一项真实 Core 用例，核同名外部定义审批前零效果及 Workflow Job 三维 unknown/user；未知 Files 的原 Workflow write 投影与执行 unknown 分类仍分别保守。来源编译前后复核、不同文件消费证明、不同持久摘要和早期 native 根路径资格检查保留，理由归上述实施决定。
+
+首次原完整默认actual1/690.901秒，727文件/588作业中351启动并排空、350通过、原 TUI 草稿整文件一失败、237未开始/六exclusive未开始；4413项仓库输入、HEAD/Git和实际Bun/Node路径/字节/版本前后全等。日志 `/private/tmp/kite-architecture-simplification-full.log` SHA `0ef17121a2704d60a372db9b9bfae0e64d6c180e303e14d8b68436f0b67fbbe8`，同prefix `-receipt.json` 与 `-plan.json` 保原完整红。实际尚未进入草稿业务：源码外 bundle 将 Ink 可选 DevTools 导入提升到顶层，启动等待收到 `shell-quote` 下载进度；相同构建的禁自动安装探针明确缺 `react-devtools-core`，不将缓存下载当正式闭包。
+
+只修这份原草稿夹具：复用现有 `compileFileRecoveryTUI`，连接原已安装 Ink/React 并保其 npm 模块边界，真实 Bun 启动加 `--no-install`。两者解析同一 React 实例，无项目源码回退。原 PTY、冷草稿、Service SIGKILL/共享lease、最后flush、恢复只读、冲突退出、零Provider及12/8/5秒与45秒整例预算全部保持；逆向修改恢复原全文字节，收据 `/private/tmp/kite-architecture-simplification-drafts-preservation.json`。修后原整文件actual0/1pass/26expects/2.996秒，4413输入全等，日志 `/private/tmp/kite-architecture-simplification-drafts-whole.log` SHA `3072be56fe5d07745b273226062651dd2c5530ad0010b7aac79ba9118f8fb3de`；[CLI owner](../../apps/cli/README.md#开发-tui-持久草稿)同步真实夹具闭包。
+
+第二次当前原完整 `bun run test` actual0/1426.467秒，727文件/588个准确正式作业全部通过；原macOS并发4、parallel167/isolated554/exclusive6、发现/断言/预算/调度保持，无未开始或遗留活动作业。日志 `/private/tmp/kite-architecture-simplification-full-settled.log` SHA `9baa8e984a62802b71f6b44a26b4d92db34657b8d44f319a162bb5137786ea51`，同prefix `-receipt.json` 与 `-plan.json` 保完整实际运行；4413项仓库输入、HEAD/Git及Bun/Node全程全等。六个原独占窗口实际通过：TUI export53129ms、CLI安装登记74859ms、Native真实版本切换226846ms、Native正式安装100189ms、Native恢复中断73505ms、Terminal bundle53988ms。首次完整红仍保留，未删断言、排除文件、放宽预算或拼接局部绿。
+
+最终根及八workspace types/build均actual0，日志 `/private/tmp/kite-architecture-simplification-settled-typecheck.log` 与 `-build.log`；边界、workspace、公共API、ownership及文档/影响检查通过，本地提交hook继续独立执行。产品手册核对确认用户行为、公开接口、权限与持久格式保持，只有职责和重复实现收束。Win/Linux实际验证后置、Windows正式Shell缺口、RSS真实红及完整观测缺项保留；37能力仍partial，wholeV13=false/phaseExit=false，无push、PR、发布或Actions dispatch。

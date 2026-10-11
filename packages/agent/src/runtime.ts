@@ -1992,7 +1992,6 @@ export class AgentRuntime {
     return { reference, content: await this.options.artifacts.read(input) };
   }
   beginHostMutation(input: Parameters<Store['beginHostMutation']>[0]) {
-    if (this.closing) throw new AgentError('runtime_draining');
     return this.options.store.beginHostMutation(input);
   }
   finishHostMutation(input: Parameters<Store['finishHostMutation']>[0]) {
@@ -2036,7 +2035,6 @@ export class AgentRuntime {
     return this.options.store.getCompressionOrigin(input);
   }
   selectContext(input: Parameters<Store['selectContext']>[0]) {
-    if (this.closing) throw new AgentError('runtime_draining');
     return this.options.store.selectContext(input);
   }
   compressContext(input: {
@@ -2080,17 +2078,14 @@ export class AgentRuntime {
     });
   }
   renameSession(input: Parameters<Store['renameSession']>[0]) {
-    if (this.closing) throw new AgentError('runtime_draining');
     return this.options.store.renameSession(input);
   }
   async deleteSession(input: Parameters<Store['deleteSession']>[0]) {
-    if (this.closing) throw new AgentError('runtime_draining');
     const result = await this.options.store.deleteSession(input);
     await this.observeOwnedCancellation();
     return result;
   }
   async removeWorkspace(input: Parameters<Store['removeWorkspace']>[0]) {
-    if (this.closing) throw new AgentError('runtime_draining');
     const receipt = await this.options.store.removeWorkspace(input);
     await this.observeOwnedCancellation();
     return receipt;
@@ -2102,7 +2097,6 @@ export class AgentRuntime {
     return this.options.store.getMessageOrigin(input);
   }
   async forkSession(input: PublicForkInput) {
-    if (this.closing) throw new AgentError('runtime_draining');
     if (
       Object.keys(input).some(
         (key) =>
@@ -2132,13 +2126,11 @@ export class AgentRuntime {
     });
   }
   async includeResult(input: Parameters<Store['includeResult']>[0]) {
-    if (this.closing) throw new AgentError('runtime_draining');
     const result = await this.options.store.includeResult(input);
     if (result.command.status === 'accepted') this.schedule(input.sessionId);
     return result;
   }
   answerInteraction(input: Parameters<Store['answerInteraction']>[0]) {
-    if (this.closing) throw new AgentError('runtime_draining');
     return this.options.store.answerInteraction(input);
   }
   getWorkspace(id: string) {
@@ -2220,7 +2212,6 @@ export class AgentRuntime {
     return this.extensionHost.query(input);
   }
   async recoverSession(input: Parameters<Store['recoverSession']>[0]) {
-    if (this.closing) throw new AgentError('runtime_draining');
     // The public caller cannot supply the private full-output observations.
     const original = {
       expectedStoreId: input.expectedStoreId,
@@ -3119,7 +3110,6 @@ export class AgentRuntime {
     return ready;
   }
   async submitCommand(input: AcceptCommandInput): Promise<CommandRecord> {
-    if (this.closing) throw new AgentError('runtime_draining');
     if (
       ![
         'run.start',

@@ -1,5 +1,11 @@
 # 本机 Agent Service
 
+## 默认装配与业务规则归属
+
+[默认配置](src/configuration.ts)读取实际 Profile、Workspace、当前身份和注册定义，装配唯一 Agent Runtime；固定内建能力效果和 Workflow 审批投影由[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一提供。正式 Run、恢复绑定与只读 Skill 目录共用工具版本校验和内建注册集合，各自的来源捕获、选中范围与资源释放时刻仍独立。Service 不维护第二份 Task、Shell、Files 或 Skills 效果规则。
+
+HTTP 身份和 schema 准入、当前持久权限与来源读取、真实 transport 可用性属于宿主。业务执行、权限决定、Workflow 能力投影和 Runtime 准入属于 Agent。Source 编译前后复核、完整文件消费证明和不同持久摘要格式有独立合同，保留原检查；本轮精简理由见[实施决定](../../.agents/notes/implemented/simplification/2026-10-11-service-agent-default-composition.md)。
+
 项目来源的专用答案 schema、可信 observer 和有限原决定 Query 已实施；当前证明与历史读取边界见[Source owner](#项目来源决定的有限历史事实)，本片取舍与已完成的有限验收见[Source 决定](../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。
 
 Session 管理提供 `POST /v1/sessions/{id}/fork`、`/rename`、`/delete`，输入为有限 closed schema，主体由可信宿主填入。Fork 核原 Store/selection/稳定配对边界，只复制历史与出处；未登记 namespace 规则默认 omit，可信注册可选择 copy/rebuild。有限 `namespaceReport` 与原命令 receipt 一致，`omittedExtensionState` 如实表示省略，HTTP 不接受内部准备计划。重命名和删除按 `ifRevision` 控制 CAS，原 command ID 查回原 Session 快照。删除原子保存整组 tombstone 和停止边界，关闭迟到创建/派发，异步通知真实 owner 收尾；回执不声称资源已停止，准确旧 ID 历史继续可读。历史物理清理和完整恢复资格尚未闭合。

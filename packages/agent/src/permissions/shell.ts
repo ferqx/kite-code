@@ -10,7 +10,8 @@ import {
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AuthorizationRequest, Extension, JobContext } from '../extensions';
 import { AgentError } from '../storage/types';
-import type { CapabilityDescription, CapabilityEffect } from './index';
+import { shellToolCapability as describe } from './capabilities';
+import type { CapabilityDescription } from './index';
 import { createShellCommandPolicy } from './shell-command-policy';
 
 export interface ShellConfigurationOptions {
@@ -427,11 +428,4 @@ export async function createShellConfiguration(input: {
     throw new AgentError('shell_asset_unavailable');
   }
 }
-function describe(id: string): { effects: readonly CapabilityEffect[]; safeRead: boolean } {
-  if (id === 'shell.read' || id === 'shell.wait') return { effects: ['read'], safeRead: true };
-  if (id === 'shell.launch')
-    return { effects: ['process', 'unknown', 'record_write'], safeRead: false };
-  return { effects: ['process', 'unknown'], safeRead: false };
-}
-
 export { createShellCommandPolicy } from './shell-command-policy';

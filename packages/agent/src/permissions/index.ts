@@ -304,11 +304,13 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
 }
 
 export {
+  builtinCapability,
   builtinToolEffect,
   createMcpSourceCapabilityDescription,
   hostReadOnlyTool,
   planningEffect,
   taskToolCapability,
+  workflowCapabilityDescription,
 } from './capabilities';
 export {
   createPlanningPermissionPolicy,
