@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Json, PublicExecution, ReadContext } from '../extensions';
 import { canonicalJson } from '../json';
-import { proveConnectionParent } from './reconnection-proof';
+import { proveConnectionParent, stoppedOrUnopened } from './reconnection-proof';
 
 const obj = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -146,6 +146,20 @@ export async function readConnection(
           const now = current(e.originStoreId, input.serverId, c.id, config);
           live = now.live;
           currentGeneration = now.generation;
+        } else if (
+          e.status === 'failed' &&
+          obj(e.result).outcome === 'failed' &&
+          Object.keys(obj(e.result)).sort().join(',') === 'content,details,outcome' &&
+          typeof obj(e.result).content === 'string' &&
+          Object.keys(details).sort().join(',') ===
+            'configDigest,operationRef,ready,stopConfirmed' &&
+          details.ready === false &&
+          details.stopConfirmed === false &&
+          created &&
+          stoppedOrUnopened(c, { serverId: input.serverId, configDigest: config })
+        ) {
+          phase = 'failed';
+          reason = 'mcp_connection_not_established';
         }
       }
     }

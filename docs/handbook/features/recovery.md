@@ -93,7 +93,7 @@ Desktop、TUI 和 CLI 使用同一正式会话库。新客户端遇到已验证�
 
 累计已完成调用较多不会使原安全检查点自动失效；恢复会核完整历史、原来源与尚未派发的工作，保留同一 Run及原调用身份。4096 次真实效果后的公开冷接续已有本机限定验证，未知效果及不支持的边界仍按下文拒绝，完整正式入口和平台资格见[实施进度](../../plans/unified-agent-refactor-v1-progress.md#2026-10-10长-run-完整来源与原任务安全接续)。
 
-恢复仍须满足原配置、当前授权与来源，并核实取消和上下文选择。半完成初始化、无法确认是否已经产生效果的调用、截断模型结果和暂未支持的子任务边界会明确拒绝，保留原历史；已经结束的 Run 不会重开。恢复申请的受理回执不代表任务完成，响应丢失只查询原申请。开发 CLI 的 `recovery run`、TUI `/recovery` 和 Native 恢复面板显式读取原 Run 后提交；CLI 普通 `resume` 仍是新任务的继续对话。正式旧入口与完整平台资格分别按实施进度记录。
+恢复仍须满足原配置、当前授权与来源，并核实取消和上下文选择。半完成初始化、无法确认是否已经产生效果的调用、截断模型结果和暂未支持的子任务边界会明确拒绝，保留原历史；已经结束的 Run 不会重开。恢复申请的受理回执不代表任务完成，响应丢失只查询原申请。正式 CLI 的 `recovery run`、Terminal `/recovery` 和 Native 恢复面板已通过公共 Client 显式读取原 Run 后提交；CLI 普通 `resume` 仍是新任务的继续对话。完整恢复行为与平台资格分别按实施进度记录。
 
 ## 开发统一 Service 的遗留任务中断
 
@@ -118,7 +118,7 @@ CLI/TUI 的私有 journal 与 Native 的私有数据库各有明确本地容量�
 
 Native 原申请面板提供原 ID 查询和原完整请求分页读取；状态只显示有限 metadata，完整正文按原 read ID、连续游标、EOF、UTF8 字节数与 SHA 核实。main 保有 profile、token 和存储边界，renderer 不获得它们，也不获得私有执行 authority。普通 IPC 页预算保留，完整 caller 提交具有单独的有限预算；超过预算明确失败，不假装已保存全文。`applied` 只表示原申请回执落定，`cancel_requested` 只表示取消请求受理，实际 Run/Job 终态仍须继续观察。
 
-普通 CLI 操作与真实等待见[命令参考](../cli/commands.md#通用开发入口的持久普通申请)。Native 输入/恢复/profile/模型设置/压缩邻接实测为 37 项、296 条 Bun 断言；随后新增的五种真实 Electron 窗口增量为 5 项、20 条 Bun 断言，另核冷 GET 前后 Core 原 Run/Execution ID 集合不增加。两组证据分别保留，见 [Native owner](../../../apps/desktop/README.md)。窗口涵盖真实 main/preload/renderer、物理 POST/首 GET 丢回应、main/所属 Service SIGKILL、原 Command 一条、完整正文与后来草稿保留。超过 1MiB 的合法 Workflow envelope 在业务中因未配置 skill 被实际拒绝，只证明申请完整与查回链，不证明 Workflow 执行成功。既有 TUI 强杀/PTY 资格独立保留；本片不覆盖正式旧入口切换、Linux/Windows Electron、正式安装或整个 §35。
+普通 CLI 操作与真实等待见[命令参考](../cli/commands.md#通用开发入口的持久普通申请)。正式 CLI、Terminal 与 Native 已消费这些公共入口；[Native owner](../../../apps/desktop/README.md)保留输入/恢复/profile/模型设置/压缩邻接和五种真实 Electron 窗口的独立证据。窗口涵盖真实 main/preload/renderer、物理 POST/首 GET 丢回应、main/所属 Service SIGKILL、原 Command 一条、完整正文与后来草稿保留，冷 GET 前后 Core 原 Run/Execution ID 集合不增加。超过 1MiB 的合法 Workflow envelope 在该窗口中因未配置 skill 被实际拒绝，只证明申请完整与查回链，不证明 Workflow 执行成功。TUI 强杀/PTY、正式安装和版本/维护恢复各自保留证据；完整业务崩溃、Linux/Windows Electron和整个 §35 仍未闭合。
 
 ## Native 原答案的冷查回
 

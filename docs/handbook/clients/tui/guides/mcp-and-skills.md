@@ -48,6 +48,8 @@ Server移除或冷重开后仍可查看已保存的历史；旧generation不会�
 
 同 Session 的原连接申请 ID 保存在 Profile 中；空目录、目录失败和 Server 已移除时仍可选择。上下、Enter 只选择原 ID，再选择“Check original connection”（查询原连接申请）并 Enter 才读取原结果。冷重开不自动查询或提交。结果未知时先查原申请，不能用新 key 绕过同 Store、Session、Server 的未确认申请；404、无法核对原身份或坏结果都保留 unknown，不重发。冷后确需新连接时，在核原申请后重新选择可用 Server，以独立确认和新的普通审批申请。
 
+连接建立失败且原连接 Job 已可靠停止时，原查询可确认本次未建立连接。先核对这份原结果，再独立申请新连接；新连接和后续工具仍各自审批。停止未确认或原证据不完整时保持 unknown，不能据失败提示重发。当前 macOS stdio 已实证失败后的原查回、新连接、完整工具详情和一次独立工具调用；其他平台资格仍单独保留。
+
 关闭、Esc、Ctrl+C 和切会话只释放所属读取，已提交的工作与原审批继续。离线恢复生成新 Store 后，旧申请保持原身份，不能成为当前 Store 的查询或提交许可。实际 Host、普通连接和源码外 80×24 暖冷键盘验证见[CLI owner](../../../../../apps/cli/README.md#tui-mcp-显式连接与原申请)；该普通连接窗口不证明强制重连；强制重连的实际范围见下一节，完整认证、增删和三平台发行仍分别验收。
 
 ## 强制重连与原申请
@@ -114,7 +116,7 @@ Login、Refresh credentials、Clear local credentials、Revoke remote credential
 
 输入动态命令后会重新读取当前完整目录，再以空对象作为原 Workflow 输入；任务文字只作为任务内容，省略任务时使用该 Skill 的默认请求文字。空闲会话启动新 Run，活动会话排为准确原 Run 之后的 follow-up。读取期间 Ctrl+C 只取消读取；切换会话或修改草稿使旧读取失效。提交结果未知时保留原草稿，Ctrl+L 查询原命令后刷新当前会话，不重复提交；迟到回执不会清除后来编辑的草稿。目录显示的版本不预订未来执行版本，实际开始以 Service 核实的可信源为准。
 
-CLI 的 `--skill` 仍用于选择本次 Run 可以按需使用的知识；显式 Workflow 使用 `--activate-skill`。这些通用开发操作尚不代表正式旧入口和全部终端交互已经切换。
+CLI 的 `--skill` 仍用于选择本次 Run 可以按需使用的知识；显式 Workflow 使用 `--activate-skill`。正式 CLI、Terminal 与开发 TUI 已消费当前公共能力；完整 Workflow、终端交互与平台资格仍按[实施进度](../../../../plans/unified-agent-refactor-v1-progress.md)分别核对。
 
 ## 手工配置参考
 

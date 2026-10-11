@@ -11,12 +11,27 @@ import type {
   ReadContext,
   ToolContext,
 } from '../../../src/extensions';
-import { createMcpLifecycle, type McpReconnectionInput } from '../../../src/mcp';
-import { confirmedStop, hash, object } from '../../../src/mcp/reconnection-proof';
+import {
+  createMcpAdapter,
+  createMcpLifecycle,
+  type McpLifecycleTransportPort,
+  type McpReconnectionInput,
+} from '../../../src/mcp';
+import {
+  confirmedStop,
+  hash,
+  object,
+  stoppedOrUnopened,
+} from '../../../src/mcp/reconnection-proof';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
-async function fixture(processConcurrency = 1, staticServer = false, readyTimeoutMs?: number) {
+async function fixture(
+  processConcurrency = 1,
+  staticServer = false,
+  readyTimeoutMs?: number,
+  ownedObservation = false,
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-reconnection-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   let store = await openSqliteStore(profile);
@@ -46,6 +61,8 @@ async function fixture(processConcurrency = 1, staticServer = false, readyTimeou
     stopEntered = resolve;
   });
   let descriptorVersion = 1;
+  let rejectInitialize = false;
+  let sourcePath = '';
   let resolves = 0,
     replacements = 0;
   const peer = Bun.serve({
@@ -56,6 +73,12 @@ async function fixture(processConcurrency = 1, staticServer = false, readyTimeou
       const rpc = (await request.json()) as { id?: number; method: string };
       if (rpc.id === undefined) return new Response(null, { status: 202 });
       wire.push(rpc.method);
+      if (rpc.method === 'initialize' && rejectInitialize)
+        return Response.json({
+          jsonrpc: '2.0',
+          id: rpc.id,
+          error: { code: -32000, message: 'owned replacement initialize failure' },
+        });
       return Response.json({
         jsonrpc: '2.0',
         id: rpc.id,
@@ -91,7 +114,10 @@ async function fixture(processConcurrency = 1, staticServer = false, readyTimeou
     variablesDigest: 'c'.repeat(64),
   };
   const resolution = () => ({
-    server: { id: 'local', transport: { type: 'http' as const, url: peer.url.href } },
+    server: {
+      id: 'local',
+      transport: { type: 'http' as const, url: new URL(sourcePath, peer.url).href },
+    },
     captureDigest: 'd'.repeat(64),
     snapshotDigest: 'e'.repeat(64),
     assertFresh({ signal }: { signal: AbortSignal }) {
@@ -99,7 +125,7 @@ async function fixture(processConcurrency = 1, staticServer = false, readyTimeou
       if (!fresh) throw Error('actual_source_drift');
     },
     transportPort: {
-      async open(binding: { executionId: string }) {
+      async open(binding: Parameters<McpLifecycleTransportPort['open']>[0]) {
         opens.push(binding.executionId);
         if (holdOpening && opens.length > 1) {
           openEntered();
@@ -118,6 +144,29 @@ async function fixture(processConcurrency = 1, staticServer = false, readyTimeou
         return {
           transport,
           stopped,
+          ...(ownedObservation
+            ? {
+                // Closed observational shape only; native process ownership has
+                // a separate actual stdio/default-Service regression.
+                readProcessEvidence: () => ({
+                  version: 2 as const,
+                  coverage: 'mcp-owned-coalition' as const,
+                  binding: {
+                    originalStoreId: binding.originalStoreId,
+                    sessionId: binding.sessionId,
+                    executionId: binding.executionId,
+                    serverId: binding.serverId,
+                    scopeId: binding.scopeId,
+                    configDigest: binding.configDigest,
+                  },
+                  ownerPid: process.pid,
+                  broker: null,
+                  guardian: null,
+                  server: null,
+                  coalition: null,
+                }),
+              }
+            : {}),
           async stop() {
             stops.push(binding.executionId);
             stopEntered();
@@ -365,6 +414,13 @@ async function fixture(processConcurrency = 1, staticServer = false, readyTimeou
     changeDescriptor() {
       descriptorVersion++;
     },
+    changeSource() {
+      sourcePath = 'replacement';
+      return createMcpAdapter(resolution().server).getCatalogue().configDigest;
+    },
+    rejectInitialize(value: boolean) {
+      rejectInitialize = value;
+    },
     stopping,
     readSet,
     get store() {
@@ -604,6 +660,54 @@ test('replacement Job denied after old stop retains exact terminal child/ref and
     const next = await f.invoke('next', 'mcp.connect', { serverId: 'local', key: 'next' });
     expect(next.status).toBe('succeeded');
     expect(f.opens).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+}, 20000);
+
+test('failed replacement binds its stopped observation to the new config and remains queryable without reopening it', async () => {
+  const f = await fixture(1, false, undefined, true);
+  try {
+    await f.invoke('a', 'mcp.connect', { serverId: 'local', key: 'a' });
+    const b = await f.invoke('b', 'mcp.connect', { serverId: 'local', key: 'b' });
+    const warm = await f.connection(b.id, 'b');
+    const replacementDigest = f.changeSource();
+    const input = f.input(warm, 'r1');
+    expect(replacementDigest).not.toBe(input.target.configDigest);
+    input.replacement.expectedConfigDigest = replacementDigest;
+    f.rejectInitialize(true);
+    const r = await f.invoke('r1', 'mcp.reconnect', input as unknown as Json);
+    expect(r.status).toBe('failed');
+    const fact = await f.query(r.id);
+    expect(fact.phase).toBe('failed');
+    expect((fact.oldStop as Record<string, Json>).confirmed).toBe(true);
+    expect((fact.newConnection as Record<string, Json>).status).toBe('failed');
+    const ref = fact.newOperationRef as Record<string, Json>;
+    const child = await f.store.getExecution(String(ref.executionId));
+    expect(child!.result).toMatchObject({
+      outcome: 'failed',
+      details: {
+        transportStopped: true,
+        remoteToolStopConfirmed: false,
+        ownedProcesses: { binding: { configDigest: replacementDigest } },
+      },
+    });
+    expect(f.opens).toHaveLength(2);
+    const wire = [...f.wire];
+    await f.cold();
+    const counters = { ...f.counters };
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    const cold = await f.query(r.id);
+    expect(cold.phase).toBe('failed');
+    expect(cold.newOperationRef).toEqual(fact.newOperationRef);
+    expect(cold.oldStop).toEqual(fact.oldStop);
+    expect(f.wire).toEqual(wire);
+    expect(f.counters).toEqual(counters);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    f.rejectInitialize(false);
+    const next = await f.invoke('next', 'mcp.connect', { serverId: 'local', key: 'next' });
+    expect(next.status).toBe('succeeded');
+    expect(f.opens).toHaveLength(3);
   } finally {
     await f.close();
   }
@@ -1066,13 +1170,20 @@ test('original stop proof accepts closed owned evidence and unavailable observat
       resultRevision: original!.resultRevision,
       resultDigest: hash(execution().result),
     });
+    const stopBinding = { serverId: input.serverId, configDigest: input.target.configDigest };
     expect(await confirmedStop(context, input, proof())).toEqual(execution());
+    expect(stoppedOrUnopened(execution(), stopBinding)).toBe(true);
+    expect(stoppedOrUnopened(execution(), { ...stopBinding, serverId: 'foreign' })).toBe(false);
+    expect(stoppedOrUnopened(execution(), { ...stopBinding, configDigest: '0'.repeat(64) })).toBe(
+      false,
+    );
     details = {
       transportStopped: true,
       remoteToolStopConfirmed: false,
       ownedProcessesUnavailable: 'mcp_owned_process_evidence_unavailable',
     };
     expect(await confirmedStop(context, input, proof())).toEqual(execution());
+    expect(stoppedOrUnopened(execution(), stopBinding)).toBe(true);
     for (const invalid of [
       { ownedProcesses: { ...evidence, binding: { ...binding, executionId: 'foreign' } } },
       { ownedProcesses: { ...evidence, command: 'must-not-be-exposed' } },
@@ -1087,6 +1198,7 @@ test('original stop proof accepts closed owned evidence and unavailable observat
       const error = await confirmedStop(context, input, proof()).catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toBe('mcp_reconnection_stop_unconfirmed');
+      expect(stoppedOrUnopened(execution(), stopBinding)).toBe(false);
     }
   } finally {
     await f.close();

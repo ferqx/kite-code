@@ -1669,7 +1669,7 @@ Runtime只在本实例仍有该根Session hot operation时保留既有空列表�
 
 ### 2026-10-07：Native MCP 完整设置集成与实际窗口（实施中）
 
-本轮按已确认[完整设置方案](unified-agent-native-mcp-settings.md)交付工作树实现，目标包含实际用户入口、Source/Auth/连接/工具全文及原操作，不能以journal或局部测试关闭整体能力。正式Native的Client leaf/Main/renderer/独立Source Review已接线；DB7准确九表与专属manifest15离线资产保持旧DB0–6/旧v2–v14grammar。四项Auth的真实默认Chrome/OS vault组合、当前原完整默认、本地交付仍待闭合；37项能力继续partial，Goal active。
+本轮按已确认完整设置方案交付工作树实现，目标包含实际用户入口、Source/Auth/连接/工具全文及原操作，不能以journal或局部测试关闭整体能力；现行合同已归位[Native owner](../../apps/desktop/README.md#native-mcp-完整设置)。正式Native的Client leaf/Main/renderer/独立Source Review已接线；DB7准确九表与专属manifest15离线资产保持旧DB0–6/旧v2–v14grammar。当时四项Auth的真实默认Chrome/OS vault组合、原完整默认、本地交付仍待闭合；37项能力继续partial，Goal active。
 
 真实Main/Service HTTP首四轮分别暴露fixture装配缺capability、workspace mutation.scope误解、工具Query字段误解、reconnect独立child Command误解；原日志保留，均按实际producer合同修正，未删除行为断言或注入生产权限。当前 `/private/tmp/kite-native-mcp-main-original-seventh.log` 1pass/61assert/2.37s，核来源与选择/既有binding原结果、独立连接/refresh/reconnect、完整descriptor、容量两槽reservation与close、foreign/坏GET保原行、丢回执与冷GET-only。独立审查另核终态不降级、并发原GET合并和Remove发表成功但cleanup失败/unknown保持总体unknown。
 
@@ -4784,3 +4784,31 @@ MCP 原现场 `/private/tmp/kite-native-mcp-bundle-O2zINH` 中，stdio 初次rea
 | 5 | 正式用户入口完全切换后旧authority／依赖引用清零、删除旧路径、阶段完整回归及适用P7发布责任 | 依前述资格与§35完整证据汇合；旧stdio组路径退役只覆盖其原范围，不提前删剩余旧authority或宣布阶段退出；本地提交授权不扩大到push／PR／发布 |
 
 37能力仍partial，wholeV13／phaseExit=false，Goal active；本轮只在既有授权内同步文档和本地提交，不push、PR或发布。
+
+## 2026-10-11：macOS MCP 失败建立与完整连接恢复
+
+用户要求优先闭合macOS MCP完整连接、Tool、准确取消与正常退出；Win/Linux交后续GitHub Actions，RSS和观测缺项保留，不重复参数对照。基线本地提交 `c0b69d8b` 的714文件／575正式作业完整默认成功属于此前冻结输入，不能代本轮四个生产消费者变化的完整收束。
+
+新的非参与式源码审查发现旧停止 `confirmedStop` 已迁入owned观察，但普通失败建立的隔离释放和失败replacement的 `stoppedOrUnopened` 仍只接受两字段；合法macOS Job已停止，却阻独立新connect或使原重连查询unknown。必要原两文件回归先actual1／24pass／3fail／482expects，再加真实失败replacement原Query后24pass／4fail／486expects，日志分别为 `/private/tmp/kite-mcp-failed-opening-consumer-red-native-20261011.log`、`/private/tmp/kite-mcp-failed-replacement-consumers-red-20261011.log`。本机sandbox的port0监听拒绝另记，不算产品红。
+
+实际默认stdio的原initialize协议失败、SQL准确born-owner停止已成立，而公共原connection Query仍unknown，真实whole红3pass／1fail／60expects保在 `/private/tmp/kite-mcp-default-stopped-opening-red-20261011.log`。源码另缺普通失败结果的当次冻结configDigest，使正确原Job仍无法分类。本轮 [MCP owner](../../packages/agent/src/mcp/README.md#原连接申请的有限事实)归位四个生产文件：停止解码共用原closed codec，各消费者保原完整身份；replacement核新摘要；普通failed结果保存原冻结摘要；Query仅从完整closed父失败及准确新建Job的持久停止返回failed。缺摘要旧记录、warm借用、未提交终态、未知停止、错parent或额外字段仍unknown，冷查回零当前来源／OS／重放。
+
+原lifecycle／reconnection／proof／connection-query四文件actual0／34pass／666expects／12.33秒，根与Agent types通过，日志 `/private/tmp/kite-mcp-failed-opening-consumers-green-20261011.log`。新增只对应上述未闭错误与原方案旅程，不扩已闭事实的故障矩阵；原unknown stop、SQL提交屏障、独立Session、完整parent／ref／result证明、新旧config不同、cold零wire／resolver／cursor与全部原预算／断言保持。
+
+[Service默认原始来源原整文件](../../apps/service/test/isolated/mcp-source-default-configuration.test.ts)actual0／4pass／80expects／2.06秒：真实macOS stdio首次initialize失败，原SQL Job可靠停止，公开原Query failed且零新增RPC；用户独立新connect／Job Ask后，公共snapshot／page／descriptor reader核完整名称／schema／hash／EOF且零额外RPC，下一真实SDK Model独立Tool Ask批准后一次准确tools.call。日志 `/private/tmp/kite-mcp-default-stopped-opening-complete-green-20261011.log`；types／Biome0，原43个expect完整表达式按原序及三个HTTP旧场景、默认5秒／8秒等待／5毫秒轮询保持，最终收据 `/private/tmp/kite-mcp-default-stopped-opening-preservation-final-20261011.json` 对应SHA `2ef08d16ce71c246483e9734aeed96d36089f9d13a9192a12f4442adab4499f8`。首次新增catalogue正文期待不符合公开ID投影、第二次缺ArtifactStore不符合真实process装配，两份夹具红日志保留；只修新增夹具，原业务断言没有删改。close直接等待Service／Runtime，不吞错误；本例未新增关闭后逐PID／Job收据资格。
+
+本轮未改stdio port／guardian、Service shutdown、Native cancel IPC／caller journal、OAuth Session／Vault和renderer生命周期。取消、正常连接／刷新／重连、源码外Native完整descriptor／独立Tool与两Service正常退出复用仍适用的原证据；新的失败旅程使用公共Service，不能冒称已在Native窗口重新点击失败查回。独立非参与者再次核当前源码、要求和上述原证据，未发现剩余macOS本机局部方案能力缺口；原完整默认和强制门禁通过后才能归位并删除局部方案，不能以审查或局部绿宣布阶段退出。
+
+正式调用者映射和手册按实际入口校正：正式CLI／Terminal／Web／Native已通过公共Client消费，开发入口的旧称不再表示仍由旧正式authority执行。TSV只更新client_scope／legacy_retirement／四项public_api与maintenance入口，37个ID／partial状态／原old_call_paths／T与E要求／平台及证据字段保持；当前调用者事实不代全能力与最终旧源码删除。
+
+本轮新冻结原完整默认已收束，准确结果见本节末段；首次真实红及局部资格各有范围。最多五个退出缺口仍按上一节依赖：①Windows原合同可靠后端及原生资格；②installed普通任务的原RSS真实红与全Runtime出生后代／activeResources／handles缺项；③后续Actions的Win/Linux安装／版本／MCP／PTY／Native／维护恢复及保数据卸载；④§35的37完整能力、适用T001—T114／E01—E14及可靠unknown Job核实；⑤依前述资格汇合的旧authority／依赖清零、最终退役与阶段完整回归。各实际用户入口和完整验收保持上一节表格，①与②不阻已独立完成的本机安装／切换／维护恢复。37partial／wholeV13=false／phaseExit=false，Goal active；仅既有本地提交授权，不push／PR／发布或Actions dispatch。
+
+本轮首次准确未筛选 `bun run test` actual1／449.158秒，原714文件／575正式作业、parallelism4与六exclusive不变；187正式作业全部排空，186通过、Native基础整窗口一个红、388未开始。原MCP失败建立／重连、stdio全树停止和Native MCP整窗口均在本轮通过，但不能代整体收束。4386tracked regular输入／Git全程全等，日志 `/private/tmp/kite-v13-macos-default-failed-mcp-recovery-20261011.log` SHA `a6d6aca98889904bc5c1818f7c0f4050d6c4beb5f639a6a976c0473bdb4ceb99` 与同名 `.json` 保原准确labels和未开始范围；wholeDefault=false。
+
+Native红在首次pending导航已完成后，原write行的“等待人工审批”断言失败。夹具先要求该文案，再读当前card与去重；用户已点击批准后同一卡仍可见，工具行可能已经批准／执行。标题可见亦不证明审批文案已完成；实际失败时text/status未保留，不将可达顺序问题冒称唯一现场因果。仅把 [原同一locator／完整断言](../../apps/desktop/test/native-bundle-electron.fixture.ts) 放到真实pending且尚未处理的card分支，文案等待限定原10秒loop剩余，不重试业务、不先批准、不用first削目标。96条完整assert表达式及原序、原whole文件全部bytes、45／45／20秒driver与120秒整例保持，收据 `/private/tmp/kite-native-pending-card-order-preservation-20261011.json` 对应SHA `e4fe79d3ff5d40b2132ce7d5ef1f9c10a0c2ec093b845f721ddccfa5755b1bb1`；独立只读审查确认依赖与限度，生产Main／renderer／审批实现不变。
+
+原完整 `bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-bundle.test.ts` actual0／1pass／13Bun expects／82.859秒，全部三个driver原业务／冷正文／一次审批／Provider3／Main强杀双锁／正常退出／诊断保存与明确重试通过。日志 `/private/tmp/kite-native-bundle-pending-card-order-whole-20261011.log` SHA `0023f4d0a8fd7243ba1378c4c665feb70d2f4e274744a3838b0d37697684d050` 与同名 `.json` 核4386输入／Git全程全等；Native types／Biome0。新的冻结输入仍须同一原完整默认收束，原真实红及未开始作业保持，不追认局部绿为阶段退出。
+
+本轮第二次准确未筛选 `bun run test` actual0／1400.998秒：714文件／575正式作业、parallelism4及167 parallel／541 isolated／6 exclusive保持；575全部启动／完成／通过，零失败／未开始／在途，4386tracked regular输入与Git全程全等。日志 `/private/tmp/kite-v13-macos-default-pending-card-order-20261011.log` SHA `a5cdb334d3385aae15abcaf16558284756461f47aa4da631be4da2adbc37e168` 与同名 `.json`、`-plan.json`保实际labels／输入／环境／退出；runner自身预期失败和完成后的同名嵌套label另列，未排除产品测试或改写真实失败。六exclusive原导出／CLI登记／Native跨代码／安装／恢复中断／Terminal包分别53099／74091／224282／100488／72301／52913ms全部通过；本机正常连接／Tool／取消／正常退出、独立安装／版本／维护恢复在当前输入汇合。
+
+根及八workspace types、API生成／通用包边界／精确runtime packages、受影响Biome、docs／docs-impact门禁通过。新的非参与式审查核全部有限Native MCP入口及当前消费者修复；局部完整设置方案的独有行为、Main／Client／Source／Auth／maintenance合同已归位owner／手册／active，设计理由迁为implemented，删除已完成局部计划与入口。它只结束macOS本机设置与连接恢复切片，不宣布P6／§35／P7或整体退出。RSS `+115.203125MiB >32MiB`、全Runtime原出生后代／activeResources／handles缺项、Windows原合同与guard、后续Win/Linux Actions、37partial／wholeV13=false／phaseExit=false保持。结果文档与Note归位不改变source／依赖／测试／配置输入，复用本次原完整回归；既有授权仅本地交付。

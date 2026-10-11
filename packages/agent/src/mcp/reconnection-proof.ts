@@ -231,6 +231,33 @@ export function decodeResultDetails(e: PublicExecution) {
     throw Error('mcp_reconnection_scope_unavailable');
   return d;
 }
+function confirmedTransportStop(
+  job: PublicExecution,
+  binding?: { serverId: string; configDigest: string },
+) {
+  const details = object(object(job.result).details);
+  const fields = Object.keys(details).sort().join(',');
+  // Decode the original observational owner without reopening processes or
+  // requiring a cold reader's PID. Supervision still needs its own true result.
+  const detailsValid =
+    fields === 'remoteToolStopConfirmed,transportStopped' ||
+    (fields === 'ownedProcessesUnavailable,remoteToolStopConfirmed,transportStopped' &&
+      details.ownedProcessesUnavailable === 'mcp_owned_process_evidence_unavailable') ||
+    (fields === 'ownedProcesses,remoteToolStopConfirmed,transportStopped' &&
+      !!binding &&
+      typeof job.originStoreId === 'string' &&
+      !!decodeMcpStdioProcessEvidence(details.ownedProcesses, {
+        originalStoreId: job.originStoreId,
+        sessionId: job.sessionId,
+        executionId: job.id,
+        serverId: binding.serverId,
+        scopeId: JSON.stringify([job.originStoreId, job.sessionId, binding.serverId]),
+        configDigest: binding.configDigest,
+      }));
+  return (
+    detailsValid && details.transportStopped === true && details.remoteToolStopConfirmed === false
+  );
+}
 export async function confirmedStop(
   context: ReadContext,
   input: McpReconnectionInput,
@@ -238,26 +265,7 @@ export async function confirmedStop(
 ) {
   if (!proof) return null;
   const job = await context.getExecution(input.target.connectionExecutionId);
-  const result = object(job?.result),
-    details = object(result.details);
-  const fields = Object.keys(details).sort().join(',');
-  // Owned evidence is observational: preserve old transports and the original cold owner.
-  // Decode its exact binding without reopening processes or requiring the reader's PID.
-  const detailsValid =
-    fields === 'remoteToolStopConfirmed,transportStopped' ||
-    (fields === 'ownedProcessesUnavailable,remoteToolStopConfirmed,transportStopped' &&
-      details.ownedProcessesUnavailable === 'mcp_owned_process_evidence_unavailable') ||
-    (fields === 'ownedProcesses,remoteToolStopConfirmed,transportStopped' &&
-      !!job &&
-      typeof job.originStoreId === 'string' &&
-      !!decodeMcpStdioProcessEvidence(details.ownedProcesses, {
-        originalStoreId: job.originStoreId,
-        sessionId: job.sessionId,
-        executionId: job.id,
-        serverId: input.serverId,
-        scopeId: JSON.stringify([job.originStoreId, job.sessionId, input.serverId]),
-        configDigest: input.target.configDigest,
-      }));
+  const result = object(job?.result);
   if (
     !decimal64(proof.resultRevision) ||
     !job ||
@@ -267,9 +275,10 @@ export async function confirmedStop(
     job.originCommandId !== input.target.operationRef.commandId ||
     !['cancelled', 'failed', 'succeeded'].includes(job.status) ||
     !['cancelled', 'failed', 'succeeded'].includes(String(result.outcome)) ||
-    !detailsValid ||
-    details.transportStopped !== true ||
-    details.remoteToolStopConfirmed !== false ||
+    !confirmedTransportStop(job, {
+      serverId: input.serverId,
+      configDigest: input.target.configDigest,
+    }) ||
     job.resultRevision !== proof.resultRevision ||
     hash(job.result) !== proof.resultDigest ||
     (job.definitionId !== 'mcp.source.connection' &&
@@ -417,18 +426,16 @@ export async function proveCarrier(
   return { e, record, catalogue, ref, connection };
 }
 /** Durable zero-adapter rejection or the exact owned transport's confirmed terminal. */
-export function stoppedOrUnopened(e: PublicExecution) {
+export function stoppedOrUnopened(
+  e: PublicExecution,
+  binding?: { serverId: string; configDigest: string },
+) {
   if (!['failed', 'cancelled', 'succeeded'].includes(e.status) || !decimal64(e.resultRevision))
     return false;
   const result = object(e.result),
     d = object(result.details);
   if (!['failed', 'cancelled', 'succeeded'].includes(String(result.outcome))) return false;
-  if (
-    Object.keys(d).length === 2 &&
-    d.transportStopped === true &&
-    d.remoteToolStopConfirmed === false
-  )
-    return true;
+  if (confirmedTransportStop(e, binding)) return true;
   if (
     Object.keys(result).length === 3 &&
     Object.keys(d).length === 2 &&

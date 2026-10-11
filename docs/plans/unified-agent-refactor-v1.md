@@ -2106,6 +2106,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+最新本轮独立审查又发现普通失败建立和失败replacement的停止详情消费者遗漏，以及普通失败结果缺冻结configDigest；旧连接已停的此前修复不能代这两条完整失败恢复。四生产文件已补齐共享closed停止解码和准确原failed Query，原四文件34／666、默认macOS stdio失败→查回→独立新连接→全文工具→独立Tool Ask／一次效果4／80均通过。首次原完整默认在Native基础窗口的重复／提前审批观察断言真实红；最小夹具修正保96条完整assert及原序／预算，第二次准确未筛选默认actual0／1400.998秒，原714文件／575正式作业全启动／完成／通过，4386tracked regular输入／Git全等。强制门禁通过，局部Native MCP设置计划已归位并删除；精确输入、原红、SHA及限度归[当前进度](unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-失败建立与完整连接恢复)。下方第十七次全绿只属此前冻结输入；37partial／wholeV13=false／phaseExit=false及五项退出依赖保持，RSS／观测未补证，Windows合同guard与后续Actions不由本机结果关闭。
+
 当前本片收束为第十七次准确未筛选 `bun run test` actual0／1406.045s：原714文件、575正式作业／parallelism4不变，全部启动／完成／通过，零失败／未开始，六独占导出／登记／Native跨代码／安装／恢复中断／Terminal包原整例全部通过。4386tracked regular输入与Git全程全等；日志SHA `54f76a3fb79c5c8387ec5b26bbc711255179d8837deab69f352f1c07b975a8e8` 和实际收据归[本轮进度](unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。wholeDefault=true仅覆盖当前macOS冻结输入，下方各原红及其当时待收束状态保留；未放宽原断言／期限／强制门禁或排除测试。MCP正式停止消费者与完整连接／Tool／取消／正常退出、独立安装版本和维护恢复按本片结束；余下最多五项依赖为Windows原合同后端、RSS／全Runtime观测、后续Actions平台实证、完整37能力／适用T/E独立审查、最终旧authority退役及阶段收束，37partial／wholeV13=false／phaseExit=false。结果文档补记不改变source／依赖／测试输入，复用本次完整回归并按既有授权仅本地交付。
 
 正式 MCP 停止结果消费者已按现有授权提交 `0477677a`，连接／刷新／重连／下一 Model 独立 Tool 审批／一次效果／取消及正常退出的 macOS 证据保留。其后原Native长历史的未变化全文改为memo只按text，私有Context更新独立文件链接并保当前回调和撤销；完整读取／EOF／准入、全部原断言和75／90秒保持。原5051条／超过8MiB、两次物理SSE缺口、live rename、Provider0和自然退出已在独立窗口及第六／七次未筛选默认通过。第六次新TUI Workflow question红只改原10秒内最新完整答复帧准入，原未知→两次明确GET含首回复丢失、完整答案及取消均保断言／40秒，并在第七次默认通过。

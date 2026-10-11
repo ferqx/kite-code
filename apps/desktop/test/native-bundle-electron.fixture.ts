@@ -548,9 +548,6 @@ try {
     if (await page.getByText('轮次：completed', { exact: true }).isVisible()) break;
     const approve = page.getByRole('button', { name: '仅批准这一次', exact: true });
     if (await approve.isVisible()) {
-      const write = page.locator('.tool-edit-heading').filter({ hasText: '写入' });
-      await write.waitFor();
-      assert.ok((await write.textContent())!.includes('等待人工审批'));
       const state = await page.evaluate(
           async () =>
             (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
@@ -571,6 +568,13 @@ try {
         continue;
       }
       if (!approvals.includes(card.id)) {
+        // The original card may remain visible after submitting its answer;
+        // only an unanswered card requires its tool's pending approval label.
+        const write = page.locator('.tool-edit-heading').filter({ hasText: '写入' });
+        await write
+          .filter({ hasText: '等待人工审批' })
+          .waitFor({ timeout: Math.max(1, deadline - Date.now()) });
+        assert.ok((await write.textContent())!.includes('等待人工审批'));
         if (approvals.length === 0) {
           const pendingRow = page
             .getByRole('button', { name: '新对话', exact: true })

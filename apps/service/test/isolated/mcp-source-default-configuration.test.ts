@@ -1,13 +1,19 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Json } from '@kite-ai/agent/extensions';
 import { mcpSourceConnectionJobId } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { createClient } from '@kite-ai/client';
+import {
+  createClient,
+  decodeMcpToolsPage,
+  decodeMcpToolsSnapshots,
+  readMcpToolDescriptor,
+} from '@kite-ai/client';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
@@ -21,7 +27,9 @@ async function until<T>(read: () => Promise<T | null>) {
     await Bun.sleep(5);
   }
 }
-async function fixture(options: { ask?: boolean; broken?: boolean; disabled?: boolean } = {}) {
+async function fixture(
+  options: { ask?: boolean; broken?: boolean; disabled?: boolean; stoppedStdio?: boolean } = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-raw-mcp-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -69,12 +77,48 @@ async function fixture(options: { ask?: boolean; broken?: boolean; disabled?: bo
       return Response.json({ jsonrpc: '2.0', id: body.id, result });
     },
   });
+  const stdioLedger = join(root, 'stdio-rpc.jsonl');
+  const stdioServer = join(root, 'owned-stdio.ts');
+  const failedOnce = join(root, 'fail-initialize-once');
+  const guardian = options.stoppedStdio
+    ? await Bun.build({
+        entrypoints: [
+          join(import.meta.dir, '../../../../packages/agent/src/mcp/stdio-guardian.ts'),
+        ],
+        outdir: root,
+        naming: 'qualified-guardian.js',
+        target: 'bun',
+      })
+    : undefined;
+  if (guardian) {
+    expect(guardian.success).toBe(true);
+    writeFileSync(failedOnce, 'one original failed initialization');
+    writeFileSync(
+      stdioServer,
+      `import {appendFileSync,existsSync,unlinkSync} from 'node:fs';
+const [ledger,failedOnce]=process.argv.slice(2);let buffer='';
+process.stdin.on('data',chunk=>{buffer+=chunk;while(buffer.includes('\\n')){
+const end=buffer.indexOf('\\n'),rpc=JSON.parse(buffer.slice(0,end));buffer=buffer.slice(end+1);
+if(rpc.id===undefined)continue;appendFileSync(ledger,JSON.stringify(rpc)+'\\n');
+if(rpc.method==='initialize'&&existsSync(failedOnce)){unlinkSync(failedOnce);process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,error:{code:-32603,message:'owned initialization failed'}})+'\\n');continue;}
+const result=rpc.method==='initialize'?{protocolVersion:'2024-11-05',serverInfo:{name:'owned',version:'1'},capabilities:{tools:{}}}:rpc.method==='tools/list'?{tools:[{name:'effect',description:'Actual owned effect',inputSchema:{type:'object',properties:{value:{type:'string'}},required:['value']}}]}:{content:[{type:'text',text:'actual effect once'}]};
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}});
+`,
+    );
+  }
   const sourcePath = join(profile.profilePath, 'mcp.json');
   const source = {
     mcpServers: {
       owned: {
-        type: 'http',
-        url: remote.url.href,
+        ...(options.stoppedStdio
+          ? {
+              type: 'stdio',
+              command: process.execPath,
+              args: [stdioServer, stdioLedger, failedOnce],
+              cwd: workspace,
+              env: {},
+            }
+          : { type: 'http', url: remote.url.href }),
         auth: { type: 'none' },
         unknown: { private: 'RAW_PRIVATE_TRANSPORT_VALUE' },
       },
@@ -84,6 +128,7 @@ async function fixture(options: { ask?: boolean; broken?: boolean; disabled?: bo
   const bodies: Record<string, unknown>[] = [];
   let step = 0;
   let workId = 'connect';
+  let useExisting = false;
   let modelCredentialReads = 0;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -94,7 +139,13 @@ async function fixture(options: { ask?: boolean; broken?: boolean; disabled?: bo
       const actualStep = step++;
       const tools = (body.tools ?? []) as { function: { name: string; parameters: unknown } }[];
       let call: ToolCall = null;
-      if (options.broken || options.disabled) {
+      if (useExisting) {
+        if (actualStep === 0) {
+          const tool = tools.find((tool) => tool.function.name.startsWith('mcp.mcp-'));
+          expect(tool).toBeDefined();
+          call = { name: tool!.function.name, input: { value: 'exact' } };
+        }
+      } else if (options.broken || options.disabled) {
         if (actualStep === 0) call = { name: 'files.read', input: { path: 'owned.txt' } };
       } else if (actualStep === 0) call = { name: 'mcp.sources.list', input: {} };
       else if (actualStep === 1) {
@@ -166,7 +217,12 @@ async function fixture(options: { ask?: boolean; broken?: boolean; disabled?: bo
   const host = createDefaultProcessConfiguration({
     profile,
     credentialBackend,
-    mcpSources: { http: { allowLoopbackForTests: true } },
+    mcpSources: {
+      http: { allowLoopbackForTests: true },
+      ...(guardian
+        ? { stdio: { guardianPath: guardian.outputs[0]!.path, bunExecutable: process.execPath } }
+        : {}),
+    },
     permissionPolicy: {
       readPolicy: (request) => ({
         mode: options.ask ? 'ask' : 'full',
@@ -186,6 +242,7 @@ async function fixture(options: { ask?: boolean; broken?: boolean; disabled?: bo
   const expectedStoreId = (await store.getMetadata()).storeId;
   const runtime = createRuntime({
     store,
+    ...(options.stoppedStdio ? { artifacts: createArtifactStore({ profile, store }) } : {}),
     permissions: host.permissions!,
     extensions: host.extensions,
     supportsExtensionInputs: host.supportsExtensionInputs,
@@ -242,6 +299,14 @@ async function fixture(options: { ask?: boolean; broken?: boolean; disabled?: bo
     bodies,
     rpc,
     expectedStoreId,
+    stdioRpc: () =>
+      readFileSync(stdioLedger, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { method: string; params?: unknown }),
+    useExistingConnection() {
+      useExisting = true;
+    },
     get effects() {
       return effects;
     },
@@ -345,6 +410,7 @@ test('default raw user MCP selection reaches actual Model and independently appr
     ]);
     const modelAndJob = JSON.stringify({ bodies: f.bodies, input: sourceJob!.input });
     expect(modelAndJob).not.toContain('RAW_PRIVATE_TRANSPORT_VALUE');
+    if (!('url' in f.source.mcpServers.owned)) throw Error('http_fixture_required');
     expect(modelAndJob).not.toContain(f.source.mcpServers.owned.url);
     expect(modelAndJob).not.toContain('owned-model-secret');
     expect(run.configuration).toMatchObject({
@@ -453,3 +519,129 @@ test('bad optional raw source and explicit resolved empty MCP selection preserve
     }
   }
 }, 25000);
+
+(process.platform === 'darwin' ? test : test.skip)(
+  'default owned stdio failed opening is durably stopped before an independent explicit connection and one Model Tool effect',
+  async () => {
+    const f = await fixture({ ask: true, stoppedStdio: true });
+    try {
+      const directory = (await f.query()) as { items: { id: string }[] };
+      const serverId = directory.items[0]!.id;
+      async function connect(commandId: string, key: string) {
+        await f.client.invokeExtension('s', {
+          expectedStoreId: f.expectedStoreId,
+          commandId,
+          kind: 'extension.invoke',
+          extensionId: 'builtin.mcp',
+          actionId: 'mcp.connect',
+          definitionVersion: '1',
+          input: { serverId, key },
+        });
+        return until(async () => {
+          for (const card of (
+            await f.client.listInteractions('s', { storeId: f.expectedStoreId, state: 'pending' })
+          ).interactions) {
+            expect(['builtin.mcp/mcp.connect', 'mcp.source.connection']).toContain(
+              card.definitionId,
+            );
+            await f.approve(card);
+          }
+          const command = await f.client.getCommand(commandId);
+          const executionId = (command.receipt as { executionId?: string } | null)?.executionId;
+          const execution = executionId ? await f.client.getExecution(executionId) : null;
+          return execution &&
+            ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status)
+            ? execution
+            : null;
+        });
+      }
+      const failed = await connect('failed-opening', 'failed-opening');
+      const jobs = await f.store.listExecutions('s');
+      const stopped = jobs.find(
+        (row) =>
+          row.parentExecutionId === failed.id && row.definitionId === mcpSourceConnectionJobId,
+      )!;
+      expect(stopped.status).toBe('failed');
+      expect(stopped.result).toMatchObject({
+        outcome: 'failed',
+        details: {
+          transportStopped: true,
+          remoteToolStopConfirmed: false,
+          ownedProcesses: {
+            version: 2,
+            coverage: 'mcp-owned-coalition',
+            broker: { exit: { reaped: true } },
+            guardian: { kernelState: 'absent' },
+            server: { exit: { reaped: true } },
+            coalition: { processTreeStopped: true, registrationRemoved: true },
+          },
+        },
+      });
+      const before = f.stdioRpc();
+      const original = (
+        await f.client.queryExtension('s', 'builtin.mcp', 'mcp.connection', {
+          executionId: failed.id,
+          serverId,
+          key: 'failed-opening',
+        })
+      )[0]!.payload as { phase: string };
+      expect(original.phase).toBe('failed');
+      expect(f.stdioRpc()).toEqual(before);
+      expect(failed.status).toBe('failed');
+      const connected = await connect('explicit-new-connect', 'explicit-new-connect');
+      expect(connected.status).toBe('succeeded');
+      const catalogue = await f.client.queryExtension('s', 'builtin.mcp', 'mcp.catalogue', {});
+      expect(JSON.stringify(catalogue)).toContain(serverId);
+      const rpcBeforeRead = f.stdioRpc();
+      const snapshots = decodeMcpToolsSnapshots(
+        await f.client.queryExtension('s', 'builtin.mcp', 'mcp.tools.snapshots', { limit: 32 }),
+      );
+      expect(snapshots.nextAfterKey).toBeNull();
+      expect(snapshots.items).toHaveLength(1);
+      const snapshot = snapshots.items[0]!;
+      const tools = decodeMcpToolsPage(
+        await f.client.queryExtension('s', 'builtin.mcp', 'mcp.tools', {
+          recordKey: snapshot.recordKey,
+          generation: snapshot.origin.generation,
+          afterIndex: 0,
+          ...(snapshot.index ? { indexDigest: snapshot.index.hash } : {}),
+          limit: 32,
+        }),
+      );
+      expect(tools.complete).toBe(true);
+      expect(tools.entries).toHaveLength(1);
+      const descriptor = await readMcpToolDescriptor({
+        currentStoreId: f.expectedStoreId,
+        sessionId: 's',
+        binding: tools.binding,
+        entry: tools.entries[0]!,
+        readArtifact: f.client.readArtifact.bind(f.client),
+      });
+      expect(descriptor.name).toBe('effect');
+      expect(descriptor.inputSchema).toEqual({
+        type: 'object',
+        properties: { value: { type: 'string' } },
+        required: ['value'],
+      });
+      expect(f.stdioRpc()).toEqual(rpcBeforeRead);
+      expect(f.stdioRpc().map((row) => row.method)).toEqual([
+        'initialize',
+        'initialize',
+        'tools/list',
+      ]);
+      f.useExistingConnection();
+      await f.submit('use-explicit-connection');
+      const approval = await f.pending();
+      expect(approval.definitionId).toMatch(/^mcp\.mcp-/);
+      expect(f.stdioRpc().filter((row) => row.method === 'tools/call')).toHaveLength(0);
+      await f.approve(approval);
+      expect((await f.done()).status).toBe('completed');
+      expect(f.stdioRpc().filter((row) => row.method === 'tools/call')).toEqual([
+        expect.objectContaining({ params: { name: 'effect', arguments: { value: 'exact' } } }),
+      ]);
+      expect(f.bodies).toHaveLength(2);
+    } finally {
+      await f.close();
+    }
+  },
+);

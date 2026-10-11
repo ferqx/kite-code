@@ -173,7 +173,12 @@ export async function readReconnection(
           : null;
         const noNew =
           (d.newConnectionAttempted === false && stage.newOperationRef === null) ||
-          (d.newConnectionAttempted === true && !!newTerminal && stoppedOrUnopened(newTerminal));
+          (d.newConnectionAttempted === true &&
+            !!newTerminal &&
+            stoppedOrUnopened(newTerminal, {
+              serverId: input.serverId,
+              configDigest: input.replacement.expectedConfigDigest,
+            }));
         if (
           e.status === 'failed' &&
           result.outcome === e.status &&

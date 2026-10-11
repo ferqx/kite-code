@@ -15,7 +15,11 @@ import { selectProfile } from '../../../src/profile';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
-async function fixture(withPort = true, beforeOpen?: () => Promise<void>) {
+async function fixture(
+  withPort = true,
+  beforeOpen?: () => Promise<void>,
+  ownedObservation = false,
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-mcp-lifecycle-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(profile);
@@ -87,6 +91,29 @@ async function fixture(withPort = true, beforeOpen?: () => Promise<void>) {
       return {
         transport,
         stopped,
+        ...(ownedObservation
+          ? {
+              // Exercise the stdio producer's closed observation shape; this HTTP
+              // fixture and null process entries do not qualify native supervision.
+              readProcessEvidence: () => ({
+                version: 2 as const,
+                coverage: 'mcp-owned-coalition' as const,
+                binding: {
+                  originalStoreId: binding.originalStoreId,
+                  sessionId: binding.sessionId,
+                  executionId: binding.executionId,
+                  serverId: binding.serverId,
+                  scopeId: binding.scopeId,
+                  configDigest: binding.configDigest,
+                },
+                ownerPid: process.pid,
+                broker: null,
+                guardian: null,
+                server: null,
+                coalition: null,
+              }),
+            }
+          : {}),
         async stop() {
           stops.push(binding.sessionId);
           if (!confirmStop) return { status: 'unknown' };
@@ -700,7 +727,7 @@ test('close during actual dispatched Job open collects the late owned handle wit
 
 for (const corruptParent of [false, true])
   test(`ordinary failed opening releases only its committed stopped Job proof (${corruptParent ? 'corrupt original parent refused' : 'exact original identity'})`, async () => {
-    const f = await fixture();
+    const f = await fixture(true, undefined, true);
     const finish = f.store.finishExecution.bind(f.store);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -753,6 +780,17 @@ for (const corruptParent of [false, true])
       f.confirmStop = false;
       const original = await invoke('failed-opening');
       expect(original.status).toBe('failed');
+      const originalFact = async () =>
+        (
+          await f.runtime.queryExtension({
+            sessionId: 'a',
+            subjectId: 'user',
+            extensionId: mcpLifecycleExtensionId,
+            queryId: 'mcp.connection',
+            input: { executionId: original.id, serverId: 'local', key: 'failed-opening' },
+          })
+        )[0]!.payload as { phase: string; ready: unknown; live: boolean };
+      expect((await originalFact()).phase).toBe('outcome_unknown');
       const child = (await f.store.listExecutions('a')).find(
         (e) => e.parentExecutionId === original.id,
       )!;
@@ -777,6 +815,7 @@ for (const corruptParent of [false, true])
       const blockedCommit = await invoke('before-terminal-commit');
       expect(blockedCommit.status).toBe('failed');
       expect(f.opens).toBe(initialOpens);
+      expect((await originalFact()).phase).toBe('outcome_unknown');
       f.rejectInitialize(false);
       const independent = await invoke('independent-session', 'b');
       expect(independent.status).toBe('succeeded');
@@ -789,7 +828,22 @@ for (const corruptParent of [false, true])
       expect(terminal.result).toMatchObject({
         details: { transportStopped: true, remoteToolStopConfirmed: false },
       });
+      expect(terminal.result).toMatchObject({
+        details: {
+          ownedProcesses: {
+            binding: {
+              originalStoreId: f.expectedStoreId,
+              sessionId: 'a',
+              executionId: child.id,
+              serverId: 'local',
+              scopeId: JSON.stringify([f.expectedStoreId, 'a', 'local']),
+              configDigest: child.definitionVersion,
+            },
+          },
+        },
+      });
       expect(terminal.parentExecutionId).toBe(original.id);
+      expect(await originalFact()).toMatchObject({ phase: 'failed', ready: null, live: false });
       if (corruptParent) {
         // Explicit owned-SQLite corruption: preserve the real stopped result but break original parent identity.
         corruption = new Database(selectProfile(f.profile).databasePath);
@@ -803,6 +857,7 @@ for (const corruptParent of [false, true])
         const refused = await invoke('corrupt-proof');
         expect(refused.status).toBe('failed');
         expect(f.opens).toBe(initialOpens + 1);
+        expect((await originalFact()).phase).toBe('outcome_unknown');
         corruption
           .query('UPDATE execution SET parent_execution_id = ? WHERE id = ?')
           .run(original.id, child.id);

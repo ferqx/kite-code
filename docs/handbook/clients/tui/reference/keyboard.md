@@ -40,4 +40,4 @@ MCP 面板只用上下、Enter 和 Esc 进行可见选择；范围确认需要�
 
 通用开发入口的主输入按完整字素编辑，保留中文、组合字符与 emoji；上下按实际显示行移动，边界处读取本输入范围的历史。固定 `/` 候选使用上下选择、Tab 补全；Tab 不提交命令，Esc 关闭候选。终端发送完整 bracketed paste 时，在结束标记前不提交，之后保留完整多行正文；大粘贴占位块按整体删除。文件候选仍待接入。
 
-Ctrl+B 打开完整待决卡目录，上下选择、Enter 返回原卡、Esc 关闭。答复未知时 Ctrl+L 查询原命令并刷新，不再次提交；这些键的开发入口语义见[审批和问题](../guides/approvals-and-questions.md)，不表示正式旧入口已完成切换。
+Ctrl+B 打开完整待决卡目录，上下选择、Enter 返回原卡、Esc 关闭。答复未知时 Ctrl+L 查询原命令并刷新，不再次提交。正式 Terminal 与开发 TUI 共用这些操作，见[审批和问题](../guides/approvals-and-questions.md)；完整平台与阶段资格仍按[实施进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。

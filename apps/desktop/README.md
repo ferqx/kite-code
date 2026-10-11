@@ -90,6 +90,8 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 
 [Main 与有限 IPC](test/native-tool-messages.test.ts)、[正式 caller 路由](test/native-caller.test.ts)、[原工具 DOM](test/isolated/native-tool-messages-dom.test.tsx)和原[源码外窗口](test/isolated/native-bundle.test.ts)分别核关联、作用域、原交互和真实执行／Files读取失败及冷读；准确输入和结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。轮次阅读、聚合与已知 Ask 回执的后续接入见下一节；自动审批历史、完整 PC、安装版全路径及其他平台资格仍未闭合。取舍见[工具消息观察决定](../../.agents/notes/implemented/architecture/2026-10-08-native-tool-message-observations.md)。
 
+原Native整窗口夹具只对准确尚未处理的pending卡要求“等待人工审批”，同一write行必须在原loop剩余期限内完成该文案后再核原断言；已提交的同一卡仍可见时不要求工具倒退到pending。此前完整默认暴露该重复／提前观察的可达错误，原红未保存失败时完整text/status，不能称唯一现场因果。生产renderer／Main／审批行为保持，原96条完整assert及顺序、whole文件bytes和10／45／120秒预算均保留；原三driver整文件1pass／13Bun断言／82.859秒，正常退出、双锁、冷正文和启动诊断均通过，具体证据与新完整默认收束归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-失败建立与完整连接恢复)。
+
 ## 原轮次阅读、聚合与问答回执
 
 [native-transcript](src/native-transcript.ts)把已核实的公共 Run 接入原 [Conversation](../../packages/ui/src/desktop/Conversation.tsx)，保原过程折叠、最终回复、失败行、工具聚合与会话阅读状态。SessionPage 的 `renderMessageContent` 只替换正文、`renderToolActivity` 接完整分组与原展开控制；外层布局和复制按钮仍归原组件。正文继续使用原 ModelOutputMessage，子详情沿原只读 reader，不以子日志重建轮次。
@@ -539,7 +541,9 @@ Native局部 `NativeCallerCommandRequest` 增加公共 `ExtensionCommandRequest`
 
 ## Native MCP 完整设置
 
-已确认设计，实施中：[设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已集成。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；此前615文件/489主作业的原完整默认通过，当前原页面迁移后的全部默认范围与真实失败由[PC主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)继续核对，同一运行输入另取得本机 Chrome/default OS vault 的四项 Auth、准确取消与重启恢复资格。[实施方案](../../docs/plans/unified-agent-native-mcp-settings.md)负责完整用户旅程和验收；本机组合通过不代表外部账号、其他平台或整个重构已完成，整片新的独立审查仍未取得。
+[设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已交付全部有限入口。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；本机 Chrome/default OS vault 四项 Auth、准确取消与重启恢复已有独立资格。新的非参与式审查所发现的普通失败建立消费者已修复；真实 stdio 完整失败恢复、原局部回归及714文件／575正式作业的新冻结原完整默认均通过。本机局部设置方案已归位并删除，设计理由归[当前决定](../../.agents/notes/implemented/architecture/2026-10-07-native-mcp-settings-and-original-records.md)，准确结果归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-失败建立与完整连接恢复)。本机组合不代表外部账号、其他平台或整个重构已完成。
+
+用户从当前 Session 的设置页读取完整安全目录、来源／选择／认证／连接事实，再明确执行 user/project 选择、有限 Add/Remove、独立 Source Review、已有 opaque Ref 的 bind/revoke、四 Auth、连接／刷新／强制重连和原工具阅读。没有当前 Session 时要求选择，不隐式创建；离线、未登录、未批准、坏源只阻相应操作，无关普通对话继续。Add只收无凭据HTTP URL或绝对stdio command，高级raw声明仍由配置owner管理，设置没有secret editor。业务取消需准确原Execution的独立普通申请；Auth成功不自动连接，401不自动Login或重放Tool。
 
 Main 冻结真实 Store/subject/Session/Workspace identity、read-set 和观察代次；renderer 仅提交来源 ID、有限操作与显式范围。换 scope/关闭释放自己的 Reader，不取消业务 Execution。工具页固定原 snapshot，Main 最多两份在途 descriptor、每次至多64KiB chunk；完整 EOF/size/hash 和严格 UTF-8 核验后才显示全文，读取零额外连接或远端 RPC。来源批准/既有 Ref binding 由独立 Source Review 答复，普通父 Action、连接 Job 和远端 Tool 的 Ask 各自保留。 原全屏设置页保留“返回应用”；来源决定与普通审批在准确会话卡中分别操作，再回MCP设置核同一个原申请，返回页面不取消业务或新建申请。现有源码外窗口已按这些真实导航保原Source Review、独立Ask、一次效果和冷查回，准确范围归上述PC主线。
 
@@ -549,7 +553,7 @@ Profile 无三项 raw MCP 文件时 DB7 创建 v15；`mcp.json`、`mcp-approvals
 
 [真实 Main/HTTP](test/isolated/native-mcp-main.test.ts)当前1项61断言；[源码外 Native 窗口](test/isolated/native-mcp-bundle.test.ts)1项18条Bun断言，driver另核实际UI与协议：两范围 Add/Remove/Select、项目批准、真实默认OS引用的bind/revoke、stdio/HTTP独立审批与ready、248180字节Unicode descriptor及零新增RPC、refresh、reconnect oldStop、下一Model schema/独立Tool Ask/一次效果、DB7冷原GET一次/POST零。两个Service PID正常退出，准确测试凭据fresh backend absence及所属进程无残留均核实。候选使用构建前固定的测试loopback网络，不冒充生产网络、OAuth、外部账号或三平台资格。
 
-macOS owned stdio 停止结果的新增观察字段已迁入[正式重连／冷结果消费者](../../packages/agent/src/mcp/README.md#强制重连持久发布与原事实)，没有删除原结果字段或改写未知事实。原源码外窗口实际重跑1pass／18断言，旧连接已停后真实建立新连接，下一轮Model独立Tool审批与一次效果、两所属Service正常退出和冷原GET／零POST保持；此前完整默认的真实重连失败及当前阶段回归资格归上述进度。
+macOS owned stdio 停止结果的新增观察字段已迁入[正式连接／重连／冷结果消费者](../../packages/agent/src/mcp/README.md#强制重连持久发布与原事实)，没有删除原字段或改写未知事实。普通建立失败仅在冻结原摘要、准确新建Job及可靠停止都成立时可由原Check确认失败，随后独立新申请；未知停止或旧无摘要结果仍unknown。原源码外窗口1pass／18断言证明旧连接停止后新连接、下一轮Model独立Tool审批与一次效果、两所属Service正常退出和冷原GET／零POST；本轮真实默认stdio补齐失败→原Query→新connect→完整descriptor→独立Tool Ask／一次效果。该新增Service测试不冒称已在Native窗口重新点击失败查回；取消／退出实现未变，复用原窗口并由本轮完整默认覆盖相邻消费者，准确范围归上述进度。
 
 窗口Host只在已验证候选的shared lease内，使用packaged runtime/config的默认OS backend准备准确自有引用；helper沿正式paired Service的有限PATH/LANG环境，父测试与Native driver仍保隔离HOME。引用ID在put前保存，失败也可准确remove；独立新helper/backend核absence后才释放shared lease并复核exclusive权。不发现用户Kite配置、枚举其他Ref或修改系统keychain设置。
 

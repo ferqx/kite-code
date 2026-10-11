@@ -826,7 +826,15 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         n.definitionVersion === ticket.jobDefinitionVersion &&
         n.rootWorkCommandId === ticket.rootWorkCommandId &&
         n.rootWorkSeq === ticket.rootWorkSeq &&
-        stoppedOrUnopened(n)
+        stoppedOrUnopened(
+          n,
+          ticket.newEntry
+            ? {
+                serverId: ticket.newEntry.serverId,
+                configDigest: ticket.newEntry.server.configDigest,
+              }
+            : undefined,
+        )
       );
     } catch {
       return false;
@@ -1176,7 +1184,12 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         return {
           outcome: 'failed',
           content: error instanceof McpAdapterError ? error.code : 'mcp_connection_unavailable',
-          details: { operationRef: ref as unknown as Json, ready: false, stopConfirmed: false },
+          details: {
+            operationRef: ref as unknown as Json,
+            configDigest: server.configDigest,
+            ready: false,
+            stopConfirmed: false,
+          },
         };
       }
       entry.ref = ref;

@@ -188,6 +188,8 @@ HTTP 来源支持 none、由真实原 question 绑定且尚未过期/撤销的 o
 
 [MCP 配置测试](test/isolated/mcp-configuration.test.ts)使用实际默认配置、SQLite/Core、本机 compatible/MCP HTTP 端点，验证网络前 Job 派发、下一 Model 的准确 remote schema 与单次 RPC、独立 Ask 卡、缓存 Query 零写入/Model/效果、Session 隔离及无效/不可用选项局部失败。注入 localhost port 仅取得测试资格。独立导出的 [HTTP port](src/mcp-http-port.ts)有本机 socket/DNS candidate/pinning/proxy/redirect 证据；[Agent stdio port](../../packages/agent/src/mcp/README.md)由默认来源固定原 Profile coordination，选择独立 macOS launchd coalition 与打包 broker／guardian 后端，拥有转组／orphan后代的停止证据。两者都要求原 Job 可信准入，不能从 JSONC 取得。真实 TLS、完整 credential broker/OAuth、MCP tasks 和跨平台发行资格仍未完成。resolver 不预连接或启动 raw stdio。
 
+[默认原始来源测试](test/isolated/mcp-source-default-configuration.test.ts)新增真实 macOS stdio 完整失败恢复：首次 initialize 返回原协议失败，SQL 原 Job 保存准确 broker/server reap、guardian absent 与 coalition 全树停止／registration removed；公共原 connection Query 核 frozen config 与原 parent 后返回 failed，零新增 RPC。用户独立新 connect 与 Job Ask 后，正式 snapshot/page/descriptor reader 核完整名称和 schema、hash/EOF，再由下一真实 SDK Model 的独立 Tool Ask 产生一次 `tools/call`。原完整文件4项／80断言、Service types与Biome通过；原HTTP三例、全部原断言与预算保持。fixture 的 ArtifactStore 仅为该 stdio 全文场景沿实际 process 装配提供，close直接等待Service／Runtime，不吞清理错误。这份新测试未新增关闭后逐PID／Job收据资格；取消、正常退出和源码外正式窗口复用仍适用的原证据，完整回归、真实红及平台限制归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-失败建立与完整连接恢复)。
+
 
 W08 追加输入使用原命令入口：`input.steer` 显式携带 `content`、`targetRunId`、`contextSelectionId`；`input.follow_up` 显式携带 `content`、`afterRunId`（可为 null）、`contextSelectionId` 和可选 `modelId`。两者要求固定 `expectedStoreId` 与原 `commandId`，只允许 root Session，主体由宿主提供。202 返回原 accepted 命令，应用结果须查原命令的 `input_applied` 回执，不能把接收视为新消息或 Run 已产生。精确取消尚未应用的输入不会产生消息或新 Run；取消原 Run 保留独立 follow-up 意图。Store、目标和上下文不匹配返回有限错误，不重选当前目标。
 
