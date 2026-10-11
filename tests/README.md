@@ -10,6 +10,10 @@
 
 Required CI、release/platform 与正式 soak 固定 Bun 1.4.2。性能或稳定性结果只适用于准确代码、运行时和平台；workflow 定义不等于执行证据。
 
+Win/Linux 后续验证沿[现行 Actions 接线](../docs/active/release-control.md#winlinux-后续-actions-接线)运行原完整安装、真实代码版本切换、维护恢复及保数据卸载。独立 `test:runtime:stdio` 保原六文件，另接 Linux SDK／namespace、Windows SDK／Job 与 sealed 默认 Source 四份完整文件。前九文件运行后，sealed 文件在独立 Bun 测试进程执行：它必须在宿主首次打开 Database 前选择包内引擎，不能与先前初始化 SQLite 的 source 测试共用进程。两条命令顺序执行、任何非零保持失败，全部原断言与180秒／12秒期限保留。
+
+[CI 日志入口](../scripts/ci/logged-shell.ts)由 Actions 自定义 shell 接收带引号的原脚本路径，保留原 run 正文、stdout／stderr 字节和退出码。[完整日志测试](isolated/scripts/ci-logged-shell.test.ts)同时进入有限默认发现及三平台 stdio job；POSIX 核实际 bash，四项 Windows 用例仅由真实 `pwsh` 核 BOM／Unicode、外部 exit23、throw 与输出失败，其他宿主明确 skip。Linux 在完整原生测试前准备 compiler／Bubblewrap，窗口消费者另准备 Xvfb；Windows 使用原安装 MSVC 准备脚本。依赖缺失、运行失败和缺正式资格仍失败，不增加 availability skip、关闭 sandbox 或调低资源门禁。
+
 | 目录 | 当前负责范围 |
 | --- | --- |
 | `packages/ai/test/` | 中立模型流与明确 SDK adapter |

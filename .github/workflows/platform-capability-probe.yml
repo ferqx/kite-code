@@ -55,6 +55,12 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - if: runner.os == 'Linux'
+        name: Prepare Linux native MCP dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap
+      - if: runner.os == 'Windows'
+        name: Prepare installed Windows x64 Native compiler
+        run: bun run scripts/release/prepare-windows-native-ci.ts
       - name: Current public boundary and fail-closed contracts
         run: >-
           bun test --parallel=1 --max-concurrency=1

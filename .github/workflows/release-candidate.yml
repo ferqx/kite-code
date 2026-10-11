@@ -26,7 +26,7 @@ jobs:
           - os: windows-2025
             target: windows-x64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -38,10 +38,14 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - if: runner.os == 'Linux'
+        name: Prepare Linux native qualification dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap xvfb
       - if: runner.os == 'Windows'
         name: Prepare installed Windows x64 Native compiler
         run: bun run scripts/release/prepare-windows-native-ci.ts
       - name: Current immutable artifact and installer contracts
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/installer-contracts.log "{0}"
         run: >-
           bun test --parallel=1 --max-concurrency=1
           tests/isolated/unified-agent/terminal-artifact.test.ts
@@ -52,62 +56,81 @@ jobs:
           tests/isolated/unified-agent/cli-registration.test.ts
           tests/isolated/unified-agent/release-tools.test.ts
       - name: Build source-bound Terminal candidate and archive
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/terminal-build.log "{0}"
         run: bun run release:build --directory dist/unified-terminal --archive dist/unified-terminal.tar.gz
       - name: Verify exact source and selected SQLite identity
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/terminal-verify.log "{0}"
         run: bun run release:verify --directory dist/unified-terminal --source-commit "${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true
       - name: Actual Terminal lifecycle and Web smoke
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/terminal-smoke.log "{0}"
         run: bun run release:smoke --directory dist/unified-terminal
       - if: runner.os == 'macOS' || runner.os == 'Linux'
         name: Actual installed Terminal CLI, TUI, upgrade, rollback and data retention
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/terminal-installed.log "{0}"
         run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-bundle.test.ts
       - if: runner.os == 'macOS' || runner.os == 'Linux'
         name: Actual installed Terminal real code upgrade and cold rollback
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/terminal-cross-version.log "{0}"
         run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-cross-version.test.ts
       - if: runner.os == 'Windows'
         name: Actual installed Windows Terminal paired version selection and data retention
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/windows-terminal-installed.log "{0}"
         run: bun run tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts "--candidate=${{ github.workspace }}/dist/unified-terminal"
       - name: Build complete Native candidate and archive
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/native-build.log "{0}"
         run: bun run release:build --product native --directory dist/unified-native --terminal dist/unified-terminal --archive dist/unified-native.tar.gz
       - name: Verify complete Native source and physical closure
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/native-verify.log "{0}"
         run: bun run release:verify --product native --directory dist/unified-native --source-commit "${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true
       - name: Verify embedded Electron and independent SQLite engine
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/native-smoke.log "{0}"
         run: bun run release:smoke --product native --directory dist/unified-native
       - if: runner.os == 'Windows'
         name: Actual installed Windows Native windows, version selection and maintenance restore
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/windows-native-installed.log "{0}"
         run: bun run tests/fixtures/unified-agent/windows-native-installation.qualification.ts "--candidate=${{ github.workspace }}/dist/unified-native"
       - if: runner.os == 'Windows'
         name: Actual installed Windows Terminal and Native complete TUI caller
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/windows-installed-tui.log "{0}"
         run: bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts "--terminal=${{ github.workspace }}/dist/unified-terminal" "--native=${{ github.workspace }}/dist/unified-native"
       - if: runner.os == 'Windows'
         name: Actual installed Windows Terminal and Native real code upgrade and cold rollback
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/windows-cross-version.log "{0}"
         run: bun run tests/fixtures/unified-agent/windows-cross-version.qualification.ts "--terminal=${{ github.workspace }}/dist/unified-terminal" "--native=${{ github.workspace }}/dist/unified-native"
       - if: runner.os == 'macOS'
         name: Actual source-free Native Main, upgrade, rollback, installed CLI and TUI
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/macos-native-installed.log "{0}"
         run: >-
           bun test --parallel=1 --max-concurrency=1
           tests/isolated/unified-agent/native-install-lifecycle.test.ts
           tests/isolated/unified-agent/cli-registration-lifecycle.test.ts
       - if: runner.os == 'Linux'
         name: Actual source-free Linux Native Main, upgrade, rollback, cold history and leases
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/linux-native-installed.log "{0}"
         run: xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-install-lifecycle.test.ts
       - if: runner.os == 'macOS'
         name: Actual installed macOS Native real code upgrade and cold rollback
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/macos-native-cross-version.log "{0}"
         run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts
       - if: runner.os == 'Linux'
         name: Actual installed Linux Native real code upgrade and cold rollback
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/linux-native-cross-version.log "{0}"
         run: xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts
       - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
       - name: Actual relocated candidate Files, assets, default capability and lifetime probe
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/platform-probe.log "{0}"
         run: >-
           bun run scripts/release/unified-platform-probe.ts
           "--candidate=${{ github.workspace }}/dist/unified-terminal"
           "--output=${{ github.workspace }}/dist/unified-evidence/platform.json"
       - name: Check diagnostic evidence
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/platform-diagnostic.log "{0}"
         run: >-
           bun run scripts/release/unified-platform-verify.ts
           "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
           --mode=diagnostic
       - name: Require complete native execution qualification
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/platform-formal.log "{0}"
         if: always()
         run: >-
           bun run scripts/release/unified-platform-verify.ts

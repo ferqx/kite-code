@@ -23,6 +23,7 @@ export const FINITE_ROOT_SCRIPT_TESTS = [
   'tests/integration/scripts/unified-ci.test.ts',
   'tests/isolated/scripts/agent-notes.test.ts',
   'tests/isolated/scripts/check-pre-release-architecture-policy.test.ts',
+  'tests/isolated/scripts/ci-logged-shell.test.ts',
   'tests/isolated/scripts/docs-impact-scopes.test.ts',
   'tests/isolated/scripts/docs-structure.test.ts',
   'tests/isolated/scripts/test-suite-runner.test.ts',

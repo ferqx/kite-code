@@ -594,3 +594,212 @@ test('Windows real code qualification retains both candidates and every precedin
   ])
     expect(check(mutate(source))).not.toEqual([]);
 });
+
+function nativeStdioFixture(source?: string) {
+  const actual = resolve(import.meta.dir, '../../..');
+  const command = JSON.parse(readFileSync(join(actual, 'package.json'), 'utf8')).scripts[
+    'test:runtime:stdio'
+  ] as string;
+  const root = fixture();
+  put(root, 'package.json', {
+    scripts: { extra: 'bun run scripts/extra.ts', 'test:runtime:stdio': command },
+  });
+  for (const path of command.split(' ').filter((token) => token.endsWith('.test.ts')))
+    put(root, path, 'export {};');
+  for (const path of [
+    'scripts/ci/logged-shell.ts',
+    'scripts/release/prepare-windows-native-ci.ts',
+    'tests/isolated/scripts/ci-logged-shell.test.ts',
+  ])
+    put(root, path, 'export {};');
+  put(
+    root,
+    '.github/workflows/runtime-stdio-smoke.yml',
+    source ?? readFileSync(join(actual, '.github/workflows/runtime-stdio-smoke.yml'), 'utf8'),
+  );
+  return { root, command };
+}
+
+test('native stdio retains every complete MCP suite and the original unfiltered paired caller', () => {
+  const code = 'formal-ci-mcp-stdio-missing';
+  const { root, command } = nativeStdioFixture();
+  expect(checkUnifiedFormalConsumers(root).violations).toEqual([]);
+  for (const path of [
+    'packages/agent/test/isolated/mcp/linux-stdio-port.test.ts',
+    'packages/agent/test/isolated/mcp/linux-owned-program.test.ts',
+    'packages/agent/test/isolated/mcp/windows-stdio-port.test.ts',
+    'apps/service/test/isolated/mcp-source-packaged-default.test.ts',
+  ]) {
+    expect(command.split(' ')).toContain(path);
+    const missingAlias = nativeStdioFixture();
+    put(missingAlias.root, 'package.json', {
+      scripts: { 'test:runtime:stdio': command.replace(` ${path}`, '') },
+    });
+    expect(
+      checkUnifiedFormalConsumers(missingAlias.root).violations.some((v) => v.code === code),
+    ).toBe(true);
+    const missingFile = nativeStdioFixture();
+    rmSync(join(missingFile.root, path));
+    expect(
+      checkUnifiedFormalConsumers(missingFile.root).violations.some((v) => v.code === code),
+    ).toBe(true);
+  }
+  const filtered = nativeStdioFixture();
+  put(filtered.root, 'package.json', {
+    scripts: { 'test:runtime:stdio': `${command} --test-name-pattern=never-match` },
+  });
+  expect(checkUnifiedFormalConsumers(filtered.root).violations.some((v) => v.code === code)).toBe(
+    true,
+  );
+  const sharedProcess = nativeStdioFixture();
+  put(sharedProcess.root, 'package.json', {
+    scripts: {
+      'test:runtime:stdio': command.replace(' && bun test --parallel=1 --max-concurrency=1', ''),
+    },
+  });
+  expect(
+    checkUnifiedFormalConsumers(sharedProcess.root).violations.some((v) => v.code === code),
+  ).toBe(true);
+});
+
+test('native stdio binds original PR source and actual three runners without suppressing its full caller', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/runtime-stdio-smoke.yml'),
+    'utf8',
+  );
+  for (const [before, after, code] of [
+    [`ref: \${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}`, 'ref: main', 'formal-ci-source-unpinned'],
+    [
+      `repository: \${{ env.KITE_CANDIDATE_REPOSITORY }}`,
+      'repository: other/repo',
+      'formal-ci-source-unpinned',
+    ],
+    ['fetch-depth: 0', 'fetch-depth: 1', 'formal-ci-source-unpinned'],
+    ['persist-credentials: false', 'persist-credentials: true', 'formal-ci-source-unpinned'],
+    ['windows-2025', 'ubuntu-24.04', 'formal-ci-platform-matrix'],
+    [`runs-on: \${{ matrix.os }}`, 'runs-on: ubuntu-latest', 'formal-ci-mcp-stdio-missing'],
+    [
+      'run: bun run test:runtime:stdio',
+      'run: echo bun run test:runtime:stdio',
+      'formal-ci-mcp-stdio-missing',
+    ],
+    [
+      'run: bun run test:runtime:stdio',
+      'run: bun run test:runtime:stdio --test-name-pattern=never-match',
+      'formal-ci-mcp-stdio-missing',
+    ],
+  ] as const) {
+    const { root } = nativeStdioFixture(source.replace(before, after));
+    expect(checkUnifiedFormalConsumers(root).violations.some((v) => v.code === code)).toBe(true);
+  }
+});
+
+test('current native CI consumers prepare Linux isolation and display plus the Windows compiler before execution', () => {
+  const actual = resolve(import.meta.dir, '../../..');
+  for (const name of [
+    'release-candidate.yml',
+    'runtime-stdio-smoke.yml',
+    'platform-capability-probe.yml',
+    'required.yml',
+  ]) {
+    const source = readFileSync(join(actual, '.github/workflows', name), 'utf8');
+    const check = (value: string) => {
+      const { root } = nativeStdioFixture();
+      put(root, `.github/workflows/${name}`, value);
+      return checkUnifiedFormalConsumers(root).violations.filter(
+        (v) =>
+          v.path === `.github/workflows/${name}` &&
+          v.code === 'formal-ci-linux-native-dependencies-missing',
+      );
+    };
+    expect(check(source)).toEqual([]);
+    expect(
+      check(source.replace('build-essential bubblewrap', 'build-essential')).length,
+    ).toBeGreaterThan(0);
+    if (name === 'release-candidate.yml' || name === 'required.yml')
+      expect(check(source.replace('bubblewrap xvfb', 'bubblewrap')).length).toBeGreaterThan(0);
+    if (name !== 'required.yml')
+      expect(
+        check(source.replace("if: runner.os == 'Linux'", "if: runner.os == 'Windows'")).length,
+      ).toBeGreaterThan(0);
+  }
+  for (const name of ['runtime-stdio-smoke.yml', 'platform-capability-probe.yml']) {
+    const source = readFileSync(join(actual, '.github/workflows', name), 'utf8');
+    const { root } = nativeStdioFixture();
+    put(
+      root,
+      `.github/workflows/${name}`,
+      source.replace(
+        'run: bun run scripts/release/prepare-windows-native-ci.ts',
+        'run: echo unavailable',
+      ),
+    );
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some(
+        (v) =>
+          v.path === `.github/workflows/${name}` &&
+          v.code === 'formal-ci-native-build-environment-missing',
+      ),
+    ).toBe(true);
+  }
+});
+
+test('complete qualification logs keep one literal script argument, distinct paths and always-upload on failure', () => {
+  const actual = resolve(import.meta.dir, '../../..');
+  for (const name of ['release-candidate.yml', 'runtime-stdio-smoke.yml']) {
+    const source = readFileSync(join(actual, '.github/workflows', name), 'utf8');
+    const shells = [
+      ...source.matchAll(
+        /shell: (bun run scripts\/ci\/logged-shell\.ts --log=dist\/unified-evidence\/[a-z0-9-]+\.log "\{0\}")/g,
+      ),
+    ];
+    expect(shells.length).toBeGreaterThan(1);
+    const check = (value: string, missing = false) => {
+      const { root } = nativeStdioFixture();
+      if (missing) rmSync(join(root, 'scripts/ci/logged-shell.ts'));
+      put(root, `.github/workflows/${name}`, value);
+      return checkUnifiedFormalConsumers(root).violations.filter(
+        (v) =>
+          v.path === `.github/workflows/${name}` &&
+          v.code.startsWith('formal-ci-qualification-log-'),
+      );
+    };
+    expect(check(source)).toEqual([]);
+    expect(check(source, true).length).toBeGreaterThan(0);
+    if (name === 'release-candidate.yml') {
+      const windows = shells.find((match) => match[1]!.includes('/windows-native-installed.log'));
+      expect(windows).toBeDefined();
+      expect(check(source.replace(windows![0], 'shell: pwsh')).length).toBeGreaterThan(0);
+    }
+    for (const mutation of [
+      source.replace(shells[0]![0], 'shell: bash'),
+      source.replace(shells[0]![0], shells[0]![0].replace('"{0}"', '{0}')),
+      source.replace(shells[1]![0], shells[0]![0]),
+      source.replace('if-no-files-found: error', 'if-no-files-found: ignore'),
+      source.replace('path: |', 'path: unrelated\n          ignored: |'),
+      source.replace(/if: always\(\)/g, "if: runner.os == 'macOS'"),
+    ])
+      expect(check(mutation).length).toBeGreaterThan(0);
+  }
+  expect(checkUnifiedFormalConsumers(actual).entrypoints).toContain('scripts/ci/logged-shell.ts');
+});
+
+test('native stdio schedules the real host logged-shell tests before the complete MCP caller', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/runtime-stdio-smoke.yml'),
+    'utf8',
+  );
+  const command =
+    'bun test --parallel=1 --max-concurrency=1 tests/isolated/scripts/ci-logged-shell.test.ts';
+  for (const mutation of [
+    source.replace(`run: ${command}`, `run: echo ${command}`),
+    source.replace(`run: ${command}`, `if: runner.os == 'macOS'\n        run: ${command}`),
+  ]) {
+    const { root } = nativeStdioFixture(mutation);
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some(
+        (v) => v.code === 'formal-ci-qualification-shell-test-missing',
+      ),
+    ).toBe(true);
+  }
+});

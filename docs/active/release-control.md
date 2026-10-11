@@ -20,6 +20,24 @@ release candidate 在 macOS 与 Linux 运行原[完整 installed Terminal 测试
 
 真实代码比较另调用完整[Terminal文件](../../tests/isolated/unified-agent/terminal-cross-version.test.ts)，条件覆盖macOS/Linux；完整[Native文件](../../tests/isolated/unified-agent/native-cross-version.test.ts)分别在macOS和Linux执行，Linux使用Xvfb。Required unit保原完整历史、显示环境和全部默认发现。正式守卫要求三项准确命令与平台条件，关闭、错平台、echo、过滤或Linux缺显示均失败；这些定义不能替代hosted运行结果，也不能替代已发布predecessor资格。
 
+## Win/Linux 后续 Actions 接线
+
+下表记录当前已接的完整消费者及其验收范围，实际 Win/Linux 结果仍待后续 GitHub Actions。正式安装／版本／维护链消费同一 release job 的准确 Terminal／Native 候选，MCP 使用独立 stdio job，避免前一安装步骤失败使该独立能力根本未执行。两者均绑定原 PR head repository／SHA、完整历史和关闭持久凭据。
+
+| 用户入口与完整能力 | Windows 消费者 | Linux 消费者 | 原验收条件 |
+| --- | --- | --- | --- |
+| installed CLI/TUI／Desktop 正式安装 | [Terminal](../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts)、[Native](../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)、[TUI](../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts) | [Terminal](../../tests/isolated/unified-agent/terminal-bundle.test.ts)、[Native](../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)／Xvfb | 原归档／源码外稳定前门、真实任务／完整结果、冷读及准确进程／双使用锁退出 |
+| installed 前门真实代码升级／冷回退 | [双产品统一 caller](../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts) | [Terminal](../../tests/isolated/unified-agent/terminal-cross-version.test.ts)、[Native](../../tests/isolated/unified-agent/native-cross-version.test.ts)／Xvfb | 原 builder 及真实不同候选、A→B→A→B、原 Store／完整历史、后续真实工作和零冷重放 |
+| 默认 MCP Source／公共 Client 连接与工具调用 | `test:runtime:stdio` 原 Windows Job 整例及 [sealed 默认 Source](../../apps/service/test/isolated/mcp-source-packaged-default.test.ts) | 同 alias 的原 Linux namespace／SDK 整例及同 sealed 文件 | 完整工具结果、准确停止／取消、原树／宿主关闭、正常 Service 退出与冷原对象零重放；缺后端直接失败 |
+| installed `maintenance` 备份／核验／恢复／状态 | 原 Terminal caller 和原 Native caller 的独立维护链 | 原 Terminal bundle 的完整安装维护分支 | backup／inspect／restore 新 Store／status、旧来源拒绝、原数据保全及恢复后读取；Native 平台专有整例仍保原适用范围 |
+| installed `uninstall` 保数据退出 | 上述原 Terminal／Native／TUI／真代码 caller 的最终卸载 | 上述原 Terminal／Native 完整文件的最终卸载 | busy 拒绝、全部原 owner 退出／候选 EX后唯一卸载，外部 Core／Native DB与配置按原断言保全 |
+
+release／Required 的 Linux 消费者显式准备 `build-essential bubblewrap xvfb`；独立 stdio 和 platform probe 准备 `build-essential bubblewrap`。Windows 的 release／stdio／platform probe 保原[MSVC 准备入口](../../scripts/release/prepare-windows-native-ci.ts)，缺项直接失败。它们不关闭 Chromium／namespace sandbox，不将 macOS-only 窗口或恢复中断 fixture 宣作 Win/Linux 已运行。
+
+[日志 shell](../../scripts/ci/logged-shell.ts)保原 run 正文和 native shell 退出语义，20个 release 验证步骤及独立 stdio 的 shell／MCP 步骤各有准确 `dist/unified-evidence/*.log`。stdout／stderr 原字节同时透传控制台；日志写入、外部命令、信号或关闭失败保持非零。日志采用排他创建，artifact 用 `always()`／`if-no-files-found:error` 保存；不上传临时 Profile 内容。stdio 的 sealed 文件在自己的 fresh Bun 测试进程选择候选引擎，避免与 source 测试的进程全局 SQLite 冲突；全10文件与原断言／期限保持，详情归[测试入口](../../tests/README.md)。
+
+整个 release job 从30分钟调整为60分钟，为构建、原Windows19分钟真代码整链和其余原安装／维护／TUI调用者留聚合时间；没有取得 hosted 超时证据，也没有放宽任何 fixture 的原期限。原 `always()` formal platform verifier、soak8外层／60—168分钟、RSS 32MiB与出生后代／activeResources／handles门禁保持。静态接线或本机局部通过不构成 G1、P6／§35／P7 或整体 V1.3 退出。
+
 Windows Native 构建与 transport 原生后端测试在消费编译器前调用[有限 CI 准备脚本](../../scripts/release/prepare-windows-native-ci.ts)。脚本只使用 runner 已安装的固定 vswhere/VsDevCmd、明确 x64 host/target、实际 canonical `cl.exe` 和对应 SDK header/library；缺项失败，不下载或从 PATH 查编译器。vswhere 按 UTF-8、CMD `SET` 按 `/u` 的 UTF-16LE 完整解码，坏字节拒绝；只向 `GITHUB_ENV` 保存十个构建变量、编译器及清空的 `CL`/`_CL_`，不打印原环境。transport 也固定原 PR head/repository 和完整历史。静态守卫核准备顺序及完整三文件 Windows 命令，`echo` 或过滤到零案例不能代替五项 Node 后端执行。本机18项80断言证明解码与调度负例，未运行 Windows 编译；准备成功不改变正式 Main 的加载前身份拒绝或平台完成条件。
 
 同一 release job 在完整 Native build／verify／smoke 后消费准确候选的 [Windows 安装窗口调用者](../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)：零参数稳定前门、真实页面任务、运行中版本选择、普通菜单退出、两次版本冷读，以及安装版 CLI 备份／新 Store 恢复／再次窗口冷读和保数据卸载。系统 UIAutomation 只操作已核原 Main，Job 的实际成员／原 HANDLE／FILETIME 保证退出观察，强制 Terminate 不计普通退出。CI 守卫拒绝删步骤、错平台／候选、过滤、忽略失败及先于完整制品准入运行；原 POSIX 整例和其他必需门禁保持。合成 B 只核同代码版本选择，不授真实跨代码资格；Windows 实际窗口、交互桌面／UIA、维护及资源仍待原生执行，原 RSS／完整观测门禁不被这条源码接线关闭。具体合同与预算归 [Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
@@ -64,7 +82,7 @@ WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多
 
 默认 macOS Shell 已接入宿主 Seatbelt/launchd coalition，真实默认 candidate 保存原 Job 输出/全树停止并可 cold 读取零重放。它不授予跨平台生产 sandbox 或完整资源/release 资格；Files runtimeAssets 保护、原权限/read-set 与不盲重放仍强制。Win/Linux 原生验证依用户选择在重构完成后由 GitHub Actions 执行，当前不从 macOS 扩大支持集合。通用 OS keyring smoke 保 CI 双 gate/实际随机 namespace；Native 本机资格只使用本任务临时 Profile 的准确独立 account，保存后准确 revoke/remove，再由 fresh backend 核 absence。MCP 外联网只在明确 live gate 开启时执行；自有 loopback 范围归 [Native owner](../../apps/desktop/README.md#native-mcp-完整设置)。
 
-Windows release job另接[完整真实代码调用者](../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)，复用该job准确Terminal／Native和原837a2b8c前驱的两份原builder；11项锁输入逐字相同、Core基线相同，实际Agent字节／candidate与clean来源独立核，不以版本标签推导兼容。原同代码、Native维护和TUI caller均保留，新步骤位于其后；原30分钟job／always formal与完整准入保持，统一1140000ms绝对期限包括物化、Terminal三任务／冷读、Native四基础窗口／三任务和installed新Store恢复后第五窗口／单次卸载。前驱已支持DB9，不计DB9拒旧／已发布样本／T029；本机源码和读取证据不授Windows或Linux原生资格。实际入口、预算和来源归[Terminal owner](../../apps/cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，平台验收按用户安排交后续Actions，当前未dispatch。
+Windows release job另接[完整真实代码调用者](../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)，复用该job准确Terminal／Native和原837a2b8c前驱的两份原builder；11项锁输入逐字相同、Core基线相同，实际Agent字节／candidate与clean来源独立核，不以版本标签推导兼容。原同代码、Native维护和TUI caller均保留，新步骤位于其后；整个release job现为60分钟／always formal与完整准入保持，所有原fixture期限保持，统一1140000ms绝对期限包括物化、Terminal三任务／冷读、Native四基础窗口／三任务和installed新Store恢复后第五窗口／单次卸载。前驱已支持DB9，不计DB9拒旧／已发布样本／T029；本机源码和读取证据不授Windows或Linux原生资格。实际入口、预算和来源归[Terminal owner](../../apps/cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，平台验收按用户安排交后续Actions，当前未dispatch。
 
 ## 平台与完成约束
 

@@ -43,6 +43,18 @@ const formalScripts: Readonly<Record<string, string>> = {
 };
 const legacyConsumer =
   /(?:@kite-ai\/|packages\/|#)(?:agent-api-(?:contract|client)|agent-kernel|builtin-runtime|runtime-(?:host|spi|contract|protocol|server|client|storage-sqlite)|kite-(?:app-contract|local-runtime|client-ui|cli|service|web|desktop))(?:\/|\b)|(?:^|[\s'"/])apps\/kite-(?:cli|service|web|desktop)(?:\/|\b)|scripts\/(?:run-tui-system-tests|runtime\/(?:run-fault-soak|verify-fault-soak-qualification)|release\/(?:oss-candidate|build-oss-candidate|build-artifact|verify-artifact|bootstrap-verifier|prepare-desktop-service|platform-capability-probe|session-log-acl-smoke))\.ts/;
+const stdioSuites = [
+  'packages/agent/test/isolated/mcp/stdio-port.test.ts',
+  'apps/service/test/isolated/paired.test.ts',
+  'apps/service/test/isolated/startup-frame.test.ts',
+  'apps/service/test/isolated/lifecycle.test.ts',
+  'apps/cli/test/stdio-grants.test.ts',
+  'apps/cli/test/stdio-interactions.test.ts',
+  'packages/agent/test/isolated/mcp/linux-stdio-port.test.ts',
+  'packages/agent/test/isolated/mcp/linux-owned-program.test.ts',
+  'packages/agent/test/isolated/mcp/windows-stdio-port.test.ts',
+  'apps/service/test/isolated/mcp-source-packaged-default.test.ts',
+] as const;
 export function checkUnifiedFormalConsumers(root: string): {
   violations: UnifiedWorkspaceViolation[];
   entrypoints: string[];
@@ -208,7 +220,13 @@ export function checkUnifiedFormalConsumers(root: string): {
               : []),
           ])
             if (typeof os === 'string') platforms.add(os.split('-')[0]!);
-          if (['release-candidate.yml', 'runtime-transport-qualification.yml'].includes(name)) {
+          if (
+            [
+              'release-candidate.yml',
+              'runtime-transport-qualification.yml',
+              'runtime-stdio-smoke.yml',
+            ].includes(name)
+          ) {
             const checkout = (job.steps as Record<string, unknown>[] | undefined)?.find(
               (step) => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'),
             );
@@ -234,6 +252,117 @@ export function checkUnifiedFormalConsumers(root: string): {
           const runs = (steps as Record<string, unknown>[]).flatMap((step) =>
             typeof step.run === 'string' ? [step.run] : [],
           );
+          if (
+            [
+              'release-candidate.yml',
+              'runtime-stdio-smoke.yml',
+              'platform-capability-probe.yml',
+            ].includes(name) ||
+            (name === 'required.yml' && jobName === 'unit')
+          ) {
+            const display = name === 'release-candidate.yml' || name === 'required.yml';
+            const prepare = steps.findIndex(
+              (step) =>
+                step.if === (name === 'required.yml' ? undefined : "runner.os == 'Linux'") &&
+                step.run ===
+                  `sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap${display ? ' xvfb' : ''}` &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            const consumer = steps.findIndex(
+              (step) =>
+                typeof step.run === 'string' &&
+                /\bbun (?:test|run (?:test(?::|\b)|release:build))/.test(step.run),
+            );
+            if (prepare < 0 || consumer <= prepare)
+              add('formal-ci-linux-native-dependencies-missing', location, jobName);
+          }
+          if (name === 'runtime-stdio-smoke.yml') {
+            const qualify = steps.findIndex(
+              (step) =>
+                step.if === undefined &&
+                step.run === 'bun run test:runtime:stdio' &&
+                step['working-directory'] === undefined &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            const scripts = packageAt('').scripts as Record<string, unknown> | undefined;
+            if (
+              qualify < 0 ||
+              job['runs-on'] !== `\${{ matrix.os }}` ||
+              scripts?.['test:runtime:stdio'] !==
+                `bun test --parallel=1 --max-concurrency=1 ${stdioSuites.slice(0, -1).join(' ')} && bun test --parallel=1 --max-concurrency=1 ${stdioSuites.at(-1)}` ||
+              !stdioSuites.every((path) => existsSync(resolve(root, path)))
+            )
+              add('formal-ci-mcp-stdio-missing', location, jobName);
+            const prepare = steps.findIndex(
+              (step) =>
+                step.if === "runner.os == 'Windows'" &&
+                step.run === 'bun run scripts/release/prepare-windows-native-ci.ts',
+            );
+            if (
+              prepare < 0 ||
+              qualify <= prepare ||
+              !existsSync(resolve(root, 'scripts/release/prepare-windows-native-ci.ts'))
+            )
+              add('formal-ci-native-build-environment-missing', location, jobName);
+            const shellTest = steps.findIndex(
+              (step) =>
+                step.if === undefined &&
+                step.run ===
+                  'bun test --parallel=1 --max-concurrency=1 tests/isolated/scripts/ci-logged-shell.test.ts',
+            );
+            if (
+              shellTest < 0 ||
+              shellTest >= qualify ||
+              !existsSync(resolve(root, 'tests/isolated/scripts/ci-logged-shell.test.ts'))
+            )
+              add('formal-ci-qualification-shell-test-missing', location, jobName);
+          }
+          if (['release-candidate.yml', 'runtime-stdio-smoke.yml'].includes(name)) {
+            const logs = new Set<string>();
+            for (const step of steps) {
+              if (
+                typeof step.run !== 'string' ||
+                !/\bbun (?:test|run (?:test:runtime:stdio\b|release:|scripts\/release\/unified-platform-|tests\/fixtures\/unified-agent\/windows-(?:terminal-installation|native-installation|installed-tui|cross-version)\.qualification\.ts\b))/.test(
+                  step.run,
+                )
+              )
+                continue;
+              const match =
+                typeof step.shell === 'string'
+                  ? /^bun run scripts\/ci\/logged-shell\.ts --log=(dist\/unified-evidence\/[a-z0-9-]+\.log) "\{0\}"$/.exec(
+                      step.shell,
+                    )
+                  : null;
+              const log = match?.[1];
+              if (
+                !log ||
+                logs.has(log) ||
+                !existsSync(resolve(root, 'scripts/ci/logged-shell.ts'))
+              ) {
+                add('formal-ci-qualification-log-missing', location, String(step.name ?? step.run));
+                continue;
+              }
+              logs.add(log);
+            }
+            if (
+              logs.size === 0 ||
+              !steps.some((step) => {
+                const withValue = step.with as Record<string, unknown> | undefined;
+                const paths =
+                  typeof withValue?.path === 'string' ? withValue.path.trim().split(/\s+/) : [];
+                return (
+                  typeof step.uses === 'string' &&
+                  step.uses.startsWith('actions/upload-artifact@') &&
+                  step.if === 'always()' &&
+                  withValue?.['if-no-files-found'] === 'error' &&
+                  [...logs].every(
+                    (log) => paths.includes(log) || paths.includes('dist/unified-evidence/'),
+                  )
+                );
+              })
+            )
+              add('formal-ci-qualification-log-upload-missing', location, jobName);
+          }
           if (
             name === 'required.yml' &&
             jobName === 'unit' &&
@@ -452,7 +581,13 @@ export function checkUnifiedFormalConsumers(root: string): {
               )
                 add(code, location, jobName);
           }
-          if (['release-candidate.yml', 'runtime-transport-qualification.yml'].includes(name)) {
+          if (
+            [
+              'release-candidate.yml',
+              'runtime-transport-qualification.yml',
+              'platform-capability-probe.yml',
+            ].includes(name)
+          ) {
             const prepare = steps.findIndex(
               (step) =>
                 step.if === "runner.os == 'Windows'" &&
@@ -461,12 +596,15 @@ export function checkUnifiedFormalConsumers(root: string): {
             const requiredConsumer =
               name === 'release-candidate.yml'
                 ? 'bun run release:build --product native --directory dist/unified-native --terminal dist/unified-terminal --archive dist/unified-native.tar.gz'
-                : 'bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/windows-path-security/default.test.ts packages/agent/test/isolated/config/mcp-selection-windows.test.ts apps/desktop/test/isolated/windows-node-access.test.ts';
+                : name === 'platform-capability-probe.yml'
+                  ? 'bun run release:build --directory dist/unified-terminal'
+                  : 'bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/windows-path-security/default.test.ts packages/agent/test/isolated/config/mcp-selection-windows.test.ts apps/desktop/test/isolated/windows-node-access.test.ts';
             const consumer = steps.findIndex(
               (step) =>
                 typeof step.run === 'string' &&
                 step.run.trim().replace(/\s+/g, ' ') === requiredConsumer &&
-                (name === 'release-candidate.yml' || step.if === "runner.os == 'Windows'"),
+                (name !== 'runtime-transport-qualification.yml' ||
+                  step.if === "runner.os == 'Windows'"),
             );
             if (
               prepare < 0 ||
@@ -532,6 +670,8 @@ export function checkUnifiedFormalConsumers(root: string): {
                 `${location}#${jobName}`,
                 typeof step['working-directory'] === 'string' ? step['working-directory'] : '',
               );
+              if (typeof step.shell === 'string')
+                inspect(step.shell, `${location}#${jobName}:shell`);
             }
           }
         }
@@ -542,6 +682,7 @@ export function checkUnifiedFormalConsumers(root: string): {
             'execution-boundary-conformance.yml',
             'mcp-native-keyring-smoke.yml',
             'runtime-transport-qualification.yml',
+            'runtime-stdio-smoke.yml',
           ].includes(name) &&
           !['macos', 'ubuntu', 'windows'].every((platform) => platforms.has(platform))
         )

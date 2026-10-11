@@ -68,6 +68,8 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - name: Prepare Linux native qualification dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap xvfb
       - run: xvfb-run -a bun run test
 
   compaction-contract:

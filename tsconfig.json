@@ -24,6 +24,7 @@
   "include": [
     "scripts/check-unified-agent-boundary.ts",
     "scripts/check-unified-workspaces.ts",
+    "scripts/ci/logged-shell.ts",
     "scripts/generate-unified-api.ts",
     "scripts/run-default-tests.ts",
     "scripts/run-unified-tests.ts",
@@ -82,6 +83,7 @@
     "tests/isolated/scripts/docs-impact-scopes.test.ts",
     "tests/isolated/scripts/docs-structure.test.ts",
     "tests/isolated/scripts/test-suite-runner.test.ts",
+    "tests/isolated/scripts/ci-logged-shell.test.ts",
     "tests/isolated/scripts/unified-agent-boundary.test.ts"
   ]
 }

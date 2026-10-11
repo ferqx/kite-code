@@ -4828,3 +4828,19 @@ Native红在首次pending导航已完成后，原write行的“等待人工审�
 最多五项退出依赖保持前节实际入口／完整验收：①Windows installed Shell／Task／Workflow的原权限合同可靠后端与原生资格；②installed普通任务／Shell／child／MCP的原RSS、八outer／九点及全Runtime出生／activeResources／handles；③依适用①②汇合的后续Win/Linux Actions安装／版本／MCP／PTY／Native／维护及保数据卸载；④§35适用37能力与T001–T114／E01–E14的完整行为、恢复、平台和证据汇合，正式入口源码审读已完成但不代这些资格；⑤依前述结果的旧authority／依赖清零、最终退役和阶段完整回归。缺可靠adapter、专用授权或原配置时保持未知／拒绝；这些不能靠本机新增按钮或自动重做解决。
 
 本轮仅修正文档与映射，source／依赖／测试／配置字节均未变化，复用上一节准确未筛选714文件／575正式作业actual0的完整回归；该结果不解除资源或跨平台门禁。文档与对应作用域门禁按实际交付执行，正常本地提交hooks保持。没有新增生产能力或旧源码退役声明，37partial／wholeV13=false／phaseExit=false、Goal active；未push／PR／发布或dispatch。
+
+## 2026-10-11：Win/Linux 后续 Actions 验证接线
+
+本轮依用户新授权核对并补齐现有 GitHub Actions 定义，不 push／PR／发布或 dispatch。两名只读审查者分别核实际 Windows／Linux installed caller 与原断言，root复核源码和有限消费者守卫：原 release job 已覆盖正式 Terminal／Native 安装、真实代码 A→B→A→B、完整 TUI、maintenance 新 Store恢复及最终保数据卸载；这些完整 run 正文与平台条件保持，不另建单个版本操作、journal 或安装故障矩阵。产品入口、完整消费者和验收范围归[release owner](../active/release-control.md#winlinux-后续-actions-接线)，本轮只闭合接线，不证明实际 hosted 通过。
+
+独立 stdio job 原六文件仅有 macOS stdio 主整例，未明确接 Linux namespace／SDK、Windows Job／SDK和跨平台 sealed 默认 Source；现追加这四份原完整文件，保持实际平台条件、全部断言及sealed180秒／12秒预算。源码外默认连接、完整Tool、准确取消／树停止、Service正常退出和cold原对象零重放由原完整文件验。stdio checkout改为准确PR head repository／SHA、完整历史、关闭持久凭据，三平台matrix／15分钟job保持。release／Required补 `build-essential bubblewrap xvfb`，stdio／platform probe补compiler／Bubblewrap；Windows stdio／platform probe接现有 installed MSVC准备脚本。缺后端直接失败，不放宽namespace／Chromium sandbox，不以Darwin-only窗口、恢复中断或coalition夹具虚构Win/Linux覆盖。
+
+新增有限[日志shell](../../scripts/ci/logged-shell.ts)包裹20个原release run及stdio的日志／MCP两条完整调用，stdout／stderr原字节同时透传、返回原失败退出码；日志排他创建且always／error上传，不上传临时Profile树。模板准确使用带引号的原脚本参数；只读复核发现Windows四个qualification入口起初未被新日志guard匹配，已补有限四前缀并以删除Native installed logger的反例闭合。新[日志整文件](../../tests/isolated/scripts/ci-logged-shell.test.ts)进入三平台stdio前置及默认有限发现；macOS实际bash／CLI成功、exit23、pipefail、signal、spawn、路径／日志拒绝及输出失败10项通过，4项真实pwsh BOM／Unicode／外部exit23／throw／输出失败仅在Win运行。本机4skip明确不是Windows资格。整个release job30→60分钟只给构建与原Windows19分钟链及其余原调用者聚合时间，没有hosted超时实证；原fixture与资源预算保持。
+
+实际接线回归先在sandbox中得到回环监听失败、startup_timeout及guardian失败，原10文件12pass／2skip／28fail／124断言、actual1／128.41秒；原log SHA `fc19716c014bd9355391a1fb290d58a5d36253988020a778d8d245f960c68791`。最小 `127.0.0.1:0` Bun监听在同sandbox失败、获准sandbox外actual0，随后用同原脚本／logger整例重跑。该次39pass／2skip／1fail／425断言、actual1／54.20秒，sealed冷读前真实 `sqlite_engine_initialization_failed`，log SHA `40413f4f96d95fe57f3a0afdbfbbea1cc1b55eb3b586a30d4b11ffd6e3a894d3`。原因由root与只读审查者沿源码确认：Bun SQLite原生选择是进程全局，原source测试已打开Database，sealed文件必须在独立fresh宿主选择自己的候选dynamic引擎；原统一调度本就按isolated单文件进程执行。新alias改为原九文件完整命令 `&&` sealed完整单文件，不改生产，不删除／过滤测试，也不放宽初始化拒绝。
+
+修正后的实际完整 `test:runtime:stdio` 经同日志shell返回actual0：九文件39pass／2skip／398断言／44.49秒，sealed原整文件1pass／60断言／9.20秒；全10文件共40pass／2平台skip／458断言，sealed原candidate／engine／Store／Command／Run／connection与cold SHA收据及正常rootRemoved保持。原log位于 `dist/unified-evidence/local-runtime-stdio-isolated-20261011.log`，SHA `0fe14ad88f9466bd8d87e6eab69688e284d600d04d86e64a1bb1e33a92b37d6c`；两个失败log仍保原字节。前一alias退出非零不会执行后一sealed成功来覆盖失败。全部原MCP／installed／version／maintenance fixture字节未改，原CI守卫测试前28143字节完整保留，新增断言仅保护新接线及fresh引擎边界。
+
+额外读取历史 `ci-bun-baseline.test.ts` 产生3fail，分别仍要求旧qualification keyring路径、execution-boundary20分钟和旧owner消费者；它与两份相关workflow逐字等于本轮基线HEAD，失败不是本轮新增。该文件本来就不在当前有限默认发现，本轮不删断言、不新增排除、不将这次额外调用报告为绿；其旧基线与当前正式来源的冲突保留。新的默认清单715文件只新增日志整文件，原714文件及全部exclusive选择保持；本轮没有执行715文件完整回归或把上轮714文件／575作业结果当当前CI配置通过。最后受影响五份完整CI／日志／workspace／发现文件46pass／4明确Windows skip／331断言、actual0；根及八workspace types、实际边界／runtime packages／API／ownership与文档／plan-evidence门禁通过。全仓format检查actual0／3639文件，原104warnings／98infos未改；正常本地提交hooks独立执行。
+
+新增闭合的是Win/Linux五类完整消费者的依赖、来源、MCP进程隔离与失败日志接线，没有新用户产品行为、正式authority退役或平台资格。真实Win/Linux、Windows原Shell合同、RSS `+115.203125MiB >32MiB`及全Runtime出生后代／activeResources／handles缺项继续未闭合；未重做参数对照，原soak8outer／60—168分钟与always formal拒绝保持。37partial／wholeV13=false／phaseExit=false，P6／§35／P7与整体阶段退出均未宣布。

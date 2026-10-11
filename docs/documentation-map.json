@@ -35,6 +35,7 @@
       "id": "unified-agent-checks",
       "sources": [
         "scripts/check-unified-agent-boundary.ts",
+        "scripts/check-unified-workspaces.ts",
         "scripts/generate-unified-api.ts",
         "scripts/run-unified-tests.ts"
       ],
@@ -606,6 +607,7 @@
       "id": "test-system",
       "sources": [
         "scripts/run-default-tests.ts",
+        "scripts/unified-test-plan.ts",
         "scripts/run-owned-tests.ts",
         "scripts/test-suite.ts",
         "scripts/check-test-ownership.ts",
@@ -659,6 +661,7 @@
       "sources": [
         "release/**",
         "scripts/release/**",
+        "scripts/ci/**",
         "tests/release/**",
         ".agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md",
         ".github/workflows/release-candidate.yml"
