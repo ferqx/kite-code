@@ -20,6 +20,10 @@
 
 [启动 DOM](test/isolated/native-startup-dom.test.tsx)沿实际 NativeDesktop 核首次等待、未核目录、空项目／无模型、两类失败、重复重试、旧响应隔离和进入后草稿保持；同轮原新对话／草稿／安排任务测试保业务断言。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)核编译启动样式及首次／冷启动完成后进入原页面，保原任务、审批、冷读与退出；实际窗口不代证初始化失败矩阵。代码输入、执行结果及剩余迁移归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)，完整 PC、安装恢复及阶段退出仍按原方案核对。
 
+旧读取的失败与成功使用同一展示归属：refresh 的 state 和 select/draft.read 捕获 generation 与 viewIntent，迟到拒绝已不属于当前视图时不再进入当前页面的“操作未完成”；当前读取仍抛原错误。全局目录仅绑定 generation，同代切换会话后真实目录失败仍提示。没有按错误码统一吞取消，也没有修改 mutation 的未知结果、原 commandId 查询、权限 CAS、启动失败和退出门禁。
+
+[真实页面归属回归](test/isolated/native-read-ownership-dom.test.tsx)在原源码下实际三红，修后8pass/61assert：旧选择、草稿和事件状态的拒绝不污染新会话；当前错误、全局目录错误、未知首次提交的同ID查询及启动真失败继续成立。[正式默认 Shell 整窗口](test/isolated/native-shell-lifecycle-bundle.test.ts)保全部原断言、预算与故障路径，在 firstWindow 连接后被动记录公开启动错误与操作弹窗；正常启动、真实 parent 完成、准确停止及最终冷读要求记录为空。该观察不代证此前首屏的瞬时提示，SIGKILL 后真实断线继续保留。准确 owner 全量、原失败与本地交付证据见[客户端修复进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11客户端迟到读取误报)。
+
 ## 原启动诊断保存
 
 原 [saveStartupDiagnosticReport](electron/startup-report.ts) 从 kite-desktop 逐字迁入，原两项[保存测试](test/startup-report.test.ts)只调整 owner import。Service 的真实 Store 打开失败产生闭合 `data_unavailable/opening_store`，配对启动准入失败在关闭所属 child 后把有效诊断交给 [Main](electron/main.ts)。没有有效 Service 诊断的通用连接、资源或目录错误不显示保存按钮；重试清除前次诊断，进入主界面不保留该启动操作。诊断协议与报告生成归 [Service owner](../service/README.md)，不导入旧 runtime，也不恢复旧数据迁移。

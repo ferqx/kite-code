@@ -5001,3 +5001,17 @@ pending-cards的root-first通过，job-first在i=2的root question等待原目�
 同轮用户另报告启动页“启动未完成”及 Agent 收尾“操作未完成”。当前日志未保弹窗正文，原坏 Store 与跨版本私有草稿用例会有意触发对应提示，不能据此解释全部正常窗口。源码已核实 renderer 对旧会话/旧视图成功读取有 fencing，而迟到拒绝仍可进入新页面全局错误；该客户端缺口将作为本次仍需处理的修复单独交付。这里完整结果属于上述冻结输入，不能提前代证尚未实施的客户端修复或正常流程零误报。
 
 产品手册、Service/Jobs/Store、Client/UI/Native、授权/执行 active 与[已实施 Note](../../.agents/notes/implemented/architecture/2026-10-11-shell-per-call-permission-scopes.md)按实际边界同步；局部资格、[剩余平台计划](shell-permission-scopes.md)及本地提交门禁分别判断。Win/Linux 共享策略/独立范围源码及原生测试已接三 OS Actions，实际资格后置且未 dispatch；Windows 正式 Shell backend 仍缺、失败关闭。原 RSS 450秒/九采样 `178814976→299614208B`、`+115.203125MiB >32MiB` 的真实红与全 Runtime 出生后代、Bun activeResources/handles 观测缺项保持，没有重复参数对照。能力37行仍 partial，wholeDefault=true仅指本次冻结 macOS 默认、wholeV13=false/phaseExit=false，不宣布 P6/§35/P7或整体退出，无 push/PR/发布。
+
+## 2026-10-11：客户端迟到读取误报
+
+用户在实际测试窗口观察到启动“启动未完成”及 Agent 收尾“操作未完成”。核对原 fixture 确认坏 Store 的 required_capability_missing 和跨版本冷回退的 draft_storage_unavailable 是原断言主动要求的真实失败提示，均未删除。原日志没有用户所见具体 code，不能断言全部提示来自故障注入，也不能认定正常启动根因已查明。
+
+源码确认旧选择/草稿/事件状态读取只隔离迟到成功，拒绝仍进入 report 全局错误。新真实 NativeDesktop DOM 原源码3fail/5pass/59assert，先证原请求进入与新B标题/草稿正确，再释放旧reject，三红均为错误dialog出现；原日志 /private/tmp/kite-native-read-ownership-original-red.log 保留。修复在读路径内核原 generation/viewIntent，当前错误原样重抛；全局目录只按generation核归属。没有按code全局吞错，mutationunknown、原查询、启动准入、permissions或退出收尾不改。修后原新整文件8pass/61assert/actual0，日志 /private/tmp/kite-native-read-ownership-fixed.log；原类型检查与独立只读审查通过。
+
+原正式默认 Shell 安装窗口增加有界被动错误记录，在 normal launch ready、UI提交后原parent实际completed、exactstop确认及最后正常coldread关闭前要求无启动/操作错误。所有35原assert行及30秒控制请求/20秒step/15秒launch和页面预算逐字保持；逆向新增后原全bytes SHA仍800c459c4eecee32a6be4ed7f3954ade5e3638a49a266e3e8b94f42cc2a2219a，收据 /private/tmp/kite-native-shell-no-popup-preservation.json。观察从firstWindow后起，不能证明此前首屏无瞬间提示；SIGKILL至原close间不新增无错误要求，真实unknown和cleanup门禁保持。
+
+完整 Desktop owner 首次受当前 sandbox 的 loopback listen 限制，actual1/2.457秒，四并行shard启动并排空，实际listen得到EADDRINUSE，62isolated未开始；日志 /private/tmp/kite-native-read-owner-desktop-complete.log SHA688a7541ac2dd52706688809f778e0affa1305956bad0703f521b7cb85d51a7e，输入前后全等。同一最小127.0.0.1随机端口探针在sandbox失败、获准本机环境成功，未改测试或预算。
+
+同源码获准环境的完整 Desktop owner actual0/354.394秒，112文件/66正式作业，原并发4与50parallel/62isolated分类、完整断言和预算保持；日志 /private/tmp/kite-native-read-owner-desktop-permitted.log SHAc3fd43022f78e09f6bf765d222e63124708fe81f10eb4e1757aefd41794e3511，同prefix receipt与 /private/tmp/kite-native-read-owner-desktop-complete-plan.json 保完整计划和冻结收据。输入/HEAD/Git/实际Bun与Node前后全等。实际窗口覆盖正常启动、真实Agent完成与完整输出、准确停止、Main/Service故障清理、冷零重放和原正常退出；坏Store诊断/明确重试及原退出警告仍按真实事实验证。
+
+权限切片已本地提交41cddf4e1f933be7e27969479d3ddc80ae2a929f，强制hooks全部通过且其运行输入与此前macOS完整726文件/587作业回归全等。该完整默认是客户端修复前的冻结输入；本次复验全部受影响Desktop owner，其他workspace源码/依赖/配置保持，可复用原证据，但不宣称改动后重新运行整体默认或V1.3完成。用户所见实际启动code仍未知；正常窗口可观察区间的结论不覆盖首屏之前。Win/Linux后置，RSS真实红与完整观测缺项、37能力partial及阶段退出门禁全部保留，无push、PR、发布或Actions dispatch。

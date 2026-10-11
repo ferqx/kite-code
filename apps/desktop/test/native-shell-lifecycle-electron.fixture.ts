@@ -83,6 +83,53 @@ async function released() {
   );
   assert.deepEqual(leases, { outer: false, inner: false });
 }
+// Observation starts after firstWindow resolves; it cannot prove that an earlier
+// first-frame error was absent. This records public DOM errors without dismissing them.
+async function observeNormalUiErrors() {
+  await page.evaluate(() => {
+    const observed = { texts: [] as string[], overflow: 0, last: '' };
+    const target = window as typeof window & { shellUiErrors?: typeof observed };
+    target.shellUiErrors = observed;
+    const collect = () => {
+      const errors = [
+        ...document.querySelectorAll('main[aria-label="kite 启动页"] [role="alert"]'),
+        ...Array.from(document.querySelectorAll('[role="alertdialog"]')).filter(
+          (element) =>
+            element.querySelector('h2')?.textContent === '操作未完成' &&
+            element.getClientRects().length > 0 &&
+            getComputedStyle(element).visibility !== 'hidden',
+        ),
+      ].map((element) => element.textContent?.trim() ?? '');
+      const key = JSON.stringify(errors);
+      if (key === observed.last) return;
+      observed.last = key;
+      for (const text of errors) {
+        if (observed.texts.length < 16) observed.texts.push(text);
+        else observed.overflow++;
+      }
+    };
+    new MutationObserver(collect).observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+    });
+    collect();
+  });
+}
+async function assertNormalUiErrorsAbsent(phase: string) {
+  const errors = await page.evaluate(() => {
+    const observed = (
+      window as typeof window & {
+        shellUiErrors?: { texts: string[]; overflow: number };
+      }
+    ).shellUiErrors;
+    if (!observed) throw Error('native_shell_ui_error_observer_missing');
+    return { texts: [...observed.texts], overflow: observed.overflow };
+  });
+  stage('normal_native_ui_error_observation', { phase, ...errors });
+  assert.deepEqual(errors, { texts: [], overflow: 0 }, `Unexpected public UI error: ${phase}`);
+}
 async function launch() {
   app = await _electron.launch({
     executablePath: launcher!,
@@ -92,6 +139,7 @@ async function launch() {
     timeout: 15000,
   });
   page = await app.firstWindow();
+  await observeNormalUiErrors();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Default Host Shell', exact: true }).waitFor();
   await openSessionTools(page);
@@ -182,6 +230,7 @@ async function launch() {
     'original session',
   );
   assert.equal(selected.selection!.storeId, storeId);
+  await assertNormalUiErrorsAbsent('normal_launch_ready');
   stage('default_native_window', { mainPid, servicePid, storeId });
 }
 async function close() {
@@ -217,6 +266,7 @@ async function send(marker: string, count: number) {
     (value) => value.selection!.runs.filter((run) => run.status === 'completed').length === count,
     'parent actual completed',
   );
+  await assertNormalUiErrorsAbsent(`parent_actual_completed:${marker}`);
 }
 const overview = () => page.getByRole('region', { name: '后台总览', exact: true });
 const card = (id: string) =>
@@ -399,6 +449,7 @@ try {
     survivingExecutionId: main.id,
     stopPosts: stops.length,
   });
+  await assertNormalUiErrorsAbsent('exact_stop_confirmed');
   const mainPid = app!.process().pid!;
   await page.context().tracing.stop({ path: join(home!, 'shell-window-1.zip') });
   const exited = new Promise<void>((resolve) => app!.process().once('exit', () => resolve()));
@@ -445,6 +496,7 @@ try {
   });
   await coldRead(afterService, afterServiceCalls);
   const finalSnapshot = await read<Snapshot>('snapshot');
+  await assertNormalUiErrorsAbsent('final_normal_cold_read_before_close');
   await close();
   const outputPages = [...physical, ...coldPhysical].filter((row) => row.bytes !== undefined);
   assert.ok(outputPages.length > 3);

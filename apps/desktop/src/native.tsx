@@ -289,7 +289,13 @@ function NativeDesktopContent({
     if (!bridge || !generation.current) return;
     const nonce = viewIntent.current,
       current = generation.current;
-    const value = await bridge.request({ method: 'state', generation: current });
+    let value: NativeResult;
+    try {
+      value = await bridge.request({ method: 'state', generation: current });
+    } catch (cause) {
+      if (nonce !== viewIntent.current || current !== generation.current) return;
+      throw cause;
+    }
     if (nonce !== viewIntent.current || current !== generation.current) return;
     apply(value);
     if (
@@ -307,6 +313,7 @@ function NativeDesktopContent({
     try {
       value = await bridge.request({ method: 'directory', generation: current });
     } catch (cause) {
+      if (current !== generation.current) return;
       // Main's observer reset replaces this GET; the next directory state owns the display.
       const code = (cause as { code?: string; message?: string }).code ?? (cause as Error).message;
       if (code === 'directory_observation_changed') return;
@@ -355,20 +362,29 @@ function NativeDesktopContent({
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
     setDraft('');
-    const value = await bridge.request({ method: 'select', generation: current, sessionId });
-    if (nonce !== viewIntent.current || current !== generation.current) return;
-    apply(value);
-    if (value && 'generation' in value && value.selection)
-      history.current?.select(current, value.selection, value.historyEpoch);
-    if (value && 'generation' in value && !value.selection?.session.parentSessionId) {
-      const saved = await bridge.request({ method: 'draft.read', generation: current, sessionId });
+    try {
+      const value = await bridge.request({ method: 'select', generation: current, sessionId });
       if (nonce !== viewIntent.current || current !== generation.current) return;
-      if (saved && 'content' in saved && 'revision' in saved) {
-        setDraft(
-          draftCache.current.get(JSON.stringify([saved.storeId, sessionId])) ?? saved.content,
-        );
-        draftRevision.current = saved.revision;
+      apply(value);
+      if (value && 'generation' in value && value.selection)
+        history.current?.select(current, value.selection, value.historyEpoch);
+      if (value && 'generation' in value && !value.selection?.session.parentSessionId) {
+        const saved = await bridge.request({
+          method: 'draft.read',
+          generation: current,
+          sessionId,
+        });
+        if (nonce !== viewIntent.current || current !== generation.current) return;
+        if (saved && 'content' in saved && 'revision' in saved) {
+          setDraft(
+            draftCache.current.get(JSON.stringify([saved.storeId, sessionId])) ?? saved.content,
+          );
+          draftRevision.current = saved.revision;
+        }
       }
+    } catch (cause) {
+      if (nonce !== viewIntent.current || current !== generation.current) return;
+      throw cause;
     }
   }
   // biome-ignore lint/correctness/useExhaustiveDependencies: Startup retries replace only this bridge observation; other facts are read through refs.
