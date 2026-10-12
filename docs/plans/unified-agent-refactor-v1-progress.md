@@ -5725,3 +5725,31 @@ Service／Runtime close 实际拒绝之后，独立 Store 取得原 Session owne
 剩余阻塞按依赖保留四项：①Runtime取消／停止的可信全 resources／handles producer、全部出生后代及准确收尾来源；固定 Bun API stub 与本机符号能力限制仍在，不以已知 FD／owner 替代；②原 lifecycle RSS +115.203125 MiB 高于32 MiB，native live owner仍未定，原八outer／九点与完整60—168分钟要求保持，未另跑参数对照、formal soak 或旧大 trace；③Win/Linux正式安装、真实切换／回退、MCP完整连接调用取消退出、维护恢复及保数据卸载仍后置Actions／用户Windows，原Shell等backend门禁保留，本机不触发Actions；④§35全部适用T/E与完整独立迁移审查、最终旧路径／依赖退役仍需上述实际资格和准确支持范围，不能因当前默认0提前删除旧树。ChatGPT官方授权／Responses仍在当前V1.3之后，Codex直接复用保原门禁。
 
 本片按 iteration_complete／stage／commit 与正常 hook 收束，仅本地提交；当前准确源码 wholeDefault=true，37能力仍partial／wholeV13=false／phaseExit=false，Goal active，无push／PR／发布／Actions。
+
+## 2026-10-13：正式迁移源码审查与匹配 Bun 符号
+
+状态：partial；上一片正常本地提交 `42867ab7`，本轮开始工作树干净。先前一轮只复核截图修复，属于无新增闭合的状态核对。本轮补充两个非参与式只读源码审查，并取得准确 release 的配套符号，改变原生地址归因的可行条件；没有新产品实现或用户能力完成声明。
+
+两份审查追踪实际调用双方与持久化边界，覆盖如下范围：
+
+- Agent／Service：公共 Client command→Service主体→Runtime受理→SQL激活→Execution完整结果→冷分页读取；根与子任务都调用同一 `executeRun/defaultLoop`；唯一 Worker writer、最终派发事务、取消图与attempt后unknown、配置准备失败的资源保留、strict-close ACK与原Worker终态、离线恢复排他。关键连接归 [Runtime](../../packages/agent/src/runtime.ts)、[Execution](../../packages/agent/src/execution/index.ts)、[SQL](../../packages/agent/src/storage/sqlite/operations.ts)、[Service装配](../../apps/service/src/configuration.ts)和[维护](../../packages/agent/src/maintenance/README.md)。默认三策略与Shell分析仍由Agent负责，Service提供身份、可信事实与装配；未发现公共路径绕过最终授权。
+- 正式调用者／制品：Terminal与Native builder→选定候选lease→paired Service→同一AgentClient，Daemon shared close仅释放网络，TUI／Native原持久意图冷态只查原ID，Web保持原身份的只读分页与重连。正式MCP lifecycle明确注入受监督 `createTransport/jobPort`，不会退回无该装配的直连默认分支；版本切换、离线恢复与保数据卸载沿实际锁、候选验证和原数据边界。关键连接归 [Terminal builder](../../scripts/release/terminal-bundle.ts)、[paired](../../apps/service/src/paired.ts)、[Native Main](../../apps/desktop/electron/main.ts)、[公共Client](../../packages/client/src/index.ts)、[MCP lifecycle](../../packages/agent/src/mcp/lifecycle.ts)和[Native安装](../../scripts/release/native-install.ts)。
+
+审查没有提出must-fix或可独立实施的macOS正式caller缺口。旧 [oss-candidate](../../scripts/release/oss-candidate.ts)仍实际消费历史Service入口，不能称旧目录无人使用；当前formal builder不引用该入口。CLI／Native的Agent／Service依赖仍用于真实主机准入、维护、候选资产和所拥有进程，不能为减少manifest文字而删除。两份审查没有逐行审完全部37能力事务、全部Native request owner、所有Planning／Workflow内部实现、全部MCP transport或各平台native leaf，也未逐项重跑所有T/E；所追踪源码连接的独立证据不能称全仓最终审查或最终退役。映射核所有T001—T114／E01—E14均有能力归属，仅证明无遗漏映射，不能标成实际通过。
+
+准确Bun符号的外部来源此前未被核实，本轮取得新的实物证据：[官方bun-v1.4.2资产](https://github.com/oven-sh/bun/releases/expanded_assets/bun-v1.4.2)公开 [bun-darwin-aarch64-profile.zip](https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-aarch64-profile.zip)。固定[构建](https://raw.githubusercontent.com/oven-sh/bun/744846f844374847c902b5e7fd59b4342a51ef99/scripts/build/bun.ts)从原linked executable提取符号并另写strip的普通Bun，[打包](https://raw.githubusercontent.com/oven-sh/bun/744846f844374847c902b5e7fd59b4342a51ef99/scripts/build/ci.ts)收录dSYM与linker-map。实际ZIP与成员核如下：
+
+| 实际对象 | bytes | SHA256／身份 |
+| --- | ---: | --- |
+| 当前安装Bun `1.4.2+744846f84` | 61884464 | `35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5` |
+| 官方profile ZIP | 126252428 | `09a5c3053e94669c837591bf9cf16a5ff84b2234dfb32304a251213f9816c7d1`，符合官方字段 |
+| `bun-profile.dSYM` | 322230690 | `83f791a2b4450b40bab3e48136eea0c9dcbaf601afcd27b604a45fb9814c0cba` |
+| `bun-profile.linker-map` | 19364239 | `4a3f4036ac382880e1190b1b3da16d32107dd36c126c21daf041b8c8eab953b3` |
+
+实际 `bun --revision`、原二进制与dSYM的独立 `dwarfdump --uuid`均actual0，两者UUID同为 `4C4C447C-5555-3144-A138-DBD9C49417A3`；root再核全部大小／SHA相等。仅缓存固定两个符号成员至 `/private/tmp/kite-v13-bun-symbols-20261013/`，收据 `receipt.json` SHA `51257a693786b3a51968c009c34a3bc222c520e9945904932ce3526cdbbbd371`；没有执行下载的runtime。`atos`首次将发行包的平面`.dSYM`误作目录而actual1；用同inode的`.dwarf`文件名读取后actual0，原linked地址 `0x10000CFD0/0x10001CA4C/0x100088800`分别解析为 `mi_malloc (alloc.c:249)`、`mi_free (free.c:242)`、`JSC::BlockDirectory::tryAllocateBlock (BlockDirectory.cpp:129)`。地址查询没有调用这些函数、附加进程、加载dylib或运行负载。
+
+本轮闭合的是“原release可取得且可读取匹配native符号”这一诊断前置；本机原安装目录仍无符号的历史事实保留，但不能再据此推导官方不可取得。静态符号不是live allocation census／业务owner／完整alloc-free来源，也不改变固定 `getActiveResourcesInfo/_getActiveHandles` stub。原RSS真实失败及全部资源门禁继续保留，没有重跑参数对照、API探针、formal soak或旧大trace。
+
+下一阶段仍按四项依赖验收：Runtime取消／正常退出须有可信全resources／handles、完整出生后代和准确cleanup来源；原完整lifecycle须满足八outer／九点／60—168分钟及32MiB原RSS门槛；Win/Linux正式安装、真实版本切换、MCP完整调用取消退出、维护恢复和保数据卸载按后置Actions／用户Windows取得实际证据；全部适用§35/T/E及完整独立迁移审查收束后，才可最终删除旧路径／依赖。匹配符号现在允许继续原release的归因诊断，不放宽以上条件。
+
+本轮生产、测试、依赖、配置及运行资产未改，准确第二轮默认的3883输入与5项运行资产重新逐哈希核对零漂移，复用599／599原默认通过；未再执行已闭合窗口或完整默认。只同步当前进度，产品手册、owner与active行为／边界核对无变化，不制造额外文档diff。按document-before-commit核iteration_complete／stage／commit和正常hook；37能力仍partial、wholeDefault=true仅属上述准确默认范围、wholeV13=false／phaseExit=false，Goal active。未新增正式caller切换或旧生产树删除；本地授权未扩大。
