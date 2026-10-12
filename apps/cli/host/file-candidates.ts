@@ -1,11 +1,15 @@
-import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
-import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { AgentClient } from '@kite-ai/client';
 import type { TuiFileCandidatesPort, TuiFileScope } from '@kite-ai/ui/tui';
 import ignore, { type Ignore } from 'ignore';
 
-const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+import {
+  type CandidateDirectory,
+  type CandidateIgnoreFile,
+  openCandidateDirectory,
+} from './file-candidate-filesystem';
+
 const excluded = new Set([
   'node_modules',
   '.git',
@@ -16,111 +20,15 @@ const excluded = new Set([
   '.DS_Store',
   'coverage',
 ]);
-let native: ReturnType<typeof load> | undefined;
-function load() {
-  return dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
-    ...(process.platform === 'darwin'
-      ? { __openat: { args: ['i32', 'ptr', 'i32', 'u32'], returns: 'i32' } as const }
-      : { openat: { args: ['i32', 'ptr', 'i32', 'u32'], returns: 'i32' } as const }),
-    fdopendir: { args: ['i32'], returns: 'ptr' },
-    readdir: { args: ['ptr'], returns: 'ptr' },
-    closedir: { args: ['ptr'], returns: 'i32' },
-    ...(process.platform === 'darwin'
-      ? { __error: { args: [], returns: 'ptr' } as const }
-      : { __errno_location: { args: [], returns: 'ptr' } as const }),
-  });
-}
-function api() {
-  native ??= load();
-  return native.symbols;
-}
-function openAt(fd: number, name: string, mode: number) {
-  const bytes = Buffer.from(`${name}\0`),
-    a = api();
-  const next = ('__openat' in a ? a.__openat : a.openat)(
-    fd,
-    ptr(bytes),
-    mode | (process.platform === 'darwin' ? 0x1000000 : 0x80000),
-    0,
-  );
-  if (next < 0) throw new Error('file_candidate_open_unavailable');
-  return next;
-}
-function canonicalDirectory(path: string) {
-  let fd = openSync('/', flags);
-  try {
-    for (const segment of path.split('/').filter(Boolean)) {
-      const next = openAt(fd, segment, flags);
-      closeSync(fd);
-      fd = next;
-    }
-    return fd;
-  } catch (error) {
-    closeSync(fd);
-    throw error;
-  }
-}
-function sameDirectory(fd: number, path: string) {
-  const proof = canonicalDirectory(path);
-  try {
-    const a = fstatSync(fd, { bigint: true }),
-      b = fstatSync(proof, { bigint: true });
-    if (a.dev !== b.dev || a.ino !== b.ino) throw new Error('file_candidate_directory_changed');
-  } finally {
-    closeSync(proof);
-  }
-}
-function names(fd: number) {
-  const a = api(),
-    dup = openAt(fd, '.', flags),
-    dir = a.fdopendir(dup);
-  if (!dir) {
-    closeSync(dup);
-    throw new Error('file_candidate_directory_unavailable');
-  }
-  const error = new DataView(
-    toArrayBuffer(('__error' in a ? a.__error : a.__errno_location)()!, 0, 4),
-  );
-  const result: { name: string; type: number }[] = [];
-  try {
-    for (;;) {
-      error.setInt32(0, 0, true);
-      const entry = a.readdir(dir);
-      if (!entry) {
-        if (error.getInt32(0, true)) throw new Error('file_candidate_directory_unavailable');
-        break;
-      }
-      const offset = process.platform === 'darwin' ? 20 : 18;
-      const length = new DataView(toArrayBuffer(entry, 16, 2)).getUint16(0, true) - offset - 1;
-      if (length < 1 || length > 2048) throw new Error('file_candidate_name_invalid');
-      const raw = new Uint8Array(toArrayBuffer(entry, offset + 1, length)),
-        end = raw.indexOf(0);
-      if (end < 0) throw new Error('file_candidate_name_invalid');
-      const name = new TextDecoder('utf-8', { fatal: true }).decode(raw.subarray(0, end));
-      if (name === '.' || name === '..') continue;
-      if (!name || name.includes('/') || name.includes('\0'))
-        throw new Error('file_candidate_name_invalid');
-      result.push({ name, type: new Uint8Array(toArrayBuffer(entry, offset, 1))[0]! });
-    }
-  } finally {
-    a.closedir(dir);
-  }
-  return result;
-}
-function stamp(fd: number) {
-  const s = fstatSync(fd, { bigint: true });
-  return `${s.dev}:${s.ino}:${s.mtimeNs}:${s.ctimeNs}:${s.size}`;
-}
-async function config(fd: number, signal: AbortSignal): Promise<Ignore> {
-  const before = stamp(fd),
-    stat = fstatSync(fd);
-  if (!stat.isFile() || stat.nlink !== 1) throw new Error('file_candidate_ignore_invalid');
+async function config(file: CandidateIgnoreFile, signal: AbortSignal): Promise<Ignore> {
+  const before = file.facts();
+  if (!before.regular || before.links !== 1) throw new Error('file_candidate_ignore_invalid');
   const decoder = new TextDecoder('utf-8', { fatal: true }),
     buffer = Buffer.alloc(65536);
   let text = '',
     chunks = 0;
   for (;;) {
-    const size = readSync(fd, buffer, 0, buffer.length, null);
+    const size = file.read(buffer);
     if (!size) break;
     signal.throwIfAborted();
     text += decoder.decode(buffer.subarray(0, size), { stream: true });
@@ -128,7 +36,7 @@ async function config(fd: number, signal: AbortSignal): Promise<Ignore> {
   }
   text += decoder.decode();
   if (text.includes('\0')) throw new Error('file_candidate_ignore_invalid');
-  if (stamp(fd) !== before) throw new Error('file_candidate_ignore_changed');
+  if (file.facts().stamp !== before.stamp) throw new Error('file_candidate_ignore_changed');
   return ignore().add(text);
 }
 function rank(path: string, query: string) {
@@ -202,36 +110,26 @@ export function createTuiFileCandidates(
       } else {
         const paths: string[] = [],
           unavailable: { path: string; reason: string }[] = [];
-        const rootFd = openSync('/', flags);
-        let fd = rootFd;
+        const directory = openCandidateDirectory(canonical);
         try {
-          for (const segment of canonical.split('/').filter(Boolean)) {
-            const next = openAt(fd, segment, flags);
-            if (fd !== rootFd) closeSync(fd);
-            fd = next;
-          }
-          const rootStamp = stamp(fd);
+          const rootStamp = directory.stamp();
           async function walk(
-            dir: number,
+            dir: CandidateDirectory,
             prefix: string,
             rules: { base: string; matcher: Ignore }[],
           ) {
             signal.throwIfAborted();
-            sameDirectory(dir, prefix ? `${canonical}/${prefix.slice(0, -1)}` : canonical);
-            const before = stamp(dir),
-              entries = names(dir),
+            dir.verifyCanonicalPath(prefix ? `${canonical}/${prefix.slice(0, -1)}` : canonical);
+            const before = dir.stamp(),
+              entries = dir.entries(),
               configuration = entries.find((e) => e.name === '.gitignore');
             if (configuration) {
               if (configuration.type !== 8) throw new Error('file_candidate_ignore_invalid');
-              const cf = openAt(
-                dir,
-                '.gitignore',
-                constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-              );
+              const cf = dir.openIgnoreFile();
               try {
                 rules = [...rules, { base: prefix, matcher: await config(cf, signal) }];
               } finally {
-                closeSync(cf);
+                cf.close();
               }
             }
             const start = paths.length;
@@ -261,9 +159,9 @@ export function createTuiFileCandidates(
                 paths.push(path);
                 continue;
               }
-              let child: number | undefined;
+              let child: CandidateDirectory | undefined;
               try {
-                child = openAt(dir, e.name, flags);
+                child = dir.openDirectory(e.name);
                 await walk(child, `${path}/`, rules);
               } catch (error) {
                 signal.throwIfAborted();
@@ -273,28 +171,27 @@ export function createTuiFileCandidates(
                     error instanceof Error ? error.message : 'file_candidate_directory_unavailable',
                 });
               } finally {
-                if (child !== undefined) closeSync(child);
+                child?.close();
               }
             }
             try {
-              sameDirectory(dir, prefix ? `${canonical}/${prefix.slice(0, -1)}` : canonical);
+              dir.verifyCanonicalPath(prefix ? `${canonical}/${prefix.slice(0, -1)}` : canonical);
             } catch (error) {
               paths.splice(start);
               throw error;
             }
-            if (stamp(dir) !== before) {
+            if (dir.stamp() !== before) {
               paths.splice(start);
               throw new Error('file_candidate_directory_changed');
             }
           }
-          await walk(fd, '', []);
+          await walk(directory, '', []);
           const afterRoot = await root(scope, signal);
-          sameDirectory(fd, canonical);
-          if (stamp(fd) !== rootStamp || afterRoot !== canonical)
+          directory.verifyCanonicalPath(canonical);
+          if (directory.stamp() !== rootStamp || afterRoot !== canonical)
             throw new Error('file_candidate_workspace_changed');
         } finally {
-          if (fd !== rootFd) closeSync(fd);
-          closeSync(rootFd);
+          directory.close();
         }
         signal.throwIfAborted();
         saved = {

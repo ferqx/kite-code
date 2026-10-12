@@ -29,6 +29,8 @@ Linux stdio MCP 的同一正式 Source／connection Job／SDK Tool 已接[独立
 
 本次正式 Shell 共用三策略与独立 filesystem/network 请求语义，macOS 的 Seatbelt 已实际验证；Linux 源码接到 Bubblewrap 与 C socket/socketpair filter。平台 workflow 新增原/native Shell、共享审批/解析以及真实 `web_fetch` 准入测试，formal verifier 保留。Windows 正式 Shell backend 仍缺失，Bash AST 对 PowerShell/cmd 不取得识别资格；共享逻辑通过与平台 skip 都不能证明 native 支持。当前只在 macOS 验证，Linux/Windows 原生运行留后续 Actions，没有 dispatch，原 RSS/完整观测与阶段门禁保持。
 
+TUI 的 Workspace 文件候选现分派到私有 POSIX FD／Windows HANDLE 只读端口；公共 scope、完整分页、实际 `.gitignore`、取消和不读候选正文保持。它不使用 Shell 执行权限，也不导出 Agent 的私有 Files I/O。[CLI owner](../../apps/cli/README.md#开发-tui-workspace-文件候选)记录实际平台范围；完整候选、目录记录和平台原生测试在 transport 中分别运行，均早于仍缺 Windows 后端的 Shell 权限例。源码与本机 POSIX 结果不改变 Windows/Linux 原生、RSS、完整观测或正式阶段门禁。
+
 ## 历史实现与仍适用的安全约束
 
 旧实现验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite-service/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts

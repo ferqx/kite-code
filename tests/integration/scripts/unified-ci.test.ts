@@ -127,6 +127,16 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
           '      - run: bun run test:runtime:transport\n      - name: Complete MCP Tools caller',
         ),
     (s: string) => s.replace(command, 'echo shared caller'),
+    (s: string) => {
+      const candidates =
+        '      - name: Complete Workspace file candidates and original draft completion\n        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-file-candidates-host.test.ts\n';
+      return s
+        .replace(candidates, '')
+        .replace(
+          '      - run: bun run test:runtime:transport\n',
+          `${candidates}      - run: bun run test:runtime:transport\n`,
+        );
+    },
     ...[
       'apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
       'apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
@@ -138,6 +148,8 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
       'apps/cli/test/isolated/tui-skills-host.test.ts',
       'apps/cli/test/isolated/tui-permissions-host.test.ts',
       'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
+      'apps/cli/test/file-candidate-windows-records.test.ts',
+      'apps/cli/test/isolated/file-candidate-windows-native.test.ts',
       'apps/cli/test/isolated/tui-export-host.test.ts',
       'apps/cli/test/isolated/tui-question-pty.test.ts',
       'apps/cli/test/isolated/tui-caller-intents-host.test.ts',
@@ -178,6 +190,8 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
       'apps/cli/test/isolated/tui-skills-host.test.ts',
       'apps/cli/test/isolated/tui-permissions-host.test.ts',
       'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
+      'apps/cli/test/file-candidate-windows-records.test.ts',
+      'apps/cli/test/isolated/file-candidate-windows-native.test.ts',
       'apps/cli/test/isolated/tui-export-host.test.ts',
       'apps/cli/test/isolated/tui-question-pty.test.ts',
       'apps/cli/test/isolated/tui-caller-intents-host.test.ts',

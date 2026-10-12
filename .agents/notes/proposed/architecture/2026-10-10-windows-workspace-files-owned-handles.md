@@ -16,6 +16,12 @@ V1.3 的正式 CLI／TUI／Native 已从同一公开入口注册六个 Files 工
 
 Windows directory sync 只复核原目录身份，file flush 不声明 POSIX directory fsync 或断电持久性。源码和本机 POSIX 通过不能完成 Windows syscall、正式客户端、安装制品或崩溃持久性资格。当前完整合同归 [Files owner](../../../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)，实施证据归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)；原生验收未完成，本文保持 proposed。
 
+## TUI 文件候选的只读范围
+
+2026-10-13 的候选目录沿同一原父 HANDLE／身份／枚举 API 原则接入 CLI 私有只读后端，公共 TUI 继续核原 scope、ignore、完整分页和取消。它只需要实际名字与固定 `.gitignore` 的完整原 HANDLE 读取；不能以业务 `WorkspaceFiles.list/readBytes` 替代原目录使用权，也不从 `@kite-ai/agent/files` 导出私有 `WorkspaceFileIo` 或 writer／temporary 能力。现有普通 Files read 的 sharing 允许 DELETE／WRITE，而候选配置只读 owner 固定 deny WRITE／DELETE；故本片保留小型独立 host leaf，参考现有 ABI，未扩大包边界或改变 Files 写入／恢复合同。
+
+这项源码接线与 macOS 原完整候选窗口分别证明列明范围；Windows 实际 syscall／安装和全部 Workspace Files 验收仍未通过，本文保持 proposed。当前实现、类型／记录／原生测试入口归 [CLI owner](../../../../apps/cli/README.md#开发-tui-workspace-文件候选)，准确本机结果归[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13tui-文件候选的平台只读后端)。
+
 ## Alternatives considered
 
 - 仅删平台拒绝、改成普通路径 open／rename：不能绑定原父对象，也会弱化 reparse、祖先替换和原对象删除边界，不采用。

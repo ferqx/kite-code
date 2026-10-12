@@ -268,6 +268,17 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.run.trim().replace(/\s+/g, ' ') === required &&
                 unfiltered(step),
             );
+            const callerIndex = (file: string) =>
+              steps.findIndex(
+                (step) =>
+                  step.run === `bun test --parallel=1 --max-concurrency=1 ${file}` &&
+                  unfiltered(step),
+              );
+            const candidateFiles = [
+              'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
+              'apps/cli/test/file-candidate-windows-records.test.ts',
+              'apps/cli/test/isolated/file-candidate-windows-native.test.ts',
+            ];
             const completeCallers = [
               'apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
               'apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
@@ -278,7 +289,7 @@ export function checkUnifiedFormalConsumers(root: string): {
               'apps/cli/test/isolated/tui-mcp-cold-pty.test.ts',
               'apps/cli/test/isolated/tui-skills-host.test.ts',
               'apps/cli/test/isolated/tui-permissions-host.test.ts',
-              'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
+              ...candidateFiles,
               'apps/cli/test/isolated/tui-export-host.test.ts',
               'apps/cli/test/isolated/tui-question-pty.test.ts',
               'apps/cli/test/isolated/tui-caller-intents-host.test.ts',
@@ -291,13 +302,7 @@ export function checkUnifiedFormalConsumers(root: string): {
               'apps/cli/test/isolated/tui-models-host.test.ts',
               'apps/cli/test/isolated/tui-status-host.test.ts',
               'apps/cli/test/isolated/tui-scrollback-pty.test.ts',
-            ].map((file) =>
-              steps.findIndex(
-                (step) =>
-                  step.run === `bun test --parallel=1 --max-concurrency=1 ${file}` &&
-                  unfiltered(step),
-              ),
-            );
+            ].map(callerIndex);
             const transport = steps.findIndex(
               (step) => step.run === 'bun run test:runtime:transport' && unfiltered(step),
             );
@@ -312,6 +317,11 @@ export function checkUnifiedFormalConsumers(root: string): {
               caller < 0 ||
               completeCallers.some((index) => index <= build || index >= caller) ||
               completeCallers.some((index) => index >= transport) ||
+              candidateFiles.some(
+                (file) =>
+                  callerIndex(file) >=
+                  callerIndex('apps/cli/test/isolated/tui-permissions-host.test.ts'),
+              ) ||
               job.if !== undefined ||
               job['runs-on'] !== `\${{ matrix.os }}` ||
               !['macos-15', 'ubuntu-24.04', 'windows-2025'].every(

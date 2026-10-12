@@ -5564,3 +5564,20 @@ code-simplification有界源码审查另定位两处实质冗余：[Web factory]
 | 2 | 原Client→HTTPService→Runtime→Store生命周期RSS真实超限，native live owner仍未知。定位真实归属并修复后按原负载、八outer／九点、32MiB与60—168分钟验收，原红不抹去，不再重复参数对照。 |
 | 3 | Win/Linux正式安装、真代码切换、MCP连接／调用／取消／退出、维护恢复及保数据卸载仍需后续Actions／用户Windows实机证据。已有接线与backend缺项保留；本机不触发Actions或授资格。 |
 | 4 | §35全部适用能力／T/E与独立迁移审查、最终legacy／依赖退役仍依赖上述条件；收束点须核最终准确输入与完整回归。本轮默认0不宣布阶段退出，37能力仍partial／wholeV13=false／phaseExit=false。ChatGPT官方授权与Responses继续按已确认顺序在V1.3之后，Codex直接复用仍保门禁。 |
+
+
+## 2026-10-13：TUI 文件候选的平台只读后端
+
+状态：partial；上一片正常提交 `3637cee2`，本轮没有重复 RSS／观测参数窗口。用户截图的真实 `native_draining` 退出误弹已由 `e0331890` 修复；当前相关源码、原窗口和读取归属断言与该修复一致，复用其原 40 项效果／零退出弹窗、Electron 与所属 Service 正常0，以及14例／112断言证据，不把截图当故障注入或以进程退出代替界面断言。
+
+本轮实际源码缺口是正式 TUI `@` 读取端口只用 POSIX FFI。现由私有平台端口分派原 POSIX FD 与 Windows 原 HANDLE；公共 Store／Session／Workspace 来源、实际 `.gitignore`、完整目录／200项分页、取消、迟到隔离、原草稿及不读候选正文保持。POSIX 七个原生函数和 scope／rank 原文搬移，旧公共层直接选择 libc 的路径退役；原完整测试与驱动、23个Bun expect和全部预算不改。
+
+仓库已有普通 Files 的 Windows `NtCreateFile.RootDirectory`／身份／枚举实现；本片参考其ABI，不能将先前仅审查 platform 文件的结论扩大为全仓没有原语。业务公开工厂没有 retained directory／原始EOF接口，私有 WorkspaceFileIo 的普通 read sharing 与此配置读取不同，故本片只增加 CLI 的私有只读 leaf，不扩大 Agent 公共文件接口、复制工具语义或装入 writer／SID／恢复政策。原祖先、volume／128-bit FileID、原父 HANDLE 相对打开、reparse／device拒绝、完整UTF-16目录记录、实际ignore EOF和关闭未知组成源码边界；本机不执行或假称Windows原生成功。
+
+transport 保每个原完整命令，新记录／原生验证及原候选文件分别运行，并移到 Shell 权限例前，避免已知 Windows Shell 缺项阻止独立读取验证。CI guard保原全部反例，新增准确命令及先后关系；不 push、不 dispatch Actions。Windows Shell 合同、普通 Files／私有 Profile、原 RSS／完整观测和§35门禁保持。
+
+实施前后分别运行原完整候选文件：实际0／1pass／23expects／8.33秒和实际0／1pass／23expects／8.39秒，后者日志 `/private/tmp/kite-file-candidates-backend-after-20261013.log`。原测试及driver字节与HEAD一致，605项穷尽、unsafe子树、原草稿／迟到隔离、零POST和正常所属退出保留。新增记录整文件实际0／3pass／24expects；原生文件在macOS仅一个明确nonWin平台skip，未计资格。CI原完整文件实际0／21pass／316expects；根及八workspace类型、CLI构建、改动格式、边界／workspaces／API／测试归属／plan／docs／impact全部实际0。
+
+独立只读审查核最终准确SHA，无剩余必要修改；草稿中的mixed separator／device和无契约64／128身份比较已修正，没有用删除原断言、过滤或时间放宽绕过。Windows leaf `e1f5cbf5a6770ccbe41c5c91941882d23f4f674e68bb8439ec6183674ab5ba7e`；POSIX leaf `6332d20dc0806ed3e133e62388926334f5f8f7c0d5cc3a4ddb422b9bb5cffb39`。产品指南、CLI owner、平台active、测试入口、原Note和对应能力partial同步；iteration_complete／stage／commit核本片范围，正常hook独立执行。
+
+复用上一片默认729文件／589主作业全0只覆盖未变输入，不代证新平台端口，本片不再重复完整默认。新增接线是正式TUI到平台只读端口，尚未称Windows完整能力闭合。Windows后端当前只覆盖x64本地盘符，UNC／其他架构明确拒绝；真实Windows/Linux及全部故障收尾仍交后续Actions／用户系统。原Windows Shell、RSS真实超限、可信全资源／出生后代观测及§35最终审查／退役／收束回归仍阻阶段退出，wholeV13=false／phaseExit=false，Goal active，仅本地提交。
