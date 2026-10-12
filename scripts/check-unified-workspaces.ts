@@ -254,7 +254,7 @@ export function checkUnifiedFormalConsumers(root: string): {
           );
           if (name === 'runtime-transport-qualification.yml') {
             const required =
-              'bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-drafts-host.test.ts apps/cli/test/isolated/file-recovery-argv.test.ts tests/isolated/unified-agent/extension-upgrade.test.ts';
+              'bun test --parallel=1 --max-concurrency=1 apps/cli/test/file-recovery-pty.test.ts apps/cli/test/isolated/tui-drafts-host.test.ts apps/cli/test/isolated/file-recovery-argv.test.ts apps/cli/test/isolated/tui-file-recovery.test.ts apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts apps/cli/test/isolated/tui-file-recovery-scopes.test.ts apps/cli/test/isolated/tui-file-recovery-crash.test.ts tests/isolated/unified-agent/extension-upgrade.test.ts';
             const unfiltered = (step: Record<string, unknown>) =>
               step.if === undefined &&
               step['working-directory'] === undefined &&

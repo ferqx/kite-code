@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
@@ -120,7 +120,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ...env, HOME: home },
+        env: { ...env, HOME: home, ...(process.platform === 'win32' ? { USERPROFILE: home } : {}) },
       }),
   });
   try {
@@ -212,5 +212,13 @@ export async function compileFileRecoveryTUI(root: string, runner: string) {
     outdir: root,
     target: 'bun',
     external: ['ink', 'react', 'react-devtools-core'],
+    plugins: [
+      {
+        name: 'fixture-file-url',
+        setup(build) {
+          build.onResolve({ filter: /^file:/ }, ({ path }) => ({ path: fileURLToPath(path) }));
+        },
+      },
+    ],
   });
 }

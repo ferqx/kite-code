@@ -5077,3 +5077,27 @@ PTY实录显示首次替换连接已ready、原RPC四次、Model零调用，但�
 三端 transport workflow现准备后构建当前八workspace，完整执行草稿／CLI Files／E13；守卫和原mutation文件拒绝漏任何一文件、删任一平台、测试名过滤、跳过步骤／job及缺当前构建。原platform workflow已覆盖权限文件，不新增重复矩阵。当前五个调用者与正式权限链整文件actual0／23pass／340expects／32.330秒，含草稿26断言与E13完整替换链9021ms、实际macOS三策略Shell及web_fetch审批；日志 `/private/tmp/kite-portable-formal-callers-settled.log` SHA `cd7e35346fa415df0709f968963bdea66c0be4ef2028727e9d4866d9675c3025`。原源码外完整制品actual0／1pass／67expects／2.900秒，日志 `/private/tmp/kite-portable-built-package-settled.log` SHA `0c71af284bf347acfb89d6401503a03e503c48736f48ed01a6ce84ed796b792d`，保SQLite Worker／Shell／MCP guardian／WASM／Web／Skills／paired全部原断言。
 
 产品手册的三策略和极危险拒绝已核对，生产边界只修Agent路径解析，Service无新权限逻辑；Task owner两处滞后“嵌套／followup after_turn尚未实现”已按同页当前源码与既有真实证据同步，不派生重复功能。根及八workspacetypes、build、边界／workspace／API／ownership／文档及计划门禁通过。未触及范围复用607be489的原完整macOS默认证据，本轮未重跑整仓默认或宣布整体完成；Win/Linux原生、Windows Shell、RSS与完整观测继续保留，37能力仍partial、wholeV13=false／phaseExit=false，无push／PR／发布／Actions触发。本地提交hook仍独立执行。
+
+## 2026-10-12：Files 恢复 TUI 完整能力三端测试接线
+
+前片 `075e959327a643ba99e98b2e2e44856e51b0195e` 已正常本地提交并结束。本轮直接实施最高依赖的共享测试缺口：`/rewind` 的目录／完整详情、session／code／both、独立 Ask、明确第二 Fork、Code与Fork真实POST及首GET物理丢回执、两个宿主和Service强杀窗口、冷只读原申请、正常退出。四个原完整文件共用 [Bun PTY／ConPTY 驱动](../../apps/cli/test/fixtures/file-recovery-pty.ts)，退役其 Python／ioctl／killpg 专用驱动；业务生产源码、权限策略与恢复格式未变，方法归 [CLI Files owner](../../apps/cli/README.md#files-三范围恢复-caller)。
+
+四份原 Bun 断言、失败诊断／cleanup尾段、70／80秒整例预算与真实fetch／丢响应实现逐字全等；每次等待20秒和正常退出10＋3秒仍在共享驱动中执行。强杀前后分别核原Service存活／消失、host exit与PTY EOF，POSIX所属进程组、Windows宿主子树使用各自实际原语，关闭旧PTY后才冷重开。冷Code／Fork request深相等、Fork未开始、wire零POST与正常exit0保持。[三端workflow](../../.github/workflows/runtime-transport-qualification.yml)保原平台、prepare与当前八workspace build，追加全部四文件和画面回归；guard拒绝逐一漏文件、过滤、skip与漏构建，无本轮dispatch。
+
+实际失败按原事实保留：第一次6fail发生在Bun1.4.2不能直接解析生成入口file URL，修test-only编译resolver后1pass／5fail，暴露长卡标题／默认none在24行viewport上方和SIGKILL后exitCode仍null的问题。`host.exited` 独立记录死亡；当前画面改读headless解析后的完整active buffer。中间将同一次输入后raw输出补入候选虽6pass，复核证实会接纳已清除旧render，故移除该补充，不将该绿作为最终画面契约证据。[新增必要回归](../../apps/cli/test/file-recovery-pty.test.ts)只核本次真实过期画面和长卡错误，有／无2026同步标记均保完整当前画面与旧内容消失。初次回归夹具缺allowProposedApi的1fail也保留，补正确选项后通过，没有删断言、改业务或放宽预算。
+
+最终macOS完整受影响消费者命令实际exit0，11文件／17pass／209expects／38.210秒，覆盖全部编译／warm fixture消费者、草稿及E13，日志 `/private/tmp/kite-files-tui-portable-consumers-final.log` SHA `4144211c4c6956f08cd680bc517fec431be97ef36d8edb3404218e34b5cf008e`。画面回归及原CI整文件实际exit0，22pass／222expects／0.905秒，日志 `/private/tmp/kite-files-tui-portable-guards-corrected.log` SHA `e07cddbde42e7baa2aa5551655faf6976eb93360228a94179301d913e7934178`。原四TUI单独最终契约窗口6pass／46expects／12.480秒；后续完整11文件再次覆盖相同全部场景。
+
+收据 `/private/tmp/kite-files-tui-portable-receipt.json` 核3833份代码／配置输入与HEAD在最终窗口全等、四份原断言／预算／真实fetch逐字保全；验证后仅formatter折叠一个条件表达式换行，TypeScript非trivia token全等另存同收据。原红、各次修正及最终日志SHA均保留。075e9593的全部CLI owner原114文件／80作业证据仅复用于未变范围；本轮新回归及受影响fixture／CI全部重验，没有把两轮相加称为当前全仓完整回归。生产／依赖／构建输入未改，复用前片八workspace build，当前根与八workspacetypes、边界／workspace／API／ownership／文档及计划门禁按本轮diff执行，普通提交hook独立执行。
+
+源码核对剩余五项退出阻塞，依赖顺序保持：
+
+| 顺序 | 实际用户入口、完整行为与验收 |
+| --- | --- |
+| 1 | 其他共享TUI能力仍受POSIX夹具限制：[/recovery](../../apps/cli/test/isolated/tui-recovery-host.test.ts)需原Run／Interrupt／Report、物理丢回执、两次强杀冷原GET与effect once；[/theme／language](../../apps/cli/test/isolated/tui-preferences-host.test.ts)需保存失败恢复读、Unicode粘贴、冷持久化与paired／shared退出；[/mcp](../../apps/cli/test/isolated/tui-mcp-connection-pty.test.ts)需暖创建／复用、冷原连接零重放、独立审批及paired排空／shared detach。移植完整入口与原30／40／180秒预算后进入同一三端命令，不能只替换一个操作。 |
+| 2 | 正式Shell／Task／MCP原持续负载RSS仍红：九点 `178814976→299614208B`，`+115.203125MiB>32MiB`。实际native allocation owner与原负载／阈值须闭合，不重复参数对照。 |
+| 3 | 同一完整Runtime出生后代、activeResources／handles producer仍缺。完整真实来源经原formal verifier核实前保unsupported／null，部分Job树／coalition／FD不能代全集。 |
+| 4 | Win/Linux原生安装、真实版本切换、MCP、维护恢复、保数据卸载和Windows Shell原合同后端。实际Actions／用户Windows验收必须满足原完整断言；当前源码和macOS绿不算平台资格，缺后端仍fail closed。 |
+| 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归依赖前述适用门禁闭合。当前37能力仍partial、wholeV13=false／phaseExit=false，不提前删除或宣布阶段退出。 |
+
+新增闭合范围是Files完整TUI测试的三端源码接线与实际macOS合同验证；本轮没有新正式业务authority迁移或生产旧路径退役。平台专项Unix socket与macOS Shell原生测试仍保各自平台条件，不靠删平台限定假称三端支持。RSS／完整观测及Win/Linux实际资格继续未闭合，无push／PR／发布／Actions触发。

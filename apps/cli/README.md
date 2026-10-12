@@ -337,7 +337,11 @@ kite caller lookup <sessionId> --input '<directory 中的完整原 intent JSON>'
 
 `files.restore` 输出完整冻结 intent 与原 outcome；所有请求成功 exit 0、失败 exit 1、pending/unknown/部分完成 exit 2。EOF/信号只停止本地读取，不发取消 Job/Run。TUI 共用同一 host，renderer 不持 profile/token/文件权限，操作见 [TUI 恢复指南](../../docs/handbook/clients/tui/guides/cancellation-and-recovery.md)。
 
-实际 [argv 三范围](test/isolated/file-recovery-argv.test.ts)、[CLI SIGKILL](test/isolated/file-recovery-crash.test.ts)、[物理丢回执](test/isolated/file-recovery-lost-replies.test.ts) 与 [第二 leg 漂移](test/isolated/file-recovery-second-leg-drift.test.ts) 使用源码外 compiled argv/default compiled Service、独立 HOME/profile、真实 SQLite/SDK 和固定兼容 Provider。真实 [80×24 PTY](test/isolated/tui-file-recovery.test.ts)、[另外两范围](test/isolated/tui-file-recovery-scopes.test.ts)、[TUI 丢回执](test/isolated/tui-file-recovery-lost-replies.test.ts) 与 [TUI SIGKILL](test/isolated/tui-file-recovery-crash.test.ts) 验证目录/三范围选择、独立 Ask、原 GET 与明确第二 leg；宿主编译保留已安装 Ink/React 依赖，不以 TS fallback 代替编译窗口。资格限本机 macOS，不代表正式旧 TUI 切换、Native 或其他平台；Files 捕获范围由业务 owner 定义，不能扩称 Shell/外部编辑的完整 workspace snapshot。
+实际 [argv 三范围](test/isolated/file-recovery-argv.test.ts)、[CLI SIGKILL](test/isolated/file-recovery-crash.test.ts)、[物理丢回执](test/isolated/file-recovery-lost-replies.test.ts) 与 [第二 leg 漂移](test/isolated/file-recovery-second-leg-drift.test.ts) 使用源码外 compiled argv/default compiled Service、独立 HOME/profile、真实 SQLite/SDK 和固定兼容 Provider。真实 [80×24 PTY](test/isolated/tui-file-recovery.test.ts)、[另外两范围](test/isolated/tui-file-recovery-scopes.test.ts)、[TUI 丢回执](test/isolated/tui-file-recovery-lost-replies.test.ts) 与 [TUI 强杀冷恢复](test/isolated/tui-file-recovery-crash.test.ts) 验证目录/三范围选择、独立 Ask、原 GET 与明确第二 leg。
+
+四份 TUI 文件共用 [Bun PTY／ConPTY 驱动](test/fixtures/file-recovery-pty.ts)，保全部原业务断言及每次等待20秒、正常退出10＋3秒、整例70／80秒预算。当前卡片以 headless 解析后的完整终端缓冲判定，包含超过24行的正文；同一次输入后已清除的旧 render 不能满足等待，审批排除条件也检查完整当前画面。仅原 `material` 断言读完整输出流；[画面回归](test/file-recovery-pty.test.ts)核长卡与有／无同步标记的清屏效果。强杀前核原 Service PID 存活，POSIX 杀所属进程组、Windows `taskkill /t /f` 杀宿主子树，并分别核宿主退出、PTY EOF 与原 Service 消失；关闭旧 PTY 后冷启动，保两腿完整请求相等、Fork未开始及冷读取零POST。正常 Ctrl+Q 必须 exit0 与完整EOF。平台差异只在这些原语，HOME与Windows USERPROFILE均属独立临时数据。
+
+宿主编译保留已安装 Ink/React 依赖，不以 TS fallback 代替编译窗口；[编译夹具](test/fixtures/file-recovery-profile.ts)将生成入口的标准 file URL 解析回本机路径，依赖目录在 Windows 用 junction。[三端 transport workflow](../../.github/workflows/runtime-transport-qualification.yml)构建当前八workspace后执行全部四文件与画面回归，不删断言或过滤场景。本机资格仍限 macOS，Win/Linux 原生待后续 Actions，不代表正式旧 TUI 切换、Native 或阶段退出；Files 捕获范围由业务 owner 定义，不能扩称 Shell/外部编辑的完整 workspace snapshot。
 
 ## 正式前门与 Native 登记
 
