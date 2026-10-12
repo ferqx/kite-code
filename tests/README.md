@@ -199,6 +199,8 @@ Windows另接[安装版本／维护完整caller](fixtures/unified-agent/windows-
 
 [当前会话 Auto 窗口](../apps/desktop/test/isolated/native-auto-approval-bundle.test.ts)构建完整 Native＋Terminal，搬迁并删除原输出后沿原 Composer／Approval／ToolActivity 验证实际批准、拒绝、转人工、无效结果和准确停止；本机固定 Provider 持有原审查，核 Store／Session／Execution／任务与参数，停止后才释放迟到批准。原文件效果、两个人工 answer、普通退出后五条冷记录及零重复调用分别核实，最终再以公开 Store 只读核原 ID 和终态。夹具按原写入卡 `.tool-edit-heading` 定位，失败会释放所属审查以收尾而保留原断言；120秒整例、45秒 driver 和10秒 UI 时限保持。它是 macOS 当前 Store 的产品路径验证，不代替全恢复／installed／其他平台；实际输入与失败见[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原会话权限停止与自动审批闭环)。
 
+[冷审核恢复](../packages/agent/test/isolated/recovery/run-resume-review-ownership.test.ts)使用真实子进程留下已结算的审核及失去 owner 的原 Run。seed 完整写闭同目录临时文件后才发布原 ready，父仍在原五秒内观察并真实停止所持 child，不能以空文件存在代替完整 Store ID。异常独立关闭已取得的冷 Store／DB，保留原错误、ready 字节与可取得的 metadata；原 identity／proof／generation、13 个静态断言和每例十秒期限保持。临时目录及 URL 转换使用标准平台接口，Windows/Linux 原生资格仍后置；本机原并发完整回归和唯一控制复现的准确范围归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前默认回归与冷审核恢复交接)。
+
 ## 显式命令与 CI
 
 原 [交互历史 DOM](../apps/desktop/test/isolated/native-interaction-history-dom.test.tsx)核通用 JSON 答案、取消、准确反馈、只读按钮与迟到范围；[Main reader](../apps/desktop/test/native-interaction-history.test.ts)核43项分页、child 原关系、变化拒绝和历史／当前审批附件资格隔离。[真实 HTTP](isolated/unified-agent/client-interactions.test.ts)另核实际 child 卡和 Core 通用问题的原答案／受理、游标与效果不增长。原默认窗口保首次／冷读，计划历史原字节从已验证完整附件读取，不把格式化 Markdown 的显示文本当源字节。邻接附件 fixture 等实际通知读取失败／恢复后才断言，原拒绝、零写入和期限保持；准确失败与通过归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。

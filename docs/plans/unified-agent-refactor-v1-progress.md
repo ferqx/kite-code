@@ -5541,3 +5541,26 @@ code-simplification有界源码审查另定位两处实质冗余：[Web factory]
 | 2 | 原公共Client→HTTPService→Runtime→Store生命周期RSS真实超限，native live owner仍未知。修复真实归属后按原负载、九点／八outer／32MiB和60—168分钟门禁验收；原红保持，不重复参数对照。 |
 | 3 | Win/Linux正式安装、真代码A→B→回退、MCP连接／调用／取消／退出、维护恢复和保数据卸载仍须后续Actions／用户Windows实机实证，原Shell／script verifier／文件候选后端失败保留；不触发Actions。 |
 | 4 | §35全部适用能力／T/E／安全／资源条件、最终旧源码及依赖退役和最终当前完整回归依赖上述门禁。37能力仍partial，wholeV13=false／phaseExit=false；本片不提前宣布阶段退出。 |
+
+## 2026-10-13：当前默认回归与冷审核恢复交接
+
+状态：partial。上一轮说明退出误弹修复并复核原证据，没有新增实现。本轮按当前源码核对退出依赖；两份独立只读核对没有找到新的 macOS 正式安装、版本切换或维护入口缺口。原 Source 异常窗口的 Service14244 仍缺当时退出事实，当前正常窗口不补认该历史证据。完整 Runtime 后代和 Bun counters 也不能由更多局部 owner 收据或 FD 代替；原资源与 RSS 门禁保持。
+
+当前 `c01d00ae` 的 Native／Web 修改尚无同输入完整默认，故运行原 `bun run test`，不加过滤、skip 或预算。首轮实际1／669.988秒，729文件／589作业计划中360作业已派发并全部drain，359通过、1失败，229未派发；3863份非Markdown代码／配置输入零漂移。真实失败为[冷审核恢复](../../packages/agent/test/isolated/recovery/run-resume-review-ownership.test.ts)第二种failed/unavailable fixture在原断言前报 `store_identity_mismatch`。日志 `/private/tmp/kite-v13-current-default-20261013-test.log` 和 result 保留，不能称该轮完整通过。
+
+生产 Store 在 FULL事务提交后才返回metadata，Worker open ACK及后续读取同一连接；未找到跨Store或未持久就返回的源码路径。fixture却直接创建最终ready再写Store ID，父只核存在便真实SIGKILL，再读取ID；该交接允许空／部分ID被原identity正确拒绝。原catch删根，旧失败字节已丢失，不能把推断当现场结论。唯一有界 `/tmp` 控制暂停原创建到写正文之间，实际原ready为 `""`，原guard报同code并退出1；修后同暂停相位由ready.tmp完整写闭、rename发布，原failed完整冷链实际0／1pass／11expects／187ms。不新增仓库镜像case、参数矩阵或身份读取重试，不追认旧字节。
+
+本轮唯一代码改动是该fixture：完整写闭同目录ready.tmp后发布原ready；tmpdir／fileURLToPath／pathToFileURL替代Mac路径；spawn立即观察原exited的结算，早退／停止／异常收尾不以exitCode或signalCode的null推断活性。已打开的冷DB与Store在失败时分别关闭，保原失败和cleanup errors，保留root及实际ready／metadata诊断。原所持Bun child强杀、原Store/proof/owner generation、两种settled审核与unsettled反例均保持；13个静态expect链及顺序、两处五秒观察、两个十秒test定义（循环展开三例）全等。最终原整文件actual0／3pass／24expects／500ms，Agent types与单文件Biome0；最终SHA805fb68dcbe05933949bf7b28ebd747086ecb6371ecab91357155569ed5df883。独立非参与者只读审查核同目录publication、原guard及清理；这不承诺断电持久或故障清理全集。Windows原生kill／生成seed模块解析未在本机执行，不以一般接口文档授平台资格。
+
+修后第二轮原完整 `bun run test` actual0／1451.851秒，729文件／589作业全部实际完成：582并发、7独占，分类168parallel／554isolated／7exclusive；未派发0、main job失败0，3863份代码／配置输入零漂移。该次冻结HEAD仍为c01d00ae、仅上述test dirty；日志 `/private/tmp/kite-v13-current-default-20261013-second-test.log` SHA69bb9871fdc6c512ce07adc68a59f60656ec73a76dd70c1f0d482f74e7b5af44，freeze／result保存准确输入及终态。原Native误弹窗口、Web/权限、正式安装、实际版本切换、维护中断恢复和所有原默认消费者均随原计划执行；不能把runner自测故意非零的内部子作业当main失败，也不能用此默认0替代formal资源／平台资格。
+
+本轮没有新增产品权限、正式caller切换或旧生产路径退役。补齐的是当前默认集成证据和冷审核恢复验证的可靠交接／失败资源收尾。手册与Agent owner的产品identity、审核和恢复合同核对保持，不制造行为不变的diff；测试入口同步实际方法。本轮普通本地提交只含一份测试和两份文档，正常hook保留，无push／PR／发布／Actions。
+
+剩余退出依赖继续按顺序保留：
+
+| 顺序 | 实际入口、完整行为及验收 |
+| --- | --- |
+| 1 | 普通任务完成／取消／Runtime停止的完整资源观测仍缺可信Bun activeResources／handles和完整出生后代来源。需要真实runtime接口／完整原生覆盖及准确terminal交接，原formal拒绝、Source旧异常事实缺失保持；不能用已知PID、FD或局部收据解除。 |
+| 2 | 原Client→HTTPService→Runtime→Store生命周期RSS真实超限，native live owner仍未知。定位真实归属并修复后按原负载、八outer／九点、32MiB与60—168分钟验收，原红不抹去，不再重复参数对照。 |
+| 3 | Win/Linux正式安装、真代码切换、MCP连接／调用／取消／退出、维护恢复及保数据卸载仍需后续Actions／用户Windows实机证据。已有接线与backend缺项保留；本机不触发Actions或授资格。 |
+| 4 | §35全部适用能力／T/E与独立迁移审查、最终legacy／依赖退役仍依赖上述条件；收束点须核最终准确输入与完整回归。本轮默认0不宣布阶段退出，37能力仍partial／wholeV13=false／phaseExit=false。ChatGPT官方授权与Responses继续按已确认顺序在V1.3之后，Codex直接复用仍保门禁。 |

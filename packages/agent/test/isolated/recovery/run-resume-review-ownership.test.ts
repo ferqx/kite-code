@@ -5,10 +5,13 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -103,7 +106,7 @@ async function seed(root: string, failed: boolean) {
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     ...base,
@@ -124,36 +127,45 @@ async function seed(root: string, failed: boolean) {
     if (Date.now() > end) throw Error('review_fixture_timeout');
     await Bun.sleep(5);
   }
-  writeFileSync(join(root, 'ready'), expectedStoreId);
+  writeFileSync(join(root, 'ready.tmp'), expectedStoreId);
+  renameSync(join(root, 'ready.tmp'), join(root, 'ready'));
   await new Promise<void>(() => {});
 }
 
 async function fixture(failed: boolean) {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-resume-review-owner-'));
-  const imports = ['runtime', 'sqlite', 'artifacts'].map(
-    (name) => new URL(`../../../src/${name}.ts`, import.meta.url).pathname,
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-resume-review-owner-')));
+  const imports = ['runtime', 'sqlite', 'artifacts'].map((name) =>
+    fileURLToPath(new URL(`../../../src/${name}.ts`, import.meta.url)),
   );
   const script = join(root, 'seed.ts');
   writeFileSync(
     script,
-    `import {join} from 'node:path';import {writeFileSync} from 'node:fs';import {createRuntime} from ${JSON.stringify(imports[0])};import {openSqliteStore} from ${JSON.stringify(imports[1])};import {createArtifactStore} from ${JSON.stringify(imports[2])};await (${seed.toString()})(${JSON.stringify(root)},${failed});`,
+    `import {join} from 'node:path';import {writeFileSync,renameSync} from 'node:fs';import {pathToFileURL} from 'node:url';import {createRuntime} from ${JSON.stringify(imports[0])};import {openSqliteStore} from ${JSON.stringify(imports[1])};import {createArtifactStore} from ${JSON.stringify(imports[2])};await (${seed.toString()})(${JSON.stringify(root)},${failed});`,
   );
   const child = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+  let childSettled = false;
+  void child.exited.then(() => {
+    childSettled = true;
+  });
   const deadline = Date.now() + 5000;
+  let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  let db: Database | undefined;
   try {
     while (!existsSync(join(root, 'ready'))) {
-      if (child.exitCode !== null || Date.now() > deadline) {
-        child.kill('SIGKILL');
+      if (childSettled || Date.now() > deadline) {
+        if (!childSettled) child.kill('SIGKILL');
         await child.exited;
         throw Error(await new Response(child.stderr).text());
       }
       await Bun.sleep(5);
     }
-    child.kill('SIGKILL');
+    if (!childSettled) child.kill('SIGKILL');
     await child.exited;
     const profile = { dataRoot: join(root, 'data'), profile: 'test' };
-    const store = await openSqliteStore(profile);
-    const db = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
+    store = await openSqliteStore(profile);
+    db = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
+    const ownedStore = store,
+      ownedDB = db;
     const expectedStoreId = readFileSync(join(root, 'ready'), 'utf8');
     const target = db
       .query("SELECT * FROM execution WHERE adapter_id='effect'")
@@ -166,7 +178,7 @@ async function fixture(failed: boolean) {
       .get(carrier.id) as ExecutionRow;
     const payload = JSON.parse(carrier.intent_json);
     const proof = () =>
-      store.getAuthorizationReview({
+      ownedStore.getAuthorizationReview({
         expectedStoreId,
         targetExecutionId: target.id,
         reviewExecutionId: carrier.id,
@@ -190,7 +202,7 @@ async function fixture(failed: boolean) {
       checkpoint: state.checkpoint!,
     });
     const commit = () =>
-      store.commitRunResume({
+      ownedStore.commitRunResume({
         expectedStoreId,
         lease: begun.lease!,
         checkpoint: state.checkpoint!,
@@ -207,17 +219,55 @@ async function fixture(failed: boolean) {
       commit,
       lease: begun.lease!,
       async close() {
-        db.close();
-        await store.close();
+        ownedDB.close();
+        await ownedStore.close();
         rmSync(root, { recursive: true, force: true });
       },
     };
   } catch (error) {
-    if (child.exitCode === null) {
-      child.kill('SIGKILL');
-      await child.exited;
+    const cleanupErrors: unknown[] = [];
+    const diagnostic: Record<string, unknown> = { root, failed, failure: String(error) };
+    try {
+      if (existsSync(join(root, 'ready'))) {
+        const bytes = readFileSync(join(root, 'ready'));
+        diagnostic.ready = { base64: bytes.toString('base64'), utf8: bytes.toString('utf8') };
+      }
+      if (db)
+        diagnostic.metadata = db.query('SELECT store_id FROM storage_meta WHERE singleton=1').get();
+    } catch (observationError) {
+      diagnostic.observationError = String(observationError);
     }
-    rmSync(root, { recursive: true, force: true });
+    try {
+      if (!childSettled) child.kill('SIGKILL');
+      diagnostic.childExitCode = await child.exited;
+      diagnostic.childSignalCode = child.signalCode;
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    try {
+      db?.close();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    try {
+      await store?.close();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    try {
+      writeFileSync(
+        join(root, 'failure.json'),
+        JSON.stringify({ ...diagnostic, cleanupErrors: cleanupErrors.map(String) }),
+      );
+    } catch (receiptError) {
+      cleanupErrors.push(receiptError);
+    }
+    console.error('review_owner_fixture_failed', root);
+    if (cleanupErrors.length)
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        'Review ownership fixture cleanup failed',
+      );
     throw error;
   }
 }
