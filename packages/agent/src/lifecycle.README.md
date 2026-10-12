@@ -18,4 +18,6 @@ cancel 路径封住新工作，并复用原 owner 范围内的清理链。封门
 
 macOS Store close 现另等原 Worker 的 Mach 权终态及准确释放，SQLite ACK 与线程停止分开核实。原身份、终态或释放未确认同样使共享关闭失败并保原 Profile 锁；详细职责和跨平台未知归[Store owner](storage/README.md#store-关闭未确认时的锁归属)，不把这个局部线程事实当作完整 Runtime 资源资格。
 
+默认普通 Web Tool的解析资源也通过[Agent Web binding](tools/web-fetch/README.md)归属原 Run disposer。Tool已保存 outcome_unknown、permit已释放时，原 scope清理失败仍保 Run binding lease，关闭返回 `shutdown_cleanup_unconfirmed`并进入 `drain_failed`，不能提前关闭Store或交接维护锁。该接线复用既有生命周期检查；被动配置准备不取得Web parser scope，不把尚未返回配置时的通用assembly清理失败一并宣称闭合。
+
 验证使用 [lifecycle.test.ts](../test/isolated/execution/lifecycle.test.ts) 中真实可丢弃的 SQLite Worker、固定本机模型和明确 barrier。unknown Job fixture 不含外部进程；只有在证明生产关闭失败和资源保留之后，测试收尾才显式关闭其原 Store。Store strict-close 未确认时的原锁交接与 owned child 实际退出后的维护／冷读见 [Store owner](storage/README.md#store-关闭未确认时的锁归属)；该失败不能因 terminate 请求被提升为资源已关闭。

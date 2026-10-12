@@ -1,6 +1,6 @@
 # 普通 Web Fetch 工具
 
-`@kite-ai/agent/web-fetch` 导出 `createWebFetchExtension`、`createPinnedWebNetworkPort`、`createPassiveWebExtractor` 及中立的宿主 port。导入和注册均不会解析 DNS、启动 Worker 或打开 socket。`builtin.web@1` 只注册 `web_fetch@1`；Core 必须授权并派发这个普通 Tool。远端内容和宿主资源准入都不能赋予 Tool 权限。
+`@kite-ai/agent/web-fetch` 导出 `createWebFetchExtension`、`createWebFetchBindingFactory`、`createPinnedWebNetworkPort`、`createPassiveWebExtractor` 及中立的宿主 port。导入和注册均不会解析 DNS、启动 Worker 或打开 socket。`builtin.web@1` 只注册 `web_fetch@1`；Core 必须授权并派发这个普通 Tool。远端内容和宿主资源准入都不能赋予 Tool 权限。
 
 输入是封闭的 `{url, max_chars?, timeout_ms?}`，默认返回完整正文。只有显式传入正整数 `max_chars` 才选择正文前缀，并通过 `details.truncated` 记录这一选择。没有 8K/16K 文本上限，也没有合法跳转次数上限；规范化 URL 构成的真实循环会失败，每个实际跳转都重新准入。URL user-info 和 metadata 名称被拒绝。响应解析的安全边界为实际解码后 5,000,000 字节，支持的 gzip/deflate/br 解压后也受此边界约束；这是单次响应的解析边界，不是累计 Run/Artifact 预算。默认 15 秒超时从 Tool 入口开始，覆盖 parser asset 校验、robots、域名队列、传输和解析；较长的显式超时使用分段计时器。取消释放本请求的 socket/Worker，不据此宣称远端服务器的工作已停止。
 
@@ -13,6 +13,10 @@ robots 检查保留原 owner 基线：最多读取 500 KB 完整规则文本，�
 parser 在自有 Bun Worker 中使用被动 JSDOM/Readability/Turndown，不执行脚本、不加载子资源、不转发 DOM 诊断。构建生成 `dist/tools/web-fetch/extractor-worker.js` 及 `extractor-worker.sha256`。源码运行同样定位这个已构建 asset，没有 TypeScript/raw parser 回退。asset 缺失或 SHA 不匹配会在网络 I/O 前局部失败，parser 身份写入 result details。macOS 的结果、原错误或准确取消在[原 Worker owner](../../platform/process/owned-worker.ts)确认原 Mach 权死名和准确释放后才结束；可信同步 preload 不改原 main、相对 import、hash 或一次输入，最早已创建取消也先交接原权再请求终止。五秒独立收尾预算包括原身份取得和终态观察，缺证据保失败；原错误与清理错误同时保留。清理未知先交原 Core 保存 outcome_unknown，取消／timeout不能掩盖它或继续下个 Model；[完整 Core 文件](../../../test/isolated/web-fetch/core.test.ts)的真实准确取消／冷读用例验证这条分支，注入的清理失败不作为 native 死亡证据。Win/Linux 原路径及未闭合资格保持。单线程收尾不提供 DOM 峰值内存上限，也不证明整个 Runtime 内存回收。
 
 纯 `webExtractorAsset()` 和 `webExtractorAssets()` 返回实际选定 Worker、同名 `.sha256` companion 及固定 observer preload／准确 source leaves或built chunk的绝对位置，不读取文件、不打开 Worker。实际 loader 使用同一 getter 核验原 parser 完整字节；默认 Service 从准确 metadata 建立 Files 保护范围。显式可信 custom extractor 不加载默认 Worker，也不把默认位置当成其运行证明；固定 observer 与 SQLite 共用，宿主另行提供 custom 运行资产。准确文件和验证过的 terminal closure 属于资产身份，任意 bundle 的父目录不自动成为保护范围。
+
+正式 Service 通过 binding factory 为每个 Run 创建被动 descriptor及 disposer；真正的 extractor scope在已经授权的 Tool execute内、prepare之前才取得，prepare hash和extract使用同一个 scope。默认 scope保实际创建的 Worker与原 termination Promise，只有准确收尾成功才移除；close先封门并取消本 scope的解析，独立尝试全部原 Worker，失败及其 owner保持，重复 close复用原结果。该 disposer接入已有 Run binding lease；普通 Tool保存 unknown不等于资源已关闭，清理失败仍阻止 Runtime关闭及 Profile维护锁交接。没有 Core的Web类别分支或全局资源注册表。
+
+网络 port、robots cache和同 origin队列仍由宿主工厂共享，关闭一个 Run不取消另一个 scope。没有 `bind` 的可信 custom extractor保持宿主所有权，Run不会调用它的 `close`；低层 `createWebFetchExtension` 的调用者自行承担所属资源寿命。[scope隔离测试](../../../test/isolated/web-fetch/binding.test.ts)核实际 parser等待HTTP时的准确关闭、兄弟完整正文及custom宿主归属；[正式清理未知测试](../../../../../apps/service/test/isolated/web-fetch-cleanup-ownership.test.ts)核原 Run未知、关闭失败、维护busy和所属进程实际退出后的完整冷读。故障fixture只注入原 JavaScript terminate失败，不能授原生OS API失败或全Runtime资源资格；已有通用assembly准备失败收尾仍属完整资源门禁。
 
 超过 64 KiB 的正文通过普通 Tool 的 Artifact publisher 发布，保留原 public scope 和 `modelContent` UTF-8 引用；下一普通 Model checkpoint 解析完整选定正文。较小正文保持 inline。缺少 Artifact 能力时明确失败，不隐式裁剪。Artifact hash/authority 和 ModelBody 处理仍由 Core 负责。
 

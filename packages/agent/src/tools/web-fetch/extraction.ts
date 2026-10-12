@@ -7,6 +7,9 @@ import { WebFetchError } from './network';
 
 export interface WebExtractor {
   prepare?(): Promise<{ hash: string }>;
+  /** An independently owned Run binding; shared host ports need not provide one. */
+  bind?(): { extractor: WebExtractor; dispose(): Promise<void> };
+  close?(): Promise<void>;
   extract(
     input: { html: string; url: string },
     options: { signal: AbortSignal; expectedAssetHash?: string },
@@ -38,6 +41,25 @@ export function createPassiveWebExtractor(
   options: { workerPath?: string; expectedHash?: string } = {},
 ): WebExtractor {
   const workerPath = options.workerPath;
+  type OwnedExtraction = {
+    owned: ReturnType<typeof createOwnedWorker>;
+    controller: AbortController;
+    termination?: Promise<void>;
+  };
+  const workers = new Set<OwnedExtraction>();
+  let closed = false;
+  let closePromise: Promise<void> | undefined;
+  const assertOpen = () => {
+    if (closed) throw new WebFetchError('web_parser_unavailable');
+  };
+  const terminate = (entry: OwnedExtraction): Promise<void> => {
+    entry.termination ??= Promise.resolve()
+      .then(() => entry.owned.terminate())
+      .then(() => {
+        workers.delete(entry);
+      });
+    return entry.termination;
+  };
   async function asset() {
     const path = workerPath ?? webExtractorAsset();
     if (!path || !isAbsolute(path) || !existsSync(path))
@@ -58,16 +80,52 @@ export function createPassiveWebExtractor(
     }
   }
   return {
-    async prepare() {
-      return { hash: (await asset()).hash };
+    bind() {
+      assertOpen();
+      const extractor = createPassiveWebExtractor({
+        workerPath,
+        expectedHash: options.expectedHash,
+      });
+      return { extractor, dispose: () => extractor.close!() };
     },
-    async extract(input, { signal, expectedAssetHash }) {
-      signal.throwIfAborted();
+    close() {
+      if (closePromise) return closePromise;
+      closed = true;
+      const original = [...workers];
+      // Cache before abort dispatch can reenter close. No new Worker can pass the seal.
+      closePromise = Promise.resolve().then(async () => {
+        for (const entry of original) entry.controller.abort(new WebFetchError('web_cancelled'));
+        const results = await Promise.allSettled(original.map(terminate));
+        const errors = results.flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : [],
+        );
+        if (errors.length === 1) throw errors[0];
+        if (errors.length > 1)
+          throw new AggregateError(errors, 'Web parser Worker cleanup failed.', {
+            cause: errors[0],
+          });
+      });
+      return closePromise;
+    },
+    async prepare() {
+      assertOpen();
+      const selected = await asset();
+      assertOpen();
+      return { hash: selected.hash };
+    },
+    async extract(input, { signal: requestedSignal, expectedAssetHash }) {
+      requestedSignal.throwIfAborted();
+      assertOpen();
       const { path, hash } = await asset();
       if (expectedAssetHash !== undefined && expectedAssetHash !== hash)
         throw new WebFetchError('web_parser_unavailable');
-      signal.throwIfAborted();
+      requestedSignal.throwIfAborted();
+      assertOpen();
+      const controller = new AbortController();
+      const signal = AbortSignal.any([requestedSignal, controller.signal]);
       const owned = createOwnedWorker(path);
+      const entry: OwnedExtraction = { owned, controller };
+      workers.add(entry);
       const worker = owned.worker;
       let removeAbort: (() => void) | undefined;
       let result: { title: string; content: string } | undefined;
@@ -101,7 +159,7 @@ export function createPassiveWebExtractor(
       }
       removeAbort?.();
       try {
-        await owned.terminate();
+        await terminate(entry);
       } catch (cleanup) {
         if (failed)
           throw new AggregateError(

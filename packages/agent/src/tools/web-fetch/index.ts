@@ -92,10 +92,57 @@ export function createWebFetchExtension(options: {
   networkPort: WebNetworkPort;
   extractor?: WebExtractor;
 }): Extension {
+  return createWebFetchDefinition(options, webState());
+}
+
+/** Passive Run binding factory; transport admission, robots and origin queues remain shared. */
+export function createWebFetchBindingFactory(options: {
+  networkPort: WebNetworkPort;
+  extractor?: WebExtractor;
+}) {
+  const state = webState();
+  const extractor = options.extractor ?? createPassiveWebExtractor();
+  const configured = { ...options, extractor };
+  return {
+    extension: createWebFetchDefinition(configured, state),
+    bind() {
+      let scope: ReturnType<NonNullable<WebExtractor['bind']>> | undefined;
+      let acquired = false;
+      let disposal: Promise<void> | undefined;
+      const acquireExtractor = () => {
+        if (disposal) throw new WebFetchError('web_parser_unavailable');
+        // Acquire only inside Tool dispatch, after Runtime owns the Run disposer.
+        // A custom host port without bind remains host-owned.
+        if (!acquired) {
+          scope = extractor.bind?.();
+          acquired = true;
+        }
+        return scope?.extractor ?? extractor;
+      };
+      return {
+        extension: createWebFetchDefinition(configured, state, acquireExtractor),
+        dispose() {
+          disposal ??= Promise.resolve().then(() => scope?.dispose());
+          return disposal;
+        },
+      };
+    },
+  };
+}
+function webState() {
+  return {
+    robots: new Map<string, { disallowed: string[]; at: number }>(),
+    queues: new Map<string, Promise<void>>(),
+  };
+}
+function createWebFetchDefinition(
+  options: { networkPort: WebNetworkPort; extractor?: WebExtractor },
+  state: ReturnType<typeof webState>,
+  acquireExtractor?: () => WebExtractor,
+): Extension {
   const network = options.networkPort,
-    extractor = options.extractor ?? createPassiveWebExtractor();
-  const robots = new Map<string, { disallowed: string[]; at: number }>();
-  const queues = new Map<string, Promise<void>>();
+    fallbackExtractor = options.extractor ?? createPassiveWebExtractor();
+  const { robots, queues } = state;
   async function throttle(origin: string, signal: AbortSignal) {
     const prior = queues.get(origin);
     let release!: () => void;
@@ -233,6 +280,7 @@ export function createWebFetchExtension(options: {
             }
           }
           try {
+            const extractor = acquireExtractor?.() ?? fallbackExtractor;
             const parserIdentity = await waitFor(
               extractor.prepare?.() ?? Promise.resolve(undefined),
               deadline.signal,

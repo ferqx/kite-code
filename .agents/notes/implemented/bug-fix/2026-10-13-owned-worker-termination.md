@@ -16,8 +16,13 @@ Status: implemented
 
 新增 preload 是真实运行资产，随 storage companion 同次构建，源码和包入口定位同一受审查文件；Service 只把准确 loader 元数据装配进文件保护范围。根 import/factory 不加载 FFI、不打开 Worker。
 
+普通 Tool把清理失败保存为 outcome_unknown后会释放permit；先前仅从execute抛错误并未把parser owner交给Runtime，正式Run仍可能closed。现Agent提供每Run的Web binding，实际scope在授权Tool execute、prepare之前取得；登记真实Worker并缓存原termination，成功才移除，close先封门并只取消自身scope。Service独立组合该disposer与原Files assembly，复用已有Run lease及shutdown_cleanup_unconfirmed门禁，失败保原scope，不新增Core的Web类别分支或全局registry。网络、robots和origin队列继续由工厂共享，无bind的可信custom port继续由宿主管理。
+
+被动descriptor不在配置准备时调用custom bind，避免本次新引入Web owner在Runtime取得disposer前发生。通用assembly准备清理失败虽然保局部原错误、清理错误及cause，尚无跨Runtime接收边界的完整custody证明；它继续属于原完整资源门禁，不能从本次执行中parser红绿推断已闭合。
+
 ## Alternatives considered
 
+- 只让Tool抛清理错误：真实默认Service回归中Tool已unknown、Model恰一次，但关闭仍返回成功；需要原Run disposer保owner及lease，单次业务异常不足。
 - 等 Bun close：官方合同及原 Mach 权实测均否定其为线程退出证明；最初通知交付 draft 的字节和红保留于测试证据，不能拿它授资格。
 - 改用 Node worker_threads.terminate Promise：固定 Bun revision 实现仍等同一个 close marker，没有独立 join。
 - 包装主模块：会改变可信 custom Worker 的 import.meta.main、相对 import 和入口身份，故使用 preload。
@@ -28,7 +33,11 @@ Status: implemented
 
 实际公共 web_fetch 结果、准确取消、SQLite ACK 后 Runtime close 与维护 EX 交接均等待原线程终态及原权准确释放；冷只读 HTTP 历史保原正文且零 Model 重放。可信 custom Worker 与同文件的无 preload 独立 Bun child 对照，保原 URL、import.meta.main、相对依赖、一次完整输入、syntax error 与最早 abort 原 reason。完整交接两项／61个 Bun expect 通过。web_fetch 在取消／timeout 分类前传播私有清理未知，让原 Core attempted Tool 保 outcome_unknown 并停止依赖；另一个实际 Core／SQL／冷读准确取消 case 覆盖该分支，整 Core 文件六项／46断言通过。
 
-当前必要18个完整相关文件／61项／835个 Bun expect、47.328秒通过，生产与测试输入零漂移，含源码外完整包和截图对应真实 Electron：40效果、零业务取消、四个真实 native_draining 读取拒绝、零quit弹窗／page error／观测错误，Electron与Service正常0且无信号。测试可三端执行；只授本机实际 Mac 原权证据，Win/Linux unknown 不放行原资源资格。当前验证范围与原失败归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13macos-原-worker-收尾与准确锁交接)。
+原Worker终态改动的18个完整相关文件／61项／835个 Bun expect、47.328秒通过，生产与测试输入零漂移，含源码外完整包和截图对应真实 Electron：40效果、零业务取消、四个真实 native_draining 读取拒绝、零quit弹窗／page error／观测错误，Electron与Service正常0且无信号。测试可三端执行；只授本机实际 Mac 原权证据，Win/Linux unknown 不放行原资源资格。当前验证范围与原失败归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13macos-原-worker-收尾与准确锁交接)。
+
+本次Run所有权的真实默认Service／Client测试先保持正式配置未接线，实际parser完成后注入JavaScript terminate失败；原Tool unknown及Model恰一次均成立，关闭却返回成功，原红保留。接线后同文件1项／29断言通过，保Service／Runtime关闭失败、drain_failed、活进程维护owner_busy；测试自己child实际退出0及双EOF后，公开backup和原metadata／Command／View／Message／Execution冷读全等、Model零重放。两scope隔离及无bind宿主归属2项／7断言通过；无OSskip，注入错误不授nativeAPI故障资格。
+
+最终15个完整相关文件／61项／658断言／34.320秒actual0，3873份非文档代码／配置输入零漂移；根及八workspace类型、Agent／Service构建和必要门禁按当前进度核对。真实Electron再验40效果、零业务取消、四次读取拒绝而无quit弹窗／page error／观测错误，Electron及Service正常0且无信号。冻结／原日志／result为 `/private/tmp/kite-web-parser-owner-final-targets-20261013-*`，result SHA dedd5a194a8e44108516980db12adfa450b0fe23bb1cce196d07162c501d2839。它不证明截图中的安装包已更新。准确原红／fixture修正及当前范围见[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13默认-web-run-的清理所有权)。
 
 未知收尾仍可能需要原宿主实际退出才能归还保有的权和锁。单线程停止不证明全部 JSC/native 分配已释放；原 RSS 与全 resources/handles/descendants 门禁不变。实际 Win/Linux 资格继续后置，不能从私有 metadata 或 Mac 通过推导。
 

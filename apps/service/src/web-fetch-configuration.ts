@@ -1,7 +1,7 @@
 import { builtinCapability, type CapabilityDescription } from '@kite-ai/agent/permissions';
 import {
   createPinnedWebNetworkPort,
-  createWebFetchExtension,
+  createWebFetchBindingFactory,
   type PinnedWebNetworkOptions,
   type WebExtractor,
 } from '@kite-ai/agent/web-fetch';
@@ -14,10 +14,11 @@ export interface WebFetchConfigurationOptions {
 /** Pure default registration helper. No DNS, parser Worker or socket until ordinary Tool dispatch. */
 export function createWebFetchConfiguration(options: WebFetchConfigurationOptions) {
   const policy = structuredClone(options.network.policy);
-  const extension = createWebFetchExtension({
+  const factory = createWebFetchBindingFactory({
     networkPort: createPinnedWebNetworkPort(options.network),
     ...(options.extractor ? { extractor: options.extractor } : {}),
   });
+  const extension = factory.extension;
   const capabilities: CapabilityDescription[] = [
     {
       kind: 'tool',
@@ -36,6 +37,7 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
   ];
   return {
     extension,
+    bind: factory.bind,
     capabilities,
     toolIds: ['web_fetch'] as readonly string[],
     snapshot: {

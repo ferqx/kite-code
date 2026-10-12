@@ -790,9 +790,28 @@ export function createDefaultProcessConfiguration(options: {
         ],
         allowedCapabilities: options.allowedToolCapabilities,
       });
-      assembly.extensions.push(...shell.extensions);
-      if (toolIds.some((id) => webTools.has(id))) assembly.extensions.push(web.extension);
+      let webBinding: ReturnType<typeof web.bind> | undefined;
+      let disposal: Promise<void> | undefined;
+      const dispose = () =>
+        (disposal ??= Promise.allSettled([
+          Promise.resolve().then(() => assembly.dispose()),
+          Promise.resolve().then(() => webBinding?.dispose()),
+        ]).then((results) => {
+          const failures = results.flatMap((result) =>
+            result.status === 'rejected' ? [result.reason] : [],
+          );
+          if (failures.length === 1) throw failures[0];
+          if (failures.length > 1)
+            throw new AggregateError(failures, 'Run configuration cleanup failed.', {
+              cause: failures[0],
+            });
+        }));
       try {
+        assembly.extensions.push(...shell.extensions);
+        if (toolIds.some((id) => webTools.has(id))) {
+          webBinding = web.bind();
+          assembly.extensions.push(webBinding.extension);
+        }
         const workflowCapabilities = workflowCapabilitiesFor(assembly);
         const workflow = await createWorkflowConfiguration({
           profile: options.profile,
@@ -1335,7 +1354,7 @@ export function createDefaultProcessConfiguration(options: {
               return [...sources.values()];
             },
           },
-          dispose: assembly.dispose,
+          dispose,
           snapshot: {
             ...snapshot,
             skillWorkflow: workflow.snapshot,
@@ -1406,7 +1425,23 @@ export function createDefaultProcessConfiguration(options: {
           } as unknown as Json,
         };
       } catch (error) {
-        await assembly.dispose();
+        try {
+          await dispose();
+        } catch (cleanupError) {
+          const failure = new AgentError(
+            error instanceof AgentError || error instanceof ConfigurationError
+              ? error.code
+              : 'configuration_unavailable',
+          );
+          Object.defineProperty(failure, 'cause', {
+            value: Object.freeze({
+              originalError: error,
+              cleanupError,
+              resources: Object.freeze({ assembly, webBinding }),
+            }),
+          });
+          throw failure;
+        }
         throw error;
       }
     } catch (error) {

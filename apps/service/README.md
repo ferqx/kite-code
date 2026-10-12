@@ -281,6 +281,8 @@ read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时�
 
 默认 resolver 通过 [web-fetch-configuration.ts](src/web-fetch-configuration.ts)装配普通 `builtin.web@1` / `web_fetch@1`。`createDefaultProcessConfiguration({webFetch?})` 只接受可信宿主的 network policy/admission 与可选 extractor；缺省开发网络策略为 public，仍逐跳检查全部 DNS 地址、拒绝私有/保留/本机目标并固定真实 socket。显式 off/allowlist 与当前宿主 `admitHop` 继续约束原请求、robots 和每次跳转，普通 Tool 仍独立经过 Core 的当前授权。实际元数据为 `network`/`unknown`、`safeRead:false`，off 为不可用；每个新 Run 封存准确 Tool 版本和非秘密 `snapshot.web`。JSONC 仅选择 Tool 与准确版本，不能提供网络权威、代理 header 或 SSRF 例外。工厂创建不进行 DNS、解析或网络 I/O。
 
+正式 Run resolver选择Agent提供的被动 Web binding，工具目录投影继续使用无I/O元数据；实际 parser scope只在授权派发后取得。Run disposer缓存同一结果，独立收尾原 Files assembly和Web scope；一个失败不跳过另一个，原配置错误与清理错误同时保留。Worker登记、封门、取消、原收尾及共享robots／origin队列由Agent负责，Service仅组合接口。没有 `bind` 的custom extractor仍由宿主管理，不借Run关闭权。原执行中清理未知会保已有Run lease；尚未返回配置时的通用assembly准备清理仍是原未闭合资源门禁，局部cause保留不证明Runtime接收者已持有它。
+
 [默认 Web Fetch 回归](test/isolated/default-web-fetch.test.ts) 3 项、32 条断言使用真实 Service/Client/Core/SQLite、本机兼容 Model 和无害 HTTP：四次 socket 前均有实际审计，完整约 125 KiB 正文通过原 scope Artifact 读回并进入下一 Provider 请求；off/当前撤权为零 DNS/socket，原 policy 修改不扩范围，坏 JSONC options/版本在 Provider 前拒绝。完整解析 Worker 属于已构建并核 hash 的包内资产，缺失时局部失败。真实 TLS、Linux/Windows 与原生制品资格仍按进度记录。
 
 [permission-management.ts](src/permission-management.ts) 是 Native 宿主的持久用户控制 port：`readMode/readTrust/setMode/setTrust/getMutation` 都要求明确原 `expectedStoreId` 与宿主注入的 `subjectId`；写入还要求稳定 `commandId` 和已观测 revision。模式仅接受 `accept_edits`、`auto`、`full`；请求、持久控制记录和最终 Shell 证明中的旧 `ask` 明确拒绝，不兼容映射。模式记录作用于准确 root Session，child 读取继承根模式但不能以 child Session 修改；`makeDefault` 只更新同一 Store/subject 的后续默认，不写项目 JSONC。信任记录作用于准确 Workspace/subject。控制 journal 与配置/凭据 journal 同库但 kind 独立，双方 getter 不将另一类记录强制转换为自身 mutation。
@@ -339,6 +341,8 @@ Settings 模型业务端口为 `GET /v1/config/{scope}/models?storeId=...&worksp
 202 仅表示关闭受理。首次关闭缓存同一 completion，失败进入 `drain_failed` 并保持 cleanup busy、HTTP 诊断和未确认资源；不得在 finally 强制停止 listener 伪装完成。成功关闭后 runner 取消自己的父管道读取并真实退出，即使父管道仍打开；网络断开不代表父进程死亡。丢回复属于原实例未知结果，只能再次观察该实例，不自动重发 shutdown。当前仅有限接口与所属 runner，不代表正式 CLI 停机或 daemon 发现完成。
 
 底层 Store strict-close 未获成功 ACK 时，[原 Store owner](../../packages/agent/src/storage/README.md#store-关闭未确认时的锁归属)保留 Session／恢复／Profile 使用锁，Service 的 `drain_failed` 不能让维护提前接管。[真实共用装配／Client 回归](test/isolated/store-close-ownership.test.ts)保原完成任务和全文，核关闭原错误与同一 completion、存活进程期间维护 `owner_busy`，原 child 实际退出后才允许备份和完整冷读，零新增 Model。该 fixture 的进程退出是测试收尾，不宣称失败关闭已成功或 Worker 线程的完整资格。
+
+[默认Web清理所有权回归](test/isolated/web-fetch-cleanup-ownership.test.ts)使用正式装配、Client、本地固定Provider和实际默认parser；只让所属child的parser JavaScript terminate失败，保原Tool未知及Model恰一次。Service／Runtime均拒绝关闭并保 `drain_failed`、活进程期间维护 `owner_busy`；显式结束该测试child并核实际0及stdout／stderr EOF后，公开备份和只读冷查询保完整原metadata／Command／View／Message／Execution、Model零重放。此可三端运行的源码测试不增加skip，不冒称真实OS API失败；本机结果仍只授macOS实际范围。
 
 [实际 HTTP 与 runner 生命周期测试](test/isolated/lifecycle.test.ts)使用临时 profile/SQLite 和固定本地配置，覆盖闭合身份、空/同源 Origin、Browser 拒绝、慢正文、原配置 mutation 发布、慢纯 GET 排空、真实 Store metadata 故障、父管道仍打开时原 PID 退出与同 profile peer 存活、诊断无 Store 退出，以及未确认清理后原进程/HTTP 保留且维护仍 `owner_busy`。这些测试没有调用 Provider/Tool；失败 fixture 最终由测试的所属子进程清理回收，不把 SIGKILL 作为成功停机证据。
 
