@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
+import type { KnowledgeReadScope } from '../../platform/knowledge-reads';
 import {
   type CompiledSkillWorkflow,
   revalidateSkillWorkflow,
@@ -44,8 +45,9 @@ export function sealCompensationAssets(
   entry: CompiledSkillWorkflow,
   base: string,
   resolveCapability?: (id: string) => WorkflowCapability | undefined,
+  knowledgeScope?: KnowledgeReadScope,
 ) {
-  const current = revalidateSkillWorkflow(entry, resolveCapability);
+  const current = revalidateSkillWorkflow(entry, resolveCapability, knowledgeScope);
   if (
     !current.contract ||
     !current.sourceBinding ||
@@ -62,6 +64,7 @@ export function sealCompensationAssets(
       current.sourceBinding!.canonicalRoot,
       target,
       lstatSync(target),
+      knowledgeScope,
     );
     digest
       .update(path)
@@ -79,7 +82,7 @@ export function sealCompensationAssets(
       files: assetsDigest,
       contract: current.contract,
     }) !== entry.descriptor.revision ||
-    revalidateSkillWorkflow(entry, resolveCapability).descriptor.revision !==
+    revalidateSkillWorkflow(entry, resolveCapability, knowledgeScope).descriptor.revision !==
       entry.descriptor.revision
   )
     throw new AgentError('workflow_source_changed');

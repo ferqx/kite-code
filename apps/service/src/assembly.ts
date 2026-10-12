@@ -16,6 +16,7 @@ import {
   type ContextSource,
   type ContextSources,
   createProjectSources,
+  KnowledgeReadCleanupError,
   type SourceRequest,
 } from '@kite-ai/agent/sources';
 import { createConfiguredSkillSource } from './skill-source';
@@ -93,11 +94,33 @@ export async function createWorkspaceAssembly(options: {
     !externalFiles && options.toolIds.some((id) => fileIds.includes(id))
       ? createWorkspaceFiles({ root })
       : undefined;
+  let skills: ReturnType<typeof createConfiguredSkillSource> | undefined;
+  let project: ReturnType<typeof createProjectSources> | undefined;
+  let disposal: Promise<void> | undefined;
+  const dispose = () => {
+    disposal ??= Promise.allSettled([
+      Promise.resolve().then(() => files?.close()),
+      Promise.resolve().then(() => skills?.dispose()),
+      Promise.resolve().then(() => project?.dispose()),
+    ]).then((results) => {
+      const failures = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : [],
+      );
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1)
+        throw new AggregateError(failures, 'Workspace assembly cleanup failed.', {
+          cause: failures[0],
+        });
+    });
+    void disposal.catch(() => {});
+    return disposal;
+  };
   try {
     const configured = (options.skills ?? []).filter((skill) => skill.enabled !== false);
-    const skills = createConfiguredSkillSource(options);
-    const initial = await skills.list();
-    const configuredId = (entry: SkillSummary) => skills.configuredId(entry);
+    const skillSource = createConfiguredSkillSource(options);
+    skills = skillSource;
+    const initial = await skillSource.list();
+    const configuredId = (entry: SkillSummary) => skillSource.configuredId(entry);
     const failSelected = (selector: string) => {
       const unavailable = initial.states.find(
         (entry) => entry.id === selector && entry.state !== 'available',
@@ -141,7 +164,7 @@ export async function createWorkspaceAssembly(options: {
       options.toolIds.includes(id),
     );
     async function catalogue() {
-      const current = await skills.list();
+      const current = await skillSource.list();
       for (const row of current.states) {
         if (selectedIds.has(row.id) && row.state !== 'available')
           throw new AgentError(row.reason ?? 'skill_not_discovered');
@@ -178,12 +201,13 @@ export async function createWorkspaceAssembly(options: {
       if (pinned !== undefined && entry.version !== pinned)
         throw new AgentError('skill_version_changed');
       try {
-        return await skills.load({
+        return await skillSource.load({
           id: entry.sourceId,
           version: version ?? entry.version,
           availableCapabilities: allowed,
         });
       } catch (error) {
+        if (error instanceof KnowledgeReadCleanupError) throw error;
         throw new AgentError(error instanceof SkillError ? error.code : 'skill_unavailable');
       }
     }
@@ -230,7 +254,7 @@ export async function createWorkspaceAssembly(options: {
             };
           }
           if (typeof value.path !== 'string') throw new AgentError('skill_input_invalid');
-          const resource = await skills.readResource({
+          const resource = await skillSource.readResource({
             skillId: selected.id,
             version: selected.version,
             path: value.path,
@@ -249,6 +273,7 @@ export async function createWorkspaceAssembly(options: {
             },
           };
         } catch (error) {
+          if (error instanceof KnowledgeReadCleanupError) throw error;
           if (context.signal.aborted)
             return { outcome: 'cancelled', content: 'cancelled_skill_read' };
           const code =
@@ -259,7 +284,7 @@ export async function createWorkspaceAssembly(options: {
         }
       },
     }));
-    const project = createProjectSources({
+    const projectSource = createProjectSources({
       workspaceRoot: async () => root,
       targetPaths(request) {
         if (
@@ -272,8 +297,9 @@ export async function createWorkspaceAssembly(options: {
         return typeof request.input.path === 'string' ? [request.input.path] : [];
       },
     });
+    project = projectSource;
     const captureSources = async (requests: readonly SourceRequest[]): Promise<ContextSource[]> => {
-      const result = await project.captureBatch!(requests);
+      const result = await projectSource.captureBatch!(requests);
       if (!requests.length) return result;
       const current = await catalogue();
       const bodies = new Map<string, Awaited<ReturnType<typeof body>>>();
@@ -301,7 +327,7 @@ export async function createWorkspaceAssembly(options: {
         a.localeCompare(b),
       )) {
         const skill = await checkpointBody(selected.skillId);
-        const resource = await skills.readResource({
+        const resource = await skillSource.readResource({
           skillId: skill.id,
           version: skill.version,
           path: selected.path,
@@ -373,22 +399,21 @@ export async function createWorkspaceAssembly(options: {
       extensions,
       toolIds: [...options.toolIds],
       sources,
+      knowledgeScope: skillSource.knowledgeScope,
       skillConfigurations: configured
         .filter((entry) => selectedIds.has(String(entry.id)))
         .map((entry): NamedConfiguration => ({ ...entry, id: String(entry.id) })),
-      dispose: async () => {
-        await files?.close();
-      },
+      dispose,
       snapshotFacts: { ...snapshotFacts, digest: digest(JSON.stringify(snapshotFacts)) },
     };
   } catch (error) {
     try {
-      await files?.close();
+      await dispose();
     } catch (cleanupError) {
       throw new ConfigurationPreparationCleanupError({
         originalError: error,
         cleanupError,
-        resources: { files },
+        resources: { files, skills, project },
       });
     }
     if (error instanceof AgentError) throw error;

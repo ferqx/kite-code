@@ -200,7 +200,10 @@ export async function startService(options: ServiceOptions) {
   const app = new Hono();
   let endpoint = '';
   let closing = false;
-  const lifecycle = createHttpLifecycle(options.runtime, options.beforeResourceClose);
+  const lifecycle = createHttpLifecycle(options.runtime, async () => {
+    await options.skillCatalogue?.dispose?.();
+    await options.beforeResourceClose?.();
+  });
   const bodyReaders = new Set<ReadableStreamDefaultReader<Uint8Array>>();
   const cancelKinds = ['command.cancel', 'run.cancel', 'execution.cancel', 'session.cancel'];
   const readBusinessBody = async <T>(

@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import {
+  createKnowledgeReadScope,
+  type KnowledgeFileAccess,
+  KnowledgeReadCleanupError,
+  type KnowledgeReadScope,
+} from '../platform/knowledge-reads';
+
+export { KnowledgeReadCleanupError, type KnowledgeReadScope } from '../platform/knowledge-reads';
 
 export interface SkillSummary {
   id: string;
@@ -16,6 +24,7 @@ export interface SkillBody extends SkillSummary {
   resources: { id: string; path: string }[];
 }
 export interface SkillSourceOptions {
+  knowledgeScope?: KnowledgeReadScope;
   trustedRoots: readonly string[];
   /** Explicit SKILL.md files or Skill directories; no home/workspace auto-discovery. */
   locations: readonly string[];
@@ -51,14 +60,14 @@ export function createSkillSource(options: SkillSourceOptions) {
     )
   )
     throw new SkillError('invalid_skill_configuration');
+  const scope = options.knowledgeScope ?? createKnowledgeReadScope();
   let entries = new Map<string, SkillSummary>();
-  async function read(path: string) {
+  async function read(path: string, files: KnowledgeFileAccess) {
     const target = await realpath(path);
     const trusted = await Promise.all(roots.map((root) => realpath(root)));
     if (!trusted.some((root) => inside(root, target))) throw new SkillError('skill_path_denied');
     const expected = await lstat(target);
-    const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
+    return files.read(target, constants.O_RDONLY | constants.O_NOFOLLOW, async (handle) => {
       const stat = await handle.stat();
       if (stat.dev !== expected.dev || stat.ino !== expected.ino)
         throw new SkillError('skill_path_changed');
@@ -85,9 +94,7 @@ export function createSkillSource(options: SkillSourceOptions) {
       }
       if (body.includes('\0')) throw new SkillError('skill_text_invalid');
       return { target, body };
-    } finally {
-      await handle.close();
-    }
+    });
   }
   function summary(target: string, body: string): SkillSummary {
     const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(body)?.[1] ?? '';
@@ -126,75 +133,89 @@ export function createSkillSource(options: SkillSourceOptions) {
       requiredCapabilities,
     };
   }
-  return {
-    async list() {
-      const next = new Map<string, SkillSummary>();
-      const errors: { location: string; code: string }[] = [];
-      for (const location of locations) {
-        try {
-          const value = await read(
-            location.endsWith('SKILL.md') ? location : join(location, 'SKILL.md'),
-          );
-          const entry = summary(value.target, value.body);
-          if (next.has(entry.id)) throw new SkillError('duplicate_skill_location');
-          next.set(entry.id, entry);
-        } catch (error) {
-          errors.push({
-            location,
-            code: error instanceof SkillError ? error.code : 'skill_unavailable',
-          });
-        }
-      }
-      entries = next;
-      return { entries: [...next.values()].sort((a, b) => a.id.localeCompare(b.id)), errors };
-    },
-    async load(input: {
+  async function load(
+    input: {
       id: string;
       version?: string;
       availableCapabilities?: readonly string[];
-    }): Promise<SkillBody> {
-      const entry = entries.get(input.id);
-      if (!entry) throw new SkillError('skill_not_discovered');
-      const value = await read(entry.location);
-      const current = summary(value.target, value.body);
-      if ((input.version ?? entry.version) !== current.version)
-        throw new SkillError('skill_version_changed');
-      const missing = current.requiredCapabilities.filter(
-        (capability) => !input.availableCapabilities?.includes(capability),
-      );
-      if (missing.length) throw new SkillError('skill_capability_missing');
-      const resources: SkillBody['resources'] = [];
-      for (const match of value.body.matchAll(/\[[^\]]*\]\(([^\s)]+)\)/g)) {
-        const path = match[1]!;
-        if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path) || path.startsWith('#')) continue;
-        if (isAbsolute(path) || path.length > 4096 || path.split(/[\\/]/).includes('..'))
-          throw new SkillError('skill_resource_denied');
-        if (resources.some((item) => item.path === path)) continue;
-        if (resourceMaximum !== undefined && resources.length >= resourceMaximum)
-          throw new SkillError('skill_resource_limit');
-        resources.push({ id: hash(`${current.id}:${current.version}:${path}`), path });
-      }
-      return { ...current, body: value.body, resources };
     },
+    files: KnowledgeFileAccess,
+  ): Promise<SkillBody> {
+    const entry = entries.get(input.id);
+    if (!entry) throw new SkillError('skill_not_discovered');
+    const value = await read(entry.location, files);
+    const current = summary(value.target, value.body);
+    if ((input.version ?? entry.version) !== current.version)
+      throw new SkillError('skill_version_changed');
+    const missing = current.requiredCapabilities.filter(
+      (capability) => !input.availableCapabilities?.includes(capability),
+    );
+    if (missing.length) throw new SkillError('skill_capability_missing');
+    const resources: SkillBody['resources'] = [];
+    for (const match of value.body.matchAll(/\[[^\]]*\]\(([^\s)]+)\)/g)) {
+      const path = match[1]!;
+      if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path) || path.startsWith('#')) continue;
+      if (isAbsolute(path) || path.length > 4096 || path.split(/[\\/]/).includes('..'))
+        throw new SkillError('skill_resource_denied');
+      if (resources.some((item) => item.path === path)) continue;
+      if (resourceMaximum !== undefined && resources.length >= resourceMaximum)
+        throw new SkillError('skill_resource_limit');
+      resources.push({ id: hash(`${current.id}:${current.version}:${path}`), path });
+    }
+    return { ...current, body: value.body, resources };
+  }
+  return {
+    list() {
+      return scope.run(async (files) => {
+        const next = new Map<string, SkillSummary>();
+        const errors: { location: string; code: string }[] = [];
+        for (const location of locations) {
+          try {
+            const value = await read(
+              location.endsWith('SKILL.md') ? location : join(location, 'SKILL.md'),
+              files,
+            );
+            const entry = summary(value.target, value.body);
+            if (next.has(entry.id)) throw new SkillError('duplicate_skill_location');
+            next.set(entry.id, entry);
+          } catch (error) {
+            if (error instanceof KnowledgeReadCleanupError) throw error;
+            errors.push({
+              location,
+              code: error instanceof SkillError ? error.code : 'skill_unavailable',
+            });
+          }
+        }
+        entries = next;
+        return { entries: [...next.values()].sort((a, b) => a.id.localeCompare(b.id)), errors };
+      });
+    },
+    load: (input: Parameters<typeof load>[0]) => scope.run((files) => load(input, files)),
     async readResource(input: {
       skillId: string;
       version: string;
       path: string;
       availableCapabilities?: readonly string[];
     }) {
-      const skill = await this.load({
-        id: input.skillId,
-        version: input.version,
-        availableCapabilities: input.availableCapabilities,
+      return scope.run(async (files) => {
+        const skill = await load(
+          {
+            id: input.skillId,
+            version: input.version,
+            availableCapabilities: input.availableCapabilities,
+          },
+          files,
+        );
+        if (!skill.resources.some((resource) => resource.path === input.path))
+          throw new SkillError('skill_resource_not_declared');
+        const value = await read(resolve(skill.location, '..', input.path), files);
+        return {
+          id: hash(`${skill.id}:${skill.version}:${input.path}`),
+          version: hash(value.body),
+          body: value.body,
+        };
       });
-      if (!skill.resources.some((resource) => resource.path === input.path))
-        throw new SkillError('skill_resource_not_declared');
-      const value = await read(resolve(skill.location, '..', input.path));
-      return {
-        id: hash(`${skill.id}:${skill.version}:${input.path}`),
-        version: hash(value.body),
-        body: value.body,
-      };
     },
+    dispose: () => scope.dispose(),
   };
 }

@@ -13,6 +13,7 @@ import type {
   ToolResult,
 } from '../../extensions';
 import { canonicalJson } from '../../json';
+import { KnowledgeReadCleanupError, type KnowledgeReadScope } from '../../platform/knowledge-reads';
 import type { RunRequirementInitializer } from '../../runtime';
 import {
   type CompiledSkillWorkflow,
@@ -61,6 +62,7 @@ export interface WorkflowCapabilityBinding {
   readonly definitionVersion: string;
 }
 export interface SkillWorkflowOptions {
+  readonly knowledgeScope?: KnowledgeReadScope;
   /** Trusted host policy only; neither Skill text nor model arguments can enable a waiver. */
   readonly userDecisions?: {
     readonly version: '1';
@@ -193,7 +195,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
     const sealed = entries.get(id);
     if (!sealed?.contract || sealed.descriptor.availability !== 'available')
       throw new AgentError('workflow_unavailable');
-    const actual = revalidateSkillWorkflow(sealed, resolver);
+    const actual = revalidateSkillWorkflow(sealed, resolver, supplied.knowledgeScope);
     if (
       !actual.contract ||
       actual.descriptor.availability !== 'available' ||
@@ -1419,7 +1421,16 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
           const value = object(input),
             active = await get(context, string(value.activation_id), attemptNumber(value.attempt));
           if (active.closed) throw new AgentError('workflow_already_closed');
-          return result(json(readWorkflowReference(active.entry, string(value.path), resolver)));
+          return result(
+            json(
+              readWorkflowReference(
+                active.entry,
+                string(value.path),
+                resolver,
+                supplied.knowledgeScope,
+              ),
+            ),
+          );
         },
       },
       {
@@ -1691,7 +1702,8 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
               entry = settled
                 ? boundEntry(frame)
                 : current(string(frame.skillId), string(frame.skillRevision));
-            } catch {
+            } catch (error) {
+              if (error instanceof KnowledgeReadCleanupError) throw error;
               return answer('unsatisfied', 'workflow_source_changed');
             }
             if (phase === 'dispatch') {

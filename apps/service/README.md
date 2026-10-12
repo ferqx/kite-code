@@ -442,7 +442,11 @@ macOS／Linux正式verifier均使用原host后端，原Skill cwd与授权Workspa
 
 每次发现仍重新读取全部启用位置及内容版本；独立位置的 I/O 每批最多四项并发，结果按原配置顺序汇总后才发布绑定。完成顺序不决定重复物理位置的配置身份，原首项即使 digest 不匹配也保留其 ID，并将双方标为重复不可用。分页不缓存发现结果，后续页仍核当前字节与完整 revision。[目录测试](test/isolated/skill-catalogue.test.ts)覆盖同批别名、跨批重复、禁用项及新版本拒绝旧绑定；[Run 选择测试](test/isolated/skill-selection.test.ts)核准确 root/child 继承。
 
+配置源使用同一[Agent 知识读取作用域](../../packages/agent/src/platform/knowledge-reads.ts)，资源 owner 独立于重建的 metadata Map。Run 的项目指令、Skill 正文／资源与 Workflow 读取沿原 assembly disposer 结算，准备失败沿现有 `ConfigurationPreparationCleanupError` 移交实际资源和两原错误。正文、目录、编译和取消 catch 先透传关闭未知；普通坏文件、缺能力和版本拒绝仍局部处理。Service 只组合原接口与错误，不执行知识文件 I/O 或建立第二份资源策略。
+
 默认装配提供 [skillCatalogue source](src/skill-catalogue.ts)，Service 仅在实际 source 存在时发布 `skill_catalogue`。`GET /v1/workspaces/:id/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 在原 Store、实际 Workspace 和持久信任范围下返回闭合 `SkillCataloguePage`：可用性、revision、metadata/status entries、nextAfterId 与 complete。没有source明确unavailable；坏配置不是空目录。响应没有正文、路径、凭据、任意宿主配置或 Workflow 契约，不构造 Run 或调用 Model/vault/Shell/MCP。
+
+该任务外目录实例保有独立知识作用域；`dispose()` 封新调用，等待本实例已进入的普通／手动 Workflow list，然后结算同一 owner，失败不随后续请求重建而丢失。`startService` 将其接到原 `beforeResourceClose`；HTTP 读取尚在途时也不能先扫描一次失败集合就释放 Store／Profile。目录关闭未确认不会返回普通 unavailable 来表示收尾成功，服务关闭失败与维护锁保留。关闭前的临时 Workflow 装配同时保原工作错误和清理错误。
 
 默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源只描述配置位置，不证明安装、物理目标或执行许可，禁用项不会因此读文件。越界、非法或不能确定的位置为 null；旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision，不增加发现路径或改变实际 Run 的知识选择。
 
@@ -453,6 +457,8 @@ macOS／Linux正式verifier均使用原host后端，原Skill cwd与授权Workspa
 目录与 Run 绑定共用 `compileConfiguredWorkflows` 的真实源前后复核，以及 `workflowCapabilitiesFor` 的实际 Tool/Job/role 版本。投影另核 profile flags、完整输入 schema、fork 角色和脚本核验资产；关闭、坏契约、缺依赖或缺实现只改变相应 Workflow 资格。投影不包含指令、路径或完整契约，不选择模型、读取 vault、连接 MCP 或启动 Job；临时装配释放所属文件资源。flags、来源、依赖及宿主绑定参与 manual 分页 revision，变化拒绝续页。无 `workflow` 的旧知识请求不承担这次装配，也不因只改 Workflow flags 而换 revision。
 
 目录不预订提交时的版本；实际 Command 仍由原 Service resolver 编译并封存可信源，后续漂移按原权限与来源检查拒绝。目录和单 Run 知识选择的原契约见前文及[同源目录决定](../../.agents/notes/implemented/architecture/2026-10-02-scoped-skill-catalogue.md)。[实际 HTTP 投影测试](test/isolated/skill-workflow-catalogue.test.ts)覆盖277项完整分页、局部失败、版本变化、零模型/凭据/执行，以及与正常原 Command 绑定的 compiled revision 相等；[旧接口测试](test/isolated/skill-catalogue.test.ts)保留旧消费者与缺实现 capability 边界。当前资格范围见[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
+[完整关闭未知调用者](test/isolated/knowledge-cleanup-ownership.test.ts)沿正式 Service／Client 验证必选 Skill 准备、实际 Tool 取消、普通目录、manual Workflow 原同步 fd 和在途目录关闭。故障只在实际原资源 close 边界拒绝；活进程公开维护拒绝，自有 child 实际0和双 EOF 后才备份并完整冷读零 Model。原正常项目指令、目录、Workflow、配置、取消与完整包回归保持。具体原红、准确输入及有限平台资格归[知识收尾进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13同源知识读取与正式目录收尾)，不提升为全资源／RSS或阶段退出。
 
 ## 默认 Task 的源码外资格
 

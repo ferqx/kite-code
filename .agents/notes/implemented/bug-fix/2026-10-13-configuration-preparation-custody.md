@@ -32,3 +32,5 @@ Status: implemented
 必要原完整24文件120／1723／0、40.041秒，3876输入零漂移；其后只改新测试文件增加child验收，完整新文件重跑3／58／0，23个未变相关文件结果精确复用，最终24文件121／1744／0。准确freeze／逐文件原log／current-result位于 `/private/tmp/kite-preparation-custody-final-targets-20261013-*`，current-result SHA 32816a7e7e4f0a8b4d786aa5bb0da743baa486b0da72f9088f4e943b150e42ea。真实Electron40效果、零取消、四次读取拒绝而无quit弹窗／page error／观测错误；Electron与原Service PID23410正常0、无信号。它不证明截图原安装包身份。
 
 原child／三类恢复完整回归与独立源码审查支持现行配置、freshness、后置disposer失败及原lease合同；三个恢复入口的新typed返回前资源失败尚未逐一直接注入，不能从统一helper的源码接线和已有绿称这些新分支全经真实资源验证。其余瞬时I/O失败owner、完整resources／handles／出生后代、原RSS及三平台／阶段门禁不变。旧Worker Note对未交接准备cause的限制在此次明确类型范围内部分替代，原Mach／SQL／Web所有权与未知资格理由继续适用，见[原Note](2026-10-13-owned-worker-termination.md)。具体原red、最终核验和独立审查归[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13配置准备清理与正式维护交接)。
+
+同源项目／Skill／Workflow 的实际文件读取关闭失败后续沿[知识资源决定](2026-10-13-knowledge-read-custody.md)补齐准确作用域、Run 与任务外目录交接；它只部分收束上述瞬时 I/O 限制，不替代本 Note 的 typed 接收者与其余资源／恢复／平台门禁。

@@ -8,6 +8,7 @@ import {
 } from '@kite-ai/agent/jobs/shell';
 import type { Extension, JobDefinition, JobHandle, Json } from '../../extensions';
 import { canonicalJson } from '../../json';
+import type { KnowledgeReadScope } from '../../platform/knowledge-reads';
 import type { CompiledSkillWorkflow, WorkflowCapability } from '../../skills/workflow-contract';
 import { validateWorkflowArguments } from '../../skills/workflow-contract/schema';
 import { AgentError } from '../../storage/types';
@@ -19,6 +20,7 @@ import {
 } from './compensation-assets';
 
 export interface SkillWorkflowCompensatorOptions {
+  readonly knowledgeScope?: KnowledgeReadScope;
   readonly entries: readonly CompiledSkillWorkflow[];
   readonly resolveCapability?: (id: string) => WorkflowCapability | undefined;
   readonly shell: ShellJobOptions;
@@ -144,7 +146,12 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
       assertDirectory(workspace);
       assertDirectory(base);
       protectedPaths.forEach(assertDirectory);
-      const assets = sealCompensationAssets(entry, base.canonical, resolver);
+      const assets = sealCompensationAssets(
+        entry,
+        base.canonical,
+        resolver,
+        options.knowledgeScope,
+      );
       let released = false;
       const release = () => {
         if (!released) {

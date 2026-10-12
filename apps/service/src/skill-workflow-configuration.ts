@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { AgentError, type RunRequirementInitializer } from '@kite-ai/agent';
+import {
+  AgentError,
+  ConfigurationPreparationCleanupError,
+  type RunRequirementInitializer,
+} from '@kite-ai/agent';
 import { type JsonObject, readConfigurationFile } from '@kite-ai/agent/config';
 import type {
   Extension,
@@ -28,6 +32,11 @@ import {
   type WorkflowActivationInput,
   type WorkflowCapability,
 } from '@kite-ai/agent/skill-workflow';
+import {
+  createKnowledgeReadScope,
+  KnowledgeReadCleanupError,
+  type KnowledgeReadScope,
+} from '@kite-ai/agent/sources';
 import { createConfiguredSkillSource } from './skill-source';
 
 export const workflowToolIds = [
@@ -84,16 +93,20 @@ export async function compileConfiguredWorkflows(options: {
     const id = options.source.configuredId(summary);
     try {
       await options.source.load({ id: summary.id, version: summary.version });
-      const entry = compileSkillWorkflow({
-        skillDir: dirname(summary.location),
-        source: summary.location.startsWith(`${canonicalProfile}/skills/`) ? 'user' : 'project',
-        origin: '.agents',
-        resolveCapability: options.resolveCapability,
-      });
+      const entry = compileSkillWorkflow(
+        {
+          skillDir: dirname(summary.location),
+          source: summary.location.startsWith(`${canonicalProfile}/skills/`) ? 'user' : 'project',
+          origin: '.agents',
+          resolveCapability: options.resolveCapability,
+        },
+        options.source.knowledgeScope,
+      );
       await options.source.load({ id: summary.id, version: summary.version });
       entries.push(entry);
       byConfiguredId.set(id, entry);
     } catch (error) {
+      if (error instanceof KnowledgeReadCleanupError) throw error;
       if (options.strict) throw error;
       failures.add(id);
     }
@@ -110,6 +123,8 @@ export async function createWorkflowConfiguration(options: {
   skills: readonly JsonObject[];
   toolIds: readonly string[];
   allowedCapabilities?: readonly string[];
+  /** Shared with the original Run assembly; never part of a persisted Workflow snapshot. */
+  knowledgeScope?: KnowledgeReadScope;
   flags: ReturnType<typeof readSkillWorkflowFlags>;
   shell?: ShellConfigurationOptions;
   userDecisions?: WorkflowUserDecisions;
@@ -143,247 +158,265 @@ export async function createWorkflowConfiguration(options: {
     options.capabilities.map((binding) => [binding.capability.capabilityId, binding.capability]),
   );
   const resolveCapability = (id: string) => facts.get(id);
-  const source = createConfiguredSkillSource(options);
-  const listed = enabled ? await source.list() : { entries: [], states: [] };
-  const { entries } = await compileConfiguredWorkflows({
-    profile: options.profile,
-    source,
-    listed,
-    resolveCapability,
-    strict: true,
-  });
-  const initialActivations: WorkflowActivationInput[] = [];
-  if (Array.isArray(inputs)) {
-    if (inputs.length > 1) throw new AgentError('workflow_duplicate_input');
-    for (const envelope of inputs) {
-      const payload = object(object(envelope).input);
-      if (Object.keys(payload).join(',') !== 'activations' || !Array.isArray(payload.activations))
-        throw new AgentError('workflow_input_invalid');
-      const keys = new Set<string>();
-      for (const value of payload.activations) {
-        const item = object(value);
-        if (
-          Object.keys(item).sort().join(',') !== 'input,key,skillId' ||
-          typeof item.key !== 'string' ||
-          !/^[A-Za-z0-9_.-]{1,128}$/.test(item.key) ||
-          keys.has(item.key)
-        )
+  const knowledgeScope = options.knowledgeScope ?? createKnowledgeReadScope();
+  const source = createConfiguredSkillSource({ ...options, knowledgeScope });
+  try {
+    const listed = enabled ? await source.list() : { entries: [], states: [] };
+    const { entries } = await compileConfiguredWorkflows({
+      profile: options.profile,
+      source,
+      listed,
+      resolveCapability,
+      strict: true,
+    });
+    const initialActivations: WorkflowActivationInput[] = [];
+    if (Array.isArray(inputs)) {
+      if (inputs.length > 1) throw new AgentError('workflow_duplicate_input');
+      for (const envelope of inputs) {
+        const payload = object(object(envelope).input);
+        if (Object.keys(payload).join(',') !== 'activations' || !Array.isArray(payload.activations))
           throw new AgentError('workflow_input_invalid');
-        keys.add(item.key);
-        const entry = entries.find((entry) => entry.descriptor.capabilityId === item.skillId);
-        if (!entry?.contract || entry.descriptor.availability !== 'available')
-          throw new AgentError('workflow_skill_unavailable');
-        if (!entry.contract.invocation.allowManual)
-          throw new AgentError('workflow_invocation_denied');
-        if (validateWorkflowArguments(entry.contract.inputSchema, item.input))
-          throw new AgentError('workflow_input_schema_invalid');
-        initialActivations.push({
-          key: item.key,
-          skillId: entry.descriptor.capabilityId,
-          input: structuredClone(item.input!),
-        });
-        if (
-          options.flags.verification &&
-          entry.contract.verification.strategy === 'script' &&
-          !options.shell
-        )
-          throw new AgentError('workflow_verifier_unavailable');
+        const keys = new Set<string>();
+        for (const value of payload.activations) {
+          const item = object(value);
+          if (
+            Object.keys(item).sort().join(',') !== 'input,key,skillId' ||
+            typeof item.key !== 'string' ||
+            !/^[A-Za-z0-9_.-]{1,128}$/.test(item.key) ||
+            keys.has(item.key)
+          )
+            throw new AgentError('workflow_input_invalid');
+          keys.add(item.key);
+          const entry = entries.find((entry) => entry.descriptor.capabilityId === item.skillId);
+          if (!entry?.contract || entry.descriptor.availability !== 'available')
+            throw new AgentError('workflow_skill_unavailable');
+          if (!entry.contract.invocation.allowManual)
+            throw new AgentError('workflow_invocation_denied');
+          if (validateWorkflowArguments(entry.contract.inputSchema, item.input))
+            throw new AgentError('workflow_input_schema_invalid');
+          initialActivations.push({
+            key: item.key,
+            skillId: entry.descriptor.capabilityId,
+            input: structuredClone(item.input!),
+          });
+          if (
+            options.flags.verification &&
+            entry.contract.verification.strategy === 'script' &&
+            !options.shell
+          )
+            throw new AgentError('workflow_verifier_unavailable');
+        }
       }
     }
-  }
-  const shellBinding = options.shell ? structuredClone(options.shell) : undefined;
-  const scriptEntries = options.flags.verification
-    ? entries.filter(
+    const shellBinding = options.shell ? structuredClone(options.shell) : undefined;
+    const scriptEntries = options.flags.verification
+      ? entries.filter(
+          (entry) =>
+            entry.contract?.verification.strategy === 'script' &&
+            entry.descriptor.availability === 'available',
+        )
+      : [];
+    const assets =
+      (scriptEntries.length ||
+        (options.flags.verification &&
+          options.userDecisions?.allowCompensation &&
+          entries.some((entry) => entry.contract?.recovery.compensation))) &&
+      shellBinding
+        ? await inspectShellAssets(shellBinding)
+        : null;
+    const verifier =
+      scriptEntries.length && assets && options.shell
+        ? createSkillWorkflowVerifier({
+            knowledgeScope,
+            entries,
+            resolveCapability,
+            shell: {
+              cwd: options.workspaceRoot,
+              env: options.shell.env,
+              supervisorPath: assets[0].path,
+              bunExecutable: assets[1].path,
+              shellExecutable: assets[2].path,
+              graceMs: options.shell.graceMs,
+              maxQueuedBytes: options.shell.maxQueuedBytes,
+              ...(options.shell.linux && assets[3]
+                ? { linux: { bubblewrapPath: assets[3].path, initExecutable: assets[0].path } }
+                : {}),
+            },
+            ...(options.shell.host
+              ? {
+                  host: {
+                    ...options.shell.host,
+                    filesystemScope: (context) =>
+                      hostFilesystemScope(context, 'skill.workflow.verify'),
+                  },
+                }
+              : {}),
+          })
+        : undefined;
+    const compensator =
+      assets &&
+      options.shell &&
+      options.userDecisions?.allowCompensation &&
+      options.flags.verification &&
+      entries.some(
         (entry) =>
-          entry.contract?.verification.strategy === 'script' &&
-          entry.descriptor.availability === 'available',
+          entry.descriptor.availability === 'available' && entry.contract?.recovery.compensation,
       )
-    : [];
-  const assets =
-    (scriptEntries.length ||
-      (options.flags.verification &&
-        options.userDecisions?.allowCompensation &&
-        entries.some((entry) => entry.contract?.recovery.compensation))) &&
-    shellBinding
-      ? await inspectShellAssets(shellBinding)
-      : null;
-  const verifier =
-    scriptEntries.length && assets && options.shell
-      ? createSkillWorkflowVerifier({
-          entries,
-          resolveCapability,
-          shell: {
-            cwd: options.workspaceRoot,
-            env: options.shell.env,
-            supervisorPath: assets[0].path,
-            bunExecutable: assets[1].path,
-            shellExecutable: assets[2].path,
-            graceMs: options.shell.graceMs,
-            maxQueuedBytes: options.shell.maxQueuedBytes,
-            ...(options.shell.linux && assets[3]
-              ? { linux: { bubblewrapPath: assets[3].path, initExecutable: assets[0].path } }
-              : {}),
-          },
-          ...(options.shell.host
-            ? {
-                host: {
-                  ...options.shell.host,
-                  filesystemScope: (context) =>
-                    hostFilesystemScope(context, 'skill.workflow.verify'),
-                },
-              }
-            : {}),
-        })
-      : undefined;
-  const compensator =
-    assets &&
-    options.shell &&
-    options.userDecisions?.allowCompensation &&
-    options.flags.verification &&
-    entries.some(
-      (entry) =>
-        entry.descriptor.availability === 'available' && entry.contract?.recovery.compensation,
-    )
-      ? createSkillWorkflowCompensator({
-          entries,
-          resolveCapability,
-          shell: {
-            cwd: options.workspaceRoot,
-            env: {},
-            supervisorPath: assets[0].path,
-            bunExecutable: assets[1].path,
-            shellExecutable: assets[2].path,
-            ...(options.shell.linux && assets[3]
-              ? { linux: { bubblewrapPath: assets[3].path, initExecutable: assets[0].path } }
-              : {}),
-            ...(options.shell.graceMs === undefined ? {} : { graceMs: options.shell.graceMs }),
-            ...(options.shell.maxQueuedBytes === undefined
-              ? {}
-              : { maxQueuedBytes: options.shell.maxQueuedBytes }),
-          },
-          protectedRoots: [options.profile.dataRoot, options.profile.coordinationPath],
-        })
-      : undefined;
-  const rejectedStarts = new WeakSet<JobHandle>();
-  const supervisedExtension = (
-    instance: { extension: Extension } | undefined,
-    assetFailureCode: string,
-  ) =>
-    instance && assets && shellBinding
-      ? {
-          ...instance.extension,
-          jobs: (instance.extension.jobs ?? []).map((job) => ({
-            ...job,
-            async start(
-              input: Parameters<typeof job.start>[0],
-              context: Parameters<typeof job.start>[1],
-            ) {
-              context.signal.throwIfAborted();
-              let valid = false;
-              try {
-                valid =
-                  workflowSnapshotDigest(await inspectShellAssets(shellBinding)) ===
-                  workflowSnapshotDigest(assets);
-              } catch {
-                /* No adapter/process has been entered. */
-              }
-              if (!valid) {
-                const handle: JobHandle = {
-                  reference: {
-                    kind: 'startup_rejected',
-                    executionId: context.executionId,
-                    code: assetFailureCode,
-                  },
-                };
-                rejectedStarts.add(handle);
-                return handle;
-              }
-              context.signal.throwIfAborted();
-              return job.start(input, context);
+        ? createSkillWorkflowCompensator({
+            knowledgeScope,
+            entries,
+            resolveCapability,
+            shell: {
+              cwd: options.workspaceRoot,
+              env: {},
+              supervisorPath: assets[0].path,
+              bunExecutable: assets[1].path,
+              shellExecutable: assets[2].path,
+              ...(options.shell.linux && assets[3]
+                ? { linux: { bubblewrapPath: assets[3].path, initExecutable: assets[0].path } }
+                : {}),
+              ...(options.shell.graceMs === undefined ? {} : { graceMs: options.shell.graceMs }),
+              ...(options.shell.maxQueuedBytes === undefined
+                ? {}
+                : { maxQueuedBytes: options.shell.maxQueuedBytes }),
             },
-            async *observe(handle: JobHandle): AsyncIterable<JobEvent> {
-              if (rejectedStarts.has(handle)) {
-                yield {
-                  type: 'terminal',
-                  result: {
-                    outcome: 'failed',
-                    content: assetFailureCode,
-                    details: { code: assetFailureCode, started: false },
-                  },
-                  supervision: 'ended',
-                };
-                return;
-              }
-              yield* job.observe(handle);
-            },
-            async cancel(handle: JobHandle) {
-              return rejectedStarts.has(handle)
-                ? { status: 'already_finished' as const }
-                : job.cancel(handle);
-            },
-            async dispose(handle: JobHandle) {
-              if (!rejectedStarts.has(handle)) await job.dispose(handle);
-            },
-          })),
-        }
-      : undefined;
-  const verifierExtension = supervisedExtension(verifier, 'workflow_verifier_asset_changed');
-  const compensatorExtension = supervisedExtension(
-    compensator,
-    'workflow_compensator_asset_changed',
-  );
-  const workflow = createSkillWorkflow({
-    flags: options.flags,
-    ...(options.userDecisions ? { userDecisions: structuredClone(options.userDecisions) } : {}),
-    initialActivations,
-    entries,
-    resolveCapability,
-    capabilities: options.capabilities.map(({ capability, ...binding }) => ({
-      ...binding,
-      capabilityId: capability.capabilityId,
-    })),
-    forkConfigurations: options.forkConfigurations,
-    ...(verifier ? { verificationJob: verifier.verificationJob } : {}),
-    ...(compensator ? { compensationJob: compensator.compensationJob } : {}),
-  });
-  return {
-    ...workflow,
-    verifierExtension,
-    compensatorExtension,
-    snapshot: structuredClone({
-      version: 1,
-      flags: options.flags,
-      userDecisions: options.userDecisions ?? null,
-      entries,
-      capabilities: options.capabilities,
-      forkConfigurations: options.forkConfigurations,
-      originalActivationIntent: inputs ?? null,
-      compensator: compensator
+            protectedRoots: [options.profile.dataRoot, options.profile.coordinationPath],
+          })
+        : undefined;
+    const rejectedStarts = new WeakSet<JobHandle>();
+    const supervisedExtension = (
+      instance: { extension: Extension } | undefined,
+      assetFailureCode: string,
+    ) =>
+      instance && assets && shellBinding
         ? {
-            backend:
-              options.shell?.platform === 'linux'
-                ? 'linux-bubblewrap-pid-namespace'
-                : 'macos-seatbelt',
-            subprocesses: 'denied',
-            definitionId: compensator.compensationJob.definitionId,
-            definitionVersion: compensator.compensationJob.definitionVersion,
+            ...instance.extension,
+            jobs: (instance.extension.jobs ?? []).map((job) => ({
+              ...job,
+              async start(
+                input: Parameters<typeof job.start>[0],
+                context: Parameters<typeof job.start>[1],
+              ) {
+                context.signal.throwIfAborted();
+                let valid = false;
+                try {
+                  valid =
+                    workflowSnapshotDigest(await inspectShellAssets(shellBinding)) ===
+                    workflowSnapshotDigest(assets);
+                } catch {
+                  /* No adapter/process has been entered. */
+                }
+                if (!valid) {
+                  const handle: JobHandle = {
+                    reference: {
+                      kind: 'startup_rejected',
+                      executionId: context.executionId,
+                      code: assetFailureCode,
+                    },
+                  };
+                  rejectedStarts.add(handle);
+                  return handle;
+                }
+                context.signal.throwIfAborted();
+                return job.start(input, context);
+              },
+              async *observe(handle: JobHandle): AsyncIterable<JobEvent> {
+                if (rejectedStarts.has(handle)) {
+                  yield {
+                    type: 'terminal',
+                    result: {
+                      outcome: 'failed',
+                      content: assetFailureCode,
+                      details: { code: assetFailureCode, started: false },
+                    },
+                    supervision: 'ended',
+                  };
+                  return;
+                }
+                yield* job.observe(handle);
+              },
+              async cancel(handle: JobHandle) {
+                return rejectedStarts.has(handle)
+                  ? { status: 'already_finished' as const }
+                  : job.cancel(handle);
+              },
+              async dispose(handle: JobHandle) {
+                if (!rejectedStarts.has(handle)) await job.dispose(handle);
+              },
+            })),
           }
-        : null,
-      verifier:
-        assets && options.shell
+        : undefined;
+    const verifierExtension = supervisedExtension(verifier, 'workflow_verifier_asset_changed');
+    const compensatorExtension = supervisedExtension(
+      compensator,
+      'workflow_compensator_asset_changed',
+    );
+    const workflow = createSkillWorkflow({
+      knowledgeScope,
+      flags: options.flags,
+      ...(options.userDecisions ? { userDecisions: structuredClone(options.userDecisions) } : {}),
+      initialActivations,
+      entries,
+      resolveCapability,
+      capabilities: options.capabilities.map(({ capability, ...binding }) => ({
+        ...binding,
+        capabilityId: capability.capabilityId,
+      })),
+      forkConfigurations: options.forkConfigurations,
+      ...(verifier ? { verificationJob: verifier.verificationJob } : {}),
+      ...(compensator ? { compensationJob: compensator.compensationJob } : {}),
+    });
+    return {
+      ...workflow,
+      dispose: () => source.dispose(),
+      verifierExtension,
+      compensatorExtension,
+      snapshot: structuredClone({
+        version: 1,
+        flags: options.flags,
+        userDecisions: options.userDecisions ?? null,
+        entries,
+        capabilities: options.capabilities,
+        forkConfigurations: options.forkConfigurations,
+        originalActivationIntent: inputs ?? null,
+        compensator: compensator
           ? {
-              assets,
-              configurationId: options.shell.configurationId,
-              envDigest: createHash('sha256')
-                .update(workflowSnapshotDigest(options.shell.env))
-                .digest('hex'),
-              graceMs: options.shell.graceMs ?? null,
-              maxQueuedBytes: options.shell.maxQueuedBytes ?? null,
+              backend:
+                options.shell?.platform === 'linux'
+                  ? 'linux-bubblewrap-pid-namespace'
+                  : 'macos-seatbelt',
+              subprocesses: 'denied',
+              definitionId: compensator.compensationJob.definitionId,
+              definitionVersion: compensator.compensationJob.definitionVersion,
             }
           : null,
-    }),
-    entries,
-  };
+        verifier:
+          assets && options.shell
+            ? {
+                assets,
+                configurationId: options.shell.configurationId,
+                envDigest: createHash('sha256')
+                  .update(workflowSnapshotDigest(options.shell.env))
+                  .digest('hex'),
+                graceMs: options.shell.graceMs ?? null,
+                maxQueuedBytes: options.shell.maxQueuedBytes ?? null,
+              }
+            : null,
+      }),
+      entries,
+    };
+  } catch (error) {
+    try {
+      await source.dispose();
+    } catch (cleanupError) {
+      throw new ConfigurationPreparationCleanupError({
+        originalError: error,
+        cleanupError,
+        resources: { source, knowledgeScope },
+      });
+    }
+    throw error;
+  }
 }
 export function composeRequirementInitializers(
   ...initializers: (RunRequirementInitializer | undefined)[]
@@ -647,6 +680,7 @@ export function workflowSnapshotDigest(value: Json) {
 
 export function assertWorkflowForkCurrent(
   fence: NonNullable<Awaited<ReturnType<typeof workflowForkFence>>>,
+  knowledgeScope?: KnowledgeReadScope,
 ) {
   const facts = new Map(
     fence.dependencyFacts.map((binding) => {
@@ -655,7 +689,11 @@ export function assertWorkflowForkCurrent(
       return [String(fact.capabilityId), fact as unknown as WorkflowCapability] as const;
     }),
   );
-  const current = revalidateSkillWorkflow(fence.compiledEntry, (id) => facts.get(id));
+  const current = revalidateSkillWorkflow(
+    fence.compiledEntry,
+    (id) => facts.get(id),
+    knowledgeScope,
+  );
   if (
     current.descriptor.availability !== 'available' ||
     current.descriptor.revision !== fence.parentSkillRevision

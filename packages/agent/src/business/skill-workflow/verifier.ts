@@ -8,6 +8,7 @@ import {
 } from '@kite-ai/agent/jobs/shell';
 import type { Extension, JobDefinition, JobHandle, Json } from '../../extensions';
 import { canonicalJson } from '../../json';
+import type { KnowledgeReadScope } from '../../platform/knowledge-reads';
 import {
   type CompiledSkillWorkflow,
   revalidateSkillWorkflow,
@@ -17,6 +18,7 @@ import { validateWorkflowArguments } from '../../skills/workflow-contract/schema
 import { AgentError } from '../../storage/types';
 
 export interface SkillWorkflowVerifierOptions {
+  readonly knowledgeScope?: KnowledgeReadScope;
   readonly entries: readonly CompiledSkillWorkflow[];
   readonly resolveCapability?: (id: string) => WorkflowCapability | undefined;
   readonly shell: ShellJobOptions;
@@ -97,7 +99,7 @@ export function createSkillWorkflowVerifier(options: SkillWorkflowVerifierOption
         original.descriptor.revision !== revision
       )
         throw new AgentError('workflow_source_changed');
-      const entry = revalidateSkillWorkflow(original, resolver);
+      const entry = revalidateSkillWorkflow(original, resolver, options.knowledgeScope);
       if (
         !entry.contract ||
         entry.descriptor.availability !== 'available' ||

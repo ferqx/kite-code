@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parseDocument } from 'yaml';
+import {
+  createKnowledgeReadScope,
+  type KnowledgeFileAccess,
+  KnowledgeReadCleanupError,
+  type KnowledgeReadScope,
+} from '../platform/knowledge-reads';
 import { readBoundWorkflowFile } from './workflow-contract/reference';
 import {
   compileWorkflowSchema,
@@ -214,6 +220,7 @@ function requiredPositiveInt(
 function readSkillFiles(
   skillDir: string,
   diagnostics: SkillDiagnostic[],
+  filesAccess: KnowledgeFileAccess,
 ): Array<{ path: string; content: Buffer }> {
   const files: Array<{ path: string; content: Buffer }> = [];
   const root = resolve(skillDir);
@@ -259,10 +266,11 @@ function readSkillFiles(
       } else if (stat.isFile()) {
         files.push({
           path: rel.split(sep).join('/'),
-          content: readBoundWorkflowFile(root, absolute, stat),
+          content: readBoundWorkflowFile(root, absolute, stat, filesAccess),
         });
       }
     } catch (error) {
+      if (error instanceof KnowledgeReadCleanupError) throw error;
       diagnostic(diagnostics, 'missing_path', `Unable to read ${rel}: ${String(error)}`, rel);
     }
   }
@@ -441,7 +449,10 @@ function buildDescriptor(input: {
 }
 
 /** Compile a complete, immutable Workflow Contract. Invalid skills are returned as diagnostics, never skipped. */
-function compile(input: CompileSkillWorkflowInput): CompiledSkillWorkflow {
+function compile(
+  input: CompileSkillWorkflowInput,
+  filesAccess: KnowledgeFileAccess,
+): CompiledSkillWorkflow {
   const diagnostics: SkillDiagnostic[] = [];
   let sourceBinding: CompiledSkillWorkflow['sourceBinding'];
   try {
@@ -453,7 +464,9 @@ function compile(input: CompileSkillWorkflowInput): CompiledSkillWorkflow {
   } catch (error) {
     diagnostic(diagnostics, 'invalid_path', `Unable to bind Skill source: ${String(error)}`);
   }
-  const files = sourceBinding ? readSkillFiles(sourceBinding.canonicalRoot, diagnostics) : [];
+  const files = sourceBinding
+    ? readSkillFiles(sourceBinding.canonicalRoot, diagnostics, filesAccess)
+    : [];
   const skillFile = files.find((file) => file.path === 'SKILL.md');
   if (!skillFile) {
     diagnostic(diagnostics, 'missing_skill_file', 'SKILL.md is required.', 'SKILL.md');
@@ -821,21 +834,31 @@ function immutable<T>(value: T): T {
   return value;
 }
 /** Explicit compilation reads only the caller-selected source, never discovery or execution. */
-export function compileSkillWorkflow(input: CompileSkillWorkflowInput): CompiledSkillWorkflow {
-  return immutable(compile(input));
+export function compileSkillWorkflow(
+  input: CompileSkillWorkflowInput,
+  knowledgeScope: KnowledgeReadScope = createKnowledgeReadScope(),
+): CompiledSkillWorkflow {
+  return knowledgeScope.runSync((files) => immutable(compile(input, files)));
 }
 export { validateWorkflowArguments } from './workflow-contract/schema';
+
 /** Recompile the original bound source against explicit current dependency facts. Drift is unavailable. */
-export function revalidateSkillWorkflow(
+function revalidateWithFiles(
   entry: CompiledSkillWorkflow,
-  resolveCapability?: CompileSkillWorkflowInput['resolveCapability'],
+  resolveCapability: CompileSkillWorkflowInput['resolveCapability'] | undefined,
+  files: KnowledgeFileAccess,
 ): CompiledSkillWorkflow {
-  const current = compileSkillWorkflow({
-    skillDir: entry.sourcePath,
-    source: entry.source,
-    origin: entry.origin,
-    ...(resolveCapability ? { resolveCapability } : {}),
-  });
+  const current = immutable(
+    compile(
+      {
+        skillDir: entry.sourcePath,
+        source: entry.source,
+        origin: entry.origin,
+        ...(resolveCapability ? { resolveCapability } : {}),
+      },
+      files,
+    ),
+  );
   if (
     current.descriptor.revision === entry.descriptor.revision &&
     current.sourceBinding?.canonicalRoot === entry.sourceBinding?.canonicalRoot &&
@@ -857,39 +880,51 @@ export function revalidateSkillWorkflow(
     },
   });
 }
+export function revalidateSkillWorkflow(
+  entry: CompiledSkillWorkflow,
+  resolveCapability?: CompileSkillWorkflowInput['resolveCapability'],
+  knowledgeScope: KnowledgeReadScope = createKnowledgeReadScope(),
+): CompiledSkillWorkflow {
+  return knowledgeScope.runSync((files) => revalidateWithFiles(entry, resolveCapability, files));
+}
 /** Reference content is read as data; scripts are never executed. Resolver must match original binding. */
 export function readWorkflowReference(
   entry: CompiledSkillWorkflow,
   path: string,
   resolveCapability?: CompileSkillWorkflowInput['resolveCapability'],
+  knowledgeScope: KnowledgeReadScope = createKnowledgeReadScope(),
 ): { path: string; encoding: 'utf8' | 'base64'; content: string; revision: string } {
-  const normalized = path.replaceAll('\\', '/');
-  if (
-    !entry.contract ||
-    entry.descriptor.availability !== 'available' ||
-    !entry.sourceBinding ||
-    !/^(?:scripts|references|assets|evals)\//.test(normalized) ||
-    !entry.contract.files.includes(normalized) ||
-    normalized.includes('\0') ||
-    isAbsolute(normalized) ||
-    normalized.split('/').includes('..')
-  )
-    throw Error('skill_reference_not_declared');
-  const current = revalidateSkillWorkflow(entry, resolveCapability);
-  if (current.descriptor.availability !== 'available') throw Error('skill_workflow_changed');
-  const root = current.sourceBinding!.canonicalRoot;
-  const target = resolve(root, normalized);
-  const expected = lstatSync(target);
-  if (!expected.isFile() || expected.isSymbolicLink()) throw Error('skill_reference_invalid');
-  const content = readBoundWorkflowFile(root, target, expected);
-  if (revalidateSkillWorkflow(entry, resolveCapability).descriptor.availability !== 'available')
-    throw Error('skill_workflow_changed');
-  const utf8 = content.toString('utf8');
-  const encoding = Buffer.from(utf8, 'utf8').equals(content) ? 'utf8' : 'base64';
-  return {
-    path: normalized,
-    encoding,
-    content: encoding === 'utf8' ? utf8 : content.toString('base64'),
-    revision: createHash('sha256').update(content).digest('hex'),
-  };
+  return knowledgeScope.runSync((files) => {
+    const normalized = path.replaceAll('\\', '/');
+    if (
+      !entry.contract ||
+      entry.descriptor.availability !== 'available' ||
+      !entry.sourceBinding ||
+      !/^(?:scripts|references|assets|evals)\//.test(normalized) ||
+      !entry.contract.files.includes(normalized) ||
+      normalized.includes('\0') ||
+      isAbsolute(normalized) ||
+      normalized.split('/').includes('..')
+    )
+      throw Error('skill_reference_not_declared');
+    const current = revalidateWithFiles(entry, resolveCapability, files);
+    if (current.descriptor.availability !== 'available') throw Error('skill_workflow_changed');
+    const root = current.sourceBinding!.canonicalRoot;
+    const target = resolve(root, normalized);
+    const expected = lstatSync(target);
+    if (!expected.isFile() || expected.isSymbolicLink()) throw Error('skill_reference_invalid');
+    const content = readBoundWorkflowFile(root, target, expected, files);
+    if (
+      revalidateWithFiles(entry, resolveCapability, files).descriptor.availability !== 'available'
+    )
+      throw Error('skill_workflow_changed');
+    const utf8 = content.toString('utf8');
+    const encoding = Buffer.from(utf8, 'utf8').equals(content) ? 'utf8' : 'base64';
+    return {
+      path: normalized,
+      encoding,
+      content: encoding === 'utf8' ? utf8 : content.toString('base64'),
+      revision: createHash('sha256').update(content).digest('hex'),
+    };
+  });
 }

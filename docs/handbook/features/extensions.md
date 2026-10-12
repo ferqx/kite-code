@@ -24,6 +24,8 @@ Skill Activation 和 Skill Workflow 默认受开关限制。手册不承诺默�
 
 通用开发入口提供同源 Skill 知识目录：不可用项显示局部原因，不阻止未选择该项的普通任务；明确选择不可用项仍会拒绝，子任务继承的原项失效也不能静默换项。默认知识读取不再附加固定项目数、正文或引用数额度，宿主明确设置的额度、配置文件字节边界、路径与格式检查仍有效。TUI `/skills` 只读发现与状态，并在宿主支持时显示独立的 Workflow 资格与命令名称，见[开发目录操作](../clients/tui/guides/mcp-and-skills.md#通用开发-tui-的-skill-目录)。
 
+项目指令、Skill 正文／资源和 Workflow 读取的文件资源关闭无法确认时，任务或目录读取保留失败，取消不会将其改为成功。应用保留原资源与使用权，不能把服务收尾或离线维护交接报告为完成；普通坏文件在关闭成功后仍按上述局部不可用处理。当前实际资源与验收范围见[知识目录 owner](../../../apps/service/README.md#同源-skill-知识目录)。
+
 通用 Service 的 Native API 支持显式 Workflow 激活，需在当前 profile 的 `skill-workflow.jsonc` 打开 `skillActivation` 与 `skillWorkflow`；缺文件默认关闭。`verification` 独立控制核验准入，关闭它仍要求输出符合原契约。请求由已支持 `run_extension_inputs` 的 Client 提交原激活意图，inline 使用原指令，fork 使用原子任务完整结果；失败或未知不能靠模型自行宣称成功。脚本核验需要宿主实际提供受监督进程能力，并继续经过原权限和必要审批。精确配置/API 由 [Service owner](../../../apps/service/README.md#有条件-skill-workflow) 维护。
 
 macOS 正式脚本核验保持原 Skill 执行目录和相对资源读取，使用完整后代监督。Profile 中的准确 Skill 来源只读，其余 Profile 与协调数据仍受保护；来源不能写入、移动或执行其中的原生程序。需要写入的核验效果仍按本次权限作用于原 Workspace，Full 也不解除私有数据保护。取消与超时须等真实停止证明；未确认时保留 unknown 和原资源。Linux 已接对应源码，但实机与完整安装资格仍待验证；当前范围见[来源与监督 owner](../../../packages/agent/src/jobs/README.md#profile-skill-的准确只读来源)。

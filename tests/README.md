@@ -55,6 +55,8 @@ argv保持原顺序准备，完整Terminal candidate归成功的开发Service fi
 
 Owner-local tests 可读自己非公开源码；root integration 使用公开 package exports 或明确 App surface。root 不通过相对 deep-import 另建生产语义，不仅为测试便利扩大 production export。fixtures/helpers 不自动拥有测试；根不保存散落测试或第二通用 `tests/runtime/` owner。
 
+[知识读取 owner](../packages/agent/test/isolated/knowledge-reads/owner.test.ts)与[正式知识收尾调用者](../apps/service/test/isolated/knowledge-cleanup-ownership.test.ts)分别归 Agent／Service。新增完整文件使用 tmpdir／标准 file URL、无 OS skip；真实原 FileHandle／fd 的 JS close 拒绝只证明准确资源持有、两原错误与一次关闭，不代证自然 OS API 失败。Service 覆盖准备、实际 Skill Tool 取消、普通／手动 Workflow 目录及在途关闭；原 child 实际0及双 EOF 后才核公开维护与完整冷读零重放。旧正常知识、Workflow、目录、配置、取消及包外消费者断言／预算保持，本机结果不授 Win/Linux、资源全集、RSS或阶段资格。原红与准确复用范围见[知识收尾进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13同源知识读取与正式目录收尾)。
+
 [TUI 取消中的后继输入](../apps/cli/test/isolated/tui-finishing-input-host.test.ts)属于 CLI owner 的隔离完整文件：真实 HTTP/SDK/SQLite/Runtime、正式 caller port 和 TuiController，以受控 Job 停止屏障核四种公开 `cancelling` 读取、原后继完整正文、切会话晚回执保草稿、原 Command 查询／重复准备零新增 POST，以及正常关闭。临时目录和 file URL 使用平台中立入口，没有 Shell 或平台 skip；它不替代 PTY、原生进程清理与 Win/Linux 实机资格。
 
 [Profile verifier 原生取消](../packages/agent/test/isolated/business/skill-workflow-host-verifier.test.ts)的脚本先写闭同目录临时PID记录，再发布最终记录，父按原预算一次读取。原 `kill(pid,0).toThrow()` 与全树收据断言保持；失败根保存实际读取字节、起始出生、terminal和瞬时kernel观察，不将事后absent追认为断言时已停止。它属于macOS原生叶的资格，其他平台门禁保持；当前完整默认红与有界空发布演示的不同证据范围见[本片进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13取消中的后继输入)。

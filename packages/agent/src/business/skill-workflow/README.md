@@ -8,6 +8,8 @@
 
 不可用 descriptor 仍是有效持久 JSON；没有有效契约时省略 provider 的可选 version，不保存 `undefined`。同一可信目录可以混合普通知识、坏合同和合法 Workflow，局部诊断不会使无关合法激活的 Run 配置无法落库。
 
+编译、来源复核、引用、Verifier 和 Compensator 的同步文件读取现在可接同一可信 `knowledgeScope`，由[Agent 读取 owner](../../platform/knowledge-reads.ts)保实际 fd、原读取／关闭错误与一次关闭结果。正式 Service 将其接到原 Run disposer，关闭未知先透传，不能变成普通 diagnostics、来源拒绝或取消成功。该参数独立于编译输入／结果和持久快照，不进入 `structuredClone` 的业务数据；程序化宿主使用共享作用域时须在自己的资源收尾中结算。完整正常编译与业务断言保持，有限实际关闭拒绝不授全资源或跨平台资格。
+
 每份 schema 独立编译其注册表，相同 `$id` 可在不同 Skill 重用，跨 Skill 未声明的 `$ref` 不借用另一份缓存。异步 Ajv 扩展被明确拒绝，Promise 不能被同步验证误当成功；标准 Draft-07 的局部引用、条件和组合约束仍完整执行。
 
 `skillActivation` 与 `skillWorkflow` 均为 true 才能激活；`verification` 是独立准入开关。启用核验时，effective effects 中的 write/destructive/unknown 要求 required；否则使用原契约 mode。关闭核验仍校验完整 output schema，且不抹除已经在 Run 中登记的义务。

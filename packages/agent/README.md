@@ -22,7 +22,7 @@
 - [SQLite 入口](src/sqlite.ts)：显式打开新 profile、一个专用 Worker；macOS 的解析／Store 原 Worker 收尾通过[平台 owner](src/platform/README.md)等待原 Mach 权终态和准确释放，再交接原锁。具体字段和事务由[基线迁移](src/storage/migrations/0001-baseline.sql)、[具名操作](src/storage/sqlite/operations.ts)维护；三端与完整资源门禁仍按进度保留。
 - [Store 目录](src/storage/README.md)：原 Store 与实际 root 创建主体的有限 keyset 分页；Workspace 保持认证 profile 范围，空 Workspace 不依赖 Session 才可见。
 - [唯一 Loop](src/loop.ts)：只使用模型/输入/执行契约；工具参数只有在完整模型响应保存后才能派发。
-- [来源入口](src/sources.ts)：宿主显式配置的项目指令适配器，根 import 不读取文件。按可信目标链读取 AGENTS.md/CLAUDE.md 的实际内容摘要，相关新增、修改、删除进入派发前复核。
+- [来源入口](src/sources.ts)：宿主显式配置的项目指令适配器，根 import 不读取文件。按可信目标链读取 AGENTS.md/CLAUDE.md 的实际内容摘要，相关新增、修改、删除进入派发前复核。具体 factory 的 disposer 与知识读取作用域保原文件资源到关闭确认；纯 `ContextSources` 及来源身份保持。
 - [文件入口](src/files.ts)与[普通文件 Tools](src/tools/files/README.md)：显式 Workspace 的目录 FD、完整内容基线与精确修改；行读取、glob、查询分页保留明确范围。大正文使用完整 Artifact，显式分页继续保留选择范围。
 - [Artifact 入口](src/artifacts/README.md)：不可变文件先发布，再事务登记原 Store、主体、Session 与准确授权 scope；相同 hash 不授予其他 scope 读取资格。
 - [完整 Model 正文与实际输入检查](src/model-body/README.md)：原产物正文与大 Model/Auto 请求以准确 scope 的不可变 Artifact 交接，Provider 前完整展开并核实 hash；只读原 Execution 请求及固定上界调用目录不捕获现在来源、不初始化 Provider，Worker 仍使用有限传输。

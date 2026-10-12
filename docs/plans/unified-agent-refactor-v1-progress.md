@@ -5667,3 +5667,22 @@ transport 保每个原完整命令，新记录／原生验证及原候选文件�
 剩余阶段退出依赖按顺序保持四项：普通完整任务／cancel／close缺可信全Runtime resources／handles、出生后代和全部cleanup来源，前述未直接覆盖恢复返回前typed分支和其他I/O owner仍归此项；原RSS +115.203125MiB >32MiB／native live allocation owner未定位，原负载／八outer／九点／60—168分钟门禁不变，不重复参数对照；Win/Linux正式安装、实际版本切换、MCP连接／调用／cancel／exit、维护恢复／保数据卸载及Windows Shell原合同交后续Actions或用户实机，本机不dispatch；全适用§35／T/E、独立全量迁移审查、最终旧源码／依赖退役和准确输入阶段完整回归依赖以上条件。37能力partial、wholeDefault=false／wholeV13=false／phaseExit=false；ChatGPT官方授权／Responses在V1.3之后，Codex直接复用保门禁。仅本地提交，原hooks保留，不push／PR／发布。
 
 本片最终根与八workspace类型、Agent／Service构建、当前Biome／API／boundary／workspace／test ownership／docs／docs-impact／plan-evidence／diff均actual0。独立只读审查绑定Runtime SHA ef06a4d5412f921579879b567207ac64a114fb102d06ec8fdffd4af7f9f4d0c7、assembly SHA 9b85bc27b41faacdd4e8e65a20b08b9af6f4d7442de56fc76b212946c78c596f、configuration SHA dd5e838b4a48396749fcb9e932d712c3184e42106b319dc6dff3126c3c336e21，未见新增实质错误；新child用例单文件最终SHA86e783f804e2a80580c1bff427496cd06e166b9f17743a1baeceeff3470ab58a。文档检查首轮因新Note标题需精确Consequences而actual1，已保log并只修标题，当前0；没有改断言或资格。iteration_complete／stage／commit仅授本片，正常hook仍独立执行。
+
+
+## 2026-10-13：同源知识读取与正式目录收尾
+
+状态：partial；上一片本地提交4028ae4b，本轮开始工作树干净。上一用户截图核对复用未变退出修复及当前输入证据，没有把既有通过再扩为故障矩阵。本轮从实际源码核项目／Skill FileHandle 和 Workflow 同步 fd 的关闭失败被普通 unavailable／diagnostics／cancelled 吞掉、实际 owner随临时 source或metadata重建丢失，按现有完整能力映射实施正式任务和 `/skills` 的收尾。
+
+退出依赖按真实顺序保持五项：同源知识资源归属；全Runtime activeResources／handles／出生后代可信producer；原RSS native live allocation归属与原窗口；后置Win/Linux原生／正式安装恢复资格；依赖前述的§35独立完整审查、旧路径最终退役和当前完整默认回归。第一项是可独立实施的源码缺口，入口是普通任务的项目指令、Skill load／resource、Workflow编译／引用／核验，以及任务外普通／manual目录。验收保原完整正文／版本／能力／路径及局部错误；关闭未知保原资源、取消不掩盖、shutdown及维护交接不能成功。没有新建单一操作、journal或窗口Goal。
+
+Agent新增[知识读取scope](../../packages/agent/src/platform/knowledge-reads.ts)，合并三个重复finally关闭路径，factory仍无I/O；具体项目／Skill factory可接trusted scope并返回dispose，ContextSources和持久身份保持。实际open／openSync在原owner内登记真实FileHandle／fd，成功才删除、关闭只一次；全部并发失败强保原资源和两原错误，dispose封新操作／等待原复合读取／缓存first failure，结束后退休Access。Workflow compile／revalidate／reference、Verifier／Compensator传同一scope，不进入DTO／clone／snapshot。Service只装配：Run依原assembly disposer，准备失败依原CPP receiver，非Run catalogue保独立scope和本实例完整在途list，经原beforeResourceClose结算。metadata重建不能丢owner；原权限fence catch也先透传knowledge清理未知，普通来源拒绝保持。详[知识资源决定](../../.agents/notes/implemented/bug-fix/2026-10-13-knowledge-read-custody.md)。
+
+本轮只读4028原源码／public exports对照真实actual1／7expects／302.69ms：真实open1／原close拒绝1，原Unicode／CRLF仍可读；Command以skill_unavailable拒绝、Model0／Run0／Execution0，却Service与Runtime error均null／closed、原自己child仍alive。原log /private/tmp/kite-knowledge-prep-before-final.log保留；前依赖、module alias、fixture trust与错误码误猜导致的setup／验证失败不冒称产品红。对照仅为验证旧行为的只读副本，所有实施都在当前durable checkout，无临时worktree唯一实现。
+
+当前[完整Service验收](../../apps/service/test/isolated/knowledge-cleanup-ownership.test.ts)五例actual0／140expects／1.81秒：必选Skill准备、实际Skill Tool原signal取消、普通目录、manual Workflow真实同步fd、在途目录异步close与Service关闭并发。first／second目录请求明确knowledge_cleanup_unconfirmed，不用任意失败冒充目标错误；Run的原shutdown_cleanup_unconfirmed与目录原beforeResourceClose错误分别保持、均drain_failed。每原资源close一次，活进程公开backup为owner_busy；实际自有child退出0和双EOF后才公开backup及完整原Metadata／View／Command／Message／Execution冷读，Model零重放。故障是原实际close边界的JS拒绝，不宣称自然OS失败。[Agent完整owner](../../packages/agent/test/isolated/knowledge-reads/owner.test.ts)2／24／0另核两并发FileHandle、两个同步fd、两原错误与准确资源、缓存失败、封口后原复合两读完成和退休Access拒绝；新增测试tmpdir／fileURL且无平台skip。
+
+按实际修改选择必要完整28文件各独立Bun进程，actual0／186pass／1825expects／112.329秒，3879输入全程零漂移，原Workflow／能力权限／目录分页／配置／child／正常关闭和全部旧预算保持。随后新Service冻结整文件重跑0／5pass／140expects，未变28文件结果精确复用，最终29文件191pass／1965expects／0fail、3881输入零漂移；准确freeze／逐文件log／result保 /private/tmp/kite-knowledge-related-20261013-* 与 /private/tmp/kite-knowledge-final-20261013-*，final-result SHA04958aef9e794bc111cf6a6e018859baefd737b9f2651a664878f8748c2f183e。没有将这些文件拼成完整默认资格。原源码外完整package1／67／0和实际Electron完整窗口1／4／0保持；后者原40效果／零取消、9次真实native_draining读取／释放拒绝，quitDialogs／pageErrors／observationErrors空，Electron和原Service PID41987各0／无信号，12.579秒。本轮只授当前源码构建，不反推截图原安装包身份。
+
+根及八workspace types、Agent／Service build、API／boundary／workspaces／test ownership当前0；独立只读审查发现权限catch的真实吞错，修后无其他必改项。产品扩展、Agent／Skills／Workflow／Service owner、active资源资格、测试入口与能力映射同步当前范围。document-before-commit的design_complete／iteration_complete／stage／commit仅覆盖本片，强制hooks独立执行；仅准备本地提交，实际hook及Git结果由本轮交付回执核实，不push／PR／发布或触发Actions。
+
+新增闭合：正式同源知识文件的实际关闭失败custody及Run／任务外目录交接；三个无owner的finally路径和吞清理未知的正式catch退出使用。全Runtime观测producer、原RSS、Win/Linux、三个恢复新typed返回前直接资源失败证据、其他瞬时I/O owner、§35整体审查／最终旧源码退役及阶段完整默认仍未闭合。37能力保持partial；wholeDefault=false／wholeV13=false／phaseExit=false，Goal active，ChatGPT／Responses仍在当前V1.3之后。

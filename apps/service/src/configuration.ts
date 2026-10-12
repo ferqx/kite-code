@@ -47,6 +47,7 @@ import {
 } from '@kite-ai/agent/permissions/shell';
 import { createPlanningValidation, type PlanningOptions } from '@kite-ai/agent/planning';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
+import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { webExtractorAssets } from '@kite-ai/agent/web-fetch';
 import {
@@ -815,6 +816,7 @@ export function createDefaultProcessConfiguration(options: {
         }
         const workflowCapabilities = workflowCapabilitiesFor(assembly);
         const workflow = await createWorkflowConfiguration({
+          knowledgeScope: assembly.knowledgeScope,
           profile: options.profile,
           workspaceRoot: root,
           skills: effective.skills ?? [],
@@ -1161,8 +1163,9 @@ export function createDefaultProcessConfiguration(options: {
             }
             if (selection?.workflowFence) {
               try {
-                assertWorkflowForkCurrent(selection.workflowFence);
-              } catch {
+                assertWorkflowForkCurrent(selection.workflowFence, assembly.knowledgeScope);
+              } catch (error) {
+                if (error instanceof KnowledgeReadCleanupError) throw error;
                 return {
                   allowed: false,
                   revision: 'workflow-fork-source-1',
@@ -1323,7 +1326,8 @@ export function createDefaultProcessConfiguration(options: {
             async capture(
               request: Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0],
             ) {
-              if (selection?.workflowFence) assertWorkflowForkCurrent(selection.workflowFence);
+              if (selection?.workflowFence)
+                assertWorkflowForkCurrent(selection.workflowFence, assembly.knowledgeScope);
               return [
                 ...(await assembly.sources.capture(request)),
                 ...(await selectedSources.sources.capture(request)),
@@ -1334,7 +1338,8 @@ export function createDefaultProcessConfiguration(options: {
                 NonNullable<RunConfiguration['sources']>['capture']
               >[0][],
             ) {
-              if (selection?.workflowFence) assertWorkflowForkCurrent(selection.workflowFence);
+              if (selection?.workflowFence)
+                assertWorkflowForkCurrent(selection.workflowFence, assembly.knowledgeScope);
               const sources = new Map<string, ContextSource>();
               const append = (values: ContextSource[]) => {
                 if (!Array.isArray(values) || values.length > 256)
@@ -1438,6 +1443,12 @@ export function createDefaultProcessConfiguration(options: {
         throw error;
       }
     } catch (error) {
+      if (error instanceof KnowledgeReadCleanupError)
+        throw new ConfigurationPreparationCleanupError({
+          originalError: error,
+          cleanupError: error.cause.cleanupError,
+          resources: error.cause.resources,
+        });
       if (error instanceof AgentError) throw error;
       throw new AgentError(
         error instanceof ConfigurationError ? error.code : 'configuration_unavailable',
@@ -1549,50 +1560,60 @@ export function createDefaultProcessConfiguration(options: {
   const child = createChildConfiguration({
     roles: childRoles,
     resolve: async (input, selection) => {
-      if (workflowToolIds.includes(input.parentExecution.definitionId ?? '') && !input.parentRun)
-        throw new AgentError('workflow_fork_unavailable');
-      const workflowFence =
-        input.parentRun &&
-        ['activate_skill', 'repair_skill', 'decide_skill_verification'].includes(
-          input.parentExecution.definitionId ?? '',
-        )
-          ? await workflowForkFence(
-              input.parentRun.configuration,
-              input.parentExecution,
-              selection.role,
-              {
-                runId: input.parentRun.id,
-                records: input.records.forExtension('builtin.skill-workflow'),
-              },
-            )
-          : undefined;
-      if (workflowFence) assertWorkflowForkCurrent(workflowFence);
-      return resolveConfigurationBinding(
-        { command: input.command, session: input.parentSession, workspace: input.workspace },
-        {
-          modelId: selection.modelId,
-          toolIds: workflowFence?.toolIds ?? selection.role.toolIds,
-          workflowFence,
-          workflowCarrier: workflowFence
-            ? {
-                parentExecutionId: input.parentExecution.id,
-                sessionId: input.parentExecution.sessionId,
-                roleId: selection.role.id,
-                roleVersion: selection.role.version,
-              }
-            : undefined,
-          mcpParent: {
-            parentExecution: input.parentExecution,
-            parentRun: input.parentRun,
-            parentSession: input.parentSession,
-            workspace: input.workspace,
-            command: input.command,
+      try {
+        if (workflowToolIds.includes(input.parentExecution.definitionId ?? '') && !input.parentRun)
+          throw new AgentError('workflow_fork_unavailable');
+        const workflowFence =
+          input.parentRun &&
+          ['activate_skill', 'repair_skill', 'decide_skill_verification'].includes(
+            input.parentExecution.definitionId ?? '',
+          )
+            ? await workflowForkFence(
+                input.parentRun.configuration,
+                input.parentExecution,
+                selection.role,
+                {
+                  runId: input.parentRun.id,
+                  records: input.records.forExtension('builtin.skill-workflow'),
+                },
+              )
+            : undefined;
+        if (workflowFence) assertWorkflowForkCurrent(workflowFence);
+        return await resolveConfigurationBinding(
+          { command: input.command, session: input.parentSession, workspace: input.workspace },
+          {
+            modelId: selection.modelId,
+            toolIds: workflowFence?.toolIds ?? selection.role.toolIds,
+            workflowFence,
+            workflowCarrier: workflowFence
+              ? {
+                  parentExecutionId: input.parentExecution.id,
+                  sessionId: input.parentExecution.sessionId,
+                  roleId: selection.role.id,
+                  roleVersion: selection.role.version,
+                }
+              : undefined,
+            mcpParent: {
+              parentExecution: input.parentExecution,
+              parentRun: input.parentRun,
+              parentSession: input.parentSession,
+              workspace: input.workspace,
+              command: input.command,
+            },
+            skillSelection: input.parentRun
+              ? readSkillSelection(input.parentRun.configuration)
+              : undefined,
           },
-          skillSelection: input.parentRun
-            ? readSkillSelection(input.parentRun.configuration)
-            : undefined,
-        },
-      );
+        );
+      } catch (error) {
+        if (error instanceof KnowledgeReadCleanupError)
+          throw new ConfigurationPreparationCleanupError({
+            originalError: error,
+            cleanupError: error.cause.cleanupError,
+            resources: error.cause.resources,
+          });
+        throw error;
+      }
     },
   });
   return {
@@ -1635,7 +1656,7 @@ export function createDefaultProcessConfiguration(options: {
           ],
           allowedCapabilities: options.allowedToolCapabilities,
         });
-        try {
+        const resolveBindings = () => {
           assembly.extensions.push(...shell.extensions);
           if (toolIds.some((id) => webTools.has(id))) assembly.extensions.push(web.extension);
           assertSelectedToolVersions(toolIds, effective.tools, [
@@ -1655,9 +1676,27 @@ export function createDefaultProcessConfiguration(options: {
             })),
             shell: shellOptions,
           };
-        } finally {
-          await assembly.dispose();
+        };
+        let bindings: ReturnType<typeof resolveBindings> | undefined;
+        let failed = false;
+        let originalError: unknown;
+        try {
+          bindings = resolveBindings();
+        } catch (error) {
+          failed = true;
+          originalError = error;
         }
+        try {
+          await assembly.dispose();
+        } catch (cleanupError) {
+          throw new ConfigurationPreparationCleanupError({
+            originalError,
+            cleanupError,
+            resources: { assembly },
+          });
+        }
+        if (failed) throw originalError;
+        return bindings!;
       },
     }),
     diagnosticSource: createDefaultHostStatusSource({
