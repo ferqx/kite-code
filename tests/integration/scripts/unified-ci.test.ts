@@ -138,6 +138,8 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
       'apps/cli/test/isolated/tui-skills-host.test.ts',
       'apps/cli/test/isolated/tui-permissions-host.test.ts',
       'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
+      'apps/cli/test/isolated/tui-export-host.test.ts',
+      'apps/cli/test/isolated/tui-question-pty.test.ts',
     ].flatMap((file) => {
       const run = `run: bun test --parallel=1 --max-concurrency=1 ${file}`;
       return [
@@ -166,6 +168,8 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
       'apps/cli/test/isolated/tui-skills-host.test.ts',
       'apps/cli/test/isolated/tui-permissions-host.test.ts',
       'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
+      'apps/cli/test/isolated/tui-export-host.test.ts',
+      'apps/cli/test/isolated/tui-question-pty.test.ts',
     ].map(
       (file) => (s: string) =>
         s

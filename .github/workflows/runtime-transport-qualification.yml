@@ -74,6 +74,10 @@ jobs:
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-cold-pty.test.ts
       - name: Complete paired and shared Skills catalogue callers
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-skills-host.test.ts
+      - name: Complete formal Terminal output and export in a fresh selected engine process
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-export-host.test.ts
+      - name: Complete default question caller with original final answer
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-question-pty.test.ts
       - name: Complete permissions caller through formal Shell and review
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-permissions-host.test.ts
       - name: Complete Workspace file candidates and original draft completion

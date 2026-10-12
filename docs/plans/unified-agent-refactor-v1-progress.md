@@ -5275,3 +5275,31 @@ Root收据 `/private/tmp/kite-permissions-files-freeze.json` 冻结3853份非Mar
 | 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归仍依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
 
 新增闭合范围是权限与文件候选两个完整用户流程的三端测试源码／CI调用者接线、测试专用macOS Shell装配退役及正式默认Shell／真实Reviewer消费，以及macOS原完整合同验证。RSS、完整观测、fault cleanup与原生后端／平台资格继续未闭合；无push／PR／发布／Actions触发。
+
+## 2026-10-12：正式 Terminal 导出和默认问答的完整三端测试
+
+前片权限／文件候选已正常本地提交 `086477eaa2c6b5478262ed1048a639b2cd0238cb` 并结束，属于实际进展。本轮继续最高共享用户能力依赖，迁移[正式Terminal正文／工具／思考／导出](../../apps/cli/test/isolated/tui-export-host.test.ts)和[默认ask_user三题问答](../../apps/cli/test/isolated/tui-question-pty.test.ts)。两个原完整文件均用Bun PTY／ConPTY；内嵌POSIX导出driver和独立Python问答driver退役，生产、公开API、Service／Agent权限职责及共享PTY原语不改。
+
+导出仍构建／核实完整Terminal候选，首DB前选择该候选准确engine，运行包内Bun、正式entrypoints/tui.js及默认Service，cwd在checkout外；没有换开发runTUIHost包装。9MiB源尾部确实进入Model，业务2／审核0，首次导出恰一份未加载preview且无全文／reason；Ctrl+O后全文尾部、两次空Enter的原Tool header／Artifact refs／清屏／content保持、两次Ctrl+T的reason显示／隐藏和完整content均保持。第二次准确两文件、新路径提示、大于8MiB正文／尾部／引用reason、原DB事实、TUI正常exit0／EOF、OS实际child Service退出及同Profile Service冷重开零额外调用保持。原22个静态Bun expect全同，当前模式列表仅complete，实际执行20个；原未启用cancel／eof分支不构成本轮资格。30秒观察／第二导出、6＋3秒退出及90秒整例不变。
+
+导出首次实际红 `/private/tmp/kite-export-mac.log` 为84.40秒，第二红 `/private/tmp/kite-export-mac-streaming.log` 为87.18秒：思考已真实输出，但等待headless完整解析／轮询时已移出原128KiB tail。没有改生产、删断言或放宽期限。最终在真实held Terminal write前设byte checkpoint，按原每帧／跨chunk reason_seen和clear_seen保已发前部材料，仍等待当次明确输入提示及完整正文尾部。共享headless处理保留，但不阻塞原流式输入／观察；原raw语义与物理PTY保持，运输资源实现不称逐字节或性能等价。最终macOS原整例actual0／1pass／20expects／77.61秒，日志 `/private/tmp/kite-export-mac-final.log`；原TUI49549／实际Service49561 normal=true／code0／failure=null及ESRCH成立，46335268真实终端字节保留。完整收据 `/private/tmp/kite-export-delivery.json` 核原SHA与115／80基线、最终两文件／共享原语／生产exporter／独立文件测试SHA、两份红及最终实际日志。
+
+原POSIX导出两文件0600逐项保持；Windows对同两真实文件使用现行defaultWindowsPathSecurity().verifyFile核原生隐私／身份，不修ACL或用mode位替代。Windows fixture根沿现有privateDirectory新建，原Profile DACL继承仍由实际运行证明；plain open(wx,0600)本身既不能证明Windows通过，也不足以宣称缺后端。实际Service归属保POSIX ps，Windows用本机Get-CimInstance Win32_Process来源；不从自填PID或包装宿主推造。Windows/Linux尚未运行，这些准确平台检查只完成源码接线。
+
+问答保源码外候选Bun／compiled host／实际默认ask_user与临时credential backend，原[Service／CLI夹具](../../apps/cli/test/fixtures/tui-question-pty.ts)字节不改。原三题材料／推荐文案、可见label不泄内部ID、初始无默认答案、空Enter零POST、Unicode组合字符／emoji／首尾空格／多行bracketed paste、两次返回后完整草稿保留、最终自由原文即使同内部ID也不转选项，均沿真实按键验证。题目核当次实际字节，数字／选择／ready核当前80×24画面；普通按键要求新帧，原空Enter明确retain当前画面，独立公共Client再次核同卡pending／revision／Run waiting及答案0，不能放宽为任意旧画面。九次control顺序initial／blank／route／text／text／back／retained／custom／finish保持，最终一Answer／一run.start、准确原revision／Run／Execution、第二Model收到完整文案与原自由文本、原Run completed／Tool succeeded均保持。原41个静态Bun expect逐项同一、原Python检查迁Node；strict流式UTF-8、排他no-follow证据文件fsync／close及真实退出保存。系统tmpdir、Windows junction／USERPROFILE仅修路径，原10秒步骤／12秒control／6＋3退出及180秒整例保持。macOS首次完整文件actual0／1pass／125expects／10.08秒，日志 `/private/tmp/kite-question-portable.log`；normalCtrlQ／normalComplete／exit0、实际Service49211 returnedAfterCleanup／exit0、cleanupConfirmed=true／root移除均实际核验，非系统Vault／安装版或fault-cleanup全集资格。
+
+[transport workflow](../../.github/workflows/runtime-transport-qualification.yml)各接一条完整独立Bun命令，现七MCP＋Skills＋导出＋问答＋权限＋文件候选先于原transport／shared14；Windows MSVC／当前八workspace构建先于消费。导出／问答不依赖Shell，安排在权限前，让独立能力不被已知Windows Shell缺项提前阻止；所有失败仍失败。首DB前engine选择文件不能与已开库测试合并，原CI guard逐一拒漏命令／过滤／平台条件／合并进程。原CI完整文件actual0／21pass／267expects／1.091秒，日志 `/private/tmp/kite-export-question-ci.log`，没有Actions dispatch。
+
+Root `/private/tmp/kite-export-question-freeze.json` 冻结3854份非Markdown输入，核两原test SHA与完整115文件／80CLI作业基线精确相同、22＋41共63个原Bun expect AST保持、两份实际执行收据与最终源码／fixture／生产／依赖输入一致。本轮两完整文件实际重验，macOS合计145expects／两TUI正常退出，导出Service冷重开另保原完整合同。未变CLI范围及前片shared14／28pass／508expects复用已冻结证据和已声明Windows optional调用补正范围；其14源码、原完整命令、生产／依赖／workspace构建输入未变，不重复未受影响整图。产品审批／问题／正文／导出合同核对后不造手册diff，CLI owner纠正仍称开发大正文宿主的旧说明并同步测试方法；测试入口与release control同步实际顺序／平台门禁。根／八workspace类型、边界／workspace／API／ownership／格式／文档及正常提交hook按本轮diff收束。当前整仓728文件／588作业并未在本轮全部运行，当前局部不能证明阶段退出。
+
+源码核对五个剩余退出阻塞，按依赖排序：
+
+| 顺序 | 实际用户入口、具体缺口与验收 |
+| --- | --- |
+| 1 | [普通申请→冷恢复／原ID查询](../../apps/cli/test/isolated/tui-caller-intents-host.test.ts)与[后台Job停止→冷恢复](../../apps/cli/test/isolated/tui-caller-job-stop.test.ts)等完整用户链仍用POSIX driver／Mac专用装配。需保原完整正文与scope、首次真实提交／丢回应、冷原GET零重发、另一任务不取消、准确原状态与正常所属退出，迁入三端整文件；不得把journal或单个窗口另立长期目标。 |
+| 2 | 正式Shell／Task／MCP原持续负载RSS仍九点 `178814976→299614208B`、`+115.203125MiB>32MiB`。实际native allocation owner修复并满足原正式完整负载／阈值前仍红，不重复参数对照。 |
+| 3 | 完整Runtime出生后代及activeResources／handles producer仍缺，Source批准故障清理receipt仍未确认。经原formal verifier核完整实际来源前保unsupported／null，正常短窗／部分Job树／coalition／FD不代全集。 |
+| 4 | Win/Linux正式安装、真实版本切换、MCP、维护恢复、保数据卸载和Windows Shell／script verifier／文件候选原合同后端仍需真实资格。后续Actions／用户Windows验证保完整门禁，本机macOS／接线不代原生通过；独立导出文件测试的既有平台假设不由本轮默认消除。 |
+| 5 | §35全能力出口、最后旧authority／依赖退役及阶段完整回归依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
+
+新增闭合范围是完整正式Terminal正文／导出和默认三题问答的三端测试源码／CI消费者接线、两个POSIX测试驱动退役及实际macOS完整合同验证。正式导出调用者保持包内入口，未新增生产authority；RSS、完整观测、fault cleanup与原生后端／平台资格继续未闭合，无push／PR／发布／Actions触发。

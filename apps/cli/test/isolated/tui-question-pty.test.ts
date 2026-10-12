@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient, type Interaction } from '@kite-ai/client';
@@ -32,8 +33,8 @@ async function until<T>(label: string, read: () => Promise<T | undefined>): Prom
 type Wire = { method: string; path: string; body?: Record<string, unknown> };
 
 test('actual 80x24 default ask_user wizard preserves labeled original IDs, edited Unicode text and Custom answer; only final Answer completes original Tool and Run', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-question-'));
-  const evidence = `/private/tmp/kite-tui-question-evidence-${randomUUID()}`;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-question-')));
+  const evidence = join(tmpdir(), `kite-tui-question-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -48,7 +49,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
   const wire = () => rows('ui-http.jsonl') as Wire[];
   const answers = () =>
     wire().filter((row) => row.method === 'POST' && row.path.endsWith('/answer'));
-  let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let observer: ReturnType<typeof createClient> | undefined;
   let control: ReturnType<typeof Bun.serve> | undefined;
@@ -97,7 +98,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
         'packages/ui/src/tui/presentation.tsx',
         'apps/cli/test/isolated/tui-question-pty.test.ts',
         'apps/cli/test/fixtures/tui-question-pty.ts',
-        'apps/cli/test/fixtures/tui-question-pty.py',
+        'apps/cli/test/fixtures/tui-question-driver.ts',
       ].map((path) => [path, sha(readFileSync(join(repo, path)))]),
     );
     build = Bun.spawn(
@@ -118,7 +119,11 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
     writeFileSync(join(evidence, 'build.log'), buildOut + buildErr, { mode: 0o600 });
     expect(buildCode).toBe(0);
     const candidate = verifyTerminalBundle(join(root, 'candidate'));
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const compiled = await Bun.build({
       entrypoints: [join(repo, 'apps/cli/test/fixtures/tui-question-pty.ts')],
       outdir: root,
@@ -383,10 +388,11 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
         return work;
       },
     });
-    python = Bun.spawn(
+    driver = Bun.spawn(
       [
-        'python3',
-        join(repo, 'apps/cli/test/fixtures/tui-question-pty.py'),
+        process.execPath,
+        '--no-install',
+        join(repo, 'apps/cli/test/fixtures/tui-question-driver.ts'),
         control.url.href,
         artifact.executable,
         artifact.entrypoint,
@@ -395,12 +401,12 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
         detail,
         custom,
       ],
-      { stdout: 'pipe', stderr: 'pipe' },
+      { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
     );
     const [out, err, code] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     writeFileSync(join(evidence, 'pty.log'), out + err, { mode: 0o600 });
     expect(code).toBe(0);
@@ -420,8 +426,8 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
     await provider?.stop(true);
     await Promise.allSettled([...controlWork]);
     globalThis.fetch = originalFetch;
-    if (python && python.exitCode === null)
-      cleanupErrors.push(Error('owned_python_exit_unconfirmed'));
+    if (driver && driver.exitCode === null)
+      cleanupErrors.push(Error('owned_driver_exit_unconfirmed'));
     if (build && build.exitCode === null) cleanupErrors.push(Error('owned_build_exit_unconfirmed'));
     if (controlWork.size) cleanupErrors.push(Error('owned_control_exit_unconfirmed'));
     const services = rows('owned-service.jsonl'),
@@ -456,7 +462,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
       modelRequests,
       observerReads,
       scope:
-        'Default production ask_user via compatible loopback Provider and temporary credential backend; canonical three questions with explicit closed text Custom; source-free development candidate; actual macOS 80x24 keyboard; no native vault, paid Provider or installed/platform qualification',
+        'Default production ask_user via compatible loopback Provider and temporary credential backend; canonical three questions with explicit closed text Custom; source-free development candidate; shared three-platform 80x24 driver, actual macOS only; no native vault, paid Provider or installed/platform qualification',
     };
     writeFileSync(join(evidence, 'result.json'), JSON.stringify(packet, null, 2), { mode: 0o600 });
     console.error(

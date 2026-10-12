@@ -268,7 +268,7 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.run.trim().replace(/\s+/g, ' ') === required &&
                 unfiltered(step),
             );
-            const mcpCallers = [
+            const completeCallers = [
               'apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
               'apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
               'apps/cli/test/isolated/tui-mcp-source-approval-pty.test.ts',
@@ -279,6 +279,8 @@ export function checkUnifiedFormalConsumers(root: string): {
               'apps/cli/test/isolated/tui-skills-host.test.ts',
               'apps/cli/test/isolated/tui-permissions-host.test.ts',
               'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
+              'apps/cli/test/isolated/tui-export-host.test.ts',
+              'apps/cli/test/isolated/tui-question-pty.test.ts',
             ].map((file) =>
               steps.findIndex(
                 (step) =>
@@ -298,8 +300,8 @@ export function checkUnifiedFormalConsumers(root: string): {
               build <= prepare ||
               caller <= build ||
               caller < 0 ||
-              mcpCallers.some((index) => index <= build || index >= caller) ||
-              mcpCallers.some((index) => index >= transport) ||
+              completeCallers.some((index) => index <= build || index >= caller) ||
+              completeCallers.some((index) => index >= transport) ||
               job.if !== undefined ||
               job['runs-on'] !== `\${{ matrix.os }}` ||
               !['macos-15', 'ubuntu-24.04', 'windows-2025'].every(
