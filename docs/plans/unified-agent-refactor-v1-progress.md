@@ -5412,9 +5412,40 @@ Root `/private/tmp/kite-scrollback-freeze.json`冻结3860份非Markdown输入；
 
 | 顺序 | 实际用户入口、缺口和验收 |
 | --- | --- |
-| 1 | 正式Shell／Task／MCP的[完整资格运行者](../../scripts/runtime/unified-soak.ts)原RSS九点178814976→299614208B、+115.203125MiB>32MiB仍失败。先定位真实native allocation owner并修复，再按原完整负载／阈值验收，不重复参数对照或以短窗代原窗。 |
+| 1 | [完整资格运行者](../../scripts/runtime/unified-soak.ts)中原 lifecycle probe 自身进程 RSS 九点178814976→299614208B、+115.203125MiB>32MiB仍失败；它与默认Shell／Task／MCP两Service continuous不同。先定位真实native allocation owner并修复，再按原完整负载／阈值验收，不重复参数对照或以短窗代原窗。 |
 | 2 | 实际Runtime停止／取消及Source批准异常关闭的[原生观察器](../../scripts/runtime/unified-soak-native.ts)仍缺完整kernel-birth后代、activeResources／handles producer与完整cleanup receipt；paired Service boundary记录不能替代全集。取得各准确来源和原故障退出证据前保持unsupported／null；本轮单一有限fixture退出不替代全集。 |
 | 3 | installed CLI／TUI／Native正式安装、真实代码A→B→回退、完整MCP、维护恢复及保数据卸载仍需[Win/Linux资格](../active/release-control.md#winlinux-后续-actions-接线)，Windows Shell／script verifier／文件候选原后端缺口保持。后续Actions／用户Windows实机按同完整断言／预算验收，本机及接线不授资格，不dispatch。 |
 | 4 | [§35阶段出口](unified-agent-refactor-v1.md)全部适用能力／安全／资源门禁、最后旧authority／依赖退役和当前完整回归依赖以上证据；原37能力仍partial，wholeV13=false／phaseExit=false。按当前最终输入完整运行并解决真实失败后才能退出。 |
 
 本轮新增闭合的是完整原生滚动的共享测试源码、原断言保留和CI接线，旧Python驱动及Windows skip退役；生产用户能力和全局架构精简仍按各自已证范围，不把测试迁移称为整个能力／新架构或阶段完成。保原RSS／观测／平台门禁、Goal active，仅本地提交。
+
+## 2026-10-12：原生命周期的 VM 调用观察与严格读取
+
+状态：partial；前切片已正常提交1d65f397／10路径、hooks0／18.87秒，提交后3860份非Markdown输入零漂移且工作树干净。本轮仅收束尚未定位的RSS失败诊断；已有完整用户入口和正式调用者保持，Win/Linux实机后置，不以采样或测试窗口另立长期目标。ChatGPT／Responses仍在当前V1.3目标后按用户确认的Kite官方授权优先实施，Codex直接复用保留门禁。
+
+先按源码纠正指标归属：[原sampler](../../scripts/runtime/unified-soak-cases.ts)读取probe自身process.memoryUsage().rss，[lifecycle](../../scripts/runtime/unified-soak-probe.ts)在同一PID持有Runtime／HTTPService／Client与SQLite Worker，循环完成／取消／重连原回执／删除。历史178814976→299614208B、+115.203125MiB是该生命周期的before指标，不是[默认Shell／Task／MCP两Service continuous](../../tests/fixtures/unified-agent/soak/continuous-default-shell.ts)。旧root `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1`及后续heap-retainer临时目录目前ENOENT；旧数值与失败保历史依据，本轮没有新核验其raw。新候选与运行范围单列，不追认旧候选。
+
+正常路径源码审计未定位可量化原RSS增长的业务持有链。SQLite请求内语句在成功／失败ACK前释放，pending／queuedBytes／ticket／arrival和成功Session owner收束；strict-close失败时锁仍按合同保留。Client JSON reader与Service body reader沿原finally取消／释放，原lifecycle不消费SSE、外部SDK、Responses或snapshot export。现有业务引用和JS snapshot没有取得native resident增长归属，因此未据此修改生产释放合同。
+
+私有[C观察器](../../scripts/runtime/native/unified-soak-vm-observer.darwin.c)只记录macOS构造器后mmap／munmap／madvise，保持原参数、返回值与errno，保PID／kernel birth／线程、保守Mach区间和image／相对PC；V2另保真实mmap请求地址，与返回地址分开。header后才发布fd，事件与footer／关闭同锁；所有frame和行尾完整后才写，16KiB溢出整条拒绝并计writeErrors。它不覆盖全部VM或live blocks；同image转交原调用依据[Apple dyld实现](https://github.com/apple-oss-distributions/dyld/blob/main/dyld/DyldRuntimeState.h)。当前Bun仅导出__mh_execute_header，相对PC未取得业务函数归属。
+
+便携[纯读取器](../../scripts/runtime/unified-soak-vm-observer.ts)严格核UTF-8／重复键／封闭字段／出生／时基／序列／完整frame／footer／writeErrors；64位值保字符串／BigInt。V1原字段与实际校准字节不变，缺请求地址为null／unknown，V2必须保真实输入字段。原六个测试／34个静态expect AST顺序全同，新增仅针对请求字段缺口；[完整测试](../../tests/isolated/unified-agent/unified-soak-vm-observer.test.ts)无平台skip、FFI或伪造backend。默认256MiB／10万事件，显式上限1GiB／100万；交集默认200万、上限1亿比较，超限失败，不截断或推定释放。完整当前限制归[资格owner](../active/runtime-resilience-qualification.md#当前-v13-owner-与资格边界)。
+
+原生JSON格式红保留于 `/private/tmp/kite-rss-vm-calibration-decode-red.log`，修复后V1及V2严格读取。最终V2 C以clang stdc11／Wall／Wextra／Werror／O2／fno-omit-frame-pointer编译actual0；`/private/tmp/kite-rss-vm-calibration-v2-decode.json`核PID43756／birth1791799896:649661、17事件／footer写错0／nested0、mmap请求0x1→实际0x108038000、advice实际0和两次32768B munmap完整覆盖65536B。失败请求0x2345保MAP_FAILED／errno22，原native回调全部实际0。临时512B容量副本只验已发现边界：原syscall仍0，17条溢出整条丢弃、footer events0／writeErrors17，读取器实际拒绝；`/private/tmp/kite-rss-vm-calibration-v2-overflow-decode.json`保结果，正式诊断容量仍16384B。
+
+只在原完整流程补一次VM证据，没有参数矩阵：同原probe／sampler／GC／断言／循环，每次原采样返回之后才记mark；450000ms／9点／180000ms操作预算和allocator保持。实际source HEAD1d65f397、dirty=true（仅三个诊断源码），candidateId b59e30c29d4d46464dcaae10f405643f696a2866a411082eaacfffd01e189f5f，包内Bun SHA35d20dd0263e5c950194434b925454fdfa9ba6e4467da960410fa05b08a7a5b5。原root `/private/var/folders/m2/2brbc_757mn1yvqp09gdyz6c0000gn/T/kite-rss-vm-current-DrAQnP` 保result／summary／work/lifecycle／raw trace／vm-linear-summary。PID35452／birth1791798606:119987，7611循环／15222Model、busy450031.020708ms、9点，normal exit0／forced=false／kernel absent，cleanupErrors空，1491原相关输入零漂移。原V1 C副本observer-v1-source.c及加载dylib保SHA17afce6c…／fd7c638b…，当前V2不重写其证据。
+
+原hasRetainedResourceGrowth仍true：measured before228704256→403521536B、+166.71875MiB>32MiB，最后after403898368B单列。raw792744314B／SHA d6b6428060146db2ac19aeffb6525695de72c6bba105e2c3ae8fcb3df7f6ef3e；全部358342事件严格读取，原出生／时基／序列／18个mark／footer成立，计33755 mmap／33745 munmap／290824 madvise。全量交集实际触及1亿上限／exit1，`/private/tmp/kite-rss-vm-current-decode.log`保原失败，mappingIntersections仍null。全量线性来源汇总actual0，只核线程／image相对PC／参数／采样区间，聚合mmap／munmap量不能证明live block释放，businessOwner仍null。私有汇总最初把mark误读为1起始，按原producer的0起始修正，labels-red／final日志均保，不改原字节或产品断言。校准、读取及汇总不计RSS通过。
+
+Root新协议完整测试actual0／9pass／76expects／50ms；根与八workspace类型、boundary／workspace／API／ownership、plan-evidence和全format actual0，原104warning／98info保留。已闭合CLI／TUI、shared14及正式用户链仅复用输入未变范围；当前整仓完整默认回归没有新执行。资格owner与tests入口同步，手册任务／取消／恢复合同核对无行为变化，不造手册diff；当前owner／源码／测试足以表达该诊断限制，未另建Note或持久验证缓存。文档iteration_complete／stage／commit按实际diff执行，正常hook独立，提交后核输入和工作树。
+
+当前四个退出缺口按依赖保留：
+
+| 顺序 | 实际用户入口、完整行为缺口与验收 |
+| --- | --- |
+| 1 | 普通任务完成／取消／重连原回执／删除（公共Client→HTTPService→Runtime→Store）的[lifecycle](../../scripts/runtime/unified-soak-probe.ts)原RSS增长仍未定位可修复native owner。修复真实归属后，按[qualification](../../scripts/runtime/unified-soak.ts)九点／八outer／原32MiB及完整负载验收；旧红、当前诊断红和未知归属保留，不重复参数对照。 |
+| 2 | 实际Runtime取消／正常停止、Source批准异常关闭仍缺完整kernel-birth后代、activeResources／handles producer和全部故障cleanup receipt。[原formal verifier](../../scripts/runtime/unified-soak-report.ts)核准确出生树、原资源与停止结果前保unsupported／null；本轮probe退出、所选VM imports或有限Job树不代全集。 |
+| 3 | installed CLI／TUI／Native正式安装、真代码A→B→回退、完整MCP连接／调用／取消／退出、维护恢复及保数据卸载仍需[Win/Linux实际资格](../active/release-control.md#winlinux-后续-actions-接线)，Windows Shell／script verifier／文件候选原后端门禁保留。依用户安排后置Actions／独立Windows，按同完整断言／预算验收，当前不触发。 |
+| 4 | [§35全部能力出口](unified-agent-refactor-v1.md)、最后旧authority／依赖退役和当前完整回归依赖适用门禁；原37能力仍partial。全部用户入口验收和强制门禁满足后才可退出，wholeV13=false／phaseExit=false。 |
+
+新增闭合范围为私有VM采集协议、V1／V2便携严格读取和必要本机校准，取得原生命周期完整新增调用证据；生产RSS、全资源观察、最后旧authority退役与阶段退出仍未闭合。该诊断切片按文档及本地提交收束，Goal继续active；无push／PR／发布／Actions触发。
