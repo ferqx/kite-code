@@ -73,6 +73,7 @@ export interface CaseEvidence {
       native: NativeProcessObservation;
       exitCode: number;
       reaped: true;
+      kernelState?: 'absent' | 'reused';
     }[];
     identities?: CaseEvidence['identities'];
   }[];

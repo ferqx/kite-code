@@ -1,5 +1,4 @@
 import { AgentError } from '@kite-ai/agent';
-import { taskToolCapability } from '@kite-ai/agent/permissions';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ChildRole } from './child-configuration';
 
@@ -50,6 +49,5 @@ export function createTaskConfiguration(
       if (!extension && ids.some((id) => taskIds.has(id)))
         throw new AgentError('task_role_unavailable');
     },
-    describe: taskToolCapability,
   };
 }

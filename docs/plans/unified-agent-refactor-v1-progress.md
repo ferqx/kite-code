@@ -5518,3 +5518,26 @@ OAuth原三处独立fault／restore连接原try内各一次设置Store Worker原
 必要相关完整文件按当前改动选择，不扩已闭合故障矩阵：原 Caller＋四项settlement实际18pass／154expects／704ms；启动DOM3pass／39expects／857ms、草稿DOM1pass／23expects／903ms；未变输入的四个边界完整文件12pass／106expects／59ms复用当前生命周期接线的准确结果。当前源码的[原完整Native候选](../../apps/desktop/test/isolated/native-bundle.test.ts)实际0／1pass／24Bun expects／83.87s，首次／冷读原任务保持，取消原两秒未知检查保草稿，原二十秒等待／明确强退／异常Service提示、Main非零退出／双锁释放／零Model重放和真实坏Store保存诊断／同窗口重试均保持。根及八workspace类型、改动格式检查0；既有无用fragment信息不扩大修复。各日志使用 `/private/tmp/kite-native-quit-` 前缀，独立只读审查核读取失效、草稿恢复、真实错误与原frame边界。
 
 产品手册、Native owner、跨层边界、测试入口及同一退出Note同步本次实际行为；iteration_complete／stage／commit按本片准确范围执行，正常hook独立门禁保留。本片没有重跑全部589作业，前提交完整默认结果不资格新Native输入；本片完整窗口与相关整文件也不宣称阶段退出。新增闭合的是正式Main→preload→renderer的退出读取／取消恢复与误弹验收，旧无生命周期读取展示路径退役。上节四项依赖继续未闭合：原RSS真实失败、完整资源观测producer／准确cleanup、后置Win/Linux实际资格及§35最终退役／当前完整回归。wholeV13=false／phaseExit=false，Goal active，仅本地提交，无push／PR／发布／Actions。
+
+## 2026-10-12：资格收尾来源与 Web 固定能力归属
+
+状态：partial；上一轮 Native 误弹修复正常提交 `e0331890`，本轮开始工作树干净，属于实质进展。重新核对37能力、§35与实际正式入口，未以历史partial文字或旧文件存在虚构缺失能力。当前正式CLI／TUI／Native、恢复Include和已迁移Task／Planning均仍有真实消费者；Win/Linux原生后置，ChatGPT／Responses按已确认顺序在当前V1.3后实施。当前可直接补齐的最高缺口是资格runner已拥有probe的实际收尾来源，并独立处理用户已授权的新架构固定权限错层。
+
+[原runner](../../scripts/runtime/unified-soak.ts)现对每个attempt的lifecycle／cases／continuous直接probe保存有序 `probeExits`，原crash／recover point保存kernelState。实际spawn即绑定原exited Promise；正常／失败finally分别等待原终态与stderr EOF，再以原kernel birth核absent／reused，alive／unavailable拒绝。信号退出后的exitCode字段可能仍null，故只按Promise结算判断是否停止，不向已结束handle重复SIGKILL。单一原错直接重抛，多错保AggregateError／cause及有界原failure和cleanup codes，不以容器名覆盖原因；stderr复用同一次有界EOF等待。stdout原ignore、原操作／整体／5秒停止期限、cycles、GC和资源阈值保持，没有重跑450秒RSS或参数对照。
+
+[v2 verifier](../../scripts/runtime/unified-soak-report.ts)允许原旧诊断缺新字段，出现时严格核封闭字段／mode顺序／同runner父身份／实际PID与采样出生关系；formal／full collection缺probe／descendant新收据仍拒绝，未加入eligibility排除。首完整实跑真实1／45pass／2fail／139expects／43.47s，两个原实际CI与blocked案例均报 `probe_exit_invalid`，日志 `/private/tmp/kite-soak-owned-exit-main.log` 保留。实际记录证明五种普通case在cases collector PID采样，TUI则在独立PTY driver的子进程采样；新校验错误地要求两者同PID。修正为cases receipt锚定真实 `long_runtime_replay` collector，TUI继续原独立PID、每点native出生、资源及全部业务门禁，不改为虚假同PID或排除TUI。追加纯反例证明独立采样可读、身份漂移仍拒绝。最终原完整文件actual0／48pass／167expects／43.74s，原CI／blocked和全部原反例保持；原完整series actual0／2pass／79expects／14.46s，原九点18个准确child分别137／0、reaped及kernel absent实际成立。原85＋18个静态expect完整按序保留，180秒实际CI／blocked、15秒lifecycle与180秒九点series预算不变。两最终日志为 `/private/tmp/kite-soak-owned-exit-main-second.log`、`kite-soak-owned-exit-series.log`；synthetic仅证明verifier，不计原生资格。该补充只覆盖直接probe，不补认完整Runtime后代、Bun counters或历史Source异常窗口cleanup。
+
+code-simplification有界源码审查另定位两处实质冗余：[Web factory](../../apps/service/src/web-fetch-configuration.ts)和Workflow分别解释固定网络效果，默认Tool先通用登记再用Web二次覆盖；[Task factory](../../apps/service/src/task-configuration.ts)的describe只有测试consumer。现[Agent分类](../../packages/agent/src/permissions/capabilities.ts)仅对准确builtin.web／web_fetch／Tool／版本1提供原network+unknown／safeReadfalse，宿主传真实版本，未知或缺版本／外部同名／不同kind继续unknown。Service一次采用原可信metadata，保builtin.web:1 revision、网络policy／snapshot与off硬拒绝；二次覆盖loop和Workflow Web特例删除。Task describe转发／导入删除，原四处效果expect直接核原Agent函数，预期值／顺序／角色／after-turn／工具schema均保持。Task共享fixture一处Workspace URI改标准pathToFileURL，不新增平台skip。当前正式默认权限和Workflow消费者已切同一分类；没有把宿主当前事实、来源复核或状态封存搬入第二authority。
+
+必要完整配置／权限／用户链：原Task＋Web配置7pass／77expects／2.10s（改前7pass／77expects），Agent权限9pass／87expects／1.88s；实际Web三策略审批3pass／40expects／3.19s、默认Web完整Artifact／Worker／off／旧版本拒绝3pass／32expects／2.92s；Workflow配置与继承12pass／186expects／5.46s、原Fork repair／replan2pass／76expects／3.12s、原补偿／独立审批2pass／39expects／2.89s。Task原52个静态expect仅四处已退役receiver改为同原函数，原期望和六场景预算保持；Agent原46个expect保持，仅新增必要精确身份与版本反例。连同上述原资格两文件，十个完整文件88pass／783expects；当前作用域实际验证不代整个默认589作业或全部八workspace精简。独立非参与者只读审查核实际scope、原错误与signal分类、TUI独立采样及Web／Task合同；根与八workspace类型、改动格式和强制边界／workspace／API／ownership／plan-evidence按最终输入执行。
+
+产品手册的三策略、批准前零联网、完整正文与取消合同核对无行为变化；Agent权限／Service owner、active资格、测试入口、能力映射和原精简Note同步实际边界。iteration_complete／stage／commit只覆盖本片，正常hook独立保留，仅本地提交。新增闭合是原正式资格collector直接probe的收尾来源、Web固定权限单点和Task冗余副出口退役；完整资源门禁仍open。
+
+当前退出缺口按依赖保留四项：
+
+| 顺序 | 实际用户入口、完整行为缺口及验收 |
+| --- | --- |
+| 1 | 普通任务完成／取消／Runtime正常停止及Source批准异常关闭仍缺完整出生后代、Bun activeResources／handles可靠producer和所有准确cleanup receipt。沿真实创建／claim到原handle关闭交接完整来源并保原verifier拒绝；本片直接probe的退出不代全集。 |
+| 2 | 原公共Client→HTTPService→Runtime→Store生命周期RSS真实超限，native live owner仍未知。修复真实归属后按原负载、九点／八outer／32MiB和60—168分钟门禁验收；原红保持，不重复参数对照。 |
+| 3 | Win/Linux正式安装、真代码A→B→回退、MCP连接／调用／取消／退出、维护恢复和保数据卸载仍须后续Actions／用户Windows实机实证，原Shell／script verifier／文件候选后端失败保留；不触发Actions。 |
+| 4 | §35全部适用能力／T/E／安全／资源条件、最终旧源码及依赖退役和最终当前完整回归依赖上述门禁。37能力仍partial，wholeV13=false／phaseExit=false；本片不提前宣布阶段退出。 |

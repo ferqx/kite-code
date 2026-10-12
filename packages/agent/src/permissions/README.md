@@ -6,6 +6,8 @@
 
 [capabilities.ts](capabilities.ts) 的 `builtinCapability` 统一实际 Tool、Job 与 Action 的固定效果和 safeRead；权限装配与 `workflowCapabilityDescription` 使用同一份分类，Shell 工厂也复用原 Shell 分类。Workflow 的 Job 三维 unknown、最低人工审批和未知 Files 的保守 write 投影保持，不能据此给执行策略补写入授权。MCP source/auth 分类只接收宿主原三个已注册定义 ID；Service 仍提供实际注册、选中 server、transport 可用性和网络配置事实。[constraints.ts](constraints.ts) 组合当前策略与原计划约束、Workflow 最低人工审批、明确文件恢复审批。宿主提供已校验的原状态和身份，约束不能放宽硬拒绝或改变原授权范围。既有 reason、revision/快照格式、单次与同命令授权、取消/恢复语义保持。
 
+Web 固定效果也由同一分类提供：仅准确 `builtin.web/web_fetch` Tool 版本1返回原 `network/unknown`、`safeRead:false`，宿主必须传实际注册版本；同名外部定义、不同 kind 和未知／缺失版本保持 unknown。Service 的 Web 工厂只组合可信网络 policy、原 revision 与 hardAllowed，默认权限登记和 Workflow 投影共用这份 Agent 规则，不再各自覆盖或解释 Web 效果。Task 固定效果沿 `taskToolCapability`，Service 装配对象的无正式调用者 `describe` 转发已删除；原角色、选择、after-turn 与效果期望保持。
+
 [after-turn.ts](after-turn.ts) 的 `createDefaultAfterTurnPolicy` 统一默认 Task／follow-up 结果汇报许可。宿主只提供冻结角色 id/version 与当前可信 policy/trust/controlReads 读取；本模块核 request/apply 的原 Command／Run／Session／Execution／role／source／root work、取消／删除与当前信任，生成原 revision 摘要。工厂不执行 I/O，authorize 保原读取前后 signal 检查；它不授权 Task、carrier、报告 Model 或递归 report。Core 激活、报告应用和 SQL 最终 CAS 仍核独立事实，不能合并成这次策略读取。完整正式 Service 消费者及原纯策略断言保留在[原默认整文件](../../../../apps/service/test/isolated/default-after-turn.test.ts)，无需平台 skip；下层完整 Task 场景由 [Task owner](../extensions/task/README.md#task-的-after_turn)维护。
 
 Planning 默认宿主直接调用 `createPlanningPermissionPolicy` 并提供原状态 reader，原 Service 转发工厂和重复 options 已退役。当前策略判定先于 required/run/state 检查，普通 required=false 请求不读取计划；其他请求仍使用当前真实绑定与原 constraint，不缓存一次状态来代替派发复核。

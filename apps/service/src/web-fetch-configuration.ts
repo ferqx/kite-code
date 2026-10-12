@@ -1,4 +1,4 @@
-import type { CapabilityDescription } from '@kite-ai/agent/permissions';
+import { builtinCapability, type CapabilityDescription } from '@kite-ai/agent/permissions';
 import {
   createPinnedWebNetworkPort,
   createWebFetchExtension,
@@ -25,8 +25,13 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
       definitionVersion: '1',
       revision: 'builtin.web:1',
       hardAllowed: policy.mode !== 'off',
-      effects: ['network', 'unknown'],
-      safeRead: false,
+      ...builtinCapability(
+        extension.id,
+        'web_fetch',
+        'tool',
+        '',
+        extension.tools?.find((tool) => tool.id === 'web_fetch')?.version,
+      ),
     },
   ];
   return {

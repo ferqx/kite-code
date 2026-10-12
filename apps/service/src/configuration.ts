@@ -570,6 +570,7 @@ export function createDefaultProcessConfiguration(options: {
         action.id,
         'action',
         planning.extension.id,
+        action.version,
       );
       globalCapabilities.set(JSON.stringify(['job', definitionId, action.version]), {
         kind: 'job',
@@ -963,21 +964,32 @@ export function createDefaultProcessConfiguration(options: {
         for (const extension of runExtensions) {
           for (const tool of extension.tools ?? []) {
             if (!assembly.toolIds.includes(tool.id)) continue;
-            const capability = builtinCapability(
-              extension.id,
-              tool.id,
-              'tool',
-              planning.extension.id,
+            const hostCapability =
+              extension.id === web.extension.id
+                ? web.capabilities.find(
+                    (capability) =>
+                      capability.kind === 'tool' &&
+                      capability.definitionId === tool.id &&
+                      capability.definitionVersion === tool.version,
+                  )
+                : undefined;
+            actual.set(
+              key('tool', tool.id, tool.version),
+              hostCapability ?? {
+                kind: 'tool',
+                definitionId: tool.id,
+                definitionVersion: tool.version,
+                revision: `${extension.id}:${extension.version}:${tool.version}`,
+                hardAllowed: true,
+                ...builtinCapability(
+                  extension.id,
+                  tool.id,
+                  'tool',
+                  planning.extension.id,
+                  tool.version,
+                ),
+              },
             );
-            actual.set(key('tool', tool.id, tool.version), {
-              kind: 'tool',
-              definitionId: tool.id,
-              definitionVersion: tool.version,
-              revision: `${extension.id}:${extension.version}:${tool.version}`,
-              effects: capability.effects,
-              hardAllowed: true,
-              safeRead: capability.safeRead,
-            });
           }
           for (const job of extension.jobs ?? []) {
             const capability = builtinCapability(
@@ -985,6 +997,7 @@ export function createDefaultProcessConfiguration(options: {
               job.id,
               'job',
               planning.extension.id,
+              job.version,
             );
             actual.set(key('job', job.id, job.version), {
               kind: 'job',
@@ -996,13 +1009,6 @@ export function createDefaultProcessConfiguration(options: {
               safeRead: capability.safeRead,
             });
           }
-        }
-        for (const capability of web.capabilities) {
-          if (assembly.toolIds.includes(capability.definitionId))
-            actual.set(
-              key(capability.kind, capability.definitionId, capability.definitionVersion),
-              capability,
-            );
         }
         // A selected mutation must match the actual definition/effect metadata; a typo
         // cannot silently leave its real mutation outside the sealed obligation.
@@ -1416,13 +1422,13 @@ export function createDefaultProcessConfiguration(options: {
       (extension.tools ?? [])
         .filter((tool) => assembly.toolIds.includes(tool.id))
         .map((tool) => {
-          const effects =
-            web.capabilities.find(
-              (capability) =>
-                capability.definitionId === tool.id &&
-                capability.definitionVersion === tool.version,
-            )?.effects ??
-            builtinCapability(extension.id, tool.id, 'tool', planning.extension.id).effects;
+          const effects = builtinCapability(
+            extension.id,
+            tool.id,
+            'tool',
+            planning.extension.id,
+            tool.version,
+          ).effects;
           return workflowCapabilityDescription({
             kind: 'tool',
             definitionId: tool.id,

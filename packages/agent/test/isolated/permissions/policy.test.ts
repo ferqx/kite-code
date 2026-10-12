@@ -444,3 +444,22 @@ test('record_write stays outside Accept Edits; Request Approval and unqualified 
     }
   }
 }, 15000);
+
+test('Web network effects require the exact registered builtin Tool identity and version', () => {
+  expect(builtinCapability('builtin.web', 'web_fetch', 'tool', 'builtin.planning', '1')).toEqual({
+    effects: ['network', 'unknown'],
+    safeRead: false,
+  });
+  for (const [extensionId, definitionId, kind, version] of [
+    ['untrusted.namesake', 'web_fetch', 'tool', '1'],
+    ['builtin.web', 'other', 'tool', '1'],
+    ['builtin.web', 'web_fetch', 'job', '1'],
+    ['builtin.web', 'web_fetch', 'action', '1'],
+    ['builtin.web', 'web_fetch', 'tool', '2'],
+    ['builtin.web', 'web_fetch', 'tool', undefined],
+  ] as const) {
+    expect(builtinCapability(extensionId, definitionId, kind, 'builtin.planning', version)).toEqual(
+      { effects: ['unknown'], safeRead: false },
+    );
+  }
+});

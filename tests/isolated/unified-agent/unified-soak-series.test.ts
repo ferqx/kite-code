@@ -69,6 +69,13 @@ test.skipIf(process.platform === 'win32')(
         );
       const result = await runStableCrashSeries(directory, 9, spawn);
       expect(result.points).toHaveLength(9);
+      expect(
+        result.points.every((point) =>
+          point.descendants!.every(
+            (child) => child.kernelState === 'absent' || child.kernelState === 'reused',
+          ),
+        ),
+      ).toBe(true);
       for (const [sequence, point] of result.points.entries()) {
         expect(point.sequence).toBe(sequence);
         expect(point.assertions.every((receipt) => receipt.passed)).toBe(true);

@@ -255,6 +255,19 @@ test.skipIf(process.platform === 'win32')(
       expect(report.attempts[0]?.lifecycle.calls).toBe(4);
       expect(report.attempts[0]?.recovery.calls).toBe(0);
       expect(report.attempts[0]?.recovery.effectLedgerLines).toBe(1);
+      expect(report.attempts[0]!.probeExits!.map((exit) => exit.mode)).toEqual([
+        'lifecycle',
+        'cases',
+        'continuous',
+      ]);
+      expect(
+        report.attempts[0]!.probeExits!.every(
+          (exit) =>
+            exit.reaped &&
+            exit.exitCode === 0 &&
+            (exit.kernelState === 'absent' || exit.kernelState === 'reused'),
+        ),
+      ).toBe(true);
       expect(verifyUnifiedSoakReport(report, report.source, true)).toContain(
         'formal_duration_invalid',
       );
@@ -431,6 +444,19 @@ test.skipIf(process.platform === 'win32')(
       expect(report.attempts[0]?.recovery.calls).toBe(0);
       expect(report.attempts[0]?.recovery.effectLedgerLines).toBe(1);
       expect(report.durationMs).toBeLessThan(180_000);
+      expect(report.attempts[0]!.probeExits!.map((exit) => exit.mode)).toEqual([
+        'lifecycle',
+        'cases',
+        'continuous',
+      ]);
+      expect(
+        report.attempts[0]!.probeExits!.every(
+          (exit) =>
+            exit.reaped &&
+            exit.exitCode === 0 &&
+            (exit.kernelState === 'absent' || exit.kernelState === 'reused'),
+        ),
+      ).toBe(true);
       expect(report.qualificationPreflight).toEqual({
         status: 'blocked',
         requiredIterations: 8,
@@ -845,15 +871,16 @@ function blockedCollectionPacket() {
     observations: {
       before: {
         ...structuredClone(sample),
-        native: { ...structuredClone(sample.native), pid: prototype.lifecycle.pid },
+        native: { ...structuredClone(sample.native), pid: prototype.lifecycle.pid, parentPid: 3 },
       },
       after: {
         ...structuredClone(sample),
-        native: { ...structuredClone(sample.native), pid: prototype.lifecycle.pid },
+        native: { ...structuredClone(sample.native), pid: prototype.lifecycle.pid, parentPid: 3 },
       },
     },
   }));
   for (const item of prototype.cases!) {
+    if (item.caseId !== 'runtime_sigkill_recovery') item.pid = 4;
     item.durationMs = 90;
     item.workloadDurationMs = 90;
     item.points = Array.from({ length: 9 }, (_, sequence) => ({
@@ -865,11 +892,11 @@ function blockedCollectionPacket() {
       observations: {
         before: {
           ...structuredClone(sample),
-          native: { ...structuredClone(sample.native), pid: item.pid },
+          native: { ...structuredClone(sample.native), pid: item.pid, parentPid: 3 },
         },
         after: {
           ...structuredClone(sample),
-          native: { ...structuredClone(sample.native), pid: item.pid },
+          native: { ...structuredClone(sample.native), pid: item.pid, parentPid: 3 },
         },
       },
       ...(item.caseId === 'runtime_sigkill_recovery'
@@ -888,6 +915,7 @@ function blockedCollectionPacket() {
               native: { ...structuredClone(sample.native), pid: 10 + index, parentPid: item.pid },
               exitCode: role === 'crash' ? 137 : 0,
               reaped: true,
+              kernelState: 'absent' as const,
             })),
           }
         : {}),
@@ -956,12 +984,56 @@ function blockedCollectionPacket() {
       }),
     },
   } satisfies ContinuousEvidence;
+  prototype.probeExits = (['lifecycle', 'cases', 'continuous'] as const).map((mode, index) => ({
+    mode,
+    native: {
+      ...structuredClone(sample.native),
+      pid: [prototype.lifecycle.pid, 4, 5][index]!,
+      parentPid: 3,
+    },
+    exitCode: 0,
+    reaped: true,
+    kernelState: 'absent',
+  }));
   report.attempts = Array.from({ length: 8 }, (_, i) => ({
     ...structuredClone(prototype),
     iteration: i + 1,
   }));
   return reseal(report);
 }
+
+test('owned probe exit receipts reject unknown, living and foreign identities and cannot be omitted from full collection', () => {
+  for (const mode of ['unknown', 'alive', 'foreign', 'missing'] as const) {
+    const report = blockedCollectionPacket();
+    if (mode === 'missing') delete report.attempts[0]!.probeExits;
+    else if (mode === 'foreign') report.attempts[0]!.probeExits![0]!.native.parentPid = 99;
+    else
+      Object.assign(report.attempts[0]!.probeExits![0]!, {
+        kernelState: mode === 'unknown' ? 'unavailable' : 'alive',
+      });
+    expect(verifyBlockedWorkloadCollection(reseal(report))).toContain(
+      mode === 'missing' ? 'probe_exit_missing' : 'probe_exit_invalid',
+    );
+  }
+});
+
+test('cases probe receipt preserves the independent TUI sampler identity and its original gates', () => {
+  const report = blockedCollectionPacket();
+  for (const attempt of report.attempts) {
+    const tui = attempt.cases!.find((item) => item.caseId === 'tui_lifecycle_churn')!;
+    tui.pid = 6;
+    for (const point of tui.points!)
+      for (const boundary of ['before', 'after'] as const) {
+        point.observations![boundary].native.pid = 6;
+        point.observations![boundary].native.parentPid = 7;
+      }
+  }
+  expect(verifyBlockedWorkloadCollection(reseal(report))).toEqual([]);
+  report.attempts[0]!.cases![6]!.points![0]!.observations!.after.native.pid = 8;
+  expect(verifyBlockedWorkloadCollection(reseal(report))).toContain(
+    'case_native_observation_invalid',
+  );
+});
 
 test('full blocked collection preserves formal rejection and all original workload and numeric growth gates', () => {
   const valid = blockedCollectionPacket();

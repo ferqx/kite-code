@@ -77,6 +77,7 @@ export function builtinCapability(
   definitionId: string,
   kind: 'tool' | 'job' | 'action',
   planningId: string,
+  definitionVersion?: string,
 ): { effects: readonly CapabilityEffect[]; safeRead: boolean } {
   if (kind === 'action' && extensionId === planningId)
     return { effects: [planningEffect(definitionId)], safeRead: false };
@@ -89,6 +90,8 @@ export function builtinCapability(
     };
   const toolId = definitionId;
   if (extensionId === 'builtin.task') return taskToolCapability(toolId);
+  if (extensionId === 'builtin.web' && toolId === 'web_fetch' && definitionVersion === '1')
+    return { effects: ['network', 'unknown'], safeRead: false };
   if (extensionId === 'builtin.shell') return shellToolCapability(toolId);
   return {
     effects:

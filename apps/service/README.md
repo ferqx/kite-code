@@ -2,7 +2,9 @@
 
 ## 默认装配与业务规则归属
 
-[默认配置](src/configuration.ts)读取实际 Profile、Workspace、当前身份和注册定义，装配唯一 Agent Runtime；固定内建能力效果和 Workflow 审批投影由[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一提供。正式 Run、恢复绑定与只读 Skill 目录共用工具版本校验和内建注册集合，各自的来源捕获、选中范围与资源释放时刻仍独立。Service 不维护第二份 Task、Shell、Files 或 Skills 效果规则。
+[默认配置](src/configuration.ts)读取实际 Profile、Workspace、当前身份和注册定义，装配唯一 Agent Runtime；固定内建能力效果和 Workflow 审批投影由[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一提供。正式 Run、恢复绑定与只读 Skill 目录共用工具版本校验和内建注册集合，各自的来源捕获、选中范围与资源释放时刻仍独立。Service 不维护第二份 Task、Shell、Files、Skills 或 Web 效果规则。
+
+[Web 装配](src/web-fetch-configuration.ts)从准确注册版本取得 Agent 的固定分类，仅组合原可信网络 policy、`off` 硬拒绝、`builtin.web:1` revision 和 snapshot；默认 Tool 登记一次采用该元数据，原后置覆盖 loop 与 Workflow 的 Web 效果特例已删除。同名外部扩展不因此取得内建分类。[Task 装配](src/task-configuration.ts)只提供原 extension、角色／工具 snapshot 和选择校验，无正式消费者的权限 `describe` 副出口已退役；实际权限仍沿 Agent 公共分类，原默认 Task 和独立 carrier 授权保持。
 
 HTTP 身份和 schema 准入、当前持久权限与来源读取、真实 transport 可用性属于宿主。业务执行、权限决定、Workflow 能力投影和 Runtime 准入属于 Agent。Source 编译前后复核、完整文件消费证明和不同持久摘要格式有独立合同，保留原检查；本轮精简理由见[实施决定](../../.agents/notes/implemented/simplification/2026-10-11-service-agent-default-composition.md)。
 

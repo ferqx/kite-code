@@ -2,8 +2,10 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
+import { taskToolCapability } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -164,7 +166,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'private',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'task' });
   return {
@@ -399,23 +401,23 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
     ].sort(),
   );
   for (const id of ['list_agents', 'wait_agents', 'wait_agent']) {
-    expect(task.describe(id)).toEqual({ effects: ['read'], safeRead: true });
+    expect(taskToolCapability(id)).toEqual({ effects: ['read'], safeRead: true });
     expect(task.tools.get(id)?.version).toBe('1');
     expect(task.tools.get(id)?.inputSchema).toMatchObject({
       type: 'object',
       additionalProperties: false,
     });
   }
-  expect(task.describe('interrupt_agent')).toEqual({ effects: ['unknown'], safeRead: false });
+  expect(taskToolCapability('interrupt_agent')).toEqual({ effects: ['unknown'], safeRead: false });
   expect(task.tools.get('interrupt_agent')?.inputSchema).toMatchObject({
     required: ['taskId', 'targetRunId', 'commandId'],
     additionalProperties: false,
   });
-  expect(task.describe('send_message')).toEqual({
+  expect(taskToolCapability('send_message')).toEqual({
     effects: ['unknown', 'record_write'],
     safeRead: false,
   });
-  expect(task.describe('followup_task')).toEqual({
+  expect(taskToolCapability('followup_task')).toEqual({
     effects: ['unknown', 'record_write'],
     safeRead: false,
   });

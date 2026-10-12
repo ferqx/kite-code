@@ -133,6 +133,13 @@ export interface UnifiedSoakReport {
     crashExit: number;
     durationMs: number;
     cleanupConfirmed: boolean;
+    probeExits?: {
+      mode: 'lifecycle' | 'cases' | 'continuous';
+      native: NativeProcessObservation;
+      exitCode: number;
+      reaped: true;
+      kernelState: 'absent' | 'reused';
+    }[];
   }[];
   qualificationPreflight?: QualificationPreflight;
   digest: string;
@@ -372,13 +379,68 @@ function verifyReport(
       !closed(
         attempt,
         ['iteration', 'lifecycle', 'recovery', 'crashExit', 'durationMs', 'cleanupConfirmed'],
-        value.version === 2 ? ['cases', 'continuous'] : [],
+        value.version === 2 ? ['cases', 'continuous', 'probeExits'] : [],
       )
     )
       return ['attempt_structure_invalid'];
     if (value.version === 2) {
       if (!Array.isArray(attempt.cases) || attempt.cases.length !== 7)
         return ['case_matrix_missing'];
+      if (attempt.probeExits !== undefined) {
+        const runnerPid = attempt.cases.find(
+          (item) => item.caseId === 'runtime_sigkill_recovery',
+        )?.pid;
+        // The functional replay samples the cases probe itself. TUI samples its
+        // separate PTY process and keeps the original per-case identity checks below.
+        const casesProbe = attempt.cases.find((item) => item.caseId === 'long_runtime_replay');
+        if (!Array.isArray(attempt.probeExits) || attempt.probeExits.length !== 3)
+          return ['probe_exit_invalid'];
+        for (const [probeIndex, exit] of attempt.probeExits.entries()) {
+          if (
+            !closed(exit, ['mode', 'native', 'exitCode', 'reaped', 'kernelState']) ||
+            exit.mode !== ['lifecycle', 'cases', 'continuous'][probeIndex] ||
+            !nativeValid(exit.native, exit.native?.pid) ||
+            !exit.native.startIdentity ||
+            exit.native.parentPid !== runnerPid ||
+            exit.native.pid === runnerPid ||
+            exit.exitCode !== 0 ||
+            exit.reaped !== true ||
+            !['absent', 'reused'].includes(exit.kernelState) ||
+            (exit.mode === 'continuous' &&
+              attempt.continuous?.shell?.serviceResources !== undefined &&
+              attempt.continuous.shell.serviceResources.ownerPid !== exit.native.pid) ||
+            (exit.mode === 'lifecycle' && exit.native.pid !== attempt.lifecycle.pid) ||
+            (exit.mode === 'lifecycle' &&
+              attempt.lifecycle.points.some(
+                (point) =>
+                  point.observations &&
+                  (!sameNativeProcess(exit.native, point.observations.before.native) ||
+                    !sameNativeProcess(exit.native, point.observations.after.native) ||
+                    point.observations.before.native.parentPid !== exit.native.parentPid ||
+                    point.observations.after.native.parentPid !== exit.native.parentPid),
+              )) ||
+            (exit.mode === 'cases' &&
+              (casesProbe?.pid !== exit.native.pid ||
+                casesProbe.points?.some(
+                  (point) =>
+                    point.observations &&
+                    (!sameNativeProcess(exit.native, point.observations.before.native) ||
+                      !sameNativeProcess(exit.native, point.observations.after.native) ||
+                      point.observations.before.native.parentPid !== exit.native.parentPid ||
+                      point.observations.after.native.parentPid !== exit.native.parentPid),
+                )))
+          )
+            return ['probe_exit_invalid'];
+        }
+        if (
+          new Set(
+            attempt.probeExits.map(
+              (exit) => `${exit.native.pid}:${exit.native.startIdentity!.value}`,
+            ),
+          ).size !== 3
+        )
+          return ['probe_exit_invalid'];
+      } else if (formal) errors.push('probe_exit_missing');
       if (attempt.continuous)
         errors.push(
           ...verifyContinuousEvidence(attempt.continuous, formal, value.environment.platform),
@@ -556,16 +618,20 @@ function verifyReport(
                 return ['case_descendant_invalid'];
               for (const [index, child] of point.descendants.entries())
                 if (
-                  !closed(child, ['role', 'native', 'exitCode', 'reaped']) ||
+                  !closed(child, ['role', 'native', 'exitCode', 'reaped'], ['kernelState']) ||
                   child.role !== ['crash', 'recovery'][index] ||
                   child.reaped !== true ||
                   child.exitCode !== (index === 0 ? 137 : 0) ||
                   !nativeValid(child.native, child.native?.pid) ||
                   child.native.parentPid !== item.pid ||
                   child.native.pid === item.pid ||
-                  !child.native.startIdentity
+                  !child.native.startIdentity ||
+                  (child.kernelState !== undefined &&
+                    !['absent', 'reused'].includes(child.kernelState))
                 )
                   return ['case_descendant_invalid'];
+              if (formal && point.descendants.some((child) => child.kernelState === undefined))
+                errors.push('descendant_exit_missing');
             }
             if (formal && item.caseId === 'runtime_sigkill_recovery' && !point.descendants)
               errors.push('descendant_identity_missing');

@@ -23,7 +23,11 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { buildTerminalBundle, verifyTerminalBundle } from '../release/terminal-bundle';
 import { type CaseEvidence, sampleSoakResources, UNIFIED_SOAK_CASES } from './unified-soak-cases';
 import type { ContinuousEvidence } from './unified-soak-continuous';
-import { observeNativeProcess, sameNativeProcess } from './unified-soak-native';
+import {
+  observeNativeProcess,
+  observeOwnedProcessExit,
+  sameNativeProcess,
+} from './unified-soak-native';
 import {
   FORMAL_DURATION_MS,
   GLOBAL_DEADLINE_MS,
@@ -145,13 +149,25 @@ export async function runStableCrashSeries(
     await Bun.sleep(0);
     const before = sampleSoakResources(),
       pointStarted = performance.now();
-    const doomed = spawn(cycleRoot, 'crash'),
-      childNative = observeNativeProcess(doomed.pid);
+    const doomed = spawn(cycleRoot, 'crash');
+    let crashSettled = false,
+      crashCode: number | null = null;
+    const crashExited = doomed.exited.then((code) => {
+      crashSettled = true;
+      crashCode = code;
+      return code;
+    });
+    const childNative = observeNativeProcess(doomed.pid);
+    const crashStderr = doomed.stderr
+      ? new Response(doomed.stderr as ReadableStream<Uint8Array>).text()
+      : Promise.resolve('');
+    let crashKernelState: ReturnType<typeof observeOwnedProcessExit>;
+    const crashErrors: unknown[] = [];
     try {
       await timeout(
         (async () => {
           while (!existsSync(join(cycleRoot, 'crash-entered'))) {
-            if (doomed.exitCode !== null) throw Error('crash_probe_early_exit');
+            if (crashSettled) throw Error('crash_probe_early_exit');
             await Bun.sleep(10);
           }
         })(),
@@ -162,34 +178,105 @@ export async function runStableCrashSeries(
         childNative.parentPid !== process.pid
       )
         throw Error('crash_descendant_identity_invalid');
-      doomed.kill('SIGKILL');
-      crashExit = await timeout(doomed.exited, 5000);
+      if (!crashSettled) doomed.kill('SIGKILL');
+      crashExit = await timeout(crashExited, 5000);
+    } catch (error) {
+      if (!crashErrors.includes(error)) crashErrors.push(error);
     } finally {
-      if (doomed.exitCode === null) {
-        doomed.kill('SIGKILL');
-        await timeout(doomed.exited, 5000);
+      try {
+        if (!crashSettled) {
+          doomed.kill('SIGKILL');
+          await timeout(crashExited, 5000);
+        }
+      } catch (error) {
+        if (!crashErrors.includes(error)) crashErrors.push(error);
+      }
+      crashKernelState = observeOwnedProcessExit(doomed.pid, childNative);
+      if (!['absent', 'reused'].includes(crashKernelState))
+        crashErrors.push(Error('crash_probe_exit_unconfirmed'));
+      try {
+        await timeout(crashStderr, 2000);
+      } catch (error) {
+        if (!crashErrors.includes(error)) crashErrors.push(error);
       }
     }
-    const cold = spawn(cycleRoot, 'recover'),
-      coldNative = observeNativeProcess(cold.pid);
+    if (crashErrors.length) {
+      console.error(
+        JSON.stringify({
+          event: 'crash_probe_failed_exit',
+          native: childNative,
+          exitCode: crashCode,
+          kernelState: crashKernelState,
+        }),
+      );
+      if (crashErrors.length === 1) throw crashErrors[0];
+      throw new AggregateError(crashErrors, 'crash_probe_cleanup_failed', {
+        cause: crashErrors[0],
+      });
+    }
+    const cold = spawn(cycleRoot, 'recover');
+    let coldSettled = false,
+      coldCode: number | null = null;
+    const coldExited = cold.exited.then((code) => {
+      coldSettled = true;
+      coldCode = code;
+      return code;
+    });
+    const coldNative = observeNativeProcess(cold.pid);
     const stderr = cold.stderr
       ? new Response(cold.stderr as ReadableStream<Uint8Array>).text()
       : Promise.resolve('');
+    let coldStderrEof: Promise<string> | undefined;
+    let coldKernelState: ReturnType<typeof observeOwnedProcessExit>;
+    const coldErrors: unknown[] = [];
     try {
-      if ((await timeout(cold.exited, 180_000)) !== 0) {
-        console.error((await stderr).slice(0, 2048));
+      const coldResult = await timeout(coldExited, 180_000);
+      coldStderrEof ??= timeout(stderr, 2000);
+      const coldErrorText = await coldStderrEof;
+      if (coldResult !== 0) {
+        console.error(coldErrorText.slice(0, 2048));
         throw Error('recovery_probe_failed');
       }
-      await stderr;
       recovery = JSON.parse(readFileSync(join(cycleRoot, 'recover.json'), 'utf8')) as ProbeEvidence;
+    } catch (error) {
+      if (!coldErrors.includes(error)) coldErrors.push(error);
     } finally {
-      if (cold.exitCode === null) {
-        cold.kill('SIGKILL');
-        await timeout(cold.exited, 5000);
+      try {
+        if (!coldSettled) {
+          cold.kill('SIGKILL');
+          await timeout(coldExited, 5000);
+        }
+      } catch (error) {
+        if (!coldErrors.includes(error)) coldErrors.push(error);
       }
+      coldKernelState = observeOwnedProcessExit(cold.pid, coldNative);
+      if (!['absent', 'reused'].includes(coldKernelState))
+        coldErrors.push(Error('recovery_probe_exit_unconfirmed'));
+      try {
+        coldStderrEof ??= timeout(stderr, 2000);
+        await coldStderrEof;
+      } catch (error) {
+        if (!coldErrors.includes(error)) coldErrors.push(error);
+      }
+    }
+    if (coldErrors.length) {
+      console.error(
+        JSON.stringify({
+          event: 'recovery_probe_failed_exit',
+          native: coldNative,
+          exitCode: coldCode,
+          kernelState: coldKernelState,
+        }),
+      );
+      if (coldErrors.length === 1) throw coldErrors[0];
+      throw new AggregateError(coldErrors, 'recovery_probe_cleanup_failed', {
+        cause: coldErrors[0],
+      });
     }
     if (
       crashExit !== 137 ||
+      coldCode !== 0 ||
+      recovery.pid !== cold.pid ||
       recovery.calls !== 0 ||
       recovery.effectLedgerLines !== 1 ||
       coldNative.parentPid !== process.pid
@@ -243,8 +330,20 @@ export async function runStableCrashSeries(
       durationMs,
       assertions,
       descendants: [
-        { role: 'crash', native: childNative, exitCode: crashExit, reaped: true },
-        { role: 'recovery', native: coldNative, exitCode: 0, reaped: true },
+        {
+          role: 'crash',
+          native: childNative,
+          exitCode: crashExit,
+          reaped: true,
+          kernelState: crashKernelState as 'absent' | 'reused',
+        },
+        {
+          role: 'recovery',
+          native: coldNative,
+          exitCode: coldCode,
+          reaped: true,
+          kernelState: coldKernelState as 'absent' | 'reused',
+        },
       ],
     });
   }
@@ -353,32 +452,90 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
         crash = join(directory, 'crash');
       mkdirSync(live, { recursive: true, mode: 0o700 });
       mkdirSync(crash, { mode: 0o700 });
+      const probeExits: NonNullable<UnifiedSoakReport['attempts'][number]['probeExits']> = [];
       const run = async <T = ProbeEvidence>(
         dir: string,
-        mode: string,
+        mode: 'lifecycle' | 'cases' | 'continuous',
         cycles: number,
         minimumMs: number | string = 0,
       ) => {
         if (maximumMs - (performance.now() - started) <= 30_000)
           throw Error('unified_soak_deadline');
         const child = spawn(dir, mode, cycles, minimumMs);
+        let settled = false,
+          exitCode: number | null = null;
+        const exited = child.exited.then((code) => {
+          settled = true;
+          exitCode = code;
+          return code;
+        });
+        const native = observeNativeProcess(child.pid);
+        const stderr = new Response(child.stderr).text();
+        let stderrEof: Promise<string> | undefined;
+        const runErrors: unknown[] = [];
+        let result!: T;
+        let kernelState: ReturnType<typeof observeOwnedProcessExit>;
         try {
           const code = await timeout(
-            child.exited,
+            exited,
             Math.max(1, maximumMs - (performance.now() - started) - 30_000),
           );
-          const stderr = await timeout(new Response(child.stderr).text(), 2000);
+          stderrEof ??= timeout(stderr, 2000);
+          const errorText = await stderrEof;
           if (code !== 0) {
-            console.error(stderr.slice(0, 2048));
+            console.error(errorText.slice(0, 2048));
             throw Error('unified_soak_probe_failed');
           }
-          return JSON.parse(readFileSync(join(dir, `${mode}.json`), 'utf8')) as T;
+          result = JSON.parse(readFileSync(join(dir, `${mode}.json`), 'utf8')) as T;
+        } catch (error) {
+          if (!runErrors.includes(error)) runErrors.push(error);
         } finally {
-          if (child.exitCode === null) {
-            child.kill('SIGKILL');
-            await timeout(child.exited, 5000);
+          try {
+            if (!settled) {
+              child.kill('SIGKILL');
+              await timeout(exited, 5000);
+            }
+          } catch (error) {
+            if (!runErrors.includes(error)) runErrors.push(error);
+          }
+          kernelState = observeOwnedProcessExit(child.pid, native);
+          if (
+            !native.startIdentity ||
+            native.parentPid !== process.pid ||
+            !['absent', 'reused'].includes(kernelState)
+          )
+            runErrors.push(Error('unified_soak_probe_exit_unconfirmed'));
+          try {
+            stderrEof ??= timeout(stderr, 2000);
+            await stderrEof;
+          } catch (error) {
+            if (!runErrors.includes(error)) runErrors.push(error);
           }
         }
+        if (runErrors.length) {
+          console.error(
+            JSON.stringify({
+              event: 'probe_failed_exit',
+              mode,
+              native,
+              exitCode,
+              kernelState,
+            }),
+          );
+          if (runErrors.length === 1) throw runErrors[0];
+          throw new AggregateError(runErrors, 'unified_soak_probe_cleanup_failed', {
+            cause: runErrors[0],
+          });
+        }
+        if (exitCode !== 0) throw Error('unified_soak_probe_exit_invalid');
+        probeExits.push({
+          mode,
+          native,
+          exitCode,
+          reaped: true,
+          kernelState: kernelState as 'absent' | 'reused',
+        });
+        return result;
       };
       const lifecycle = await run(
         live,
@@ -478,6 +635,7 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
       attempts.push({
         cases,
         continuous,
+        probeExits,
         iteration,
         lifecycle,
         recovery,
@@ -496,8 +654,14 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
         );
     }
   } catch (error) {
-    const code = error instanceof Error ? error.message : '';
-    failures.push(/^[a-z_]+$/.test(code) ? code : 'unified_soak_operation_failed');
+    const pending = [error];
+    for (let index = 0; index < pending.length && index < 16; index++) {
+      const failure = pending[index];
+      const code = failure instanceof Error ? failure.message : '';
+      failures.push(/^[a-z_]+$/.test(code) ? code : 'unified_soak_operation_failed');
+      if (failure instanceof AggregateError) pending.push(...failure.errors.slice(0, 16));
+    }
+    if (pending.length > 16) failures.push('unified_soak_failure_limit');
   } finally {
     if (options.collectBlocked && failures.length)
       console.log(JSON.stringify({ event: 'workload_failure_retained', root }));
