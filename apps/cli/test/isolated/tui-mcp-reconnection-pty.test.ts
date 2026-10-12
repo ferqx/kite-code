@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -25,6 +26,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { getLoadedSqliteEngine, initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { ClientError, createClient, requiresInteractionAttachment } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { assertSqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
 import type { TuiMcpReconnectionFact } from '@kite-ai/ui/tui';
 import type { CLIServiceArtifact } from '../../host';
 import { parseMcpConnectionRecord } from '../../host/mcp-connection-intents';
@@ -78,8 +80,8 @@ function installed(name: string, owner: string) {
 }
 
 test('80x24 forced warm reconnect targets original warm carrier, independently rejects replacement Job, and cold/foreign original checks preserve identity', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-mcp-reconnection-'));
-  const evidence = `/private/tmp/kite-tui-mcp-reconnection-evidence-${randomUUID()}`;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-reconnection-')));
+  const evidence = join(tmpdir(), `kite-tui-mcp-reconnection-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -121,7 +123,7 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
     success = false,
     cleanupConfirmed = false;
   let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-    python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
     seed: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     observer: ReturnType<typeof createClient> | undefined,
     artifact: CLIServiceArtifact | undefined,
@@ -232,7 +234,19 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
     };
     const engine = initializeSqliteEngine(engineSelection);
     expect(engine.version).toBe(candidate.manifest.sqlite.version);
-    expect(engine.version).toBe('3.51.3');
+    if (process.platform === 'darwin') expect(engine.version).toBe('3.51.3');
+    else {
+      assertSqliteReleaseIdentity(
+        {
+          driver: candidate.manifest.sqlite.driver,
+          linkage: candidate.manifest.sqlite.linkage,
+          version: candidate.manifest.sqlite.version,
+          sourceId: candidate.manifest.sqlite.sourceId,
+        },
+        engine,
+      );
+      expect(candidate.manifest.sqlite.linkage).toBe('builtin');
+    }
     expect(engine.sourceId).toBe(candidate.manifest.sqlite.sourceId);
     expect(engine.selection).toEqual(engineSelection);
     expect(getLoadedSqliteEngine()).toEqual(engine);
@@ -256,7 +270,11 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
       dependencyVersions[name] = expected;
     }
     privateFile(join(evidence, 'service-dependencies.json'), dependencyVersions);
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const compiled = await Bun.build({
       entrypoints: [join(import.meta.dir, '../fixtures/tui-mcp-reconnection-pty.ts')],
       outdir: root,
@@ -898,173 +916,31 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
       },
     });
     writeFileSync(join(evidence, 'pty-owned.jsonl'), '', { mode: 0o600, flag: 'wx' });
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json,urllib.request,codecs,threading
-p=None;master=None;buffer='';decoder=codecs.getincrementaldecoder('utf-8')('strict');exits=[];cleanup=False;trace=[];failure=None
-
-def note(kind,**values):
- trace.append(dict(kind=kind,time=time.monotonic(),**values))
- if len(trace)>512:del trace[0]
-
-def control(path):
- note('control',path=path,frame=normalized()[-32768:])
- # A pending control reply must not stop PTY reads and backpressure the actual Host.
- result={}
- def request():
-  try:
-   with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:result['reply']=json.load(response)
-  except BaseException as error:result['error']=error
- worker=threading.Thread(target=request,daemon=True);worker.start()
- deadline=time.monotonic()+12
- while worker.is_alive():
-  if time.monotonic()>deadline:raise RuntimeError('owned_control_deadline:'+path)
-  if master is None:worker.join(.01)
-  else:receive(.01);drain(deadline)
- worker.join()
- if 'error' in result:raise result['error']
- return result['reply']
-def normalized():
- frames=buffer.split('\\x1b[?2026h')
- complete=next((frame.split('\\x1b[?2026l')[0] for frame in reversed(frames[1:]) if '\\x1b[?2026l' in frame),'')
- return re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',complete))
-def receive(timeout=.05):
- global buffer
- if select.select([master],[],[],timeout)[0]:
-  chunk=os.read(master,65536)
-  if not chunk:raise RuntimeError('owned_pty_eof')
-  buffer=(buffer+decoder.decode(chunk))[-1048576:]
-def drain(deadline=None):
- reads=0
- while select.select([master],[],[],0)[0]:
-  if reads>=16:raise RuntimeError('owned_frame_drain_limit')
-  if deadline is not None and time.monotonic()>deadline:raise RuntimeError('owned_frame_drain_deadline')
-  receive(0);reads+=1
-def wait(text,compact=False):
- deadline=time.monotonic()+10
- while True:
-  drain(deadline)
-  if text in (normalized().replace(' ','') if compact else normalized()):
-   note('matched',text=text,frame=normalized()[-32768:]);return
-  if time.monotonic()>deadline:raise RuntimeError('owned_frame_deadline:'+text)
-  receive()
-def wait_idle():
- # API completion can precede the selected Session refresh; wait for its live composer.
- deadline=time.monotonic()+10
- while True:
-  drain(deadline)
-  frame=normalized()
-  if 'New Run >' in frame and ' · Loading ' not in frame:
-   note('composer-ready',frame=frame[-32768:]);return
-  if time.monotonic()>deadline:raise RuntimeError('owned_composer_deadline')
-  receive()
-def wait_new_reconnection(previous):
- # Keep reading while submission completes; older menu and detail IDs are not this request.
- deadline=time.monotonic()+10
- while True:
-  drain(deadline)
-  original=next((match.group(1) for match in re.finditer(r'Originalforcedreconnect:([a-f0-9-]{36})',normalized().replace(' ','')) if match.group(1) not in previous),None)
-  if original:
-   note('new-reconnection',commandId=original,frame=normalized()[-32768:]);return original
-  if time.monotonic()>deadline:raise RuntimeError('owned_new_reconnection_deadline')
-  receive()
-def key(value,preserveSelectedFrame=False):
- global buffer
- if not value:return
- drain()
- note('key',hex=value.hex(),preserveSelectedFrame=preserveSelectedFrame,frame=normalized()[-32768:])
- if not preserveSelectedFrame:buffer=''
- os.write(master,value)
-def selected(command_id):
- # Only the outcome detail has the original Session suffix; list labels do not.
- detail='Originalforcedreconnect:'+command_id+'·OriginalStore:'+${JSON.stringify(storeId)}+'·Sessiona'
- wait(detail,True)
-def start(phase):
- global p,master,buffer,decoder
- master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
- decoder=codecs.getincrementaldecoder('utf-8')('strict')
- p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(root, 'host.js'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True,env=dict(os.environ,HOME=${JSON.stringify(root)},KITE_CODE_HOME=${JSON.stringify(join(root, 'owned-home'))}))
- os.close(slave);buffer=''
- with open(${JSON.stringify(join(evidence, 'pty-owned.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'pid':p.pid})+'\\n');log.flush();os.fsync(log.fileno())
- wait('New Run >')
-def choose(label,top='Project sources',settle_mcp=False):
- deadline=time.monotonic()+10
- if settle_mcp:
-  # New server facts invalidate selection; navigate only after this read settles.
-  # Share the existing navigation budget, including the cold unavailable case.
-  while True:
-   drain(deadline)
-   frame=normalized()
-   if 'Server list ready' in frame or 'Server list unknown; refresh to verify' in frame:break
-   if time.monotonic()>deadline:raise RuntimeError('owned_navigation_read_deadline:'+label)
-   receive()
-  note('mcp-navigation-read-settled',frame=frame[-32768:])
- if ('› '+label) in normalized():return
- if ('› '+top) not in normalized():
-  key(b'\\x1b[A'*64)
-  while ('› '+top) not in normalized():
-   drain(deadline)
-   if time.monotonic()>deadline:raise RuntimeError('owned_navigation_top_deadline:'+top)
-   receive()
- while True:
-  drain(deadline)
-  if ('› '+label) in normalized():return
-  if time.monotonic()>deadline:raise RuntimeError('owned_navigation_deadline:'+label)
-  key(b'\\x1b[B')
-  while not normalized():
-   if time.monotonic()>deadline:raise RuntimeError('owned_navigation_frame_deadline:'+label)
-   receive()
-def select_original(command_id,top):
- choose('Original forced reconnect: '+command_id,top)
- known=('Originalforcedreconnect:'+command_id+'·OriginalStore:'+${JSON.stringify(storeId)}+'·Sessiona') in normalized().replace(' ','')
- note('select-original-key',commandId=command_id,retainedKnownDetail=known)
- key(b'\\r',preserveSelectedFrame=known);selected(command_id)
-def mcp():
- wait_idle();key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('Project sources')
-def request_connection():
- mcp();wait('Server list ready');choose(${JSON.stringify(sourceId)}+' · enabled · available');key(b'\\r');wait('Server:');choose('Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:')
-def check_connection():
- choose('Check original connection');key(b'\\r');wait('Original catalogue ready')
-def reconnections():
- mcp();choose('Forced reconnects',settle_mcp=True);key(b'\\r');wait('Selecting an original ID does not query, reconnect or authorize tools.')
-def leave_reconnections(pending=False,parentTitle='MCP · w'):
- # Child close only returns to the real parent MCP panel; observe that frame before a second close.
- key(b'\\x03');wait(parentTitle);note('parent-mcp-after-child-close',expectedTitle=parentTitle,frame=normalized()[-32768:]);key(b'\\x03');wait('Ctrl+B pending cards' if pending else 'New Run >');note('main-after-parent-close',pending=pending,frame=normalized()[-32768:])
-def close(phase):
- global master,p
- key(b'\\x11');deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.05)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3)
- exits.append({'phase':phase,'pid':p.pid,'exitCode':p.returncode,'normalCtrlQ':True})
- assert p.returncode==0
- os.close(master);master=None;p=None
-try:
- start('warm');request_connection();first=control('approve-a')['commandId'];check_connection();choose('Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:');second=control('approve-b')['commandId'];check_connection();wait('Reused original connection');choose('Review forced reconnect');key(b'\\r');wait('Confirm forced reconnect:');wait('Original carrier: '+second);wait('› Confirm forced reconnect');control('before-confirm');key(b'\\r');submitted_ready=wait_new_reconnection([]);leave_reconnections(pending=True);ready=control('approve-replacement')['commandId'];assert ready==submitted_ready;wait('New Run >');reconnections();select_original(ready,'Check original forced reconnect');choose('Check original forced reconnect','Check original forced reconnect');key(b'\\r');wait('Replacement catalogue ready');wait('Live replacement observed');choose('Review forced reconnect','Check original forced reconnect');key(b'\\r');wait('Confirm forced reconnect:');wait('Original carrier: '+ready);wait('› Confirm forced reconnect');control('before-second-confirm');key(b'\\r');submitted_denied=wait_new_reconnection([ready]);leave_reconnections(pending=True);original=control('deny-replacement')['commandId'];assert original==submitted_denied;wait('New Run >');reconnections();select_original(original,'Check original forced reconnect');choose('Check original forced reconnect','Check original forced reconnect');key(b'\\r');wait('Forced reconnect failed');wait('Original connection stop confirmed');wait('Live replacement not confirmed');control('warm-complete');leave_reconnections();close('warm')
- control('cold-removed');start('cold-removed');reconnections();control('selection-baseline');select_original(original,'Original forced reconnect: '+ready);control('cold-selected');choose('Check original forced reconnect','Check original forced reconnect');key(b'\\r');wait('Forced reconnect failed');wait('Original connection stop confirmed');control('cold-lookup');leave_reconnections(parentTitle='MCP · unavailable');close('cold-removed')
- control('cold-foreign');start('cold-foreign');reconnections();control('selection-baseline');select_original(original,'Original forced reconnect: '+ready);wait('Forced reconnect outcome unknown; Check original');control('foreign-selected');choose('Check original forced reconnect','Check original forced reconnect');note('foreign-check-key',commandId=original,observation='retained identical known unknown detail; no new frame or server receipt');key(b'\\r',preserveSelectedFrame=True);selected(original);wait('Forced reconnect outcome unknown; Check original');control('foreign-lookup');leave_reconnections(parentTitle='MCP · unavailable');close('cold-foreign')
- cleanup=True;print('RECONNECTION_WARM_COLD_FOREIGN_COMPLETE')
-except BaseException as error:
- failure={'type':type(error).__name__,'message':str(error)[:4096],'frame':normalized()[-32768:]}
- raise
-finally:
- try:
-  if p is not None:
-   if p.poll() is None:
-    p.terminate()
-    try:p.wait(timeout=6)
-    except subprocess.TimeoutExpired:p.kill();p.wait(timeout=3)
-   exits.append({'phase':'cleanup','pid':p.pid,'exitCode':p.returncode,'normalCtrlQ':False});p=None
- finally:
-  if master is not None:os.close(master);master=None
-  with os.fdopen(os.open(${JSON.stringify(join(evidence, 'pty-trace.json'))},os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600),'w') as log:json.dump({'failure':failure,'latestCompleteFrame':normalized()[-32768:],'trace':trace},log);log.flush();os.fsync(log.fileno())
-  with os.fdopen(os.open(${JSON.stringify(join(evidence, 'pty-exits.json'))},os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600),'w') as log:json.dump({'normalComplete':cleanup,'exits':exits},log);log.flush();os.fsync(log.fileno())
-`;
-    python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    driver = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        join(import.meta.dir, '../fixtures/tui-mcp-reconnection-driver.ts'),
+        JSON.stringify({
+          controlURL: control.url.href,
+          executable: process.execPath,
+          host: join(root, 'host.js'),
+          root,
+          evidence,
+          storeId,
+          sourceId,
+        }),
+      ],
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+      },
+    );
     const [ptyOut, ptyErr, ptyCode] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     writeFileSync(join(evidence, 'pty.log'), ptyOut + ptyErr, { mode: 0o600, flag: 'wx' });
     expect(ptyCode).toBe(0);
@@ -1119,9 +995,10 @@ finally:
     try {
       await collect(async () => observer?.disposeNetwork());
       await collect(async () => {
-        if (python?.exitCode === null) {
-          python.kill('SIGINT');
-          await bounded(python.exited, 9000);
+        if (driver?.exitCode === null) {
+          if (process.platform === 'win32') driver.send('mcp-reconnection-driver-stop');
+          else driver.kill('SIGINT');
+          await bounded(driver.exited, 9000);
         }
       });
       await collect(async () => {
@@ -1162,7 +1039,7 @@ finally:
               e.returnedAfterCleanup === true,
           ),
         );
-        if (controlWork.size !== 0 || python?.exitCode === null || !ownedSettled)
+        if (controlWork.size !== 0 || driver?.exitCode === null || !ownedSettled)
           cleanupErrors.push(Error('owned_candidate_lease_retained_for_unconfirmed_work'));
         else {
           candidateAccess?.release();
@@ -1219,7 +1096,7 @@ finally:
       }
       if (controlWork.size === 0) globalThis.fetch = parentFetch;
       cleanupConfirmed =
-        (python === undefined || python.exitCode !== null) &&
+        (driver === undefined || driver.exitCode !== null) &&
         (build === undefined || build.exitCode !== null) &&
         controlWork.size === 0 &&
         cleanupErrors.length === 0;

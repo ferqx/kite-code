@@ -5189,3 +5189,33 @@ Root收据 `/private/tmp/kite-mcp-tui-caller-freeze.json` 冻结3846份非Markdo
 | 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归仍依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
 
 新增闭合的是Tools查看与Source来源管理的完整三端测试源码、两类POSIX测试驱动退役、准确候选／公开caller的本机完整合同及其CI进程隔离接线。无生产新authority迁移、push／PR／发布／Actions触发；RSS、完整观测和平台资格未闭合。
+
+## 2026-10-12：MCP 来源批准、强制重连和认证的完整三端测试
+
+前片Tools／Source修改已正常本地提交 `c3ff12899ed2c755fe2ae8ca7643a7558c81d880` 并结束。本轮继续原最高依赖的三个完整用户入口：[项目来源批准](../../apps/cli/test/isolated/tui-mcp-source-approval-pty.test.ts)、[强制重连](../../apps/cli/test/isolated/tui-mcp-reconnection-pty.test.ts)和[Auth管理](../../apps/cli/test/isolated/tui-mcp-auth-pty.test.ts)。替换两段内嵌Python和唯一Auth Python driver，复用现行Bun PTY／ConPTY及实际候选／Client／Service；三个实际Service helper字节不改。系统tmpdir、Windows junction／USERPROFILE、私有失败IPC和真实树清理替代测试POSIX假设；全文件按三端接线，没有availability skip、平台过滤或普通runner替身。
+
+Source批准保approved／rejected／cancel、Review／Confirm／普通Ask和Source Question、空Enter零答案、同Store cold removed／missing与foreign四窗。90个原Bun expect及55次原控制路径顺序保全，原两Python身份／退出断言分别三次／四次保持。公开当前backup实际v16及原5109journal字节／SHA／身份均保持；更早v10资格不追认为本窗口schema。macOS原完整文件actual0／1pass／281expects／17.77秒，日志 `/private/tmp/kite-source-approval-portable-settled.log`；四次Ctrl+Q／EOF／exit0、五份Service正常收尾、lease与root释放。暖UI POST9为3Source／3ordinary／3Question，三冷窗均0；没有Model／credential／MCP RPC或Run。原10／12／6＋3／180秒保持，原build没有另设60秒窗口。
+
+首轮移植真实红保 `/private/tmp/kite-source-approval-portable.log`。原Question在空Enter后正确仍pending／零答案、Idle／none且无新画面，新driver错误等待fresh输出才超原10秒；修复只保留已核同一原卡ready观察，原control继续核pending／零答案并新增同QuestionID核验，任何新render覆盖。普通选择／正式答案仍核当前ready和原Question，不从旧历史替代输入准入。该红的异常Service收尾未确认、原root和packet保留；root只读复核两个原PID已退出，不能由PID不在或随后normal绿补认原Service cleanup receipt，也不能宣布fault cleanup通过。没有扩展故障矩阵。
+
+强制重连保ordinary A／warm B、R1独立新Job批准、R2以原R1为target并独立拒绝replacement Job，准确旧terminal／transportStopped早于新open。三窗原ID选择零查、显式Check及公开v11恢复到新Store的HTTP前拒绝、原journal bytes／SHA／cursor保持；110个原Bun expect、15次原control顺序、三个exit0及两次submitted新Command相等核验保全。真实子面板关闭后先观测原MCP父帧再关主面板，foreign只沿已核同一unknown明细保无变化观察，不称新server receipt。macOS原完整文件actual0／1pass／226expects／17.82秒，日志 `/private/tmp/kite-mcp-reconnection-portable-actual.log`；暖POST4／重连POST2、两组initialize／tools-list、Model／credential0、三次Ctrl+Q／EOF及四份Service正常收尾、candidate lease释放、root删除。首次受沙箱拒loopback监听的运行保 `/private/tmp/kite-mcp-reconnection-portable.log`，完整实际验证在已授权测试范围内运行；原10／12／6＋3／60秒build／180秒整例不改。
+
+Auth保Login／Refresh／Revoke／Login／Clear五次Review／Confirm、五个唯一原Command／Execution及独立SDK Ask，不能称键盘审批。受控AS沿原discovery／DCR／PKCE／callback／token／refresh／revoke，MCP RPC／Model0；Source与physical Workspace移除后的cold原ID选择零结果GET、明确两原GET／零POST及AS／Vault计数保持。60个原Bun expect逐字节保全，旧独立Python driver退役。macOS最终原完整文件actual0／1pass／101expects／18.25秒，日志 `/private/tmp/kite-mcp-auth-retain-contract.log`；暖冷两次Ctrl+Q／EOF／exit0、三个Service正常收尾及root删除。原10／12／6＋3／9秒driver清理／180秒整例保持，临时Vault与fetch callback opener不代系统Vault或浏览器资格。前绿 `/private/tmp/kite-mcp-auth-portable.log` 保留；最终源码复核发现新driver的retain原先只进trace，现只在按键前核完整同Command／Store／Session明细后保留，任何fresh render覆盖且仅同ID明细等待可用。本次六次选择事前均没有合格明细，实际全部等新画面，不追认retained no-op分支已测；原断言／控制／预算保持，只重跑这个受影响完整文件和CLI类型。
+
+只有强制重连原Mac固定SQLite3.51.3字面断言需scope correction：Mac仍执行，nonMac用公共reviewed identity核准确version／官方sourceId和真实builtin linkage。Source批准原本没有固定3.51.3字面要求，仅增加nonMac审查核验；三个原候选／实测engine／selection／getLoaded绑定按原适用范围不变。首Database前选择候选引擎、全部私有Profile和lease准入保持。Python select／16次read-burst／1MiB raw窗改为共享异步PTY parser；保trace512、frame32768个UTF-16单元与终端screen边界，但运输资源实现不称逐字节等价，不能由这些短窗降低原RSS／完整观测门禁。Windows异常树终止记录normal=false，不称OS信号或正常退出资格。
+
+[三平台transport workflow](../../.github/workflows/runtime-transport-qualification.yml)追加三个完整独立Bun命令，现五个MCP消费者全部在Windows MSVC和current八workspace build后、原transport／shared14前运行。选候选engine的文件不能合并进已开库进程。原CI guard逐一拒命令遗漏／echo／filter／平台条件和合并进程、缺build／prepare、旧transport前置；原所有文件保留。CI原完整文件actual0／21pass／239expects／1.493秒，日志 `/private/tmp/kite-mcp-complete-callers-ci-settled.log`；本机未push、PR、发布或dispatch Actions。
+
+根收据 `/private/tmp/kite-mcp-complete-callers-freeze.json` 核90／110／60共260个原Bun expect均保、三个helper和原test SHA精确匹配115文件／80作业CLI基线，并冻结3848份非Markdown输入。三个本轮原完整文件各实际重验；既有完整CLI证据只复用未变范围，前片shared14／28pass／508expects的原命令及14文件、依赖与生产输入保持，故不重复。三个执行收据的源码SHA、原控制序列、normal退出及当前类型／CI／边界／workspace／API／ownership／格式／文档按实际diff核对，正常提交hook仍独立强制执行。当前整仓728文件／588作业未在本轮全部执行，不能把独立窗口相加冒称整仓或阶段完成。
+
+源码核对五个剩余退出阻塞，按依赖排序：
+
+| 顺序 | 实际用户入口、具体缺口与验收 |
+| --- | --- |
+| 1 | [/mcp配置启停](../../apps/cli/test/isolated/tui-mcp-pty.test.ts)及[冷原配置申请](../../apps/cli/test/isolated/tui-mcp-cold-pty.test.ts)等后续完整共享入口仍有Python／POSIX夹具。需保原scope选择／独立确认与审批、完整原结果、同Profile冷原ID明确GET-only／零重放和真实正常退出，迁入三端整文件；Source／连接／Auth邻接绿不能代该用户能力。 |
+| 2 | 正式Shell／Task／MCP原持续负载RSS仍九点 `178814976→299614208B`、`+115.203125MiB>32MiB`。实际native allocation owner修复并满足原正式完整负载和阈值前仍红，不重复参数对照。 |
+| 3 | 完整Runtime出生后代及activeResources／handles producer仍缺。实际完整来源经原formal verifier核实前保unsupported／null，部分Job树／coalition／FD不能代全集；正常短窗和本轮未确认fault cleanup不能替代完整资源门禁。 |
+| 4 | Win/Linux正式安装、真实版本切换、MCP、维护恢复、保数据卸载和Windows Shell／script verifier原合同后端仍需真实资格。后续Actions／用户Windows验证保原完整门禁，本机macOS、源码接线和missing backend不代原生通过；本轮不dispatch。 |
+| 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归仍依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
+
+新增闭合范围是三个完整用户入口的三端测试源码、其POSIX driver退役和实际macOS完整合同，以及五个完整MCP消费者的CI隔离接线。本轮没有生产新authority迁移；原RSS、完整观测、异常清理及原生平台资格仍按原实际门禁。

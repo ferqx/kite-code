@@ -271,6 +271,9 @@ export function checkUnifiedFormalConsumers(root: string): {
             const mcpCallers = [
               'apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
               'apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
+              'apps/cli/test/isolated/tui-mcp-source-approval-pty.test.ts',
+              'apps/cli/test/isolated/tui-mcp-reconnection-pty.test.ts',
+              'apps/cli/test/isolated/tui-mcp-auth-pty.test.ts',
             ].map((file) =>
               steps.findIndex(
                 (step) =>

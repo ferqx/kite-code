@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -70,8 +71,8 @@ function installed(name: string, owner: string) {
 }
 
 test('80x24 real OAuth Auth Actions preserve original IDs and cold removed source history is explicit GET-only', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-mcp-auth-'));
-  const evidence = `/private/tmp/kite-tui-mcp-auth-evidence-${randomUUID()}`;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-auth-')));
+  const evidence = join(tmpdir(), `kite-tui-mcp-auth-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -106,7 +107,7 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
     success = false,
     cleanupConfirmed = false;
   let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-    python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
     seed: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     observer: ReturnType<typeof createClient> | undefined,
     artifact: CLIServiceArtifact | undefined,
@@ -273,7 +274,11 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       dependencyVersions[name] = expected;
     }
     privateFile(join(evidence, 'service-dependencies.json'), dependencyVersions);
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const compiled = await Bun.build({
       entrypoints: [join(import.meta.dir, '../fixtures/tui-mcp-auth-pty.ts')],
       outdir: root,
@@ -540,23 +545,26 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
         return work;
       },
     });
-    python = Bun.spawn(
+    driver = Bun.spawn(
       [
-        'python3',
-        join(import.meta.dir, '../fixtures/tui-mcp-auth-pty.py'),
-        control.url.href,
-        artifact.executable,
-        artifact.entrypoint,
-        root,
-        evidence,
-        storeId,
+        process.execPath,
+        '--no-install',
+        join(import.meta.dir, '../fixtures/tui-mcp-auth-driver.ts'),
+        JSON.stringify({
+          controlURL: control.url.href,
+          executable: artifact.executable,
+          host: artifact.entrypoint,
+          root,
+          evidence,
+          storeId,
+        }),
       ],
-      { stdout: 'pipe', stderr: 'pipe' },
+      { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
     );
     const [ptyOut, ptyErr, ptyCode] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     writeFileSync(join(evidence, 'pty.log'), ptyOut + ptyErr, { mode: 0o600, flag: 'wx' });
     expect(ptyCode).toBe(0);
@@ -617,9 +625,10 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
     try {
       await collect(async () => observer?.disposeNetwork());
       await collect(async () => {
-        if (python?.exitCode === null) {
-          python.kill('SIGINT');
-          await bounded(python.exited, 9000);
+        if (driver?.exitCode === null) {
+          if (process.platform === 'win32') driver.send('mcp-auth-driver-stop');
+          else driver.kill('SIGINT');
+          await bounded(driver.exited, 9000);
         }
       });
       await collect(async () => {
@@ -702,7 +711,7 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       }
       if (controlWork.size === 0) globalThis.fetch = parentFetch;
       cleanupConfirmed =
-        (python === undefined || python.exitCode !== null) &&
+        (driver === undefined || driver.exitCode !== null) &&
         (build === undefined || build.exitCode !== null) &&
         controlWork.size === 0 &&
         cleanupErrors.length === 0;

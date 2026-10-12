@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -25,6 +26,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { getLoadedSqliteEngine, initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { ClientError, createClient, type Interaction } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { assertSqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
 import type { TuiMcpSourceApprovalFact } from '@kite-ai/ui/tui';
 import type { CLIServiceArtifact } from '../../host';
 import { mcpSha } from '../../host/mcp-selection-intents';
@@ -79,8 +81,8 @@ function installed(name: string, owner: string) {
 }
 
 test('80x24 Source Review independently confirms Action and original Question decisions; cold removed Source/Workspace checks original IDs GET-only and foreign restored Store rejects original lookups', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-mcp-source-approval-'));
-  const evidence = `/private/tmp/kite-tui-mcp-source-approval-evidence-${randomUUID()}`;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-source-approval-')));
+  const evidence = join(tmpdir(), `kite-tui-mcp-source-approval-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -121,7 +123,7 @@ test('80x24 Source Review independently confirms Action and original Question de
     success = false,
     cleanupConfirmed = false;
   let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-    python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
     seed: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     observer: ReturnType<typeof createClient> | undefined,
     artifact: CLIServiceArtifact | undefined,
@@ -198,6 +200,11 @@ test('80x24 Source Review independently confirms Action and original Question de
       manifestSha256: candidate.manifest.sqlite.manifestSha256,
     };
     const engine = initializeSqliteEngine(engineSelection);
+    if (process.platform !== 'darwin') {
+      const { driver, linkage, version, sourceId } = candidate.manifest.sqlite;
+      assertSqliteReleaseIdentity({ driver, linkage, version, sourceId }, engine);
+      expect(linkage).toBe('builtin');
+    }
     expect(engine.version).toBe(candidate.manifest.sqlite.version);
     expect(engine.sourceId).toBe(candidate.manifest.sqlite.sourceId);
     expect(engine.selection).toEqual(engineSelection);
@@ -222,7 +229,11 @@ test('80x24 Source Review independently confirms Action and original Question de
       dependencyVersions[name] = expected;
     }
     privateFile(join(evidence, 'service-dependencies.json'), dependencyVersions);
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const compiled = await Bun.build({
       entrypoints: [join(import.meta.dir, '../fixtures/tui-mcp-source-approval-pty.ts')],
       outdir: root,
@@ -522,7 +533,7 @@ test('80x24 Source Review independently confirms Action and original Question de
           observer?.disposeNetwork();
           observer = undefined;
           maintenanceStage = 'prior_services_close';
-          // The previous Popen has been reaped; require every owned Service's own close receipt
+          // The previous PTY host has been reaped; require every owned Service's own close receipt
           // before acquiring the public exclusive maintenance lease.
           await until(
             'all-prior-services-closed',
@@ -687,150 +698,28 @@ test('80x24 Source Review independently confirms Action and original Question de
       },
     });
     writeFileSync(join(evidence, 'pty-owned.jsonl'), '', { mode: 0o600, flag: 'wx' });
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json,urllib.request,codecs
-p=None;master=None;buffer='';decoder=codecs.getincrementaldecoder('utf-8')('strict');exits=[];cleanup=False;trace=[];failure=None
-
-def note(kind,**values):
- trace.append(dict(kind=kind,time=time.monotonic(),**values))
- if len(trace)>512:del trace[0]
-
-def control(path):
- note('control',path=path,frame=normalized()[-32768:])
- with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:return json.load(response)
-def normalized():
- frames=buffer.split('\\x1b[?2026h')
- complete=next((frame.split('\\x1b[?2026l')[0] for frame in reversed(frames[1:]) if '\\x1b[?2026l' in frame),'')
- return re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',complete))
-def receive(timeout=.05):
- global buffer
- if select.select([master],[],[],timeout)[0]:
-  chunk=os.read(master,65536)
-  if not chunk:raise RuntimeError('owned_pty_eof')
-  buffer=(buffer+decoder.decode(chunk))[-1048576:]
-def drain(deadline=None):
- reads=0
- while select.select([master],[],[],0)[0]:
-  if reads>=16:raise RuntimeError('owned_frame_drain_limit')
-  if deadline is not None and time.monotonic()>deadline:raise RuntimeError('owned_frame_drain_deadline')
-  receive(0);reads+=1
-def wait(text,compact=False,deadline=None):
- if deadline is None:deadline=time.monotonic()+10
- while True:
-  drain(deadline)
-  if text in (normalized().replace(' ','') if compact else normalized()):
-   note('matched',text=text,frame=normalized()[-32768:]);return
-  if time.monotonic()>deadline:raise RuntimeError('owned_frame_deadline:'+text)
-  receive()
-def wait_new_original(previous):
- # Keep draining the PTY while the host publishes this request, and reject an older receipt.
- deadline=time.monotonic()+10
- while True:
-  drain(deadline)
-  original=next((match.group(1) for match in re.finditer(r'Originalsourcedecision:([a-f0-9-]{36})',normalized().replace(' ','')) if match.group(1) not in previous),None)
-  if original:
-   note('new-original',commandId=original,frame=normalized()[-32768:]);return original
-  if time.monotonic()>deadline:raise RuntimeError('owned_new_original_deadline')
-  receive()
-def source_question_ready(question_id,decision):
- # The original ID was proven in native static history; footer refreshes need not reprint it.
- # A retained choice alone is not ready while history reloads.
- deadline=time.monotonic()+10
- while True:
-  drain(deadline);frame=normalized()
-  if 'Session a · Idle' in frame and 'Up/Down explicit source decision: '+decision in frame and ' · Loading' not in frame:
-   note('source-question-ready',questionId=question_id,decision=decision,frame=frame[-32768:]);return
-  if time.monotonic()>deadline:raise RuntimeError('owned_source_question_ready_deadline:'+question_id)
-  receive()
-def key(value,preserveSelectedFrame=False):
- global buffer
- if not value:return
- drain()
- note('key',hex=value.hex(),preserveSelectedFrame=preserveSelectedFrame,frame=normalized()[-32768:])
- if not preserveSelectedFrame:buffer=''
- os.write(master,value)
-def choose_source(label):
- # Select the exact visible menu row in a fresh complete Ink frame, not a fixed offset.
- deadline=time.monotonic()+10
- for step in range(16):
-  drain(deadline)
-  frame=normalized().replace(' ','');target=label.replace(' ','')
-  if '›'+target in frame:
-   note('source-choice',label=label,frame=normalized()[-32768:]);return
-  selected_at=frame.find('›');target_at=frame.find(target)
-  if selected_at<0:raise RuntimeError('owned_source_selection_absent')
-  # Long original IDs can push the earlier lookup row outside this 80x24 frame.
-  # The actual panel puts lookup before originals; move toward it, then require its visible selection.
-  if target_at<0 and label!='Check original source decision':raise RuntimeError('owned_source_choice_absent:'+label)
-  key(b'\\x1b[A' if target_at<0 or target_at<selected_at else b'\\x1b[B');wait('Project sources',deadline=deadline)
- raise RuntimeError('owned_source_choice_unavailable:'+label)
-def selected(command_id):
- # Only the outcome detail has the original Session suffix; list labels do not.
- detail='Originalsourcedecision:'+command_id+'·OriginalStore:'+${JSON.stringify(storeId)}+'·Sessiona'
- wait(detail,True)
-def start(phase):
- global p,master,buffer,decoder
- master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
- decoder=codecs.getincrementaldecoder('utf-8')('strict')
- p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(root, 'host.js'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True,env=dict(os.environ,HOME=${JSON.stringify(root)},KITE_CODE_HOME=${JSON.stringify(join(root, 'owned-home'))}))
- os.close(slave);buffer=''
- with open(${JSON.stringify(join(evidence, 'pty-owned.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'pid':p.pid})+'\\n');log.flush();os.fsync(log.fileno())
- wait('New Run >')
-def sources():
- key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('› Project sources');key(b'\\r');wait('Project sources')
-def close(phase):
- global master,p
- key(b'\\x11');deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.05)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3)
- exits.append({'phase':phase,'pid':p.pid,'exitCode':p.returncode,'normalCtrlQ':True})
- assert p.returncode==0
- os.close(master);master=None;p=None
-try:
- start('warm')
- ids=[]
- for n,decision in enumerate(['approved','rejected','cancel'],1):
-  sources();wait('Source list ready');key(b'\\r');wait('› Review project source');key(b'\\r');wait('Confirm project source review:');control('before-confirm/'+str(n));key(b'\\r');original_id=wait_new_original(ids);key(b'\\x03');ordinary=control('ordinary/'+str(n));assert ordinary['commandId']==original_id;wait('approval['+ordinary['id']+']originalSessiona',True)
-  key(b'approve');wait('revise feedback / deny. approve');key(b'\\r');question=control('question/'+str(n));wait('question['+question['id']+']originalSessiona',True)
-  source_question_ready(question['id'],'none (Enter has no answer)');key(b'\\r');control('question-blank/'+str(n))
-  source_question_ready(question['id'],'none (Enter has no answer)');key(b'\\x1b[B'*n)
-  source_question_ready(question['id'],decision);key(b'\\r');terminal=control('finish/'+str(n));ids.append(terminal['commandId']);wait('New Run >');sources();wait('Source list ready');choose_source('Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('warm-saved/'+str(n));key(b'\\x03');wait('New Run >');control('check')
- control('warm-complete');close('warm')
- for cold in ['cold-removed','cold-missing']:
-  control(cold);start(cold);sources();wait('Source list ready' if cold=='cold-removed' else 'Source list unknown; original decisions remain available')
-  for n,command_id in enumerate(ids,1):
-   control('selection-baseline');choose_source('Original source decision: '+command_id)
-   if n==1:selected(command_id)
-   key(b'\\r',preserveSelectedFrame=True);selected(command_id);control('cold-selected');choose_source('Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('cold-lookup/'+str(n))
-  key(b'\\x03');wait('New Run >');control('check');close(cold)
- control('cold-foreign');start('cold-foreign');sources();wait('Source list unknown; original decisions remain available')
- for n,command_id in enumerate(ids,1):
-  control('selection-baseline');choose_source('Original source decision: '+command_id);key(b'\\r',preserveSelectedFrame=True);selected(command_id);wait('Source outcome unknown; check original');control('foreign-selected/'+str(n));choose_source('Check original source decision');note('foreign-check-key',commandId=command_id,observation='retained identical known detail; no new frame or public receipt');key(b'\\r',preserveSelectedFrame=True);selected(command_id);wait('Source outcome unknown; check original');control('foreign-lookup/'+str(n))
- key(b'\\x03');wait('New Run >');control('check');close('cold-foreign')
- cleanup=True;print('SOURCE_APPROVAL_WARM_COLD_COMPLETE')
-except BaseException as error:
- failure={'type':type(error).__name__,'message':str(error)[:4096],'frame':normalized()[-32768:]}
- raise
-finally:
- try:
-  if p is not None:
-   if p.poll() is None:
-    p.terminate()
-    try:p.wait(timeout=6)
-    except subprocess.TimeoutExpired:p.kill();p.wait(timeout=3)
-   exits.append({'phase':'cleanup','pid':p.pid,'exitCode':p.returncode,'normalCtrlQ':False});p=None
- finally:
-  if master is not None:os.close(master);master=None
-  with os.fdopen(os.open(${JSON.stringify(join(evidence, 'pty-trace.json'))},os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600),'w') as log:json.dump({'failure':failure,'latestCompleteFrame':normalized()[-32768:],'trace':trace},log);log.flush();os.fsync(log.fileno())
-  with os.fdopen(os.open(${JSON.stringify(join(evidence, 'pty-exits.json'))},os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600),'w') as log:json.dump({'normalComplete':cleanup,'exits':exits},log);log.flush();os.fsync(log.fileno())
-`;
-    python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    driver = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        join(import.meta.dir, '../fixtures/tui-mcp-source-approval-driver.ts'),
+        control.url.href,
+        process.execPath,
+        join(root, 'host.js'),
+        root,
+        evidence,
+        storeId,
+      ],
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+      },
+    );
     const [ptyOut, ptyErr, ptyCode] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     writeFileSync(join(evidence, 'pty.log'), ptyOut + ptyErr, { mode: 0o600, flag: 'wx' });
     expect(ptyCode).toBe(0);
@@ -893,9 +782,10 @@ finally:
     try {
       await collect(async () => observer?.disposeNetwork());
       await collect(async () => {
-        if (python?.exitCode === null) {
-          python.kill('SIGINT');
-          await bounded(python.exited, 9000);
+        if (driver?.exitCode === null) {
+          if (process.platform === 'win32') driver.send('owned-source-approval-driver-stop');
+          else driver.kill('SIGINT');
+          await bounded(driver.exited, 9000);
         }
       });
       await collect(async () => {
@@ -978,7 +868,7 @@ finally:
       }
       if (controlWork.size === 0) globalThis.fetch = parentFetch;
       cleanupConfirmed =
-        (python === undefined || python.exitCode !== null) &&
+        (driver === undefined || driver.exitCode !== null) &&
         (build === undefined || build.exitCode !== null) &&
         controlWork.size === 0 &&
         cleanupErrors.length === 0;
@@ -1026,7 +916,7 @@ finally:
           },
           limits: {
             foreignRestore:
-              'Public v10 A→B; terminal original ID lookup rejects foreign Store before original lookup HTTP',
+              'Public current-schema A→B (this original case asserts v16); terminal original ID lookup rejects foreign Store before original lookup HTTP',
             cursorUnchanged: false,
             windows: false,
             linux: false,

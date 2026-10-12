@@ -62,6 +62,12 @@ jobs:
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-tools-pty.test.ts
       - name: Complete MCP Source caller in a fresh selected engine process
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts
+      - name: Complete MCP Source approval caller in a fresh selected engine process
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-approval-pty.test.ts
+      - name: Complete MCP reconnection caller in a fresh selected engine process
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-reconnection-pty.test.ts
+      - name: Complete MCP authentication caller through the current candidate
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-auth-pty.test.ts
       - run: bun run test:runtime:transport
       - if: runner.os != 'Windows'
         name: POSIX Profile locks, maintenance and recovery

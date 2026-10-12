@@ -130,6 +130,9 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
     ...[
       'apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
       'apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
+      'apps/cli/test/isolated/tui-mcp-source-approval-pty.test.ts',
+      'apps/cli/test/isolated/tui-mcp-reconnection-pty.test.ts',
+      'apps/cli/test/isolated/tui-mcp-auth-pty.test.ts',
     ].flatMap((file) => {
       const run = `run: bun test --parallel=1 --max-concurrency=1 ${file}`;
       return [
@@ -149,6 +152,22 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
           'run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
           'run: echo combined caller',
         ),
+    ...[
+      'apps/cli/test/isolated/tui-mcp-source-approval-pty.test.ts',
+      'apps/cli/test/isolated/tui-mcp-reconnection-pty.test.ts',
+      'apps/cli/test/isolated/tui-mcp-auth-pty.test.ts',
+    ].map(
+      (file) => (s: string) =>
+        s
+          .replace(
+            'run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
+            `run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-tools-pty.test.ts ${file}`,
+          )
+          .replace(
+            `run: bun test --parallel=1 --max-concurrency=1 ${file}`,
+            'run: echo combined caller',
+          ),
+    ),
     (s: string) =>
       s.replace(command, command.replace('bun test ', 'bun test --test-name-pattern=never-match ')),
     (s: string) => s.replace('          apps/cli/test/isolated/file-recovery-argv.test.ts', ''),
