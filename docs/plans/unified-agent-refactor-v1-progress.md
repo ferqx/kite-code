@@ -5393,3 +5393,28 @@ Root冻结3860份非Markdown输入，三个原整文件SHA精确匹配115文件�
 | 5 | §35全部能力出口、最后旧authority／依赖退役和阶段完整回归依赖上述适用门禁；37原能力仍partial、wholeV13=false／phaseExit=false。ChatGPT／Responses在当前目标完成后实施，当前不借新增功能绕过主线。 |
 
 本轮新增闭合管理、模型／effort和主机状态三个完整用户链的共享测试源码与CI接线，三个内嵌Python driver退役，默认生产装配／原用户语义不改。原断言、真实红、RSS／观测和平台门禁保持，继续当前主线，无阶段退出声明。
+
+## 2026-10-12：完整原生滚动的三端测试
+
+状态：partial；上一切片已正常提交4e44750b／14路径，hooks实际0／18.66秒，提交后3860份非Markdown输入零漂移、工作树干净，`/private/tmp/kite-tui-state-delivery.json`记录7pass／53expects及原42静态／20Python检查。本轮继续最高依赖的完整滚动消费者，Windows/Linux实际后置，RSS／完整观测保持；ChatGPT／Responses依已确认顺序在当前V1.3目标后实施，Kite自己的官方授权优先、Codex直接复用保留门禁。
+
+[原完整文件](../../apps/cli/test/isolated/tui-scrollback-pty.test.ts)退役Windows skip和[共享驱动](../../apps/cli/test/fixtures/tui-scrollback-driver.ts)替代的Python／POSIX驱动。公共TUI源码、[有限TSX port](../../apps/cli/test/fixtures/tui-scrollback-pty.tsx)字节不改；没有Service／Provider／installed或GUI终端装配。实际共享Bun PTY／ConPTY及原held `terminal.resize(40,24)`／`resize(80,24)`提供原始hex和resize顺序，原独立20,000行headless VT仍负责所有最终断言，不按共享helper的80列私有parser推导滚动位置。三轮90完成标记、40活动正文、35问题／60选项描述、上滚100行后状态／编辑／改选零重发与阅读位置、179字符paste、12行自由答案、150字符软换行与原79／9列单光标、30项Unicode JSON及12行原文JSON编辑、正文替换／clear／refresh／跨Session和stored snapshot／零mutation完整保持。
+
+Root和独立只读审查分别核41个原Bun静态expect及顺序全同、31检查点、全部control／键序／paste／resize顺序。原20秒整例、4秒ACK、50ms pump／150ms ACK后排空、400／200／300／40／80ms停顿、100ms stop与3秒正常join、故障3秒TERM＋3秒KILL保持。原fixture正常stop回执、真实held child exit0／EOF及父进程独立核原kernel birth已dead；强退或未知身份不计正常，原失败与cleanup errors／root独立保留。当前fixture没有子进程，单一原PID正常回收不授全Runtime后代／handles／activeResources资格。驱动运行时观察既有私有kernel identity，不扩公共API；原真实TERM dispatch错误保留，已结束fixture仍取实际exited，drain和close独立清理。父进程fallback仅用已核原出生身份，uncertain不发PID信号，fallback即使关闭也判资格失败。
+
+首本机整文件actual0／1pass／169expects／15.82秒；其后CLI typecheck actual2发现直接相对私有import越出rootDir，日志`/private/tmp/kite-scrollback-cli-types.log`保留。这是类型边界失败，不改称产品runtime失败；修正为标准file URL运行时观察，无生产或公开export变化。最终当前源的原整文件actual0／1pass／169expects／15.67秒，case15621.07ms，日志`/private/tmp/kite-scrollback-mac-final.log`。证据`kite-tui-scrollback-v5YWyT-evidence`保原hex／全部31检查点／host回执／driver记录，实际fixture PID16782、birth `darwin:proc_bsdinfo:1791795612:547129`、code0／normal true／forcedCleanup false，父级cleanupConfirmed true／cleanupErrors空／ownedroot已删除。没有新增故障矩阵；失败收尾源码审查不代原生fault qualification。
+
+[transport](../../.github/workflows/runtime-transport-qualification.yml)在Windows MSVC／当前八workspace build后、权限和原transport／shared14前，新增上述完整文件的独立Bun命令；现22个完整独立caller进程。原21条命令／顺序全部保留，[守卫](../../scripts/check-unified-workspaces.ts)及[完整CI反例](../../tests/integration/scripts/unified-ci.test.ts)继续拒漏文件／过滤／平台条件／合并进程；本轮仅5行接线新增，整CI文件actual0／21pass／307expects／1342ms。定义不代Win/Linux原生通过，未dispatch，原权限／Shell／文件候选后端失败不能被本例无Shell装配绕过。
+
+Root `/private/tmp/kite-scrollback-freeze.json`冻结3860份非Markdown输入；相对已提交上一切片仅三个CI文件、完整滚动test、新driver及旧Python删除六处差异。原test／Python／TSX均精确匹配115文件／80CLI作业基线，生产／依赖／builder／共享PTY及其他已闭合caller不改；原未变范围复用既有CLI／shared14证据，改动整例已按最终输入实际重验，不据局部组合声称当前全默认执行。`/private/tmp/kite-scrollback-review.json`保存只读审查和源SHA，`/private/tmp/kite-scrollback-ci-delivery.json`保存完整CI实际结果。根与八workspace类型、boundary／workspace／API／ownership和全format检查actual0；全format原104warning／98info保留，不扩大无关修复。手册终端行为／输入／问答合同与UI owner核对无行为变化，CLI owner／tests／release control同步当前方法及有限资格；文档检查、iteration_complete／stage／commit和正常hook按当前完整交付范围执行，提交后再核实际冻结与干净状态。
+
+当前阻碍阶段退出的四项按依赖保留：
+
+| 顺序 | 实际用户入口、缺口和验收 |
+| --- | --- |
+| 1 | 正式Shell／Task／MCP的[完整资格运行者](../../scripts/runtime/unified-soak.ts)原RSS九点178814976→299614208B、+115.203125MiB>32MiB仍失败。先定位真实native allocation owner并修复，再按原完整负载／阈值验收，不重复参数对照或以短窗代原窗。 |
+| 2 | 实际Runtime停止／取消及Source批准异常关闭的[原生观察器](../../scripts/runtime/unified-soak-native.ts)仍缺完整kernel-birth后代、activeResources／handles producer与完整cleanup receipt；paired Service boundary记录不能替代全集。取得各准确来源和原故障退出证据前保持unsupported／null；本轮单一有限fixture退出不替代全集。 |
+| 3 | installed CLI／TUI／Native正式安装、真实代码A→B→回退、完整MCP、维护恢复及保数据卸载仍需[Win/Linux资格](../active/release-control.md#winlinux-后续-actions-接线)，Windows Shell／script verifier／文件候选原后端缺口保持。后续Actions／用户Windows实机按同完整断言／预算验收，本机及接线不授资格，不dispatch。 |
+| 4 | [§35阶段出口](unified-agent-refactor-v1.md)全部适用能力／安全／资源门禁、最后旧authority／依赖退役和当前完整回归依赖以上证据；原37能力仍partial，wholeV13=false／phaseExit=false。按当前最终输入完整运行并解决真实失败后才能退出。 |
+
+本轮新增闭合的是完整原生滚动的共享测试源码、原断言保留和CI接线，旧Python驱动及Windows skip退役；生产用户能力和全局架构精简仍按各自已证范围，不把测试迁移称为整个能力／新架构或阶段完成。保原RSS／观测／平台门禁、Goal active，仅本地提交。

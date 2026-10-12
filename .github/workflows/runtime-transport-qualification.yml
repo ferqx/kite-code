@@ -92,6 +92,8 @@ jobs:
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-models-host.test.ts
       - name: Complete original host status diagnostics and shared daemon loss
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-status-host.test.ts
+      - name: Complete native scrollback resize and clear with original material
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-scrollback-pty.test.ts
       - name: Complete permissions caller through formal Shell and review
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-permissions-host.test.ts
       - name: Complete independent Job stop and original cold lookup through formal Shell
