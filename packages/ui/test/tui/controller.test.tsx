@@ -215,6 +215,61 @@ test('active exact steer, idle start, unknown original lookup and precise cancel
   c.dispose();
   expect(f.cancels).toHaveLength(1);
 });
+test('input during original Run cancellation queues one exact follow-up and late acceptance preserves another Session draft', async () => {
+  const f = fixture();
+  f.port.readSession = async (id) => {
+    const value = snapshot(id, id === 'a');
+    if (id === 'a') value.view.runs[0]!.status = 'cancelling';
+    return value;
+  };
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.port.submit = async (sessionId, request) => {
+    f.writes.push({ id: sessionId, intent: request });
+    await held;
+    return { ...command(request.commandId, sessionId), kind: request.kind };
+  };
+  const c = new TuiController(f.port);
+  try {
+    await c.select('a');
+    const text = '原收尾之后的新工作\r\n完整🙂正文';
+    c.setDraft(text);
+    const pending = c.send();
+    expect(f.writes).toEqual([
+      {
+        id: 'a',
+        intent: {
+          kind: 'input.follow_up',
+          expectedStoreId: 'store',
+          commandId: 'id1',
+          afterRunId: 'run',
+          contextSelectionId: 'selection',
+          content: text,
+        },
+      },
+    ]);
+    await c.select('b');
+    c.setDraft('B 的未提交正文');
+    release();
+    await pending;
+    expect(c.state.intent).toMatchObject({
+      sessionId: 'a',
+      kind: 'input.follow_up',
+      phase: 'accepted',
+    });
+    expect(c.state.draft).toBe('B 的未提交正文');
+    await c.select('a');
+    expect(c.state.draft).toBe('');
+    await c.select('b');
+    expect(c.state.draft).toBe('B 的未提交正文');
+    expect(f.writes).toHaveLength(1);
+  } finally {
+    release();
+    c.dispose();
+  }
+});
 test('late selected history fails closed, preserves same target stale snapshot and drafts, dispose aborts only reads', async () => {
   const f = fixture(),
     c = new TuiController(f.port);

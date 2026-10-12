@@ -105,7 +105,7 @@ export function readBackgroundExecutions(
     const leanRun = (id: string | null): BackgroundRun | null => {
       if (!id) return null;
       const row = db.row(
-        'SELECT id,session_id,origin_command_id,origin_store_id,root_work_command_id,root_work_seq,context_selection_id,waiting_results_json,status,is_active,started_at,deadline_at,finished_at,reason,NULL AS config_json,NULL AS requirements_json FROM run WHERE id=?',
+        'SELECT id,session_id,origin_command_id,origin_store_id,root_work_command_id,root_work_seq,context_selection_id,waiting_results_json,status,is_active,cancel_requested,started_at,deadline_at,finished_at,reason,NULL AS config_json,NULL AS requirements_json FROM run WHERE id=?',
         id,
       );
       if (!row) throw new AgentError('directory_identity_conflict');

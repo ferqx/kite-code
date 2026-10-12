@@ -538,6 +538,13 @@ export class SqliteOperations {
       cancelRequestedAt: row.cancel_requested_at === null ? null : Number(row.cancel_requested_at),
     };
   }
+  runStatus(
+    status: RunRecord['status'],
+    isActive: boolean,
+    cancelRequested: boolean,
+  ): RunRecord['status'] {
+    return isActive && cancelRequested ? 'cancelling' : status;
+  }
   runRecord(row: Row): RunRecord {
     return {
       contextSelectionId: String(row.context_selection_id),
@@ -548,7 +555,11 @@ export class SqliteOperations {
       originStoreId: String(row.origin_store_id),
       rootWorkCommandId: String(row.root_work_command_id),
       rootWorkSeq: String(row.root_work_seq),
-      status: row.status as RunRecord['status'],
+      status: this.runStatus(
+        row.status as RunRecord['status'],
+        Boolean(row.is_active),
+        Boolean(row.cancel_requested),
+      ),
       isActive: Boolean(row.is_active),
       configuration: parse(row.config_json),
       requirements: parse(row.requirements_json) as unknown as RequirementRef[],

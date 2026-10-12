@@ -20,6 +20,10 @@ import {
   type MacosShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from '../../../src/jobs/shell';
+import {
+  observeOwnedProcessIdentity,
+  ownedProcessKernelState,
+} from '../../../src/process-observation';
 import { compileSkillWorkflow } from '../../../src/skills/workflow-contract';
 
 const mac = process.platform === 'darwin' ? test : test.skip;
@@ -286,14 +290,18 @@ mac.each(['cancel', 'timeout'] as const)(
   async (reason) => {
     const f = fixture(
       `
-import {writeFileSync} from 'node:fs';
+import {writeFileSync,renameSync} from 'node:fs';
 const child=Bun.spawn([process.execPath,'-e','setInterval(()=>{},100)'],{stdin:'ignore',stdout:'ignore',stderr:'ignore'});
-writeFileSync(process.env.WORKSPACE+'/pids',process.pid+' '+child.pid);
+writeFileSync(process.env.WORKSPACE+'/pids.tmp',process.pid+' '+child.pid);
+renameSync(process.env.WORKSPACE+'/pids.tmp',process.env.WORKSPACE+'/pids');
 setInterval(()=>{},100);
 `,
       reason === 'timeout' ? 1000 : 5000,
     );
     const handle = await f.start();
+    let rawPids: string | null = null;
+    let startingIdentities: ReturnType<typeof observeOwnedProcessIdentity>[] = [];
+    let terminalEvidence: JobEvent | null = null;
     try {
       const observing = observe(f.job, handle);
       const deadline = Date.now() + 2000;
@@ -301,13 +309,50 @@ setInterval(()=>{},100);
         if (Date.now() > deadline) throw Error('workflow_host_script_not_started');
         await Bun.sleep(10);
       }
-      const pids = readFileSync(join(f.workspace, 'pids'), 'utf8').split(' ').map(Number);
+      rawPids = readFileSync(join(f.workspace, 'pids'), 'utf8');
+      const pids = rawPids.split(' ').map(Number);
+      startingIdentities = pids.map(observeOwnedProcessIdentity);
       if (reason === 'cancel') expect((await f.job.cancel(handle)).status).toBe('stopped');
-      const terminal = ended(await observing, handle);
+      const events = await observing;
+      terminalEvidence = events.find((event) => event.type === 'terminal') ?? null;
+      const terminal = ended(events, handle);
       expect(terminal.result.outcome).toBe(reason === 'timeout' ? 'failed' : 'cancelled');
       if (reason === 'timeout')
         expect(terminal.result.content).toBe('workflow_verification_timeout');
       for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    } catch (error) {
+      try {
+        const diagnostic = {
+          root: f.root,
+          reason,
+          rawPids,
+          startingIdentities,
+          terminalEvidence,
+          originalReference: handle.reference,
+          observedAt: new Date().toISOString(),
+          currentIdentities: (rawPids === null ? [] : rawPids.split(' ').map(Number)).map((pid) => {
+            const identity = observeOwnedProcessIdentity(pid);
+            return { identity, kernelState: ownedProcessKernelState(identity) };
+          }),
+          originalKernelStates: startingIdentities.map((identity) => ({
+            identity,
+            kernelState: ownedProcessKernelState(identity),
+          })),
+          controlEntries: readdirSync(f.control),
+          temporaryEntries: readdirSync(f.temp),
+          error:
+            error instanceof Error ? { name: error.name, message: error.message } : String(error),
+        };
+        writeFileSync(join(f.root, 'stop-failure.json'), JSON.stringify(diagnostic, null, 2));
+        console.error(
+          JSON.stringify({ stage: 'workflow_host_stop_failed', root: f.root, rawPids }),
+        );
+      } catch {
+        console.error(
+          JSON.stringify({ stage: 'workflow_host_stop_diagnostic_unavailable', root: f.root }),
+        );
+      }
+      throw error;
     } finally {
       await f.job.dispose(handle);
     }

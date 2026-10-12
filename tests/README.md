@@ -55,6 +55,10 @@ argv保持原顺序准备，完整Terminal candidate归成功的开发Service fi
 
 Owner-local tests 可读自己非公开源码；root integration 使用公开 package exports 或明确 App surface。root 不通过相对 deep-import 另建生产语义，不仅为测试便利扩大 production export。fixtures/helpers 不自动拥有测试；根不保存散落测试或第二通用 `tests/runtime/` owner。
 
+[TUI 取消中的后继输入](../apps/cli/test/isolated/tui-finishing-input-host.test.ts)属于 CLI owner 的隔离完整文件：真实 HTTP/SDK/SQLite/Runtime、正式 caller port 和 TuiController，以受控 Job 停止屏障核四种公开 `cancelling` 读取、原后继完整正文、切会话晚回执保草稿、原 Command 查询／重复准备零新增 POST，以及正常关闭。临时目录和 file URL 使用平台中立入口，没有 Shell 或平台 skip；它不替代 PTY、原生进程清理与 Win/Linux 实机资格。
+
+[Profile verifier 原生取消](../packages/agent/test/isolated/business/skill-workflow-host-verifier.test.ts)的脚本先写闭同目录临时PID记录，再发布最终记录，父按原预算一次读取。原 `kill(pid,0).toThrow()` 与全树收据断言保持；失败根保存实际读取字节、起始出生、terminal和瞬时kernel观察，不将事后absent追认为断言时已停止。它属于macOS原生叶的资格，其他平台门禁保持；当前完整默认红与有界空发布演示的不同证据范围见[本片进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13取消中的后继输入)。
+
 [恢复后完整Context消费者](isolated/unified-agent/restored-context.test.ts)属于跨workspace隔离集成：实际Service／SQLite、公开backup／restore及两个冷Service，通过正式CLI和Web App reader核HTTP／Cookie完整原结果与出处、当前Store守卫及零重放。owner-local分页／DOM整文件保各自守卫，原TUI管理PTY另核实际开发入口；不把这些范围合称installed恢复PTY、实际浏览器或阶段完整默认。真实红与准确冻结证据见[Context恢复进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后完整-context-正式消费者)。
 
 [恢复后 Native 明确 Include](../apps/desktop/test/isolated/native-restored-context.test.tsx)归 Desktop owner：真实 Job→Rewind→公开 backup/restore A→B，正式 Context DOM 按钮经有限 decoded bridge 调用 Main／实际 SDK／Service／Core，新 Command 属 B，完整原来源属 A，后续明确新 Run 以唯一 source ID 收到完整低信任结果，冷读零重放。公共 Execution 与 Core 接纳投影分开核对，后者只允许准确新 source 变化。原 Main、共享 Context、Core 自动消费／active Include 和原 Electron 作业保完整文件／断言／预算；原窗口 disabled/busy 时 Enter 零POST的真实失败保留，fixture仅先核同按钮 actionability再保原键盘和丢回执流程。六唯一完整作业26文件137pass／1337Bun断言，原窗口另15Node断言；不代证新 installed 恢复窗口或阶段默认，准确红绿与保全见[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-context-明确纳入原结果)。

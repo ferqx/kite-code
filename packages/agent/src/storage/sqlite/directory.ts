@@ -83,6 +83,7 @@ export function readDirectory(
               SELECT e.scope_session_id,MAX(e.cursor) AS cursor FROM change_event e
               JOIN roots s ON s.id=e.scope_session_id GROUP BY e.scope_session_id
             ) SELECT s.*,r.id AS activity_run_id,r.status AS activity_run_status,r.is_active AS activity_run_active,
+              r.cancel_requested AS activity_run_cancel_requested,
               r.waiting_results_json<>'[]' AS activity_run_waiting,
               EXISTS(SELECT 1 FROM command c WHERE c.session_id=s.id AND c.status='accepted' AND c.cancelled=0 AND c.root_work_seq>s.stop_boundary
                 AND c.kind IN ('run.start','input.follow_up')) AS activity_queued,
@@ -129,9 +130,13 @@ export function readDirectory(
                   ? null
                   : {
                       id: String(row.activity_run_id),
-                      status: row.activity_run_status as NonNullable<
-                        SessionDirectoryActivity['run']
-                      >['status'],
+                      status: db.runStatus(
+                        row.activity_run_status as NonNullable<
+                          SessionDirectoryActivity['run']
+                        >['status'],
+                        !!row.activity_run_active,
+                        !!row.activity_run_cancel_requested,
+                      ),
                       isActive: !!row.activity_run_active,
                       waitingForResults: !!row.activity_run_waiting,
                     },

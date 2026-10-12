@@ -42,6 +42,8 @@ HTTP Change 的 `objectId` 读取契约与 Store 事件生产者一致：不透�
 
 SQLite Worker 持有唯一所属连接；业务事实和变化通知同事务。profile/Session 协调锁位于可替换 profile 外，取得 OS 锁后更新 owner generation，正常释放先复查并清空持久 owner。无损 64 位游标与消息顺序不使用 JS Number。未知外部效果不自动重放；失败取消请求不能停止未经授权的对象，真实存储故障只允许对本 owner 已核实句柄执行收缩性停止。
 
+Run 仍活动且真实取消标记已保存时，公开 Run/view、Session 和后台目录由[Store 共用投影](../../packages/agent/src/storage/README.md#当前会话视图)一致返回 `cancelling`。Service 传递这一事实；取消受理与监督停止仍独立。正式 TUI 此时使用原 Run/selection 的公共 follow-up，后继启动继续由原事务与 Runtime 决定。
+
 Store 在原条数与完整 frame 字节上限内投递，容量不足时调用方先等待，关键控制预留与 Worker 公平调度保持；等待后重核 owner/lease，不自动重投未知写入。关闭同步封门并排空此前调用。Operation 唤醒仍最多 64 个活动登记，容量等待使用原绝对期限、准确 abort 和关闭拒绝。具体容量与[验收](../../packages/agent/README.md#同一-step-的并行工具批次)归 Agent owner；生产者等待不代替整个 Runtime 的 RSS 或完整资源门禁。
 
 正常空闲交接使用原 owner 的有限 dispatch 观察，核 Store、instance/generation、准确 Session 并与 acquire/release 共用组阻塞条件。旧空列表与释放之间新接受的本 Session 工作，没有未结算执行时沿同一 generation 继续；已取消工作有限释放后退出，其他 Session 保持原调度。真实 unknown/cold active 不借 accepted 新命令解除，观察不取得 owner 或恢复权。[Store owner](../../packages/agent/src/storage/README.md)与[确定性交接测试](../../packages/agent/test/isolated/execution/owner-handoff.test.ts)负责准确范围。

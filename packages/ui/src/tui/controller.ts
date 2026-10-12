@@ -4673,7 +4673,12 @@ export class TuiController {
     )
       return;
     const run = snapshot.view.runs.find((r) => r.isActive);
-    if (run && !['running', 'waiting_interaction', 'waiting_execution'].includes(run.status))
+    const cancelling = run?.status === 'cancelling';
+    if (
+      run &&
+      !cancelling &&
+      !['running', 'waiting_interaction', 'waiting_execution'].includes(run.status)
+    )
       return;
     const commandId = this.port.nextCommandId(),
       sessionId = snapshot.view.session.id;
@@ -4709,7 +4714,7 @@ export class TuiController {
         }
       : {};
     const intent: StartCommandRequest | SteerCommandRequest | FollowUpCommandRequest = freezeIntent(
-      maintenance || (planning && run)
+      run && (maintenance || cancelling || planning)
         ? {
             kind: 'input.follow_up',
             expectedStoreId: this.port.storeId,

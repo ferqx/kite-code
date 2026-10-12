@@ -48,6 +48,8 @@ Worker 的首次和积压 pump 使用 `setImmediate`，每个宏任务至多执�
 
 `getView` 在同一短只读事务读取原 Session、Store、通知水位与显示投影。Run 选取该 Session 最近200个分配身份，加全部 `is_active=1`；Execution 选取最近200个身份，加全部 `planned/dispatching/running/outcome_unknown` 原事实。两组身份分别去重后按原 rowid 顺序返回，历史数量不能隐藏当前 Run、较早的运行中 Job 或未知结果。未知结果即使另有核实证明，也不在此查询中改写原状态；显示不授予恢复或取消权限。
 
+活动 Run 的真实 `cancel_requested` 已保存时，[共用 Run 投影](sqlite/operations.ts)返回 `cancelling`；`getRun`、`getView`、[Session directory](sqlite/directory.ts)与[background directory](sqlite/background-directory.ts)读取同一事实。SQL 原调度状态、派发条件与结束事务保持；终态显示真实最终状态，单个 Tool/Job 的取消不扩大为整个 Run。由[真实 TUI 后继链](../../../../apps/cli/test/isolated/tui-finishing-input-host.test.ts)核取消后尚未停止时的四种公开读取和停止后完整后继执行，[精确取消原回归](../../test/isolated/storage/cancellation.test.ts)保独立执行与旧 Run 范围。
+
 这个投影不是全部 Run/Execution 历史。旧记录仍可按准确 ID 独立读取；完整 Message 历史和输出沿各自固定上界的分页，不从当前视图数量推导 EOF。消息首屏、公共 DTO、执行/授权/恢复事务与读取预算保持各自原合同。
 
 [真实长会话回归](../../../../tests/isolated/unified-agent/active-view.test.ts)通过公开 Runtime/HTTP/Client 完成205轮实际模型执行，第206轮已派发时保留当前 Run、当前 Model及最早的真实 detached Job，并核便携 Desktop controller、只读游标不增长、准确取消当前 Run不停止旧 Job。它不证明跨会话后台总览、所有历史Execution分页或实际三平台窗口；准确执行结果见[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07长会话当前工作投影)。

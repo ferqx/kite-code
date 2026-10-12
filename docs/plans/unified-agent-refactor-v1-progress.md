@@ -5581,3 +5581,32 @@ transport 保每个原完整命令，新记录／原生验证及原候选文件�
 独立只读审查核最终准确SHA，无剩余必要修改；草稿中的mixed separator／device和无契约64／128身份比较已修正，没有用删除原断言、过滤或时间放宽绕过。Windows leaf `e1f5cbf5a6770ccbe41c5c91941882d23f4f674e68bb8439ec6183674ab5ba7e`；POSIX leaf `6332d20dc0806ed3e133e62388926334f5f8f7c0d5cc3a4ddb422b9bb5cffb39`。产品指南、CLI owner、平台active、测试入口、原Note和对应能力partial同步；iteration_complete／stage／commit核本片范围，正常hook独立执行。
 
 复用上一片默认729文件／589主作业全0只覆盖未变输入，不代证新平台端口，本片不再重复完整默认。新增接线是正式TUI到平台只读端口，尚未称Windows完整能力闭合。Windows后端当前只覆盖x64本地盘符，UNC／其他架构明确拒绝；真实Windows/Linux及全部故障收尾仍交后续Actions／用户系统。原Windows Shell、RSS真实超限、可信全资源／出生后代观测及§35最终审查／退役／收束回归仍阻阶段退出，wholeV13=false／phaseExit=false，Goal active，仅本地提交。
+
+## 2026-10-13：取消中的后继输入
+
+状态：partial；本片从 `9c6f3d6d` 的干净工作树继续。核对原产品输入承诺时发现正式 TUI 在取消中的 Run 上不提交后继；更早的 Store 读取也没有将已保存的取消标记投影为 `cancelling`。不能仅删除手册承诺来消除缺口。现由 Agent SQLite 的同一 mapper 结合实际 active/cancel 标记供 Run、view、Session directory 和 background directory 使用，保原 SQL 调度／派发／终态和单 Tool/Job 的取消范围。Service 继续传递原事实。
+
+正式 TUI 对已确认 `cancelling` 的原 Run 使用公共 `input.follow_up`，完整封存原 afterRunId、selection、正文与 caller identity。原 Run 停止后由服务端启动后继；普通 running/waiting 仍 steer，idle 仍 start，Planning／维护及 unknown／stale 草稿规则保持。晚回执只处理原提交版本，切到另一会话不会覆盖其草稿。旧取消中直接 return 的输入路径退役，没有恢复客户端 FIFO 或增加执行 authority。
+
+[真实 HTTP 宿主整例](../../apps/cli/test/isolated/tui-finishing-input-host.test.ts)消费正式 CLI caller port、SDK、SQLite、Runtime 和 TuiController，以受控 Job 停止屏障核四类公开读取。原投影未修时真实失败；投影已修、旧 controller 时 actual1／0pass／1fail／7expects，实际后继 POST 为0而原断言为1。修后 actual0／1pass／25expects／293ms，停止前原 accepted／Model仍1，停止后原 cancelled／后继 completed／Model2收到完整 Unicode/CRLF；晚回执保B草稿，原 Command lookup及重复prepare/submit无新增POST，原Job dispose1，Service/Runtime正常关闭。两份准确红／绿日志分别为 `/private/tmp/kite-tui-finishing-input-original-controller-red.log` 和 `/private/tmp/kite-tui-finishing-input-fixed-green.log`；它不是原生 Shell、PTY 或全资源资格。
+
+必要相邻16个原完整文件 actual0／105pass／1468expects，覆盖原取消、child、输入、store／rollback、目录／workspace removal、TUI planning／草稿／状态、HTTP 和准确 Job stop，未删原断言或放宽预算。目录资格 fixture 错放同一Bun进程的一次初始化失败日志保留；按其原 isolated owner 独立进程复验通过。根及八workspace类型／构建、边界／workspaces／API／ownership／plan、docs／impact均0。静态门禁发现新增测试 finally 抛错，现逐项尝试关闭原资源并在finally外传播原失败／AggregateError，真正成功才删根。最终宿主整例actual0／1pass／25expects／315ms，CLI types及owned Biome0；SHA af7d6832f6b501547bae9a8237e55593ab7f892ef22e81865b3939df4571e88c，日志 `/private/tmp/kite-tui-finishing-input-final-cleanup.log`，未用lint忽略或修改业务断言。
+
+首轮原完整默认 actual1／530.411秒，732文件／591主作业计划只完成已派发293项：292pass／1fail，298未派发，3869份非Markdown代码／配置输入零漂移。真实失败为[Profile verifier 原取消整例](../../packages/agent/test/isolated/business/skill-workflow-host-verifier.test.ts)原310行：已核ended收据后数字PID探测仍存在。日志 `/private/tmp/kite-v13-cancelling-input-default-20261013-test.log` SHA71b0e64b9399c585b432fbda34e5103d04ad3ebaf0b68ebe8db994aa7c733411保留。原root oto3Hb／PID47711与47712保存，但事后absent与完整pids字节不能证明断言时状态；唯一原整文件复跑5pass／78expects也不解释原红。
+
+原fixture直接创建最终pids再写完整身份，父只核exists；真实有界 `/tmp` 控制演示看到最终文件已存在但raw为空、Number解析为0、kill(0,0)返回true，随后写闭得到完整两个PID。这只证明可能机制，不追认历史读取。现完整写闭同目录pids.tmp后rename发布，父继续原一次读取／等待／精确停止；失败保存准确raw、起始native出生、terminal/reference和失败瞬时原／当前kernel观察，不授信号权或吞原断言。27处原expect及参数、2秒观察／10ms、cancel5秒／timeout1秒全等。最终原完整文件actual0／5pass／78expects／3.36秒，Agent types／Biome0，SHA cac2d74d520f1f4a2f26c29183bb70e3c24d16b05444a736239cfef5f37fad2f；准确日志和演示归 `/private/tmp/kite-workflow-host-verifier-atomic-pids-final.log`、`kite-workflow-pids-publication-demonstration.json`。
+
+第二轮原完整默认按最终输入 actual0／1422.297秒，732文件／591主作业全部完成：584并发和7独占，未派发0／main失败0，3869份代码／配置输入零漂移。冻结HEAD仍为9c6f3d6d加本片改动；日志 `/private/tmp/kite-v13-cancelling-input-default-20261013-second-test.log` SHAe3d31c5790f6849de490690ff1b78ca59f7433aa6f6ab472826754f0efe6cc76，freeze／result保准确输入与实际终态。正式CLI/TUI caller、新后继整例、Profile verifier及原Native窗口、真实A→B→回退、安装、维护中断恢复与Terminal包均随原计划完成。首轮红和原现场保持，当前完整0不追认旧字节或解除完整资源门禁。
+
+截图 `native_draining` 误弹修复 `e0331890` 的未变源码和原40效果／零取消、9个真实拒绝、DOM14例／112断言证据保持。当前第二轮真实Electron再验40效果／零取消、5个真实退出读取拒绝，quit dialogs／page errors／observation errors均空；Electron正常0／无信号，所属Service PID64020正常0／无信号，原窗口main job实际通过13.059秒。它是退出读取失效后仍被展示为操作错误的已修问题，不能以后台succeeded当正常界面验收。截图自身构建身份未知，不反推当时运行包已包含修复。
+
+本片产品指南、UI／Store owner、active、测试入口及两项能力partial同步实际范围；独立只读审查核最终SHA、原断言／预算、精确取消与清理错误。iteration_complete／stage／commit只覆盖本片，正常hook保留，仅本地提交。新增闭合是正式TUI取消中完整后继输入链和一致取消观察，旧取消中丢提交分支退役；第二次当前完整默认0与新诊断不代表阶段退出。
+
+剩余阶段退出依赖按顺序保留：
+
+| 顺序 | 实际入口、完整行为和验收缺口 |
+| --- | --- |
+| 1 | 普通任务完成／取消／Runtime停止仍缺可信Bun activeResources／handles、完整出生后代与准确cleanup来源；原formal拒绝和Source旧异常窗口的缺失退出事实保留，局部handle/FD/PID收据不代全集。 |
+| 2 | 原公共Client→HTTPService→Runtime→Store生命周期RSS真实超限，native live owner仍未知。修真实归属后沿原负载、八outer／九点、32MiB、60—168分钟验收，原红保留，不重复参数对照。 |
+| 3 | Win/Linux正式安装、真实版本切换、MCP连接／调用／取消／退出、维护恢复和保数据卸载仍交后续Actions／用户Windows实机；源码接线与本机skip不授资格，Windows Shell原合同门禁保留，不触发Actions。 |
+| 4 | §35全部适用能力／T/E、独立迁移审查、最终legacy／依赖退役与最终准确输入完整回归依赖上述条件。37能力仍partial，wholeV13=false／phaseExit=false；ChatGPT官方授权／Responses在V1.3之后，Codex直接复用仍保门禁。 |
