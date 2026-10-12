@@ -24,4 +24,6 @@ macOS Store close 现另等原 Worker 的 Mach 权终态及准确释放，SQLite
 
 [返回配置回归](../test/isolated/execution/preparation-cleanup.test.ts)用真实Files／SQLite核失败与健康同一校验场景；[完整Service准备回归](../../../apps/service/test/isolated/preparation-cleanup-ownership.test.ts)核实际standalone目录、原必选Skill错误、原JavaScript close拒绝、零Model／Run／Execution、活进程维护拒绝和所属进程退出后的完整冷读。fixture手工清理不是Runtime成功；源码测试可三端执行，本机结果不授全资源观测、临时I/O全部失败边界或Win/Linux原生资格。
 
+[三个显式恢复入口](../../../apps/service/test/isolated/recovery-preparation-ownership.test.ts)另直接核 Run resume／report recovery／Job reconcile 返回前的实际准备资源失败：原 lease／Session owner 在关闭拒绝之后仍保留，独立 Store 的抢占被拒绝。Run resume 和 Job reconcile 已接纳恢复 Command，report 尚未提交新 Command；原执行、消息、交互及 report 保持，恢复 Model 与 adapter 零重放。关闭失败不等于进程退出；所属进程真实 0 与 stdout／stderr EOF 后才核维护和完整冷记录。
+
 验证使用 [lifecycle.test.ts](../test/isolated/execution/lifecycle.test.ts) 中真实可丢弃的 SQLite Worker、固定本机模型和明确 barrier。unknown Job fixture 不含外部进程；只有在证明生产关闭失败和资源保留之后，测试收尾才显式关闭其原 Store。Store strict-close 未确认时的原锁交接与 owned child 实际退出后的维护／冷读见 [Store owner](storage/README.md#store-关闭未确认时的锁归属)；该失败不能因 terminate 请求被提升为资源已关闭。

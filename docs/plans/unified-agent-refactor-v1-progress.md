@@ -5686,3 +5686,24 @@ Agent新增[知识读取scope](../../packages/agent/src/platform/knowledge-reads
 根及八workspace types、Agent／Service build、API／boundary／workspaces／test ownership当前0；独立只读审查发现权限catch的真实吞错，修后无其他必改项。产品扩展、Agent／Skills／Workflow／Service owner、active资源资格、测试入口与能力映射同步当前范围。document-before-commit的design_complete／iteration_complete／stage／commit仅覆盖本片，强制hooks独立执行；仅准备本地提交，实际hook及Git结果由本轮交付回执核实，不push／PR／发布或触发Actions。
 
 新增闭合：正式同源知识文件的实际关闭失败custody及Run／任务外目录交接；三个无owner的finally路径和吞清理未知的正式catch退出使用。全Runtime观测producer、原RSS、Win/Linux、三个恢复新typed返回前直接资源失败证据、其他瞬时I/O owner、§35整体审查／最终旧源码退役及阶段完整默认仍未闭合。37能力保持partial；wholeDefault=false／wholeV13=false／phaseExit=false，Goal active，ChatGPT／Responses仍在当前V1.3之后。
+
+## 2026-10-13：显式恢复准备失败的维护交接
+
+状态：partial；上一片正常本地提交 `df6667a3`。本轮补明确留下的三个返回前直接资源失败验收；生产源码、原测试、权限合同与旧预算未变。用户截图的“操作未完成 / native_draining”是原测试漏查的退出读取误弹，已由 `e0331890` 修复。该修复源码及测试未变，复用最新真实原窗口 40 效果／零取消、9 次实际退出读取／释放拒绝、零退出弹窗／页面异常，以及 Electron 和原 Service PID41987 正常 0／无信号，不声称截图运行包已含修复。
+
+[新完整调用者](../../apps/service/test/isolated/recovery-preparation-ownership.test.ts)经正式 SDK／Service 进入 Run resume、Job report resume、Job reconcile，各 resolver 实际调用受支持的 standalone assembly。原 WorkspaceFiles 的 JS close 在 native close 前拒绝，准确 CPP type／两原错误／原 Files 实例及关闭一次均核实，原 Unicode／CRLF 内容仍可读。Run 是独立真实 warm 进程的待审批检查点，report 是实际 Task／child 待汇报结果，Job 是实际 ledger 效果的 unknown 记录；无伪造 SQL seed。三个公共错误均准确为 `configuration_cleanup_unconfirmed`，原 Run／Execution／Command／Message／交互／report 完整保持，Model／Tool／Job start／reconcile 零重放。Run／Job 新恢复 Command 已 accepted，只增加一次游标；report 尚无新 Command，游标不增加。
+
+Service／Runtime close 实际拒绝之后，独立 Store 取得原 Session owner 仍被拒绝，原 owner 与维护锁保持。只有所属进程实际退出 0 与 stdout／stderr 双 EOF 后才公开备份及完整原 metadata／View／消息／交互／Execution／Command 冷读零重放。新故障只证明准确 JS 关闭边界与实际资源持有，不授自然 OS API 故障。首两轮夹具红保存于 `/private/tmp/kite-recovery-preparation-ownership-{first,second}.log`：超过正式交互页上限的 limit，及误判 accepted 事件的 snapshotCursor 推进。修为完整原 entries、null 页边界和准确游标，未删原业务断言或放宽旧期限，不称夹具错误为产品红。独立审查补齐新 runner 15 秒对业务 10 秒／清理 14 秒的覆盖、关闭失败后的 owner 证据，以及 seed 独立停止／有界失败收尾；清理等待原退出与两输出全部 settle 后保原错误，业务成功仍严格核 0 与双 EOF。
+
+最终新整文件 actual0／3pass／176expects／1.189秒；三个原 Service 恢复整文件各独立 Bun 进程 actual0／4pass／128expects，原 3881 输入零漂移。合四文件 7pass／304expects／0fail、3883 输入全程未变；冻结／原 log／准确 result 保 `/private/tmp/kite-recovery-final-20261013-*` 与 `/private/tmp/kite-recovery-formal-regression-20261013-*`，result SHA `47377f3a1dbf64e123f13417f132d3cadcc8f6b10fdc6fe24868b7f3da3c6b2b`。Service 类型与两文件格式通过，最后只读复核无新增必要问题。产品恢复手册原合同未变，补 owner、测试入口、active、现行 Note 与能力证据；本轮没有新增产品行为或独立长期故障目标。
+
+剩余退出依赖按实际门禁保留：
+
+| 顺序 | 实际用户入口、阻塞与验收 |
+| --- | --- |
+| 1 | Runtime 取消／停止仍缺完整 resources／handles producer、全部出生后代及准确收尾来源。只读核[固定 Bun 源码](https://raw.githubusercontent.com/oven-sh/bun/744846f844374847c902b5e7fd59b4342a51ef99/src/jsc/bindings/BunProcess.cpp)两 API 均为无条件空数组 stub，本机 release binary 无内部 allocation 符号／匹配 dSYM。须取得准确候选的可信 producer／归属；不重复 API 探针或以 owner／FD 数代全量。 |
+| 2 | 原 lifecycle RSS +115.203125 MiB 高于 32 MiB，实际 native live allocation owner 未定。原八 outer／九点与完整负载保持；本轮无参数对照、soak 或旧大 trace 解析，修准确归属后沿原合同验收。 |
+| 3 | 正式安装、真实代码切换／回退、MCP 连接／调用／取消／退出、维护恢复及保数据卸载的 Win/Linux 实机继续后置 Actions／用户 Windows。新共享测试无 OS skip，本机不授平台资格，不触发 Actions，原 Windows Shell 门禁保留。 |
+| 4 | §35 全部适用场景、独立完整迁移审查、最终旧路径／依赖退役及收束时当前完整回归依赖对应门禁。四文件绿色不代整体默认；ChatGPT／Responses 仍后置当前 V1.3。 |
+
+本片闭合三个正式恢复接收者的实际准备资源交接证据；生产接线已在原本地提交完成，仅补完整验收和文档。按 iteration_complete／stage／commit 及正常 hook 收束，37 能力仍 partial，wholeDefault=false／wholeV13=false／phaseExit=false，Goal active；仅本地提交，无 push／PR／发布／Actions。

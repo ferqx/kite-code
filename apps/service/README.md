@@ -283,6 +283,8 @@ read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时�
 
 [完整准备回归](test/isolated/preparation-cleanup-ownership.test.ts)从正式Service／Client原Command进入受支持的trusted resolver／standalone assembly，实际打开目录，因必选Skill缺失而准备失败；故障只让该原实例JavaScript close在原native close之前拒绝，目录仍可完整读取，Model／Run／Execution均未开始。关闭失败与维护owner_busy保留，测试自己的child实际退出0及双EOF之后才可公开backup／冷读原完整metadata／View／Command／Message／Execution，零重放。它不依赖已删除的默认重复FD，也不把fixture错误称真实OS API故障；全部资源观测、临时I/O全部失败路径及平台资格仍按进度保留。
 
+[显式恢复准备回归](test/isolated/recovery-preparation-ownership.test.ts)经正式 SDK 分别调用 Run resume、Job report resume 和 Job reconcile，直接核三个 resolver 返回前的同一实际目录清理失败。原 Run、Job、report、审批与完整消息不推进或重放；Run／Job 的新恢复 Command 已受理，report 的新恢复 Command 尚未提交，公共错误均为 `configuration_cleanup_unconfirmed`。Service／Runtime 关闭实际拒绝后，独立 Store 仍不能取得原 Session owner，维护仍拒绝；自己的进程实际退出 0 与双 EOF 后，才允许公开备份和完整原数据冷读。路径使用平台中立接口，本机结果不授 Win/Linux 实机资格。
+
 ## 默认 Web Fetch 装配
 
 默认 resolver 通过 [web-fetch-configuration.ts](src/web-fetch-configuration.ts)装配普通 `builtin.web@1` / `web_fetch@1`。`createDefaultProcessConfiguration({webFetch?})` 只接受可信宿主的 network policy/admission 与可选 extractor；缺省开发网络策略为 public，仍逐跳检查全部 DNS 地址、拒绝私有/保留/本机目标并固定真实 socket。显式 off/allowlist 与当前宿主 `admitHop` 继续约束原请求、robots 和每次跳转，普通 Tool 仍独立经过 Core 的当前授权。实际元数据为 `network`/`unknown`、`safeRead:false`，off 为不可用；每个新 Run 封存准确 Tool 版本和非秘密 `snapshot.web`。JSONC 仅选择 Tool 与准确版本，不能提供网络权威、代理 header 或 SSRF 例外。工厂创建不进行 DNS、解析或网络 I/O。
