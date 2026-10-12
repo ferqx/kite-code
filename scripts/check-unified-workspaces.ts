@@ -277,6 +277,8 @@ export function checkUnifiedFormalConsumers(root: string): {
               'apps/cli/test/isolated/tui-mcp-pty.test.ts',
               'apps/cli/test/isolated/tui-mcp-cold-pty.test.ts',
               'apps/cli/test/isolated/tui-skills-host.test.ts',
+              'apps/cli/test/isolated/tui-permissions-host.test.ts',
+              'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
             ].map((file) =>
               steps.findIndex(
                 (step) =>

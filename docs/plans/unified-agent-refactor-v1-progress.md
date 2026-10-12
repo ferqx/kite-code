@@ -5249,3 +5249,29 @@ Skills保完整304真实来源及所有页同revision／唯一ID、available／d
 | 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归仍依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
 
 新增闭合范围是配置启停与冷原查询的完整三端测试源码、完整paired／shared Skills目录的三端驱动及其实际macOS用户合同，三个POSIX测试驱动退役与当前CI调用者接线。无生产新authority迁移、push／PR／发布／Actions触发；RSS、完整观测、fault cleanup及原生资格保持原实际门禁。
+
+## 2026-10-12：权限授权和 Workspace 文件候选的完整三端测试
+
+前片MCP配置／冷恢复／Skills已正常本地提交 `b8b95ad84468ea1f226f503ef659619508cbb8b4` 并结束。本轮按最高剩余依赖实施[/permissions完整授权链](../../apps/cli/test/isolated/tui-permissions-host.test.ts)和[Workspace文件候选／精确草稿补全](../../apps/cli/test/isolated/tui-file-candidates-host.test.ts)。两个Python／POSIX驱动退役，统一用现行Bun PTY／ConPTY、系统tmpdir和标准file URL；Windows private IPC进入所属finally，实际树强制结束不计正常退出。生产权限、业务authority、API和文件候选实现不改；本轮退役仅测试驱动和权限测试专用macOS装配。
+
+原权限夹具自装配legacy Shell，unknown执行语义在旧accept_edits场景触发两张卡。正式默认Shell已识别Workspace写／不联网，请求批准模式允许该写入；不能只换后端后伪称原卡场景无条件等价。完整用户流程现显式选择自动审核，实际默认Reviewer Model返回ask_user，保原Workspace信任确认、空Enter零答案／零文件、准确shell.launch Tool和shell.command Job各一次same_command批准、不同operation key相同语义第二次免卡、清除原Session两grant后第三次再次审批／准确取消。原8个Bun expect顺序和4个Python检查保持；业务Provider7次与两行 `owned\nowned\n` 不变，新增实际审核3次断言。原10秒读取／5秒Job卡／200ms键／400ms pump／6＋3秒正常退出及40秒整例保持，实际TUI exit0／EOF与所属Service退出核实。这是测试场景范围修正，不改变三种产品权限策略。
+
+首次直接消费仓库built main的完整用例真实失败，原run.start实际rejected／receipt.reason为shell_unavailable：该入口仍解析源码Agent，缺封闭包的正式Shell资产。红日志 `/private/tmp/kite-permissions-default-portable.log` 保留；追加有限诊断误用了不存在的Command.error_json，第二红及保留root的真实receipt_json读取归 `/private/tmp/kite-permissions-default-diagnostic.log`、`/private/tmp/kite-permissions-retained-command.log`，诊断已按实际schema修正。有限bundler探针证明URI／路径external均只是正确转发，没有据此捏造bundling原因。当前消费实际封闭built默认Service和正式平台资产，原Bun.build断言与真实entrypoint仍执行；最终完整macOS actual0／1pass／9expects／10.46秒，日志 `/private/tmp/kite-permissions-packaged-final.log`。原两张答案／两文件效果、业务7／审核3、normal=true／exit0／failure=null及原Service ESRCH均由实际收据核验，正常绿不补授异常清理或完整资源资格。
+
+文件候选保605真实文件完整页、ignore comments／negation／nested scope、坏UTF-8／硬链／外部unsafe subtree、真实另Workspace原延迟页取消和隔离、独立built adapter源码外解析准确ignore@5.3.2。实际Tab闭合中文空格、Esc后编辑、quote/backslash草稿及候选Ctrl+C均保六次网络POST0、files Session Run0、Provider1。POSIX物理样本与精确转义字面保持；Windows物理双引号／反斜杠非法，改合法中文空格名仍测真实Tab／JSON quoted草稿，原[共享Composer token检查](../../packages/ui/test/tui/file-candidates.test.tsx)保quote/backslash转义合同。此为物理样本适用范围修正，不称Windows非法文件名资格。原23个Bun expect和7个Python检查保留；10秒读取／5秒draft／每键100ms／6＋3秒退出／30秒整例保持。仅为新增实际owned Service启动／正常退出核验重跑原完整文件，最终macOS actual0／1pass／23expects／8.34秒，日志 `/private/tmp/kite-file-candidates-mac-final.log`；收据 `/private/tmp/kite-file-candidates-delivery.json` 核test／driver／helper／生产host及原UI token测试SHA，实际PTY／Service正常退出。PTY证据为实际输出，异步parser／UTF-8记录实现不称原Python运输逐字节等价。
+
+源码核对发现[文件候选host](../../apps/cli/host/file-candidates.ts)仍直接依赖非Darwin的libc.so.6及POSIX rootfd／openat／readdir，没有Windows后端。保用户延后Win/Linux原生验证的范围，该生产缺项与Windows正式Shell／script verifier一并保未闭合门禁；驱动可用三端不等于后端可用，不替换实际backend或增加availability skip。[transport workflow](../../.github/workflows/runtime-transport-qualification.yml)为两个原完整文件各追加独立、无过滤Bun进程，现七MCP＋Skills＋权限＋文件候选均在Windows MSVC／当前八workspace构建之后、原transport／shared14之前。原CI完整文件actual0／21pass／259expects／1.051秒，日志 `/private/tmp/kite-permissions-files-ci.log`；原守卫逐一拒命令遗漏／过滤／平台条件／合并进程，未dispatch Actions。
+
+Root收据 `/private/tmp/kite-permissions-files-freeze.json` 冻结3853份非Markdown输入，核两原完整文件8＋23共31个原expect顺序保留、最终test／driver与各执行收据匹配，权限新增审核计数后本机两个整例合计32expects／两TUI正常退出。两原test SHA精确匹配既有115文件／80CLI作业基线，全部受影响文件本轮实际重验；未变范围复用。shared14／28pass／508expects及准确Windows optional调用补正范围保持，14源码、原命令、生产／依赖／workspace构建输入不变，故复用而不重复未受影响整图。产品三权限／审批／输入合同已核对，未造行为不变的手册diff；CLI owner、测试入口与release control同步实际方法／后端门禁。根及八workspace类型、边界／workspace／API／ownership／格式／文档按当前diff收束，正常提交hook独立强制执行。当前整仓728文件／588作业未在本轮完整运行，不能由这些窗口累加宣布整体完成。
+
+源码核对五个剩余退出阻塞，按依赖排序：
+
+| 顺序 | 实际用户入口、具体缺口与验收 |
+| --- | --- |
+| 1 | [完整导出／正文查看](../../apps/cli/test/isolated/tui-export-host.test.ts)、[默认ask_user答题](../../apps/cli/test/isolated/tui-question-pty.test.ts)及[普通申请恢复](../../apps/cli/test/isolated/tui-caller-intents-host.test.ts)等共享入口仍有POSIX／Mac路径。需保实际默认Service、原完整正文／reason／文件、完整答案／零副作用、原ID查回零重发与所属退出，迁入三端整文件；不以运输替身替代生产caller合同。 |
+| 2 | 正式Shell／Task／MCP原持续负载RSS仍九点 `178814976→299614208B`、`+115.203125MiB>32MiB`。实际native allocation owner修复并满足原正式完整负载／阈值前仍红，不重复参数对照。 |
+| 3 | 完整Runtime出生后代及activeResources／handles producer仍缺。实际完整来源经原formal verifier核实前保unsupported／null，部分Job树／coalition／FD与正常短窗不代全集；Source批准红的fault cleanup receipt仍未确认。 |
+| 4 | Win/Linux正式安装、真实版本切换、MCP、维护恢复、保数据卸载和Windows Shell／script verifier／文件候选原合同后端仍需真实资格。后续Actions／用户Windows验证保原完整门禁，本机macOS／源码接线不代原生通过，本轮不dispatch。 |
+| 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归仍依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
+
+新增闭合范围是权限与文件候选两个完整用户流程的三端测试源码／CI调用者接线、测试专用macOS Shell装配退役及正式默认Shell／真实Reviewer消费，以及macOS原完整合同验证。RSS、完整观测、fault cleanup与原生后端／平台资格继续未闭合；无push／PR／发布／Actions触发。

@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
 import { cpSync, linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fileToken, TuiController, type TuiPort } from '@kite-ai/ui/tui';
 import { createTuiFileCandidates } from '../../host/file-candidates';
 import { recoveryProfile } from '../fixtures/recovery-profile';
@@ -9,13 +11,14 @@ import { recoveryProfile } from '../fixtures/recovery-profile';
 const repo = resolve(import.meta.dir, '../../../..');
 test('actual SDK original Workspace names exhaust >500, scoped ignore negation, unsafe subtrees, and 80x24 quoted Tab without mutation', async () => {
   const f = await recoveryProfile();
-  let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
-  const transcript = `${f.root}-file-candidates.pty.log`,
+  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  const transcript = join(tmpdir(), `kite-file-candidates-${crypto.randomUUID()}.pty.log`),
     wire = `${f.root}-file-wire.jsonl`;
   try {
     mkdirSync(join(f.workspace, '目录'), { recursive: true });
     writeFileSync(join(f.workspace, '目录', '中文 空格.txt'), 'CANDIDATE_BODY_MUST_NOT_BE_READ');
-    writeFileSync(join(f.workspace, '目录', 'quote"\\.txt'), 'PRIVATE_TARGET_BODY');
+    const quoteName = process.platform === 'win32' ? 'quote 空格.txt' : 'quote"\\.txt';
+    writeFileSync(join(f.workspace, '目录', quoteName), 'PRIVATE_TARGET_BODY');
     for (let i = 0; i < 605; i++)
       writeFileSync(join(f.workspace, `catalog-${String(i).padStart(4, '0')}.txt`), 'NEVER_READ');
     mkdirSync(join(f.workspace, 'nested'));
@@ -38,7 +41,11 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
     writeFileSync(join(f.workspace, 'hard', 'never.txt'), 'hidden hardlink subtree');
     mkdirSync(join(f.root, 'outside'));
     writeFileSync(join(f.root, 'outside', 'OUTSIDE_SECRET.txt'), 'OUTSIDE_PRIVATE_BODY');
-    symlinkSync(join(f.root, 'outside'), join(f.workspace, 'unsafe'));
+    symlinkSync(
+      join(f.root, 'outside'),
+      join(f.workspace, 'unsafe'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const shared = await f.launch();
     try {
       await shared.client.recoverSession('s', {
@@ -60,7 +67,7 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
         expectedStoreId: f.storeId,
         id: 'wb',
         name: 'B',
-        rootUri: `file://${join(f.root, 'workspace-b')}`,
+        rootUri: pathToFileURL(join(f.root, 'workspace-b')).href,
       });
       await shared.client.createSession({
         expectedStoreId: f.storeId,
@@ -176,7 +183,7 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
         '5.3.2',
       );
       cpSync(ignoreRoot, join(standalone, 'node_modules/ignore'), { recursive: true });
-      const compiled = await import(join(standalone, 'file-candidates.js'));
+      const compiled = await import(pathToFileURL(join(standalone, 'file-candidates.js')).href);
       const standalonePage = await compiled
         .createTuiFileCandidates(shared.client, f.storeId)
         .read(scope, { query: '中文' }, signal.signal);
@@ -191,60 +198,32 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
     const runner = join(f.root, 'file-runner.ts');
     writeFileSync(
       runner,
-      `import{appendFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(wire)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'files',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
+      `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(wire)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'files',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'file-service.pid'))},String(pid),{mode:0o600})});`,
     );
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';full=b''
-def pump():
- global buffer,full
- end=time.monotonic()+.1
- while time.monotonic()<end:
-  if select.select([master],[],[],.02)[0]:
-   data=os.read(master,65536);buffer+=data;full+=data
-def key(v):
- global buffer
- buffer=b'';os.write(master,v);pump()
-def wait(text):
- deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-6000:].decode(errors='replace'))
-  pump()
-def posts():return [json.loads(line) for line in open(${JSON.stringify(wire)}) if json.loads(line)['method']=='POST']
-def draft(expected):
- deadline=time.monotonic()+5
- while True:
-  if not os.path.exists(${JSON.stringify(join(f.profile.profilePath, 'ui/tui.json'))}):
-   if time.monotonic()>deadline:raise RuntimeError('draft file unavailable')
-   pump();continue
-  rows=json.load(open(${JSON.stringify(join(f.profile.profilePath, 'ui/tui.json'))}))['drafts']
-  if any(r['sessionId']=='files' and r['text']==expected for r in rows):return
-  if time.monotonic()>deadline:raise RuntimeError('draft mismatch '+json.dumps(rows,ensure_ascii=False))
-  pump()
-try:
- wait('New Run');key(${JSON.stringify('@目录/中文')}.encode());wait('目录/中文 空格.txt');assert posts()==[];key(b'\\t');draft(${JSON.stringify('@"目录/中文 空格.txt"')});assert posts()==[]
- key(b'\\x1b[H')
- for _ in range(${Array.from('@"目录/中文 空格.txt"').length}):key(b'\\x1b[3~')
- key(b'@catalog-060');wait('catalog-0600.txt');assert posts()==[];key(b'\\x1b');key(b'4');wait('catalog-0604.txt');key(b'\\t');draft('@catalog-0604.txt');assert posts()==[]
- key(b'\\x1b[H')
- for _ in range(17):key(b'\\x1b[3~')
- key(${JSON.stringify('@目录/quote')}.encode());wait('quote');key(b'\\t');draft(${JSON.stringify('@"目录/quote\\"\\\\.txt"')});assert posts()==[]
- key(b'\\x1b[H')
- for _ in range(${Array.from('@"目录/quote\\"\\\\.txt"').length}):key(b'\\x1b[3~')
- key(b'@');wait('File candidates incomplete');key(b'\\x03');assert posts()==[]
- key(b'\\x11');deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:pump()
- p.wait(timeout=3);assert p.returncode==0;print('FILES_REAL_SCOPED_TAB_ZERO_POST')
-finally:
- open(${JSON.stringify(transcript)},'wb').write(full)
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-    writeFileSync(`${f.root}-file-driver.py`, program);
-    python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    driver = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        join(repo, 'apps/cli/test/fixtures/tui-file-candidates-driver.ts'),
+        runner,
+        f.workspace,
+        f.profile.profilePath,
+        wire,
+        transcript,
+        quoteName,
+        join(f.root, 'file-service.pid'),
+      ],
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+        env: { ...process.env, HOME: f.root, USERPROFILE: f.root },
+      },
+    );
     const [out, err, code] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     console.log('file candidate PTY', transcript);
     if (code !== 0) console.error(err);
@@ -267,9 +246,10 @@ finally:
       }),
     );
   } finally {
-    if (python && python.exitCode === null) {
-      python.kill('SIGKILL');
-      await python.exited;
+    if (driver && driver.exitCode === null) {
+      if (process.platform === 'win32') driver.send('owned-file-candidates-driver-stop');
+      else driver.kill('SIGINT');
+      await driver.exited;
     }
     f.close();
   }

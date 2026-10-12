@@ -1,17 +1,22 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
+import { ptyDeadline } from '../fixtures/tui-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
 test('built Service and actual PTY permission controls create exact Shell grants, clear only selected Session, no default approval', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-permissions-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+  const evidence = join(tmpdir(), `kite-tui-permissions-evidence-${randomUUID()}`);
+  mkdirSync(evidence, { mode: 0o700 });
   mkdirSync(workspace, { mode: 0o700 });
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   // This fixture asserts English labels independently of the host device locale.
@@ -19,12 +24,36 @@ test('built Service and actual PTY permission controls create exact Shell grants
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
     mode: 0o600,
   });
-  let calls = 0;
+  let calls = 0,
+    reviewCalls = 0;
+  let passed = false;
+  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as { messages: { role: string; content: string }[] };
+      const review = body.messages.some((message) => {
+        if (message.role !== 'user') return false;
+        try {
+          return JSON.parse(message.content).purpose === 'authorization_review';
+        } catch {
+          return false;
+        }
+      });
+      if (review) {
+        reviewCalls++;
+        const delta = {
+          content: JSON.stringify({
+            decision: 'ask_user',
+            reason: 'Confirm the exact original same-command authorization',
+          }),
+        };
+        return new Response(
+          `data: ${JSON.stringify({ id: 'review', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       calls++;
       const last = body.messages.reduce(
           (last, m, i) => (m.role === 'user' && /^owned-[123]$/.test(m.content) ? i : last),
@@ -78,21 +107,20 @@ test('built Service and actual PTY permission controls create exact Shell grants
       }),
       { mode: 0o600 },
     );
+    const artifactRoot = join(root, 'artifact');
+    await buildOwnedDaemon(artifactRoot);
+    const defaultMain = join(artifactRoot, 'node_modules/@kite-ai/service/main.js');
     const fixture = join(root, 'service.ts');
     writeFileSync(
       fixture,
-      `import {runServiceProcess} from ${JSON.stringify(join(repo, 'apps/service/dist/main.js'))};import {createDefaultProcessConfiguration} from ${JSON.stringify(join(repo, 'apps/service/dist/configuration.js'))};import {selectProfile} from ${JSON.stringify(join(repo, 'packages/agent/dist/profile.js'))};await runServiceProcess({configure:startup=>createDefaultProcessConfiguration({profile:selectProfile({dataRoot:startup.profile.dataRoot,profile:startup.profile.profile}),shell:{platform:'darwin',configurationId:'owned-shell',env:{PATH:'/usr/bin:/bin'},supervisorPath:${JSON.stringify(join(repo, 'packages/agent/dist/platform/process/shell-supervisor.js'))},bunExecutable:${JSON.stringify(realpathSync(process.execPath))},shellExecutable:'/bin/sh',graceMs:20}})});`,
+      `import {runServiceProcess} from ${JSON.stringify(pathToFileURL(defaultMain).href)};await runServiceProcess();`,
     );
     const built = await Bun.build({
       entrypoints: [fixture],
       outdir: join(root, 'built'),
       target: 'bun',
       packages: 'external',
-      external: [
-        join(repo, 'apps/service/dist/main.js'),
-        join(repo, 'apps/service/dist/configuration.js'),
-        join(repo, 'packages/agent/dist/profile.js'),
-      ],
+      external: [pathToFileURL(defaultMain).href],
     });
     expect(built.success).toBe(true);
     const entrypoint = built.outputs[0]!.path,
@@ -116,7 +144,7 @@ test('built Service and actual PTY permission controls create exact Shell grants
       await seed.client.createWorkspace({
         expectedStoreId,
         id: 'w',
-        rootUri: `file://${workspace}`,
+        rootUri: pathToFileURL(workspace).href,
         name: 'owned',
       });
       await seed.client.createSession({
@@ -132,58 +160,30 @@ test('built Service and actual PTY permission controls create exact Shell grants
     const runner = join(root, 'runner.ts');
     writeFileSync(
       runner,
-      `import {runTUIHost} from ${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};await runTUIHost({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
+      `import {writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};await runTUIHost({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(root, 'owned-service-pid'))},String(pid))});`,
     );
-    const program = `import os,pty,subprocess,select,time,signal,re,json,sqlite3
-master,slave=pty.openpty();p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b''
-def wait(text):
- global buffer
- end=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>end:
-   db=sqlite3.connect(${JSON.stringify(profile.databasePath)});print('FINITE_SQL '+json.dumps({'executions':db.execute('select kind,adapter_id,state,cancel_requested from execution').fetchall(),'interactions':db.execute('select definition_id,state,accepted_decision_revision,answer_json from interaction').fetchall(),'runs':db.execute('select status from run').fetchall()}),flush=True);db.close();raise RuntimeError('expected '+text+' tail='+buffer[-3000:].decode(errors='replace'))
-  if select.select([master],[],[],.1)[0]:buffer+=os.read(master,65536)
-def send(text):
- global buffer
- buffer=b'';os.write(master,text.encode());wait('New Run > '+text);buffer=b'';os.write(master,b'\\r')
-def key(value):
- global buffer
- buffer=b'';os.write(master,value);time.sleep(.2)
-def pump():
- global buffer
- end=time.monotonic()+.4
- while time.monotonic()<end:
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
-try:
- wait('New Run');send('/permissions');wait('Saved same_command grants: 0');key(b't');wait('Confirm original');key(b'\\r');wait('workspace.trust: applied');wait('trusted, revision');pump();key(b'\\r');wait('Confirm original');key(b'\\r');wait('permission.mode: applied');key(b'\\x1b');wait('New Run >');send('owned-1');wait('same_command');key(b'\\r');pump()
- db=sqlite3.connect(${JSON.stringify(profile.databasePath)});assert db.execute('select count(*) from interaction where answer_json is not null').fetchone()[0]==0;db.close();assert not os.path.exists(${JSON.stringify(join(workspace, 'effects'))})
- key(b'\\x1b[B');key(b'\\x1b[B');wait('same command in original Session');key(b'\\r');wait('interaction.answer: applied');pump()
- db=sqlite3.connect(${JSON.stringify(profile.databasePath)});end=time.monotonic()+5;card=None
- while card is None and time.monotonic()<end:
-  card=db.execute("select id from interaction where definition_id='shell.command' and state='pending'").fetchone();pump()
- db.close();assert card is not None;wait('approval ['+card[0]+'] original Session');pump();key(b'\\x1b[B');key(b'\\x1b[B');wait('same command in original Session');key(b'\\r');wait('DONE owned-1');pump();send('/permissions');wait('Saved same_command grants: 2');key(b'\\x1b');wait('New Run >');send('owned-2');wait('DONE owned-2');pump();send('/permissions');wait('Saved same_command grants: 2');key(b'c');wait('Confirm original');key(b'\\r');wait('permission.grants.clear: applied');wait('Saved same_command grants: 0');key(b'\\x1b');wait('New Run >');send('owned-3');wait('same_command');key(b'\\x03');pump();key(b'\\x11')
- end=time.monotonic()+6
- while p.poll() is None and time.monotonic()<end:
-  if select.select([master],[],[],.1)[0]:
-   try:buffer+=os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;print('PERMISSIONS_ORIGINAL_COMPLETE')
-finally:
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-    const child = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    child = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        join(import.meta.dir, '../fixtures/tui-permissions-driver.ts'),
+        JSON.stringify({ runner, root, databasePath: profile.databasePath, workspace, evidence }),
+      ],
+      { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
+    );
     const [out, err, exit] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
     ]);
+    writeFileSync(join(evidence, 'driver.log'), out + err);
     if (exit !== 0) console.error(out, err);
     expect(exit).toBe(0);
     expect(err).toBe('');
     expect(out).toContain('PERMISSIONS_ORIGINAL_COMPLETE');
     expect(readFileSync(join(workspace, 'effects'), 'utf8')).toBe('owned\nowned\n');
     expect(calls).toBe(7);
+    expect(reviewCalls).toBe(3);
     const db = new Database(profile.databasePath, { readonly: true });
     try {
       expect(
@@ -196,11 +196,39 @@ finally:
           )
           .get(),
       ).toEqual({ n: 1 });
+      writeFileSync(
+        join(evidence, 'facts.json'),
+        JSON.stringify({
+          calls,
+          reviewCalls,
+          effects: readFileSync(join(workspace, 'effects'), 'utf8'),
+          defaultMainSHA: sha(readFileSync(defaultMain)),
+          compiledEntrypointSHA: artifact.entrypointSha256,
+          executions: db
+            .query('select kind,adapter_id,state,cancel_requested from execution')
+            .all(),
+          interactions: db
+            .query(
+              'select definition_id,state,accepted_decision_revision,answer_json from interaction',
+            )
+            .all(),
+          commands: db.query('select kind,status,request_json,receipt_json from command').all(),
+        }),
+      );
     } finally {
       db.close();
     }
+    passed = true;
   } finally {
+    if (child?.exitCode === null) {
+      if (process.platform === 'win32') child.send('permissions-driver-stop');
+      else child.kill('SIGTERM');
+      await ptyDeadline(child.exited, 3000, 'permission driver cleanup unconfirmed');
+    }
+    console.error(
+      JSON.stringify({ evidence, calls, reviewCalls, retainedRoot: passed ? null : root }),
+    );
     provider.stop(true);
-    rmSync(root, { recursive: true, force: true });
+    if (passed) rmSync(root, { recursive: true, force: true });
   }
 }, 40000);
