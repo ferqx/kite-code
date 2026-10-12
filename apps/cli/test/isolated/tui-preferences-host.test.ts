@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { createClient } from '@kite-ai/client';
+import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
+import { ptyDeadline } from '../fixtures/tui-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -94,6 +95,9 @@ for (const mode of ['paired', 'shared'] as const)
     let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined,
       python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let client: ReturnType<typeof createClient> | undefined;
+    let stopShared: () => Promise<void> = async () => {
+      throw Error('preferences_daemon_lifecycle_missing');
+    };
     const socket = selectDaemonEndpoint({
       profileAccessKey: profile.profileAccessKey,
       ...(process.platform === 'win32' ? {} : { explicitSocket: join(root, 'd.sock') }),
@@ -185,6 +189,24 @@ for (const mode of ['paired', 'shared'] as const)
           reader.releaseLock();
         }
         const boot = bootstrapSchema.parse(JSON.parse(frame));
+        stopShared = async () => {
+          const lifecycle = createServiceLifecycleClient({
+            endpoint: boot.httpEndpoint,
+            token: boot.token,
+            expected: { profile: boot.profile, instanceId: boot.instanceId },
+          });
+          try {
+            try {
+              await lifecycle.shutdown('if_idle');
+            } catch (error) {
+              if (!(error instanceof ClientError && error.code === 'network_outcome_unknown'))
+                throw error;
+            }
+            if ((await daemon!.exited) !== 0) throw Error('preferences_daemon_exit_not_normal');
+          } finally {
+            lifecycle.disposeNetwork();
+          }
+        };
         client = createClient({
           endpoint: boot.httpEndpoint,
           token: boot.token,
@@ -272,8 +294,12 @@ for (const mode of ['paired', 'shared'] as const)
       }
       client?.disposeNetwork();
       if (daemon && daemon.exitCode === null) {
-        daemon.kill('SIGTERM');
-        await daemon.exited;
+        if (process.platform === 'win32') {
+          await ptyDeadline(stopShared(), 9000, 'preferences_daemon_exit_unconfirmed');
+        } else {
+          daemon.kill('SIGTERM');
+          await daemon.exited;
+        }
       }
       provider.stop(true);
       rmSync(root, { recursive: true, force: true });

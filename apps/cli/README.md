@@ -244,7 +244,7 @@ Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，�
 
 原[完整偏好 PTY](test/isolated/tui-preferences-host.test.ts)在 macOS paired/shared 两模式核真实语言保存后的宿主提示、空 Job 目录、显式恢复、只读文件恢复和 Unicode bracketed paste；原保存失败旧配色/语言、profile 冷重开、Provider1、五张业务表计数不增加及所属 Service 正常关闭/共享 detach 的断言保持。中文输入显示和原正文保真另有 UI 回归，实际版本与阶段完整默认见[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-的语言提示与原始内容)；该本机资格不证明其他平台或完整 V1.3 退出。
 
-该完整文件现共用 [CLI 测试 PTY 原语](test/fixtures/tui-pty.ts)与[偏好驱动](test/fixtures/tui-preferences-pty.ts)，三端保原真实ANSI配色、保存失败旧值、原英文正文、两次宿主退出与五张业务表的五次计数一致。SQLite使用真实只读连接；Unicode粘贴数量按码点计算，保原Python语义。Windows共享端点选择正式SID named pipe，POSIX保持显式socket；临时目录和workspace file URL按宿主选择。10秒读取、6＋3秒正常退出、40秒整例保持。三端CI执行同一完整文件，当前实际结果仍限macOS。
+该完整文件现共用 [CLI 测试 PTY 原语](test/fixtures/tui-pty.ts)与[偏好驱动](test/fixtures/tui-preferences-pty.ts)，三端保原真实ANSI配色、保存失败旧值、原英文正文、两次宿主退出与五张业务表的五次计数一致。SQLite使用真实只读连接；Unicode粘贴数量按码点计算，保原Python语义。Windows共享端点选择正式SID named pipe，POSIX保持显式socket；临时目录和workspace file URL按宿主选择。Windows shared测试收尾绑定原bootstrap profile／instance，经公共Lifecycle `if_idle`在9秒内等待原daemon正常exit0，POSIX仍保真实SIGTERM；仅网络回执未知可以继续核实际退出，身份或业务拒绝不吞掉。10秒读取、6＋3秒TUI正常退出、40秒整例保持。三端CI执行同一完整文件，当前实际结果仍限macOS。
 
 ## 通用终端候选安装
 

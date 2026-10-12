@@ -5129,3 +5129,5 @@ PTY实录显示首次替换连接已ready、原RPC四次、Model零调用，但�
 | 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归仍依赖前述门禁；当前37能力partial、wholeV13=false／phaseExit=false，不提前删除或宣布退出。 |
 
 新增闭合的是三个完整共享用户入口的测试驱动三端迁移、其实际macOS合同及当前CLI owner全集；本轮无新生产正式authority迁移或生产旧路径退役。原RSS、完整观测、平台与最终退役门禁保持，无push／PR／发布／Actions触发。
+
+上述18文件已正常本地提交 `28a5789b00f6c9279cc6269ece5ac79d9eefcf2c`，hook全部通过。最终三端复核补正偏好shared测试的Windows收尾：原统一SIGTERM在Windows属于强制终止，现仅Windows经原bootstrap profile／instance绑定的公共Lifecycle `if_idle`，9秒内等待原daemon实际exit0；POSIX真实SIGTERM及原全部Bun断言、40秒预算保持。只有network_outcome_unknown允许继续核实际退出，其他拒绝不吞掉。受影响偏好完整文件macOS再次actual0／2pass／16expects／5.85秒，CLI类型和scopedBiome通过，日志 `/private/tmp/kite-tui-preferences-lifecycle-final.log`；Windows分支仍未原生执行。3837输入冻结与115文件／80作业全集证据保其原窗口，后续仅这项Windows条件收尾及owner说明改变，按实际diff复验、未重复未受影响全集或把前窗口追认为Win/Linux通过。
