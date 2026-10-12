@@ -1,5 +1,7 @@
 # Profile 使用权与平台锁
 
+macOS 的[原 Worker leaf](process/worker-thread.darwin.ts)在可信 preload 中自捕原 Mach send-right，以 pthread／Mach thread ID 独立核身份；父[唯一 owner](process/owned-worker.ts)保原权到 DEAD_NAME，再分别核 thread/task 权准确释放。SEND、thread_info 错误或 Bun close 不授死亡，释放未知保原权和原失败，五秒收尾期限不放宽业务执行预算。库只在显式调用时从固定 libSystem lazy-load，import无原生 I/O；不添加全局资源登记或停止其他线程的权。取舍及固定上游依据见[原 Worker Note](../../../../.agents/notes/implemented/bug-fix/2026-10-13-owned-worker-termination.md)。这项本机收尾不解除 Win/Linux、全 Runtime census、VM/RSS 或阶段门禁。
+
 [纯身份入口](../profile.ts) `@kite-ai/agent/profile` 只使用 Node 模块解析 canonical dataRoot、逻辑 profile、稳定 `profileAccessKey` 和路径，import/select 不创建文件或授予锁。显式宿主入口 [profile-access](../profile-access.ts) 由 Bun 平台运行，import 不 acquire；公开普通 `acquireProfileAccess(options)` 固定 shared，内部维护-exclusive 入口保持独立。
 
 [平台 profile](profile.ts) 在稳定 `.coordination/<profileAccessKey>/profile-use.lock` 上取得 OS 锁，普通 acquire 保持原 namespace 初始化、私有目录、restore journal 和 profile symlink guard。[锁实现](locks.ts) 校验普通文件、非 symlink、单 hardlink、私有权限、宿主 uid 与 path/fd 的 dev/ino 一致。读取和 SQLite 句柄的宿主使用权不能借另一个 Service 进程持锁来代替。

@@ -14,9 +14,13 @@ Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-r
 
 ## Store 关闭未确认时的锁归属
 
-[公共 SQLite Store](../sqlite.ts)的 `close()` 同步封住新请求并缓存原完成 Promise。只有 Worker 已排空原请求、释放语句且 `db.close(true)` 返回成功 ACK，才释放原 Session owner、恢复 lease 和 Profile 使用锁。关闭错误、Worker 不可用或关闭请求未被接纳时，仍请求 terminate 并拒绝 pending，但保留原锁与 ownership，传播原错误；重复关闭不重试、不补造确认。terminate 请求本身不证明物理线程退出，未确认锁由原宿主进程实际退出归还。
+[公共 SQLite Store](../sqlite.ts)的 `close()` 同步封住新请求并缓存原完成 Promise。Worker 排空原请求、释放语句且 `db.close(true)` 返回成功 ACK后，macOS 还须由[原 Worker owner](../platform/process/owned-worker.ts)确认原 Mach thread right 已变死名且准确释放，才能归还原 Session owner、恢复 lease 和 Profile 使用锁。打开失败的成功构造 Worker 也先完成这一收尾再归还 Profile。关闭错误、Worker 不可用或关闭请求未被接纳时，仍请求 terminate 并拒绝 pending，但保留原锁与 ownership；原业务错误和收尾错误同时存在时保两者及原 cause。重复关闭不重试、不补造确认，未确认锁由原宿主进程实际退出归还。
+
+固定可信 preload 保持原 Worker main 与消息协议，只向其唯一父 owner 交接原身份。原身份取得与退出观察共用五秒收尾预算；缺身份、查询错误、超时或原权释放失败保 `worker_exit_unconfirmed`／清理错误，Bun close 不授死亡。源码的 preload、native leaf 和 owner，或 built 的共享 chunk／bundled preload均由准确 loader metadata 进入保护范围。Win/Linux 原调用路径保持，原线程与平台资格仍未闭合，不从 macOS 结果推定。
 
 [真实 Service 关闭回归](../../../../apps/service/test/isolated/store-close-ownership.test.ts)经共用装配和 Client 完成普通 Model 任务，在真实 Worker strict-close 前注入错误；核原完整正文、`drain_failed`、原关闭 Promise，以及进程存活时公开维护 EX 被拒绝。随后等原 owned child 实际退出，公开备份和冷 readonly 的 metadata／完整 View／cursor／Model 正文保持，冷 Model 零调用。这项交接不补齐正常 Worker 物理退出、原 RSS 或全 Runtime 资源资格。
+
+[完整 Worker 交接回归](../../../../tests/isolated/unified-agent/worker-close-handoff.test.ts)沿真实 HTTP／web_fetch／准确取消／Store close／维护 EX／新只读 HTTP 冷历史完成用户链。macOS 原权已真实变死名、确认尚未交付时，结果、取消终态和锁交接不能提前完成；准确释放后原完整历史与零 Model 重放保持。其他平台整例仍执行业务链并保物理资格 unknown。这只闭合本机单 Worker 收尾，不解除 RSS、全 resources／handles／出生后代或阶段退出门禁。
 
 ## Worker 构造失败的 Profile 释放
 

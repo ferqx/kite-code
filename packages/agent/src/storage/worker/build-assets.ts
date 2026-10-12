@@ -7,7 +7,10 @@ export async function buildStorageAssets(outdir: string): Promise<void> {
   mkdirSync(workerDirectory, { recursive: true });
   mkdirSync(migrations, { recursive: true });
   const result = await Bun.build({
-    entrypoints: [new URL('./main.ts', import.meta.url).pathname],
+    entrypoints: [
+      new URL('./main.ts', import.meta.url).pathname,
+      new URL('./observer-preload.ts', import.meta.url).pathname,
+    ],
     outdir: workerDirectory,
     target: 'bun',
     packages: 'bundle',

@@ -5610,3 +5610,22 @@ transport 保每个原完整命令，新记录／原生验证及原候选文件�
 | 2 | 原公共Client→HTTPService→Runtime→Store生命周期RSS真实超限，native live owner仍未知。修真实归属后沿原负载、八outer／九点、32MiB、60—168分钟验收，原红保留，不重复参数对照。 |
 | 3 | Win/Linux正式安装、真实版本切换、MCP连接／调用／取消／退出、维护恢复和保数据卸载仍交后续Actions／用户Windows实机；源码接线与本机skip不授资格，Windows Shell原合同门禁保留，不触发Actions。 |
 | 4 | §35全部适用能力／T/E、独立迁移审查、最终legacy／依赖退役与最终准确输入完整回归依赖上述条件。37能力仍partial，wholeV13=false／phaseExit=false；ChatGPT官方授权／Responses在V1.3之后，Codex直接复用仍保门禁。 |
+
+
+## 2026-10-13：macOS 原 Worker 收尾与准确锁交接
+
+本轮按剩余退出依赖中的真实源码缺口推进：正式 `web_fetch` 的结果／精确取消和 SQLite 的正常 close 都曾只请求原 Worker terminate。Bun close 只标记terminated；固定1.4.2实测在原close到来2.970ms时，原Mach权仍SEND且原thread ID可读，3.603ms才DEAD_NAME，随后原thread/task权分别deallocate0。官方源码与本机原权事实支持接线，不能用Node terminate Promise、HALTED、查询失败或数字ID消失替代。
+
+[唯一 Worker owner](../../packages/agent/src/platform/process/owned-worker.ts)通过固定可信同步preload自捕原权，保原entrypoint／hash／relative import／一次输入，父消费第一帧不进入SQL／parser协议；最早已创建取消先取得原身份再请求停止。原身份取得与原权终态共用五秒收尾观察预算，只认原DEAD_NAME且准确释放，不新增全局registry或其他线程停止权。SQL strict-close ACK仍独立必要；任一关闭／收尾未知保原Profile／Session／recovery锁与原错误，复合失败保两者和cause。失败的真实原record／nativeResult／未释权诊断也保留，source owner／native leaf／preload和built chunk进入准确保护清单；Service只装配元数据，不新增权限或业务逻辑。
+
+必要审查发现原Web catch会因context取消／deadline理由掩盖新cleanup未知。现私有WorkerCleanupError在取消／timeout分类前传播到原Core attempted Tool路径，持久outcome_unknown并停止后续依赖；没有给Core增加Tool类别分支。新增[真实Core取消用例](../../packages/agent/test/isolated/web-fetch/core.test.ts)先进入可信extractor后准确cancel原Run，核原signal／cause／诊断、Tool unknown、Model只调用一次及冷readonly原Command／完整Message／Execution零重放。该显式失败fixture证明归类，不能授native资格；原整Core文件6／46／0。
+
+[完整公开交接文件](../../tests/isolated/unified-agent/worker-close-handoff.test.ts)2／61／0：真实HTTP默认web_fetch／原Tool／准确取消／SQLite ACK／Runtime close／维护EX／新只读Service／Client完整wire。只包装真实parent leaf，在真实DEAD_NAME后延迟确认交付，证明结果／取消终态／锁不能先交；交付后真实原权release成功，原正文和零Model重放保持。custom Worker以同文件／同input的无preload独立Bun child actual0作对照，原URL、import.meta.main、relative import、完整input一次、syntax-error和最早abort原reason保持。Win/Linux整例可运行且明确physical unknown，无OSskip或fakeexit资格。
+
+最初通知方案draft／红及类型证据保在 `/private/tmp/kite-worker-close-retired-notification-draft/`；其close交付断言基于被官方实现和原Mach事实否定的方案，不能做最终门禁。新文件第一次实际0pass／2fail为tmpdir别名，现用realpath保完整URL／owner_busy原断言；第二次主链通过但新main=true预期失败，独立无preload原Worker实际false，故改为完整原行为对照，未删除断言。两红分别保 `/private/tmp/kite-worker-native-handoff-first.log`、`kite-worker-native-handoff-second.log`；根类型首次读取test尚缺nullable guard的真实红保 `/private/tmp/kite-owned-worker-typecheck-final.log`，最终根与八workspace types全0。原正式测试的断言／预算保持，不追认失败窗口。
+
+当前必要18个原完整相关文件逐个独立Bun执行，actual0／61pass／835个Bun expect／47.328秒，输入零漂移；覆盖Worker请求／语句／queue／store／rollback／timing、Runtime生命周期、Service打开失败／关闭锁／Files保护、默认Task／MCP源外包、完整manifest和截图对应真实Electron。冻结／逐文件原log／result保 `/private/tmp/kite-worker-final-targets-20261013-*`，result SHA4e8237521e926a1203a5e9c0321f0d986ecdb2024c87b3f17921f422b2c8e561。当前Electron再验40实际效果、0业务取消、4个真实native_draining读取拒绝、quitDialogs／pageErrors／observationErrors均空，Electron正常0／无信号，原Service PID96576正常0／无信号；真实整窗13.314秒，不以后台succeeded替代界面验收。截图本身的构建身份未知，不声称用户安装包已更新。
+
+本片新增闭合为macOS正式默认解析与Store收尾／原权／维护锁交接；这两个正式caller的直接terminate即结算分支已由唯一owner等待替换。产品手册的未知／取消承诺保持，技术owner／Note和三项能力partial同步；仅本地提交，原hook保留，不push／PR／Actions。当前相关文件全部0不宣称当前完整默认回归或阶段退出；fc00a2aa的732文件／591作业完整0只保当时准确输入证据。wholeDefault=false／wholeV13=false／phaseExit=false。
+
+剩余退出依赖仍按四项保留：普通任务／取消／正常关闭缺全Runtime可信activeResources／handles、出生后代全集和全部cleanup来源；原RSS +115.203125MiB >32MiB且native live owner未知，保原负载／八outer／九点／60—168分钟条件、不重复参数对照；Win/Linux正式安装、真实版本切换、MCP完整连接／Tool／cancel／exit、维护恢复／保数据卸载及Windows Shell原合同交后续Actions或用户实机，本机不dispatch；前述满足后再执行全部适用§35／T/E、独立迁移审查、最终legacy／依赖退役与最终准确输入完整回归。单线程原权事实不授JSC／VM全部回收，37能力仍partial；ChatGPT官方授权／Responses仍在V1.3之后，Codex直接复用保门禁。

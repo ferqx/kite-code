@@ -10,9 +10,9 @@ URL 中的字面地址同样接受检查；private、loopback、link-local、met
 
 robots 检查保留原 owner 基线：最多读取 500 KB 完整规则文本，没有固定 100 条规则裁剪；缓存为 5 分钟、200 个 origin，读取失败/超时采用宽松回退，取消仍向外传播。同 origin 请求在可取消的 500ms 域名队列等待；队列项会释放和移除，不设累计 hostname 预算。robots 请求遵守相同的逐跳 DNS、准入和 socket 规则。
 
-parser 在自有 Bun Worker 中使用被动 JSDOM/Readability/Turndown，不执行脚本、不加载子资源、不转发 DOM 诊断。构建生成 `dist/tools/web-fetch/extractor-worker.js` 及 `extractor-worker.sha256`。源码运行同样定位这个已构建 asset，没有 TypeScript/raw parser 回退。asset 缺失或 SHA 不匹配会在网络 I/O 前局部失败，parser 身份写入 result details。Worker 终止约束取消/超时，不提供 DOM 峰值内存上限。
+parser 在自有 Bun Worker 中使用被动 JSDOM/Readability/Turndown，不执行脚本、不加载子资源、不转发 DOM 诊断。构建生成 `dist/tools/web-fetch/extractor-worker.js` 及 `extractor-worker.sha256`。源码运行同样定位这个已构建 asset，没有 TypeScript/raw parser 回退。asset 缺失或 SHA 不匹配会在网络 I/O 前局部失败，parser 身份写入 result details。macOS 的结果、原错误或准确取消在[原 Worker owner](../../platform/process/owned-worker.ts)确认原 Mach 权死名和准确释放后才结束；可信同步 preload 不改原 main、相对 import、hash 或一次输入，最早已创建取消也先交接原权再请求终止。五秒独立收尾预算包括原身份取得和终态观察，缺证据保失败；原错误与清理错误同时保留。清理未知先交原 Core 保存 outcome_unknown，取消／timeout不能掩盖它或继续下个 Model；[完整 Core 文件](../../../test/isolated/web-fetch/core.test.ts)的真实准确取消／冷读用例验证这条分支，注入的清理失败不作为 native 死亡证据。Win/Linux 原路径及未闭合资格保持。单线程收尾不提供 DOM 峰值内存上限，也不证明整个 Runtime 内存回收。
 
-纯 `webExtractorAsset()` 和 `webExtractorAssets()` 只返回实际选定 Worker 及同名 `.sha256` companion 的绝对位置，不读取文件、不打开 Worker。实际 loader 使用同一 getter 核验完整字节；默认 Service 用这对位置建立 Files 保护范围。显式可信 custom extractor 不加载默认 Worker，也不把默认位置当成其运行证明；宿主另行提供实际 runtime assets。准确文件和验证过的 terminal closure 属于资产身份，任意 bundle 的父目录不自动成为保护范围。
+纯 `webExtractorAsset()` 和 `webExtractorAssets()` 返回实际选定 Worker、同名 `.sha256` companion 及固定 observer preload／准确 source leaves或built chunk的绝对位置，不读取文件、不打开 Worker。实际 loader 使用同一 getter 核验原 parser 完整字节；默认 Service 从准确 metadata 建立 Files 保护范围。显式可信 custom extractor 不加载默认 Worker，也不把默认位置当成其运行证明；固定 observer 与 SQLite 共用，宿主另行提供 custom 运行资产。准确文件和验证过的 terminal closure 属于资产身份，任意 bundle 的父目录不自动成为保护范围。
 
 超过 64 KiB 的正文通过普通 Tool 的 Artifact publisher 发布，保留原 public scope 和 `modelContent` UTF-8 引用；下一普通 Model checkpoint 解析完整选定正文。较小正文保持 inline。缺少 Artifact 能力时明确失败，不隐式裁剪。Artifact hash/authority 和 ModelBody 处理仍由 Core 负责。
 

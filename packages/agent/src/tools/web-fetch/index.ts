@@ -1,4 +1,5 @@
 import type { Extension, Json, ToolContext, ToolResult } from '../../extensions';
+import { isWorkerCleanupFailure } from '../../platform/process/owned-worker';
 import { createPassiveWebExtractor, type WebExtractor } from './extraction';
 import {
   parsingLimit,
@@ -312,6 +313,9 @@ export function createWebFetchExtension(options: {
             }
             return { outcome: 'succeeded', content, details };
           } catch (error) {
+            // A cancelled request still cannot confirm that its owned parser stopped.
+            // Let the ordinary attempted-Tool path preserve outcome_unknown and stop dependencies.
+            if (isWorkerCleanupFailure(error)) throw error;
             if (context.signal.aborted) return { outcome: 'cancelled', content: 'web_cancelled' };
             const known =
               deadline.signal.reason instanceof WebFetchError ? deadline.signal.reason : error;

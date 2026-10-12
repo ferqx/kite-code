@@ -14,6 +14,7 @@ import {
   webExtractorAsset,
 } from '@kite-ai/agent/web-fetch';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { WorkerCleanupError } from '../../../src/platform/process/owned-worker';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -364,6 +365,108 @@ test('precise original command cancellation closes dispatched Web socket without
       'uncommitted partial',
     );
   } finally {
+    await f.close();
+  }
+}, 12000);
+
+test('exact Run cancellation cannot mask uncertain extractor cleanup; original unknown result is cold-readable without next Model', async () => {
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const diagnostic = { fixtureToken: 'original-cleanup-custody' };
+  let observedSignal: AbortSignal | undefined;
+  let cleanupFailure: WorkerCleanupError | undefined;
+  const f = await setup(
+    (req, res) => {
+      if (req.url === '/robots.txt') {
+        res.end('User-agent: *');
+        return;
+      }
+      res
+        .writeHead(200, { 'content-type': 'text/html' })
+        .end(
+          '<html><title>Original boundary</title><article><p>Original full data before cleanup</p></article></html>',
+        );
+    },
+    {
+      extractor: {
+        async extract(_input, { signal }) {
+          observedSignal = signal;
+          enter();
+          let abort!: () => void;
+          const aborted = new Promise<void>((resolve) => {
+            abort = resolve;
+          });
+          signal.addEventListener('abort', abort, { once: true });
+          if (signal.aborted) abort();
+          try {
+            await aborted;
+          } finally {
+            signal.removeEventListener('abort', abort);
+          }
+          cleanupFailure = new WorkerCleanupError(signal.reason, diagnostic);
+          throw cleanupFailure;
+        },
+      },
+    },
+  );
+  let entryTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const pending = f.run({ url: f.url });
+    await Promise.race([
+      entered,
+      new Promise<never>((_, reject) => {
+        entryTimer = setTimeout(() => reject(Error('original_extractor_not_entered')), 2000);
+      }),
+    ]);
+    clearTimeout(entryTimer);
+    const original = await f.store.getCommand('work1');
+    const runId = (original?.receipt as { runId?: string } | null)?.runId;
+    if (!runId) throw Error('original_run_identity_missing');
+    await f.runtime.cancelRun({
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'cancel-uncertain-original',
+      sessionId: 's',
+      subjectId: 'owner',
+      runId,
+    });
+    const result = await pending;
+    expect(observedSignal?.aborted).toBe(true);
+    expect(cleanupFailure?.cause === observedSignal?.reason).toBe(true);
+    expect(
+      (cleanupFailure as WorkerCleanupError & { originalThread: unknown }).originalThread,
+    ).toBe(diagnostic);
+    expect(result.result.id).toBe('work1');
+    expect(result.execution?.originCommandId).toBe('work1');
+    expect(result.execution?.runId).toBe(runId);
+    expect(result.execution?.status).toBe('outcome_unknown');
+    if (!result.execution) throw Error('original_unknown_tool_missing');
+    expect(result.execution?.result).toMatchObject({
+      outcome: 'outcome_unknown',
+      content: 'worker_exit_unconfirmed',
+    });
+    expect(result.model.requests.length).toBe(1);
+    expect(f.counts().requests).toBe(2);
+    const originalCommand = await f.store.getCommand('work1');
+    const originalData = await f.store.listMessages('s', { limit: 200 });
+    await f.runtime.close();
+    const cold = await openSqliteStore({
+      dataRoot: join(f.root, 'data'),
+      profile: 'new',
+      mode: 'readonly',
+    });
+    try {
+      expect((await cold.getMetadata()).storeId).toBe(f.expectedStoreId);
+      expect(await cold.getCommand('work1')).toEqual(originalCommand);
+      expect(await cold.getExecution(result.execution!.id)).toEqual(result.execution);
+      expect(await cold.listMessages('s', { limit: 200 })).toEqual(originalData);
+      expect(result.model.requests.length).toBe(1);
+    } finally {
+      await cold.close();
+    }
+  } finally {
+    clearTimeout(entryTimer);
     await f.close();
   }
 }, 12000);

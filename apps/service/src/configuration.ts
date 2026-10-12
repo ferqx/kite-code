@@ -358,6 +358,8 @@ export function createDefaultProcessConfiguration(options: {
         fileURLToPath(storage.module),
         fileURLToPath(storage.worker),
         fileURLToPath(storage.baseline),
+        fileURLToPath(storage.preload),
+        ...storage.observerModules.map((module) => fileURLToPath(module)),
         ...(options.shell
           ? [
               options.shell.supervisorPath,

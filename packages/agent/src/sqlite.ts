@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { canonicalJson } from './json';
 import { acquireFileLock, type FileLock, LockBusyError } from './platform/locks';
+import { createOwnedWorker, ownedWorkerAssets } from './platform/process/owned-worker';
 import { acquireProfileAccess, acquireSessionLock, type ProfileOptions } from './platform/profile';
 import { initializeDefaultSqliteEngine } from './sqlite-engine';
 import type { Store } from './storage/port';
@@ -23,6 +24,7 @@ export type SqliteStorePreflight = import('./storage/sqlite/connection').StorePr
 
 /** Exact loader assets; pure metadata, no database or filesystem access. */
 export function sqliteStorageAssets() {
+  const observer = ownedWorkerAssets();
   return Object.freeze({
     module: new URL(import.meta.url),
     worker: new URL(
@@ -30,6 +32,8 @@ export function sqliteStorageAssets() {
       import.meta.url,
     ),
     baseline: new URL('./storage/migrations/0001-baseline.sql', import.meta.url),
+    preload: observer.preload,
+    observerModules: observer.modules,
   });
 }
 
@@ -76,8 +80,10 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
   const engine = selectedEngine.qualification === 'selected' ? selectedEngine.selection : null;
   const access = acquireProfileAccess(options);
   let worker: Worker;
+  let owned: ReturnType<typeof createOwnedWorker>;
   try {
-    worker = new Worker(sqliteStorageAssets().worker.href);
+    owned = createOwnedWorker(sqliteStorageAssets().worker.href);
+    worker = owned.worker;
   } catch (error) {
     access.lock.release();
     throw error;
@@ -281,8 +287,14 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       { access: { ...access, lock: undefined }, readOnly: options.mode === 'readonly', engine },
     ]);
   } catch (error) {
-    worker.terminate();
-    access.lock.release();
+    try {
+      await owned.terminate();
+      access.lock.release();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], 'Database open and Worker cleanup failed.', {
+        cause: error,
+      });
+    }
     throw error;
   } finally {
     migration?.release();
@@ -453,6 +465,8 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       closing = true;
       closePromise = (async () => {
         let acknowledged = false;
+        let failedClose = false;
+        let closeError: unknown;
         try {
           // The seal rejects new calls, but pre-seal producers still drain before close.
           if (activeRequests)
@@ -461,11 +475,16 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
             });
           await request('close', []);
           acknowledged = true;
-        } finally {
+        } catch (error) {
+          failedClose = true;
+          closeError = error;
+        }
+        try {
           closed = true;
-          worker.terminate();
           rejectAll(new AgentError('store_closed'));
-          // Termination requests do not confirm native closure; retain original ownership on error.
+          await owned.terminate();
+          // DB ACK and the macOS original thread/right are separate closure facts.
+          // Deferred platforms retain their existing, explicitly unqualified path.
           if (acknowledged) {
             for (const held of owners.values()) held.lock.release();
             owners.clear();
@@ -473,7 +492,14 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
             recoveryLeases.clear();
             access.lock.release();
           }
+        } catch (cleanup) {
+          if (failedClose)
+            throw new AggregateError([closeError, cleanup], 'Database and Worker cleanup failed.', {
+              cause: closeError,
+            });
+          throw cleanup;
         }
+        if (failedClose) throw closeError;
       })();
       return closePromise;
     },

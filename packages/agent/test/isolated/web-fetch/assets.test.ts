@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { type createPassiveWebExtractor, webExtractorAsset } from '@kite-ai/agent/web-fetch';
 
 test('formal built public entry selects package Worker asset/hash; source path has no parser fallback and mismatching captured identity fails', async () => {
@@ -11,6 +13,22 @@ test('formal built public entry selects package Worker asset/hash; source path h
   expect(readFileSync(path.replace('.js', '.sha256'), 'utf8').trim()).toBe(hash);
   const built = await import(resolve(import.meta.dir, '../../../dist/tools/web-fetch/index.js'));
   expect(built.webExtractorAsset()).toBe(path);
+  const storage = sqliteStorageAssets();
+  expect(storage.preload.pathname.endsWith('/storage/worker/observer-preload.ts')).toBe(true);
+  expect(storage.observerModules.map((module) => module.pathname)).toEqual([
+    new URL('../../../src/platform/process/owned-worker.ts', import.meta.url).pathname,
+    new URL('../../../src/platform/process/worker-thread.darwin.ts', import.meta.url).pathname,
+  ]);
+  const builtStorage = await import(resolve(import.meta.dir, '../../../dist/sqlite.js'));
+  const actualBuiltAssets = builtStorage.sqliteStorageAssets();
+  expect(built.webExtractorAssets().preload).toBe(fileURLToPath(actualBuiltAssets.preload));
+  expect(actualBuiltAssets.preload.pathname.endsWith('/storage/worker/observer-preload.js')).toBe(
+    true,
+  );
+  for (const module of [actualBuiltAssets.preload, ...actualBuiltAssets.observerModules]) {
+    expect(existsSync(module)).toBe(true);
+    expect(module.pathname.endsWith('.js')).toBe(true);
+  }
   const extractor = built.createPassiveWebExtractor() as ReturnType<
     typeof createPassiveWebExtractor
   >;

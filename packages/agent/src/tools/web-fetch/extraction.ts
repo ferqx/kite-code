@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createOwnedWorker, ownedWorkerAssets } from '../../platform/process/owned-worker';
 import { WebFetchError } from './network';
 
 export interface WebExtractor {
@@ -24,7 +25,13 @@ export function webExtractorAsset(): string {
 }
 /** Exact worker/checksum loader selections, including trusted custom worker paths; pure metadata. */
 export function webExtractorAssets(worker = webExtractorAsset()) {
-  return Object.freeze({ worker, checksum: worker.replace(/\.js$/, '.sha256') });
+  const observer = ownedWorkerAssets();
+  return Object.freeze({
+    worker,
+    checksum: worker.replace(/\.js$/, '.sha256'),
+    preload: fileURLToPath(observer.preload),
+    observerModules: Object.freeze(observer.modules.map((module) => fileURLToPath(module))),
+  });
 }
 /** Explicit parser asset identity, no worker/DOM/network at import or factory time. */
 export function createPassiveWebExtractor(
@@ -60,12 +67,15 @@ export function createPassiveWebExtractor(
       if (expectedAssetHash !== undefined && expectedAssetHash !== hash)
         throw new WebFetchError('web_parser_unavailable');
       signal.throwIfAborted();
-      const worker = new Worker(path);
+      const owned = createOwnedWorker(path);
+      const worker = owned.worker;
       let removeAbort: (() => void) | undefined;
+      let result: { title: string; content: string } | undefined;
+      let failed = false;
+      let extractionError: unknown;
       try {
-        return await new Promise((resolve, reject) => {
+        result = await new Promise((resolve, reject) => {
           const abort = () => {
-            worker.terminate();
             reject(signal.reason ?? new WebFetchError('web_cancelled'));
           };
           signal.addEventListener('abort', abort, { once: true });
@@ -85,10 +95,26 @@ export function createPassiveWebExtractor(
           if (signal.aborted) abort();
           else worker.postMessage(structuredClone(input));
         });
-      } finally {
-        removeAbort?.();
-        worker.terminate();
+      } catch (error) {
+        failed = true;
+        extractionError = error;
       }
+      removeAbort?.();
+      try {
+        await owned.terminate();
+      } catch (cleanup) {
+        if (failed)
+          throw new AggregateError(
+            [extractionError, cleanup],
+            'Web parsing and Worker cleanup failed.',
+            {
+              cause: extractionError,
+            },
+          );
+        throw cleanup;
+      }
+      if (failed) throw extractionError;
+      return result!;
     },
   };
 }
