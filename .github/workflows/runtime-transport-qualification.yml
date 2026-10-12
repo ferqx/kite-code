@@ -68,6 +68,12 @@ jobs:
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-reconnection-pty.test.ts
       - name: Complete MCP authentication caller through the current candidate
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-auth-pty.test.ts
+      - name: Complete MCP configuration caller with original pending work
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-pty.test.ts
+      - name: Complete cold MCP configuration caller with explicit original lookup
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-cold-pty.test.ts
+      - name: Complete paired and shared Skills catalogue callers
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-skills-host.test.ts
       - run: bun run test:runtime:transport
       - if: runner.os != 'Windows'
         name: POSIX Profile locks, maintenance and recovery

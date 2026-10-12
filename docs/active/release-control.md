@@ -36,7 +36,7 @@ release／Required 的 Linux 消费者显式准备 `build-essential bubblewrap x
 
 transport 的共享 TUI 命令保持三平台完整文件，追加 composer／Workflow 问题／Planning，不过滤 Windows。Workflow 夹具与原 CLI 消费者已选择正式 built 默认 Service；Linux 准备与构建顺序由原 CI guard 核验。Windows 缺合格 script verifier 的门禁继续失败，不用替身、平台 skip 或局部绿色推导阶段退出；测试方法归[CLI owner](../../apps/cli/README.md#开发-tui-输入编辑)。
 
-transport 另接Tools查看、Source修改／批准、强制重连和Auth五个完整MCP独立Bun进程，Windows MSVC准备及当前八workspace构建先于消费，MCP先于原transport／shared调用者测试，原测试未移除。首DB前选择已审查候选engine的文件不能与已开库测试共进程；Mac原固定版本与nonMac准确builtin审查身份各保合同，manifest绑定保持。CI guard拒逐一漏文件／过滤／平台条件及合并进程。独立HTTP能力不以缺Windows Shell为替身或资格，本机正常通过不替代fault cleanup、系统Vault／浏览器或原生平台资格；准确方法、原期限和资源差异归[CLI owner](../../apps/cli/README.md#tui-mcp-目录与配置选择)，RSS／完整观测与阶段完整回归仍保门禁。
+transport 另接Tools查看、Source修改／批准、强制重连、Auth、配置与冷配置七个完整MCP独立Bun进程，以及paired／shared Skills完整目录，Windows MSVC准备及当前八workspace构建先于消费，MCP先于原transport／shared调用者测试，原测试未移除。首DB前选择已审查候选engine的文件不能与已开库测试共进程；Mac原固定版本与nonMac准确builtin审查身份各保合同，manifest绑定保持。CI guard拒逐一漏文件／过滤／平台条件及合并进程。独立HTTP能力不以缺Windows Shell为替身或资格，本机正常通过不替代fault cleanup、系统Vault／浏览器或原生平台资格；准确方法、原期限和资源差异归[CLI owner](../../apps/cli/README.md#tui-mcp-目录与配置选择)，Skills共享Windows端点为正式SID pipe，测试最后绑定启动前已选Profile／instance经公共Lifecycle正常关闭，POSIX仍保真实SIGTERM；原完整页／零效果／时限不改。RSS／完整观测与阶段完整回归仍保门禁。
 
 [日志 shell](../../scripts/ci/logged-shell.ts)保原 run 正文和 native shell 退出语义，20个 release 验证步骤及独立 stdio 的 shell／MCP 步骤各有准确 `dist/unified-evidence/*.log`。stdout／stderr 原字节同时透传控制台；日志写入、外部命令、信号或关闭失败保持非零。日志采用排他创建，artifact 用 `always()`／`if-no-files-found:error` 保存；不上传临时 Profile 内容。stdio 的 sealed 文件在自己的 fresh Bun 测试进程选择候选引擎，避免与 source 测试的进程全局 SQLite 冲突；全10文件与原断言／期限保持，详情归[测试入口](../../tests/README.md)。
 

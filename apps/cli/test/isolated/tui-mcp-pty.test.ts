@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -33,8 +34,8 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
 }
 
 test('80x24 source-free MCP selection and clear preserve original pending work and complete history', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-mcp-pty-'));
-  const evidenceRoot = `/private/tmp/kite-tui-mcp-pty-evidence-${randomUUID()}`;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-pty-')));
+  const evidenceRoot = join(tmpdir(), `kite-tui-mcp-pty-evidence-${randomUUID()}`);
   mkdirSync(evidenceRoot, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -106,7 +107,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
     },
   });
   let observer: ReturnType<typeof createClient> | undefined;
-  let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let stdout = '',
     stderr = '';
   let control: ReturnType<typeof Bun.serve> | undefined;
@@ -130,7 +131,11 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
     writeFileSync(join(evidenceRoot, 'candidate-build.log'), buildOut + buildErr);
     if (buildExit !== 0) throw Error('source_free_candidate_build_failed');
     const candidate = verifyTerminalBundle(join(root, 'candidate'));
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const built = await Bun.build({
       entrypoints: [join(repo, 'apps/cli/test/fixtures/tui-mcp-pty.ts')],
       target: 'bun',
@@ -464,76 +469,31 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
         }
       },
     });
-    const program = `import os,pty,subprocess,select,time,fcntl,termios,struct,re,json,urllib.request
-m,s=pty.openpty();fcntl.ioctl(s,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(artifact.executable)},${JSON.stringify(entrypoint)}],stdin=s,stdout=s,stderr=s,start_new_session=True);os.close(s);b=b'';all_output=b''
-def wait(text):
- global b,all_output
- end=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',b.decode(errors='replace'))):
-  if p.poll() is not None:raise RuntimeError('early exit '+b[-3000:].decode(errors='replace'))
-  if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+b[-5000:].decode(errors='replace'))
-  if select.select([m],[],[],.05)[0]:
-   data=os.read(m,65536);b+=data;all_output+=data
-def receive(timeout=.05):
- global b,all_output
- if select.select([m],[],[],timeout)[0]:
-  data=os.read(m,65536);b+=data;all_output+=data
-def drain(deadline):
- reads=0
- while select.select([m],[],[],0)[0]:
-  if reads>=16 or time.monotonic()>deadline:raise RuntimeError('owned_frame_drain_deadline')
-  receive(0);reads+=1
-def wait_draft(text):
- end=time.monotonic()+10
- while True:
-  drain(end)
-  frames=b.decode(errors='replace').split(chr(27)+'[?2026h')
-  complete=next((frame.split(chr(27)+'[?2026l')[0] for frame in reversed(frames[1:]) if chr(27)+'[?2026l' in frame),'')
-  frame=re.sub(re.escape(chr(27)+'[')+r'[0-?]*[ -/]*[@-~]','',complete)
-  footer=frame.rsplit('Development TUI ·',1)[-1]
-  if 'Session a ·' in footer and ' · Loading' not in footer and text in footer.splitlines():return
-  if p.poll() is not None:raise RuntimeError('early exit before current draft')
-  if time.monotonic()>end:raise RuntimeError('expected current draft '+text+' tail='+footer[-5000:])
-  receive()
-def key(value):
- global b
- drain(time.monotonic()+10)
- b=b'';os.write(m,value)
-def check(path):
- try:
-  with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:assert json.load(response)['passed']
- except urllib.error.HTTPError as error:raise RuntimeError(path+' '+error.read().decode())
-try:
- wait('New Run');key(b'owned pending task');wait('owned pending task');key(b'\\r');wait('approval [');check('baseline')
- key(b'/mcp');wait_draft('/mcp');key(b'\\r');wait('owned-server');wait('Reading this list does not connect');wait('Server list ready');key(b'\\x1b[B');wait('› owned-server ·');key(b'\\r');wait('Server: owned-server');wait('User settings');wait('Project settings');key(b'\\x1b[B');wait('› Enable · User settings');check('read-detail')
- key(b'\\r');wait('Confirm server change:');wait('Enter saves; Esc abandons');check('before-confirm');key(b'\\r');wait('Waiting for original result');check('approve-job')
- key(b'\\x1b[B'*2);wait('› Check original change');key(b'\\r');wait('Selection saved');key(b'\\x1b');wait('New Run');check('new-pending');wait('approval [');check('esc')
- key(b'/mcp');wait_draft('/mcp');key(b'\\r');wait('owned-server');wait('Server list ready');key(b'\\x1b[B');wait('› owned-server ·');key(b'\\r');wait('Server: owned-server');key(b'\\x1b[B'*3);wait('› Refresh servers');key(b'\\r');wait('owned-server');check('refresh');key(b'\\x03');wait('Up/Down explicit approval selection: none');check('ctrl-c')
- assert b'ORIGINAL_COMPLETE_HISTORY_TAIL' in all_output
- key(b'/clear');wait('/clear');key(b'\\r');wait('Up/Down explicit approval selection: none');check('clear');assert b'ORIGINAL_COMPLETE_HISTORY_TAIL' not in re.sub(rb'\\x1b\\[[0-?]*[ -/]*[@-~]',b'',b)
- key(b'PRIVATE_CARD_DRAFT');wait('PRIVATE_CARD_DRAFT');key(b'\\x0c');wait('PRIVATE_CARD_DRAFT');check('draft-clear');key(b'\\x11')
- end=time.monotonic()+6
- while p.poll() is None and time.monotonic()<end:
-  if select.select([m],[],[],.05)[0]:
-   try:all_output+=os.read(m,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;print(json.dumps({'pty':True,'columns':80,'rows':24,'pid':p.pid,'exit':p.returncode}))
-finally:
- with open(${JSON.stringify(join(evidenceRoot, 'terminal.txt'))},'wb') as f:f.write(all_output)
- if p.poll() is None:os.killpg(p.pid,9);p.wait(timeout=5)
- os.close(m)
-`;
-    python = Bun.spawn(['python3', '-c', program], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      cwd: root,
-      env: { PATH: process.env.PATH ?? '', HOME: join(root, 'home'), TMPDIR: root },
-    });
+    driver = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        join(import.meta.dir, '../fixtures/tui-mcp-selection-driver.ts'),
+        JSON.stringify({
+          executable: artifact.executable,
+          entrypoint,
+          root,
+          evidence: evidenceRoot,
+          controlUrl: control.url.href,
+        }),
+      ],
+      {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        cwd: root,
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+      },
+    );
     const outputs = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     stdout = outputs[0];
     stderr = outputs[1];
@@ -643,9 +603,11 @@ finally:
         join(evidenceRoot, 'http-ledger.jsonl'),
         readFileSync(join(root, 'http-ledger.jsonl')),
       );
-    if (python?.exitCode === null) {
-      python.kill('SIGKILL');
-      await python.exited;
+    if (driver?.exitCode === null) {
+      if (process.platform === 'win32') driver.send('mcp-selection-driver-stop');
+      else driver.kill('SIGINT');
+      const { ptyDeadline } = await import('../fixtures/tui-pty');
+      await ptyDeadline(driver.exited, 5000, 'owned_mcp_selection_driver_cleanup_unconfirmed');
     }
     observer?.disposeNetwork();
     await control?.stop(true);

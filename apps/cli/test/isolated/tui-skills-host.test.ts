@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { createClient } from '@kite-ai/client';
-import { bootstrapSchema } from '@kite-ai/service/daemon';
+import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
+import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
 
@@ -23,7 +25,11 @@ async function seedTrust(client: ReturnType<typeof createClient>, storeId: strin
 }
 for (const mode of ['paired', 'shared'] as const)
   test(`80x24 actual ${mode} TUI Skills reads full real catalogue and discards old scope replies without work`, async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-skills-'));
+    const root = realpathSync(
+      mkdtempSync(
+        join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'kite-tui-skills-'),
+      ),
+    );
     const workspace = join(root, 'workspace'),
       ledger = join(root, 'catalogue-reads'),
       ownedPid = join(root, 'owned-pid');
@@ -106,9 +112,15 @@ for (const mode of ['paired', 'shared'] as const)
       apiMajor: 1,
     };
     let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined,
-      python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+      driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let client: ReturnType<typeof createClient> | undefined;
-    const socket = join(root, 'd.sock');
+    let stopShared: () => Promise<void> = async () => {
+      throw Error('skills lifecycle missing');
+    };
+    const socket = selectDaemonEndpoint({
+      profileAccessKey: profile.profileAccessKey,
+      ...(process.platform === 'win32' ? {} : { explicitSocket: join(root, 'd.sock') }),
+    }).socket;
     try {
       let storeId: string;
       if (mode === 'paired') {
@@ -123,7 +135,7 @@ for (const mode of ['paired', 'shared'] as const)
           await seed.client.createWorkspace({
             expectedStoreId: storeId,
             id: 'w',
-            rootUri: `file://${workspace}`,
+            rootUri: pathToFileURL(workspace).href,
             name: 'owned',
           });
           await seedTrust(seed.client, storeId);
@@ -195,6 +207,31 @@ for (const mode of ['paired', 'shared'] as const)
           reader.releaseLock();
         }
         const boot = bootstrapSchema.parse(JSON.parse(frame));
+        stopShared = async () => {
+          const lifecycle = createServiceLifecycleClient({
+            endpoint: boot.httpEndpoint,
+            token: boot.token,
+            expected: {
+              profile: {
+                dataRoot: profile.dataRoot,
+                name: profile.profile,
+                accessKey: profile.profileAccessKey,
+              },
+              instanceId,
+            },
+          });
+          try {
+            try {
+              await lifecycle.shutdown('if_idle');
+            } catch (error) {
+              if (!(error instanceof ClientError && error.code === 'network_outcome_unknown'))
+                throw error;
+            }
+            if ((await daemon!.exited) !== 0) throw Error('skills shared exit not normal');
+          } finally {
+            lifecycle.disposeNetwork();
+          }
+        };
         client = createClient({
           endpoint: boot.httpEndpoint,
           token: boot.token,
@@ -211,7 +248,7 @@ for (const mode of ['paired', 'shared'] as const)
         await client.createWorkspace({
           expectedStoreId: storeId,
           id: 'w',
-          rootUri: `file://${workspace}`,
+          rootUri: pathToFileURL(workspace).href,
           name: 'owned',
         });
         await seedTrust(client, storeId);
@@ -238,57 +275,27 @@ for (const mode of ['paired', 'shared'] as const)
         control: provider.url.href,
         ...(mode === 'paired' ? { artifact } : { server: socket }),
       };
-      const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json,urllib.request
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));env=dict(os.environ);env['TUI_SKILLS_SETTINGS']=${JSON.stringify(JSON.stringify(settings))};p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';all_output=b''
-def wait(text,exact_line=False):
- global buffer,all_output
- end=time.monotonic()+10
- while True:
-  rendered=buffer.decode(errors='replace')
-  if exact_line:
-   frames=rendered.split(chr(27)+'[?2026h')
-   rendered=next((frame.split(chr(27)+'[?2026l')[0] for frame in reversed(frames[1:]) if chr(27)+'[?2026l' in frame),'')
-  rendered=re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',rendered)
-  if (text in rendered.splitlines()) if exact_line else (text in re.sub(r'\\s+',' ',rendered)):return
-  if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+buffer[-6000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:
-   data=os.read(master,65536);buffer+=data;all_output+=data
-def key(value):
- global buffer
- buffer=b'';os.write(master,value)
-def rows():return [json.loads(row) for row in open(${JSON.stringify(ledger)})]
-def counts():
- db=sqlite3.connect('file:'+${JSON.stringify(profile.databasePath)}+'?mode=ro',uri=True);values={table:db.execute('select count(*) from '+table).fetchone()[0] for table in ['session','run','execution','command','host_mutation']};db.close();return values
-try:
- wait('New Run >');baseline=counts();key(b'/skills');wait('/skills');key(b'\\r');wait('Knowledge Skills');wait('total 304');wait('Catalog read: verified');wait('Guide000 [available]');wait('a001-disabled [disabled]');wait('a002-broken [unavailable]');wait('a003-missing [unavailable]')
- key(b'\\x1b[B'*303);wait('Entry 304/304');wait('g299 [available]');key(b'\\x1b[A'*303);wait('Entry 1/304');wait('Guide000 [available]')
- original=rows();assert len(original)>1;entries=[entry for page in original for entry in page['value']['entries']];assert len(entries)==304;assert len({entry['id'] for entry in entries})==304;assert original[-1]['value']['complete'];assert len({page['value']['revision'] for page in original})==1
- assert next(entry for entry in entries if entry['id']=='a002-broken')['state']=='unavailable';assert next(entry for entry in entries if entry['id']=='a001-disabled')['state']=='disabled';assert next(entry for entry in entries if entry['id']=='a003-missing')['missingCapabilities']==['fixture.unavailable'];os.write(master,b'\\r');time.sleep(.1);assert counts()==baseline
- key(b'r');end=time.monotonic()+5
- while not os.path.exists(${JSON.stringify(join(root, 'held-page'))}):
-  if time.monotonic()>end:raise RuntimeError('refresh did not request original page')
-  time.sleep(.01)
- key(b'\\x1b');wait('New Run >');key(b'\\x12');wait('Select Session');key(b'\\x1b[A');wait('> Beta [b]',exact_line=True);key(b'\\r');wait('Session b · Idle')
- open(${JSON.stringify(join(workspace, 'a000', 'SKILL.md'))},'w').write('---\\nname: ScopeFresh000\\ndescription: refreshed real file\\n---\\nKnowledge only; never execute script.sh\\n')
- key(b'/skills');wait('/skills');key(b'\\r');wait('Catalog read: verified');wait('ScopeFresh000 [available]')
- urllib.request.urlopen(${JSON.stringify(`${provider.url.href}release-page`)}).read();time.sleep(.2);key(b'\\x1b[B');wait('ScopeFresh000 [available]');key(b'\\x1b[A');wait('ScopeFresh000 [available]');assert counts()==baseline
- key(b'\\x1b');wait('Session b');key(b'/skills');wait('/skills');key(b'\\r');wait('ScopeFresh000 [available]');wait('Read only');assert counts()==baseline;assert not os.path.exists(${JSON.stringify(join(root, 'script-effect'))});key(b'\\x03');wait('New Run >');key(b'\\x11')
- end=time.monotonic()+6
- while p.poll() is None and time.monotonic()<end:
-  if select.select([master],[],[],.05)[0]:
-   try:all_output+=os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;assert counts()==baseline
- print('SKILLS_ORIGINAL_COMPLETE')
-finally:
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+      driver = Bun.spawn(
+        [
+          process.execPath,
+          '--no-install',
+          fileURLToPath(new URL('../fixtures/tui-skills-driver.ts', import.meta.url)),
+          JSON.stringify({
+            root,
+            workspace,
+            databasePath: profile.databasePath,
+            ledger,
+            runner,
+            settings,
+            control: provider.url.href,
+          }),
+        ],
+        { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
+      );
       const [out, err, exitCode] = await Promise.all([
-        new Response(python.stdout).text(),
-        new Response(python.stderr).text(),
-        python.exited,
+        new Response(driver.stdout).text(),
+        new Response(driver.stderr).text(),
+        driver.exited,
       ]);
       if (exitCode) {
         console.error(out, err);
@@ -328,14 +335,18 @@ finally:
         expect((await client!.getView('b')).runs.length).toBe(0);
       }
     } finally {
-      if (python && python.exitCode === null) {
-        python.kill('SIGTERM');
-        await python.exited;
+      if (driver && driver.exitCode === null) {
+        if (process.platform === 'win32') driver.send('skills-driver-stop');
+        else driver.kill('SIGTERM');
+        await driver.exited;
       }
       client?.disposeNetwork();
       if (daemon && daemon.exitCode === null) {
-        daemon.kill('SIGTERM');
-        await daemon.exited;
+        if (process.platform === 'win32') await stopShared();
+        else {
+          daemon.kill('SIGTERM');
+          await daemon.exited;
+        }
       }
       releasePage();
       provider.stop(true);

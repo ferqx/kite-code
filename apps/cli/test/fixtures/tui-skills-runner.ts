@@ -1,4 +1,5 @@
 import { appendFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runTUIHost } from '../../host/tui';
 
 const settings = JSON.parse(process.env.TUI_SKILLS_SETTINGS!) as {
@@ -18,11 +19,11 @@ globalThis.fetch = Object.assign(
     if (url.pathname.includes('/skills')) {
       const value = await response.clone().json();
       appendFileSync(
-        `${settings.root}/catalogue-reads`,
+        join(settings.root, 'catalogue-reads'),
         `${JSON.stringify({ url: url.pathname, query: url.search, value })}\n`,
       );
       if (!url.searchParams.has('afterId') && ++starts === 2) {
-        writeFileSync(`${settings.root}/held-page`, 'held');
+        writeFileSync(join(settings.root, 'held-page'), 'held');
         await actual(`${settings.control}held-page`);
       }
     }
@@ -34,7 +35,7 @@ const exit = new AbortController();
 process.once('SIGTERM', () => exit.abort());
 await runTUIHost({
   exitSignal: exit.signal,
-  onLaunched: ({ pid }) => writeFileSync(`${settings.root}/owned-pid`, String(pid)),
+  onLaunched: ({ pid }) => writeFileSync(join(settings.root, 'owned-pid'), String(pid)),
   ...(settings.artifact ? { artifact: settings.artifact } : { server: settings.server }),
   dataRoot: settings.dataRoot,
   profile: 'development',

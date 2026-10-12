@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -37,8 +38,8 @@ type HttpRow = {
   body?: { kind?: string; commandId?: string };
 };
 test('80x24 cold TUI selects the second real original MCP intent from an empty catalogue with GET-only recovery', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-mcp-cold-pty-'));
-  const evidence = `/private/tmp/kite-mcp-cold-pty-evidence-${randomUUID()}`;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-mcp-cold-pty-')));
+  const evidence = join(tmpdir(), `kite-mcp-cold-pty-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -54,7 +55,7 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
   });
   let observer: ReturnType<typeof createClient> | undefined;
   let control: ReturnType<typeof Bun.serve> | undefined;
-  let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let artifact: CLIServiceArtifact | undefined;
   let storeId = '';
   let subjectId: string | undefined;
@@ -96,7 +97,11 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
     writeFileSync(join(evidence, 'candidate-build.log'), out + err);
     expect(exit).toBe(0);
     const candidate = verifyTerminalBundle(join(root, 'candidate'));
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const built = await Bun.build({
       entrypoints: [join(repo, 'apps/cli/test/fixtures/tui-mcp-cold-pty.ts')],
       target: 'bun',
@@ -318,88 +323,41 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
         }
       },
     });
-    const program = `import os,pty,subprocess,select,time,fcntl,termios,struct,re,json,urllib.request
-all_output=b''; p=None; m=None
-def publish_pid():
- with open(${JSON.stringify(join(root, 'pty-pids.jsonl'))}, 'a') as channel:
-  channel.write(json.dumps({'pid':p.pid,'pgid':os.getpgid(p.pid)})+'\\n');channel.flush();os.fsync(channel.fileno())
-def start():
- global p,m,b
- m,s=pty.openpty();fcntl.ioctl(s,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(artifact.executable)},${JSON.stringify(entrypoint)}],stdin=s,stdout=s,stderr=s,start_new_session=True);os.close(s);publish_pid();b=b''
-def current_frame():
- frames=b.decode(errors='replace').split('\\x1b[?2026h')
- raw=next((part.split('\\x1b[?2026l')[0] for part in reversed(frames[1:]) if '\\x1b[?2026l' in part),'')
- return re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',raw)
-def selected_label():
- return next((line.strip()[2:] for line in current_frame().splitlines() if line.strip().startswith('› ')),None)
-def wait(text, absent=None):
- global b,all_output
- end=time.monotonic()+10
- while True:
-  frame=re.sub(r'\\s+',' ',current_frame())
-  if text in frame and (absent is None or absent not in frame):return
-  if p.poll() is not None:raise RuntimeError('early exit '+b[-3000:].decode(errors='replace'))
-  if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+b[-5000:].decode(errors='replace'))
-  if select.select([m],[],[],.05)[0]:
-   data=os.read(m,65536);b+=data;all_output+=data
-def key(value):
- global b
- b=b'';os.write(m,value)
-def choose(label):
- global b,all_output
- end=time.monotonic()+10
- if selected_label()==label:return
- if selected_label()!='Project sources':
-  key(b'\\x1b[A'*64);wait('› Project sources')
- while selected_label()!=label:
-  previous=selected_label();key(b'\\x1b[B')
-  while selected_label() is None or selected_label()==previous:
-   if time.monotonic()>end:raise RuntimeError('original MCP selection did not move: '+label)
-   if select.select([m],[],[],.05)[0]:
-    data=os.read(m,65536);b+=data;all_output+=data
-def check(path):
- with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:return json.load(response)
-def quit():
- global m
- key(b'\\x11');end=time.monotonic()+6
- while p.poll() is None and time.monotonic()<end:
-  if select.select([m],[],[],.05)[0]:
-   try:os.read(m,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;pid=p.pid;os.close(m);m=None;return pid
-try:
- start();wait('New Run')
- for ordinal in [1,2]:
-  key(b'/mcp');wait('/mcp');key(b'\\r');wait('owned-server','Reading servers');wait('Server list ready');key(b'\\x1b[B');wait('› owned-server ·');key(b'\\r');wait('Server: owned-server');key(b'\\x1b[B');wait('› '+('Enable' if ordinal==1 else 'Disable')+' · User settings');key(b'\\r');wait('Confirm server change:');key(b'\\r');wait('Waiting for original result');row=check('approve-'+str(ordinal));key(b'\\x1b[B'*2);wait('› Check original change');key(b'\\r');wait('Selection saved');key(b'\\x1b');wait('New Run')
- warm=quit();row=check('warm-closed');second=row['originals'][1]
- start();wait('New Run');key(b'/mcp');wait('/mcp');key(b'\\r');wait('No configured MCP servers');wait('Original change: '+second);check('cold-open')
- choose('Original change: '+second);key(b'\\r');wait('Original change: '+second+' · Outcome unknown; check original change');check('cold-selected');choose('Check original change');key(b'\\r');wait('Selection saved');check('cold-lookup');key(b'\\x1b');wait('New Run');cold=quit();print(json.dumps({'columns':80,'rows':24,'warmPid':warm,'coldPid':cold,'exit':0}))
-finally:
- with open(${JSON.stringify(join(evidence, 'terminal.txt'))},'wb') as f:f.write(all_output)
- if p is not None and p.poll() is None:os.killpg(p.pid,9);p.wait(timeout=5)
- if m is not None:os.close(m)
-`;
-    python = Bun.spawn(['python3', '-c', program], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: {
-        ...process.env,
-        HOME: root,
-        KITE_CODE_HOME: join(root, 'owned-home'),
-        LANG: 'en_US.UTF-8',
-        LC_ALL: 'en_US.UTF-8',
-        TERM: 'xterm-256color',
-        NO_COLOR: '1',
+    driver = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        join(import.meta.dir, '../fixtures/tui-mcp-cold-driver.ts'),
+        control.url.href,
+        artifact.executable,
+        entrypoint,
+        root,
+        evidence,
+      ],
+      {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+        env: {
+          ...process.env,
+          HOME: root,
+          ...(process.platform === 'win32' ? { USERPROFILE: root } : {}),
+          KITE_CODE_HOME: join(root, 'owned-home'),
+          LANG: 'en_US.UTF-8',
+          LC_ALL: 'en_US.UTF-8',
+          TERM: 'xterm-256color',
+          NO_COLOR: '1',
+        },
       },
-    });
+    );
     const [stdout, stderr, code] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
-    writeFileSync(join(evidence, 'python-stdout.log'), stdout);
-    writeFileSync(join(evidence, 'python-stderr.log'), stderr);
+    writeFileSync(join(evidence, 'driver-stdout.log'), stdout);
+    writeFileSync(join(evidence, 'driver-stderr.log'), stderr);
     expect(code).toBe(0);
     const pids = JSON.parse(stdout) as { warmPid: number; coldPid: number };
     for (const pid of [
@@ -444,24 +402,35 @@ finally:
       let cleanupError: unknown;
       const cleanupPids = new Set<number>();
       try {
-        if (python?.exitCode === null) {
-          // SIGINT enters Python's finally, which kills only its owned TUI process group.
-          python.kill('SIGINT');
+        if (driver?.exitCode === null) {
+          // POSIX signal / Windows private IPC enters the held driver's own tree cleanup.
+          if (process.platform === 'win32') driver.send('owned-mcp-cold-driver-stop');
+          else driver.kill('SIGINT');
           const stopped = await new Promise<boolean>((resolve) => {
             const timer = setTimeout(() => resolve(false), 9000);
-            void python!.exited.then(() => {
+            void driver!.exited.then(() => {
               clearTimeout(timer);
               resolve(true);
             });
           });
-          if (!stopped) throw Error('python_cleanup_unconfirmed');
+          if (!stopped) throw Error('driver_cleanup_unconfirmed');
         }
         for (const row of ledger()) cleanupPids.add(row.pid);
         const channel = join(root, 'pty-pids.jsonl');
         if (existsSync(channel))
           for (const line of readFileSync(channel, 'utf8').trim().split('\n')) {
-            const row = JSON.parse(line) as { pid: number; pgid: number };
-            if (!Number.isSafeInteger(row.pid) || row.pid <= 0 || row.pgid !== row.pid)
+            const row = JSON.parse(line) as {
+              pid: number;
+              pgid?: number;
+              ownership: 'posix-process-group' | 'windows-process-tree';
+            };
+            if (
+              !Number.isSafeInteger(row.pid) ||
+              row.pid <= 0 ||
+              (process.platform === 'win32'
+                ? row.ownership !== 'windows-process-tree' || row.pgid !== undefined
+                : row.ownership !== 'posix-process-group' || row.pgid !== row.pid)
+            )
               throw Error('owned_pty_pid_channel_invalid');
             cleanupPids.add(row.pid);
           }
