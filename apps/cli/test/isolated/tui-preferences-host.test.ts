@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
-import { bootstrapSchema } from '@kite-ai/service/daemon';
+import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
 
@@ -37,7 +39,7 @@ async function seedModel(client: ReturnType<typeof createClient>, storeId: strin
 }
 for (const mode of ['paired', 'shared'] as const)
   test(`80x24 actual ${mode} TUI preferences persist colors and language without extra work and retain old facts on save failure`, async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-preferences-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-preferences-')));
     const workspace = join(root, 'workspace'),
       ownedPid = join(root, 'owned-pid');
     mkdirSync(workspace, { mode: 0o700 });
@@ -92,7 +94,10 @@ for (const mode of ['paired', 'shared'] as const)
     let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined,
       python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let client: ReturnType<typeof createClient> | undefined;
-    const socket = join(root, 'd.sock');
+    const socket = selectDaemonEndpoint({
+      profileAccessKey: profile.profileAccessKey,
+      ...(process.platform === 'win32' ? {} : { explicitSocket: join(root, 'd.sock') }),
+    }).socket;
     try {
       let storeId: string;
       if (mode === 'paired') {
@@ -107,7 +112,7 @@ for (const mode of ['paired', 'shared'] as const)
           await seed.client.createWorkspace({
             expectedStoreId: storeId,
             id: 'w',
-            rootUri: `file://${workspace}`,
+            rootUri: pathToFileURL(workspace).href,
             name: 'owned',
           });
           await seedTrust(seed.client, storeId);
@@ -196,7 +201,7 @@ for (const mode of ['paired', 'shared'] as const)
         await client.createWorkspace({
           expectedStoreId: storeId,
           id: 'w',
-          rootUri: `file://${workspace}`,
+          rootUri: pathToFileURL(workspace).href,
           name: 'owned',
         });
         await seedTrust(client, storeId);
@@ -218,58 +223,26 @@ for (const mode of ['paired', 'shared'] as const)
       if (client) await seedModel(client, storeId);
       const runner = join(repo, 'apps/cli/test/fixtures/tui-preferences-runner.ts');
       const preferencePath = join(profile.profilePath, 'ui', 'preferences.jsonc');
-      const transcript = `/private/tmp/kite-tui-preferences-${mode}-${randomUUID()}.pty.log`;
-      const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
-settings=${JSON.stringify(JSON.stringify({ root, dataRoot: profile.dataRoot, workspace, ...(mode === 'paired' ? { artifact } : { server: socket }) }))};pref=${JSON.stringify(preferencePath)};p=None;master=None;buffer=b'';all_output=b'';window_output=b''
-def spawn():
- global p,master,buffer,window_output
- master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));env=dict(os.environ);env['TUI_PREFERENCES_SETTINGS']=settings;env['TERM']='xterm-256color';env['FORCE_COLOR']='3';p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';window_output=b''
-def current_frame():
- text=buffer.decode(errors='replace');frames=re.findall(r'\\x1b\\[\\?2026h(.*?)\\x1b\\[\\?2026l',text,re.S)
- return frames[-1] if frames else text
-def wait(text,material=False):
- global buffer,all_output,window_output
- end=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',window_output.decode(errors='replace') if material else current_frame())):
-  if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+buffer[-7000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:
-   data=os.read(master,65536);buffer+=data;all_output+=data;window_output+=data
-def key(value):
- global buffer
- buffer=b'';os.write(master,value)
-def counts():
- db=sqlite3.connect('file:'+${JSON.stringify(profile.databasePath)}+'?mode=ro',uri=True);values={table:db.execute('select count(*) from '+table).fetchone()[0] for table in ['session','run','execution','command','host_mutation']};db.close();return values
-def close():
- global master
- key(b'\\x11');end=time.monotonic()+6
- while p.poll() is None and time.monotonic()<end:
-  if select.select([master],[],[],.05)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;os.close(master);master=None
-try:
- spawn();wait('ORIGINAL English model body stays exact.',material=True);baseline=counts();key(b'/theme');wait('/theme');key(b'\\r');wait('[teal]');wait('Confirmed preferences');assert re.search(b'38;(?:2;78;201;176|5;115)m',buffer)
- key(b'\\x1b[B');wait('> blue');key(b'\\r');wait('blue [blue] ✓');wait('Preference saved');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer);assert json.load(open(pref))['colorPreset']=='blue'
- key(b'\\x1b');wait('Session a');wait('ORIGINAL English model body stays exact.',material=True);key(b'/language');wait('/language');key(b'\\r');wait('Language');key(b'\\x1b[A');wait('> Simplified Chinese [zh-CN]');key(b'\\r');wait('偏好已保存');wait('简体中文 [zh-CN]');assert json.load(open(pref))['language']=='zh-CN'
- key(b'\\x1b');wait('会话 a');wait('新 Run >');wait('ORIGINAL English model body stays exact.',material=True);assert counts()==baseline
- wait('终端界面 · Ctrl+N 新工作区会话 · Ctrl+Q');wait('${mode === 'paired' ? '退出当前宿主' : '断开共享服务'}')
- key(b'/background');wait('/background');key(b'\\r');wait('原后台任务 · 会话 a');wait('当前快照中没有已核验的 Job');key(b'\\x1b');wait('会话 a');wait('新 Run >')
- key(b'/recovery');wait('/recovery');key(b'\\r');wait('显式恢复 · a');wait('Ctrl+L 查询原申请');key(b'\\x1b');wait('会话 a');wait('新 Run >')
- key(b'/rewind');wait('/rewind');key(b'\\r');wait('文件恢复：');wait('Enter 确认所选范围');key(b'\\x1b');wait('会话 a');wait('新 Run >')
- paste='Theme Language /Original/path\\n中文🙂e\\u0301';key(b'\\x1b[200~'+paste.encode()+b'\\x1b[201~');wait('[已粘贴 '+str(len(paste))+' 个字符]');key(b'\\x7f');wait('新 Run >');assert counts()==baseline
- print('CHINESE_OWNED_PANELS_AND_PASTE')
- key(b'/theme');wait('/theme');key(b'\\r');wait('主题');wait('blue [blue] ✓');os.rename(pref,pref+'.saved');os.mkdir(pref,0o700)
- key(b'\\x1b[B');wait('> purple');key(b'\\r');wait('tui_preferences_unavailable');wait('保留原值');wait('blue [blue] ✓');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer);assert counts()==baseline
- os.rmdir(pref);os.rename(pref+'.saved',pref);key(b'r');wait('blue [blue] ✓');key(b'\\x1b');wait('会话 a');wait('新 Run >');close();assert counts()==baseline
- spawn();wait('会话 a');wait('ORIGINAL English model body stays exact.',material=True);key(b'/theme');wait('/theme');key(b'\\r');wait('主题');wait('blue [blue] ✓');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer)
- key(b'\\x1b');wait('会话 a');wait('新 Run >');key(b'/language');wait('/language');key(b'\\r');wait('语言');wait('简体中文 [zh-CN]');key(b'\\x1b');wait('会话 a');wait('新 Run >');wait('ORIGINAL English model body stays exact.',material=True);close();assert counts()==baseline;assert json.load(open(pref))=={'colorPreset':'blue','language':'zh-CN'}
- print('PREFERENCES_ORIGINAL_COMPLETE')
-finally:
- open(${JSON.stringify(transcript)},'wb').write(all_output)
- if p and p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- if master is not None:os.close(master)
-`;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+      const transcript = join(tmpdir(), `kite-tui-preferences-${mode}-${randomUUID()}.pty.log`);
+      python = Bun.spawn(
+        [
+          process.execPath,
+          '--no-install',
+          fileURLToPath(new URL('../fixtures/tui-preferences-pty.ts', import.meta.url)),
+          JSON.stringify({
+            root,
+            dataRoot: profile.dataRoot,
+            workspace,
+            ...(mode === 'paired' ? { artifact } : { server: socket }),
+            runner,
+            preferencePath,
+            databasePath: profile.databasePath,
+            transcript,
+            mode,
+          }),
+        ],
+        { stdout: 'pipe', stderr: 'pipe' },
+      );
       const [out, err, exitCode] = await Promise.all([
         new Response(python.stdout).text(),
         new Response(python.stderr).text(),

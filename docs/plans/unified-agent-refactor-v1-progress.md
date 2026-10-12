@@ -5101,3 +5101,31 @@ PTY实录显示首次替换连接已ready、原RPC四次、Model零调用，但�
 | 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归依赖前述适用门禁闭合。当前37能力仍partial、wholeV13=false／phaseExit=false，不提前删除或宣布阶段退出。 |
 
 新增闭合范围是Files完整TUI测试的三端源码接线与实际macOS合同验证；本轮没有新正式业务authority迁移或生产旧路径退役。平台专项Unix socket与macOS Shell原生测试仍保各自平台条件，不靠删平台限定假称三端支持。RSS／完整观测及Win/Linux实际资格继续未闭合，无push／PR／发布／Actions触发。
+
+## 2026-10-12：普通恢复、偏好与 MCP 连接的完整三端测试迁移
+
+前片Files测试已正常本地提交 `bf7b354d03a1a18c3ef7c2c32b480f44679f7c1c` 并结束。本轮按最高共享验收依赖，直接移植[/recovery](../../apps/cli/test/isolated/tui-recovery-host.test.ts)、[/theme／language](../../apps/cli/test/isolated/tui-preferences-host.test.ts)与[/mcp连接](../../apps/cli/test/isolated/tui-mcp-connection-pty.test.ts)完整用户链；三个原Python POSIX驱动已移除。生产功能、权限、原申请格式和公开API未改。本机验证限定macOS，Win/Linux原生仍由后续Actions处理。
+
+恢复保Run／interrupt／report原目标、真实POST及首GET丢回执、Ctrl+C不取消／Ctrl+L只原GET、两个宿主／Service实际强杀后原journal冷重开、唯一warm POST／cold零POST、原审查proof和effect once。偏好保paired/shared两模式的实际ANSI、原英文正文、中文自有面板／Unicode粘贴、保存失败旧值及恢复重读、两次宿主退出／冷持久化、五表五次真实只读计数不变。MCP连接保暖新建／复用、两原ID冷选择零查询、明确原GET零重放、独立新Confirm、原Job审批、Model／credential0、paired排空与shared detach。三者均沿现行普通业务入口，不把一个journal或窗口另建长期目标。
+
+四类TUI driver复用[CLI测试PTY原语](../../apps/cli/test/fixtures/tui-pty.ts)：Bun PTY／ConPTY、当前完整parsed buffer、输入checkpoint、exit／EOF及所属树终止由一处负责；业务流程和预算仍归各driver。Files原20／10＋3／70—80秒保持，新增三入口分别保原10秒步骤、6＋3秒退出、30／40／180秒整例，MCP control12秒、恢复原Service死亡6秒保持。原非强制Files cleanup允许Service先结束、仍终止活host并核事后ESRCH；强杀资格仍要求事前alive，不让提取后更严格检查阻止必要清理。root URI、tmpdir、依赖junction按平台；macOS MCP保短socket路径，默认与显式endpoint不能混用。Windows shared用正式SID namedpipe；MCP收尾以原bootstrap profile／instance的公共Lifecycle cancel等待实际daemon exit0，POSIX仍发真实SIGTERM，不计Windows OS信号证据。
+
+原完整基线macOS分别5pass／51expects／6.61秒、2pass／16expects／2.79秒、1pass／71expects／9.27秒。偏好与MCP初次受限sandbox基线在loopback port0失败、零业务断言，日志 `/private/tmp/kite-tui-preferences-baseline.log` 与 `/private/tmp/kite-mcp-connection-baseline.log` 保留；实际权限复跑原整文件通过，没有改断言。MCP移植两次真实红分别为默认／显式POSIX reservation不一致、菜单已经顶部但无效Up不产生新render，保于 `kite-mcp-connection-portable.log`／`-portable-settled.log`；修同一endpoint selection和按真实当前选择导航，没有放宽fresh门禁。三个移植整文件局部实际5／51、2／16、1／71通过，后续再按原CLI全owner调度完整收束。
+
+最终准确macOS CLI owner计划115文件／80作业，四并发、39parallel／75isolated／1exclusive，全部actual0／188.845秒；最后原独占导出52485ms。完整命令 `bun run /private/tmp/kite-tui-shared-cli-planned.ts` 从现行默认计划取全部CLI owner，先核文件集精确等于原发现集，不改根调度或扩大预算；原stdout `/private/tmp/kite-tui-shared-cli-planned.log` SHA `9212c21807d902f4e027b34abb98692f1e3bdb7e0a8b58ddfd749d2702f7ca6b` 与同prefix plan保全部80准确作业。新恢复9176ms、偏好6222ms、MCP16799ms，全部原fixture消费者亦包括在全集中。此通过不代表当前728文件／588作业整仓默认已执行；未变的其他owner复用607be489原完整证据，最终阶段仍须当前整仓回归。
+
+收据 `/private/tmp/kite-tui-shared-receipt.json` 核3837代码／配置输入及HEAD在最终窗口全等。三原文件32／10／41个静态Bun expect完整表达式逐字全等，对应实际循环51／16／71；恢复三段真实fetch丢响应逐字全等、14个Python assert与偏好13个assert均已映射保留。偏好57个原业务wait、真实readonly SQLite／Python码点长度语义有独立保全收据；MCP原fixture字节未改，原packet RPC／实际清理及71断言证据有独立收据。共用原语提取后的Files四文件与新恢复／画面回归六完整文件另actual0／12pass／109expects／20.800秒，未扩展已闭合故障矩阵。
+
+三端transport命令保原Files／草稿／E13并追加三个完整入口；原CI整文件actual0／21pass／213expects，逐一遗漏mutation以及原matrix／build／prepare／filter／skip拒绝保持。根与八workspace类型、边界／workspace／API／ownership／文档／plan门禁通过，生产／依赖／构建输入未改而复用前片build；正常本地提交hook继续独立执行。owner和tests入口同步方法及实际未验范围，手册用户行为保持。
+
+源码核五个剩余退出阻塞，依赖排序：
+
+| 顺序 | 实际入口、完整范围与验收 |
+| --- | --- |
+| 1 | 其他共享TUI夹具仍POSIX专用。最高项[输入composer](../../apps/cli/test/isolated/tui-composer-host.test.ts)需完整grapheme／emoji／粘贴／历史编辑、原UTF8只一次POST、删除块零POST、持久draft与跨Session不串、独立审批／正常退出，保10秒wait／5秒draft／6＋3秒exit／30秒整例。随后[Workflow问题](../../apps/cli/test/isolated/tui-workflow-question-host.test.ts)保完整replan／waive／cancel与原proof／丢答案只查／40秒，[Planning四入口](../../apps/cli/test/isolated/tui-planning-host.test.ts)保大Artifact review／原答案查回／queued afterRun／一次写入／30秒。迁移同一完整文件进三端，不删原断言或平台专项。 |
+| 2 | 正式Shell／Task／MCP原持续负载RSS仍 `+115.203125MiB>32MiB`。真实native allocation owner修复并满足原九点／完整正式负载前仍红，不重复参数对照。 |
+| 3 | 完整Runtime出生后代与activeResources／handles producer仍缺；原formal verifier拒绝保持，实际完整来源和资源计数成立才闭合，局部Job树／FD不能代替。 |
+| 4 | Win/Linux正式安装、真实代码版本切换、MCP、维护恢复、保数据卸载及Windows Shell原合同后端仍需真实平台证据；后续Actions／用户Windows验证保原门禁，缺后端仍fail closed，本轮不dispatch。 |
+| 5 | §35全能力出口、最后旧authority／依赖退役与阶段完整回归仍依赖前述门禁；当前37能力partial、wholeV13=false／phaseExit=false，不提前删除或宣布退出。 |
+
+新增闭合的是三个完整共享用户入口的测试驱动三端迁移、其实际macOS合同及当前CLI owner全集；本轮无新生产正式authority迁移或生产旧路径退役。原RSS、完整观测、平台与最终退役门禁保持，无push／PR／发布／Actions触发。

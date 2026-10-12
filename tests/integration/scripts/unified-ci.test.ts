@@ -116,7 +116,7 @@ test('shared draft and file-recovery caller tests run whole on every OS after th
     'utf8',
   );
   const command =
-    'bun test --parallel=1 --max-concurrency=1\n          apps/cli/test/file-recovery-pty.test.ts\n          apps/cli/test/isolated/tui-drafts-host.test.ts\n          apps/cli/test/isolated/file-recovery-argv.test.ts\n          apps/cli/test/isolated/tui-file-recovery.test.ts\n          apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts\n          apps/cli/test/isolated/tui-file-recovery-scopes.test.ts\n          apps/cli/test/isolated/tui-file-recovery-crash.test.ts\n          tests/isolated/unified-agent/extension-upgrade.test.ts';
+    'bun test --parallel=1 --max-concurrency=1\n          apps/cli/test/file-recovery-pty.test.ts\n          apps/cli/test/isolated/tui-drafts-host.test.ts\n          apps/cli/test/isolated/file-recovery-argv.test.ts\n          apps/cli/test/isolated/tui-file-recovery.test.ts\n          apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts\n          apps/cli/test/isolated/tui-file-recovery-scopes.test.ts\n          apps/cli/test/isolated/tui-file-recovery-crash.test.ts\n          apps/cli/test/isolated/tui-recovery-host.test.ts\n          apps/cli/test/isolated/tui-preferences-host.test.ts\n          apps/cli/test/isolated/tui-mcp-connection-pty.test.ts\n          tests/isolated/unified-agent/extension-upgrade.test.ts';
   for (const mutate of [
     (s: string) => s.replace('run: bun run build', 'run: bun run extra'),
     (s: string) => s.replace(command, 'echo shared caller'),
@@ -129,6 +129,9 @@ test('shared draft and file-recovery caller tests run whole on every OS after th
       'apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts',
       'apps/cli/test/isolated/tui-file-recovery-scopes.test.ts',
       'apps/cli/test/isolated/tui-file-recovery-crash.test.ts',
+      'apps/cli/test/isolated/tui-recovery-host.test.ts',
+      'apps/cli/test/isolated/tui-preferences-host.test.ts',
+      'apps/cli/test/isolated/tui-mcp-connection-pty.test.ts',
     ].map((file) => (s: string) => s.replace(`          ${file}`, '')),
     (s: string) =>
       s.replace('          tests/isolated/unified-agent/extension-upgrade.test.ts', ''),

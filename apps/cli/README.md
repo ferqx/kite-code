@@ -244,6 +244,8 @@ Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，�
 
 原[完整偏好 PTY](test/isolated/tui-preferences-host.test.ts)在 macOS paired/shared 两模式核真实语言保存后的宿主提示、空 Job 目录、显式恢复、只读文件恢复和 Unicode bracketed paste；原保存失败旧配色/语言、profile 冷重开、Provider1、五张业务表计数不增加及所属 Service 正常关闭/共享 detach 的断言保持。中文输入显示和原正文保真另有 UI 回归，实际版本与阶段完整默认见[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-的语言提示与原始内容)；该本机资格不证明其他平台或完整 V1.3 退出。
 
+该完整文件现共用 [CLI 测试 PTY 原语](test/fixtures/tui-pty.ts)与[偏好驱动](test/fixtures/tui-preferences-pty.ts)，三端保原真实ANSI配色、保存失败旧值、原英文正文、两次宿主退出与五张业务表的五次计数一致。SQLite使用真实只读连接；Unicode粘贴数量按码点计算，保原Python语义。Windows共享端点选择正式SID named pipe，POSIX保持显式socket；临时目录和workspace file URL按宿主选择。10秒读取、6＋3秒正常退出、40秒整例保持。三端CI执行同一完整文件，当前实际结果仍限macOS。
+
 ## 通用终端候选安装
 
 新 `release:terminal` 的构建、完整 npm/固定 Bun 闭包、归档、安装、升级、回滚和使用锁卸载见[终端制品 owner](docs/terminal-release.md)。安装入口使用完整候选身份与独立 `default` profile；真实 macOS 搬迁与生命周期已验证，根正式入口已切换，完整跨平台资格仍待取得。
@@ -267,6 +269,8 @@ CLI 保持原 Command 的 Store/Session/Run scope；原 Session 中没有独立 
 [recovery-host.test.ts](test/isolated/recovery-host.test.ts) 使用编译默认 Service、固定 loopback SDK、普通 Ask 原 files.write 审批和 disposable owned SQLite，在原 Service SIGKILL 后验证接续/中断、一次 POST 与首次原 GET 丢回执；编译 paired/shared CLI 核原卡一次回答、准确决定 revision、原 Run 完成或中断、保存目录与冷 reference lookup、零 cancel 与重复效果。[tui-recovery-host.test.ts](test/isolated/tui-recovery-host.test.ts) 使用真实 80×24 PTY，另验证 TUI 宿主 SIGKILL、配对 Service 退出和冷进程从 durable journal 只原 GET，Ctrl+C/Ctrl+L 保原 scope。
 
 恢复 PTY 的 Run、interrupt 与 report 窗口明确在一次原生写入中发送 Ctrl+C/Ctrl+L，沿同一原请求检查结果；暖/冷独立申请、原审批、单 POST、原 GET 与实际 Run/效果断言保持。共享 [恢复面板](../../packages/ui/src/tui/recovery-panel.tsx)区分控制批次与 bracketed paste，原材料和当前控件分别按其实际输出核对。完整默认负载及 scoped 结果归[总体进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不由驱动等待或有限组件反例推定全平台恢复资格。
+
+该完整恢复文件已移除POSIX Python驱动，由[恢复驱动](test/fixtures/tui-recovery-pty.ts)使用共用Bun PTY／ConPTY。生成宿主经现有编译夹具处理标准file URL与真实Ink/React闭包，不回退源码。10秒读取、6＋3秒退出及30秒整例保持；冷强杀先核原Service存活，POSIX实际SIGKILL／Windows所属树强制终止后核host exit、PTY EOF与原Service消失，保原6秒Service期限。冷原Store／Session／commandId、唯一warm POST、cold零POST与原GET均保留；正常退出必须0与EOF。三端CI接线和本机macOS证据分别记录，Win/Linux实际资格仍待后续执行。
 
 [recovery-report-host.test.ts](test/isolated/recovery-report-host.test.ts) 与同一 PTY fixture 使用显式 program-host afterTurn policy、冻结 reader 角色/model/Task 与真实原 `job.report`：父 Run 已完成，独立 Child Job 批准且效果一次，冷恢复只生成唯一来源绑定的 report Run，report completion 通过原 ledger/SQLite 核实。该证据只覆盖 configured host，不证明默认制品已启用后台汇报。当前 macOS 开发资格不代表完整公共报告目录、全部崩溃窗口、其他平台或正式旧入口切换。
 
@@ -339,7 +343,7 @@ kite caller lookup <sessionId> --input '<directory 中的完整原 intent JSON>'
 
 实际 [argv 三范围](test/isolated/file-recovery-argv.test.ts)、[CLI SIGKILL](test/isolated/file-recovery-crash.test.ts)、[物理丢回执](test/isolated/file-recovery-lost-replies.test.ts) 与 [第二 leg 漂移](test/isolated/file-recovery-second-leg-drift.test.ts) 使用源码外 compiled argv/default compiled Service、独立 HOME/profile、真实 SQLite/SDK 和固定兼容 Provider。真实 [80×24 PTY](test/isolated/tui-file-recovery.test.ts)、[另外两范围](test/isolated/tui-file-recovery-scopes.test.ts)、[TUI 丢回执](test/isolated/tui-file-recovery-lost-replies.test.ts) 与 [TUI 强杀冷恢复](test/isolated/tui-file-recovery-crash.test.ts) 验证目录/三范围选择、独立 Ask、原 GET 与明确第二 leg。
 
-四份 TUI 文件共用 [Bun PTY／ConPTY 驱动](test/fixtures/file-recovery-pty.ts)，保全部原业务断言及每次等待20秒、正常退出10＋3秒、整例70／80秒预算。当前卡片以 headless 解析后的完整终端缓冲判定，包含超过24行的正文；同一次输入后已清除的旧 render 不能满足等待，审批排除条件也检查完整当前画面。仅原 `material` 断言读完整输出流；[画面回归](test/file-recovery-pty.test.ts)核长卡与有／无同步标记的清屏效果。强杀前核原 Service PID 存活，POSIX 杀所属进程组、Windows `taskkill /t /f` 杀宿主子树，并分别核宿主退出、PTY EOF 与原 Service 消失；关闭旧 PTY 后冷启动，保两腿完整请求相等、Fork未开始及冷读取零POST。正常 Ctrl+Q 必须 exit0 与完整EOF。平台差异只在这些原语，HOME与Windows USERPROFILE均属独立临时数据。
+四份 TUI 文件共用 [Files 恢复驱动](test/fixtures/file-recovery-pty.ts)，其Bun PTY／ConPTY、完整当前画面、EOF／退出与树终止现归 [CLI 测试公共原语](test/fixtures/tui-pty.ts)，与普通恢复、偏好和MCP连接复用；各驱动继续拥有业务流程与原预算。Files保全部原业务断言及每次等待20秒、正常退出10＋3秒、整例70／80秒预算。当前卡片以 headless 解析后的完整终端缓冲判定，包含超过24行的正文；同一次输入后已清除的旧 render 不能满足等待，审批排除条件也检查完整当前画面。仅原 `material` 断言读完整输出流；[画面回归](test/file-recovery-pty.test.ts)核长卡与有／无同步标记的清屏效果。强杀前核原 Service PID 存活，POSIX 杀所属进程组、Windows `taskkill /t /f` 杀宿主子树，并分别核宿主退出、PTY EOF 与原 Service 消失；关闭旧 PTY 后冷启动，保两腿完整请求相等、Fork未开始及冷读取零POST。正常 Ctrl+Q 必须 exit0 与完整EOF。平台差异只在这些原语，HOME与Windows USERPROFILE均属独立临时数据。
 
 宿主编译保留已安装 Ink/React 依赖，不以 TS fallback 代替编译窗口；[编译夹具](test/fixtures/file-recovery-profile.ts)将生成入口的标准 file URL 解析回本机路径，依赖目录在 Windows 用 junction。[三端 transport workflow](../../.github/workflows/runtime-transport-qualification.yml)构建当前八workspace后执行全部四文件与画面回归，不删断言或过滤场景。本机资格仍限 macOS，Win/Linux 原生待后续 Actions，不代表正式旧 TUI 切换、Native 或阶段退出；Files 捕获范围由业务 owner 定义，不能扩称 Shell/外部编辑的完整 workspace snapshot。
 
@@ -404,6 +408,8 @@ accepted Command保持pending；配置已保存须原subject/Store/Command kind/
 [此前源码外80×24 PTY](test/isolated/tui-mcp-connection-pty.test.ts)1项61断言、10.85s，在固定文案locale修复后的fresh构建上，通过真实键盘暖申请、warm复用、paired退出、removed-source冷空目录选第二原ID零GET、显式原查回零POST，再恢复owned source并独立确认新申请。warm UI HTTP GET126/POST2、cold GET197/POST1，最后cold POST来自明确新确认；原查回ready但live=false，新申请新Job/created=true。Model/credential/Run0。shared TUI exit0时held Service仍live，随后持有的subprocess handle SIGTERM关闭并exit0；两TUI exit0、paired ESRCH、cleanupConfirmed=true、ownedroot删除。candidate `e25977303279ce68fc182f4db8f11030b9cde2c183d4717aed7774920de76212`，helper `b84e4e2fc7d02b2e2c1d81a3c940781a70d10140d1d13eb300d93d881ed288d5`，packet SHA `cbb47d49834713512c77dc0a2d378cf3a83c6edbfe013722a370c2452eab082b`。实际原IDs与分段计数保存在owned packet；红日志和旧sourcewindow保留。本例为英文实际终端，中文固定文案与外部metadata保真由[UI实际Ink测试](../../packages/ui/src/tui/README.md#mcp-显式连接与原申请)单独证明；正常生命周期不推定timeout/SIGKILL/异常cleanup或其他平台。v9原字节维护由[maintenance owner](../../packages/agent/src/maintenance/README.md#mcp-连接申请的独立离线资产)负责；完整OAuth、强制warm重连、增删与三平台仍未闭合。
 
 当前Source入口整合后的同一[connection PTY](test/isolated/tui-mcp-connection-pty.test.ts)明确选observed Server与原ID明细，适配新增Project sources/Review行。恢复原申请后按当前完整帧的选项标签进行有限导航，不再按固定两次Up推定Check位置；实际公开candidate 1项71断言、10.67s排空通过。保原普通申请、warm复用、原冷GET、独立新Confirm、shared detach与paired cleanup；准确原Store/Session核验、helper字节和原业务预算保持。旧菜单导航红与最新有限通过分别见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，当前完整默认资格独立核对。
+
+同一完整文件现用[连接驱动](test/fixtures/tui-mcp-connection-pty.ts)及共享Bun PTY／ConPTY替代Python。菜单已经在目标位置时直接核当前选择，实际移动后仍要求新画面，不从被擦除的raw render证明状态。shared启动和显式连接使用同一endpoint selection，Windows为正式SID named pipe；macOS保短socket临时路径，Linux使用系统临时目录。Windows正常收尾绑定原bootstrap profile／instance调用公共Lifecycle `cancel`并等待原held daemon exit0；macOS/Linux仍发真实SIGTERM。原10秒步骤、12秒control、6＋3秒正常退出和180秒整例不变；warm新建／复用、cold两原ID选择和明确原GET、独立新申请、Model／credential0、shared detach与paired ESRCH断言保留。三端workflow接线不代原生运行资格。
 
 ## TUI MCP 强制重连与原申请
 

@@ -10,7 +10,9 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
@@ -19,7 +21,7 @@ import { untilRecovery } from './recovery-profile';
 
 /** Programmatic finite afterTurn policy; actual default Task/SDK/SQLite, no forged report. */
 export async function recoveryReportProfile() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-report-caller-')),
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-report-caller-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' }),
     ledger = join(root, 'ledger'),
@@ -165,7 +167,7 @@ export async function recoveryReportProfile() {
       expectedStoreId: storeId,
       id: 'w',
       name: 'Owned',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
     });
     const trust = await client.getWorkspaceTrust('w', { storeId });
     await client.setWorkspaceTrust('w', {

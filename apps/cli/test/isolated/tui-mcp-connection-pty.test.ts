@@ -10,11 +10,17 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { ClientError, createClient, requiresInteractionAttachment } from '@kite-ai/client';
-import { bootstrapSchema } from '@kite-ai/service/daemon';
+import {
+  ClientError,
+  createClient,
+  createServiceLifecycleClient,
+  requiresInteractionAttachment,
+} from '@kite-ai/client';
+import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
@@ -46,8 +52,12 @@ type HttpRow = {
 };
 
 test('80x24 TUI explicitly requests cold connections and checks original warm/cold receipts without replay; paired drains and shared detaches', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-mcp-connection-'));
-  const evidence = `/private/tmp/kite-tui-mcp-connection-evidence-${randomUUID()}`;
+  const root = realpathSync(
+    mkdtempSync(
+      join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'kite-tui-mcp-connection-'),
+    ),
+  );
+  const evidence = join(tmpdir(), `kite-tui-mcp-connection-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -57,6 +67,7 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
     server: string | undefined;
   let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
   let daemonErrors: Promise<string> | undefined;
+  let stopShared: (() => Promise<void>) | undefined;
   const rpc: { phase: string; method: string }[] = [];
   const facts: unknown[] = [];
   let modelCalls = 0,
@@ -160,7 +171,11 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
         2,
       ),
     );
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const bundled = await Bun.build({
       entrypoints: [join(import.meta.dir, '../fixtures/tui-mcp-connection.ts')],
       outdir: root,
@@ -424,14 +439,24 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
           });
           const manifest = JSON.stringify(assets);
           writeFileSync(join(web, 'manifest.json'), manifest);
+          const sharedEndpoint = selectDaemonEndpoint({
+            profileAccessKey: profile.profileAccessKey,
+            ...(process.platform === 'win32' ? {} : { explicitSocket: join(root, 'daemon.sock') }),
+          });
           daemon = Bun.spawn([process.execPath, artifact!.entrypoint], {
             stdin: 'pipe',
             stdout: 'pipe',
             stderr: 'pipe',
+            env: {
+              ...process.env,
+              HOME: root,
+              KITE_CODE_HOME: join(root, 'owned-home'),
+              ...(process.platform === 'win32' ? { USERPROFILE: root } : {}),
+            },
           });
           daemonErrors = new Response(daemon.stderr).text();
           daemon.stdin.write(
-            `${JSON.stringify({ operation: 'start', startup: { profile: { dataRoot: profile.dataRoot, profile: profile.profile, profileAccessKey: profile.profileAccessKey }, instanceId: randomUUID(), buildId: 'owned-connection', token: randomUUID().replaceAll('-', '').repeat(2) }, workspace, socket: join(root, 'daemon.sock'), web: { directory: web, manifestSha256: sha(Buffer.from(manifest)) } })}\n`,
+            `${JSON.stringify({ operation: 'start', startup: { profile: { dataRoot: profile.dataRoot, profile: profile.profile, profileAccessKey: profile.profileAccessKey }, instanceId: randomUUID(), buildId: 'owned-connection', token: randomUUID().replaceAll('-', '').repeat(2) }, workspace, socket: sharedEndpoint.socket, web: { directory: web, manifestSha256: sha(Buffer.from(manifest)) } })}\n`,
           );
           daemon.stdin.end();
           const reader = daemon.stdout.getReader();
@@ -448,7 +473,25 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
             reader.releaseLock();
           }
           const boot = bootstrapSchema.parse(JSON.parse(text));
-          server = join(root, 'daemon.sock');
+          stopShared = async () => {
+            const lifecycle = createServiceLifecycleClient({
+              endpoint: boot.httpEndpoint,
+              token: boot.token,
+              expected: { profile: boot.profile, instanceId: boot.instanceId },
+            });
+            try {
+              try {
+                await lifecycle.shutdown('cancel');
+              } catch (error) {
+                if (!(error instanceof ClientError && error.code === 'network_outcome_unknown'))
+                  throw error;
+              }
+              await daemon!.exited;
+            } finally {
+              lifecycle.disposeNetwork();
+            }
+          };
+          server = sharedEndpoint.socket;
           settings();
           const sharedObserver = createClient({
             endpoint: boot.httpEndpoint,
@@ -553,86 +596,15 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
         return pending;
       },
     });
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json,urllib.request
-p=None;master=None;buffer=b''
-def control(path):
- with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:return json.load(response)
-def normalized():
- frames=buffer.split(b'\\x1b[?2026h')
- complete=next((frame.split(b'\\x1b[?2026l')[0] for frame in reversed(frames[1:]) if b'\\x1b[?2026l' in frame),b'')
- return re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',complete.decode(errors='replace')))
-def receive(timeout=.05):
- global buffer
- if select.select([master],[],[],timeout)[0]:
-  chunk=os.read(master,65536)
-  if not chunk:raise RuntimeError('owned_pty_eof')
-  buffer=(buffer+chunk)[-1048576:]
-def drain(deadline=None):
- reads=0
- while select.select([master],[],[],0)[0]:
-  if reads>=16:raise RuntimeError('owned_frame_drain_limit')
-  if deadline is not None and time.monotonic()>deadline:raise RuntimeError('owned_frame_drain_deadline')
-  receive(0);reads+=1
-def wait(text,compact=False):
- deadline=time.monotonic()+10
- while True:
-  drain(deadline)
-  if text in (normalized().replace(' ','') if compact else normalized()):return
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+normalized()[-5000:])
-  receive()
-def key(value):
- global buffer
- drain();buffer=b'';os.write(master,value)
-def choose(label):
- # Read the current choice instead of assuming offsets after a restored original.
- deadline=time.monotonic()+10
- key(b'\\x1b[A'*32);wait('› Project sources')
- for _ in range(32):
-  drain(deadline)
-  if '›'+label.replace(' ','') in normalized().replace(' ',''):return
-  previous=normalized();key(b'\\x1b[B')
-  while not normalized() or normalized()==previous:
-   if time.monotonic()>deadline:raise RuntimeError('owned_choice_deadline:'+label)
-   receive();drain(deadline)
- raise RuntimeError('owned_choice_unavailable:'+label)
-def selected_connection(command_id):
- # Only selected outcome details include their finite phase; list labels have no phase.
- wait('Originalconnection:'+command_id+'·Connectionoutcomeunknown;checkoriginal',True)
-def start(phase):
- global p,master,buffer
- master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
- p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(root, 'host.js'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True,env=dict(os.environ,HOME=${JSON.stringify(root)},KITE_CODE_HOME=${JSON.stringify(join(root, 'owned-home'))}))
- os.close(slave);buffer=b''
- with open(${JSON.stringify(join(evidence, 'pids.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'tuiPid':p.pid})+'\\n');log.flush();os.fsync(log.fileno())
- wait('New Run >')
-def request_connection():
- key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('Server list ready');key(b'\\x1b[B');wait('›'+${JSON.stringify(selectedServerId)}+'·enabled·available',True);key(b'\\r');wait('Server:'+${JSON.stringify(selectedServerId)}+'·http',True);wait('Source:')
- key(b'\\x1b[B'*6);wait('› Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:')
-def lookup_detail():
- choose('Check original connection');key(b'\\r');wait('Original catalogue ready')
- with open(${JSON.stringify(join(evidence, 'frames.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'frame':normalized()})+'\\n')
-def close():
- global master
- key(b'\\x11');deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.1)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;os.close(master);master=None
- with open(${JSON.stringify(join(evidence, 'exits.jsonl'))},'a') as log:log.write(json.dumps({'pid':p.pid,'exit':p.returncode})+'\\n')
-try:
- phase='warm';start(phase);request_connection();first=control('approve-new')['commandId'];lookup_detail();choose('Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:');second=control('approve-reuse')['commandId'];lookup_detail();wait('Reused original connection');close()
- control('cold');phase='cold';start(phase);key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('No configured MCP servers');choose('Original connection: '+second);key(b'\\r');selected_connection(second);control('cold-selected');choose('Check original connection');key(b'\\r');wait('Original catalogue ready');wait('Live connection not confirmed');control('cold-lookup');choose('Original connection: '+first);key(b'\\r');selected_connection(first);choose('Check original connection');key(b'\\r');wait('Original catalogue ready');wait('Live connection not confirmed');control('check');key(b'\\x1b');wait('New Run >');control('restore-source');request_connection();control('approve-new');lookup_detail();wait('Created by original request');close();control('detached');print('ORIGINAL_CONNECTION_WARM_COLD_COMPLETE')
-finally:
- try:
-  with open(${JSON.stringify(join(evidence, 'final-frame.txt'))},'wb') as log:log.write(buffer)
- finally:
-  try:
-   if p is not None and p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
-  finally:
-   if master is not None:os.close(master)
-`;
-    python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    python = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        join(import.meta.dir, '../fixtures/tui-mcp-connection-pty.ts'),
+        JSON.stringify({ root, evidence, controlUrl: control.url.href, selectedServerId }),
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
     const [pythonOut, pythonErr, pythonExit] = await Promise.all([
       new Response(python.stdout).text(),
       new Response(python.stderr).text(),
@@ -696,8 +668,13 @@ finally:
       });
       await collect(async () => {
         if (daemon?.exitCode === null) {
-          daemon.kill('SIGTERM');
-          await boundedExit(daemon.exited, 9000, 'owned_shared_daemon_exit_unconfirmed');
+          if (process.platform === 'win32') {
+            if (!stopShared) throw Error('owned_shared_lifecycle_missing');
+            await boundedExit(stopShared(), 9000, 'owned_shared_daemon_exit_unconfirmed');
+          } else {
+            daemon.kill('SIGTERM');
+            await boundedExit(daemon.exited, 9000, 'owned_shared_daemon_exit_unconfirmed');
+          }
         }
         if (daemon) expect(daemon.exitCode).toBe(0);
         if (daemonErrors) writeFileSync(join(evidence, 'daemon.log'), await daemonErrors);

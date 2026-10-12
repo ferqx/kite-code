@@ -10,8 +10,10 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
@@ -32,7 +34,7 @@ export async function untilRecovery(check: () => Promise<boolean>) {
 
 /** Default compatible SDK, actual original Auto ask_user card, real SIGKILL and owned SQLite. */
 export async function recoveryProfile() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-client-recovery-')),
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-client-recovery-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   mkdirSync(workspace, { mode: 0o700 });
@@ -155,7 +157,7 @@ export async function recoveryProfile() {
       expectedStoreId: storeId,
       id: 'w',
       name: 'Owned',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
     });
     await client.createSession({
       expectedStoreId: storeId,

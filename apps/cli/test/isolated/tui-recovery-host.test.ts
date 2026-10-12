@@ -1,58 +1,36 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { recoveryProfile } from '../fixtures/recovery-profile';
+import { runRecoveryPTY } from '../fixtures/tui-recovery-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
 for (const mode of ['run', 'interrupt'] as const)
   test(`80x24 actual TUI ${mode} retains original cold intent through lost receipt, Ctrl+C and Ctrl+L`, async () => {
     const f = await recoveryProfile();
-    let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
       const runner = join(f.root, 'runner.ts'),
         network = join(f.root, 'network');
       writeFileSync(
         runner,
-        `import {appendFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;let saved,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const options=args[1],path=new URL(String(args[0])).pathname,body=options?.body?JSON.parse(String(options.body)):null;appendFileSync(${JSON.stringify(network)},JSON.stringify({method:options?.method??'GET',path,body})+'\\n');const result=await actual(...args);if(options?.method==='POST'&&['run.resume','session.recover'].includes(body?.kind)){saved=body.commandId;await result.arrayBuffer();throw Error('committed response physically lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;await result.arrayBuffer();writeFileSync(${JSON.stringify(join(f.root, 'lost'))},'lost');throw Error('first original GET physically lost');}return result;},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
+        `import {appendFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;let saved,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const options=args[1],path=new URL(String(args[0])).pathname,body=options?.body?JSON.parse(String(options.body)):null;appendFileSync(${JSON.stringify(network)},JSON.stringify({method:options?.method??'GET',path,body})+'\\n');const result=await actual(...args);if(options?.method==='POST'&&['run.resume','session.recover'].includes(body?.kind)){saved=body.commandId;await result.arrayBuffer();throw Error('committed response physically lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;await result.arrayBuffer();writeFileSync(${JSON.stringify(join(f.root, 'lost'))},'lost');throw Error('first original GET physically lost');}return result;},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'service-pid'))},String(pid))});`,
       );
-      const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';full=b''
-def wait(text, material=False):
- global buffer,full
- deadline=time.monotonic()+10
- while True:
-  frames=buffer.decode(errors='replace').split('\\x1b[?2026h')
-  frame=next((part.split('\\x1b[?2026l')[0] for part in reversed(frames[1:]) if '\\x1b[?2026l' in part),'')
-  if text in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',full.decode(errors='replace') if material else frame)):return
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:
-   data=os.read(master,65536);buffer+=data;full+=data
-def key(value):
- global buffer
- buffer=b'';os.write(master,value)
-try:
- wait('Waiting for answer');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery')
- key(${JSON.stringify(mode === 'run' ? `run ${f.run.id}` : 'interrupt confirm')}.encode());wait(${JSON.stringify(mode === 'run' ? `run ${f.run.id}` : 'interrupt confirm')});key(b'\\r');wait('outcome_unknown');assert os.path.exists(${JSON.stringify(join(f.root, 'lost'))})
- key(b'\\x03\\x0c');wait(${JSON.stringify(mode === 'run' ? 'run · resumed' : 'interrupt · interrupted')})
- ${mode === 'run' ? `key(b'\\x1b');wait(${JSON.stringify(f.card.id.slice(0, 24))},True);wait('Up/Down explicit approval selection: none (Enter has no answer)');key(b'\\x1b[B');wait('only this call');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE',True)` : ''}
- key(b'\\x11')
- deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.05)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;print('ORIGINAL_RECOVERY_CONFIRMED')
-finally:
- open(${JSON.stringify(join(f.root, 'pty-output'))},'wb').write(full)
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
-      const [out, err, code] = await Promise.all([
-        new Response(python.stdout).text(),
-        new Response(python.stderr).text(),
-        python.exited,
-      ]);
+      const built = await compileFileRecoveryTUI(f.root, runner);
+      if (!built.success) throw new AggregateError(built.logs, 'recovery_tui_compile_failed');
+      const { out, err, code } = await runRecoveryPTY({
+        root: f.root,
+        runner: join(f.root, 'runner.js'),
+        profilePath: f.profile.profilePath,
+        network,
+        pidPath: join(f.root, 'service-pid'),
+        transcript: join(f.root, 'pty-output'),
+        mode,
+        runId: f.run.id,
+        storeId: f.storeId,
+        cardId: f.card.id,
+      });
       if (code !== 0) console.error(err);
       expect(code).toBe(0);
       expect(out).toContain('ORIGINAL_RECOVERY_CONFIRMED');
@@ -99,10 +77,6 @@ finally:
         expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
       }
     } finally {
-      if (python && python.exitCode === null) {
-        python.kill('SIGKILL');
-        await python.exited;
-      }
       f.close();
     }
   }, 30000);
@@ -110,7 +84,6 @@ finally:
 for (const kind of ['run', 'interrupt'] as const)
   test(`80x24 TUI host SIGKILL restores durable ${kind} unknown and performs only the original GET`, async () => {
     const f = await recoveryProfile();
-    let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     const transcript = `${f.root}-cold-${kind}.pty.log`;
     try {
       const runner = join(f.root, 'cold-runner.ts'),
@@ -118,53 +91,22 @@ for (const kind of ['run', 'interrupt'] as const)
         pidPath = join(f.root, 'service-pid');
       writeFileSync(
         runner,
-        `import {appendFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;let saved,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const options=args[1],path=new URL(String(args[0])).pathname,body=options?.body?JSON.parse(String(options.body)):null;appendFileSync(${JSON.stringify(network)},JSON.stringify({pid:process.pid,method:options?.method??'GET',path,body})+'\\n');const result=await actual(...args);if(options?.method==='POST'&&['run.resume','session.recover'].includes(body?.kind)){saved=body.commandId;await result.arrayBuffer();throw Error('committed recovery response lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;await result.arrayBuffer();throw Error('original GET lost');}return result;},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(pidPath)},String(pid))});`,
+        `import {appendFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;let saved,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const options=args[1],path=new URL(String(args[0])).pathname,body=options?.body?JSON.parse(String(options.body)):null;appendFileSync(${JSON.stringify(network)},JSON.stringify({pid:process.pid,method:options?.method??'GET',path,body})+'\\n');const result=await actual(...args);if(options?.method==='POST'&&['run.resume','session.recover'].includes(body?.kind)){saved=body.commandId;await result.arrayBuffer();throw Error('committed recovery response lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;await result.arrayBuffer();throw Error('original GET lost');}return result;},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(pidPath)},String(pid))});`,
       );
-      const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json
-master=None;p=None;buffer=b'';full=b'';owned=[]
-def launch():
- global master,p,buffer
- master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);owned.append(p);os.close(slave);buffer=b''
-def wait(text):
- global buffer,full
- deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:
-   data=os.read(master,65536);buffer+=data;full+=data
-def key(value):
- global buffer
- buffer=b'';os.write(master,value)
-try:
- launch();warm=p.pid;wait('Session s');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery');key(${JSON.stringify(kind === 'run' ? `run ${f.run.id}` : 'interrupt confirm')}.encode());wait(${JSON.stringify(kind === 'run' ? `run ${f.run.id}` : 'interrupt confirm')});key(b'\\r');wait('outcome_unknown')
- saved=json.load(open(${JSON.stringify(join(f.profile.profilePath, 'ui/recovery.json'))}));assert len(saved['records'])==1;original=saved['records'][0]['intent'];assert original['sessionId']=='s';assert original['request']['expectedStoreId']==${JSON.stringify(f.storeId)};assert saved['records'][0]['phase'] in ['submitting','outcome_unknown']
- service=int(open(${JSON.stringify(pidPath)}).read());os.killpg(p.pid,signal.SIGKILL);p.wait(timeout=3);assert p.returncode==-signal.SIGKILL;os.close(master);master=None
- deadline=time.monotonic()+6
- while True:
-  try:os.kill(service,0)
-  except ProcessLookupError:break
-  if time.monotonic()>deadline:raise RuntimeError('owned paired Service failed to exit after killed host')
-  time.sleep(.02)
- launch();cold=p.pid;assert cold!=warm;wait('Session s');key(b'/recovery');wait('/recovery');key(b'\\r');wait('outcome_unknown');wait(original['request']['commandId']);key(b'\\x03');time.sleep(.1);key(b'\\x0c');wait(${JSON.stringify(kind === 'run' ? 'run · resumed' : 'interrupt · interrupted')});wait(original['request']['commandId']);key(b'\\x11')
- deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.05)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0
- rows=[json.loads(line) for line in open(${JSON.stringify(network)})];writes=[row for row in rows if row['method']=='POST' and row.get('body') and row['body'].get('kind') in ['run.resume','session.recover']];assert len(writes)==1;assert writes[0]['pid']==warm;assert not [row for row in rows if row['pid']==cold and row['method']=='POST'];assert [row for row in rows if row['pid']==cold and row['path']=='/v1/commands/'+original['request']['commandId']];print('COLD_ORIGINAL_JOURNAL_ONLY_GET')
-finally:
- open(${JSON.stringify(transcript)},'wb').write(full)
- for owned_process in owned:
-  if owned_process.poll() is None:os.killpg(owned_process.pid,signal.SIGKILL);owned_process.wait()
- if master is not None:os.close(master)
-`;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
-      const [out, err, code] = await Promise.all([
-        new Response(python.stdout).text(),
-        new Response(python.stderr).text(),
-        python.exited,
-      ]);
+      const built = await compileFileRecoveryTUI(f.root, runner);
+      if (!built.success) throw new AggregateError(built.logs, 'recovery_tui_compile_failed');
+      const { out, err, code } = await runRecoveryPTY({
+        root: f.root,
+        runner: join(f.root, 'cold-runner.js'),
+        profilePath: f.profile.profilePath,
+        network,
+        pidPath,
+        transcript,
+        mode: kind,
+        cold: true,
+        runId: f.run.id,
+        storeId: f.storeId,
+      });
       console.log('PTY transcript', transcript);
       if (code !== 0) console.error(err);
       expect(code).toBe(0);
@@ -191,10 +133,6 @@ finally:
       expect(journal.records[0].phase).toBe(kind === 'run' ? 'resumed' : 'interrupted');
       expect(JSON.stringify(journal)).not.toMatch(/token|generation|lease/);
     } finally {
-      if (python && python.exitCode === null) {
-        python.kill('SIGKILL');
-        await python.exited;
-      }
       f.close();
     }
   }, 30000);
@@ -203,7 +141,6 @@ test('80x24 configured-host TUI original report ID creates one source-bound repo
   const { recoveryReportProfile } = await import('../fixtures/recovery-report-profile');
   const { mkdirSync } = await import('node:fs');
   const f = await recoveryReportProfile();
-  let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   const transcript = `${f.root}-report.pty.log`;
   try {
     mkdirSync(join(f.profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
@@ -214,42 +151,20 @@ test('80x24 configured-host TUI original report ID creates one source-bound repo
       network = join(f.root, 'report-network');
     writeFileSync(
       runner,
-      `import {appendFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;let saved,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const options=args[1],path=new URL(String(args[0])).pathname,body=options?.body?JSON.parse(String(options.body)):null;appendFileSync(${JSON.stringify(network)},JSON.stringify({method:options?.method??'GET',path,body})+'\\n');const result=await actual(...args);if(options?.method==='POST'&&path===${JSON.stringify(`/v1/sessions/s/job-reports/${f.reportId}/resume`)}){saved=body.commandId;await result.arrayBuffer();throw Error('committed original report recovery response lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;await result.arrayBuffer();throw Error('first original report recovery GET lost');}return result;},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
+      `import {appendFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;let saved,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const options=args[1],path=new URL(String(args[0])).pathname,body=options?.body?JSON.parse(String(options.body)):null;appendFileSync(${JSON.stringify(network)},JSON.stringify({method:options?.method??'GET',path,body})+'\\n');const result=await actual(...args);if(options?.method==='POST'&&path===${JSON.stringify(`/v1/sessions/s/job-reports/${f.reportId}/resume`)}){saved=body.commandId;await result.arrayBuffer();throw Error('committed original report recovery response lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;await result.arrayBuffer();throw Error('first original report recovery GET lost');}return result;},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'service-pid'))},String(pid))});`,
     );
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';full=b''
-def wait(text, material=False):
- global buffer,full
- deadline=time.monotonic()+10
- while True:
-  frames=buffer.decode(errors='replace').split('\\x1b[?2026h')
-  frame=next((part.split('\\x1b[?2026l')[0] for part in reversed(frames[1:]) if '\\x1b[?2026l' in part),'')
-  if text in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',full.decode(errors='replace') if material else frame)):return
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:
-   data=os.read(master,65536);buffer+=data;full+=data
-def key(value):
- global buffer
- buffer=b'';os.write(master,value)
-try:
- wait('Session s');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery');key(${JSON.stringify(`report ${f.reportId}`)}.encode());wait(${JSON.stringify(`report ${f.reportId}`)});key(b'\\r');wait('outcome_unknown');key(b'\\x03\\x0c');wait('report · resumed');key(b'\\x1b');wait('REPORT_ORIGINAL_CHILD_DONE',True);key(b'\\x11')
- deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.05)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;print('ORIGINAL_REPORT_RUN_CONFIRMED')
-finally:
- open(${JSON.stringify(transcript)},'wb').write(full)
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-    python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
-    const [out, err, code] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
-    ]);
+    const built = await compileFileRecoveryTUI(f.root, runner);
+    if (!built.success) throw new AggregateError(built.logs, 'recovery_tui_compile_failed');
+    const { out, err, code } = await runRecoveryPTY({
+      root: f.root,
+      runner: join(f.root, 'tui-report.js'),
+      profilePath: f.profile.profilePath,
+      network,
+      pidPath: join(f.root, 'service-pid'),
+      transcript,
+      mode: 'report',
+      reportId: f.reportId,
+    });
     console.log('PTY transcript', transcript);
     if (code !== 0) console.error(err);
     expect(code).toBe(0);
@@ -285,10 +200,6 @@ finally:
       ),
     ).toEqual([{ state: 'succeeded', attempt: 1, result_revision: 1, delivery: 'consumed' }]);
   } finally {
-    if (python && python.exitCode === null) {
-      python.kill('SIGKILL');
-      await python.exited;
-    }
     f.close();
   }
 }, 30000);

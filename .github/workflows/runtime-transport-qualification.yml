@@ -81,4 +81,7 @@ jobs:
           apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts
           apps/cli/test/isolated/tui-file-recovery-scopes.test.ts
           apps/cli/test/isolated/tui-file-recovery-crash.test.ts
+          apps/cli/test/isolated/tui-recovery-host.test.ts
+          apps/cli/test/isolated/tui-preferences-host.test.ts
+          apps/cli/test/isolated/tui-mcp-connection-pty.test.ts
           tests/isolated/unified-agent/extension-upgrade.test.ts
