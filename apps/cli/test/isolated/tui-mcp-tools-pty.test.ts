@@ -10,8 +10,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import {
   createClient,
@@ -48,8 +49,8 @@ type HttpRow = {
 };
 
 test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original generations without restoring authority', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-mcp-tools-'));
-  const evidence = `/private/tmp/kite-tui-mcp-tools-evidence-${randomUUID()}`;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-tools-')));
+  const evidence = join(tmpdir(), `kite-tui-mcp-tools-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -61,7 +62,7 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
   let modelCalls = 0,
     success = false,
     cleanupConfirmed = false;
-  let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let observer: ReturnType<typeof createClient> | undefined;
   let seed: Awaited<ReturnType<typeof launchPairedService>> | undefined;
@@ -171,7 +172,11 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
         2,
       ),
     );
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const bundled = await Bun.build({
       entrypoints: [join(import.meta.dir, '../fixtures/tui-mcp-tools.ts')],
       outdir: root,
@@ -445,77 +450,24 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
         return pending;
       },
     });
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json,urllib.request
-p=None;master=None;buffer=b''
-def control(path):
- with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:return json.load(response)
-def normalized():
- frames=buffer.split(b'\\x1b[?2026h')
- complete=next((frame.split(b'\\x1b[?2026l')[0] for frame in reversed(frames[1:]) if b'\\x1b[?2026l' in frame),b'')
- return re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',complete.decode(errors='replace')))
-def wait(text,compact=False):
- global buffer
- deadline=time.monotonic()+10
- while text not in (normalized().replace(' ','') if compact else normalized()):
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+normalized()[-5000:])
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
-def wait_seed(executionId):
- global buffer
- deadline=time.monotonic()+10
- while True:
-  frame=normalized()
-  if ('"executionId":"'+executionId+'"') in frame.replace(' ','') and 'toolsMetadata' in frame and 'New Run >' in frame and 'Up/Down explicit approval selection:' not in frame:
-   with open(${JSON.stringify(join(evidence, 'ready-frame.json'))},'w') as log:json.dump({'executionId':executionId,'frame':frame},log)
-   return
-  if time.monotonic()>deadline:raise RuntimeError('original refresh not rendered ready: '+frame[-5000:])
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
-def key(value):
- global buffer
- buffer=b'';os.write(master,value)
-def start(phase):
- global p,master,buffer
- master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
- p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(root, 'host.js'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True,env=dict(os.environ,HOME=${JSON.stringify(root)},KITE_CODE_HOME=${JSON.stringify(join(root, 'owned-home'))}))
- os.close(slave);buffer=b''
- with open(${JSON.stringify(join(evidence, 'pids.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'tuiPid':p.pid})+'\\n');log.flush();os.fsync(log.fileno())
- wait('New Run >')
-def tools(indices,generation):
- key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('Server list ready')
- key(b'\\x1b[B'*(3 if phase=='warm' else 2));wait('› Saved tool snapshots');key(b'\\r');wait('Generation ')
- if indices[generation-1]:key(b'\\x1b[B'*indices[generation-1])
- wait('› Generation '+str(generation));key(b'\\r');wait('Tools 1')
- key(b'\\x1b[B'*32);wait('› Next tools');key(b'\\r');wait('Tools 33')
- key(b'\\r');wait('Complete metadata');key(b'\\x1b[F');wait('FULL_METADATA_TAIL_V'+str(generation)+'_终点😀')
- with open(${JSON.stringify(join(evidence, 'frames.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'generation':generation,'kind':'metadataTail','frame':normalized()})+'\\n')
- key(b'\\x1b[D'*2);wait('INPUT_SCHEMA_TAIL_V'+str(generation)+'_终点😀',True)
- with open(${JSON.stringify(join(evidence, 'frames.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'generation':generation,'kind':'inputSchemaTail','frame':normalized()})+'\\n')
- key(b'\\x03');wait('New Run >')
-def close():
- global master
- key(b'\\x11');deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.1)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;os.close(master);master=None
- with open(${JSON.stringify(join(evidence, 'exits.jsonl'))},'a') as log:log.write(json.dumps({'pid':p.pid,'exit':p.returncode})+'\\n')
-try:
- phase='warm';start(phase);seeded=control('seed');indices=seeded['indices'];wait_seed(seeded['readyExecutionId']);tools(indices,1);tools(indices,2);control('check');close()
- control('cold');phase='cold';start(phase);indices=control('check')['indices'];tools(indices,1);tools(indices,2);control('check');close();print('ORIGINAL_TOOLS_WARM_COLD_COMPLETE')
-finally:
- try:
-  with open(${JSON.stringify(join(evidence, 'final-frame.txt'))},'wb') as log:log.write(buffer)
- finally:
-  try:
-   if p is not None and p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
-  finally:
-   if master is not None:os.close(master)
-`;
-    python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    driver = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        fileURLToPath(new URL('../fixtures/tui-mcp-tools-pty.ts', import.meta.url)),
+        JSON.stringify({
+          root,
+          evidence,
+          controlURL: control.url.href,
+          runner: join(root, 'host.js'),
+        }),
+      ],
+      { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
+    );
     const [pythonOut, pythonErr, pythonExit] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     writeFileSync(join(evidence, 'pty.log'), pythonOut + pythonErr);
     expect(pythonExit).toBe(0);
@@ -564,9 +516,10 @@ finally:
     try {
       observer?.disposeNetwork();
       await collect(async () => {
-        if (python?.exitCode === null) {
-          python.kill('SIGINT');
-          await boundedExit(python.exited, 9000, 'owned_python_exit_unconfirmed');
+        if (driver?.exitCode === null) {
+          if (process.platform === 'win32') driver.send('mcp-tools-driver-stop');
+          else driver.kill('SIGINT');
+          await boundedExit(driver.exited, 9000, 'owned_tools_driver_exit_unconfirmed');
         }
       });
       await collect(async () => {
@@ -596,7 +549,7 @@ finally:
           }
         }
       });
-      cleanupConfirmed = (python === undefined || python.exitCode !== null) && errors.length === 0;
+      cleanupConfirmed = (driver === undefined || driver.exitCode !== null) && errors.length === 0;
     } catch (error) {
       errors.push(error);
     } finally {

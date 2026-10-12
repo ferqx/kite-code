@@ -365,6 +365,8 @@ kite caller lookup <sessionId> --input '<directory 中的完整原 intent JSON>'
 
 该candidate使用默认1MiB MCP frame预算，实际schema约714KiB；Agent与Client超过1MiB原body分别有独立资格，不将这份PTY称为大于1MiB wire。正常暖/冷TUI与所属Service均确认退出，cleanup=true并删除ownedroot。默认全图曾暴露API完成早于TUI渲染、输入被待决卡吞掉的fixture竞态；现在在原10s内等最新完整Ink帧的准确原refresh result executionId、metadata及无审批Composer后才输入，不用旧累计画面提前命中。原180s期限、43断言和helper保持。此前默认来源、GET、按键及64cells行断开红日志保留；异常timeout/throw/SIGKILL清理未因正常退出取得资格。当前Tool查看不代替认证、重连、增删或三平台发行。
 
+同一[Tools完整文件](test/isolated/tui-mcp-tools-pty.test.ts)现使用[共享Bun PTY驱动](test/fixtures/tui-mcp-tools-pty.ts)，系统tmpdir／标准file URL／Windows junction和USERPROFILE只适配运输层。当前完整parsed render核原refresh ExecutionID／toolsMetadata／无审批Composer及每代后页Tool33，两暖冷代共8份metadata／schema尾帧；原23个Bun expect表达式和三次SDK独立Ask保持。原10秒步骤、12秒control、6＋3秒正常退出、9秒清理及180秒整例不变，诊断文件写失败仍继续清理所属host，不能放过未知清理。实际macOS原整例1pass／43expects／12.46秒，RPC4、Model／credential0、全UI GET及暖冷所属Service退出有原packet证明。Windows私有IPC仅停止测试driver进入finally，不证明OS信号；本机通过与三端源码接线不代原生资格。
+
 [tui-mcp.ts](host/tui-mcp.ts)仅通过公共Client接固定 `mcp.servers` Query、`mcp.server.select@1`普通Action与原Command/Execution/HostMutation GET。完整安全目录与UI选择合同归[TUI owner](../../packages/ui/src/tui/README.md#mcp-安全目录与原选择意图)；host不接原始Server配置或secret，读取零连接/凭据/Model。点击时封存实际Store/Session/Workspace/identity、完整read-set、server/enabled/scope和commandId；请求SHA按实际Core canonical input核，不能用HTTP bodyDigest互换。
 
 accepted Command保持pending；配置已保存须原subject/Store/Command kind/request SHA、原Action版本/Execution及成功结果binding、真实原config mutation请求摘要/安全CAS marker/applied receipt和公共HostMutation GET全部一致。派发失败只有明确effectAttempted:false才显示known failed；发布后SQLite receipt故障仍unknown，lookup只有原GET，不重POST或换CAS。
@@ -451,6 +453,10 @@ saved 必须同时核准确原 Command/subject/requestDigest、原 E 的 definit
 status只当前safe policy/backend/presence。lookup核原Caller C/subject/request digest/receipt Execution，再核mcp.auth.result的完整binding/input digest/phase/authStatus/effectAttempted；Command applied单独不显示认证成功。history无当前Source/W/Vault读取，新Clear/Revoke仍需fresh Source/read-set，不能借历史越域。pending/unknown阻同scope冲突，cancel用同一execution.cancel普通申请。
 
 TUI先Review再独立Enter确认，成功提示凭据保存和另行连接；冷选择零GET，明确Check才查原Caller/Query，关闭/切S只停Reader。现有asset实际含Auth才选v13，旧manifest/请求语法不扩大，A→B保原bytes/身份且不授新HTTP许可。[Host](test/isolated/tui-mcp-auth.test.ts)、[Caller契约](test/isolated/caller-auth-contract.test.ts)和[Ink](../../packages/ui/test/tui/mcp-auth.test.tsx)各保实际范围；当前默认图与历史红见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
+同一[来源修改完整文件](test/isolated/tui-mcp-source-mutation-pty.test.ts)现用[共享Bun驱动](test/fixtures/tui-mcp-source-mutation-driver.ts)替代独立Python驱动；原Service／CLI helper字节不改。Add／Remove、Review／Confirm与独立Ask、移除Source及Workspace后的冷原ID只查、公开v12换Store拒绝原读取、3532原journal字节与SHA、三次Ctrl+Q／EOF及四份Service正常收尾保持。16次原控制调用与93个原Bun expect表达式保持；原10／12／6＋3／60秒build／120秒整例不改。Mac固定3.51.3断言仍执行；nonMac按正式审查表校验真实builtin engine的准确version／sourceId，全部平台继续核原候选manifest绑定，不以自报版本或availability skip放行。原evidence排他新建、POSIX no-follow与fd fsync／close保持，Windows强制失败清理记录normal=false。实际macOS1pass／274expects／15.68秒；原生平台、系统Vault／浏览器和持续Soak仍按原门禁。
+
+这两个完整MCP消费者在[transport workflow](../../.github/workflows/runtime-transport-qualification.yml)分别用独立Bun进程运行，先准备Windows MSVC和当前八workspace构建，再执行MCP，随后保原transport与shared14命令。Source必须在首Database前选候选引擎，不能合并进已打开数据库的Bun进程；MCP HTTP行为不借用未闭合Windows Shell后端。CI guard拒绝漏命令／过滤／平台条件、合并Source进程及把旧transport前置，原所有测试保留。本轮准确输入、证据复用及门禁归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12mcp-tools-查看和-source-来源管理的完整三端测试)。
 
 [源码外80×24 Auth PTY](test/isolated/tui-mcp-auth-pty.test.ts)经公开 terminal builder、实际 paired Service/Runtime/SQLite 与 Client，真实键盘依次完成 Login、Refresh、Revoke、Login、Clear 的 Review 与独立 Enter Confirm。五个原 Command/Execution 唯一，UI仅五次 Auth POST；每次普通 Ask 核准确原 Execution/definition/revision，由 observer SDK 回答 approve_once，不能称为键盘审批。受控 AS 实际经过 discovery、两次 DCR/PKCE/callback、token、refresh 和 revoke，MCP RPC/Model均零，没有自动连接。
 

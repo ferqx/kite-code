@@ -36,6 +36,8 @@ release／Required 的 Linux 消费者显式准备 `build-essential bubblewrap x
 
 transport 的共享 TUI 命令保持三平台完整文件，追加 composer／Workflow 问题／Planning，不过滤 Windows。Workflow 夹具与原 CLI 消费者已选择正式 built 默认 Service；Linux 准备与构建顺序由原 CI guard 核验。Windows 缺合格 script verifier 的门禁继续失败，不用替身、平台 skip 或局部绿色推导阶段退出；测试方法归[CLI owner](../../apps/cli/README.md#开发-tui-输入编辑)。
 
+transport 另接[MCP Tools完整查看](../../apps/cli/test/isolated/tui-mcp-tools-pty.test.ts)及[Source来源管理](../../apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts)两个独立Bun进程，Windows MSVC准备及当前八workspace构建先于消费，MCP先于原transport／shared调用者测试，原测试未移除。Source首DB前必须初始化已审查候选engine，不能与已开库测试共进程；Mac固定版本与其他平台实际builtin审查身份各保原合同。独立HTTP能力不以缺Windows Shell为替身或资格，本机通过仍不扩大原生支持集合；准确方法归[CLI owner](../../apps/cli/README.md#tui-mcp-目录与配置选择)。
+
 [日志 shell](../../scripts/ci/logged-shell.ts)保原 run 正文和 native shell 退出语义，20个 release 验证步骤及独立 stdio 的 shell／MCP 步骤各有准确 `dist/unified-evidence/*.log`。stdout／stderr 原字节同时透传控制台；日志写入、外部命令、信号或关闭失败保持非零。日志采用排他创建，artifact 用 `always()`／`if-no-files-found:error` 保存；不上传临时 Profile 内容。stdio 的 sealed 文件在自己的 fresh Bun 测试进程选择候选引擎，避免与 source 测试的进程全局 SQLite 冲突；全10文件与原断言／期限保持，详情归[测试入口](../../tests/README.md)。
 
 整个 release job 从30分钟调整为60分钟，为构建、原Windows19分钟真代码整链和其余原安装／维护／TUI调用者留聚合时间；没有取得 hosted 超时证据，也没有放宽任何 fixture 的原期限。原 `always()` formal platform verifier、soak8外层／60—168分钟、RSS 32MiB与出生后代／activeResources／handles门禁保持。静态接线或本机局部通过不构成 G1、P6／§35／P7 或整体 V1.3 退出。

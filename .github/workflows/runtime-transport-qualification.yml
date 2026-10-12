@@ -53,6 +53,15 @@ jobs:
         name: Prepare Linux native verifier dependencies
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap
       - run: bun install --frozen-lockfile
+      - if: runner.os == 'Windows'
+        name: Prepare installed Windows x64 Native compiler
+        run: bun run scripts/release/prepare-windows-native-ci.ts
+      - name: Build the current eight workspaces for shared caller tests
+        run: bun run build
+      - name: Complete MCP Tools caller through the current candidate
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-tools-pty.test.ts
+      - name: Complete MCP Source caller in a fresh selected engine process
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts
       - run: bun run test:runtime:transport
       - if: runner.os != 'Windows'
         name: POSIX Profile locks, maintenance and recovery
@@ -63,17 +72,12 @@ jobs:
           packages/agent/test/isolated/maintenance/restore.test.ts
           apps/service/test/isolated/process-cleanup-retention.test.ts
       - if: runner.os == 'Windows'
-        name: Prepare installed Windows x64 Native compiler
-        run: bun run scripts/release/prepare-windows-native-ci.ts
-      - if: runner.os == 'Windows'
         name: Actual Windows private Store, Worker and LockFileEx contracts
         run: >-
           bun test --parallel=1 --max-concurrency=1
           packages/agent/test/isolated/windows-path-security/default.test.ts
           packages/agent/test/isolated/config/mcp-selection-windows.test.ts
           apps/desktop/test/isolated/windows-node-access.test.ts
-      - name: Build the current eight workspaces for shared caller tests
-        run: bun run build
       - name: Shared TUI drafts and file recovery through the current caller
         run: >-
           bun test --parallel=1 --max-concurrency=1

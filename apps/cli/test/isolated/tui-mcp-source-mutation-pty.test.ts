@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -25,6 +26,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { getLoadedSqliteEngine, initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { ClientError, createClient, requiresInteractionAttachment } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { assertSqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
 import type { TuiMcpSourceMutationFact } from '@kite-ai/ui/tui';
 import type { CLIServiceArtifact } from '../../host';
 import { parseMcpSourceMutationRecord } from '../../host/mcp-source-mutation-intents';
@@ -74,8 +76,8 @@ type Wire = {
 };
 
 test('80x24 basic source Add and exact Remove retain independent approval, cold original GET-only and foreign restored bytes', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-source-mutation-'));
-  const evidence = `/private/tmp/kite-tui-source-mutation-evidence-${randomUUID()}`;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-source-mutation-')));
+  const evidence = join(tmpdir(), `kite-tui-source-mutation-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -98,7 +100,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
   let artifact: CLIServiceArtifact | undefined,
     candidateAccess: ReturnType<typeof acquireArtifactAccess> | undefined;
   let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-    python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let seed: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     observer: ReturnType<typeof createClient> | undefined;
   let control: ReturnType<typeof Bun.serve> | undefined,
@@ -192,7 +194,12 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       manifestSha256: candidate.manifest.sqlite.manifestSha256,
     };
     const engine = initializeSqliteEngine(engineSelection);
-    expect(engine.version).toBe('3.51.3');
+    if (process.platform === 'darwin') expect(engine.version).toBe('3.51.3');
+    else {
+      const { driver, linkage, version, sourceId } = candidate.manifest.sqlite;
+      assertSqliteReleaseIdentity({ driver, linkage, version, sourceId }, engine);
+      expect(linkage).toBe('builtin');
+    }
     expect(engine.version).toBe(candidate.manifest.sqlite.version);
     expect(engine.sourceId).toBe(candidate.manifest.sqlite.sourceId);
     expect(getLoadedSqliteEngine()).toEqual(engine);
@@ -214,7 +221,11 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       expect(installed(name, serviceBuilt).version).toBe(dependencies[name]);
     }
     privateFile(join(evidence, 'service-dependencies.json'), dependencies);
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const helperPath = join(import.meta.dir, '../fixtures/tui-mcp-source-mutation-pty.ts');
     const compiled = await Bun.build({
       entrypoints: [helperPath],
@@ -235,8 +246,8 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
     privateFile(join(evidence, 'helper.json'), {
       helperSourceSha256: sha(readFileSync(helperPath)),
       compiledSha256: artifact.entrypointSha256,
-      pythonSha256: sha(
-        readFileSync(join(import.meta.dir, '../fixtures/tui-mcp-source-mutation-pty.py')),
+      driverSha256: sha(
+        readFileSync(join(import.meta.dir, '../fixtures/tui-mcp-source-mutation-driver.ts')),
       ),
       candidateDigest: candidate.digest,
     });
@@ -649,10 +660,11 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       },
     });
     writeFileSync(join(evidence, 'pty-owned.jsonl'), '', { mode: 0o600, flag: 'wx' });
-    python = Bun.spawn(
+    driver = Bun.spawn(
       [
-        'python3',
-        join(import.meta.dir, '../fixtures/tui-mcp-source-mutation-pty.py'),
+        process.execPath,
+        '--no-install',
+        join(import.meta.dir, '../fixtures/tui-mcp-source-mutation-driver.ts'),
         control.url.href,
         process.execPath,
         join(root, 'host.js'),
@@ -660,12 +672,16 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
         evidence,
         storeId,
       ],
-      { stdout: 'pipe', stderr: 'pipe' },
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+      },
     );
     const [ptyOut, ptyErr, ptyCode] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     writeFileSync(join(evidence, 'pty.log'), ptyOut + ptyErr, { mode: 0o600, flag: 'wx' });
     expect(ptyCode).toBe(0);
@@ -698,9 +714,10 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
     };
     await collect(async () => observer?.disposeNetwork());
     await collect(async () => {
-      if (python?.exitCode === null) {
-        python.kill('SIGINT');
-        await bounded(python.exited, 9000, 'owned_pty_cleanup_unconfirmed');
+      if (driver?.exitCode === null) {
+        if (process.platform === 'win32') driver.send('owned-source-mutation-driver-stop');
+        else driver.kill('SIGINT');
+        await bounded(driver.exited, 9000, 'owned_pty_cleanup_unconfirmed');
       }
     });
     await collect(async () => {
@@ -749,7 +766,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
         cleanupErrors.push(Error('owned_service_identity_duplicate'));
       if (
         controlWork.size ||
-        python?.exitCode === null ||
+        driver?.exitCode === null ||
         !serviceCleanupReceipts.every((row) => row.confirmed)
       )
         cleanupErrors.push(Error('candidate_lease_retained_unconfirmed'));
@@ -779,7 +796,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       }
     }
     cleanupConfirmed =
-      (python === undefined || python.exitCode !== null) &&
+      (driver === undefined || driver.exitCode !== null) &&
       (build === undefined || build.exitCode !== null) &&
       controlWork.size === 0 &&
       cleanupErrors.length === 0;

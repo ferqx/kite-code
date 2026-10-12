@@ -268,6 +268,19 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.run.trim().replace(/\s+/g, ' ') === required &&
                 unfiltered(step),
             );
+            const mcpCallers = [
+              'apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
+              'apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
+            ].map((file) =>
+              steps.findIndex(
+                (step) =>
+                  step.run === `bun test --parallel=1 --max-concurrency=1 ${file}` &&
+                  unfiltered(step),
+              ),
+            );
+            const transport = steps.findIndex(
+              (step) => step.run === 'bun run test:runtime:transport' && unfiltered(step),
+            );
             const prepare = steps.findIndex(
               (step) =>
                 step.if === "runner.os == 'Windows'" &&
@@ -277,6 +290,8 @@ export function checkUnifiedFormalConsumers(root: string): {
               build <= prepare ||
               caller <= build ||
               caller < 0 ||
+              mcpCallers.some((index) => index <= build || index >= caller) ||
+              mcpCallers.some((index) => index >= transport) ||
               job.if !== undefined ||
               job['runs-on'] !== `\${{ matrix.os }}` ||
               !['macos-15', 'ubuntu-24.04', 'windows-2025'].every(

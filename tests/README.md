@@ -18,6 +18,8 @@ Win/Linux 后续验证沿[现行 Actions 接线](../docs/active/release-control.
 
 同一三端命令已接完整[composer](../apps/cli/test/isolated/tui-composer-host.test.ts)、[Workflow 问题](../apps/cli/test/isolated/tui-workflow-question-host.test.ts)及[Planning 四入口](../apps/cli/test/isolated/tui-planning-host.test.ts)，共用上述 PTY 原语和 native driver，不依赖 Python 的 POSIX `pty`。原完整断言、实际 HTTP／SQLite／审批／终态与30／40／30秒预算保留。Workflow 及其 CLI JSON 消费者使用实际 built 默认 Service，移除 macOS 专用 wrapper；Linux transport 在消费前准备 compiler／Bubblewrap，Windows 缺合格 script verifier 仍保持真实失败，不删用例或替换权限后端。最终正文仅观察原问题提交之后的实际输出字节，Ctrl+L 清屏不改变原全文断言；当前答题就绪仍核当前原 Session／Question2／Answer。准确红绿和证据复用范围见[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12composerworkflow-问题和-planning-完整三端测试)。
 
+[MCP Tools完整查看](../apps/cli/test/isolated/tui-mcp-tools-pty.test.ts)和[Source来源管理](../apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts)现各用一条独立Bun命令进入同一三平台transport job，Windows编译器和当前八workspace构建在所有这些消费者之前；MCP先于原transport及shared14执行，原测试仍保留。Source在首次Database前选择准确候选engine，所以两文件不能合并进同一Bun进程。Mac原3.51.3断言保留，其他平台用公共审查身份与真实builtin linkage核实际engine，原version/sourceId和manifest绑定仍无条件。各自保两代暖冷完整metadata／schema尾、完整Add／Remove／Review／Confirm／独立审批／换Store冷原ID拒绝及正常退出，方法与10／12／6＋3秒步骤、180／120秒整例归[CLI owner](../apps/cli/README.md#tui-mcp-目录与配置选择)。新增guard只覆盖本次源码接线与必要进程隔离，不扩大已闭合故障矩阵，实际Win/Linux仍待后续验证。
+
 [CI 日志入口](../scripts/ci/logged-shell.ts)由 Actions 自定义 shell 接收带引号的原脚本路径，保留原 run 正文、stdout／stderr 字节和退出码。[完整日志测试](isolated/scripts/ci-logged-shell.test.ts)同时进入有限默认发现及三平台 stdio job；POSIX 核实际 bash，四项 Windows 用例仅由真实 `pwsh` 核 BOM／Unicode、外部 exit23、throw 与输出失败，其他宿主明确 skip。Linux 在完整原生测试前准备 compiler／Bubblewrap，窗口消费者另准备 Xvfb；Windows 使用原安装 MSVC 准备脚本。依赖缺失、运行失败和缺正式资格仍失败，不增加 availability skip、关闭 sandbox 或调低资源门禁。
 
 | 目录 | 当前负责范围 |

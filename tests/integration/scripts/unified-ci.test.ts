@@ -119,7 +119,36 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
     'bun test --parallel=1 --max-concurrency=1\n          apps/cli/test/file-recovery-pty.test.ts\n          apps/cli/test/isolated/tui-drafts-host.test.ts\n          apps/cli/test/isolated/file-recovery-argv.test.ts\n          apps/cli/test/isolated/tui-file-recovery.test.ts\n          apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts\n          apps/cli/test/isolated/tui-file-recovery-scopes.test.ts\n          apps/cli/test/isolated/tui-file-recovery-crash.test.ts\n          apps/cli/test/isolated/tui-recovery-host.test.ts\n          apps/cli/test/isolated/tui-preferences-host.test.ts\n          apps/cli/test/isolated/tui-mcp-connection-pty.test.ts\n          apps/cli/test/isolated/tui-composer-host.test.ts\n          apps/cli/test/isolated/tui-workflow-question-host.test.ts\n          apps/cli/test/isolated/tui-planning-host.test.ts\n          tests/isolated/unified-agent/extension-upgrade.test.ts';
   for (const mutate of [
     (s: string) => s.replace('run: bun run build', 'run: bun run extra'),
+    (s: string) =>
+      s
+        .replace('      - run: bun run test:runtime:transport\n', '')
+        .replace(
+          '      - name: Complete MCP Tools caller',
+          '      - run: bun run test:runtime:transport\n      - name: Complete MCP Tools caller',
+        ),
     (s: string) => s.replace(command, 'echo shared caller'),
+    ...[
+      'apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
+      'apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
+    ].flatMap((file) => {
+      const run = `run: bun test --parallel=1 --max-concurrency=1 ${file}`;
+      return [
+        (s: string) => s.replace(run, 'run: echo MCP caller'),
+        (s: string) =>
+          s.replace(run, run.replace('bun test ', 'bun test --test-name-pattern=never-match ')),
+        (s: string) => s.replace(run, `if: runner.os != 'Windows'\n        ${run}`),
+      ];
+    }),
+    (s: string) =>
+      s
+        .replace(
+          'run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-tools-pty.test.ts',
+          'run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-tools-pty.test.ts apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
+        )
+        .replace(
+          'run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts',
+          'run: echo combined caller',
+        ),
     (s: string) =>
       s.replace(command, command.replace('bun test ', 'bun test --test-name-pattern=never-match ')),
     (s: string) => s.replace('          apps/cli/test/isolated/file-recovery-argv.test.ts', ''),
