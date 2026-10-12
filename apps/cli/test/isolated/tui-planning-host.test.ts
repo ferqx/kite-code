@@ -2,14 +2,16 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { workflowQuestionProfile } from '../fixtures/workflow-question-profile';
 
 const repo = resolve(import.meta.dir, '../../../..');
 for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draft'] as const)
   test(`80x24 actual ${entrance} single Planning intent reviews full original Artifact and never inherits Full authority`, async () => {
     const f = await workflowQuestionProfile('waive');
-    let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     const body = `ORIGINAL_PLAN_UTF8 ${'原完整🙂e\u0301方案'.repeat(6500)} ORIGINAL_PLAN_FULL_TAIL`;
     let calls = 0,
       closing = false;
@@ -171,7 +173,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         await seed.client.createWorkspace({
           expectedStoreId: storeId,
           id: 'w',
-          rootUri: `file://${f.workspace}`,
+          rootUri: pathToFileURL(f.workspace).href,
           name: 'owned',
         });
         const trust = await seed.client.getWorkspaceTrust('w', { storeId });
@@ -216,65 +218,35 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         transcript = `${f.root}-plan.pty.log`;
       writeFileSync(
         runner,
-        `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;let originalAnswer,lostGet=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const path=new URL(String(args[0])).pathname,method=args[1]?.method??'GET',body=args[1]?.body?JSON.parse(String(args[1].body)):null;appendFileSync(${JSON.stringify(wire)},JSON.stringify({path,method,body})+'\\n');const response=await actual(...args);if(method==='GET'&&path.includes('/artifacts/')){writeFileSync(${JSON.stringify(join(f.root, 'plan-attachment.bin'))},new Uint8Array(await response.clone().arrayBuffer()));}if(method==='POST'&&path.endsWith('/answer')&&body?.answer?.kind==='plan_review'){originalAnswer=body.commandId;await response.arrayBuffer();throw Error('actual original plan answer POST response lost');}if(method==='GET'&&originalAnswer&&path==='/v1/commands/'+originalAnswer&&!lostGet){lostGet=true;await response.arrayBuffer();writeFileSync(${JSON.stringify(firstLost)},'actual original GET lost');throw Error('actual original plan GET response lost');}return response;},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'plan-owned-pid'))},String(pid))});`,
+        `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;let originalAnswer,lostGet=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const path=new URL(String(args[0])).pathname,method=args[1]?.method??'GET',body=args[1]?.body?JSON.parse(String(args[1].body)):null;appendFileSync(${JSON.stringify(wire)},JSON.stringify({path,method,body})+'\\n');const response=await actual(...args);if(method==='GET'&&path.includes('/artifacts/')){writeFileSync(${JSON.stringify(join(f.root, 'plan-attachment.bin'))},new Uint8Array(await response.clone().arrayBuffer()));}if(method==='POST'&&path.endsWith('/answer')&&body?.answer?.kind==='plan_review'){originalAnswer=body.commandId;await response.arrayBuffer();throw Error('actual original plan answer POST response lost');}if(method==='GET'&&originalAnswer&&path==='/v1/commands/'+originalAnswer&&!lostGet){lostGet=true;await response.arrayBuffer();writeFileSync(${JSON.stringify(firstLost)},'actual original GET lost');throw Error('actual original plan GET response lost');}return response;},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'plan-owned-pid'))},String(pid),{mode:0o600})});`,
       );
-      const enter =
-        entrance === 'scope-draft'
-          ? String.raw`choose('b','Other original Plan scope');wait('New Run >');key(b'\x1b[Z');wait('Planning next Run >');key(b'UNSENT_ORIGINAL_OTHER_PLAN');wait('UNSENT_ORIGINAL_OTHER_PLAN');choose('s','Original Plan');wait('New Run >');key(${JSON.stringify('/plan original single plan 中文🙂')}.encode());wait('/plan original single plan');key(b'\r')`
-          : entrance === 'active-queued'
-            ? String.raw`key(b'original parent task');wait('original parent task');key(b'\r');wait('Steer original active Run >');key(${JSON.stringify('/plan original single plan 中文🙂')}.encode());wait('/plan original single plan');key(b'\r');wait('input.follow_up: accepted');db=sqlite3.connect(${JSON.stringify(f.profile.databasePath)});assert db.execute("SELECT COUNT(*) FROM run WHERE session_id='s'").fetchone()[0]==1;assert db.execute("SELECT status FROM run WHERE session_id='s'").fetchone()[0]=='running';db.close();open(${JSON.stringify(join(f.root, 'original-model-release'))},'w').write('explicit owned original Model release')`
-            : entrance === 'slash-task'
-              ? String.raw`key(b'\x1b[Z');wait('Planning next Run >');key(b'\x1b[Z');wait('New Run >');key(${JSON.stringify('/plan original single plan 中文🙂')}.encode());wait('/plan original single plan');key(b'\r')`
-              : String.raw`key(b'/plan');wait('/plan');key(b'\r');wait('Planning next Run >');key(b'\x1b[Z');wait('New Run >');key(b'\x1b[Z');wait('Planning next Run >');key(${JSON.stringify('original single plan 中文🙂')}.encode());wait('original single plan');key(b'\r')`;
-      const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';full=b''
-def pump():
- global buffer,full
- if select.select([master],[],[],.05)[0]:
-  try:data=os.read(master,65536);buffer+=data;full+=data
-  except OSError:pass
-def wait(text):
- deadline=time.monotonic()+8
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
-  pump()
-def key(value):
- global buffer
- buffer=b'';os.write(master,value);until=time.monotonic()+.1
- while time.monotonic()<until:pump()
-def choose(id,title):
- key(b'\\x12');wait(title)
- for direction in [None,b'\\x1b[B',b'\\x1b[A']:
-  if direction:key(direction)
-  frames=buffer.decode(errors='replace').split(chr(27)+'[?2026h')
-  complete=next((frame.split(chr(27)+'[?2026l')[0] for frame in reversed(frames[1:]) if chr(27)+'[?2026l' in frame),'')
-  rendered=re.sub(re.escape(chr(27)+'[')+r'[0-?]*[ -/]*[@-~]','',complete)
-  if '> '+title+' ['+id+']' in rendered.splitlines():key(b'\\r');wait('Session '+id+' ·');return
- raise RuntimeError('original Session target not selected '+id)
-try:
- wait('New Run >');${enter};wait('plan_review');assert not os.path.exists(${JSON.stringify(join(f.workspace, 'before.txt'))}),'original Full wrote before plan';assert not os.path.exists(${JSON.stringify(join(f.workspace, 'after.txt'))}),'effect existed before user approval'
- key(b'\\x01');wait('ORIGINAL_PLAN_FULL_TAIL');key(b'approve accept_edits');wait('approve accept_edits');key(b'\\r');wait('interaction.answer: unknown');key(b'\\x0c');wait('interaction.answer: unknown');assert os.path.exists(${JSON.stringify(firstLost)});key(b'\\x0c');wait('interaction.answer: applied');wait('ORIGINAL_PLAN_ACTUALLY_COMPLETED')
- deadline=time.monotonic()+8
- while True:
-  db=sqlite3.connect(${JSON.stringify(f.profile.databasePath)});actual=db.execute("SELECT status,reason FROM run WHERE session_id='s' ORDER BY rowid DESC LIMIT 1").fetchone();db.close()
-  if actual[0]=='completed':break
-  if time.monotonic()>deadline:raise RuntimeError('actual original Run not completed '+repr(actual))
-  pump()
- ${entrance === 'scope-draft' ? String.raw`choose('b','Other original Plan scope');wait('Planning next Run >');wait('UNSENT_ORIGINAL_OTHER_PLAN')` : ''}
- key(b'\\x11')
- deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:pump()
- p.wait(timeout=3);assert p.returncode==0;open(${JSON.stringify(transcript)},'wb').write(full);print('ORIGINAL_PLAN_PT Y_COMPLETE')
-finally:
- open(${JSON.stringify(transcript)},'wb').write(full)
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+      const compiled = await compileFileRecoveryTUI(f.root, runner);
+      if (!compiled.success) throw new AggregateError(compiled.logs, 'owned Planning host build');
+      driver = Bun.spawn(
+        [
+          process.execPath,
+          '--no-install',
+          join(import.meta.dir, '../fixtures/tui-planning-pty.ts'),
+          JSON.stringify({
+            entrance,
+            root: f.root,
+            workspace: f.workspace,
+            databasePath: f.profile.databasePath,
+            runner: join(f.root, 'plan-runner.js'),
+            firstLost,
+            transcript,
+          }),
+        ],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          ...(process.platform === 'win32' ? { ipc() {} } : {}),
+        },
+      );
       const [out, err, exit] = await Promise.all([
-        new Response(python.stdout).text(),
-        new Response(python.stderr).text(),
-        python.exited,
+        new Response(driver.stdout).text(),
+        new Response(driver.stderr).text(),
+        driver.exited,
       ]);
       if (exit) console.error(err, out);
       expect(exit).toBe(0);
@@ -462,9 +434,10 @@ finally:
       }
     } finally {
       closing = true;
-      if (python && python.exitCode === null) {
-        python.kill();
-        await python.exited;
+      if (driver && driver.exitCode === null) {
+        if (process.platform === 'win32') driver.send('owned-planning-stop');
+        else driver.kill();
+        await driver.exited;
       }
       provider.stop(true);
       f.close();

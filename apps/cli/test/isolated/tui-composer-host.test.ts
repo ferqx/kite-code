@@ -2,13 +2,15 @@ import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createStdioPermissionReader, promptPermissionMode } from '../../src/permissions';
+import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { recoveryProfile } from '../fixtures/recovery-profile';
 
 const repo = resolve(import.meta.dir, '../../../..');
 test('80x24 actual composer edits graphemes and bracketed paste without premature POST or placeholder content', async () => {
   const f = await recoveryProfile();
-  let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let relay: ReturnType<typeof Bun.serve> | undefined;
   let closing = false;
   const transcript = `${f.root}-composer.pty.log`;
@@ -74,75 +76,31 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
     const expected = '首前中🙂改后' + paste;
     writeFileSync(
       runner,
-      `import{appendFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'composer',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
+      `import{appendFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'composer',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
     );
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';full=b''
-def pump():
- global buffer,full
- end=time.monotonic()+.1
- while time.monotonic()<end:
-  if select.select([master],[],[],.02)[0]:
-   data=os.read(master,65536);buffer+=data;full+=data
-def key(value):
- global buffer
- buffer=b'';os.write(master,value);pump()
-def wait(text):
- deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-6000:].decode(errors='replace'))
-  pump()
-def wait_selection(current,target):
- deadline=time.monotonic()+10
- begin=(chr(27)+'[?2026h').encode();end=(chr(27)+'[?2026l').encode()
- while True:
-  start=buffer.rfind(begin);finish=buffer.find(end,start+len(begin)) if start>=0 else -1
-  if finish>=0:
-   frame=buffer[start+len(begin):finish].decode(errors='replace')
-   lines=re.sub(chr(27)+r'\\[[0-?]*[ -/]*[@-~]','',frame).splitlines()
-   if any(line.startswith('Session '+current+' · ') for line in lines) and 'Select Session (arrows/Enter, Esc)' in lines and '> '+target in lines:
-    print('COMPOSER_SELECTION_FRAME '+current+' -> '+target,flush=True);return
-  if time.monotonic()>deadline:raise RuntimeError('expected current Session '+current+' chooser target '+target+' tail='+buffer[-6000:].decode(errors='replace'))
-  pump()
-def wait_file(path):
- deadline=time.monotonic()+10
- while not os.path.exists(path):
-  if time.monotonic()>deadline:raise RuntimeError('owned model request did not enter')
-  pump()
-def writes():return [row for row in [json.loads(line) for line in open(${JSON.stringify(network)})] if row['method']=='POST']
-try:
- wait('New Run');key(b'/rec');wait('/recovery');key(b'\\x1b');key(b'o');wait('/recovery');key(b'\\t');wait('/recovery');assert writes()==[]
- for _ in range(9):key(b'\\x7f')
- key('前中🙂e\\u0301后'.encode());key(b'\\x1b[H');key('首'.encode());key(b'\\x1b[F');key(b'\\x1b[D');key(b'\\x7f');key('改'.encode());key(b'\\x1b[F')
- key(b'\\x1b[200~'+('REMOVE_BLOCK\\n'+'discard '*30).encode()+b'\\x1b[201~');wait('Pasted');assert writes()==[];key(b'\\x7f');assert writes()==[]
- key(b'\\x1b[200~'+${JSON.stringify(paste)}.encode()+b'\\x1b[201~');wait('Pasted');assert writes()==[];key(b'\\r');wait('Steer original active Run');wait_file(${JSON.stringify(join(f.root, 'composer-model-entered'))});assert len(writes())==1;assert writes()[0]['body']['content']==${JSON.stringify(expected)}
- key(${JSON.stringify('A中🙂e\u0301Z')}.encode());key(b'\\x1b[H');key(b'\\x1b[C');key(b'\\x1b[3~');key(b'\\x1b[F');key(b'\\x1b[D');key(b'\\x7f');key(b'\\x1b\\r');key(b'\\x1b[A');key('行'.encode());key(b'\\x1b[B');key(b'\\x1b[H');key('次'.encode());assert len(writes())==1
- deadline=time.monotonic()+5
- while True:
-  drafts=json.load(open(${JSON.stringify(join(f.profile.profilePath, 'ui/tui.json'))}))
-  if any(row['sessionId']=='composer' and row['text']==${JSON.stringify('行A🙂\n次Z')} for row in drafts['drafts']):break
-  if time.monotonic()>deadline:raise RuntimeError('exact held draft not durable: '+json.dumps(drafts,ensure_ascii=False))
-  pump()
- key(b'\\x1b[F')
- for _ in range(6):key(b'\\x7f')
- open(${JSON.stringify(join(f.root, 'composer-model-release'))},'w').write('explicit owned model release');wait('approval [')
- key(b'\\x1b[B');wait('only this call');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE');assert len(writes())==2
- key(b'\\x1b[A');wait('Pasted');assert len(writes())==2;key(b'\\x1b[B');assert len(writes())==2
- key(b'\\x12');wait('Select Session');key(b'\\x1b[A');wait_selection('composer','Original recovery [s]');key(b'\\r');wait('Session s');key(b'ORIGINAL_SCOPE_TEXT');wait('ORIGINAL_SCOPE_TEXT');key(b'\\x12');wait('Select Session');key(b'\\x1b[B');wait_selection('s','Composer [composer]');key(b'\\r');wait('Session composer');key(b'COMPOSER_SCOPE_TEXT');wait('COMPOSER_SCOPE_TEXT');key(b'\\x12');wait('Select Session');key(b'\\x1b[A');wait_selection('composer','Original recovery [s]');key(b'\\r');wait('Session s');wait('ORIGINAL_SCOPE_TEXT');assert len(writes())==2
- key(b'\\x11');deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:pump()
- p.wait(timeout=3);assert p.returncode==0;print('COMPOSER_REAL_UTF8_ONCE')
-finally:
- open(${JSON.stringify(transcript)},'wb').write(full)
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-    writeFileSync(`${f.root}-composer-driver.py`, program);
-    python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    const built = await compileFileRecoveryTUI(f.root, runner);
+    if (!built.success) throw new AggregateError(built.logs, 'composer_tui_compile_failed');
+    driver = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        fileURLToPath(new URL('../fixtures/tui-composer-pty.ts', import.meta.url)),
+        JSON.stringify({
+          root: f.root,
+          runner: join(f.root, 'composer-runner.js'),
+          network,
+          profilePath: f.profile.profilePath,
+          paste,
+          expected,
+          transcript,
+        }),
+      ],
+      { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
+    );
     const [out, err, code] = await Promise.all([
-      new Response(python.stdout).text(),
-      new Response(python.stderr).text(),
-      python.exited,
+      new Response(driver.stdout).text(),
+      new Response(driver.stderr).text(),
+      driver.exited,
     ]);
     if (code !== 0) {
       console.error(err);
@@ -210,9 +168,10 @@ finally:
       f.reviewProof().map(({ state, outcome, decision }) => ({ state, outcome, decision })),
     ).toEqual(Array(2).fill({ state: 'succeeded', outcome: 'succeeded', decision: 'ask_user' }));
   } finally {
-    if (python && python.exitCode === null) {
-      python.kill('SIGKILL');
-      await python.exited;
+    if (driver && driver.exitCode === null) {
+      if (process.platform === 'win32') driver.send('composer-driver-stop');
+      else driver.kill('SIGINT');
+      await driver.exited;
     }
     closing = true;
     relay?.stop(true);

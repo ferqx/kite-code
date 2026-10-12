@@ -110,13 +110,13 @@ test('release source binding and three-platform matrix cannot silently shrink', 
   }
 });
 
-test('shared draft and file-recovery caller tests run whole on every OS after the current build', () => {
+test('shared TUI caller tests run whole on every OS after the current build', () => {
   const source = readFileSync(
     resolve(import.meta.dir, '../../../.github/workflows/runtime-transport-qualification.yml'),
     'utf8',
   );
   const command =
-    'bun test --parallel=1 --max-concurrency=1\n          apps/cli/test/file-recovery-pty.test.ts\n          apps/cli/test/isolated/tui-drafts-host.test.ts\n          apps/cli/test/isolated/file-recovery-argv.test.ts\n          apps/cli/test/isolated/tui-file-recovery.test.ts\n          apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts\n          apps/cli/test/isolated/tui-file-recovery-scopes.test.ts\n          apps/cli/test/isolated/tui-file-recovery-crash.test.ts\n          apps/cli/test/isolated/tui-recovery-host.test.ts\n          apps/cli/test/isolated/tui-preferences-host.test.ts\n          apps/cli/test/isolated/tui-mcp-connection-pty.test.ts\n          tests/isolated/unified-agent/extension-upgrade.test.ts';
+    'bun test --parallel=1 --max-concurrency=1\n          apps/cli/test/file-recovery-pty.test.ts\n          apps/cli/test/isolated/tui-drafts-host.test.ts\n          apps/cli/test/isolated/file-recovery-argv.test.ts\n          apps/cli/test/isolated/tui-file-recovery.test.ts\n          apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts\n          apps/cli/test/isolated/tui-file-recovery-scopes.test.ts\n          apps/cli/test/isolated/tui-file-recovery-crash.test.ts\n          apps/cli/test/isolated/tui-recovery-host.test.ts\n          apps/cli/test/isolated/tui-preferences-host.test.ts\n          apps/cli/test/isolated/tui-mcp-connection-pty.test.ts\n          apps/cli/test/isolated/tui-composer-host.test.ts\n          apps/cli/test/isolated/tui-workflow-question-host.test.ts\n          apps/cli/test/isolated/tui-planning-host.test.ts\n          tests/isolated/unified-agent/extension-upgrade.test.ts';
   for (const mutate of [
     (s: string) => s.replace('run: bun run build', 'run: bun run extra'),
     (s: string) => s.replace(command, 'echo shared caller'),
@@ -132,6 +132,9 @@ test('shared draft and file-recovery caller tests run whole on every OS after th
       'apps/cli/test/isolated/tui-recovery-host.test.ts',
       'apps/cli/test/isolated/tui-preferences-host.test.ts',
       'apps/cli/test/isolated/tui-mcp-connection-pty.test.ts',
+      'apps/cli/test/isolated/tui-composer-host.test.ts',
+      'apps/cli/test/isolated/tui-workflow-question-host.test.ts',
+      'apps/cli/test/isolated/tui-planning-host.test.ts',
     ].map((file) => (s: string) => s.replace(`          ${file}`, '')),
     (s: string) =>
       s.replace('          tests/isolated/unified-agent/extension-upgrade.test.ts', ''),
@@ -747,6 +750,7 @@ test('current native CI consumers prepare Linux isolation and display plus the W
     'release-candidate.yml',
     'runtime-stdio-smoke.yml',
     'platform-capability-probe.yml',
+    'runtime-transport-qualification.yml',
     'required.yml',
   ]) {
     const source = readFileSync(join(actual, '.github/workflows', name), 'utf8');

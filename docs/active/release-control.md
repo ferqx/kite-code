@@ -32,7 +32,9 @@ release candidate 在 macOS 与 Linux 运行原[完整 installed Terminal 测试
 | installed `maintenance` 备份／核验／恢复／状态 | 原 Terminal caller 和原 Native caller 的独立维护链 | 原 Terminal bundle 的完整安装维护分支 | backup／inspect／restore 新 Store／status、旧来源拒绝、原数据保全及恢复后读取；Native 平台专有整例仍保原适用范围 |
 | installed `uninstall` 保数据退出 | 上述原 Terminal／Native／TUI／真代码 caller 的最终卸载 | 上述原 Terminal／Native 完整文件的最终卸载 | busy 拒绝、全部原 owner 退出／候选 EX后唯一卸载，外部 Core／Native DB与配置按原断言保全 |
 
-release／Required 的 Linux 消费者显式准备 `build-essential bubblewrap xvfb`；独立 stdio 和 platform probe 准备 `build-essential bubblewrap`。Windows 的 release／stdio／platform probe 保原[MSVC 准备入口](../../scripts/release/prepare-windows-native-ci.ts)，缺项直接失败。它们不关闭 Chromium／namespace sandbox，不将 macOS-only 窗口或恢复中断 fixture 宣作 Win/Linux 已运行。
+release／Required 的 Linux 消费者显式准备 `build-essential bubblewrap xvfb`；独立 stdio、platform probe 和 transport 准备 `build-essential bubblewrap`。Windows 的 release／stdio／platform probe 保原[MSVC 准备入口](../../scripts/release/prepare-windows-native-ci.ts)，缺项直接失败。它们不关闭 Chromium／namespace sandbox，不将 macOS-only 窗口或恢复中断 fixture 宣作 Win/Linux 已运行。
+
+transport 的共享 TUI 命令保持三平台完整文件，追加 composer／Workflow 问题／Planning，不过滤 Windows。Workflow 夹具与原 CLI 消费者已选择正式 built 默认 Service；Linux 准备与构建顺序由原 CI guard 核验。Windows 缺合格 script verifier 的门禁继续失败，不用替身、平台 skip 或局部绿色推导阶段退出；测试方法归[CLI owner](../../apps/cli/README.md#开发-tui-输入编辑)。
 
 [日志 shell](../../scripts/ci/logged-shell.ts)保原 run 正文和 native shell 退出语义，20个 release 验证步骤及独立 stdio 的 shell／MCP 步骤各有准确 `dist/unified-evidence/*.log`。stdout／stderr 原字节同时透传控制台；日志写入、外部命令、信号或关闭失败保持非零。日志采用排他创建，artifact 用 `always()`／`if-no-files-found:error` 保存；不上传临时 Profile 内容。stdio 的 sealed 文件在自己的 fresh Bun 测试进程选择候选引擎，避免与 source 测试的进程全局 SQLite 冲突；全10文件与原断言／期限保持，详情归[测试入口](../../tests/README.md)。
 

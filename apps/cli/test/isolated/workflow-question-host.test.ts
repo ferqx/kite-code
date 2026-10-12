@@ -4,7 +4,9 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
@@ -13,7 +15,7 @@ import { startService } from '@kite-ai/service';
 import { observeCommand, run } from '../../src';
 
 test('ordinary question physically loses POST and GET responses; original answer is recovered once before terminal work', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-workflow-question-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-workflow-question-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
@@ -126,7 +128,7 @@ test('ordinary question physically loses POST and GET responses; original answer
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,
@@ -219,7 +221,7 @@ test('actual paired CLI host retains unknown answer across its wait cycle and re
   const { parseCLIArguments } = await import('../../src/arguments');
   const { Readable } = await import('node:stream');
   const { readFileSync } = await import('node:fs');
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-question-host-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-question-host-')));
   const lines: string[] = [];
   let saved: string | undefined,
     answerPosts = 0,

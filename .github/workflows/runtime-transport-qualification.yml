@@ -49,6 +49,9 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.2
+      - if: runner.os == 'Linux'
+        name: Prepare Linux native verifier dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap
       - run: bun install --frozen-lockfile
       - run: bun run test:runtime:transport
       - if: runner.os != 'Windows'
@@ -84,4 +87,7 @@ jobs:
           apps/cli/test/isolated/tui-recovery-host.test.ts
           apps/cli/test/isolated/tui-preferences-host.test.ts
           apps/cli/test/isolated/tui-mcp-connection-pty.test.ts
+          apps/cli/test/isolated/tui-composer-host.test.ts
+          apps/cli/test/isolated/tui-workflow-question-host.test.ts
+          apps/cli/test/isolated/tui-planning-host.test.ts
           tests/isolated/unified-agent/extension-upgrade.test.ts

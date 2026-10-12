@@ -1,9 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AnswerInteractionRequest } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { workflowQuestionProfile } from '../fixtures/workflow-question-profile';
 
 const repo = resolve(import.meta.dir, '../../../..');
@@ -11,9 +14,9 @@ for (const scenario of ['replan', 'waive', 'cancel'] as const)
   test(`80x24 actual TUI ${scenario} preserves the original Workflow question scope`, async () => {
     const decision = scenario === 'cancel' ? 'waive' : scenario;
     const f = await workflowQuestionProfile(decision);
-    const evidence = `/private/tmp/kite-workflow-question-pty-evidence-${crypto.randomUUID()}`;
+    const evidence = join(tmpdir(), `kite-workflow-question-pty-evidence-${crypto.randomUUID()}`);
     mkdirSync(evidence, { mode: 0o700 });
-    let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
       const seed = await launchPairedService({
         ...f.artifact,
@@ -26,7 +29,7 @@ for (const scenario of ['replan', 'waive', 'cancel'] as const)
         await seed.client.createWorkspace({
           expectedStoreId: storeId,
           id: 'w',
-          rootUri: `file://${f.workspace}`,
+          rootUri: pathToFileURL(f.workspace).href,
           name: 'owned',
         });
         const trust = await seed.client.getWorkspaceTrust('w', { storeId });
@@ -63,7 +66,7 @@ for (const scenario of ['replan', 'waive', 'cancel'] as const)
       writeFileSync(
         runner,
         `import {appendFileSync,writeFileSync} from 'node:fs';
-import {runTUIHost} from ${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};
+import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};
 const actual=globalThis.fetch;let savedAnswer, lostGet=false;
 globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{
  const options=args[1],path=new URL(String(args[0])).pathname;
@@ -81,98 +84,32 @@ globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{
 },{preconnect:actual.preconnect});
 await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(pidPath)},String(pid))});`,
       );
-      const detail = 'original explicit user instruction';
-      const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b''
-def latest_answer_ready(text):
- start=buffer.rfind(b'\\x1b[?2026h')
- if start<0:return False
- end=buffer.find(b'\\x1b[?2026l',start)
- if end<0:return False
- frame=re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer[start:end].decode(errors='replace'))
- lines=[line.strip() for line in frame.splitlines()]
- return 'Session s · Waiting for answer' in lines and 'Question 2/2' in lines and 'Answer > '+text in lines
-def wait(text,latest_ready=False):
- global buffer
- deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))) or (latest_ready and not latest_answer_ready(text)):
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
-def key(value):
- global buffer
- buffer=b'';os.write(master,value)
-seen=set()
-def card(kind,definition=None):
- global buffer
- deadline=time.monotonic()+10
- while True:
-  db=sqlite3.connect(${JSON.stringify(f.profile.databasePath)});rows=db.execute("SELECT id,request_json FROM interaction WHERE kind=? AND state='pending'",(kind,)).fetchall();db.close()
-  for id,request in rows:
-   if id not in seen and (definition is None or json.loads(request).get('definitionId')==definition):
-    seen.add(id);wait(id[:24]);return id
-  if time.monotonic()>deadline:raise RuntimeError('missing pending '+kind+' '+str(definition))
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
-def approve(definition):
- card('approval',definition);key(b'\\x1b[B');wait('only this call');key(b'\\r')
-def snapshot(stage):
- db=sqlite3.connect(${JSON.stringify(f.profile.databasePath)});db.row_factory=sqlite3.Row
- value={'stage':stage,'tuiPid':p.pid,'tuiExit':p.poll(),'facts':{table:[dict(row) for row in db.execute('SELECT * FROM '+table)] for table in ['run','command','execution','interaction','extension_record']}};db.close()
- with open(${JSON.stringify(join(evidence, 'stages.jsonl'))},'a') as stream:stream.write(json.dumps(value)+'\\n')
-def completed():
- global buffer
- # Final streamed prose precedes the original Run's durable terminal transition.
- snapshot('final-body-visible');deadline=time.monotonic()+10
- db=sqlite3.connect(${JSON.stringify(f.profile.databasePath)});original=db.execute("SELECT run_id FROM interaction WHERE kind='question'").fetchone()[0];db.close()
- while True:
-  db=sqlite3.connect(${JSON.stringify(f.profile.databasePath)});state=db.execute('SELECT status FROM run WHERE id=?',(original,)).fetchone()[0];db.close()
-  if state=='completed':snapshot('original-completed-before-quit');return
-  if state in ['cancelled','failed','interrupted']:raise RuntimeError('original Run terminal '+state)
-  if time.monotonic()>deadline:raise RuntimeError('original Run completion not confirmed '+original+' '+state)
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
-try:
- wait('New Run >');key(b'/alpha-skill original verification task');wait('/alpha-skill original verification task');key(b'\\r')
- approve('complete_skill');approve('skill.workflow.verify');approve('decide_skill_verification')
- ${
-   scenario === 'cancel'
-     ? `card('question');key(b'\\x03');wait('command.cancel: applied');key(b'\\x03')
- deadline=time.monotonic()+10
- while True:
-  db=sqlite3.connect(${JSON.stringify(f.profile.databasePath)});state=db.execute("SELECT status FROM run").fetchone()[0];db.close()
-  if state=='cancelled':break
-  if time.monotonic()>deadline:raise RuntimeError('original Run cancellation not confirmed')
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
- key(b'\\x11')`
-     : `card('question');wait('Question 1/2 · Selection: No selection (Enter has no answer)');key(b'\\x1b[B' * ${decision === 'replan' ? 1 : 2});wait('Question 1/2 · Selection: ${decision === 'replan' ? 1 : 2}');key(b'\\r')
- wait('Question 2/2');key(${JSON.stringify(detail)}.encode());wait(${JSON.stringify(detail)},latest_ready=True);key(b'\\r');wait('interaction.answer: unknown')
- key(b'\\x0c');deadline=time.monotonic()+10
- while not os.path.exists(${JSON.stringify(join(f.root, 'first-get-lost'))}):
-  if time.monotonic()>deadline:raise RuntimeError('original question answer GET loss not confirmed')
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
- wait('interaction.answer: unknown');assert os.path.exists(${JSON.stringify(join(f.root, 'first-get-lost'))})
- key(b'\\x0c');wait('interaction.answer: applied')
- ${decision === 'replan' ? "approve('complete_skill');approve('skill.workflow.verify')" : ''}
- wait('WORKFLOW_DECISION_DONE');completed();key(b'\\x11')`
-}
-
- deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.1)[0]:
-   try:os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;print(${JSON.stringify(scenario === 'cancel' ? 'WORKFLOW_QUESTION_ORIGINAL_CANCELLED' : 'WORKFLOW_QUESTION_ORIGINAL_COMPLETE')})
-finally:
- try:
-  snapshot('tui-finally')
-  with open(${JSON.stringify(join(evidence, 'frame.txt'))},'wb') as stream:stream.write(buffer)
- finally:
-  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
-  os.close(master)
-`;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+      const built = await compileFileRecoveryTUI(f.root, runner);
+      if (!built.success)
+        throw new AggregateError(built.logs, 'workflow_question_tui_compile_failed');
+      driver = Bun.spawn(
+        [
+          process.execPath,
+          '--no-install',
+          fileURLToPath(new URL('../fixtures/tui-workflow-question-pty.ts', import.meta.url)),
+          JSON.stringify({
+            root: f.root,
+            runner: join(f.root, 'runner.js'),
+            databasePath: f.profile.databasePath,
+            evidence,
+            scenario,
+          }),
+        ],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          ...(process.platform === 'win32' ? { ipc() {} } : {}),
+        },
+      );
       const [out, err, exit] = await Promise.all([
-        new Response(python.stdout).text(),
-        new Response(python.stderr).text(),
-        python.exited,
+        new Response(driver.stdout).text(),
+        new Response(driver.stderr).text(),
+        driver.exited,
       ]);
       if (exit !== 0) console.error(err);
       expect(exit).toBe(0);
@@ -415,10 +352,11 @@ finally:
       expect(() => process.kill(Number(readFileSync(pidPath, 'utf8')), 0)).toThrow();
     } finally {
       try {
-        if (python && python.exitCode === null) {
-          // Interrupt the held Python so its finally owns cleanup of its current Popen.
-          python.kill('SIGINT');
-          await python.exited;
+        if (driver && driver.exitCode === null) {
+          // Interrupt the fixture driver so its finally owns cleanup of its current PTY.
+          if (process.platform === 'win32') driver.send('workflow-question-driver-stop');
+          else driver.kill('SIGINT');
+          await driver.exited;
         }
       } finally {
         try {
@@ -443,7 +381,7 @@ finally:
               db.close();
             }
           }
-          console.error(JSON.stringify({ scenario, evidence, pythonExit: python?.exitCode }));
+          console.error(JSON.stringify({ scenario, evidence, driverExit: driver?.exitCode }));
         } finally {
           f.close();
         }

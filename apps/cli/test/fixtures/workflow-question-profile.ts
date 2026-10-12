@@ -1,15 +1,16 @@
 import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from './daemon-host-build';
 import { workflowManifest } from './workflow-manifest';
 
-/** Actual default assembly and ordinary supervised verifier; no custom permission authority. */
+/** Actual built default assembly, including the platform's qualified verifier backend. */
 export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-workflow-decision-')),
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-workflow-decision-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   mkdirSync(join(workspace, 'skill'), { recursive: true });
@@ -147,27 +148,7 @@ export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
     );
     const artifactRoot = join(root, 'artifact');
     await buildOwnedDaemon(artifactRoot);
-    const repo = resolve(import.meta.dir, '../../../..');
-    const supervisor = await Bun.build({
-      entrypoints: [join(repo, 'packages/agent/src/platform/process/shell-supervisor.ts')],
-      target: 'bun',
-      outdir: join(root, 'assets'),
-      naming: 'shell-supervisor.js',
-    });
-    if (!supervisor.success) throw Error('supervisor_fixture_build');
-    const source = join(artifactRoot, 'workflow-question-service.ts');
-    writeFileSync(
-      source,
-      `import {selectProfile} from '@kite-ai/agent/profile';import {createDefaultProcessConfiguration} from '@kite-ai/service/configuration';import {runServiceProcess} from '@kite-ai/service/main';await runServiceProcess({configure(startup){return createDefaultProcessConfiguration({profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,shell:${JSON.stringify({ platform: 'darwin', configurationId: 'owned-question-verifier', env: { PATH: '/usr/bin:/bin' }, supervisorPath: supervisor.outputs[0]!.path, bunExecutable: realpathSync(process.execPath), shellExecutable: '/bin/sh' })}});}});`,
-    );
-    const built = await Bun.build({
-      entrypoints: [source],
-      target: 'bun',
-      packages: 'external',
-      outdir: artifactRoot,
-    });
-    if (!built.success) throw Error('question_service_fixture_build');
-    const entrypoint = join(artifactRoot, 'workflow-question-service.js');
+    const entrypoint = join(artifactRoot, 'node_modules/@kite-ai/service/main.js');
     const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
     const artifact: CLIServiceArtifact = {
       entrypoint,

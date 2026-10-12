@@ -5131,3 +5131,31 @@ PTY实录显示首次替换连接已ready、原RPC四次、Model零调用，但�
 新增闭合的是三个完整共享用户入口的测试驱动三端迁移、其实际macOS合同及当前CLI owner全集；本轮无新生产正式authority迁移或生产旧路径退役。原RSS、完整观测、平台与最终退役门禁保持，无push／PR／发布／Actions触发。
 
 上述18文件已正常本地提交 `28a5789b00f6c9279cc6269ece5ac79d9eefcf2c`，hook全部通过。最终三端复核补正偏好shared测试的Windows收尾：原统一SIGTERM在Windows属于强制终止，现仅Windows经原bootstrap profile／instance绑定的公共Lifecycle `if_idle`，9秒内等待原daemon实际exit0；POSIX真实SIGTERM及原全部Bun断言、40秒预算保持。只有network_outcome_unknown允许继续核实际退出，其他拒绝不吞掉。受影响偏好完整文件macOS再次actual0／2pass／16expects／5.85秒，CLI类型和scopedBiome通过，日志 `/private/tmp/kite-tui-preferences-lifecycle-final.log`；Windows分支仍未原生执行。3837输入冻结与115文件／80作业全集证据保其原窗口，后续仅这项Windows条件收尾及owner说明改变，按实际diff复验、未重复未受影响全集或把前窗口追认为Win/Linux通过。
+
+## 2026-10-12：Composer、Workflow 问题和 Planning 完整三端测试
+
+前片偏好 shared Windows lifecycle 补正已正常本地提交 `7a2f709d85789bdad7f8f715019f6473857dcde6` 并结束。本轮直接移植最高共享验收依赖的完整[composer](../../apps/cli/test/isolated/tui-composer-host.test.ts)、[Workflow 问题](../../apps/cli/test/isolated/tui-workflow-question-host.test.ts)及[Planning 四入口](../../apps/cli/test/isolated/tui-planning-host.test.ts)。三个 Python POSIX driver 已退役，复用现行 Bun PTY／ConPTY、当前完整 parsed render、输入 checkpoint、实际 exit／EOF与所属树终止。Windows 异常清理以测试私有 IPC 进入原 finally，POSIX 保真实信号；测试源码可在三端执行与后端原生资格分别记录。
+
+Composer 保 grapheme／中文／emoji／combining 中间编辑、完整原 UTF-8/CRLF/LF 粘贴一次 POST、补全／删除块零 POST、真实 held Model 时多行草稿落盘、历史编辑、三次准确原 Session 切换、两份 scope 草稿、原独立审批及正常退出。原10秒 wait、5秒 draft、100ms key pump、6＋3秒退出、30秒整例保持。Planning 保 slash-task／draft-mode／active-queued／scope-draft、143279字节原 Artifact、Full 审核前零写、原答案 POST／首 GET 实际丢回应后只读原 ID、queued afterRun 唯一后继、单次实际文件写入、原 progress／Run completed及所属 Service 退出；8秒 wait／Run、100ms key pump、6＋3秒退出和30秒整例保持。Workflow 保 replan／waive／cancel、三次独立审批、两问无默认选择、原 POST／两次原 GET、proof／attempt／revision、零取消串域和真实 completed／cancelled；10秒 wait、6＋3秒退出与40秒整例保持。
+
+[共享 Workflow 夹具](../../apps/cli/test/fixtures/workflow-question-profile.ts)删除整段 macOS 专用 supervisor 构建和 programmatic Service wrapper，直接选择实际 built `@kite-ai/service/main.js`。正式默认装配自行选择 Mac/Linux 合格 backend；Planning 未启用 Skill，不再装配未使用的 macOS verifier。[原 CLI 问题整文件](../../apps/cli/test/isolated/workflow-question-host.test.ts)同时改系统 tmpdir／标准 file URL，两份原 JSON replan／waive也消费此实际装配。生产业务 authority、输入守卫、权限和公开 API 未改；退役范围只覆盖这项测试专用装配，不能称生产旧权限或全部旧路径已退役。Windows 缺合格 script verifier 的真实 backend 门禁保留，不加 availability skip或普通 runner替身。
+
+必要真实失败保留。Workflow 首次 PTY 移植曾因 waive 最终正文从当前帧消失而红，恢复原 material 检查后3case通过；切换正式 native 后再现2pass／1fail，日志 `/private/tmp/kite-workflow-question-default-native.log`。只读证据定位 Ctrl+L 依次 lookup→同 Session refresh→clearDisplay，手册明确该操作会清理本地正文，不能为测试删生产 clear。最终输入 ready仍核当前原 Session／Question2／完整 Answer；只在原问题最后 Enter 前开启独立字节窗口，原最终正文断言只接受该次答复后真实输出，跨两次查询清屏仍读完整正文，不能从答复前旧画面或数据库终态替代。收据明确 `originalKeyClearByteEquivalent:false`，这是合法清屏下的观察窗口修正。原 native 红与 replan／waive 74014／30632字节实际原答复窗口保留，cancel窗口0。修后原完整3case实际0／3pass／70expects／9.05秒，日志 `/private/tmp/kite-workflow-question-submit-window.log`，原42个 Bun expect、两个显式 Python assert和全部期限保留，没有新增故障矩阵。
+
+三个入口分别 macOS 实际1pass／12expects／7.73秒、3pass／70expects／9.05秒、4pass／143expects／10.70秒；共享夹具的原 CLI 整文件另实际0／4pass／80expects／5.22秒。根 AST 收据 `/private/tmp/kite-tui-composer-freeze.json` 核原三 TUI 的12／41／42和原 CLI 的52个完整 expect AST相同，20项原 Python显式检查映射保持，真实 HTTP丢回应和原正文不改。Planning 每例原 Artifact／答案1 POST和2 GET／一次写入有独立最终收据 `/private/tmp/kite-planning-delivery.json`。
+
+最终直接解析当前[transport workflow](../../.github/workflows/runtime-transport-qualification.yml)原完整调用者命令，不过滤任何文件或 case，本机 macOS 实际0／14文件／28pass／508expects／82.20秒，包含全部原Files／草稿／E13／普通恢复／偏好／MCP连接和本轮三入口。日志 `/private/tmp/kite-tui-composer-workflow-command.log` SHA `ea8ce3143b2cbe71c7051b93ebc6f5ef1ba7d23082386a7e26010a66b61c4492`；收据 `/private/tmp/kite-tui-composer-workflow-receipt.json` 核3845份非Markdown输入在执行窗口漂移0。之后仅补正 Windows IPC disconnect 的 TypeScript optional调用；Mac分支语义保持，Windows未原生执行，先前类型错误 TS2722及修正复验分别保 `kite-tui-composer-final-types.log`／`-final-types-settled.log`，不追认执行窗口字节未变。前片完整CLI 115文件／80作业只复用未变范围，本轮全部受影响四个CLI文件及接线命令实际完整验证；当前整仓728文件／588作业未在此轮全部执行，不能把各窗口相加当整仓或阶段通过。
+
+三端 transport 追加原三个完整文件，并在 Linux native 消费前准备 compiler／Bubblewrap。原 CI guard保原三平台／准确 head／current build／Windows prepare、整文件无过滤，并拒逐一漏本轮文件和漏Linux依赖／错误准备平台。原 CI整文件实际21pass／219expects；新验证仅对应这次接线及真实清屏错误。owner／tests／release active同步测试方法与平台边界；输入、计划、审批和键盘手册已核用户行为保持，不制造产品行为 diff。原生产／依赖／workspace build输入不变，复用前片构建，当前类型／边界／workspace／API／ownership／文档及正常提交hook按实际diff收束。
+
+源码核对五个剩余退出阻塞，按依赖排序：
+
+| 顺序 | 实际用户入口、具体缺口与验收 |
+| --- | --- |
+| 1 | [/mcp Tools完整查看](../../apps/cli/test/isolated/tui-mcp-tools-pty.test.ts)及[来源管理](../../apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts)等后续共享TUI资格仍有Python／POSIX夹具。需保原暖冷完整metadata／schema EOF、准确原来源独立确认／审批、原申请只查零重放、维护换Store原身份拒绝与真实正常退出，迁到同一三端完整文件；不把一个读取或journal另建长期目标。 |
+| 2 | 正式Shell／Task／MCP原持续负载RSS仍红：九点 `178814976→299614208B`，`+115.203125MiB>32MiB`。实际native allocation owner修复并满足原完整正式负载／阈值才闭合，不重复参数对照。 |
+| 3 | 完整Runtime出生后代及activeResources／handles producer仍缺。实际完整来源经原formal verifier核实前保unsupported／null；部分Job树／coalition／FD不能代全集。 |
+| 4 | Win/Linux正式安装、真实版本切换、MCP、维护恢复、保数据卸载和Windows Shell／script verifier原合同后端仍需原生实际证据。后续Actions／用户Windows验收保完整断言；本机macOS绿、接线或缺后端不能代资格，本轮不dispatch。 |
+| 5 | §35全能力出口、最后旧authority／依赖退役及阶段完整回归依赖前述适用门禁。当前37能力仍partial、wholeV13=false／phaseExit=false，不提前删除或宣布退出。 |
+
+新增闭合范围是三个完整共享用户入口的三端测试源码接线、测试专用macOS装配退役与正式默认Service消费，以及实际macOS完整合同验证。RSS、完整观测和Win/Linux实际资格继续未闭合；无push／PR／发布／Actions触发。
