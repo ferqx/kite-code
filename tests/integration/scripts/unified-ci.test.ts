@@ -110,6 +110,43 @@ test('release source binding and three-platform matrix cannot silently shrink', 
   }
 });
 
+test('shared draft and file-recovery caller tests run whole on every OS after the current build', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/runtime-transport-qualification.yml'),
+    'utf8',
+  );
+  const command =
+    'bun test --parallel=1 --max-concurrency=1\n          apps/cli/test/isolated/tui-drafts-host.test.ts\n          apps/cli/test/isolated/file-recovery-argv.test.ts\n          tests/isolated/unified-agent/extension-upgrade.test.ts';
+  for (const mutate of [
+    (s: string) => s.replace('run: bun run build', 'run: bun run extra'),
+    (s: string) => s.replace(command, 'echo shared caller'),
+    (s: string) =>
+      s.replace(command, command.replace('bun test ', 'bun test --test-name-pattern=never-match ')),
+    (s: string) => s.replace('          apps/cli/test/isolated/file-recovery-argv.test.ts', ''),
+    (s: string) =>
+      s.replace('          tests/isolated/unified-agent/extension-upgrade.test.ts', ''),
+    (s: string) =>
+      s.replace(
+        '      - name: Shared TUI drafts',
+        '      - if: false\n        name: Shared TUI drafts',
+      ),
+    (s: string) =>
+      s.replace('conformance:\n', 'conformance:\n    if: "runner.os != \'Windows\'"\n'),
+    ...['macos-15', 'ubuntu-24.04', 'windows-2025'].map(
+      (os) => (s: string) => s.replace(os, 'unsupported-runner'),
+    ),
+  ]) {
+    const root = fixture();
+    put(root, 'scripts/release/prepare-windows-native-ci.ts', 'export {};');
+    put(root, '.github/workflows/runtime-transport-qualification.yml', mutate(source));
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some(
+        (v) => v.code === 'formal-ci-shared-caller-tests-missing',
+      ),
+    ).toBe(true);
+  }
+});
+
 test('Windows Native environment precedes both consumers and transport results stay on the original PR head', () => {
   const actual = resolve(import.meta.dir, '../../..');
   for (const workflow of ['release-candidate.yml', 'runtime-transport-qualification.yml']) {

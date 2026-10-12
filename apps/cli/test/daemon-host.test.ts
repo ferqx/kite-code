@@ -9,6 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
@@ -29,7 +30,10 @@ let entrypoint: string;
 const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
 const hash = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex');
 beforeAll(async () => {
-  root = mkdtempSync('/private/tmp/kite-cli-daemon-host-');
+  // macOS's per-user tmpdir exceeds the original Unix socket path budget.
+  root = realpathSync(
+    mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'kite-cli-daemon-host-')),
+  );
   entrypoint = await buildOwnedDaemon(join(root, 'artifact'));
 }, 60000);
 afterAll(() => {

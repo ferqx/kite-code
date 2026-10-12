@@ -18,7 +18,21 @@ const repository = resolve(import.meta.dir, '../../..');
 async function child(argv: string[], cwd: string, home: string) {
   const child = Bun.spawn(argv, {
     cwd,
-    env: { HOME: home, PATH: process.env.PATH ?? '' },
+    env: {
+      HOME: home,
+      PATH: process.env.PATH ?? '',
+      ...(process.platform === 'win32'
+        ? {
+            USERPROFILE: home,
+            ...Object.fromEntries(
+              ['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP'].flatMap((key) => {
+                const value = process.env[key];
+                return value === undefined ? [] : [[key, value]];
+              }),
+            ),
+          }
+        : {}),
+    },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -67,7 +81,11 @@ test('E13 two standalone artifacts replace at a new Run while original active Jo
     const app = join(root, 'app');
     mkdirSync(app, { mode: 0o700 });
     mkdirSync(join(app, 'home'), { mode: 0o700 });
-    symlinkSync(join(candidate.root, 'node_modules'), join(app, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(app, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const runChild = (argv: string[], cwd: string) => child(argv, cwd, join(app, 'home'));
     const artifacts: string[] = [];
     for (const version of ['1', '2']) {
@@ -108,7 +126,7 @@ test('E13 two standalone artifacts replace at a new Run while original active Jo
     const owned = join(app, 'owned');
     const evidence = JSON.parse(
       await runChild(
-        [join(candidate.root, 'runtime/bun'), join(app, 'host.js'), owned, 'warm', ...artifacts],
+        [candidate.artifact.executable, join(app, 'host.js'), owned, 'warm', ...artifacts],
         app,
       ),
     ) as Evidence;
@@ -159,7 +177,7 @@ test('E13 two standalone artifacts replace at a new Run while original active Jo
     expect(evidence.futureAfter).toEqual(evidence.futureBefore);
     const cold = JSON.parse(
       await runChild(
-        [join(candidate.root, 'runtime/bun'), join(app, 'host.js'), owned, 'cold', ...artifacts],
+        [candidate.artifact.executable, join(app, 'host.js'), owned, 'cold', ...artifacts],
         app,
       ),
     );

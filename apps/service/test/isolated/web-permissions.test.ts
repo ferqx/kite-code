@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { PermissionMode } from '@kite-ai/agent/permissions';
@@ -156,7 +157,7 @@ async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 
   await client.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
     name: 'temporary',
   });
   await client.createSession({

@@ -252,6 +252,39 @@ export function checkUnifiedFormalConsumers(root: string): {
           const runs = (steps as Record<string, unknown>[]).flatMap((step) =>
             typeof step.run === 'string' ? [step.run] : [],
           );
+          if (name === 'runtime-transport-qualification.yml') {
+            const required =
+              'bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-drafts-host.test.ts apps/cli/test/isolated/file-recovery-argv.test.ts tests/isolated/unified-agent/extension-upgrade.test.ts';
+            const unfiltered = (step: Record<string, unknown>) =>
+              step.if === undefined &&
+              step['working-directory'] === undefined &&
+              (step['continue-on-error'] === undefined || step['continue-on-error'] === false);
+            const build = steps.findIndex(
+              (step) => step.run === 'bun run build' && unfiltered(step),
+            );
+            const caller = steps.findIndex(
+              (step) =>
+                typeof step.run === 'string' &&
+                step.run.trim().replace(/\s+/g, ' ') === required &&
+                unfiltered(step),
+            );
+            const prepare = steps.findIndex(
+              (step) =>
+                step.if === "runner.os == 'Windows'" &&
+                step.run === 'bun run scripts/release/prepare-windows-native-ci.ts',
+            );
+            if (
+              build <= prepare ||
+              caller <= build ||
+              caller < 0 ||
+              job.if !== undefined ||
+              job['runs-on'] !== `\${{ matrix.os }}` ||
+              !['macos-15', 'ubuntu-24.04', 'windows-2025'].every(
+                (os) => Array.isArray(matrix?.os) && matrix.os.includes(os),
+              )
+            )
+              add('formal-ci-shared-caller-tests-missing', location, jobName);
+          }
           if (
             [
               'release-candidate.yml',

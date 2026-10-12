@@ -126,11 +126,18 @@ function unwrap(words: readonly string[], cwd: string): { words: readonly string
   return { words: words.slice(index), cwd };
 }
 
+const windowsPath = (value: string) =>
+  /^[a-z]:[\\/]/iu.test(value) || /^\\\\[^\\/]+[\\/][^\\/]+/u.test(value);
+// A normalized Windows UNC directory uses forward slashes. An initial //path
+// or a command argument in a POSIX directory retains its POSIX interpretation.
+const windowsDirectory = (value: string) =>
+  windowsPath(value) || /^\/\/[^\\/]+\/[^\\/]+/u.test(value);
+
 function pathAt(value: string, cwd: string): string {
   if (value === unknownArgument) return unknownArgument;
   if (cwd === unknownArgument && !posix.isAbsolute(value) && !win32.isAbsolute(value))
     return unknownArgument;
-  return /^[a-z]:[\\/]/iu.test(value) || /^[a-z]:[\\/]/iu.test(cwd)
+  return windowsPath(value) || windowsDirectory(cwd)
     ? win32.resolve(cwd, value).replace(/\\/gu, '/')
     : posix.resolve(cwd, value);
 }
@@ -309,7 +316,13 @@ export async function createShellCommandPolicy(input: {
   } catch {
     throw new AgentError('shell_parser_asset_unavailable');
   }
-  const cwd = resolve(input.cwd);
+  // Absolute analysis inputs retain their path syntax on every host. Relative
+  // inputs still refer to the real caller's working directory.
+  const cwd = windowsPath(input.cwd)
+    ? win32.resolve(input.cwd).replace(/\\/gu, '/')
+    : posix.isAbsolute(input.cwd)
+      ? posix.resolve(input.cwd)
+      : resolve(input.cwd);
   const supported = ['bash', 'zsh', 'sh', 'dash'].includes(basename(input.shellExecutable));
   return {
     assets,

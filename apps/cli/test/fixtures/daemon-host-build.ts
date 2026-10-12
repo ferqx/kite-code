@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const repository = resolve(import.meta.dir, '../../../..');
 async function deadline<T>(work: Promise<T>, ms: number): Promise<T> {
@@ -93,10 +94,10 @@ export async function buildOwnedDaemon(artifact: string): Promise<string> {
     if (!installed) throw Error(`daemon_fixture_dependency_missing:${dependency}`);
     const target = join(modules, dependency);
     mkdirSync(dirname(target), { recursive: true });
-    symlinkSync(realpathSync(installed), target, 'dir');
+    symlinkSync(realpathSync(installed), target, process.platform === 'win32' ? 'junction' : 'dir');
   }
   const fixtureBuild = await Bun.build({
-    entrypoints: [new URL('./daemon-host-child.ts', import.meta.url).pathname],
+    entrypoints: [fileURLToPath(new URL('./daemon-host-child.ts', import.meta.url))],
     target: 'bun',
     packages: 'external',
     outdir: artifact,

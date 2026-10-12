@@ -8,7 +8,7 @@
 
 ## 当前 V1.3 owner 与资格边界
 
-按用户2026-10-11最新安排，当前优先闭合 macOS 可独立完成的能力，Windows/Linux 实际验证后置，Windows 由用户后续独立验证；已有 Actions 接线保留，本轮不触发。此前“交后续 GitHub Actions”的平台安排由此调整，任何 macOS 结果仍不授 Win/Linux 资格。
+按用户2026-10-12最新安排，当前优先闭合 macOS 可独立完成的能力，Windows/Linux 实际验证留到最后由 GitHub Actions 执行；已有接线保留，本轮不触发。用户后续独立 Windows 验证同样必须保原断言和门禁，任何 macOS 结果仍不授 Win/Linux 资格。
 
 原 macOS RSS `+115.203125MiB >32MiB` 仍为真实失败。一次有界的 JS heap 持有链诊断没有定位可据此修复的业务持有链：root 可达字节略降，Worker 增长主要落在 JSC FunctionCodeBlock；快照引入 full GC、停顿和分配，且候选不是当前输入，不能替代原 RSS 证据。native live allocation owner 尚未确定，不再重复参数对照。全 Runtime 出生后代可靠 producer、Bun activeResources/handles 仍缺失，formal verifier 的原拒绝保持；准确诊断输入和限制归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-独立能力与并行工具完整行为)。
 

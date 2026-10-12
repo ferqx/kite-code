@@ -173,7 +173,7 @@ Profile facade 先核原 authority 和短锁归属并挂资源 guard，再做可
 
 [真实文件/CAS测试](test/tui-drafts.test.ts) 验证9MiB完整尾部、100次快速编辑仅一次文件发布、冲突/坏格式/权限/软硬链接及明确容量失败；[UI测试](../../packages/ui/test/tui/drafts.test.ts) 核对冷scope、迟到成功、ABA、原目录只读与unknown。[源码树外built PTY](test/isolated/tui-drafts-host.test.ts) 使用自有临时profile和固定loopback模型，验证冷重开最后编辑、Service SIGKILL后仍持共享lease/维护busy、新Store恢复原文不改标及零Provider调用。此资格限本机macOS，不完成正式旧TUI切换或三平台发行。
 
-该 PTY 复用[现有 TUI 夹具编译](test/fixtures/file-recovery-profile.ts)的 Ink/React 依赖接线，保留已安装 npm 模块边界，避免 bundle 将可选 DevTools 变成顶层导入；启动时禁止 Bun 自动安装。原等待预算和全部业务断言保持，下载缓存不作为依赖闭包证据。
+该 PTY 复用[现有 TUI 夹具编译](test/fixtures/file-recovery-profile.ts)的 Ink/React 依赖接线，保留已安装 npm 模块边界，避免 bundle 将可选 DevTools 变成顶层导入；启动时禁止 Bun 自动安装。临时目录按系统选择并 realpath，Windows 依赖目录使用 junction；[草稿驱动](test/fixtures/tui-drafts-pty.ts)以 Bun 原生 PTY／ConPTY 替代 POSIX Python，三端执行同一冷草稿、lease、恢复和冲突断言。macOS／Linux 强制关闭仍发送真实 SIGTERM；Windows 只在[测试 fixture](test/isolated/tui-drafts.fixture.ts)的私有 IPC 触发同一已注册关闭处理器并核确认、最后保存与退出码1，这不证明 Windows OS 信号投递。产品退出码和 PTY EOF 分别核对，保原12／8／5秒及45秒整例预算；下载缓存、强制清理和 workflow 定义均不计正常退出或平台通过证据。
 
 开发 `cli:dev server start|restart` 由 [unified-cli selector](../../scripts/development/unified-cli.ts)提供私有 `resolveArtifact` 回调，只有真正启动或重启预检时才读取目标构建。`server status/stop`、`web` 和已经兼容的 `server start` 复用不依赖目标资产存在；absent 状态查询/停止不创建 profile、启动 Service 或调用 Provider。该回调属于可信宿主，不进入 argv 或公共业务 schema。
 

@@ -5055,3 +5055,25 @@ PTY实录显示首次替换连接已ready、原RPC四次、Model零调用，但�
 第二次当前原完整 `bun run test` actual0/1426.467秒，727文件/588个准确正式作业全部通过；原macOS并发4、parallel167/isolated554/exclusive6、发现/断言/预算/调度保持，无未开始或遗留活动作业。日志 `/private/tmp/kite-architecture-simplification-full-settled.log` SHA `9baa8e984a62802b71f6b44a26b4d92db34657b8d44f319a162bb5137786ea51`，同prefix `-receipt.json` 与 `-plan.json` 保完整实际运行；4413项仓库输入、HEAD/Git及Bun/Node全程全等。六个原独占窗口实际通过：TUI export53129ms、CLI安装登记74859ms、Native真实版本切换226846ms、Native正式安装100189ms、Native恢复中断73505ms、Terminal bundle53988ms。首次完整红仍保留，未删断言、排除文件、放宽预算或拼接局部绿。
 
 最终根及八workspace types/build均actual0，日志 `/private/tmp/kite-architecture-simplification-settled-typecheck.log` 与 `-build.log`；边界、workspace、公共API、ownership及文档/影响检查通过，本地提交hook继续独立执行。产品手册核对确认用户行为、公开接口、权限与持久格式保持，只有职责和重复实现收束。Win/Linux实际验证后置、Windows正式Shell缺口、RSS真实红及完整观测缺项保留；37能力仍partial，wholeV13=false/phaseExit=false，无push、PR、发布或Actions dispatch。
+
+## 2026-10-12：共享调用者三端测试接线与路径分析修正
+
+按用户要求，共享语义保持三端同一完整文件、业务断言和预算，平台原语单独适配；Win/Linux 实际验证留到最后交 GitHub Actions，本机继续 macOS。草稿完整生命周期退役 POSIX Python 驱动，改用 Bun 原生 PTY／ConPTY，保冷重开、Service 强杀后宿主 lease／维护 busy、最后编辑、恢复原文只读、冲突阻止普通退出及零 Provider。macOS／Linux 仍发送真实 SIGTERM；Windows 只由测试私有 IPC 触发已有宿主关闭处理器并核确认、最终保存及返回1，不计 Windows OS 信号资格。产品退出码与 PTY EOF 分别核实，原26断言、12／8／5秒和45秒整例保持。临时目录、file URL、URL→文件路径及 Windows junction 修正保已安装依赖与同一 React；Daemon 的 macOS 短 `/tmp` 必须保留，直接用长 per-user tmpdir 曾真实触发原 socket 长度门禁，未放宽该门禁。
+
+实际路径缺口同时修于 Agent 独立 Shell 分析模块：明确盘符／反斜杠 UNC 不再被测试宿主改作本机相对路径，POSIX 绝对输入保持 POSIX，相对 cwd 才依实际宿主解析。初版把 POSIX `//etc/hosts` 当 UNC 的新增漏拒绝已用 HEAD／改前／改后准确对比修正，原危险拒绝、支持 Shell、三权限策略、WASM 完整性及执行范围不变。原三权限整文件20pass／234expects；CI 最终整文件21pass／205expects。五份原业务文件逆向夹具/setup 后恢复全部 HEAD bytes，另 E13 逆向同样全等；收据为 `/private/tmp/kite-portable-original-contract-preservation.json` 和 `kite-portable-extension-upgrade-preservation.json`，没有删断言或扩大预算。
+
+直接 CLI 包脚本 `bun run --cwd apps/cli test` 实际exit1／422.760秒，114文件／364tests／320pass／42fail／2skip／4433expects；它把应隔离的 source／sealed SQLite 初始化放在同一进程，多份原资格文件收到 `sqlite_engine_initialization_failed`。误用命令的真实失败保留于 `/private/tmp/kite-portable-cli-owner.log`，SHA `6ec90810f4f1b244229a14987948f528ff2886610b1a2792ffce20319c6203ba`。随后从同一原默认计划取全部 CLI owner，逐一核114文件精确相等，保四并发、no-orphans、38parallel／75isolated／1exclusive；实际80／80作业通过、206.243秒，末独占TUI导出58686ms。日志 `/private/tmp/kite-portable-cli-planned.log` SHA `8ef54ed909e276998abf0993e0ada5d8305119c614df4d41673b3cba1de5eb69`，同prefix plan／receipt保3831份代码和配置输入全等与HEAD不变。它证明本轮完整 CLI owner，不将第一次错误调度追认为通过，也不代当前整仓默认。
+
+基于实际能力映射和源码按依赖核五个退出缺口：
+
+| 顺序 | 用户入口、未闭合范围与验收 |
+| --- | --- |
+| 1 | 正式草稿／`files restore`／外部分发扩展版本替换的共享验收接线。最高优先级 E13 已直接修：已核制品声明的 executable 替代 POSIX Bun 路径、Windows junction及必要系统环境；必须真实核v1活动Job保旧资产、v2新Run替换、原Job排空与冷读零重放，原45／120秒及全部断言保留。其他既有 POSIX TUI 夹具仍需按其完整能力移植，不能从这一项推定全库存三端可测。 |
+| 2 | 正式 Shell／Task／MCP 长期负载的原 RSS 红：九点 `178814976→299614208B`，`+115.203125MiB>32MiB`。仍需定位真实 native allocation owner、修复并满足原正式负载与阈值；不重复参数对照。 |
+| 3 | 同一正式 Runtime 从出生起全部后代与 activeResources／handles 完整 producer。现仍unsupported／null，必须真实生产并经原formal verifier核实，部分FD／listener／Job树不能替代。 |
+| 4 | Win/Linux 的实际安装、真实代码切换、MCP、维护恢复、保数据卸载以及 Windows Shell 原合同后端。最后由Actions执行原完整消费者和门禁；缺后端仍失败关闭，本轮不dispatch。 |
+| 5 | §35 全能力出口与最后旧路径退役：全部适用T／E和平台／资源门禁闭合后，核正式／default／CI无旧authority或依赖，最终删除并完整回归；当前旧源码存在，不提前退出。 |
+
+三端 transport workflow现准备后构建当前八workspace，完整执行草稿／CLI Files／E13；守卫和原mutation文件拒绝漏任何一文件、删任一平台、测试名过滤、跳过步骤／job及缺当前构建。原platform workflow已覆盖权限文件，不新增重复矩阵。当前五个调用者与正式权限链整文件actual0／23pass／340expects／32.330秒，含草稿26断言与E13完整替换链9021ms、实际macOS三策略Shell及web_fetch审批；日志 `/private/tmp/kite-portable-formal-callers-settled.log` SHA `cd7e35346fa415df0709f968963bdea66c0be4ef2028727e9d4866d9675c3025`。原源码外完整制品actual0／1pass／67expects／2.900秒，日志 `/private/tmp/kite-portable-built-package-settled.log` SHA `0c71af284bf347acfb89d6401503a03e503c48736f48ed01a6ce84ed796b792d`，保SQLite Worker／Shell／MCP guardian／WASM／Web／Skills／paired全部原断言。
+
+产品手册的三策略和极危险拒绝已核对，生产边界只修Agent路径解析，Service无新权限逻辑；Task owner两处滞后“嵌套／followup after_turn尚未实现”已按同页当前源码与既有真实证据同步，不派生重复功能。根及八workspacetypes、build、边界／workspace／API／ownership／文档及计划门禁通过。未触及范围复用607be489的原完整macOS默认证据，本轮未重跑整仓默认或宣布整体完成；Win/Linux原生、Windows Shell、RSS与完整观测继续保留，37能力仍partial、wholeV13=false／phaseExit=false，无push／PR／发布／Actions触发。本地提交hook仍独立执行。

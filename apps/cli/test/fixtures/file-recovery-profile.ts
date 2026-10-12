@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -25,7 +26,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) 
   }
 }
 export async function fileRecoveryProfile(input: { secondMutation?: boolean } = {}) {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-file-fork-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-file-fork-')));
   const workspace = join(root, 'workspace'),
     home = join(root, 'home');
   mkdirSync(workspace);
@@ -204,7 +205,7 @@ export async function compileFileRecoveryTUI(root: string, runner: string) {
     symlinkSync(
       realpathSync(join(resolve(import.meta.dir, '../../../..'), 'node_modules', name)),
       join(modules, name),
-      'dir',
+      process.platform === 'win32' ? 'junction' : 'dir',
     );
   return Bun.build({
     entrypoints: [runner],

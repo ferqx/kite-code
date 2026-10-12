@@ -16,7 +16,7 @@
 
 `task` 和 `followup_task` 默认 `resultDisposition=required`，只有显式 `background` 才不登记本 Run 的结果义务。Store 在原 ensure 同一事务封存 carrier、不可变结果 metadata 与原父 Run completion ref；原 key 重试不能补加、移除或改变处置。准确已知终态结果由原父 Run/current selection 一次接纳为具名低信任来源，并进入下一 Model 输入后才解除完成等待。child failed/cancelled 保留实际状态，父可如实报告；unknown 只接纳一次状态诊断来源，不能满足义务或伪成功。取消后 suppressed/execution_cancel 的 required Task 仅接纳状态，不导入完整外部结果、不改回 pending；普通 suppressed Job 不消费。
 
-Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 waiting_execution 与 waitingForResults 范围，通过既有 controls/持久变化水位等待；progress 和第一份 staggered 结果不轮询调用 Model。全部结果准确接纳后才重新请求一次 Model；完成评估期间刚结算的 carrier 也会在该边界重新核实并接纳，未知仍只产生一次状态诊断；新引导、取消和真实 interaction 使安全边界重新处理。`task_wait` 接受 1–64 个去重目标，等待任一真实终态/interaction/新输入，默认最多 30 秒且不超过调用 child Run 的原固定期限。超时或新引导不取消目标。QueueOnly 邮件见下节；idle follow-up 接纳见下节；根父 Task 的 after_turn 见下节；嵌套目标与完整 retry/delivery 尚未实施；默认 Service metadata 与 assembly 由 Service owner 接入。
+Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 waiting_execution 与 waitingForResults 范围，通过既有 controls/持久变化水位等待；progress 和第一份 staggered 结果不轮询调用 Model。全部结果准确接纳后才重新请求一次 Model；完成评估期间刚结算的 carrier 也会在该边界重新核实并接纳，未知仍只产生一次状态诊断；新引导、取消和真实 interaction 使安全边界重新处理。`task_wait` 接受 1–64 个去重目标，等待任一真实终态/interaction/新输入，默认最多 30 秒且不超过调用 child Run 的原固定期限。超时或新引导不取消目标。QueueOnly 邮件与 idle follow-up 接纳见下节；根父、嵌套 Task 及 followup_task 的 after_turn 见下节。完整 retry/delivery 尚未实施；默认 Service metadata 与 assembly 由 Service owner 接入。
 
 普通 `operations.wait(ref)` 保留单目标终态等待契约：输入/interaction 事件仅唤醒重新核实，不使已派发的等待 Tool 失败或推断 child 已停止；原绝对 timeout 不重置，真实取消 signal 仍生效。新引导留在 durable input ledger，待该 Tool 返回后的安全边界处理。`waitAny` 的 input/interaction 返回继续用于 Task 的显式等待边界。真实 Desktop paired 测试覆盖等待 child 时 steer 与后续 Run 排队、释放后原 Run 正常完成。
 
@@ -37,7 +37,7 @@ Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 
 
 接收事务核 owner/fencing、准确 Run/selection、原父子/carrier、已成功 sender 与原 Artifact、取消和根 stop/delete 边界，再按原 messageId 一次写入低信任接收消息。Model 展开正文只凭这个 Command 与准确 receivedMessageId 的 SQL 证明，不解析普通 user JSON 取得私有引用。`receivedSeq` 仅观察已提交 inbox 消息；列表、等待和接收回执都不证明模型已读。实际后继 Model 的持久原请求/sourceIds 才证明 prepared 输入。
 
-普通 Operations 的有界目录与邮件等待不消费正文或启动历史工作；`wait_agent` 最多 30 秒，仍受当前 child 原 deadline 约束。等待可报告邮件状态变更，但不会把 sender 失败/未知当成可用正文。显式 follow-up 在原 ensure 事务封存原目标 child 的邮件 seq 与成功 sender completed_cursor 双上界，并绑定准确 predecessor carrier、主体和目标 selection。同 key 重试不扩大集合；后来发送或后来确认的邮件继续 QueueOnly。新 Run 分页接收并保存 receivedRunId/receivedContextSelectionId，原 targetRunId=null 的意图不改写。根 Rewind 只改变根 Session 的选择；目标 child 未 Rewind 时，新显式 follow-up 可在全部原绑定核实后接纳旧 root→child 邮件。旧 child→root 邮件仍按目标根 selection 隔离。根父 Task 的 after_turn 自动汇报见下节；嵌套目标、followup_task 的 after_turn 与完整显式 retry/delivery 协议尚未实现。
+普通 Operations 的有界目录与邮件等待不消费正文或启动历史工作；`wait_agent` 最多 30 秒，仍受当前 child 原 deadline 约束。等待可报告邮件状态变更，但不会把 sender 失败/未知当成可用正文。显式 follow-up 在原 ensure 事务封存原目标 child 的邮件 seq 与成功 sender completed_cursor 双上界，并绑定准确 predecessor carrier、主体和目标 selection。同 key 重试不扩大集合；后来发送或后来确认的邮件继续 QueueOnly。新 Run 分页接收并保存 receivedRunId/receivedContextSelectionId，原 targetRunId=null 的意图不改写。根 Rewind 只改变根 Session 的选择；目标 child 未 Rewind 时，新显式 follow-up 可在全部原绑定核实后接纳旧 root→child 邮件。旧 child→root 邮件仍按目标根 selection 隔离。根父、嵌套 Task 及 followup_task 的 after_turn 自动汇报见下节；完整显式 retry/delivery 协议尚未实现。
 
 [mailbox.test.ts](../../../test/isolated/business/task/mailbox.test.ts) 用同一 Loop、实际父子 Tool 和 SQLite 验证十二封超过旧 4KiB 的完整正文、双向消息、只读 scope 目标、接收触发器回滚与原 id 幂等、发送结算故障及显式恢复、取消目标不注入、idle 零启动、列表/等待不推进 prepared，以及后来活动人类 Run 不被旧 parent 查询选中。
 

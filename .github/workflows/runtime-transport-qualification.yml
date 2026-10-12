@@ -69,3 +69,11 @@ jobs:
           packages/agent/test/isolated/windows-path-security/default.test.ts
           packages/agent/test/isolated/config/mcp-selection-windows.test.ts
           apps/desktop/test/isolated/windows-node-access.test.ts
+      - name: Build the current eight workspaces for shared caller tests
+        run: bun run build
+      - name: Shared TUI drafts and file recovery through the current caller
+        run: >-
+          bun test --parallel=1 --max-concurrency=1
+          apps/cli/test/isolated/tui-drafts-host.test.ts
+          apps/cli/test/isolated/file-recovery-argv.test.ts
+          tests/isolated/unified-agent/extension-upgrade.test.ts

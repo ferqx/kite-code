@@ -139,6 +139,40 @@ test('does not reinterpret a non-POSIX shell with Bash grammar', async () => {
   });
 });
 
+test('retains Windows drive and UNC path semantics independently of the test host', async () => {
+  for (const cwd of ['C:/workspace/deep', 'C:\\workspace\\deep']) {
+    const policy = await createShellCommandPolicy({ cwd, shellExecutable: '/bin/bash' });
+    expect((await policy.classify('rm -rf ../../Windows/System32')).hardDenied).toBe(
+      'shell_critical_system_removal',
+    );
+    expect((await policy.classify('git -C ../../Windows clean -fdx')).hardDenied).toBe(
+      'shell_critical_system_git_destruction',
+    );
+    expect((await policy.classify('rm -rf ./build')).hardDenied).toBeNull();
+  }
+  const policy = await createShellCommandPolicy({
+    cwd: '\\\\server\\share\\workspace',
+    shellExecutable: '/bin/bash',
+  });
+  expect((await policy.classify('rm -rf ./build')).hardDenied).toBeNull();
+  expect((await policy.classify("rm -rf 'C:/Windows/System32'")).hardDenied).toBe(
+    'shell_critical_system_removal',
+  );
+});
+
+test('retains POSIX critical-system denial for ambiguous double-slash paths', async () => {
+  for (const cwd of ['/tmp/kite-workspace', '//tmp/kite-workspace']) {
+    const policy = await createShellCommandPolicy({ cwd, shellExecutable: '/bin/bash' });
+    for (const command of ['rm -f //etc/hosts', 'cd //etc; rm -f ./hosts'])
+      expect((await policy.classify(command)).hardDenied).toBe('shell_critical_system_removal');
+    expect((await policy.classify('git -C //etc clean -fdx')).hardDenied).toBe(
+      'shell_critical_system_git_destruction',
+    );
+  }
+  const policy = await createShellCommandPolicy({ cwd: '//etc', shellExecutable: '/bin/bash' });
+  expect((await policy.classify('rm -f ./hosts')).hardDenied).toBe('shell_critical_system_removal');
+});
+
 test('rejects changed original parser assets without touching installed dependencies', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-shell-parser-'));
   try {
@@ -155,7 +189,7 @@ test('rejects changed original parser assets without touching installed dependen
     symlinkSync(
       realpathSync(fileURLToPath(new URL('../../../', import.meta.url))),
       join(modules, '@kite-ai/agent'),
-      'dir',
+      process.platform === 'win32' ? 'junction' : 'dir',
     );
     const result = await Bun.build({
       entrypoints: [
