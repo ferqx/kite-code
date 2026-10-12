@@ -5753,3 +5753,21 @@ Service／Runtime close 实际拒绝之后，独立 Store 取得原 Session owne
 下一阶段仍按四项依赖验收：Runtime取消／正常退出须有可信全resources／handles、完整出生后代和准确cleanup来源；原完整lifecycle须满足八outer／九点／60—168分钟及32MiB原RSS门槛；Win/Linux正式安装、真实版本切换、MCP完整调用取消退出、维护恢复和保数据卸载按后置Actions／用户Windows取得实际证据；全部适用§35/T/E及完整独立迁移审查收束后，才可最终删除旧路径／依赖。匹配符号现在允许继续原release的归因诊断，不放宽以上条件。
 
 本轮生产、测试、依赖、配置及运行资产未改，准确第二轮默认的3883输入与5项运行资产重新逐哈希核对零漂移，复用599／599原默认通过；未再执行已闭合窗口或完整默认。只同步当前进度，产品手册、owner与active行为／边界核对无变化，不制造额外文档diff。按document-before-commit核iteration_complete／stage／commit和正常hook；37能力仍partial、wholeDefault=true仅属上述准确默认范围、wholeV13=false／phaseExit=false，Goal active。未新增正式caller切换或旧生产树删除；本地授权未扩大。
+
+## 2026-10-13：Planning／Workflow 补审与原生采集前置
+
+状态：partial；上一片正常本地提交 `57df644d`。本轮在系统调试授权待决定期间，补审上片明确未审完的业务分支；没有把native符号升级为完整资源producer，也未重跑原RSS参数窗口。
+
+新的非参与式只读审查沿公共 `invokeExtension`／`run.start` 到真实Extension、UnifiedExecution及Store最终事务，核 [Planning](../../packages/agent/src/business/planning/index.ts)的原Run不可变批准、完整plan digest、accepted Interaction proof、成功step Execution receipt、required evaluator及准确waiver；[Agent权限交集](../../packages/agent/src/permissions/constraints.ts)保当前策略、计划scope及硬拒绝，Service仍仅装配事实。根与无模型Action不伪造下一Run批准，普通外部定义不能靠同名或描述取得管理资格。root另核实际waiver与权限接收分支，未发现must-fix。
+
+同一审查继续追踪 [Workflow](../../packages/agent/src/business/skill-workflow/index.ts)的anchor/head/attempt、inline/fork真实结果、同一Operation等待、失败后的repair/replan、独立waiver决定、accepted proof与最终evaluator；[verifier](../../packages/agent/src/business/skill-workflow/verifier.ts)用真实Shell owner和普通Job，停止未知不改标成功。[Service forkFence](../../apps/service/src/skill-workflow-configuration.ts)封原carrier／source／决定／head及角色定义交集，恢复snapshot在vault.resolve前比较，知识正文与资源复读同源且未知关闭透传。原验证失败保留，补偿仍通过普通operations与最终条件，不存在这里可证的自动重放或扩权恢复。
+
+本次没有逐行穷尽全部TUI／Native展示、所有cold-query／附件读取、command／MCP／file-hash／artifact checker与自动mutation所有CAS、compensation-assets及各OS隔离leaf，也未运行其测试；不能把补审称为全部37能力／全部T/E或全仓最终资格。原599／599准确默认结果只按未变输入复用，全部平台与资源门禁继续保留。
+
+准确Bun的现有native诊断路径又核三项边界：公开[JSC接口](https://raw.githubusercontent.com/oven-sh/bun/744846f844374847c902b5e7fd59b4342a51ef99/src/jsc/modules/BunJSCModule.h)不给完整alloc-free／持有链；固定[mimalloc block visitor](https://raw.githubusercontent.com/oven-sh/mimalloc/6a64e1ba7f5b2130d4efccb67ec87fd0003f0f6a/src/theap.c)会先收集deferred/local free，不能当作纯读；[page.used](https://raw.githubusercontent.com/oven-sh/mimalloc/6a64e1ba7f5b2130d4efccb67ec87fd0003f0f6a/include/mimalloc/types.h)包含其他线程已释放但未收集的block，裸计数不是live owner。身份匹配的稳定core可提供部分离线元数据，但当前没有完整采集和经校准的解码合同，单core也不包含历史调用栈。没有调用这些内部函数或拿它们填原null指标。
+
+本机已安装Xcode提供Allocations模板，实际配置保free事件；该存在性不证明覆盖Bun自定义allocator。root仅尝试一个短方法校验：准确原Bun、两个已知Uint8Array、5秒recording上限，输出在 `/private/tmp/kite-v13-allocation-method-20261013-yzg1qutb/`。实际采集未开始：原target PID99100保持T，stdout为0，没有start标记，不能证明任一allocation／free。对准确controller PID99094发送SIGINT未收束后，仅核原命令再清理这两个诊断进程，controller实际137；原PID对应程序均已消失，失败与原文件留在 `result.json`。这不是正常退出或RSS／资源资格，没有启动原长时负载。
+
+只读 `DevToolsSecurity -status`实际0，返回 `Developer mode is currently disabled.`；本机 `man DevToolsSecurity`说明普通用户系统首次在本登录会话调试自己的进程需要管理员授权。已请求用户决定是否完成一次会话调试授权，不启用永久开发者模式、不修改系统调试策略；关闭状态尚不能证明是本次启动受阻的唯一原因。采集限定本任务诊断进程，Kite三种权限策略保持。进一步依赖该授权的采集保持待决定，不把等待当作批准。
+
+本轮没有新增正式caller切换、旧路径删除或用户能力完成声明；新增的是上述有界业务源码审查和原生方法前置的实际未通过证据。生产、测试、依赖、配置与运行资产保持，产品手册／owner／active核对无需行为或边界diff；只同步进度并按iteration_complete／stage／commit与正常hook本地交付。原RSS +115.203125MiB／32MiB、全resources／handles／后代／cleanup、后置Win/Linux实际资格、§35完整最终审查及退役继续未闭合，37partial／wholeV13=false／phaseExit=false，Goal active。
