@@ -5303,3 +5303,31 @@ Root `/private/tmp/kite-export-question-freeze.json` 冻结3854份非Markdown输
 | 5 | §35全能力出口、最后旧authority／依赖退役及阶段完整回归依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
 
 新增闭合范围是完整正式Terminal正文／导出和默认三题问答的三端测试源码／CI消费者接线、两个POSIX测试驱动退役及实际macOS完整合同验证。正式导出调用者保持包内入口，未新增生产authority；RSS、完整观测、fault cleanup与原生后端／平台资格继续未闭合，无push／PR／发布／Actions触发。
+
+## 2026-10-12：普通申请和独立 Job 停止恢复的完整三端测试
+
+前片正式导出／默认问答已正常本地提交 `63966675aa8ee867258cfdaa56859fee8c46ec8b` 并结束，属于实际进展。本轮按最高依赖推进[普通Work申请→中断→冷原ID查询](../../apps/cli/test/isolated/tui-caller-intents-host.test.ts)和[独立Job停止→回应丢失→冷恢复](../../apps/cli/test/isolated/tui-caller-job-stop.test.ts)，并完整复验共享装配的[CLI library三个原整例](../../apps/cli/test/isolated/cli-caller-library.test.ts)。两内嵌Python／POSIX driver退役，统一Bun PTY／ConPTY，普通Work保真实runTUIHost／默认paired Service；不把journal、单操作或一个强杀窗口另立长期目标。
+
+普通Work保原prepared和post-lost两完整用户链。前者持久申请后、实际POST前中断，原后端该Work Command0；后者actual POST已提交、物理socket毁回应，实际原Model succeeded后才按原20ms中断，原Command1。完整UTF-8／组合字符／emoji／CRLF、原Store／Workspace／Session／subject／request与submitting／unknown保持。冷恢复删除原草稿后打开/recovery，未知原申请只GET；post-lost首原GET物理丢回应，Ctrl+C仅停本次读取，第二Ctrl+L仍准确原ID并applied，全部冷POST0／Model不增加。原11个Bun expect按序保留，原Python的producer真实SIGKILL／marker及cold exit0检查迁Node。原10秒读取／producer exit、5秒loss、100ms每键pump、冷6＋3退出及30秒整例不变；另以生产onLaunched回调的实际Service PID核启动／ESRCH，不推造进程归属。macOS原完整文件首次actual0／2pass／26expects／5.77秒，日志 `/private/tmp/kite-caller-intents-portable.log`；prepared冷GET1／calls1、post-lost冷GET2／calls2，四个所属Service实际退出、两个producer SIGKILL和两个cold正常0分别保收据。
+
+Job[共享夹具](../../apps/cli/test/fixtures/caller-job-profile.ts)原自建进程内Runtime／SQLite／Service、Mac专用Shell supervisor与可信Full策略已退役；当前用封闭built默认paired Service及正式平台Shell，通过原公开Workspace trust和Full确认取得范围，Provider／工具／原两个真实detached Job不变。未用fake Job或给Linux拼装另一测试工厂；这是实际测试装配迁移，不声称旧／新装配无条件等价。原父Run已完成，准确/background stop第一原Job，cancel真实提交后物理毁回应、caller中断；另持Service及sibling仍live。冷/recovery首次原GET毁回应，Ctrl+C后第二同GET确认原execution.cancel applied，精确唯一POST、冷POST0、正确target／scope／原记录、sibling无cancelRequested且仍running、Model2／一父Run保持。原15个Bun expect和3个Python检查保持，10秒读取／5秒GET-loss／100ms pump／cold6秒及30秒整例不变；applied／cancel_requested仍只表示受理，不冒称全后代已经清理。
+
+CLI library因共享Job装配改变，完整三个原整例复验：普通新Work必须durable host port、独立于UI草稿的完整申请与原Run、重复同申请不重发、准确一次Work取消；独立Job Stop原POST丢回应／producer中断／冷first2再second0与sibling保持；128槽、损坏／硬链journal本地not_submitted、原文件字节不替换和网络POST0。原38个Bun expect保留，Windows新增三个原生中断检查不替代原POSIX信号断言。原30秒每例不改。Job／library最终完整两文件actual0／4pass／54expects／5.82秒，日志 `/private/tmp/kite-caller-job-complete-final.log`，各自首次Job1pass／16expects／2.42秒及完整library3pass／38expects／3.45秒也保留。收据 `/private/tmp/kite-caller-job-delivery.json` 核最终四文件／日志／原AST／wire／journal／原execution、两个正式Service关闭及实际PID ESRCH；本轮没有runtime红，初次类型检查的excess property／optional disconnect错误已修正、最终类型及格式0，不能把编译诊断称产品运行失败。
+
+POSIX保持真实self-SIGKILL及原信号断言。Windows在同durable或真实提交毁回应屏障后暂停，由实际持有caller的parent／driver执行caller-only taskkill /pid /f，核dispatcher实际0、caller异常EOF／PID gone，不能用普通throw的exit1冒充强杀。Work的post-lost还保实际Model-ready屏障；Job／library不作/t树终止，另持Service／同胞必须继续。原SIGKILL输出／断言限定其真实平台，Windows另输出native forced exit并核原实际目标，不称POSIX信号等价。Job的Darwin skip移除；正式Windows Shell缺项仍由原Command准确shell_unavailable拒绝，而非替身／skip／opaque timeout。标准tmpdir／file URL／junction及private IPC仅修测试路径／所属清理，原真实socket丢回执保持；共享PTY、原recoveryProfile、生产权限／API／Store和builder依赖不改。PTY运输／UTF-8记录不称原Python逐字节实现或全资源资格，Win/Linux实际运行仍后置。
+
+[三端transport workflow](../../.github/workflows/runtime-transport-qualification.yml)追加三个完整独立Bun命令，普通Work不依赖Shell、先于权限；Job／library跟随正式Shell依赖。现七MCP及上述其余完整入口共15个独立caller进程均在Windows MSVC／当前八workspace build之后、原transport／shared14之前。原命令、首DB前engine选择隔离与逐一漏命令／过滤／平台条件／合并进程guard保持；完整原CI文件actual0／21pass／279expects／1.096秒，日志 `/private/tmp/kite-callers-recovery-ci.log`。本轮不dispatch Actions，缺Windows后端不会由本机绿变成平台资格。
+
+Root `/private/tmp/kite-callers-recovery-freeze.json` 冻结3856份非Markdown输入，三原test SHA精确匹配115文件／80CLI作业基线、11＋15＋38共64个原Bun expect按序保持；Win专用新增共4个expect不影响本机原80实际数量。当前三个原完整文件macOS合计6pass／80expects；普通Work两cold TUI和Job一个cold TUI正常0、三个目标producer的真实SIGKILL分别记录。Job四文件／实际日志／retained事实与Root最终SHA相符，recoveryProfile／共享PTY不改；shared Job夹具仅两真实消费者均完整重验，旧store返回值无消费者并随自建Runtime退役。未变CLI范围及shared14／28pass／508expects复用原冻结和已声明Windows optional补正范围；其14源码／原完整命令／生产／依赖／workspace构建输入未变，不重复未受影响整图。产品恢复／取消合同已核对，无行为变化手册diff；CLI owner、测试入口和release control同步实际正式装配／原生中断范围。根／八workspace类型、边界／workspace／API／ownership／格式／文档及正常hook按本轮diff收束；当前整仓728文件／588作业未全部运行，不由局部累加宣布退出。
+
+源码核对五个剩余退出阻塞，按依赖排序：
+
+| 顺序 | 实际用户入口、具体缺口与验收 |
+| --- | --- |
+| 1 | [普通CLI paired／shared argv申请与原查询](../../apps/cli/test/isolated/cli-caller-host.test.ts)、[三类CLI原请求恢复](../../apps/cli/test/isolated/cli-caller-kinds.test.ts)及[对应三类TUI原请求](../../apps/cli/test/isolated/caller-kind-crash.test.ts)等共享入口仍有POSIX中断／路径假设。需保完整正文／extensionInputs／scope／subject、真实提交丢回应、冷原GET零POST、正确原结果和所属退出，迁入三端完整文件；不从library局部通过推导真实argv资格。 |
+| 2 | 正式Shell／Task／MCP原持续负载RSS仍九点 `178814976→299614208B`、`+115.203125MiB>32MiB`。实际native allocation owner修复并满足原完整负载／阈值前仍红，不重复参数对照。 |
+| 3 | 完整Runtime出生后代／activeResources／handles producer及Source批准故障清理receipt仍缺。原formal verifier核完整实际来源前保unsupported／null，当前PID退出／正常短窗／部分Job树不代全集。 |
+| 4 | Win/Linux正式安装、真实版本切换、MCP、维护恢复、保数据卸载及Windows Shell／script verifier／文件候选后端仍需实际资格。后续Actions／用户Windows验证保完整门禁，本机macOS／接线不代原生通过，不在本轮dispatch。 |
+| 5 | §35全能力出口、最后旧authority／依赖退役和阶段完整回归依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
+
+新增闭合范围为普通申请和独立Job停止恢复两个完整用户链的三端测试源码／CI接线、默认正式Shell／公共权限装配迁移及完整CLI library回归；两个POSIX测试driver、自建Runtime和Mac专用测试策略退役。未宣称生产全部authority退役，RSS／完整观测／fault cleanup与平台门禁继续未闭合；无push／PR／发布／Actions触发。

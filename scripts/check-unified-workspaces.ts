@@ -281,6 +281,9 @@ export function checkUnifiedFormalConsumers(root: string): {
               'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
               'apps/cli/test/isolated/tui-export-host.test.ts',
               'apps/cli/test/isolated/tui-question-pty.test.ts',
+              'apps/cli/test/isolated/tui-caller-intents-host.test.ts',
+              'apps/cli/test/isolated/tui-caller-job-stop.test.ts',
+              'apps/cli/test/isolated/cli-caller-library.test.ts',
             ].map((file) =>
               steps.findIndex(
                 (step) =>

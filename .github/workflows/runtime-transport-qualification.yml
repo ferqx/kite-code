@@ -78,8 +78,14 @@ jobs:
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-export-host.test.ts
       - name: Complete default question caller with original final answer
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-question-pty.test.ts
+      - name: Complete original Work caller interruption and cold lookup
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-caller-intents-host.test.ts
       - name: Complete permissions caller through formal Shell and review
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-permissions-host.test.ts
+      - name: Complete independent Job stop and original cold lookup through formal Shell
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-caller-job-stop.test.ts
+      - name: Complete durable CLI library callers and local rejection contracts
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-library.test.ts
       - name: Complete Workspace file candidates and original draft completion
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-file-candidates-host.test.ts
       - run: bun run test:runtime:transport

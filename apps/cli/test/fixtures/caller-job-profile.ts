@@ -1,19 +1,37 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRuntime } from '@kite-ai/agent';
+import { Readable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { createClient } from '@kite-ai/client';
-import { startService } from '@kite-ai/service';
-import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { launchPairedService } from '@kite-ai/service/paired';
+import {
+  createStdioPermissionReader,
+  promptPermissionMode,
+  promptWorkspaceTrust,
+} from '../../src/permissions';
+import { buildOwnedDaemon } from './daemon-host-build';
 import { untilRecovery } from './recovery-profile';
 
-/** Explicit host policy and actual compatible SDK; two independent ordinary Shell Jobs. */
+/** Formal default paired Service, public trusted Full mode and actual compatible SDK; two independent ordinary Shell Jobs. */
 export async function callerJobProfile() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-caller-jobs-')),
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-caller-jobs-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  symlinkSync(join(import.meta.dir, '../../node_modules'), join(root, 'node_modules'), 'dir');
+  symlinkSync(
+    join(import.meta.dir, '../../node_modules'),
+    join(root, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   mkdirSync(workspace);
   mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
@@ -52,15 +70,6 @@ export async function callerJobProfile() {
       );
     },
   });
-  const built = await Bun.build({
-    entrypoints: [
-      join(import.meta.dir, '../../../../packages/agent/src/platform/process/shell-supervisor.ts'),
-    ],
-    target: 'bun',
-    outdir: join(root, 'assets'),
-    naming: 'shell-supervisor.js',
-  });
-  if (!built.success) throw Error('caller_shell_build_failed');
   writeFileSync(
     join(profile.profilePath, 'config.jsonc'),
     JSON.stringify({
@@ -71,53 +80,31 @@ export async function callerJobProfile() {
       tools: [{ id: 'shell.launch', definitionVersion: '1' }],
     }),
   );
-  const host = createDefaultProcessConfiguration({
+  const artifact = join(root, 'artifact');
+  await buildOwnedDaemon(artifact);
+  const entrypoint = join(artifact, 'node_modules/@kite-ai/service/main.js');
+  const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+  const chosen = {
+    entrypoint,
+    entrypointSha256: digest(entrypoint),
+    executable: realpathSync(process.execPath),
+    executableSha256: digest(process.execPath),
+    buildId: 'caller-formal-jobs',
+    apiMajor: 1,
+  };
+  const service = await launchPairedService({
     profile,
-    shell: {
-      platform: 'darwin',
-      configurationId: 'caller-owned-confined-1',
-      env: { PATH: '/usr/bin:/bin' },
-      supervisorPath: built.outputs[0]!.path,
-      bunExecutable: process.execPath,
-      shellExecutable: '/bin/sh',
-      graceMs: 20,
-    },
-    permissionPolicy: {
-      readPolicy: () => ({
-        mode: 'full',
-        workspaceTrust: true,
-        revision: 'explicit-caller-job-fixture',
-        allowed: [
-          { kind: 'model', definitionId: 'fixed', definitionVersion: '1' },
-          { kind: 'tool', definitionId: 'shell.launch', definitionVersion: '1' },
-          { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
-        ],
-      }),
-    },
+    ...chosen,
+    instanceId: crypto.randomUUID(),
+    requiredCapabilities: ['commands', 'inputs', 'permission_controls'],
   });
-  const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: 'owned' }),
-    runtime = createRuntime({ ...host, store, permissions: host.permissions! }),
-    storeId = (await store.getMetadata()).storeId;
-  const service = await startService({
-      runtime,
-      buildId: 'caller-owned-jobs',
-      profile: { dataRoot: profile.dataRoot, name: 'owned', accessKey: profile.profileAccessKey },
-    }),
-    client = createClient({
-      endpoint: service.endpoint,
-      token: service.bootstrap.token,
-      expected: {
-        profile: service.bootstrap.profile,
-        apiMajor: 1,
-        requiredCapabilities: ['commands', 'inputs'],
-      },
-    });
-  await client.connect();
+  const client = service.client,
+    storeId = service.bootstrap.storeId!;
   try {
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
       name: 'owned',
     });
     await client.createSession({
@@ -127,6 +114,21 @@ export async function callerJobProfile() {
       workspaceId: 'w',
       title: 'Jobs',
     });
+    for (const [line, invoke] of [
+      ['trust\n', promptWorkspaceTrust],
+      ['full\n', promptPermissionMode],
+    ] as const) {
+      const reader = createStdioPermissionReader(Readable.from([line]));
+      try {
+        const result = await invoke(line.startsWith('trust') ? 'w' : 's', storeId, reader, {
+          client,
+          write() {},
+        });
+        if (result.exitCode !== 0) throw Error('caller_public_permission_failed');
+      } finally {
+        reader.dispose();
+      }
+    }
     await client.startRun('s', {
       expectedStoreId: storeId,
       commandId: 'work',
@@ -134,6 +136,9 @@ export async function callerJobProfile() {
       content: 'two owned jobs',
     });
     await untilRecovery(async () => {
+      const original = await client.getCommand('work');
+      if (original.status === 'rejected')
+        throw Error(`caller_formal_work_rejected:${JSON.stringify(original.receipt)}`);
       const v = await client.getView('s');
       return (
         v.runs.some((r) => r.originCommandId === 'work' && r.status === 'completed') &&
@@ -148,14 +153,23 @@ export async function callerJobProfile() {
       storeId,
       client,
       jobs,
-      store,
-      endpoint: service.endpoint,
+      endpoint: service.bootstrap.endpoint,
       token: service.bootstrap.token,
       serviceProfile: service.bootstrap.profile,
+      servicePid: service.pid,
       calls: () => calls,
       async close() {
         client.disposeNetwork();
         await service.close();
+        writeFileSync(
+          `${root}.service-exit.json`,
+          JSON.stringify({
+            pid: service.pid,
+            closed: true,
+            assembly: 'sealed-default-paired',
+            policy: 'public-workspace-trust-and-full',
+          }),
+        );
         provider.stop(true);
         rmSync(root, { recursive: true, force: true });
       },
