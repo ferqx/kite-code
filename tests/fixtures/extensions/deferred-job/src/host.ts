@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -216,7 +216,7 @@ if (mode === 'cold') {
       (cancelled && ['cancelled', 'outcome_unknown'].includes(execution?.execution?.status ?? ''))
     ) {
       writeFileSync(
-        join(root, 'ready.json'),
+        join(root, 'ready.tmp'),
         JSON.stringify({
           ...(barrier ? await snapshot() : snap),
           window: barrier
@@ -224,6 +224,7 @@ if (mode === 'cold') {
             : { window: mode },
         }),
       );
+      renameSync(join(root, 'ready.tmp'), join(root, 'ready.json'));
       await waitFile(join(external, 'finish-host'));
       break;
     }

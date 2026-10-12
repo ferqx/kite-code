@@ -37,9 +37,10 @@ export const UNIFIED_TEST_SUITES = [
   ...FINITE_ROOT_SCRIPT_TESTS,
 ] as const;
 
-// These tests perform large installation or full text I/O within their original budgets.
+// These tests perform full artifact verification, installation or text I/O within their original budgets.
 // Run their complete files after the other default jobs have drained.
 export const UNIFIED_EXCLUSIVE_TEST_FILES = [
+  'apps/cli/test/isolated/cli-caller-host.test.ts',
   'apps/cli/test/isolated/tui-export-host.test.ts',
   'tests/isolated/unified-agent/cli-registration-lifecycle.test.ts',
   'tests/isolated/unified-agent/native-cross-version.test.ts',

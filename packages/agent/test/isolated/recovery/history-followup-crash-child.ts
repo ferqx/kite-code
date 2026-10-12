@@ -1,5 +1,6 @@
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -16,13 +17,14 @@ const wrapped = new Proxy(store, {
       return async (input: Parameters<Store['markDispatching']>[0]) => {
         if ((await store.getExecution(input.executionId))?.kind === 'tool') {
           writeFileSync(
-            join(directory, 'ready.json'),
+            join(directory, 'ready.tmp'),
             JSON.stringify({
               expectedStoreId,
               executionId: input.executionId,
               expectedOwnerGeneration: (await store.getSession('s'))!.ownerGeneration,
             }),
           );
+          renameSync(join(directory, 'ready.tmp'), join(directory, 'ready.json'));
           await new Promise<void>(() => {});
         }
         return store.markDispatching(input);
@@ -40,7 +42,7 @@ await runtime.createWorkspace({
   expectedStoreId,
   id: 'w',
   name: 'owned',
-  rootUri: `file://${directory}`,
+  rootUri: pathToFileURL(directory).href,
 });
 await runtime.createSession({
   expectedStoreId,

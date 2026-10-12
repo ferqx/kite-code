@@ -3,17 +3,18 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import {
+  createDefaultAfterTurnPolicy,
+  type DefaultAfterTurnInput,
+} from '@kite-ai/agent/permissions';
 import { planningExtensionId } from '@kite-ai/agent/planning';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Json } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../src';
-import {
-  createDefaultAfterTurnPolicy,
-  type DefaultAfterTurnInput,
-} from '../../src/after-turn-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
 function original(phase: 'request' | 'apply' = 'request'): DefaultAfterTurnInput {
@@ -552,7 +553,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await client.createSession({
     expectedStoreId,
@@ -780,6 +781,7 @@ test('default report final source digest rejects changed original Tool intent wh
     const originalTool = (await f.store.getExecution(tool.executionId))!;
     const db = new Database(join(f.profile.profilePath, 'core.db'));
     try {
+      db.exec('PRAGMA busy_timeout=1000');
       db.run('UPDATE execution SET intent_json=? WHERE id=?', [
         JSON.stringify({
           ...(originalTool.input as Record<string, Json>),
@@ -896,6 +898,7 @@ async function plannedReport(singleSlot: boolean, driftPlan = false) {
       }))!;
       const db = new Database(join(f.profile.profilePath, 'core.db'));
       try {
+        db.exec('PRAGMA busy_timeout=1000');
         db.run(
           "UPDATE extension_record SET revision=revision+1,json=? WHERE extension_id=? AND scope_kind='session' AND scope_id=? AND key=?",
           [

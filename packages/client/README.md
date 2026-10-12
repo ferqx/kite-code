@@ -19,7 +19,7 @@ MCP 原工具 metadata 的 [公共 decoder/reader](src/mcp-tools.ts)使用既有
 
 [真实本地HTTP测试](test/mcp-tools.test.ts)当前40/128/0，公共Artifact链完整1,115,912 bytes/18chunks，Unicode在65535 byte跨块、完整tail/optional metadata、current/origin Store分离、manifest1GET。闭合DTO、inner binding、header和真实body/EOF、repeat/skip/swap/missing/UTF-8/budget/abort反例保持零POST、cursor不变。原Artifact/CSP/extension邻接5/27/0；Agent publication与TUI实际链分别归[MCP](../agent/src/mcp/README.md)和[TUI](../ui/src/tui/README.md)，不是此受控HTTP协议fixture的证明范围。
 
-`run.start/input.follow_up` 可携带通用 `extensionInputs:[{extensionId,definitionVersion,input}]`，即使显式空数组也必须已有 `run_extension_inputs` capability。SDK 在发送前克隆原意图并使用生成 closed schema；顺序、重复项、payload 和省略/空数组原样参与 Command 摘要，SDK 不解析 Skill 或修改版本。`input.steer` 不接受它，BrowserClient 保持只读。物理丢回复仍只查原 command ID，不重新 POST；[实际断线测试](test/isolated/extension-inputs.test.ts)验证该边界。
+`run.start/input.follow_up` 可携带通用 `extensionInputs:[{extensionId,definitionVersion,input}]`，即使显式空数组也必须已有 `run_extension_inputs` capability。SDK 在发送前克隆原意图并使用生成 closed schema；顺序、重复项、payload 和省略/空数组原样参与 Command 摘要，SDK 不解析 Skill 或修改版本。`input.steer` 不接受它，BrowserClient 保持只读。物理丢回复仍只查原 command ID，不重新 POST；[实际断线测试](test/isolated/extension-inputs.test.ts)同时核完整空JSON的 `invalid_response` 与任何回应前socket断开的 `network_outcome_unknown`，每个原申请实际一次POST，入参后来修改不影响完整快照。空响应后socket关闭只属收尾，不代替真正丢回应的证明。
 
 `forkSession(sourceSessionId,{expectedStoreId,commandId,expectedContextSelectionId,boundary?,newSessionId,title})` 要求 `context` 与 `sessions` 能力。省略边界使用当前选择的稳定完整上界，显式 `null` 选择空历史；消息 ID/seq 必须形成完整 Model/Tool 配对。回执核原 source Session/selection、新 root Session、原命令及有限 `namespaceReport`，未登记规则默认 omit；`omittedExtensionState` 如实表示是否有省略。规则只来自可信宿主注册的 copy/rebuild，不从请求取得。复制不创建原 Run/Execution、授权或外部效果。`Message.originMessage` 来自 sealed Store 出处；Fork 的输出仍从原 Session/Execution 读取和验证，不改绑原 Run/hash。[SDK 反例](test/isolated/fork.test.ts)、[真实 namespace Fork](../../tests/isolated/unified-agent/client-fork-namespaces.test.ts)与[实际 HTTP/Native/Cookie](../../tests/isolated/unified-agent/client-fork.test.ts)覆盖回执报告不一致、原 provenance、>17MiB 原正文、冷只读零 Provider、新工作零旧效果重放。
 
@@ -63,7 +63,7 @@ SDK 提供 workspace/session 创建及列表、`startRun`、`cancelCommand`、`c
 
 `steer(sessionId,input)` 与 `followUp(sessionId,input)` 分别采用生成的 `SteerCommandRequest` 和 `FollowUpCommandRequest`，要求已准入的 `commands`、`inputs` capabilities。调用者显式保存原目标 Run/前序 Run、context selection、Store 与 command ID；SDK 不猜当前 Run，不重绑旧意图，不自动重试。非空白内容按 UTF-8 校验最多 1 MiB，请求保持 closed。202 的 accepted 不是应用完成；后续查询原 command 的回执判断应用事实。
 
-`startRun` 与 `followUp` 可携 `selectedSkills`，最多 256 个非空名称或配置 ID、每项最多 128 字符。字段存在时（包括 `[]`）要求原 Service 的 `run_skill_selection` 能力；缺能力在业务 POST 前拒绝。省略使用该次 Service 配置目录，空数组选择零项。SDK 在异步请求前私有复制原数组，不排序、不去重、不解析 Skill 或读取本机文件；同 ID 请求冲突由 Service/Core 核对。选择不适用于活动 Run 的 steer，也不改变权限、信任或 daemon 默认配置。
+`startRun` 与 `followUp` 可携 `selectedSkills`，最多 256 个非空名称或配置 ID、每项最多 128 字符。字段存在时（包括 `[]`）要求原 Service 的 `run_skill_selection` 能力；缺能力在业务 POST 前拒绝。省略使用该次 Service 配置目录，空数组选择零项。SDK 在异步请求前私有复制原数组，不排序、不去重、不解析 Skill 或读取本机文件；同 ID 请求冲突由 Service/Core 核对。选择不适用于活动 Run 的 steer，也不改变权限、信任或 daemon 默认配置。[原完整选择测试](test/isolated/selected-skills.test.ts)分别用真实空JSON回应和发送任何回应前物理断线核 `invalid_response` 与 `network_outcome_unknown`，各一次POST并保完整原选择与command快照；空响应后的socket关闭仅为收尾。
 
 `listPendingInputs(sessionId,{storeId,kind?,targetRunId?,afterSeq?,limit?})` 要求 `inputs` capability，按生成 query 校验，最多 200 条。`afterSeq` 严格校验 Decimal64 范围，待输入的原 request 与未来响应字段保留，纯读取不推进 SSE 游标。公开消息的原命令、context、input kind 与 source IDs 用于追溯应用来源。child 可展示历史，但追加输入只能从原 root 发起。
 

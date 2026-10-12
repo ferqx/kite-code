@@ -198,6 +198,9 @@ test('a later parallel Tool terminal SQLite rejection survives the earlier unkno
   });
   const store = await openSqliteStore({ dataRoot: root, profile: 'storage' });
   const db = new Database(join(root, 'storage/core.db'));
+  // Match the Store Worker's bounded native writer wait: the accepted terminal
+  // snapshot does not stop its independent control/owner-release transactions.
+  db.exec('PRAGMA busy_timeout=1000');
   db.exec(
     "CREATE TRIGGER reject_late_terminal BEFORE UPDATE OF state ON execution WHEN NEW.call_id='storage-second' AND NEW.state='succeeded' BEGIN SELECT RAISE(ABORT,'late Tool terminal denied'); END",
   );

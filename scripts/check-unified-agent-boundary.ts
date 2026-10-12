@@ -39,6 +39,9 @@ const servicePermissionImplementations = new Set([
   'createShellConfiguration',
   'hostExecutionScope',
   'hostFilesystemScope',
+  'createDefaultAfterTurnPolicy',
+  'createPlanningPermissionPolicy',
+  'createPlanningPermissionCeiling',
 ]);
 const shellParserDependency = /^(?:web-tree-sitter|tree-sitter-bash)(?:\/|$)/;
 const infrastructure =

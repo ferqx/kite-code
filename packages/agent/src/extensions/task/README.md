@@ -51,7 +51,7 @@ Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 
 
 原 carrier 的 after_turn 封存与 ensure 在同一事务；真实终态结算与唯一因果 `job.report` Command 登记在同一事务。汇报申请保留原 Store、主体、父 Run、Tool 定义/输入、配置、rootWork 与目标 context selection。应用时重新核实准确来源成功、已知 carrier 终态、原父已完成、owner、取消/删除、当前策略与控制 revision，再原子创建一个新 Run、接纳原结果源与保存回执。carrier 的 failed 状态保留，父可如实报告；unknown 不续轮。
 
-报告 Run 在该原子应用中继承原父 requirements，不以新 Run 清空原 Planning/验证义务。宿主 initializer 保留 refs 而不重复登记原 Run ref；派发与完成仍核原 sealed record/proof/control read-set。Service 对有限实际 report/source/carrier/config/root work 关系核实后，才沿原批准读取执行方式；同 Session 的无关新 Run 不获得历史例外。当前信息来源仍与历史 receipt 校验分开，inactive 原 Run 不向新任务贡献批准。通用引用规则与实际 SQL 资格由[requirements owner](../../storage/sqlite/requirements/README.md)负责，默认可信角色/afterTurn 策略由[Service owner](../../../../../apps/service/README.md)负责。
+报告 Run 在该原子应用中继承原父 requirements，不以新 Run 清空原 Planning/验证义务。宿主 initializer 保留 refs 而不重复登记原 Run ref；派发与完成仍核原 sealed record/proof/control read-set。Service 对有限实际 report/source/carrier/config/root work 关系核实后，才沿原批准读取执行方式；同 Session 的无关新 Run 不获得历史例外。当前信息来源仍与历史 receipt 校验分开，inactive 原 Run 不向新任务贡献批准。通用引用规则与实际 SQL 资格由[requirements owner](../../storage/sqlite/requirements/README.md)负责；默认 Task／follow-up 后续汇报策略由[Agent 权限 owner](../../permissions/README.md)核原角色／来源／工作／取消／当前信任，角色装配和可信事实读取由[Service owner](../../../../../apps/service/README.md)提供，原 Task／carrier／Model 授权保持独立。
 
 已经接纳的新人类 start/follow-up 意图优先抑制尚未应用的汇报；先应用的报告占用普通前台，新人类工作按既有 admission 排队。Rewind、根停止或控制撤销抑制旧汇报，不向后来人类 Run 偷渡结果。完整正文沿原 carrier Artifact/低信任具名 source 读取，不复制 child 历史。普通 Model 权限与来源检查仍独立执行。
 

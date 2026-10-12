@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -52,7 +52,7 @@ const runtime = createRuntime({
                 .getView('s')
                 .then(() => writeFileSync(join(root, 'observation-returned.json'), 'true'));
               writeFileSync(
-                join(root, 'entered.json'),
+                join(root, 'entered.tmp'),
                 JSON.stringify({
                   pid: process.pid,
                   executionId: context.executionId,
@@ -61,6 +61,7 @@ const runtime = createRuntime({
                   timeoutMs,
                 }),
               );
+              renameSync(join(root, 'entered.tmp'), join(root, 'entered.json'));
               for (;;) {
                 // This is an actual synchronous infinite callback, not an unresolved Promise.
               }
@@ -87,7 +88,8 @@ await runtime.createSession({
   workspaceId: 'w',
   title: 'Synchronous boundary',
 });
-writeFileSync(join(root, 'ready.json'), JSON.stringify({ pid: process.pid, expectedStoreId }));
+writeFileSync(join(root, 'ready.tmp'), JSON.stringify({ pid: process.pid, expectedStoreId }));
+renameSync(join(root, 'ready.tmp'), join(root, 'ready.json'));
 await runtime.submitCommand({
   expectedStoreId,
   commandId: 'work',

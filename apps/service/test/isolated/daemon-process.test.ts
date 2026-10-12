@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import specification from '../../generated/openapi.json';
@@ -354,7 +355,7 @@ nativeTest(
       await client.createWorkspace({
         expectedStoreId: storeId,
         id: 'workspace',
-        rootUri: `file://${value.directory}`,
+        rootUri: pathToFileURL(value.directory).href,
         name: 'Owned',
       });
       await client.createSession({
@@ -439,6 +440,7 @@ nativeTest(
         originalWal,
       );
       const db = new Database(value.profile.databasePath);
+      db.exec('PRAGMA busy_timeout=1000');
       db.exec('UPDATE storage_meta SET format_major=99');
       db.close(true);
       const core = readFileSync(value.profile.databasePath);

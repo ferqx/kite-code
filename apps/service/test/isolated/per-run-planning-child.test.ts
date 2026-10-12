@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
 import type { PermissionMode } from '@kite-ai/agent/permissions';
@@ -278,6 +278,7 @@ async function fixture(
           );
           const db = new Database(join(profile.profilePath, 'core.db'));
           try {
+            db.exec('PRAGMA busy_timeout=1000');
             db.run(
               "UPDATE extension_record SET revision=revision+1 WHERE extension_id=? AND scope_id='s' AND key='plan.current'",
               [planningExtensionId],
@@ -325,7 +326,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await client.createSession({
     expectedStoreId,

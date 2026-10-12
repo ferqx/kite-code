@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { mcpCanonical } from '@kite-ai/agent/config';
@@ -83,7 +84,7 @@ async function fixture(
     expectedStoreId: storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}/`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,
@@ -277,6 +278,7 @@ test('partial result, mutated proof and reprepare cannot manufacture terminal sa
     expect((await f.query('original')).phase).toBe('saved');
     const db = new Database(f.profile.databasePath);
     try {
+      db.exec('PRAGMA busy_timeout=1000');
       const commandOriginal = db
         .query('SELECT receipt_json FROM command WHERE id=?')
         .get('original') as { receipt_json: string };
@@ -467,7 +469,7 @@ test('unconfigured process default uses the actual local observer and separate o
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
     });
     await client.createSession({
       expectedStoreId: storeId,
@@ -623,6 +625,7 @@ test('cancel proof requires closed original result and persistent read scope', a
     expect((await f.query('original')).phase).toBe('cancelled');
     const db = new Database(f.profile.databasePath);
     try {
+      db.exec('PRAGMA busy_timeout=1000');
       const row = db.query('SELECT result_json FROM execution WHERE id=?').get(e.id) as {
         result_json: string;
       };
@@ -659,7 +662,7 @@ test('cancel proof requires closed original result and persistent read scope', a
         expectedStoreId: f.storeId,
         id: 'other-workspace',
         name: 'other',
-        rootUri: `file://${f.workspace}/`,
+        rootUri: pathToFileURL(f.workspace).href,
       });
       db.run('UPDATE session SET workspace_id=? WHERE id=?', ['other-workspace', 's']);
       expect((await f.query('original')).phase).toBe('outcome_unknown');

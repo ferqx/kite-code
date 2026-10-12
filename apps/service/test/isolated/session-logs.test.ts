@@ -307,6 +307,7 @@ test('checked HTTP Decimal64/replay-floor SQL fault probes preserve exact waterm
   });
   const db = new Database(profile.databasePath);
   try {
+    db.exec('PRAGMA busy_timeout=1000');
     await store.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',

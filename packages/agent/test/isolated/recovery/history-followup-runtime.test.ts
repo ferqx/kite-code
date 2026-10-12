@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { createRuntime } from '../../../src/runtime';
@@ -16,7 +19,7 @@ async function until(check: () => boolean | Promise<boolean>) {
 }
 for (const mode of ['inline', 'sealed'] as const)
   test(`actual SIGKILL ${mode} Model output interrupt preserves original call history for same Session SDK followup`, async () => {
-    const directory = mkdtempSync('/private/tmp/kite-history-followup-');
+    const directory = mkdtempSync(join(tmpdir(), 'kite-history-followup-'));
     const bodies: {
       messages: {
         role: string;
@@ -62,19 +65,36 @@ for (const mode of ['inline', 'sealed'] as const)
     const child = Bun.spawn(
       [
         process.execPath,
-        new URL('./history-followup-crash-child.ts', import.meta.url).pathname,
+        fileURLToPath(new URL('./history-followup-crash-child.ts', import.meta.url)),
         directory,
         baseURL,
       ],
       { stdout: 'pipe', stderr: 'pipe' },
     );
+    async function forceOriginalChild() {
+      assert.equal(child.exitCode, null, 'original held child must be alive');
+      process.kill(child.pid, 0);
+      if (process.platform === 'win32') {
+        const dispatched = Bun.spawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        assert.equal(dispatched.exitCode, 0, 'native termination of original child failed');
+      } else child.kill('SIGKILL');
+      const code = await child.exited;
+      if (process.platform !== 'win32') assert.equal(child.signalCode, 'SIGKILL');
+      else assert.notEqual(code, 0);
+      assert.throws(
+        () => process.kill(child.pid, 0),
+        (error: unknown) => (error as NodeJS.ErrnoException).code === 'ESRCH',
+      );
+    }
     let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let runtime: ReturnType<typeof createRuntime> | undefined;
     try {
       await until(() => existsSync(join(directory, 'ready.json')));
       const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8'));
-      child.kill('SIGKILL');
-      await child.exited;
+      await forceOriginalChild();
       const profile = { dataRoot: join(directory, 'data'), profile: 'owned' };
       store = await openSqliteStore(profile);
       const input = {
@@ -168,10 +188,8 @@ for (const mode of ['inline', 'sealed'] as const)
       expect(readFileSync(join(directory, 'effects'), 'utf8')).toBe('followup\n');
       expect((await store.getExecution(ready.executionId))?.status).toBe('cancelled');
     } finally {
-      if (child.exitCode === null) {
-        child.kill('SIGKILL');
-        await child.exited;
-      }
+      if (child.exitCode === null && child.signalCode === null) await forceOriginalChild();
+      else await child.exited;
       if (runtime) await runtime.close();
       else await store?.close();
       server.stop(true);

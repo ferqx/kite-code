@@ -6,6 +6,10 @@
 
 [capabilities.ts](capabilities.ts) 的 `builtinCapability` 统一实际 Tool、Job 与 Action 的固定效果和 safeRead；权限装配与 `workflowCapabilityDescription` 使用同一份分类，Shell 工厂也复用原 Shell 分类。Workflow 的 Job 三维 unknown、最低人工审批和未知 Files 的保守 write 投影保持，不能据此给执行策略补写入授权。MCP source/auth 分类只接收宿主原三个已注册定义 ID；Service 仍提供实际注册、选中 server、transport 可用性和网络配置事实。[constraints.ts](constraints.ts) 组合当前策略与原计划约束、Workflow 最低人工审批、明确文件恢复审批。宿主提供已校验的原状态和身份，约束不能放宽硬拒绝或改变原授权范围。既有 reason、revision/快照格式、单次与同命令授权、取消/恢复语义保持。
 
+[after-turn.ts](after-turn.ts) 的 `createDefaultAfterTurnPolicy` 统一默认 Task／follow-up 结果汇报许可。宿主只提供冻结角色 id/version 与当前可信 policy/trust/controlReads 读取；本模块核 request/apply 的原 Command／Run／Session／Execution／role／source／root work、取消／删除与当前信任，生成原 revision 摘要。工厂不执行 I/O，authorize 保原读取前后 signal 检查；它不授权 Task、carrier、报告 Model 或递归 report。Core 激活、报告应用和 SQL 最终 CAS 仍核独立事实，不能合并成这次策略读取。完整正式 Service 消费者及原纯策略断言保留在[原默认整文件](../../../../apps/service/test/isolated/default-after-turn.test.ts)，无需平台 skip；下层完整 Task 场景由 [Task owner](../extensions/task/README.md#task-的-after_turn)维护。
+
+Planning 默认宿主直接调用 `createPlanningPermissionPolicy` 并提供原状态 reader，原 Service 转发工厂和重复 options 已退役。当前策略判定先于 required/run/state 检查，普通 required=false 请求不读取计划；其他请求仍使用当前真实绑定与原 constraint，不缓存一次状态来代替派发复核。
+
 [shell.ts](shell.ts) 的 `createShellConfiguration` 接收 Workspace、选中工具及可信平台路径/环境，检查原资产后装配普通 Shell Tool/Job。输入请求与实际授权分开；`hostExecutionScope` 只读取最终已接纳证明，逐维求父子文件系统和网络交集。命令摘要绑定原命令、范围、环境、配置和执行/解析资产，真正启动前重核资产与硬拒绝；原 8192 proof 上限及失败关闭保持。Service 不保留策略或范围解释副本。
 
 Shell 工厂通过本包既有 `@kite-ai/agent/jobs/shell` 与 `/shell` 公共入口装配，保留 Job 的独立构建和资产位置。这里用包内相对导入会使 Bun splitting 将 supervisor 定位函数提升到根共享 chunk，破坏基于 `import.meta.url` 的原相对路径；真实源码树外制品测试已证此失败。保留 public entry，而非增加资产回退或放宽校验。

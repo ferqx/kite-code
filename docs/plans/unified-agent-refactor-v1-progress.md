@@ -5449,3 +5449,58 @@ Root新协议完整测试actual0／9pass／76expects／50ms；根与八workspace
 | 4 | [§35全部能力出口](unified-agent-refactor-v1.md)、最后旧authority／依赖退役和当前完整回归依赖适用门禁；原37能力仍partial。全部用户入口验收和强制门禁满足后才可退出，wholeV13=false／phaseExit=false。 |
 
 新增闭合范围为私有VM采集协议、V1／V2便携严格读取和必要本机校准，取得原生命周期完整新增调用证据；生产RSS、全资源观察、最后旧authority退役与阶段退出仍未闭合。该诊断切片按文档及本地提交收束，Goal继续active；无push／PR／发布／Actions触发。
+
+## 2026-10-12：默认 Task 汇报与 Planning 权限单点装配
+
+状态：partial；前片72651270已正常本地提交，hooks0／19.83秒、3863份输入零漂移且工作树干净，属于实质进展。VM诊断切片已结束，本轮不重复RSS采集或参数对照。只读核对37能力、§35、当前正式入口和实际消费者，映射里“TUI明确Include”“正式消费者待闭合”等旧文字只属历史限制；当前恢复Include、CLI／TUI／Native新前门和此前本机安装／真代码版本切换／维护链源码已存在，不据37partial或旧文件存在再建立功能目标。
+
+实际新缺口是默认Service仍持有Task／follow-up后续汇报的业务许可。正式入口为普通Task→独立carrier→父完成／结果报告，以及单Run Planning／child／report执行方式；完整行为要求原Task/carrier/Model各自审批、原role/source/root work和当前信任匹配、取消／删除／来源或控制漂移拒绝、准确一次汇报与完整原结果、无递归／查询重放，Planning批准只约束原Run与准确子／报告，不授下一Run。
+
+[默认after-turn工厂](../../packages/agent/src/permissions/after-turn.ts)现归Agent独立权限模块，正式Service从 `@kite-ai/agent/permissions` 直接装配；原138行Service实现删除且无shim。宿主只给原角色id/version与可信current读取，原判定body、revision/controlReads摘要、读前后signal与冻结时刻保持。[Planning装配](../../apps/service/src/configuration.ts)直接调用原Agent工厂与 `readPlanningPermissionState`；单次转发工厂和重复options退役，该owner净减32行，原reader完整body／真实身份／父链／报告绑定／状态读取不变。职责迁移不冒称净精简；实际消失的转发维护面单列，Core激活、报告应用和SQL最终read-set/CAS有独立owner／事实／时刻，继续保留。
+
+改动前11个原完整文件逐个独立Bun进程通过：94pass／1200expects／全部actual0，记录 `/private/tmp/kite-agent-report-baseline/result.json`；涵盖默认／root／nested／follow-up Task、required/background、父先完成／单槽子先完成、信任／控制／plan head漂移、per-Run／child Planning和Agent原策略。原授权与Planning reader body的TS printer文本全同，默认汇报原62静态expect节点和顺序全同，`/private/tmp/kite-agent-report-preservation.json`保证明。完整boundary原20case／177expects／actual0，原47静态expect保持，仅原重声明循环追加after-turn／Planning三个已退役工厂；Agent public imports仍允许，Agent→Service仍拒绝，无平台skip或镜像测试。
+
+首构建actual1、根类型actual2为我使用不存在的 `../errors`，原日志保build-red／typecheck-red；已改为原AgentError实际 `storage/types` 来源，未发生产品runtime失败。根／八workspace类型和八workspace构建actual0，边界actual0。独立最终审阅又核 Planning 的 originStoreId 仍在装配时捕获原 primitive，runtime／planningRun 仍在原时刻读取；`/private/tmp/kite-planning-afterturn-final-review.json` 绑定最终源，无审批／状态缓存变化。
+
+原完整默认 `bun run test` 两次实际退出1：第一轮203371ms，66个作业结束／65通过／1失败，523未派发；第二轮193112ms，59个作业结束／58通过／1失败，530未派发。两轮均发现729文件／589job、macOS4并发、原6exclusive，冻结窗口非Markdown输入漂移0；准确来源与全日志保 `/private/tmp/kite-agent-report-full-{freeze-first,result-first,test-first}` 和 `kite-agent-report-full-second-{freeze,result,test}` 对应文件。真实失败均为 CLI paired 完整链耗尽原30秒，第二轮默认 Task 汇报原完整文件已通过；不能据已派发绿色追认整图或未运行范围。
+
+CLI 原完整调用者文件保三个整例、原静态41处expect、12次paired／shared冷调用及每整例30秒。真实stdout／stderr随调用消费，所属Service出生先记录，onLaunched仍核同一pid/start；launch前失败保实际退出／signal／phase，未知所属者不冒认清理。曾尝试同一期限内并行准备，限定全文件3pass／83expects／37.08秒，原receipt `/private/tmp/kite-cli-caller-host-deadline-delivery.json` 保该输入；它未解决第二轮并发默认的原30秒失败。只读审阅另发现准备失败只杀builder父进程不能证明编译子树收尾，以及spawn在try外时无目录owner。最终恢复HEAD原顺序，先成功取得fixture，再于其所属根／既有try中构建candidate，直接删去新增并行失败分支和额外目录，不扩进程框架；正常builder逐段等实际child exit及双流EOF，异常父退出仍不授完整后代资格。
+
+最终原完整CLI文件实际macOS0／3pass／83expects／34.14秒：paired22285.65ms、shared10438.94ms、main1356.04ms，全部原30秒内；日志 `/private/tmp/kite-cli-caller-serial-final.log`。原41个expect AST／12次launch／三个整例与同屏障平台终止保留，候选全检、首DB前真实引擎选择／SH及正常原caller／Service回执不减。此限定通过不抵消前两次完整默认红。
+
+当前把该完整候选制品／12次冷调用文件纳入已有大型制品exclusive分类，保其全部行为／预算与原六个独占文件。当前729文件／589job仍恰好一次：582concurrent／7exclusive、168parallel／554isolated／7exclusive，macOS4／Linux2并发与失败后停止新派发、已启动作业drain规则不变；Windows原已独占。原计划与runner两个完整文件11pass／84expects／actual0，既有barrier和覆盖反例保留。下一次完整默认仍须保存真实终态，当前分类和局部通过不宣布wholeDefault、平台资格或§35退出。
+
+第三次未过滤完整默认实际1／350194ms，166个作业结束／165通过／1失败，423未派发；729文件／589job、7exclusive、非Markdown输入漂移0，`/private/tmp/kite-agent-report-full-third-{freeze,result,test,jobs}` 保原输入、日志及准确main job计数。真实失败为并行Tool原故障注入连接的 `DROP TRIGGER reject_late_terminal` 得SQLITE_BUSY；此前业务terminal／准确错误／unknown／Model一次及原效果断言已通过，不是terminal拒绝被吞。该独立Database实际默认busy_timeout=0，生产Store Worker已为1000，Run inactive并不承诺控制短事务与owner释放均停；仅在原注入连接一次设相同 `PRAGMA busy_timeout=1000`，原CREATE／拒绝／DROP、全部断言／预算和生产状态合同不变，无应用重试。原完整文件3pass／63expects／427ms，Agent types／Biome0，逆向移除三行即准确恢复HEAD；`/private/tmp/kite-parallel-tools-delivery.json` 绑定最终源。原瞬时竞争事务未trace，不声称Runtime泄漏修复或整图绿。
+
+第四次未过滤完整默认实际1／793699ms，535个main job结束／534通过／1失败，54未派发；同729文件／589job／7exclusive，输入漂移0，`/private/tmp/kite-agent-report-full-fourth-{freeze,result,test}` 保原窗口。原SQL文件在该整图已0／511ms；新真实失败是Client扩展输入原用例，任何response前socket.destroy实际 `network_outcome_unknown`，却断言 `invalid_response`。生产原合同正确：实际body读取传输失败亦属network unknown，只有实际完整HTTP framing的空／坏JSON或不合法DTO为invalid response，不按错误断言改生产。
+
+原Client完整case保七个静态expect及顺序、capability／非法输入／唯一POST／完整原array snapshot和原期限；先用真实response.end的完整空JSON核原invalid_response，消费确认后关闭socket仅为收尾，再以独立原command在任何response之前保真实socket.destroy，核network_outcome_unknown和完整原clone，每phase实际一次POST／零重发，仅尾部追加两个expect。无globalfetch替身、伪造Response、直接throw、sleep或重试。原case1pass／20expects，Client types／Biome0；`/private/tmp/kite-client-extension-inputs-delivery.json` 保Agent输入。Root只加socket已关闭检查，避免别的平台晚注册close挂起，并完整重验 `/private/tmp/kite-client-extension-inputs-final-closure.log` actual0，最终非Markdown输入在下一整图冻结。该修复对应本次真实未解决的传输相位错误，不扩已闭合事实的矩阵。
+
+第五次未过滤默认actual1／726315ms，459个main job结束／458通过／1失败，130未派发；729文件／589job、输入漂移0，`/private/tmp/kite-agent-report-full-fifth-{freeze,result,test}` 保原窗口。真实sealed history-followup child直接writeFileSync最终ready.json，先创建可见空路径后才写字节；父原exists后一次JSON.parse读到Unexpected EOF，不是原Model历史或恢复效果断言失败。仅改同所属目录ready.tmp完整写闭后rename原ready.json，父读取不加retry／吞错／期限；系统tmpdir与标准fileURLToPath/pathToFileURL替代Mac路径，POSIX原SIGKILL与Windowsheld child原生dispatch／异常exited分流。首新增收尾证明又发现Bun信号退出exitCode仍null，原红日志保留；按signalCode及持有exited分类后原完整两case2pass／33expects／514ms，原19静态expect按序保持，20秒整例／5秒观察不改。`/private/tmp/kite-history-followup-delivery.json` 绑定两最终源；WindowsArtifact原chmod／真实损坏未绕ACL，kernel birth原语当前仅Darwin，native后代与Win/Linux仍不授资格。
+
+同机制只读源码核对另证四个实际producer／reader配对：[report-profile](../../apps/cli/test/fixtures/recovery-report-profile.ts)、[Windows caller](../../apps/cli/test/isolated/tui-caller-intents-host.test.ts)、[deferred host](../../tests/fixtures/extensions/deferred-job/src/host.ts)及[synchronous child](../../tests/fixtures/unified-agent/synchronous-extension.ts)。只在原ready／entered JSON点同目录完整写闭后rename，原payload／snapshot各求值一次、callback条件、hold／提交／无限同步窗口、父读取和所有原assert／预算保持。已有atomic或完整IPC及无payload sentinel排除，不展开新矩阵；每file逆向撤销import／临时名／rename即字节恢复原源，types／格式0。收据 `kite-cli-ready-publication-delivery.json` 与 `kite-extension-ready-publication-receipt.json` 保源SHA；五个原完整消费者按原default job／私有HOME／独立进程串行actual0／17pass／617expects／22900ms，输入漂移0，`/private/tmp/kite-ready-publication-consumers-result.json` 保所有五个准确作业／源码，完整log为同prefix.log。此限定图不代当前全部589默认作业，下一整图冻结本轮最终非Markdown源。
+
+第六次未过滤默认actual1／678589ms，404个main job结束／403通过／1失败，185未派发；729文件／589job、输入漂移0，`/private/tmp/kite-agent-report-full-sixth-{freeze,result,test}` 保原窗口。真实Native Approval DOM首case在click后的26ms读approval-command得null。产品InteractionCard handler明确void load，真实loadInteractionAttachment仍需await crypto.subtle.digest；act不自动拥有该异步完成，产品未verified继续禁批准正确。原test复用现有UI完整附件条件等待：点击后等实际 `[data-complete-attachment="verified"]`，核验错误即失败、截止绑定整例开始原5秒，未fakeResponse／直接setLoaded／绕digest或增deadline。原两case2pass／26expects／693ms，21静态expect按序全保，Desktop types／格式0；`/private/tmp/kite-native-approval-final-receipt.json` 绑定最终源，生产state／reader／hash不改，无平台skip或新场景。
+
+第七次未过滤默认actual1／819642ms，551个main job结束／550通过／1失败，38未派发；729文件／589job、输入漂移0，`/private/tmp/kite-agent-report-full-seventh-{freeze,result,test}` 保原窗口。真实失败为Client selected-skills同一回应相位错误：任何HTTP回应前实际socket.destroy，却断言 `invalid_response`。仅原完整case补两次独立实际请求：完整空JSON核原invalid_response及原唯一POST／完整原选择快照；随后发送任何回应前原物理断线核network_outcome_unknown、准确command／完整选择、入参后来变动不影响快照及本相位一次POST。空响应后的socket关闭有closed guard且只作收尾，原物理断线仍实际执行，不改生产或制造fetch／Response。六个原静态expect按序全保、预算不增；原完整文件actual0／1pass／19expects／45ms，Client types／格式0，`/private/tmp/kite-client-selected-skills-delivery.json` 绑定最终源与原红。有限只读核对Client九个实际destroy源码，未见其他未解决的同机制配对；合法截断、清理关闭和原已正确unknown的断线不扩入新矩阵。限定通过不代当前完整默认，下一整图冻结最终输入并保存实际终态。
+
+第八次原默认命令actual1／1623ms、输入漂移0，四个已派发Desktop shard以原失败或drain终止，585未派发；`/private/tmp/kite-agent-report-full-eighth-{freeze,result,test}` 保原结果。多个无关用例在Bun.serve localhost随机端口处得EADDRINUSE。随后同一最小监听／立即关闭源码在当前use_default执行沙箱actual1、在已授权require_escalated实际macOS环境actual0／listening=true；该对照定位本轮本机监听限制，不改生产或测试端口／断言／预算。此环境失败仍不能判完整默认绿；下一原默认窗口在具备实际本机监听与原生验证能力的授权执行环境运行。根／八workspace类型、全Biome及docs／docs-impact本轮actual0，原104warning／98info保留；八workspace构建仅复用生产输入未变范围。
+
+第九次在已授权本机验证环境的未过滤默认actual1／360109ms，157个main job结束／156通过／1失败，432未派发；729文件／589job、输入漂移0，`/private/tmp/kite-agent-report-full-ninth-{freeze,result,test}` 保原窗口。唯一失败为MCP OAuth Actions history request_digest原故障注入的独立Database在UPDATE时SQLITE_BUSY；原文件17pass／1fail／133expects，其余已启动主作业按原drain结束。真实红保留，不能用已过的默认Task／Planning或MCP链代该原证明拒绝／当前完整默认。本轮仅核当前故障注入连接的实际有界写锁等待，原生产权限、OAuth、历史证明合同、故障值与全部原断言／预算继续保留。
+
+OAuth原三处独立fault／restore连接原try内各一次设置Store Worker原 `busy_timeout=1000`，六种证明fault和拒绝原样，原完整18case／135expects／1170ms actual0。随后有限只读Service源码核对：Source entry/result、default after-turn、per-Run child、session logs和running daemon六个文件共有八个缺等待的原写连接，写时同库Worker实际仍打开、原注入要求成功而非BUSY；据同机制补原生等待，排除只读观察／未开或已关库，已有child proof等待100ms保持。没有为这六文件制造新红或新fault场景，不按关键词扩大集合；原并行Tool和OAuth两次真实BUSY仍是修复依据。各原临时Workspace URI用标准pathToFileURL，仅保证路径编码，原SQL值／恢复／close／try顺序／guard／until和整例期限不增，无应用retry／production变更。
+
+这七个原完整文件各按原default job独立Bun进程actual0，合计74pass／1274expects；原446静态expect文本与顺序全保，所有原test title／budget保持。OAuth、Source entry/result、session logs／daemon及root after-turn／child分别由 `/private/tmp/kite-mcp-oauth-actions-delivery.json`、`kite-mcp-source-peer-delivery.json`、`kite-service-busy-pair-delivery.json` 和 `kite-service-primary-peer-review.json` 绑定最终源／日志／逆向精确恢复与原断言。root两文件11pass／104expects／3.66s及5pass／52expects／4.90s；其他五个真实结果保原receipt。确切竞争事务未trace，不称生产锁泄漏修复；Windows／Linux原生和当前全部默认仍未验证。
+
+第十次原未过滤 `bun run test` 在最终源码实际0／1440222ms：全部589个main job通过、0失败／0未派发，覆盖729文件，582concurrent／7exclusive、168parallel／554isolated／7exclusive与macOS4并发不变，非Markdown冻结输入漂移0。`/private/tmp/kite-agent-report-full-tenth-{freeze,result,test}` 保原窗口，实际log SHA为 `e66edc039016b4ec95ff72927cd5607185b1933e706d4f8e375bcc963a55f12c`；独立审计 `kite-agent-report-full-tenth-audit.json` 核全部主作业启动／通过各准确一次、文件全集准确一次与七个真实独占终态。默认Task／Planning、MCP／Shell、恢复历史／Client原请求／原UI、正式安装／版本切换／维护恢复和保数据卸载各沿原完整文件运行，所有原断言／预算保留，未过滤或删除原红。此次完整默认只资格当前macOS源码与原断言，RSS和资源观测未知、三端及§35退出不由此推导。
+
+当前四个退出缺口按依赖：
+
+| 顺序 | 实际用户入口、缺口与验收 |
+| --- | --- |
+| 1 | 普通任务完成／取消／重连原回执／删除的原lifecycle RSS仍红，native owner未确定。修复真实归属后按原九点／八outer／32MiB及完整负载验收，不重复参数对照。 |
+| 2 | Runtime取消／正常停止及异常关闭的完整出生后代／activeResources／handles producer和准确cleanup receipt仍缺，须沿原资源verifier核真实来源与原handle终态。历史Source元数据Question的driver fresh帧故障虽peer／Model／凭据效果0且TUI143，原warm Service14244仍缺退出回执、packet cleanupConfirmed=false；后来正常绿不补认，不把该旧窗口设为新长期目标或扩新矩阵。 |
+| 3 | installed CLI／TUI／Native安装、真代码A→B→回退、MCP完整连接／调用／取消／退出、维护恢复与保数据卸载的Win/Linux实际资格后置Actions／用户Windows，原Shell／script verifier／文件候选后端门禁保持。完整原断言与预算验收前不授平台资格，不触发Actions。 |
+| 4 | §35全部适用场景和最终旧authority／依赖删除依赖各适用门禁；本轮当前macOS完整默认已0，37能力整体仍partial，wholeV13=false／phaseExit=false。ChatGPT／Responses按用户确认的Kite官方授权优先在当前目标后实施，Codex直接复用保门禁。 |
+
+本片闭合默认Task→carrier→后续汇报与单Run Planning的Agent权限单点装配，正式Service调用者已切换、原Service实现／Planning转发已删除，Core／SQL最终守卫保留。owner／active／能力映射和既有权限Note按实际边界同步，手册Task／Planning／授权语义核对无行为变化。code-simplification的整架构结果仍partial；本片按iteration_complete／stage／commit与正常hook收束，当前完整默认不扩大到RSS、全资源或Win/Linux资格。Goal继续active，本地提交授权不扩大到push／PR／发布／Actions。

@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend, mcpCanonical } from '@kite-ai/agent/config';
@@ -128,7 +129,7 @@ async function fixture(options: { mode?: 'full' | 'auto' | 'deny'; observer?: st
     expectedStoreId: storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}/`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,
@@ -627,6 +628,7 @@ test('original result, finalization and HostMutation faults cannot manufacture s
     expect((await f.history('original')).phase).toBe('saved');
     const db = new Database(f.profile.databasePath);
     try {
+      db.exec('PRAGMA busy_timeout=1000');
       const c = db
         .query(
           'SELECT receipt_json, request_json, request_digest, subject_id FROM command WHERE id=?',

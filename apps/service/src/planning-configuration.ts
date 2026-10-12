@@ -1,15 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
-import type {
-  AuthorizationRequest,
-  ConditionReadContext,
-  Json,
-  Permissions,
-} from '@kite-ai/agent/extensions';
-import {
-  type CapabilityDescription,
-  createPlanningPermissionPolicy,
-} from '@kite-ai/agent/permissions';
+import type { AuthorizationRequest, ConditionReadContext, Json } from '@kite-ai/agent/extensions';
 import {
   type createPlanningValidation,
   type PlanningState,
@@ -208,7 +199,7 @@ export async function readBoundJobReportParent(
   return parent;
 }
 
-async function readState(
+export async function readPlanningPermissionState(
   runtime: AgentRuntime,
   planning: Planning,
   request: AuthorizationRequest,
@@ -312,27 +303,4 @@ async function readState(
     },
   };
   return planning.readPlanningState(read, { runId: identity.runId, originStoreId });
-}
-
-/** Read original planning facts and inject them into the Agent permission policy. */
-export function createPlanningPermissionCeiling(options: {
-  required: boolean;
-  runtime: () => AgentRuntime | undefined;
-  planning: Planning;
-  originStoreId: string;
-  run: () => PlanningRunIdentity | undefined;
-  current: Permissions;
-  describe: (request: AuthorizationRequest) => CapabilityDescription | null;
-}): Permissions {
-  return createPlanningPermissionPolicy({
-    required: options.required,
-    run: options.run,
-    current: options.current,
-    describe: options.describe,
-    async readState(request, identity) {
-      const runtime = options.runtime();
-      if (!runtime || !identity) throw new AgentError('planning_run_scope_unavailable');
-      return readState(runtime, options.planning, request, options.originStoreId, identity);
-    },
-  });
 }

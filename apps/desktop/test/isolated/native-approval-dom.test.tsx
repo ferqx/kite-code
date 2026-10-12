@@ -73,6 +73,7 @@ const card: Interaction = {
 };
 
 test('the original Approval form consumes the verified complete request and submits only the original card and offered grant', async () => {
+  const deadline = Date.now() + 5000;
   const f = fixture(),
     answers: { id: string; answer: unknown }[] = [];
   const request = {
@@ -127,6 +128,11 @@ test('the original Approval form consumes the verified complete request and subm
         .find((button) => button.textContent === 'Load complete attachment')!
         .click(),
     );
+    while (!f.host.querySelector('[data-complete-attachment="verified"]')) {
+      if (f.host.querySelector('[role="alert"]')) throw new Error('approval_attachment_unverified');
+      if (Date.now() >= deadline) throw new Error('approval_attachment_dom_deadline');
+      await act(async () => await Bun.sleep(5));
+    }
     expect(f.host.querySelector('.approval-command')!.textContent).toBe(request.input.command);
     expect(approve().disabled).toBe(false);
     const menu = f.host.querySelector<HTMLButtonElement>('[aria-label="更多批准方式"]')!;

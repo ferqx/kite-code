@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { type AfterTurnPolicy, AgentError } from '@kite-ai/agent';
-import type { PermissionControlRead } from '@kite-ai/agent/storage';
-import type { ChildRole } from './child-configuration';
+import type { AfterTurnPolicy } from '../runtime';
+import type { PermissionControlRead } from '../storage';
+import { AgentError } from '../storage/types';
 
 export type DefaultAfterTurnInput = Parameters<AfterTurnPolicy['authorize']>[0];
 export interface DefaultAfterTurnCurrent {
@@ -12,7 +12,7 @@ export interface DefaultAfterTurnCurrent {
 
 /** Reporting eligibility only. Ordinary Task, carrier and report dispatch retain their permissions. */
 export function createDefaultAfterTurnPolicy(options: {
-  readonly roles: readonly ChildRole[];
+  readonly roles: readonly { readonly id: string; readonly version: string }[];
   readonly readCurrent: (input: DefaultAfterTurnInput) => Promise<DefaultAfterTurnCurrent>;
 }): AfterTurnPolicy {
   const roles = new Map<string, string>();
@@ -33,7 +33,7 @@ export function createDefaultAfterTurnPolicy(options: {
     async authorize(input: DefaultAfterTurnInput) {
       input.signal.throwIfAborted();
       const { command, run, session, execution, configuration, phase } = input;
-      // Runtime wraps the actual Service role marker in its immutable model/tool snapshot.
+      // Runtime wraps the actual host role marker in its immutable model/tool snapshot.
       const assembled = configuration.snapshot;
       const snapshot =
         assembled && typeof assembled === 'object' && !Array.isArray(assembled)

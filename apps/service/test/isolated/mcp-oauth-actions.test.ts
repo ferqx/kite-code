@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { type AgentRuntime, createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend, type McpSourceReadSet } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
@@ -146,6 +147,8 @@ async function fixture(
           if (options.acquireFault) {
             const db = new Database(profile.databasePath);
             try {
+              // Match the Store Worker's bounded native writer wait on this peer connection.
+              db.exec('PRAGMA busy_timeout=1000');
               db.run('UPDATE command SET request_digest=? WHERE id=?', [
                 'b'.repeat(64),
                 'original',
@@ -201,7 +204,7 @@ async function fixture(
     expectedStoreId: storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}/`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,
@@ -425,6 +428,7 @@ for (const fault of [
       const original = await f.invoke();
       const db = new Database(f.profile.databasePath);
       try {
+        db.exec('PRAGMA busy_timeout=1000');
         if (fault === 'finalization') {
           const receipt = obj(original.command.receipt);
           db.run('UPDATE command SET receipt_json=? WHERE id=?', [
@@ -468,6 +472,7 @@ for (const fault of [
         // Remove only this fixture's deliberate corruption before normal Runtime shutdown.
         const db = new Database(f.profile.databasePath);
         try {
+          db.exec('PRAGMA busy_timeout=1000');
           db.run('UPDATE command SET kind=?,request_digest=?,receipt_json=? WHERE id=?', [
             original.command.kind,
             original.command.requestDigest,

@@ -42,7 +42,9 @@ async function stopCaller(child: Bun.Subprocess) {
 
 for (const connection of ['paired', 'shared'] as const)
   test(`actual ${connection} work argv durable POST loss + SIGKILL and cold caller argv first GET loss preserve complete Workflow request and zero POST`, async () => {
+    const started = Date.now();
     const f = await recoveryProfile();
+    const candidateRoot = join(f.root, 'candidate');
     const base = `${f.root}-cli-caller`,
       runner = join(f.root, 'caller-runner.ts'),
       wire = `${base}.wire.jsonl`,
@@ -54,18 +56,21 @@ for (const connection of ['paired', 'shared'] as const)
     let daemonArtifact: Parameters<typeof runSelectedDaemon>[0]['artifact'];
     let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let building: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let buildResult: Promise<[string, string, number]> | undefined;
     let seed:
       | Awaited<ReturnType<Awaited<ReturnType<typeof recoveryProfile>>['launch']>>
       | undefined;
     let currentPIDPath: string | undefined;
+    let pendingOutput: Promise<[string, string, number]> | undefined;
     let failure: unknown;
+    let serviceSpawnUnconfirmed = false;
     const cleanupErrors: unknown[] = [];
     const owned = new Map<
       number,
       {
         observation: ReturnType<typeof retainProcessObservation>;
         stopRequested?: boolean;
-        bootstrap: {
+        bootstrap?: {
           endpoint: string;
           token: string;
           profile: { dataRoot: string; name: string; accessKey: string };
@@ -81,20 +86,29 @@ for (const connection of ['paired', 'shared'] as const)
           original.stopRequested = true;
           if (process.platform === 'win32') {
             const b = original.bootstrap;
-            const lifecycle = createServiceLifecycleClient({
-              endpoint: b.endpoint,
-              token: b.token,
-              expected: { profile: b.profile, instanceId: b.instanceId },
-            });
-            try {
+            if (!b) {
+              const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(pid), '/f'], {
+                stdout: 'pipe',
+                stderr: 'pipe',
+              });
+              if (dispatch.exitCode !== 0)
+                throw Error('caller_early_service_native_cleanup_failed');
+            } else {
+              const lifecycle = createServiceLifecycleClient({
+                endpoint: b.endpoint,
+                token: b.token,
+                expected: { profile: b.profile, instanceId: b.instanceId },
+              });
               try {
-                await lifecycle.shutdown('if_idle');
-              } catch (error) {
-                if (!(error instanceof ClientError && error.code === 'network_outcome_unknown'))
-                  throw error;
+                try {
+                  await lifecycle.shutdown('if_idle');
+                } catch (error) {
+                  if (!(error instanceof ClientError && error.code === 'network_outcome_unknown'))
+                    throw error;
+                }
+              } finally {
+                lifecycle.disposeNetwork();
               }
-            } finally {
-              lifecycle.disposeNetwork();
             }
           } else process.kill(pid, 'SIGKILL');
         }
@@ -115,8 +129,10 @@ for (const connection of ['paired', 'shared'] as const)
       }
     };
     const harvest = () => {
-      if (connection !== 'paired' || !currentPIDPath || !existsSync(currentPIDPath)) return;
-      const record = JSON.parse(readFileSync(currentPIDPath, 'utf8'));
+      if (connection !== 'paired' || !currentPIDPath) return;
+      const recordPath = existsSync(currentPIDPath) ? currentPIDPath : `${currentPIDPath}.spawned`;
+      if (!existsSync(recordPath)) return;
+      const record = JSON.parse(readFileSync(recordPath, 'utf8'));
       if (!Number.isSafeInteger(record.pid) || typeof record.start !== 'string')
         throw Error('caller_owned_service_record_invalid');
       if (!owned.has(record.pid))
@@ -132,19 +148,27 @@ for (const connection of ['paired', 'shared'] as const)
           join(repo, 'scripts/release/terminal.ts'),
           'build',
           '--directory',
-          join(f.root, 'candidate'),
+          candidateRoot,
         ],
         { stdout: 'pipe', stderr: 'pipe' },
       );
-      const build = building;
-      const [buildOut, buildErr, buildCode] = await Promise.all([
-        new Response(build.stdout).text(),
-        new Response(build.stderr).text(),
-        build.exited,
+      buildResult = Promise.all([
+        new Response(building.stdout).text(),
+        new Response(building.stderr).text(),
+        building.exited,
       ]);
+      const [buildOut, buildErr, buildCode] = await buildResult;
+      writeFileSync(
+        `${base}.preparation.json`,
+        JSON.stringify({
+          elapsedMs: Date.now() - started,
+          candidateRoot,
+          sequentialBuild: true,
+        }),
+      );
       writeFileSync(`${base}.build.log`, buildOut + buildErr);
       if (buildCode !== 0) throw Error(`caller_candidate_build_failed:${buildErr}`);
-      const selected = verifyTerminalBundle(join(f.root, 'candidate'));
+      const selected = verifyTerminalBundle(candidateRoot);
       const artifact = selected.artifact;
       const reader = join(f.root, 'candidate-readonly.ts');
       writeFileSync(
@@ -223,13 +247,31 @@ for (const connection of ['paired', 'shared'] as const)
         if (connection === 'shared') argv = [...argv, '--server', socket];
         writeFileSync(
           runner,
-          `import{appendFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{runSelectedCLI}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/index.ts')).href)};import{parseCLIArguments}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/src/arguments.ts')).href)};import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};const actual=fetch;let drop=true,forwarding='';const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});const json=await response.json();appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',mode:${JSON.stringify(mode)},method:req.method,json})+'\\n');res.socket!.destroy();${mode === 'post' ? "if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');" : ''}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const address=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',mode:${JSON.stringify(mode)},method,path:url.pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');${mode === 'prepared' ? `if(method==='POST'&&url.pathname==='/v1/sessions/s/commands'){writeFileSync(${JSON.stringify(`${base}.prepared-barrier`)},'prepared');if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');}` : ''}if(drop&&${mode === 'post' ? "method==='POST'&&url.pathname==='/v1/sessions/s/commands'" : mode === 'get' ? "method==='GET'&&url.pathname==='/v1/commands/cli-original'" : 'false'}){drop=false;forwarding=url.href;const pending=actual('http://127.0.0.1:'+address.port+url.pathname,args[1]);${mode === 'post' ? `if(process.platform==='win32'){void pending.catch(()=>{});await new Promise(()=>{});}` : ''}return pending;}return actual(...args);},{preconnect:actual.preconnect});const hostExit=new AbortController();try{process.exitCode=await runSelectedCLI({exitSignal:hostExit.signal,arguments:parseCLIArguments(${JSON.stringify(argv)}),artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(f.workspace)},onLaunched:c=>writeFileSync(${JSON.stringify(currentPIDPath)},JSON.stringify({pid:c.pid,start:readProcessStartIdentity(c.pid),bootstrap:c.bootstrap})),write:l=>{console.log(l);if(${mode === 'normal'}&&JSON.parse(l).kind==='work.event'&&(JSON.parse(l).line.startsWith('accepted ')||JSON.parse(l).line.includes('outcome_unknown')))hostExit.abort();},prompt:l=>process.stderr.write(l)});}finally{relay.close();}`,
+          `import{appendFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{runSelectedCLI}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/index.ts')).href)};import{parseCLIArguments}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/src/arguments.ts')).href)};import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};const actualSpawn=Bun.spawn.bind(Bun);Bun.spawn=((...args)=>{const original=actualSpawn(...args);const command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(artifact.entrypoint)})){writeFileSync(${JSON.stringify(`${currentPIDPath}.spawned`)},JSON.stringify({pid:original.pid,start:readProcessStartIdentity(original.pid),entrypoint:${JSON.stringify(artifact.entrypoint)}}));}return original;});const actual=fetch;let drop=true,forwarding='';const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});const json=await response.json();appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',mode:${JSON.stringify(mode)},method:req.method,json})+'\\n');res.socket!.destroy();${mode === 'post' ? "if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');" : ''}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const address=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',mode:${JSON.stringify(mode)},method,path:url.pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');${mode === 'prepared' ? `if(method==='POST'&&url.pathname==='/v1/sessions/s/commands'){writeFileSync(${JSON.stringify(`${base}.prepared-barrier`)},'prepared');if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');}` : ''}if(drop&&${mode === 'post' ? "method==='POST'&&url.pathname==='/v1/sessions/s/commands'" : mode === 'get' ? "method==='GET'&&url.pathname==='/v1/commands/cli-original'" : 'false'}){drop=false;forwarding=url.href;const pending=actual('http://127.0.0.1:'+address.port+url.pathname,args[1]);${mode === 'post' ? `if(process.platform==='win32'){void pending.catch(()=>{});await new Promise(()=>{});}` : ''}return pending;}return actual(...args);},{preconnect:actual.preconnect});const hostExit=new AbortController();try{process.exitCode=await runSelectedCLI({exitSignal:hostExit.signal,arguments:parseCLIArguments(${JSON.stringify(argv)}),artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(f.workspace)},onLaunched:c=>writeFileSync(${JSON.stringify(currentPIDPath)},JSON.stringify({pid:c.pid,start:readProcessStartIdentity(c.pid),bootstrap:c.bootstrap})),write:l=>{console.log(l);if(${mode === 'normal'}&&JSON.parse(l).kind==='work.event'&&(JSON.parse(l).line.startsWith('accepted ')||JSON.parse(l).line.includes('outcome_unknown')))hostExit.abort();},prompt:l=>process.stderr.write(l)});}finally{relay.close();}`,
         );
         child = Bun.spawn([process.execPath, runner], {
           stdout: 'pipe',
           stderr: 'pipe',
           stdin: 'ignore',
         });
+        const capture = async (stream: ReadableStream<Uint8Array>, path: string) => {
+          let text = '';
+          const decoder = new TextDecoder();
+          for await (const chunk of stream) {
+            text += decoder.decode(chunk, { stream: true });
+            writeFileSync(path, text);
+          }
+          text += decoder.decode();
+          writeFileSync(path, text);
+          return text;
+        };
+        const current = child;
+        pendingOutput = Promise.all([
+          capture(current.stdout, `${currentPIDPath}.stdout`),
+          capture(current.stderr, `${currentPIDPath}.stderr`),
+          current.exited,
+        ]);
+        const output = pendingOutput;
         if (process.platform === 'win32' && (mode === 'post' || mode === 'prepared')) {
           const end = Date.now() + 10000;
           while (
@@ -264,21 +306,30 @@ for (const connection of ['paired', 'shared'] as const)
             }),
           );
         }
-        const [out, err, code] = await Promise.all([
-          new Response(child.stdout).text(),
-          new Response(child.stderr).text(),
-          child.exited,
-        ]);
+        const [out, err, code] = await output;
+        pendingOutput = undefined;
+        writeFileSync(`${base}.${mode}.stdout`, out);
+        writeFileSync(`${base}.${mode}.stderr`, err);
+        writeFileSync(
+          `${currentPIDPath}.caller-exit.json`,
+          JSON.stringify({
+            pid: current.pid,
+            code,
+            signalCode: current.signalCode,
+            pidGone: processGone(current.pid),
+            mode,
+            elapsedMs: Date.now() - started,
+            phase: existsSync(currentPIDPath!) ? 'launched' : 'before_onLaunched',
+          }),
+        );
+        harvest();
+        if (connection === 'paired' && !existsSync(currentPIDPath!)) {
+          serviceSpawnUnconfirmed = !existsSync(`${currentPIDPath}.spawned`);
+          throw Error(`caller_exit_before_onLaunched:${code}:${current.signalCode}:${err}`);
+        }
         const original =
           connection === 'paired' ? JSON.parse(readFileSync(currentPIDPath!, 'utf8')) : null;
         const pid = original?.pid;
-        if (pid && !owned.has(pid))
-          owned.set(pid, {
-            observation: retainProcessObservation(pid, original.start),
-            bootstrap: original.bootstrap,
-          });
-        writeFileSync(`${base}.${mode}.stdout`, out);
-        writeFileSync(`${base}.${mode}.stderr`, err);
         if (mode === 'post' || mode === 'prepared') {
           if (process.platform !== 'win32') expect(child.signalCode).toBe('SIGKILL');
           else {
@@ -290,16 +341,6 @@ for (const connection of ['paired', 'shared'] as const)
           expect([0, 1, 2]).toContain(code!);
         }
         // Cleanup only the exact Service launched by this fixture's host.
-        writeFileSync(
-          `${currentPIDPath}.caller-exit.json`,
-          JSON.stringify({
-            pid: child.pid,
-            code,
-            signalCode: child.signalCode,
-            pidGone: processGone(child.pid),
-            mode,
-          }),
-        );
         if (pid) await closeOwned(pid);
         return { out, code };
       };
@@ -432,7 +473,24 @@ for (const connection of ['paired', 'shared'] as const)
           }
         },
         async () => {
+          if (pendingOutput) {
+            const [out, err, code] = await pendingOutput;
+            writeFileSync(
+              `${currentPIDPath}.interrupted-output.json`,
+              JSON.stringify({
+                out,
+                err,
+                code,
+                signalCode: child?.signalCode,
+                phase: 'interrupted',
+              }),
+            );
+            pendingOutput = undefined;
+          }
+        },
+        async () => {
           if (building) await stopCaller(building);
+          if (buildResult) await buildResult;
         },
         async () => {
           harvest();
@@ -471,12 +529,25 @@ for (const connection of ['paired', 'shared'] as const)
         } catch (error) {
           cleanupErrors.push(error);
         }
-      if (cleanupErrors.length === 0 && owned.size === 0) f.close();
-      else retainedCallerOwners.add({ root: f.root, f, owned, child, building, seed });
+      if (serviceSpawnUnconfirmed) cleanupErrors.push(Error('caller_service_spawn_unconfirmed'));
+      if (cleanupErrors.length === 0 && owned.size === 0) {
+        f.close();
+      } else
+        retainedCallerOwners.add({
+          root: f.root,
+          candidateRoot,
+          f,
+          owned,
+          child,
+          building,
+          seed,
+        });
       writeFileSync(
         `${base}.cleanup.json`,
         JSON.stringify({
           originalFailure: failure ? String(failure) : null,
+          candidateRoot,
+          elapsedMs: Date.now() - started,
           cleanupErrors: cleanupErrors.map(String),
           retainedRoot: cleanupErrors.length || owned.size ? f.root : null,
         }),

@@ -144,6 +144,9 @@ test('Service cannot redeclare retired permission factories or accepted Shell sc
     'export function createShellConfiguration() {}',
     'function hostExecutionScope() {}',
     'const hostFilesystemScope = () => {};',
+    'export function createDefaultAfterTurnPolicy() {}',
+    'export const createPlanningPermissionPolicy = () => {};',
+    'export function createPlanningPermissionCeiling() {}',
   ]) {
     const root = fixture({ 'apps/service/src/permissions.ts': source });
     expect(

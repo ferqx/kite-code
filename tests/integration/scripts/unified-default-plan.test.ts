@@ -37,6 +37,7 @@ test('default selection covers current public safety and formal lifecycle files 
     expect(files).toContain(file);
   for (const file of FINITE_ROOT_SCRIPT_TESTS) expect(files).toContain(file);
   expect(UNIFIED_EXCLUSIVE_TEST_FILES).toEqual([
+    'apps/cli/test/isolated/cli-caller-host.test.ts',
     'apps/cli/test/isolated/tui-export-host.test.ts',
     'tests/isolated/unified-agent/cli-registration-lifecycle.test.ts',
     'tests/isolated/unified-agent/native-cross-version.test.ts',

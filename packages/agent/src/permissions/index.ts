@@ -304,6 +304,11 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
 }
 
 export {
+  createDefaultAfterTurnPolicy,
+  type DefaultAfterTurnCurrent,
+  type DefaultAfterTurnInput,
+} from './after-turn';
+export {
   builtinCapability,
   builtinToolEffect,
   createMcpSourceCapabilityDescription,

@@ -29,7 +29,9 @@ import {
   builtinCapability,
   type CapabilityDescription,
   type CapabilityIdentity,
+  createDefaultAfterTurnPolicy,
   createPermissionPolicy,
+  createPlanningPermissionPolicy,
   hostReadOnlyTool,
   type PermissionPolicyOptions,
   type PermissionPolicySnapshot,
@@ -53,7 +55,6 @@ import {
   reasoningEfforts,
   type SdkModelPreset,
 } from '@kite-ai/ai/sdk';
-import { createDefaultAfterTurnPolicy } from './after-turn-configuration';
 import { createWorkspaceAssembly } from './assembly';
 import type { ProcessHostConfiguration } from './bootstrap';
 import {
@@ -76,11 +77,11 @@ import {
 import { isSupportedModelProvider, supportsReasoningEffort } from './model-providers';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import {
-  createPlanningPermissionCeiling,
   planningSnapshotDigest,
   readBoundJobReportParent,
   readBusinessRunInputs,
   readPlanningIntent,
+  readPlanningPermissionState,
 } from './planning-configuration';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
 import {
@@ -1085,13 +1086,22 @@ export function createDefaultProcessConfiguration(options: {
           planningOptions.requiredValidation ||
           planningOptions.automaticValidation ||
           workflow.enabled;
-        const planningPermissions = createPlanningPermissionCeiling({
+        const planningOriginStoreId = command.originStoreId;
+        const planningPermissions = createPlanningPermissionPolicy({
           required: requirePlan,
-          runtime: () => policyRuntime,
-          planning,
-          originStoreId: command.originStoreId,
           run: () => planningRun,
           current: classifiedPermissions,
+          async readState(request, identity) {
+            const runtime = policyRuntime;
+            if (!runtime || !identity) throw new AgentError('planning_run_scope_unavailable');
+            return readPlanningPermissionState(
+              runtime,
+              planning,
+              request,
+              planningOriginStoreId,
+              identity,
+            );
+          },
           describe: (request) => {
             const description = actual.get(
               key(request.kind, request.definitionId, request.definitionVersion),
