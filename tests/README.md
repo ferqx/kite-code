@@ -398,3 +398,5 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 
 
 原[Native 交互分页整文件](../apps/desktop/test/isolated/interaction-pages-electron.test.ts)在关闭/切换准备中核 Main 的真实 fetch 进入信号，保 pending 的实际结局；同一10秒准备预算内最多三次显式读取同 generation/Store/Session/Workspace 的新 state，仅确切观察失效且尚未进入 fetch 的只读拒绝可再读。已进入的读取和其他错误不重试；关闭前核尚未取消，之后核真实 abort、释放 held 回包并等待同一请求结束。IPC仍受原外层期限约束，该准备预算不冒称每次IPC的硬中断。原20卡分页、40效果、一次原答案POST、原身份、晚回包不换scope及35/45/60秒期限保持，生产SSE与过期guard不变；实际次数及整例/默认结果归本轮进度。
+
+该原窗口现同时核正常退出：只观察既有请求、实际 before-quit、退出期间的操作／启动弹窗，以及原 Electron 和准确所属 Service ChildProcess 的真实 close0／无信号；不注入 `native_draining`、新任务或延长窗口。退出时合法的读取拒绝只记录，不要求所有 IPC 成功；业务阶段原未知回执提示仍保留。清理失败与实际业务失败分别保留，强杀不能算普通退出。[读取归属 DOM](../apps/desktop/test/isolated/native-read-ownership-dom.test.tsx)保原八项，六项新增断言对应四类待完成读取的生命周期、取消后原草稿与零重发，以及当前真实错误／已提交未知回执仍显示。Radix 卸载的原零延迟焦点任务在销毁 DOM 前排空，避免跨 Event realm；这不是断言前等待或期限放宽。共享 DOM／codec 测试不新增平台条件，真实窗口仍保原 macOS 适用范围。准确运行归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12native-退出期间操作未完成误报)。

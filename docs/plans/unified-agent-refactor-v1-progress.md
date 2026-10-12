@@ -5504,3 +5504,17 @@ OAuth原三处独立fault／restore连接原try内各一次设置Store Worker原
 | 4 | §35全部适用场景和最终旧authority／依赖删除依赖各适用门禁；本轮当前macOS完整默认已0，37能力整体仍partial，wholeV13=false／phaseExit=false。ChatGPT／Responses按用户确认的Kite官方授权优先在当前目标后实施，Codex直接复用保门禁。 |
 
 本片闭合默认Task→carrier→后续汇报与单Run Planning的Agent权限单点装配，正式Service调用者已切换、原Service实现／Planning转发已删除，Core／SQL最终守卫保留。owner／active／能力映射和既有权限Note按实际边界同步，手册Task／Planning／授权语义核对无行为变化。code-simplification的整架构结果仍partial；本片按iteration_complete／stage／commit与正常hook收束，当前完整默认不扩大到RSS、全资源或Win/Linux资格。Goal继续active，本地提交授权不扩大到push／PR／发布／Actions。
+
+## 2026-10-12：Native 退出期间“操作未完成”误报
+
+状态：partial；上一切片正常提交 `d81142ff`，其完整默认0只覆盖该提交的准确输入。本轮响应用户原40项任务窗口的真实截图：任务已完成，退出却显示“操作未完成 / native_draining”。此前原测试只核业务结果和进程退出，缺少退出期间误弹断言，不能以原默认绿色否认该现象。本轮仅修此读取生命周期缺口，保留所有原业务断言、资源门禁与期限。
+
+[Main](../../apps/desktop/electron/main.ts)在 before-quit 停止业务准入，但原 renderer 未收到退出生命周期，仍把原 state／目录／select／draft.read 的迟到拒绝报告为当前错误。现沿原固定 event channel 发闭合 `quitting/active` 通知，[preload](../../apps/desktop/electron/preload.ts)严格解码；[renderer](../../apps/desktop/src/native.tsx)将旧读取的展示归属绑定私有 epoch、原 generation 和适用 viewIntent，暂停自动刷新。取消退出沿同一 generation 重读原页面与草稿，选择期间暂空 Composer 不覆盖原缓存；没有新 attach、草稿写入或业务重发。当前读取错误、已提交 mutation unknown／原 commandId 查询、真实启动失败、原 frame 身份及 Caller／Main 资源退出顺序保持，没有按错误码统一吞错或提前 close／detach。
+
+[读取归属 DOM](../../apps/desktop/test/isolated/native-read-ownership-dom.test.tsx)新增检查先在旧 renderer 实际1／9pass／2fail／68expects，state 和目录两个退出拒绝产生误弹，日志 `/private/tmp/kite-native-quit-read-ownership-before.log` 保留。最终完整14case实际0／112expects／1124ms：原八例保持，六项新增对应四类未完成读取的退出／取消、当前 `native_draining` 仍提示，以及已提交未知写入保同ID查询和一次POST。原 Radix 卸载的 setTimeout0 焦点任务在销毁 DOM／恢复 globals 前排空，修复实际跨 Event realm 错误；不是断言前延迟、放宽期限或改变生产展示。
+
+[截图对应原窗口](../../apps/desktop/test/isolated/interaction-pages-electron.test.ts)保原20卡／40效果、唯一原答案POST、物理丢回执、关闭／切换真实abort与35／45／60秒预算。观察器只被动记录既有退出请求／弹窗和准确所属 Service ChildProcess 的真实close，清理失败与业务失败分别保留；不注入 `native_draining`、新任务、sleep 或伪造终态。首观察器 VM 动态import错误保原失败日志，修为 Main 公开 `process.getBuiltinModule`；该失败不称产品红。旧 renderer 第二次真实窗口实际0／13.00s，四个退出读取拒绝但无弹窗，说明现象有时序条件，不冒称每次必现。修后最终整文件实际0／1pass／4expects／12.70s，原40效果／cancellations0，实际9个退出读取／释放 IPC 被 `native_draining` 拒绝但退出误弹、pageerror 和观察错误均为空；Electron close0／无信号与原 Service PID31329 close0／无信号分别核实。日志 `/private/tmp/kite-native-pages-quit-after.log` 保真实回执，不能用全部IPC成功替换正常退出条件。
+
+必要相关完整文件按当前改动选择，不扩已闭合故障矩阵：原 Caller＋四项settlement实际18pass／154expects／704ms；启动DOM3pass／39expects／857ms、草稿DOM1pass／23expects／903ms；未变输入的四个边界完整文件12pass／106expects／59ms复用当前生命周期接线的准确结果。当前源码的[原完整Native候选](../../apps/desktop/test/isolated/native-bundle.test.ts)实际0／1pass／24Bun expects／83.87s，首次／冷读原任务保持，取消原两秒未知检查保草稿，原二十秒等待／明确强退／异常Service提示、Main非零退出／双锁释放／零Model重放和真实坏Store保存诊断／同窗口重试均保持。根及八workspace类型、改动格式检查0；既有无用fragment信息不扩大修复。各日志使用 `/private/tmp/kite-native-quit-` 前缀，独立只读审查核读取失效、草稿恢复、真实错误与原frame边界。
+
+产品手册、Native owner、跨层边界、测试入口及同一退出Note同步本次实际行为；iteration_complete／stage／commit按本片准确范围执行，正常hook独立门禁保留。本片没有重跑全部589作业，前提交完整默认结果不资格新Native输入；本片完整窗口与相关整文件也不宣称阶段退出。新增闭合的是正式Main→preload→renderer的退出读取／取消恢复与误弹验收，旧无生命周期读取展示路径退役。上节四项依赖继续未闭合：原RSS真实失败、完整资源观测producer／准确cleanup、后置Win/Linux实际资格及§35最终退役／当前完整回归。wholeV13=false／phaseExit=false，Goal active，仅本地提交，无push／PR／发布／Actions。

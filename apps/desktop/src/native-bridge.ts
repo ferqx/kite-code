@@ -391,7 +391,32 @@ export type NativeState = {
   readonly answerSubmissions?: readonly NativeAnswerMetadata[];
   readonly answerUnavailable?: boolean;
 };
-export type NativeEvent = { readonly generation: number; readonly kind: 'changed' };
+export type NativeEvent =
+  | { readonly generation: number; readonly kind: 'changed' }
+  | { readonly kind: 'lifecycle'; readonly phase: 'quitting' | 'active' };
+
+export function decodeNativeEvent(value: unknown): NativeEvent | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  if (
+    'kind' in value &&
+    value.kind === 'changed' &&
+    'generation' in value &&
+    typeof value.generation === 'number' &&
+    Number.isSafeInteger(value.generation) &&
+    value.generation >= 0
+  )
+    return { kind: 'changed', generation: value.generation };
+  if (
+    'kind' in value &&
+    value.kind === 'lifecycle' &&
+    'phase' in value &&
+    (value.phase === 'quitting' || value.phase === 'active') &&
+    Object.keys(value).length === 2 &&
+    Object.keys(value).every((key) => key === 'kind' || key === 'phase')
+  )
+    return { kind: 'lifecycle', phase: value.phase };
+  return undefined;
+}
 export type NativeModelBodyOpen<K extends 'modelOutput' | 'modelInput'> = {
   kind: `${K}.opened`;
   readId: string;

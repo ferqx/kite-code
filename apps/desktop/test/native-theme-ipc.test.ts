@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { registerNativeIpc, registerNativeThemeIpc } from '../electron/native-ipc';
 import {
+  decodeNativeEvent,
   type NativeReply,
   type NativeThemePreference,
   nativeChannel,
@@ -97,5 +98,51 @@ test('closed theme payload and original frame authority reject unsupported value
   f.destroy();
   expect(await f.send({ theme: 'dark' })).toEqual({ ok: false, code: 'native_sender_denied' });
   expect(f.preferences).toEqual([]);
+  expect(f.callerOpens).toBe(0);
+});
+
+test('preload forwards only the closed lifecycle notification and original validated change observation', () => {
+  for (const phase of ['quitting', 'active'] as const)
+    expect(decodeNativeEvent({ kind: 'lifecycle', phase })).toEqual({ kind: 'lifecycle', phase });
+  expect(
+    decodeNativeEvent({ kind: 'changed', generation: 3, ignored: 'original behavior' }),
+  ).toEqual({
+    kind: 'changed',
+    generation: 3,
+  });
+  for (const value of [
+    null,
+    [],
+    { kind: 'lifecycle' },
+    { kind: 'lifecycle', phase: 'closed' },
+    { kind: 'lifecycle', phase: 'quitting', generation: 3 },
+    { kind: 'lifecycle', phase: 'active', authorized: true },
+    { kind: 'changed', generation: -1 },
+    { kind: 'changed', generation: 1.5 },
+  ])
+    expect(decodeNativeEvent(value)).toBeUndefined();
+});
+
+test('lifecycle-shaped payload grants no business IPC authority and foreign frames remain denied', async () => {
+  const f = fixture(),
+    payload = { kind: 'lifecycle', phase: 'active' };
+  expect(await f.handlers.get(nativeChannel)!(f.event, payload)).toEqual({
+    ok: false,
+    code: 'invalid_native_request',
+  });
+  expect(
+    await f.handlers.get(nativeChannel)!(
+      {
+        ...f.event,
+        senderFrame: { url: f.frame.url },
+      } as IpcMainInvokeEvent,
+      payload,
+    ),
+  ).toEqual({ ok: false, code: 'native_sender_denied' });
+  f.destroy();
+  expect(await f.handlers.get(nativeChannel)!(f.event, payload)).toEqual({
+    ok: false,
+    code: 'native_sender_denied',
+  });
   expect(f.callerOpens).toBe(0);
 });

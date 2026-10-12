@@ -9,7 +9,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
@@ -17,7 +19,7 @@ const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'actual Electron replaces 20-card pending pages, closes stale reads, answers original later card once and reconciles lost POST',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-interaction-pages-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-interaction-pages-')));
     const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -28,7 +30,7 @@ test.skipIf(process.platform !== 'darwin')(
         expectedStoreId: storeId,
         id: 'w',
         name: 'owned',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       for (const id of ['s', 'other'])
         await store.createSession({
@@ -134,6 +136,7 @@ test.skipIf(process.platform !== 'darwin')(
       console.info(result.trim());
       expect(result).toContain('Native interaction pages assertions:');
       expect(readFileSync(join(root, 'ledger'), 'utf8').trim().split('\n')).toHaveLength(40);
+      expect(result).toContain('Native interaction pages ordinary exit:');
     } finally {
       clearTimeout(timer);
       driver?.kill('SIGKILL');

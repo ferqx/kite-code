@@ -177,6 +177,10 @@ function NativeDesktopContent({
     pageIntent = useRef(0),
     draftRevision = useRef(0),
     writing = useRef(false);
+  const readLifecycle = useRef({ epoch: 0, quitting: false });
+  const selectionRead = useRef<object | undefined>(undefined);
+  const rememberLatestDraft = useRef<() => void>(() => {});
+  rememberLatestDraft.current = rememberDraft;
   const selected = useRef<string | undefined>(undefined);
   const verifiedReplyBodies = useRef(new Map<string, { identity: string; text: string }>());
   const [, renderVerifiedReply] = useState(0);
@@ -285,18 +289,27 @@ function NativeDesktopContent({
       return undefined;
     }
   }
+  function isCurrentRead(current: number, epoch: number, nonce?: number) {
+    return (
+      !readLifecycle.current.quitting &&
+      current === generation.current &&
+      epoch === readLifecycle.current.epoch &&
+      (nonce === undefined || nonce === viewIntent.current)
+    );
+  }
   async function refresh() {
-    if (!bridge || !generation.current) return;
+    if (!bridge || !generation.current || readLifecycle.current.quitting) return;
     const nonce = viewIntent.current,
-      current = generation.current;
+      current = generation.current,
+      epoch = readLifecycle.current.epoch;
     let value: NativeResult;
     try {
       value = await bridge.request({ method: 'state', generation: current });
     } catch (cause) {
-      if (nonce !== viewIntent.current || current !== generation.current) return;
+      if (!isCurrentRead(current, epoch, nonce)) return;
       throw cause;
     }
-    if (nonce !== viewIntent.current || current !== generation.current) return;
+    if (!isCurrentRead(current, epoch, nonce)) return;
     apply(value);
     if (
       value &&
@@ -307,18 +320,20 @@ function NativeDesktopContent({
       history.current?.select(current, value.selection, value.historyEpoch);
   }
   async function readDirectory() {
-    if (!bridge) return;
-    const current = generation.current;
+    if (!bridge || readLifecycle.current.quitting) return;
+    const current = generation.current,
+      epoch = readLifecycle.current.epoch;
     let value: NativeResult;
     try {
       value = await bridge.request({ method: 'directory', generation: current });
     } catch (cause) {
-      if (current !== generation.current) return;
+      if (!isCurrentRead(current, epoch)) return;
       // Main's observer reset replaces this GET; the next directory state owns the display.
       const code = (cause as { code?: string; message?: string }).code ?? (cause as Error).message;
       if (code === 'directory_observation_changed') return;
       throw cause;
     }
+    if (epoch !== readLifecycle.current.epoch || readLifecycle.current.quitting) return;
     if (current === generation.current && value && 'workspaces' in value) acceptDirectory(value);
     else if (current === generation.current) throw Error('native_directory_unavailable');
   }
@@ -351,7 +366,7 @@ function NativeDesktopContent({
       setGrantFacts({ observationId: value.observationId, page: value.page });
   }
   async function select(sessionId: string, keepCurrentDraft = true) {
-    if (!bridge) return;
+    if (!bridge || readLifecycle.current.quitting) return;
     if (keepCurrentDraft) rememberDraft();
     setPreparing(false);
     setScheduledTasksView(false);
@@ -362,9 +377,15 @@ function NativeDesktopContent({
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
     setDraft('');
+    await readSelection(sessionId, current, nonce, readLifecycle.current.epoch);
+  }
+  async function readSelection(sessionId: string, current: number, nonce: number, epoch: number) {
+    if (!isCurrentRead(current, epoch, nonce)) return;
+    const original = {};
+    selectionRead.current = original;
     try {
       const value = await bridge.request({ method: 'select', generation: current, sessionId });
-      if (nonce !== viewIntent.current || current !== generation.current) return;
+      if (!isCurrentRead(current, epoch, nonce)) return;
       apply(value);
       if (value && 'generation' in value && value.selection)
         history.current?.select(current, value.selection, value.historyEpoch);
@@ -374,7 +395,7 @@ function NativeDesktopContent({
           generation: current,
           sessionId,
         });
-        if (nonce !== viewIntent.current || current !== generation.current) return;
+        if (!isCurrentRead(current, epoch, nonce)) return;
         if (saved && 'content' in saved && 'revision' in saved) {
           setDraft(
             draftCache.current.get(JSON.stringify([saved.storeId, sessionId])) ?? saved.content,
@@ -383,15 +404,47 @@ function NativeDesktopContent({
         }
       }
     } catch (cause) {
-      if (nonce !== viewIntent.current || current !== generation.current) return;
+      if (!isCurrentRead(current, epoch, nonce)) return;
       throw cause;
+    } finally {
+      if (selectionRead.current === original && epoch === readLifecycle.current.epoch)
+        selectionRead.current = undefined;
     }
   }
   // biome-ignore lint/correctness/useExhaustiveDependencies: Startup retries replace only this bridge observation; other facts are read through refs.
   useEffect(() => {
     let alive = true;
+    const startupEpoch = readLifecycle.current.epoch;
     const unwatch = bridge.watch((event) => {
-      if (alive && generation.current > 0 && event.generation === generation.current)
+      if (!alive) return;
+      if (event.kind === 'lifecycle') {
+        const quitting = event.phase === 'quitting';
+        if (quitting === readLifecycle.current.quitting) return;
+        if (quitting && !selectionRead.current) rememberLatestDraft.current();
+        readLifecycle.current = { epoch: readLifecycle.current.epoch + 1, quitting };
+        viewIntent.current++;
+        if (!quitting) {
+          if (!generation.current) setStartupAttempt((value) => value + 1);
+          else {
+            const current = generation.current,
+              nonce = viewIntent.current,
+              epoch = readLifecycle.current.epoch;
+            void report(async () => {
+              await refresh();
+              if (!isCurrentRead(current, epoch, nonce)) return;
+              if (selected.current) await readSelection(selected.current, current, nonce, epoch);
+              if (!isCurrentRead(current, epoch, nonce)) return;
+              await readDirectory();
+            }, false);
+          }
+        }
+        return;
+      }
+      if (
+        !readLifecycle.current.quitting &&
+        generation.current > 0 &&
+        event.generation === generation.current
+      )
         void refresh().catch((cause) => {
           if (alive && event.generation === generation.current)
             void report(async () => {
@@ -401,7 +454,7 @@ function NativeDesktopContent({
     });
     void (async () => {
       const value = await bridge.request({ method: 'attach' });
-      if (!alive) return;
+      if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
       if (
         !value ||
         !('generation' in value) ||
@@ -414,7 +467,7 @@ function NativeDesktopContent({
       if (!value.selection) setPreparing(true);
       await readDirectory();
     })().catch(async (cause) => {
-      if (!alive) return;
+      if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
       const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
       if (startupPhase.current === 'ready') {
         setError(/^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '目录状态待核实。');

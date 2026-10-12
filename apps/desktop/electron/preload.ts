@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+  decodeNativeEvent,
   type NativeBridge,
-  type NativeEvent,
   type NativeReply,
   type NativeRequest,
   type NativeStartupBridge,
@@ -50,13 +50,9 @@ const bridge: NativeBridge & NativeThemeBridge & NativeWindowBridge & NativeStar
     return reply.value;
   },
   watch(listener) {
-    const receive = (_event: unknown, value: NativeEvent) => {
-      if (
-        value?.kind === 'changed' &&
-        Number.isSafeInteger(value.generation) &&
-        value.generation >= 0
-      )
-        listener({ kind: 'changed', generation: value.generation });
+    const receive = (_event: unknown, value: unknown) => {
+      const event = decodeNativeEvent(value);
+      if (event) listener(event);
     };
     ipcRenderer.on(nativeEventChannel, receive);
     return () => ipcRenderer.removeListener(nativeEventChannel, receive);

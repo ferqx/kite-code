@@ -20,7 +20,7 @@
 
 [启动 DOM](test/isolated/native-startup-dom.test.tsx)沿实际 NativeDesktop 核首次等待、未核目录、空项目／无模型、两类失败、重复重试、旧响应隔离和进入后草稿保持；同轮原新对话／草稿／安排任务测试保业务断言。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)核编译启动样式及首次／冷启动完成后进入原页面，保原任务、审批、冷读与退出；实际窗口不代证初始化失败矩阵。代码输入、执行结果及剩余迁移归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)，完整 PC、安装恢复及阶段退出仍按原方案核对。
 
-旧读取的失败与成功使用同一展示归属：refresh 的 state 和 select/draft.read 捕获 generation 与 viewIntent，迟到拒绝已不属于当前视图时不再进入当前页面的“操作未完成”；当前读取仍抛原错误。全局目录仅绑定 generation，同代切换会话后真实目录失败仍提示。没有按错误码统一吞取消，也没有修改 mutation 的未知结果、原 commandId 查询、权限 CAS、启动失败和退出门禁。
+旧读取的失败与成功使用同一展示归属：refresh 的 state 和 select/draft.read 捕获 generation、viewIntent 与 Main 退出生命周期 epoch，迟到拒绝已不属于当前视图时不再进入当前页面的“操作未完成”；当前读取仍抛原错误。全局目录绑定 generation 与生命周期，同代切换会话后真实目录失败仍提示。没有按错误码统一吞取消，也没有修改 mutation 的未知结果、原 commandId 查询、权限 CAS、启动失败和退出门禁。
 
 [真实页面归属回归](test/isolated/native-read-ownership-dom.test.tsx)在原源码下实际三红，修后8pass/61assert：旧选择、草稿和事件状态的拒绝不污染新会话；当前错误、全局目录错误、未知首次提交的同ID查询及启动真失败继续成立。[正式默认 Shell 整窗口](test/isolated/native-shell-lifecycle-bundle.test.ts)保全部原断言、预算与故障路径，在 firstWindow 连接后被动记录公开启动错误与操作弹窗；正常启动、真实 parent 完成、准确停止及最终冷读要求记录为空。该观察不代证此前首屏的瞬时提示，SIGKILL 后真实断线继续保留。准确 owner 全量、原失败与本地交付证据见[客户端修复进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11客户端迟到读取误报)。
 
@@ -53,6 +53,10 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 ## 原窗口关闭与退出收尾
 
 [Main](electron/main.ts)保留关闭窗口时隐藏、activate 时显示并聚焦的现有行为，阅读、草稿和所属 Service 不因此停止。明确退出先从完整 Session 目录／View 只读核活动或未知执行；原两秒检查上限沿 [inspectNativeQuitWork](electron/quit-settlement.ts)接当前 NativeCaller，只 abort 本次检查 GET。失败或超时按未知工作提示，默认保留服务，取消退出后可继续原页面；检查不提交业务或重发任务。
+
+Main 开始退出和取消退出时通过原固定 event channel 通知 renderer；[preload](electron/preload.ts)只转发闭合的 `quitting/active` 生命周期。退出通知撤销旧 state、目录、选择与私有草稿读取的展示归属，暂停自动刷新；原 caller 的读取与资源仍按既有退出顺序收束。取消退出沿同一 generation 恢复读取，保留原草稿，不重新 attach、写草稿或重发任务。正在选择时的暂空输入不覆盖原草稿。真实当前错误、已提交写入的未知结果和异常收尾继续提示，不能仅凭 `native_draining` 错误码消除它们。
+
+[读取归属 DOM](test/isolated/native-read-ownership-dom.test.tsx)保原八例，另核上述四类读取的退出失效／取消恢复、退出期间零自动刷新、当前 `native_draining` 仍提示和未知原提交仅查询同 commandId。[交互分页原窗口](test/isolated/interaction-pages-electron.test.ts)保原40项效果及全部预算，在正常退出时被动观察操作／启动误弹窗，分别核实际 Electron 与准确所属 Service 的零退出；清理失败不能由 `app.close().catch()` 算作正常。准确红绿及当前有限 macOS 验证见[退出误报修复进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12native-退出期间操作未完成误报)。
 
 原 [settleDesktopQuit](electron/quit-settlement.ts)函数逐字迁入，Main 沿现有唯一清理顺序关闭原 caller、私有数据／使用权和配对 Service，另核实际 Service 退出为零后才释放制品使用权；launcher close 返回不代证正常退出。收尾只启动一次；超过原二十秒后提供“继续等待／强制退出”，默认继续等待。清理失败先说明结果待核实，再提供退出。明确紧急退出只对 Main 当前直接创建的配对 child 句柄发 SIGKILL，随后 app.exit(1)；不从 PID／目录发现任意进程，也不把未知效果改写为成功。普通重复退出不另开清理，业务／私有格式与公共协议保持。
 

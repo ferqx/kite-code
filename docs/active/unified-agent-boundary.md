@@ -192,6 +192,8 @@ Native 原消息复制与标题栏缩放同属窗口 Host。preload 只提供固
 
 Native 明确退出的活动检查只读完整公共目录与 View；两秒超时仅撤销本次 GET，不能把未回答当无活动，也不撤销其他观察。原窗口隐藏／激活不停止 Service。原二十秒收尾决定由 Main 持有，继续等待复用同一清理 promise；紧急退出只调用当前配对 child 的直接进程句柄，不发现其他 PID，不给卸载或普通读取强杀资格。配对 launcher close 与实际退出状态分别核实，非零退出进入异常收尾提示；未知执行保持原事实，正常清理顺序和双层制品使用权不放宽；实现与有限故障／实际窗口范围见[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)。
 
+Main 通过原固定 channel 的闭合生命周期通知撤销 renderer 旧读取的展示归属；它不增加业务请求或执行权。退出期间暂停自动刷新，取消后沿同一 generation 恢复状态／目录／选择和原草稿读取，不重新 attach 或提交业务。该展示撤销不提前 close／detach caller，也不消除真实当前错误、已提交 mutation 的未知回执或异常收尾提示；原 frame 身份与退出资源门禁保持。
+
 Native 启动诊断只来自本次所属 Service 的闭合私有 stderr 帧，经 paired launcher 重建后由 Main 持有；通用错误不变造有效报告。保存沿两个无 payload 的固定 host IPC，renderer 不提供报告或路径，Main 只写系统对话框选定的新文件，等待后复核当前 frame／窗口／报告。重试清除前次资格，保存不打开业务 caller、不修改 Store、不获得执行或恢复 authority；当前实现与范围见[Native owner](../../apps/desktop/README.md#原启动诊断保存)和[Service owner](../../apps/service/README.md)。
 
 ## 授权观察与执行资格

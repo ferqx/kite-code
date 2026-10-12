@@ -690,7 +690,13 @@ test('main IPC denies foreign/subframe senders and closed or oversized requests 
 test('main-private drafts require exact selection/revision; detached or late generations cannot rebind; network disposal is not owned shutdown', async () => {
   const port = client(),
     events: number[] = [],
-    caller = new NativeCaller(port, (event) => events.push(event.generation), memoryPrivateData());
+    caller = new NativeCaller(
+      port,
+      (event) => {
+        if (event.kind === 'changed') events.push(event.generation);
+      },
+      memoryPrivateData(),
+    );
   try {
     const first = await caller.invoke({ method: 'attach' });
     const generation = (first as { generation: number }).generation;

@@ -18,14 +18,158 @@ const app = await _electron.launch({
   timeout: 10000,
 });
 const watchdog = setTimeout(() => app.process().kill('SIGKILL'), 35000);
+const electronExit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+  (resolve) => app.process().once('close', (code, signal) => resolve({ code, signal })),
+);
+let ordinaryExitConfirmed = false;
+let originalFailure: unknown;
+let cleanupFailure: unknown;
+let pageForDiagnostics: import('playwright').Page | undefined;
+const quitDialogs: unknown[] = [],
+  quitPageErrors: string[] = [];
+let quitRequested = false;
+const quitReceipt = join(root!, 'ordinary-quit.json');
+const quitObservationReceipt = join(root!, 'ordinary-quit-observations.json');
 try {
   const page = await app.firstWindow();
+  pageForDiagnostics = page;
   console.error('pages_stage', 'window');
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text.startsWith('pages_quit_dialog ')) {
+      const observed = JSON.parse(text.slice('pages_quit_dialog '.length));
+      quitDialogs.push(observed);
+      console.error(text);
+    }
+  });
+  page.on('pageerror', (error) => {
+    if (quitRequested) {
+      quitPageErrors.push(error.message);
+      console.error('pages_quit_pageerror', error.message);
+    }
+  });
+  await page.evaluate(() => {
+    const observation = { phase: 'business', observed: new Set<string>() };
+    Reflect.set(window, '__pagesQuitObservation', observation);
+    const collect = () => {
+      if (observation.phase !== 'quitting') return;
+      for (const dialog of document.querySelectorAll('[role="alertdialog"]')) {
+        const text = dialog.textContent ?? '';
+        if (!/操作未完成|启动未完成/.test(text) || observation.observed.has(text)) continue;
+        observation.observed.add(text);
+        console.log(`pages_quit_dialog ${JSON.stringify({ phase: observation.phase, text })}`);
+      }
+    };
+    Reflect.set(window, '__pagesCollectQuitDialogs', collect);
+    new MutationObserver(collect).observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+  });
   page.setDefaultTimeout(10000);
   const request = (input: NativeRequest) =>
     page.evaluate((text) => window.kiteNative!.request(JSON.parse(text)), JSON.stringify(input));
   const state = async () => (await request({ method: 'state', generation: 1 })) as NativeState;
   await page.getByRole('button', { name: 's', exact: true }).click();
+  await app.evaluate(
+    ({ app, ipcMain, BrowserWindow }, input) => {
+      const { writeFileSync } = process.getBuiltinModule('node:fs') as typeof import('node:fs');
+      const observations: {
+        beforeQuit: boolean;
+        rejected: { method: unknown; code: unknown }[];
+        dialogs: unknown[];
+        observationErrors: string[];
+      } = { beforeQuit: false, rejected: [], dialogs: [], observationErrors: [] };
+      const publish = () => {
+        try {
+          writeFileSync(input.observationReceipt, JSON.stringify(observations));
+        } catch (error) {
+          observations.observationErrors.push(String(error));
+        }
+      };
+      publish();
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) throw Error('pages_original_window_missing');
+      window.webContents.on('console-message', (_event, ...args: unknown[]) => {
+        const first = args[0];
+        const message =
+          first && typeof first === 'object' ? Reflect.get(first, 'message') : args[1];
+        if (typeof message === 'string' && message.startsWith('pages_quit_dialog ')) {
+          observations.dialogs.push(message.slice('pages_quit_dialog '.length));
+          publish();
+        }
+      });
+      Reflect.set(globalThis, '__pagesQuitObservation', observations);
+      app.on('before-quit', () => {
+        observations.beforeQuit = true;
+        publish();
+      });
+      const handlers = Reflect.get(ipcMain, '_invokeHandlers') as Map<
+        string,
+        (...args: unknown[]) => Promise<unknown>
+      >;
+      const actual = handlers?.get(input.channel);
+      if (!actual) throw Error('pages_actual_native_handler_missing');
+      handlers.set(input.channel, async function (this: unknown, ...args) {
+        const method =
+          args[1] && typeof args[1] === 'object' ? Reflect.get(args[1], 'method') : null;
+        try {
+          const reply = await Reflect.apply(actual, this, args);
+          if (
+            observations.beforeQuit &&
+            reply &&
+            typeof reply === 'object' &&
+            Reflect.get(reply, 'ok') === false
+          ) {
+            observations.rejected.push({
+              method,
+              code: Reflect.get(reply, 'code'),
+            });
+            publish();
+            console.log('pages_quit_ipc_rejected', JSON.stringify(observations.rejected.at(-1)));
+          }
+          return reply;
+        } catch (error) {
+          if (observations.beforeQuit) {
+            observations.rejected.push({ method, code: String(error) });
+            publish();
+          }
+          throw error;
+        }
+      });
+      type Child = {
+        pid?: number;
+        spawnargs?: string[];
+        once(event: string, listener: (code: number | null, signal: string | null) => void): void;
+      };
+      const owned = (process as unknown as { _getActiveHandles(): Child[] })
+        ._getActiveHandles()
+        .filter((child) => child.pid && child.spawnargs?.includes(input.entrypoint));
+      if (owned.length !== 1) throw Error('pages_actual_service_child_unavailable');
+      const child = owned[0]!;
+      child.once('close', (code, signal) => {
+        writeFileSync(
+          input.receipt,
+          JSON.stringify({
+            pid: child.pid,
+            entrypoint: input.entrypoint,
+            code,
+            signal,
+            beforeQuit: observations.beforeQuit,
+            ipcRejections: observations.rejected,
+          }),
+        );
+      });
+    },
+    {
+      channel: 'kite:native:request',
+      entrypoint: join(root!, 'service.js'),
+      receipt: quitReceipt,
+      observationReceipt: quitObservationReceipt,
+    },
+  );
   await page
     .getByRole('textbox', { name: '当前会话私有草稿' })
     .fill('40 harmless original Job approvals');
@@ -309,21 +453,83 @@ try {
       cancellations: 0,
     }),
   );
-} catch (error) {
-  console.error(error);
-  console.error(
-    (
-      await (
-        await app.firstWindow()
-      )
-        .locator('body')
-        .innerText()
-        .catch(() => '')
-    ).slice(0, 6000),
+  quitRequested = true;
+  await page.evaluate(() => {
+    const observation = Reflect.get(window, '__pagesQuitObservation') as { phase: string };
+    observation.phase = 'quitting';
+    (Reflect.get(window, '__pagesCollectQuitDialogs') as () => void)();
+  });
+  // Observe the existing renderer requests across ordinary quit without injecting new work.
+  await app.evaluate(({ app }) => app.quit());
+  const exit = await electronExit;
+  assert.equal(exit.code, 0);
+  assert.equal(exit.signal, null);
+  const serviceExit = JSON.parse(readFileSync(quitReceipt, 'utf8')) as {
+    pid: number;
+    entrypoint: string;
+    code: number | null;
+    signal: string | null;
+    beforeQuit: boolean;
+    ipcRejections: unknown[];
+  };
+  assert.equal(serviceExit.entrypoint, join(root!, 'service.js'));
+  assert.equal(serviceExit.code, 0);
+  assert.equal(serviceExit.signal, null);
+  assert.equal(serviceExit.beforeQuit, true);
+  const quitObservations = JSON.parse(readFileSync(quitObservationReceipt, 'utf8')) as {
+    beforeQuit: boolean;
+    rejected: unknown[];
+    dialogs: unknown[];
+    observationErrors: string[];
+  };
+  assert.equal(quitObservations.beforeQuit, true);
+  assert.deepEqual(quitObservations.dialogs, []);
+  assert.deepEqual(quitObservations.observationErrors, []);
+  assert.deepEqual(quitDialogs, []);
+  assert.deepEqual(quitPageErrors, []);
+  ordinaryExitConfirmed = true;
+  console.log(
+    'Native interaction pages ordinary exit:',
+    JSON.stringify({
+      electron: exit,
+      service: serviceExit,
+      quitDialogs,
+      quitPageErrors,
+      quitObservations,
+    }),
   );
+} catch (error) {
+  originalFailure = error;
+  console.error(error);
+  if (
+    app.process().exitCode === null &&
+    app.process().signalCode === null &&
+    pageForDiagnostics &&
+    !pageForDiagnostics.isClosed()
+  )
+    console.error(
+      (
+        await pageForDiagnostics
+          .locator('body')
+          .innerText()
+          .catch(() => '')
+      ).slice(0, 6000),
+    );
   app.process().kill('SIGKILL');
-  throw error;
 } finally {
   clearTimeout(watchdog);
-  await app.close().catch(() => {});
+  if (!ordinaryExitConfirmed) {
+    try {
+      await app.close();
+    } catch (cleanup) {
+      cleanupFailure = cleanup;
+    }
+  }
 }
+if (cleanupFailure)
+  throw new AggregateError(
+    originalFailure ? [originalFailure, cleanupFailure] : [cleanupFailure],
+    'pages_quit_cleanup_failed',
+    { cause: originalFailure },
+  );
+if (originalFailure) throw originalFailure;

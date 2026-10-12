@@ -99,6 +99,18 @@ let artifactAccess: { close(): void }[] = windowsHandoff ? [acquireFormalWindows
 let startupDiagnostic: ServiceStartupDiagnostic | undefined;
 let quitting = false,
   exitAllowed = false;
+function setQuitting(value: boolean) {
+  quitting = value;
+  try {
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
+      window.webContents.send(nativeEventChannel, {
+        kind: 'lifecycle',
+        phase: value ? 'quitting' : 'active',
+      });
+  } catch {
+    // A disappearing renderer cannot receive lifecycle events; shutdown still settles its resources.
+  }
+}
 async function openCaller(): Promise<NativeCaller> {
   if (quitting) throw Error('native_draining');
   if (caller) return caller;
@@ -345,7 +357,7 @@ app.on('before-quit', (event) => {
   if (exitAllowed) return;
   event.preventDefault();
   if (quitting) return;
-  quitting = true;
+  setQuitting(true);
   if (window && !window.isDestroyed()) {
     window.show();
     window.focus();
@@ -363,7 +375,7 @@ app.on('before-quit', (event) => {
         cancelId: 0,
       });
       if (result.response !== 1) {
-        quitting = false;
+        setQuitting(false);
         return;
       }
     }
@@ -391,7 +403,7 @@ app.on('before-quit', (event) => {
     exitAllowed = true;
     app.quit();
   })().catch(() => {
-    quitting = false;
+    setQuitting(false);
     dialog.showErrorBox('服务结果待核实', '无法确认清理完成；没有将未知结果标记为成功。');
   });
 });

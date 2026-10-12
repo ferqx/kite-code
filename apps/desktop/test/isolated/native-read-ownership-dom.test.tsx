@@ -175,9 +175,9 @@ function fixture(
     calls,
     click,
     render: () => act(async () => root.render(<NativeDesktop />)),
-    notify: () =>
+    notify: (event: NativeEvent = { generation: 1, kind: 'changed' }) =>
       act(async () => {
-        for (const listener of listeners) listener({ generation: 1, kind: 'changed' });
+        for (const listener of listeners) listener(event);
       }),
     assertOther() {
       expect(
@@ -190,6 +190,8 @@ function fixture(
     },
     async close() {
       await act(async () => root.unmount());
+      // Radix restores focus in a zero-delay unmount task; keep this DOM's Event realm until it ends.
+      await act(async () => Bun.sleep(0));
       dom.window.close();
       restoreLayout();
       Object.assign(globalThis, prior);
@@ -359,6 +361,131 @@ test('a real initial attach failure retains startup failure and retry instead of
       ),
     ).toBe(true);
     expect(f.calls.map((request) => request.method)).toEqual(['attach']);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const method of ['state', 'directory'] as const)
+  test(`normal quit retires the pending ${method} display, pauses refresh and cancel restores the same draft without mutation`, async () => {
+    const held = deferred<NativeResult>();
+    let hold = false;
+    const f = fixture((request) => (request.method === method && hold ? held.promise : undefined));
+    try {
+      await f.render();
+      await f.click('Original A');
+      hold = true;
+      if (method === 'state') await f.notify();
+      else await f.click('重新读取目录');
+      const callsBeforeQuit = f.calls.filter((request) => request.method === 'state').length;
+      await f.notify({ kind: 'lifecycle', phase: 'quitting' });
+      await act(async () => held.reject(Error('native_draining')));
+      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(f.dom.window.document.querySelector('textarea')!.value).toBe('original text');
+      await f.notify();
+      expect(f.calls.filter((request) => request.method === 'state')).toHaveLength(callsBeforeQuit);
+      hold = false;
+      await f.notify({ kind: 'lifecycle', phase: 'active' });
+      expect(f.calls.filter((request) => request.method === 'state').length).toBeGreaterThan(
+        callsBeforeQuit,
+      );
+      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(f.dom.window.document.querySelector('textarea')!.value).toBe('original text');
+      expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
+      expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
+      expect(f.calls.filter((request) => request.method === 'draft.write')).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('native_draining without a Main quit lifecycle remains a current operation error', async () => {
+  let fail = false;
+  const f = fixture((request) => {
+    if (request.method === 'state' && fail) throw Error('native_draining');
+    return undefined;
+  });
+  try {
+    await f.render();
+    await f.click('Original A');
+    fail = true;
+    await f.notify();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'native_draining',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+for (const method of ['select', 'draft.read'] as const)
+  test(`cancelled quit resumes the retired ${method} read without clearing the original private draft`, async () => {
+    const held = deferred<NativeResult>();
+    let hold = false;
+    const f = fixture((request) =>
+      request.method === method && request.sessionId === 'a' && hold ? held.promise : undefined,
+    );
+    try {
+      await f.render();
+      await f.click('Original A');
+      hold = true;
+      await f.click('Original A');
+      await f.notify({ kind: 'lifecycle', phase: 'quitting' });
+      await act(async () => held.reject(Error('native_draining')));
+      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      hold = false;
+      await f.notify({ kind: 'lifecycle', phase: 'active' });
+      expect(f.dom.window.document.querySelector('textarea')!.value).toBe('original text');
+      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
+      expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
+      expect(f.calls.filter((request) => request.method === 'draft.write')).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('an already submitted mutation keeps its unknown receipt through quit and cancel without another POST', async () => {
+  const held = deferred<NativeResult>();
+  let submitted: Extract<NativeRequest, { method: 'conversation.send' }> | undefined;
+  const f = fixture((request) => {
+    if (request.method === 'conversation.send') {
+      submitted = request;
+      return held.promise;
+    }
+    if (request.method === 'conversation.lookup')
+      return {
+        kind: 'conversation',
+        commandId: request.commandId,
+        phase: 'unknown',
+        stage: 'create',
+      };
+    return undefined;
+  });
+  try {
+    await f.render();
+    await f.click('Original A');
+    await f.click('在 Workspace 中新建对话');
+    await f.click('研究与理解资料');
+    await f.click('发送首条消息');
+    expect(submitted).toBeDefined();
+    await f.notify({ kind: 'lifecycle', phase: 'quitting' });
+    await act(async () => held.reject(Error('network_outcome_unknown')));
+    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'network_outcome_unknown',
+    );
+    await f.notify({ kind: 'lifecycle', phase: 'active' });
+    await f.click('确定');
+    await f.click('查询原首次提交');
+    const lookups = f.calls.filter((request) => request.method === 'conversation.lookup');
+    expect(lookups).toHaveLength(1);
+    expect(lookups[0]!.commandId).toBe(submitted!.intent.commandId);
+    expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(1);
+    expect(
+      [...f.dom.window.document.querySelectorAll('button')].some(
+        (button) => button.textContent === '查询原首次提交',
+      ),
+    ).toBe(true);
   } finally {
     await f.close();
   }
