@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -12,9 +12,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
+import { ptyDeadline } from '../fixtures/tui-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
 test('actual development PTY slash routes manage Session/Fork/current Context and manual compression without replay', async () => {
@@ -31,6 +33,11 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
     buildId: `development-${entrypointSha256}`,
     apiMajor: 1,
   };
+  const evidence = join(tmpdir(), `kite-tui-management-${randomUUID()}`);
+  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let passed = false;
+  let failure: unknown;
+  const cleanupErrors: unknown[] = [];
   let stopped = false;
   let calls = 0,
     summaryFullInput = false,
@@ -120,7 +127,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
       await seed.client.createWorkspace({
         expectedStoreId,
         id: 'w',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
         name: 'owned',
       });
       // Dynamic slash resolution reads only the trusted original workspace catalogue.
@@ -143,62 +150,30 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
     } finally {
       await seed.close();
     }
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,urllib.request
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
-p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(repo, 'scripts/development/unified-tui.ts'))},'--thread','a','--data-root',${JSON.stringify(profile.dataRoot)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
-os.close(slave);buffer=b''
-def wait(text):
- global buffer
- deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>deadline: raise RuntimeError('expected '+text+' tail='+buffer[-3000:].decode(errors='replace'))
-  if select.select([master],[],[],.1)[0]: buffer+=os.read(master,65536)
-def send(text):
- global buffer
- buffer=b'';os.write(master,text.encode());wait(text);buffer=b'';os.write(master,b'\\r')
-def pump():
- global buffer
- end=time.monotonic()+.5
- while time.monotonic()<end:
-  if select.select([master],[],[],.05)[0]: buffer+=os.read(master,65536)
-try:
- wait('New Run');send('Owned ordinary task');wait('ORIGINAL_FULL_TAIL');pump()
- send('/session rename Managed title');wait('session.rename: applied');pump()
- send('/context');wait('Current selected Context projection');wait('frozen upper');os.write(master,b'\\x1b');pump()
- send('/compact preserve original facts');wait('context.compress: accepted');pump();send('Queued after maintenance');wait('input.follow_up');open(${JSON.stringify(join(root, 'release-summary'))},'w').write('explicit fixture release');pump();os.write(master,b'\\x0b');wait('FOLLOWUP_COMPLETED');pump();os.write(master,b'\\x0b');wait('context.compress: applied');pump()
- send('/compact reset');pump();os.write(master,b'\\x0b');wait('context.compression.reset: failed');os.write(master,b'\\x1b');pump()
- urllib.request.urlopen(${JSON.stringify(`${provider.url.href}rewind-observation`)}).read()
- send('/rewind');wait('Files recovery:');wait('R reloads readonly directory. Esc closes.');os.write(master,b'\\x1b');pump()
- urllib.request.urlopen(${JSON.stringify(`${provider.url.href}rewind-observation`)}).read()
- send('/unknown');wait('tui_command_unavailable');pump()
- for remaining in range(len('/unknown')-1,-1,-1):
-  buffer=b'';os.write(master,b'\\x7f');wait('New Run >'+(' '+('/unknown'[:remaining]) if remaining else ''))
- send('/session fork Forked scope');wait('session.fork: applied');pump()
- send('/session delete confirm');wait('delete_requested');wait('stop unconfirmed');pump()
- os.write(master,b'\\x11');
- deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.1)[0]:
-   try: buffer+=os.read(master,65536)
-   except OSError: break
- p.wait(timeout=3);assert p.returncode==0
- os.close(master)
- master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
- p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(repo, 'scripts/development/unified-tui.ts'))},'--thread','a','--data-root',${JSON.stringify(profile.dataRoot)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
- os.close(slave);buffer=b''
- wait('New Run');send('/exit')
- deadline=time.monotonic()+6
- while p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.1)[0]:
-   try: buffer+=os.read(master,65536)
-   except OSError: break
- p.wait(timeout=3);assert p.returncode==0
- print('SLASH_COMPLETE_ZERO_REPLAY')
-finally:
- if p.poll() is None: os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-    const child = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    child = Bun.spawn(
+      [
+        process.execPath,
+        '--no-install',
+        join(repo, 'apps/cli/test/fixtures/tui-management-driver.ts'),
+        JSON.stringify({
+          executable: process.execPath,
+          script: join(repo, 'scripts/development/unified-tui.ts'),
+          preload: join(repo, 'apps/cli/test/fixtures/tui-management-observation.ts'),
+          dataRoot: profile.dataRoot,
+          root,
+          repo,
+          provider: provider.url.href,
+          serviceEntry: entrypoint,
+          evidence,
+        }),
+      ],
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        stdin: 'ignore',
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+      },
+    );
     const [out, err, exit] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
@@ -293,9 +268,40 @@ finally:
     } finally {
       db.close();
     }
+    passed = true;
+  } catch (error) {
+    failure = error;
   } finally {
     stopped = true;
-    provider.stop(true);
-    rmSync(root, { recursive: true, force: true });
+    try {
+      if (child && child.exitCode === null) {
+        if (process.platform === 'win32') child.send('management-driver-stop');
+        else child.kill('SIGTERM');
+        await ptyDeadline(child.exited, 3000, 'management_driver_cleanup_unknown');
+      }
+    } catch (error) {
+      cleanupErrors.push(error);
+    } finally {
+      provider.stop(true);
+      console.log(
+        'management evidence',
+        JSON.stringify({ evidence, retainedRoot: passed && !cleanupErrors.length ? null : root }),
+      );
+      writeFileSync(
+        `${evidence}.parent-cleanup.json`,
+        JSON.stringify({
+          failure: failure ? String(failure) : null,
+          cleanupErrors: cleanupErrors.map(String),
+          retainedRoot: passed && !cleanupErrors.length ? null : root,
+        }),
+      );
+      if (passed && !cleanupErrors.length) rmSync(root, { recursive: true, force: true });
+    }
   }
+  if (cleanupErrors.length)
+    throw new AggregateError(
+      failure ? [failure, ...cleanupErrors] : cleanupErrors,
+      'management_parent_cleanup_unknown',
+    );
+  if (failure) throw failure;
 }, 40000);

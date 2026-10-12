@@ -5361,3 +5361,35 @@ Root `/private/tmp/kite-callers-argv-freeze.json` 核3856份非Markdown输入，
 | 5 | §35全部用户能力、最后旧authority／依赖退役和阶段完整回归仍依赖上述适用门禁。原37能力继续partial；wholeV13=false／phaseExit=false，不提前宣布阶段退出。ChatGPT新增完整用户链依用户最新顺序在此前目标完成后实施。 |
 
 本轮闭合正式CLI argv与六个原请求caller恢复用例的共享测试源码／CI接线，退役手工daemon产物装配，修正实际候选引擎与所属退出证明；没有声称生产全部权限／authority退役或三平台／阶段资格。后续ChatGPT的只读源码与官方契约核对结果已保留，实施顺序仍先完成当前主线；RSS／完整观测及原断言继续保留。
+
+## 2026-10-12：TUI 完整管理、模型设置与主机状态的三端测试
+
+状态：partial；上一轮已提交89357cea／10路径／3856输入零漂移，属于实质进展。本轮按最高依赖推进完整管理链，再并行完成不依赖Shell的模型／effort和主机状态。仍以完整用户行为／实际入口／原断言为验收，Windows/Linux原生后置，RSS／完整观测未闭合，不push／PR／发布／dispatch或宣布阶段退出。ChatGPT／Responses依用户最新顺序，在上述V1.3目标完成后实施；已确认的Kite官方授权优先、Codex直接复用门禁保留。
+
+[管理原整文件](../../apps/cli/test/isolated/tui-management-host.test.ts)退役Python／POSIX内嵌driver，改[共享驱动](../../apps/cli/test/fixtures/tui-management-driver.ts)。实际 `scripts/development/unified-tui.ts`／原参数／Profile／默认built Service／固定compatible Provider保持，[被动preload](../../apps/cli/test/fixtures/tui-management-observation.ts)只观察准确Service真实spawn／PID／kernel birth／实际退出，参数和stdio不替换。普通约42KiB完整正文／尾、rename、当前Context／frozen upper、held手动摘要完整原文与focus、维护期间准确follow-up、释放后原查回、reset准确失败保旧点、只读rewind前后相同、未知slash草稿逐字删除零Model、Fork原Session／selection／namespace／extensions、delete受理／stop未确认，以及Ctrl+Q／冷同一前门 `/exit`完整保持。19个原Bun expect按序保持；两个Python正常退出检查迁为两次真实exit0，原40秒整例／10秒观察／500ms pump／6秒观察＋3秒exit/EOF join保持。两所属Service按原PID／出生身份／实际code0／dead证明正常，未知Service观察不阻止独立清理持有TUI，不借未知PID；原失败与cleanup errors分别保留，不互相覆盖。
+
+[模型原整文件](../../apps/cli/test/isolated/tui-models-host.test.ts)及[共享驱动](../../apps/cli/test/fixtures/tui-models-driver.ts)保持paired／shared两个40秒原整链和第三有限CAS review。真实held原Run用one、原default POST改two后response已返回再抛owned_lost_reply、明确原lookup前阻再提交、effort high不影响原Run、原完成one／下一实际Run two-high，POST2／GET1／HostMutation2／完整Provider请求保持。原18个Bun expect及六项Python检查等义保留，10秒观察／150ms key／5秒Provider／6＋3秒退出不变；它是回应后异常注入，不能称物理socket丢回应。实际runTUIHost／默认开发Service和默认SQLite、开发raw daemon／有限Web／原身份装配保持，Windows使用正式SID pipe与准确bootstrap Profile／instance的公共Lifecycle；没有伪造候选runtimeProtection或额外切SQLite engine。paired实际TUI／原出生Service code0，shared TUI退出保daemon live再核所属普通exit0，失败／未知保根与错误。
+
+[状态原整文件](../../apps/cli/test/isolated/tui-status-host.test.ts)及[共享驱动](../../apps/cli/test/fixtures/tui-status-driver.ts)保持paired／shared／shared-loss三条40秒完整链。原Build owned-status／Shell unavailable、固定scope／Store、第二GET失败保最后确认事实／第三GET重读、共享daemon真实强杀后unknown、SECRET／private profile path／access key／endpoint不展示、零Model／Run／Execution／cancel、正常TUI退出和shared detach存活全部保持。五个原Bun静态断言、十二项原Python检查保留；10秒观察／6＋3秒退出不变。Windows强杀由实际持有daemon的父进程经IPC在原窗口执行taskkill /pid /f，核dispatcher0／实际非零退出／ESRCH，不使用/t或伪造SIGKILL；POSIX仍真实SIGKILL。普通Windows关闭沿准确已准入bootstrap的Lifecycle，POSIX仍SIGTERM；正常／abrupt各核实际exited并独立保回执，闭合未知状态保身份和根，收尾有界于本例原整体期限。
+
+源码范围有两项必须保留的区别：管理仍真实开发脚本前门，模型／状态仍实际runTUIHost，不把透明观察wrapper说成改过的生产入口。状态原诊断特意需要owned-status与Shell unavailable；改真实候选会改变构建和默认Shell事实，所以本轮保原开发built／raw daemon／有限Web装配，不能给它补造protection或称正式installed资格。标准tmpdir／file URL／共享PTY-ConPTY、原engine和平台真实终止接线只修测试路径／所属收尾；运输实现不冒称原Python字节／资源逐项等价，RSS／完整后代资格仍独立。
+
+两处真实红已保留，均在新增所属退出证明中暴露，未删断言／过滤整例：模型误将TUI pid-only onLaunched当完整paired对象读取exited，paired启动TypeError；`/private/tmp/kite-tui-models-mac-final.log` actual1／2pass1fail，failedroot和原出生Service已核dead／零清理信号记录在`/private/tmp/kite-tui-models-failed-owner.json`。修正为透明真实Bun.spawn准确Service观察，callback仍pid-only。状态新增正常exit0检查误套原SIGKILL daemon；`/private/tmp/kite-tui-status-mac.log` actual1／2pass1fail和旧root/abrupt receipt保留，实际code137／SIGKILL／PID gone。修正按真实exited分类，正常shared即使先结束也核code0，intentional shared-loss保实际abrupt，不用可能仍null的exitCode字段判存活；完整原三例重验。管理交叉审查另补原6＋3退出窗口和准确Service exit0、独立错误收尾，没有新增故障矩阵。初次类型／unsafe-finally诊断与真实运行红分开，最终门禁按当前源核对。
+
+最终macOS完整文件：管理1pass／19expects／11.70秒，模型3pass／23expects／10.44秒，状态3pass／11expects／3.88秒；合计7pass／53个实际Bun expect，19＋18＋5共42个原静态AST表达式顺序保持，2＋6＋12共20个原Python检查等义迁移。管理两TUI＋模型两TUI＋状态三TUI共七次正常0；同出生paired Service／共享detach存活／普通daemon0和status强杀daemon137分别记录，不代全Runtime树／handles／activeResources。`/private/tmp/kite-tui-management-delivery.json`和`/private/tmp/kite-tui-models-delivery.json`绑定最终源／日志／原AST／driver检查及实际回执，Root `/private/tmp/kite-tui-state-freeze.json`另核status实际facts／完整输出／退出和cleanup0。unknown清理分支没有原生故障资格，正常成功不放宽原Gate。
+
+[三端transport](../../.github/workflows/runtime-transport-qualification.yml)追加上述三个整文件独立Bun命令，不过滤平台；全部无Shell依赖、在权限例之前，现21个完整独立caller进程在原Windows MSVC／当前八workspace build之后、原transport／shared14之前。CI guard保逐一漏文件／过滤／平台条件／合并进程拒绝，原完整CI文件actual0／21pass／303expects／1.81秒，日志`/private/tmp/kite-tui-state-ci.log`。没有dispatch，定义不代hosted结果或Windows后端支持。
+
+Root冻结3860份非Markdown输入，三个原整文件SHA精确匹配115文件／80CLI作业基线；新增四个helper和三份CI接线，生产／依赖／builder／共享PTY／recoveryProfile／Job夹具不改，未变CLI／shared14范围复用原冻结结果。三个实际完整消费已各重验，原SQL／权限／body／API合同不改。根与八workspace类型、边界／workspace／API／ownership／Biome及文档检查按当前源通过，正常hook仍独立；当前默认728文件／588job未整体重跑，不由局部累加宣布阶段退出。手册命令／模型设置／status／压缩与取消合同核对无行为变化，无无意义手册diff；CLI owner／tests／release control同步真实方法和资格范围，文档actions按本轮交付执行。
+
+最多五个具体退出缺口仍按依赖顺序保留：
+
+| 顺序 | 实际入口、缺口与验收 |
+| --- | --- |
+| 1 | [共享TUI原生完整滚动](../../apps/cli/test/isolated/tui-scrollback-pty.test.ts)仍有POSIX/Python驱动和Windows skip。原完整轮次、活动正文、待决问答／长编辑、滚动位置、resize／clear／切scope及零重绘／mutation需按原断言和预算迁入共享三端运输；不能由本轮管理／状态快照代证。 |
+| 2 | 正式Shell／Task／MCP原完整持续负载RSS九点178814976→299614208B、+115.203125MiB>32MiB，仍须真实native allocation owner修复并满足原负载／阈值；不重复参数对照或用短窗代完整。 |
+| 3 | 完整Runtime kernel-birth后代、activeResources／handles producer与Source批准异常cleanup receipt仍缺。完整实际来源取得前保unsupported／null，七个正常TUI和所属短链不是资源全集。 |
+| 4 | Win/Linux正式安装／真代码版本切换／MCP／维护恢复／保数据卸载及Windows Shell／script verifier／文件候选后端仍需后续Actions／用户Windows真实资格，不把接线或Mac绿当原生通过。 |
+| 5 | §35全部能力出口、最后旧authority／依赖退役和阶段完整回归依赖上述适用门禁；37原能力仍partial、wholeV13=false／phaseExit=false。ChatGPT／Responses在当前目标完成后实施，当前不借新增功能绕过主线。 |
+
+本轮新增闭合管理、模型／effort和主机状态三个完整用户链的共享测试源码与CI接线，三个内嵌Python driver退役，默认生产装配／原用户语义不改。原断言、真实红、RSS／观测和平台门禁保持，继续当前主线，无阶段退出声明。

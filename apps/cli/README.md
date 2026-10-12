@@ -90,6 +90,8 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 新验证见 [纯 Context 分页](test/context-pagination.test.ts)、[实际管理 HTTP](test/isolated/session-context-management.test.ts)、[真实开发 argv](test/isolated/management-argv.test.ts) 与 [实际管理 PTY](test/isolated/tui-management-host.test.ts)。HTTP fixture 物理丢弃已提交 rename 响应后核对原 ID/零重发，并读取 202 条真实消息；压缩使用实际 Model/Run 终态，缺可信 expanded preflight 的 reset 准确失败并保留旧点。该开发消费者资格不等于正式旧 CLI/TUI 切换、复杂终端编辑或 Linux/Windows/全发行资格。
 
+[管理完整文件](test/isolated/tui-management-host.test.ts)现以[共享Bun驱动](test/fixtures/tui-management-driver.ts)替代Python／POSIX驱动，实际执行原 `scripts/development/unified-tui.ts`，参数／默认built Service／完整Model输入不改。[被动preload](test/fixtures/tui-management-observation.ts)仅观察准确Service真实Bun.spawn／PID／kernel birth／实际exit，所有调用参数和stdio原样转发。普通完整任务、rename、Context、held手动压缩focus与原全文、维护期间准确follow-up、明确查回、reset失败保旧点、只读rewind前后相同、未知slash草稿、Fork原身份／selection／namespace／extensions、delete受理／stop未确认及Ctrl+Q／冷同前门 `/exit` 均保持。19个原Bun expect及两个原Python正常退出检查保留；40秒整例／10秒观察／500ms pump／6秒观察＋3秒exit/EOF join不变，两所属Service实际code0与同birth dead另核。缺Service观察仍独立清理持有TUI，原错误与cleanup errors不覆盖、unknown保根和身份。macOS最终1pass／19expects／11.70秒，平台接线不代Win/Linux原生或安装版资格；证据归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12tui-完整管理模型设置与主机状态的三端测试)。
+
 
 本管理切片的最终资格分组记录：CLI 参数/完整 Context 分页与 Ink/port 组合 21 项／398 个断言；实际公共 HTTP 与真实 argv 管理 2 项／146 个断言；原 active include/Context 意图回归 4 项／56 个断言；原开发宿主 5 项／56 个断言与 UI 实际 PTY 3 项／19 个断言保持。新增管理 PTY 1 项／11 个断言独立验证完整 focus/原正文到压缩请求、维护期间 follow-up、后续请求来源、原命令 GET 和有限 slash，结果以该实际测试日志为准，不累加成平台完整资格。
 
@@ -212,6 +214,8 @@ TUI 观察不可用独立于快照读取失败：SSE 出错而 HTTP 仍健康时
 
 [模型 controller 测试](../../packages/ui/test/tui/models.test.tsx) 核对 stale、原观察、迟到与原查询；[实际 PTY 测试](test/isolated/tui-models-host.test.ts) 使用自有临时 profile、固定本机 compatible Provider 和标准 80×24 终端验证真实按键。最终资格与失败过程记录于[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。此接入不扩展 Native 的有限设置 IPC，也不代表远端模型发现或正式旧 TUI 切换完成。
 
+该[完整模型文件](test/isolated/tui-models-host.test.ts)的paired／shared两个40秒整链及原有限CAS review现消费[共享驱动](test/fixtures/tui-models-driver.ts)。原held Run仍model one；default改two的首次POST已收到response后抛原owned_lost_reply，明确查询前重复保存阻挡；effort high不影响原Run，原完成one／下一真实Run two/high、POST2／原GET1／HostMutation2保持。这是原回应后异常注入，不冒称物理socket毁损。18个原Bun expect及六项原Python检查等义保留，10秒观察／150ms key／5秒provider／6＋3秒退出不改；真实runTUIHost及默认开发Service／SQLite、开发raw daemon装配保持，Windows使用SID pipe和原Profile／instance的公共Lifecycle。paired实际TUI／同birth Service正常0，shared TUI detach保daemon live后其所属普通退出另核；unknown保错误和根。macOS完整3pass／23expects／10.44秒；新增退出观察误用pid-only onLaunched的真实红已保留并改透明真实spawn观察，准确范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12tui-完整管理模型设置与主机状态的三端测试)。
+
 
 开发 `job reconcile <root-session> --input <ReconcileJobRequest JSON> [--server <local socket>]` 使用原 profile/Workspace 的配对或共享 Service。input 固定 `kind:"job.reconcile"`、expectedStoreId、commandId、executionId、expectedResultRevision，不能提交 adapter、关联或结果。`src/job-reconcile.ts` 在输出中保存准确原意图，丢回应只 GET 原 Command，同一 Client/commandId 不重复 POST；闭合回执必须匹配原 Store/Session/Execution/revision。verified退出0，已知拒绝1，unresolved/accepted/坏回执/未知2。0只证明核实，不表示原 Run 已恢复或工具重新执行。
 
@@ -227,6 +231,8 @@ Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，�
 开发 TUI `/status` 通过有限 status port 调用同一 HTTP GET。host固定原 profile显示名和paired/shared模式，复核准入身份后只向UI传有限事实；观察流状态与诊断GET分开，GET成功不清除SSE失联。关闭或切换只释放所属读取，失败保最后确认事实并标当前unknown；不会取消Run或关闭Service。面板使用明确字段，不把完整DTO序列化到终端，更不显示token、endpoint或本机路径。该状态迁移不证明正式release/sandbox/exporter装配已具备。
 
 [真实编译CLI状态](test/isolated/status-host.test.ts)验证配对/共享三flag、纯JSON、信任CAS、坏配置、原scope与零Provider/凭据backend访问；[真实80×24 TUI](test/isolated/tui-status-host.test.ts)验证paired/shared、读取失败重试与daemon强杀后的unknown，原运行和所属进程分别核实。
+
+该[TUI状态完整文件](test/isolated/tui-status-host.test.ts)现用[共享Bun驱动](test/fixtures/tui-status-driver.ts)执行paired／shared／shared-loss三条原40秒链。原Build owned-status与Shell unavailable诊断保留，不能改成正式候选身份或删除不可用检查；当前built开发Service／raw daemon／有限Web／默认SQLite如实保留，未伪造runtimeProtection。原scope／Store、GET失败保最后确认事实／重读、daemon真实强杀后unknown、SECRET／private path／access key／endpoint不展示、零Model／Run／Execution／cancel、正常TUI退出与shared daemon不被detach关闭保持。五个原Bun静态expect及十二项Python检查保留，10秒观察／6＋3秒退出不变。Windows由实际持有daemon的父进程原生taskkill /pid /f并等真实异常退出／ESRCH，POSIX仍SIGKILL；正常收尾Windows沿准确bootstrap的Lifecycle，POSIX仍SIGTERM。分类依据实际exited，不能以信号退出时可能仍null的exitCode字段假称存活；正常和abrupt回执分开，unknown保所属根。macOS3pass／11expects／3.88秒；正常关闭检查误套已强杀daemon的红已保留并修正，原断言不删。证据与未验范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12tui-完整管理模型设置与主机状态的三端测试)，不代正式安装／三平台／持续资源资格。
 
 ## 开发 TUI Skill 目录
 
@@ -468,7 +474,7 @@ TUI先Review再独立Enter确认，成功提示凭据保存和另行连接；冷
 
 同一[来源修改完整文件](test/isolated/tui-mcp-source-mutation-pty.test.ts)现用[共享Bun驱动](test/fixtures/tui-mcp-source-mutation-driver.ts)替代独立Python驱动；原Service／CLI helper字节不改。Add／Remove、Review／Confirm与独立Ask、移除Source及Workspace后的冷原ID只查、公开v12换Store拒绝原读取、3532原journal字节与SHA、三次Ctrl+Q／EOF及四份Service正常收尾保持。16次原控制调用与93个原Bun expect表达式保持；原10／12／6＋3／60秒build／120秒整例不改。Mac固定3.51.3断言仍执行；nonMac按正式审查表校验真实builtin engine的准确version／sourceId，全部平台继续核原候选manifest绑定，不以自报版本或availability skip放行。原evidence排他新建、POSIX no-follow与fd fsync／close保持，Windows强制失败清理记录normal=false。实际macOS1pass／274expects／15.68秒；原生平台、系统Vault／浏览器和持续Soak仍按原门禁。
 
-Tools、Source修改／批准、强制重连、Auth、配置与冷配置七个完整MCP消费者，以及paired／shared Skills目录、正式Terminal导出／正文、默认问答、普通申请冷恢复、正式paired／shared CLI argv、三类普通CLI／TUI原请求恢复、权限、独立Job停止恢复、完整CLI library和文件候选在[transport workflow](../../.github/workflows/runtime-transport-qualification.yml)各用独立Bun进程运行。先准备Windows MSVC和当前八workspace构建；不依赖Shell的导出／问答／普通Work及三份原caller恢复文件先于权限，Job／library消费正式Shell，随后保原transport与shared14。Source、重连和导出的首Database前候选engine选择不能与已开库测试合并。CI guard拒逐一漏命令／过滤／平台条件、合并进程及把旧transport前置，原所有测试保留。Windows Shell／文件候选缺后端仍失败，不从接线取得原生资格；准确输入、复用及门禁归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12普通申请和独立-job-停止恢复的完整三端测试)。
+Tools、Source修改／批准、强制重连、Auth、配置与冷配置七个完整MCP消费者，以及paired／shared Skills目录、正式Terminal导出／正文、默认问答、普通申请冷恢复、正式paired／shared CLI argv、三类普通CLI／TUI原请求恢复、完整Session／Context管理、模型／effort设置、主机状态、权限、独立Job停止恢复、完整CLI library和文件候选在[transport workflow](../../.github/workflows/runtime-transport-qualification.yml)各用独立Bun进程运行。先准备Windows MSVC和当前八workspace构建；不依赖Shell的导出／问答／普通Work、原caller恢复和管理／模型／状态先于权限，Job／library消费正式Shell，随后保原transport与shared14。Source、重连和导出的首Database前候选engine选择不能与已开库测试合并。CI guard拒逐一漏命令／过滤／平台条件、合并进程及把旧transport前置，原所有测试保留。Windows Shell／文件候选缺后端仍失败，不从接线取得原生资格；准确输入、复用及门禁归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12普通申请和独立-job-停止恢复的完整三端测试)。
 
 [源码外80×24 Auth PTY](test/isolated/tui-mcp-auth-pty.test.ts)经公开 terminal builder、实际 paired Service/Runtime/SQLite 与 Client，真实键盘依次完成 Login、Refresh、Revoke、Login、Clear 的 Review 与独立 Enter Confirm。五个原 Command/Execution 唯一，UI仅五次 Auth POST；每次普通 Ask 核准确原 Execution/definition/revision，由 observer SDK 回答 approve_once，不能称为键盘审批。受控 AS 实际经过 discovery、两次 DCR/PKCE/callback、token、refresh 和 revoke，MCP RPC/Model均零，没有自动连接。
 

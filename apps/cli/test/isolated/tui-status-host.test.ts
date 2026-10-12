@@ -1,21 +1,42 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { createClient } from '@kite-ai/client';
-import { bootstrapSchema } from '@kite-ai/service/daemon';
+import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
+import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
+import { ptyDeadline } from '../fixtures/tui-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+const retainedStatusOwners = new Set<unknown>();
+function processGone(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
 for (const mode of ['paired', 'shared', 'shared-loss'] as const)
   test(`80x24 actual ${mode} TUI status checks original host with no work and preserves failed facts`, async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-status-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-status-')));
     const workspace = join(root, 'workspace'),
       ledger = join(root, 'reads'),
       ownedPid = join(root, 'owned-pid');
+    const evidence = `${root}-${mode}`;
     mkdirSync(workspace, { mode: 0o700 });
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
@@ -58,9 +79,71 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
       apiMajor: 1,
     };
     let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined,
-      python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+      driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let client: ReturnType<typeof createClient> | undefined;
-    const socket = join(root, 'd.sock');
+    let lifecycle: ReturnType<typeof createServiceLifecycleClient> | undefined;
+    let daemonExit: number | undefined;
+    let daemonIdentity: { instanceId: string; birth: string } | undefined;
+    let abrupt: Promise<void> | undefined;
+    let failure: unknown;
+    const cleanupErrors: unknown[] = [];
+    const socket = selectDaemonEndpoint({
+      profileAccessKey: profile.profileAccessKey,
+      ...(process.platform === 'win32' ? {} : { explicitSocket: join(root, 'd.sock') }),
+    }).socket;
+    const settleDriver = async () => {
+      if (driver?.exitCode === null) {
+        if (process.platform === 'win32') driver.send('owned-status-driver-stop');
+        else driver.kill('SIGTERM');
+        await ptyDeadline(driver.exited, 9000, 'status_driver_cleanup_unconfirmed');
+      }
+      if (existsSync(`${evidence}.receipt.json`)) {
+        const receipt = JSON.parse(readFileSync(`${evidence}.receipt.json`, 'utf8'));
+        if (receipt.serviceDead === false) throw Error('status_service_cleanup_unconfirmed');
+      } else if (driver) throw Error('status_driver_receipt_missing');
+      if (existsSync(ownedPid)) {
+        const record = JSON.parse(readFileSync(ownedPid, 'utf8'));
+        if (!processGone(record.pid)) throw Error('status_owned_service_remains');
+        if (!failure) {
+          const exited = JSON.parse(readFileSync(`${ownedPid}.exit`, 'utf8'));
+          if (exited.pid !== record.pid || exited.start !== record.start || exited.code !== 0)
+            throw Error('status_owned_service_exit_not_normal');
+          writeFileSync(`${evidence}.service-exit.json`, JSON.stringify(exited));
+        }
+      }
+    };
+    const settleDaemon = async () => {
+      if (!daemon) return;
+      const end = Date.now() + 9000;
+      if (abrupt) {
+        await ptyDeadline(abrupt, 9000, 'status_daemon_abrupt_exit_unknown');
+        return;
+      }
+      if (daemonExit === undefined) {
+        if (process.platform === 'win32') {
+          if (!lifecycle) throw Error('status_daemon_lifecycle_missing');
+          try {
+            await lifecycle.shutdown('if_idle', { signal: AbortSignal.timeout(9000) });
+          } catch (error) {
+            if (!(error instanceof ClientError && error.code === 'network_outcome_unknown'))
+              throw error;
+          }
+        } else daemon.kill('SIGTERM');
+      }
+      if (Date.now() >= end) throw Error('status_daemon_exit_unknown');
+      const code = await ptyDeadline(daemon.exited, end - Date.now(), 'status_daemon_exit_unknown');
+      if (code !== 0 || !processGone(daemon.pid)) throw Error('status_daemon_exit_not_normal');
+      writeFileSync(
+        `${evidence}.daemon-exit.json`,
+        JSON.stringify({
+          pid: daemon.pid,
+          code,
+          pidGone: true,
+          waitConfirmed: true,
+          ...daemonIdentity,
+        }),
+      );
+    };
     try {
       let storeId: string;
       if (mode === 'paired') {
@@ -75,7 +158,7 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
           await seed.client.createWorkspace({
             expectedStoreId: storeId,
             id: 'w',
-            rootUri: `file://${workspace}`,
+            rootUri: pathToFileURL(workspace).href,
             name: 'owned',
           });
           await seed.client.createSession({
@@ -106,6 +189,9 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
           stdin: 'pipe',
           stdout: 'pipe',
           stderr: 'pipe',
+        });
+        void daemon.exited.then((code) => {
+          daemonExit = code;
         });
         daemon.stdin.write(
           `${JSON.stringify({
@@ -139,6 +225,13 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
           reader.releaseLock();
         }
         const boot = bootstrapSchema.parse(JSON.parse(frame));
+        if (boot.pid !== daemon.pid) throw Error('status_daemon_bootstrap_pid_mismatch');
+        daemonIdentity = { instanceId, birth: boot.processStartIdentity };
+        lifecycle = createServiceLifecycleClient({
+          endpoint: boot.httpEndpoint,
+          token: boot.token,
+          expected: { profile: boot.profile, instanceId },
+        });
         client = createClient({
           endpoint: boot.httpEndpoint,
           token: boot.token,
@@ -155,7 +248,7 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
         await client.createWorkspace({
           expectedStoreId: storeId,
           id: 'w',
-          rootUri: `file://${workspace}`,
+          rootUri: pathToFileURL(workspace).href,
           name: 'owned',
         });
         await client.createSession({
@@ -169,53 +262,100 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
       const runner = join(root, 'runner.ts');
       writeFileSync(
         runner,
-        `import {appendFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;let gets=0;globalThis.fetch=async(...args)=>{const response=await actual(...args);if(String(args[0]).includes('/diagnostics/host-status')){const value=await response.clone().json();appendFileSync(${JSON.stringify(ledger)},JSON.stringify(value)+'\\n');if(++gets===2)throw Error('SECRET endpoint token')}return response};const exit=new AbortController();process.once('SIGTERM',()=>exit.abort());await runTUIHost({exitSignal:exit.signal,onLaunched:({pid})=>writeFileSync(${JSON.stringify(ownedPid)},String(pid)),${mode === 'paired' ? `artifact:${JSON.stringify(artifact)}` : `server:${JSON.stringify(socket)}`},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
+        `import {appendFileSync,readFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};const actualSpawn=Bun.spawn.bind(Bun);Bun.spawn=(...args)=>{const actualChild=actualSpawn(...args),command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(entrypoint)})){const record={pid:actualChild.pid,start:readProcessStartIdentity(actualChild.pid)};writeFileSync(${JSON.stringify(ownedPid)},JSON.stringify(record));void actualChild.exited.then(code=>writeFileSync(${JSON.stringify(`${ownedPid}.exit`)},JSON.stringify({...record,code})));}return actualChild;};const actual=globalThis.fetch;let gets=0;globalThis.fetch=async(...args)=>{const response=await actual(...args);if(String(args[0]).includes('/diagnostics/host-status')){const value=await response.clone().json();appendFileSync(${JSON.stringify(ledger)},JSON.stringify(value)+'\\n');if(++gets===2)throw Error('SECRET endpoint token')}return response};const exit=new AbortController();process.once('SIGTERM',()=>exit.abort());await runTUIHost({exitSignal:exit.signal,onLaunched:({pid})=>{const record=JSON.parse(readFileSync(${JSON.stringify(ownedPid)},'utf8'));if(record.pid!==pid)throw Error('status_service_spawn_identity_mismatch')},${mode === 'paired' ? `artifact:${JSON.stringify(artifact)}` : `server:${JSON.stringify(socket)}`},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
       );
-      const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';all_output=b''
-def wait(text):
- global buffer,all_output
- end=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+buffer[-6000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:
-   data=os.read(master,65536);buffer+=data;all_output+=data
-def key(value):
- global buffer
- buffer=b'';os.write(master,value)
-try:
- wait('New Run >');key(b'/status');wait('/status');key(b'\\r');wait('Connection: verified');wait('${mode === 'paired' ? 'paired' : 'shared'}');wait('Profile: development');wait('Build: owned-status');wait('Workspace: w');wait('Session: a');wait('Shell: unavailable');wait('Telemetry: disabled')
- rows=[json.loads(row) for row in open(${JSON.stringify(ledger)})];assert len(rows)==1;assert rows[0]['scope']=={'workspaceId':'w','sessionId':'a'};assert rows[0]['identity']['storeId']==${JSON.stringify(storeId)}
- key(b'r');wait('Connection: unknown');wait('Last confirmed host facts');wait('Build: owned-status');assert b'SECRET' not in all_output
- key(b'r');wait('Connection: verified');key(b'\\x03');wait('New Run >');assert len(open(${JSON.stringify(ledger)}).readlines())==3
- key(b'/status');wait('/status');key(b'\\r');wait('Connection: verified')
- ${mode === 'shared-loss' ? `os.kill(${daemon?.pid},signal.SIGKILL);wait('Connection: unknown');key(b'r');wait('Current host status unknown');wait('Last confirmed host facts');wait('Build: owned-status')` : ''}
- key(b'\\x1b');wait('New Run >');db=sqlite3.connect('file:'+${JSON.stringify(profile.databasePath)}+'?mode=ro',uri=True);assert db.execute('select count(*) from run').fetchone()[0]==0;assert db.execute('select count(*) from execution').fetchone()[0]==0;assert db.execute("select count(*) from command where kind='command.cancel'").fetchone()[0]==0;db.close();key(b'\\x11')
- end=time.monotonic()+6
- while p.poll() is None and time.monotonic()<end:
-  if select.select([master],[],[],.05)[0]:
-   try:all_output+=os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0
- assert ${JSON.stringify(profile.profileAccessKey)}.encode() not in all_output;assert ${JSON.stringify(profile.profilePath)}.encode() not in all_output;assert b'httpEndpoint' not in all_output
- ${
-   mode === 'paired'
-     ? `pid=int(open(${JSON.stringify(ownedPid)}).read());
- try:os.kill(pid,0);raise RuntimeError('owned Service remains')
- except ProcessLookupError:pass`
-     : ''
-}
- print('STATUS_ORIGINAL_COMPLETE')
-finally:
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+      driver = Bun.spawn(
+        [
+          process.execPath,
+          '--no-install',
+          join(repo, 'apps/cli/test/fixtures/tui-status-driver.ts'),
+          JSON.stringify({
+            runner,
+            ledger,
+            databasePath: profile.databasePath,
+            storeId,
+            mode,
+            profileAccessKey: profile.profileAccessKey,
+            profilePath: profile.profilePath,
+            ownedService: ownedPid,
+            evidence,
+          }),
+        ],
+        {
+          stdin: 'ignore',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          ipc(message, subprocess) {
+            if (
+              message &&
+              typeof message === 'object' &&
+              'type' in message &&
+              message.type === 'owned-status-daemon-abrupt' &&
+              mode === 'shared-loss' &&
+              !abrupt
+            ) {
+              abrupt = (async () => {
+                if (!daemon || daemonExit !== undefined)
+                  throw Error('status_original_daemon_not_alive');
+                process.kill(daemon.pid, 0);
+                let dispatchExitCode: number | null = null;
+                if (process.platform === 'win32') {
+                  const dispatch = Bun.spawnSync(
+                    ['taskkill.exe', '/pid', String(daemon.pid), '/f'],
+                    { stdout: 'pipe', stderr: 'pipe' },
+                  );
+                  dispatchExitCode = dispatch.exitCode;
+                  if (dispatchExitCode !== 0) throw Error('status_daemon_native_dispatch_failed');
+                } else daemon.kill('SIGKILL');
+                const code = await ptyDeadline(
+                  daemon.exited,
+                  10000,
+                  'status_daemon_abrupt_exit_unknown',
+                );
+                if (code === 0 || !processGone(daemon.pid))
+                  throw Error('status_daemon_abrupt_exit_unconfirmed');
+                if (process.platform !== 'win32' && daemon.signalCode !== 'SIGKILL')
+                  throw Error('status_daemon_signal_not_sigkill');
+                writeFileSync(
+                  `${evidence}.daemon-abrupt.json`,
+                  JSON.stringify({
+                    pid: daemon.pid,
+                    code,
+                    signalCode: daemon.signalCode,
+                    dispatchExitCode,
+                    pidGone: true,
+                    descendants: false,
+                    ...daemonIdentity,
+                  }),
+                );
+              })();
+              void abrupt.then(
+                () => subprocess.send({ type: 'owned-status-daemon-dead' }),
+                () => subprocess.send({ type: 'owned-status-daemon-failed' }),
+              );
+            }
+          },
+        },
+      );
       const [out, err, exit] = await Promise.all([
-        new Response(python.stdout).text(),
-        new Response(python.stderr).text(),
-        python.exited,
+        new Response(driver.stdout).text(),
+        new Response(driver.stderr).text(),
+        driver.exited,
       ]);
+      if (abrupt) await abrupt;
+      writeFileSync(`${evidence}.driver.stdout`, out);
+      writeFileSync(`${evidence}.driver.stderr`, err);
+      writeFileSync(
+        `${evidence}.facts.json`,
+        JSON.stringify({
+          storeId,
+          calls,
+          rows: readFileSync(ledger, 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line)),
+        }),
+      );
       if (exit) console.error(out, err);
       expect(exit).toBe(0);
       expect(out).toContain('STATUS_ORIGINAL_COMPLETE');
@@ -224,17 +364,38 @@ finally:
         expect(daemon!.exitCode).toBeNull();
         expect((await client!.verifyConnection()).storeId).toBe(storeId);
       }
+      const receipt = JSON.parse(readFileSync(`${evidence}.receipt.json`, 'utf8'));
+      if (!receipt.normal || receipt.forcedCleanup || receipt.failure)
+        throw Error('status_normal_driver_exit_unconfirmed');
+      console.log('status retained', evidence);
+    } catch (error) {
+      failure = error;
     } finally {
-      if (python && python.exitCode === null) {
-        python.kill('SIGTERM');
-        await python.exited;
+      for (const action of [settleDriver, settleDaemon]) {
+        try {
+          await action();
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
       }
       client?.disposeNetwork();
-      if (daemon && daemon.exitCode === null) {
-        daemon.kill('SIGTERM');
-        await daemon.exited;
-      }
+      lifecycle?.disposeNetwork();
       provider.stop(true);
-      rmSync(root, { recursive: true, force: true });
+      if (!cleanupErrors.length) rmSync(root, { recursive: true, force: true });
+      else retainedStatusOwners.add({ root, driver, daemon, lifecycle });
+      writeFileSync(
+        `${evidence}.cleanup.json`,
+        JSON.stringify({
+          originalFailure: failure ? String(failure) : null,
+          cleanupErrors: cleanupErrors.map(String),
+          retainedRoot: cleanupErrors.length ? root : null,
+        }),
+      );
     }
+    if (cleanupErrors.length)
+      throw new AggregateError(
+        failure ? [failure, ...cleanupErrors] : cleanupErrors,
+        'status_cleanup_unknown',
+      );
+    if (failure) throw failure;
   }, 40000);

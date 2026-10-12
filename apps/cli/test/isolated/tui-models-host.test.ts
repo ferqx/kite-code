@@ -1,17 +1,25 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { createClient } from '@kite-ai/client';
-import { bootstrapSchema } from '@kite-ai/service/daemon';
+import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
+import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+
+import { ptyDeadline } from '../fixtures/tui-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 for (const mode of ['paired', 'shared'] as const)
   test(`actual ${mode} TUI model/default/effort CAS preserves held Run and lost original reply never resubmits`, async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-model-')),
+    const root = realpathSync(
+        mkdtempSync(
+          join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'kite-tui-model-'),
+        ),
+      ),
       workspace = join(root, 'workspace'),
       profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     mkdirSync(workspace, { mode: 0o700 });
@@ -55,6 +63,13 @@ for (const mode of ['paired', 'shared'] as const)
     });
     let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
     let client: ReturnType<typeof createClient> | undefined;
+    let stopShared: (() => Promise<void>) | undefined;
+    let seed: Awaited<ReturnType<typeof launchPairedService>> | undefined;
+    let failure: unknown;
+    const cleanupErrors: unknown[] = [];
+    let passed = false;
+    const ownedPath = join(root, 'owned-service.json');
+    const transcript = `${root}.models.pty`;
     let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
       writeFileSync(
@@ -80,9 +95,12 @@ for (const mode of ['paired', 'shared'] as const)
           apiMajor: 1,
         };
       let storeId: string;
-      const socket = join(root, 'd.sock');
+      const socket = selectDaemonEndpoint({
+        profileAccessKey: profile.profileAccessKey,
+        ...(process.platform === 'win32' ? {} : { explicitSocket: join(root, 'd.sock') }),
+      }).socket;
       if (mode === 'paired') {
-        const seed = await launchPairedService({
+        seed = await launchPairedService({
           profile,
           ...artifact,
           instanceId: randomUUID(),
@@ -93,7 +111,7 @@ for (const mode of ['paired', 'shared'] as const)
           await seed.client.createWorkspace({
             expectedStoreId: storeId,
             id: 'w',
-            rootUri: `file://${workspace}`,
+            rootUri: pathToFileURL(workspace).href,
             name: 'owned',
           });
           await seed.client.createSession({
@@ -105,6 +123,7 @@ for (const mode of ['paired', 'shared'] as const)
           });
         } finally {
           await seed.close();
+          seed = undefined;
         }
       } else {
         const web = join(root, 'web');
@@ -154,6 +173,46 @@ for (const mode of ['paired', 'shared'] as const)
         await reader.cancel();
         reader.releaseLock();
         const boot = bootstrapSchema.parse(JSON.parse(frame));
+        stopShared = async () => {
+          if (!daemon) throw Error('models original daemon missing');
+          if (daemon.exitCode !== null) {
+            if (daemon.exitCode !== 0) throw Error('models original daemon exit not normal');
+            return;
+          }
+          if (process.platform === 'win32') {
+            const lifecycle = createServiceLifecycleClient({
+              endpoint: boot.httpEndpoint,
+              token: boot.token,
+              expected: { profile: boot.profile, instanceId },
+            });
+            try {
+              try {
+                await lifecycle.shutdown('if_idle');
+              } catch (error) {
+                if (!(error instanceof ClientError && error.code === 'network_outcome_unknown'))
+                  throw error;
+              }
+            } finally {
+              lifecycle.disposeNetwork();
+            }
+          } else daemon.kill('SIGTERM');
+          const code = await ptyDeadline(
+            daemon.exited,
+            9000,
+            'models original daemon exit unknown',
+          );
+          if (code !== 0) throw Error('models original daemon exit not normal');
+          writeFileSync(
+            `${transcript}.daemon-exit.json`,
+            JSON.stringify({
+              pid: daemon.pid,
+              code,
+              waitConfirmed: true,
+              instanceId,
+              birth: boot.processStartIdentity,
+            }),
+          );
+        };
         client = createClient({
           endpoint: boot.httpEndpoint,
           token: boot.token,
@@ -170,7 +229,7 @@ for (const mode of ['paired', 'shared'] as const)
         await client.createWorkspace({
           expectedStoreId: storeId,
           id: 'w',
-          rootUri: `file://${workspace}`,
+          rootUri: pathToFileURL(workspace).href,
           name: 'owned',
         });
         await client.createSession({
@@ -186,52 +245,31 @@ for (const mode of ['paired', 'shared'] as const)
         lookupCount = join(root, 'lookup-count');
       writeFileSync(
         runner,
-        `import {appendFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;let lost=false;globalThis.fetch=async(...args)=>{const response=await actual(...args);const u=String(args[0]);if(u.includes('/host-mutations/'))appendFileSync(${JSON.stringify(lookupCount)},'get\\n');if(args[1]?.method==='POST'&&u.endsWith('/models')){appendFileSync(${JSON.stringify(count)},'post\\n');if(!lost){lost=true;throw Error('owned_lost_reply')}}return response};const exit=new AbortController();process.once('SIGTERM',()=>exit.abort());await runTUIHost({exitSignal:exit.signal,${mode === 'paired' ? `artifact:${JSON.stringify(artifact)}` : `server:${JSON.stringify(socket)}`},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
+        `import {appendFileSync,writeFileSync} from 'node:fs';import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const originalSpawn=Bun.spawn.bind(Bun);Bun.spawn=(...args)=>{const child=originalSpawn(...args);const command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(entrypoint)})){const record={pid:child.pid,start:readProcessStartIdentity(child.pid)};void child.exited.then(code=>writeFileSync(${JSON.stringify(`${ownedPath}.exit`)},JSON.stringify({...record,code})));}return child;};const actual=globalThis.fetch;let lost=false;globalThis.fetch=async(...args)=>{const response=await actual(...args);const u=String(args[0]);if(u.includes('/host-mutations/'))appendFileSync(${JSON.stringify(lookupCount)},'get\\n');if(args[1]?.method==='POST'&&u.endsWith('/models')){appendFileSync(${JSON.stringify(count)},'post\\n');if(!lost){lost=true;throw Error('owned_lost_reply')}}return response};const exit=new AbortController();process.once('SIGTERM',()=>exit.abort());await runTUIHost({exitSignal:exit.signal,onLaunched:c=>{const record={pid:c.pid,start:readProcessStartIdentity(c.pid)};writeFileSync(${JSON.stringify(ownedPath)},JSON.stringify(record));},${mode === 'paired' ? `artifact:${JSON.stringify(artifact)}` : `server:${JSON.stringify(socket)}`},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
       );
-      const program = `import os,pty,subprocess,select,time,signal,re,json,urllib.request,sqlite3,fcntl,termios,struct
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b''
-def wait(text):
- global buffer
- end=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>end:
-   db=sqlite3.connect(${JSON.stringify(profile.databasePath)});print('FINITE_MUTATIONS '+str(db.execute('select kind,state,safe_request_json,receipt_json from host_mutation').fetchall()),flush=True);db.close();raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
-def key(value):
- global buffer
- buffer=b'';os.write(master,value);time.sleep(.15)
-def send(text):
- key(text.encode());wait(text);key(b'\\r')
-def requests():return json.load(urllib.request.urlopen(${JSON.stringify(provider.url.href + 'calls')}))
-try:
- wait('New Run');send('/permissions');wait('Workspace w: untrusted');key(b't');wait('Confirm original');key(b'\\r');wait('workspace.trust: applied');key(b'\\x1b');wait('New Run');send('held-original')
- end=time.monotonic()+5
- while len(requests())!=1:
-  if time.monotonic()>end:raise RuntimeError('held provider not entered')
-  time.sleep(.02)
- wait('Steer original active Run >');send('/model');wait('Desired default: one');key(b'\\x1b[B');wait('› compatible / two');key(b'\\r');wait('Confirm original project change');key(b'\\r');wait('outcome_unknown');key(b'\\r');wait('Confirm original project change');key(b'\\r');wait('model_settings_original_outcome_required');key(b'k');wait('Desired default: two');assert requests()==[{'model':'one'}]
- key(b'\\x1b');wait('Steer original active Run >');send('/effort');wait('clear project effort');key(b'\\x1b[B');wait('› none');key(b'\\x1b[B');wait('› minimal');key(b'\\x1b[B');wait('› low');key(b'\\x1b[B');wait('› medium');key(b'\\x1b[B');wait('› high');key(b'\\r');wait('Confirm original project change');key(b'\\r');wait('Current effective effort: high');assert requests()==[{'model':'one'}]
- key(b'\\x1b');urllib.request.urlopen(${JSON.stringify(provider.url.href + 'release')}).read();wait('DONE one');wait('New Run >');send('next-original');wait('DONE two');assert requests()==[{'model':'one'},{'model':'two','reasoning_effort':'high'}]
- db=sqlite3.connect(${JSON.stringify(profile.databasePath)});assert db.execute("select count(*) from host_mutation where json_extract(safe_request_json,'$.modelSettings') is not null").fetchone()[0]==2;db.close();assert open(${JSON.stringify(count)}).read()=='post\\npost\\n';key(b'\\x11')
- end=time.monotonic()+6
- while p.poll() is None and time.monotonic()<end:
-  if select.select([master],[],[],.05)[0]:
-   try:buffer+=os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;print('MODEL_ORIGINAL_COMPLETE')
-finally:
- if p.poll() is None:
-  os.killpg(p.pid,signal.SIGTERM)
-  end=time.monotonic()+6
-  while p.poll() is None and time.monotonic()<end:
-   if select.select([master],[],[],.05)[0]:
-    try:os.read(master,65536)
-    except OSError:break
-  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL)
-  p.wait(timeout=3)
- os.close(master)
-`;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+      python = Bun.spawn(
+        [
+          process.execPath,
+          '--no-install',
+          fileURLToPath(new URL('../fixtures/tui-models-driver.ts', import.meta.url)),
+          JSON.stringify({
+            runner,
+            databasePath: profile.databasePath,
+            count,
+            callsURL: provider.url.href + 'calls',
+            releaseURL: provider.url.href + 'release',
+            mode,
+            ownedPath,
+            transcript,
+          }),
+        ],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          stdin: 'ignore',
+          ...(process.platform === 'win32' ? { ipc() {} } : {}),
+        },
+      );
       const [out, err, exit] = await Promise.all([
         new Response(python.stdout).text(),
         new Response(python.stderr).text(),
@@ -246,20 +284,64 @@ finally:
       ]);
       expect(readFileSync(count, 'utf8')).toBe('post\npost\n');
       expect(readFileSync(lookupCount, 'utf8')).toBe('get\n');
+      if (mode === 'shared') {
+        if (!daemon || daemon.exitCode !== null)
+          throw Error('models shared TUI stopped original daemon');
+        process.kill(daemon.pid, 0);
+        writeFileSync(
+          `${transcript}.shared-detach.json`,
+          JSON.stringify({ pid: daemon.pid, exitCode: daemon.exitCode, alive: true }),
+        );
+      }
+      passed = true;
+    } catch (error) {
+      failure = error;
     } finally {
       release();
-      if (python && python.exitCode === null) {
-        python.kill('SIGTERM');
-        await python.exited;
-      }
-      client?.disposeNetwork();
-      if (daemon && daemon.exitCode === null) {
-        daemon.kill('SIGTERM');
-        await daemon.exited;
-      }
+      for (const action of [
+        async () => {
+          if (python && python.exitCode === null) {
+            if (process.platform === 'win32') python.send('models-driver-stop');
+            else python.kill('SIGTERM');
+            await ptyDeadline(python.exited, 9000, 'models driver cleanup unknown');
+          }
+        },
+        async () => {
+          if (seed) await seed.close();
+        },
+        async () => {
+          client?.disposeNetwork();
+        },
+        async () => {
+          if (stopShared) await stopShared();
+          else if (daemon && daemon.exitCode === null)
+            throw Error('models daemon identity not admitted');
+        },
+      ])
+        try {
+          await action();
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
       provider.stop(true);
-      rmSync(root, { recursive: true, force: true });
+      if (passed && cleanupErrors.length === 0) rmSync(root, { recursive: true, force: true });
+      writeFileSync(
+        `${transcript}.cleanup.json`,
+        JSON.stringify({
+          failure: failure ? String(failure) : null,
+          cleanupErrors: cleanupErrors.map(String),
+          retainedRoot: passed && cleanupErrors.length === 0 ? null : root,
+        }),
+      );
+      console.log('models evidence', transcript);
     }
+    if (cleanupErrors.length)
+      throw new AggregateError(
+        failure ? [failure, ...cleanupErrors] : cleanupErrors,
+        'models fixture cleanup unknown',
+        { cause: failure },
+      );
+    if (failure) throw failure;
   }, 40000);
 test('model host review: pending 409 and wrong ifMatch stay original unknown; known CAS failure remains finite', async () => {
   const { createTuiModelPort } = await import('../../host/tui');

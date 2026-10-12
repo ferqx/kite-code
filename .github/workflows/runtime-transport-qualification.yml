@@ -86,6 +86,12 @@ jobs:
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-kinds.test.ts
       - name: Complete original TUI steer follow-up and cancel recovery
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/caller-kind-crash.test.ts
+      - name: Complete actual development TUI Session Fork and Context maintenance
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-management-host.test.ts
+      - name: Complete paired and shared model settings with original mutation lookup
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-models-host.test.ts
+      - name: Complete original host status diagnostics and shared daemon loss
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-status-host.test.ts
       - name: Complete permissions caller through formal Shell and review
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-permissions-host.test.ts
       - name: Complete independent Job stop and original cold lookup through formal Shell
