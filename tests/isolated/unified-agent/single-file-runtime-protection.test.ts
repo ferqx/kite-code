@@ -11,6 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
@@ -41,11 +42,12 @@ async function execute(argv: string[], cwd: string, home: string) {
 }
 
 test('actual single-file default Service protects loader companions without protecting its Workspace parent', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-runtime-protection-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-protection-')));
   const home = join(root, 'home');
   mkdirSync(home, { mode: 0o700 });
   let provider: ReturnType<typeof Bun.serve> | undefined;
   let runtime = '';
+  let completed = false;
   try {
     const { buildTerminalBundle } = await import('../../../scripts/release/terminal-bundle');
     const { verifyTerminalBundle } = await import('../../../apps/cli/host/terminal-artifact');
@@ -90,13 +92,19 @@ test('actual single-file default Service protects loader companions without prot
     expect(output.outputs[0]?.path).toBe(single);
     const agent = join(built.root, 'node_modules/@kite-ai/agent');
     // These are the actual production standalone Worker and loader-selected companions, not substitutes.
-    for (const path of ['storage/worker/main.js', 'storage/migrations/0001-baseline.sql']) {
+    for (const path of [
+      'storage/worker/main.js',
+      'storage/worker/observer-preload.js',
+      'storage/migrations/0001-baseline.sql',
+    ]) {
       mkdirSync(join(root, path.substring(0, path.lastIndexOf('/'))), {
         recursive: true,
         mode: 0o700,
       });
       cpSync(join(agent, path), join(root, path));
     }
+    const preload = join(root, 'storage/worker/observer-preload.js');
+    const preloadBytes = readFileSync(join(agent, 'storage/worker/observer-preload.js'));
     for (const [from, to] of [
       ['tools/web-fetch/extractor-worker.js', 'extractor-worker.js'],
       ['tools/web-fetch/extractor-worker.sha256', 'extractor-worker.sha256'],
@@ -120,6 +128,7 @@ test('actual single-file default Service protects loader companions without prot
     const protectedPaths = [
       'single-file-service.js',
       'storage/worker/main.js',
+      'storage/worker/observer-preload.js',
       'storage/migrations/0001-baseline.sql',
       'extractor-worker.js',
       'extractor-worker.sha256',
@@ -197,6 +206,7 @@ test('actual single-file default Service protects loader companions without prot
       `
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
 import {launchPairedService} from ${JSON.stringify(join(built.root, 'node_modules/@kite-ai/service/paired.js'))};
 const p=JSON.parse(readFileSync(process.argv[2],'utf8'));
 const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000,spawnChild(argv,{env}){const child=Bun.spawn(argv,{env,stdin:'pipe',stdout:'pipe',stderr:'pipe'});const [copy,stderr]=child.stderr.tee();void new Response(copy).text().then(text=>{writeFileSync(${JSON.stringify(join(root, 'child-stderr-'))}+instanceId+'.log',text);if(text)console.error(text)});return {stdin:child.stdin,stdout:child.stdout,stderr,pid:child.pid,exited:child.exited,kill:signal=>child.kill(signal)};}});
@@ -204,7 +214,7 @@ let h;const ownedPids=[];
 try {
  h=await launch('runtime-paired');ownedPids.push(h.pid);
  const c=h.client,s=h.bootstrap.storeId;
- await c.createWorkspace({expectedStoreId:s,id:'w',name:'owned',rootUri:new URL('file://'+p.workspace).href});
+ await c.createWorkspace({expectedStoreId:s,id:'w',name:'owned',rootUri:pathToFileURL(p.workspace).href});
  await c.createSession({expectedStoreId:s,commandId:'create',sessionId:'s',workspaceId:'w',title:'runtime'});
  const trust=await c.getWorkspaceTrust('w',{storeId:s});
  await c.setWorkspaceTrust('w',{expectedStoreId:s,commandId:'trust',canonicalIdentity:trust.canonicalIdentity,externalReadScopeDigest:trust.externalReadScopeDigest,trusted:true,ifRevision:trust.revision});
@@ -240,6 +250,7 @@ try {
     expect(readFileSync(join(root, 'neighbor.txt'), 'utf8')).toBe('邻近 UTF8 😀\r\n');
     expect(readFileSync(configPath, 'utf8')).toBe(configBytes);
     expect(readFileSync(manifestPath)).toEqual(manifestBytes);
+    expect(readFileSync(preload)).toEqual(preloadBytes);
     verifyTerminalBundle(built.root);
     // A trusted custom extractor owns its exact real parser/checksum inventory; the default
     // sibling parser is absent and must not be invented as loaded authority.
@@ -287,6 +298,7 @@ await runServiceProcess({async configure(startup){const extractor=createPassiveW
       'custom-runtime-service.js',
       'custom-parser/extractor-worker.js',
       'custom-parser/extractor-worker.sha256',
+      'storage/worker/observer-preload.js',
       relative(workspace, runtime),
     ];
     calls.splice(
@@ -340,6 +352,7 @@ await runServiceProcess({async configure(startup){const extractor=createPassiveW
       readFileSync(join(root, 'custom-parser/extractor-worker.sha256'), 'utf8').trim(),
     );
     expect(parserProof.extracted.content).toContain('Original custom parser content.');
+    expect(readFileSync(preload)).toEqual(preloadBytes);
     verifyTerminalBundle(built.root);
     // Explicit trusted-host fault injection: actual HTTP/Runtime shutdown with a real shared artifact lock.
     // This proves failure retention, not an arbitrary default-bundle filesystem failure.
@@ -388,9 +401,10 @@ c.disposeNetwork();process.exit(0);
     const released = await execute([runtime, releaseDriver], workspace, home);
     expect(released.code).toBe(0);
     expect(released.stdout.trim()).toBe('process_exit_released');
+    completed = true;
   } finally {
     provider?.stop(true);
-    if (process.env.KITE_TERMINAL_TEST_KEEP_BUNDLE === '1')
+    if (!completed || process.env.KITE_TERMINAL_TEST_KEEP_BUNDLE === '1')
       console.log(`OWNED_SINGLE_FILE_PROTECTION_ROOT ${root}`);
     else rmSync(root, { recursive: true, force: true });
   }

@@ -5707,3 +5707,21 @@ Service／Runtime close 实际拒绝之后，独立 Store 取得原 Session owne
 | 4 | §35 全部适用场景、独立完整迁移审查、最终旧路径／依赖退役及收束时当前完整回归依赖对应门禁。四文件绿色不代整体默认；ChatGPT／Responses 仍后置当前 V1.3。 |
 
 本片闭合三个正式恢复接收者的实际准备资源交接证据；生产接线已在原本地提交完成，仅补完整验收和文档。按 iteration_complete／stage／commit 及正常 hook 收束，37 能力仍 partial，wholeDefault=false／wholeV13=false／phaseExit=false，Goal active；仅本地提交，无 push／PR／发布／Actions。
+
+## 2026-10-13：当前完整默认收束与单文件资产交接
+
+状态：partial；上一片正常本地提交 `95448f65`。两份独立只读审查核八 workspace manifest／公开出口、正式 CLI/TUI／Native／Web、Service 默认装配与公共 Client 调用链，未找到新的有证据 macOS 完整用户能力或净精简候选。CLI／Native 的 Agent／Service 依赖仍有宿主、维护和制品消费者；Service 的 Task／Web／Summary 胶水不是新的执行 authority，旧生产 carrier 无正式入口引用。审查只覆盖上述主要依赖与调用链，不冒称全内部实现逐行审查、P5/P6 退出或旧树已删除。按既有 code-simplification 约束保留现行接口与安全、恢复、平台理由，不为凑候选移动已闭合模块。
+
+当前输入尚缺完整默认集成证据，故原 `bun run test` 无过滤、skip、并发或预算变更。首轮 actual1／329.978秒：740文件／599作业计划中126派发并全部收束，125通过、1失败、473未派发；3883代码／配置输入及 Bun／Node／Electron／工具资产零漂移。唯一真实失败为[单文件资产保护](../../tests/isolated/unified-agent/single-file-runtime-protection.test.ts)初始 paired，`opening_store/data_unavailable`，原 `paired.code === 0` 红。完整 log SHA `9a01ced495d753ed9cbb1633be3239a97a450b2e68582cbbaffc602c8010176a`、result SHA `07a839d699f436411382fa7341f591e019a9afc16c56f021fd7cb5c9972633f1` 保留，不能称首次完整通过。
+
+原 fixture 默认 finally 删除失败根；使用其既有 keep flag 整文件复跑 actual1／0pass／1fail／8expects／5.68秒，原根 `/private/tmp/kite-runtime-protection-XYfO6t`、paired-proof／provider-wire／child stderr 保留。真实候选有 `observer-preload.js`，手工单文件布局没有它，Provider0。当前 production buildStorageAssets 同时构建 main 和 preload，ownedWorkerPreloadAsset 按实际单文件位置查同根 companion，默认 runtimeAssets 已声明它；本次是 fixture 未消费新必需资产，没有生产 loader fallback 修复。
+
+唯一代码改动在该原整文件：复制真实候选 preload，并纳入默认／custom 原 Files read/write 拒绝循环；两处新增完整原 bytes 不变检查。原 paired／cold、邻近写入、其余保护项、真实 custom parser、收尾失败 listener／shared lease 和真实进程退出保持；失败默认保根，完成最后原断言后才允许成功清理，既有 keep 保留。tmpdir 和标准 file URL 替换平台路径拼接，无新平台 skip。AST 顺序核原34条 expect 全保、仅新增2条；原 driver assert 文本、120秒／20秒保持。局部原整文件 actual0／1pass／36expects／10.62秒，独立只读审查无必改项，Root types／Biome／diff0；最终测试 SHA `0120a1f6e8841d0487d886cbee70bda0ddd430ffd4e0675efbd9eeed6070df8b`。
+
+第二轮仍运行原完整 `bun run test`，actual0／1422.691秒，740文件／599作业全部实际完成：592并发与7独占、169parallel／564isolated／7exclusive，未派发0、顶层失败0。冻结 HEAD95448f65 加上述唯一测试 dirty；两轮之间仅该测试输入变化，生产、其他测试、依赖、配置和运行资产保持。第二轮3883输入、运行资产及原Git状态全程零漂移；log SHA `a35956fe028633166dd3a92a589c08031759d0879e01bd0ce80fdfe20626240a`、result SHA `e231c6455c9c02a05cacf7beefdd36e9c2a3af11445cc756cc40bec9eac2a167`。准确 freeze／plan／log／progress／result 保 `/private/tmp/kite-v13-convergence-default-20261013-*`，局部原 red/green 与原断言核对保 `/private/tmp/kite-v13-single-file-*`。该测试在第二轮原并发15.152秒实际通过；所有原安装、真实代码切换、维护恢复及默认消费者沿原计划执行，不将 runner 自测内部预期非零认作顶层失败。
+
+截图对应原交互窗口同轮再验40效果／零取消、2次真实退出读取拒绝，quitDialogs／pageErrors／observationErrors均空，Electron0／无信号、原Service PID81280正常0／无信号。它验证当前源码退出读取修复，不反推截图安装包身份。普通产品入口、权限及恢复手册核对无行为变化；更新 Service 资产验收、测试入口、当前进度和能力证据。本片未新增正式 caller 切换或旧生产树删除，补齐当前默认集成证据及实际单文件资产交接验证。
+
+剩余阻塞按依赖保留四项：①Runtime取消／停止的可信全 resources／handles producer、全部出生后代及准确收尾来源；固定 Bun API stub 与本机符号能力限制仍在，不以已知 FD／owner 替代；②原 lifecycle RSS +115.203125 MiB 高于32 MiB，native live owner仍未定，原八outer／九点与完整60—168分钟要求保持，未另跑参数对照、formal soak 或旧大 trace；③Win/Linux正式安装、真实切换／回退、MCP完整连接调用取消退出、维护恢复及保数据卸载仍后置Actions／用户Windows，原Shell等backend门禁保留，本机不触发Actions；④§35全部适用T/E与完整独立迁移审查、最终旧路径／依赖退役仍需上述实际资格和准确支持范围，不能因当前默认0提前删除旧树。ChatGPT官方授权／Responses仍在当前V1.3之后，Codex直接复用保原门禁。
+
+本片按 iteration_complete／stage／commit 与正常 hook 收束，仅本地提交；当前准确源码 wholeDefault=true，37能力仍partial／wholeV13=false／phaseExit=false，Goal active，无push／PR／发布／Actions。
