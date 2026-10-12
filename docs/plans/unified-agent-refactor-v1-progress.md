@@ -5331,3 +5331,33 @@ Root `/private/tmp/kite-callers-recovery-freeze.json` 冻结3856份非Markdown�
 | 5 | §35全能力出口、最后旧authority／依赖退役和阶段完整回归依赖适用门禁；37能力仍partial、wholeV13=false／phaseExit=false，不提前宣布退出。 |
 
 新增闭合范围为普通申请和独立Job停止恢复两个完整用户链的三端测试源码／CI接线、默认正式Shell／公共权限装配迁移及完整CLI library回归；两个POSIX测试driver、自建Runtime和Mac专用测试策略退役。未宣称生产全部authority退役，RSS／完整观测／fault cleanup与平台门禁继续未闭合；无push／PR／发布／Actions触发。
+
+## 2026-10-12：正式 CLI argv 和三类原请求恢复的三端测试
+
+状态：partial；当前三个完整文件的测试源码／CI接线已迁移，本机macOS已验证，Windows/Linux实际资格及原阶段退出仍未闭合。继续原授权本地提交，不push、PR、发布或触发Actions；当前客户端能力、权限、HTTP／Store／builder生产语义不改。
+
+按上一轮依赖先完成真实paired／shared CLI argv，以及普通CLI和TUI有限caller port的steer、follow-up、原Command cancel恢复。后两者不是键盘PTY或真实argv，不能由有限端口资格代证全部UI、完整Workflow业务或Native。三个原整文件均无过滤、每例30秒和全部原Bun断言保持；动态import使用标准file URL、Windows目录链接使用junction。POSIX仍真实自发SIGKILL及原信号断言；Windows在原prepared／真实提交毁回应屏障后保持实际caller，再由持有caller的父进程native taskkill /pid /f、实际wait、异常exit及ESRCH证明终止，不用普通throw或伪造信号。三类caller还强制结束所属原Service并等实际退出，才冷开原Profile；完整Unicode／CRLF／extensionInputs、原Run／context／scope／subject、首GET物理丢回应、同ID再GET、冷POST0和唯一原Command保持。两项直接physical loss检查对应原运输证明，不增加新的故障窗口。
+
+[argv原整文件](../../apps/cli/test/isolated/cli-caller-host.test.ts)的两个Workflow例现在原预算内真实Terminal build＋verify，消费完整候选runtime／daemon／Web／runtimeProtection。手工拼装daemon manifest退役；Windows使用正式SID pipe，实际runSelectedCLI／runSelectedDaemon保持。prepared实际POST0、原POST1、首GET毁回应、完整Workflow申请及所有scope／body／subject漂移零POST仍核；该分支只证明interrupted原Run上的queued／accepted申请，不称Workflow业务终态。独立actual-main正例仍实际runCLIProcess，原Tool审批／唯一文件效果／Provider3、准确原Command的实际Run completed后才正常关闭Service。
+
+第一遍完整argv有真实红：paired最后原readonly SQL因开发宿主SQLite读候选WAL失败SQLITE_CANTOPEN，日志 `/private/tmp/kite-cli-argv-mac.log` exit1保留；旧finally删除该失败root，不能称保留完整失败现场。修复沿已核正式候选Bun在新进程首DB前选准确engine／manifest version／sourceId，持候选SH至DB关闭，再执行完全原readonly SQL与断言；未删WAL、改数据库设置或移除断言。源码审查同时修正原失败收尾丢失所属Service身份：每launch独立出生记录，caller真实等待退出后收取当前记录，unknown保观察及所属根，各owner／daemon收尾独立尝试，原失败与cleanup error合并保留，不再重发shutdown POST。actual-main以透明观察真实Bun.spawn的准确Service entry捕获原PID／kernel birth，原参数和stdio不改，正常核Service exit0及原birth dead；seed也在关闭确认前保持owner。新失败分支没有扩大原生故障矩阵，不能称unknown cleanup实际资格。
+
+最终macOS完整文件：[argv](../../apps/cli/test/isolated/cli-caller-host.test.ts)3pass／83expects／35.58秒，三个原整例22.357／11.644／1.521秒；[普通CLI三类](../../apps/cli/test/isolated/cli-caller-kinds.test.ts)3pass／42expects／4.11秒；[TUI三类](../../apps/cli/test/isolated/caller-kind-crash.test.ts)3pass／42expects／3.51秒。合计9pass／167个实际expect，39＋12＋12共63个原静态AST断言按序全保；新增直接运输证明和Windows-only退出证明不替换旧断言。CLI和TUI各三个producer真实SIGKILL、六个cold正常0，argv所有正常caller wait、paired原birth dead、shared formal stop及actual-main Service正常0有真实回执。最后三root均已删除、cleanupErrors空；这些短链不证明全Runtime后代／资源全集。
+
+本轮[transport workflow](../../.github/workflows/runtime-transport-qualification.yml)增加三条整文件独立Bun命令，在当前八workspace build／Windows MSVC之后、Shell权限例与原transport／shared14之前，现18个完整独立caller进程。原CI guard逐一拒漏命令／过滤／平台条件／合并进程，完整原CI文件actual0／21pass／291expects／1.83秒，日志 `/private/tmp/kite-callers-argv-ci.log`。无platform skip或删原用例，Windows正式Shell等既有缺后端继续真实失败，接线不算原生通过。
+
+Root `/private/tmp/kite-callers-argv-freeze.json` 核3856份非Markdown输入，仅三个caller文件和三份CI接线变化；原三file SHA精确匹配115文件／80CLI作业基线。共享PTY、recoveryProfile、Job夹具、所有生产／依赖／构建输入及shared14源码和完整命令不改，未变范围复用原冻结证据。实际argvreceipt `/private/tmp/kite-cli-argv-delivery.json` 绑定最终源码／原红／实际日志／wire／完整请求和正常收尾；Root另核当前CLI／TUI原请求事实、退出回执和原AST。根及八workspace类型、边界／workspace／API／ownership／文档／格式、正常hook按本轮diff收束，当前728文件／588job没有新跑完整阶段回归。手册输入／取消／恢复合同已核，无用户行为变化，无无意义手册diff；CLI owner、tests和release control同步实际方法。
+
+后续用户能力已记录：支持ChatGPT、Responses、优先本地Codex认证与缺认证时官方授权。用户最新明确要求先完成上述V1.3目标，再实施这项新增内容；当前不提前写入认证或协议实现。只读源码核对AI只有compatible chatModel，Service所有provider仍无条件compatible binding；配置、公开provider和正式连接入口没有ChatGPT认证类型。官方公开[注册授权](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)和[账号会话](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)要求应用注册／issued client与token对应；[Responses计划调用](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)要求公开api.openai.com、store:false／stream:true。已安装Codex0.153.2的launcher／binary标签及[官方缓存说明](https://learn.chatgpt.com/docs/auth)只提供有限格式／Codex自身缓存复用事实，不能证明Kite直接采用其token的公开资格。没有读取真实auth.json／keychain／token，没有真实账号登录／调用。用户已确认后续先交付Kite自己的官方授权与Responses完整能力，Codex直接复用保留未闭合门禁；这一方向保留为后续实施依据，不替代当前主线。
+
+当前最多五个具体退出阻塞，按先完成用户能力、再取得完整资格的依赖顺序：
+
+| 顺序 | 实际用户入口、缺口与验收 |
+| --- | --- |
+| 1 | 共享TUI的[Session／Fork／Context维护](../../apps/cli/test/isolated/tui-management-host.test.ts)、[模型／effort](../../apps/cli/test/isolated/tui-models-host.test.ts)、[status](../../apps/cli/test/isolated/tui-status-host.test.ts)及[完整滚动](../../apps/cli/test/isolated/tui-scrollback-pty.test.ts)仍有Python／POSIX固定路径或Windows skip。需保正式入口、完整原结果／scope／零重发与正常所属退出，按原断言／预算迁入共享三端测试，不能用本轮有限caller端口代证。 |
+| 2 | 正式Shell／Task／MCP原完整持续负载RSS九点178814976→299614208B、+115.203125MiB仍大于32MiB。真实native allocation owner修复、原负载／32MiB阈值满足前继续保红，不重复参数对照。 |
+| 3 | 全Runtime kernel-birth后代、activeResources／handles producer及Source批准异常cleanup receipt仍缺。原formal verifier核完整实际来源前保unsupported／null；本轮短链原PID退出不代资源全集或全故障清理。 |
+| 4 | Win/Linux正式安装／真实版本切换／MCP／维护恢复／保数据卸载，以及Windows Shell／script verifier／文件候选后端，继续需Actions或用户Windows真实完整资格。当前Mac绿／静态接线不替代原生证据，不触发Actions。 |
+| 5 | §35全部用户能力、最后旧authority／依赖退役和阶段完整回归仍依赖上述适用门禁。原37能力继续partial；wholeV13=false／phaseExit=false，不提前宣布阶段退出。ChatGPT新增完整用户链依用户最新顺序在此前目标完成后实施。 |
+
+本轮闭合正式CLI argv与六个原请求caller恢复用例的共享测试源码／CI接线，退役手工daemon产物装配，修正实际候选引擎与所属退出证明；没有声称生产全部权限／authority退役或三平台／阶段资格。后续ChatGPT的只读源码与官方契约核对结果已保留，实施顺序仍先完成当前主线；RSS／完整观测及原断言继续保留。

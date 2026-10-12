@@ -40,6 +40,8 @@ transport 另接Tools查看、Source修改／批准、强制重连、Auth、配�
 
 transport追加普通Work中断冷查询、独立Job停止冷恢复及完整CLI library三个独立完整文件。Work在权限前取得独立资格，Job／library以封闭默认paired Service及公开trust／Full消费正式Shell，不重建Mac专用工厂；Windows缺后端以实际shell_unavailable失败。POSIX SIGKILL断言保持，Windows同丢回应屏障后caller-only原生dispatcher0、异常退出和PID gone由持有caller的父／driver核实，另持Service／同胞不得终止。它们保原申请、物理socket loss、冷原GET／零POST／另一Job无取消及30秒整例，正常本机不能代全Runtime后代清理或Win/Linux资格；当前范围归[CLI owner](../../apps/cli/README.md#tui-普通-caller-的持久原意图)。原CI guard与原transport／shared命令仍独立执行，无阶段门禁放宽。
 
+transport另增正式paired／shared CLI argv、普通CLI与TUI有限caller port三类原请求恢复三个独立整文件，均不依赖Shell、在权限例之前，现共18个独立caller进程。argv选择真实构建／核验Terminal的runtimeProtection／daemon／Web，原SQLite只读查询由准确候选engine独立进程执行；手工manifest已退役。原请求、prepared零POST／实际POST毁回应、冷首GET毁回应和同ID只查／零重发、完整Tool审批与原Run完成正例均保持。原30秒／全部断言不改，实际进程强制结束与正常关闭分开记录；Windows使用实际所属进程原生退出证据，不伪造SIGKILL，未知所属退出不删除身份或资产。各完整caller保持独立Bun命令和原CI guard，实际方法与失败归[CLI owner](../../apps/cli/README.md#普通-cli-caller-的持久原申请)；本机绿色及三端接线均不代Windows/Linux原生或阶段退出。
+
 [日志 shell](../../scripts/ci/logged-shell.ts)保原 run 正文和 native shell 退出语义，20个 release 验证步骤及独立 stdio 的 shell／MCP 步骤各有准确 `dist/unified-evidence/*.log`。stdout／stderr 原字节同时透传控制台；日志写入、外部命令、信号或关闭失败保持非零。日志采用排他创建，artifact 用 `always()`／`if-no-files-found:error` 保存；不上传临时 Profile 内容。stdio 的 sealed 文件在自己的 fresh Bun 测试进程选择候选引擎，避免与 source 测试的进程全局 SQLite 冲突；全10文件与原断言／期限保持，详情归[测试入口](../../tests/README.md)。
 
 整个 release job 从30分钟调整为60分钟，为构建、原Windows19分钟真代码整链和其余原安装／维护／TUI调用者留聚合时间；没有取得 hosted 超时证据，也没有放宽任何 fixture 的原期限。原 `always()` formal platform verifier、soak8外层／60—168分钟、RSS 32MiB与出生后代／activeResources／handles门禁保持。静态接线或本机局部通过不构成 G1、P6／§35／P7 或整体 V1.3 退出。

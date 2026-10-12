@@ -22,6 +22,8 @@ Win/Linux 后续验证沿[现行 Actions 接线](../docs/active/release-control.
 
 同一三端job另接[普通申请中断／冷原查询](../apps/cli/test/isolated/tui-caller-intents-host.test.ts)、[独立Job停止／冷恢复](../apps/cli/test/isolated/tui-caller-job-stop.test.ts)和[完整CLI library](../apps/cli/test/isolated/cli-caller-library.test.ts)，各整文件／独立进程／无过滤，原30秒预算及所有原断言保持。普通Work不依赖Shell、先于权限；Job夹具退役自建Runtime／Mac Shell／可信策略，消费封闭built默认Service和公开trust／Full，library完整共享消费已重验。POSIX原SIGKILL保持，Windows在同提交丢回应屏障后由实际持有caller的父／driver只终止caller，核native dispatcher0／异常exit／PID gone，不强杀另持Service／sibling或伪造信号。原字节／scope／唯一POST／冷原GET／Model不增加及正常退出保持；缺Windows正式Shell继续真实失败，准确证据归[CLI owner](../apps/cli/README.md#tui-普通-caller-的持久原意图)。
 
+同一三端job增加[正式paired／shared CLI argv](../apps/cli/test/isolated/cli-caller-host.test.ts)、[普通CLI三类原请求](../apps/cli/test/isolated/cli-caller-kinds.test.ts)和[对应TUI有限caller port](../apps/cli/test/isolated/caller-kind-crash.test.ts)三个完整独立Bun进程，均在Shell权限例前；原30秒整例／断言不变。argv消费真实build／verify Terminal和正式SID pipe，旧手工daemon manifest退役；原SQL在新候选Bun中首DB前选择已核engine并持SH。三类caller保原scope／完整正文、真实POST／首GET loss、原Service中断和冷两GET零POST，Windows只对实际所属caller／Service作原生终止并核实际异常exit／ESRCH，POSIX原SIGKILL仍核。argv未知退出保出生身份和所属根，不把异常清理改写为正常。CI guard同步逐一拒漏文件／过滤／平台条件／合并进程；具体范围、真实失败及最终本机证据归[CLI owner](../apps/cli/README.md#普通-cli-caller-的持久原申请)。Win/Linux实际运行、RSS／完整观测仍未通过。
+
 [CI 日志入口](../scripts/ci/logged-shell.ts)由 Actions 自定义 shell 接收带引号的原脚本路径，保留原 run 正文、stdout／stderr 字节和退出码。[完整日志测试](isolated/scripts/ci-logged-shell.test.ts)同时进入有限默认发现及三平台 stdio job；POSIX 核实际 bash，四项 Windows 用例仅由真实 `pwsh` 核 BOM／Unicode、外部 exit23、throw 与输出失败，其他宿主明确 skip。Linux 在完整原生测试前准备 compiler／Bubblewrap，窗口消费者另准备 Xvfb；Windows 使用原安装 MSVC 准备脚本。依赖缺失、运行失败和缺正式资格仍失败，不增加 availability skip、关闭 sandbox 或调低资源门禁。
 
 | 目录 | 当前负责范围 |

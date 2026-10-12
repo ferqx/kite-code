@@ -80,6 +80,12 @@ jobs:
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-question-pty.test.ts
       - name: Complete original Work caller interruption and cold lookup
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-caller-intents-host.test.ts
+      - name: Complete paired and shared formal CLI argv callers
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-host.test.ts
+      - name: Complete ordinary CLI steer follow-up and cancel recovery
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-kinds.test.ts
+      - name: Complete original TUI steer follow-up and cancel recovery
+        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/caller-kind-crash.test.ts
       - name: Complete permissions caller through formal Shell and review
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-permissions-host.test.ts
       - name: Complete independent Job stop and original cold lookup through formal Shell

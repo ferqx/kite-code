@@ -1,12 +1,30 @@
 import { expect, test } from 'bun:test';
-import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { CallerCommandRequest } from '@kite-ai/client';
 import { recoveryProfile, untilRecovery } from '../fixtures/recovery-profile';
 
 const repo = resolve(import.meta.dir, '../../../..');
+function processGone(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+function terminateOwnedCaller(child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>) {
+  if (process.platform === 'win32') {
+    const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (dispatch.exitCode !== 0) throw Error('caller_cleanup_native_dispatch_failed');
+  } else child.kill('SIGKILL');
+}
 for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const)
-  test(`actual ordinary CLI ${kind} caller and paired Service SIGKILL preserve original request; physical first GET loss cannot POST`, async () => {
+  test(`actual ordinary CLI ${kind} caller and paired Service native abrupt termination preserve original request; physical first GET loss cannot POST`, async () => {
     const f = await recoveryProfile();
     let warm = await f.launch(),
       child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
@@ -75,9 +93,13 @@ for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const
           afterRunId: run.id,
           contextSelectionId: view.session.contextSelectionId,
         });
-      symlinkSync(join(repo, 'apps/cli/node_modules'), join(f.root, 'node_modules'), 'dir');
+      symlinkSync(
+        join(repo, 'apps/cli/node_modules'),
+        join(f.root, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
       const source = (cold: boolean) =>
-        `import{appendFileSync,readFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{createClient}from'@kite-ai/client';import{acquireProfileAccess,acquireProfileDataLock}from'@kite-ai/agent/profile-access';import{openCallerJournal}from${JSON.stringify(join(repo, 'apps/cli/host/caller-journal.ts'))};import{createCLICallerPort}from${JSON.stringify(join(repo, 'apps/cli/host/caller-port.ts'))};const actual=fetch;let forwarding='',drop=${true};const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});const json=await response.json();appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',cold:${cold},method:req.method,response:json})+'\\n');res.socket!.destroy();if(req.method==='POST'){writeFileSync(${JSON.stringify(`${base}.prepared.json`)},readFileSync(${JSON.stringify(journal)}));process.kill(process.pid,'SIGKILL');}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const addr=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',cold:${cold},method,path:url.pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');if(drop&&${cold ? "method==='GET'&&url.pathname==='/v1/commands/original-caller'" : "method==='POST'"}){drop=false;forwarding=url.href;return actual('http://127.0.0.1:'+addr.port+url.pathname,args[1]);}return actual(...args);},{preconnect:actual.preconnect});const client=createClient({endpoint:process.env.KITE_CALLER_TEST_ENDPOINT!,token:process.env.KITE_CALLER_TEST_TOKEN!,expected:{profile:${JSON.stringify(warm.bootstrap.profile)},apiMajor:1,requiredCapabilities:['commands','inputs']}});await client.connect();const access=acquireProfileAccess({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned'}),lock=()=>acquireProfileDataLock(access,'tui_private'),j=openCallerJournal({access,acquireWriteLock:lock}),p=createCLICallerPort({client,storeId:${JSON.stringify(f.storeId)},journal:j});try{${cold ? `const original=j.list()[0]!.intent;let first;try{await p.lookup('s',original.request,new AbortController().signal);throw Error('loss missing');}catch{first={phase:'unknown'};}const command=await p.submit('s',original.request),second={phase:command.status,intent:original};console.log(JSON.stringify({first,second}));` : `await p.submit('s',${JSON.stringify(request)});throw Error('expected actual SIGKILL');`}}finally{j.close();access.lock.release();client.disposeNetwork();relay.close();}`;
+        `import{appendFileSync,readFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{createClient}from'@kite-ai/client';import{acquireProfileAccess,acquireProfileDataLock}from'@kite-ai/agent/profile-access';import{openCallerJournal}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/caller-journal.ts')).href)};import{createCLICallerPort}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/caller-port.ts')).href)};const actual=fetch;let forwarding='',drop=${true};const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});const json=await response.json();appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',cold:${cold},method:req.method,response:json})+'\\n');res.socket!.destroy();if(req.method==='POST'){writeFileSync(${JSON.stringify(`${base}.prepared.json`)},readFileSync(${JSON.stringify(journal)}));if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const addr=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',cold:${cold},method,path:url.pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');if(drop&&${cold ? "method==='GET'&&url.pathname==='/v1/commands/original-caller'" : "method==='POST'"}){drop=false;forwarding=url.href;const forwarded=actual('http://127.0.0.1:'+addr.port+url.pathname,args[1]);if(process.platform==='win32'&&!${cold}){void forwarded.catch(()=>{});return await new Promise<Response>(()=>{});}return forwarded;}return actual(...args);},{preconnect:actual.preconnect});const client=createClient({endpoint:process.env.KITE_CALLER_TEST_ENDPOINT!,token:process.env.KITE_CALLER_TEST_TOKEN!,expected:{profile:${JSON.stringify(warm.bootstrap.profile)},apiMajor:1,requiredCapabilities:['commands','inputs']}});await client.connect();const access=acquireProfileAccess({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned'}),lock=()=>acquireProfileDataLock(access,'tui_private'),j=openCallerJournal({access,acquireWriteLock:lock}),p=createCLICallerPort({client,storeId:${JSON.stringify(f.storeId)},journal:j});try{${cold ? `const original=j.list()[0]!.intent;let first;try{await p.lookup('s',original.request,new AbortController().signal);throw Error('loss missing');}catch{first={phase:'unknown'};}const command=await p.submit('s',original.request),second={phase:command.status,intent:original};console.log(JSON.stringify({first,second}));` : `await p.submit('s',${JSON.stringify(request)});throw Error('expected actual SIGKILL');`}}finally{j.close();access.lock.release();client.disposeNetwork();relay.close();}`;
       const launch = async (cold: boolean) => {
         writeFileSync(runner, source(cold));
         child = Bun.spawn([process.execPath, runner], {
@@ -89,13 +111,51 @@ for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const
           stdout: 'pipe',
           stderr: 'pipe',
         });
+        if (!cold && process.platform === 'win32') {
+          await untilRecovery(async () => {
+            if (child!.exitCode !== null) throw Error('caller_exited_before_native_dispatch');
+            return (
+              existsSync(`${base}.prepared.json`) &&
+              existsSync(wire) &&
+              readFileSync(wire, 'utf8')
+                .split('\n')
+                .filter(Boolean)
+                .some((line) => {
+                  const row = JSON.parse(line);
+                  return (
+                    row.event === 'physical_loss' && row.method === 'POST' && row.cold === false
+                  );
+                })
+            );
+          });
+          process.kill(child.pid, 0);
+          const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          expect(dispatch.exitCode).toBe(0);
+          writeFileSync(
+            `${base}.native-caller-kill.json`,
+            JSON.stringify({
+              pid: child.pid,
+              dispatchExitCode: dispatch.exitCode,
+              descendants: false,
+              physicalPostLoss: true,
+              preparedJournalCopied: true,
+            }),
+          );
+        }
         const [out, err, code] = await Promise.all([
           new Response(child.stdout).text(),
           new Response(child.stderr).text(),
           child.exited,
         ]);
         if (!cold) {
-          expect(child.signalCode).toBe('SIGKILL');
+          if (process.platform !== 'win32') expect(child.signalCode).toBe('SIGKILL');
+          else {
+            expect(code).not.toBe(0);
+            expect(processGone(child.pid)).toBe(true);
+          }
         } else {
           if (code) console.error(err);
           expect(code).toBe(0);
@@ -104,6 +164,17 @@ for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const
           expect(['accepted', 'applied', 'rejected']).toContain(result.second.phase);
           expect(result.second.intent.request).toEqual(request);
         }
+        writeFileSync(
+          `${base}.${cold ? 'cold' : 'warm'}-caller-exit.json`,
+          JSON.stringify({
+            platform: process.platform,
+            pid: child.pid,
+            code,
+            signalCode: child.signalCode,
+            pidGone: processGone(child.pid),
+            cold,
+          }),
+        );
         return { out, err, code };
       };
       await launch(false);
@@ -111,8 +182,40 @@ for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const
       expect(original.intent.request).toEqual(request);
       expect(original.intent.scope.storeId).toBe(f.storeId);
       expect(original.phase).toBe('submitting');
-      process.kill(warm.pid, 'SIGKILL');
+      let nativeServiceExit: Promise<number> | undefined;
+      process.kill(warm.pid, 0);
+      if (process.platform === 'win32') {
+        let exited = false;
+        nativeServiceExit = warm.exited.then((code) => {
+          exited = true;
+          return code;
+        });
+        await Promise.resolve();
+        if (exited) throw Error('service_exited_before_native_dispatch');
+        const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(warm.pid), '/f'], {
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        expect(dispatch.exitCode).toBe(0);
+        writeFileSync(
+          `${base}.native-service-kill.json`,
+          JSON.stringify({
+            pid: warm.pid,
+            dispatchExitCode: dispatch.exitCode,
+            descendants: false,
+          }),
+        );
+      } else process.kill(warm.pid, 'SIGKILL');
       await warm.exited;
+      if (process.platform === 'win32') {
+        const code = await nativeServiceExit!;
+        expect(code).not.toBe(0);
+        expect(processGone(warm.pid)).toBe(true);
+        writeFileSync(
+          `${base}.native-service-exit.json`,
+          JSON.stringify({ pid: warm.pid, code, waitConfirmed: true, pidGone: true }),
+        );
+      }
       warm.client.disposeNetwork();
       warm = await f.launch();
       await launch(true);
@@ -120,6 +223,12 @@ for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const
         .trim()
         .split('\n')
         .map((l) => JSON.parse(l));
+      expect(
+        rows.filter((r) => r.event === 'physical_loss' && r.method === 'POST' && !r.cold),
+      ).toHaveLength(1);
+      expect(
+        rows.filter((r) => r.event === 'physical_loss' && r.method === 'GET' && r.cold),
+      ).toHaveLength(1);
       expect(rows.filter((r) => r.event === 'request' && r.method === 'POST')).toHaveLength(1);
       expect(rows.filter((r) => r.cold && r.event === 'request' && r.method === 'POST')).toEqual(
         [],
@@ -146,7 +255,7 @@ for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const
       console.log('caller kind retained', base);
     } finally {
       if (child && child.exitCode === null) {
-        child.kill('SIGKILL');
+        terminateOwnedCaller(child);
         await child.exited;
       }
       await warm.close();
