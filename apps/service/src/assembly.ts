@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
-import { AgentError } from '@kite-ai/agent';
+import { AgentError, ConfigurationPreparationCleanupError } from '@kite-ai/agent';
 import type { JsonObject, NamedConfiguration } from '@kite-ai/agent/config';
 import {
   defineExtension,
@@ -89,9 +89,10 @@ export async function createWorkspaceAssembly(options: {
     )
       throw new AgentError('unsupported_tool_options');
   }
-  const files = options.toolIds.some((id) => fileIds.includes(id))
-    ? createWorkspaceFiles({ root })
-    : undefined;
+  const files =
+    !externalFiles && options.toolIds.some((id) => fileIds.includes(id))
+      ? createWorkspaceFiles({ root })
+      : undefined;
   try {
     const configured = (options.skills ?? []).filter((skill) => skill.enabled !== false);
     const skills = createConfiguredSkillSource(options);
@@ -381,7 +382,15 @@ export async function createWorkspaceAssembly(options: {
       snapshotFacts: { ...snapshotFacts, digest: digest(JSON.stringify(snapshotFacts)) },
     };
   } catch (error) {
-    await files?.close();
+    try {
+      await files?.close();
+    } catch (cleanupError) {
+      throw new ConfigurationPreparationCleanupError({
+        originalError: error,
+        cleanupError,
+        resources: { files },
+      });
+    }
     if (error instanceof AgentError) throw error;
     throw new AgentError(error instanceof SkillError ? error.code : 'assembly_unavailable');
   }

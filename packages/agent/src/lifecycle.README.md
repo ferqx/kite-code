@@ -18,6 +18,10 @@ cancel 路径封住新工作，并复用原 owner 范围内的清理链。封门
 
 macOS Store close 现另等原 Worker 的 Mach 权终态及准确释放，SQLite ACK 与线程停止分开核实。原身份、终态或释放未确认同样使共享关闭失败并保原 Profile 锁；详细职责和跨平台未知归[Store owner](storage/README.md#store-关闭未确认时的锁归属)，不把这个局部线程事实当作完整 Runtime 资源资格。
 
-默认普通 Web Tool的解析资源也通过[Agent Web binding](tools/web-fetch/README.md)归属原 Run disposer。Tool已保存 outcome_unknown、permit已释放时，原 scope清理失败仍保 Run binding lease，关闭返回 `shutdown_cleanup_unconfirmed`并进入 `drain_failed`，不能提前关闭Store或交接维护锁。该接线复用既有生命周期检查；被动配置准备不取得Web parser scope，不把尚未返回配置时的通用assembly清理失败一并宣称闭合。
+默认普通 Web Tool的解析资源也通过[Agent Web binding](tools/web-fetch/README.md)归属原 Run disposer。Tool已保存 outcome_unknown、permit已释放时，原 scope清理失败仍保 Run binding lease，关闭返回 `shutdown_cleanup_unconfirmed`并进入 `drain_failed`，不能提前关闭Store或交接维护锁。该接线复用既有生命周期检查；被动配置准备不取得Web parser scope。
+
+配置返回前，可信producer若确实取得资源且清理失败，使用公开 `ConfigurationPreparationCleanupError({originalError,cleanupError,resources})` 明确交接。非枚举cause保两种原错误及实际资源引用；Runtime不从任意Error.cause猜所有权。根／follow-up、child、Run resume、report recovery和Job reconcile五处resolver接收该类型；配置已返回后验证或SQL启动失败，其disposer失败由准确接收者组成同一交接。失败沿原配置清理预约集合强保，返回缓存拒绝，shutdown不重试宿主disposer；单一准备清理失败事实进入已有busy/drain门禁，原恢复lease／owner保留，不伪造Run或建立另一资源registry。普通配置拒绝且清理成功仍可正常关闭。
+
+[返回配置回归](../test/isolated/execution/preparation-cleanup.test.ts)用真实Files／SQLite核失败与健康同一校验场景；[完整Service准备回归](../../../apps/service/test/isolated/preparation-cleanup-ownership.test.ts)核实际standalone目录、原必选Skill错误、原JavaScript close拒绝、零Model／Run／Execution、活进程维护拒绝和所属进程退出后的完整冷读。fixture手工清理不是Runtime成功；源码测试可三端执行，本机结果不授全资源观测、临时I/O全部失败边界或Win/Linux原生资格。
 
 验证使用 [lifecycle.test.ts](../test/isolated/execution/lifecycle.test.ts) 中真实可丢弃的 SQLite Worker、固定本机模型和明确 barrier。unknown Job fixture 不含外部进程；只有在证明生产关闭失败和资源保留之后，测试收尾才显式关闭其原 Store。Store strict-close 未确认时的原锁交接与 owned child 实际退出后的维护／冷读见 [Store owner](storage/README.md#store-关闭未确认时的锁归属)；该失败不能因 terminate 请求被提升为资源已关闭。

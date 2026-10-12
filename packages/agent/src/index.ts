@@ -18,6 +18,7 @@ export {
   AgentRuntime,
   type AuthorizationReviewBinding,
   type ChildAgentConfiguration,
+  ConfigurationPreparationCleanupError,
   createRuntime,
   type ModelInputPage,
   type ModelInputSnapshot,

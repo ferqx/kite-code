@@ -86,7 +86,7 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 主 Run 的来源请求按定义及完整输入语义摘要保留，不以累计 256 次请求结束长任务。`ContextSources.captureBatch` 可在一个检查点接收全部原请求；未提供时仍逐项调用 `capture`。Core 继续核每个实际 source 的格式、同 ID 摘要一致性及当前最多 256 个唯一来源，不丢弃旧路径或不同输入。默认项目捕获只在该次调用内复用实际目录核验与指令字节，下一检查点重新读取；请求各自的路径、目标、目录及字节门禁保持。取舍见[完整来源捕获 Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)。
 
-`resolveRunConfiguration` 在新 Run 激活前解析实际模型与工具选择，原子保存脱敏配置和准确 Tool 版本；旧 Run 继续使用自己的绑定。宿主可返回每 Run 的 `extensions/sources/dispose`，Core 复制并冻结 schema、资源声明及定义集合；模型目录、自有 namespace 和子操作使用同一绑定。后台 Job 保留该绑定 lease，最后一个真实任务结束后才释放资源，新 Run 的定义或来源不会替换旧任务。未知或重复选择在模型调用前局部拒绝，并释放失败准入的资源。权限请求明确区分 model/tool/job，模型权限不会因同名 Tool 被复用。普通 Tool 的 progress 合并为一个待写点，以 100ms 起测间隔写入，单点最多 32 KiB；终态前排空。观察写入失败记录在真实结果中，不把已知效果改写为未知或再次执行。
+`resolveRunConfiguration` 在新 Run 激活前解析实际模型与工具选择，原子保存脱敏配置和准确 Tool 版本；旧 Run 继续使用自己的绑定。宿主可返回每 Run 的 `extensions/sources/dispose`，Core 复制并冻结 schema、资源声明及定义集合；模型目录、自有 namespace 和子操作使用同一绑定。后台 Job 保留该绑定 lease，最后一个真实任务结束后才释放资源，新 Run 的定义或来源不会替换旧任务。未知或重复选择在模型调用前局部拒绝，只有实际清理成功才释放失败准入资源；准备清理双失败通过 `ConfigurationPreparationCleanupError` 保原错误及资源并阻止关闭，具体五个接收点和可信producer合同归[生命周期owner](src/lifecycle.README.md)。权限请求明确区分 model/tool/job，模型权限不会因同名 Tool 被复用。普通 Tool 的 progress 合并为一个待写点，以 100ms 起测间隔写入，单点最多 32 KiB；终态前排空。观察写入失败记录在真实结果中，不把已知效果改写为未知或再次执行。
 
 宿主可选 `readStepCapabilities` 只读取已存在的目录缓存。每个 Model 安全边界固定额外 extensions、所选 tools 和最多 64 KiB 的非秘密 snapshot；全局注册由 Runtime 加入，调用者不能重复它们。实际 Model 保存准确 `toolBindings` 与 `capabilitySnapshot`，不会重写初始 Run manifest。审批或资源等待期间目录变更使尚未派发的旧调用明确 `capability_refresh_required`，下一 Model 重新选择；模型准入的有限刷新也同时重建 tools。已派发 Job 的 scope、来源和实现保持原绑定。定义版本负责标识实现，宿主负责让整个 Run 的 disposer 保留所有在途 Step 注册资源；Query/历史读取不调用该回调，回调不能建立连接或执行工具。
 

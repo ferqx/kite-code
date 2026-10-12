@@ -16,7 +16,7 @@ parser 在自有 Bun Worker 中使用被动 JSDOM/Readability/Turndown，不执�
 
 正式 Service 通过 binding factory 为每个 Run 创建被动 descriptor及 disposer；真正的 extractor scope在已经授权的 Tool execute内、prepare之前才取得，prepare hash和extract使用同一个 scope。默认 scope保实际创建的 Worker与原 termination Promise，只有准确收尾成功才移除；close先封门并取消本 scope的解析，独立尝试全部原 Worker，失败及其 owner保持，重复 close复用原结果。该 disposer接入已有 Run binding lease；普通 Tool保存 unknown不等于资源已关闭，清理失败仍阻止 Runtime关闭及 Profile维护锁交接。没有 Core的Web类别分支或全局资源注册表。
 
-网络 port、robots cache和同 origin队列仍由宿主工厂共享，关闭一个 Run不取消另一个 scope。没有 `bind` 的可信 custom extractor保持宿主所有权，Run不会调用它的 `close`；低层 `createWebFetchExtension` 的调用者自行承担所属资源寿命。[scope隔离测试](../../../test/isolated/web-fetch/binding.test.ts)核实际 parser等待HTTP时的准确关闭、兄弟完整正文及custom宿主归属；[正式清理未知测试](../../../../../apps/service/test/isolated/web-fetch-cleanup-ownership.test.ts)核原 Run未知、关闭失败、维护busy和所属进程实际退出后的完整冷读。故障fixture只注入原 JavaScript terminate失败，不能授原生OS API失败或全Runtime资源资格；已有通用assembly准备失败收尾仍属完整资源门禁。
+网络 port、robots cache和同 origin队列仍由宿主工厂共享，关闭一个 Run不取消另一个 scope。没有 `bind` 的可信 custom extractor保持宿主所有权，Run不会调用它的 `close`；低层 `createWebFetchExtension` 的调用者自行承担所属资源寿命。[scope隔离测试](../../../test/isolated/web-fetch/binding.test.ts)核实际 parser等待HTTP时的准确关闭、兄弟完整正文及custom宿主归属；[正式清理未知测试](../../../../../apps/service/test/isolated/web-fetch-cleanup-ownership.test.ts)核原 Run未知、关闭失败、维护busy和所属进程实际退出后的完整冷读。故障fixture只注入原 JavaScript terminate失败，不能授原生OS API失败或全Runtime资源资格；通用assembly准备／清理双失败现按[生命周期owner](../../lifecycle.README.md)的明确类型交接，完整资源观测与其他producer资格仍保门禁。
 
 超过 64 KiB 的正文通过普通 Tool 的 Artifact publisher 发布，保留原 public scope 和 `modelContent` UTF-8 引用；下一普通 Model checkpoint 解析完整选定正文。较小正文保持 inline。缺少 Artifact 能力时明确失败，不隐式裁剪。Artifact hash/authority 和 ModelBody 处理仍由 Core 负责。
 

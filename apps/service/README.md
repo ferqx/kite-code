@@ -237,7 +237,7 @@ Auto 分类只返回准确 invocation、effects 及可选只读 task/plan/拒绝
 
 默认 Service 现支持可信宿主通过 `createDefaultProcessConfiguration({child:[{id,version,modelId?,toolIds?}]})` 声明有限 child 配置，入口见 [child-configuration.ts](src/child-configuration.ts)。该声明不来自 JSONC，也不是业务 AgentType 或权限模式。静态注册只有闭合 `{content:string}` 输入 schema、准确角色 id/version 和不可执行、无 I/O 的占位 Model；只有首次建立新 carrier 时，Core 提供实际原父 Execution/Run/Session/Command、Workspace 和取消信号，再由共享默认 resolver 重读选定新 profile 的 `config.jsonc` 与 Workspace 的 `kite-agent.jsonc`。显式角色 `modelId` 或原父 Run 封存的 `modelId` 固定路由选择身份，当前 JSONC `models` 只解析该已知身份的 compatible SDK 配置与凭据引用；没有模型、坏配置、未知/禁用 Tool 或未知角色均局部失败，不发现旧配置、不调用 Provider fallback。
 
-每个新 carrier 重新建立实际 Workspace Files/Skills、来源与纯 Step 模块，冻结准确 Model route/options、目录版本和非秘密快照。显式 `toolIds` 限制当次已启用选择及未来 Step 可见 Tools；Core 进一步核实普通 child Tools/Jobs 的定义版本、schema、namespace 与实际父 Step 集合，并对准确调用形成父子权限交集。角色模型提供准确 `kind:model` 描述；carrier 独立提供 `kind:job agent/<id>@<version>`、`unknown` 效果与 `safeRead:false` 元数据。它们继续要求当前 programmatic policy 的准确 allowlist、trust 与必要 Ask，不复用 Model 或同名 Tool 的批准，不能从 JSONC 扩大权限。活动 child 保持原 SDK binding，即使后续配置更换 route；来源正文变化仍在下一安全 Model checkpoint 更新，旧等待调用不得硬派发。fresh Files disposer 由 Core binding lease 管理，child 和父 Run 完成之后仍有 detached Job 时继续持有，最后已监督终态后才释放。原 operation key/Command 查回已有持久引用，不重新解析配置、不重建 child 或恢复冷历史执行。
+每个新 carrier 重新封存实际 Workspace 文件工具／Skills的选择、来源与纯 Step 模块，冻结准确 Model route/options、目录版本和非秘密快照。默认assembly复用已经正式注册的Files，只保选择及版本事实，不再打开无人消费的第二Workspace目录owner；不提供externalFiles的standalone装配仍创建并拥有真实Files。显式 `toolIds` 限制当次已启用选择及未来 Step 可见 Tools；Core 进一步核实普通 child Tools/Jobs 的定义版本、schema、namespace 与实际父 Step 集合，并对准确调用形成父子权限交集。角色模型提供准确 `kind:model` 描述；carrier 独立提供 `kind:job agent/<id>@<version>`、`unknown` 效果与 `safeRead:false` 元数据。它们继续要求当前 programmatic policy 的准确 allowlist、trust 与必要 Ask，不复用 Model 或同名 Tool 的批准，不能从 JSONC 扩大权限。活动 child 保持原 SDK binding，即使后续配置更换 route；来源正文变化仍在下一安全 Model checkpoint 更新，旧等待调用不得硬派发。carrier实际取得的资源disposer由Core binding lease管理，child和父Run完成之后仍有detached Job时继续持有，最后已监督终态后才释放；各实际文件资源owner保持自身清理职责。原 operation key/Command 查回已有持久引用，不重新解析配置、不重建 child 或恢复冷历史执行。
 
 [test/isolated/child-configuration.test.ts](test/isolated/child-configuration.test.ts) 使用实际本机 compatible HTTP 端点、临时 SQLite、单 Model 槽、真实 Workspace 文件与受控许可/Job barrier，验证旧 child route、新 carrier Workspace 配置覆盖、source freshness、准确角色版本、父权限拒绝零文件效果、独立 carrier Job Ask 与 Model-only/trust 拒绝、可选 modelId 继承原父身份、失败前零 child Session/Provider、warm 重试、真实 Store 冷重开查回以及后台 Job 延迟释放绑定。未调用付费模型或用户凭据。此切片只交付可信默认装配，不声明产品 `task` Tool、满容量立即失败、期限、追加邮箱、正式客户端入口或跨平台资格已完成。
 
@@ -277,11 +277,17 @@ read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时�
 
 可信 command digest 固定 Tool/Job kind/definition/version、准确 command、attached/detached、host configuration/范围、canonical cwd、克隆 env、实际 guardian/Bun/Shell bytes hash 及 grace/output queue；只排除新的 operation key。默认值与 Job 一致：200ms、256KiB。Core 不按 Tool 名猜命令或剥字段，非 Shell 仍使用完整 input digest。相同命令只在当前 policy 提供 same_command 且最终权限/epoch/必要义务仍成立时复用，Tool/Job 授权独立；环境、范围或命令改变仍需重新核对。
 
+## 配置准备清理交接
+
+[assembly](src/assembly.ts)和[默认resolver](src/configuration.ts)在已经取得资源后准备失败时，独立尝试自身原disposer；清理再失败使用Agent的 `ConfigurationPreparationCleanupError({originalError,cleanupError,resources})` 交接实际Files／assembly／scope。原错误与清理错误保在非枚举cause，不进入HTTP DTO；普通配置拒绝且清理成功继续按原错误处理。资源保留、五个resolver接收点、恢复lease及shutdown门禁由[Agent生命周期owner](../../packages/agent/src/lifecycle.README.md)负责，Service只作producer装配，不能凭未知关闭交接Profile维护权。
+
+[完整准备回归](test/isolated/preparation-cleanup-ownership.test.ts)从正式Service／Client原Command进入受支持的trusted resolver／standalone assembly，实际打开目录，因必选Skill缺失而准备失败；故障只让该原实例JavaScript close在原native close之前拒绝，目录仍可完整读取，Model／Run／Execution均未开始。关闭失败与维护owner_busy保留，测试自己的child实际退出0及双EOF之后才可公开backup／冷读原完整metadata／View／Command／Message／Execution，零重放。它不依赖已删除的默认重复FD，也不把fixture错误称真实OS API故障；全部资源观测、临时I/O全部失败路径及平台资格仍按进度保留。
+
 ## 默认 Web Fetch 装配
 
 默认 resolver 通过 [web-fetch-configuration.ts](src/web-fetch-configuration.ts)装配普通 `builtin.web@1` / `web_fetch@1`。`createDefaultProcessConfiguration({webFetch?})` 只接受可信宿主的 network policy/admission 与可选 extractor；缺省开发网络策略为 public，仍逐跳检查全部 DNS 地址、拒绝私有/保留/本机目标并固定真实 socket。显式 off/allowlist 与当前宿主 `admitHop` 继续约束原请求、robots 和每次跳转，普通 Tool 仍独立经过 Core 的当前授权。实际元数据为 `network`/`unknown`、`safeRead:false`，off 为不可用；每个新 Run 封存准确 Tool 版本和非秘密 `snapshot.web`。JSONC 仅选择 Tool 与准确版本，不能提供网络权威、代理 header 或 SSRF 例外。工厂创建不进行 DNS、解析或网络 I/O。
 
-正式 Run resolver选择Agent提供的被动 Web binding，工具目录投影继续使用无I/O元数据；实际 parser scope只在授权派发后取得。Run disposer缓存同一结果，独立收尾原 Files assembly和Web scope；一个失败不跳过另一个，原配置错误与清理错误同时保留。Worker登记、封门、取消、原收尾及共享robots／origin队列由Agent负责，Service仅组合接口。没有 `bind` 的custom extractor仍由宿主管理，不借Run关闭权。原执行中清理未知会保已有Run lease；尚未返回配置时的通用assembly准备清理仍是原未闭合资源门禁，局部cause保留不证明Runtime接收者已持有它。
+正式 Run resolver选择Agent提供的被动 Web binding，工具目录投影继续使用无I/O元数据；实际 parser scope只在授权派发后取得。Run disposer缓存同一结果，独立收尾原 Files assembly和Web scope；一个失败不跳过另一个，原配置错误与清理错误同时保留。Worker登记、封门、取消、原收尾及共享robots／origin队列由Agent负责，Service仅组合接口。没有 `bind` 的custom extractor仍由宿主管理，不借Run关闭权。原执行中清理未知会保已有Run lease；assembly或resolver准备／清理双失败另用Agent公开ConfigurationPreparationCleanupError移交实际资源，Runtime只接收该准确类型并保原配置清理预约与严格门禁。
 
 [默认 Web Fetch 回归](test/isolated/default-web-fetch.test.ts) 3 项、32 条断言使用真实 Service/Client/Core/SQLite、本机兼容 Model 和无害 HTTP：四次 socket 前均有实际审计，完整约 125 KiB 正文通过原 scope Artifact 读回并进入下一 Provider 请求；off/当前撤权为零 DNS/socket，原 policy 修改不扩范围，坏 JSONC options/版本在 Provider 前拒绝。完整解析 Worker 属于已构建并核 hash 的包内资产，缺失时局部失败。真实 TLS、Linux/Windows 与原生制品资格仍按进度记录。
 

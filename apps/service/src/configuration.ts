@@ -5,6 +5,7 @@ import {
   type AfterTurnPolicy,
   AgentError,
   type AgentRuntime,
+  ConfigurationPreparationCleanupError,
   type ContextCompressor,
   type ContextSource,
   type RunConfiguration,
@@ -1428,19 +1429,11 @@ export function createDefaultProcessConfiguration(options: {
         try {
           await dispose();
         } catch (cleanupError) {
-          const failure = new AgentError(
-            error instanceof AgentError || error instanceof ConfigurationError
-              ? error.code
-              : 'configuration_unavailable',
-          );
-          Object.defineProperty(failure, 'cause', {
-            value: Object.freeze({
-              originalError: error,
-              cleanupError,
-              resources: Object.freeze({ assembly, webBinding }),
-            }),
+          throw new ConfigurationPreparationCleanupError({
+            originalError: error,
+            cleanupError,
+            resources: { assembly, webBinding },
           });
-          throw failure;
         }
         throw error;
       }

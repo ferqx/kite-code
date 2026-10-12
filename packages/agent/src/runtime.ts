@@ -72,6 +72,24 @@ import {
   type WorkspaceRecord,
 } from './storage/types';
 
+/** A trusted configuration producer could not confirm cleanup of its actual preparation resources. */
+export class ConfigurationPreparationCleanupError extends AgentError {
+  declare readonly cause: {
+    readonly originalError: unknown;
+    readonly cleanupError: unknown;
+    readonly resources: object;
+  };
+  constructor(input: {
+    originalError: unknown;
+    cleanupError: unknown;
+    resources: object;
+  }) {
+    super('configuration_cleanup_unconfirmed');
+    this.name = 'ConfigurationPreparationCleanupError';
+    Object.defineProperty(this, 'cause', { value: Object.freeze({ ...input }), enumerable: false });
+  }
+}
+
 export type { ModelInputPage } from './storage/types';
 export interface ModelInputSnapshot extends Omit<ModelInputIdentity, 'modelId'> {
   storeId: string;
@@ -390,7 +408,8 @@ export class AgentRuntime {
     string,
     { binding: RunBinding; configuration: ChildConfiguration; inputSchema: JsonSchema }
   >();
-  private readonly childBaseReleases: (() => Promise<void>)[] = [];
+  private readonly configurationReleases: (() => Promise<void>)[] = [];
+  private preparationCleanupFailed = false;
   private readonly childRetainers = new Map<string, () => () => Promise<void>>();
   private readonly authorizationReviewTasks = new Map<string, Promise<void>>();
   private readonly runBindingLeases = new Map<
@@ -494,7 +513,7 @@ export class AgentRuntime {
           await configuration.dispose?.();
         }
       };
-      this.childBaseReleases.push(release);
+      this.configurationReleases.push(release);
       this.childRetainers.set(configuration.id, () => {
         users++;
         let released = false;
@@ -737,6 +756,40 @@ export class AgentRuntime {
       }
     };
   }
+  private retainPreparationCleanupFailure(error: unknown): boolean {
+    if (!(error instanceof ConfigurationPreparationCleanupError)) return false;
+    this.preparationCleanupFailed = true;
+    // The retained rejection owns the original resources and errors; never replay a host disposer.
+    const failed = Promise.reject<void>(error);
+    void failed.catch(() => {});
+    this.configurationReleases.push(() => failed);
+    return true;
+  }
+  private async resolvePreparation<T>(resolve: () => Promise<T>): Promise<T> {
+    try {
+      return await resolve();
+    } catch (error) {
+      this.retainPreparationCleanupFailure(error);
+      throw error;
+    }
+  }
+  private preparationDisposer(resources: { dispose?: () => Promise<void> }): () => Promise<void> {
+    let result: Promise<void> | undefined;
+    return () => (result ??= Promise.resolve().then(() => resources.dispose?.()));
+  }
+  private preparationCleanupError(
+    originalError: unknown,
+    cleanupError: unknown,
+    resources: object,
+  ): ConfigurationPreparationCleanupError {
+    const error = new ConfigurationPreparationCleanupError({
+      originalError,
+      cleanupError,
+      resources,
+    });
+    this.retainPreparationCleanupFailure(error);
+    return error;
+  }
   getLifecycleState(): RuntimeLifecycleState {
     const reasons: RuntimeBusyReason[] = [];
     if (this.admissions) reasons.push('admission');
@@ -751,6 +804,7 @@ export class AgentRuntime {
       this.reportRecoveryCleanupFailed ||
       this.jobReconcileCleanupFailed ||
       this.runResumeCleanupFailed ||
+      this.preparationCleanupFailed ||
       (this.closing && this.lifecycleState !== 'closed')
     )
       reasons.push('cleanup');
@@ -1268,22 +1322,24 @@ export class AgentRuntime {
     };
     let configuration: RunConfiguration;
     try {
-      configuration = await this.options.resolveChildRunConfiguration({
-        records: {
-          forExtension: (extensionId) => {
-            if (!reading || !allowedExtensions.has(extensionId))
-              throw new AgentError('child_configuration_read_scope_denied');
-            return { get: (key) => getRecord(extensionId, key) };
+      configuration = await this.resolvePreparation(() =>
+        this.options.resolveChildRunConfiguration!({
+          records: {
+            forExtension: (extensionId) => {
+              if (!reading || !allowedExtensions.has(extensionId))
+                throw new AgentError('child_configuration_read_scope_denied');
+              return { get: (key) => getRecord(extensionId, key) };
+            },
           },
-        },
-        configurationId,
-        parentExecution: freeze(structuredClone(execution)),
-        parentRun: freeze(structuredClone(nearest.run)),
-        parentSession: freeze(structuredClone(session)),
-        workspace: freeze(structuredClone(workspace)),
-        command: freeze(structuredClone(parent.command)),
-        signal: parent.signal,
-      });
+          configurationId,
+          parentExecution: freeze(structuredClone(execution)),
+          parentRun: freeze(structuredClone(nearest.run)),
+          parentSession: freeze(structuredClone(session)),
+          workspace: freeze(structuredClone(workspace)),
+          command: freeze(structuredClone(parent.command)),
+          signal: parent.signal,
+        }),
+      );
     } finally {
       reading = false;
     }
@@ -1344,7 +1400,11 @@ export class AgentRuntime {
         continuation,
       );
     } catch (error) {
-      await configuration.dispose?.();
+      try {
+        await this.preparationDisposer(configuration)();
+      } catch (cleanupError) {
+        throw this.preparationCleanupError(error, cleanupError, configuration);
+      }
       throw error;
     }
   }
@@ -2454,6 +2514,8 @@ export class AgentRuntime {
       let dispose: (() => Promise<void>) | undefined;
       let transferred = false;
       let cleanupFailed = false;
+      let preparationError: unknown;
+      let preparationResources: RunConfiguration | undefined;
       try {
         const prepared = await this.prepareRunCheckpoint(state, input.subjectId, controller.signal);
         const checkpoint = {
@@ -2480,20 +2542,17 @@ export class AgentRuntime {
         if (!workspace) throw new AgentError('workspace_not_found');
         let resolved: RunConfiguration | undefined;
         if (this.options.resolveRecoveryRunConfiguration) {
-          resolved = await this.options.resolveRecoveryRunConfiguration({
-            command: freeze(structuredClone(state.originalCommand)),
-            run: freeze(structuredClone(state.run)),
-            session: freeze(structuredClone(state.session)),
-            workspace: freeze(structuredClone(workspace)),
-            signal: controller.signal,
-          });
-          let attempted = false;
-          dispose = async () => {
-            if (!attempted) {
-              attempted = true;
-              await resolved!.dispose?.();
-            }
-          };
+          resolved = await this.resolvePreparation(() =>
+            this.options.resolveRecoveryRunConfiguration!({
+              command: freeze(structuredClone(state.originalCommand)),
+              run: freeze(structuredClone(state.run)),
+              session: freeze(structuredClone(state.session)),
+              workspace: freeze(structuredClone(workspace)),
+              signal: controller.signal,
+            }),
+          );
+          preparationResources = resolved;
+          dispose = this.preparationDisposer(resolved);
         } else if (this.options.resolveRunConfiguration)
           throw new AgentError('run_recovery_binding_unavailable');
         controller.signal.throwIfAborted();
@@ -2559,6 +2618,12 @@ export class AgentRuntime {
           prepared,
         );
       } catch (error) {
+        preparationError = error;
+        if (!transferred && error instanceof ConfigurationPreparationCleanupError) {
+          cleanupFailed = true;
+          this.runResumeCleanupFailed = true;
+          this.stopDispatchPolling(input.sessionId, error);
+        }
         fail(error);
         if (transferred) this.stopDispatchPolling(input.sessionId, error);
       } finally {
@@ -2567,7 +2632,10 @@ export class AgentRuntime {
         } catch (error) {
           cleanupFailed = true;
           this.runResumeCleanupFailed = true;
-          this.stopDispatchPolling(input.sessionId, error);
+          this.stopDispatchPolling(
+            input.sessionId,
+            this.preparationCleanupError(preparationError, error, preparationResources!),
+          );
         }
         this.runResumeControllers.delete(input.commandId);
         if (lease && !cleanupFailed) {
@@ -2614,6 +2682,8 @@ export class AgentRuntime {
       let lease: import('./storage/types').JobRecoveryLease | null = null;
       let dispose: (() => Promise<void>) | undefined;
       let cleanupFailed = false;
+      let preparationError: unknown;
+      let preparationResources: { extension: Extension; dispose?: () => Promise<void> } | undefined;
       try {
         const execution = await this.options.store.getExecution(input.executionId);
         const session = execution && (await this.options.store.getSession(execution.sessionId));
@@ -2664,18 +2734,16 @@ export class AgentRuntime {
         lease = begun.lease;
         let extension: Extension | undefined;
         if (this.options.resolveRecoveryJobConfiguration) {
-          const restored = await this.options.resolveRecoveryJobConfiguration({
-            execution: freeze(structuredClone(begun.execution)),
-            session: freeze(structuredClone(session)),
-            workspace: freeze(structuredClone(workspace)),
-            signal: controller.signal,
-          });
-          let attempted = false;
-          dispose = async () => {
-            if (attempted) return;
-            attempted = true;
-            await restored.dispose?.();
-          };
+          const restored = await this.resolvePreparation(() =>
+            this.options.resolveRecoveryJobConfiguration!({
+              execution: freeze(structuredClone(begun.execution)),
+              session: freeze(structuredClone(session)),
+              workspace: freeze(structuredClone(workspace)),
+              signal: controller.signal,
+            }),
+          );
+          preparationResources = restored;
+          dispose = this.preparationDisposer(restored);
           extension = sealExtension(restored.extension);
         } else {
           extension = this.extensions.find(
@@ -2842,13 +2910,24 @@ export class AgentRuntime {
           authorization,
           receipt,
         });
+      } catch (error) {
+        preparationError = error;
+        if (error instanceof ConfigurationPreparationCleanupError) {
+          cleanupFailed = true;
+          this.jobReconcileCleanupFailed = true;
+          this.stopDispatchPolling(input.sessionId, error);
+        }
+        throw error;
       } finally {
         try {
           await dispose?.();
         } catch (error) {
           cleanupFailed = true;
           this.jobReconcileCleanupFailed = true;
-          this.stopDispatchPolling(input.sessionId, error);
+          this.stopDispatchPolling(
+            input.sessionId,
+            this.preparationCleanupError(preparationError, error, preparationResources!),
+          );
         } finally {
           this.jobReconcileControllers.delete(input.commandId);
           if (lease && !cleanupFailed) {
@@ -2936,6 +3015,9 @@ export class AgentRuntime {
     const task = (async () => {
       let owner: OwnerRef | null = null;
       let bindingTransferred = false;
+      let cleanupFailed = false;
+      let preparationError: unknown;
+      let preparationResources: RunConfiguration | undefined;
       let dispose: (() => Promise<void>) | undefined;
       try {
         const session = await this.options.store.getSession(input.sessionId);
@@ -2971,20 +3053,17 @@ export class AgentRuntime {
           initializeRequirements: this.options.initializeRunRequirements,
         };
         if (this.options.resolveRecoveryRunConfiguration) {
-          const resolved = await this.options.resolveRecoveryRunConfiguration({
-            command: freeze(structuredClone(origin)),
-            run: freeze(structuredClone(parent)),
-            session: freeze(structuredClone(session)),
-            workspace: freeze(structuredClone(workspace)),
-            signal: controller.signal,
-          });
-          let disposalAttempted = false;
-          dispose = async () => {
-            if (!disposalAttempted) {
-              disposalAttempted = true;
-              await resolved.dispose?.();
-            }
-          };
+          const resolved = await this.resolvePreparation(() =>
+            this.options.resolveRecoveryRunConfiguration!({
+              command: freeze(structuredClone(origin)),
+              run: freeze(structuredClone(parent)),
+              session: freeze(structuredClone(session)),
+              workspace: freeze(structuredClone(workspace)),
+              signal: controller.signal,
+            }),
+          );
+          preparationResources = resolved;
+          dispose = this.preparationDisposer(resolved);
           controller.signal.throwIfAborted();
           model = resolved.model;
           modelId = resolved.modelId;
@@ -3085,6 +3164,12 @@ export class AgentRuntime {
           );
         }
       } catch (error) {
+        preparationError = error;
+        if (!bindingTransferred && error instanceof ConfigurationPreparationCleanupError) {
+          cleanupFailed = true;
+          this.reportRecoveryCleanupFailed = true;
+          this.stopDispatchPolling(input.sessionId, error);
+        }
         fail(error);
       } finally {
         this.reportRecoveryPreparations.delete(controller);
@@ -3093,10 +3178,15 @@ export class AgentRuntime {
         } catch (error) {
           // A failed release remains a local cleanup fact, never successful disposal.
           // Do not replay an arbitrary host disposer during shutdown.
+          cleanupFailed = true;
           this.reportRecoveryCleanupFailed = true;
-          this.stopDispatchPolling(input.sessionId, error);
+          this.stopDispatchPolling(
+            input.sessionId,
+            this.preparationCleanupError(preparationError, error, preparationResources!),
+          );
         } finally {
-          if (owner) await this.options.store.releaseSessionOwner(owner).catch(() => false);
+          if (owner && !cleanupFailed)
+            await this.options.store.releaseSessionOwner(owner).catch(() => false);
         }
       }
     })().finally(() => {
@@ -3523,6 +3613,7 @@ export class AgentRuntime {
     let readStepCapabilities: StepCapabilitiesReader | undefined;
     let dispose: (() => Promise<void>) | undefined;
     let run: RunRecord;
+    let preparationResources: RunConfiguration | undefined;
     try {
       let snapshot: Json = null;
       if (
@@ -3542,15 +3633,18 @@ export class AgentRuntime {
         if (!session) throw new AgentError('session_not_found');
         const workspace = await this.options.store.getWorkspace(session.workspaceId);
         if (!workspace) throw new AgentError('workspace_not_found');
-        const resolved = await this.options.resolveRunConfiguration({
-          command: structuredClone(command),
-          session,
-          workspace,
-        });
+        const resolved = await this.resolvePreparation(() =>
+          this.options.resolveRunConfiguration!({
+            command: structuredClone(command),
+            session,
+            workspace,
+          }),
+        );
+        preparationResources = resolved;
+        dispose = this.preparationDisposer(resolved);
         model = resolved.model;
         modelId = resolved.modelId;
         maxConcurrentSubagents = resolved.maxConcurrentSubagents;
-        dispose = resolved.dispose;
         sources = resolved.sources;
         permissions = resolved.permissions;
         authorizationReview = sealReview(resolved.authorizationReview ?? this.defaultReviewer);
@@ -3594,13 +3688,18 @@ export class AgentRuntime {
           ? (await this.options.store.applyInput({ ...write, kind: 'follow_up' })).run
           : await this.options.store.startRun(write);
     } catch (error) {
-      await dispose?.();
-      if (error instanceof AgentError && error.code === 'command_cancelled') return;
+      let failure = error;
+      try {
+        await dispose?.();
+      } catch (cleanupError) {
+        failure = this.preparationCleanupError(error, cleanupError, preparationResources!);
+      }
+      if (failure instanceof AgentError && failure.code === 'command_cancelled') return;
       await this.options.store.rejectCommand({
         expectedStoreId: command.originStoreId,
         owner,
         commandId: command.id,
-        reason: error instanceof AgentError ? error.code : 'run_start_failed',
+        reason: failure instanceof AgentError ? failure.code : 'run_start_failed',
       });
       return;
     }
@@ -3618,7 +3717,7 @@ export class AgentRuntime {
       readStepCapabilities,
       afterTurn,
       compressor,
-      dispose,
+      dispose: preparationResources ? preparationResources.dispose : dispose,
     });
   }
   private async executeRun(
@@ -4945,10 +5044,11 @@ export class AgentRuntime {
       this.runBindingLeases.size ||
       this.reportRecoveryCleanupFailed ||
       this.jobReconcileCleanupFailed ||
-      this.runResumeCleanupFailed
+      this.runResumeCleanupFailed ||
+      this.preparationCleanupFailed
     )
       throw new AgentError('shutdown_cleanup_unconfirmed');
-    await Promise.all(this.childBaseReleases.map((release) => release()));
+    await Promise.all(this.configurationReleases.map((release) => release()));
     await options.beforeResourceClose?.();
     this.resourceAdmissionClosed = true;
     if (this.resourceUsers) await new Promise<void>((resolve) => this.resourceWaiters.add(resolve));
