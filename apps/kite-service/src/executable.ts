@@ -1,86 +1,37 @@
 #!/usr/bin/env bun
-import { encodeServiceStartupDiagnostic } from '@kite-ai/kite-local-runtime/startup-diagnostic';
-import {
-  isMcpStdioWrapperInvocation,
-  MCP_STDIO_WRAPPER_ENTRYPOINT_,
-  runMcpStdioChildRuntime,
-  runPosixSupervisorChild,
-  runProcessTreeChild,
-} from '@kite-ai/runtime-host';
-import { type KiteAppServerMainDependencies, runKiteAppServerMain } from './app-server';
-import { runKiteAppServerDaemonMain } from './app-server-daemon';
-import { isHistoryPageWorker, runHistoryPageWorker } from './runtime-client/history-page-worker';
+import { rejectRetiredEntrypoint } from '../../../scripts/development/retired-entrypoints';
 
-export interface KiteServiceMainDependencies {
-  readonly onStoreStartupProgress?: KiteAppServerMainDependencies['onStoreStartupProgress'];
-  readonly beforeStorePublication?: KiteAppServerMainDependencies['beforeStorePublication'];
-  readonly assertRetiredStoreWritersStopped?: KiteAppServerMainDependencies['assertRetiredStoreWritersStopped'];
-  /** Parent-provided explicit child environment; defaults to the process environment at entry. */
-  readonly environment?: Readonly<Record<string, string | undefined>>;
-}
+export type { KiteServiceMainDependencies } from './legacy-executable';
+export let runKiteServiceMain: typeof import('./legacy-executable').runKiteServiceMain;
+export let isKiteServiceMcpStdioInvocation: typeof import('./legacy-executable').isKiteServiceMcpStdioInvocation;
 
-/**
- * Internal executable router. Public clients reach App Server entrypoints through their parent
- * composition; the remaining markers are private MCP/process-tree helpers.
- */
-export async function runKiteServiceMain(
-  args: readonly string[] = process.argv.slice(2),
-  dependencies: KiteServiceMainDependencies = {},
-): Promise<void> {
-  if (isHistoryPageWorker(args)) {
-    await runHistoryPageWorker();
-    return;
-  }
-  if (isKiteServiceMcpStdioInvocation(args)) {
-    await runMcpStdioChildRuntime([MCP_STDIO_WRAPPER_ENTRYPOINT_]);
-    return;
-  }
-  if (args[0] === 'app-server') {
-    if (args[1] === 'run-daemon') {
-      await runKiteAppServerDaemonMain(args, {
-        environment: dependencies.environment,
-        assertRetiredStoreWritersStopped: dependencies.assertRetiredStoreWritersStopped,
-        onStoreStartupProgress: dependencies.onStoreStartupProgress,
-        beforeStorePublication: dependencies.beforeStorePublication,
-      });
-    } else {
-      await runKiteAppServerMain(args, {
-        environment: dependencies.environment,
-        assertRetiredStoreWritersStopped: dependencies.assertRetiredStoreWritersStopped,
-        onStoreStartupProgress: dependencies.onStoreStartupProgress,
-        beforeStorePublication: dependencies.beforeStorePublication,
-      });
-    }
-    return;
-  }
-  if (args.length === 1 && args[0] === '--kite-internal-process-tree-v1') {
-    runProcessTreeChild([]);
-    return;
-  }
-  const posixSupervisorMarker = '--kite-internal-posix-supervisor-v1';
-  if (
-    args[0] === posixSupervisorMarker &&
-    !args.slice(1).some((argument) => argument.startsWith('--kite-internal-'))
-  ) {
-    runPosixSupervisorChild(args.slice(1));
-    return;
-  }
-  throw new Error('Unsupported Kite Service internal entrypoint.');
-}
+const args = process.argv.slice(2);
+// Only the original private helper families retain their historical executable route.
+// Their exact parsing and execution remain in the unchanged historical router.
+const mcpMarker = '--kite-internal-mcp-stdio-v1';
+const mcpHelper = (argv: readonly string[]) =>
+  argv.filter((argument) => argument === mcpMarker).length === 1 &&
+  argv.at(-1) === mcpMarker &&
+  !argv.some((argument) => argument.startsWith('--kite-internal-') && argument !== mcpMarker);
+const historicalHelper =
+  (args.length === 1 &&
+    ['--kite-internal-history-page-v1', '--kite-internal-process-tree-v1'].includes(args[0]!)) ||
+  (args[0] === '--kite-internal-posix-supervisor-v1' &&
+    !args.slice(1).some((argument) => argument.startsWith('--kite-internal-'))) ||
+  mcpHelper(args) ||
+  mcpHelper(process.argv);
 
-/** Bun standalone uses a platform-specific argv prefix; private markers are validated at either seam. */
-export function isKiteServiceMcpStdioInvocation(
-  args: readonly string[],
-  processArguments: readonly string[] = process.argv,
-): boolean {
-  return isMcpStdioWrapperInvocation(args) || isMcpStdioWrapperInvocation(processArguments);
-}
-
-if (import.meta.main) {
-  await runKiteServiceMain().catch((error: unknown) => {
-    process.stderr.write(
-      encodeServiceStartupDiagnostic(error) ?? '[kite-service] service failed\n',
-    );
-    process.exitCode = 1;
-  });
+if (import.meta.main && !historicalHelper) rejectRetiredEntrypoint('service');
+else {
+  ({ runKiteServiceMain, isKiteServiceMcpStdioInvocation } = await import('./legacy-executable'));
+  if (import.meta.main)
+    await runKiteServiceMain().catch(async (error: unknown) => {
+      const { encodeServiceStartupDiagnostic } = await import(
+        '@kite-ai/kite-local-runtime/startup-diagnostic'
+      );
+      process.stderr.write(
+        encodeServiceStartupDiagnostic(error) ?? '[kite-service] service failed\n',
+      );
+      process.exitCode = 1;
+    });
 }

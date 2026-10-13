@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
-    "dev:web": "bun run ../../scripts/development/retired-desktop.ts",
-    "build": "bun run ../../scripts/development/retired-desktop.ts",
+    "dev:web": "bun run ../../scripts/development/retired-entrypoints.ts desktop",
+    "build": "bun run ../../scripts/development/retired-entrypoints.ts desktop",
     "build:desktop": "bun run scripts/package.ts",
     "prepare:service": "bun run ../../scripts/release/prepare-desktop-service.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",

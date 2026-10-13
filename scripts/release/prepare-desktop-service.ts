@@ -1,3 +1,3 @@
-import { rejectRetiredDesktopEntry } from '../development/retired-desktop';
+import { rejectRetiredEntrypoint } from '../development/retired-entrypoints';
 
-rejectRetiredDesktopEntry();
+rejectRetiredEntrypoint('desktop');

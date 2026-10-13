@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-按[当前开发合同](../../../../docs/development/local-development.md)，六个旧package命令和四个直接脚本使用[统一退役诊断](../../../../scripts/development/retired-desktop.ts)，在读取archive、Profile、构建或服务启动前返回退出码2。诊断分别给当前完整Native构建、启动、隔离验证与release help，不静默选择新Profile或混用旧／新writer。
+按[当前开发合同](../../../../docs/development/local-development.md)，六个旧package命令和四个直接脚本使用[统一退役诊断](../../../../scripts/development/retired-entrypoints.ts)的desktop分支，在读取archive、Profile、构建或服务启动前返回退出码2。诊断分别给当前完整Native构建、启动、隔离验证与release help，不静默选择新Profile或混用旧／新writer。该leaf随后与[其他普通应用入口](../architecture/2026-10-13-historical-application-bootstrap.md)统一；本记录的Desktop范围、理由和原断言继续适用。
 
 旧源码、已保存制品和显式历史验收保留准确出处。此次只删除上述消费者内部的Vite／Electron启动、旧identity注入、staging／签名／打包和Service准备链；整个旧authority树及其他历史producer的最终退役仍按V1.3原门禁完成。
 

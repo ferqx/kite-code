@@ -2,6 +2,8 @@
 
 本文保留重构前App Server／Store的历史边界与威胁模型，源码定位和当前合同归[通用Agent边界](unified-agent-boundary.md)及[新Desktop owner](../../apps/desktop/README.md)。旧Desktop普通开发／构建／服务准备入口现已明确退役，六个package命令和四个直接脚本只返回退役诊断／退出码2；实际回归归[调用者测试](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)。下方旧拓扑、验证命令和“当前”实现描述仅指其历史版本，不是现行正式启动或新数据写入许可。历史源码／制品的保留不闭合V1.3的RSS、观测、平台或最终退役门禁。
 
+旧CLI/TUI／Service普通启动与构建亦已明确拒绝；历史library函数和Service私有helper另保原方法／对象／同步语义，普通App Server不进入该保留通路。准确入口、实际胶水验证和原源码比对见[旧Service owner](../../apps/kite-service/README.md)及[本轮证据](../plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。Web按本轮用户要求保持现状；保留这些历史接口不构成当前Stage或平台通过。
+
 > 实施中：[会话存储兼容性与连续性 V1](../plans/session-store-compatibility-and-continuity.md)已统一正式数据入口；已验证转换路径及未完成的平台资格见该计划，不由入口统一推导完整跨版本兼容。
 
 

@@ -6076,7 +6076,7 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 
 上一轮 `c6bb667b` 收束准确 `4eddd7cc` 的752文件／609作业完整默认和指定用户原文粘贴确认，是实际progress。本轮重新核§35和真实旧消费者：旧Desktop `dev` 绑定Vite再执行 `prepare-desktop-service.ts`→旧OSS candidate→旧Service，`build:electron`注入旧identity，`package.ts`复制旧Service资源到 `.app`。现行[开发合同](../development/local-development.md)明确当前八workspace和新Native；这些旧普通消费者的收束没有RSS／观测或P6整体退出的技术前置。此前“仍有消费者所以不能直接删producer”保持正确，但不能扩为“任何消费者切换都须等最终门禁”。
 
-实施先闭合这个可独立的完整入口范围：旧 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 六命令，以及原dev／Electron build／package／Service prepare四直接脚本，均沿[单一诊断](../../scripts/development/retired-desktop.ts)返回 `legacy_desktop_entrypoint_retired`／2。旧普通路径内部的Vite／Electron／旧producer导入、archive／manifest读取、staging／签名、构建和服务启动实际删除；拒绝不先发生旧副作用，也不自动选择新Profile或fallback旧writer。诊断列出当前完整Native构建、启动、隔离验证与release help。原Vite热更新只属历史，不伪造等价能力；旧源码／制品／显式历史验收仍保出处，整树和其他历史producer没有由此全部退役。长期理由和真实备选归[决定](../../.agents/notes/implemented/simplification/2026-10-13-legacy-desktop-entrypoints.md)。
+实施先闭合这个可独立的完整入口范围：旧 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 六命令，以及原dev／Electron build／package／Service prepare四直接脚本，均沿[单一诊断（现为公共leaf）](../../scripts/development/retired-entrypoints.ts)返回 `legacy_desktop_entrypoint_retired`／2。旧普通路径内部的Vite／Electron／旧producer导入、archive／manifest读取、staging／签名、构建和服务启动实际删除；拒绝不先发生旧副作用，也不自动选择新Profile或fallback旧writer。诊断列出当前完整Native构建、启动、隔离验证与release help。原Vite热更新只属历史，不伪造等价能力；旧源码／制品／显式历史验收仍保出处，整树和其他历史producer没有由此全部退役。长期理由和真实备选归[决定](../../.agents/notes/implemented/simplification/2026-10-13-legacy-desktop-entrypoints.md)。
 
 新增[完整调用者文件](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)先在原代码安全地调用prepare与不存在archive，期望退役2实际1，原red `/private/tmp/kite-retired-desktop-original-red-20261013.log` 保留；没有让原开发链真的打开用户Profile。实施后十条实际调用均核诊断／退出码、旧sentinel原bytes与全部目录保持，1pass／100assert，日志 `/private/tmp/kite-retired-desktop-green-20261013.log`。测试使用标准tmpdir／路径API、独立HOME／USERPROFILE／AppData／XDG，无macOS专属路径或skip；当前只实际验macOS，不授Win/Linux原生产品资格。
 
@@ -6095,3 +6095,29 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 | 其他旧消费者与全能力退出 | 37能力正式入口、剩余历史producer／consumer及整体阶段 | 逐一核实际用途再收束，适用T001–T114/E01–E14／§35和阶段完整默认齐全；此次十条入口不替代整树退役 |
 
 本轮只完成上述普通Desktop调用者退役、必要验证／同步和已授权本地交付，能力映射仍37partial，Goal active；无push、PR、发布或Actions触发。
+
+## 2026-10-13：旧 CLI/TUI/Service 普通入口退役与历史导入保留
+
+从 clean `dc85e80b` 继续核实际旧消费者。旧CLI package build及CLI根／CLI／TUI源码直接执行、旧Service package build和普通App Server执行仍能加载旧运行库；它们不依赖RSS、完整观测或P6整体退出才能先收束。当前正式根入口已用新八workspace；本轮退役的是这些明确旧普通消费者，未删历史library、私有helper、旧producer或整个旧树。实际实现及长期取舍归[旧CLI owner](../../apps/kite-cli/README.md)、[旧Service owner](../../apps/kite-service/README.md)和[决定](../../.agents/notes/implemented/architecture/2026-10-13-historical-application-bootstrap.md)。
+
+公共[退役leaf](../../scripts/development/retired-entrypoints.ts)接原Desktop及本轮Terminal／Service诊断；普通源码和两个package构建在旧依赖及Profile前返回 `legacy_terminal_entrypoint_retired`／`legacy_service_entrypoint_retired`、退出2与当前根命令，不打开旧数据或自动转发。原CLI、同步TUI及Service方法移同目录历史实现；根／subpath导入取得原函数对象，类型API保留。Service的history／process-tree／POSIX supervisor／MCP四private family只按原准确argv形状进入原router；两处MCP argv seam保留，原验证／执行继续由原方法负责，混杂internal marker不会开放普通App Server。CLI条件同步加载、Service原异步模块及main完整等待保持，未新增权限判断或Service业务authority。
+
+真实失败完整保留：原代码普通入口期望退役2而实际1；统一条件async方案在Bun1.4.2实际bundle报 `ReferenceError: __promiseAll is not defined`，改根为顺序await仍失败。保实际bundle执行断言后，将CLI改为条件同步绑定才通过；不把Service改成未等待的后台调用。原red、bundle失败和失败尝试分别保在 `/private/tmp/kite-retired-applications-original-red-20261013.log`、`/private/tmp/kite-retired-applications-contract-red-detail-20261013.log`、`/private/tmp/kite-retired-applications-contract-after-sequential-20261013.log`，源码／bundle修后绿在 `/private/tmp/kite-retired-applications-contract-after-sync-bindings-20261013.log`。原历史方法独立与 `dc85e80b` 比对，三项正文bytes equal，仅去两个不再适用的main-only import；证据 `/private/tmp/kite-retired-applications-historical-source-20261013.json`，不以port替代方法保全。
+
+用户本轮回复“wen端先保持现状”，按Web端保持现状收束：仅本轮未提交的旧Web package与README精确还原到 `dc85e80b`，撤回新增Web退役分支及两个新增调用样本，所有原Web／release／CI断言未改。此回复没有确认助手原文粘贴，系统剪贴板门禁保持未确认；指定用户消息的先前实际粘贴事实仍有效。自有复制预览收到stop后正常退出0／finalModelCalls3，自有Profile根已消失，唯一自有IAB标签已关闭；不继续预览、复制对照或重复追问。
+
+必要验证保持原断言与预算。收束前五完整文件33pass／619断言、actual0／22.20秒，日志 `/private/tmp/kite-retired-applications-adjacent-20261013.log`；原release smoke真实新候选 `79470b08c0e91e2f684d902bddda3ad793724013cce7355cb9be6b24f932edd5` 的entry／daemon／Web／cleanup均true，零模型调用。Web还原后两个退役完整文件再核实际范围，3pass／181断言／0fail，日志 `/private/tmp/kite-retired-applications-final-scope-20261013.log`；未变的原release tools／workspace／CI三完整文件30pass／422断言按同轮结果复用，五唯一完整文件合33pass／603断言。新增文件只对应实际普通路径、函数对象／同步语义、实际bundle失败及四private family保留要求；标准tmpdir／路径、独立HOME／USERPROFILE／AppData／XDG可三端同断言，无平台skip，当前仅实际运行macOS。私有路由核源码dispatch，API导入核源码及实际bundle，均不冒称完整旧OS能力。
+
+根与八workspace typecheck实际0，统一边界／工作区、归属、plan evidence通过；当前正式Client／Core／Store／Native／安装／版本链的生产输入和原相邻测试未改，适用既有证据复用。owner、开发入口、跨包active、Note、能力映射及测试入口同步；手册现行正式入口／数据／关闭合同保持，未制造行为无变化的diff。原运行资产、安全、SQL及维护格式未改，正常hook仍独立执行。默认发现为754完整文件／611正式作业（604并发、7独占），两个退役文件各恰一次；之前752／609完整绿色只属原冻结版本，本次未宣布754完整默认或阶段收束。
+
+本轮闭合上述普通旧Terminal／Service消费者退役及历史导入保留。依赖排序后，下一阶段仍最多五项未闭合要求：
+
+| 剩余缺口 | 实际用户入口与完整行为 | 验收条件 |
+| --- | --- | --- |
+| 剩余旧producer／显式消费者退役 | 仍保的OSS构建／安装／版本链和 `scripts/release/entrypoints/service.ts` 历史导入 | 核每个真实consumer的用途及完整替代后收束；保历史验收与原数据，不将本轮普通拒绝当作整树删除许可 |
+| 原Shell停止失败及完整资源观测 | 正式Job效果、准确停止和客户端／Service正常退出 | 解释原首停止／SIGTERM来源，出生后代／资源／句柄覆盖完整；原Bun非可调试签名的附加阻碍仍held |
+| 原生命周期RSS | 正式持续用户工作至正常退出 | 原8 outer／9点／60–168分钟／32MiB门禁和+115.203125MiB原红保持，不重复参数对照或降限 |
+| Win/Linux正式原系统资格 | 安装、真实切换、MCP连接／调用／取消／退出、维护恢复及保数据卸载 | 后续Actions／用户Windows实测；Windows Shell原合同guard保留，本轮不push／dispatch |
+| 全能力与阶段退出 | 37能力的正式入口、Web原文复制及完整阶段收束 | Web按用户保持现状，助手全文实际粘贴未确认；适用T001–T114/E01–E14、§35和阶段完整回归齐全，前述依赖闭合后才核退出 |
+
+能力映射仍37partial，Goal active；本轮只必要实施／验证／文档及已授权本地提交，无push、PR、发布或Actions触发。

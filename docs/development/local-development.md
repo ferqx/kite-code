@@ -24,6 +24,8 @@
 
 旧 `apps/kite-desktop` 的 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 已退役，直接执行原开发／Electron构建／打包／服务准备脚本也返回 `legacy_desktop_entrypoint_retired` 和退出码2。诊断给出上表的当前 Native 构建、启动和验证命令；拒绝发生在读取旧archive、打开Profile、构建或启动服务之前。旧开发Vite热更新属于[历史实现](../../apps/kite-desktop/README.md)，不将当前候选启动称为等价热更新。旧源码和制品可追溯，当前数据不会交给旧writer；全部旧authority删除与阶段退出仍按原门禁核对。
 
+旧CLI/TUI源码普通启动及旧CLI／Service `build`、旧Service普通App Server启动也已沿同一leaf退役，错误码分别为 `legacy_terminal_entrypoint_retired`、`legacy_service_entrypoint_retired`，退出2。当前替代入口在上表，不自动转发旧参数／数据。历史runCli、同步runTui／MCP判定和runKiteServiceMain仍供明确library用途，Service原私有helper保原路由；它们不恢复旧普通启动。保留范围和实际source／bundle证据归[旧CLI](../../apps/kite-cli/README.md)、[旧Service](../../apps/kite-service/README.md)。用户要求Web端保持现状，旧Web不纳入本轮退役；全部旧producer／源码最终删除仍按原阶段条件核对。
+
 `cli:dev`、`tui:dev` 和 `web:dev` 验证实际 Bun 与已构建 Service 的 SHA，通过私有 bootstrap 准入。缺资产局部失败；help/version 与严格参数拒绝先于 Profile 或 Provider I/O。开发 entry SHA 只标识所选入口，完整发行资格另行核对。
 
 开发 CLI 的 `run/resume` 消费公开 Client；`resume` 在原 Session 输入新任务，冷接续原 Run 使用明确 recovery 命令。`--skill` 只选已配置知识，Workflow 使用明确 `--activate-skill`。首次 mutation 前保存完整原申请，回执未知只查原 ID。stdin EOF 保留原待人工作；Ctrl+C 精确取消原 work。显式 `--server` 连接所选 data root 的原共享服务，不读取本地 Service 资产。`caller list` 和 `files intents` 仍先连接服务，不是离线查询。参数和退出码见[CLI 手册](../handbook/cli/commands.md)，真实 argv 证据见[CLI owner](../../apps/cli/README.md)。

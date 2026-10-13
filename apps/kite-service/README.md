@@ -1,4 +1,10 @@
-# Kite App Server
+# 重构前 App Server 与历史路由
+
+当前Service owner为 [apps/service](../service/README.md)，当前完整构建／daemon入口归[本地开发](../../docs/development/local-development.md)。旧package `build` 和旧executable的普通App Server执行已退役，在加载旧运行库前输出 `legacy_service_entrypoint_retired`／2和当前命令；不自动切Profile或重建旧服务。
+
+历史library导入保原runKiteServiceMain和同步isKiteServiceMcpStdioInvocation对象；原方法逐字保于同目录[historical implementation](src/legacy-executable.ts)。原history、process-tree、POSIX supervisor与MCP四个private helper family继续沿原精确argv与原router，普通App Server不能借混杂internal marker绕过退役。实际source／bundle入口胶水及marker控制归[完整测试](../../tests/isolated/unified-agent/retired-application-entrypoints.test.ts)，无副作用port不证明完整旧OS资格。其他历史producer、已保存制品、旧源码和原失败保出处；此项不闭合RSS／完整观测、Win/Linux或§35。
+
+下方拓扑、Store、Native client和验证描述只属历史实现；当前合同以新owner及[通用边界](../../docs/active/unified-agent-boundary.md)为准。
 
 ## 定位
 

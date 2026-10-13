@@ -11,7 +11,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/executable.ts --outdir ./dist --target bun",
+    "build": "bun run ../../scripts/development/retired-entrypoints.ts service",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

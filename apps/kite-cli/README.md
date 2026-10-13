@@ -1,4 +1,10 @@
-# kite-cli
+# 重构前 CLI/TUI 与历史导入
+
+当前终端owner为 [apps/cli](../cli/README.md)，正式命令为根 `agent`／`tui`，开发为 `cli:dev`／`tui:dev`；准确参数与Profile归[开发入口](../../docs/development/local-development.md)。本workspace保留旧实现及历史验证，下文旧App Server／Native client说明仅指重构前版本，不是现行产品合同。
+
+旧package `build` 与 `src/index.ts`／CLI／TUI executable的普通直接执行已退役：加载旧依赖前输出 `legacy_terminal_entrypoint_retired`／2和当前命令。历史library导入仍转出原runCli／runTui对象，根和subpath相等、runCli异步／runTui同步；原方法在同目录[CLI implementation](src/cli/legacy-executable.ts)与[TUI implementation](src/tui/legacy-executable.tsx)。实现和原测试API保留不表示当前旧构建或旧Profile写入许可，也不闭合整个旧树／RSS／观测／平台／阶段。
+
+实际普通调用／数据保全及source、bundle的导入胶水范围见[完整测试](../../tests/isolated/unified-agent/retired-application-entrypoints.test.ts)。原历史方法另有字节比对；port控制不冒称完整旧运行库或OS资格。以下专题保留其历史理由，当前行为以新owner与手册为准。
 
 ## 定位
 
