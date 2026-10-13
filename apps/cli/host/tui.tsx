@@ -6,7 +6,6 @@ import { TuiController, type TuiPort, TuiSession, translateTuiLabel } from '@kit
 import { Box, render, Text, useInput } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
 import {
-  type ContextOutcome,
   getCompleteContext,
   includeHistoricalResult,
   lookupContextOutcome,
@@ -282,7 +281,6 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       () => {},
     );
     const workspaceId = initial.workspace.id;
-    const contextOutcomes = new Map<string, ContextOutcome>();
     fileRecoveryOwner = openFileRecoveryJournal({
       access: profileAccess,
       acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
@@ -428,7 +426,6 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
               client,
               write: () => {},
             });
-            contextOutcomes.set(intent.request.commandId, result);
             return { intent, status: result.status, command: result.command };
           }
           if (intent.kind === 'result.include') {
@@ -438,22 +435,28 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
               intent.request,
               { client, write: () => {} },
             );
-            contextOutcomes.set(intent.request.commandId, result);
             return { intent, status: result.status, command: result.command };
           }
           const result = await submitManagement(intent, { client, write: () => {} });
           return { ...result, intent };
         },
-        lookup: async (intent) => {
+        lookup: async (intent, signal) => {
           if (intent.kind === 'context.select' || intent.kind === 'result.include') {
-            const saved = contextOutcomes.get(intent.request.commandId);
-            if (!saved) return { intent, status: 'outcome_unknown' };
-            const result = await lookupContextOutcome(saved, { client, write: () => {} });
-            contextOutcomes.set(intent.request.commandId, result);
+            const result = await lookupContextOutcome(
+              {
+                sessionId: intent.sessionId,
+                kind: intent.kind === 'context.select' ? 'rewind' : 'include',
+                ...(intent.kind === 'result.include' ? { executionId: intent.executionId } : {}),
+                request: intent.request,
+                status: 'outcome_unknown',
+                exitCode: 2,
+              },
+              { client, write: () => {}, signal },
+            );
             return { intent, status: result.status, command: result.command };
           }
           return {
-            ...(await lookupManagementOutcome(intent, { client, write: () => {} })),
+            ...(await lookupManagementOutcome(intent, { client, write: () => {}, signal })),
             intent,
           };
         },

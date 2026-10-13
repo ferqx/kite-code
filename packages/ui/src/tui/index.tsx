@@ -16,6 +16,7 @@ import { isCtrlCBatch, TuiComposer } from './composer-input';
 import { activity, type TuiController, terminalText } from './controller';
 import { TuiExecutionPanel } from './execution-panel';
 import type { FileToken } from './file-candidates';
+import { TuiManagementRequestsPanel } from './management-requests-panel';
 import { TerminalMarkdown } from './markdown';
 import { TuiMcpPanel } from './mcp-panel';
 import { isMcpSourceQuestion, sourceDecisions } from './mcp-source-question';
@@ -475,6 +476,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     if (chooser) return;
     const cancelKey = (key.ctrl && input === 'c') || (!state.panel && isCtrlCBatch(input));
     if (state.panel === 'recovery') return;
+    if (state.panel === 'management_requests') return;
     if (state.panel === 'executions') return;
     if (state.panel === 'mcp') return;
     if (state.panel === 'skills' || state.panel === 'theme' || state.panel === 'language') return;
@@ -540,6 +542,8 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       else if (key.upArrow) setPanelIndex((i) => Math.max(0, i - 1));
       else if (key.downArrow)
         setPanelIndex((i) => Math.min(Math.max(0, (items?.length ?? 0) - 1), i + 1));
+      else if (state.panel === 'context' && !key.ctrl && !key.meta && input.toLowerCase() === 'k')
+        controller.openManagementRequests();
       else if (state.panel === 'context' && input === 'i') {
         const item = state.snapshot?.view.executions.filter((e) => e.resultRevision !== null)[
           panelIndex
@@ -781,6 +785,8 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   if (state.panel === 'status') return withHistory(<TuiStatusPanel controller={controller} />);
   if (state.panel === 'recovery')
     return withHistory(<TuiRecoveryPanel key={state.sessionId} controller={controller} />);
+  if (state.panel === 'management_requests')
+    return withHistory(<TuiManagementRequestsPanel controller={controller} />);
   if (state.panel === 'skills')
     return withHistory(<TuiSkillsPanel key={state.sessionId} controller={controller} />);
   return (
@@ -920,6 +926,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           <Text>
             {t('Current selected Context projection, not actual Model input Inspector; Esc close')}
           </Text>
+          <Text>{t('K: choose an original Context/Session request')}</Text>
           {state.context ? (
             <>
               <Text>

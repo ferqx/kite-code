@@ -34,6 +34,7 @@ export function NativeRecoveryView({
     setFacts(undefined);
     setConfirm(false);
     setBusy(false);
+    setError('');
     if (read.current) {
       void bridge
         .request({ method: 'recovery.close', generation, readId: read.current })

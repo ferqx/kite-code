@@ -5850,3 +5850,27 @@ Core 的 `planExecution` 现在在原事务从实际直属 Run 父的当前 refs
 5. **最终正式消费者与旧路径退役、§35完整资格。** 全部适用T001—T114/E01—E14与真实升级/恢复/制品通过后收束；旧producer有限核对不代全仓迁移审查，阶段收束仍须完整回归。
 
 新增闭合的是当前 TUI 工作区模型设置的完整原结果查回与展示归属；没有新增正式caller切换或旧生产树删除。37能力仍partial、wholeV13=false／phaseExit=false，Goal active；RSS、完整观测和后置平台门禁保持。
+
+## 2026-10-13：Context/Session 原申请正式读取与恢复面板归属
+
+状态：partial；基线为正常本地提交 `85208055`，开始时 clean。核对实际管理 map／Host 与手册后，确认 Context/Session 原申请虽能由 controller 查询，正式键盘却没有准确原 ID 的选择入口，原测试直接调用 `lookupManagement` 漏掉用户操作。现由正式 Terminal 与开发 TUI 共用 `/context requests` 和 Context K 的 [原申请面板](../../packages/ui/src/tui/management-requests-panel.tsx)。列表保留本 controller 固定 Store 下全部原 Session 的准确 ID、kind、状态与完整原 intent；K/Enter 只查原 GET，V 阅读原申请，Ctrl+C/Esc/换选项/切 Session 只关闭所属读取。查询不自动 Fork 导航、删除后继、新建、重新提交或取消原工作；原 chooser 和提交路径的已授权行为保持。原 Command 回执与压缩 Run 终态分开，未知查询单独呈现，已核终态不因同 ID 旧 POST 或随后未核读取降级。
+
+[Host](../../apps/cli/host/tui.tsx)直接从完整原 intent 构造 Context select／Include 查询输入并转交 signal，不再维护仅在 POST 回复后填充的重复 `contextOutcomes` map；尚未收到回复也可原 GET。原 [Context helper](../../apps/cli/src/context.ts)与[管理 helper](../../apps/cli/src/session-management.ts)继续核 Store/Session/kind/targetRun 与准确维护 Run，signal 实传 Command/Run。没有新增后端 authority、公共 API、存储格式或跨进程 journal。产品操作归 [Context 指南](../handbook/clients/tui/guides/context-and-compaction.md)，本地记录与边界归 [TUI owner](../../packages/ui/src/tui/README.md)、[CLI owner](../../apps/cli/README.md)和 [active](../active/unified-agent-boundary.md)；UI 根说明和共享 Context/Session、恢复合同核对后未改变。
+
+独立有界测试仅新增 [实际 Ink 键盘文件](../../packages/ui/test/tui/management-requests.test.tsx)。旧 production 的准确红为0pass/3fail/5 expects，日志 `/private/tmp/kite-tui-management-requests-red-20261013.log`；首个夹具在清 draft 后未等待 Composer 同步而混入旧正文的初始失败仍保存，未作为 parser 证据。原完整 PTY 随后真实发现新 K handler 误接 Ctrl+K，原 reset failed 断言失败；完整红日志 `/private/tmp/kite-management-capability-final-tui-management-host-20261013.log` SHA `4dbd5a9ba15831c77c4034e2bd51776ad3a5b0620349f5691792ee18bec11f16` 与隔离库/cleanup 证据保留，原 Service dead，不把该异常收尾称正常。新增修饰符断言实际2pass/1fail/25 expects后，仅限制普通 K，原 driver、所有原断言和40秒/10秒等期限均未改。最后核对新增查询状态时，实际2pass/1fail/43 expects证明未知 GET 被保留的 applied 遮住；修后单独标当前未核实、保原终态，并隐藏未核 Command 回执，不把失联解释为刷新成功。
+
+Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-recovery.tsx)切 scope 清 facts/confirm/busy、取消旧 read，却未清已显示的旧 error。现在同时清旧错误，原 saved records、epoch、Main/IPC 与提交路径不变。[真实 ReactDOM](../../apps/desktop/test/isolated/native-recovery-scope-dom.test.tsx)准确旧 production 1pass/1fail/13 expects，修后2pass/21 expects：A 当前 Prepare 失败→B 清旧 alert/保 A 原记录→B 当前错误仍显示；held A 读取切 B 仅幂等关闭准确原 read ID，迟回无 facts/refresh/submit/cancel。夹具最初误猜同 ID close 次数，后按实际幂等合同只核至少一次且全部同原 ID；目标 alert 断言未放宽。来源与范围归 [Desktop owner](../../apps/desktop/README.md)，不代证自然 HTTP 故障或整 Native 恢复资格。
+
+用户截图 `native_draining` 的旧退出误报在 `e0331890` 已修复，本轮只复核未变的 Main/preload/bridge/renderer 与原窗口证据，不重复窗口：普通退出实际五次 draining 拒绝，quitDialogs/quitPageErrors/observation errors均为空，40效果/0取消，Electron及原 Service PID38512 code0／无signal。receipt `/private/tmp/kite-nested-native-quit-20261013.json` SHA `79246bf50d96b805dcb9e3986852a1cb0c2c6604f9c655540bcd1d28e3921231` 与其原日志一致；当前源码构建的窗口有效，不证明截图安装包已含修复。退出测试现在核实际用户弹窗，不能只靠 Run completed 或进程退出；当前真实错误仍保留。
+
+本轮最终35个完整相关文件、7个按原隔离域分别执行的组，全 actual0／307pass／2778 Bun expects：26 TUI281/2418，4 CLI Context7/72，实际 Session/Context HTTP1/130，共享管理7/69，原完整管理 PTY1/19（11.644秒、两次正常 Host/Service退出），Native Main恢复8/49和新增ReactDOM2/21。freeze `/private/tmp/kite-management-capability-final-after-query-state-freeze-20261013.json` SHA `5f288ba95894b8c577de41356622bccd90345702bfb634e736bd28a21d756c93`，result `/private/tmp/kite-management-capability-final-after-query-state-result-20261013.json` SHA `65a2d6aa2bac1c80e25621791b39de02a02f79397664f577487d6256bbabfa31`，3889代码/配置及5运行资产终态零漂移。原默认分类/并发4、断言、预算均保留；必要局部验证单Bun并发1未改默认。完整8 workspace类型、静态边界/工作区/API、test ownership、owned格式及文档检查通过，正常hook另执行；局部当前范围不授原完整默认、平台或阶段退出资格。
+
+按依赖排序的最多五项退出缺口：
+
+1. **Context/Session正式原申请读取与Native恢复展示归属：本轮闭合上述有限能力。** 准确原 ID、完整请求、取消域、当前未知与已核终态分开；实际键盘和原管理/Host回归保留，不扩冷 journal或整阶段资格。
+2. **普通 Shell/Tool/Job 停止和正常退出的完整可信观测。** resources/handles、出生后代和准确 cleanup 来源仍缺，有限 FD/PID或Bun空stub不代证明。用户现已明确允许本次 Instruments 登录会话授权；先正常提交本切片，再对准确本任务Bun做原五秒Allocations有界诊断，由用户在macOS提示完成授权，不改变永久DevToolsSecurity。许可不等于系统已授予或观测已可信。
+3. **正式客户端原完整 lifecycle RSS。** 原八outer/九点/60—168分钟、32MiB及实际 +115.203125MiB失败保持；可信观测前置仍未闭合，不重复参数对照。
+4. **Win/Linux正式安装、真实版本切换、完整MCP、维护恢复与保数据卸载。** 后续Actions/用户Windows取得实际结果，保原Windows Shell guard；本轮不dispatch、push或授平台资格。
+5. **最终正式消费者、旧路径退役与§35完整资格。** 适用T001—T114/E01—E14、真实升级/恢复/制品通过后阶段收束须完整回归；本片无新增caller架构切换或旧树删除。
+
+按 document-before-commit 核 iteration_complete/stage/commit，只做已授权本地提交。新增闭合为上述正式原查询和Native旧错误归属；37能力仍partial、wholeV13=false／phaseExit=false，Goal active。后续官方授权/Responses和未证Codex缓存复用的原范围不变。

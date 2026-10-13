@@ -458,6 +458,8 @@ profile 生命周期锁接入后的最终完整 Native/共享权限组合实测�
 
 Native 显式恢复由 [main owner](electron/recovery.ts) 与 [renderer 面板](src/native-recovery.tsx) 实施有限 `prepare/submit/lookup/close` IPC。用户明确输入原 Run 或原 `job.report` Command ID；interrupt 必须明确勾选确认。main 读取实际根 Session、Store 与原记录，冻结原 ID 和原 Run 的 `originCommandId`，生成恢复 Command ID，并调用公开 SDK 的 `resumeRun`、`resumeJobReport` 或 `recoverSession`。renderer 只有 DTO 与不透明 observation/read ID；它不拥有 profile、token、Runtime 或 execution owner generation，也不从窗口中的有限 Run 列表推断恢复目标。纯 decoder 与原结果 Run 的 Store/Session/origin 核对共同验证回执；`resumed` 表示已核实恢复受理与原绑定，Run 完成仍须读取实际状态。
 
+面板 scope 切换同时清除旧恢复读取、确认、busy 和错误，保留来源明确的已保存原申请；A 的已显示准备错误不能留在 B 的标题下。现有 epoch 隔离迟回，关闭原 read ID 只结束读取，不提交或取消恢复。新增 [实际 ReactDOM 回归](test/isolated/native-recovery-scope-dom.test.tsx)在旧 production 下核真实失败，再核切 A→B 清旧 alert、保 saved originals、B 当前失败继续显示；另核切换关闭准确 held read ID、迟回零事实/刷新/submit/cancel。它不改变 Main、私有格式或退出生命周期，也不代证自然 HTTP 故障、截图安装包版本或整窗口资格。
+
 [私有 UI 数据库](electron/private-data.ts) schema 2 增加有限 [恢复意图 journal](electron/recovery-journal.ts)，在现有真实 profile 生命周期锁、私有路径检查、`synchronous=FULL` 与 `BEGIN IMMEDIATE` 边界内先保存原 Store/Session/target/original Command 及 main 生成的恢复 Command，再发 POST。schema 1 自动迁移保留原草稿与会话创建意图；未知 schema、损坏文件或坏意图不回退空库。journal 是 UI 请求身份记录，不是 Service receipt 或执行权限。最多 128 项未决恢复；当前进程最多 128 项意图，超界拒绝且不丢弃 unknown。同一 observation 共享原 Promise/Command，一次 POST；丢失或坏回执保留 `outcome_unknown`，不自动重发或自动查询。独立 unknown/accepted 阻止同一实际 Store/Session 的新恢复提交，其他 Session 的意图保持独立。
 
 Native 重开或 main SIGKILL 后，持久 `submitting` 转为 unknown，未决原 ID 只通过显式 `lookup` 做原 Command GET。关闭读取、切换或迟到回应只释放该读租约；不会取消 Run、重发恢复或覆盖独立 unknown。查询已 applied receipt 不重新安装另一次进程崩溃丢失的热绑定；若又发生真实 orphan 边界，必须先核实原意图，再由用户 prepare/submit 新的明确恢复。已知终态不能被迟到读取降回 unknown；未知副作用仍由 Service 原闭包保护，interrupt 回执里的 unknown Execution 不被宣称完成。

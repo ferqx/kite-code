@@ -43,6 +43,12 @@
 
 Context 有独立读取取消域、固定选择与双游标，明确是当前投影而非历史 Model 输入。面板关闭只 abort 读取；实际 Fork 选择真实消息 ID/seq 或 `0` 空边界，`/rewind` 三范围 Files 端口与操作见下文，Include 仅引用已观测原 Execution/result revision，活动时封存准确 Run ID。压缩 Command 受理不等于完成，reset 前读取原 compression ID；缺可信 preflight 失败不改旧点。delete_requested 说明 stop 未确认，成功 Fork 明示 omitted extension state；未确认创建/失败不猜新 Session。普通维护期间输入保存为准确原 afterRunId 的 follow-up。实际效果和终态仍由宿主公共 Client/Core 决定。
 
+正式 `/context requests` 与 Context 内 K 使用 [原申请面板](management-requests-panel.tsx)，从已有 128 项 map 列出本 controller 固定 Store 的全部原管理记录，不以当前 Session 重建请求。上下选择准确原 ID，K/Enter 只 GET，V 查看完整冻结申请；查询不会调用删除后继、Fork 导航、新建或业务取消。独立 managementRead 的身份、signal、generation、当前面板与选中 ID 同时成立才更新查询事实；Ctrl+C、Esc、换选项和切 Session 只撤销所属 GET。保存 POST 的原结果仍带来源 Session，已核 applied/failed/delete_requested 不被同 ID 旧回复或未知读取降级。Command 回执与压缩 Run 的实际完成分开；Host 查询从已保存完整 intent 构造输入，不依赖首次 POST 回应缓存，并将相同 signal 传到 Command/Run GET。本次只闭合现有 controller 生命周期内的正式入口，不新增冷启动 journal。
+
+[实际 Ink 原申请测试](../../test/tui/management-requests.test.tsx)核 slash 与 Context K、跨原 Session 精确 GET、零新写/导航/Model/取消/建会话、读取取消与迟回隔离，以及 held 同 ID POST 不降级已核终态。原 [管理测试](../../test/tui/management.test.tsx)和 [选择器测试](../../test/tui/session-chooser.test.tsx)保全部断言；真实 HTTP/维护 Run 与原宿主 PTY 的范围由 [CLI owner](../../../../apps/cli/README.md)维护。
+
+本次查询状态独立于原已核终态：helper 返回 outcome_unknown 时，保留原 map 的终态并明确显示当前未核实，不显示未核回执为已核原 Command。K 仅接普通字母，Ctrl+K 仍属于 Host 原有查询；实际 Ink 与原 PTY 回归分别保留修复前失败及修复后断言，不靠改变原 reset 失败文案或期限收束。
+
 恢复后的 `/context` 上下选择与 `i` 仍调用原 `includeExecution`：snapshot 和 view 核宿主当前 Store、所选 Session，原结果保非空 originStore、准确 Session/revision 与终态，不把旧出处要求为当前准入。新的 Include Command 绑定当前 Store/selection；idle 不带 targetRun，不创建 Run，后续明确新任务才消费；active 继续封存准确原 Run 并由 Core 等待安全检查点。管理 root/未知原查询、stop 与自动消费边界保持。
 
 [真实恢复 Include](../../../../tests/isolated/unified-agent/restored-tui-context-include.test.tsx)使用公开 A→B 备份恢复、实际 Ink `/context`/`i`、CLI 正式 `includeHistoricalResult` 和真实 Service/Core，核一次新 Command 与完整原 source、idle 零 Model、明确新 Run 的唯一低信任结果、两次冷只读及旧效果一次。新增单元核 idle/active 准确 envelope、当前准入和错误 Session 零写；原完整管理分片与 Core active Include 文件保断言/预算。当前证据及 installed PTY/阶段资格限制归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-context-明确纳入原结果)。

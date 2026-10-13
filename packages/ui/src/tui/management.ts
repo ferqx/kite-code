@@ -41,7 +41,7 @@ export interface TuiManagementPort {
     signal: AbortSignal,
   ): Promise<SelectedContextPage>;
   manage(intent: TuiManagementIntent): Promise<TuiManagementOutcome>;
-  lookup(intent: TuiManagementIntent): Promise<TuiManagementOutcome>;
+  lookup(intent: TuiManagementIntent, signal?: AbortSignal): Promise<TuiManagementOutcome>;
   newSession(): Promise<string>;
   quit(): void;
 }

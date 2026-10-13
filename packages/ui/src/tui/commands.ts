@@ -13,6 +13,7 @@ export type TuiCommand =
         | 'recovery'
         | 'exit'
         | 'context'
+        | 'management_requests'
         | 'rewind'
         | 'status'
         | 'skills'
@@ -34,6 +35,8 @@ export function parseTuiCommand(text: string): TuiCommand {
   if (!parts) throw new Error('invalid_tui_command');
   const name = parts[1]!.toLowerCase(),
     tail = parts[2]?.trim() ?? '';
+  if (name === 'context' && tail.toLowerCase() === 'requests')
+    return { kind: 'management_requests' };
   const fixed: Record<string, TuiCommand['kind']> = {
     theme: 'theme',
     language: 'language',
@@ -135,6 +138,7 @@ export const fixedTuiCommands = [
   '/recovery',
   '/exit',
   '/context',
+  '/context requests',
   '/rewind',
   '/status',
   '/skills',

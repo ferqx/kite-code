@@ -122,6 +122,8 @@ steer 定位原活动 Run 的安全检查点，follow-up 保留独立命令及�
 
 Context 只读准入核当前 Store，`resultSources.originStoreId` 则保留真实原 Execution 的出处，离线恢复后两者可以不同。Core 在同一读事务核当前 Session／selection／高水位，再核来源的准确 Execution／revision／origin；TUI 与 Web 聚合沿这个合同保留完整结果，不重标来源或扩大执行权。原双游标、其他 Session、重复记录和选择／上界漂移守卫保持，真实恢复与消费者范围见 [CLI owner](../../apps/cli/README.md)和[Web owner](../../apps/web/README.md#按需只读诊断)。
 
+正式 TUI 的 Context／Session 原申请查询消费已封存完整 intent，固定原 Store、Session、Command 与请求体，不依赖当前选择或首次 POST 回复缓存。UI 关闭、换选择或切会话只撤销该 GET 的读取和展示资格；公共 Client 的原 Command／维护 Run 身份校验保持。只读结果不触发 Fork 导航、删除后继或业务取消，也不授予跨 Store 执行权。当前入口、生命周期内记录与验证范围归 [TUI owner](../../packages/ui/src/tui/README.md)和[CLI owner](../../apps/cli/README.md)，不扩展公共 API、私有存储格式或冷启动发现承诺。
+
 恢复后的显式 `result.include` 是当前 Store 的新上下文命令，原结果出处无需等于当前准入。正式 Native 从当前观察核准确已终态 suppressed Job、revision、Session／Workspace／selection 和活动目标；正式 TUI 核当前 snapshot/view 的 Store 与所选 Session、原 Execution/终态/revision 和准确 active Run。两者沿公共 Client 由 Core 写入事务核原 subject、delivery target Session；结果引用保原 Store，idle 只登记来源，活动受理仍等待原 checkpoint。它不改原 delivery、不重放 Job，自动 consume 的当前 origin／owner／selection／stop 限制保持。当前消费者和真实恢复范围分别归 [Native owner](../../apps/desktop/README.md)与[TUI owner](../../packages/ui/src/tui/README.md)。
 
 

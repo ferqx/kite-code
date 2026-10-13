@@ -331,6 +331,22 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   revision: '修订',
   'Target Run': '目标 Run',
   'Original management': '原管理操作',
+  'Original management requests': '原上下文与会话申请',
+  '↑/↓ choose · K/Enter query original · V request · Ctrl+C stop read · Esc close':
+    '↑/↓ 选择 · K/Enter 查询原结果 · V 查看原申请 · Ctrl+C 停止读取 · Esc 关闭',
+  'No saved management requests in this client': '当前客户端尚无保存的上下文与会话申请',
+  'Original Command receipt': '原命令回执',
+  'Original receipt accepted/queued; not dispatch or maintenance completion':
+    '原回执已受理或排队；尚不代表派发或压缩维护完成',
+  'Directory hidden; stop is unconfirmed; workspace files unchanged':
+    '已隐藏会话目录；停止仍未确认；工作区文件未改变',
+  'Fork omitted extension state; authorization is not inherited':
+    '分支省略了扩展状态；不会继承授权',
+  'Reading the selected original request': '正在读取所选原申请',
+  'Original result unverified; saved facts retained': '本次原结果未核实；保留已保存的原事实',
+  'Original request read cancelled; work unchanged': '已停止本次原申请读取；原工作继续',
+  'Original request query failed:': '原申请查询失败：',
+  'K: choose an original Context/Session request': 'K：选择上下文或会话的原申请',
   Original: '原操作',
   '(receipt is not dispatch success)': '（回执不代表派发成功）',
   'Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command':

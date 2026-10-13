@@ -193,6 +193,12 @@ export interface TuiState {
   preferenceError?: string;
   preferenceSaved?: boolean;
   management?: TuiManagementOutcome;
+  managementRequests?: {
+    saved: readonly TuiManagementOutcome[];
+    selectedId?: string;
+    phase: 'ready' | 'reading' | 'cancelled' | 'unknown';
+    error?: string;
+  };
   sessionDeletion?: TuiSessionDeletion;
   recovery?: TuiRecoveryOutcome;
   context?: import('@kite-ai/client').SelectedContextPage;
@@ -206,6 +212,7 @@ export interface TuiState {
   };
   panel?:
     | 'context'
+    | 'management_requests'
     | 'rewind'
     | 'permissions'
     | 'models'
@@ -446,6 +453,7 @@ export class TuiController {
   private unknownIntents = new Map<string, TuiIntent>();
   private cancelled = new Set<string>();
   private managementIntents = new Map<string, TuiManagementOutcome>();
+  private managementRead?: AbortController;
   private handledDeletions = new Set<string>();
   private recoveryRestoring = false;
   private recoveryRestoreFailed = false;
@@ -858,6 +866,7 @@ export class TuiController {
       loadedOutputBodies: same ? this.value.loadedOutputBodies : new Map(),
       attachment: same ? this.value.attachment : undefined,
       context: same ? this.value.context : undefined,
+      managementRequests: same ? this.value.managementRequests : undefined,
       fileRecovery: same ? this.value.fileRecovery : undefined,
       models: same ? this.value.models : undefined,
       modelOutcome: same ? this.value.modelOutcome : undefined,
@@ -1226,8 +1235,10 @@ export class TuiController {
     this.mcpSourceLookupRead?.abort();
     this.permissionRead?.abort();
     this.contextRead?.abort();
+    this.managementRead?.abort();
     this.publish({
       panel: undefined,
+      managementRequests: undefined,
       chooserRequested: false,
       mcpReconnectionOpen: false,
       mcpReconnectionObservation: undefined,
@@ -1738,14 +1749,119 @@ export class TuiController {
     }
     await this.performManagement(saved, this.generation);
   }
+  /** A Command/maintenance Run terminal cannot regress to a lost reply of the same original. */
+  private saveManagement(result: TuiManagementOutcome) {
+    const id = result.intent.request.commandId,
+      prior = this.managementIntents.get(id),
+      saved =
+        prior && ['applied', 'failed', 'delete_requested'].includes(prior.status)
+          ? prior
+          : freezeIntent(structuredClone(result));
+    this.managementIntents.set(id, saved);
+    return saved;
+  }
+  private publishManagement(result: TuiManagementOutcome) {
+    const saved = this.saveManagement(result),
+      requests = this.value.managementRequests;
+    this.publish({
+      management: saved,
+      ...(requests
+        ? { managementRequests: { ...requests, saved: [...this.managementIntents.values()] } }
+        : {}),
+    });
+  }
+  openManagementRequests(commandId?: string) {
+    if (!this.port.management || this.disposed) return;
+    this.contextRead?.abort();
+    this.managementRead?.abort();
+    const saved = [...this.managementIntents.values()],
+      selected =
+        saved.find((row) => row.intent.request.commandId === commandId) ??
+        saved.find((row) => ['outcome_unknown', 'accepted', 'queued'].includes(row.status)) ??
+        saved[0];
+    this.publish({
+      panel: 'management_requests',
+      managementRequests: {
+        saved,
+        selectedId: selected?.intent.request.commandId,
+        phase: 'ready',
+      },
+    });
+  }
+  selectManagementRequest(commandId: string) {
+    const requests = this.value.managementRequests;
+    if (
+      this.disposed ||
+      this.value.panel !== 'management_requests' ||
+      !requests ||
+      !this.managementIntents.has(commandId) ||
+      requests.selectedId === commandId
+    )
+      return;
+    this.managementRead?.abort();
+    this.publish({
+      managementRequests: { ...requests, selectedId: commandId, phase: 'ready', error: undefined },
+    });
+  }
+  cancelManagementRead() {
+    this.managementRead?.abort();
+    const requests = this.value.managementRequests;
+    if (this.value.panel === 'management_requests' && requests?.phase === 'reading')
+      this.publish({ managementRequests: { ...requests, phase: 'cancelled', error: undefined } });
+  }
+  /** Viewing an original result never selects/forks/deletes a Session or cancels work. */
+  async lookupManagementRequest() {
+    const requests = this.value.managementRequests,
+      port = this.port.management,
+      saved = requests?.selectedId && this.managementIntents.get(requests.selectedId);
+    if (!saved || !port || this.disposed || this.value.panel !== 'management_requests') return;
+    this.managementRead?.abort();
+    const read = this.reading(),
+      generation = this.generation,
+      commandId = saved.intent.request.commandId;
+    this.managementRead = read;
+    const current = () =>
+      !this.disposed &&
+      !read.signal.aborted &&
+      this.managementRead === read &&
+      generation === this.generation &&
+      this.value.panel === 'management_requests' &&
+      this.value.managementRequests?.selectedId === commandId;
+    this.publish({ managementRequests: { ...requests!, phase: 'reading', error: undefined } });
+    try {
+      const outcome = await port.lookup(structuredClone(saved.intent), read.signal);
+      if (!current()) return;
+      if (JSON.stringify(outcome.intent) !== JSON.stringify(saved.intent))
+        throw new Error('management_identity_mismatch');
+      const result = this.saveManagement(outcome);
+      this.publish({
+        management: result,
+        managementRequests: {
+          saved: [...this.managementIntents.values()],
+          selectedId: commandId,
+          phase: outcome.status === 'outcome_unknown' ? 'unknown' : 'ready',
+        },
+      });
+    } catch (error) {
+      if (current())
+        this.publish({
+          managementRequests: {
+            ...this.value.managementRequests!,
+            phase: 'ready',
+            error: error instanceof Error ? error.message : 'management_query_failed',
+          },
+        });
+    } finally {
+      this.reads.delete(read);
+    }
+  }
   private async performManagement(saved: TuiManagementIntent, generation: number) {
     if (this.managementIntents.size >= 128) {
       this.publish({ error: 'management_intent_limit' });
       return;
     }
     const pending: TuiManagementOutcome = { intent: saved, status: 'outcome_unknown' };
-    this.managementIntents.set(saved.request.commandId, pending);
-    this.publish({ management: pending });
+    this.publishManagement(pending);
     let result: TuiManagementOutcome;
     try {
       result = await this.port.management!.manage(saved);
@@ -1753,10 +1869,14 @@ export class TuiController {
       result = pending;
     }
     if (JSON.stringify(result.intent) !== JSON.stringify(saved)) result = pending;
-    this.managementIntents.set(saved.request.commandId, result);
-    this.publish({ management: result });
+    this.publishManagement(result);
     await this.finishSessionDeletion(result, generation);
-    if (!this.disposed && this.value.sessionId === saved.sessionId && result.status === 'applied') {
+    if (
+      !this.disposed &&
+      generation === this.generation &&
+      this.value.sessionId === saved.sessionId &&
+      result.status === 'applied'
+    ) {
       if (saved.kind === 'session.fork') {
         await this.list();
         if (generation === this.generation && this.value.sessionId === saved.sessionId)
@@ -1792,6 +1912,7 @@ export class TuiController {
   async lookupManagement(commandId?: string) {
     const saved = commandId ? this.managementIntents.get(commandId) : this.value.management;
     if (!saved || !this.port.management || this.disposed) return;
+    const generation = this.generation;
     let result: TuiManagementOutcome;
     try {
       result = await this.port.management.lookup(structuredClone(saved.intent));
@@ -1799,10 +1920,13 @@ export class TuiController {
       return;
     }
     if (JSON.stringify(result.intent) !== JSON.stringify(saved.intent)) return;
-    this.managementIntents.set(saved.intent.request.commandId, result);
-    this.publish({ management: result });
-    await this.finishSessionDeletion(result, this.generation);
-    if (this.value.sessionId === saved.intent.sessionId && result.status === 'applied')
+    this.publishManagement(result);
+    await this.finishSessionDeletion(result, generation);
+    if (
+      generation === this.generation &&
+      this.value.sessionId === saved.intent.sessionId &&
+      result.status === 'applied'
+    )
       await this.select(saved.intent.sessionId);
   }
   closeSessionDeletion() {
@@ -4255,6 +4379,11 @@ export class TuiController {
       consumeCommand();
       return;
     }
+    if (command.kind === 'management_requests') {
+      this.openManagementRequests();
+      consumeCommand();
+      return;
+    }
     if (command.kind === 'theme' || command.kind === 'language') {
       this.openPreferences(command.kind);
       consumeCommand();
@@ -4268,7 +4397,7 @@ export class TuiController {
     if (command.kind === 'help') {
       this.publish({
         notice:
-          '/plan [task] /background [stop|output|child <Job ID>] /theme /language /model /effort /new /resume /drafts /draft <id> /permissions /status /skills /mcp /clear /export /context /rewind /compact [focus] /compact reset /session rename <title> /session delete confirm /session fork <title> /exit',
+          '/plan [task] /background [stop|output|child <Job ID>] /theme /language /model /effort /new /resume /drafts /draft <id> /permissions /status /skills /mcp /clear /export /context /context requests /rewind /compact [focus] /compact reset /session rename <title> /session delete confirm /session fork <title> /exit',
       });
       consumeCommand();
       return;
