@@ -456,6 +456,16 @@ function shellJob(
               ) &&
               typeof frame.groupStopped === 'boolean'
             ) {
+              const hasFailure =
+                frame.failureCode !== undefined || frame.failureErrno !== undefined;
+              if (
+                hasFailure &&
+                (!['failed', 'outcome_unknown'].includes(String(frame.outcome)) ||
+                  typeof frame.failureCode !== 'string' ||
+                  !/^[a-zA-Z0-9_]{1,128}$/.test(frame.failureCode) ||
+                  (frame.failureErrno !== null && !Number.isSafeInteger(frame.failureErrno)))
+              )
+                throw Error('invalid_private_shell_failure');
               if (configuration.supervision && state.pendingTerminal) continue;
               if (
                 configuration.supervision &&
@@ -471,6 +481,12 @@ function shellJob(
                   processGroupId: state.groupId ?? null,
                   groupStopped: frame.groupStopped,
                   forced: frame.forced === true,
+                  ...(hasFailure
+                    ? {
+                        supervisorFailure: frame.failureCode as string,
+                        supervisorErrno: frame.failureErrno as number | null,
+                      }
+                    : {}),
                   ...(state.coalitionId
                     ? { coalitionId: state.coalitionId, processTreeStopped: frame.groupStopped }
                     : {}),

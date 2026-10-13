@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import {
   type LaunchIdentity,
   removeRuntimeTemp,
@@ -46,6 +47,7 @@ let closing: Promise<void> | undefined;
 let parentGone = false;
 let childExit: Promise<number | null> | undefined;
 let outputDrain: Promise<unknown> | undefined;
+let outputFailure: { code: string; errno: number | null } | undefined;
 const pendingSends = new Set<() => void>();
 
 function disconnectParent(): void {
@@ -158,7 +160,7 @@ async function terminateGroup(pid: number): Promise<{ confirmed: boolean; forced
   }
   return { confirmed: await waitGroup(pid, 2000), forced: true };
 }
-async function drain(stream: NodeJS.ReadableStream, name: 'stdout' | 'stderr'): Promise<void> {
+async function drain(stream: Readable, name: 'stdout' | 'stderr'): Promise<void> {
   const decoder = new TextDecoder();
   async function output(text: string) {
     let piece = '';
@@ -175,9 +177,13 @@ async function drain(stream: NodeJS.ReadableStream, name: 'stdout' | 'stderr'): 
     }
     if (piece) await send({ type: 'output', stream: name, content: piece });
   }
-  for await (const chunk of stream)
-    await output(decoder.decode(chunk as Uint8Array, { stream: true }));
-  await output(decoder.decode());
+  try {
+    for await (const chunk of stream)
+      await output(decoder.decode(chunk as Uint8Array, { stream: true }));
+    await output(decoder.decode());
+  } finally {
+    stream.destroy();
+  }
 }
 async function start(): Promise<void> {
   const input = request!;
@@ -275,14 +281,25 @@ async function start(): Promise<void> {
           }
         : {}),
     });
-    const outputs = Promise.all([
-      drain(processChild.stdout!, 'stdout'),
-      drain(processChild.stderr!, 'stderr'),
-    ]);
-    outputDrain = outputs;
-    void outputs.catch(() => {
-      void stop();
-    });
+    const drains = [drain(processChild.stdout!, 'stdout'), drain(processChild.stderr!, 'stderr')];
+    // A failed stream must not abandon the other owned drain or masquerade as
+    // a user cancellation. Keep the first failure through the shared cleanup.
+    outputDrain = Promise.allSettled(
+      drains.map((pending) =>
+        pending.catch((error: unknown) => {
+          const code =
+            error instanceof Error && /^[a-zA-Z0-9_]{1,128}$/.test(error.message)
+              ? error.message
+              : 'shell_output_read_failed';
+          const errno = (error as { errno?: unknown } | null)?.errno;
+          outputFailure ??= {
+            code,
+            errno: typeof errno === 'number' && Number.isSafeInteger(errno) ? errno : null,
+          };
+          void close('failed', null, true);
+        }),
+      ),
+    );
     const code = await childExit;
     // A shell can exit with background descendants. Its terminal includes group cleanup, not pid-only exit.
     await close(code === 0 ? 'succeeded' : 'failed', code);
@@ -339,10 +356,13 @@ function close(
     }
     await send({
       type: 'terminal',
-      outcome: stopped.confirmed ? outcome : 'outcome_unknown',
+      outcome: stopped.confirmed ? (outputFailure ? 'failed' : outcome) : 'outcome_unknown',
       exitCode,
       groupStopped: stopped.confirmed,
       forced: stopped.forced,
+      ...(outputFailure
+        ? { failureCode: outputFailure.code, failureErrno: outputFailure.errno }
+        : {}),
       ...(coalition && ownedChild
         ? {
             coalitionId: coalition.id,
@@ -375,7 +395,7 @@ function close(
         process.exit(125);
       }
     }
-    process.exit(stopped.confirmed && !helperFailure ? 0 : 125);
+    process.exit(stopped.confirmed && !helperFailure && !outputFailure ? 0 : 125);
   })();
   return closing;
 }
