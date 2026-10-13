@@ -14,6 +14,8 @@ CLI采用条件同步加载。首次统一条件async方案在Bun1.4.2真实bund
 
 此决定扩展[Desktop普通入口退役](../simplification/2026-10-13-legacy-desktop-entrypoints.md)的leaf，不反转其理由。历史源码、明确library调用、私有helper和已保存制品保留出处；这些保留项不成为当前正式入口或新数据写入许可。
 
+随后沿同一边界收束旧OSS普通build／verify／installer生命周期／smoke：四个脚本普通执行只进release诊断分支。installer非main取得原五函数、常量、类型，原方法同目录保全，同步语义和prefix根／OS home不变；原smoke整脚本另保明确historical qualification，原producer库及样本不改。当前owner和完整证据归[发布边界](../../../../docs/active/release-control.md#历史-oss-工具与明确验收)。此决定只消除普通旧调用者，未将历史库标为无消费者或全树已删。
+
 ## Alternatives considered
 
 - 保留静态re-export，只在main末尾报退役：拒绝。旧依赖先加载，缺旧依赖时诊断不能到达，且可能先进入旧初始化。
@@ -21,6 +23,7 @@ CLI采用条件同步加载。首次统一条件async方案在Bun1.4.2真实bund
 - 所有分支条件async加载：原实现已尝试，真实bundle失败，不删除或排除其断言。
 - 普通入口提前拒绝、library保原实现对象，CLI同步加载而Service保原异步／等待：采用，实际source与bundle的入口胶水通过。
 - 直接删除整个旧运行库：拒绝。完整资源／RSS／平台和其他旧consumer的退出条件尚未闭合，历史用途仍需单独核对。
+- 在OSS producer／installer导出内统一拒绝，或删除原smoke检查：拒绝。历史样本仍实际调用这些原方法，原检查和完整清理有保留用途，普通main可在旧加载前独立拒绝。
 
 ## Consequences
 

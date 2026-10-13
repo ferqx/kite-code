@@ -1,4 +1,4 @@
-type RetiredApplication = 'desktop' | 'terminal' | 'service';
+type RetiredApplication = 'desktop' | 'terminal' | 'service' | 'release';
 
 const currentCommands: Record<RetiredApplication, readonly string[]> = {
   desktop: [
@@ -15,6 +15,14 @@ const currentCommands: Record<RetiredApplication, readonly string[]> = {
     'bun run tui:dev',
   ],
   service: ['bun run build', 'bun run release:build', 'bun run server'],
+  release: [
+    'bun run release:build',
+    'bun run release:verify',
+    'bun run release:smoke',
+    'bun run release:install --help',
+    'bun run release:terminal --help',
+    'bun run release:native --help',
+  ],
 };
 
 /** Ordinary retired paths reject before loading their historical implementations. */
@@ -29,7 +37,12 @@ export function rejectRetiredEntrypoint(application: RetiredApplication): void {
 
 if (import.meta.main) {
   const application = process.argv[2];
-  if (application === 'desktop' || application === 'terminal' || application === 'service')
+  if (
+    application === 'desktop' ||
+    application === 'terminal' ||
+    application === 'service' ||
+    application === 'release'
+  )
     rejectRetiredEntrypoint(application);
   else {
     process.stderr.write('legacy_entrypoint_arguments_invalid\n');

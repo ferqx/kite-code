@@ -6121,3 +6121,29 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 | 全能力与阶段退出 | 37能力的正式入口、Web原文复制及完整阶段收束 | Web按用户保持现状，助手全文实际粘贴未确认；适用T001–T114/E01–E14、§35和阶段完整回归齐全，前述依赖闭合后才核退出 |
 
 能力映射仍37partial，Goal active；本轮只必要实施／验证／文档及已授权本地提交，无push、PR、发布或Actions触发。
+
+## 2026-10-13：旧 OSS 发布普通调用者完整退役
+
+上一轮clean `c7d595cb` 已收束旧CLI/TUI／Service普通入口；本轮按用户“先集中实施，再统一测试”收束完整旧OSS普通发布链。两个独立只读审计与正式Native／Terminal核对确认：根／当前CI／默认调度已用新完整发布路径，旧build／verify／installer／smoke仍能手工进入旧闭包，但它们没有RSS或完整观测技术前置才能先退役。§35要求无遗留正式业务carrier，同时保旧历史；不能把历史library消费者当unused删掉。未发现新的确定macOS安装／真代码切换／维护恢复／保数据卸载／normal退出漏接，阅读不代实测或整体完成。
+
+四个旧普通脚本实际替换为[纯退役leaf](../../scripts/development/retired-entrypoints.ts)：build／verify／smoke不再加载旧producer或自动执行任何旧检查／安装，installer的status／install／rollback／uninstall也在旧依赖、archive、prefix及Profile前诊断 `legacy_release_entrypoint_retired`／2。只给当前根build／verify／smoke及Terminal／Native安装帮助，不自动翻译旧格式／参数或切数据。完整保留边界归[发布owner](../active/release-control.md#历史-oss-工具与明确验收)。
+
+[原安装方法](../../scripts/release/historical-install-oss-candidate.ts)同目录保全，公开原五函数／同步常量／InstallMarker类型由[原导入路径](../../scripts/release/install-oss-candidate.ts)非main条件绑定；async install、同步默认prefix／status／rollback／void uninstall及原函数对象保持。原危险prefix判定仍按同一 `import.meta.dir` 根，默认home仍是实际OS userInfo。仅去main-only默认archive import及option／main，不改变方法／锁／Windows发布／格式。原[OSS producer](../../scripts/release/oss-candidate.ts)全bytes不变；原smoke全部检查与清理按原字节保[明确历史qualification](../../scripts/release/historical-smoke-oss-candidate.ts)，不冒充当前正式smoke。原历史Windows source测试只换真实implementation读取路径，全部原assert与次数不删。synthetic测试制品有独立非生产用途，本轮未按命名删除。
+
+真实基线red为同一完整退役文件2pass／1fail／83assert，普通verify期望2实际1；`/private/tmp/kite-retired-oss-original-red-20261013.log` 保留。集中必要五完整文件修后34pass／0fail／708assert／actual0／24.04秒，日志 `/private/tmp/kite-retired-oss-unified-scoped-20261013.log`；七个旧完整普通操作逐一核诊断、archive／原prefix／Profile bytes和目录保持，原CLI/TUI／Service／Desktop断言不改。真实wrapper的source及实际Bun bundle复核原安装导出完整集合、函数对象、同步／异步和常量，另保原四private helper；无副作用port不代完整旧库／OS资格。原release smoke真实新候选 `1bd9acfa04a779103b43afb411df61e253fddb3632351cdc2a906490581db9a5` 的entry／daemon／Web／cleanup全部true，模型0。原方法／smoke／producer字节证明归 `/private/tmp/kite-retired-oss-historical-source-20261013.json`。
+
+根与八workspace types、统一边界／消费者、测试归属和原plan evidence集中核验；文档／正常hook按准确交付作用域独立执行。默认发现仍754完整文件／611正式作业，新旧退役要求同属现有完整文件，未增加独立测试窗口或更改原预算。当前完整默认在这批普通消费者全部收束后统一执行，结果未取得前不标为通过。Web保持现状，先前指定用户原文粘贴事实保留，助手全文实际系统粘贴仍未确认；Win/Linux后置，不push／dispatch。
+
+原Shell失败同步仅用原日志／收据复核：原Job cancelled／cancelWithParent=false／cancelRequestedAt=null，根PID37523 birth固定、kind2/status15与waitpid一致且reaped、broker0，只有实际停止结果，没有首停止发送者／调用栈。当前首drain错误、唯一closing和晚到failed链已修；不从后续绿色或终态倒推原SIGTERM来源，不复跑参数对照或扩故障矩阵。
+
+剩余阶段退出要求按依赖保持五项：
+
+| 剩余缺口 | 实际用户入口与完整行为 | 验收条件 |
+| --- | --- | --- |
+| 原Shell停止来源与完整资源观测 | 正式Job效果、准确停止、客户端／Service正常退出 | 解释原首停止／SIGTERM来源，出生后代／资源／句柄全集有证据；原Bun非可调试签名阻碍Instruments仍held |
+| 原生命周期RSS | 正式持续用户工作至normal退出 | 原8 outer／9点／60–168分钟／32MiB门禁及+115.203125MiB原红保持，不参数对照或降低标准 |
+| 助手原文实际粘贴资格 | 正式Web整轮全文及Native准确最终段复制 | Web按用户保持现状，未获助手全文实际粘贴事实，DOM／源码／指定用户样本不外推 |
+| Win/Linux原系统完整资格 | 正式安装、真版本切换、MCP连接调用取消退出、维护恢复及保数据卸载 | 后续Actions／用户Windows实测，Windows Shell原合同guard保持，不由本机绿替代 |
+| 全能力／§35阶段收束 | 37能力、正式默认调用者、明确历史保留与最终退出 | 适用T001–T114/E01–E14、独立审查及当前完整回归齐全；其他依赖闭合后核阶段，历史保留不等于正式carrier仍在 |
+
+本轮源码普通调用者已收束，历史库／样本明确保留；37partial、Goal active，不提前宣布整体或阶段退出。

@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 const workflow = readFileSync(resolve('.github/workflows/release-candidate.yml'), 'utf8');
 const candidateBuilder = readFileSync(resolve('scripts/release/oss-candidate.ts'), 'utf8');
 const candidateInstaller = readFileSync(
-  resolve('scripts/release/install-oss-candidate.ts'),
+  resolve('scripts/release/historical-install-oss-candidate.ts'),
   'utf8',
 );
 const windowsPublication = readFileSync(

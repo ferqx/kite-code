@@ -8,6 +8,8 @@
 
 [旧CLI/TUI与Service入口完整测试](isolated/unified-agent/retired-application-entrypoints.test.ts)再补真实源码普通启动及两个package构建的退役／原Profile保全，并以复制真实wrapper和无副作用历史port核原函数对象、同步API、实际Bun bundle与源码四private helper路由。port仅证明入口胶水，原历史方法另比原提交字节，不代完整旧运行库或OS资格。用户要求Web端保持现状，本轮Web退役改动已撤回，原Web回归保留；助手全文系统剪贴板仍未确认。最终两个退役完整文件3pass／181断言，未变的原release smoke、workspace与CI三完整文件30pass／422断言按本轮原运行复用。当前默认发现754完整文件／611作业（604并发、7独占），两个退役文件各恰一次；未运行本次754完整默认，阶段及原RSS／观测／平台门禁保持。准确红绿、范围与证据归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。
 
+旧OSS普通发布全链随后在上述退役文件集中核验：build／verify、installer四操作和smoke实际七次调用保archive／prefix／Profile；原安装导出对象／同步／async／常量沿真实wrapper的source与实际bundle，原历史方法另保bytes，原smoke完整检查全bytes保留明确historical qualification。原source检查只移动读取目标，未改原Windows断言。五唯一完整文件34pass／708断言／actual0，原正式release smoke新候选与normal cleanup通过。默认仍754完整文件／611作业，不新增独立窗口；这批改动收束后统一原完整默认结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-oss-发布普通调用者完整退役)，结果未取得前保持未确认。
+
 ## 环境基线与 owner
 
 [Windows installed TUI 完整调用者](fixtures/unified-agent/windows-installed-tui.qualification.ts)以 `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>` 消费同 release job 已构建的两种准确候选；actual win32/x64 required，无 backend availability skip。真实 80×24 ConPTY 先用独立 Terminal，再登记 Native 到同一稳定前门，每模式 120 秒、各 PTY 30 秒、写操作最多 10 秒，核提交／全文／思考／导出／精确取消／未提交草稿／普通退出／冷读零重放及最终卸载保数据。原 Job0／完整 EOF／strict Close 与未 Terminate 是成功条件，强制收尾不能改成通过；这条新 caller 不修改原 POSIX 窗口或默认 isolated 调度，也不代 Windows 真正跨代码／Shell／MCP／RSS／完整阶段资格。

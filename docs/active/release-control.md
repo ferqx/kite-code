@@ -58,6 +58,16 @@ Windows Native 构建与 transport 原生后端测试在消费编译器前调用
 
 同一 release job 在完整 Native build／verify／smoke 后消费准确候选的 [Windows 安装窗口调用者](../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)：零参数稳定前门、真实页面任务、运行中版本选择、普通菜单退出、两次版本冷读，以及安装版 CLI 备份／新 Store 恢复／再次窗口冷读和保数据卸载。系统 UIAutomation 只操作已核原 Main，Job 的实际成员／原 HANDLE／FILETIME 保证退出观察，强制 Terminate 不计普通退出。CI 守卫拒绝删步骤、错平台／候选、过滤、忽略失败及先于完整制品准入运行；原 POSIX 整例和其他必需门禁保持。合成 B 只核同代码版本选择，不授真实跨代码资格；Windows 实际窗口、交互桌面／UIA、维护及资源仍待原生执行，原 RSS／完整观测门禁不被这条源码接线关闭。具体合同与预算归 [Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
+## 历史 OSS 工具与明确验收
+
+旧OSS普通构建／核验／smoke三个脚本和旧installer的status／install／rollback／uninstall已统一经[退役leaf](../../scripts/development/retired-entrypoints.ts)在旧依赖和任何archive／prefix／Profile前返回 `legacy_release_entrypoint_retired`／2，只显示当前命令，不自动转发旧参数或选择新数据。正式build／verify／smoke／install和版本操作继续由上方新Terminal／Native负责；此普通入口收束不以RSS／观测或整体阶段退出为前置，也不证明三平台资格。
+
+[旧installer导入入口](../../scripts/release/install-oss-candidate.ts)在非main导入时保原五个函数、常量和类型；原方法及prefix安全／锁／Windows发布／卸载检查在[同目录历史实现](../../scripts/release/historical-install-oss-candidate.ts)，`import.meta.dir`根与OS默认home语义不变，同步方法不包装Promise。原[OSS manifest／producer库](../../scripts/release/oss-candidate.ts)未改，旧已保存制品／跨版本样本仍有明确library消费者；保留不等于现行发行资格，不供新基线writer。
+
+原smoke的完整verify／install／CLI／TUI／daemon／MCP／切换／回退／卸载与失败清理，按原字节保于[明确历史qualification脚本](../../scripts/release/historical-smoke-oss-candidate.ts)。它只供原旧制品的显式历史验收，不被根命令、当前CI或默认测试自动选择；普通旧smoke不加载它。原[历史source检查](../../tests/release/supply-chain-workflow.test.ts)只更新读取真正installer实现的路径，全部原Windows发布断言／次数保持。synthetic测试制品和非生产信任标记不属于旧产品authority，不因文件名删除。
+
+实际七条普通调用保archive、旧prefix和Profile，历史API的source／实际bundle胶水及字节证明归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-oss-发布普通调用者完整退役)。这些证据不代完整旧OS资格或§35整体完成，Web按用户要求保持现状。
+
 ## 安装、登记与使用权
 
 Windows 同 job 另必须执行 [installed TUI 完整调用者](../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)，准确传入两个已 build／verify／smoke 的 Terminal／Native 路径。独立前门及登记 Native 选择各沿真实 ConPTY／所选候选 TUI／Service 完成提交、完整阅读／思考、导出、精确取消、草稿、正常退出与冷读零重放；guard 保两种选择的完整顺序及禁止忽略失败。原九份 TUI 私有文件已迁入 current-SID 原生记录端口，验证期和发布期 Close 未确认保原 Profile／数据锁，格式／codec／容量不变。源码、本机 POSIX／mock 与 CI 守卫不代原生资格；Windows/Linux 实际验证按用户最新安排后置，Windows 由用户后续独立验证；现有 Actions 接线保留，无本轮 dispatch。完整合同归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-installed-tui-正式调用者)，RSS／观测、Shell 原合同、跨代码和阶段门禁保持。
