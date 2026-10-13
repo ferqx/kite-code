@@ -6260,3 +6260,19 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 当前可闭合本轮Actions恢复接线、正式测试子环境／DOM收尾错误及普通旧运行闭包的退役核对。有限§35演进审查复用mini-review真实Native／SDK第二消费者、deferred-job七场景、固定counted-tool兼容／unseen样本及在途版本替换，原完整文件在当前默认图内，没有确定新的独立源码must-fix，也不以此或37partial标签代全部退出资格。执行／测试／制品输入最终保持，取得结果后仅补本进度与tests README；文档、类型／API／边界等本地提交门禁独立执行，不再为已闭合事实重复负载。
 
 仍未闭合的真实依赖为①正式客户端连续运行的原RSS32MiB及八outer／九点资格，当前一个outer仍166.609375MiB真实红；②任务／后台／取消／重连到退出的全Runtime activeResources／handles与全部出生后代可信来源；③以上证据汇合后的全能力／适用T/E／§35整体阶段退出。Win/Linux当前配置验收已完成且未实测，不再作为本轮运行前置；Windows Shell原guard和原系统未知继续注明。完整默认可记wholeDefault=true，37仍partial、wholeV13=false／phaseExit=false。历史源码保明确owner／回退资格，不新增全部删除目标；ChatGPT官方授权与Responses仍按用户顺序在V1.3后。本片仅本地交付，不push、PR、发布或Actions。
+
+## 2026-10-13：RSS 离线读取缺口与完整观测来源
+
+用户要求继续两个原门禁，优先实际源码缺口，复用通过证据，不重复参数对照或盲跑全量。本轮从 clean `ede068a18b32d708b6e70b8798d4c3a6e40eabfa` 继续；生产 Runtime／Store／Client、sampler、probe、formal verifier、运行资产、原 RSS32MiB／八outer／九点及出生身份要求保持，未启动新负载、Instruments、GC 或 allocator 对照。上一节当前完整默认 611 正式作业通过仅复用于未变的生产／调用者范围，不给本轮新读取算法或观测资格。
+
+**离线读取的确定源码缺口。** 原 [VM 读取器](../../scripts/runtime/unified-soak-vm-observer.ts) 对每条成功 mmap 遍历所有成功 mmap／munmap，在排除不交地址、自己和早期记录前就计费；原 33755×67500 必须产生 2,278,462,500 次比较。现分别建平衡地址／时间索引，mmap 歧义只查是否存在准确匹配，munmap 仍枚举全部交集并恢复原 trace 序。原结果字段、BigInt、并发歧义、完整区间并集、200万默认／1亿最高预算及 false／null 资格保持；构建、排序、节点访问和输出区间工作均计费。只有两份代码／测试文件变化，原九测试不删，新增四个针对实际算法缺口的回归；完整文件 13 pass／16474 expects／108ms／实际0，根 `bunx tsc --noEmit` 和两文件 Biome 实际0。400个确定性trace／20595事件与冻结原 naive 的完整JSON一致；这是一次临时oracle核对，不是原生采集或新增正式协议。非参与式有界代码审查确认 unmap 查询不短路、原序／歧义保持及没有新增无界核心扫描。
+
+**原大 trace 仍拒绝。** 只复用 `/private/var/folders/m2/2brbc_757mn1yvqp09gdyz6c0000gn/T/kite-rss-vm-current-DrAQnP/vm.trace.jsonl`，792744314B／SHA `d6b6428060146db2ac19aeffb6525695de72c6bba105e2c3ae8fcb3df7f6ef3e`，每次严格读取全部358342事件成功。首个混合索引仍实际1／11794ms／`vm_observer_analysis_limit`，原收据 `/private/tmp/kite-v13-vm-index-existing-trace-first-failure-20261013.result.json` 保留。分开 mmap存在性／munmap完整输出后的最终源码 SHA `6e1a58efb3d1756500e9aade69cbc3a350477d6f8f6495d07b97fbf1685e52af`、测试 SHA `59794ea446a9a2cf14a3b0f227a72c9a3359773807e3d31bb65b8a94ad6ef709`；第二次同一原限实际1／10277ms，收据 `/private/tmp/kite-v13-vm-index-existing-trace-second-20261013.result.json` SHA `1da760cc42a66d127963bec14a2f4c56abaf3155aee5818710c85a02ea4e9f65`。没有增加预算、截断或产出假的完整交集。
+
+随后一次线性分组／二分计数，仅计算相同地址与长度且 `munmap.completedTicks > mmap.startedTicks` 的原合同必要交集子集，结果已至少 527,712,192 条；其中同一16KiB地址32469次map／unmap贡献527,134,215条。这个下界自身超过原1亿，故不再重复完整交集分析。该计数严格读取原bytes、实际0／6909ms；收据 `/private/tmp/kite-v13-existing-vm-density-20261013.result.json` SHA `3658c10e14290fbc349c3a81f95ac2de8b35ee9a516f42308d496d055d3920fc`、一次性脚本 SHA `591cae2599a494cf7d681a6df8ad54b916897f048ec2b8449db27a6b7edbe1e8`。它是输出下界证明，不是完整交集、活块或正式资格。
+
+**RSS 因果仍未证明。** 有界 owner 审查确认原 Store／SQLite Worker／Runtime／HTTPService 在 loop 之前各创建一次，重复cycle只有任务、取消／删除和Client重连；未发现重复Worker／FFI载入、未清 Runtime任务集合或可确认业务持有链。既有同UUID Bun dSYM／原PC只读解析实际0，原主线程1114056的33569次16KiB mmap及对应munmap调用栈为 `mi_arena_purge → mi_arena_try_purge_visitor → _mi_arenas_try_purge → mi_scavenger_thread_main`，是mimalloc后台清扫。它不是SQLite Worker身份，也不证明业务活分配／释放；不据 syscall字节总和定位RSS漏点。旧115.203125MiB与最新166.609375MiB真实失败保持，未修改生产来迎合无因果的性能猜测。
+
+**完整来源实施范围已授权，尚未实现。** 固定 [BunProcess.cpp](https://github.com/oven-sh/bun/blob/744846f844374847c902b5e7fd59b4342a51ef99/src/jsc/bindings/BunProcess.cpp#L2653) 实读SHA `c056180084c08bef7b892dba478a9098a0b168806a692bf403fb7c19c0f5ac85`：2653–2669的report libuv／workers也是空数组stub，4351–4354与4947／4948／4985的原resource／handle API同样无数据。所需计数是采样时活跃资源和保留增长，不是历史alloc/free、FD／线程／Machport或有限owner登记。全Runtime ever-born 另需在创建前就覆盖短命后代、launchd guardian、准确kernel出生身份和连续流丢失检测；原两role crash/recovery及单Job证明不具此全局范围。用户已明确授权扩展到可审计的runtime观测实现、原生采集端及所需系统权限；开始分别核真实内部来源与可用原生接口，不把授权当系统entitlement或资格通过。原formal缺项拒绝、null、scope与报告保持，实际producer落地并取得证据后才允许收束对应缺项。
+
+本轮新增闭合的是离线索引的无谓工作和该大trace不能在原预算完整输出的原因；没有新增用户能力迁移或旧生产路径退役，RSS与完整观测门禁均未闭合。技术owner／测试／进度同步，产品行为与安装资产未变；`wholeV13=false／phaseExit=false`。Win/Linux仍只配置且未实测、Web保持现状、ChatGPT后置；本地提交门禁独立执行，不push、PR、发布或Actions。

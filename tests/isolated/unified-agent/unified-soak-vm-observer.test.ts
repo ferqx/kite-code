@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   analyzeVmObserverTrace,
   decodeVmObserverTrace,
+  type VmTrace,
 } from '../../../scripts/runtime/unified-soak-vm-observer';
 
 // Captured actual Bun1.4.2 Darwin calibration; decoder checks run unconditionally on every OS.
@@ -72,6 +73,129 @@ test('actual calibrated mmap advice and two partial unmaps retain exact syscall 
     liveAllocations: null,
     businessOwner: null,
   });
+});
+
+function intervalTrace(pairs: number, sameAddress = false): VmTrace {
+  const trace = decodeVmObserverTrace(bytes(calibrationRaw));
+  const template = trace.events.find((event) => event.kind === 'mmap' && event.result === 0)!;
+  const events: VmTrace['events'] = [];
+  for (let index = 0; index < pairs; index++) {
+    const address = `0x${(0x20000000000001n + (sameAddress ? 0n : BigInt(pairs - index) * 8192n)).toString(16)}`;
+    const ticks = 100n + BigInt(index) * 4n;
+    for (const [offset, kind] of ['mmap', 'munmap'].entries()) {
+      events.push({
+        ...template,
+        kind: kind as 'mmap' | 'munmap',
+        thread: '1',
+        address,
+        length: '4096',
+        startedTicks: String(ticks + BigInt(offset) * 2n),
+        completedTicks: String(ticks + BigInt(offset) * 2n + 1n),
+        sequence: String(events.length),
+      });
+    }
+  }
+  return { ...trace, events, finish: { ...trace.finish, events: String(events.length) } };
+}
+
+test('sparse disjoint mappings retain every exact intersection within the unchanged default work budget', () => {
+  const trace = intervalTrace(4096);
+  const summary = analyzeVmObserverTrace(trace);
+  expect(summary.mappingIntersections).toHaveLength(4096);
+  for (const [index, map] of summary.mappingIntersections.entries()) {
+    const unmap = trace.events[index * 2 + 1]!;
+    expect(map.sequence).toBe(String(index * 2));
+    expect(map.intersections).toEqual([
+      {
+        sequence: unmap.sequence,
+        address: unmap.address,
+        length: '4096',
+        start: unmap.address,
+        end: `0x${(BigInt(unmap.address) + 4096n).toString(16)}`,
+        startedTicks: unmap.startedTicks,
+        completedTicks: unmap.completedTicks,
+        ordering: 'after',
+      },
+    ]);
+    expect(map.coverage).toBe('full_observed_intersection');
+    expect(map.coveredBytes).toBe('4096');
+  }
+  expect(summary).toMatchObject({
+    completeProcess: false,
+    completeResources: false,
+    formalQualified: false,
+    liveAllocations: null,
+    businessOwner: null,
+  });
+});
+
+test('dense overlapping output remains bounded instead of truncating or increasing the work limit', () => {
+  expect(() => analyzeVmObserverTrace(intervalTrace(512, true), 20_000)).toThrow(
+    'vm_observer_analysis_limit',
+  );
+  expect(() => analyzeVmObserverTrace(intervalTrace(1), 100_000_001)).toThrow(
+    'vm_observer_limit_invalid',
+  );
+});
+
+test('dense remap existence short-circuits while the sparse unmap output remains exact', () => {
+  const trace = intervalTrace(8192, true);
+  const finalUnmap = trace.events.at(-1)!;
+  trace.events = trace.events.filter((event) => event.kind === 'mmap');
+  trace.events.push(finalUnmap);
+  trace.events.forEach((event, index) => {
+    event.sequence = String(index);
+  });
+  trace.finish.events = String(trace.events.length);
+  const summary = analyzeVmObserverTrace(trace);
+  expect(summary.mappingIntersections).toHaveLength(8192);
+  expect(summary.mappingIntersections.every((map) => map.intersections.length === 1)).toBe(true);
+  expect(
+    summary.mappingIntersections.every(
+      (map) =>
+        map.intersections[0]?.sequence === finalUnmap.sequence && map.coveredBytes === '4096',
+    ),
+  ).toBe(true);
+  expect(summary.mappingIntersections.slice(0, -1).every((map) => map.coverage === 'unknown')).toBe(
+    true,
+  );
+  expect(summary.mappingIntersections.at(-1)?.coverage).toBe('full_observed_intersection');
+  expect(summary).toMatchObject({
+    formalQualified: false,
+    liveAllocations: null,
+    businessOwner: null,
+  });
+});
+
+test('address-index traversal preserves trace ordering and prior or concurrent remap ambiguity', () => {
+  const trace = intervalTrace(1);
+  const template = trace.events[0]!;
+  const map = {
+    ...template,
+    address: '0x20000000000000',
+    length: '12288',
+    startedTicks: '20',
+    completedTicks: '30',
+    sequence: '1',
+  };
+  const prior = { ...map, sequence: '0', startedTicks: '1', completedTicks: '20' };
+  const unmaps = [8192n, 0n, 4096n].map((offset, index) => ({
+    ...template,
+    kind: 'munmap' as const,
+    address: `0x${(BigInt(map.address) + offset).toString(16)}`,
+    length: '4096',
+    startedTicks: String(31 + index * 2),
+    completedTicks: String(32 + index * 2),
+    sequence: String(index + 2),
+  }));
+  trace.events = [prior, map, ...unmaps];
+  const original = analyzeVmObserverTrace(trace).mappingIntersections[1]!;
+  expect(original.intersections.map((event) => event.sequence)).toEqual(['2', '3', '4']);
+  expect(original.coverage).toBe('full_observed_intersection');
+  expect(original.coveredIntervals).toEqual([{ start: map.address, end: '0x20000000003000' }]);
+  const concurrent = { ...prior, completedTicks: '21' };
+  trace.events[0] = concurrent;
+  expect(analyzeVmObserverTrace(trace).mappingIntersections[1]?.coverage).toBe('unknown');
 });
 
 test('one partial intersection cannot mean full coverage and concurrent syscall order remains unknown', () => {

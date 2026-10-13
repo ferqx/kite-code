@@ -330,13 +330,31 @@ const range = (event: VmEvent) => ({
   start: BigInt(event.address),
   end: BigInt(event.address) + BigInt(event.length),
 });
-const overlaps = (a: ReturnType<typeof range>, b: ReturnType<typeof range>) =>
-  a.start < b.end && b.start < a.end;
-const ordered = (a: VmEvent, b: VmEvent) => BigInt(a.completedTicks) <= BigInt(b.startedTicks);
 /** Coverage means observed syscall intersections, never current mappings or live/freed blocks. */
 export function analyzeVmObserverTrace(trace: VmTrace, comparisonLimit = 2000000) {
   bound(comparisonLimit, 2000000, 100000000);
   let comparisons = 0;
+  // Charge actual index construction, sorting, visits and emitted-interval work.
+  // Dense overlap remains bounded; disjoint addresses need no Cartesian scan.
+  const work = () => {
+    if (++comparisons > comparisonLimit) throw Error('vm_observer_analysis_limit');
+  };
+  type Change = ReturnType<typeof range> & {
+    event: VmEvent;
+    index: number;
+    started: bigint;
+    completed: bigint;
+  };
+  type Node = {
+    change: Change;
+    left?: Node;
+    right?: Node;
+    minStart: bigint;
+    maxEnd: bigint;
+    maxCompleted: bigint;
+  };
+  const mappings: Change[] = [];
+  const unmaps: Change[] = [];
   const count = { mmap: 0, munmap: 0, madvise: 0, mark: 0 };
   const callsites = new Map<
     string,
@@ -350,6 +368,18 @@ export function analyzeVmObserverTrace(trace: VmTrace, comparisonLimit = 2000000
     }
   >();
   for (const event of trace.events) {
+    work();
+    if (event.result === 0 && (event.kind === 'mmap' || event.kind === 'munmap')) {
+      const change: Change = {
+        ...range(event),
+        event,
+        index: mappings.length + unmaps.length,
+        started: BigInt(event.startedTicks),
+        completed: BigInt(event.completedTicks),
+      };
+      if (event.kind === 'mmap') mappings.push(change);
+      else unmaps.push(change);
+    }
     count[event.kind]++;
     const frame = event.frames[2] ?? null;
     const relative =
@@ -369,12 +399,35 @@ export function analyzeVmObserverTrace(trace: VmTrace, comparisonLimit = 2000000
     group.requestedBytes = String(BigInt(group.requestedBytes) + BigInt(event.length));
     callsites.set(key, group);
   }
-  const mappings = trace.events.filter((event) => event.kind === 'mmap' && event.result === 0);
-  const changes = trace.events.filter(
-    (event) => event.result === 0 && (event.kind === 'munmap' || event.kind === 'mmap'),
-  );
-  const mappingIntersections = mappings.map((map) => {
-    const original = range(map);
+  const index = (changes: Change[]): Node | undefined => {
+    changes.sort((a, b) => {
+      work();
+      return a.start < b.start ? -1 : a.start > b.start ? 1 : a.index - b.index;
+    });
+    const build = (start: number, end: number): Node | undefined => {
+      if (start === end) return;
+      work();
+      const middle = start + Math.floor((end - start) / 2);
+      const change = changes[middle]!;
+      const left = build(start, middle);
+      const right = build(middle + 1, end);
+      let maxEnd = change.end;
+      let maxCompleted = change.completed;
+      for (const child of [left, right]) {
+        if (child && child.maxEnd > maxEnd) maxEnd = child.maxEnd;
+        if (child && child.maxCompleted > maxCompleted) maxCompleted = child.maxCompleted;
+      }
+      return { change, left, right, minStart: changes[start]!.start, maxEnd, maxCompleted };
+    };
+    return build(0, changes.length);
+  };
+  // Remaps only set a boolean. Keep them separate so the first exact match
+  // terminates that query; every qualifying unmap row still has to be emitted.
+  const mappingIndex = index([...mappings]);
+  const unmapIndex = index(unmaps);
+  const mappingIntersections = mappings.map((original) => {
+    work();
+    const map = original.event;
     const intersections: {
       sequence: string;
       address: string;
@@ -385,18 +438,42 @@ export function analyzeVmObserverTrace(trace: VmTrace, comparisonLimit = 2000000
       completedTicks: string;
       ordering: 'after' | 'ambiguous';
     }[] = [];
-    let ambiguous = false;
-    for (const change of changes) {
-      if (++comparisons > comparisonLimit) throw Error('vm_observer_analysis_limit');
-      if (change === map || !overlaps(original, range(change)) || ordered(change, map)) continue;
-      if (change.kind === 'mmap') {
-        ambiguous = true;
-        continue;
+    const matches: Change[] = [];
+    const visit = (node: Node | undefined, firstOnly: boolean): boolean => {
+      if (!node) return false;
+      work();
+      if (
+        node.minStart >= original.end ||
+        node.maxEnd <= original.start ||
+        node.maxCompleted <= original.started
+      )
+        return false;
+      const change = node.change;
+      if (
+        change.event !== map &&
+        change.start < original.end &&
+        original.start < change.end &&
+        change.completed > original.started
+      ) {
+        work();
+        if (firstOnly) return true;
+        matches.push(change);
       }
-      const unmap = range(change),
-        start = original.start > unmap.start ? original.start : unmap.start,
-        end = original.end < unmap.end ? original.end : unmap.end;
-      const after = ordered(map, change);
+      return visit(node.left, firstOnly) || visit(node.right, firstOnly);
+    };
+    let ambiguous = visit(mappingIndex, true);
+    visit(unmapIndex, false);
+    // Address traversal must not reorder the original trace's intersection rows.
+    matches.sort((a, b) => {
+      work();
+      return a.index - b.index;
+    });
+    for (const candidate of matches) {
+      work();
+      const change = candidate.event;
+      const start = original.start > candidate.start ? original.start : candidate.start;
+      const end = original.end < candidate.end ? original.end : candidate.end;
+      const after = original.completed <= candidate.started;
       if (!after) ambiguous = true;
       intersections.push({
         sequence: change.sequence,
@@ -411,10 +488,17 @@ export function analyzeVmObserverTrace(trace: VmTrace, comparisonLimit = 2000000
     }
     const intervals = intersections
       .filter((item) => item.ordering === 'after')
-      .map((item) => ({ start: BigInt(item.start), end: BigInt(item.end) }))
-      .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+      .map((item) => {
+        work();
+        return { start: BigInt(item.start), end: BigInt(item.end) };
+      })
+      .sort((a, b) => {
+        work();
+        return a.start < b.start ? -1 : a.start > b.start ? 1 : 0;
+      });
     const covered: typeof intervals = [];
     for (const interval of intervals) {
+      work();
       const last = covered.at(-1);
       if (last && interval.start <= last.end) {
         if (interval.end > last.end) last.end = interval.end;
