@@ -3,13 +3,14 @@
   "baseRepository": "https://github.com/oven-sh/bun",
   "baseCommit": "744846f844374847c902b5e7fd59b4342a51ef99",
   "patch": "bun-1.4.2-resource-census.patch",
-  "patchSha256": "476ded14cdbdefe80ef853f652c735abadc1b4761b7750bfe93715310b498a1b",
+  "patchSha256": "68d6d0bddd297397f41e579dfccb30c82f82eebdda357591b75f22f89ce534cc",
   "entrypoint": "bun:jsc.getResourceCensus",
   "snapshotVersion": 1,
   "scope": "process-native-primitive-hooks",
   "coveredPrimitives": [
     "all Job<C> requests",
-    "POSIX FilePoll including overflow allocations and deferred close"
+    "POSIX FilePoll including overflow allocations and deferred close",
+    "EventLoopTimer actual heap/immediate/imminent admission, cancellation and final owner Drop"
   ],
   "uncovered": [
     "timers",
@@ -21,7 +22,16 @@
   "coverageComplete": false,
   "productionRuntimeReplaced": false,
   "stageQualified": false,
-  "nativeBuildQualified": false,
-  "nativeBuildLimitation": "LLVM 21.1.8 and installed macOS 27 SDK OS_LOG stack_protector_ignore attribute incompatibility; original compiler errors retained, no warning suppression",
-  "patchContextLines": 0
+  "nativeBuildQualified": true,
+  "nativeBuildLimitation": null,
+  "patchContextLines": 0,
+  "nativeBuild": {
+    "sdkVersion": "26.5",
+    "llvmVersion": "21.1.8",
+    "deploymentTarget": "13.0",
+    "binarySha256": "da9325f5fa8ead88f3a996e0d771710a43402487e997cd67b78232ae7b61a309",
+    "buildLogSha256": "a35d225a2d9fa55852aa67445b7f4081cd708515282aa2a590ab1ea03eaf8e29"
+  },
+  "runtimeLifecycleVerification": "verify-runtime.ts",
+  "runtimeLifecycleResultSha256": "c0f14aea6843bd393127d3b9b4a0168b2063ffa152a70d7280234ee89e7a54ea"
 }

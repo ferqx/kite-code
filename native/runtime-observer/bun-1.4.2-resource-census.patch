@@ -1,3 +1,39 @@
+diff --git a/scripts/build/config.ts b/scripts/build/config.ts
+index 671839b7..0990da73 100644
+--- a/scripts/build/config.ts
++++ b/scripts/build/config.ts
+@@ -1117,0 +1118,3 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
++    if (partial.macosSdk !== undefined) {
++      osxSysroot = resolveMacosSdkPath(partial.macosSdk, cacheDir, cwd);
++    }
+diff --git a/src/event_loop/EventLoopTimer.rs b/src/event_loop/EventLoopTimer.rs
+index e69dfb58..85e4d78d 100644
+--- a/src/event_loop/EventLoopTimer.rs
++++ b/src/event_loop/EventLoopTimer.rs
+@@ -12,0 +13 @@ pub use bun_io::heap::IntrusiveField;
++pub use bun_io::resource_census::TimerCensus;
+@@ -52,0 +54,2 @@ pub struct EventLoopTimer {
++    /// Move-stable identity; never the address of this potentially movable value.
++    pub census: TimerCensus,
+@@ -82,0 +86 @@ impl EventLoopTimer {
++            census: TimerCensus::new(),
+@@ -90,0 +95,10 @@ impl EventLoopTimer {
++    pub fn census_sync(&self) {
++        use bun_io::resource_census::State as CensusState;
++        let state = match self.state {
++            State::PENDING => CensusState::Allocated,
++            State::ACTIVE => CensusState::Watching,
++            State::CANCELLED | State::FIRED => CensusState::Dormant,
++        };
++        self.census.update(state, self.state == State::ACTIVE);
++    }
++
+@@ -180,0 +195,5 @@ impl EventLoopTimer {
++        unsafe {
++            (*this)
++                .census
++                .update(bun_io::resource_census::State::Dormant, false)
++        };
 diff --git a/src/io/lib.rs b/src/io/lib.rs
 index 4df690e1..bf35dbc8 100644
 --- a/src/io/lib.rs
@@ -76,6 +112,14 @@ index 1d9cfc27..0830980a 100644
 +                );
 @@ -1353,0 +1407 @@ impl Store {
 +            crate::resource_census::release(crate::resource_census::Kind::FilePoll, poll as usize);
+diff --git a/src/jsc/AbortSignal.rs b/src/jsc/AbortSignal.rs
+index 5e5e64bb..6955fe8b 100644
+--- a/src/jsc/AbortSignal.rs
++++ b/src/jsc/AbortSignal.rs
+@@ -302,0 +303 @@ impl Timeout {
++                census: bun_event_loop::EventLoopTimer::TimerCensus::new(),
+@@ -384,0 +386 @@ impl Timeout {
++            (*this).event_loop_timer.census_sync();
 diff --git a/src/jsc/bindings/JSNodePerformanceHooksHistogram.cpp b/src/jsc/bindings/JSNodePerformanceHooksHistogram.cpp
 index 0f72fd60..82cde8e2 100644
 --- a/src/jsc/bindings/JSNodePerformanceHooksHistogram.cpp
@@ -143,11 +187,95 @@ index 88f2ea81..8c98b57a 100644
 +    INIT_NATIVE_MODULE(BunJSC, 37);
 @@ -979,0 +982 @@ DEFINE_NATIVE_MODULE(BunJSC)
 +    putNativeFn(Identifier::fromString(vm, "getResourceCensus"_s), Bun__getResourceCensus);
+diff --git a/src/runtime/test_runner/timers/FakeTimers.rs b/src/runtime/test_runner/timers/FakeTimers.rs
+index 9604d487..c60f063d 100644
+--- a/src/runtime/test_runner/timers/FakeTimers.rs
++++ b/src/runtime/test_runner/timers/FakeTimers.rs
+@@ -208,0 +209 @@ impl FakeTimers {
++                (*timer).census_sync();
+diff --git a/src/runtime/timer/WTFTimer.rs b/src/runtime/timer/WTFTimer.rs
+index 9a0841e5..c562e5cb 100644
+--- a/src/runtime/timer/WTFTimer.rs
++++ b/src/runtime/timer/WTFTimer.rs
+@@ -81,0 +82,3 @@ impl WTFTimer {
++        t.event_loop_timer
++            .census
++            .observe_auxiliary_pending(t.imminent.get(), this.cast());
+@@ -138,0 +142,3 @@ impl WTFTimer {
++            t.event_loop_timer
++                .census
++                .observe_auxiliary_pending(imminent, self_opaque);
+@@ -147,0 +154,3 @@ impl WTFTimer {
++        t.event_loop_timer
++            .census
++            .observe_auxiliary_pending(imminent_br.get(), self_opaque);
+@@ -192,0 +202,3 @@ impl WTFTimer {
++            t.event_loop_timer
++                .census
++                .observe_auxiliary_pending(imminent_br.get(), self_opaque);
+@@ -224,0 +237,3 @@ impl WTFTimer {
++        t.event_loop_timer
++            .census
++            .observe_auxiliary_pending(imminent_br.get(), self_opaque);
+@@ -261,0 +277 @@ unsafe extern "C" fn WTFTimer__create(run_loop_timer: *mut RunLoopTimer) -> *mut
++                census: bun_event_loop::EventLoopTimer::TimerCensus::new(),
+diff --git a/src/runtime/timer/mod.rs b/src/runtime/timer/mod.rs
+index 97b1e578..cd22b642 100644
+--- a/src/runtime/timer/mod.rs
++++ b/src/runtime/timer/mod.rs
+@@ -370,0 +371 @@ impl DateHeaderTimer {
++        self.event_loop_timer.census_sync();
+@@ -473,0 +475 @@ impl EventLoopDelayMonitor {
++        self.event_loop_timer.census_sync();
+@@ -660,0 +663 @@ impl All {
++                (*timer).census_sync();
+@@ -667,0 +671 @@ impl All {
++                (*timer).census_sync();
+@@ -811,0 +816 @@ impl All {
++            (*timer).census_sync();
+@@ -862,0 +868 @@ impl All {
++                (*timer).census_sync();
+@@ -880,0 +887 @@ impl All {
++                (*timer).census_sync();
+diff --git a/src/runtime/timer/timer_object_internals.rs b/src/runtime/timer/timer_object_internals.rs
+index 4760250b..3f9334c0 100644
+--- a/src/runtime/timer/timer_object_internals.rs
++++ b/src/runtime/timer/timer_object_internals.rs
+@@ -188,0 +189,4 @@ impl TimerObjectInternals {
++        // Short native observation before any user callback/re-entrant owner operation.
++        unsafe {
++            (*self.event_loop_timer()).census.set_ref_active(enable);
++        }
+@@ -315,0 +320,5 @@ impl TimerObjectInternals {
++            unsafe {
++                (*self.event_loop_timer())
++                    .census
++                    .update(bun_io::resource_census::State::Watching, true)
++            };
+@@ -368,0 +378,5 @@ impl TimerObjectInternals {
++        unsafe {
++            (*s.event_loop_timer())
++                .census
++                .update(bun_io::resource_census::State::Dormant, false)
++        };
+@@ -445,0 +460,5 @@ impl TimerObjectInternals {
++        unsafe {
++            (*s.event_loop_timer())
++                .census
++                .update(bun_io::resource_census::State::Dormant, false)
++        };
+@@ -896 +915,4 @@ impl TimerObjectInternals {
+-        unsafe { (*self.event_loop_timer()).state = state };
++        unsafe {
++            (*self.event_loop_timer()).state = state;
++            (*self.event_loop_timer()).census_sync();
++        };
 diff --git a/src/io/resource_census.rs b/src/io/resource_census.rs
 new file mode 100644
+index 00000000..89d7a0b1
 --- /dev/null
 +++ b/src/io/resource_census.rs
-@@ -0,0 +1,349 @@
+@@ -0,0 +1,570 @@
 +//! Primitive lifecycle evidence, not a complete runtime census yet.
 +//! No JS values, resource ownership, I/O or callbacks are retained by this module.
 +use std::collections::HashMap;
@@ -157,6 +285,7 @@ new file mode 100644
 +pub enum Kind {
 +    PoolJob,
 +    FilePoll,
++    Timer,
 +}
 +#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 +pub enum State {
@@ -339,9 +468,229 @@ new file mode 100644
 +    with_registry(Registry::snapshot)
 +}
 +
++/// Native identity only: no JS values, callbacks or owner references.
++pub struct TimerCensus {
++    key: usize,
++    admission_attempted: std::sync::atomic::AtomicBool,
++    ref_active: std::sync::atomic::AtomicBool,
++    primary_pending: std::sync::atomic::AtomicBool,
++    auxiliary_pending: std::sync::atomic::AtomicBool,
++}
++impl TimerCensus {
++    pub fn new() -> Self {
++        use std::sync::atomic::{AtomicUsize, Ordering};
++        static NEXT: AtomicUsize = AtomicUsize::new(1);
++        let mut current = NEXT.load(Ordering::Relaxed);
++        let key = loop {
++            let Some(next) = current.checked_add(1) else {
++                break 0;
++            };
++            match NEXT.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
++                Ok(_) => break current,
++                Err(observed) => current = observed,
++            }
++        };
++        let this = Self {
++            key,
++            admission_attempted: std::sync::atomic::AtomicBool::new(false),
++            ref_active: std::sync::atomic::AtomicBool::new(false),
++            primary_pending: std::sync::atomic::AtomicBool::new(false),
++            auxiliary_pending: std::sync::atomic::AtomicBool::new(false),
++        };
++        // Embedded optional timer storage is not a native resource until an
++        // actual heap/queue admission. The move-stable token reserves identity only.
++        this
++    }
++    fn status(&self, state: State, pending: bool) -> Status {
++        Status {
++            state,
++            ref_active: self.ref_active.load(std::sync::atomic::Ordering::Relaxed),
++            pending,
++            closing: state == State::Closing,
++        }
++    }
++    fn apply_status(&self, registry: &mut Registry, status: Status) {
++        if !self
++            .admission_attempted
++            .load(std::sync::atomic::Ordering::Relaxed)
++        {
++            if !status.pending {
++                return;
++            }
++            // Set even when register fails: a failed admission stays unknown;
++            // subsequent transitions must never retry their way to valid evidence.
++            self.admission_attempted
++                .store(true, std::sync::atomic::Ordering::Relaxed);
++            registry.register(Kind::Timer, self.key, status);
++        } else {
++            registry.update(Kind::Timer, self.key, status);
++        }
++    }
++    pub fn update(&self, state: State, pending: bool) {
++        with_registry(|registry| {
++            self.primary_pending
++                .store(pending, std::sync::atomic::Ordering::Relaxed);
++            let pending = state != State::Closing
++                && (pending
++                    || self
++                        .auxiliary_pending
++                        .load(std::sync::atomic::Ordering::Relaxed));
++            let state = if pending { State::Watching } else { state };
++            self.apply_status(registry, self.status(state, pending));
++        });
++    }
++    /// Snapshot the independent imminent queue while holding the same census lock.
++    /// Reading its actual atomic slot here avoids a late publication update resurrecting
++    /// pending after the consumer has already exchanged the slot to null.
++    pub fn observe_auxiliary_pending(
++        &self,
++        slot: &std::sync::atomic::AtomicPtr<()>,
++        identity: *mut (),
++    ) {
++        with_registry(|registry| {
++            let auxiliary = slot.load(std::sync::atomic::Ordering::SeqCst) == identity;
++            self.auxiliary_pending
++                .store(auxiliary, std::sync::atomic::Ordering::Relaxed);
++            let pending = self
++                .primary_pending
++                .load(std::sync::atomic::Ordering::Relaxed)
++                || auxiliary;
++            self.apply_status(
++                registry,
++                self.status(
++                    if pending {
++                        State::Watching
++                    } else {
++                        State::Dormant
++                    },
++                    pending,
++                ),
++            );
++        });
++    }
++    pub fn set_ref_active(&self, value: bool) {
++        self.ref_active
++            .store(value, std::sync::atomic::Ordering::Relaxed);
++        with_registry(|registry| {
++            if !self
++                .admission_attempted
++                .load(std::sync::atomic::Ordering::Relaxed)
++            {
++                return;
++            }
++            let Some(mut status) = registry
++                .entries
++                .get(&(Kind::Timer, self.key))
++                .map(|entry| entry.status)
++            else {
++                registry.invalidate();
++                return;
++            };
++            status.ref_active = value;
++            registry.update(Kind::Timer, self.key, status);
++        });
++    }
++}
++impl Drop for TimerCensus {
++    fn drop(&mut self) {
++        with_registry(|registry| {
++            if self
++                .admission_attempted
++                .load(std::sync::atomic::Ordering::Relaxed)
++            {
++                registry.update(Kind::Timer, self.key, self.status(State::Closing, false));
++                registry.release(Kind::Timer, self.key);
++            }
++        });
++    }
++}
++
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
++    #[test]
++    fn unarmed_placeholder_and_ref_changes_do_not_admit_a_native_timer() {
++        let timer = TimerCensus::new();
++        let key = timer.key;
++        let registered =
++            || with_registry(|registry| registry.entries.contains_key(&(Kind::Timer, key)));
++        assert!(!registered());
++        timer.set_ref_active(true);
++        timer.update(State::Allocated, false);
++        timer.set_ref_active(false);
++        timer.update(State::Dormant, false);
++        assert!(!registered());
++        drop(timer);
++        assert!(!registered());
++        assert!(snapshot().unwrap().observation_valid);
++    }
++    #[test]
++    fn imminent_and_heap_pending_are_independent() {
++        use std::sync::atomic::{AtomicPtr, Ordering};
++        let timer = TimerCensus::new();
++        let identity = std::ptr::without_provenance_mut::<()>(1);
++        let slot = AtomicPtr::new(identity);
++        let status =
++            || with_registry(|registry| registry.entries[&(Kind::Timer, timer.key)].status);
++        timer.observe_auxiliary_pending(&slot, identity);
++        assert!(status().pending);
++        timer.update(State::Watching, true);
++        slot.store(std::ptr::null_mut(), Ordering::SeqCst);
++        timer.observe_auxiliary_pending(&slot, identity);
++        assert!(status().pending); // clearing imminent cannot cancel heap ownership
++        slot.store(identity, Ordering::SeqCst);
++        timer.observe_auxiliary_pending(&slot, identity);
++        timer.update(State::Dormant, false);
++        assert!(status().pending); // heap fire cannot cancel imminent ownership
++        slot.store(std::ptr::null_mut(), Ordering::SeqCst);
++        timer.observe_auxiliary_pending(&slot, identity);
++        assert!(!status().pending);
++        timer.observe_auxiliary_pending(&slot, identity); // delayed publisher after consumer
++        assert!(!status().pending);
++    }
++    #[test]
++    fn timer_move_refresh_cancel_ref_and_final_release() {
++        let timer = TimerCensus::new();
++        let key = timer.key;
++        assert!(!with_registry(|registry| registry
++            .entries
++            .contains_key(&(Kind::Timer, key))));
++        let timer = Box::new(timer); // moving must retain the same native identity
++        timer.set_ref_active(true);
++        timer.update(State::Watching, true);
++        let resource_id =
++            with_registry(|registry| registry.entries[&(Kind::Timer, key)].resource_id);
++        let active = snapshot().unwrap();
++        let entry = active
++            .entries
++            .iter()
++            .find(|entry| entry.resource_id == resource_id)
++            .unwrap();
++        assert!(entry.status.ref_active && entry.status.pending);
++        timer.set_ref_active(false);
++        timer.update(State::Dormant, false); // cancel/fire does not destroy a retained handle
++        let dormant = with_registry(|registry| registry.entries[&(Kind::Timer, key)]);
++        assert_eq!(dormant.resource_id, resource_id);
++        assert_eq!(dormant.status.state, State::Dormant);
++        assert!(!dormant.status.pending);
++        timer.update(State::Watching, true); // refresh reuses the identity
++        assert_eq!(timer.key, key);
++        let refreshed = snapshot().unwrap();
++        let entry = refreshed
++            .entries
++            .iter()
++            .find(|entry| entry.resource_id == resource_id)
++            .unwrap();
++        assert!(!entry.status.ref_active && entry.status.pending);
++        drop(timer); // actual owner destruction releases the original identity
++        assert!(
++            !snapshot()
++                .unwrap()
++                .entries
++                .iter()
++                .any(|entry| entry.resource_id == resource_id)
++        );
++    }
 +    #[test]
 +    fn lifecycle_identity_and_partial_coverage() {
 +        let mut registry = Registry::new();
@@ -499,9 +848,10 @@ new file mode 100644
 +}
 diff --git a/src/jsc/resource_census_binding.rs b/src/jsc/resource_census_binding.rs
 new file mode 100644
+index 00000000..b827da72
 --- /dev/null
 +++ b/src/jsc/resource_census_binding.rs
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,141 @@
 +//! Private process-wide primitive observation. This is deliberately partial.
 +use crate::{CallFrame, JSGlobalObject, JSValue, JsResult, bun_string_jsc::create_utf8_for_js};
 +use bun_io::resource_census::{self, Kind, State};
@@ -538,6 +888,7 @@ new file mode 100644
 +    match kind {
 +        Kind::PoolJob => b"PoolJob",
 +        Kind::FilePoll => b"FilePoll",
++        Kind::Timer => b"Timer",
 +    }
 +}
 +fn state_name(state: State) -> &'static [u8] {

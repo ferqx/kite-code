@@ -1,17 +1,17 @@
 # 通用 Agent V1.3 实施进度与证据
 
-状态：implementing；当前执行范围为下述实现交付收尾，整体资格尚未通过。总体设计为 [V1.3](unified-agent-refactor-v1.md)，[能力映射](unified-agent-refactor-v1-capabilities.tsv)记录旧调用者、目标 owner 和退役条件。本页只登记实际交付和验证范围。
+状态：implementing；当前按用户最新要求收束系统采集，只处理正常运行和内存稳定；RSS 原失败和完整观测缺项仍未取得正式资格。总体设计为 [V1.3](unified-agent-refactor-v1.md)，[能力映射](unified-agent-refactor-v1-capabilities.tsv)记录旧调用者、目标 owner 和退役条件。本页只登记实际交付和验证范围。
 
 ## 当前 Goal 收尾范围（2026-10-13）
 
-用户要求停止过度验证，并确认更新 Goal 后执行收尾。本轮以正式用户能力、正式调用者切换和旧路径退役为交付范围，不再把测试窗口、性能诊断或未接入产品的观测原型作为持续推进目标。
+用户重新要求完成 RSS 稳定性与完整资源／出生后代观测后，最新明确“不要过度检查，目前没有进入生产阶段，程序能够正常运行，内存稳定即可”。本轮停止 root 校准与来源类别扩展，提交已定位构建／计数修复，并只针对实际运行和内存管理路径作必要验证；原完整资格要求、真实失败与缺项不改写为通过。
 
-- 冻结[原生观测原型](../../native/runtime-observer/README.md)和自定义 Bun 构建，保留耐久源码及真实失败记录；不追加系统采集、SDK／工具链扩展或参数对照。
-- 正式生产源码、调用者、配置和运行资产未变，复用[611 正式作业的完整默认回归](#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。本轮只同步收尾文档，运行文档与本地提交的强制检查；有确定新缺陷或实际代码变化时才增加对应验证。
+- [原生观测源码](../../native/runtime-observer/README.md)保留已实施的部分来源与耐久补丁，停止继续系统采集和类别扩展；partial、unknown 与原失败保持，不拿有限 owner 或当前存活树冒充全量。
+- 未变的正式生产／调用者范围复用[611 正式作业的完整默认回归](#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。新增验证仅对应实际改动和未闭合的正常运行／内存问题，保留提交强制检查；未变范围不重复完整负载。
 - Win/Linux 本轮按 Actions 配置完成及未实测说明交付；Web 保持现状，ChatGPT 官方授权与 Responses 保持原顺序。原 Windows Shell guard 保留，不 push、PR、发布或触发 Actions。
 - RSS 原失败、完整资源／出生后代缺项及全能力／§35 退出条件继续保留。原断言、阈值和拒绝不变，不以本轮收尾证明无内存泄漏或宣布 V1.3／阶段退出。
 
-本轮验收为：当前负责文档明确原型冻结与交付边界，复用证据没有超出其范围，必要检查通过并完成已授权本地提交。满足后结束本轮实现交付，不由保留的资格缺项自动续开观测开发或性能采集。准确实现与失败证据仍归[已有收束记录](#2026-10-13原生观测源码与性能诊断收束)，不新增独立验证台账。
+原完整资格的依赖仍为可用原生构建→完整资源来源→连续出生身份与独立对账→版本化正式证据及原 RSS 门禁→全能力／§35 退出。这是尚未满足的资格依赖，不再作为本轮自动扩展采集和构建工作的清单。当前按正常运行与内存稳定收尾；没有完整资格证据时保持 wholeV13=false／phaseExit=false。准确实现与失败证据仍归本页已有记录，不新增独立验证台账。
 
 ## 执行目标与阶段边界
 
@@ -6299,3 +6299,17 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 **出生计数真实入口已实现。** [独立sampler](../../scripts/runtime/unified-soak-coalition.ts)读取私有libSystem `coalition_info_resource_usage(u64,ptr,u64)->i32` 的明确16byte前缀，调用前后核原PID unique ID／pidversion／coalition ID，失败、sentinel或guardian不活关系保null，不猜完整struct或改现有树清空证明。[完整纯测试](../../tests/isolated/unified-agent/unified-soak-coalition.test.ts)3pass／12expects、根types与Biome0，独立源码审查接受。一次本机自身非独占coalition真实调用实际0：PID2692／unique1192061／version1708446／CID1319，started710296／exited710232；收据 `/private/tmp/kite-v13-own-coalition-prefix-20261013.result.json` SHA `f8481f83f198fb3610af44c4a36ec256151627dd38bf51d7545aa076445cc12b`。这是Mach task累计数，exec替换也计数，不能与unique进程数直接凑平；原guardian最终保存、全流身份、启动／收束边界、丢失及逐项对账尚未接入。ES系统tool有entitlement但需要实际root／FDA；用户本轮收束采集，未执行、不声称有系统完整事件来源。
 
 本轮新增闭合是确定native观测逻辑与可用计数源，未新增正式caller迁移或旧路径退役。未变生产与正式调用者复用原611作业完整功能回归，原RSS166.609375MiB仍是真实未闭合红；没有确认业务持有链的新漏点，也不能由源码逻辑核对宣称无泄漏。原门槛／断言／完整资源和出生拒绝均保留，37partial／wholeV13=false／phaseExit=false。按用户最新安排在此收束新增性能诊断，维护当前代码／文档本地交付；Win/Linux只配置未实测，Web现状与ChatGPT顺序保持，不push、PR、发布或Actions。观测扩展决定仍[proposed](../../.agents/notes/proposed/architecture/2026-10-13-native-resource-census.md)，未把原型记为正式功能完成。
+
+## 2026-10-14：恢复两门禁与原生构建、Timer 实际准入
+
+用户重新要求闭合 RSS 与完整资源／出生后代，再确认整体退出。本轮沿五项依赖实施，不改原 RSS32MiB／八outer／九点、身份／清理和 formal 缺项拒绝。已恢复实际 Goal，Win/Linux 仍发布前实测，Web／ChatGPT顺序及仅本地提交范围保持。
+
+确定构建缺口为原生 Darwin 忽略已有 `--macos-sdk`，固定 LLVM21.1.8 被默认 SDK27 的新属性阻断。本机已有 Bun 固定的 SDK26.5；三行配置修复保默认检测、minos13.0 与 Werror，必要默认／显式／非法路径核对通过。完整 native build 实际0，未下载 SDK、未替正式 Bun。
+
+EventLoopTimer 新接移动稳定 token 和真实调度／取消／最终 Drop。独立审查修复 imminent 与 heap 的 pending 合并以及 Immediate teardown；真实运行另发现未启用 timeout 的 Subprocess 内嵌字段被误计4→5，旧错误日志和 raw 收据保留。首次 harness 自造 Bun.sleep Timer 的4→102也保留，已改用原文件 Job 推进事件循环、不强制 GC；原聚合释放断言不变，源码 lazy admission 修复未 armed placeholder，并保已准入 Dormant 到最终 Drop。当前 native 核心9pass／0fail／无warning，完整构建实际0；同真实入口观察8个Job、3个FilePoll，live2→2、generation2→56、原实际child退出0及双EOF，最终入口actual0。
+
+耐久补丁 SHA `68d6d0bddd297397f41e579dfccb30c82f82eebdda357591b75f22f89ce534cc`，准确base上 `git apply --cached --check --unidiff-zero` 实际0；当前部分binary SHA `da9325f5fa8ead88f3a996e0d771710a43402487e997cd67b78232ae7b61a309`。最终build log `.cache/bun-resource-runtime/native-census-timer-admission-build.log` SHA `a35d225a2d9fa55852aa67445b7f4081cd708515282aa2a590ab1ea03eaf8e29`；生命周期result `.cache/bun-resource-runtime/native-census-admission-lifecycle-result.json` SHA `c0f14aea6843bd393127d3b9b4a0168b2063ffa152a70d7280234ee89e7a54ea`。源码耐久副本及验证入口归 [native owner](../../native/runtime-observer/README.md)。
+
+连续来源还需本机系统条件：传统 ES 的普通UID能力检查实际5／ERR_NOT_PRIVILEGED；Apple eslogger 签名已有client entitlement，工具 `sudo -n true` 仍因缺会话失败。曾准备一次仅自有短命目标的有界校准，但用户最新要求停止过度检查和采集，未执行的辅助脚本已删除；不再请求系统认证，不授ready／flush或完整出生。macOS27新增的descendants／sync API不能在当前26.7运行。完整资源仍缺socket／HTTP后台loop、Worker、其他请求／native addon及部分timer ref，当前coverageComplete=false；v1／v2 formal 原硬拒绝保持，后续实际来源须版本化接线。
+
+RSS 因果有界复核未发现可确认业务漏点：该lifecycle不进入question schema、AJV编译或result requirement热路径，原Worker FunctionCodeBlock增长不能据此归因。未改生产去迎合猜测，未重跑RSS或已闭合完整默认；611正式作业证据仅复用未变的原正式运行时范围，不授本轮新部分binary。新增闭合为构建前提及上述观测逻辑缺口，没有正式caller切换、旧路径删除或整体资格通过；RSS原166.609375MiB红、完整资源／出生与§35仍未闭合。

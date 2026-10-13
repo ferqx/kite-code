@@ -10,9 +10,9 @@ Status: proposed
 
 用户已授权新增可审计 runtime 观测实现及所需原生采集范围。资源从 Bun 实际 primitive 的创建、状态及最终释放取得，在短同步锁下形成进程级快照，避免跨 Worker 直接遍历和错时响应。计数语义须独立区分 live／refActive／pending／closing，任何未接入类别或来源失败保不完整，不能把多个调度计数求和充作 activeResources／handles。
 
-首批 [固定源码补丁](../../../../native/runtime-observer/README.md)已接 Job／POSIX FilePoll 和私有 JS 出口，但没有合格 native build、全部类别或正式指标接线，因此状态保持 proposed。正式运行时／安装资产保持。后续实际入口仍是原资格 runner 与全部固定负载，不将单次 syscall、collector 或 journal 作为独立长期目标。
+当前[固定源码补丁](../../../../native/runtime-observer/README.md)已接 Job／POSIX FilePoll、EventLoopTimer 实际准入与私有 JS 出口；原生 SDK 选择修复后完整 native build 和实际局部释放通过，但全部类别、独立 ref 和正式指标接线未完成，因此状态保持 proposed。Timer 的内嵌 placeholder 不是已准入资源；实际入队后才登记，取消／触发后的 Dormant 保至最终 Drop，不凭 pending false 提前释放。正式运行时／安装资产保持。后续实际入口仍是原资格 runner 与全部固定负载，不将单次 syscall、collector 或 journal 作为独立长期目标。
 
-出生身份可由连续内核事件提供，独占 coalition 的累计 Mach task 数作为独立缺项约束；必须逐项解释 fork／spawn／exec 和 task 的关系，不能用总数抵消未知身份。原 guardian 存活时才能取得最终 kernel 快照；共享 root、退出后数值 CID 或窗口外出生都不能授予全 Runtime 范围。本轮仅实现只读的[计数前缀入口](../../../../scripts/runtime/unified-soak-coalition.ts)，未接完整出生 producer。用户随后要求停止过度采集并尽快收尾；本轮没有运行已准备的 ES 校准，也不追加系统权限动作。
+出生身份可由连续内核事件提供，独占 coalition 的累计 Mach task 数作为独立缺项约束；必须逐项解释 fork／spawn／exec 和 task 的关系，不能用总数抵消未知身份。原 guardian 存活时才能取得最终 kernel 快照；共享 root、退出后数值 CID 或窗口外出生都不能授予全 Runtime 范围。只读[计数前缀入口](../../../../scripts/runtime/unified-soak-coalition.ts)未接完整出生 producer。用户曾重新要求闭合这两项门禁，随后再次明确以正常运行和内存稳定为本轮范围、停止过度采集。未执行的系统校准辅助脚本已删除，停止扩展来源；原完整资格要求与缺项拒绝保留。
 
 ## Alternatives considered
 
@@ -29,4 +29,4 @@ Status: proposed
 
 ## Risks
 
-定制 runtime 增加构建维护和工具链成本，当前完整编译尚未通过；计数钩子不得持有业务对象或制造自身无界增长。Darwin coalition ABI 为私有固定前缀，不冒称完整结构或跨版本公开保证。ES 仍需实际系统会话与来源验证，当前用户收束范围内不采集。该决定不承诺平台资格，不修改产品权限合同或发布门禁。
+定制 runtime 增加构建维护和工具链成本，当前部分源码完整编译已通过；计数钩子不得持有业务对象或制造自身无界增长。Darwin coalition ABI 为私有固定前缀，不冒称完整结构或跨版本公开保证。ES 的实际系统会话与来源验证未完成；当前不继续采集，不能据能力检查替代公开 ready／flush、全出生域或独立对账。该决定不承诺平台资格，不修改产品权限合同或发布门禁。
