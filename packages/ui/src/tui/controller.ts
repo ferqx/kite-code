@@ -895,6 +895,7 @@ export class TuiController {
       mcpSourceOutcome: same ? this.value.mcpSourceOutcome : undefined,
       mcpSourceReading: false,
       permissions: same ? this.value.permissions : undefined,
+      permissionOutcome: same ? this.value.permissionOutcome : undefined,
       status: same ? this.value.status : undefined,
       skills: same ? this.value.skills : undefined,
       panel: same ? this.value.panel : undefined,
@@ -3878,6 +3879,41 @@ export class TuiController {
     if (result.status === 'applied')
       await this.openModels(this.value.panel === 'effort' ? 'effort' : 'models');
   }
+  private permissionMatches(intent: TuiPermissionIntent) {
+    const session = this.value.snapshot?.view.session;
+    return (
+      session?.id === this.value.sessionId &&
+      intent.request.expectedStoreId === this.port.storeId &&
+      (intent.kind === 'workspace.trust'
+        ? intent.workspaceId === session?.workspaceId
+        : intent.sessionId === session?.id)
+    );
+  }
+  private permissionOutcome() {
+    const outcomes = [...this.permissionIntents.values()].filter((outcome) =>
+      this.permissionMatches(outcome.intent),
+    );
+    return (
+      outcomes.find((outcome) => ['pending', 'outcome_unknown'].includes(outcome.status)) ??
+      outcomes.at(-1)
+    );
+  }
+  private ownsPermissionView(
+    generation: number,
+    read: AbortController | undefined,
+    intent: TuiPermissionIntent,
+  ) {
+    return (
+      !this.disposed &&
+      generation === this.generation &&
+      !!read &&
+      read === this.permissionRead &&
+      !read.signal.aborted &&
+      this.value.panel === 'permissions' &&
+      this.permissionMatches(intent) &&
+      this.value.permissionOutcome?.intent.request.commandId === intent.request.commandId
+    );
+  }
   async openPermissions() {
     const snapshot = this.value.snapshot,
       port = this.port.permissions;
@@ -3890,7 +3926,11 @@ export class TuiController {
     this.permissionRead?.abort();
     const read = this.reading();
     this.permissionRead = read;
-    this.publish({ panel: 'permissions', permissions: undefined });
+    this.publish({
+      panel: 'permissions',
+      permissions: undefined,
+      permissionOutcome: this.permissionOutcome(),
+    });
     try {
       const value = await port.read(session.id, session.workspaceId, read.signal);
       if (
@@ -3916,7 +3956,11 @@ export class TuiController {
         )
       )
         throw new Error('permission_scope_mismatch');
-      this.publish({ permissions: freezeIntent(structuredClone(value)), error: undefined });
+      this.publish({
+        permissions: freezeIntent(structuredClone(value)),
+        permissionOutcome: this.permissionOutcome(),
+        error: undefined,
+      });
     } catch (error) {
       if (!read.signal.aborted && generation === this.generation)
         this.publish({ error: error instanceof Error ? error.message : 'permission_read_failed' });
@@ -3943,11 +3987,18 @@ export class TuiController {
       this.value.stale ||
       this.disposed ||
       !this.port.permissions ||
+      this.value.panel !== 'permissions' ||
       current.mode.sessionId !== session.id ||
-      (['pending', 'outcome_unknown'].includes(this.value.permissionOutcome?.status ?? '') &&
-        (this.value.permissionOutcome?.intent.kind === 'workspace.trust'
-          ? this.value.permissionOutcome.intent.workspaceId === session.workspaceId
-          : this.value.permissionOutcome?.intent.sessionId === session.id))
+      current.mode.storeId !== this.port.storeId ||
+      current.trust.storeId !== this.port.storeId ||
+      current.trust.workspaceId !== session.workspaceId ||
+      current.grants.storeId !== this.port.storeId ||
+      current.grants.sessionId !== session.id ||
+      [...this.permissionIntents.values()].some(
+        (outcome) =>
+          this.permissionMatches(outcome.intent) &&
+          ['pending', 'outcome_unknown'].includes(outcome.status),
+      )
     )
       return;
     if (choice.kind === 'mode' && current.mode.scopeSessionId !== session.id) {
@@ -3989,7 +4040,9 @@ export class TuiController {
       this.publish({ error: 'permission_intent_limit' });
       return;
     }
-    const saved = freezeIntent(structuredClone(intent)),
+    const generation = this.generation,
+      read = this.permissionRead,
+      saved = freezeIntent(structuredClone(intent)),
       pending: TuiPermissionOutcome = { intent: saved, status: 'outcome_unknown' };
     this.permissionIntents.set(request.commandId, pending);
     this.publish({ permissionOutcome: pending });
@@ -3998,22 +4051,44 @@ export class TuiController {
       result = await this.port.permissions.submit(saved);
     } catch {}
     if (JSON.stringify(result.intent) !== JSON.stringify(saved)) result = pending;
+    if (this.permissionIntents.get(request.commandId) !== pending) return;
     this.permissionIntents.set(request.commandId, result);
+    if (!this.ownsPermissionView(generation, read, saved)) return;
     this.publish({ permissionOutcome: result });
-    if (!this.disposed && this.value.sessionId === session.id && this.value.panel === 'permissions')
-      await this.openPermissions();
+    await this.openPermissions();
   }
   async lookupPermission() {
-    const original = this.value.permissionOutcome;
-    if (!original || !this.port.permissions || this.disposed) return;
+    const displayed = this.value.permissionOutcome,
+      original = displayed && this.permissionIntents.get(displayed.intent.request.commandId),
+      generation = this.generation,
+      read = this.permissionRead;
+    if (
+      !original ||
+      JSON.stringify(original.intent) !== JSON.stringify(displayed?.intent) ||
+      !this.port.permissions ||
+      this.disposed ||
+      this.value.panel !== 'permissions' ||
+      !this.permissionMatches(original.intent)
+    )
+      return;
+    // Each original lookup owns its reply; an earlier save or GET cannot downgrade it.
+    const pending = { ...original };
+    this.permissionIntents.set(original.intent.request.commandId, pending);
     let result = original;
     try {
       result = await this.port.permissions.lookup(original.intent);
     } catch {}
-    if (JSON.stringify(result.intent) !== JSON.stringify(original.intent)) result = original;
+    // A lookup failure cannot erase the immutable terminal receipt already verified for this ID.
+    if (
+      JSON.stringify(result.intent) !== JSON.stringify(original.intent) ||
+      ['applied', 'failed'].includes(original.status)
+    )
+      result = original;
+    if (this.permissionIntents.get(original.intent.request.commandId) !== pending) return;
     this.permissionIntents.set(original.intent.request.commandId, result);
+    if (!this.ownsPermissionView(generation, read, original.intent)) return;
     this.publish({ permissionOutcome: result });
-    if (this.value.panel === 'permissions') await this.openPermissions();
+    await this.openPermissions();
   }
   async routeCommand(text: string) {
     const commandSession = this.value.sessionId;

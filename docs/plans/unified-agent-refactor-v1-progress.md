@@ -5800,3 +5800,29 @@ Core 的 `planExecution` 现在在原事务从实际直属 Run 父的当前 refs
 4. 全部适用§35／T001—T114／E01—E14与37能力的独立完整迁移核对：最终正式caller收束、实际消费者转移和旧路径／依赖删除须有完整资格；有限业务及客户端读取审查不代全仓审查。
 
 本轮修复上述原 Run→普通Tool→嵌套Files→独立校验→完成能力，并保合法恢复核原已知事实；没有新增正式caller切换或旧生产树删除。37能力仍partial、wholeDefault=true仅属上述准确默认范围、wholeV13=false／phaseExit=false，Goal active；RSS／观测／平台门禁继续未闭合。
+
+## 2026-10-13：TUI 权限原结果的范围与查询归属
+
+状态：partial；上一片正常本地提交 `bd7ef3d9`。用户指出截图的“操作未完成 / native_draining”，root 明确承认原测试漏查退出弹窗。退出修复 `e0331890` 的 Main/preload/bridge/renderer、原 DOM 和真实窗口测试保持无 diff；Desktop 不依赖本轮 TUI controller。复用上片准确原窗口 40 效果／零取消、五次真实 native_draining 拒绝、零退出弹窗／页面异常／观察异常、Electron 与原 Service PID38512 各正常0／无信号。截图没有构建身份，不声称用户原安装包已含修复，也不重复这项已经闭合的窗口。
+
+新的有限只读审查沿 Native Provider/Model/permission、TUI Settings 的正式端口与 Service/Agent/Store，确认一个真实源码缺口：[TUI controller](../../packages/ui/src/tui/controller.ts) 切 Session 未清 permissionOutcome，重开不从原 map 选匹配项，submit/lookup 在 await 后无条件发布；A 的保存或查询晚回能覆盖 B 的结果，新写阻塞又只看一个显示槽。同 Workspace 的 trust 与各 Session mode/grants 不能合并为一个作用域。这是 `/permissions` 保存→切换/关闭→重开→查询原 ID 的完整能力错误，不是单独 journal 目标。
+
+[原完整权限文件](../../packages/ui/test/tui/permissions.test.tsx) 新六项场景先在原生产实际3pass／6fail／27断言／140ms；原三例继续通过，真实六红分别指出跨 Session 结果、双保存逆序迟回、旧查询覆盖当前错误、同 Workspace 作用域、关闭后错误查询和同 ID 晚回降级。日志 `/private/tmp/kite-tui-permission-scope-original-red-20261013.log` 保留。初版修复的独立审查另指出显示仍 unknown、原 map 已 applied 时，查询失败用旧显示作基线会丢终态；在同一关闭/重开用例真实8pass／1fail／65断言／100ms，日志 `/private/tmp/kite-tui-permission-scope-map-baseline-red-20261013.log` 保留，再修当前 map 基线和已核终态保护。实际 CLI host 将网络失败返回 outcome_unknown 的分支也在同一用例核实。初次 UI typecheck 的新 expect 数组项可为 undefined 错误已按实际长度断言加非空标记；未改生产合同或删断言。
+
+当前实现按原 Store+Session(mode/grants) 或 Workspace(trust) 选择，全部匹配 map 未决项参与阻塞，重开先选未决再选最近保存的终态。切 Session 清显示槽；已关闭面板的旧确认/查询不发请求。提交和 GET 晚回保原 map，展示另核 generation、准确 permissionRead/未 abort、当前 panel、实际 scope 与原 commandId。同 ID 最新请求对象持有更新资格，旧 submit/GET 不覆盖后来查询。显示槽只选 ID，查询从 map 当前已核原意图起步，失联或未知不降级已知 applied/failed。三模式、原完整 CAS/defaultRevision/canonicalIdentity/readScopeDigest、child 继承和公共后端最后校验保持，不增加“观察对象必须等于当前对象”的前置拒绝。
+
+最终受影响29个完整文件实际全0／287项／2549个 Bun expect：全部25个 TUI 文件273／2319；原公共权限/CLI两文件10／198（其 API/Store/运行输入未变，复用真实结果）；已构建 Service/SQLite/实际 PTY 权限原整例1／9／10.64秒，原 calls7/reviewCalls3、准确 Shell grant/清除/默认不审批保持；原 paired/shared 模型与权限切换完整文件3／23／10.50秒。新测试无 OS 原语、无平台 skip，原预算／分类／断言保持。冻结的3886份代码/配置输入与5项运行资产终态零漂移，只有 controller 与权限测试相对上一完整默认变化；freeze `/private/tmp/kite-tui-permission-final-freeze-20261013.json` SHA `ca96b6e379533944dad7ca9cf32b2ec8a4362905197cf1c02a4b7898a5ee9951`，逐范围原日志与 actual exit 汇总 `/private/tmp/kite-tui-permission-final-result-20261013.json` SHA `e1b0e943c5693e784fa3c10b0fe15bc6b277e7a23a7e6e9bd898ba07fbdbe227`。全部8 workspace typecheck、静态架构/工作区/API、test ownership及 owned 格式通过；临时回执 parser 首次只认复数 test/file 的失败是整理错误，修正匹配单复数后读取原终态日志，不冒称产品失败或重跑测试。
+
+本轮按实际 UI/恢复风险完成上述必要范围，不把上片743文件／602作业完整默认自动授给变更后的整个仓库，也不把29文件称为完整默认或阶段收束回归。产品行为归 [TUI 指南](../handbook/clients/tui/guides/approvals-and-questions.md)，技术行为归 [TUI owner](../../packages/ui/src/tui/README.md)；沿 [原权限决定](../../.agents/notes/implemented/architecture/2026-10-02-persisted-permission-controls-and-dispatch-read-set.md)补单显示槽不能代原事实的原因，同步 [active](../active/unified-agent-boundary.md)。核共享权限手册与 UI 根 README，无需改变策略或组件合同。按 document-before-commit 执行 iteration_complete/stage/commit 和正常 hook，本轮仍只本地提交。
+
+有限 Context/Workspace 审查核 Rewind/Include、compress/reset 的原 Store/selection/Run/resultRevision 和最终事务、Workspace removal 持久原身份/冷 GET/先核整批及 stopConfirmed=false；Artifact/schema、显式可信 command/MCP checker、普通版本更新/在途旧 lease/冷读取的审查没有发现新 must-fix。它们都没有跑测试或穷尽所有分支，不代全仓资格。Native Context/Compression 与 TUI 设置原意图仍有当前 Window/controller 内存范围；原 owner 与普通持久 caller 手册未承诺这些路径跨进程全部自动发现原 ID，不能套用其他 caller 的冷 journal 证据，也未擅自扩大需求。
+
+本轮按依赖排序的最多五项缺口及验收保持：
+
+1. **正式 `/permissions` 完整保存与原结果恢复：本轮修复。** 准确 Session/Workspace 展示、切换/重开、全部未决阻塞、同 ID GET零重投、晚回隔离和已核终态保持；上述真实红/绿与原 PTY/公共 CAS 支持当前 controller 生命周期，不宣称强杀后的自动原 ID 发现。
+2. **普通 Shell/Tool/Job 停止及客户端正常退出的可信观测。** 原入口必须有完整 resources/handles、出生后代和准确 cleanup 来源，有限 FD/PID不代合同。准确 Bun stub 与系统会话调试授权待决定保持，不重做闭合参数探测。
+3. **正式客户端完整 lifecycle 的 RSS 门禁。** 依赖可信观测，保八 outer／九点／60—168分钟及32MiB门槛；原 +115.203125MiB真实失败未闭合，不由本轮 UI 通过解除。
+4. **Win/Linux 正式安装与版本切换、MCP、维护恢复和保数据卸载。** 原平台入口须实际完成连接/调用/取消/正常退出、恢复身份和原数据保留，由后置 Actions/用户 Windows 验证；不 push 或 dispatch，Windows Shell guard 保留。
+5. **正式 Terminal/Native 的最终迁移与旧路径退役。** 实际用户入口、消费者、发布/恢复和原安装升级能力须满足全部适用§35/T001—T114/E01—E14后再退役；有限审查与静态零违规不能替代完整资格，阶段收束仍须完整回归。
+
+新增闭合的是本次 TUI 权限保存、切换/重开和原查询能力；没有新增正式 caller 切换或旧生产树删除。37能力仍partial、wholeV13=false／phaseExit=false，Goal active；RSS、完整观测和后置平台门禁保持。

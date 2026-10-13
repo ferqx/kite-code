@@ -206,6 +206,8 @@ Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准�
 
 Native 原 Composer 的当前会话模式选择沿既有 permission observation；Full 确认以阅读身份撤销。停止沿原持久 Caller 的 `command.cancel`，只目标已核实当前活动 Run 的原开始 Command，未知申请保原身份；控制与只读授权标签分别拥有资格。当前职责与窗口范围见 [Native owner](../../apps/desktop/README.md#原会话输入区权限与停止)，没有新增执行端口或持久格式。
 
+TUI 权限保存的原结果与显示归属分别持有：当前 Store 的 mode/grants 按原 Session、trust 按实际 Workspace，全范围未决项阻止新写；关闭、切会话或重开只撤销旧读取的展示资格，迟到结果仍归原意图。原查询以 map 已核事实为基线，同 ID 最新请求持有结果更新资格，网络未知不降级已核终态。此 map 仅当前 controller 生命周期，不成为权限 authority 或跨进程 journal；原完整观察/CAS和公共权限接口保持，当前实现与验证范围见 [TUI owner](../../packages/ui/src/tui/README.md)。
+
 ## Skill Workflow 的执行边界
 
 已有有条件 Workflow 使用 Agent 的[显式业务扩展](../../packages/agent/src/business/skill-workflow/README.md)。Core 只保存通用具版本 `extensionInputs` 原意图与 Command 摘要；Service 先验证支持、可信实际源、flags 与 payload，再读取凭据。初始化记录先于首次 Model；动态必要条件绑定对应 Extension 判定器，不能由全局业务 provider 错接或忽略。知识目录和 selectedSkills 不触发 activation。

@@ -56,9 +56,13 @@ Context 有独立读取取消域、固定选择与双游标，明确是当前投
 
 `/permissions` 不带参数，使用独立 [TuiPermissionPort](permissions.ts) 当场读取原 Session 模式、实际 Workspace 信任范围和完整固定上界授权目录；Model 等待期间也可读取。面板上下选择模式、D 明确选择以后 Session 默认值、T/U 核对信任/撤销、C 核对清除当前准确 Session 的授权；首次 Enter 只打开原观察确认，第二次 Enter 才提交，Esc 不改变事实。原 child 模式继承根事实且不能写，清除只选中 Session、不借根清除 child。读取、刷新、关闭或 EOF 都不提交授权。
 
-写入封存确认时原 Store、Session/Workspace、两份模式 revision 或信任范围 hashes 与 revision；最多保留 128 个未决意图且不淘汰未知。重复/未知只 K 查询原 mutation，不再次 POST；CAS 失败不采纳新 revision 重试。只在原顶层 request.grants 提供时，原 approval 上下选项才包含 same_command；没有选择时 Enter 零回答，新卡/决定版本不能沿用旧选项。plan/question 与 Model 批准不制造 Tool/Job grant。保存控制或答案只显示原回执，不声称已派发或停止。
+写入封存确认时原 Store、Session/Workspace、两份模式 revision 或信任范围 hashes 与 revision；本次 controller 最多保留 128 个原意图且不淘汰未知。模式与授权清除按准确 Session、信任按准确 Workspace 匹配，同一 Store 的全部匹配 pending/unknown 都阻止新写入。面板重开先呈现原未决项，其次是最近保存的终态；一个结果查回后继续呈现该范围剩余未决项。K 只查询所选原 mutation，不再次 POST；CAS 失败不采纳新 revision 重试，旧完整观察仍提交其原 CAS，由后端核实际冲突。
 
-[权限 controller 测试](../../test/tui/permissions.test.tsx) 验证原 CAS、迟到、关闭、child 继承与未知原查询；实际 macOS PTY 的 [child 卡测试](../../test/isolated/tui/child-permissions.test.ts) 两项保留原 child/presentation 根关系，完成例批准与问题均通过原卡，EOF 例 child 等待、父 Tool 实际等待 child、零回答/效果。实际默认 Shell 同命令 grant 保存/清除与 mode/trust 的配对证据由 [CLI owner](../../../../apps/cli/README.md) 维护。这些 child 与权限断言未建立三平台终端或完整设置资格。
+保存和查询结果保在原 map，展示另核 generation、准确 permissionRead/未 abort、当前面板与原 ID。关闭/切会话/同目标重开使旧展示归属失效，不取消提交；切回或重开从 map 读取原结果。显示槽只选择 ID，查询使用 map 已核原事实作为基线；同 ID 最新请求标记排除旧保存/GET 迟回，查询失败不降级已核终态。已关闭面板的旧确认不 POST。这是当前 controller 生命周期的能力，不声明跨进程原意图发现或新增持久 journal。
+
+只在原顶层 request.grants 提供时，原 approval 上下选项才包含 same_command；没有选择时 Enter 零回答，新卡/决定版本不能沿用旧选项。plan/question 与 Model 批准不制造 Tool/Job grant。保存控制或答案只显示原回执，不声称已派发或停止。
+
+[权限 controller 测试](../../test/tui/permissions.test.tsx) 验证原 CAS、child 继承、不同 Session/Workspace、共享 Workspace 的 trust、原 ID 零重投、关闭/重开/dispose、双保存逆序迟回、当前真实读取错误与同 ID 查询不降级；无平台专属 API。实际 macOS PTY 的 [child 卡测试](../../test/isolated/tui/child-permissions.test.ts) 两项保留原 child/presentation 根关系，完成例批准与问题均通过原卡，EOF 例 child 等待、父 Tool 实际等待 child、零回答/效果。实际默认 Shell 同命令 grant 保存/清除与 mode/trust 的配对证据由 [CLI owner](../../../../apps/cli/README.md) 维护。这些 child 与权限断言未建立三平台终端或完整设置资格。
 
 
 `/export` 仅冻结当前已加载会话的 user/assistant 文本与已验证 loaded reasoning，调用 [纯 Markdown serializer](export.ts) 和宿主有限 `TuiExportPort`。组件不接受目标路径，不读取历史/全文，不创建执行；未读 Model output 保留当前真实 preview 并明确注明，不将 metadata 或 Artifact 引用当正文。Ctrl+O 完整校验成功后，视图同时保留 content/reasoning 供导出；普通屏仍不默认展示 reasoning。已加载 Markdown 按不可变正文复用解析和渲染节点，输入草稿与导出 notice 更新不会反复解析整份大正文。运行中仅反映点击时加载的前缀，Tool、审批、诊断不是此 Markdown 导出内容。会话切换/卸载 abort 本视图写入等待，迟到成功不写入新会话提示；写失败保留 `Export failed`。

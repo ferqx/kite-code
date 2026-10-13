@@ -18,6 +18,8 @@ Trust 将 canonical Workspace 文件身份与当前可信额外读取范围摘�
 
 Native HTTP、CLI 与便携 Desktop/UI 固定原 Store、目标、观察和命令 ID。保存、已接纳、已应用、失败和未知分别展示；未知只查询原 journal，局部视图取消不提交 Run 取消。Browser gateway 保持只读，不取得这些写入口。实际实现由 [Service 权限管理](../../../../apps/service/src/permission-management.ts)、[Store 控制](../../../../packages/agent/src/storage/sqlite/host-mutation-operations.ts)、[CLI](../../../../apps/cli/README.md)和[Desktop](../../../../apps/desktop/README.md)维护。
 
+正式 TUI 的当前进程原意图不能与单个显示槽合并：用户从 A 切到 B 后，A 的保存和 GET 仍可能返回；仅给晚回加 guard 会保住 B，却可能丢掉 A 的可查结果或漏掉同 Workspace 的 trust 未决阻塞。因此沿现有 map 保完整原意图，分别按 Session/Workspace 匹配，以准确读取身份撤销展示；不新建持久格式。查询由显示槽选择 ID，但基线必须是 map 中已核原事实，最新同 ID 请求独占更新标记；否则旧 unknown 显示加一次网络失败会覆盖已经核实的终态。产品范围由 [TUI 指南](../../../../docs/handbook/clients/tui/guides/approvals-and-questions.md)与 [TUI owner](../../../../packages/ui/src/tui/README.md)维护，[原 controller 用例](../../../../packages/ui/test/tui/permissions.test.tsx)保旧 CAS 并覆盖这条完整行为；不从这项修复推导客户端强杀后的原 ID 发现。
+
 ## same_command 与准确 Session 清除
 
 同命令批准不是跨 Session 的通行证，也不能从 Tool 名称或任意 JSON 推测作用范围。Core 保留真实 Store/subject/Workspace/Session、kind/definition/version、原 accepted Interaction/decision revision/Execution 与完整 input digest；可信 policy 可以另给严格 command digest。只有当前 policy 仍明确提供 same_command 时才复用，最后派发事务核 grant epoch 与原控制/必要义务读集。child 与 root 不能互借；creator 只能按实际 scope 管理准确 child。
