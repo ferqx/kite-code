@@ -6201,6 +6201,10 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 
 覆盖核验仍未通过：List1118行全live=true，其中1115行timestamp0且stack-limit／addr0x1；另外三行是Foundation／ObjC／pthread清理系统栈，16个定义frame／全部ref可解析但没有实际Bun／JSC／mimalloc样本PC。原small `0x306cf180000 /65659B`、large `0x306cf400000 /17825915B` 在当前表的exact／包含／overlap／请求size匹配均0；表无free timestamp／lifetime，VM Regions0行。Statistics persistent1122／239264B、List1118／238864B并非同全集，不能硬合；total925344B小于大样本也不能唯一归因custom allocator。recording保freed events不等于当前表已导出全部事件，XML缺lifespan／inspection range／filter和trace对method的可靠时基映射；不能由live表缺样本推整trace从未记录分配／释放，dSYM也不能补造0x1的真实PC。覆盖audit SHA `5278375e6f0bf5d86932a8863dc7066400a613cdecc2a590644109af06520c1d`，原XML及独立只读核验均保。已请求用户只核已有Instruments窗口的表筛选／检查区间或导出路径；Native Apps工具禁用且CLI缺这些字段，这是外部事实输入，不是再次授权或新的采集目标。
 
+用户随后提供本机Instruments截图：method／Run1、Allocations的Statistics视图，存续筛选为 `Created & Persistent`，类别为 `All Heap & Anonymous VM`，输入及detail filter为空；persistent233.66KiB／1122、total903.66KiB／1156和transient34与上述Statistics XML吻合。截图SHA `3034a5a364a41bdfa98fd2bf3188b78a035d90f8a54af2a3794de0b43871cd10`。它补齐当前窗口的存续筛选事实，不证明CLI导出继承全部GUI选择，也没有给出准确inspection range／时基映射或已释放样本。不能由此前live列表无匹配推整trace无分配／释放。
+
+用户最新明确“性能这块不要过度检查，目前没有正式发布”。本次诊断据此收束，停止后续导出语义查证，不追加采集／导出／参数对照，也不再要求用户切换或导出当前Instruments窗口；此前外部事实请求不再作为当前推进依赖。原RSS红、resources／handles／出生后代和原停止来源未知仍保留，发布／阶段退出资格不变。当前继续工作限已授权功能收尾、确定源码缺口及其必要验证，不为未发布状态重建性能矩阵或宣布整体完成。
+
 另有限审查原独立Shell Job：host先retain原Run binding、detached独立controller不订阅parent abort，Execution再retain至terminal／dispose或失败custody；Run正常finally只减自身引用，活Job阻止binding.dispose，Service assembly不直接关guardian controlWriter。原shell.wait先读cancelled、之后parent completed，也不支持反向取消假设；未找到可据此修的新源码错误，不推原SIGTERM首发送者。该阅读没有启动Service／测试或旁矩阵，原停止来源仍unknown。
 
 本轮新增的是受支持的私有采集／公开detail读取路径和明确的覆盖未通过证据，没有新增产品能力、正式caller切换或旧路径退役；该一次方法校准到此收束，不持续扩窗口／参数。生产／测试／配置／依赖及正式运行资产保持，复用准确58af夹具11／1172及未受影响的2e3完整默认冻结证据，只同步进度和当前资格owner，文档与正常提交门禁独立强制。剩余仍五项：原停止来源／完整资源与出生后代观测（含当前表选择／时基／样本free-owner缺口）；原八outer／九点RSS+115.203125MiB对32MiB失败；Web现状下助手全文实际粘贴；后置Win/Linux原系统安装／版本／MCP／维护／卸载；以及37能力／适用T/E／§35独立整体收束。37partial、wholeV13=false／phaseExit=false／Goal active；不push、PR、发布或Actions。
