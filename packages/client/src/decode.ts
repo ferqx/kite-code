@@ -35,6 +35,7 @@ export interface Responses {
   BrowserWorkspaceList: API.BrowserWorkspaceList;
   BrowserSessionList: API.BrowserSessionList;
   BrowserView: API.BrowserView;
+  BrowserRunFacts: API.BrowserRunFacts;
   SelectedContextPage: API.SelectedContextPage;
   SelectContextResponse: API.SelectContextResponse;
   ForkSessionResponse: API.ForkSessionResponse;

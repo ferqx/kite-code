@@ -43,7 +43,13 @@
 
 History 为独立滚动区域，首次进入定位最新，向上阅读时刷新保持原位置，可显式回到最新。会话内复制仅包含当前已展开的原消息正文；Cmd/Ctrl+A 限于当前 History，输入、textarea、select 与 contenteditable 不劫持。工具详情使用原消息 ID 独立展开，不从名称猜测分类或 Turn。页面内最多保留 32 个会话的滚动 metadata，每会话最多 256 个展开 ID，不保存旧正文；返回会话重读实际接口后恢复位置和展开。重载不承诺恢复。
 
-已发送的 complete 用户消息逐条提供共享 [MessageCopyButton](../../packages/ui/src/desktop/MessageCopyButton.tsx)，直接复制原公共 `message.content` 字符串，保留 Unicode、CRLF、Markdown 与脚本字面量，不从渲染 DOM 重建文本。按钮按当前 Store/Session/message ID 挂载，悬停或键盘聚焦可见；成功勾保留两秒，失败可重试，正文变化／隐藏／暂停／换会话清除旧反馈与所属定时器。只调用本页面 `navigator.clipboard.writeText`，不增加 HTTP 写入、模型调用或任务操作；未知格式的原诊断保持，复制不解释或升级其内容。助手整轮复制仍受既有缺可信 Turn 身份的守卫约束，不以相邻消息推造回合。
+已发送的 complete 用户消息逐条提供共享 [MessageCopyButton](../../packages/ui/src/desktop/MessageCopyButton.tsx)，直接复制原公共 `message.content` 字符串，保留 Unicode、CRLF、Markdown 与脚本字面量，不从渲染 DOM 重建文本。按钮按当前 Store/Session/message ID 挂载，悬停或键盘聚焦可见；成功勾保留两秒，失败可重试，正文变化／隐藏／暂停／换会话清除旧反馈与所属定时器。只调用本页面 `navigator.clipboard.writeText`，不增加 HTTP 写入、模型调用或任务操作；未知格式的原诊断保持，复制不解释或升级其内容。助手整轮复制沿准确 Run metadata 与当前已读完整正文核实，见下一段；不以相邻消息推造回合。
+
+助手复制复用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts) 与正式 Native 的最终回复资格核验：只有当前 Session 未封存消息所属的准确 completed／inactive Run 才可合并，按原 Decimal64 seq 将全部助手正文以空行连接；中间助手的普通正文保留，Tool 参数、工具结果、reasoning、其他 Run 和子／封存消息不加入。最后助手仍须完整、支持格式且无后续 Tool；任一非零 `outputBody` 未经现有 reader 完整验证并显示，整轮按钮不可用，不拿预览补缺段，也不自动读 Model 正文。成功／失败交互继续共用 MessageCopyButton，关闭任一全文、隐藏、暂停、stale 或切换阅读身份撤销相应资格。
+
+[run-facts](src/run-facts.ts)只为完整已读 History 中准确的未封存 Run 补 metadata。有限 View 已核项优先；超出最近200项时经具名 Browser `getRun(sessionId,runId)` GET 核当前 Store／准确 Run／Session，保合法恢复后的原 originStoreId。cache 只属于当前 Client／Store／Session／controller generation，completed／failed／cancelled 非活动事实可复用，active／interrupted／读取失败在新实际 snapshot 刷新时重核；View 新事实覆盖此前缓存。关闭、隐藏、页面暂停或不可读状态 abort 所属 GET；读取不提供执行、配置或凭据权。错误保原消息并说明整轮范围尚不可核，可沿原 Refresh history 重试。
+
+[整轮页面用例](test/isolated/assistant-copy.test.tsx)覆盖201条完整历史、有限 View 外 Run、中间 Tool call 的普通正文、每段已加载全文与切换迟到隔离；[原真实恢复整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)保原完整断言，并核实际 Cookie／Store A→B、原大正文加 inline 最终段的准确整轮复制、sealed 零按钮与关闭撤销。便携 DOM clipboard 使用内存端口，不能替代本机 OS 剪贴板字节或其他平台资格。
 
 [正式页面复制整例](test/isolated/message-copy.test.tsx)经实际 mount/ReactDOM 核两条原用户全文、重试、两秒反馈、切会话迟到隔离和已读 Model 正文保持；共享 Conversation 的原消费基线与最终 DOM 回归另保原用户／助手完整文本选择和同 ID 换正文隔离。相邻完整组合 13 文件／75 项／724 条 Bun 断言通过，含真实 Web assets 构建，根与八个 workspace 类型检查通过。本机 IAB 实际 Enter 核按钮焦点、24px 控件及 18px 成功图标、两秒复位，读取前后仍为 3 个固定模型调用、4 条消息、2 个 Run、4 个 Execution、cursor 45；工具提供的 clipboard reader 返回空文本，实际 OS 字节未确认，不据成功图标授该资格。`data:` 粘贴核对页被浏览器安全策略拒绝后未绕过；原公共 Cookie/正文读取证据按未改范围复用，完整浏览器／平台与阶段门禁保持。
 

@@ -6,7 +6,7 @@
 
 同一公共入口现导出原[Tooltip](src/desktop/components/ui/tooltip.tsx)四个组件，供[Web目录](../../apps/web/README.md)复用已有hover／focus／Escape和共享延迟行为；原组件、Radix依赖与Native Sidebar保持。Web负责准确公共activity、读取生命周期和本包scoped CSS，不引入第二份计时器、运行状态或业务authority。Web完整DOM、可信browser build与本机IAB证据归该owner和[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11web-完整工作区与会话目录)，不据新增export宣称全平台资格。
 
-原 Conversation 的复制交互现归共享 [MessageCopyButton](src/desktop/MessageCopyButton.tsx)，正式 Native 的 Conversation 和正式 Web 用户消息共同消费。宿主只交付准确文本、复制类别和 clipboard port；组件保成功两秒反馈、失败重试、卸载及正文／disabled 变化后的迟到隔离，不推断 Turn、聚合正文、读取模型或发业务请求。原 Conversation 继续决定用户原文及宿主确认的最终助手全文，缺完整 copyText 的守卫保持。[真实 Conversation DOM](test/isolated/desktop-message-copy.test.tsx)核原文本、回合守卫、重试、换 scope 及同 ID 正文变化；Web 的原文、实际页与独立资产样式证据归 [Web owner](../../apps/web/README.md)，不把共享控件测试外推为 OS 剪贴板或完整客户端资格。
+原 Conversation 的复制交互现归共享 [MessageCopyButton](src/desktop/MessageCopyButton.tsx)，正式 Native 的 Conversation 和正式 Web 用户／助手消息共同消费。宿主只交付准确文本、复制类别和 clipboard port；组件保成功两秒反馈、失败重试、卸载及正文／disabled 变化后的迟到隔离，不推断 Turn、聚合正文、读取模型或发业务请求。原 Conversation 继续决定用户原文及宿主确认的最终助手全文，缺完整 copyText 的守卫保持。[真实 Conversation DOM](test/isolated/desktop-message-copy.test.tsx)核原文本、回合守卫、重试、换 scope 及同 ID 正文变化；Web 的原文、实际页与独立资产样式证据归 [Web owner](../../apps/web/README.md)，不把共享控件测试外推为 OS 剪贴板或完整客户端资格。
 
 [Desktop build](scripts/build-desktop.ts)将[唯一声明](scripts/bundled-dependencies.ts)的 `@hugeicons/core-free-icons` 内联到原浏览器产物；其余 npm 依赖、React peer、原导出及 CSS 保持。Terminal 的生成 package manifest 不再声明这条已内联依赖，复制器仍保留其他包真正需要的依赖边。原包许可和 NOTICE 完整复制；固定 4.3.2 npm 包实际缺许可正文时，仅对准确版本／MIT使用[附带官方原文](scripts/licenses/core-free-icons-4.3.2/LICENSE.md)和[固定来源](scripts/licenses/core-free-icons-4.3.2/SOURCE.json)，离线核 SHA，不替换其他包许可。制品全部生成文件仍进入完整 inventory，实际原窗口和默认回归结果归[普通启动进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
 
@@ -106,3 +106,6 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 
 [MCP Source Review](src/mcp-source-review.tsx)只接受准确来源批准或既有opaque Ref binding的问题：闭合原schema/choices/read-set与安全身份，显示完整原请求，提交准确decision。非法或未来Source request保只读，不退化为任意JSON答复；同定义产生的普通approval仍保独立Approve once，不能因definitionId被误当Source question。[实际DOM测试](test/mcp-source-review.test.tsx)核Source答复和普通审批分离；正式Native窗口与Main再次核原答案的证据归[Desktop owner](../../apps/desktop/README.md#native-mcp-完整设置)。
+
+
+[completeRunReplies](src/run-reply-copy.ts)是两个正式宿主共用的纯回复资格与正文投影；宿主交准确原 Run、完整已读 Message 和当前 verified full-content callback。它以准确 completed／inactive 及完整最终回复核资格；Web 使用 `copyScope=run` 按严格 Decimal64 顺序合并同 Session／同 Run 的未封存助手正文，以空行连接。Native 显式 `copyScope=final` 保桌面手册只复制完整最终回复、不含同轮工具前说明的合同。两者均不加入 Tool 参数、结果、reasoning、其他 Run 或子消息；各自复制范围内非零 body-backed 段均须由宿主当前 reader 提供完整正文，缺失／不完整／未来格式不拿预览补齐。该 leaf 没有 I/O、cache、剪贴板或新 authority；[纯契约](test/run-reply-copy.test.ts)与两个宿主的实际消费分别证明选择和读取边界。

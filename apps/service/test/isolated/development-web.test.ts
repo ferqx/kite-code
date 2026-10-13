@@ -529,3 +529,78 @@ test('Gateway streams complete real 17 MiB Model output and closes an interrupte
     await f.close();
   }
 }, 60000);
+
+test('Cookie Browser reads the accurate original Run beyond the recent View without configuration, writes or replay', async () => {
+  const f = await fixture(8);
+  try {
+    f.release();
+    await f.client.startRun('s', {
+      expectedStoreId: f.storeId,
+      commandId: 'historical-first',
+      kind: 'run.start',
+      content: 'Original complete work',
+    });
+    await f.runtime.waitForCommand('historical-first', { timeoutMs: 5000 });
+    const runId = (await f.client.getView('s')).runs.find(
+      (run) => run.originCommandId === 'historical-first',
+    )!.id;
+    for (let index = 0; index < 201; index++) {
+      const commandId = `newer-work-${index}`;
+      await f.client.startRun('s', {
+        expectedStoreId: f.storeId,
+        commandId,
+        kind: 'run.start',
+        content: `Explicit newer work ${index}`,
+      });
+      await f.runtime.waitForCommand(commandId, { timeoutMs: 5000 });
+    }
+    const recent = await f.browser.getView('s');
+    expect(recent.runs).toHaveLength(200);
+    expect(recent.runs.some((run) => run.id === runId)).toBe(false);
+    const original = await f.client.getRun(runId);
+    expect(original.configuration).toBeDefined();
+    const before = await f.store.getMetadata();
+    const priorModels = f.models;
+    const priorRequests = f.requests.length;
+    const facts = await f.browser.getRun('s', runId);
+    expect(facts).toMatchObject({
+      storeId: f.storeId,
+      run: {
+        id: runId,
+        sessionId: 's',
+        originStoreId: f.storeId,
+        originCommandId: 'historical-first',
+        status: 'completed',
+        isActive: false,
+      },
+    });
+    expect(facts.run).not.toHaveProperty('configuration');
+    expect(JSON.stringify(facts)).not.toContain(f.service.bootstrap.token);
+    expect(JSON.stringify(facts)).not.toContain(f.root);
+    await expect(f.browser.getRun('other', runId)).rejects.toMatchObject({
+      code: 'browser_scope_denied',
+      status: 403,
+    });
+    for (const [path, method] of [
+      [`/browser/v1/sessions/s/runs/${runId}?token=forbidden`, 'GET'],
+      [`/browser/v1/sessions/s/runs/${runId}`, 'POST'],
+      [`/browser/v1/runs/${runId}`, 'GET'],
+    ] as const) {
+      const response = await f.raw(path, method);
+      expect([400, 404, 405]).toContain(response.status);
+      await response.body?.cancel();
+    }
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(before.lastChangeCursor);
+    expect(await f.client.getRun(runId)).toEqual(original);
+    expect(f.models).toBe(priorModels);
+    expect(f.models).toBe(202);
+    expect(f.jobs).toBe(0);
+    expect(
+      f.requests
+        .slice(priorRequests)
+        .every((request) => request.method === 'GET' && request.authorization === null),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 60000);

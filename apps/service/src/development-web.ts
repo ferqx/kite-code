@@ -7,6 +7,7 @@ import {
   BrowserContextQuerySchema,
   BrowserInfoSchema,
   BrowserModelInputQuerySchema,
+  BrowserRunFactsSchema,
   BrowserSessionDirectoryQuerySchema,
   BrowserSessionListSchema,
   BrowserViewSchema,
@@ -158,6 +159,9 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
         ...(original.capabilities.includes('sessions')
           ? ['workspaces', 'sessions', 'execution_output']
           : []),
+        ...(original.capabilities.includes('sessions') && original.capabilities.includes('commands')
+          ? ['runs']
+          : []),
         ...(original.capabilities.includes('session_directory_activity')
           ? ['session_directory_activity']
           : []),
@@ -267,6 +271,7 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
         /^\/browser\/v1\/sessions\/([^/]+)\/(view|messages|context|model-inputs|logs)$/.exec(
           url.pathname,
         );
+      const runMatch = /^\/browser\/v1\/sessions\/([^/]+)\/runs\/([^/]+)$/.exec(url.pathname);
       const outputMatch = /^\/browser\/v1\/sessions\/([^/]+)\/executions\/([^/]+)\/output$/.exec(
         url.pathname,
       );
@@ -288,6 +293,7 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
         ].includes(url.pathname) &&
         !checkpointMatch &&
         !viewMatch &&
+        !runMatch &&
         !outputMatch &&
         !modelInputMatch &&
         !modelOutputMatch &&
@@ -435,7 +441,12 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
         const sessionId = checkpointMatch
           ? checkpointSegment(checkpointMatch[1]!)
           : decodeURIComponent(
-              (viewMatch ?? outputMatch ?? modelInputMatch ?? modelOutputMatch ?? exportMatch)![1]!,
+              (viewMatch ??
+                runMatch ??
+                outputMatch ??
+                modelInputMatch ??
+                modelOutputMatch ??
+                exportMatch)![1]!,
             );
         if (!id.test(sessionId)) throw new ClientError('invalid_query');
         if (checkpointMatch) {
@@ -552,6 +563,24 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
           }
           await identity(controller.signal);
           return json(exported);
+        }
+        if (runMatch) {
+          if (!info().capabilities.includes('runs'))
+            throw new ClientError('capability_unavailable');
+          query(url, []);
+          const runId = decodeURIComponent(runMatch[2]!);
+          if (!id.test(runId)) throw new ClientError('invalid_query');
+          const view = await options.admittedClient.getView(sessionId, {
+            signal: controller.signal,
+          });
+          if (view.storeId !== original.storeId || view.session.id !== sessionId)
+            throw new ClientError('browser_identity_mismatch');
+          const run = await options.admittedClient.getRun(runId, { signal: controller.signal });
+          if (run.id !== runId || run.sessionId !== sessionId)
+            throw new ClientError('browser_scope_denied', 'browser_scope_denied', 403);
+          await identity(controller.signal);
+          const { configuration: _configuration, ...safeRun } = run;
+          return json(BrowserRunFactsSchema.parse({ storeId: original.storeId, run: safeRun }));
         }
         if (modelOutputMatch) {
           if (!info().capabilities.includes('model_outputs'))

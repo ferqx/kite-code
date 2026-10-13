@@ -16,7 +16,7 @@ Status: implemented
 
 没有 outputBody 的普通 inline 正文按 generation／viewSelection／Store／Session／Message 保持组件，不随 epoch 重挂同一 Markdown；有 outputBody 保原 epoch key 和全部 reader 撤销，切换分支也重挂。共享 ModelOutputMessage 只按原八项身份 memo JSON 序列化，callbacks、suspension、原身份变更、snapshot核验及复制撤销不变。普通展示保持不能延续旧完整正文资格或文件动作，原宿主回调仍以当前已提交能力控制。
 
-完整回复复制只持有原 reader 当前已验证并显示的准确正文；预览 copyText=null，关闭／换身份即撤销，不写新的持久缓存。相邻已知 Files 探索交原组件聚合，每项保自己的 receipt／文件回调，分组不授予范围。默认 ask_user v1 只按原成功 Execution／准确结果展示已保存人类答案，唯一原 Model call 才提供问题；信息取消与停止 Run 分开。原 pending 审批提交仍沿准确卡片；原 Approval 表单和有限审批历史已由[后续审批决定](2026-10-09-native-approval-observations.md)接入，本篇的来源、轮次、复制与问答理由继续适用。
+Native 完整最终回复复制只持有原 reader 当前已验证并显示的准确正文；预览 copyText=null，关闭／换身份即撤销，不写新的持久缓存。2026-10-13 资格核验归共享纯 completeRunReplies，Native 显式 final 范围仍只取完整最终回复；Web 手册的整轮范围由 Web 显式 run 选择，不把同轮工具前说明加入 Native。原 DOM 最终段精确断言保持，用此真实失败纠正了共享接线的范围回归。相邻已知 Files 探索交原组件聚合，每项保自己的 receipt／文件回调，分组不授予范围。默认 ask_user v1 只按原成功 Execution／准确结果展示已保存人类答案，唯一原 Model call 才提供问题；信息取消与停止 Run 分开。原 pending 审批提交仍沿准确卡片；原 Approval 表单和有限审批历史已由[后续审批决定](2026-10-09-native-approval-observations.md)接入，本篇的来源、轮次、复制与问答理由继续适用。
 
 原通用问题、计划和审批的记录阅读由[后续交互历史决定](2026-10-09-native-interaction-history.md)补入；本篇的唯一来源、封存边界、轮次、复制与默认问答结果理由继续适用。
 

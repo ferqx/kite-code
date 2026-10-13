@@ -110,7 +110,7 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 没有 `outputBody` 的普通历史正文按 generation／viewSelection／Store／Session／Message 的 inline 身份保持组件，不因 epoch 重新挂载相同 Markdown；当前文件回调有无仍随核验状态变化。带 `outputBody` 的组件保原 epoch key，完整读取、关闭、换 scope 的撤销仍沿原边界；inline／body 分支切换同样重新挂载。共享正文身份仅按原八项字段 memo，任一字段变更仍清理原已读结果，不以展示组件保持借用旧全文或动作许可。
 
-只有已确认 completed 且非活动 Run 的最后一条完整、支持格式、无工具调用且后面无工具结果的助手消息才成为最终回复。原起止时间与终态供原组件显示耗时／失败／停止；无法核对时保原消息，活动视图失效显示“上次确认状态”，不补造成功或计时。大正文预览的 `copyText=null`；仅原完整 reader 已验证并显示的准确正文启用“复制本轮Agent回复”，关闭正文、换消息身份或换scope即撤销。本地 Map 只持有当前已显示内容，不写持久日志或格式。
+只有已确认 completed 且非活动 Run 的最后一条完整、支持格式、无工具调用且后面无工具结果的助手消息才成为最终回复。原起止时间与终态供原组件显示耗时／失败／停止；无法核对时保原消息，活动视图失效显示“上次确认状态”，不补造成功或计时。最终回复资格与正式 Web 共用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts)；Native 显式选择 `copyScope=final`，保[桌面手册](../../docs/handbook/clients/desktop/README.md)只复制完整最终回复、不含同轮工具前说明的合同，Web 整轮范围不扩到 Native。大正文预览的 `copyText=null`；仅最终段原 reader 已验证并显示的准确正文启用“复制本轮Agent回复”，关闭正文、换消息身份或换scope即撤销。本地 Map 只持有当前已显示内容，不写持久日志或格式。
 
 同一准确 Run 中相邻、已核实的 Files read2/3、glob/search2、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
 

@@ -5993,3 +5993,29 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 | 全部能力和实际旧消费者退出 | 37 能力实际正式入口及旧构建链最终退役 | 适用 T001–T114/E01–E14、§35 与阶段完整回归，最后旧 consumer 有完整替代证据后才删，不以 static green 完成 P5/P6 |
 
 本轮只做必要集中验证、实际交互核对、文档同步和已授权本地交付；Goal 保持 active，整体、阶段与旧路径最终退役均不提前宣布。
+
+## 2026-10-13：正式 Web 助手整轮复制与准确历史 Run
+
+从 clean `29451506` 的用户复制切片继续核源码，正式 Web 的助手复制缺口为：完整 History 已可穷尽，但有限 View 外没有准确 Run reader，页面也没有整轮正文选择。原 `mountWebPage` 在201条消息、两页完整读取且原 completed Run 缺于 View 时，最后助手复制按钮期望1、实际0；新增完整文件实际1pass/2fail/25断言，日志 `/private/tmp/kite-web-assistant-copy-original-business-red-20261013.log` 保留。未改变原消息、终态、全文或权限门禁来通过。
+
+Browser 增加固定 Session/Run GET 及可选 `runs` capability，Gateway 只转发与 View 同份安全 Run metadata。当前 Cookie／页面／Store 准入和原 Run 出处分开核；合法恢复 origin 保原值，配置、token 和其他未公开扩展不进入返回。SDK 首轮真实测试发现 additive decoder 会保扩展，保新增 configuration 拒绝断言后修精确公开投影，不改全局未来响应字段合同。真实 SQLite／Cookie 用例创建202个 Run，原 Run 确实离开最近200 View，准确 GET 仍可读；错 Session、POST、query、全局路径拒绝，cursor／Model／Job 不变。标准生成器产生唯一 DTO／schema／静态 validator，新增响应后的约8千行 validator diff 为符号重排，未手改产物。
+
+正式页面按完整 History 中准确未封存 Run 获取必要 metadata，View 当前事实优先；当前 Client／Store／Session／controller generation 隔离缓存和所属 GET，active／interrupted／失败沿实际刷新重核。共享纯 `completeRunReplies` 核 completed／inactive、完整最终助手及准确 seq；Web 显式 `copyScope=run` 合并同轮全部普通正文，不含参数、工具结果、reasoning 或子／sealed 消息。全部非零 body-backed 段须沿原 reader 已验证且当前显示，未齐备不自动读正文、不借 preview 补齐；关闭、隐藏、暂停、stale 或切身份撤销资格。用户和助手仍共用原 MessageCopyButton，不增加业务写、Model 或执行操作。
+
+初次把 Web 范围外推到 Native 导致原 DOM 精确断言失败：期望仅最终回复，实际多了工具前说明。该失败日志 `/private/tmp/kite-run-reply-restored-web-native-transcript-20261013.log` 保留；核 [Desktop 手册](../handbook/clients/desktop/README.md)明确只复制完整最终回复，与 [Web 手册](../handbook/clients/web/interface.md)整轮范围不同后，修生产接线为 Native 显式 `copyScope=final`。原 Native 断言保持并通过，没有把测试预期改成回归行为；新增测试原先误设的 Native 整轮预期按准确产品合同纠正。原 Native 来源、最终段 reader、复制和退出传输边界保持，共享资格替换了本地重复条件，不宣称整仓精简。
+
+集中验证22个完整文件、130pass/0fail/1401条 Bun 断言，结果 `/private/tmp/kite-run-reply-delivery-20261013.json`。包含两原真实 SDK/Gateway 文件、全部原 Web 文件及新增助手文件、共享正文／复制和纯选择、原 Native caller／Model／Tool／Conversation，以及原恢复 Web 和 Native transcript DOM。真实 restore A→B 的原大正文加 inline 最终段准确整轮复制、sealed 零按钮及关闭撤销已核，原 Command／Message／Run／Execution、metadata 和零重放断言全部保持。普通 sandbox 的端口0失败保原日志；完整本机 loopback 重跑 actual0，未过滤测试。根与八 workspace 类型检查、边界、ownership及正常提交门禁通过；新测试无 macOS 专用跳过。便携 DOM 使用内存 clipboard，只证明原字符选择，不代 OS 字节、安装窗口或三平台资格。
+
+产品、Web／Native／UI／Client／Service owner、跨包 active 与现有轮次决定同步；能力映射 `ui.shared_drafts` 保持 partial。当前源码已改变，此前 `8db4c3b7` 的完整默认通过只作旧基线；本轮集中绿不代表当前完整默认、阶段或 V1.3 已退出。本机剪贴板字节核对仍未收到实际确认，原浏览器策略拒绝的核对路径未绕过。系统会话认证已完成，但原 Bun 因非可调试签名附加失败，观测缺项仍保原事实；本轮没有重复 Instruments、参数对照或 Shell 故障矩阵。
+
+仍阻碍下一阶段退出的五项依赖如下；源码可独立实施的助手复制本轮已交付，不将 journal 或单个测试窗口立长期目标。
+
+| 剩余缺口 | 实际用户入口与完整行为 | 验收条件 |
+| --- | --- | --- |
+| 本机复制实际字节资格 | 正式 Web 用户原文与已核整轮正文复制，Native 保最终段合同及原反馈／失败 | 源码、便携 DOM 和真实 Cookie/恢复链已核；实际 OS 原文粘贴字节仍须事实证据，不能从成功图标推出 |
+| 原 Shell SIGTERM 与完整观测 | 正式 Job 效果、准确停止及客户端／Service 正常退出 | 保原失败，解释首停止／信号来源，出生后代、资源及句柄覆盖完整；认证成功不解除非可调试 Bun 的观测缺项 |
+| 原完整生命周期 RSS | 正式持续工作至正常退出 | 原8 outer／9点／60–168分钟／32MiB合同保持，+115.203125MiB原红仍held，不参数对照或降限 |
+| Win/Linux 正式系统资格 | 安装、版本切换、MCP连接／调用／取消／退出、维护恢复、保数据卸载 | 后续 Actions／用户 Windows 验证，Windows Shell 原guard保留；本轮不push或dispatch |
+| 全能力迁移、旧消费者退役和收束 | 37能力的实际正式入口与仍消费旧producer的构建链 | 完成适用T001–T114/E01–E14、§35及当前完整回归；有完整替代证据后才退役旧consumer，P5/P6和整体不提前退出 |
+
+本轮范围为完整复制能力的正式接线、必要验证、文档和已授权本地提交；Goal 保持 active，无 push、PR、发布或 Actions 触发。

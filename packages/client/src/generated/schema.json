@@ -12549,6 +12549,7 @@
           "enum": [
             "workspaces",
             "sessions",
+            "runs",
             "session_directory_activity",
             "history",
             "context",
@@ -13165,6 +13166,110 @@
       }
     },
     "required": ["session", "runs", "executions", "snapshotCursor", "storeId"],
+    "additionalProperties": false
+  },
+  "BrowserRunFacts": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "run": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "originCommandId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "originStoreId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "waiting_interaction",
+              "waiting_execution",
+              "cancelling",
+              "completed",
+              "failed",
+              "cancelled",
+              "interrupted"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "waitingForResults": {
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "originCommandId",
+          "originStoreId",
+          "status",
+          "isActive",
+          "createdAt",
+          "finishedAt",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": ["storeId", "run"],
     "additionalProperties": false
   },
   "SelectedContextPage": {

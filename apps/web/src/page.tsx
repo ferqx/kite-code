@@ -1,6 +1,11 @@
-import { type BrowserWorkspaceList, ClientError } from '@kite-ai/client';
+import { type BrowserWorkspaceList, ClientError, type Message } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
-import { ConnectionNotice, ModelOutputMessage, SafeMessageMarkdown } from '@kite-ai/ui';
+import {
+  ConnectionNotice,
+  completeRunReplies,
+  ModelOutputMessage,
+  SafeMessageMarkdown,
+} from '@kite-ai/ui';
 import { MessageCopyButton, TooltipProvider } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { WebController, type WebUpdate } from './controller';
@@ -15,7 +20,23 @@ import {
 import { FileCheckpoints } from './file-checkpoints';
 import { ModelInputs } from './model-input';
 import { navigationCSS, useNavigation } from './navigation';
+import { useRunFacts } from './run-facts';
 import { RuntimeLogs } from './runtime-logs';
+
+function outputKey(scope: string, message: Message) {
+  return JSON.stringify([
+    scope,
+    message.id,
+    message.sessionId,
+    message.runId,
+    message.seq,
+    message.status,
+    message.contentFormat,
+    message.originMessage,
+    message.outputBody,
+    message.content,
+  ]);
+}
 
 function selectedPath(path: string): string | undefined {
   const match = /^\/sessions\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/.exec(path);
@@ -40,7 +61,9 @@ export function WebPage({
 }: WebPageOptions) {
   const navigation = useNavigation(browser, suspended);
   const [pageVisible, setPageVisible] = useState(browser.document.visibilityState !== 'hidden');
-  const visibleOutput = useRef(new Map<string, string>());
+  const visibleOutput = useRef(new Map<string, { key: string; text: string }>());
+  const currentOutputs = useRef(new Map<string, string>());
+  const [, outputChanged] = useState(0);
   const outputTarget = useRef('');
   const paused = useRef(suspended);
   paused.current = suspended;
@@ -221,11 +244,34 @@ export function WebPage({
     wasPaused.current = suspended;
   }, [suspended, browser, controller, refreshDirectory, abortDirectory, saveReading]);
   const snapshot = update?.snapshot;
-  const outputIdentity = JSON.stringify([client.serverInfo?.storeId, update?.sessionId]);
+  const outputIdentity = JSON.stringify([
+    snapshot?.view.storeId,
+    update?.sessionId,
+    update?.generation,
+  ]);
   if (outputTarget.current !== outputIdentity) {
     visibleOutput.current.clear();
     outputTarget.current = outputIdentity;
   }
+  currentOutputs.current = new Map(
+    snapshot?.messages.map((message) => [message.id, outputKey(outputIdentity, message)]) ?? [],
+  );
+  const runFacts = useRunFacts(
+    client,
+    snapshot,
+    update?.phase === 'ready' && !suspended && pageVisible,
+  );
+  const fullContent = (message: Message) => {
+    const entry = visibleOutput.current.get(message.id);
+    return entry?.key === outputKey(outputIdentity, message) ? entry.text : undefined;
+  };
+  const replies = completeRunReplies({
+    messages: snapshot?.messages ?? [],
+    runs: runFacts.runs,
+    sessionId: update?.sessionId ?? '',
+    fullContent,
+    copyScope: 'run',
+  });
   // The Cookie/Core reader proves the original Execution chain under the current
   // admitted Store. A restored origin remains read-only and keeps its original IDs.
   const readModelOutput = useCallback(
@@ -278,7 +324,7 @@ export function WebPage({
     if (!snapshot) return;
     const content = snapshot.messages
       .filter((message) => message.role !== 'tool' || toolExpanded.has(message.id))
-      .map((message) => visibleOutput.current.get(message.id) ?? message.content)
+      .map((message) => fullContent(message) ?? message.content)
       .join('\n\n');
     try {
       await browser.navigator.clipboard.writeText(content);
@@ -535,6 +581,12 @@ export function WebPage({
                         {run.isActive ? ' · active' : ''}
                       </p>
                     ))}
+                    {runFacts.error && (
+                      <p role="alert">
+                        Original Run copy scope unavailable: {runFacts.error}. Refresh history to
+                        retry; original messages remain visible.
+                      </p>
+                    )}
                   </section>
                   <section aria-label="Execution status">
                     <h2>Executions</h2>
@@ -671,8 +723,17 @@ export function WebPage({
                               }
                               onContent={(content) => {
                                 if (outputTarget.current !== outputIdentity) return;
-                                if (content === undefined) visibleOutput.current.delete(message.id);
-                                else visibleOutput.current.set(message.id, content);
+                                const key = outputKey(outputIdentity, message);
+                                if (currentOutputs.current.get(message.id) !== key) return;
+                                const previous = visibleOutput.current.get(message.id);
+                                if (content === undefined) {
+                                  if (previous?.key !== key) return;
+                                  visibleOutput.current.delete(message.id);
+                                } else {
+                                  if (previous?.key === key && previous.text === content) return;
+                                  visibleOutput.current.set(message.id, { key, text: content });
+                                }
+                                outputChanged((revision) => revision + 1);
                               }}
                             />
                             {message.role === 'user' &&
@@ -687,6 +748,16 @@ export function WebPage({
                                   }
                                 />
                               )}
+                            {message.role === 'assistant' && replies.get(message.id)?.text && (
+                              <MessageCopyButton
+                                text={replies.get(message.id)!.text!}
+                                copyRole="assistant"
+                                disabled={suspended || !pageVisible || update.phase !== 'ready'}
+                                writeClipboardText={(text) =>
+                                  browser.navigator.clipboard.writeText(text)
+                                }
+                              />
+                            )}
                           </>
                         )}
                       </article>

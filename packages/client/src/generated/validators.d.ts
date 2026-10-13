@@ -32,6 +32,7 @@ export declare function response_BrowserInfo(value: unknown): boolean;
 export declare function response_BrowserWorkspaceList(value: unknown): boolean;
 export declare function response_BrowserSessionList(value: unknown): boolean;
 export declare function response_BrowserView(value: unknown): boolean;
+export declare function response_BrowserRunFacts(value: unknown): boolean;
 export declare function response_SelectedContextPage(value: unknown): boolean;
 export declare function response_SelectContextResponse(value: unknown): boolean;
 export declare function response_ForkSessionResponse(value: unknown): boolean;
@@ -163,6 +164,7 @@ export declare const responseValidators: {
   BrowserWorkspaceList: (value: unknown) => boolean;
   BrowserSessionList: (value: unknown) => boolean;
   BrowserView: (value: unknown) => boolean;
+  BrowserRunFacts: (value: unknown) => boolean;
   SelectedContextPage: (value: unknown) => boolean;
   SelectContextResponse: (value: unknown) => boolean;
   ForkSessionResponse: (value: unknown) => boolean;

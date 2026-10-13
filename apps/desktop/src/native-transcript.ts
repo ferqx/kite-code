@@ -1,4 +1,5 @@
 import type { Message } from '@kite-ai/client';
+import { completeRunReplies } from '@kite-ai/ui';
 import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/desktop';
 import { useEffect, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
@@ -265,24 +266,13 @@ export function desktopTranscript({
     runs.filter((run) => presentableRun(run, storeId, sessionId)).map((run) => [run.id, run]),
   );
   const identity = (runId: string) => JSON.stringify(['native-run', storeId, sessionId, runId]);
-  const finals = new Set<string>();
-  for (const run of observed.values()) {
-    if (run.status !== 'completed' || run.isActive) continue;
-    const own = messages.filter(
-      (message) =>
-        !message.originMessage && message.sessionId === sessionId && message.runId === run.id,
-    );
-    const last = own.filter((message) => message.role === 'assistant').at(-1);
-    if (
-      last &&
-      last.status === 'complete' &&
-      last.contentFormat !== 'unsupported' &&
-      !last.toolCalls?.length &&
-      (!last.outputBody || (last.outputBody.complete && last.outputBody.toolCallCount === 0)) &&
-      !own.some((message) => message.role === 'tool' && BigInt(message.seq) > BigInt(last.seq))
-    )
-      finals.add(last.id);
-  }
+  const replies = completeRunReplies({
+    messages,
+    runs: [...observed.values()],
+    sessionId,
+    fullContent: fullReply,
+    copyScope: 'final',
+  });
   const modeled = desktopMessages(messages).map((model, index) => {
     const message = messages[index]!,
       run =
@@ -298,10 +288,10 @@ export function desktopTranscript({
     const result: DesktopMessage = {
       ...(fact ? desktopToolMessage(fact, message.id, message.content) : model),
       ...(run ? { turnId: identity(run.id) } : {}),
-      ...(finals.has(message.id)
+      ...(replies.has(message.id)
         ? {
             finalReply: true,
-            copyText: message.outputBody ? (fullReply?.(message) ?? null) : message.content,
+            copyText: replies.get(message.id)?.text ?? null,
           }
         : {}),
     };

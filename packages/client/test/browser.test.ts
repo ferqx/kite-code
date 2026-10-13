@@ -491,3 +491,96 @@ test('diagnostics reject foreign selection or output receipt and never substitut
     await g.close();
   }
 });
+
+test('Browser historical Run reader is capability-gated, accurate in current Store/Session scope and aborts only its GET', async () => {
+  const original = {
+    storeId: 'original',
+    run: {
+      id: 'old-run',
+      sessionId: 's',
+      originCommandId: 'old-command',
+      originStoreId: 'restored-origin',
+      status: 'completed' as const,
+      isActive: false,
+      createdAt: 1,
+      finishedAt: 2,
+      reason: null,
+    },
+  };
+  let facts: unknown = original;
+  let held = false,
+    started = false,
+    release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const g = gateway(async () => {
+    if (held) {
+      started = true;
+      await gate;
+    }
+    return response(facts);
+  });
+  try {
+    await g.client.connect();
+    const before = g.requests.length;
+    await expect(g.client.getRun('s', 'old-run')).rejects.toMatchObject({
+      code: 'capability_unavailable',
+    });
+    expect(g.requests).toHaveLength(before);
+    g.setInfo({ ...info, capabilities: [...info.capabilities, 'runs'] });
+    await g.client.connect();
+    expect(await g.client.getRun('s', 'old-run')).toEqual(original);
+    expect(new URL(g.requests.at(-1)!.url).pathname).toBe('/browser/v1/sessions/s/runs/old-run');
+    expect(g.options.at(-1)?.credentials).toBe('same-origin');
+    for (const invalid of [
+      { ...original, storeId: 'foreign' },
+      { ...original, run: { ...original.run, id: 'other-run' } },
+      { ...original, run: { ...original.run, sessionId: 'other-session' } },
+    ]) {
+      facts = invalid;
+      await expect(g.client.getRun('s', 'old-run')).rejects.toMatchObject({
+        code: 'browser_identity_mismatch',
+      });
+    }
+    facts = { ...original, run: { ...original.run, configuration: { token: 'never-public' } } };
+    await expect(g.client.getRun('s', 'old-run')).rejects.toMatchObject({
+      code: 'invalid_response',
+    });
+    facts = {
+      ...original,
+      token: 'never-public',
+      run: { ...original.run, binding: 'never-public' },
+    };
+    expect(await g.client.getRun('s', 'old-run')).toEqual(original);
+    const beforeInvalid = g.requests.length;
+    await expect(g.client.getRun('s', '../native')).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    expect(g.requests).toHaveLength(beforeInvalid);
+    facts = original;
+    held = true;
+    const pending = g.client.getRun('s', 'old-run');
+    const rejected = pending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    const deadline = Date.now() + 2000;
+    while (!started) {
+      if (Date.now() >= deadline) throw Error('browser_run_read_not_started');
+      await Bun.sleep(1);
+    }
+    g.client.disposeNetwork();
+    expect(g.options.at(-1)?.signal?.aborted).toBe(true);
+    release();
+    expect(await rejected).toBeInstanceOf(Error);
+    expect(g.requests.every((request) => request.method === 'GET')).toBe(true);
+    expect(g.requests.every((request) => !request.headers.has('authorization'))).toBe(true);
+    expect(
+      g.requests.filter((request) => new URL(request.url).pathname.endsWith('/runs/old-run')),
+    ).toHaveLength(7);
+  } finally {
+    release();
+    await g.close();
+  }
+});

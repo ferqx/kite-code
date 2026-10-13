@@ -382,7 +382,24 @@ test('actual restored Web page reads original plain and sealed full Model bodies
           await click(button('Copy conversation'));
           expect(copied).toContain(expected.output.content);
           expect(copied).not.toContain(reasoning);
+          const replyCopies = () =>
+            [...page.document.querySelectorAll<HTMLButtonElement>('button')].filter(
+              (element) => element.getAttribute('aria-label') === '复制本轮Agent回复',
+            );
+          if (sessionId === 'source') {
+            await settle(() => replyCopies().length === 1);
+            expect(
+              replyCopies()[0]!.closest('[data-message-id]')?.getAttribute('data-message-id'),
+            ).toBe(smallMessage.id);
+            await click(replyCopies()[0]!);
+            expect(copied).toBe(`${content}\n\n${smallContent}`);
+            expect(copied).not.toContain(reasoning);
+            expect(copied).not.toContain(JSON.stringify([toolCall], null, 2));
+          } else {
+            expect(replyCopies()).toHaveLength(0);
+          }
           await click(button('Close full Model output', article));
+          expect(replyCopies()).toHaveLength(0);
           expect(article.textContent).toContain('Model output preview');
           await click(button('Copy conversation'));
           if (index === 0) expect(copied).not.toContain('WEB_RESTORED_EXACT_TAIL');

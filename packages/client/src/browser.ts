@@ -246,6 +246,54 @@ export class BrowserClient {
     return view;
   }
 
+  async getRun(sessionId: string, runId: string, options: { signal?: AbortSignal } = {}) {
+    this.require('runs');
+    const validId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+    if (
+      typeof sessionId !== 'string' ||
+      typeof runId !== 'string' ||
+      !validId.test(sessionId) ||
+      !validId.test(runId)
+    )
+      throw new ClientError('invalid_request');
+    const storeId = this.info!.storeId!,
+      generation = this.networkGeneration;
+    const facts = await this.read(
+      `/browser/v1/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}`,
+      'BrowserRunFacts',
+      options.signal,
+    );
+    if (
+      generation !== this.networkGeneration ||
+      storeId !== this.info!.storeId ||
+      facts.storeId !== storeId ||
+      facts.run.id !== runId ||
+      facts.run.sessionId !== sessionId
+    )
+      throw new ClientError('browser_identity_mismatch');
+    if (Object.hasOwn(facts.run, 'configuration')) throw new ClientError('invalid_response');
+    // Response decoding allows additive fields generally. This Browser boundary
+    // returns only the same public Run facts as View, never Native authority.
+    const run = facts.run;
+    return {
+      storeId: facts.storeId,
+      run: {
+        id: run.id,
+        sessionId: run.sessionId,
+        originCommandId: run.originCommandId,
+        originStoreId: run.originStoreId,
+        status: run.status,
+        isActive: run.isActive,
+        ...(run.waitingForResults === undefined
+          ? {}
+          : { waitingForResults: run.waitingForResults }),
+        createdAt: run.createdAt,
+        finishedAt: run.finishedAt,
+        reason: run.reason,
+      },
+    };
+  }
+
   private async readExport<K extends keyof Responses>(
     sessionId: string,
     operation: 'manifest' | 'records' | 'text' | 'verify',

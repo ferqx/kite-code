@@ -2248,6 +2248,7 @@ export type BrowserInfo = {
   capabilities: Array<
     | 'workspaces'
     | 'sessions'
+    | 'runs'
     | 'session_directory_activity'
     | 'history'
     | 'context'
@@ -2367,6 +2368,29 @@ export type BrowserView = {
   }>;
   snapshotCursor: string;
   storeId: string;
+};
+export type BrowserRunFacts = {
+  storeId: string;
+  run: {
+    id: string;
+    sessionId: string;
+    originCommandId: string;
+    originStoreId: string;
+    status:
+      | 'running'
+      | 'waiting_interaction'
+      | 'waiting_execution'
+      | 'cancelling'
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted';
+    isActive: boolean;
+    waitingForResults?: Array<string>;
+    createdAt: number;
+    finishedAt: number | null;
+    reason: string | null;
+  };
 };
 type SelectedContextPage___schema0 =
   | string

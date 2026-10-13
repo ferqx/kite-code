@@ -42,6 +42,8 @@ Gateway 将 `model_inputs` 作为有限只读 capability，固定原 Store 和 S
 
 [`@kite-ai/service/development-web`](src/development-web.ts) 的 `startDevelopmentWeb` 是显式的只读浏览器宿主：接收已准入的 Native Client 与可选固定可信 asset Map，在独立 `127.0.0.1:0` listener 提供页面、短期 HttpOnly/SameSite Cookie 和有限 `/browser/v1` GET。它复制并封存宿主提供的有限 HTML/JS/CSS 资产，并加入本 Service 构建内的 `/openapi.json`、`/api-docs` 静态文档，页面 identity 同时绑定资产完整 SHA-256 与原 instance/build/Store；调用者后来修改原 Map 不会更换原页面。它核对实际 Host/loopback peer/Origin 和页面 identity，转发空间、会话、view、history 与按需诊断；workspace 路径、Run 配置、view 中的 execution result 和 Native bearer 不进入这些投影。未知路径、query、写入、SSE、配置、凭据及任何 Authorization header 在转发前拒绝。
 
+Browser 历史轮次使用固定 `GET /browser/v1/sessions/:sessionId/runs/:runId`。只有原 Service 实际支持 sessions 和 commands 才宣告 `runs`；沿原读取 owner 和 Cookie／页面 identity，先核真实 Session 与当前 Store，再取准确 Run／Session，返回前复核原准入。响应经唯一 `BrowserRunFactsSchema` 仅保与 View 相同的安全 Run 字段，不含配置／token；原恢复 originStoreId 保留。拒绝额外 query、POST 和全局 Run 路径，不取得 Model 正文或执行权。[原真实配对文件](test/isolated/development-web.test.ts)保全部原断言，另核202个真实 Run、有限 View 外原 Run、错 Session 和读取零 Store／Model／Job 效果；正式 Web 整轮 UI 的读取与复制归 Web owner。
+
 Cookie 建立、续期、删除及 gateway close 只改变本浏览器的访问状态，不提交 Store 命令、模型请求或执行取消。关闭时先封住自身入口、清除 Cookie 并中断自身读取，等待已受理 GET 和返回正文流的真实 EOF 或 reader cancel 清理，再停止自身 listener。重复 `close()` 返回首次缓存的同一 completion；读取尚未清理时不能提前完成。它不关闭共享 Native Client 或其 Service。HTTP schema 仍由 [schema owner](src/http/schema/index.ts)定义，BrowserClient 与 [新 Web 调用者](../web/README.md)通过生成 DTO 消费。[真实配对测试](test/isolated/development-web.test.ts)覆盖认证隔离、读投影、零写入及浏览器关闭后原 Model 工作继续。当前最小默认页面不是正式 Web 功能切换；页面与完整观察能力按实施进度验证。
 
 每个有限浏览器 GET 通过共享 Native Client 的只读 `verifyConnection` 核实原身份，身份复核不重置该 Client 或中止其他读取。目录、历史、Context 与 Job 输出可以同时读取；每个请求仍保留自己的取消信号和原 page/instance/build/Store 约束。

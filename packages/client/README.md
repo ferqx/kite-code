@@ -85,6 +85,8 @@ R10 SDK 提供 `getContext(sessionId,ContextQuery)`、`rewind(sessionId,SelectCo
 
 `@kite-ai/client/browser` 提供独立的只读 `BrowserClient`。宿主从配套页面取得 `pageIdentity`，连接同源 `/browser/v1/server`，随后读取空间、会话、view、固定上界历史和按需诊断；浏览器使用 HttpOnly Cookie，不持有 Native token。每个响应的 page header、instance/build/Store 必须与原准入一致，身份变化不重新绑定。401 续 Cookie 为 single-flight，同一过期代次只续一次，每个原 GET 最多重试一次；其他失败不重试。closed query、Decimal64 cursor、生成 schema、严格 UTF-8 和完整响应预算仍适用。
 
+Browser 可选 `runs` 提供 `getRun(sessionId,runId,{signal?})`，固定 GET `/browser/v1/sessions/:sessionId/runs/:runId` 返回 `BrowserRunFacts`。Session、Run ID、当前 Store 与网络代次前后核对；合法恢复后的原 `originStoreId` 保留，不将出处改为当前准入。返回字段与 Browser View 的安全 Run 投影相同，配置字段明确拒绝，其他未公开扩展不进入返回；全局 additive response 兼容规则保持。缺 capability 本地拒绝，取消只释放该 GET；无通用全局 Run、query、POST、Native bearer 或配置读取。真实 Cookie／SQLite 原测试创建202个 Run，原 Run 不在最近200 View 中仍可精确读取，错 Session 拒绝且 cursor／Model／Job 不变；SDK 和 Gateway 的原完整用例归上述所属测试。
+
 `getContext(sessionId,BrowserContextQuery,{signal?})` 使用当前选定上下文的双游标和固定上界，原 Store 由 gateway 绑定；请求不能声明 Store 或主体。`listExecutionOutput(sessionId,executionId,{afterSeq?,upperSeq?,limit?,signal?})` 只读取属于原 Session 的准确 Job，保留三种 stream、区间、字节量及 null。消费跨 stream 的 coalesced gap 时必须保留重叠区间并以本页最大 `throughSeq` 推进。两个入口分别要求 `context`、`execution_output` capability，页面切换或取消读取只释放所属网络；当前 Context 投影与 Job 输出不等于一次 Model 的实际请求或完整 Runtime event log。
 
 `disposeNetwork()` 仅中断所属 GET/续 Cookie；`closeBrowserSession()` 先停止这些请求，再删除浏览器 Cookie 会话，均不取消 Run 或关闭 Service。网络读取和续期不推进 SSE 水位。该入口没有 mutation、SSE、配置或凭据方法。[BrowserClient 测试](test/browser.test.ts)覆盖真实 loopback HTTP 的身份、并发晚到 401、local 拒绝、预算及关闭；[实际配对](../../apps/service/test/isolated/development-web.test.ts)另核实 Core/SQLite 工作继续。

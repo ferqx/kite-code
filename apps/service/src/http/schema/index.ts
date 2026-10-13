@@ -1298,6 +1298,7 @@ export const BrowserInfoSchema = z.object({
     z.enum([
       'workspaces',
       'sessions',
+      'runs',
       'session_directory_activity',
       'history',
       'context',
@@ -1314,9 +1315,11 @@ export const BrowserContextQuerySchema = schemas.ContextQuery.omit({ storeId: tr
 export const BrowserModelInputQuerySchema = schemas.ModelInputQuery.omit({ storeId: true });
 export const BrowserWorkspaceListSchema = z.array(schemas.Workspace.omit({ rootUri: true }));
 export const BrowserSessionListSchema = z.array(schemas.Session);
+const browserRun = schemas.Run.omit({ configuration: true });
+export const BrowserRunFactsSchema = z.object({ storeId: id, run: browserRun });
 export const BrowserViewSchema = z.object({
   session: schemas.Session,
-  runs: z.array(schemas.Run.omit({ configuration: true })),
+  runs: z.array(browserRun),
   executions: z.array(schemas.Execution.omit({ result: true })),
   snapshotCursor: sequence,
   storeId: id,
@@ -1569,6 +1572,7 @@ export const apiSchemas = {
   BrowserWorkspaceList: BrowserWorkspaceListSchema,
   BrowserSessionList: BrowserSessionListSchema,
   BrowserView: BrowserViewSchema,
+  BrowserRunFacts: BrowserRunFactsSchema,
   SelectedContextPage: SelectedContextPageSchema,
   SelectContextResponse: SelectContextResponseSchema,
   ForkSessionResponse: ForkSessionResponseSchema,

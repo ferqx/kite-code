@@ -90,6 +90,7 @@ const responseNames = [
   'BrowserWorkspaceList',
   'BrowserSessionList',
   'BrowserView',
+  'BrowserRunFacts',
   'SelectedContextPage',
   'SelectContextResponse',
   'ForkSessionResponse',

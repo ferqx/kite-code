@@ -10,15 +10,64 @@ import {
   ClientError,
   type Command,
   canonicalCallerCommandRequest,
+  type Message,
   type PermissionMutation,
 } from '@kite-ai/client';
 import { callerTextDigest } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import type { NativeConversationResult, NativeDraft, NativeRequest } from '../src/native-bridge';
+import { desktopTranscript } from '../src/native-transcript';
 import { memoryPrivateData } from './private-data.fixture';
 
 const text = 'first input\n雪🙂\u0000end';
+test('formal Native transcript preserves the explicit final-only copy contract for the exact completed Run', () => {
+  const message = (
+    id: string,
+    seq: string,
+    content: string,
+    extra: Partial<Message> = {},
+  ): Message => ({
+    id,
+    seq,
+    content,
+    sessionId: 'session',
+    runId: 'run',
+    role: 'assistant',
+    status: 'complete',
+    ...extra,
+  });
+  const first = '先说明原方案🙂';
+  const final = '最后给出完整结论 中文';
+  const projection = desktopTranscript({
+    storeId: 'current-store',
+    sessionId: 'session',
+    tools: [],
+    runs: [
+      {
+        id: 'run',
+        sessionId: 'session',
+        originStoreId: 'restored-store',
+        status: 'completed',
+        isActive: false,
+        createdAt: 1,
+        finishedAt: 2,
+        reason: null,
+      },
+    ],
+    messages: [
+      message('first', '2', first, {
+        toolCalls: [{ id: 'tool', name: 'shell', arguments: 'excluded arguments' }],
+      }),
+      message('user', '1', 'excluded user', { role: 'user' }),
+      message('tool', '3', 'excluded tool', { role: 'tool' }),
+      message('final', '4', final),
+    ],
+  });
+  expect(projection.messages.find((entry) => entry.id === 'first')?.finalReply).not.toBe(true);
+  expect(projection.messages.find((entry) => entry.id === 'final')?.finalReply).toBe(true);
+  expect(projection.messages.find((entry) => entry.id === 'final')?.copyText).toBe(final);
+});
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'native-conversation-')));
   const data = memoryPrivateData(),
