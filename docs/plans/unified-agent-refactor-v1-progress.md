@@ -6159,3 +6159,16 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 原完整读归属DOM修后15pass／0fail／127assert／actual0／962ms，准确A generation1／revision7／原CRLF文本一次保存，迟到A回执不影响B草稿和revision1，零业务submit／conversation／answer／cancel。Desktop types0；原信息级Biome不做无关改写。原失败macOS问答完整文件和driver未改任何字节／断言／期限，修后真实源码外搬迁／default Service窗口1pass／32Bunassert／actual0／32.86秒，Provider4、原两Run完成、正确完整回答／只取消问卷、原主草稿恢复、所属Service退出后冷Store保持。日志 `/private/tmp/kite-native-private-draft-original-window-green-20261013.log`，局部通过不抹原full失败；新当前完整默认仍须重新实际执行并核全部作业。
 
 手册与Native owner同步真实私有保存行为，37能力和全部原门禁保留；此修复对应统一回归真实失败，不扩大已经闭合的故障矩阵。Web保持现状，Win/Linux后置；原Shell首停止／资源观测、RSS、助手实际原文粘贴与§35／完整阶段仍未闭合。Goal active，只本地提交，不push、PR、发布或Actions。
+
+
+## 2026-10-13：普通调用者退役与 Native 修复后的完整统一验证
+
+旧OSS普通完整链提交 `f2730258`、Native私有草稿保存提交 `2e3c19bd` 均经正常hook实际0。本轮在clean `2e3c19bde0ea51cb8c67a0b24c2cbf2e0a640eba` 重新执行原 `bun run test`，实际Bun98508退出0／1464.452秒：754完整文件、611唯一正式作业全部各一次启动／通过，正式失败0、未启动0。原四并发的604作业全部排空后原七个独占顺序执行；原总结 `parallel=171 isolated=576 exclusive=7` 与冻结计划一致。此前失败的原Native问答整例在本次原并发中实际通过；原文件／driver／断言／10秒读取及整例预算未改，未删断言、排除测试或以局部拼接代整轮。
+
+运行前后4493文件输入、11运行时／Web资产、HEAD和clean Git状态零漂移。原log `/private/tmp/kite-v13-retirement-full-second-test-20261013.log` SHA `65e5b9a6628e78c9f1e09125ed503013335053039426d10dc42405fa5b44a183`；freeze `/private/tmp/kite-v13-retirement-full-second-freeze-20261013.json` SHA `d02a431fc6bf9be4eca903bd645f7d17c0b36b5b9ff2511c19a3e274ac5e276d`；独立审计结果 `/private/tmp/kite-v13-retirement-full-second-audited-20261013.json` SHA `fff02155f8a7d12a34c72d66047dd795c5679bc1a7142ca14c00f7f62fd748c6`。第一轮真实退出1、草稿保存原失败及其完整fixture／日志继续保留，第二轮通过不改写第一轮事实。
+
+临时统计wrapper原结果 `/private/tmp/kite-v13-retirement-full-second-result-20261013.json` 也完整保留：它把成功名称不可见误判为同名夹具未证明，因而 `wholeDefaultQualified=false`，但自身保实际Bun退出0。原runner的 `--only-failures` 不输出成功body名称；冻结[TUI runner自测源码](../../tests/isolated/unified-agent/unified-tui-runner.test.ts)明确创建同名临时fixture，父区间35428–35463内只有35443开始、35451通过两条对应记录。独立审计仅将这两条归属原临时子用例，其余冻结611正式label各一次原开始／通过；五条原预期失败子记录及父断言全保留，两个正式父测试通过。没有改日志、测试、调度或重跑Bun来修统计；另存准确audited结果，并经独立只读审查重新核全部输入及退出证据。
+
+本轮闭合当前冻结代码的完整默认回归，并确认此前旧普通Desktop、CLI/TUI／Service及OSS调用者退役和Native私有草稿修复可以共同通过原整轮。正式安装、真实代码切换、MCP、维护恢复、保数据卸载和正常退出沿本次原完整用例执行；每个断言的资格仍限其真实范围，不外推未观测资源或三端实机。Web遵用户保持现状，没有新预览或剪贴板询问。产品、owner和active合同均已在实施提交同步；本次只归位测试入口、进度和两条相关能力证据，文档后续提交不改变冻结生产／测试／运行资产，适用证据复用。
+
+剩余阻塞仍沿[此前五项依赖](#2026-10-13旧-oss-发布普通调用者完整退役)：原Shell首停止／SIGTERM来源与资源／句柄／出生后代完整观测、原8 outer／9点生命周期RSS的+115.203125MiB超过32MiB原红、助手全文实际系统粘贴、Win/Linux原系统完整资格，以及37能力／适用T001–T114/E01–E14／§35独立整体退出核对。Instruments原Bun非可调试签名阻碍未解除，不重新参数对照；Web和平台按用户安排后置。本次wholeDefault=true只覆盖以上当前完整default，37状态仍partial、wholeV13=false、phaseExit=false、Goal active。正常文档与提交门禁保持，只本地提交，不push、PR、发布或Actions。

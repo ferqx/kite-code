@@ -2,15 +2,17 @@
 
 本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
+当前完整默认证据为macOS clean `2e3c19bd` 的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1464.452秒，原4并发／604排空后7独占和全部原断言／预算保持。4493文件输入及11运行资产／HEAD／status零漂移，原Native问答失败修复后也在整轮通过；第一轮真实失败仍保留。同名临时fixture仅按冻结源码和父区间归属，不过滤正式失败、不改原runner或为统计重测。准确原始与独立审计证据归[当前整轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13普通调用者退役与-native-修复后的完整统一验证)。完整默认通过不解除原RSS／资源观测、Win/Linux原系统、助手实际粘贴或阶段退出门禁。
+
 2026-10-13 在 macOS 的 clean `4eddd7cc` 执行原 `bun run test`，752 个完整文件组成609个正式作业，原四并发及最后七个独占作业全部通过，实际退出0。执行前后4483个文件输入和11个运行时／Web资产输入无漂移，准确原始日志、冻结与审计结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前代码完整默认回归与用户原文粘贴确认)。[测试运行器自测](isolated/scripts/test-suite-runner.test.ts)和[TUI运行器自测](isolated/unified-agent/unified-tui-runner.test.ts)会在所属临时目录运行预期失败及同名夹具，原始日志包含它们的子记录；核定完整默认结果须同时核正式冻结计划、父用例断言、实际退出码和原总结，不能只累计所有 `[test:…]` 文本。本次没有修改运行器或过滤测试；完整默认通过不解除原RSS／资源观测、Win/Linux原系统或阶段退出门禁。
 
 [旧Desktop入口完整测试](isolated/unified-agent/retired-desktop-entrypoints.test.ts)随后新增，属于现行有限root suite：六个package命令和四个直接脚本均在旧archive／Profile／producer之前返回退役诊断／2，原数据字节与目录保持。标准tmpdir／路径及HOME／USERPROFILE／AppData／XDG使同一断言可在三端执行，无macOS-only skip。macOS受影响组合四完整文件31pass／522断言，保原release smoke与CI／consumer断言；默认发现现753文件且该文件恰一次。上述752文件完整回归只证明其冻结版本，不能称为这次新增后的完整默认或Win/Linux实测；当前退役切片及剩余门禁归[准确进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-desktop-普通开发准备与打包调用者退役)。
 
-[旧CLI/TUI与Service入口完整测试](isolated/unified-agent/retired-application-entrypoints.test.ts)再补真实源码普通启动及两个package构建的退役／原Profile保全，并以复制真实wrapper和无副作用历史port核原函数对象、同步API、实际Bun bundle与源码四private helper路由。port仅证明入口胶水，原历史方法另比原提交字节，不代完整旧运行库或OS资格。用户要求Web端保持现状，本轮Web退役改动已撤回，原Web回归保留；助手全文系统剪贴板仍未确认。最终两个退役完整文件3pass／181断言，未变的原release smoke、workspace与CI三完整文件30pass／422断言按本轮原运行复用。当前默认发现754完整文件／611作业（604并发、7独占），两个退役文件各恰一次；未运行本次754完整默认，阶段及原RSS／观测／平台门禁保持。准确红绿、范围与证据归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。
+[旧CLI/TUI与Service入口完整测试](isolated/unified-agent/retired-application-entrypoints.test.ts)再补真实源码普通启动及两个package构建的退役／原Profile保全，并以复制真实wrapper和无副作用历史port核原函数对象、同步API、实际Bun bundle与源码四private helper路由。port仅证明入口胶水，原历史方法另比原提交字节，不代完整旧运行库或OS资格。用户要求Web端保持现状，本轮Web退役改动已撤回，原Web回归保留；助手全文系统剪贴板仍未确认。最终两个退役完整文件3pass／181断言，未变的原release smoke、workspace与CI三完整文件30pass／422断言按本轮原运行复用。当前默认发现754完整文件／611作业（604并发、7独占），两个退役文件各恰一次；该切片提交时未运行754完整默认，后续当前整轮结果见上；阶段及原RSS／观测／平台门禁保持。准确红绿、范围与证据归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。
 
-旧OSS普通发布全链随后在上述退役文件集中核验：build／verify、installer四操作和smoke实际七次调用保archive／prefix／Profile；原安装导出对象／同步／async／常量沿真实wrapper的source与实际bundle，原历史方法另保bytes，原smoke完整检查全bytes保留明确historical qualification。原source检查只移动读取目标，未改原Windows断言。五唯一完整文件34pass／708断言／actual0，原正式release smoke新候选与normal cleanup通过。默认仍754完整文件／611作业，不新增独立窗口；这批改动收束后统一原完整默认结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-oss-发布普通调用者完整退役)，结果未取得前保持未确认。
+旧OSS普通发布全链随后在上述退役文件集中核验：build／verify、installer四操作和smoke实际七次调用保archive／prefix／Profile；原安装导出对象／同步／async／常量沿真实wrapper的source与实际bundle，原历史方法另保bytes，原smoke完整检查全bytes保留明确historical qualification。原source检查只移动读取目标，未改原Windows断言。五唯一完整文件34pass／708断言／actual0，原正式release smoke新候选与normal cleanup通过。默认仍754完整文件／611作业，不新增独立窗口；这批改动收束后统一原完整默认结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-oss-发布普通调用者完整退役)，该切片提交时结果未取得，后续当前整轮结果见上。
 
-旧普通调用者收束提交 `f2730258` 后已实际统一执行原754文件／611作业default：Bun退出1，246启动／245通过／1Native问答草稿保存失败／365未启动，原并发／预算及4493文件／11资产／Git输入保持；原red完整保留。确定的enabled Save受History门禁静默返回已补生产单调用，原完整DOM15／127／0及未改原窗口1／32／0通过；不以两文件绿代完整默认，新整轮结果归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13统一回归发现的-native-私有草稿保存)。
+旧普通调用者收束提交 `f2730258` 后已实际统一执行原754文件／611作业default：Bun退出1，246启动／245通过／1Native问答草稿保存失败／365未启动，原并发／预算及4493文件／11资产／Git输入保持；原red完整保留。确定的enabled Save受History门禁静默返回已补生产单调用，原完整DOM15／127／0及未改原窗口1／32／0通过；不以两文件绿代完整默认，原失败／必要修复归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13统一回归发现的-native-私有草稿保存)。
 
 ## 环境基线与 owner
 
