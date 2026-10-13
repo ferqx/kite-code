@@ -1,7 +1,7 @@
 import { type BrowserWorkspaceList, ClientError } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { ConnectionNotice, ModelOutputMessage, SafeMessageMarkdown } from '@kite-ai/ui';
-import { TooltipProvider } from '@kite-ai/ui/desktop';
+import { MessageCopyButton, TooltipProvider } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { WebController, type WebUpdate } from './controller';
 import { Diagnostics } from './diagnostics';
@@ -621,7 +621,11 @@ export function WebPage({
                   >
                     {snapshot.messages.length === 0 && <p>No messages</p>}
                     {snapshot.messages.map((message) => (
-                      <article key={message.id} data-message-id={message.id}>
+                      <article
+                        key={JSON.stringify([snapshot.view.storeId, update.sessionId, message.id])}
+                        data-message-id={message.id}
+                        data-message-role={message.role}
+                      >
                         {message.role === 'tool' ? (
                           <details
                             open={toolExpanded.has(message.id)}
@@ -671,6 +675,18 @@ export function WebPage({
                                 else visibleOutput.current.set(message.id, content);
                               }}
                             />
+                            {message.role === 'user' &&
+                              message.status === 'complete' &&
+                              message.content && (
+                                <MessageCopyButton
+                                  text={message.content}
+                                  copyRole="user"
+                                  disabled={suspended || !pageVisible}
+                                  writeClipboardText={(text) =>
+                                    browser.navigator.clipboard.writeText(text)
+                                  }
+                                />
+                              )}
                           </>
                         )}
                       </article>

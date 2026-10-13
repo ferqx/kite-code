@@ -43,6 +43,10 @@
 
 History 为独立滚动区域，首次进入定位最新，向上阅读时刷新保持原位置，可显式回到最新。会话内复制仅包含当前已展开的原消息正文；Cmd/Ctrl+A 限于当前 History，输入、textarea、select 与 contenteditable 不劫持。工具详情使用原消息 ID 独立展开，不从名称猜测分类或 Turn。页面内最多保留 32 个会话的滚动 metadata，每会话最多 256 个展开 ID，不保存旧正文；返回会话重读实际接口后恢复位置和展开。重载不承诺恢复。
 
+已发送的 complete 用户消息逐条提供共享 [MessageCopyButton](../../packages/ui/src/desktop/MessageCopyButton.tsx)，直接复制原公共 `message.content` 字符串，保留 Unicode、CRLF、Markdown 与脚本字面量，不从渲染 DOM 重建文本。按钮按当前 Store/Session/message ID 挂载，悬停或键盘聚焦可见；成功勾保留两秒，失败可重试，正文变化／隐藏／暂停／换会话清除旧反馈与所属定时器。只调用本页面 `navigator.clipboard.writeText`，不增加 HTTP 写入、模型调用或任务操作；未知格式的原诊断保持，复制不解释或升级其内容。助手整轮复制仍受既有缺可信 Turn 身份的守卫约束，不以相邻消息推造回合。
+
+[正式页面复制整例](test/isolated/message-copy.test.tsx)经实际 mount/ReactDOM 核两条原用户全文、重试、两秒反馈、切会话迟到隔离和已读 Model 正文保持；共享 Conversation 的原消费基线与最终 DOM 回归另保原用户／助手完整文本选择和同 ID 换正文隔离。相邻完整组合 13 文件／75 项／724 条 Bun 断言通过，含真实 Web assets 构建，根与八个 workspace 类型检查通过。本机 IAB 实际 Enter 核按钮焦点、24px 控件及 18px 成功图标、两秒复位，读取前后仍为 3 个固定模型调用、4 条消息、2 个 Run、4 个 Execution、cursor 45；工具提供的 clipboard reader 返回空文本，实际 OS 字节未确认，不据成功图标授该资格。`data:` 粘贴核对页被浏览器安全策略拒绝后未绕过；原公共 Cookie/正文读取证据按未改范围复用，完整浏览器／平台与阶段门禁保持。
+
 DOM 测试验证 Markdown 安全与完整文本、复制范围、键盘范围、刷新/切换位置及工具展开；JSDOM 的模拟 scroll 数值和 Range 证据不代表原生浏览器选区、实际布局或触控资格。正式浏览器体验仍由宿主独立验证。
 
 

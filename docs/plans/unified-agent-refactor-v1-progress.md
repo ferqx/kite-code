@@ -5968,3 +5968,28 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 | 全部能力正式迁移与旧路径退役、阶段收束 | 37 项能力的实际正式客户端入口及仍有消费者的旧构建链 | 全部适用 T001–T114/E01–E14、§35 与完整回归覆盖；真实旧消费者完成替换后才退役，P5/P6 和总体 V1.3 不提前退出 |
 
 本轮只交付该正式 Context 缺口、必要文档与已授权本地提交；Goal 仍 active，无 push、PR、发布或 Actions 触发。
+
+
+## 2026-10-13：正式 Web 原用户消息复制迁移
+
+上一轮 `366069d3` 已闭合 Native Context 完整历史候选／正文／明确 Include 并本地提交，是实际 progress。本轮从该 clean HEAD 核能力映射与 §35，不复验已闭合 Context、RSS 参数或 Instruments。正式 Native build/launch/pack/install 实际使用新 Terminal/Service/renderer，未发现旧 authority 的新漏接；旧 Desktop 历史开发/打包仍消费旧 producer，不能仅按旧目录存在或名称删除。正式 Web 与 Agent 计划／required／waiver／恢复装配分别只读复核；最高优先级的独立具体违约是 Web 手册的逐条用户消息复制在正式 `mountWebPage` 缺按钮。
+
+原页面 red 为实际 mount/ReactDOM 完整读取后 `expect(first).not.toBeNull` 失败，0pass/1fail/1expect、actual1，日志 `/private/tmp/kite-web-message-copy-original-red-20261014.log` 保留。该文件名日期误写 14，实际为 13；标准 clock 2026-10-13 04:16:34 UTC 已核。没有把缺失按钮改成允许没有按钮。新 [Web 整例](../../apps/web/test/isolated/message-copy.test.tsx)保持原文／Model 正文并取得 1/22；新 [原 Conversation DOM](../../packages/ui/test/isolated/desktop-message-copy.test.tsx)先原码基线 1/17，再最终 1/22，保原消费断言并核同 ID 正文变动的迟到隔离。JSDOM 只交付 Enter 的浏览器 click，不冒称原生键盘证据。
+
+实施将原 Conversation 复制状态／按钮归唯一共享 MessageCopyButton，正式 Native 和 Web 两真实消费者共用；宿主仍决定准确正文和助手 copyText，公共浏览器仅为 complete 用户消息复制原 `message.content`，不修改消息、推断 Turn、读其他正文或发业务写。Store/Session/message ID、正文和隐藏／暂停分别限制实例及回包。原 Clipboard Main／bridge、公共 HTTP/Cookie/SDK、Store 与权限没有变更。用户原 Unicode/CRLF/Markdown/脚本字面量、成功两秒反馈、失败重试和晚回包范围保持；Web 的实际 CSS／可信 assets build 提供自身图标、hover 和 focus，不依赖 Native Tailwind。实现边界和产品使用归 [UI owner](../../packages/ui/README.md)、[Web owner](../../apps/web/README.md)及[用户指南](../handbook/clients/web/guides/conversation.md)。这是实际用户复制入口迁移和局部共享，不宣称整仓代码精简或完整 Web 退出。
+
+集中受影响验证为 13 完整文件、75pass/0fail/724 条 Bun 断言：新 Web/Conversation 两文件、全部原 Web 九文件（含实际资产 build/manifest）、原 Desktop 静态页与 Native conversation 两文件，各独立 Bun 进程沿原完整文件执行，原断言不删。最终日志为 `/private/tmp/kite-web-message-copy-green-20261013.log`、`/private/tmp/kite-desktop-message-copy-final-20261013.log` 和 `/private/tmp/kite-web-user-copy-adjacent-20261013-result.json`。根及八 workspace typecheck actual0；新用例没有 macOS skip／专属路径。公共 Cookie/大正文及原 Native clipboard transport 的不变输入证据按范围复用，不因此授当前整包或三端资格。当前完整默认未重新运行；上轮完整默认只作原版本基线，阶段收束仍需完整回归。
+
+本机已有 preview 夹具使用本轮真实 Web assets、临时 Profile、Core/SQLite/Service/Cookie 和固定模型。IAB 实际 Enter 后原用户按钮聚焦、24×24px／18×18px 成功图标、copied 标签及两秒恢复已核；读取前后仍是 Provider3/messages4/Runs2/Executions4/cursor45。工具 clipboard reader 返回空字符串，不能从成功图标推出实际 OS 原文字节已验；已请求一次用户手工核对，暂留未确认。`data:` 本机粘贴核对页被浏览器 URL 安全策略拒绝，因为只允许 HTTP(S)；没有通过其他协议、底层输入或设置更改绕过。截图 `/private/tmp/kite-web-user-message-copy-20261013.png` 只证明当前入口和焦点，不作字节证据。
+
+下一阶段退出仍最多五项依赖，实际入口／完整行为／验收各保原合同：
+
+| 缺口 | 实际入口与完整行为 | 验收条件 |
+| --- | --- | --- |
+| Web 本机实际剪贴板字节与完整消息复制范围 | 正式只读 History 的用户复制、原文／反馈／失败和切换；助手整轮须可信 Turn 身份 | 已迁移用户源码和便携验收；本机实际原文字节核实后才授对应资格，助手整轮不靠邻接猜身份 |
+| 原 Shell SIGTERM 与完整资源观测 | 正式 Job 执行、准确停止、客户端／Service 正常退出 | 保原失败、解释首停止／信号来源，出生后代／资源／句柄观测完整；已完成认证但原 Bun 附加失败不解除门禁 |
+| 原生命周期 RSS | 正式持续用户任务至正常退出 | 原 8 outer／9 点／60–168 分钟／32MiB 保持，+115.203125MiB 原红仍 held，不参数对照 |
+| Win/Linux 正式原系统资格 | 安装、真实版本切换、MCP 完整连接调用取消退出、维护恢复、保数据卸载 | 后续 Actions／用户 Windows 原系统验证；本机不 push 或 dispatch，Windows Shell guard 保留 |
+| 全部能力和实际旧消费者退出 | 37 能力实际正式入口及旧构建链最终退役 | 适用 T001–T114/E01–E14、§35 与阶段完整回归，最后旧 consumer 有完整替代证据后才删，不以 static green 完成 P5/P6 |
+
+本轮只做必要集中验证、实际交互核对、文档同步和已授权本地交付；Goal 保持 active，整体、阶段与旧路径最终退役均不提前宣布。

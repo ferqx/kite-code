@@ -59,6 +59,7 @@ export {
 } from './components/ui/tooltip';
 export { FileChanges, FileDiff } from './FileChanges';
 export { MessageContent } from './MessageContent';
+export { MessageCopyButton } from './MessageCopyButton';
 export {
   ModelEffortSelector,
   type ModelEffortSelectorProps,

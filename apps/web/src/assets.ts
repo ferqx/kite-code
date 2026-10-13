@@ -20,6 +20,16 @@ export const documentHTML =
 export const documentCSS = `:root{font-family:system-ui,sans-serif;color-scheme:dark light}*{box-sizing:border-box}body{margin:0}button,a{font:inherit}button{cursor:pointer}a{color:inherit}button{padding:.45rem .65rem;border:1px solid #8886;border-radius:5px;background:transparent;color:inherit}.web-page{min-height:100vh;background:#181a20;color:#eef0f5}.web-page[data-theme=light]{background:#fafafa;color:#242630}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #8886;padding:1rem}.web-layout{display:grid;grid-template-columns:minmax(200px,280px) minmax(0,1fr)}nav{padding:1rem;border-right:1px solid #8886}nav ul{padding-left:1.2rem}nav li{margin:.5rem 0}main{padding:1.5rem;min-width:0}.conversation-header{display:flex;align-items:center;justify-content:space-between;gap:1rem}h1{font-size:1.5rem}h2{font-size:1rem}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;user-select:text}.history article{padding:.75rem 0;border-top:1px solid #8884}small{opacity:.7}a[aria-current=page]{font-weight:700}[role=alert]{color:#dc8857}@media(max-width:640px){.web-layout{grid-template-columns:1fr}nav{border-right:0;border-bottom:1px solid #8886}main{padding:1rem}}`;
 // Selection belongs to message bodies, and the history is an independent viewport.
 export const readingCSS = `.web-page{height:100dvh;display:flex;flex-direction:column;user-select:none}.web-layout{flex:1;min-height:0}nav{overflow:auto}main{min-height:0;display:flex;flex-direction:column;overflow:auto}.history{overflow:auto;min-height:100px;flex:1;user-select:text;overscroll-behavior:contain}.diagnostic-panel{max-height:45vh;overflow:auto;border:1px solid #8886;padding:.5rem}.diagnostic-panel pre{user-select:text}.diagnostics,.model-inputs{flex-shrink:0}.model-input-panel{max-height:55vh;overflow:auto;border:1px solid #8886;padding:.5rem}.model-input-panel pre{user-select:text}.history summary{user-select:none;cursor:pointer}.message-markdown{padding:0;max-width:none;width:100%;overflow-wrap:anywhere}.message-markdown pre{overflow:auto;white-space:pre;max-width:100%;font-family:monospace}.message-markdown table{border-collapse:collapse;display:block;overflow:auto}.message-markdown td,.message-markdown th{border:1px solid #8886;padding:.3em}.message-markdown blockquote{margin-left:0;border-left:3px solid #8886;padding-left:1em}.message-markdown>*:first-child{margin-top:0}.message-markdown>*:last-child{margin-bottom:0}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}`;
+const messageCopyCSS = `
+.history article[data-message-role=user]{position:relative;padding-bottom:32px}
+.history .message-copy{position:absolute;right:0;bottom:2px;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;color:inherit;background:transparent;opacity:0;transition:opacity 120ms}
+.history article:hover .message-copy,.history article:focus-within .message-copy{opacity:1}
+.history .message-copy:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.history .message-copy svg{width:16px;height:16px;pointer-events:none}
+.history .message-copy[data-copy-state=copied] svg{width:18px;height:18px}
+.history .message-copy:disabled{cursor:default;opacity:.5}
+@media(prefers-reduced-motion:reduce){.history .message-copy{transition:none}}
+`;
 export async function assetDigest(content: string): Promise<string> {
   const bytes = new TextEncoder().encode(content);
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
@@ -27,7 +37,7 @@ export async function assetDigest(content: string): Promise<string> {
   ).join('');
 }
 export async function createTrustedAssets(bundle: string) {
-  const contents = [documentHTML, bundle, documentCSS + readingCSS];
+  const contents = [documentHTML, bundle, documentCSS + readingCSS + messageCopyCSS];
   const assets = new Map<string, TrustedAsset>();
   const manifest: AssetManifestEntry[] = [];
   for (let index = 0; index < assetPaths.length; index++) {

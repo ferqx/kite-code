@@ -1,10 +1,4 @@
-import {
-  ArrowDown01Icon,
-  Copy01Icon,
-  CopyXIcon,
-  KiteIcon,
-  Tick02Icon,
-} from '@hugeicons/core-free-icons';
+import { ArrowDown01Icon, KiteIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Fragment,
@@ -23,6 +17,7 @@ import {
 import { Marker, MarkerContent } from './components/ui/marker';
 import { ScrollArea } from './components/ui/scroll-area';
 import { MessageContent } from './MessageContent';
+import { MessageCopyButton } from './MessageCopyButton';
 import { statusLabel } from './status';
 import { ToolActivity } from './ToolActivity';
 import { TurnFailure } from './TurnFailure';
@@ -148,42 +143,6 @@ const MessageItem = memo(function MessageItem({
   childDetail?: { readonly label: string; readonly onOpen: () => void };
   renderContent?: (message: Message) => ReactNode;
 }) {
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const copyAttempt = useRef(0);
-  useEffect(
-    () => () => {
-      copyAttempt.current++;
-      if (copyResetTimer.current !== undefined) clearTimeout(copyResetTimer.current);
-    },
-    [],
-  );
-  const copyLabel =
-    copyState === 'copied'
-      ? '已复制消息'
-      : copyState === 'failed'
-        ? '复制失败，请重试'
-        : copyRole === 'user'
-          ? '复制本轮用户消息'
-          : '复制本轮Agent回复';
-  const copyMessage = async () => {
-    if (!copyText) return;
-    const attempt = ++copyAttempt.current;
-    if (copyResetTimer.current !== undefined) clearTimeout(copyResetTimer.current);
-    copyResetTimer.current = undefined;
-    try {
-      if (writeClipboardText) await writeClipboardText(copyText);
-      else await navigator.clipboard.writeText(copyText);
-      if (attempt !== copyAttempt.current) return;
-      setCopyState('copied');
-      copyResetTimer.current = setTimeout(() => {
-        copyResetTimer.current = undefined;
-        setCopyState('idle');
-      }, 2000);
-    } catch {
-      if (attempt === copyAttempt.current) setCopyState('failed');
-    }
-  };
   // Raw model reasoning is never part of the readable transcript.
   if (message.role === 'thinking') return null;
   if (message.role === 'tool') return null;
@@ -359,22 +318,11 @@ const MessageItem = memo(function MessageItem({
         </small>
       )}
       {copyText && (
-        <Button
-          className="message-copy"
-          data-copy-state={copyState}
-          variant="ghost"
-          size="icon-xs"
-          aria-label={copyLabel}
-          title={copyLabel}
-          onClick={copyMessage}
-        >
-          <HugeiconsIcon
-            className={copyState === 'copied' ? 'size-[18px]' : undefined}
-            icon={
-              copyState === 'copied' ? Tick02Icon : copyState === 'failed' ? CopyXIcon : Copy01Icon
-            }
-          />
-        </Button>
+        <MessageCopyButton
+          text={copyText}
+          copyRole={copyRole}
+          writeClipboardText={writeClipboardText}
+        />
       )}
     </article>
   );
