@@ -5874,3 +5874,7 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 5. **最终正式消费者、旧路径退役与§35完整资格。** 适用T001—T114/E01—E14、真实升级/恢复/制品通过后阶段收束须完整回归；本片无新增caller架构切换或旧树删除。
 
 按 document-before-commit 核 iteration_complete/stage/commit，只做已授权本地提交。新增闭合为上述正式原查询和Native旧错误归属；37能力仍partial、wholeV13=false／phaseExit=false，Goal active。后续官方授权/Responses和未证Codex缓存复用的原范围不变。
+
+本地交付结果：`62a2f1771d4f91d08f1b895edfd34814bec7ffcb` 正常hook全部通过（20.98秒），18个准确已授权文件，提交后clean。随后执行用户已明确允许的 Instruments 本次会话诊断，仅附加直接持有句柄的 Bun PID90339；准确当前binary与原 method SHA保持，原Allocations/5秒未换参数或比较矩阵。Bun先在有限 stdin闸门等待，只有工具的唯一 `--notify-tracing-started` 事件后才运行原65,659/17,825,915字节分配与释放，确保目标及清理归属可证；允许系统提示，不使用旧no-prompt，不改永久DevToolsSecurity，不采集其他进程。
+
+实际采集未进入开始：120秒内未收到开始通知，controller日志仅为指定PID的Starting/Attaching；Bun仅输出ready，原start/allocated/reference-released/done均未执行。controller一次SIGINT后仍未结束，按原有界cleanup仅清理本次三个直接句柄；actual controller -9、Bun -15、通知 -15，三句柄已reap，准确四PID（含runner）终态只读检查均不存在。Developer mode前后仍disabled。receipt `/private/tmp/kite-v13-instruments-session-20261013-_06eeg4r/result.json` SHA `a482708724fb9684a8dd74b11c074a0339e04b8419f85c6b19ebf26ec2ecc65e` 与全部原stdout/stderr/控制/通知文件保留；RunIssues的ZISSUE为空，不能据此推断唯一失败原因。runner自身0只表示写完不可用receipt，**不表示采集通过**，systemAuthorizationVerified=false／methodActuallyRan=false／qualification=unavailable。系统提示是否出现及用户是否实际完成尚待桌面事实确认，已问事实而非再次请求诊断许可；在此之前不启动依赖采集。原RSS、完整资源/出生后代/cleanup来源、后置平台与阶段门禁全部保持，当前3889已验代码/配置仍零漂移。
