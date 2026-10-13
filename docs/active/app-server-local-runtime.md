@@ -1,5 +1,7 @@
 # 本机 App Server 与 Durable Session Runtime
 
+本文保留重构前App Server／Store的历史边界与威胁模型，源码定位和当前合同归[通用Agent边界](unified-agent-boundary.md)及[新Desktop owner](../../apps/desktop/README.md)。旧Desktop普通开发／构建／服务准备入口现已明确退役，六个package命令和四个直接脚本只返回退役诊断／退出码2；实际回归归[调用者测试](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)。下方旧拓扑、验证命令和“当前”实现描述仅指其历史版本，不是现行正式启动或新数据写入许可。历史源码／制品的保留不闭合V1.3的RSS、观测、平台或最终退役门禁。
+
 > 实施中：[会话存储兼容性与连续性 V1](../plans/session-store-compatibility-and-continuity.md)已统一正式数据入口；已验证转换路径及未完成的平台资格见该计划，不由入口统一推导完整跨版本兼容。
 
 

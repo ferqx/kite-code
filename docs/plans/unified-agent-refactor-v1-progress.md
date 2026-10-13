@@ -6071,3 +6071,27 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 | 全能力迁移与旧消费者退役 | 37能力正式用户入口及仍消费旧producer的开发／构建／版本链 | 适用T001–T114/E01–E14、§35及各平台门禁齐全；当前完整默认已通过，仍须实际旧consumer完整替换与退役后核阶段退出 |
 
 本轮新增闭合指定用户消息的实际粘贴确认及当前代码完整默认回归；不覆盖旧失败、不宣布P5/P6或V1.3退出。Goal保持active，仅文档同步和已授权本地提交，无push、PR、发布或Actions触发。
+
+## 2026-10-13：旧 Desktop 普通开发准备与打包调用者退役
+
+上一轮 `c6bb667b` 收束准确 `4eddd7cc` 的752文件／609作业完整默认和指定用户原文粘贴确认，是实际progress。本轮重新核§35和真实旧消费者：旧Desktop `dev` 绑定Vite再执行 `prepare-desktop-service.ts`→旧OSS candidate→旧Service，`build:electron`注入旧identity，`package.ts`复制旧Service资源到 `.app`。现行[开发合同](../development/local-development.md)明确当前八workspace和新Native；这些旧普通消费者的收束没有RSS／观测或P6整体退出的技术前置。此前“仍有消费者所以不能直接删producer”保持正确，但不能扩为“任何消费者切换都须等最终门禁”。
+
+实施先闭合这个可独立的完整入口范围：旧 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 六命令，以及原dev／Electron build／package／Service prepare四直接脚本，均沿[单一诊断](../../scripts/development/retired-desktop.ts)返回 `legacy_desktop_entrypoint_retired`／2。旧普通路径内部的Vite／Electron／旧producer导入、archive／manifest读取、staging／签名、构建和服务启动实际删除；拒绝不先发生旧副作用，也不自动选择新Profile或fallback旧writer。诊断列出当前完整Native构建、启动、隔离验证与release help。原Vite热更新只属历史，不伪造等价能力；旧源码／制品／显式历史验收仍保出处，整树和其他历史producer没有由此全部退役。长期理由和真实备选归[决定](../../.agents/notes/implemented/simplification/2026-10-13-legacy-desktop-entrypoints.md)。
+
+新增[完整调用者文件](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)先在原代码安全地调用prepare与不存在archive，期望退役2实际1，原red `/private/tmp/kite-retired-desktop-original-red-20261013.log` 保留；没有让原开发链真的打开用户Profile。实施后十条实际调用均核诊断／退出码、旧sentinel原bytes与全部目录保持，1pass／100assert，日志 `/private/tmp/kite-retired-desktop-green-20261013.log`。测试使用标准tmpdir／路径API、独立HOME／USERPROFILE／AppData／XDG，无macOS专属路径或skip；当前只实际验macOS，不授Win/Linux原生产品资格。
+
+集中必要验证为该文件、原完整[release tools](../../tests/isolated/unified-agent/release-tools.test.ts)、[workspace消费者](../../tests/integration/scripts/unified-workspaces.test.ts)及[CI守卫](../../tests/integration/scripts/unified-ci.test.ts)四文件31pass／0fail／522assert，actual0／22.59秒；日志 `/private/tmp/kite-retired-desktop-adjacent-20261013.log`。原release smoke实际新候选 `cca0c361ea0a16245209bf7f46bef7c73acf4cfcb4e6f6675a882fe4144d4748` 的entry／daemon／Web／身份／normal cleanup全部true，零模型调用，未改原断言或预算。根与八workspace types actual0，消费者／依赖边界／测试归属和文档检查通过；其他正式Main／Service／安装／维护／版本消费者输入未变，既有证据按范围复用，强制hook独立执行。默认发现已753文件，新文件准确一次；前轮完整752／609不冒充新增后完整默认，本切片不宣布阶段收束。
+
+助手实际复制资格仍独立待核：现代码本机固定模型／Cookie／SQLite预览已明确复制第一轮完整Markdown，期望原文3925 UTF-8 bytes、SHA256 `913a5a94019202afc6345e51e57003831b4cd3cc831ef04167b560b64c276253`，文件 `/private/tmp/kite-web-assistant-copy-expected-20261013.md`。图标／焦点只证明交互；已请求用户在本机编辑器比较完整原文，未答不能以时间或此前用户消息回答替代。没有重复工具clipboard对照或尝试已拒协议，也没有调用付费Provider。
+
+本轮按依赖收束旧Desktop普通消费者，下一阶段最多五项未闭合要求如下；不是将单操作或测试窗口另立长期目标。
+
+| 剩余缺口 | 实际用户入口与完整行为 | 验收条件 |
+| --- | --- | --- |
+| 对应助手完整回复的实际复制资格 | 正式Web整轮原文及Native准确最终段复制 | 需完整准确原文的实际粘贴证据；指定用户消息已确认，助手样本尚待回答 |
+| 原Shell SIGTERM及完整资源观测 | 正式Job效果、准确停止和客户端／Service退出 | 保原失败并解释首停止／信号来源，出生后代／资源／句柄完整；原Bun非可调试签名阻碍附加仍held |
+| 原生命周期RSS | 正式持续用户工作至正常退出 | 原8 outer／9点／60–168分钟／32MiB不变，+115.203125MiB原红保持，不参数对照 |
+| Win/Linux正式原系统资格 | 完整安装、真实切换、MCP连接调用取消退出、维护恢复、保数据卸载 | 后续Actions／用户Windows实测；Windows Shell原guard保持，不push或dispatch |
+| 其他旧消费者与全能力退出 | 37能力正式入口、剩余历史producer／consumer及整体阶段 | 逐一核实际用途再收束，适用T001–T114/E01–E14／§35和阶段完整默认齐全；此次十条入口不替代整树退役 |
+
+本轮只完成上述普通Desktop调用者退役、必要验证／同步和已授权本地交付，能力映射仍37partial，Goal active；无push、PR、发布或Actions触发。

@@ -8,6 +8,8 @@
 
 ## 当前发行与源身份
 
+旧 Desktop 的普通开发、服务准备、Electron构建和打包调用者已明确退役：六个package命令及四个直接脚本在任何旧producer或制品写入前以 `legacy_desktop_entrypoint_retired`／2退出，并指向当前Native命令。完整行为和历史追溯归[开发入口](../development/local-development.md)与[旧Desktop owner](../../apps/kite-desktop/README.md)，实际拒绝及原数据保全由[完整调用者测试](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)核验。此项可独立于RSS／完整观测推进；当前完整Native仍使用新Service／Terminal闭包。旧历史测试／已保存制品及全部旧源码最终退役不因这些命令闭合而自动完成，三平台和§35门禁保持。
+
 根 workspaces 精确为 AI、Agent、Client、UI、Service、CLI、Desktop、Web。正式 CLI/TUI 固定完整 Terminal，Desktop 固定完整 Native；独立 source/development 显式入口不发现旧发布包或旧用户数据。业务通过唯一 HTTP/SSE Client；私有 bootstrap/发现只负责配套进程，不是第二业务 carrier。
 
 完整候选只物化生成 exports 真正需要的解析边。当前唯一内联的核心图标依赖归[UI build owner](../../packages/ui/README.md#原桌面展示层)：其他 external／peer、原 exports／CSS与准确许可保持，builder拒绝残留该包的外部引用。复制器不能以内联声明跳过 peer、optional或workspace；新闭包的全部文件仍纳入原manifest和每次独立完整校验。此构建收束不改变三次准入、双使用锁或平台完成约束。

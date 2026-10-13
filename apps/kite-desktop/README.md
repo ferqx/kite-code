@@ -1,4 +1,19 @@
-# kite-desktop
+# 重构前 Desktop 实现与历史验证
+
+当前桌面 owner 为 [apps/desktop](../desktop/README.md)，运行入口归[本地开发](../../docs/development/local-development.md)。本 workspace 保留旧实现、威胁模型和已保存制品的历史验证；下方历史正文中的“当前”只指重构前版本，不表示现行八 workspace 的产品合同或数据写入许可。
+
+## 当前命令与退役范围
+
+旧 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 及原直接开发／Electron构建／打包／服务准备脚本现均返回 `legacy_desktop_entrypoint_retired`／退出码2。它们在旧archive读取、Profile打开、构建或服务启动前拒绝，并给出仓库根的当前命令：
+
+- `bun run release:build --product native` 构建完整新Native候选。
+- `bun run desktop` 核验并启动该候选。
+- `bun run test:desktop:native` 执行当前隔离窗口／进程／Files验证。
+- `bun run release:native --help` 查归档、安装、版本选择与卸载。
+
+原Vite热更新是历史开发能力，当前制品启动不冒称热更新迁移。已保存旧制品、显式历史验收和源码仍保留各自出处，源码可从退役前 `c6bb667b` 追溯；不能用这些记录替代当前三平台资格。整个旧authority删除、RSS／观测与阶段退出保持未闭合。实际六个命令和四个直接脚本的拒绝／原数据保全见[完整调用者测试](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)。
+
+## 历史实现说明
 
 设置入口由 [App](src/App.tsx) 以全屏覆盖层呈现；[Settings](src/Settings.tsx) 负责分类、搜索、常规编辑器选择与已有模型／扩展操作，[桌面样式](src/tailwind.css)负责固定宽度的设置侧栏、模型分组横向列表及双栏布局，并沿用共享浅色主题变量与基础字号。模型页将默认模型选择独立展示，复用共享 shadcn 下拉菜单按提供商分组选择并标记当前项；默认选择、模型启停、手动刷新和提供商保存沿用 App 的操作互斥与错误处理；App 保存前台／后台操作状态，设置页保留当前操作的局部反馈，不触发全局控件禁用。关闭重开设置后仍显示后台操作未完成并拦截新的配置操作；保留页面、滚动位置和焦点。启停开关在等待期间保持用户选择的位置，失败后回到服务确认的快照；保存中的提供商输入只读，表单不卸载，分组列出模型数量与提供商状态，以开关管理启用状态，并在窄窗口调整排列。模型页通过 App Control 的版本保护操作切换启用状态和默认模型；会话输入区只展示已启用模型。提供商配置复用共享 `RightSidebar` 在设置页右侧展开，关闭后焦点返回原操作；切换提供商时重新创建对应表单，清空上一提供商的密钥、地址与模型草稿。设置侧栏不订阅会话侧栏的拖拽宽度。没有 Runtime 配置接口的参考图开关不进入页面状态。MCP 与 Skills 的设置行为及验证边界见[扩展设置](docs/extensions.md)。
 
@@ -28,22 +43,11 @@
 - renderer 只导入 `kite-local-runtime/client/protocol` 的环境无关组合，不使用 Node/Bun、Host、Store 或 Web REST。
 - 关闭窗口隐藏主窗口；明确退出前由 [Electron lifecycle](electron/main.ts)查询完整会话目录，仅有运行或等待中的会话任务时要求确认。继续退出或空闲直接退出都会先关闭自有服务 stdin 并等待 Service 清理；清理失败或超过 20 秒时提供紧急退出，紧急路径不等待 Host 锁，尝试终止本应用拥有的 Service。查询无法完整确认时保守提示；失败与副作用未知保持可见，不影响其他客户端。
 
-## 开发与验证
+## 历史开发与验证
 
-界面开发采用 [HTML 预览优先的迭代流程](docs/conversation-ui.md#html-预览优先的界面迭代)，先在浏览器中调整实际组件，再按变更范围验证原生能力。
+重构前开发链曾先绑定Vite 1420，再通过 `prepare-desktop-service.ts` 验证旧OSS candidate，将旧Host identity编入Main／preload并启动Electron；打包链另复制旧service resource到 `.app`。这些普通调用者现已退役，不能再按旧步骤从当前checkout运行。原开发CSP／React Refresh、打包CSP、准确配对、隔离HOME以及退出所属进程的理由仍指导其历史分析，当前负责实现见[新Native owner](../desktop/README.md)。
 
-环境需要 Bun 和 macOS；Electron 与官方 `@electron/packager` 已由 workspace 依赖锁定，不需要 Rust、Cargo 或 Tauri 开发依赖。开发用配套服务也不从 PATH 寻找服务或连接 daemon。
-
-1. 仓库根执行 `bun install`。
-2. `bun run --cwd apps/kite-desktop dev` 先绑定 Vite 开发端口 1420，再从当前工作树自动构建并校验配套 Runtime Host，把该 Host 的精确 identity 编译进 Electron main/preload，最后启动 Electron 开发窗口。端口占用时立即给出中文排查提示，不执行构建、不启动新窗口；可用 `lsof -nP -iTCP:1420 -sTCP:LISTEN` 查看占用者，在原开发终端按 Ctrl+C 退出后重试。构建失败或窗口退出时关闭本次 Vite 服务。
-3. 只需单独刷新配套服务时可执行 `bun run --cwd apps/kite-desktop prepare:service`；可在脚本后提供已验证 candidate archive，复用 release owner 的构建/校验和服务 identity。
-4. `bun run --cwd apps/kite-desktop build:desktop` 依次构建 renderer、Electron host，并用官方 Electron Packager 生成当前 macOS arm64 制品 `apps/kite-desktop/out/kite-darwin-arm64/kite.app`。
-
-开发窗口的 CSP 允许 Vite 注入的 React Refresh 内联初始化脚本；打包窗口的 `script-src` 只允许自身资源。修改开发加载方式后须验证真实 Electron 开发窗口的首次渲染和刷新，打包窗口 smoke 不覆盖 Vite 注入路径。
-
-`build` 只执行 Vite renderer 构建，用于 workspace 默认构建。`build:electron` 要求已有 `service/desktop.json`，将其中经过验证的 candidate ID、服务摘要、expected server version 与环境白名单编入 `dist-electron/main.cjs`；运行时不会信任被替换的资源清单。`dev` 绑定开发端口后调用 `prepare:service`，避免 renderer 热更新与旧 Host 协议混用；`prepare:service` 复用 release owner 构建或验证 candidate，只把配套 `kite-service` 与 `desktop.json` 提取到 `apps/kite-desktop/service`。服务使用当前 OS 用户的 `.kite-code` 配置；开发包与打包版均由 [Electron host](electron/host.ts) 将 canonical config root 作为 runtimeRoot，不再按 checkout 或 Store epoch 自动分库；自动验证必须传入隔离 home/workspace，不能改动开发者已有信任与凭据。
-
-检查：`bun run --cwd apps/kite-desktop typecheck`、`test`、`build` 和 `build:electron`。准备服务后运行 `bun run test:desktop:native`；构建应用后运行 `bun run test:desktop:window`，后者需要本机图形会话，使用源码外隔离应用和本机模型 fixture。[真实模型原生切换测试](scripts/native-live-session-switch.ts)单独以 `KITE_RUN_LIVE_NATIVE_SWITCH=1` 和 `KITE_LIVE_DEEPSEEK_API_KEY` 显式启用，在隔离打包窗口中验证运行中的子会话详情往返、父会话恢复与 B/A 反复切换，不属于默认 smoke。全局类型与边界检查包含 renderer 与 Electron owner。原生窗口、preload、安装、隐藏、重接、退出和崩溃清理需要独立真实 Electron 场景，单元测试、DOM 预览与构建通过不替代它们。
+本目录 `typecheck`、`test`、`test:native:window`、`test:native:store-upgrade` 和明确opt-in历史模型脚本只属旧实现／已保存旧制品验证；不进入当前默认或当前平台发行资格。旧完整源码和验证出处仍可追溯退役前 `c6bb667b`，原记录中的断言和失败不因命令退役而改写。现行正式生命周期、版本切换、保数据卸载与维护恢复沿新Native／Terminal前门执行，实际平台范围和剩余门禁归[发布边界](../../docs/active/release-control.md)。
 
 ## 当前限制
 

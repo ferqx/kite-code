@@ -31,10 +31,7 @@ KITE_LIVE_DEEPSEEK_API_KEY=... \
 bun run test:model:live:background
 ```
 
-默认从 TypeScript 服务入口运行。验证桌面端实际携带的服务二进制时，先执行
-`bun run --cwd apps/kite-desktop prepare:service`，再增加
-`KITE_LIVE_BACKGROUND_SERVICE_EXECUTABLE="$PWD/apps/kite-desktop/service/kite-service"`。
-该路径复用同一组真实模型、多会话、后台 Shell 与子 Agent 断言。
+本节的旧App Server套件和 `KITE_LIVE_BACKGROUND_SERVICE_EXECUTABLE` 属历史实现。旧Desktop的 `prepare:service` 已退役，不再从当前checkout生成其配套二进制；已保存旧制品的显式历史验证仍只证明那个版本，不能将新Native／Service交给这套旧协议驱动。当前正式Native、完整默认和平台验收归[测试入口](../../../README.md)；本次入口退役没有重跑付费模型或改写原历史断言。
 
 默认 endpoint 为 `https://api.deepseek.com/v1`；只有使用受信的 DeepSeek-compatible 代理时才设置 `KITE_LIVE_DEEPSEEK_BASE_URL`。未设置 `KITE_RUN_LIVE_BACKGROUND_MULTISESSION=1` 时 runner 会在建立网络连接前明确拒绝执行。显式 opt-in 后，runner 会先调用该 endpoint 的 `/models`，确认固定模型 `deepseek-flash` 确实被公布；模型不可用时不发送测试提示，并以“场景未建立”快速失败。
 

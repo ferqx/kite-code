@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
-    "dev:web": "vite --host 127.0.0.1",
-    "build": "vite build",
-    "build:desktop": "bun run build && bun run build:electron && bun run scripts/package.ts",
+    "dev:web": "bun run ../../scripts/development/retired-desktop.ts",
+    "build": "bun run ../../scripts/development/retired-desktop.ts",
+    "build:desktop": "bun run scripts/package.ts",
     "prepare:service": "bun run ../../scripts/release/prepare-desktop-service.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts .",

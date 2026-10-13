@@ -40,6 +40,7 @@
     "scripts/runtime/unified-mcp-live-smoke.ts",
     "scripts/runtime/unified-session-log-acl.ts",
     "scripts/development/ensure-web.ts",
+    "scripts/development/retired-desktop.ts",
     "scripts/development/unified-cli.ts",
     "scripts/development/unified-tui.ts",
     "scripts/development/unified-web.ts",
