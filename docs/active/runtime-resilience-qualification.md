@@ -8,7 +8,7 @@
 
 ## 当前 V1.3 owner 与资格边界
 
-用户最新要求以程序正常运行和内存稳定为本轮范围，停止过度采集；按[当前 Goal 范围](../plans/unified-agent-refactor-v1-progress.md#当前-goal-收尾范围2026-10-13)交付已定位修复和必要验证，不继续 root 校准或扩大完整来源实现。原断言、阈值、unknown 和缺项拒绝保持，完整观测资格没有因此通过；Win/Linux 发布前实测仍后置，不为已闭合事实重复负载。
+用户最新确认按业务与清理正常、重复运行的内存趋势和没有已确认持续保留问题结束当前开发实施；原32MiB正式门禁保留为尚未取得的发布资格，不作为当前开发完成的唯一标准。按[当前Goal范围](../plans/unified-agent-refactor-v1-progress.md#当前-goal-收尾范围2026-10-13)停止root校准、性能负载与完整来源扩展。原断言、阈值、unknown和缺项拒绝保持，开发交付完成不授完整观测或正式阶段资格；Win/Linux发布前实测仍后置。
 
 用户要求避免过度验证和性能采集，正式功能证据按未变范围复用。已授权观测扩展的[耐久原生源码](../../native/runtime-observer/README.md)目前只接所有 Job／POSIX FilePoll、EventLoopTimer 实际准入与真实 partial 快照，未替换正式 Bun／安装资产；原 SDK27 编译失败保留，现已修复原生 SDK 选择并用本机 SDK26.5 取得完整构建和真实 Job／FilePoll 释放证据。其他资源类别与完整出生来源尚未接齐，独立 coalition task 前缀不代全 Runtime 出生证明。RSS 原红、全资源／身份与阶段门禁仍未闭合，源码审查不能证明“无内存泄漏”；准确已有失败归[原生观测记录](../plans/unified-agent-refactor-v1-progress.md#2026-10-13原生观测源码与性能诊断收束)。
 
@@ -20,7 +20,7 @@
 
 按用户2026-10-13“性能这块不要过度检查，目前没有正式发布”的安排，本次性能诊断到此收束，不追加 Instruments 导出／采集、参数对照或性能矩阵，也不再要求用户操作现有采集窗口。RSS、资源观测和发布／阶段退出门禁仍保原失败与缺项；当前功能收尾按确定源码缺口和必要验证推进，不以本安排解除资格或宣布阶段退出。
 
-当前退出条件以原 formal verifier 和 §35 为准。历史间歇 SIGTERM 的首发送者仍未知，但解释该首发送者不是原独立门禁；原失败收据、当前 Shell 完整功能断言和真实清理证明分别保留，不能据后续绿色倒推历史原因。助手全文的再次人工粘贴确认也不是新增功能推进条件，未直接观测的 OS 剪贴板字节仍按证据范围说明。两项诊断未知不再单独扩大退出条件；原 RSS、完整资源／出生后代、平台及整体资格要求不变，准确核对归[门禁收束进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13回到原退出条件收束额外诊断依赖)。
+完整资格退出条件仍以原 formal verifier 和 §35 为准；当前开发交付已按用户另行确认的口径结束。历史间歇 SIGTERM 的首发送者仍未知，但解释该首发送者不是原独立门禁；原失败收据、当前 Shell 完整功能断言和真实清理证明分别保留，不能据后续绿色倒推历史原因。助手全文的再次人工粘贴确认也不是新增功能推进条件，未直接观测的 OS 剪贴板字节仍按证据范围说明。两项诊断未知不再单独扩大退出条件；原 RSS、完整资源／出生后代、平台及整体资格要求不变，准确核对归[门禁收束进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13回到原退出条件收束额外诊断依赖)。
 
 macOS 的正式 web_fetch／SQLite [原 Worker owner](../../packages/agent/src/platform/process/owned-worker.ts)现保可信 preload 捕获的原 Mach right 到严格死名并准确释放；SQL ACK仍独立必要，缺身份、查询／释放失败或五秒收尾耗尽保未知与原锁，取消／timeout不掩盖清理未知。source observer／native leaf与built chunk属于准确运行资产保护，Service只装配metadata。当前[完整公开交接和真实窗口证据](../plans/unified-agent-refactor-v1-progress.md#2026-10-13macos-原-worker-收尾与准确锁交接)只授本机单Worker终态与原权释放；不能填全Runtime资源／出生后代、JSC／VM全部回收、activeResources／handles或RSS，也不解除Win/Linux或阶段资格。原formal verifier／八outer／九点／原RSS拒绝继续保持。
 

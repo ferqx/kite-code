@@ -1,17 +1,17 @@
 # 通用 Agent V1.3 实施进度与证据
 
-状态：implementing；当前按用户最新要求收束系统采集，只处理正常运行和内存稳定；RSS 原失败和完整观测缺项仍未取得正式资格。总体设计为 [V1.3](unified-agent-refactor-v1.md)，[能力映射](unified-agent-refactor-v1-capabilities.tsv)记录旧调用者、目标 owner 和退役条件。本页只登记实际交付和验证范围。
+状态：implementation_delivered；按用户最新开发验收口径结束本轮实施。业务／清理和已有重复运行趋势已核对；RSS32MiB正式门禁及完整资源／出生观测仍为尚未取得的资格，wholeV13=false／phaseExit=false。总体设计为 [V1.3](unified-agent-refactor-v1.md)，[能力映射](unified-agent-refactor-v1-capabilities.tsv)记录旧调用者、目标 owner 和退役条件。本页只登记实际交付和验证范围。
 
 ## 当前 Goal 收尾范围（2026-10-13）
 
-用户重新要求完成 RSS 稳定性与完整资源／出生后代观测后，最新明确“不要过度检查，目前没有进入生产阶段，程序能够正常运行，内存稳定即可”。本轮停止 root 校准与来源类别扩展，提交已定位构建／计数修复，并只针对实际运行和内存管理路径作必要验证；原完整资格要求、真实失败与缺项不改写为通过。
+用户最新明确：业务与清理正常，重复运行后内存趋于稳定，没有已确认的持续保留问题；原32MiB正式门禁可保留为尚未取得的发布资格，不继续作为当前开发阶段的唯一完成标准。按此口径结束当前开发实施，不再扩大系统采集、性能诊断、观测类别或负载矩阵。
 
-- [原生观测源码](../../native/runtime-observer/README.md)保留已实施的部分来源与耐久补丁，停止继续系统采集和类别扩展；partial、unknown 与原失败保持，不拿有限 owner 或当前存活树冒充全量。
-- 未变的正式生产／调用者范围复用[611 正式作业的完整默认回归](#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。新增验证仅对应实际改动和未闭合的正常运行／内存问题，保留提交强制检查；未变范围不重复完整负载。
-- Win/Linux 本轮按 Actions 配置完成及未实测说明交付；Web 保持现状，ChatGPT 官方授权与 Responses 保持原顺序。原 Windows Shell guard 保留，不 push、PR、发布或触发 Actions。
-- RSS 原失败、完整资源／出生后代缺项及全能力／§35 退出条件继续保留。原断言、阈值和拒绝不变，不以本轮收尾证明无内存泄漏或宣布 V1.3／阶段退出。
+- [原生观测源码](../../native/runtime-observer/README.md)保留已实施的部分来源、可构建补丁与局部释放证明；未执行的系统采集辅助脚本已删除。partial、unknown和完整资源／出生缺项不改写为通过，未替换正式运行时。
+- 正式生产代码与[611正式作业完整默认回归](#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)对应范围相同，复用该证据。两份既有测试只改系统临时路径，本轮保原断言完成受影响验证和提交强制检查；未重复完整默认或发布长测。
+- Win/Linux当前只按Actions配置及未实测备注交付，正式发布前再实测；Web保持现状，ChatGPT官方授权与Responses保持既定后置顺序。原Windows Shell guard保留，不push、PR、发布或触发Actions。
+- 当前开发交付完成与完整发布资格分开记录。原RSS32MiB、八outer／九点和完整来源拒绝仍保留；旧红和本轮未成功尝试不删除，不宣称无泄漏、完整观测或正式阶段资格通过。
 
-原完整资格的依赖仍为可用原生构建→完整资源来源→连续出生身份与独立对账→版本化正式证据及原 RSS 门禁→全能力／§35 退出。这是尚未满足的资格依赖，不再作为本轮自动扩展采集和构建工作的清单。当前按正常运行与内存稳定收尾；没有完整资格证据时保持 wholeV13=false／phaseExit=false。准确实现与失败证据仍归本页已有记录，不新增独立验证台账。
+原完整资格依赖仍为可用原生构建→完整资源来源→连续出生身份与独立对账→版本化正式证据及原RSS门禁→全能力／§35退出。这些未取得资格不再驱动本轮自动扩展工作；当前按用户确认的开发完成标准收尾。准确证据归本页既有记录及[本轮最终收尾](#2026-10-14正常运行与开发实施收尾)，不新增验证台账。
 
 ## 执行目标与阶段边界
 
@@ -6313,3 +6313,17 @@ EventLoopTimer 新接移动稳定 token 和真实调度／取消／最终 Drop�
 连续来源还需本机系统条件：传统 ES 的普通UID能力检查实际5／ERR_NOT_PRIVILEGED；Apple eslogger 签名已有client entitlement，工具 `sudo -n true` 仍因缺会话失败。曾准备一次仅自有短命目标的有界校准，但用户最新要求停止过度检查和采集，未执行的辅助脚本已删除；不再请求系统认证，不授ready／flush或完整出生。macOS27新增的descendants／sync API不能在当前26.7运行。完整资源仍缺socket／HTTP后台loop、Worker、其他请求／native addon及部分timer ref，当前coverageComplete=false；v1／v2 formal 原硬拒绝保持，后续实际来源须版本化接线。
 
 RSS 因果有界复核未发现可确认业务漏点：该lifecycle不进入question schema、AJV编译或result requirement热路径，原Worker FunctionCodeBlock增长不能据此归因。未改生产去迎合猜测，未重跑RSS或已闭合完整默认；611正式作业证据仅复用未变的原正式运行时范围，不授本轮新部分binary。新增闭合为构建前提及上述观测逻辑缺口，没有正式caller切换、旧路径删除或整体资格通过；RSS原166.609375MiB红、完整资源／出生与§35仍未闭合。
+
+## 2026-10-14：正常运行与开发实施收尾
+
+用户最新要求停止过度检查／采集，并明确原32MiB正式门禁保留为发布资格、不作为当前开发完成的唯一标准。按业务和清理正常、重复运行的内存趋稳及没有已确认持续保留问题结束本轮开发实施；不把尚未取得的完整资格记为通过。
+
+原生构建与Timer实际准入切片已本地提交 `ec8d82583136fad220320f3a9073f92326f18edc`，九文件583insert／22delete，正常hook全部0／21.71秒；未执行的系统采集辅助脚本已删除。固定SDK选择、九项native核心测试和真实Job／FilePoll／Timer聚合释放证据归上一节。正式安装、默认运行时和formal verifier未切换到部分观测原型，完整资源／出生来源继续partial。
+
+曾按固定Bun已支持的选项，试探仅给长寿命SQLite Worker启用smol小堆。四份原完整功能测试实际0／9pass／169expects／2.12秒，但一次原450秒／九点确认在370.413851秒以137退出、timedOut=false，真实双EOF、七项源码零漂移，未生成lifecycle.json或完整测量点。首发送者未知，不归因于用户输入、超时或确定内存泄漏；收据 `/private/tmp/kite-v13-sqlite-smol-rss-51Tsqp/result.json` SHA `4c35e74a9c6aae695bf19e86c99ff4203f6b368065c2118de6b6101e64e1cd40`、原日志保留。此尝试未取得正常长运行或RSS证明，已完整回退两处生产配置及相应试探性文档，未重跑负载、未留下smol选项、未删断言或过滤失败。
+
+最终正式Agent／Service／Client源码与 `ede068a18b32d708b6e70b8798d4c3a6e40eabfa` 完整默认通过版本一致；`git diff`核该三处生产范围为空，未变能力复用754文件／611作业完整证据。唯一最终测试代码变化是statement-lifecycle／backpressure两份既有完整文件采用系统tmpdir／join，保原断言和预算，使同一文件可在三端执行。回退后受影响statement、backpressure、queue和完整Worker交接四文件实际0／9pass／169expects／1.92秒；结果归原日志 `/private/tmp/kite-v13-storage-final-development-20261014.log`；正常提交检查独立执行。
+
+仍适用的原正式生产450秒记录实际exit0／双EOF，7386cycles／14772Model调用，业务完成／取消／重连／删除与清理完整。八个测量RSS点为226656256、364478464、371654656、398245888、399065088、399097856、401129472、401358848B，表现为先增长后趋平台；末四点增加2.1875MiB只描述该已存在记录的趋势，不能替代原全窗口166.609375MiB>32MiB真实失败，也不是新测量或“无泄漏”证明。没有确认新的持续业务保留链，不再追加性能采集。原收据及SHA归[SQL owner收尾](#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。
+
+当前开发交付已收束，developmentDeliveryComplete=true；原RSS32MiB／八outer、全Runtime资源和全部出生后代资格继续未取得，wholeV13=false／phaseExit=false，不把开发完成升级成正式资格。Win/Linux配置交付完成且未实测，发布前验证仍后置；Web现状和ChatGPT顺序保持。没有新增正式caller迁移或退役结果，没有剩余已确认的独立生产must-fix；本轮只本地提交，不push、PR、发布或Actions。

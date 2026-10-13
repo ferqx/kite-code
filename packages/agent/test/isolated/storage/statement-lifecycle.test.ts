@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openSqliteStore } from '../../../src/sqlite';
 
 test('real Worker finalizes native query and Drizzle statements before success/error ACK and remains usable', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-statement-lifecycle-');
+  const dataRoot = mkdtempSync(join(tmpdir(), 'kite-statement-lifecycle-'));
   chmodSync(dataRoot, 0o700);
   const NativeWorker = globalThis.Worker;
   const audits: { observed: number; finalized: boolean; failed: boolean }[] = [];

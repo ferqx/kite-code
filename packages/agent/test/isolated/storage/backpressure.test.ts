@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { WorkerRequest } from '../../../src/storage/worker/protocol';
 
@@ -66,7 +68,7 @@ class GatedWorker extends NativeWorker {
 }
 
 async function fixture() {
-  const dataRoot = mkdtempSync('/private/tmp/kite-store-backpressure-');
+  const dataRoot = mkdtempSync(join(tmpdir(), 'kite-store-backpressure-'));
   chmodSync(dataRoot, 0o700);
   let worker: GatedWorker | undefined;
   class SelectedWorker extends GatedWorker {
