@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "baseRepository": "https://github.com/oven-sh/bun",
+  "baseCommit": "744846f844374847c902b5e7fd59b4342a51ef99",
+  "patch": "bun-1.4.2-resource-census.patch",
+  "patchSha256": "476ded14cdbdefe80ef853f652c735abadc1b4761b7750bfe93715310b498a1b",
+  "entrypoint": "bun:jsc.getResourceCensus",
+  "snapshotVersion": 1,
+  "scope": "process-native-primitive-hooks",
+  "coveredPrimitives": [
+    "all Job<C> requests",
+    "POSIX FilePoll including overflow allocations and deferred close"
+  ],
+  "uncovered": [
+    "timers",
+    "sockets including shared HTTP background loop",
+    "workers",
+    "non-Job requests and native addons",
+    "Windows FilePoll"
+  ],
+  "coverageComplete": false,
+  "productionRuntimeReplaced": false,
+  "stageQualified": false,
+  "nativeBuildQualified": false,
+  "nativeBuildLimitation": "LLVM 21.1.8 and installed macOS 27 SDK OS_LOG stack_protector_ignore attribute incompatibility; original compiler errors retained, no warning suppression",
+  "patchContextLines": 0
+}

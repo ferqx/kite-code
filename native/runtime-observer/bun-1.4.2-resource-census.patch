@@ -1,0 +1,644 @@
+diff --git a/src/io/lib.rs b/src/io/lib.rs
+index 4df690e1..bf35dbc8 100644
+--- a/src/io/lib.rs
++++ b/src/io/lib.rs
+@@ -14,0 +15,2 @@
++pub mod resource_census;
++
+diff --git a/src/io/posix_event_loop.rs b/src/io/posix_event_loop.rs
+index 1d9cfc27..0830980a 100644
+--- a/src/io/posix_event_loop.rs
++++ b/src/io/posix_event_loop.rs
+@@ -305,0 +306,27 @@ impl FilePoll {
++    fn census_status(
++        &self,
++        state: crate::resource_census::State,
++    ) -> crate::resource_census::Status {
++        crate::resource_census::Status {
++            state,
++            ref_active: self.flags.contains(Flags::HasIncrementedActiveCount),
++            pending: self.flags.contains(Flags::HasIncrementedPollCount),
++            closing: state == crate::resource_census::State::Closing,
++        }
++    }
++
++    fn census_update(&self, state: crate::resource_census::State) {
++        let state = if state == crate::resource_census::State::Closing {
++            state
++        } else if self.flags.contains(Flags::HasIncrementedPollCount) {
++            crate::resource_census::State::Watching
++        } else {
++            crate::resource_census::State::Dormant
++        };
++        crate::resource_census::update(
++            crate::resource_census::Kind::FilePoll,
++            self as *const Self as usize,
++            self.census_status(state),
++        );
++    }
++
+@@ -388,0 +416 @@ impl FilePoll {
++        self.census_update(crate::resource_census::State::Closing);
+@@ -389,0 +418,3 @@ impl FilePoll {
++        // Deactivation updates ref/poll flags; preserve Closing until the
++        // Store actually recycles the native storage, including deferred frees.
++        self.census_update(crate::resource_census::State::Closing);
+@@ -455,0 +487 @@ impl FilePoll {
++        self.census_update(crate::resource_census::State::Dormant);
+@@ -467,0 +500 @@ impl FilePoll {
++        self.census_update(crate::resource_census::State::Watching);
+@@ -482,0 +516 @@ impl FilePoll {
++        self.census_update(crate::resource_census::State::Dormant);
+@@ -500,0 +535 @@ impl FilePoll {
++        self.census_update(crate::resource_census::State::Watching);
+@@ -887,0 +923,5 @@ impl FilePoll {
++        if matches!(&result, sys::Result::Err(_)) {
++            // Production still deactivates/cleans up exactly as before. An
++            // unsuccessful kernel deregistration cannot establish zero watches.
++            crate::resource_census::invalidate();
++        }
+@@ -1323 +1363,8 @@ impl Store {
+-        self.hive.get_init(value)
++        let status = value.census_status(crate::resource_census::State::Allocated);
++        let poll = self.hive.get_init(value);
++        crate::resource_census::register(
++            crate::resource_census::Kind::FilePoll,
++            poll.as_ptr() as usize,
++            status,
++        );
++        poll
+@@ -1336,0 +1384,6 @@ impl Store {
++                // Release immediately before actual storage recycling; there
++                // is no census release when merely joining pending_free.
++                crate::resource_census::release(
++                    crate::resource_census::Kind::FilePoll,
++                    current as usize,
++                );
+@@ -1353,0 +1407 @@ impl Store {
++            crate::resource_census::release(crate::resource_census::Kind::FilePoll, poll as usize);
+diff --git a/src/jsc/bindings/JSNodePerformanceHooksHistogram.cpp b/src/jsc/bindings/JSNodePerformanceHooksHistogram.cpp
+index 0f72fd60..82cde8e2 100644
+--- a/src/jsc/bindings/JSNodePerformanceHooksHistogram.cpp
++++ b/src/jsc/bindings/JSNodePerformanceHooksHistogram.cpp
+@@ -23,0 +24 @@
++#include <limits>
+@@ -175 +176 @@ double JSNodePerformanceHooksHistogram::getMean() const
+-    if (!m_histogramData.histogram) return NAN;
++    if (!m_histogramData.histogram) return std::numeric_limits<double>::quiet_NaN();
+@@ -181 +182 @@ double JSNodePerformanceHooksHistogram::getStddev() const
+-    if (!m_histogramData.histogram) return NAN;
++    if (!m_histogramData.histogram) return std::numeric_limits<double>::quiet_NaN();
+diff --git a/src/jsc/job.rs b/src/jsc/job.rs
+index 55c2c671..4852229e 100644
+--- a/src/jsc/job.rs
++++ b/src/jsc/job.rs
+@@ -328,0 +329,5 @@ impl<C: JobContext> Job<C> {
++        bun_io::resource_census::register(
++            bun_io::resource_census::Kind::PoolJob,
++            job as usize,
++            bun_io::resource_census::Status::job(bun_io::resource_census::State::Queued),
++        );
+@@ -344,0 +350,5 @@ impl<C: JobContext> Job<C> {
++        bun_io::resource_census::update(
++            bun_io::resource_census::Kind::PoolJob,
++            this as usize,
++            bun_io::resource_census::Status::job(bun_io::resource_census::State::Running),
++        );
+@@ -368,8 +378,6 @@ impl<C: JobContext> Job<C> {
+-        // SAFETY: fn contract.
+-        let Job {
+-            mut keep_alive,
+-            off,
+-            js,
+-            ..
+-        } = unsafe { *Box::from_raw(this) };
+-        keep_alive.unref(bun_io::js_vm_ctx());
++        // SAFETY: fn contract. Keep storage live until after native unref and
++        // census release, rather than exposing a missing still-refed job.
++        let mut job = unsafe { Box::from_raw(this) };
++        job.keep_alive.unref(bun_io::js_vm_ctx());
++        bun_io::resource_census::release(bun_io::resource_census::Kind::PoolJob, this as usize);
++        let Job { off, js, .. } = *job;
+@@ -408,0 +417,5 @@ impl<C: JobContext> Completion<C> {
++        bun_io::resource_census::update(
++            bun_io::resource_census::Kind::PoolJob,
++            me.job.as_ptr() as usize,
++            bun_io::resource_census::Status::job(bun_io::resource_census::State::CompletionQueued),
++        );
+diff --git a/src/jsc/lib.rs b/src/jsc/lib.rs
+index 03faa8de..f6047889 100644
+--- a/src/jsc/lib.rs
++++ b/src/jsc/lib.rs
+@@ -1234,0 +1235 @@ pub mod event_loop;
++pub mod resource_census_binding;
+diff --git a/src/jsc/modules/BunJSCModule.h b/src/jsc/modules/BunJSCModule.h
+index 88f2ea81..8c98b57a 100644
+--- a/src/jsc/modules/BunJSCModule.h
++++ b/src/jsc/modules/BunJSCModule.h
+@@ -67,0 +68,2 @@ extern "C" size_t Bun__Feature__heap_snapshot;
++BUN_DECLARE_HOST_FUNCTION(Bun__getResourceCensus);
++
+@@ -978 +980 @@ DEFINE_NATIVE_MODULE(BunJSC)
+-    INIT_NATIVE_MODULE(BunJSC, 36);
++    INIT_NATIVE_MODULE(BunJSC, 37);
+@@ -979,0 +982 @@ DEFINE_NATIVE_MODULE(BunJSC)
++    putNativeFn(Identifier::fromString(vm, "getResourceCensus"_s), Bun__getResourceCensus);
+diff --git a/src/io/resource_census.rs b/src/io/resource_census.rs
+new file mode 100644
+--- /dev/null
++++ b/src/io/resource_census.rs
+@@ -0,0 +1,349 @@
++//! Primitive lifecycle evidence, not a complete runtime census yet.
++//! No JS values, resource ownership, I/O or callbacks are retained by this module.
++use std::collections::HashMap;
++use std::sync::{LazyLock, Mutex};
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
++pub enum Kind {
++    PoolJob,
++    FilePoll,
++}
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub enum State {
++    Allocated,
++    Queued,
++    Running,
++    CompletionQueued,
++    Watching,
++    Dormant,
++    Closing,
++}
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub struct Status {
++    pub state: State,
++    pub ref_active: bool,
++    pub pending: bool,
++    pub closing: bool,
++}
++impl Status {
++    pub const fn job(state: State) -> Self {
++        Self {
++            state,
++            ref_active: true,
++            pending: true,
++            closing: false,
++        }
++    }
++}
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub struct Entry {
++    pub resource_id: u64,
++    pub kind: Kind,
++    pub status: Status,
++}
++#[derive(Debug)]
++pub struct Snapshot {
++    pub generation: u64,
++    pub observation_valid: bool,
++    /// Always false until all enabled primitive families are connected.
++    pub coverage_complete: bool,
++    pub uncovered: &'static [&'static str],
++    pub entries: Vec<Entry>,
++    pub live: usize,
++    pub ref_active: usize,
++    pub pending: usize,
++    pub closing: usize,
++}
++struct Registry {
++    entries: HashMap<(Kind, usize), Entry>,
++    next_id: u64,
++    generation: u64,
++    valid: bool,
++}
++impl Registry {
++    fn new() -> Self {
++        Self {
++            entries: HashMap::new(),
++            next_id: 1,
++            generation: 0,
++            valid: true,
++        }
++    }
++    fn changed(&mut self) {
++        match self.generation.checked_add(1) {
++            Some(value) => self.generation = value,
++            None => self.valid = false,
++        }
++    }
++    fn register(&mut self, kind: Kind, address: usize, status: Status) {
++        if address == 0 || self.entries.contains_key(&(kind, address)) {
++            self.valid = false;
++            return;
++        }
++        let Some(next_id) = self.next_id.checked_add(1) else {
++            self.valid = false;
++            return;
++        };
++        if self.entries.try_reserve(1).is_err() {
++            self.valid = false;
++            return;
++        }
++        self.entries.insert(
++            (kind, address),
++            Entry {
++                resource_id: self.next_id,
++                kind,
++                status,
++            },
++        );
++        self.next_id = next_id;
++        self.changed();
++    }
++    fn update(&mut self, kind: Kind, address: usize, mut status: Status) {
++        let Some(entry) = self.entries.get_mut(&(kind, address)) else {
++            self.valid = false;
++            return;
++        };
++        // Closing is terminal for this native identity. Ref/poll flags may
++        // still change during cleanup, but recycling alone ends its lifetime.
++        if entry.status.closing {
++            status.state = State::Closing;
++            status.closing = true;
++        }
++        if entry.status != status {
++            entry.status = status;
++            self.changed();
++        }
++    }
++    fn release(&mut self, kind: Kind, address: usize) {
++        if self.entries.remove(&(kind, address)).is_none() {
++            self.valid = false;
++        } else {
++            self.changed();
++        }
++    }
++    fn invalidate(&mut self) {
++        self.valid = false;
++        self.changed();
++    }
++    fn snapshot(&mut self) -> Option<Snapshot> {
++        let mut entries = Vec::new();
++        if entries.try_reserve_exact(self.entries.len()).is_err() {
++            self.valid = false;
++            return None;
++        }
++        entries.extend(self.entries.values().copied());
++        entries.sort_unstable_by_key(|entry| entry.resource_id);
++        Some(Snapshot {
++            generation: self.generation,
++            observation_valid: self.valid,
++            coverage_complete: false,
++            uncovered: &[
++                "timers",
++                "sockets-including-http-background-loop",
++                "workers",
++                "non-Job-requests-and-native-addons",
++                "windows-file-polls",
++            ],
++            live: entries.len(),
++            ref_active: entries
++                .iter()
++                .filter(|entry| entry.status.ref_active)
++                .count(),
++            pending: entries.iter().filter(|entry| entry.status.pending).count(),
++            closing: entries.iter().filter(|entry| entry.status.closing).count(),
++            entries,
++        })
++    }
++}
++static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| Mutex::new(Registry::new()));
++fn with_registry<T>(body: impl FnOnce(&mut Registry) -> T) -> T {
++    let mut registry = match REGISTRY.lock() {
++        Ok(registry) => registry,
++        Err(poisoned) => {
++            let mut registry = poisoned.into_inner();
++            registry.valid = false;
++            registry
++        }
++    };
++    body(&mut registry)
++}
++/// Address is only an internal lookup key; snapshots expose monotonic IDs.
++pub fn register(kind: Kind, address: usize, status: Status) {
++    with_registry(|registry| registry.register(kind, address, status));
++}
++pub fn update(kind: Kind, address: usize, status: Status) {
++    with_registry(|registry| registry.update(kind, address, status));
++}
++pub fn release(kind: Kind, address: usize) {
++    with_registry(|registry| registry.release(kind, address));
++}
++/// A real native transition failed: counts cannot establish kernel closure.
++/// Sticky for the process lifetime, even if the owner's storage is recycled.
++pub fn invalidate() {
++    with_registry(Registry::invalidate);
++}
++/// All primitive hook updates and this copy share one process-wide lock.
++/// None means observation allocation failed, never an empty successful census.
++pub fn snapshot() -> Option<Snapshot> {
++    with_registry(Registry::snapshot)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn lifecycle_identity_and_partial_coverage() {
++        let mut registry = Registry::new();
++        registry.register(Kind::PoolJob, 1, Status::job(State::Queued));
++        let first = registry.snapshot().unwrap();
++        assert!(first.observation_valid);
++        assert!(!first.coverage_complete);
++        assert_eq!((first.live, first.ref_active, first.pending), (1, 1, 1));
++        registry.update(Kind::PoolJob, 1, Status::job(State::CompletionQueued));
++        registry.release(Kind::PoolJob, 1);
++        registry.register(Kind::PoolJob, 1, Status::job(State::Queued));
++        let second = registry.snapshot().unwrap();
++        assert!(second.entries[0].resource_id > first.entries[0].resource_id);
++        assert!(second.generation > first.generation);
++    }
++    #[test]
++    fn failures_are_sticky_and_do_not_replace_entries() {
++        let mut registry = Registry::new();
++        registry.register(Kind::FilePoll, 1, Status::job(State::Queued));
++        registry.register(Kind::FilePoll, 1, Status::job(State::Running));
++        assert_eq!(registry.entries.len(), 1);
++        assert_eq!(
++            registry.entries[&(Kind::FilePoll, 1)].status.state,
++            State::Queued
++        );
++        registry.update(Kind::FilePoll, 2, Status::job(State::Running));
++        registry.release(Kind::FilePoll, 2);
++        assert!(!registry.snapshot().unwrap().observation_valid);
++    }
++    #[test]
++    fn closing_storage_stays_live_until_recycled_and_error_stays_unknown() {
++        let mut registry = Registry::new();
++        registry.register(
++            Kind::FilePoll,
++            1,
++            Status {
++                state: State::Watching,
++                ref_active: true,
++                pending: true,
++                closing: false,
++            },
++        );
++        registry.update(
++            Kind::FilePoll,
++            1,
++            Status {
++                state: State::Closing,
++                ref_active: false,
++                pending: false,
++                closing: true,
++            },
++        );
++        registry.update(
++            Kind::FilePoll,
++            1,
++            Status {
++                state: State::Dormant,
++                ref_active: false,
++                pending: false,
++                closing: false,
++            },
++        );
++        let closing = registry.snapshot().unwrap();
++        assert_eq!((closing.live, closing.closing), (1, 1));
++        registry.invalidate();
++        registry.release(Kind::FilePoll, 1);
++        let recycled = registry.snapshot().unwrap();
++        assert_eq!(recycled.live, 0);
++        assert!(!recycled.observation_valid);
++        assert!(!recycled.coverage_complete);
++        registry.register(Kind::FilePoll, 1, Status::job(State::Queued));
++        assert!(!registry.snapshot().unwrap().observation_valid);
++    }
++    #[test]
++    fn concurrent_snapshot_is_one_locked_generation() {
++        use std::sync::Arc;
++        let registry = Arc::new(Mutex::new(Registry::new()));
++        let threads: Vec<_> = (0..4)
++            .map(|thread| {
++                let registry = Arc::clone(&registry);
++                std::thread::spawn(move || {
++                    for item in 0..256 {
++                        let address = 1 + thread * 256 + item;
++                        registry.lock().unwrap().register(
++                            Kind::PoolJob,
++                            address,
++                            Status::job(State::Queued),
++                        );
++                        registry.lock().unwrap().update(
++                            Kind::PoolJob,
++                            address,
++                            Status::job(State::Running),
++                        );
++                        registry.lock().unwrap().release(Kind::PoolJob, address);
++                    }
++                })
++            })
++            .collect();
++        for _ in 0..64 {
++            let snapshot = registry.lock().unwrap().snapshot().unwrap();
++            assert!(snapshot.observation_valid);
++            assert!(!snapshot.coverage_complete);
++            assert_eq!(snapshot.live, snapshot.entries.len());
++            assert_eq!(
++                (snapshot.live, snapshot.ref_active, snapshot.pending),
++                (
++                    snapshot.entries.len(),
++                    snapshot.entries.len(),
++                    snapshot.entries.len()
++                )
++            );
++        }
++        for thread in threads {
++            thread.join().unwrap();
++        }
++        let snapshot = registry.lock().unwrap().snapshot().unwrap();
++        assert_eq!(snapshot.live, 0);
++        assert_eq!(snapshot.generation, 4 * 256 * 3);
++        assert!(snapshot.observation_valid);
++    }
++    #[test]
++    fn census_has_no_inline_pool_capacity_limit() {
++        let mut registry = Registry::new();
++        let status = Status {
++            state: State::Allocated,
++            ref_active: false,
++            pending: false,
++            closing: false,
++        };
++        for address in 1..=4096 {
++            registry.register(Kind::FilePoll, address, status);
++        }
++        let snapshot = registry.snapshot().unwrap();
++        assert!(snapshot.observation_valid);
++        assert_eq!(
++            (snapshot.live, snapshot.ref_active, snapshot.pending),
++            (4096, 0, 0)
++        );
++        for address in 1..=4096 {
++            registry.release(Kind::FilePoll, address);
++        }
++        assert_eq!(registry.snapshot().unwrap().live, 0);
++    }
++    #[test]
++    fn overflow_refuses_registration_and_invalidates_generation() {
++        let mut registry = Registry::new();
++        registry.next_id = u64::MAX;
++        registry.register(Kind::PoolJob, 1, Status::job(State::Queued));
++        assert!(registry.entries.is_empty());
++        assert!(!registry.valid);
++        registry.generation = u64::MAX;
++        registry.changed();
++        assert_eq!(registry.generation, u64::MAX);
++    }
++}
+diff --git a/src/jsc/resource_census_binding.rs b/src/jsc/resource_census_binding.rs
+new file mode 100644
+--- /dev/null
++++ b/src/jsc/resource_census_binding.rs
+@@ -0,0 +1,140 @@
++//! Private process-wide primitive observation. This is deliberately partial.
++use crate::{CallFrame, JSGlobalObject, JSValue, JsResult, bun_string_jsc::create_utf8_for_js};
++use bun_io::resource_census::{self, Kind, State};
++
++const BASE_REVISION: &[u8] = b"744846f844374847c902b5e7fd59b4342a51ef99";
++const UNCOVERED: &[&str] = &[
++    "timers",
++    "sockets-including-http-background-loop",
++    "workers",
++    "non-Job-requests-and-native-addons",
++    "windows-file-polls",
++];
++
++fn decimal(global: &JSGlobalObject, mut value: u64) -> JsResult<JSValue> {
++    // No intermediate heap allocation, and no lossy JavaScript Number cast.
++    let mut bytes = [0u8; 20];
++    let mut offset = bytes.len();
++    loop {
++        offset -= 1;
++        bytes[offset] = b'0' + (value % 10) as u8;
++        value /= 10;
++        if value == 0 {
++            break;
++        }
++    }
++    create_utf8_for_js(global, &bytes[offset..])
++}
++fn strings(global: &JSGlobalObject, values: &[&str]) -> JsResult<JSValue> {
++    JSValue::create_array_from_iter(global, values.iter(), |value| {
++        create_utf8_for_js(global, value.as_bytes())
++    })
++}
++fn kind_name(kind: Kind) -> &'static [u8] {
++    match kind {
++        Kind::PoolJob => b"PoolJob",
++        Kind::FilePoll => b"FilePoll",
++    }
++}
++fn state_name(state: State) -> &'static [u8] {
++    match state {
++        State::Allocated => b"allocated",
++        State::Queued => b"queued",
++        State::Running => b"running",
++        State::CompletionQueued => b"completionQueued",
++        State::Watching => b"watching",
++        State::Dormant => b"dormant",
++        State::Closing => b"closing",
++    }
++}
++
++#[crate::host_fn(export = "Bun__getResourceCensus")]
++pub fn get_resource_census(global: &JSGlobalObject, _frame: &CallFrame) -> JsResult<JSValue> {
++    // snapshot() releases its lock before any JS allocation or property write.
++    let snapshot = resource_census::snapshot();
++    let result = JSValue::create_empty_object(global, 13);
++    result.put(global, b"version", JSValue::js_number_from_int32(1));
++    result.put(
++        global,
++        b"baseRevision",
++        create_utf8_for_js(global, BASE_REVISION)?,
++    );
++    result.put(
++        global,
++        b"scope",
++        create_utf8_for_js(global, b"process-native-primitive-hooks")?,
++    );
++    result.put(global, b"coverageComplete", JSValue::from(false));
++    let Some(snapshot) = snapshot else {
++        result.put(global, b"observationValid", JSValue::from(false));
++        result.put(global, b"unknown", JSValue::from(true));
++        result.put(
++            global,
++            b"reason",
++            create_utf8_for_js(global, b"snapshot-allocation-failed")?,
++        );
++        result.put(global, b"uncovered", strings(global, UNCOVERED)?);
++        for key in [
++            b"generation".as_slice(),
++            b"entries",
++            b"live",
++            b"refActive",
++            b"pending",
++            b"closing",
++        ] {
++            result.put(global, key, JSValue::NULL);
++        }
++        return Ok(result);
++    };
++    result.put(global, b"generation", decimal(global, snapshot.generation)?);
++    result.put(
++        global,
++        b"observationValid",
++        JSValue::from(snapshot.observation_valid),
++    );
++    result.put(
++        global,
++        b"unknown",
++        JSValue::from(!snapshot.observation_valid),
++    );
++    result.put(
++        global,
++        b"reason",
++        if snapshot.observation_valid {
++            JSValue::NULL
++        } else {
++            create_utf8_for_js(global, b"native-observation-invalid")?
++        },
++    );
++    result.put(global, b"uncovered", strings(global, snapshot.uncovered)?);
++    let entries = JSValue::create_array_from_iter(global, snapshot.entries.iter(), |entry| {
++        let value = JSValue::create_empty_object(global, 7);
++        value.put(global, b"resourceId", decimal(global, entry.resource_id)?);
++        value.put(
++            global,
++            b"kind",
++            create_utf8_for_js(global, kind_name(entry.kind))?,
++        );
++        value.put(
++            global,
++            b"state",
++            create_utf8_for_js(global, state_name(entry.status.state))?,
++        );
++        value.put(global, b"live", JSValue::from(true));
++        value.put(global, b"refActive", JSValue::from(entry.status.ref_active));
++        value.put(global, b"pending", JSValue::from(entry.status.pending));
++        value.put(global, b"closing", JSValue::from(entry.status.closing));
++        Ok(value)
++    })?;
++    result.put(global, b"entries", entries);
++    // Counts, IDs and generations are decimal strings throughout this private ABI.
++    for (key, count) in [
++        (b"live".as_slice(), snapshot.live),
++        (b"refActive", snapshot.ref_active),
++        (b"pending", snapshot.pending),
++        (b"closing", snapshot.closing),
++    ] {
++        result.put(global, key, decimal(global, count as u64)?);
++    }
++    Ok(result)
++}
