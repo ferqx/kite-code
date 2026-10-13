@@ -41,6 +41,7 @@ function fixture() {
   const client = {
     serverInfo: { storeId: 'store', capabilities: ['context', 'commands'] },
     getContext: async () => page(),
+    listAllBackgroundExecutions: async () => [],
     getView: async () => {
       if (failed) throw new ClientError('worker_unavailable');
       return {

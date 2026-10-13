@@ -5946,3 +5946,25 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 本轮新增闭合的是正式Shell输出故障的如实失败、原错误保留及一次准确收尾，未新增正式调用者源码迁移或旧路径退役。按依赖保最多五项退出缺口：①正式执行／停止入口的原间歇SIGTERM首触发，需确证原因并保持原完整40任务成功断言；②同入口和正常退出的全部resources／handles、出生后代与cleanup来源，当前认证已完成但原binary附加失败／覆盖未证；③原正式lifecycle RSS，必须保八outer／九点／60—168分钟／32MiB，+115.203125MiB红仍未闭合；④后置Win／Linux正式安装、真实切换、MCP、维护恢复与保数据卸载，按用户Windows／后续Actions实际验收且保原guard；⑤全部适用用户能力与正式消费者接替、旧闭包退役及§35／T001—T114／E01—E14／37行映射，收束仍须对应最终输入完整回归。原native_draining窗口修复继续复用正常退出原证据，当前未在用户安装包核验版本，不把源码构建通过写成其安装包已更新。
 
 8工作区typecheck实际0；文档结构／准确diff影响、原plan evidence、test ownership、统一静态／工作区／API边界、三份归属代码Biome和whitespace检查通过。document-before-commit的iteration_complete／stage／commit只覆盖本轮七文件错误处理与文档事实；Agent根README和统一边界核对后不制造无意义diff。普通局部bug修复不新增架构Note或独立诊断目标，临时停止记录已移除。仅已授权本地提交，正常hook仍独立执行；wholeV13=false／phaseExit=false，Goal active，官方授权／Responses和未证Codex认证复用仍在V1.3之后。
+
+
+## 2026-10-13：正式 Context 完整历史结果显式纳入
+
+本轮依 W18-B 的旧结果隔离与明确 Include 合同，核实际正式调用者；CLI/TUI 维护恢复审查没有发现可确定的新接线缺口。最高优先级的独立源码缺口是 Native Context 以最近 200 个 View Execution 提供候选及判断资格：真实原 Job 在 Rewind 后被隔离，后续 201 个 Run 完成时，公共准确查询和完整目录仍保留结果，页面却没有 Include 按钮。原生产真实业务红 0pass/1fail/16expect 的日志 `/private/tmp/kite-native-context-history-original-business-red-20261014.log` 保留；文件名日期误写为 14，实际运行日期为 13，不据此改动原记录。
+
+正式“会话工具 → Context”现从完整固定后台元数据目录发现当前 Session 的 suppressed Job；按当前窗口精确读取完整正文、核原版本并保留原 4MiB IPC 预算。Include 用原 ID 精确查询，原 Context/Store/Session/Workspace/targetRun 守卫和 Core 最终事务不变。消息／来源和历史结果独立分页，关闭、刷新和换会话取消所属读取；空闲纳入不创建 Run、不重放 Job，只有用户明确新轮次才消费原来源。目录没有正文的真实类型交接已补齐，不以元数据伪造全文。实现与产品范围归 [Desktop owner](../../apps/desktop/README.md) 和 [桌面手册](../handbook/clients/desktop/README.md)，公共 Service/SDK/API 和旧路径未扩展或删除。
+
+集中必要验证为 9 个完整文件、23pass/0fail/474 条 Bun 断言：新增 [真实历史整例](../../apps/desktop/test/isolated/native-context-history.test.tsx) 1/56 证明原完整正文、出处、Command/history、idle 零模型／Job 效果和显式新 Run；旧 Main/DOM/compression 三文件 17/175 证明 405 候选完整遍历、近预算分开传输、精确 close/abort 和目录 revision 变化拒绝；原 Context／compression Electron、restore Include、历史压缩查询及恢复输入三条 HTTP/DOM 整例共五文件保持通过。新全文断言先因 fixture 插入键顺序与 SQLite `canonicalJson` 不同失败，原日志保留；改为深相等已验证的原公共 `job.result` 序列化全文，全部原 55 条断言继续保留。最终日志为 `/private/tmp/kite-native-context-history-final-20261013.log`、`/private/tmp/kite-native-context-history-existing-async-20261013.log` 和 `/private/tmp/kite-context-history-hydrated-adjacent-20261013-result.json`。根与 8 个 workspace 类型检查通过；结构、影响、ownership、plan 检查通过，提交仍走正常强制 hook。
+
+本轮不重新扩展 Shell 故障矩阵或 Instruments 参数实验。上一轮 `8db4c3b7` 对应完整默认 605/605 作业通过只作此前基线，本轮生产和测试输入已改变，不能把该结果移作当前完整默认通过或阶段退出。Windows/Linux 本机资格仍后置；新历史、Main 与 DOM 用例无新增 macOS 专属路径或平台跳过，既有原生窗口的原平台条件保留，不将 macOS 通过代证三端。
+
+仍阻碍阶段退出的具体缺口依赖次序如下；这四项是完整能力／资格要求，不将日志或测试窗口另立长期目标。
+
+| 剩余缺口 | 实际用户入口与完整行为 | 验收条件 |
+| --- | --- | --- |
+| 原 Shell 间歇性 SIGTERM 原因及完整资源观测 | 正式 Shell Job 执行、准确停止和客户端／Service 退出；原效果及所属进程清理须与持久结果一致 | 原失败不能被后续绿覆盖；原信号／首停止来源可解释，出生后代、资源和句柄观测完整。系统认证已完成，原 Bun 因非可调试签名而附加失败，缺覆盖仍 held |
+| 原完整生命周期 RSS | 同正式持续用户工作及正常退出 | 保留原 8 次外层、9 点、60–168 分钟和 32MiB 门禁；原 +115.203125MiB 失败仍 held，不作参数对照或降低门限 |
+| Windows/Linux 正式完整资格 | 正式安装、版本切换、MCP 连接／调用／取消／退出、维护恢复、保数据卸载 | 后续 Actions／用户 Windows 原系统实测；不 push、不 dispatch，Windows Shell 未闭合 guard 保留 |
+| 全部能力正式迁移与旧路径退役、阶段收束 | 37 项能力的实际正式客户端入口及仍有消费者的旧构建链 | 全部适用 T001–T114/E01–E14、§35 与完整回归覆盖；真实旧消费者完成替换后才退役，P5/P6 和总体 V1.3 不提前退出 |
+
+本轮只交付该正式 Context 缺口、必要文档与已授权本地提交；Goal 仍 active，无 push、PR、发布或 Actions 触发。

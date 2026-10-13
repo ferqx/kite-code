@@ -1,12 +1,62 @@
 import { expect, test } from 'bun:test';
 import {
   type AgentClient,
+  type BackgroundExecutionItem,
   ClientError,
   type Command,
+  type Execution,
   type SelectedContextPage,
 } from '@kite-ai/client';
 import { NativeContext } from '../electron/context';
 import { decodeNativeRequest } from '../electron/native-ipc';
+
+const contextReadPort = {
+  getView: async () => ({
+    storeId: 'store',
+    session: {
+      id: 's',
+      rootSessionId: 's',
+      parentSessionId: null,
+      workspaceId: 'w',
+      contextSelectionId: 'selection',
+      deletedAt: null,
+    },
+    runs: [],
+    executions: [],
+  }),
+  listAllBackgroundExecutions: async () => [],
+};
+
+function backgroundMetadata(execution: Execution): BackgroundExecutionItem['execution'] {
+  return {
+    id: execution.id,
+    sessionId: execution.sessionId,
+    rootSessionId: execution.sessionId,
+    runId: execution.runId,
+    originCommandId: 'original-command',
+    originStoreId: execution.originStoreId!,
+    rootWorkCommandId: 'original-command',
+    rootWorkSeq: '1',
+    parentExecutionId: null,
+    childSessionId: null,
+    cancelWithParent: false,
+    stepId: 'original-step',
+    callId: 'original-call',
+    attempt: 1,
+    kind: 'job',
+    definitionId: execution.definitionId,
+    definitionVersion: execution.definitionVersion,
+    status: execution.status,
+    ownerGeneration: '1',
+    cancelRequested: false,
+    cancelRequestedAt: execution.cancelRequestedAt,
+    resultRevision: execution.resultRevision!,
+    delivery: execution.delivery ?? null,
+    deliveryReason: null,
+    deliveryTargetSessionId: null,
+    contextSelectionId: 'selection',
+  };
+}
 
 const selection = {
   id: 'selection',
@@ -63,6 +113,7 @@ test('Native context exhausts independent pinned cursors without duplicate first
   const calls: unknown[] = [];
   let turn = 0;
   const client = {
+    ...contextReadPort,
     serverInfo: { capabilities: ['context'] },
     async getContext(_id: string, query: unknown) {
       calls.push(query);
@@ -121,6 +172,7 @@ test('Native context one original rewind shares dispatch; unknown lookup after s
   let original!: Parameters<AgentClient['rewind']>[1];
   const gets: string[] = [];
   const client = {
+    ...contextReadPort,
     serverInfo: { capabilities: ['context'] },
     async getContext() {
       if (fail) throw new ClientError('network_outcome_unknown');
@@ -129,7 +181,14 @@ test('Native context one original rewind shares dispatch; unknown lookup after s
     async getView() {
       return {
         storeId: 'store',
-        session: { id: 's', workspaceId: 'w', contextSelectionId: 'selection', deletedAt: null },
+        session: {
+          id: 's',
+          rootSessionId: 's',
+          parentSessionId: null,
+          workspaceId: 'w',
+          contextSelectionId: 'selection',
+          deletedAt: null,
+        },
         runs: [],
         executions: [],
       };
@@ -185,12 +244,29 @@ test('Native active Include forwards exact UI scope and rejects missing/switched
     posts = 0;
   const scope = { generation: 1, selection: 1, storeId: 'store', sessionId: 's', workspaceId: 'w' };
   const client = {
+    ...contextReadPort,
     serverInfo: { capabilities: ['context'] },
     getContext: async () => page([], []),
+    getExecution: async () => ({
+      id: 'job',
+      sessionId: 's',
+      kind: 'job',
+      originStoreId: 'store',
+      resultRevision: '1',
+      delivery: 'suppressed',
+      status: 'succeeded',
+    }),
     async getView() {
       return {
         storeId: 'store',
-        session: { id: 's', workspaceId: 'w', contextSelectionId: 'selection', deletedAt: null },
+        session: {
+          id: 's',
+          rootSessionId: 's',
+          parentSessionId: null,
+          workspaceId: 'w',
+          contextSelectionId: 'selection',
+          deletedAt: null,
+        },
         runs: [{ id: target, sessionId: 's', isActive: true }],
         executions: [
           {
@@ -271,6 +347,7 @@ test('Native context retries an oversized page at the same frozen selection and 
   const calls: Parameters<AgentClient['getContext']>[1][] = [];
   let single = false;
   const client = {
+    ...contextReadPort,
     serverInfo: { capabilities: ['context'] },
     async getContext(_session: string, query: Parameters<AgentClient['getContext']>[1]) {
       calls.push(query);
@@ -322,6 +399,7 @@ test('Native context view close aborts only its GET and late old selection canno
     finish = resolve;
   });
   const client = {
+    ...contextReadPort,
     serverInfo: { capabilities: ['context'] },
     getContext(_session: string, _query: unknown, options: { signal: AbortSignal }) {
       signal = options.signal;
@@ -398,11 +476,28 @@ test('Native restored suppressed Job Include binds current Store command and rej
     input: Parameters<AgentClient['includeResult']>[2];
   }[] = [];
   const client = {
+    ...contextReadPort,
     serverInfo: { capabilities: ['context'] },
     getContext: async () => page([], []),
+    getExecution: async () => ({
+      id: 'original-job',
+      sessionId: 's',
+      kind: 'job',
+      originStoreId,
+      resultRevision: '7',
+      delivery: 'suppressed',
+      status: 'succeeded',
+    }),
     getView: async () => ({
       storeId: scope.storeId,
-      session: { id: 's', workspaceId: 'w', contextSelectionId: 'selection', deletedAt: null },
+      session: {
+        id: 's',
+        rootSessionId: 's',
+        parentSessionId: null,
+        workspaceId: 'w',
+        contextSelectionId: 'selection',
+        deletedAt: null,
+      },
       runs: [],
       executions: [
         {
@@ -488,4 +583,222 @@ test('Native restored suppressed Job Include binds current Store command and rej
     ),
   ).toBe('context_selection_changed');
   expect(posts).toHaveLength(0);
+});
+
+test('Native historical result windows exhaust more than two hundred candidates and refuse a replaced scope', async () => {
+  let scope = { generation: 1, selection: 1, storeId: 'store', sessionId: 's', workspaceId: 'w' };
+  const executions: Execution[] = Array.from({ length: 405 }, (_, index) => ({
+    id: `historical-job-${index}`,
+    sessionId: 's',
+    kind: 'job',
+    originStoreId: 'store',
+    resultRevision: '1',
+    delivery: 'suppressed',
+    status: 'succeeded',
+    runId: null,
+    definitionId: 'fixture.job',
+    definitionVersion: '1',
+    cancelRequestedAt: null,
+    result: { outcome: 'succeeded', content: `Complete original result ${index}` },
+  }));
+  const candidates = executions.map((execution) => ({ execution: backgroundMetadata(execution) }));
+  const directoryQueries: unknown[] = [];
+  const client = {
+    ...contextReadPort,
+    serverInfo: { capabilities: ['context'] },
+    getContext: async () => page([], []),
+    getExecution: async (id: string) => executions.find((execution) => execution.id === id)!,
+    async listAllBackgroundExecutions(query: unknown) {
+      directoryQueries.push(query);
+      return candidates;
+    },
+  } as unknown as AgentClient;
+  const host = new NativeContext(
+    client,
+    () => scope,
+    () => {},
+  );
+  try {
+    const original = await host.read('s');
+    expect(directoryQueries).toHaveLength(1);
+    expect(directoryQueries[0]).toMatchObject({ workspaceId: 'w', rootSessionId: 's' });
+    const ids = original.historicalResults.executions.map((execution) => execution.id);
+    let current = original;
+    while (current.historicalResults.nextIndex !== null) {
+      const next = await host.nextResults(original.observationId);
+      expect(next.observationId).toBe(original.observationId);
+      expect(next.historicalResults.startIndex).toBe(ids.length);
+      ids.push(...next.historicalResults.executions.map((execution) => execution.id));
+      current = { ...original, ...next };
+    }
+    expect(ids).toEqual(candidates.map((item) => item.execution.id));
+    expect(current.historicalResults.total).toBe(405);
+    const fresh = await host.read('s');
+    scope = { ...scope, selection: 2, sessionId: 'other' };
+    expect(await code(Promise.resolve().then(() => host.nextResults(fresh.observationId)))).toBe(
+      'context_observation_changed',
+    );
+  } finally {
+    host.release();
+  }
+});
+
+test('Native near-budget Context and one complete historical result travel in separate original-budget replies', async () => {
+  const scope = { generation: 1, selection: 1, storeId: 'store', sessionId: 's', workspaceId: 'w' };
+  const budget = 4 * 1048576 - 1024;
+  const empty = page([{ ...message(1), content: '' }], []);
+  const reserved = Buffer.byteLength(
+    JSON.stringify({
+      observationId: 1,
+      page: empty,
+      historicalResults: {
+        startIndex: 0,
+        nextIndex: Number.MAX_SAFE_INTEGER,
+        total: Number.MAX_SAFE_INTEGER,
+        executions: [],
+      },
+    }),
+  );
+  const content = 'C'.repeat(budget - reserved - 256);
+  const context = page([{ ...message(1), content }], []);
+  const execution: Execution = {
+    id: 'complete-historical-job',
+    runId: null,
+    definitionId: 'fixture.job',
+    definitionVersion: '1',
+    cancelRequestedAt: null,
+    sessionId: 's',
+    kind: 'job',
+    originStoreId: 'store',
+    resultRevision: '1',
+    delivery: 'suppressed',
+    status: 'succeeded',
+    result: { outcome: 'succeeded', content: `${'原结果'.repeat(2048)} COMPLETE_RESULT_TAIL` },
+  };
+  let directoryReads = 0,
+    contextReads = 0,
+    posts = 0;
+  const client = {
+    ...contextReadPort,
+    serverInfo: { capabilities: ['context'] },
+    getContext: async () => {
+      contextReads++;
+      return context;
+    },
+    listAllBackgroundExecutions: async () => {
+      directoryReads++;
+      return [{ execution: backgroundMetadata(execution) }];
+    },
+    getExecution: async () => execution,
+    includeResult: async () => {
+      posts++;
+      throw Error('unexpected_post');
+    },
+    rewind: async () => {
+      posts++;
+      throw Error('unexpected_post');
+    },
+  } as unknown as AgentClient;
+  const host = new NativeContext(
+    client,
+    () => scope,
+    () => {},
+  );
+  try {
+    const first = await host.read('s');
+    expect(first.page.messages[0]?.content).toBe(content);
+    expect(first.historicalResults).toEqual({
+      startIndex: 0,
+      nextIndex: 0,
+      total: 1,
+      executions: [],
+    });
+    const next = await host.nextResults(first.observationId);
+    expect(next.observationId).toBe(first.observationId);
+    expect(next.historicalResults).toEqual({
+      startIndex: 0,
+      nextIndex: null,
+      total: 1,
+      executions: [execution],
+    });
+    expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThanOrEqual(budget);
+    expect(Buffer.byteLength(JSON.stringify(next))).toBeLessThanOrEqual(budget);
+    expect(
+      Buffer.byteLength(JSON.stringify({ ...first, historicalResults: next.historicalResults })),
+    ).toBeGreaterThan(budget);
+    expect(directoryReads).toBe(1);
+    expect(contextReads).toBe(1);
+    expect(posts).toBe(0);
+  } finally {
+    host.release();
+  }
+});
+
+test('Native next historical window aborts only its original reader and refuses an Execution changed from the pinned directory', async () => {
+  const scope = { generation: 1, selection: 1, storeId: 'store', sessionId: 's', workspaceId: 'w' };
+  const executions: Execution[] = Array.from({ length: 201 }, (_, index) => ({
+    id: `window-job-${index}`,
+    sessionId: 's',
+    kind: 'job',
+    originStoreId: 'store',
+    resultRevision: '1',
+    delivery: 'suppressed',
+    status: 'succeeded',
+    runId: null,
+    definitionId: 'fixture.job',
+    definitionVersion: '1',
+    cancelRequestedAt: null,
+    result: { outcome: 'succeeded', content: `Original window result ${index}` },
+  }));
+  let mode: 'hold' | 'changed' = 'hold';
+  let finish!: (execution: Execution) => void;
+  let enter!: () => void;
+  let signal!: AbortSignal;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const waiting = new Promise<Execution>((resolve) => {
+    finish = resolve;
+  });
+  const client = {
+    ...contextReadPort,
+    serverInfo: { capabilities: ['context'] },
+    getContext: async () => page([], []),
+    listAllBackgroundExecutions: async () =>
+      executions.map((execution) => ({ execution: backgroundMetadata(execution) })),
+    getExecution: async (id: string, options: { signal: AbortSignal }) => {
+      const execution = executions.find((value) => value.id === id)!;
+      if (id !== 'window-job-200') return execution;
+      if (mode === 'changed') return { ...execution, resultRevision: '2' };
+      signal = options.signal;
+      enter();
+      return waiting;
+    },
+  } as unknown as AgentClient;
+  const host = new NativeContext(
+    client,
+    () => scope,
+    () => {},
+  );
+  try {
+    const original = await host.read('s', false, 'original-history-read');
+    const pending = host.nextResults(original.observationId);
+    await entered;
+    host.close('another-read');
+    expect(signal.aborted).toBe(false);
+    host.close('original-history-read');
+    expect(signal.aborted).toBe(true);
+    finish(executions[200]!);
+    await expect(pending).rejects.toBeDefined();
+    expect(await code(Promise.resolve().then(() => host.nextResults(original.observationId)))).toBe(
+      'context_observation_changed',
+    );
+    mode = 'changed';
+    const current = await host.read('s');
+    await expect(host.nextResults(current.observationId)).rejects.toMatchObject({
+      code: 'historical_result_changed',
+    });
+  } finally {
+    host.release();
+  }
 });

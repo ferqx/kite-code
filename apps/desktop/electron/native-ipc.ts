@@ -124,6 +124,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'context.read': ['sessionId', 'readId'],
   'context.next': ['sessionId', 'readId'],
   'context.close': ['readId'],
+  'context.results.next': ['observationId'],
   'context.rewind': ['observationId', 'boundary'],
   'context.include': ['observationId', 'executionId', 'resultRevision', 'scope'],
   lookupContext: ['commandId'],

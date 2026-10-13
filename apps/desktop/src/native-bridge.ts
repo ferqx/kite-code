@@ -270,7 +270,17 @@ export type NativeModelSettingsSubmission = {
   phase: 'submitting' | 'unknown' | 'applied' | 'failed';
   error?: string;
 };
-export type NativeContextFacts = { observationId: number; page: SelectedContextPage };
+export type NativeContextResults = {
+  startIndex: number;
+  nextIndex: number | null;
+  total: number;
+  executions: readonly Execution[];
+};
+export type NativeContextResultFacts = {
+  observationId: number;
+  historicalResults: NativeContextResults;
+};
+export type NativeContextFacts = NativeContextResultFacts & { page: SelectedContextPage };
 export type NativeCompressionSubmission = {
   kind: 'compress' | 'reset';
   sessionId: string;
@@ -558,6 +568,7 @@ export type NativeRequest =
       readId: string;
     }
   | { method: 'context.close'; generation: number; readId: string }
+  | { method: 'context.results.next'; generation: number; observationId: number }
   | {
       method: 'context.rewind';
       generation: number;
@@ -756,6 +767,7 @@ export type NativeResult =
   | NativeModelSettingsSubmission
   | NativeSessionFacts
   | NativeContextFacts
+  | NativeContextResultFacts
   | NativeGrantFacts
   | NativeState
   | ModelInputPage

@@ -1,5 +1,6 @@
 import {
   type AgentClient,
+  type BackgroundExecutionItem,
   ClientError,
   type Command,
   type Execution,
@@ -7,6 +8,7 @@ import {
   type SelectedContextPage,
 } from '@kite-ai/client';
 import type { ContextSubmission } from '../src/controller';
+import type { NativeContextFacts, NativeContextResultFacts } from '../src/native-bridge';
 import { NativeCompression } from './compression';
 export type ContextViewScope = {
   generation: number;
@@ -15,7 +17,7 @@ export type ContextViewScope = {
   sessionId: string;
   workspaceId: string;
 };
-export type NativeContextFacts = { observationId: number; page: SelectedContextPage };
+export type { NativeContextFacts } from '../src/native-bridge';
 export type IncludeScope = {
   storeId: string;
   sessionId: string;
@@ -34,6 +36,8 @@ export class NativeContext {
         lastSourceId?: string;
         boundaries: Map<string, string>;
         readId?: string;
+        historicalResults: readonly BackgroundExecutionItem['execution'][];
+        abort: AbortController;
       }
     | undefined;
   private reading: { abort: AbortController; readId?: string } | undefined;
@@ -95,6 +99,7 @@ export class NativeContext {
   }
   release() {
     this.reading?.abort.abort();
+    this.observed?.abort.abort();
     this.reading = undefined;
     this.observed = undefined;
   }
@@ -103,7 +108,10 @@ export class NativeContext {
       this.reading.abort.abort();
       this.reading = undefined;
     }
-    if (this.observed?.readId === readId) this.observed = undefined;
+    if (this.observed?.readId === readId) {
+      this.observed.abort.abort();
+      this.observed = undefined;
+    }
   }
   private same(scope: ContextViewScope) {
     const now = this.current();
@@ -169,7 +177,18 @@ export class NativeContext {
       const selectedId = value.selection.id,
         highWaterSeq = value.highWaterSeq;
       while (
-        Buffer.byteLength(JSON.stringify({ observationId: this.sequence + 1, page: value })) >
+        Buffer.byteLength(
+          JSON.stringify({
+            observationId: this.sequence + 1,
+            page: value,
+            historicalResults: {
+              startIndex: previous?.facts.historicalResults.startIndex ?? 0,
+              nextIndex: Number.MAX_SAFE_INTEGER,
+              total: Number.MAX_SAFE_INTEGER,
+              executions: [],
+            },
+          }),
+        ) >
         4 * 1048576 - 1024
       ) {
         abort.signal.throwIfAborted();
@@ -203,14 +222,123 @@ export class NativeContext {
       const boundaries = previous?.boundaries ?? new Map<string, string>();
       for (const message of value.messages)
         if (message.status === 'complete') boundaries.set(message.id, message.seq);
-      const facts = { observationId: ++this.sequence, page: structuredClone(value) };
+      let historicalResults = previous?.historicalResults;
+      if (!historicalResults) {
+        const view = await this.client.getView(scope.sessionId, { signal: abort.signal });
+        if (
+          !this.same(scope) ||
+          view.storeId !== scope.storeId ||
+          view.session.id !== scope.sessionId ||
+          view.session.workspaceId !== scope.workspaceId ||
+          view.session.deletedAt !== null
+        )
+          throw new ClientError('context_selection_changed');
+        const items = await this.client.listAllBackgroundExecutions({
+          workspaceId: scope.workspaceId,
+          rootSessionId: view.session.rootSessionId ?? view.session.id,
+          signal: abort.signal,
+        });
+        abort.signal.throwIfAborted();
+        if (!this.same(scope)) throw new ClientError('native_selection_changed');
+        historicalResults = items
+          .filter(
+            (item) =>
+              item.execution.sessionId === scope.sessionId &&
+              item.execution.kind === 'job' &&
+              item.execution.delivery === 'suppressed',
+          )
+          .map((item) => structuredClone(item.execution));
+      }
+      const facts: NativeContextFacts = {
+        ...(await this.resultPage(
+          historicalResults,
+          scope,
+          abort,
+          previous?.facts.historicalResults.startIndex ?? 0,
+          ++this.sequence,
+          value,
+        )),
+        page: structuredClone(value),
+      };
       this.observed = {
         scope: { ...scope },
         facts,
         boundaries,
         lastSourceId: value.resultSources.at(-1)?.id ?? previous?.lastSourceId,
         readId,
+        historicalResults,
+        abort,
       };
+      return facts;
+    } finally {
+      if (this.reading === reading) this.reading = undefined;
+    }
+  }
+  private async resultPage(
+    directory: readonly BackgroundExecutionItem['execution'][],
+    scope: ContextViewScope,
+    abort: AbortController,
+    startIndex: number,
+    observationId: number,
+    page?: SelectedContextPage,
+  ): Promise<NativeContextResultFacts> {
+    const executions: Execution[] = [];
+    const facts: NativeContextResultFacts = {
+      observationId,
+      historicalResults: {
+        startIndex,
+        nextIndex: Number.MAX_SAFE_INTEGER,
+        total: directory.length,
+        executions,
+      },
+    };
+    const budget = 4 * 1048576 - 1024;
+    let bytes = Buffer.byteLength(JSON.stringify(page ? { ...facts, page } : facts));
+    for (const original of directory.slice(startIndex, startIndex + 200)) {
+      const execution = await this.client.getExecution(original.id, { signal: abort.signal });
+      abort.signal.throwIfAborted();
+      if (!this.same(scope)) throw new ClientError('native_selection_changed');
+      if (
+        execution.id !== original.id ||
+        execution.sessionId !== scope.sessionId ||
+        execution.kind !== 'job' ||
+        execution.originStoreId !== original.originStoreId ||
+        execution.resultRevision !== original.resultRevision ||
+        execution.delivery !== original.delivery ||
+        execution.status !== original.status
+      )
+        throw new ClientError('historical_result_changed');
+      const size = Buffer.byteLength(JSON.stringify(execution)) + (executions.length ? 1 : 0);
+      if (bytes + size > budget) {
+        if (!executions.length && !page) throw new ClientError('context_results_page_too_large');
+        // Keep the entire result for the next window; a full Context page may
+        // leave no room for any result, without increasing the IPC budget.
+        break;
+      }
+      bytes += size;
+      executions.push(execution);
+    }
+    const nextIndex = startIndex + executions.length;
+    facts.historicalResults.nextIndex = nextIndex < directory.length ? nextIndex : null;
+    return facts;
+  }
+  async nextResults(observationId: number): Promise<NativeContextResultFacts> {
+    const observed = this.observe(observationId),
+      startIndex = observed.facts.historicalResults.nextIndex;
+    if (startIndex === null) throw new ClientError('context_results_end');
+    if (this.reading) throw new ClientError('context_read_busy');
+    const reading = { abort: observed.abort, readId: observed.readId };
+    this.reading = reading;
+    try {
+      const facts = await this.resultPage(
+        observed.historicalResults,
+        observed.scope,
+        observed.abort,
+        startIndex,
+        observationId,
+      );
+      if (this.observed !== observed) throw new ClientError('context_observation_changed');
+      observed.facts = { ...observed.facts, ...facts };
       return facts;
     } finally {
       if (this.reading === reading) this.reading = undefined;
@@ -305,17 +433,18 @@ export class NativeContext {
         },
       },
       async () => {
-        const view = await this.verified(observed, frozen),
-          execution: Execution | undefined = view.executions.find(
-            (value) => value.id === executionId && value.resultRevision === resultRevision,
-          );
+        const execution = await this.client.getExecution(executionId);
         if (
+          execution?.id !== executionId ||
+          execution.sessionId !== frozen.sessionId ||
+          execution.resultRevision !== resultRevision ||
           execution?.kind !== 'job' ||
           !execution.originStoreId ||
           execution.delivery !== 'suppressed' ||
           !['succeeded', 'failed', 'cancelled'].includes(execution.status)
         )
           throw new ClientError('historical_result_unavailable');
+        await this.verified(observed, frozen);
       },
     );
   }

@@ -82,11 +82,49 @@ export function NativeContextView({
         !value ||
         !('observationId' in value) ||
         !('page' in value) ||
+        !('historicalResults' in value) ||
         !('selection' in value.page) ||
         value.page.selection.sessionId !== selection.session.id
       )
         throw Error('context_scope_mismatch');
-      setFacts({ observationId: value.observationId, page: value.page });
+      setFacts({
+        observationId: value.observationId,
+        page: value.page,
+        historicalResults: value.historicalResults,
+      });
+    } catch (cause) {
+      if (original === current.current && sequence === readSequence.current)
+        setError(failure(cause));
+    } finally {
+      if (original === current.current && sequence === readSequence.current) setReading(false);
+    }
+  }
+  async function nextResults() {
+    if (!facts || reading || facts.historicalResults.nextIndex === null) return;
+    const original = identity,
+      sequence = ++readSequence.current,
+      observationId = facts.observationId;
+    setReading(true);
+    setError('');
+    try {
+      const value = await bridge.request({
+        method: 'context.results.next',
+        generation,
+        observationId,
+      });
+      if (original !== current.current || sequence !== readSequence.current) return;
+      if (
+        !value ||
+        !('observationId' in value) ||
+        value.observationId !== observationId ||
+        !('historicalResults' in value)
+      )
+        throw Error('context_scope_mismatch');
+      setFacts((previous) =>
+        previous?.observationId === observationId
+          ? { ...previous, historicalResults: value.historicalResults }
+          : previous,
+      );
     } catch (cause) {
       if (original === current.current && sequence === readSequence.current)
         setError(failure(cause));
@@ -246,9 +284,25 @@ export function NativeContextView({
         </div>
       ))}
       {facts && (
+        <section aria-label="历史任务结果目录">
+          <p>
+            已固定历史任务结果目录，共 {facts.historicalResults.total} 项；当前显示{' '}
+            {facts.historicalResults.executions.length
+              ? `${facts.historicalResults.startIndex + 1}–${facts.historicalResults.startIndex + facts.historicalResults.executions.length}`
+              : '0'}{' '}
+            项。读取目录不会重新执行任务；加入上下文须明确选择原结果。
+          </p>
+          {facts.historicalResults.nextIndex !== null && (
+            <button type="button" disabled={reading} onClick={() => void nextResults()}>
+              读取下一页历史任务结果
+            </button>
+          )}
+        </section>
+      )}
+      {facts && (
         <ContextPanel
           context={facts.page}
-          history={selection.executions}
+          history={facts.historicalResults.executions}
           storeId={selection.storeId}
           activeRun={active.length === 1 ? active[0] : undefined}
           busy={busy || unresolved}

@@ -1351,6 +1351,9 @@ export class NativeCaller {
         this.context.close(request.readId);
         result = null;
         break;
+      case 'context.results.next':
+        result = await this.context.nextResults(request.observationId);
+        break;
       case 'context.rewind':
         if (this.permissionUnavailable || this.controller.snapshot?.sessionId !== this.selected)
           throw new ClientError('context_view_unavailable');
