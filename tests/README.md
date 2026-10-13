@@ -2,6 +2,8 @@
 
 本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
+2026-10-13 在 macOS 的 clean `4eddd7cc` 执行原 `bun run test`，752 个完整文件组成609个正式作业，原四并发及最后七个独占作业全部通过，实际退出0。执行前后4483个文件输入和11个运行时／Web资产输入无漂移，准确原始日志、冻结与审计结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前代码完整默认回归与用户原文粘贴确认)。[测试运行器自测](isolated/scripts/test-suite-runner.test.ts)和[TUI运行器自测](isolated/unified-agent/unified-tui-runner.test.ts)会在所属临时目录运行预期失败及同名夹具，原始日志包含它们的子记录；核定完整默认结果须同时核正式冻结计划、父用例断言、实际退出码和原总结，不能只累计所有 `[test:…]` 文本。本次没有修改运行器或过滤测试；完整默认通过不解除原RSS／资源观测、Win/Linux原系统或阶段退出门禁。
+
 ## 环境基线与 owner
 
 [Windows installed TUI 完整调用者](fixtures/unified-agent/windows-installed-tui.qualification.ts)以 `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>` 消费同 release job 已构建的两种准确候选；actual win32/x64 required，无 backend availability skip。真实 80×24 ConPTY 先用独立 Terminal，再登记 Native 到同一稳定前门，每模式 120 秒、各 PTY 30 秒、写操作最多 10 秒，核提交／全文／思考／导出／精确取消／未提交草稿／普通退出／冷读零重放及最终卸载保数据。原 Job0／完整 EOF／strict Close 与未 Terminate 是成功条件，强制收尾不能改成通过；这条新 caller 不修改原 POSIX 窗口或默认 isolated 调度，也不代 Windows 真正跨代码／Shell／MCP／RSS／完整阶段资格。

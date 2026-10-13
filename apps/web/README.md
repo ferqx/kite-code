@@ -55,7 +55,7 @@ History 每条消息在生产 CSS 中拥有自己的定位容器，复制按钮�
 
 [整轮页面用例](test/isolated/assistant-copy.test.tsx)覆盖201条完整历史、有限 View 外 Run、中间 Tool call 的普通正文、每段已加载全文与切换迟到隔离；[原真实恢复整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)保原完整断言，并核实际 Cookie／Store A→B、原大正文加 inline 最终段的准确整轮复制、sealed 零按钮与关闭撤销。便携 DOM clipboard 使用内存端口，不能替代本机 OS 剪贴板字节或其他平台资格。
 
-[正式页面复制整例](test/isolated/message-copy.test.tsx)经实际 mount/ReactDOM 核两条原用户全文、重试、两秒反馈、切会话迟到隔离和已读 Model 正文保持；共享 Conversation 的原消费基线与最终 DOM 回归另保原用户／助手完整文本选择和同 ID 换正文隔离。相邻完整组合 13 文件／75 项／724 条 Bun 断言通过，含真实 Web assets 构建，根与八个 workspace 类型检查通过。本机 IAB 实际 Enter 核按钮焦点、24px 控件及 18px 成功图标、两秒复位，读取前后仍为 3 个固定模型调用、4 条消息、2 个 Run、4 个 Execution、cursor 45；工具提供的 clipboard reader 返回空文本，实际 OS 字节未确认，不据成功图标授该资格。`data:` 粘贴核对页被浏览器安全策略拒绝后未绕过；原公共 Cookie/正文读取证据按未改范围复用，完整浏览器／平台与阶段门禁保持。
+[正式页面复制整例](test/isolated/message-copy.test.tsx)经实际 mount/ReactDOM 核两条原用户全文、重试、两秒反馈、切会话迟到隔离和已读 Model 正文保持；共享 Conversation 的原消费基线与最终 DOM 回归另保原用户／助手完整文本选择和同 ID 换正文隔离。相邻完整组合 13 文件／75 项／724 条 Bun 断言通过，含真实 Web assets 构建，根与八个 workspace 类型检查通过。本机 IAB 实际 Enter 核按钮焦点、24px 控件及 18px 成功图标、两秒复位，读取前后仍为 3 个固定模型调用、4 条消息、2 个 Run、4 个 Execution、cursor 45；工具提供的 clipboard reader 返回空文本，当时未能核实实际 OS 原文。用户随后在本机编辑器粘贴，并确认指定用户消息 `Show the full original Markdown response.` 为准确原文；共享复制控件自该预览至当前代码未变，因此该单条用户消息的实际粘贴事实可复用。此确认不覆盖助手整条回复、其他内容或 Native 剪贴板；这些资格仍按各自证据核定。`data:` 粘贴核对页被浏览器安全策略拒绝后未绕过；原公共 Cookie/正文读取证据按未改范围复用，完整浏览器／平台与阶段门禁保持。当前代码的完整默认回归及精确证据范围见[本轮收束](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前代码完整默认回归与用户原文粘贴确认)。
 
 DOM 测试验证 Markdown 安全与完整文本、复制范围、键盘范围、刷新/切换位置及工具展开；JSDOM 的模拟 scroll 数值和 Range 证据不代表原生浏览器选区、实际布局或触控资格。正式浏览器体验仍由宿主独立验证。
 
