@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
   parseUnifiedTuiShard,
@@ -43,7 +44,7 @@ test('four exact deterministic shards cover all current CLI TUI owner tests and 
 });
 
 test('closed argv and four-shard grammar reject before any test inventory access', async () => {
-  const missing = '/private/tmp/kite-unified-tui-inventory-does-not-exist';
+  const missing = join(tmpdir(), 'kite-unified-tui-inventory-does-not-exist');
   for (const value of [
     '',
     ' ',
@@ -72,7 +73,7 @@ test('closed argv and four-shard grammar reject before any test inventory access
 });
 
 test('actual runner argv lists four shards without HOME publication and rejects invalid env before test execution', async () => {
-  const home = mkdtempSync('/private/tmp/kite-unified-tui-list-');
+  const home = mkdtempSync(join(tmpdir(), 'kite-unified-tui-list-'));
   try {
     const invoke = async (args: string[], shard: string) => {
       const child = Bun.spawn(
@@ -80,8 +81,14 @@ test('actual runner argv lists four shards without HOME publication and rejects 
         {
           cwd: home,
           env: {
+            ...process.env,
             HOME: home,
-            PATH: '/usr/bin:/bin',
+            USERPROFILE: home,
+            APPDATA: home,
+            LOCALAPPDATA: home,
+            XDG_CONFIG_HOME: home,
+            XDG_DATA_HOME: home,
+            KITE_CODE_HOME: join(home, '.kite-code'),
             KITE_TUI_SYSTEM_SHARD: shard,
             BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
           },
@@ -127,7 +134,7 @@ test('actual runner argv lists four shards without HOME publication and rejects 
 test.skipIf(process.platform === 'win32')(
   'list executes zero test bodies; actual shared runner propagates failure, drains isolated sibling and never starts exclusive job',
   async () => {
-    const owned = mkdtempSync('/private/tmp/kite-unified-tui-runner-');
+    const owned = mkdtempSync(join(tmpdir(), 'kite-unified-tui-runner-'));
     const marker = (name: string) => join(owned, name);
     const add = (path: string, body: string) => {
       const file = join(owned, path);

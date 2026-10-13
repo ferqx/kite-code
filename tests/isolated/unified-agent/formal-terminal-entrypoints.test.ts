@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -9,13 +10,36 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { verifyTerminalBundle } from '../../../apps/cli/host/terminal-artifact';
 import { sourceServerArguments } from '../../../scripts/development/ensure-web';
 import { sourceTerminalRoot } from '../../../scripts/release/source-terminal';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
+function childEnvironment(home: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: process.platform === 'win32' ? process.env.PATH : '/usr/bin:/bin',
+    HOME: home,
+    USERPROFILE: home,
+    APPDATA: home,
+    LOCALAPPDATA: home,
+    XDG_CONFIG_HOME: home,
+    XDG_DATA_HOME: home,
+    KITE_CODE_HOME: join(home, '.kite-code'),
+    LANG: 'C.UTF-8',
+    TERM: 'xterm-256color',
+  };
+}
+function ownedSocket(root: string, name: string) {
+  return process.platform === 'win32'
+    ? `\\\\.\\pipe\\kite-daemon-formal-${randomUUID()}`
+    : join(root, name);
+}
+
 function observation(testCase: 'pure' | 'full') {
   const origin = performance.now();
   let sequence = 0,
@@ -42,7 +66,7 @@ function observation(testCase: 'pure' | 'full') {
     execute(command: string[], cwd: string, home: string) {
       const entry = basename(command[1] ?? '');
       const step =
-        command[1] === '-c'
+        entry === 'PTY.ts'
           ? { entry: 'TUI', action: 'owned_pty' }
           : entry === 'CLI.ts' || entry === 'cli.ts'
             ? {
@@ -82,7 +106,7 @@ async function execute(
   observe('begin');
   const child = Bun.spawn(command, {
     cwd,
-    env: { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8', TERM: 'xterm-256color' },
+    env: childEnvironment(home),
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -119,7 +143,7 @@ function driver(root: string, kind: 'CLI' | 'TUI' | 'Server') {
   const fn = kind === 'Server' ? 'runSourceServer' : `runSourceTerminal${kind}`;
   writeFileSync(
     path,
-    `import {${fn}} from ${JSON.stringify(join(repositoryRoot, source))};\ntry{process.exitCode=await ${fn}(process.argv.slice(2),${JSON.stringify(root)});}catch(error){process.stderr.write(String(error?.code??'terminal_host_failed')+'\\n');process.exitCode=1;}\n`,
+    `import {${fn}} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, source)).href)};\ntry{process.exitCode=await ${fn}(process.argv.slice(2),${JSON.stringify(root)});}catch(error){process.stderr.write(String(error?.code??'terminal_host_failed')+'\\n');process.exitCode=1;}\n`,
   );
   return path;
 }
@@ -127,8 +151,9 @@ function driver(root: string, kind: 'CLI' | 'TUI' | 'Server') {
 test('formal source wrappers pure argv and server finite projection never inspect missing candidates or profiles', async () => {
   const timing = observation('pure'),
     execute = timing.execute;
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-formal-pure-')),
-    home = join(root, 'home');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-formal-pure-'))),
+    home = join(root, 'home'),
+    socket = ownedSocket(root, 's.sock');
   mkdirSync(home);
   try {
     expect(sourceTerminalRoot(root)).toBe(join(root, 'dist/unified-terminal'));
@@ -136,7 +161,7 @@ test('formal source wrappers pure argv and server finite projection never inspec
       '--data-root',
       join(root, 'data'),
       '--server',
-      join(root, 's.sock'),
+      socket,
       '--workspace',
       root,
       '--json',
@@ -147,7 +172,7 @@ test('formal source wrappers pure argv and server finite projection never inspec
       '--data-root',
       join(root, 'data'),
       '--server',
-      join(root, 's.sock'),
+      socket,
       '--workspace',
       root,
     ]);
@@ -156,7 +181,7 @@ test('formal source wrappers pure argv and server finite projection never inspec
       '--data-root',
       join(root, 'data'),
       '--server',
-      join(root, 's.sock'),
+      socket,
       '--json',
     ]);
     for (const argv of [
@@ -208,7 +233,7 @@ test('formal source wrappers pure argv and server finite projection never inspec
 test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x24 TUI with actual completed Run facts', async () => {
   const timing = observation('full'),
     execute = timing.execute;
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-formal-terminal-')),
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-formal-terminal-'))),
     home = join(root, 'home'),
     workspace = join(root, 'workspace'),
     candidate = sourceTerminalRoot(root);
@@ -217,7 +242,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
   const cli = driver(root, 'CLI'),
     tui = driver(root, 'TUI'),
     server = driver(root, 'Server'),
-    socket = join(root, 'owned.sock');
+    socket = ownedSocket(root, 'owned.sock');
   let calls = 0,
     started = false,
     stopped = false,
@@ -325,7 +350,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
       dataRoot = join(home, '.kite-code', 'unified-agent');
     writeFileSync(
       setup,
-      `import {selectProfile} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/profile.js'))};import {mkdirSync} from 'node:fs';const p=selectProfile({dataRoot:${JSON.stringify(dataRoot)},profile:'default'});mkdirSync(p.profilePath,{recursive:true,mode:0o700});console.log(JSON.stringify(p));`,
+      `import {selectProfile} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/agent/profile.js')).href)};import {mkdirSync} from 'node:fs';const p=selectProfile({dataRoot:${JSON.stringify(dataRoot)},profile:'default'});mkdirSync(p.profilePath,{recursive:true,mode:0o700});console.log(JSON.stringify(p));`,
     );
     const prepared = await execute([runtime, setup], workspace, home);
     expect(prepared.code).toBe(0);
@@ -374,7 +399,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     const read = join(root, 'read.mjs');
     writeFileSync(
       read,
-      `import {openSqliteStore} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/sqlite.js'))};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const executions=await s.listExecutions('formal-session');const runs=await Promise.all([...new Set(executions.map(e=>e.runId))].map(id=>s.getRun(id)));console.log(JSON.stringify({session:await s.getSession('formal-session'),runs,executions,messages:await s.listMessages('formal-session')}));}finally{await s.close();}`,
+      `import {openSqliteStore} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/agent/sqlite.js')).href)};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const executions=await s.listExecutions('formal-session');const runs=await Promise.all([...new Set(executions.map(e=>e.runId))].map(id=>s.getRun(id)));console.log(JSON.stringify({session:await s.getSession('formal-session'),runs,executions,messages:await s.listMessages('formal-session')}));}finally{await s.close();}`,
     );
     const before = await execute([runtime, read], workspace, home);
     expect(before.code).toBe(0);
@@ -426,63 +451,85 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     const seedDirectory = join(root, 'seed-directory.mjs');
     writeFileSync(
       seedDirectory,
-      `import {selectProfile} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/profile.js'))};import {requestDaemonBootstrap,selectDaemonEndpoint} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/service/daemon.js'))};import {createClient} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/client/index.js'))};const p=selectProfile({dataRoot:${JSON.stringify(dataRoot)},profile:'default'}),profile={dataRoot:p.dataRoot,name:p.profile,accessKey:p.profileAccessKey};const b=await requestDaemonBootstrap(selectDaemonEndpoint({profileAccessKey:p.profileAccessKey,explicitSocket:${JSON.stringify(socket)}}),profile);const c=createClient({endpoint:b.httpEndpoint,token:b.token,expected:{profile,apiMajor:1,instanceId:b.instanceId,buildId:b.buildId,requiredCapabilities:['sessions','commands']}});try{const info=await c.connect();await c.createSession({expectedStoreId:info.storeId,commandId:'create-resume-delete-target',sessionId:'resume-delete-target',workspaceId:${JSON.stringify(first.session.workspaceId)},title:'Directory delete target'});console.log('DIRECTORY_SEEDED');}finally{c.disposeNetwork();}`,
+      `import {selectProfile} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/agent/profile.js')).href)};import {requestDaemonBootstrap,selectDaemonEndpoint} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/service/daemon.js')).href)};import {createClient} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/client/index.js')).href)};const p=selectProfile({dataRoot:${JSON.stringify(dataRoot)},profile:'default'}),profile={dataRoot:p.dataRoot,name:p.profile,accessKey:p.profileAccessKey};const b=await requestDaemonBootstrap(selectDaemonEndpoint({profileAccessKey:p.profileAccessKey,explicitSocket:${JSON.stringify(socket)}}),profile);const c=createClient({endpoint:b.httpEndpoint,token:b.token,expected:{profile,apiMajor:1,instanceId:b.instanceId,buildId:b.buildId,requiredCapabilities:['sessions','commands']}});try{const info=await c.connect();await c.createSession({expectedStoreId:info.storeId,commandId:'create-resume-delete-target',sessionId:'resume-delete-target',workspaceId:${JSON.stringify(first.session.workspaceId)},title:'Directory delete target'});console.log('DIRECTORY_SEEDED');}finally{c.disposeNetwork();}`,
     );
     const seeded = await execute([runtime, seedDirectory], workspace, home);
     expect(seeded.code).toBe(0);
     expect(seeded.stdout).toContain('DIRECTORY_SEEDED');
     expect(calls).toBe(1);
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,urllib.request
-signal.signal(signal.SIGTERM,lambda *_: (_ for _ in ()).throw(RuntimeError('owned PTY cancelled')))
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],env={'PATH':'/usr/bin:/bin','HOME':${JSON.stringify(home)},'LANG':'C.UTF-8','TERM':'xterm-256color'},stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';transcript=b''
-def read_until(text, seconds):
- global buffer,transcript
- end=time.monotonic()+seconds
- while text not in re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace')):
-  if time.monotonic()>end:raise RuntimeError('formal PTY deadline '+buffer[-4000:].decode(errors='replace'))
-  if select.select([master],[],[],.05)[0]:
-   chunk=os.read(master,65536);buffer+=chunk;transcript+=chunk
-def key(value,text):
- global buffer
- buffer=b'';os.write(master,value);read_until(text,10)
-try:
- read_until('FORMAL CLI COMPLETE',10)
- read_until('New Run >',10)
- os.write(master,b'formal TUI task')
- read_until('formal TUI task',10)
- os.write(master,b'\\r')
- read_until('Working',10)
- end=time.monotonic()+10
- while not os.path.exists(${JSON.stringify(join(root, 'tui-model-started'))}):
-  if time.monotonic()>end:raise RuntimeError('original model did not start')
-  if select.select([master],[],[],.05)[0]:
-   chunk=os.read(master,65536);buffer+=chunk;transcript+=chunk
- key(b'\\x12','Select Session (arrows/Enter, Esc)')
- read_until('Directory delete target [resume-delete-target]',10)
- key(b'\\x1b[B','> Directory delete target')
- key(b'd','Delete Session?');read_until('> Keep Session',10)
- key(b'\\r','Select Session (arrows/Enter, Esc)')
- urllib.request.urlopen(${JSON.stringify(`${provider.url.href}directory-observation`)}).read()
- key(b'd','Delete Session?');read_until('> Keep Session',10)
- key(b'\\x1b[B','> Delete Session')
- key(b'\\r','delete_requested');read_until('stop unconfirmed',10)
- urllib.request.urlopen(${JSON.stringify(`${provider.url.href}directory-observation`)}).read()
- key(b'\\x1b','Select Session (arrows/Enter, Esc)')
- key(b'\\x1b','Working')
- open(${JSON.stringify(join(root, 'release-tui-model'))},'w').write('explicit fixture release')
- read_until('FORMAL TUI COMPLETE',10)
- os.write(master,b'\\x11');end=time.monotonic()+5
- while p.poll() is None and time.monotonic()<end:
-  if select.select([master],[],[],.05)[0]:
-   try:buffer+=os.read(master,65536)
-   except OSError:break
- p.wait(timeout=3);assert p.returncode==0;open(${JSON.stringify(join(root, 'pty-output'))},'wb').write(transcript);print('FORMAL_PTY_COMPLETE')
-finally:
- open(${JSON.stringify(join(root, 'pty-output'))},'wb').write(transcript)
- if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
- os.close(master)
-`;
-    const pty = await execute(['/usr/bin/python3', '-c', program], workspace, home);
+    const ptyDriver = join(root, 'PTY.ts');
+    writeFileSync(
+      ptyDriver,
+      `import assert from 'node:assert/strict';
+import {existsSync,writeFileSync} from 'node:fs';
+import {ptyDeadline,spawnTuiPTY,terminateTuiTree} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, 'apps/cli/test/fixtures/tui-pty.ts')).href)};
+const owned=spawnTuiPTY({cmd:[${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],cwd:${JSON.stringify(workspace)}});
+const cancelled=new AbortController();
+process.once('SIGTERM',()=>cancelled.abort(Error('owned PTY cancelled')));
+const cancellation=new Promise((_,reject)=>cancelled.signal.addEventListener('abort',()=>reject(cancelled.signal.reason),{once:true}));
+void cancellation.catch(()=>{});
+function cancellable(work){cancelled.signal.throwIfAborted();return Promise.race([work,cancellation]);}
+async function observeDirectory(){
+ const response=await fetch(${JSON.stringify(`${provider.url.href}directory-observation`)},{signal:cancelled.signal});
+ assert.equal(response.status,200);
+ await response.arrayBuffer();
+}
+let action=false;
+// Keep the original driver's exact raw material checks after each key.
+const ansi=/\\x1b\\[[0-?]*[ -/]*[@-~]/g;
+async function readUntil(text,seconds){
+ const end=Date.now()+seconds*1000;
+ while(!(action?owned.sinceAction():owned.text()).replace(ansi,'').includes(text)){
+  cancelled.signal.throwIfAborted();
+  assert.ok(Date.now()<end,'formal PTY deadline '+owned.text().slice(-4000));
+  await owned.drain();
+  await Bun.sleep(20);
+ }
+}
+async function key(value,text){action=true;await owned.key(value);await readUntil(text,10);}
+try{
+ await readUntil('FORMAL CLI COMPLETE',10);
+ await readUntil('New Run >',10);
+ action=true;await owned.key('formal TUI task');
+ await readUntil('formal TUI task',10);
+ await owned.key('\\r');
+ await readUntil('Working',10);
+ const end=Date.now()+10000;
+ while(!existsSync(${JSON.stringify(join(root, 'tui-model-started'))})){
+  cancelled.signal.throwIfAborted();
+  assert.ok(Date.now()<end,'original model did not start');
+  await owned.drain();await Bun.sleep(20);
+ }
+ await key('\\x12','Select Session (arrows/Enter, Esc)');
+ await readUntil('Directory delete target [resume-delete-target]',10);
+ await key('\\x1b[B','> Directory delete target');
+ await key('d','Delete Session?');await readUntil('> Keep Session',10);
+ await key('\\r','Select Session (arrows/Enter, Esc)');
+ await observeDirectory();
+ await key('d','Delete Session?');await readUntil('> Keep Session',10);
+ await key('\\x1b[B','> Delete Session');
+ await key('\\r','delete_requested');await readUntil('stop unconfirmed',10);
+ await observeDirectory();
+ await key('\\x1b','Select Session (arrows/Enter, Esc)');
+ await key('\\x1b','Working');
+ writeFileSync(${JSON.stringify(join(root, 'release-tui-model'))},'explicit fixture release');
+ await readUntil('FORMAL TUI COMPLETE',10);
+ await owned.key('\\x11');
+ const exitDeadline=Date.now()+5000;
+ while(!owned.ended&&Date.now()<exitDeadline){cancelled.signal.throwIfAborted();await cancellable(owned.drain());await cancellable(Bun.sleep(20));}
+ const code=await ptyDeadline(cancellable(Promise.all([owned.host.exited,owned.eof]).then(([code])=>code)),3000,'host exit timeout');
+ assert.equal(code,0);
+ await owned.drain();
+ writeFileSync(${JSON.stringify(join(root, 'pty-output'))},owned.text());
+ console.log('FORMAL_PTY_COMPLETE');
+}finally{
+ writeFileSync(${JSON.stringify(join(root, 'pty-output'))},owned.text());
+ try{if(!owned.ended)await terminateTuiTree(owned,{exitTimeoutMs:3000});}
+ finally{owned.close();}
+}
+`,
+    );
+    const pty = await execute([process.execPath, ptyDriver], workspace, home);
     expect(pty.code).toBe(0);
     expect(pty.stdout).toContain('FORMAL_PTY_COMPLETE');
     expect(directoryObservations).toHaveLength(2);
@@ -523,7 +570,7 @@ finally:
     const publicRead = join(root, 'public-read.mjs');
     writeFileSync(
       publicRead,
-      `import {selectProfile} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/profile.js'))};import {requestDaemonBootstrap,selectDaemonEndpoint} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/service/daemon.js'))};import {createClient} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/client/index.js'))};const p=selectProfile({dataRoot:${JSON.stringify(dataRoot)},profile:'default'}),profile={dataRoot:p.dataRoot,name:p.profile,accessKey:p.profileAccessKey};const b=await requestDaemonBootstrap(selectDaemonEndpoint({profileAccessKey:p.profileAccessKey,explicitSocket:${JSON.stringify(socket)}}),profile);const c=createClient({endpoint:b.httpEndpoint,token:b.token,expected:{profile,apiMajor:1,instanceId:b.instanceId,buildId:b.buildId,requiredCapabilities:['sessions','history']}});try{const info=await c.connect();console.log(JSON.stringify({storeId:info.storeId,view:await c.getView('formal-session'),runs:await Promise.all(${JSON.stringify(facts.runs.map((r: { id: string }) => r.id))}.map(id=>c.getRun(id)))}));}finally{c.disposeNetwork();}`,
+      `import {selectProfile} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/agent/profile.js')).href)};import {requestDaemonBootstrap,selectDaemonEndpoint} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/service/daemon.js')).href)};import {createClient} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/client/index.js')).href)};const p=selectProfile({dataRoot:${JSON.stringify(dataRoot)},profile:'default'}),profile={dataRoot:p.dataRoot,name:p.profile,accessKey:p.profileAccessKey};const b=await requestDaemonBootstrap(selectDaemonEndpoint({profileAccessKey:p.profileAccessKey,explicitSocket:${JSON.stringify(socket)}}),profile);const c=createClient({endpoint:b.httpEndpoint,token:b.token,expected:{profile,apiMajor:1,instanceId:b.instanceId,buildId:b.buildId,requiredCapabilities:['sessions','history']}});try{const info=await c.connect();console.log(JSON.stringify({storeId:info.storeId,view:await c.getView('formal-session'),runs:await Promise.all(${JSON.stringify(facts.runs.map((r: { id: string }) => r.id))}.map(id=>c.getRun(id)))}));}finally{c.disposeNetwork();}`,
     );
     const publicResult = await execute([runtime, publicRead], workspace, home);
     expect(publicResult.code).toBe(0);

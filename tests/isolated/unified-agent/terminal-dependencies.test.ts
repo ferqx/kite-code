@@ -12,7 +12,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve, sep } from 'node:path';
 import { copyTerminalDependencies } from '../../../scripts/release/terminal-dependencies';
 
 function pkg(
@@ -29,17 +30,18 @@ function pkg(
 function link(from: string, name: string, to: string) {
   const path = join(from, 'node_modules', name);
   mkdirSync(dirname(path), { recursive: true });
-  symlinkSync(to, path);
+  symlinkSync(to, path, process.platform === 'win32' ? 'junction' : 'dir');
 }
 function validateTree(path: string, root: string) {
   for (const entry of readdirSync(path, { withFileTypes: true })) {
     const target = join(path, entry.name);
-    if (entry.isSymbolicLink()) expect(realpathSync(target).startsWith(`${root}/`)).toBe(true);
+    if (entry.isSymbolicLink())
+      expect(realpathSync(target).startsWith(`${realpathSync(root)}${sep}`)).toBe(true);
     else if (entry.isDirectory()) validateTree(target, root);
   }
 }
 test('finite installed graph preserves multiversion, peer contexts, aliases, cycles, optional platform native files and bins without source links', async () => {
-  const root = mkdtempSync('/private/tmp/kite-terminal-deps-');
+  const root = mkdtempSync(join(tmpdir(), 'kite-terminal-deps-'));
   try {
     const repository = join(root, 'repository');
     mkdirSync(join(repository, 'node_modules'), { recursive: true });
@@ -188,7 +190,7 @@ test('finite installed graph preserves multiversion, peer contexts, aliases, cyc
 });
 
 test('real locked terminal workspace graph copies actual native assets and resolves production npm outside the repository', async () => {
-  const root = mkdtempSync('/private/tmp/kite-terminal-real-deps-');
+  const root = mkdtempSync(join(tmpdir(), 'kite-terminal-real-deps-'));
   try {
     const repositoryRoot = resolve(import.meta.dir, '../../..');
     const destination = join(root, 'node_modules');
@@ -249,7 +251,7 @@ test('real locked terminal workspace graph copies actual native assets and resol
 }, 60_000);
 
 test('generated workspace exports retain peers and external dependencies after an explicitly bundled dependency and source are absent', async () => {
-  const root = mkdtempSync('/private/tmp/kite-terminal-bundled-deps-');
+  const root = mkdtempSync(join(tmpdir(), 'kite-terminal-bundled-deps-'));
   try {
     const repositoryRoot = join(root, 'repository');
     mkdirSync(join(repositoryRoot, 'node_modules'), { recursive: true });
@@ -311,7 +313,7 @@ test('generated workspace exports retain peers and external dependencies after a
 });
 
 test('missing required, unknown workspace, external package and escaping asset are rejected without installing', () => {
-  const root = mkdtempSync('/private/tmp/kite-terminal-reject-deps-');
+  const root = mkdtempSync(join(tmpdir(), 'kite-terminal-reject-deps-'));
   try {
     const repositoryRoot = join(root, 'repo');
     mkdirSync(join(repositoryRoot, 'node_modules'), { recursive: true });
@@ -357,7 +359,7 @@ test('missing required, unknown workspace, external package and escaping asset a
     symlinkSync(join(external, 'LICENSE'), join(asset, 'escape'));
     expect(() => run({ asset: '1' })).toThrow('terminal_dependency_asset_escape');
     rmSync(join(asset, 'escape'));
-    symlinkSync(asset, join(asset, 'cycle'));
+    symlinkSync(asset, join(asset, 'cycle'), process.platform === 'win32' ? 'junction' : 'dir');
     expect(() => run({ asset: '1' })).toThrow('terminal_dependency_asset_cycle');
     const foreign = pkg(join(repositoryRoot, 'node_modules/foreign'), {
       name: 'foreign',

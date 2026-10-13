@@ -6172,3 +6172,18 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 本轮闭合当前冻结代码的完整默认回归，并确认此前旧普通Desktop、CLI/TUI／Service及OSS调用者退役和Native私有草稿修复可以共同通过原整轮。正式安装、真实代码切换、MCP、维护恢复、保数据卸载和正常退出沿本次原完整用例执行；每个断言的资格仍限其真实范围，不外推未观测资源或三端实机。Web遵用户保持现状，没有新预览或剪贴板询问。产品、owner和active合同均已在实施提交同步；本次只归位测试入口、进度和两条相关能力证据，文档后续提交不改变冻结生产／测试／运行资产，适用证据复用。
 
 剩余阻塞仍沿[此前五项依赖](#2026-10-13旧-oss-发布普通调用者完整退役)：原Shell首停止／SIGTERM来源与资源／句柄／出生后代完整观测、原8 outer／9点生命周期RSS的+115.203125MiB超过32MiB原红、助手全文实际系统粘贴、Win/Linux原系统完整资格，以及37能力／适用T001–T114/E01–E14／§35独立整体退出核对。Instruments原Bun非可调试签名阻碍未解除，不重新参数对照；Web和平台按用户安排后置。本次wholeDefault=true只覆盖以上当前完整default，37状态仍partial、wholeV13=false、phaseExit=false、Goal active。正常文档与提交门禁保持，只本地提交，不push、PR、发布或Actions。
+
+
+## 2026-10-13：正式入口完整测试的三端夹具接线
+
+从clean `ecb2ead1` 继续核§30／§35、能力映射与实际源码：正式安装／版本选择／六项维护／保数据卸载及权限owner的有限只读审查没有新的确定业务漏接；原RSS实际负载的Runtime、Client、HTTP及SQLite owner也未找到能直接归因原增长的业务长期持有链。没有把猜测当作生产修复、从37partial造新需求或重复参数／soak。剩余平台资格的独立前置却有明确源码缺口：正式入口共享测试以macOS `/private/tmp` 建根、固定POSIX启动环境，完整formal caller依赖Python PTY，不能将本机绿色视为三端可执行。
+
+本轮集中修四份现有完整文件。[TUI runner](../../tests/isolated/unified-agent/unified-tui-runner.test.ts)和[开发选择](../../tests/isolated/unified-agent/development-tui.test.ts)使用平台tmpdir；runner child保必要宿主环境，同时固定私有HOME／USERPROFILE／AppData／XDG／KITE_CODE_HOME，原四shard、closed argv、零Profile创建和失败传播／排空断言保持。原Windows skip仅属POSIX并发调度例，Windows既有串行合同不改变，不扩大平台skip。[完整依赖图](../../tests/isolated/unified-agent/terminal-dependencies.test.ts)四根改tmpdir，真实目录链接Windows用junction／POSIX仍symlink；原containment的true断言核canonical root加宿主sep，保真实文件symlink、逃逸／循环拒绝、执行位、native bytes、peer／多版本及搬迁读取。Windows文件symlink权限和执行位的原断言仍保留，不能从目录接线推其原生通过。
+
+[正式wrapper完整caller](../../tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts)两根改tmpdir、生成imports用file URL、Windows显式endpoint用现有named pipe合同；child必要环境保留且数据目录隔离。原Python driver改自有Bun子driver，复用既有[PTY／ConPTY原语](../../apps/cli/test/fixtures/tui-pty.ts)，不改helper或生产。原80×24、CLI完成、daemon／Web复用、TUI活动Model、目录Keep／Delete及两个GET时点、显式模型release、最终原Run事实、正常退出、制品复核和篡改拒绝完整保持。十个原文本读取均保十秒，两个HTTP要求200后读完整body；Ctrl+Q后原五秒排空及三秒exit／EOF内必须真实code0，子driver随后才输出marker。SIGTERM同时打断读取和退出等待并沿finally只清所属树；成功不借强杀。原71个Bun expect、15／60秒case、20秒步骤及10秒读取／5+3秒退出预算不改，不加skip。
+
+必要验证分别执行四份完整文件，合11pass／0fail／1172expects，不称一次新完整默认：runner4／67／actual0／805ms，开发选择1／15／actual0／106ms，依赖图4／1008／actual0／6.12秒，最终正式caller2／82／actual0／17.99秒。正式caller实际候选digest `1c57c2535aa52493c9806bdb803b275c153f80e63d22d0a600ecc15ce1b9fb8f`、Provider2／两个completed Run、原daemon stop0及篡改拒绝1；PTY成功marker以实际host0及EOF为前置。首次正式caller移植完整绿18.40秒保原log；随后只补原HTTP失败拒绝与TERM退出finally合同，按唯一改动文件重验，最终日志 `/private/tmp/kite-formal-terminal-portable-final-20261013.log`。其他日志为 `/private/tmp/kite-v13-tui-runner-platform-fixtures-20261013.log`、`/private/tmp/kite-v13-development-tui-platform-fixture-20261013.log` 和 `/private/tmp/kite-terminal-dependencies-platform-after-20261013.log`。
+
+原断言和预算由逐字逆向／原71expect及十读取映射与独立只读diff审查核对；证明保 `/private/tmp/kite-v13-shared-tui-fixture-preservation-20261013.json`、`/private/tmp/kite-terminal-dependencies-platform-delivery-20261013.json`。根typecheck及四文件Biome通过；正常hook仍执行受影响类型、依赖、API、文档等强制门禁。最初尝试的root workspace filter没有匹配而退出1，未执行类型检查；已改用实际root `bun run tsc --noEmit`，不把调用错误算通过。当前生产／其他测试／依赖／配置／11运行资产逐hash保持最近原完整default冻结输入；只复用不受四夹具改动影响的证据，不将754／611旧冻结整轮改写为本次新测试输入整轮。测试owner和本进度归位，产品手册／workspace／active用户行为与边界核对无需新diff，本次没有新增产品行为、正式caller切换或旧生产代码删除。
+
+未闭合仍最多五项按依赖：①正式Shell／Tool／Job停止及正常退出的首SIGTERM来源和resources／handles／出生后代完整观测；②原八outer／九点生命周期RSS的+115.203125MiB对32MiB原红；③Web保持现状下的助手全文实际系统粘贴；④Win/Linux正式安装、真代码切换、完整MCP、维护恢复和保数据卸载的实际资格，本轮只移除确定夹具前提，不触发Actions或外推原生通过；⑤以上依赖汇合后的37能力／适用T001–T114/E01–E14／§35与阶段退出。本次共享测试接线切片结束，37partial、wholeV13=false、phaseExit=false、Goal active；不把单个夹具变长期目标，不push、PR或发布。

@@ -2,7 +2,7 @@
 
 本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
-当前完整默认证据为macOS clean `2e3c19bd` 的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1464.452秒，原4并发／604排空后7独占和全部原断言／预算保持。4493文件输入及11运行资产／HEAD／status零漂移，原Native问答失败修复后也在整轮通过；第一轮真实失败仍保留。同名临时fixture仅按冻结源码和父区间归属，不过滤正式失败、不改原runner或为统计重测。准确原始与独立审计证据归[当前整轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13普通调用者退役与-native-修复后的完整统一验证)。完整默认通过不解除原RSS／资源观测、Win/Linux原系统、助手实际粘贴或阶段退出门禁。
+最近一次完整默认证据为macOS clean `2e3c19bd` 的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1464.452秒，原4并发／604排空后7独占和全部原断言／预算保持。4493文件输入及11运行资产／HEAD／status零漂移，原Native问答失败修复后也在整轮通过；第一轮真实失败仍保留。同名临时fixture仅按冻结源码和父区间归属，不过滤正式失败、不改原runner或为统计重测。准确原始与独立审计证据归[当前整轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13普通调用者退役与-native-修复后的完整统一验证)。完整默认通过不解除原RSS／资源观测、Win/Linux原系统、助手实际粘贴或阶段退出门禁。
 
 2026-10-13 在 macOS 的 clean `4eddd7cc` 执行原 `bun run test`，752 个完整文件组成609个正式作业，原四并发及最后七个独占作业全部通过，实际退出0。执行前后4483个文件输入和11个运行时／Web资产输入无漂移，准确原始日志、冻结与审计结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前代码完整默认回归与用户原文粘贴确认)。[测试运行器自测](isolated/scripts/test-suite-runner.test.ts)和[TUI运行器自测](isolated/unified-agent/unified-tui-runner.test.ts)会在所属临时目录运行预期失败及同名夹具，原始日志包含它们的子记录；核定完整默认结果须同时核正式冻结计划、父用例断言、实际退出码和原总结，不能只累计所有 `[test:…]` 文本。本次没有修改运行器或过滤测试；完整默认通过不解除原RSS／资源观测、Win/Linux原系统或阶段退出门禁。
 
@@ -231,6 +231,8 @@ Windows另接[安装版本／维护完整caller](fixtures/unified-agent/windows-
 根默认和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)：精确八 workspace、mini-review 独立扩展、新 root unified-agent 场景及有限脚本安全列表；不会发现整个旧 integration/qualification/release/e2e/golden/TUI 树。原测试机制的独立 HOME、exclusive、失败停止派发、运行者 drain 与 OS 并发上限保持。新增 source-free/真实 Native/TTY 场景按实际分类单独进程执行，不以历史排除规则丢失其断言。
 
 新 `test:tui:system` 由[当前 runner](../scripts/run-unified-tui-system-tests.ts)从新 UI TUI 与 CLI `tui*.test.ts` owner 动态发现，按当前文件清单分配四个 shard；`--list` 只读返回准确 inventory，只有所有 shard 成功才通过既有 `tui-system` check。根 runtime mock/e2e/fault/stdio/transport 与 Desktop aliases 已指向当前 owner 测试；旧 WebSocket/standalone/foundation/模型 live aliases 已退出，未将 paid Provider 测试重命名为 mock 通过。
+
+正式入口共享夹具的[TUI runner](isolated/unified-agent/unified-tui-runner.test.ts)、[开发选择](isolated/unified-agent/development-tui.test.ts)、[依赖图](isolated/unified-agent/terminal-dependencies.test.ts)与[完整formal caller](isolated/unified-agent/formal-terminal-entrypoints.test.ts)使用平台临时目录；child保宿主必要环境并隔离用户数据目录，Windows目录链接用junction／endpoint用named pipe，生成imports用file URL。formal caller复用已有Bun PTY／ConPTY执行原80×24完整步骤，真实host0＋EOF后才输出成功marker；原读取、HTTP成功、正常退出、目录删除、冷读和篡改拒绝／全部预算保持。四个完整文件macOS合11pass／1172expects，准确范围见[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13正式入口完整测试的三端夹具接线)。Windows串行合同和原POSIX并发例适用条件保持；文件symlink／执行位等原生断言不删，Win/Linux仍由实际平台验证。上述最近整轮只属其冻结输入，不冒称夹具调整后的新完整默认或阶段退出。
 
 三平台 workflow 使用新实际 producer/SQLite/平台报告，保 Bun1.4.2、40位Action pin、PR源head、clean-source与失败上传。OS vault 只在 CI 双 gate执行随机 owned namespace；默认 gate关闭零vault调用。live MCP默认gate关闭零network，workflow明确开启后才真实官方 tools/list+Tool。ACL脚本按实际OS核private路径，Winx64走currentSID/DACL；ARM64明确unsupported，运行失败非skip。
 
