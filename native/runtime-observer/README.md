@@ -1,5 +1,7 @@
 # 私有 Runtime 观测源码
 
+当前状态：冻结原型。按用户确认的[实现交付收尾范围](../../docs/plans/unified-agent-refactor-v1-progress.md#当前-goal-收尾范围2026-10-13)，停止本原型的继续接线、构建及采集；保留现有源码和失败证据，不将完整观测缺项自动转为当前开发任务。
+
 本目录保存针对固定 [Bun 1.4.2 源码](https://github.com/oven-sh/bun/tree/744846f844374847c902b5e7fd59b4342a51ef99)的可审计补丁；它尚未进入正式安装、候选构建、默认测试运行时或发布资产。[补丁元数据](bun-1.4.2-resource-census.json)记录准确 base commit、SHA 与未覆盖范围，[补丁](bun-1.4.2-resource-census.patch)是实现的耐久副本，本机忽略的构建 checkout 不是唯一保存位置。补丁为零context格式，避免补丁空context前缀被误作源码尾随空格；只对元数据固定base使用 `git apply --unidiff-zero --check` 后应用。
 
 当前原生接线登记所有 `Job<C>` 请求及 POSIX FilePoll，包括非取消任务、池外溢出对象和延迟回收。进程级同步快照只持有原生条目的身份和状态；不保 JS 值／owner 对象，锁内不调用 JS、I/O 或业务 callback。地址仅用于内部查找，输出单调 `resourceId`；重复、未知更新、溢出、分配或注销失败保 unknown，不恢复有效资格。取消链、原任务执行及 ACK 行为保持。

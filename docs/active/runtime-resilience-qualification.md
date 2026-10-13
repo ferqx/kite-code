@@ -8,6 +8,8 @@
 
 ## 当前 V1.3 owner 与资格边界
 
+当前实现交付按[已确认的 Goal 收尾范围](../plans/unified-agent-refactor-v1-progress.md#当前-goal-收尾范围2026-10-13)收束：未接入正式调用者的观测与自定义 Bun 原型冻结，不再作为当前自动推进任务。该交付范围调整不解除本页完整资格门禁，也不新增采集或授权要求。
+
 用户最新要求不再过度验证或收集性能数据，核代码／内存生命周期后尽快收尾。本轮停止新增系统采集、参数与矩阵，未执行准备的 ES 校准；正式功能证据按未变范围复用。已授权观测扩展的[耐久原生源码](../../native/runtime-observer/README.md)目前只接所有 Job／POSIX FilePoll 与真实 partial 快照，未替换正式 Bun／安装资产；完整 native build 因 LLVM21.1.8 与本机 SDK27 属性不兼容失败，原错误保留。独立 coalition task 前缀已本机读取成功，但不是全 Runtime 出生证明。RSS 原红、全资源／身份与阶段门禁仍未闭合，源码审查不能证明“无内存泄漏”；准确收束范围归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13原生观测源码与性能诊断收束)。
 
 本轮消除 SQL finalized statement 的额外缓存 owner 后，只执行一次原450秒／九点生命周期验证：7386 cycles／14772 Model调用、实际子进程退出0与双EOF，八个原测量点RSS增长 `+166.609375MiB >32MiB`，仍为真实失败。它只有一个outer，不授原八outer／60–168分钟或完整资源资格；与旧负载／输入不同，不推改善或恶化因果。准确新输入与原始证据归[集中收尾进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)，不追加参数对照或采集。
