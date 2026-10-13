@@ -2106,6 +2106,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+2026-10-13 按原 §35／formal verifier 核回真实退出条件：历史 SIGTERM 首发送者未知与助手全文未直接观测 OS 粘贴字节继续如实保留，但不将“解释首发送者”和“用户必须再人工粘贴”作为新增独立门禁。当前已验证功能按准确源码、完整断言和既有结果收束，原 RSS／全资源／出生后代、后置 Win/Linux 实际资格和全部适用 T/E／最终退役仍保持。此次纠正不授平台、P5/P6 或整体完成，准确证据及仍待验范围见[门禁收束进度](unified-agent-refactor-v1-progress.md#2026-10-13回到原退出条件收束额外诊断依赖)。以下历史轮次保各自输入与当时状态。
+
 当前37行能力的正式入口、公共producer／consumer与原断言范围先由三组只读源码审查核对，再由两名新的非参与式审查者分别独立核第1–19、20–37行，未发现新的可复现macOS行为缺口；这不等于37能力或全部适用T/E完成，历史实现参与者的审查也不冒称全体非参与式审查。映射明确CLI原Job核实依可靠adapter，Native／TUI有限Run／report／interrupt及原申请查回不承诺通用Job核实；导出早期“正式入口未切换”保为当时范围。DB9资产恢复、安装版中断恢复和真实代码切换复用各自证据，不新建单一窗口作为门禁。原RSS失败尚无对应新资格，也未定位可安全修改的剩余分配持有链；全Runtime出生完整性及Bun资源／handles缺可靠来源，Windows原合同guard与后续Win/Linux Actions保持。审查范围、五项退出依赖及本地交付归[当前能力核对](unified-agent-refactor-v1-progress.md#2026-10-11正式能力源码与退出依赖核对)，37partial／wholeV13=false／phaseExit=false。
 
 此前macOS MCP独立审查发现普通失败建立和失败replacement的停止详情消费者遗漏，以及普通失败结果缺冻结configDigest；旧连接已停的此前修复不能代这两条完整失败恢复。四生产文件已补齐共享closed停止解码和准确原failed Query，原四文件34／666、默认macOS stdio失败→查回→独立新连接→全文工具→独立Tool Ask／一次效果4／80均通过。首次原完整默认在Native基础窗口的重复／提前审批观察断言真实红；最小夹具修正保96条完整assert及原序／预算，第二次准确未筛选默认actual0／1400.998秒，原714文件／575正式作业全启动／完成／通过，4386tracked regular输入／Git全等。强制门禁通过，局部Native MCP设置计划已归位并删除；精确输入、原红、SHA及限度归[当前进度](unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-失败建立与完整连接恢复)。下方第十七次全绿只属此前冻结输入；37partial／wholeV13=false／phaseExit=false及五项退出依赖保持，RSS／观测未补证，Windows合同guard与后续Actions不由本机结果关闭。

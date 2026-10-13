@@ -6208,3 +6208,24 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 另有限审查原独立Shell Job：host先retain原Run binding、detached独立controller不订阅parent abort，Execution再retain至terminal／dispose或失败custody；Run正常finally只减自身引用，活Job阻止binding.dispose，Service assembly不直接关guardian controlWriter。原shell.wait先读cancelled、之后parent completed，也不支持反向取消假设；未找到可据此修的新源码错误，不推原SIGTERM首发送者。该阅读没有启动Service／测试或旁矩阵，原停止来源仍unknown。
 
 本轮新增的是受支持的私有采集／公开detail读取路径和明确的覆盖未通过证据，没有新增产品能力、正式caller切换或旧路径退役；该一次方法校准到此收束，不持续扩窗口／参数。生产／测试／配置／依赖及正式运行资产保持，复用准确58af夹具11／1172及未受影响的2e3完整默认冻结证据，只同步进度和当前资格owner，文档与正常提交门禁独立强制。剩余仍五项：原停止来源／完整资源与出生后代观测（含当前表选择／时基／样本free-owner缺口）；原八outer／九点RSS+115.203125MiB对32MiB失败；Web现状下助手全文实际粘贴；后置Win/Linux原系统安装／版本／MCP／维护／卸载；以及37能力／适用T/E／§35独立整体收束。37partial、wholeV13=false／phaseExit=false／Goal active；不push、PR、发布或Actions。
+
+
+## 2026-10-13：回到原退出条件，收束额外诊断依赖
+
+用户明确保持V1.3先于ChatGPT官方授权／Responses的顺序，随后要求尽快完成阻塞、不要过度验证。本轮从clean `2294cf61719cf5de4ce4532f86b8d3d0b4d98ed7` 核原§30／§35、能力映射、产品手册和实际verifier，两个独立有界审查确认此前退出表增加了两个原合同未指定的独立要求。这里纠正当前推进依赖，保留所有旧轮次、真实失败、原断言和未知证据，不改生产、测试或verifier。
+
+**正式Shell完整功能收尾。** 原§35.1／35.3及[完整40任务用例](../../tests/isolated/unified-agent/unified-default-shell-continuous.test.ts)要求真实完成／准确停止、原Files／child／Shell效果、全所属树reap与冷读零重放；[formal verifier](../../scripts/runtime/unified-soak-report.ts)要求资源／句柄、出生后代、原负载和32MiB RSS，没有独立首发送者字段。先前将“查明原SIGTERM首发送者”提升为阶段条件超出了这些要求，现收束该额外调查目标。原cancelled／cancelWithParent=false／cancelRequestedAt=null、status15和首因未知收据保持；当前首drain错误、唯一closing、晚到failed的源码修复按原完整断言保留，不用后续绿色推原历史原因。
+
+最近原完整默认在 `2e3c19bd` actual0／754完整文件／611正式作业全通过；其中原40任务完整文件原log36207行实际passed／68889ms。运行输入冻结、原失败与独立审计保上述完整回归段；从该输入至本轮生产／依赖／配置和11运行资产保持，四份后续跨平台夹具各已有完整验证11pass／1172expects。当前可收束本机完整短窗功能与输出故障处理，不能将短窗、原signal未知或当前源码核对当长时稳定性／全资源通过。
+
+**Web完整复制功能收尾。** [原产品合同](../handbook/clients/web/interface.md)要求准确同轮正文、空行连接、排除thinking／tool／child、终态与成功／失败反馈；没有规定再次由用户人工粘贴为独立验收方法。[完整助手页面](../../apps/web/test/isolated/assistant-copy.test.tsx)保201条历史与准确完整文本，[真实恢复整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)经Cookie／Store A→B核传入正式clipboard API的原全文及最终段、sealed零按钮和Close撤销，原assert全部保持。真实浏览器定位／焦点／反馈和指定用户原文实际粘贴只证明各自范围；助手最终OS字节仍未直接观测，不能改记passed，也不从内存端口或用户样本外推。现收束额外人工确认依赖，按用户保持Web现状，不新预览或要求用户操作；手册复制承诺不变。
+
+当前仍阻碍阶段退出的三项依赖如下，按原顺序保留：
+
+| 剩余缺口 | 实际用户入口与完整行为 | 验收条件 |
+| --- | --- | --- |
+| 原RSS与完整资源／出生后代资格 | 正式客户端连续运行、取消、重连、后台工作至正常退出 | 原8 outer／9点／60–168分钟／32MiB与+115.203125MiB真实红保持；activeResources／handles及全Runtime出生后代须有可信来源，当前性能诊断按用户收束 |
+| Win/Linux原系统完整资格 | 正式安装、真实版本切换、MCP连接／调用／取消／退出、维护恢复及保数据卸载 | 后续Actions／用户Windows取得各系统真实证据，保Windows Shell原合同guard，本机结果不外推，不push或dispatch |
+| 全能力与最终退役／阶段收束 | 全部正式Terminal／Native／Web能力及公开扩展路径 | 37能力、适用T001–T114／E01–E14、独立整体核对及相关平台证据完整后核最终旧闭包退役；阶段收束运行当前输入完整回归，证据限制不得写成通过 |
+
+本轮没有新增产品实现、正式caller迁移或旧源码删除；新增闭合的是上述两项额外诊断推进依赖，当前功能证据按准确范围归位。手册预期及owner行为未变，只同步Web owner、active与计划；复用未变实现的原完整证据，不重跑已闭合窗口、不新增性能矩阵。原formal断言／拒绝／阈值保持，37仍partial、wholeV13=false／phaseExit=false，ChatGPT仍在V1.3之后。文档与正常本地提交门禁独立执行，不push、PR、发布或Actions。

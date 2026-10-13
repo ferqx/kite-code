@@ -14,6 +14,8 @@
 
 按用户2026-10-13“性能这块不要过度检查，目前没有正式发布”的安排，本次性能诊断到此收束，不追加 Instruments 导出／采集、参数对照或性能矩阵，也不再要求用户操作现有采集窗口。RSS、资源观测和发布／阶段退出门禁仍保原失败与缺项；当前功能收尾按确定源码缺口和必要验证推进，不以本安排解除资格或宣布阶段退出。
 
+当前退出条件以原 formal verifier 和 §35 为准。历史间歇 SIGTERM 的首发送者仍未知，但解释该首发送者不是原独立门禁；原失败收据、当前 Shell 完整功能断言和真实清理证明分别保留，不能据后续绿色倒推历史原因。助手全文的再次人工粘贴确认也不是新增功能推进条件，未直接观测的 OS 剪贴板字节仍按证据范围说明。两项诊断未知不再单独扩大退出条件；原 RSS、完整资源／出生后代、平台及整体资格要求不变，准确核对归[门禁收束进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13回到原退出条件收束额外诊断依赖)。
+
 macOS 的正式 web_fetch／SQLite [原 Worker owner](../../packages/agent/src/platform/process/owned-worker.ts)现保可信 preload 捕获的原 Mach right 到严格死名并准确释放；SQL ACK仍独立必要，缺身份、查询／释放失败或五秒收尾耗尽保未知与原锁，取消／timeout不掩盖清理未知。source observer／native leaf与built chunk属于准确运行资产保护，Service只装配metadata。当前[完整公开交接和真实窗口证据](../plans/unified-agent-refactor-v1-progress.md#2026-10-13macos-原-worker-收尾与准确锁交接)只授本机单Worker终态与原权释放；不能填全Runtime资源／出生后代、JSC／VM全部回收、activeResources／handles或RSS，也不解除Win/Linux或阶段资格。原formal verifier／八outer／九点／原RSS拒绝继续保持。
 
 原binary的Instruments诊断已取得采集器自身会话认证与方法实际运行，但backend拒绝non-debuggable目标的task-control附加，controller实际失败；[认证后原始证据](../plans/unified-agent-refactor-v1-progress.md#2026-10-13采集器认证后附加失败与当前完整回归)继续保留，不再将观测缺失归因为用户尚未认证。后续只在私有诊断目录给原Bun副本增加get-task-allow，原17个file-backed section字节、全部section／加载地址保护和UUID保持，LINKEDIT／签名size差异明确记录；安装Bun、正式运行资产和永久系统权限保持原输入。新副本的原五秒方法采集与公开detail导出均实际0，但1118条live行没有匹配原两块缓冲区，释放／存续字段和VM区间／业务frame覆盖仍未证明。该副本是新签名／SHA的诊断输入，不授原binary／RSS／完整资源或阶段资格；准确表筛选、检查区间和时基映射仍待核对，不从当前表无样本推断整trace无分配，也不重复参数／负载。实际范围归[副本观测进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13私有调试副本与原生分配导出范围)。
