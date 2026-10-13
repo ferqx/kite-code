@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   parseTerminalBundleManifest as parseManifest,
@@ -26,6 +27,10 @@ function translate<T>(read: () => T): T {
       error instanceof TerminalRuntimeAssetError ? error.code : 'terminal_bundle_unavailable',
     );
   }
+}
+/** Select the path before taking its lease, with the same closed asset errors as verification. */
+export function resolveTerminalBundleRoot(bundleRoot: string): string {
+  return translate(() => realpathSync(bundleRoot));
 }
 /** Closed unsigned integrity metadata. This does not establish publisher authenticity. */
 export function parseTerminalBundleManifest(value: unknown): TerminalBundleManifest {

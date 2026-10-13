@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { runInstalledTerminalCLI } from './entrypoints/terminal-cli';
+import { releaseErrorCode, sourceCandidateBuildHint } from './release-arguments';
 
 const repositoryRoot = resolve(import.meta.dir, '../..');
 /** Trusted checkout selection, never an argv override or a development fallback. */
@@ -23,15 +24,8 @@ export async function terminalEntrypoint(run: () => Promise<number>): Promise<vo
   try {
     process.exitCode = await run();
   } catch (error) {
-    const code =
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      typeof error.code === 'string' &&
-      /^[a-z][a-z0-9_]{0,80}$/.test(error.code)
-        ? error.code
-        : 'terminal_host_failed';
-    process.stderr.write(`${code}\n`);
+    const code = releaseErrorCode(error, 'terminal_host_failed');
+    process.stderr.write(`${code}\n${sourceCandidateBuildHint(code)}`);
     process.exitCode = 1;
   }
 }

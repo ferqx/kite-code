@@ -42,6 +42,7 @@
     "scripts/development/ensure-web.ts",
     "scripts/development/retired-entrypoints.ts",
     "scripts/development/unified-cli.ts",
+    "scripts/development/unified-desktop.ts",
     "scripts/development/unified-tui.ts",
     "scripts/development/unified-web.ts",
     "scripts/release/release-arguments.ts",

@@ -4,6 +4,8 @@
 
 ## 构建与操作
 
+根 `npm run agent`／`npm run tui` 使用固定 `dist/unified-terminal`，先执行 `npm run release:build`。缺候选路径现沿同一结构化资产错误返回 `terminal_bundle_unavailable` 并说明构建／开发命令；纯帮助、版本和非TTY拒绝仍先于候选与Profile访问。取锁、完整闭包验证和原finally释放保持，不自动构建或转向源码。日常源码调整使用 `npm run build` 后 `npm run cli:dev`／`npm run tui:dev`，步骤见[本地开发](../../../docs/development/local-development.md)。
+
 在已经安装仓库依赖的 checkout 中使用 Bun 1.4.2。所有目标路径由调用者明确指定；构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新的目录或本工具已经标记的安装根。下例的占位路径需要替换；SHA256 使用 pack 返回的准确值。
 
 ```sh

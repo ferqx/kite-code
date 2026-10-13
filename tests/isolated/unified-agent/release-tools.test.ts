@@ -118,6 +118,31 @@ test('actual release argv help and rejected installation inputs leave absent ass
   }
 }, 15000);
 
+test('native launch reports absent or incomplete local candidates before opening a profile', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-launch-missing-')));
+  const home = join(root, 'home'),
+    partial = join(root, 'partial');
+  mkdirSync(home, { mode: 0o700 });
+  mkdirSync(partial, { mode: 0o700 });
+  try {
+    for (const directory of [join(root, 'missing'), partial]) {
+      const result = await execute('native.ts', ['launch', '--directory', directory], root, home);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe('');
+      if (process.platform === 'win32') expect(result.stderr).toBe('native_platform_unsupported\n');
+      else {
+        expect(result.stderr).toContain('native_bundle_unavailable\n');
+        expect(result.stderr).toContain('npm run release:build -- --product native');
+        expect(result.stderr).not.toContain(directory);
+      }
+    }
+    expect(readdirSync(home)).toEqual([]);
+    expect(existsSync(join(root, 'dist'))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('current formal release smoke uses a fresh complete candidate for daemon identity and readonly Web, then confirms stop', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-release-tools-actual-')));
   try {

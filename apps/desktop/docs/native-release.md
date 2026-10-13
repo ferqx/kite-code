@@ -8,6 +8,8 @@ inner Terminal 的共享 UI Desktop build 现内联唯一核心图标依赖，�
 
 ## 构建与安装
 
+根 `npm run desktop` 需要先生成默认 Terminal 和Native候选：`npm run release:build`、`npm run release:build -- --product native`。缺外层路径或内嵌Terminal时，launch保原双使用锁／完整验证顺序，失败返回 `native_bundle_unavailable` 和准备命令，已取得的锁仍在finally释放。日常开发使用 `npm run build` 后 `npm run desktop:dev`，由独立development profile与每次新建应用目录承载源码调整；不将该开发入口算作完整候选或发行资格。
+
 ```sh
 bun run release:build --directory /absolute/output/terminal
 bun run release:build --product native --terminal /absolute/output/terminal --directory /absolute/output/native --archive /absolute/output/native.tar.gz

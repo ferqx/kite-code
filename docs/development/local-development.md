@@ -10,6 +10,7 @@
 | 正式 daemon/Web | `bun run server` | 先显式启动候选 daemon，再读取 Web 地址；不自动构建缺失资源 |
 | CLI 开发 | `bun run cli:dev run --task "任务"` | 已构建 Service 与独立 development profile |
 | TUI 开发 | `bun run tui:dev --workspace .` | 同一 development profile 与 Ink；`--thread <id>` 选择原 Session |
+| Desktop 开发 | `bun run desktop:dev` | 已构建 Service、已安装 Electron；每次生成独立应用目录，同一 development profile |
 | 只读 Web 开发 | `bun run web:dev` | 已构建 Service/Web assets、development profile 与只读 Gateway |
 | 完整 Native 候选 | `bun run release:build --product native` 后 `bun run desktop` | 验证完整 Native、内嵌 Terminal/Bun 与实际 Electron Node；不依赖旧 Vite/配套服务 |
 | Desktop 定向验证 | `bun run test:desktop:native` | 新 Native bundle/process/Files 的隔离实际场景，使用本地固定 Provider |
@@ -21,6 +22,19 @@
 | 首发证据 | `bun run check:plan-evidence` | 独立历史证据消费者，不代替当前 §35 资格 |
 
 正式 Terminal 默认使用 `~/.kite-code/unified-agent/default`，开发入口默认使用 checkout 的 `.kite-code/unified-development/development`。可用 `--data-root <绝对路径>` 明确隔离；当前入口不读取旧 Kite Home 配置或数据库，也不自动迁移旧用户数据。测试必须使用所属临时 home/workspace/profile/endpoint，按 harness 清理。
+
+日常开发可使用 npm 调用同一 Bun 脚本：
+
+```sh
+npm run build
+npm run cli:dev -- run --workspace . --task "任务"
+npm run tui:dev -- --workspace .
+npm run desktop:dev
+```
+
+三种开发客户端使用同一 development profile；任务仍需要已配置模型和工作区信任。修改代码后退出对应客户端，重新执行 `npm run build` 并启动。Desktop 每次启动重新编译 Main/preload/renderer，在自己的 `.cache/unified-desktop-*` 目录运行，退出后清理该次应用目录；会话、设置和草稿保留在开发 profile。此入口不提供 Vite 热更新。
+
+`npm run agent`、`npm run tui`、`npm run desktop` 仍选择正式候选。首次运行这组命令，先执行 `npm run release:build`，再执行 `npm run release:build -- --product native` 生成 Desktop 候选。缺失候选时分别返回 `terminal_bundle_unavailable`／`native_bundle_unavailable` 和准备命令，未通过完整验证时不进入 Profile。源码变化不会自动更新候选；需要重新生成时，先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。构建不覆盖正在使用或已有的目录。
 
 旧 `apps/kite-desktop` 的 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 已退役，直接执行原开发／Electron构建／打包／服务准备脚本也返回 `legacy_desktop_entrypoint_retired` 和退出码2。诊断给出上表的当前 Native 构建、启动和验证命令；拒绝发生在读取旧archive、打开Profile、构建或启动服务之前。旧开发Vite热更新属于[历史实现](../../apps/kite-desktop/README.md)，不将当前候选启动称为等价热更新。旧源码和制品可追溯，当前数据不会交给旧writer；全部旧authority删除与阶段退出仍按原门禁核对。
 

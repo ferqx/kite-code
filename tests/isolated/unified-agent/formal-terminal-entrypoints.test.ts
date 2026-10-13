@@ -139,14 +139,21 @@ async function execute(
     }
   }
 }
-function driver(root: string, kind: 'CLI' | 'TUI' | 'Server') {
+function driver(root: string, kind: 'CLI' | 'TUI' | 'Server', terminal = false) {
   const path = join(root, `${kind}.ts`);
   const source =
     kind === 'Server' ? 'scripts/development/ensure-web.ts' : 'scripts/release/source-terminal.ts';
   const fn = kind === 'Server' ? 'runSourceServer' : `runSourceTerminal${kind}`;
+  const tty = terminal
+    ? "Object.defineProperty(process.stdin,'isTTY',{value:true});Object.defineProperty(process.stdout,'isTTY',{value:true});\n"
+    : '';
+  const entry =
+    kind === 'Server'
+      ? `try{process.exitCode=await ${fn}(process.argv.slice(2),${JSON.stringify(root)});}catch(error){process.stderr.write(String(error?.code??'terminal_host_failed')+'\\n');process.exitCode=1;}\n`
+      : `import{terminalEntrypoint}from ${JSON.stringify(pathToFileURL(join(repositoryRoot, 'scripts/release/source-terminal.ts')).href)};\n${tty}await terminalEntrypoint(()=>${fn}(process.argv.slice(2),${JSON.stringify(root)}));\n`;
   writeFileSync(
     path,
-    `import {${fn}} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, source)).href)};\ntry{process.exitCode=await ${fn}(process.argv.slice(2),${JSON.stringify(root)});}catch(error){process.stderr.write(String(error?.code??'terminal_host_failed')+'\\n');process.exitCode=1;}\n`,
+    `import {${fn}} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, source)).href)};\n${entry}`,
   );
   return path;
 }
@@ -221,6 +228,12 @@ test('formal source wrappers pure argv and server finite projection never inspec
       home,
     );
     expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('terminal_bundle_unavailable\n');
+    expect(missing.stderr).toContain('npm run release:build');
+    expect(missing.stderr).not.toContain(root);
+    const missingTUI = await execute([process.execPath, driver(root, 'TUI', true)], root, home);
+    expect(missingTUI.code).toBe(1);
+    expect(missingTUI.stderr).toBe(missing.stderr);
     expect(existsSync(join(home, '.kite-code'))).toBe(false);
     expect(existsSync(join(root, 'dist'))).toBe(false);
   } finally {

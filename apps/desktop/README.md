@@ -1,5 +1,7 @@
 # Desktop 与 Native 制品
 
+本地开发使用根 `npm run build` 后 `npm run desktop:dev`。该[显式开发宿主](../../scripts/development/unified-desktop.ts)复用实际 built Service／Bun SHA、已有 Native development assets 与构建器，使用 checkout 的 `unified-development/development` profile。每次构建到独立 `.cache/unified-desktop-*`，实际 Electron 退出后清理自己的应用目录；开发数据保留，活动应用目录不覆盖。纯帮助与严格参数拒绝先于资产读取／构建／Profile 写入，缺 built Service 明确要求 `npm run build`；SIGINT／SIGTERM转发给自有Electron，菜单退出沿Native原收尾流程。操作步骤归[本地开发](../../docs/development/local-development.md)。
+
 当前桌面构建与启动使用仓库根 `bun run release:build --product native` 和 `bun run desktop`，定向验证为 `bun run test:desktop:native`，安装／归档／版本选择见 `bun run release:native --help`。旧 `apps/kite-desktop` 的普通开发、服务准备和打包命令已给出明确退役诊断／退出码2；不再从当前checkout构建或启动旧writer。原Vite开发热更新只属历史实现，当前Native候选启动的具体行为仍按本页及[发布owner](docs/native-release.md)核对。此项调用者退役不表示全部旧源码或阶段已退出。
 
 ## 复用原桌面展示层

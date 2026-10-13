@@ -7,7 +7,7 @@ TUI 适合在终端中发起任务、查看执行过程并处理审批。需要�
 
 ## 第一次任务
 
-1. 在仓库根目录执行 `bun install`，再执行 `bun run tui`。这是从源码运行的方式；已安装版本直接使用 `kite-tui`，自动启动发布包内配套服务，无需 Bun 或先运行 server start。
+1. 在仓库根目录执行 `bun install --frozen-lockfile` 和 `npm run build`，开发时用 `npm run tui:dev -- --workspace .`。如果使用正式源码命令 `npm run tui`，还须先执行 `npm run release:build` 生成默认Terminal候选。已安装版本直接使用 `kite-tui`，自动启动发布包内配套服务，无需 Bun 或先运行 server start。
 2. 如果显示首次配置向导，按提示选择 Provider、模型并保存凭据。配置错误时修正错误，不要把启动失败当成空会话。
 3. 阅读工作区信任提示及额外只读目录。只有确认范围后才继续；拒绝时不会开始任务。
 4. 输入一个明确任务，例如“只阅读项目，解释启动入口”，按 Enter 提交。消息出现后，状态栏显示 `Working`。
@@ -27,7 +27,7 @@ TUI 适合在终端中发起任务、查看执行过程并处理审批。需要�
 
 ## 通用开发 TUI 的共享连接
 
-`bun run tui:dev --data-root <绝对根路径> --server <本地socket>` 显式连接已经启动、使用同一 data root 的开发 daemon；启动方式见[通用 Agent 开发生命周期](../../server/lifecycle.md#通用-agent-开发生命周期)。省略 `--server` 仍启动本客户端拥有的配套 Service。正式 `bun run tui` 和安装入口尚未由此切换。
+`bun run tui:dev --data-root <绝对根路径> --server <本地socket>` 显式连接已经启动、使用同一 data root 的开发 daemon；启动方式见[通用 Agent 开发生命周期](../../server/lifecycle.md#通用-agent-开发生命周期)。省略 `--server` 仍启动本客户端拥有的配套 Service。正式 `bun run tui` 和安装入口保持完整候选选择。
 
 共享连接固定原 daemon 的 profile、实例和工作区；省略 `--workspace` 沿用 daemon 工作区，显式不一致或选择其他工作区的会话会拒绝。连接缺席或不兼容时不启动替代服务，也不创建空 profile。`Ctrl+Q`、`/exit`、EOF 或宿主 SIGTERM 只保存未提交文本并断开此客户端；`Ctrl+C` 仍准确取消原工作。
 
@@ -36,4 +36,4 @@ TUI 适合在终端中发起任务、查看执行过程并处理审批。需要�
 
 如果只有事件流失效而普通读取仍可用，手动刷新可以更新读到的内容，但界面会继续标记失联；单次读取成功不表示后续事件已恢复。只有原服务的事件观察重新确认就绪后，才清除此失联状态。
 
-新通用终端候选的 `<prefix>/bin/kite-tui` 已可在独立安装目录启动，并复用上述 paired/shared 行为。它自带 Bun，默认使用独立 `~/.kite-code/unified-agent` 的 `default` profile；原正式安装版与 `bun run tui` 尚未替换。构建、安装及当前本机验证范围见[终端制品说明](../../../../apps/cli/docs/terminal-release.md)。
+新通用终端候选的 `<prefix>/bin/kite-tui` 已可在独立安装目录启动，并复用上述 paired/shared 行为。它自带 Bun，默认使用独立 `~/.kite-code/unified-agent` 的 `default` profile；根 `bun run tui` 已选择同一新候选。构建、安装及当前本机验证范围见[终端制品说明](../../../../apps/cli/docs/terminal-release.md)。

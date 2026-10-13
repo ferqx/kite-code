@@ -59,6 +59,7 @@
     "check:protected-branch": "bun run scripts/check-protected-branch.ts",
     "check:plan-evidence": "bun run scripts/check-plan-execution-matrix.ts",
     "desktop": "bun run scripts/release/native.ts launch",
+    "desktop:dev": "bun run scripts/development/unified-desktop.ts",
     "test:desktop:native": "bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-bundle.test.ts apps/desktop/test/isolated/native-process.test.ts apps/desktop/test/isolated/native-file-recovery-paired.test.ts",
     "test:desktop:window": "bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-install-lifecycle.test.ts",
     "release:native": "bun run scripts/release/native.ts",

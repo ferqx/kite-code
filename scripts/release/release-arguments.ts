@@ -59,12 +59,21 @@ export function assertReleaseSource(
     throw Error('release_source_mismatch');
 }
 
-export function releaseErrorCode(error: unknown): string {
+export function releaseErrorCode(error: unknown, fallback = 'release_failed'): string {
   const value =
     error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
       ? error.code
       : error instanceof Error
         ? error.message
         : '';
-  return /^[a-z][a-z0-9_]{0,100}$/.test(value) ? value : 'release_failed';
+  return /^[a-z][a-z0-9_]{0,100}$/.test(value) ? value : fallback;
+}
+
+/** Trusted source-tool instructions; never include filesystem paths or raw error details. */
+export function sourceCandidateBuildHint(code: string): string {
+  if (code === 'terminal_bundle_unavailable')
+    return 'Build the local Terminal candidate first: npm run release:build\nFor CLI/TUI development: npm run build, then npm run cli:dev or npm run tui:dev\n';
+  if (code === 'native_bundle_unavailable')
+    return 'Build the local Native candidate first: npm run release:build, then npm run release:build -- --product native\nFor Desktop development: npm run build, then npm run desktop:dev\n';
+  return '';
 }

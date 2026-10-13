@@ -5,6 +5,7 @@ import {
   parseReleaseArguments,
   releaseErrorCode,
   requiredReleaseValue,
+  sourceCandidateBuildHint,
   validateReleaseSourceArguments,
 } from './release-arguments';
 
@@ -159,12 +160,14 @@ export async function runNativeRelease(
     case 'launch': {
       if (!['darwin', 'linux'].includes(process.platform))
         throw Error('native_platform_unsupported');
-      const { verifyNativeRuntimeBundle } = await import('@kite-ai/service/native-runtime-assets');
+      const { NativeRuntimeAssetError, verifyNativeRuntimeBundle } = await import(
+        '@kite-ai/service/native-runtime-assets'
+      );
       const { acquireArtifactAccess } = await import('@kite-ai/agent/artifact-access');
       const { realpathSync } = await import('node:fs');
-      const canonical = realpathSync(directory);
       const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
       try {
+        const canonical = realpathSync(directory);
         for (const selected of [canonical, join(canonical, 'terminal')])
           leases.push(acquireArtifactAccess({ root: selected, mode: 'shared' }));
         const bundle = verifyNativeRuntimeBundle(directory);
@@ -184,6 +187,17 @@ export async function runNativeRelease(
           process.removeListener('SIGTERM', terminate);
           process.removeListener('SIGINT', terminate);
         }
+      } catch (error) {
+        if (
+          error &&
+          typeof error === 'object' &&
+          'code' in error &&
+          (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+        )
+          throw Object.assign(new NativeRuntimeAssetError('native_bundle_unavailable'), {
+            cause: error,
+          });
+        throw error;
       } finally {
         for (const lease of leases.reverse()) lease.release();
       }
@@ -284,7 +298,8 @@ if (import.meta.main) {
       process.exitCode = result.exitCode;
     else console.log(JSON.stringify(result));
   } catch (error) {
-    process.stderr.write(`${releaseErrorCode(error)}\n`);
+    const code = releaseErrorCode(error);
+    process.stderr.write(`${code}\n${sourceCandidateBuildHint(code)}`);
     process.exitCode = 1;
   }
 }

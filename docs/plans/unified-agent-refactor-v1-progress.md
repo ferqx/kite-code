@@ -6327,3 +6327,17 @@ RSS 因果有界复核未发现可确认业务漏点：该lifecycle不进入ques
 仍适用的原正式生产450秒记录实际exit0／双EOF，7386cycles／14772Model调用，业务完成／取消／重连／删除与清理完整。八个测量RSS点为226656256、364478464、371654656、398245888、399065088、399097856、401129472、401358848B，表现为先增长后趋平台；末四点增加2.1875MiB只描述该已存在记录的趋势，不能替代原全窗口166.609375MiB>32MiB真实失败，也不是新测量或“无泄漏”证明。没有确认新的持续业务保留链，不再追加性能采集。原收据及SHA归[SQL owner收尾](#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。
 
 当前开发交付已收束，developmentDeliveryComplete=true；原RSS32MiB／八outer、全Runtime资源和全部出生后代资格继续未取得，wholeV13=false／phaseExit=false，不把开发完成升级成正式资格。Win/Linux配置交付完成且未实测，发布前验证仍后置；Web现状和ChatGPT顺序保持。没有新增正式caller迁移或退役结果，没有剩余已确认的独立生产must-fix；本轮只本地提交，不push、PR、发布或Actions。
+
+## 2026-10-14：本地三客户端启动与开发入口补齐
+
+用户实际 `npm run desktop` 返回release_failed、`npm run tui`返回terminal_host_failed，随后要求CLI／TUI／Desktop能本地启动开发调整。真实原因是当前checkout没有默认 `dist/unified-terminal`／`dist/unified-native`；此前临时测试制品未物化到这两个普通用户入口。原realpathSync在结构化资产验证前抛ENOENT，外层小写code白名单将其压成generic，不能据原测试绿称本机默认入口已准备。
+
+Terminal路径选取现复用所属host的资产错误翻译，CLI／TUI保pure help/version/trace及nonTTY在候选／Profile读取前返回；Native launch保双使用锁与完整验证顺序，将实际缺外层／inner的ENOENT／ENOTDIR归native_bundle_unavailable，finally释放不变。只允许既有闭合code文本的共同formatter保合法锁／资产错误，source入口给准确准备命令，不输出raw私有路径、自动构建或fallback到源码。
+
+新增显式 `desktop:dev`，复用既有built Service／Bun SHA选择器和Native development assets／构建器，绑定相同checkout development profile。每次独立cache app目录、已安装Electron、四项runtime注入环境清除、信号只转发自有child、实际child退出后清理所属app目录；开发数据保留。help和严格零参数拒绝先于资产／构建／Profile，缺built Service说明npm run build；没有watch／旧writer或新增业务carrier。根package和tsconfig明确接线，手册与技术owner同步首次准备和改代码后重启步骤。
+
+实际两个完整正式入口／release-tools文件6pass／186expects／41.11秒，保原TTY完整Run／daemon Web及清理断言，补CLI／TTY选择缺候选准确诊断、Native缺外层／inner与零Profile反例，无三端skip；原nonTTY拒绝、wrong-platform／tamper断言及预算保持。三个开发文件7pass／230expects／4.94秒，含真实CLI paired built Service、完整正文与cold公开GET、TUI准确选择以及新Desktop纯入口。root tsc0，Biome与docs／影响核对0；原默认611不升级为当前全部回归。
+
+本机实际 `npm run build` 八workspace0，默认Terminal candidate `b8f77fc55fbd8774b8cfbf74d7cd65b192c33b4420ff90bdfc22b54a97319206`、Native candidate `c0f6084fef21d50beeaa72bd4e6707a3d1da8199aebd754d6feb4dff35e6e11e` 已生成，未安装／发布。普通CLI help0，desktop:dev实际编译并启动Electron，一次实际退出0、再次启动供本机使用。完整默认Native的实际Playwright窗口核新对话、attach、显式directory可用、无启动／操作弹窗，真实close0／无signal／零Model；结果 `/private/tmp/kite-native-local-startup-clean-20261014.log`。前临时driver的变量遮蔽、误读directory回复形态和close后SDK handle读取失败raw保留，按实际契约修正driver后整体actual0，没有修改产品断言或将这些driver错误充作产品失败。
+
+本轮只闭合本地入口准备、缺资产可操作诊断和显式Desktop开发能力，不取得Win/Linux、RSS32MiB、完整资源／出生或正式阶段资格；无新增正式退役目标。文档同步和正常本地提交保留，不push、PR、发布或触发Actions。
