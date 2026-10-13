@@ -260,6 +260,8 @@ Main 从实际选中根的 controller snapshot 固定 Store／subject／generati
 
 renderer 的页面 Map 分别保存步骤与 JSON fallback 草稿，身份固定 Store/source/presentation Session/id/revision/inputDigest。切换会话、新建会话及待决后页替换不会搬移或清理原草稿；读取失败和卡片未出现在 bounded pending 页也不证明终态。Main 已核准确 accepted answer_saved 回执时只清原键，观察到同原卡的新 revision/inputDigest 或非 pending 状态时才清理对应旧键。关闭页面进程不保证未提交问卷草稿恢复，持久原 Answer journal 仍负责未知回执。
 
+明确“保留草稿”只保存原Main私有主输入，不要求业务History已经完整读取。原保存按钮可用而 `write` 的默认History门禁静默返回已修：此调用显式不依赖History，原pending防重、generation／Session／revision CAS及迟到scope更新guard保持；发送／回答等原业务操作的门禁不变。[原完整读归属DOM](test/isolated/native-read-ownership-dom.test.tsx)保原断言并新增History GET held时准确原文保存、迟到A回执不改B草稿／修订、零业务提交正例；原macOS问答整窗口保全部流程／断言／10秒读取／45秒driver／120秒整例通过。原完整默认的真实失败及修后证据归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13统一回归发现的-native-私有草稿保存)。
+
 [页面 DOM](test/native-questionnaire-dom.test.tsx)核会话隔离、遗漏页／读取失败、未知一次答复、准确回执只清原草稿，以及 question 隐藏主输入并在终态恢复原文；[实际完整 Native 候选](test/isolated/native-questionnaire-bundle.test.ts)与 [Electron driver](test/native-questionnaire-electron.fixture.ts)核搬迁、删除构建源后的默认 Service／compatible Provider 窗口流程，末页主动提交前零 HTTP Answer、原 ID／文案和自由原文、问卷取消后原 Run 继续，以及所属 Service 真正退出后的冷 Store。该 fixture 仅暂存各原 Run 的首个 Provider 响应，沿既有“保留草稿”准备并读取准确主草稿后释放；实测答复／取消均隐藏主输入再恢复原文，没有新增 Model 或重答。首次发送等待实际 Renderer 权限与历史就绪，并核一次真实 form submit；[原 Native bundle driver](test/native-bundle-electron.fixture.ts)复用这项界面观察，原制品、独立审批与退出断言保持。实际运行结果与限制归 [进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不由组件或单个窗口测试推导全部 P5、三平台或签名发行资格。
 
 ## Native 计划入口与完整审核

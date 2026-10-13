@@ -10,6 +10,8 @@
 
 旧OSS普通发布全链随后在上述退役文件集中核验：build／verify、installer四操作和smoke实际七次调用保archive／prefix／Profile；原安装导出对象／同步／async／常量沿真实wrapper的source与实际bundle，原历史方法另保bytes，原smoke完整检查全bytes保留明确historical qualification。原source检查只移动读取目标，未改原Windows断言。五唯一完整文件34pass／708断言／actual0，原正式release smoke新候选与normal cleanup通过。默认仍754完整文件／611作业，不新增独立窗口；这批改动收束后统一原完整默认结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-oss-发布普通调用者完整退役)，结果未取得前保持未确认。
 
+旧普通调用者收束提交 `f2730258` 后已实际统一执行原754文件／611作业default：Bun退出1，246启动／245通过／1Native问答草稿保存失败／365未启动，原并发／预算及4493文件／11资产／Git输入保持；原red完整保留。确定的enabled Save受History门禁静默返回已补生产单调用，原完整DOM15／127／0及未改原窗口1／32／0通过；不以两文件绿代完整默认，新整轮结果归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13统一回归发现的-native-私有草稿保存)。
+
 ## 环境基线与 owner
 
 [Windows installed TUI 完整调用者](fixtures/unified-agent/windows-installed-tui.qualification.ts)以 `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>` 消费同 release job 已构建的两种准确候选；actual win32/x64 required，无 backend availability skip。真实 80×24 ConPTY 先用独立 Terminal，再登记 Native 到同一稳定前门，每模式 120 秒、各 PTY 30 秒、写操作最多 10 秒，核提交／全文／思考／导出／精确取消／未提交草稿／普通退出／冷读零重放及最终卸载保数据。原 Job0／完整 EOF／strict Close 与未 Terminate 是成功条件，强制收尾不能改成通过；这条新 caller 不修改原 POSIX 窗口或默认 isolated 调度，也不代 Windows 真正跨代码／Shell／MCP／RSS／完整阶段资格。

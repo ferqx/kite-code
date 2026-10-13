@@ -2648,7 +2648,7 @@ function NativeDesktopContent({
                               selected.current === original.sessionId
                             )
                               draftRevision.current = saved.revision;
-                          })
+                          }, false)
                         }
                       >
                         保留草稿

@@ -490,3 +490,95 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
     await f.close();
   }
 });
+
+test('explicit private draft save keeps its original scope and CAS while history is still reading', async () => {
+  const history = deferred<NativeResult>();
+  const savedReply = deferred<NativeResult>();
+  const raw = '  原私有草稿🙂\r\n保留 空格  ';
+  const saves: Extract<NativeRequest, { method: 'draft.write' }>[] = [];
+  const f = fixture((request) => {
+    if (request.method === 'messages' && request.sessionId === 'a') return history.promise;
+    if (request.method === 'draft.read' && request.sessionId === 'a')
+      return {
+        id: 'a',
+        storeId: 'store',
+        workspaceId: 'w',
+        rootSessionId: 'a',
+        revision: 7,
+        content: raw,
+      };
+    if (request.method === 'draft.write') {
+      saves.push(request);
+      if (request.sessionId === 'a') return savedReply.promise;
+      return {
+        id: 'b',
+        storeId: 'store',
+        workspaceId: 'w',
+        rootSessionId: 'b',
+        revision: 2,
+        content: request.content,
+      };
+    }
+    return undefined;
+  });
+  try {
+    await f.render();
+    await f.click('Original A');
+    expect(
+      f.calls.some((request) => request.method === 'messages' && request.sessionId === 'a'),
+    ).toBe(true);
+    expect(f.dom.window.document.body.textContent).not.toContain(
+      '历史已完整读取至固定高水位；当前执行事实仍须核实。',
+    );
+    expect(f.dom.window.document.querySelector('textarea')!.value).toBe(
+      raw.replaceAll('\r\n', '\n'),
+    );
+    const button = [...f.dom.window.document.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent === '保留草稿',
+    )!;
+    expect(button.disabled).toBe(false);
+    await f.click('保留草稿');
+    expect(saves).toEqual([
+      { method: 'draft.write', generation: 1, sessionId: 'a', revision: 7, content: raw },
+    ]);
+    await f.click('Other B');
+    expect(f.dom.window.document.querySelector('textarea')!.value).toBe('other text');
+    await act(async () =>
+      savedReply.resolve({
+        id: 'a',
+        storeId: 'store',
+        workspaceId: 'w',
+        rootSessionId: 'a',
+        revision: 8,
+        content: raw,
+      }),
+    );
+    f.assertOther();
+    await f.click('保留草稿');
+    expect(saves[1]).toEqual({
+      method: 'draft.write',
+      generation: 1,
+      sessionId: 'b',
+      revision: 1,
+      content: 'other text',
+    });
+    expect(
+      f.calls.some((request) =>
+        ['submit', 'conversation.send', 'interaction.answer', 'cancelInput'].includes(
+          request.method,
+        ),
+      ),
+    ).toBe(false);
+  } finally {
+    history.resolve({ messages: [], nextAfterSeq: null, highWaterSeq: '0' });
+    savedReply.resolve({
+      id: 'a',
+      storeId: 'store',
+      workspaceId: 'w',
+      rootSessionId: 'a',
+      revision: 8,
+      content: raw,
+    });
+    await f.close();
+  }
+});

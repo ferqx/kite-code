@@ -6147,3 +6147,15 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 | 全能力／§35阶段收束 | 37能力、正式默认调用者、明确历史保留与最终退出 | 适用T001–T114/E01–E14、独立审查及当前完整回归齐全；其他依赖闭合后核阶段，历史保留不等于正式carrier仍在 |
 
 本轮源码普通调用者已收束，历史库／样本明确保留；37partial、Goal active，不提前宣布整体或阶段退出。
+
+## 2026-10-13：统一回归发现的 Native 私有草稿保存
+
+旧OSS普通完整链已本地提交 `f2730258`，正常hook0／22.33秒，工作树clean。随后按用户统一验证要求实际执行原 `bun run test`，冻结754完整文件／611正式作业、原4并发、604并发排空后7独占，以及4493个原文件和11个运行资产。正式Bun81056实际退出1／489.218秒；246正式作业启动、245通过、1真实Native问答失败、365未启动。停止派发和排空沿原runner，完整输入／资产／HEAD／status零漂移，不将未派发算通过，不过滤或重跑失败子集冒充全绿。原完整log `/private/tmp/kite-v13-retirement-full-test-20261013.log` SHA `e34d5141eb279089fbe5af191f50505050966ff19be357af52090c5b65df0101`，freeze SHA `305ad54fe4d94f9b7ab52ec9406c367f4c33e1d87884b13bc843485a126c5efe`，结果 `/private/tmp/kite-v13-retirement-full-result-20261013.json` 完整保留。
+
+原[Native问答整例](../../apps/desktop/test/isolated/native-questionnaire-bundle.test.ts)第二次start在原10秒内不能读到明确保存的主草稿，driver断言 `original Main draft was not saved`，Provider实际3次，完整问答第二轮尚未释放。原fixture保 `/private/tmp/kite-native-questionnaire-bundle-IwYngZ`，独立解码实际failure字段保 `/private/tmp/kite-native-questionnaire-full-red-20261013.json`：trusted点击保留草稿、disabled=false、DOM原文正确，无错误弹窗。点击瞬间内部History phase没有记录，不能把事后字段当唯一现场因果。
+
+源码却明确存在同型真实用户错误：[Native按钮](../../apps/desktop/src/native.tsx)仅按pending禁用，却以 `write` 默认完整History门禁执行私有 `draft.write`；History尚未完整时静默return。新便携真实NativeDesktop DOM保持A History GET、确认enabled按钮后准确点击，原代码不发任何保存请求，14pass／1fail／119assert／actual1；`/private/tmp/kite-native-private-draft-history-original-red-20261013.log` 保红。私有草稿不是业务History mutation，只将该Save调用设为不依赖History；Main generation／Session／修订CAS、pending与迟到scopeguard原样，不改发送／回答／取消或Main／Client／Core／私有格式。新case对DOM textarea的CRLF展示正规化有一次夹具期望修正，另保原red.log；真实保存原CRLF bytes的断言始终保留，不改生产文本。
+
+原完整读归属DOM修后15pass／0fail／127assert／actual0／962ms，准确A generation1／revision7／原CRLF文本一次保存，迟到A回执不影响B草稿和revision1，零业务submit／conversation／answer／cancel。Desktop types0；原信息级Biome不做无关改写。原失败macOS问答完整文件和driver未改任何字节／断言／期限，修后真实源码外搬迁／default Service窗口1pass／32Bunassert／actual0／32.86秒，Provider4、原两Run完成、正确完整回答／只取消问卷、原主草稿恢复、所属Service退出后冷Store保持。日志 `/private/tmp/kite-native-private-draft-original-window-green-20261013.log`，局部通过不抹原full失败；新当前完整默认仍须重新实际执行并核全部作业。
+
+手册与Native owner同步真实私有保存行为，37能力和全部原门禁保留；此修复对应统一回归真实失败，不扩大已经闭合的故障矩阵。Web保持现状，Win/Linux后置；原Shell首停止／资源观测、RSS、助手实际原文粘贴与§35／完整阶段仍未闭合。Goal active，只本地提交，不push、PR、发布或Actions。
