@@ -432,13 +432,20 @@ export function commitMutationCheck(
     )
       throw new AgentError('mutation_check_invalid');
     const target = db.row(
-        'SELECT * FROM execution WHERE id=? AND run_id=?',
+        "SELECT * FROM execution WHERE id=? AND session_id=? AND kind='tool'",
         input.mutationExecutionId,
-        run.id!,
+        run.session_id!,
       ),
       intent = record(db, ref, `${prefix(ref)}intent/${input.mutationExecutionId}`),
       head = getHead(db, ref);
-    if (!target || !intent || !head.row || String(head.row.revision) !== input.headRevision)
+    if (
+      !target ||
+      target.origin_store_id !== input.expectedStoreId ||
+      !belongsToRun(db, target, String(run.id)) ||
+      !intent ||
+      !head.row ||
+      String(head.row.revision) !== input.headRevision
+    )
       throw new AgentError('mutation_head_changed');
     if (!['succeeded', 'failed', 'cancelled'].includes(String(target.state)))
       throw new AgentError('operation_unverifiable');

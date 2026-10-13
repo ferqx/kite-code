@@ -5771,3 +5771,32 @@ Service／Runtime close 实际拒绝之后，独立 Store 取得原 Session owne
 只读 `DevToolsSecurity -status`实际0，返回 `Developer mode is currently disabled.`；本机 `man DevToolsSecurity`说明普通用户系统首次在本登录会话调试自己的进程需要管理员授权。已请求用户决定是否完成一次会话调试授权，不启用永久开发者模式、不修改系统调试策略；关闭状态尚不能证明是本次启动受阻的唯一原因。采集限定本任务诊断进程，Kite三种权限策略保持。进一步依赖该授权的采集保持待决定，不把等待当作批准。
 
 本轮没有新增正式caller切换、旧路径删除或用户能力完成声明；新增的是上述有界业务源码审查和原生方法前置的实际未通过证据。生产、测试、依赖、配置与运行资产保持，产品手册／owner／active核对无需行为或边界diff；只同步进度并按iteration_complete／stage／commit与正常hook本地交付。原RSS +115.203125MiB／32MiB、全resources／handles／后代／cleanup、后置Win/Linux实际资格、§35完整最终审查及退役继续未闭合，37partial／wholeV13=false／phaseExit=false，Goal active。
+
+## 2026-10-13：嵌套 Files 的原 Run 完整验证与持久门禁
+
+状态：partial；上一片正常本地提交 `4df0333e`。用户再贴原“操作未完成 / native_draining”截图，root 和独立审查核实原测试确实漏查退出弹窗，不能用任务成功或旧默认绿色否认。该退出竞态已由 `e0331890` 修复；当前 Main/preload/bridge/renderer 与原 DOM/窗口测试相对该提交无 diff。复用上片准确原始日志中的40效果／零取消、零退出弹窗／页面异常／观察异常、Electron及原Service正常0；该轮两个真实退出拒绝分别为 usage 的 native_request_failed 和 close 的 native_draining，不把它们都称同一错误。截图没有构建身份，不反推用户安装包包含修复。
+
+新的业务审查发现真实独立缺口：公开 `run.start` 进入普通外部 Tool，再经 `operations.ensure` 调用正式 Files write/edit 时，子 Tool 的 `runId=null`，登记和事实页认可其真实父链，最终检查却要求 target 直接带原 Run ID；同时子 Tool 行缺少继承 refs，最终派发／同事务结算漏掉原义务。新增 [Service/Client/Files 完整回归](../../apps/service/test/isolated/automatic-validation-nested-tools.test.ts)先在原生产取得 actual1／5断言／294ms：wrapper、write、edit各一次及完整Unicode最终正文四项先通过，Model2/read0；原 Run failed/mutation_head_changed，两个子 Tool succeeded但requirements=[]，head lastSeq2/checkedThrough0。红日志与真实 receipt 保留于 `/private/tmp/kite-nested-automatic-red-20261013.log` 和原 `kite-nested-automatic-jIt3Fw/receipt.json`，最初loopback／客户端准入准备错误不算产品红。
+
+Core 的 `planExecution` 现在在原事务从实际直属 Run 父的当前 refs，或 runless 父的封存 refs，写入既有 requirements_json；准确重放先返回旧 row，不因晚登记重封。父查询只读取所需三列，不复制大 intent/result。UnifiedExecution 使用 Store 返回快照进行原授权、mutation登记和条件评估，最终事务继续读取同一持久引用。没有新增 caller 可自报的继承参数、SQL格式版本或Service业务判断。`commitMutationCheck` 对 target 核同Session/current Store与有限实际父链/root work；checker自身仍属于原Run并核现行owner/generation，head/CAS/顺序/known terminal与unknown拒绝保持。
+
+最终源码下新增三个完整文件实际0／3项／66断言：上述真实 Service 流程1／29断言，核原 Run completed、write/edit一次、持久refs/intent/settlement与准确result revision、旧事实superseded／最新passed、head2/2、完整全文hash、Model2/read1和cold公共GET零重放；[公开 Store 门禁](../../packages/agent/test/isolated/storage/nested-tool-requirements.test.ts)1／21断言，核晚登记后同ID重放零新事件、后代继承冻结refs、缺evaluation／intent的最终拒绝及准确同事务settlement，不用SQL伪造义务或假checker passed。测试均用realpath(tmpdir)/fileURL、无平台skip。Store夹具原三次Bun rejects断言等待超时保留为harness失败；改用仓库已有catch/error-code断言后同10秒预算通过，准确三个进程已TERM／143终态，不冒称产品红。
+
+独立恢复复核另发现本轮新增target.owner_generation相等限制过严：合法公开resume换owner时只迁移planned零dispatch，原成功terminal保历史代次。root撤销这个新增限制，仍核checker的现行写权限与target原父链，不回填历史。新增[恢复门禁](../../packages/agent/test/isolated/storage/mutation-check-resume.test.ts)先真实1／11断言／145ms：正确初始化、原Model stop checkpoint、cold reopen与公开resume、旧owner拒绝均通过，新checker准确commit却报mutation_head_changed；原红receipt保 `kite-mutation-resume-llPPYM/before-check.json`。修正后原完整文件1／16／0，核gen2 checker保存inconclusive、旧gen1 target/result/refs/settlement全等与实际原文件零重放，checkedThrough仍0，不伪造Files/hash passed。三文件最终前后六项输入SHA零漂移，日志和实际exit归 `/private/tmp/kite-nested-final-source-20261013-receipt.json`，SHA `71d50520c3f4c21b14406a35cc125f8a88ab285a621f3f655bf9d96639d5b92a`。
+
+原14个必要完整文件逐进程实际0／161项／1676断言，含原Planning／Workflow／条件／Store／普通Job配置与自动验证门禁，原断言、分类与期限保持；其后收缩上述父查询列并纠正新增target代次限制，最终三新增文件复验0。原14份结果保 `/private/tmp/kite-nested-related-20261013-*`，不拿它们单独授最终全默认资格。原首轮742／601默认在恢复复核后停止后续准入：准确graph PID14741匹配原stdout/cwd后暂停，四个已启动测试自行终态后仅TERM该调度，drain46.737秒；原process -15／wrapper241，已记录240passed，不授完整资格。原freeze／stop／log／result保 `/private/tmp/kite-nested-convergence-20261013-*`，没有过滤用例或把中止当产品红。
+
+最终原 `bun run test` 实际0／1441.278秒：743文件／602作业全部started并passed（169 parallel／567 isolated／7 exclusive），原并发4、全部原预算／断言／独占屏障保持；3886份代码／配置输入和5项运行资产终态逐hash零漂移。freeze／progress／原log／result归 `/private/tmp/kite-nested-final-convergence-20261013-*`；raw log SHA `d4b07264d4c2705fd630624a64c51a300899f35de6c7d1be8ac7e5c6bd514306`，result SHA `b26e6462c2dc544093480c6e39ec42db420a8daae06b014ae0e241af151e9ee4`，freeze SHA `7821193b610b1f6c85d443667c58c4ec32c8b9c66cc75dabb8ea639acc3660e9`。Root确认launcher实际0终态；typecheck八workspace、架构／工作区／API、test ownership、格式和文档门禁按最终输入通过。
+
+当前默认中的截图对应原窗口1／4／0／13.038秒：40实际效果／零业务取消，五次真实native_draining读取／释放拒绝，quitDialogs／pageErrors／observationErrors全空；Electron和准确原Service PID38512分别正常0／无信号。原读取归属DOM14／112／0保持当前真实错误、取消退出恢复与未知提交同ID查询；不是统一吞掉错误码。短回执 `/private/tmp/kite-nested-native-quit-20261013.json` SHA `79246bf50d96b805dcb9e3986852a1cb0c2c6604f9c655540bcd1d28e3921231`关联上述完整原log。当前源码资格不能反推截图原安装包身份，也不把有限正常退出证明升级成全Runtime资源资格。
+
+核[产品手册](../handbook/features/planning-and-tasks.md)原任务／required验证承诺，修复恢复既有行为，无需添加用户操作或改变权限策略。当前完整技术事实归[Planning owner](../../packages/agent/src/business/planning/README.md)、[Store requirements owner](../../packages/agent/src/storage/sqlite/requirements/README.md)及[跨层boundary](../active/unified-agent-boundary.md)，沿[既有决定](../../.agents/notes/implemented/architecture/2026-10-02-mutation-facts-and-same-loop-validation.md)补为何不能只放宽target查询或信任进程内refs。按document-before-commit执行iteration_complete／stage／commit及正常hook，仍仅本地授权。
+
+下一阶段退出仍按四项真实依赖核验：
+
+1. 正式 Runtime 的普通 Tool/Job 取消和正常 close：全resources／handles、完整出生后代和准确cleanup来源必须来自可信producer；有限FD／已知PID不代完整合同。准确Bun资源API仍是stub，系统调试会话授权待用户决定，不重探闭合参数。
+2. 正式客户端持续工作到取消／正常退出：完整lifecycle保八outer／九点／60—168分钟及32MiB RSS原门槛；原真实 +115.203125MiB失败保留，未由此功能修复解除。
+3. Win/Linux正式安装、真实版本切换、完整MCP连接调用取消退出、维护恢复与保数据卸载：由后置Actions／用户Windows取得真实平台结果，当前只保接线和合同，不push或dispatch。
+4. 全部适用§35／T001—T114／E01—E14与37能力的独立完整迁移核对：最终正式caller收束、实际消费者转移和旧路径／依赖删除须有完整资格；有限业务及客户端读取审查不代全仓审查。
+
+本轮修复上述原 Run→普通Tool→嵌套Files→独立校验→完成能力，并保合法恢复核原已知事实；没有新增正式caller切换或旧生产树删除。37能力仍partial、wholeDefault=true仅属上述准确默认范围、wholeV13=false／phaseExit=false，Goal active；RSS／观测／平台门禁继续未闭合。

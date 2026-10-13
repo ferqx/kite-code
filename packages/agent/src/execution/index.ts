@@ -829,7 +829,7 @@ export class UnifiedExecution {
         'invalid_tool_arguments',
         definition.version,
       );
-    await this.prepare(scope, {
+    const execution = await this.prepare(scope, {
       executionId,
       stepId,
       callId: call.id,
@@ -839,6 +839,7 @@ export class UnifiedExecution {
       input,
       decisionSource: source,
     });
+    if (!('run' in scope)) scope = { ...scope, requirements: execution.requirements };
     let release: (() => void) | undefined;
     let dispatched = false;
     let attempted = false;

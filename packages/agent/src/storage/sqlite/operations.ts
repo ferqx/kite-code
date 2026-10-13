@@ -1146,8 +1146,13 @@ export class SqliteOperations {
             input.parentExecutionId !== childJob.id
           )
             throw new AgentError('execution_scope_mismatch');
+          const parent = parentId
+            ? this.row(
+                'SELECT session_id,run_id,requirements_json FROM execution WHERE id=?',
+                parentId,
+              )
+            : null;
           if (parentId) {
-            const parent = this.row('SELECT session_id FROM execution WHERE id=?', parentId);
             if (!parent) throw new AgentError('invalid_operation_parent');
             this.owner(input.owner, String(parent.session_id));
           }
@@ -1191,8 +1196,18 @@ export class SqliteOperations {
             return this.execution(prior);
           }
           if (input.kind === 'model') verifyCompressionModel(this, input);
+          const inheritedRequirements =
+            input.runId === null && parent
+              ? parent.run_id === null
+                ? parent.requirements_json
+                : this.row(
+                    'SELECT requirements_json FROM run WHERE id=? AND session_id=?',
+                    parent.run_id!,
+                    input.sessionId,
+                  )?.requirements_json
+              : null;
           this.run(
-            'INSERT INTO execution(id,session_id,run_id,kind,origin_command_id,origin_store_id,root_work_command_id,root_work_seq,root_session_id,step_id,call_id,attempt,adapter_id,definition_version,state,intent_json,decision_source_json,owner_generation,parent_execution_id,cancel_with_parent,model_snapshot_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO execution(id,session_id,run_id,kind,origin_command_id,origin_store_id,root_work_command_id,root_work_seq,root_session_id,step_id,call_id,attempt,adapter_id,definition_version,state,intent_json,decision_source_json,owner_generation,parent_execution_id,cancel_with_parent,model_snapshot_json,requirements_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             input.executionId,
             input.sessionId,
             input.runId,
@@ -1214,6 +1229,7 @@ export class SqliteOperations {
             parentId,
             input.cancelWithParent === false ? 0 : 1,
             input.modelMetadata === undefined ? null : canonicalJson(input.modelMetadata),
+            inheritedRequirements ?? '[]',
           );
           if (command.kind === 'operation.tool')
             this.run(
