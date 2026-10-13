@@ -3730,6 +3730,43 @@ export class TuiController {
         this.publish({ mcpOutcome: outcome });
     }
   }
+  private savedSettingsOutcome<T extends TuiModelOutcome | TuiPermissionOutcome>(outcomes: T[]) {
+    return (
+      outcomes.find((outcome) => ['pending', 'outcome_unknown'].includes(outcome.status)) ??
+      outcomes.at(-1)
+    );
+  }
+  private modelMatches(intent: TuiModelIntent) {
+    const session = this.value.snapshot?.view.session;
+    return (
+      session?.id === this.value.sessionId &&
+      intent.scope === 'workspace' &&
+      intent.request.expectedStoreId === this.port.storeId &&
+      intent.request.workspaceId === session?.workspaceId
+    );
+  }
+  private modelOutcome() {
+    return this.savedSettingsOutcome(
+      [...this.modelIntents.values()].filter((outcome) => this.modelMatches(outcome.intent)),
+    );
+  }
+  private ownsModelView(
+    generation: number,
+    read: AbortController | undefined,
+    panel: 'models' | 'effort',
+    intent: TuiModelIntent,
+  ) {
+    return (
+      !this.disposed &&
+      generation === this.generation &&
+      !!read &&
+      read === this.modelRead &&
+      !read.signal.aborted &&
+      this.value.panel === panel &&
+      this.modelMatches(intent) &&
+      this.value.modelOutcome?.intent.request.commandId === intent.request.commandId
+    );
+  }
   async openModels(panel: 'models' | 'effort' = 'models') {
     const session = this.value.snapshot?.view.session,
       port = this.port.models;
@@ -3744,10 +3781,7 @@ export class TuiController {
     this.publish({
       panel,
       models: undefined,
-      modelOutcome: [...this.modelIntents.values()].find(
-        (o) =>
-          o.intent.sessionId === session.id && ['pending', 'outcome_unknown'].includes(o.status),
-      ),
+      modelOutcome: this.modelOutcome(),
       error: undefined,
     });
     try {
@@ -3765,7 +3799,10 @@ export class TuiController {
         facts.workspaceId !== session.workspaceId
       )
         throw Error('model_settings_scope_mismatch');
-      this.publish({ models: freezeIntent(structuredClone(facts)) });
+      this.publish({
+        models: freezeIntent(structuredClone(facts)),
+        modelOutcome: this.modelOutcome(),
+      });
     } catch (error) {
       if (!read.signal.aborted && generation === this.generation)
         this.publish({
@@ -3786,14 +3823,14 @@ export class TuiController {
       this.disposed ||
       this.value.stale ||
       !['models', 'effort'].includes(this.value.panel ?? '') ||
+      observed.storeId !== this.port.storeId ||
+      observed.scope !== 'workspace' ||
       observed.workspaceId !== session.workspaceId
     )
       return;
     if (
       [...this.modelIntents.values()].some(
-        (o) =>
-          o.intent.request.workspaceId === session.workspaceId &&
-          ['pending', 'outcome_unknown'].includes(o.status),
+        (o) => this.modelMatches(o.intent) && ['pending', 'outcome_unknown'].includes(o.status),
       )
     ) {
       this.publish({ error: 'model_settings_original_outcome_required' });
@@ -3821,6 +3858,8 @@ export class TuiController {
       return;
     }
     const generation = this.generation,
+      read = this.modelRead,
+      panel = this.value.panel === 'effort' ? 'effort' : 'models',
       saved: TuiModelIntent = freezeIntent({
         sessionId: session.id,
         scope: 'workspace',
@@ -3832,52 +3871,58 @@ export class TuiController {
           operation: structuredClone(operation),
         },
       });
-    let result: TuiModelOutcome = { intent: saved, status: 'outcome_unknown' };
-    this.modelIntents.set(saved.request.commandId, result);
-    this.publish({ modelOutcome: result });
+    const pending: TuiModelOutcome = { intent: saved, status: 'outcome_unknown' };
+    let result = pending;
+    this.modelIntents.set(saved.request.commandId, pending);
+    this.publish({ modelOutcome: pending });
     try {
       const reply = await port.submit(saved);
       if (JSON.stringify(reply.intent) === JSON.stringify(saved)) result = reply;
     } catch {}
+    if (this.modelIntents.get(saved.request.commandId) !== pending) return;
     this.modelIntents.set(saved.request.commandId, result);
-    if (
-      this.disposed ||
-      generation !== this.generation ||
-      this.value.sessionId !== session.id ||
-      !['models', 'effort'].includes(this.value.panel ?? '')
-    )
-      return;
+    if (!this.ownsModelView(generation, read, panel, saved)) return;
     this.publish({
       modelOutcome: result,
       error: result.status === 'failed' ? 'model_settings_save_failed' : undefined,
     });
-    if (result.status === 'applied')
-      await this.openModels(this.value.panel === 'effort' ? 'effort' : 'models');
+    if (result.status === 'applied') await this.openModels(panel);
   }
   async lookupModel() {
-    const original = this.value.modelOutcome,
+    const displayed = this.value.modelOutcome,
+      original = displayed && this.modelIntents.get(displayed.intent.request.commandId),
       port = this.port.models,
-      generation = this.generation;
-    if (!original || !port || this.disposed) return;
+      generation = this.generation,
+      read = this.modelRead,
+      panel = this.value.panel === 'effort' ? 'effort' : 'models';
+    if (
+      !original ||
+      !port ||
+      this.disposed ||
+      !['models', 'effort'].includes(this.value.panel ?? '') ||
+      !this.modelMatches(original.intent) ||
+      JSON.stringify(original.intent) !== JSON.stringify(displayed?.intent)
+    )
+      return;
+    const pending = { ...original };
+    this.modelIntents.set(original.intent.request.commandId, pending);
     let result = original;
     try {
       const reply = await port.lookup(original.intent);
-      if (JSON.stringify(reply.intent) === JSON.stringify(original.intent)) result = reply;
+      if (
+        JSON.stringify(reply.intent) === JSON.stringify(original.intent) &&
+        !['applied', 'failed'].includes(original.status)
+      )
+        result = reply;
     } catch {}
+    if (this.modelIntents.get(original.intent.request.commandId) !== pending) return;
     this.modelIntents.set(original.intent.request.commandId, result);
-    if (
-      this.disposed ||
-      generation !== this.generation ||
-      this.value.sessionId !== original.intent.sessionId ||
-      !['models', 'effort'].includes(this.value.panel ?? '')
-    )
-      return;
+    if (!this.ownsModelView(generation, read, panel, original.intent)) return;
     this.publish({
       modelOutcome: result,
       error: result.status === 'failed' ? 'model_settings_save_failed' : undefined,
     });
-    if (result.status === 'applied')
-      await this.openModels(this.value.panel === 'effort' ? 'effort' : 'models');
+    if (result.status === 'applied') await this.openModels(panel);
   }
   private permissionMatches(intent: TuiPermissionIntent) {
     const session = this.value.snapshot?.view.session;
@@ -3890,12 +3935,10 @@ export class TuiController {
     );
   }
   private permissionOutcome() {
-    const outcomes = [...this.permissionIntents.values()].filter((outcome) =>
-      this.permissionMatches(outcome.intent),
-    );
-    return (
-      outcomes.find((outcome) => ['pending', 'outcome_unknown'].includes(outcome.status)) ??
-      outcomes.at(-1)
+    return this.savedSettingsOutcome(
+      [...this.permissionIntents.values()].filter((outcome) =>
+        this.permissionMatches(outcome.intent),
+      ),
     );
   }
   private ownsPermissionView(

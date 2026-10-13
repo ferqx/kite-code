@@ -5826,3 +5826,27 @@ Core 的 `planExecution` 现在在原事务从实际直属 Run 父的当前 refs
 5. **正式 Terminal/Native 的最终迁移与旧路径退役。** 实际用户入口、消费者、发布/恢复和原安装升级能力须满足全部适用§35/T001—T114/E01—E14后再退役；有限审查与静态零违规不能替代完整资格，阶段收束仍须完整回归。
 
 新增闭合的是本次 TUI 权限保存、切换/重开和原查询能力；没有新增正式 caller 切换或旧生产树删除。37能力仍partial、wholeV13=false／phaseExit=false，Goal active；RSS、完整观测和后置平台门禁保持。
+
+## 2026-10-13：工作区模型设置跨会话原查询与正式 producer 核对
+
+状态：partial；上一片正常本地提交 `6db09600`，当前先核 clean 工作树。上一轮已交付 TUI 权限完整修复，属于实质进展；本轮不扩其故障矩阵或重复截图退出窗口。按能力映射 `model.settings` 与实际手册/源码，发现 `/model`、`/effort` 的真实完整能力缺口：写入和未决阻塞按 Workspace，原结果却按来源 Session 选择，A/W 保存 unknown 后切 B/W，既不能新保存也不能 K 查询原 ID。同一工作区设置合同见 [TUI 指南](../handbook/clients/tui/guides/models-and-settings.md)，正式链为 [面板](../../packages/ui/src/tui/model-panel.tsx)→controller→[固定 Host port](../../apps/cli/host/tui.tsx)→公共 Client→Service/Agent/HostMutation；不是要求新的跨进程 journal。
+
+有界独立测试子任务只编辑 [models.test.tsx](../../packages/ui/test/tui/models.test.tsx)，保留原五例正文、断言和预算，新增五条完整行为，无 OS 原语或平台 skip。root 在原生产真实5pass／5fail／37断言／98ms；红日志 `/private/tmp/kite-tui-model-scope-original-red-20261013.log` SHA `bdb3bdebd55197242f61c19a1409eb5e99da2bef8509cd66f8ee1e5736b82893`。实际红指出同 W 原结果缺失、回到同 W 仍无原 ID、关闭后错误 GET 准入，以及设置终态在重开/迟回中丢失；它们不冒称每个内部竞态都已被单独红证。修后原完整模型文件10／79／0／91ms，核来源 Session/read-set 不改、B/W 查询准确原 C/零 POST、另一 W 独立、closed GET零请求、model/effort切换/重开/晚回保当前真实错误、同 ID 最新查询排旧 save/GET、map 已核 applied/failed 不被显示旧 unknown 与查询失联降级。held Promise 正常路径明确 resolve/await，finally 仅释放原测试所有等待并 dispose，不放宽期限或删除断言。
+
+[controller](../../packages/ui/src/tui/controller.ts) 按实际 Store+Workspace 选择和查询 map 原意图；原 `intent.sessionId` 保出处，本次查询展示另核 generation、准确 modelRead/未 abort、原 panel、当前 Workspace 与原 commandId。最新同 ID 请求对象拥有 map 更新资格，旧返回不覆盖后来查询；显示只选 ID，查询基线取 map 当前已核事实。全部匹配 unknown/pending 阻止新写；原当前 observation、完整 read-set/CAS、模型/effort可用条件与活动 Run 冻结配置保持。沿已使用的 code-simplification 技能，Model/Permission 仅共用同一 owner 的纯“未决优先、否则最近终态”选择函数；各自 scope 和 guard 不合并，权限语义不变。没有新抽象模块、authority、公共接口、存储格式或 Service 判断。
+
+独立非参与式复核实际两文件 diff 与原 Host 完整 marker 接收者，有限范围通过，未编辑或跑测试。最终当前26个完整相关文件实际全0／281项／2394个 Bun expect：全部25个 TUI 文件278／2371／27.17秒，含全部原权限场景；原 paired/shared 模型整文件3／23／10.55秒，保 held Run 原配置、实际收到回应后抛 owned_lost_reply 的原异常注入、唯一原查询、pending409/wrong-ifMatch与已知 CAS 失败，不冒称物理socket毁损。冻结3886份代码/配置和5项运行资产终态零漂移，各整例原预算、仓库分类与全部断言保持；必要范围使用单Bun并发1，不改默认并发4。freeze `/private/tmp/kite-tui-model-final-freeze-20261013.json` SHA `aa528d88cc0c809dac0d01ea8cb33e6064a2ac7b0f8032c45410457c67dbd64c`，原逐范围日志/actual exit 与 result `/private/tmp/kite-tui-model-final-result-20261013.json` SHA `4a5477f1525f552d8e82b4190f2dd001c8de7bfa5335531834e8a41e907abf87`。全部8 workspace typecheck、静态架构/工作区/API、test ownership和 owned 格式通过。上片公共权限/真实权限 PTY 与 Native退出的未变合同和依赖证据仍适用，不重复窗口；当前局部结果不授整个默认或阶段退出资格。
+
+本轮还核对 [旧 prepare](../../scripts/release/prepare-desktop-service.ts) 与 [OSS producer](../../scripts/release/oss-candidate.ts)：旧 Desktop package/dev 实际调用它们，旧 executable/desktop.json 由旧 Host 的 stdio/version/hash合同消费，旧 installer/archive/smoke/资格工具也有实际引用。当前正式根、8 workspace/default/Required 和 [release workflow](../../.github/workflows/release-candidate.yml) 已走 unified→完整 Terminal→新 Native，正式 closure guard 拒绝回到旧 producer；没有需要单独转接的新正式消费者。新 HTTP executable 不能直接塞进旧 stdio manifest。旧 OSS 当前 CLI/TUI entry 已指新 source-terminal，而 service entry 仍旧引擎，因此源码混合不能授当前重建的完整旧制品资格；本轮未执行旧构建、不冒称实际失败。最终删除须按§29.6取得替代行为、消费者与制品证据，不能因默认不发现旧测试而宣称整树可删。
+
+产品行为归 TUI 指南，技术行为归 [TUI owner](../../packages/ui/src/tui/README.md)与[active](../active/unified-agent-boundary.md)。核共享模型/配置手册、UI根README、CLI owner和当前release-control：公开设置/Host合同、活动Run、后端CAS与正式producer未变，无需制造其他文档diff。按 document-before-commit 执行 iteration_complete/stage/commit及正常hook，本轮仍仅本地提交，不push、PR、发布或dispatch。
+
+按依赖排序的最多五项退出缺口：
+
+1. **正式 `/model`/`/effort` 工作区保存与原查回：本轮修复。** A/W→B/W/另一W→关闭/重开→K同原ID，原申请/完整CAS不变，零重投、全部未决阻塞、迟回隔离和终态保持；当前controller完整行为有上述红/绿和原Host整链支持，强杀后的自动原ID发现未被扩称。
+2. **普通 Shell/Tool/Job 停止与客户端正常退出的可信观测。** 完整resources/handles、出生后代和准确cleanup来源仍缺，有限FD/PID或准确Bun的空stub不代合同；系统调试会话授权待决定，不重复闭合参数探测。
+3. **正式客户端完整lifecycle RSS。** 原八outer／九点／60—168分钟、32MiB门槛及真实 +115.203125MiB失败保持，可信观测前置未闭合，不被本次设置修复解除。
+4. **Win/Linux正式安装、版本切换、完整MCP、维护恢复和保数据卸载。** 后置Actions/用户Windows取得实际平台结果；当前保原接线与Windows Shell guard，不由本机通过授平台资格，不dispatch。
+5. **最终正式消费者与旧路径退役、§35完整资格。** 全部适用T001—T114/E01—E14与真实升级/恢复/制品通过后收束；旧producer有限核对不代全仓迁移审查，阶段收束仍须完整回归。
+
+新增闭合的是当前 TUI 工作区模型设置的完整原结果查回与展示归属；没有新增正式caller切换或旧生产树删除。37能力仍partial、wholeV13=false／phaseExit=false，Goal active；RSS、完整观测和后置平台门禁保持。

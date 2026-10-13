@@ -1,11 +1,17 @@
 import { expect, test } from 'bun:test';
 import type { ModelSettingsView, SessionView } from '@kite-ai/client';
-import { TuiController, type TuiModelIntent, type TuiPort, type TuiSnapshot } from '../../src/tui';
+import {
+  TuiController,
+  type TuiModelIntent,
+  type TuiModelOutcome,
+  type TuiPort,
+  type TuiSnapshot,
+} from '../../src/tui';
 
-const observed = (): ModelSettingsView => ({
+const observed = (workspaceId = 'w'): ModelSettingsView => ({
   storeId: 'store',
   scope: 'workspace',
-  workspaceId: 'w',
+  workspaceId,
   readSet: {
     userEtag: 'a'.repeat(64),
     workspaceEtag: 'b'.repeat(64),
@@ -33,9 +39,10 @@ const observed = (): ModelSettingsView => ({
   ],
   errors: [],
 });
-function fixture() {
+function fixture(workspaces: Record<string, string> = {}) {
   let count = 0;
   const sent: TuiModelIntent[] = [];
+  const looked: TuiModelIntent[] = [];
   const port: TuiPort = {
     storeId: 'store',
     nextCommandId: () => `c${++count}`,
@@ -45,7 +52,12 @@ function fixture() {
         storeId: 'store',
         view: {
           storeId: 'store',
-          session: { id, rootSessionId: id, parentSessionId: null, workspaceId: 'w' },
+          session: {
+            id,
+            rootSessionId: id,
+            parentSessionId: null,
+            workspaceId: workspaces[id] ?? 'w',
+          },
           runs: [],
           executions: [],
           messages: [],
@@ -66,15 +78,18 @@ function fixture() {
       throw Error('no command');
     },
     models: {
-      read: async () => observed(),
+      read: async (workspaceId) => observed(workspaceId),
       submit: async (intent) => {
         sent.push(intent);
         return { intent, status: 'outcome_unknown' };
       },
-      lookup: async (intent) => ({ intent, status: 'applied' }),
+      lookup: async (intent) => {
+        looked.push(intent);
+        return { intent, status: 'applied' };
+      },
     },
   };
-  return { port, sent, controller: new TuiController(port) };
+  return { port, sent, looked, controller: new TuiController(port) };
 }
 test('models freeze read set, unknown blocks a second write, lookup only queries the original and preserves failed default', async () => {
   const f = fixture();
@@ -196,4 +211,253 @@ test('known model CAS failure preserves facts and allows a later explicit choice
   expect(f.sent).toHaveLength(2);
   expect(f.sent[1]!.request.commandId).not.toBe(f.sent[0]!.request.commandId);
   f.controller.dispose();
+});
+
+test('model settings remain queryable by original ID from another Session in the same Workspace and either settings panel', async () => {
+  const f = fixture();
+  try {
+    await f.controller.select('a');
+    await f.controller.routeCommand('/model');
+    await f.controller.chooseModel({ kind: 'default', modelId: 'two' });
+    const original = structuredClone(f.sent[0]!);
+    expect(original).toMatchObject({
+      sessionId: 'a',
+      scope: 'workspace',
+      request: { commandId: 'c1', expectedStoreId: 'store', workspaceId: 'w' },
+    });
+    await f.controller.select('b');
+    await f.controller.routeCommand('/effort');
+    expect(f.controller.state.modelOutcome).toEqual({
+      intent: original,
+      status: 'outcome_unknown',
+    });
+    await f.controller.chooseModel({ kind: 'default', modelId: 'one' });
+    expect(f.sent).toHaveLength(1);
+    expect(f.controller.state.error).toBe('model_settings_original_outcome_required');
+    await f.controller.lookupModel();
+    expect(f.looked).toEqual([original]);
+    expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]).toEqual(original);
+    expect(f.controller.state.sessionId).toBe('b');
+    expect(f.controller.state.panel).toBe('effort');
+    expect(f.controller.state.modelOutcome).toEqual({ intent: original, status: 'applied' });
+    await f.controller.routeCommand('/model');
+    await f.controller.chooseModel({ kind: 'default', modelId: 'two' });
+    expect(f.sent).toHaveLength(2);
+    expect(f.sent[1]).toMatchObject({
+      sessionId: 'b',
+      request: { commandId: 'c2', workspaceId: 'w' },
+    });
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('model unknowns do not cross Workspaces and returning through another Session restores the matching original', async () => {
+  const f = fixture({ c: 'other' });
+  try {
+    await f.controller.select('a');
+    await f.controller.openModels();
+    await f.controller.chooseModel({ kind: 'default', modelId: 'two' });
+    const original = f.sent[0]!;
+    await f.controller.select('c');
+    await f.controller.openModels('effort');
+    expect(f.controller.state.modelOutcome).toBeUndefined();
+    await f.controller.lookupModel();
+    expect(f.looked).toHaveLength(0);
+    await f.controller.chooseModel({ kind: 'default', modelId: 'two' });
+    expect(f.sent).toHaveLength(2);
+    expect(f.sent[1]).toMatchObject({ sessionId: 'c', request: { workspaceId: 'other' } });
+    await f.controller.select('b');
+    await f.controller.openModels();
+    expect(f.controller.state.modelOutcome).toEqual({
+      intent: original,
+      status: 'outcome_unknown',
+    });
+    await f.controller.lookupModel();
+    expect(f.looked).toEqual([original]);
+    expect(f.sent).toHaveLength(2);
+    await f.controller.select('c');
+    await f.controller.openModels();
+    expect(f.controller.state.modelOutcome).toEqual({
+      intent: f.sent[1]!,
+      status: 'outcome_unknown',
+    });
+    await f.controller.lookupModel();
+    expect(f.looked).toEqual(f.sent);
+    expect(f.sent).toHaveLength(2);
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('closing and changing model panels retires save and lookup display ownership while current read errors remain visible', async () => {
+  const f = fixture();
+  let finishSave: ((value: TuiModelOutcome) => void) | undefined;
+  let finishLookup: ((value: TuiModelOutcome) => void) | undefined;
+  let writing: Promise<void> | undefined;
+  let querying: Promise<void> | undefined;
+  let closedQuery: Promise<void> | undefined;
+  let reads = 0;
+  f.port.models!.read = async (workspaceId) => {
+    reads++;
+    return observed(workspaceId);
+  };
+  f.port.models!.submit = (intent) => {
+    f.sent.push(intent);
+    return new Promise((resolve) => {
+      finishSave = resolve;
+    });
+  };
+  f.port.models!.lookup = (intent) => {
+    f.looked.push(intent);
+    return new Promise((resolve) => {
+      finishLookup = resolve;
+    });
+  };
+  try {
+    await f.controller.select('a');
+    await f.controller.openModels();
+    writing = f.controller.chooseModel({ kind: 'default', modelId: 'two' });
+    f.controller.closePanel();
+    closedQuery = f.controller.lookupModel();
+    // Release an incorrectly admitted old-controller lookup before asserting its absence.
+    if (f.looked.length) finishLookup!({ intent: f.sent[0]!, status: 'outcome_unknown' });
+    await closedQuery;
+    expect(f.looked).toHaveLength(0);
+    f.port.models!.read = async () => {
+      reads++;
+      throw Error('current_effort_read_failed');
+    };
+    await f.controller.openModels('effort');
+    const displayed = f.controller.state.modelOutcome;
+    const currentReads = reads;
+    finishSave!({ intent: f.sent[0]!, status: 'failed' });
+    await writing;
+    expect(f.controller.state.panel).toBe('effort');
+    expect(f.controller.state.modelOutcome).toBe(displayed);
+    expect(f.controller.state.error).toBe('current_effort_read_failed');
+    expect(reads).toBe(currentReads);
+    f.port.models!.read = async (workspaceId) => {
+      reads++;
+      return observed(workspaceId);
+    };
+    await f.controller.openModels();
+    expect(f.controller.state.modelOutcome).toEqual({ intent: f.sent[0]!, status: 'failed' });
+    querying = f.controller.lookupModel();
+    f.controller.closePanel();
+    f.port.models!.read = async () => {
+      reads++;
+      throw Error('current_models_read_failed');
+    };
+    await f.controller.openModels();
+    const laterDisplay = f.controller.state.modelOutcome;
+    const laterReads = reads;
+    finishLookup!({ intent: f.sent[0]!, status: 'outcome_unknown' });
+    await querying;
+    expect(f.controller.state.modelOutcome).toBe(laterDisplay);
+    expect(f.controller.state.error).toBe('current_models_read_failed');
+    expect(reads).toBe(laterReads);
+    expect(f.looked).toEqual([f.sent[0]!]);
+    expect(f.sent).toHaveLength(1);
+  } finally {
+    f.controller.dispose();
+    if (f.sent[0]) {
+      finishSave?.({ intent: f.sent[0], status: 'failed' });
+      finishLookup?.({ intent: f.sent[0], status: 'outcome_unknown' });
+    }
+    await Promise.allSettled([writing, querying, closedQuery]);
+  }
+});
+
+test('the later original model lookup cannot be downgraded by an earlier save or same-ID query', async () => {
+  const f = fixture();
+  let finishSave: ((value: TuiModelOutcome) => void) | undefined;
+  const finishes: ((value: TuiModelOutcome) => void)[] = [];
+  let writing: Promise<void> | undefined;
+  let earlier: Promise<void> | undefined;
+  let later: Promise<void> | undefined;
+  f.port.models!.submit = (intent) => {
+    f.sent.push(intent);
+    return new Promise((resolve) => {
+      finishSave = resolve;
+    });
+  };
+  f.port.models!.lookup = (intent) => {
+    f.looked.push(intent);
+    return new Promise((resolve) => finishes.push(resolve));
+  };
+  try {
+    await f.controller.select('a');
+    await f.controller.openModels();
+    writing = f.controller.chooseModel({ kind: 'default', modelId: 'two' });
+    earlier = f.controller.lookupModel();
+    later = f.controller.lookupModel();
+    finishes[1]!({ intent: f.sent[0]!, status: 'applied' });
+    await later;
+    const current = f.controller.state.modelOutcome;
+    finishes[0]!({ intent: f.sent[0]!, status: 'outcome_unknown' });
+    await earlier;
+    finishSave!({ intent: f.sent[0]!, status: 'outcome_unknown' });
+    await writing;
+    expect(current).toEqual({ intent: f.sent[0]!, status: 'applied' });
+    expect(f.controller.state.modelOutcome).toBe(current);
+    await f.controller.openModels('effort');
+    expect(f.controller.state.modelOutcome).toEqual(current);
+    expect(f.looked).toEqual([f.sent[0]!, f.sent[0]!]);
+    expect(f.sent).toHaveLength(1);
+  } finally {
+    f.controller.dispose();
+    if (f.sent[0]) {
+      finishSave?.({ intent: f.sent[0], status: 'outcome_unknown' });
+      for (const finish of finishes) finish({ intent: f.sent[0], status: 'outcome_unknown' });
+    }
+    await Promise.allSettled([writing, earlier, later]);
+  }
+});
+
+test('a model lookup uses the current saved terminal fact when the reopened panel still displays unknown', async () => {
+  for (const terminal of ['applied', 'failed'] as const) {
+    const f = fixture();
+    let finishSave: ((value: TuiModelOutcome) => void) | undefined;
+    let writing: Promise<void> | undefined;
+    f.port.models!.submit = (intent) => {
+      f.sent.push(intent);
+      return new Promise((resolve) => {
+        finishSave = resolve;
+      });
+    };
+    try {
+      await f.controller.select('a');
+      await f.controller.openModels();
+      writing = f.controller.chooseModel({ kind: 'default', modelId: 'two' });
+      f.controller.closePanel();
+      await f.controller.openModels('effort');
+      const displayed = f.controller.state.modelOutcome;
+      finishSave!({ intent: f.sent[0]!, status: terminal });
+      await writing;
+      expect(f.controller.state.modelOutcome).toBe(displayed);
+      expect(displayed?.status).toBe('outcome_unknown');
+      f.port.models!.lookup = async (intent) => {
+        f.looked.push(intent);
+        throw Error('original_model_lookup_unavailable');
+      };
+      await f.controller.lookupModel();
+      expect(f.controller.state.modelOutcome).toEqual({ intent: f.sent[0]!, status: terminal });
+      f.port.models!.lookup = async (intent) => {
+        f.looked.push(intent);
+        return { intent, status: 'outcome_unknown' };
+      };
+      await f.controller.lookupModel();
+      expect(f.controller.state.modelOutcome).toEqual({ intent: f.sent[0]!, status: terminal });
+      await f.controller.openModels();
+      expect(f.controller.state.modelOutcome).toEqual({ intent: f.sent[0]!, status: terminal });
+      expect(f.looked).toEqual([f.sent[0]!, f.sent[0]!]);
+      expect(f.sent).toHaveLength(1);
+    } finally {
+      f.controller.dispose();
+      if (f.sent[0]) finishSave?.({ intent: f.sent[0], status: terminal });
+      await Promise.allSettled([writing]);
+    }
+  }
 });

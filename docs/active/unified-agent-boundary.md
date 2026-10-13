@@ -208,6 +208,8 @@ Native 原 Composer 的当前会话模式选择沿既有 permission observation�
 
 TUI 权限保存的原结果与显示归属分别持有：当前 Store 的 mode/grants 按原 Session、trust 按实际 Workspace，全范围未决项阻止新写；关闭、切会话或重开只撤销旧读取的展示资格，迟到结果仍归原意图。原查询以 map 已核事实为基线，同 ID 最新请求持有结果更新资格，网络未知不降级已核终态。此 map 仅当前 controller 生命周期，不成为权限 authority 或跨进程 journal；原完整观察/CAS和公共权限接口保持，当前实现与验证范围见 [TUI owner](../../packages/ui/src/tui/README.md)。
 
+TUI 项目模型/effort 设置按准确 Store+Workspace 保存和查询原意图，来源 Session 与本次展示归属分开，同工作区换 Session 不能丢原 ID 查询入口。modelRead/generation/原 panel 与原 ID 共同核展示，map 的最新同 ID 请求核结果更新；已核终态不因失联降级，活动 Run 仍用原配置。Model/Permission 仅复用原结果选择，scope、公共完整 read-set/CAS 与安全 marker 分别保持；没有新增 authority、持久格式或 Service 判断，当前完整行为归 [TUI owner](../../packages/ui/src/tui/README.md)。
+
 ## Skill Workflow 的执行边界
 
 已有有条件 Workflow 使用 Agent 的[显式业务扩展](../../packages/agent/src/business/skill-workflow/README.md)。Core 只保存通用具版本 `extensionInputs` 原意图与 Command 摘要；Service 先验证支持、可信实际源、flags 与 payload，再读取凭据。初始化记录先于首次 Model；动态必要条件绑定对应 Extension 判定器，不能由全局业务 provider 错接或忽略。知识目录和 selectedSkills 不触发 activation。

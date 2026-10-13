@@ -77,7 +77,11 @@ Context 有独立读取取消域、固定选择与双游标，明确是当前投
 
 `/model` 与 `/effort` 通过独立 [TuiModelPort](models.ts) 读取专门模型设置事实，[model-panel.tsx](model-panel.tsx) 仅提交有限 default、enabled、effort 操作。项目设置作用于同 Workspace 的后续执行，活动 Run 继续使用原冻结配置。模型按 Provider 和准确 ID 排序；Enter 先核对默认模型修改，E 先核对启禁，再按 Enter 保存。推理深度只显示 API 明确提供的 compatible wire 选项及清除项目 effort；只读原因可见，缺元数据不推导支持，清除后的有效值必须重读，不能承诺必然继承用户层。
 
-R 重新读取、K 查询原 mutation、Esc 放弃确认或关闭。提交封存原 Store、Workspace、Session、read-set 和 operation；最多保留 128 个意图，未知不淘汰、不重发、不换 CAS。确定的 4xx 拒绝显示保存失败，mutation_incomplete 保持未知；保存失败可以在明确重读后重新选择；丢回执保留 unknown，原查询核对完整安全 marker。持续观察 stale 时只读、零写；面板关闭只取消读取，迟到结果不覆盖后来会话。controller 证据见 [models.test.tsx](../../test/tui/models.test.tsx)，真实终端证据由 [CLI owner](../../../../apps/cli/README.md) 维护。
+R 重新读取、K 查询原 mutation、Esc 放弃确认或关闭。提交封存原 Store、Workspace、来源 Session、read-set 和 operation；最多保留 128 个意图，未知不淘汰、不重发、不换 CAS。设置按 Store+Workspace 选择原结果，同工作区另一 Session 的 `/model` 或 `/effort` 都能查询原 ID；来源 Session 不改标成当前查看者。全部匹配未决项阻止新写入，未决优先、其次最近保存终态的纯选择逻辑与权限 map 共用，两类 scope 判断分别保持。其他 Workspace 不呈现/查询或被原 unknown 阻塞。
+
+原查询从 map 当前已核原意图起步，完整安全 marker 仍由 host 核对；同 ID 最新请求对象拥有更新资格，旧 save/GET 不降级后来结果，查询失联或未知保已核终态。结果保存与展示分开：generation、准确 modelRead/未 abort、原 models/effort panel、当前 Workspace 和原 ID 同时成立才发布或自动重读。关闭/重开、切会话或 model→effort 不取消提交，但使旧显示权失效；关闭后的旧 GET 不再准入。确定的 4xx 拒绝显示保存失败，mutation_incomplete 保持未知；保存失败可以在明确重读后重新选择。持续观察 stale 时只读、零写；原当前 observation、完整 read-set/CAS、有效模型/effort 与活动 Run 配置保持。这仅属当前 controller 生命周期，不声明新增持久 journal 或强杀后的自动原 ID 发现。
+
+controller 证据见 [models.test.tsx](../../test/tui/models.test.tsx)：原五例保留，新增完整跨 Session/Workspace、面板关闭/切换、当前读取错误与同 ID 竞争/终态保持，无平台专属 API。真实 paired/shared PTY、活动 Run 原配置、物理丢回执和后端 CAS 证据由 [CLI owner](../../../../apps/cli/README.md) 维护。
 
 
 `/status` 使用 [status port](status.ts) 与 [status panel](status-panel.tsx) 展示实际宿主身份、profile名、paired/shared来源、当前连接和独立观察状态，以及有限执行/发行/遥测事实。R重读，Esc或Ctrl+C仅释放所属诊断。controller固定当前Session/Workspace和读取代次，切换或关闭后的迟到页不发布；GET失败保同scope最后确认值并标当前unknown。GET成功不能清除SSE失联或快照错误，不产生mutation。宿主负责HTTP原身份核验与实际装配，UI不接收token/URL/路径，不把注册或监督状态解释为授权。
