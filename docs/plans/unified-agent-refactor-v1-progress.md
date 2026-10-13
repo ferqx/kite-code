@@ -5878,3 +5878,26 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 本地交付结果：`62a2f1771d4f91d08f1b895edfd34814bec7ffcb` 正常hook全部通过（20.98秒），18个准确已授权文件，提交后clean。随后执行用户已明确允许的 Instruments 本次会话诊断，仅附加直接持有句柄的 Bun PID90339；准确当前binary与原 method SHA保持，原Allocations/5秒未换参数或比较矩阵。Bun先在有限 stdin闸门等待，只有工具的唯一 `--notify-tracing-started` 事件后才运行原65,659/17,825,915字节分配与释放，确保目标及清理归属可证；允许系统提示，不使用旧no-prompt，不改永久DevToolsSecurity，不采集其他进程。
 
 实际采集未进入开始：120秒内未收到开始通知，controller日志仅为指定PID的Starting/Attaching；Bun仅输出ready，原start/allocated/reference-released/done均未执行。controller一次SIGINT后仍未结束，按原有界cleanup仅清理本次三个直接句柄；actual controller -9、Bun -15、通知 -15，三句柄已reap，准确四PID（含runner）终态只读检查均不存在。Developer mode前后仍disabled。receipt `/private/tmp/kite-v13-instruments-session-20261013-_06eeg4r/result.json` SHA `a482708724fb9684a8dd74b11c074a0339e04b8419f85c6b19ebf26ec2ecc65e` 与全部原stdout/stderr/控制/通知文件保留；RunIssues的ZISSUE为空，不能据此推断唯一失败原因。runner自身0只表示写完不可用receipt，**不表示采集通过**，systemAuthorizationVerified=false／methodActuallyRan=false／qualification=unavailable。系统提示是否出现及用户是否实际完成尚待桌面事实确认，已问事实而非再次请求诊断许可；在此之前不启动依赖采集。原RSS、完整资源/出生后代/cleanup来源、后置平台与阶段门禁全部保持，当前3889已验代码/配置仍零漂移。
+
+
+## 2026-10-13：Native 长历史原压缩结果查询
+
+本轮从实际能力入口和源码核对独立缺口，修复 Native Context 的“查询原压缩命令与执行”。原 Main 从 `view.runs` 查原 Run，但真实 Store 的 View 只含活动及近期 200 条 Run；201 个后续真实轮次后，原 Command／Run 仍在 Store、公共 `getRun` 可读，正式按钮却实际报 `compression_run_unavailable`。原压缩／重置受理与执行分别展示的产品承诺保持；问题与实现归 [Desktop owner](../../apps/desktop/README.md)，没有把有限 View 扩成完整历史或新增查询权威。
+
+[NativeCompression](../../apps/desktop/electron/compression.ts)保留原 View Store／Session／root scope 准入，再由原 Command receipt 调公共准确 `getRun`，核 Run ID、originStoreId、sessionId、originCommandId；核验全部成功才发布。accepted 不制造 Run，Command applied 不冒充 Run completed；原 Run failed 原样保存。GET 不可用或四项身份不符都保已经确认的整个 submission。原正式 renderer→decoder→NativeCaller→NativeContext 接线由实际源码核对；变更只是 Main 消费者从有限目录成员查找切到已有公共精确 reader，没有新 API、存储格式、POST、journal 或旧树退役。
+
+[原 main 文件](../../apps/desktop/test/native-compression.test.ts)前三例与断言不变，只新增完整 compress/reset 例。准确旧生产红 `/private/tmp/kite-native-compression-exact-run-unit-red-20261013.log` 为 3pass／1fail／30 expects，修后完整文件4pass／78 expects；新例核 accepted 无 Run、有限 View 缺 Run、精确读取、四项身份错误／读取不可用保原事实及仅一次 POST。[新增长历史整例](../../apps/desktop/test/isolated/native-compression-history.test.tsx)使用真实 Core／SQLite／Service／Client 和固定 Model，执行原压缩及201个后续 Run，实际确认原 Run 不在200条 View内。点击真实 NativeContextView 按钮，经 decoded bridge 直接委托真实 Main／公共 HTTP，只 GET 原 Command／Run；原 Command／Run／Model Execution、完整分页历史、View、Store metadata 和固定 Model requests 全等。准确旧生产红 `/private/tmp/kite-native-compression-history-original-red-20261013.log` 为0pass／1fail／11 expects，错误确为 `compression_run_unavailable`；修后1pass／24 expects。新例没有 OS API／平台 skip／付费 Provider，按既有隔离归属清理所属读、DOM、Service／Runtime／Store和临时 root；它不经过真实 NativeCaller IPC，不能代证 Electron或安装包的新长历史窗口。
+
+最终在 macOS／Bun 1.4.2、基线 `685bb9f8451e394fe613498d3fe3b8205dd7312a` 加本轮准确三个源／测试 diff，按原隔离域执行8个完整文件、5组，actual全部0／24pass／413 Bun expects：Context／Main／DOM／压缩4文件20/174，真实长历史1/24，原恢复Context1/66，原恢复压缩输入1/146，原完整Electron压缩窗口1/3（17.688秒）。原窗口／恢复文件、断言、期限和默认发现／分类／并发未改；局部单并发只限定本次执行。freeze `/private/tmp/kite-native-compression-history-final-freeze-20261013.json` SHA `03a540efc0908c24977dbee18d8409736fd24dff8b35b37886bb2fba8ee96282`，result `/private/tmp/kite-native-compression-history-final-result-20261013.json` SHA `c0a17995b42dc3c41102b7f996e4ccd43567a3c78266dafdfe7a1915f996ab3b`，3890代码／配置和5运行资产终态零漂移。原8 workspace类型检查actual0；该局部当前结果不授旧版本完整默认、正式安装、平台或阶段退出资格。
+
+用户已回答上轮系统事实问题：本次 Instruments **没有出现管理员授权提示**。本次登录会话诊断许可继续有效，但实际 systemAuthorizationVerified=false／methodActuallyRan=false／qualification=unavailable；120秒只见附加、未收开始通知的原失败receipt保持。未确定是授权路径还是采集器启动故障，不据 Developer mode disabled 推断唯一原因。本轮不重复 profiler／RSS 或参数对照，不启永久开发模式，不把 runner自身0当采集成功。
+
+按真实依赖排序，最多五项阶段退出缺口及本轮结果如下：
+
+1. **Native 长历史原压缩／重置结果查询：本轮闭合该完整能力。** 正式 Context 按钮查原准确 Run，后续201轮仍可读，accepted／applied／completed／failed分开，失败保已核事实，原业务和完整历史零改写；上述实际红绿与完整相邻回归支持。37能力映射仍partial，不把局部能力改成整体退出。
+2. **普通 Shell／Tool／Job 停止和正常退出的完整可信观测。** 实际用户入口为正式 Terminal／Native 的执行、停止及退出；验收须核 resources／handles、出生后代、准确 cleanup 来源和终态，而有限 FD／PID或Bun空stub不足。源码核对尚未发现可据证实施的生产 release 缺口，Instruments未开始，门禁保留；不能以局部原压缩查询通过替代。
+3. **正式客户端原完整 lifecycle RSS。** 实际原连接／运行／取消／重连／会话清理全生命周期仍须按原八outer、九点、60—168分钟和32MiB门槛验收。真实 +115.203125MiB 失败保留，可信观测为当前归因前置，不通过重设参数、删断言或只看局部读取放行。
+4. **Win／Linux正式安装、真实版本切换、完整MCP、维护恢复和保数据卸载。** 入口为既有正式命令和客户端；验收须由后续Actions／用户Windows实际执行完整行为、保持数据和原断言。源码接线不授运行资格，原Windows Shell guard保持；本轮不push或dispatch。
+5. **最终正式消费者、旧路径退役与完整阶段资格。** 实际Terminal／Native／Web的全部适用能力须按§35、T001—T114／E01—E14和37行映射闭合；旧正式消费者和制品依赖迁移后才退役，在阶段收束运行完整默认回归。原完整默认结果按其准确旧源范围复用，本轮相关8文件不能替代最终全回归。
+
+本轮同步产品指南、Native owner和跨包读取边界；普通精确 reader 修复沿既有合同，不新增独立架构取舍 Note。文档结构／实际diff影响核对、plan evidence、test ownership、统一静态边界／8工作区／生成API、三个归属代码文件Biome及diff whitespace检查通过。影响映射本次0规则，只表示没有匹配映射，实际产品／技术语义仍由上述双方源码与owner核对。迭代／stage／commit按 document-before-commit 核准确本轮 diff，仅已授权本地交付，正常hook独立执行。wholeV13=false／phaseExit=false，Goal active；官方授权／Responses与未证Codex缓存复用仍在V1.3之后。

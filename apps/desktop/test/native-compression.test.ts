@@ -221,3 +221,96 @@ test('Native accepted compression never invents successful Run; original Run fac
   await f.host.lookupCompression(command.id);
   expect(f.host.compressionSubmissions[0]?.phase).toBe('failed');
 });
+
+test('Native original compression and reset query exact historical Runs beyond the current View without replay', async () => {
+  for (const kind of ['compress', 'reset'] as const) {
+    const f = fixture();
+    let command!: Command;
+    let posts = 0;
+    let commandReads = 0;
+    let mode: 'correct' | 'id' | 'originStoreId' | 'sessionId' | 'originCommandId' | 'unavailable' =
+      'correct';
+    const runReads: string[] = [];
+    const runId = `historical-${kind}`;
+    const accept = async (_sessionId: string, input: { commandId: string }) => {
+      posts++;
+      command = {
+        id: input.commandId,
+        sessionId: 's',
+        originStoreId: 'store',
+        kind: kind === 'compress' ? 'context.compress' : 'context.compression.reset',
+        status: 'accepted',
+        receipt: null,
+        cancelRequestedAt: null,
+      };
+      return command;
+    };
+    Object.assign(f.client, {
+      compressContext: accept,
+      resetCompressionContext: accept,
+      getCommand: async (id: string) => {
+        commandReads++;
+        expect(id).toBe(command.id);
+        return { ...command, status: 'applied', receipt: { runId } };
+      },
+      getRun: async (id: string) => {
+        runReads.push(id);
+        if (mode === 'unavailable') throw new ClientError('worker_unavailable');
+        const run = {
+          id: runId,
+          sessionId: 's',
+          originStoreId: 'store',
+          originCommandId: command.id,
+          status: kind === 'compress' ? 'completed' : 'failed',
+          isActive: false,
+        };
+        return mode === 'correct' ? run : { ...run, [mode]: 'foreign' };
+      },
+    });
+    try {
+      const facts = await f.host.read('s');
+      await f.host.maintainCompression(
+        facts.observationId,
+        kind,
+        kind === 'compress' ? '原重点🙂' : undefined,
+      );
+      const accepted = f.host.compressionSubmissions[0]!;
+      expect(accepted.phase).toBe('accepted');
+      expect(accepted.run).toBeUndefined();
+      expect(runReads).toHaveLength(0);
+      // The bounded current View remains empty: the original receipt, not its latest 200 rows, selects the Run.
+      expect((await f.client.getView('s')).runs).toHaveLength(0);
+      expect(await code(f.host.lookupCompression(command.id))).toBe('success');
+      const verified = f.host.compressionSubmissions[0]!;
+      expect(verified).toMatchObject({
+        phase: 'applied',
+        command: { id: command.id, status: 'applied', receipt: { runId } },
+        run: {
+          id: runId,
+          sessionId: 's',
+          originStoreId: 'store',
+          originCommandId: command.id,
+          status: kind === 'compress' ? 'completed' : 'failed',
+        },
+      });
+      expect(runReads).toEqual([runId]);
+      for (const changed of [
+        'id',
+        'originStoreId',
+        'sessionId',
+        'originCommandId',
+        'unavailable',
+      ] as const) {
+        mode = changed;
+        expect(await code(f.host.lookupCompression(command.id))).not.toBe('success');
+        expect(f.host.compressionSubmissions[0]).toEqual(verified);
+      }
+      expect(posts).toBe(1);
+      expect(commandReads).toBe(6);
+      expect(runReads).toEqual(Array(6).fill(runId));
+      expect(f.host.compressionSubmissions).toHaveLength(1);
+    } finally {
+      f.host.release();
+    }
+  }
+}, 10000);

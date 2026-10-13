@@ -142,13 +142,16 @@ export class NativeCompression {
         (view.session.rootSessionId ?? view.session.id) !== state.rootSessionId
       )
         throw new ClientError('compression_scope_mismatch');
-      run = view.runs.find(
-        (value) =>
-          value.id === runId &&
-          value.sessionId === state.sessionId &&
-          value.originCommandId === state.intent.commandId,
-      );
-      if (!run) throw new ClientError('compression_run_unavailable');
+      // View contains current/recent work; absence there cannot erase an original receipt.
+      const original = await this.client.getRun(runId);
+      if (
+        original.id !== runId ||
+        original.originStoreId !== state.intent.expectedStoreId ||
+        original.sessionId !== state.sessionId ||
+        original.originCommandId !== state.intent.commandId
+      )
+        throw new ClientError('compression_run_unavailable');
+      run = original;
     }
     entry.state = {
       ...state,
