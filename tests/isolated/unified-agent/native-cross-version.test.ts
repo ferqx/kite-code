@@ -152,6 +152,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           : {}),
       });
       const current = await buildNativeCandidate({
+        testDiagnostics: true,
         terminalRoot: terminal.root,
         electronDist,
         outdir: join(root, 'current-native'),

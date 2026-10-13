@@ -1,5 +1,6 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import { TuiMcpAuthPanel } from './mcp-auth-panel';
 import type { TuiMcpSourceSnapshot } from './mcp-source';
@@ -158,10 +159,13 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
             : 'Source outcome unknown; check original';
   if (state.mcpAuthOpen) return <TuiMcpAuthPanel controller={controller} />;
   return (
-    <Box flexDirection="column">
-      <Text bold>
-        {t('Project sources')} · {terminalText(state.snapshot?.view.session.workspaceId ?? '')}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        <>
+          {t('Project sources')} · {terminalText(state.snapshot?.view.session.workspaceId ?? '')}
+        </>
+      }
+    >
       <Text>
         {t('Review requests an independent decision; it does not connect or authorize tools.')}
       </Text>
@@ -221,6 +225,6 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
           {t('Error:')} {terminalText(state.error)}
         </Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

@@ -12,6 +12,7 @@ import {
   terminalText,
 } from '../../src/tui';
 import { TuiExecutionPanel } from '../../src/tui/execution-panel';
+import { TuiPresentationProvider } from '../../src/tui/presentation';
 
 function snapshot(id = 'a', active = true): TuiSnapshot {
   return {
@@ -142,7 +143,7 @@ test('completed parent and current unfinished Jobs stay separate through clear, 
   f.port.readSession = async (id) => (id === 'a' ? current : snapshot(id, false));
   const controller = new TuiController(f.port);
   await controller.select('a');
-  const app = render(<TuiSession controller={controller} />);
+  const app = render(<TuiSession testDiagnostics controller={controller} />);
   const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
   try {
     await pause();
@@ -381,7 +382,7 @@ test('Ink ordinary text and Return in one native input block submit the exact cu
   f.port.readSession = async (id) => snapshot(id, false);
   const c = new TuiController(f.port);
   await c.select('a');
-  const app = render(<TuiSession controller={c} />);
+  const app = render(<TuiSession testDiagnostics controller={c} />);
   try {
     await Bun.sleep(20);
     app.stdin.write('owned task\r');
@@ -415,7 +416,7 @@ test('Ink text plus Return preserves slash completion and routes the complete ex
   };
   const c = new TuiController(f.port);
   await c.select('a');
-  const app = render(<TuiSession controller={c} />);
+  const app = render(<TuiSession testDiagnostics controller={c} />);
   try {
     await Bun.sleep(20);
     app.stdin.write('/exp\r');
@@ -442,7 +443,7 @@ test('Ink literal bracketed paste preserves CRLF and Ctrl bytes without submit o
   f.port.readSession = async (id) => snapshot(id, false);
   const c = new TuiController(f.port);
   await c.select('a');
-  const app = render(<TuiSession controller={c} />);
+  const app = render(<TuiSession testDiagnostics controller={c} />);
   const original = '原文\r\nline\u0003';
   try {
     await Bun.sleep(20);
@@ -476,7 +477,7 @@ test('Ink text plus Return uses the updated file token and requires ready comple
   };
   const c = new TuiController(f.port);
   await c.select('a');
-  const app = render(<TuiSession controller={c} />);
+  const app = render(<TuiSession testDiagnostics controller={c} />);
   const finish = (index: number) => {
     const original = reads[index]!;
     original.resolve({
@@ -534,7 +535,7 @@ for (const surface of ['approval', 'composer'] as const) {
     const c = new TuiController(f.port);
     await c.select('a');
     c.setDraft('kept main');
-    const app = render(<TuiSession controller={c} />);
+    const app = render(<TuiSession testDiagnostics controller={c} />);
     try {
       await Bun.sleep(20);
       app.stdin.write('\u001b[200~\u0003\u0003\u001b[201~');
@@ -593,7 +594,7 @@ test('Ink actual keyboard session selection and full terminal-safe history prese
   const f = fixture(),
     c = new TuiController(f.port);
   await c.select('a');
-  const rendered = render(<TuiSession controller={c} />);
+  const rendered = render(<TuiSession testDiagnostics controller={c} />);
   await Bun.sleep(40);
   expect(rendered.lastFrame()).toContain('full正文尾部\\u001b[2J');
   expect(rendered.lastFrame()).toContain('Waiting for required result');
@@ -895,7 +896,7 @@ test('Ink Ctrl+L restores the frozen answer GET before refreshing and clearing o
       receipt: { outcome: 'answer_saved', interactionId: 'card', decisionRevision: '8' },
     };
   };
-  const rendered = render(<TuiSession controller={c} />);
+  const rendered = render(<TuiSession testDiagnostics controller={c} />);
   await Bun.sleep(25);
   rendered.stdin.write('\u000c');
   await Bun.sleep(40);
@@ -1019,7 +1020,7 @@ for (const blocked of ['stale', 'unknown'] as const)
       expect(c.state.intent?.phase).toBe('unknown');
     }
     const before = f.writes.length,
-      app = render(<TuiSession controller={c} />);
+      app = render(<TuiSession testDiagnostics controller={c} />);
     try {
       await Bun.sleep(20);
       app.stdin.write('编辑🙂');
@@ -1045,7 +1046,7 @@ test('pending chooser preserves independent original card drafts and clears only
   f.port.readSession = async () => ({ ...snapshot(), interactions: cards });
   const c = new TuiController(f.port);
   await c.select('a');
-  const app = render(<TuiSession controller={c} />);
+  const app = render(<TuiSession testDiagnostics controller={c} />);
   const key = async (input: string) => {
     app.stdin.write(input);
     await Bun.sleep(20);
@@ -1149,7 +1150,7 @@ test('open pending chooser freezes exact original rows when the paged directory 
   f.port.readSession = async () => ({ ...snapshot(), interactions: cards });
   const c = new TuiController(f.port);
   await c.select('a');
-  const app = render(<TuiSession controller={c} />);
+  const app = render(<TuiSession testDiagnostics controller={c} />);
   const key = async (input: string) => {
     app.stdin.write(input);
     await Bun.sleep(20);
@@ -1603,7 +1604,11 @@ test('restored background Job remains readable without preparing a historical st
     await c.stopJob(job.id);
     expect(stops).toBe(0);
     expect(c.state.jobStops.size).toBe(0);
-    const ui = render(<TuiExecutionPanel controller={c} />);
+    const ui = render(
+      <TuiPresentationProvider value={{ preferences: c.state.preferences, testDiagnostics: true }}>
+        <TuiExecutionPanel controller={c} />
+      </TuiPresentationProvider>,
+    );
     try {
       expect(ui.lastFrame()).toContain('saved [saved-job] running · restored history; read only');
       ui.stdin.write('s');

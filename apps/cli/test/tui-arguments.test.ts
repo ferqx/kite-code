@@ -1,6 +1,21 @@
 import { expect, test } from 'bun:test';
 import { parseTUIArguments } from '../host/tui-arguments';
 
+test('test diagnostics is an explicit presentation flag, with strict duplicate and argument checks', () => {
+  expect(parseTUIArguments(['--test-ui-diagnostics', '--thread', 's'])).toEqual({
+    kind: 'tui',
+    testDiagnostics: true,
+    thread: 's',
+  });
+  expect(parseTUIArguments([])).toEqual({ kind: 'tui' });
+  expect(() => parseTUIArguments(['--test-ui-diagnostics', '--test-ui-diagnostics'])).toThrow(
+    'invalid_tui_arguments',
+  );
+  expect(() => parseTUIArguments(['--test-ui-diagnostics', 'true'])).toThrow(
+    'invalid_tui_arguments',
+  );
+});
+
 test('development TUI arguments are pure, closed and do not invent authority or endpoints', () => {
   expect(parseTUIArguments([])).toEqual({ kind: 'tui' });
   expect(

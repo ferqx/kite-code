@@ -1,5 +1,13 @@
 # 独立终端消费者
 
+## 原 Ink 展示与明确测试诊断
+
+[chrome](chrome.tsx)搬迁原 Header／Footer／OverlayFrame 的纯布局，当前 controller、ComposerBuffer 与公共 port 保留原行为；不导入旧 provider、projector 或 Runtime。Header 作为原 Static 第一项，实际环境／显示事实变化才替换展示代次，普通编辑和观察状态不重发正文。宿主可提供 snapshot.environment；模型与权限读失败只缺对应展示事实，不阻断完整会话读取。
+
+普通消息隐藏机器身份，工具／Job 的[result](result.tsx)保留全部业务字段、原换行和 false/null 等值；审批审查材料、部分正文、未知和取消未确认继续可见。主输入使用 ❯ 和原横线布局；[help](help-panel.tsx)取得只读焦点，滚动或关闭不取消工作。选择与管理面板共用纯 frame，原 Review/Confirm、schema、scope、EOF 和持久申请逻辑不变。
+
+`TuiSession({testDiagnostics:true})` 或宿主明确测试参数才显示原 ID／协议 JSON／回执诊断，默认 false；development 本身不启用。恢复、状态和用户明确读取的原申请详情保持完整核实能力。现有原身份测试显式开启诊断，普通模式由[展示回归](../../test/tui/normal-presentation.test.tsx)覆盖，不以诊断模式测试代替普通界面。
+
 主会话底部另列当前 Session/Store 的未结束 Job 和 outcome_unknown 数量；planned/dispatching/running 包含已请求停止但未到终态的项，已结束、其他 Session、旧 Store 和非 Job 不计入。计数直接消费完整当前 view 的全部非终态投影，不依赖显示基线或最近历史数量，不增加读取、缓存或执行权。父 Run 完成后的 Idle 与后台数保持独立，stale 时保留原数及原状态提示。[controller 测试](../../test/tui/controller.test.tsx)核清屏、未知、来源隔离与切会话；[真实80×24 PTY](../../../../apps/cli/test/isolated/tui-caller-job-stop.test.ts)核父已完成而两个 Job 存续、准确单项停止后冷读剩余一个、原一 POST 和 sibling 不取消。实际 installed Native 的第二消费者与当前原完整默认结果归[阶段进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。
 
 普通 question 的有限原 schema grammar 由 [中立解析器](../question.ts)与 DOM 共用，[TUI adapter](question.ts)只负责 ComposerBuffer 编辑草稿。闭合浅问卷加明确 `const:null` 的根 oneOf 保留原整份替代决定；仅原 schema 提供该项时，Alt+A 提交这个 null 信息答案。默认 ask_user 将它解释为取消问卷，原任务继续；Ctrl+C 仍是准确原 work 取消，Ctrl+A 仍读取附件，Alt+Enter／Shift+Enter 仍插入换行。未知 schema 不生成替代项，不把 Escape 或空白当取消答案。

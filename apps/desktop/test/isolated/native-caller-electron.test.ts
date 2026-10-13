@@ -101,6 +101,7 @@ for (const kind of [
             profile: { dataRoot: f.profile.dataRoot, profile: 'owned' },
           },
           outdir,
+          { testDiagnostics: true },
         );
         const built = await Bun.build({
           entrypoints: [resolve(import.meta.dir, '../native-caller-electron.fixture.ts')],

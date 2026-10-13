@@ -1,7 +1,14 @@
 export type TUIArguments =
   | { kind: 'help' }
   | { kind: 'version' }
-  | { kind: 'tui'; workspace?: string; thread?: string; dataRoot?: string; server?: string };
+  | {
+      kind: 'tui';
+      workspace?: string;
+      thread?: string;
+      dataRoot?: string;
+      server?: string;
+      testDiagnostics?: true;
+    };
 export class TUIArgumentError extends Error {
   readonly code = 'invalid_tui_arguments';
   constructor() {
@@ -17,6 +24,12 @@ export function parseTUIArguments(argv: readonly string[]): TUIArguments {
   const seen = new Set<string>();
   for (let index = 0; index < argv.length; index++) {
     const key = argv[index];
+    if (key === '--test-ui-diagnostics') {
+      if (seen.has(key)) throw new TUIArgumentError();
+      seen.add(key);
+      result.testDiagnostics = true;
+      continue;
+    }
     if (
       !key ||
       !['--workspace', '--thread', '--data-root', '--server'].includes(key) ||

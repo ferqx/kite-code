@@ -32,6 +32,7 @@ const pty = spawnTuiPTY({
   cmd: [
     input.executable,
     input.entrypoint,
+    '--test-ui-diagnostics',
     '--workspace',
     input.workspace,
     '--thread',

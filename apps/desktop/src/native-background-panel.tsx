@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { NativeBackgroundChild } from './background-bridge';
 import { readNativeBackground, readNativeBackgroundChild } from './native-background';
 import type { NativeBridge } from './native-bridge';
+import { NativeDiagnostic, useNativeDiagnostics } from './native-diagnostics';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 
 const safeError = (cause: unknown) => {
@@ -31,6 +32,7 @@ function BackgroundPanel({
   unavailable,
   onChanged,
 }: NativeBackgroundPanelProps) {
+  const diagnostics = useNativeDiagnostics();
   const [opened, setOpened] = useState(false),
     [refresh, setRefresh] = useState(0),
     [view, setView] = useState<{
@@ -217,7 +219,10 @@ function BackgroundPanel({
           {view.items?.length === 0 && <p>此主体尚无已保存后台执行。</p>}
           {stopError && <p role="alert">原停止请求：{stopError}。请在原申请面板核实原命令。</p>}
           {accepted && (
-            <p role="status">停止请求已受理：{accepted}；实际执行和清理仍以随后状态为准。</p>
+            <p role="status">
+              停止请求已受理<NativeDiagnostic>：{accepted}</NativeDiagnostic>
+              ；实际执行和清理仍以随后状态为准。
+            </p>
           )}
           {view.items?.map((item) => {
             const e = item.execution,
@@ -233,7 +238,11 @@ function BackgroundPanel({
             return (
               <article
                 key={`${generation}/${storeId}/${e.id}`}
-                aria-label={`后台执行 · ${e.id}`}
+                aria-label={
+                  diagnostics
+                    ? `后台执行 · ${e.id}`
+                    : `后台${e.childSessionId ? '子 Agent' : 'Job'}`
+                }
                 data-execution-id={e.id}
               >
                 <p>
@@ -241,26 +250,37 @@ function BackgroundPanel({
                   {e.cancelRequested ? ' · 停止已请求' : ''}
                 </p>
                 <p>
-                  原会话 {item.rootSession.title} · {item.rootSession.id} · 工作区{' '}
-                  {item.session.workspaceId}
+                  原会话 {item.rootSession.title}
+                  <NativeDiagnostic>
+                    {' '}
+                    · {item.rootSession.id} · 工作区 {item.session.workspaceId}
+                  </NativeDiagnostic>
                 </p>
-                <p>
-                  原执行 {e.id} · 来源会话 {e.sessionId} · 原命令 {e.originCommandId} · 尝试{' '}
-                  {e.attempt}
-                </p>
-                <p>原 Store {e.originStoreId}</p>
+                <NativeDiagnostic>
+                  {' '}
+                  <p>
+                    原执行 {e.id} · 来源会话 {e.sessionId} · 原命令 {e.originCommandId} · 尝试{' '}
+                    {e.attempt}
+                  </p>
+                  <p>原 Store {e.originStoreId}</p>
+                </NativeDiagnostic>
                 {e.originStoreId !== storeId && <p>恢复历史，只读。当前连接已使用新 Store。</p>}
                 {item.run && (
                   <p>
-                    原父轮次 {item.run.id} · {item.run.status}
+                    原父轮次 <NativeDiagnostic>{item.run.id} · </NativeDiagnostic>
+                    {item.run.status}
                     {item.run.reason ? ` · ${item.run.reason}` : ''}
                     {item.run.waitingForResults.includes(e.id) ? ' · 本轮必需任务' : ''}
                   </p>
                 )}
                 {e.childSessionId && (
                   <p>
-                    子会话 {e.childSessionId} · 原子轮次{' '}
-                    {item.childRun ? `${item.childRun.id} · ${item.childRun.status}` : '尚未确认'}
+                    子会话<NativeDiagnostic> {e.childSessionId}</NativeDiagnostic> · 原子轮次{' '}
+                    {item.childRun
+                      ? diagnostics
+                        ? `${item.childRun.id} · ${item.childRun.status}`
+                        : item.childRun.status
+                      : '尚未确认'}
                   </p>
                 )}
                 {e.delivery && (
@@ -301,7 +321,7 @@ function BackgroundPanel({
                         });
                     }}
                   >
-                    停止后台执行 · {e.id}
+                    停止后台执行{diagnostics ? ` · ${e.id}` : ''}
                   </button>
                 )}
                 {view.observationId && (
@@ -363,6 +383,7 @@ function BackgroundChildPanel({
     release: () => void;
   }>;
 }) {
+  const diagnostics = useNativeDiagnostics();
   const [opened, setOpened] = useState(false),
     [refresh, setRefresh] = useState(0),
     [view, setView] = useState<{ facts?: NativeBackgroundChild; busy: boolean; error?: string }>({
@@ -402,7 +423,7 @@ function BackgroundChildPanel({
     return () => abort.abort();
   }, [bridge, generation, storeId, executionId, opened, refresh]);
   return (
-    <section aria-label={`子 Agent 完整日志 · ${executionId}`}>
+    <section aria-label={diagnostics ? `子 Agent 完整日志 · ${executionId}` : '子 Agent 完整日志'}>
       {!opened ? (
         <button type="button" onClick={() => setOpened(true)}>
           读取完整子日志
@@ -431,8 +452,11 @@ function BackgroundChildPanel({
           {view.facts && (
             <>
               <p>
-                已完整读取子会话 {view.facts.session.id} 截至序号 {view.facts.upperSeq}{' '}
-                的日志。原任务对应子轮次 {view.facts.item.childRun?.id ?? '尚未确认'}。
+                已完整读取子会话日志。
+                <NativeDiagnostic>
+                  原会话 {view.facts.session.id} 截至序号 {view.facts.upperSeq} ，原任务对应子轮次{' '}
+                  {view.facts.item.childRun?.id ?? '尚未确认'}。
+                </NativeDiagnostic>
               </p>
               <p>日志只读；同一子会话中的后续轮次保留各自身份，不改变原任务。</p>
               {view.facts.messages.map((message) => {
@@ -440,9 +464,16 @@ function BackgroundChildPanel({
                   (entry) => entry.messageId === message.id,
                 )?.snapshot;
                 return (
-                  <article key={message.id} aria-label={`子消息 · ${message.id}`}>
+                  <article
+                    key={message.id}
+                    aria-label={diagnostics ? `子消息 · ${message.id}` : '子消息'}
+                  >
                     <small>
-                      {message.role} · {message.seq} · 轮次 {message.runId ?? '未记录'}
+                      {message.role}
+                      <NativeDiagnostic>
+                        {' '}
+                        · {message.seq} · 轮次 {message.runId ?? '未记录'}
+                      </NativeDiagnostic>
                     </small>
                     <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                       {output?.output.content ?? message.content}
@@ -454,7 +485,11 @@ function BackgroundChildPanel({
                       </details>
                     )}
                     {(output?.output.toolCalls ?? message.toolCalls)?.map((call) => (
-                      <pre key={call.id}>{JSON.stringify(call, null, 2)}</pre>
+                      <pre key={call.id}>
+                        {diagnostics
+                          ? JSON.stringify(call, null, 2)
+                          : `${call.name}\n${call.arguments}`}
+                      </pre>
                     ))}
                     {output && !output.output.complete && <p>原模型输出不完整。</p>}
                     {message.contentFormat === 'unsupported' && <p>原正文不可用。</p>}

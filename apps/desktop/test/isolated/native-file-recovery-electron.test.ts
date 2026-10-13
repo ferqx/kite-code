@@ -286,6 +286,7 @@ test.skipIf(process.platform !== 'darwin')(
           profile: { dataRoot: profile.dataRoot, profile: profile.profile },
         },
         outdir,
+        { testDiagnostics: true },
       );
       const fixture = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../native-file-recovery-electron.fixture.ts')],

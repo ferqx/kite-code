@@ -171,7 +171,7 @@ const port: TuiPort = {
 };
 const controller = new TuiController(port);
 await controller.select('a');
-const app = render(<TuiSession controller={controller} />, {
+const app = render(<TuiSession testDiagnostics controller={controller} />, {
   patchConsole: false,
   exitOnCtrlC: false,
 });

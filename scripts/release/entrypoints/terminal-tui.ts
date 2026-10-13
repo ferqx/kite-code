@@ -12,6 +12,7 @@ const bundleRoot = resolve(import.meta.dir, '..');
 export async function runInstalledTerminalTUI(
   argv: readonly string[] = process.argv.slice(2),
   candidateRoot: string = bundleRoot,
+  options: { readonly testDiagnostics?: boolean } = {},
 ) {
   const args = parseTUIArguments(argv);
   // Preserve pure help/version and the original nonterminal rejection without touching a profile.
@@ -27,6 +28,7 @@ export async function runInstalledTerminalTUI(
       ...(bundle ? { artifact: bundle.artifact } : {}),
       dataRoot: join(homedir(), '.kite-code', 'unified-agent'),
       profile: 'default',
+      testDiagnostics: options.testDiagnostics,
     });
   } finally {
     access?.release();

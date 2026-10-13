@@ -1,6 +1,7 @@
-import { Box, useInput, usePaste, useStdout } from 'ink';
+import { useInput, usePaste, useStdout } from 'ink';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import stringWidth from 'string-width';
+import { TuiOverlayFrame } from './chrome';
 import { ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch } from './composer-input';
 import { type TuiController, terminalText } from './controller';
@@ -15,7 +16,7 @@ export function TuiSessionChooser({
   close(): void;
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
-  const { t } = useTuiPresentation(),
+  const { t, testDiagnostics } = useTuiPresentation(),
     { stdout } = useStdout();
   const buffer = useRef(new ComposerBuffer()).current;
   const [query, setQuery] = useState(''),
@@ -108,12 +109,13 @@ export function TuiSessionChooser({
   });
   if (deletion)
     return (
-      <Box flexDirection="column">
-        <Text bold>{t('Delete Session?')}</Text>
+      <TuiOverlayFrame title={<> {t('Delete Session?')} </>}>
         <Text wrap="truncate">{terminalText(deletion.title)}</Text>
-        <Text>
-          {t('Original Session')} [{terminalText(deletion.sessionId)}]
-        </Text>
+        {testDiagnostics && (
+          <Text>
+            {t('Original Session')} [{terminalText(deletion.sessionId)}]
+          </Text>
+        )}
         <Text>
           {t(
             'Delete hides this Session and requests its work to stop. Workspace files stay unchanged.',
@@ -146,7 +148,7 @@ export function TuiSessionChooser({
             ) : null}
           </>
         )}
-      </Box>
+      </TuiOverlayFrame>
     );
   const prefix = `${t('Search')} > `,
     display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t),
@@ -154,8 +156,7 @@ export function TuiSessionChooser({
     line = row.lines[row.index]!;
   const start = Math.max(0, selected - 2);
   return (
-    <Box flexDirection="column">
-      <Text bold>{t('Select Session (arrows/Enter, Esc)')}</Text>
+    <TuiOverlayFrame title={<> {t('Select Session (arrows/Enter, Esc)')} </>}>
       <Text>
         {prefix}
         {buffer.parts.slice(line.start, line.end).map((part, offset) => (
@@ -171,7 +172,8 @@ export function TuiSessionChooser({
       {sessions.slice(start, start + 5).map((session, offset) => (
         <Text key={session.id} wrap="truncate">
           {focus === 'list' && start + offset === selected ? '> ' : '  '}
-          {terminalText(session.title.replace(/[\r\n]/g, ' '))} [{terminalText(session.id)}]
+          {terminalText(session.title.replace(/[\r\n]/g, ' '))}
+          {testDiagnostics ? ` [${terminalText(session.id)}]` : ''}
         </Text>
       ))}
       {!sessions.length && <Text>{t('No matching Sessions')}</Text>}
@@ -179,6 +181,6 @@ export function TuiSessionChooser({
         {sessions.length ? `${selected + 1}/${sessions.length}` : '0/0'} ·{' '}
         {t('Up/Down: search/list · Enter: open · D: delete with empty search · Esc: clear/back')}
       </Text>
-    </Box>
+    </TuiOverlayFrame>
   );
 }

@@ -1,10 +1,11 @@
 import type { ModelSettingsRequest, ModelSettingsView } from '@kite-ai/client';
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 export function TuiModelPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   const state = controller.state,
     facts = state.models;
   const effortPanel = state.panel === 'effort';
@@ -89,11 +90,19 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     }
   });
   return (
-    <Box flexDirection="column">
-      <Text bold>
-        {effortPanel ? t('Reasoning effort') : t('Models')} {t('· Workspace')}{' '}
-        {terminalText(facts?.workspaceId ?? t('unavailable'))}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        <>
+          {effortPanel ? t('Reasoning effort') : t('Models')}
+          {testDiagnostics && (
+            <>
+              {' '}
+              {t('· Workspace')} {terminalText(facts?.workspaceId ?? t('unavailable'))}
+            </>
+          )}
+        </>
+      }
+    >
       <Text>
         {t(
           'Saved project settings apply to later executions; active Run keeps its original model.',
@@ -170,16 +179,24 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
       )}
       {pending && (
         <Text>
-          {t('Confirm original project change')} {terminalText(JSON.stringify(pending.operation))}
+          {t('Confirm original project change')}{' '}
+          {testDiagnostics
+            ? terminalText(JSON.stringify(pending.operation))
+            : pending.operation.kind === 'default'
+              ? `${t('Desired default:')} ${terminalText(pending.operation.modelId)}`
+              : pending.operation.kind === 'enabled'
+                ? `${terminalText(pending.operation.modelId)} · ${t(pending.operation.enabled ? 'enabled' : 'disabled')}`
+                : `${terminalText(pending.operation.modelId)} · ${pending.operation.reasoningEffort ?? t('clear project effort (read resulting value)')}`}
           {t('; Enter save / Esc abandon')}
         </Text>
       )}
       {state.modelOutcome && (
         <Text>
-          {t('Original')} {terminalText(state.modelOutcome.intent.request.commandId)}
+          {t('Original')}{' '}
+          {testDiagnostics && terminalText(state.modelOutcome.intent.request.commandId)}
           {':'} {state.modelOutcome.status}
         </Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

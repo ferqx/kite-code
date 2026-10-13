@@ -1,5 +1,6 @@
-import { Box, useInput, usePaste } from 'ink';
+import { useInput, usePaste } from 'ink';
 import { useEffect, useRef, useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { ComposerBuffer } from './composer';
 import { type TuiController, terminalText } from './controller';
 import type { TuiMcpSourceSnapshot } from './mcp-source';
@@ -240,8 +241,7 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
   });
   const start = Math.max(0, index - 2);
   return (
-    <Box flexDirection="column">
-      <Text bold>{t('Source entry changes')}</Text>
+    <TuiOverlayFrame title={<> {t('Source entry changes')} </>}>
       <Text>
         {t(
           'Removal clears owned OAuth credentials locally; shared credentials are retained. Connection status is separate.',
@@ -349,6 +349,6 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
           {t('Error:')} {terminalText(error ?? t(state.mcpMutationError ?? ''))}
         </Text>
       ) : null}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

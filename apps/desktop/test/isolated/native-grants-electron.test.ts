@@ -216,6 +216,7 @@ test.skipIf(process.platform !== 'darwin')(
         profile: { dataRoot: profile.dataRoot, profile: profile.profile },
       },
       outdir,
+      { testDiagnostics: true },
     );
     const fixture = join(root, 'driver.ts');
     writeFileSync(

@@ -62,6 +62,7 @@ test.skipIf(process.platform !== 'darwin')(
         processHostFixture: 'native-mcp-loopback',
       });
       const built = await buildNativeCandidate({
+        testDiagnostics: true,
         terminalRoot: terminal.root,
         electronDist: resolve(dirname(dirname(require('electron') as string)), '../..'),
         outdir: join(root, 'source'),

@@ -70,6 +70,8 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 开发 TUI 宿主见 [host/tui.tsx](host/tui.tsx) 与 [host/tui-main.ts](host/tui-main.ts)。公开 `/tui-host` 的 `runTUIHost` 接收明确 `artifact/dataRoot/profile/workspace/thread` 和独立宿主退出 signal；`/tui-main` 提供纯 `parseTUIArguments` 与 `runTUIProcess`。help/version 和非终端拒绝均先于 profile 创建；没有制品 source fallback、隐式服务发现、argv token 或权限模式猜测；显式 `server` 选择既有共享服务。配对启动校验既有 Service/Bun SHA、profile/instance/build/API/capabilities，私有 bootstrap 不打印到终端。
 
+当前正式与开发 TUI 接回原 Ink 的纯展示骨架，业务仍通过公共 Server port：Header 使用实际 Workspace URI、公开模型配置和当前权限读取，局部不可用不造成功事实。主输入、选择面板、完整结果与帮助沿[UI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)。普通启动不常驻开发横幅、原回执和机器 ID；`--test-ui-diagnostics` 或可信 `testDiagnostics:true` 只切展示，严格拒绝重复参数和多余值。原 caller、审批、取消、草稿、观察与生命周期门禁不变，纯参数测试见[test/tui-arguments.test.ts](test/tui-arguments.test.ts)。
+
 宿主复用公开 `@kite-ai/ui/tui` 的单一 controller，读取同 Workspace 的完整固定上界 Session 目录和会话历史；原审批附件与 Model 正文经公共 SDK 全量验证后才显示。活动输入封存准确 Run/context selection，空闲输入创建新 Run；批准保存不等于执行完成，未知仅查询原 Command，不换 ID 或重发。`Ctrl+R` 选已有 Session，`Ctrl+N` 创建同 Workspace 新 Session（未确认创建时再次按键只查询原 ID），`Ctrl+K` 查询原未知工作，`Ctrl+C` 精确取消原工作且不退出共享 Service。`Ctrl+Q` 或明确 SIGTERM 才退出并关闭本宿主拥有的 paired Service；stdin EOF 停止视图读与输入，保留原等待任务且不默认批准，直到明确宿主退出。切换会话不取消旧工作。
 
 本开发宿主新增下述有限 slash 路由；原 `tui`、旧 CLI/daemon/Electron 入口没有由此退役。复杂编辑、完整终端屏幕滚动/resize 与三平台资格仍未完成。开发入口的 buildId 只证明配套 Service entry 的准确 SHA，不是完整发行 candidate 身份。[test/isolated/tui-host.test.ts](test/isolated/tui-host.test.ts) 通过真实 argv/PTy 和构建 Service 验证宿主生命周期；平台与测试结果以实际验证记录为准。

@@ -1,5 +1,6 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 
@@ -67,10 +68,13 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
                 : 'Back',
         );
   return (
-    <Box flexDirection="column">
-      <Text bold>
-        {t('Forced reconnects')} · {terminalText(state.snapshot?.view.session.workspaceId ?? '')}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        <>
+          {t('Forced reconnects')} · {terminalText(state.snapshot?.view.session.workspaceId ?? '')}
+        </>
+      }
+    >
       <Text>{t('Selecting an original ID does not query, reconnect or authorize tools.')}</Text>
       {state.mcpReconnectionObserving && <Text>{t('Reading current reconnect target')}</Text>}
       {observed && (
@@ -168,6 +172,6 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
           {t('Error:')} {terminalText(state.error)}
         </Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

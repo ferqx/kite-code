@@ -1,5 +1,6 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useMemo, useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import { mcpTextRows, mcpTextWindow } from './mcp-tools';
 import { TuiText as Text, useTuiPresentation } from './presentation';
@@ -115,8 +116,7 @@ export function TuiMcpToolsPanel({ controller }: { controller: TuiController }) 
     }[choice.kind];
   };
   return (
-    <Box flexDirection="column">
-      <Text bold>{t('MCP Tools · saved metadata')}</Text>
+    <TuiOverlayFrame title={<> {t('MCP Tools · saved metadata')} </>}>
       <Text>{t('Reading does not connect or authorize tools.')}</Text>
       {state.snapshot && (
         <Text>
@@ -175,6 +175,6 @@ export function TuiMcpToolsPanel({ controller }: { controller: TuiController }) 
           <Text>{t('↑/↓ choose · Enter read · Esc back')}</Text>
         </>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

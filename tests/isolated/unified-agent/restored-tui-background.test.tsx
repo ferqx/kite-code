@@ -325,7 +325,7 @@ test('restored TUI background directory and complete output/child readers preser
       controller = new TuiController(port);
       await controller.select('session');
       await controller.routeCommand('/background');
-      app = render(<TuiSession controller={controller} />);
+      app = render(<TuiSession testDiagnostics controller={controller} />);
       await Bun.sleep(50);
       console.log('restored-tui-directory', {
         currentStore: controller.state.snapshot?.storeId,

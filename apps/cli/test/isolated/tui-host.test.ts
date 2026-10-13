@@ -169,7 +169,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
       }
       const program = `import os,pty,subprocess,select,time,signal,re,json,sqlite3
 master,slave=pty.openpty()
-p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))},'--workspace',${JSON.stringify(workspace)},'--thread','a','--data-root',${JSON.stringify(join(root, 'data'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
+p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))},'--test-ui-diagnostics','--workspace',${JSON.stringify(workspace)},'--thread','a','--data-root',${JSON.stringify(join(root, 'data'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
 os.close(slave);buffer=b''
 def wait(text):
  global buffer

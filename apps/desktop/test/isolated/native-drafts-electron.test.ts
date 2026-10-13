@@ -180,6 +180,7 @@ test.skipIf(process.platform !== 'darwin')(
         profile: { dataRoot: profile.dataRoot, profile: profile.profile },
       },
       outdir,
+      { testDiagnostics: true },
     );
     const resetStore = join(root, 'reset-store.js');
     writeFileSync(

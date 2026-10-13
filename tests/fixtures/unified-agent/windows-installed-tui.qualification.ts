@@ -413,7 +413,7 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       const pty = await startWindowsInstalledTuiPty({
         runtimeExecutable: driverRuntime,
         launcher,
-        argv: ['--workspace', workspace, '--thread', scenario.sessionId],
+        argv: ['--test-ui-diagnostics', '--workspace', workspace, '--thread', scenario.sessionId],
         cwd: workspace,
         env,
         productEnv,

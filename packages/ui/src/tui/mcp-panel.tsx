@@ -1,5 +1,6 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import type { TuiMcpSnapshot } from './mcp';
 import { TuiMcpReconnectionPanel } from './mcp-reconnection-panel';
@@ -237,8 +238,7 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
       : '';
   };
   return (
-    <Box flexDirection="column">
-      <Text bold>MCP · {terminalText(facts?.workspaceId ?? t('unavailable'))}</Text>
+    <TuiOverlayFrame title={<> MCP · {terminalText(facts?.workspaceId ?? t('unavailable'))} </>}>
       <Text>
         {t(
           'Selection applies to later work; active work and connections retain their configuration.',
@@ -366,6 +366,6 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           {t('Error:')} {terminalText(state.error)}
         </Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

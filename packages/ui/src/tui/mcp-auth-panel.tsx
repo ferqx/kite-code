@@ -1,6 +1,7 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
 import { callerKey } from './caller';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import { mcpAuthRequest, type TuiMcpAuthAction } from './mcp-auth';
 import type { TuiMcpSourceSnapshot } from './mcp-source';
@@ -132,8 +133,7 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
           );
   const offset = Math.max(0, Math.min(index - 2, actions.length - 5));
   return (
-    <Box flexDirection="column">
-      <Text bold>{t('MCP authentication')}</Text>
+    <TuiOverlayFrame title={<> {t('MCP authentication')} </>}>
       <Text>{t('Authentication does not reconnect or replay tools.')}</Text>
       {state.mcpAuthServerId && (
         <Text>
@@ -173,6 +173,6 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
       )}
       {!original && state.mcpAuthReading && <Text>{t('Reading authentication')}</Text>}
       {state.mcpAuthError && <Text>{t('Authentication unavailable')}</Text>}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

@@ -5,6 +5,7 @@ import type {
   NativeRecoverySubmission,
   NativeSelection,
 } from './native-bridge';
+import { NativeDiagnostic } from './native-diagnostics';
 
 export function NativeRecoveryView({
   bridge,
@@ -77,8 +78,8 @@ export function NativeRecoveryView({
     <section aria-label="Explicit recovery">
       <h2>Explicit recovery</h2>
       <p>
-        Original Session {selection.session.id}. Recovery resumes the explicit original ID. Applied
-        records do not prove Run completion.
+        <NativeDiagnostic>Original Session {selection.session.id}. </NativeDiagnostic>Recovery
+        resumes the explicit original ID. Applied records do not prove Run completion.
       </p>
       <label>
         Recovery operation
@@ -142,8 +143,11 @@ export function NativeRecoveryView({
       {facts && (
         <div>
           <p>
-            Verified original {facts.kind} · {facts.sessionId} ·{' '}
-            {facts.targetId ?? 'orphan execution group'}
+            Verified original {facts.kind}
+            <NativeDiagnostic>
+              {' '}
+              · {facts.sessionId} · {facts.targetId ?? 'orphan execution group'}
+            </NativeDiagnostic>
           </p>
           {facts.kind === 'interrupt' && (
             <label>
@@ -195,16 +199,22 @@ export function NativeRecoveryView({
       {submissions.map((saved) => (
         <div key={saved.commandId}>
           <p>
-            Recovery {saved.kind} · {saved.phase} · original Session {saved.sessionId} · Command{' '}
-            {saved.commandId}
+            Recovery {saved.kind} · {saved.phase}
+            <NativeDiagnostic>
+              {' '}
+              · original Session {saved.sessionId} · Command {saved.commandId}
+            </NativeDiagnostic>
           </p>
           {saved.run && (
             <p>
-              Original result Run {saved.run.id} · {saved.run.status}
+              Original result Run <NativeDiagnostic>{saved.run.id} · </NativeDiagnostic>
+              {saved.run.status}
             </p>
           )}
           {saved.command?.kind === 'session.recover' && saved.command.receipt && (
-            <pre>{JSON.stringify(saved.command.receipt, null, 2)}</pre>
+            <NativeDiagnostic>
+              <pre>{JSON.stringify(saved.command.receipt, null, 2)}</pre>
+            </NativeDiagnostic>
           )}
           <button
             type="button"

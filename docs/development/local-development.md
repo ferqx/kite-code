@@ -34,6 +34,8 @@ npm run desktop:dev
 
 三种开发客户端使用同一 development profile；任务仍需要已配置模型和工作区信任。修改代码后退出对应客户端，重新执行 `npm run build` 并启动。Desktop 每次启动重新编译 Main/preload/renderer，在自己的 `.cache/unified-desktop-*` 目录运行，退出后清理该次应用目录；会话、设置和草稿保留在开发 profile。此入口不提供 Vite 热更新。
 
+`tui:dev` 与 `desktop:dev` 默认使用普通用户界面，开发运行不自动启用测试诊断。TUI 自动化可明确加 `--test-ui-diagnostics`，或调用可信 host 的 `testDiagnostics:true`；Desktop 测试通过明确 builder／组件参数开启，普通命令不启用。测试诊断只影响展示，原权限、scope、未知结果和制品校验不变。
+
 `npm run agent`、`npm run tui`、`npm run desktop` 仍选择正式候选。首次运行这组命令，先执行 `npm run release:build`，再执行 `npm run release:build -- --product native` 生成 Desktop 候选。缺失候选时分别返回 `terminal_bundle_unavailable`／`native_bundle_unavailable` 和准备命令，未通过完整验证时不进入 Profile。源码变化不会自动更新候选；需要重新生成时，先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。构建不覆盖正在使用或已有的目录。
 
 旧 `apps/kite-desktop` 的 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 已退役，直接执行原开发／Electron构建／打包／服务准备脚本也返回 `legacy_desktop_entrypoint_retired` 和退出码2。诊断给出上表的当前 Native 构建、启动和验证命令；拒绝发生在读取旧archive、打开Profile、构建或启动服务之前。旧开发Vite热更新属于[历史实现](../../apps/kite-desktop/README.md)，不将当前候选启动称为等价热更新。旧源码和制品可追溯，当前数据不会交给旧writer；全部旧authority删除与阶段退出仍按原门禁核对。

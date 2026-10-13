@@ -132,10 +132,12 @@ test.skipIf(process.platform !== 'darwin')(
     await buildNativeDesktop(
       { ...assets, profile: { dataRoot: profile.dataRoot, profile: profile.profile } },
       outdir,
+      { testDiagnostics: true },
     );
     await buildNativeDesktop(
       { ...assets, profile: { dataRoot: blocked.dataRoot, profile: blocked.profile } },
       blockedApp,
+      { testDiagnostics: true },
     );
     const source = readFileSync(
       resolve(import.meta.dir, '../native-profile-access-electron.fixture.ts'),

@@ -3,7 +3,9 @@ import { ActionInputForm, PublicViewCard } from '@kite-ai/ui';
 import { useEffect, useRef, useState } from 'react';
 import type { NativeExtensionScope, NativeExtensionSubmission } from './extensions-bridge';
 import type { NativeBridge, NativeCallerMetadata } from './native-bridge';
+import { NativeDiagnostic, useNativeDiagnostics } from './native-diagnostics';
 import { readNativeExtensionBody } from './native-extension-read';
+import { NativeExecutionResult } from './native-result';
 
 export function NativeExtensions({
   bridge,
@@ -18,6 +20,7 @@ export function NativeExtensions({
   canRead?: boolean;
   canInvoke?: boolean;
 }) {
+  const diagnostics = useNativeDiagnostics();
   const [open, setOpen] = useState(false);
   const [catalogue, setCatalogue] = useState<ExtensionCatalogue[]>([]);
   const [views, setViews] = useState<PublicView[]>([]);
@@ -283,13 +286,16 @@ export function NativeExtensions({
           {intent && (
             <>
               <p>
-                原命令 {intent.commandId}：{result?.outcome ?? 'unknown'}
+                <NativeDiagnostic>原命令 {intent.commandId}：</NativeDiagnostic>
+                {result?.outcome ?? 'unknown'}
                 {result?.outcome === 'accepted' ? '（已受理，执行尚未完成）' : ''}
               </p>
-              <pre>{JSON.stringify(intent.input, null, 2)}</pre>
-              <button type="button" disabled={busy} onClick={() => void lookup(intent.commandId)}>
-                查询原命令
-              </button>
+              <NativeExecutionResult result={intent.input} />
+              {(diagnostics || !result || ['unknown', 'accepted'].includes(result.outcome)) && (
+                <button type="button" disabled={busy} onClick={() => void lookup(intent.commandId)}>
+                  查询原命令
+                </button>
+              )}
               {result &&
                 ['succeeded', 'failed', 'cancelled', 'rejected'].includes(result.outcome) && (
                   <button
@@ -307,14 +313,20 @@ export function NativeExtensions({
           )}
           {!intent && result && (
             <p role="status">
-              原命令 {result.metadata.request.commandId}：{result.outcome}
+              <NativeDiagnostic>原命令 {result.metadata.request.commandId}：</NativeDiagnostic>
+              {result.outcome}
             </p>
           )}
           {records
-            .filter((record) => record.request.commandId !== intent?.commandId)
+            .filter(
+              (record) =>
+                record.request.commandId !== intent?.commandId &&
+                (diagnostics || ['unknown', 'submitting', 'accepted'].includes(record.phase)),
+            )
             .map((record) => (
               <p key={record.request.commandId}>
-                {record.request.commandId} · {record.phase}{' '}
+                <NativeDiagnostic>{record.request.commandId} · </NativeDiagnostic>
+                {record.phase}{' '}
                 <button
                   type="button"
                   disabled={busy}

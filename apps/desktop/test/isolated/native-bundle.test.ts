@@ -83,6 +83,7 @@ test.skipIf(process.platform !== 'darwin')(
       console.log('native_bundle_stage: build');
       observe('native_build_begin');
       const built = await buildNativeCandidate({
+        testDiagnostics: true,
         terminalRoot: terminal.root,
         electronDist: actualDist,
         outdir: source,

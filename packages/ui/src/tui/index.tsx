@@ -11,11 +11,13 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { interactionKey } from './cards';
+import { type TuiChromeFacts, TuiFooter, TuiHeader, TuiOverlayFrame } from './chrome';
 import { ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch, TuiComposer } from './composer-input';
 import { activity, type TuiController, terminalText } from './controller';
 import { TuiExecutionPanel } from './execution-panel';
 import type { FileToken } from './file-candidates';
+import { TuiHelpPanel } from './help-panel';
 import { TuiManagementRequestsPanel } from './management-requests-panel';
 import { TerminalMarkdown } from './markdown';
 import { TuiMcpPanel } from './mcp-panel';
@@ -38,6 +40,7 @@ import {
   TuiAnswerInput,
 } from './question-panel';
 import { TuiRecoveryPanel } from './recovery-panel';
+import { TuiResult } from './result';
 import { TuiSessionChooser } from './session-chooser';
 import { TuiSkillsPanel } from './skills-panel';
 import { TuiStatusPanel } from './status-panel';
@@ -51,11 +54,17 @@ export * from './mcp-source';
 export * from './mcp-source-mutation';
 export { translateTuiLabel } from './presentation';
 
-/** Independent Ink renderer. Host owns admission, full readers and Service lifetime. */
-export function TuiSession({ controller }: { controller: TuiController }) {
+/** Ink presentation on public Server ports. Host owns admission and Service lifetime. */
+export function TuiSession({
+  controller,
+  testDiagnostics = false,
+}: {
+  controller: TuiController;
+  testDiagnostics?: boolean;
+}) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   return (
-    <TuiPresentationProvider value={{ preferences: state.preferences }}>
+    <TuiPresentationProvider value={{ preferences: state.preferences, testDiagnostics }}>
       <TuiSessionView controller={controller} />
     </TuiPresentationProvider>
   );
@@ -64,6 +73,18 @@ type Execution = SessionView['executions'][number];
 type HistoryItem = { key: string; version: string; node: ReactNode };
 const executionDisplayKey = (execution: Execution) =>
   JSON.stringify([execution.originStoreId, execution.sessionId, execution.id]);
+
+function chromeFacts(
+  state: Pick<TuiController['state'], 'snapshot' | 'models' | 'permissions'>,
+): TuiChromeFacts {
+  const selected = state.models?.models.find((model) => model.id === state.models?.defaultModelId);
+  return {
+    ...state.snapshot?.environment,
+    sessionTitle: state.snapshot?.view.session.title,
+    ...(selected ? { modelName: selected.id, effort: selected.reasoningEffort ?? undefined } : {}),
+    ...(state.permissions ? { permissionMode: state.permissions.mode.mode } : {}),
+  };
+}
 
 /** Ink owns the emitted bytes; these are only the current immutable render items. */
 function TuiHistory({
@@ -83,7 +104,12 @@ function TuiHistory({
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const { stdout, write } = useStdout();
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
+  const { snapshot, models, permissions } = state;
+  const facts = useMemo(
+    () => chromeFacts({ snapshot, models, permissions }),
+    [snapshot, models, permissions],
+  );
   const scope = JSON.stringify([
     state.snapshot?.storeId,
     state.snapshot?.view.session.workspaceId,
@@ -91,12 +117,14 @@ function TuiHistory({
     state.preferences.resolvedLanguage,
     state.preferences.theme,
     state.preferences.colorPreset,
+    testDiagnostics,
   ]);
   const messages = controller.visibleMessages;
   const executions = controller.visibleExecutions;
   const items: HistoryItem[] = useMemo(() => {
     const results = executions.filter((execution) => execution.kind !== 'model');
     return [
+      { key: 'header', version: JSON.stringify(facts), node: <TuiHeader {...facts} /> },
       ...messages.map((message) => ({
         key: `message:${message.id}`,
         version: JSON.stringify([
@@ -149,9 +177,21 @@ function TuiHistory({
               node: (
                 <Box flexDirection="column">
                   <Text bold>
-                    {card.kind} [{terminalText(card.id)}
-                    {t('] original Session')} {terminalText(card.sessionId)} {t('· revision')}{' '}
-                    {card.revision}
+                    {testDiagnostics ? (
+                      <>
+                        {card.kind} [{terminalText(card.id)}
+                        {t('] original Session')} {terminalText(card.sessionId)} {t('· revision')}{' '}
+                        {card.revision}
+                      </>
+                    ) : (
+                      t(
+                        card.kind === 'approval'
+                          ? 'Approval'
+                          : card.kind === 'plan_review'
+                            ? 'Plan review'
+                            : 'Question',
+                      )
+                    )}
                   </Text>
                   {form &&
                     Object.entries(card.request as Record<string, unknown>)
@@ -188,6 +228,8 @@ function TuiHistory({
     t,
     collapsed,
     showReasoning,
+    facts,
+    testDiagnostics,
   ]);
   const [committed, setCommitted] = useState({ scope, items, epoch: 0 });
   const replace =
@@ -233,14 +275,28 @@ function TuiMessage({
   reasoning?: string;
   showReasoning: boolean;
 }) {
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   return (
-    <Box flexDirection="column">
-      <Text bold>
-        {message.role} {'['}
-        {terminalText(message.id)}
-        {']'} {message.status}
-      </Text>
+    <Box
+      flexDirection="column"
+      marginBottom={1}
+      paddingLeft={!testDiagnostics && message.role === 'assistant' ? 2 : 0}
+    >
+      {testDiagnostics ? (
+        <Text bold>
+          {message.role} {'['}
+          {terminalText(message.id)}
+          {']'} {message.status}
+        </Text>
+      ) : (
+        message.role !== 'assistant' &&
+        message.role !== 'user' && (
+          <Text bold>{t(message.role === 'tool' ? 'Tool result' : 'System')}</Text>
+        )
+      )}
+      {!testDiagnostics && message.status === 'incomplete' && (
+        <Text color="yellow">{t('Incomplete response')}</Text>
+      )}
       {showReasoning && message.role === 'assistant' && message.outputBody && (
         <Box flexDirection="column">
           <Text dimColor>
@@ -267,7 +323,16 @@ function TuiMessage({
           )}
         </Box>
       )}
-      <TerminalMarkdown content={fullOutput ?? message.content} />
+      {!testDiagnostics && message.role === 'user' ? (
+        <Box>
+          <Text bold>❯ </Text>
+          <Box flexDirection="column" flexGrow={1}>
+            <TerminalMarkdown content={fullOutput ?? message.content} />
+          </Box>
+        </Box>
+      ) : (
+        <TerminalMarkdown content={fullOutput ?? message.content} />
+      )}
       {message.outputBody && fullOutput === undefined && (
         <Text>
           {t('Recorded Model output preview only;')}{' '}
@@ -277,29 +342,53 @@ function TuiMessage({
             : controller.port.readModelOutput
               ? t('Ctrl+O reads verified full body')
               : t('full reader unavailable')}{' '}
-          {'('}
-          {message.outputBody.contentBytes} {t('bytes,')}{' '}
-          {message.outputBody.complete ? t('complete') : t('incomplete prefix')}
-          {').'}
+          {testDiagnostics && (
+            <>
+              {'('}
+              {message.outputBody.contentBytes} {t('bytes,')}{' '}
+              {message.outputBody.complete ? t('complete') : t('incomplete prefix')}
+              {').'}
+            </>
+          )}
         </Text>
       )}
     </Box>
   );
 }
 function TuiExecution({ execution, collapsed }: { execution: Execution; collapsed: boolean }) {
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginBottom={1}>
       <Text>
-        {terminalText(execution.definitionId)} {'['}
-        {terminalText(execution.id)}
-        {']'} {execution.status}
+        {!testDiagnostics &&
+          (execution.status === 'succeeded'
+            ? '✓ '
+            : execution.status === 'failed'
+              ? '✗ '
+              : execution.status === 'outcome_unknown'
+                ? '! '
+                : '⋄ ')}
+        {terminalText(execution.definitionId)}{' '}
+        {testDiagnostics && (
+          <>
+            {'['}
+            {terminalText(execution.id)}
+            {']'}{' '}
+          </>
+        )}
+        {testDiagnostics ? execution.status : t(execution.status)}
       </Text>
       {collapsed ? (
         <Text dimColor>{t('Result collapsed')}</Text>
       ) : (
-        <Text>{terminalText(JSON.stringify(execution.result, null, 2))}</Text>
+        <Box paddingLeft={testDiagnostics ? 0 : 2}>
+          <TuiResult value={execution.result} />
+        </Box>
       )}
+      {execution.cancelRequestedAt !== null &&
+        ['planned', 'dispatching', 'running'].includes(execution.status) && (
+          <Text color="yellow">{t(' · cancel requested; cleanup not confirmed')}</Text>
+        )}
     </Box>
   );
 }
@@ -312,7 +401,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     },
     [controller],
   );
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const resultScope = JSON.stringify([controller.port.storeId, state.sessionId]);
@@ -485,6 +574,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       else if (input.toLowerCase() === 'r') void controller.openStatus();
       return;
     }
+    if (state.panel === 'help') return;
     if (cancelKey) {
       if (sourceQuestion) {
         setSourceChoices((previous) => {
@@ -789,15 +879,37 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     return withHistory(<TuiManagementRequestsPanel controller={controller} />);
   if (state.panel === 'skills')
     return withHistory(<TuiSkillsPanel key={state.sessionId} controller={controller} />);
+  if (state.panel === 'help') return withHistory(<TuiHelpPanel controller={controller} />);
+  const running = activity(state.snapshot);
+  const focused = !!card || !!state.panel || chooser || cardChooser;
+  const activeLine =
+    !focused &&
+    !state.stale &&
+    ['Working', 'Cancelling', 'Waiting for required result'].includes(running)
+      ? (running as 'Working' | 'Cancelling' | 'Waiting for required result')
+      : undefined;
   return (
     <Box flexDirection="column">
       {history}
-      <Text bold>
-        {t('Session')} {terminalText(state.sessionId ?? t('not selected'))} {'·'}{' '}
-        {t(activity(state.snapshot))}
-        {state.loading ? t(' · Loading') : ''}
-        {state.stale ? t(' · Stale') : ''}
-      </Text>
+      {testDiagnostics ? (
+        <Text bold>
+          {t('Session')} {terminalText(state.sessionId ?? t('not selected'))} {'·'}{' '}
+          {t(activity(state.snapshot))}
+          {state.loading ? t(' · Loading') : ''}
+          {state.stale ? t(' · Stale') : ''}
+        </Text>
+      ) : (
+        <>
+          {(state.stale ||
+            running === 'Unknown — verify original work' ||
+            running === 'Unavailable') && (
+            <Text color="yellow">
+              {t(state.stale ? 'Observation unknown: new writes disabled' : running)}
+            </Text>
+          )}
+          {state.loading && <Text dimColor>{t('Loading')}</Text>}
+        </>
+      )}
       {(unfinishedJobs > 0 || unknownJobs > 0) && (
         <Text>
           {t('Background Jobs:')} {unfinishedJobs} {t('unfinished')} · {unknownJobs} {t('unknown')}
@@ -811,26 +923,57 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       )}
       {chooser && <TuiSessionChooser controller={controller} close={() => setChooser(false)} />}
       {cardChooser && (
-        <Box flexDirection="column">
-          <Text bold>
-            {t('Pending cards ·')} {cardOptions.length}{' '}
-            {t('· Up/Down, Enter selects original card, Esc closes')}
-          </Text>
+        <TuiOverlayFrame
+          title={`${t('Pending cards ·')} ${cardOptions.length}`}
+          hint={t('· Up/Down, Enter selects original card, Esc closes')}
+        >
           {cardOptions.slice(Math.max(0, cardIndex - 2), cardIndex + 3).map((item) => (
             <Text key={interactionKey(item)}>
               {cardOptions[cardIndex] === item ? '› ' : '  '}
-              {item.kind} [{terminalText(item.id)}
-              {t('] original Session')} {terminalText(item.sessionId)} · Store{' '}
-              {terminalText(item.originStoreId)} {t('· revision')} {item.revision}
+              {testDiagnostics ? (
+                <>
+                  {item.kind} [{terminalText(item.id)}
+                  {t('] original Session')} {terminalText(item.sessionId)} · Store{' '}
+                  {terminalText(item.originStoreId)} {t('· revision')} {item.revision}
+                </>
+              ) : (
+                <>
+                  {t(
+                    item.kind === 'approval'
+                      ? 'Approval'
+                      : item.kind === 'plan_review'
+                        ? 'Plan review'
+                        : 'Question',
+                  )}{' '}
+                  ·{' '}
+                  {terminalText(
+                    String(
+                      (item.request &&
+                        typeof item.request === 'object' &&
+                        !Array.isArray(item.request) &&
+                        (item.request.title ?? item.request.description)) ||
+                        '',
+                    ),
+                  )}
+                </>
+              )}
               {cards.some((current) => interactionKey(current) === interactionKey(item))
                 ? ''
                 : t(' · changed; reopen to select')}
             </Text>
           ))}
-        </Box>
+        </TuiOverlayFrame>
       )}
       {card && !cardChooser && (
-        <Box flexDirection="column">
+        <TuiOverlayFrame
+          title={t(
+            card.kind === 'approval'
+              ? 'Approval'
+              : card.kind === 'plan_review'
+                ? 'Plan review'
+                : 'Question',
+          )}
+        >
           {form && question && <QuestionPanel form={form} draft={question} />}
           {card.kind === 'approval' && (
             <Text>
@@ -880,10 +1023,10 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
             </Text>
           )}
           {!form && !jsonQuestion && <Text>{terminalText(answer)}</Text>}
-        </Box>
+        </TuiOverlayFrame>
       )}
       {state.panel === 'rewind' && (
-        <Box flexDirection="column">
+        <TuiOverlayFrame title={t('Files recovery')}>
           <Text>
             {t(
               'Files recovery: arrows/Enter preview; 1 session only, 2 code only, 3 both; Enter confirms selected scope. R reloads readonly directory. Esc closes.',
@@ -919,10 +1062,10 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
               {t('; L queries selected original intent')}
             </Text>
           ))}
-        </Box>
+        </TuiOverlayFrame>
       )}
       {state.panel === 'context' && (
-        <Box flexDirection="column">
+        <TuiOverlayFrame title={t('Context')}>
           <Text>
             {t('Current selected Context projection, not actual Model input Inspector; Esc close')}
           </Text>
@@ -973,9 +1116,9 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
               </Text>
             </>
           )}
-        </Box>
+        </TuiOverlayFrame>
       )}
-      {state.notice && (
+      {state.notice && (testDiagnostics || !state.notice.startsWith('/plan [task]')) && (
         <Text>
           {t('Notice:')}{' '}
           {terminalText(
@@ -990,37 +1133,68 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           )}
         </Text>
       )}
-      {state.management && (
-        <Text>
-          {t('Original management')} {terminalText(state.management.intent.sessionId)} {'/'}{' '}
-          {terminalText(state.management.intent.request.commandId)} {state.management.intent.kind}
-          {':'} {state.management.status}{' '}
-          {state.management.status === 'delete_requested'
-            ? t('(stop unconfirmed; files unchanged)')
-            : state.management.status === 'accepted' || state.management.status === 'queued'
-              ? t('(receipt queued, not completed)')
-              : ''}
-          {state.management.omittedExtensionState ? t(' · Fork omitted extension state') : ''}
-        </Text>
-      )}
-      {state.intent && (
-        <Text>
-          {t('Original')} {terminalText(state.intent.sessionId)} {'/'}{' '}
-          {terminalText(state.intent.commandId)} {terminalText(state.intent.kind)}
-          {':'} {state.intent.phase} {t('(receipt is not dispatch success)')}
-        </Text>
-      )}
+      {state.management &&
+        (testDiagnostics ||
+          !['applied', 'completed'].includes(state.management.status) ||
+          state.management.intent.sessionId !== state.sessionId) && (
+          <Text>
+            {testDiagnostics || state.management.intent.sessionId !== state.sessionId ? (
+              <>
+                {t('Original management')} {terminalText(state.management.intent.sessionId)} {'/'}{' '}
+                {terminalText(state.management.intent.request.commandId)}{' '}
+                {state.management.intent.kind}
+              </>
+            ) : (
+              t('Session operation')
+            )}
+            {':'} {state.management.status}{' '}
+            {state.management.status === 'delete_requested'
+              ? t('(stop unconfirmed; files unchanged)')
+              : state.management.status === 'accepted' || state.management.status === 'queued'
+                ? t('(receipt queued, not completed)')
+                : ''}
+            {state.management.omittedExtensionState ? t(' · Fork omitted extension state') : ''}
+          </Text>
+        )}
+      {state.intent &&
+        (testDiagnostics ||
+          ['unknown', 'submitting', 'rejected'].includes(state.intent.phase) ||
+          state.intent.sessionId !== state.sessionId) && (
+          <Text>
+            {testDiagnostics || state.intent.sessionId !== state.sessionId ? (
+              <>
+                {t('Original')} {terminalText(state.intent.sessionId)} {'/'}{' '}
+                {terminalText(state.intent.commandId)} {terminalText(state.intent.kind)}
+              </>
+            ) : (
+              t('Submission')
+            )}
+            {':'}{' '}
+            {testDiagnostics
+              ? state.intent.phase
+              : t(state.intent.phase === 'unknown' ? 'Outcome unknown' : state.intent.phase)}{' '}
+            {testDiagnostics && t('(receipt is not dispatch success)')}
+            {state.intent.phase === 'unknown' && (
+              <>
+                {' · '}
+                {t('Ctrl+L: check the original request')}
+              </>
+            )}
+          </Text>
+        )}
       {state.error && (
         <Text color="red">
           {t('Error:')} {terminalText(state.error)}
         </Text>
       )}
-      <Text>
-        {t(
-          'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command',
-        )}
-      </Text>
-      {!card && !state.panel && !chooser && !cardChooser && (
+      {testDiagnostics && (
+        <Text>
+          {t(
+            'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command',
+          )}
+        </Text>
+      )}
+      {testDiagnostics && !card && !state.panel && !chooser && !cardChooser && (
         <Text dimColor>
           {tail &&
             t(
@@ -1036,47 +1210,59 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           )}
         </Text>
       )}
-      <TuiComposer
-        buffer={composer}
-        files={state.fileCandidates}
-        fileScope={`${composerScope}:${state.loading}:${state.snapshotStale}`}
-        onFileQuery={fileQuery}
-        value={state.draft}
-        active={!card && !state.panel && !chooser && !cardChooser}
-        label={
-          state.planning
-            ? state.snapshot?.view.runs.some((r) => r.isActive)
-              ? t('Queue Planning after original Run')
-              : t('Planning next Run')
-            : state.snapshot?.view.runs.some((r) => r.isActive)
-              ? ['context.compress', 'context.compression.reset'].includes(
-                  state.snapshot.activeCommand?.kind ?? '',
-                )
-                ? t('Queue follow-up after original maintenance Run')
-                : t('Steer original active Run')
-              : t('New Run')
-        }
-        onChange={(text) => controller.setDraft(text)}
-        onSubmit={() => void controller.send()}
-        onEmptyEnter={() => {
-          const current = controller.visibleExecutions
-            .filter((item) => item.kind !== 'model')
-            .at(-1);
-          if (
-            !tail ||
-            !current ||
-            controller.state.sessionId !== state.sessionId ||
-            executionDisplayKey(current) !== executionDisplayKey(tail)
-          )
-            return;
-          const collapsed = new Set(resultDisplay.collapsed),
-            key = executionDisplayKey(tail);
-          if (collapsed.has(key)) collapsed.delete(key);
-          else collapsed.add(key);
-          setResultDisplay({ ...resultDisplay, collapsed });
-        }}
-        onTogglePlan={() => controller.togglePlanning()}
-      />
+      <TuiFooter
+        {...chromeFacts(state)}
+        activity={activeLine}
+        planning={state.planning}
+        inputActive={!focused}
+      >
+        {!focused && (state.planning || state.snapshot?.view.runs.some((r) => r.isActive)) && (
+          <Text dimColor>
+            {state.planning ? t('Planning next Run') : t('Add guidance to the current task')}
+          </Text>
+        )}
+        <TuiComposer
+          buffer={composer}
+          files={state.fileCandidates}
+          fileScope={`${composerScope}:${state.loading}:${state.snapshotStale}`}
+          onFileQuery={fileQuery}
+          value={state.draft}
+          active={!card && !state.panel && !chooser && !cardChooser}
+          label={
+            state.planning
+              ? state.snapshot?.view.runs.some((r) => r.isActive)
+                ? t('Queue Planning after original Run')
+                : t('Planning next Run')
+              : state.snapshot?.view.runs.some((r) => r.isActive)
+                ? ['context.compress', 'context.compression.reset'].includes(
+                    state.snapshot.activeCommand?.kind ?? '',
+                  )
+                  ? t('Queue follow-up after original maintenance Run')
+                  : t('Steer original active Run')
+                : t('New Run')
+          }
+          onChange={(text) => controller.setDraft(text)}
+          onSubmit={() => void controller.send()}
+          onEmptyEnter={() => {
+            const current = controller.visibleExecutions
+              .filter((item) => item.kind !== 'model')
+              .at(-1);
+            if (
+              !tail ||
+              !current ||
+              controller.state.sessionId !== state.sessionId ||
+              executionDisplayKey(current) !== executionDisplayKey(tail)
+            )
+              return;
+            const collapsed = new Set(resultDisplay.collapsed),
+              key = executionDisplayKey(tail);
+            if (collapsed.has(key)) collapsed.delete(key);
+            else collapsed.add(key);
+            setResultDisplay({ ...resultDisplay, collapsed });
+          }}
+          onTogglePlan={() => controller.togglePlanning()}
+        />
+      </TuiFooter>
     </Box>
   );
 }

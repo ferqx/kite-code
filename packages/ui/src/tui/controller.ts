@@ -122,6 +122,13 @@ export interface TuiSnapshot {
   readonly interactions: readonly Interaction[];
   /** Actual active Run origin, read and identity-checked by the admitted host. */
   readonly activeCommand?: Command;
+  /** Optional display facts read through the admitted host's public Client. */
+  readonly environment?: {
+    workspacePath: string;
+    modelName?: string;
+    effort?: string;
+    permissionMode?: import('@kite-ai/client').PermissionModeState['mode'];
+  };
 }
 function freezeIntent<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
@@ -211,6 +218,7 @@ export interface TuiState {
     saved?: import('@kite-ai/client/file-recovery-intent').FileRecoveryIntent[];
   };
   panel?:
+    | 'help'
     | 'context'
     | 'management_requests'
     | 'rewind'
@@ -4396,6 +4404,7 @@ export class TuiController {
     }
     if (command.kind === 'help') {
       this.publish({
+        panel: 'help',
         notice:
           '/plan [task] /background [stop|output|child <Job ID>] /theme /language /model /effort /new /resume /drafts /draft <id> /permissions /status /skills /mcp /clear /export /context /context requests /rewind /compact [focus] /compact reset /session rename <title> /session delete confirm /session fork <title> /exit',
       });

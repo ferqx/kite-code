@@ -4,6 +4,60 @@ import { defaultTuiPreferences } from './preferences';
 
 /** Only explicit UI-owned labels enter this catalog. Public machine values and body text do not. */
 export const tuiChinese: Readonly<Record<string, string>> = {
+  'Model unavailable': '模型信息不可用',
+  'Workspace unavailable': '工作区信息不可用',
+  'Automatic review': '自动审核',
+  'Full access': '完全访问',
+  'Request approval': '请求批准',
+  'Shift+Tab: exit plan · /help': 'Shift+Tab 退出计划 · /help 帮助',
+  'Shift+Tab: plan · /help': 'Shift+Tab 计划 · /help 帮助',
+  'Tool result': '工具结果',
+  System: '系统',
+  'Incomplete response': '回答尚不完整',
+  Approval: '审批',
+  'Plan review': '方案审核',
+  'Files recovery': '文件恢复',
+  Context: '上下文',
+  'Session operation': '会话操作',
+  Submission: '提交状态',
+  'Ctrl+L: check the original request': 'Ctrl+L 查询原申请',
+  'Add guidance to the current task': '补充当前任务',
+  'Observation unknown: new writes disabled': '观察状态未知，暂不能提交新申请',
+  Loading: '读取中',
+  'Stop request': '停止申请',
+  'Background tasks': '后台任务',
+  'Child conversation': '子会话',
+  Trust: '信任',
+  Untrust: '撤销信任',
+  Help: '帮助',
+  '↑/↓ scroll · Home/End · Esc close': '上下滚动 · Home/End 跳转 · Esc 关闭',
+  'Model and reasoning settings': '模型与思考设置',
+  'Create or switch conversation': '新建或切换会话',
+  'Review a plan before work': '先审核计划',
+  'Permissions and workspace trust': '权限与工作区信任',
+  'Tools and Skills': '工具与 Skills',
+  'Background results and child logs': '后台结果与子日志',
+  'Context and original requests': '上下文与原申请',
+  'Files and execution recovery': '文件与执行恢复',
+  'Context maintenance': '上下文维护',
+  'Saved drafts': '已保存草稿',
+  'Session management': '会话管理',
+  'Appearance and language': '显示与语言',
+  'Connection, export and display': '连接、导出与显示',
+  'Exit the terminal': '退出终端',
+  'Ctrl+N new conversation · Ctrl+R sessions · Ctrl+B pending requests':
+    'Ctrl+N 新会话 · Ctrl+R 切换会话 · Ctrl+B 待决交互',
+  'Ctrl+O full output · Ctrl+T reasoning · Ctrl+C cancel · Ctrl+Q exit':
+    'Ctrl+O 全文 · Ctrl+T 思考 · Ctrl+C 取消 · Ctrl+Q 退出',
+  succeeded: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+  outcome_unknown: '结果未知',
+  planned: '待执行',
+  dispatching: '派发中',
+  running: '执行中',
+  submitting: '提交中',
+  'Outcome unknown': '结果未知',
   Search: '搜索',
   'Delete Session?': '删除会话？',
   'Delete hides this Session and requests its work to stop. Workspace files stay unchanged.':
@@ -544,15 +598,19 @@ export type TuiTranslator = (label: string) => string;
 export function translateTuiLabel(label: string, language: 'zh-CN' | 'en-US'): string {
   return language === 'zh-CN' ? (tuiChinese[label] ?? label) : label;
 }
-const Presentation = createContext({ preferences: defaultTuiPreferences });
+const Presentation = createContext<{
+  preferences: typeof defaultTuiPreferences;
+  /** Trusted renderer option; development alone never enables test diagnostics. */
+  testDiagnostics?: boolean;
+}>({ preferences: defaultTuiPreferences });
 export const TuiPresentationProvider = Presentation.Provider;
 export function useTuiPresentation() {
-  const { preferences } = useContext(Presentation);
+  const { preferences, testDiagnostics = false } = useContext(Presentation);
   const t = useMemo<TuiTranslator>(
     () => (label) => translateTuiLabel(label, preferences.resolvedLanguage),
     [preferences.resolvedLanguage],
   );
-  return { t, preferences };
+  return { t, preferences, testDiagnostics };
 }
 const lightAccents = {
   teal: '#087E66',

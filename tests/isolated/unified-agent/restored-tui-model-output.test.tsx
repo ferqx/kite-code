@@ -369,7 +369,7 @@ test('restored shared TUI reads plain and sealed original Model bodies with real
       const mount = async (id: string) => {
         controller = new TuiController(port);
         await controller.select(id);
-        app = render(<TuiSession controller={controller} />);
+        app = render(<TuiSession testDiagnostics controller={controller} />);
         await Bun.sleep(20);
       };
       const key = async (input: string) => {

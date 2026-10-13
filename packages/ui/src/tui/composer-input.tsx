@@ -4,7 +4,7 @@ import stringWidth from 'string-width';
 import { type ComposerBuffer, composerDisplay } from './composer';
 import type { TuiState } from './controller';
 import type { FileToken } from './file-candidates';
-import { useTuiPresentation } from './presentation';
+import { TuiText as Label, useTuiPresentation } from './presentation';
 export function isCtrlCBatch(input: string): boolean {
   return input.length > 1 && [...input].every((control) => control === '\u0003');
 }
@@ -34,11 +34,11 @@ export function TuiComposer({
   onFileQuery?(token?: FileToken): void;
 }) {
   const [, render] = useReducer((n: number) => n + 1, 0);
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const { stdout } = useStdout();
-  const prefix = `${label} > `;
-  const width = Math.max(24, (stdout.columns ?? 80) - stringWidth(prefix) - 1);
+  const prefix = testDiagnostics ? `${label} > ` : '❯ ';
+  const width = Math.max(1, (stdout.columns || 80) - stringWidth(prefix) - 1);
   buffer.sync(value);
   const token = active ? buffer.fileToken : undefined;
   const tokenKey = token?.key;
@@ -142,7 +142,7 @@ export function TuiComposer({
     visible = lines.slice(start, start + 5);
   return (
     <Box flexDirection="column">
-      {start > 0 && <Text dimColor>{t('↑ Earlier input')}</Text>}
+      {start > 0 && <Label dimColor>{t('↑ Earlier input')}</Label>}
       {visible.map((line, n) => (
         <Text key={start + n}>
           {n === 0 ? prefix : ' '.repeat(stringWidth(prefix))}
@@ -154,7 +154,7 @@ export function TuiComposer({
           {buffer.cursor === line.end && <Text inverse> </Text>}
         </Text>
       ))}
-      {start + visible.length < lines.length && <Text dimColor>{t('↓ Later input')}</Text>}
+      {start + visible.length < lines.length && <Label dimColor>{t('↓ Later input')}</Label>}
       {files && files.key === tokenKey && files.phase === 'reading' && (
         <Text dimColor>{t('Reading Workspace file names…')}</Text>
       )}

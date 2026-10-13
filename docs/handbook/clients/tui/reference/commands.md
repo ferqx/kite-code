@@ -25,10 +25,14 @@
 | `/export` | 无参数 | 当前已加载对话 Markdown，不代替完整 records export |
 | `/clear` | 无参数 | 清理本地正文展示，保留历史数据、草稿、待决审批和活动工作 |
 | `/status` | 无参数 | 实际 profile/实例/API/候选与执行、发行、遥测事实 |
-| `/help` | `/h`，无参数 | 当前命令帮助 |
+| `/help` | `/h`，无参数 | 当前命令帮助；上下滚动、Home/End 跳转、Esc 或 Ctrl+C 关闭，不取消任务 |
 | `/exit` | `/quit`、`/q`，无参数 | 明确结束本宿主 |
 
 未知 slash 不作为普通模型任务提交，固定命令优先于同名 Skill。只有当前编译目录中合格的 `/<Skill名称> [任务]` 才能显式激活 Workflow。`/mcp` 是固定无参数命令；当前有限目录与启停不等于完整认证、重连、增删或工具管理，差异见[MCP 指南](../guides/mcp-and-skills.md#通用-tui-的-mcp-目录与选择)。多余参数局部拒绝，不静默扩大操作。当前实现见[命令 owner](../../../../../packages/ui/src/tui/commands.ts)，详细按键见[键盘参考](keyboard.md)。
+
+## 测试诊断展示
+
+普通 `tui` 和 `tui:dev` 默认不显示测试诊断。自动化身份断言可明确添加启动参数 `--test-ui-diagnostics`；同一参数用于 macOS、Windows、Linux，不依赖开发环境变量。它只增加准确 ID、回执和完整协议对象的展示，不改变审批、权限、任务提交或数据范围。`/status` 和显式恢复详情在普通模式仍可用于核实；日常编辑无需开启此选项。
 
 ## 通用开发 TUI 草稿入口
 

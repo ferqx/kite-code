@@ -1,5 +1,7 @@
 # UI
 
+当前 TUI 接回原 Ink 的纯展示骨架，正常与显式测试诊断由[终端 owner](src/tui/README.md#原-ink-展示与明确测试诊断)维护。Desktop 的[诊断展示 context](src/desktop/diagnostics.tsx)允许 Native 明确传入 false／true，回复失败详情与客户端面板共用该值；未指定的现有 Web 消费者保原环境行为，不扩大控制权限。
+
 ## 原桌面展示层
 
 `@kite-ai/ui/desktop` 的 [SessionPage](src/desktop/SessionPage.tsx)、Sidebar、Conversation、Composer、RightSidebar 与 shadcn 控件从原 kite-client-ui 展示源码迁入，保留原 CSS、交互和依赖版本；[样式导出](src/desktop/style.css)供正式 Native 的原 Vite/Tailwind 管线编译。此层不导入旧 workspace 或 Runtime，事实映射和写入 authority 属 [Desktop host](../../apps/desktop/README.md#复用原桌面展示层)。

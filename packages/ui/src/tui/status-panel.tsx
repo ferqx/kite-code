@@ -1,4 +1,4 @@
-import { Box } from 'ink';
+import { TuiOverlayFrame } from './chrome';
 import { activity, type TuiController, terminalText } from './controller';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 
@@ -14,8 +14,7 @@ export function TuiStatusPanel({ controller }: { controller: TuiController }) {
     ['planned', 'dispatching', 'running', 'outcome_unknown'].includes(value.status),
   );
   return (
-    <Box flexDirection="column">
-      <Text>{t('Host status · Esc back · R refresh')}</Text>
+    <TuiOverlayFrame title={<> {t('Host status · Esc back · R refresh')} </>}>
       <Text>
         {t('Connection:')} {status?.connection ?? 'unknown'} {'·'} {host?.mode ?? 'unknown'}{' '}
         {t('· Profile:')} {terminalText(host?.profile ?? 'unknown')}
@@ -87,6 +86,6 @@ export function TuiStatusPanel({ controller }: { controller: TuiController }) {
       {status?.error && (
         <Text>{t('Current host status unknown; refresh to verify original host')}</Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

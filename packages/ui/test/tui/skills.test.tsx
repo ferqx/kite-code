@@ -168,7 +168,7 @@ test('Ink arrows navigate entries, detail pages preserve full text and local Ctr
   const f = fixture();
   await f.controller.select('a');
   await f.controller.openSkills();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
   await tick();
   expect(ui.lastFrame()).toContain('Knowledge Skills · total 303');
@@ -232,7 +232,7 @@ test('unavailable source is unknown and retains last confirmed catalogue; an ava
   await f.controller.select('b');
   await f.controller.openSkills();
   expect(f.controller.state.skills?.facts?.availability).toBe('unavailable');
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(ui.lastFrame()).toContain('total unknown');
   expect(ui.lastFrame()).toContain('Catalogue source unavailable');
@@ -362,7 +362,7 @@ test('ambiguous, knowledge-only and unqualified Workflow never create work; cand
   const available = workflowFixture();
   await available.controller.select('a');
   await available.controller.openSkills();
-  const ui = render(<TuiSession controller={available.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={available.controller} />);
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(ui.lastFrame()).toContain('/review [task]');
   expect(ui.lastFrame()).toContain('Read only · Use /name [task]');
@@ -520,7 +520,7 @@ test('Ink CtrlL recovers only the original lost Workflow receipt then refreshes 
     lookups++;
     return f.receipt(id, sessionId);
   };
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(ui.lastFrame()).toContain('unknown');
   ui.stdin.write('\u000c');

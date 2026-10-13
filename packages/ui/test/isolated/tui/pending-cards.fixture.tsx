@@ -363,7 +363,9 @@ if (process.env.KITE_TUI_CARDS)
     },
   );
 process.stdin.setRawMode(true);
-const terminal = render(<TuiSession controller={controller} />, { exitOnCtrlC: false });
+const terminal = render(<TuiSession testDiagnostics controller={controller} />, {
+  exitOnCtrlC: false,
+});
 let updating = false;
 const refreshRead = new AbortController();
 const timer = setInterval(() => {

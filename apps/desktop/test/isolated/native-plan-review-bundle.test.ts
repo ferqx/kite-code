@@ -53,6 +53,7 @@ test.skipIf(process.platform !== 'darwin')(
       const electronDist = resolve(dirname(dirname(require('electron') as string)), '../..');
       const source = join(root, 'source-candidate');
       const built = await buildNativeCandidate({
+        testDiagnostics: true,
         terminalRoot: terminal.root,
         electronDist,
         outdir: source,

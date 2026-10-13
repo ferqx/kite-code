@@ -1,6 +1,7 @@
 import type { SkillCataloguePage } from '@kite-ai/client';
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useMemo, useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import { TuiText as Text, type TuiTranslator, useTuiPresentation } from './presentation';
 import { manualWorkflow } from './skills';
@@ -71,11 +72,14 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
   });
   const start = Math.max(0, Math.min(index - 2, entries.length - 5));
   return (
-    <Box flexDirection="column">
-      <Text>
-        {t('Knowledge Skills · total')}{' '}
-        {facts?.availability === 'available' ? entries.length : 'unknown'}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        <>
+          {t('Knowledge Skills · total')}{' '}
+          {facts?.availability === 'available' ? entries.length : 'unknown'}
+        </>
+      }
+    >
       <Text>
         {t(
           facts?.entries.some((value) => value.workflow)
@@ -120,7 +124,7 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
         );
         return (
           <Text key={value.id}>
-            {start + offset === index ? '> ' : '  '}
+            {start + offset === index ? '› ' : '  '}
             {name.slice(0, 28).join('')}
             {name.length > 28 ? '…' : ''} {'['}
             {value.state}
@@ -152,6 +156,6 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
           {t('; refresh original Workspace')}
         </Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

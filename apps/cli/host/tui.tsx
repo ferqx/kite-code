@@ -56,11 +56,13 @@ function TerminalHost({
   onNew,
   onQuit,
   shared,
+  testDiagnostics = false,
 }: {
   controller: TuiController;
   onNew: () => Promise<string>;
   onQuit: () => void;
   shared: boolean;
+  testDiagnostics?: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const [notice, setNotice] = useState('');
@@ -78,11 +80,13 @@ function TerminalHost({
   });
   return (
     <Box flexDirection="column">
-      <Text>
-        {t('Development TUI · Ctrl+N new Workspace Session · Ctrl+Q')}{' '}
-        {shared ? t('disconnect shared service') : t('quit owned host')}
-      </Text>
-      <TuiSession controller={controller} />
+      {testDiagnostics && (
+        <Text>
+          {t('Development TUI · Ctrl+N new Workspace Session · Ctrl+Q')}{' '}
+          {shared ? t('disconnect shared service') : t('quit owned host')}
+        </Text>
+      )}
+      <TuiSession controller={controller} testDiagnostics={testDiagnostics} />
       {notice && <Text>{shownNotice}</Text>}
       {state.intent?.phase === 'unknown' && (
         <Text>{t('Original outcome unknown: Ctrl+K only reads original Command')}</Text>
@@ -161,6 +165,8 @@ export interface TUIHostOptions {
   exitSignal?: AbortSignal;
   /** Private host test hook, never stdout bootstrap or public token. */
   onLaunched?: (value: { pid: number }) => void;
+  /** Explicit renderer option, also selected by the dedicated test UI argument. */
+  testDiagnostics?: boolean;
 }
 /** Native composition only; no Loop or Provider implementation. */
 export async function runTUIHost(input: TUIHostOptions): Promise<number> {
@@ -564,12 +570,41 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
             activeCommand.id !== active!.originCommandId)
         )
           throw new CLIHostError('active_command_identity_mismatch');
+        // Chrome uses public observed configuration. A failed optional read must not
+        // prevent the conversation or manufacture a configured model/permission.
+        const [models, mode] = await Promise.allSettled([
+          client.getModelSettings('workspace', { storeId, workspaceId, signal }),
+          client.getPermissionMode(sessionId, { storeId, signal }),
+        ]);
+        const modelFacts =
+          models.status === 'fulfilled' &&
+          models.value.storeId === storeId &&
+          models.value.workspaceId === workspaceId &&
+          models.value.scope === 'workspace'
+            ? models.value
+            : undefined;
+        const selectedModel = modelFacts?.models.find(
+          (model) => model.id === modelFacts.defaultModelId,
+        );
+        const permission =
+          mode.status === 'fulfilled' &&
+          mode.value.storeId === storeId &&
+          mode.value.sessionId === sessionId
+            ? mode.value.mode
+            : undefined;
         return {
           storeId,
           view,
           messages,
           interactions,
           ...(activeCommand ? { activeCommand } : {}),
+          environment: {
+            workspacePath: initial.workspace.rootUri,
+            ...(selectedModel
+              ? { modelName: selectedModel.id, effort: selectedModel.reasoningEffort ?? undefined }
+              : {}),
+            ...(permission ? { permissionMode: permission } : {}),
+          },
         };
       },
       readModelOutput: (sessionId, executionId, signal) =>
@@ -699,6 +734,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         onNew={createNew}
         onQuit={requestQuit}
         shared={!!input.server}
+        testDiagnostics={input.testDiagnostics}
       />,
       {
         exitOnCtrlC: false,

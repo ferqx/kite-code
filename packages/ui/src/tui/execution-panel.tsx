@@ -1,12 +1,13 @@
 import { Box, useInput } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import { TerminalMarkdown } from './markdown';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 
 export function TuiExecutionPanel({ controller }: { controller: TuiController }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   const jobs =
     state.snapshot?.view.executions.filter(
       (execution) =>
@@ -79,11 +80,13 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
   });
   const reading = state.executionReading;
   return (
-    <Box flexDirection="column">
-      <Text bold>
-        {t('Original background Jobs · Session')}{' '}
-        {terminalText(state.sessionId ?? t('unavailable'))}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        testDiagnostics
+          ? `${t('Original background Jobs · Session')} ${terminalText(state.sessionId ?? t('unavailable'))}`
+          : t('Background tasks')
+      }
+    >
       <Text>
         {t(
           'Up/Down target · O complete recorded output · C child logs · S then Enter stop original Job · R refresh · Ctrl+L original receipt · Esc/Ctrl+C close reader',
@@ -92,7 +95,8 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
       {jobs.map((item, i) => (
         <Text key={item.id}>
           {index === i ? '› ' : '  '}
-          {terminalText(item.definitionId)} [{terminalText(item.id)}] {item.status}
+          {terminalText(item.definitionId)} {testDiagnostics && <>[{terminalText(item.id)}] </>}
+          {testDiagnostics ? item.status : t(item.status)}
           {item.originStoreId !== state.snapshot?.storeId
             ? t(' · restored history; read only')
             : ''}
@@ -102,15 +106,23 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
       {!jobs.length && <Text>{t('No verified Job in the current snapshot')}</Text>}
       {confirm && (
         <Text bold>
-          {t('Confirm stop original Job')} [{terminalText(confirm)}]
+          {t('Confirm stop original Job')} {testDiagnostics && <>[{terminalText(confirm)}]</>}
           {t(' · Enter submits once; Esc closes')}
         </Text>
       )}
       {[...state.jobStops.values()].map((intent) => (
         <Text key={intent.request.commandId}>
-          {t('Original')} {terminalText(intent.target.storeId)} /{' '}
-          {terminalText(intent.target.sessionId)} / Job {terminalText(intent.target.executionId)}{' '}
-          {t('/ stop Command')} {terminalText(intent.request.commandId)}: {intent.phase}
+          {testDiagnostics ? (
+            <>
+              {t('Original')} {terminalText(intent.target.storeId)} /{' '}
+              {terminalText(intent.target.sessionId)} / Job{' '}
+              {terminalText(intent.target.executionId)} {t('/ stop Command')}{' '}
+              {terminalText(intent.request.commandId)}:
+            </>
+          ) : (
+            t('Stop request')
+          )}{' '}
+          {intent.phase}
           {intent.phase === 'applied' ? t(' · cancel requested; await actual Job terminal') : ''}
         </Text>
       ))}
@@ -118,7 +130,8 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
       {state.error && <Text>{terminalText(state.error)}</Text>}
       {reading && (
         <Text>
-          {t('Original read')} [{terminalText(reading.target.executionId)}]: {reading.phase}
+          {t('Original read')}{' '}
+          {testDiagnostics && <>[{terminalText(reading.target.executionId)}]</>}: {reading.phase}
           {reading.error ? ' · ' + terminalText(reading.error) : ''}
         </Text>
       )}
@@ -146,29 +159,50 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
       {reading?.child && (
         <Box flexDirection="column">
           <Text bold>
-            {t('Original child')} [{terminalText(reading.child.view.session.id)}]
-            {t(' · parent carrier [')}
-            {terminalText(reading.child.carrier.id)}]{t(' · selection')}{' '}
-            {terminalText(reading.child.view.session.contextSelectionId)}
-            {t(' · frozen history through')} {reading.child.view.session.nextSeq}
+            {testDiagnostics ? (
+              <>
+                {t('Original child')} [{terminalText(reading.child.view.session.id)}]
+                {t(' · parent carrier [')}
+                {terminalText(reading.child.carrier.id)}]{t(' · selection')}{' '}
+                {terminalText(reading.child.view.session.contextSelectionId)}
+                {t(' · frozen history through')} {reading.child.view.session.nextSeq}
+              </>
+            ) : (
+              t('Child conversation')
+            )}
           </Text>
           {reading.child.messages.map((message) => {
             const full = reading.child!.modelOutputs.get(message.id);
             return (
               <Box key={message.id} flexDirection="column">
                 <Text>
-                  {message.role} [{terminalText(message.id)}] {t('· seq')} {message.seq} ·{' '}
+                  {message.role}{' '}
+                  {testDiagnostics && (
+                    <>
+                      [{terminalText(message.id)}] {t('· seq')} {message.seq} ·{' '}
+                    </>
+                  )}
                   {message.status}
                 </Text>
                 <TerminalMarkdown content={full?.output.content ?? message.content} />
-                {message.toolCallId && (
+                {testDiagnostics && message.toolCallId && (
                   <Text>
                     {t('Original tool call')} [{terminalText(message.toolCallId)}]
                   </Text>
                 )}
-                {!full && message.toolCalls && (
-                  <Text>{terminalText(JSON.stringify(message.toolCalls))}</Text>
-                )}
+                {!full &&
+                  message.toolCalls &&
+                  (testDiagnostics ? (
+                    <Text>{terminalText(JSON.stringify(message.toolCalls))}</Text>
+                  ) : (
+                    message.toolCalls.map((call) => (
+                      <Text key={call.id}>
+                        {terminalText(call.name)}
+                        {'\n'}
+                        {terminalText(call.arguments)}
+                      </Text>
+                    ))
+                  ))}
                 {full && (
                   <>
                     <Text>
@@ -176,7 +210,17 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
                       · {full.output.complete ? t('complete') : t('incomplete recorded prefix')}
                     </Text>
                     <Text>{terminalText(full.output.reasoning)}</Text>
-                    <Text>{terminalText(JSON.stringify(full.output.toolCalls))}</Text>
+                    {testDiagnostics ? (
+                      <Text>{terminalText(JSON.stringify(full.output.toolCalls))}</Text>
+                    ) : (
+                      full.output.toolCalls.map((call) => (
+                        <Text key={call.id}>
+                          {terminalText(call.name)}
+                          {'\n'}
+                          {terminalText(call.arguments)}
+                        </Text>
+                      ))
+                    )}
                   </>
                 )}
                 {message.outputBody && !full && (
@@ -189,6 +233,6 @@ export function TuiExecutionPanel({ controller }: { controller: TuiController })
           })}
         </Box>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

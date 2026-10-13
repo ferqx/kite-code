@@ -1,5 +1,6 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import type { TuiPermissionSnapshot } from './permissions';
 import { TuiText as Text, useTuiPresentation } from './presentation';
@@ -15,7 +16,7 @@ type Choice =
   | { kind: 'trust'; trusted: boolean }
   | { kind: 'clear' };
 export function TuiPermissionPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   const state = controller.state,
     observed = state.permissions;
   const [index, setIndex] = useState(0),
@@ -55,19 +56,34 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
       setPending({ choice: { kind: 'mode', mode: modes[index]!, makeDefault }, observed });
   });
   return (
-    <Box flexDirection="column">
-      <Text bold>
-        {t('Permissions · original Session')} {terminalText(state.sessionId ?? t('unavailable'))}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        <>
+          {t('Permissions · original Session')}{' '}
+          {testDiagnostics && terminalText(state.sessionId ?? t('unavailable'))}
+        </>
+      }
+    >
       {!observed ? (
         <Text>{t('Reading actual permission controls')}</Text>
       ) : (
         <>
           <Text>
-            {t('Mode')} {modeLabels[observed.mode.mode]} ({observed.mode.mode}) {t('revision')}{' '}
-            {observed.mode.revision} {t('· scope')} {terminalText(observed.mode.scopeSessionId)}{' '}
-            {t('· default')} {modeLabels[observed.mode.defaultMode]} ({observed.mode.defaultMode}){' '}
-            {t('revision')} {observed.mode.defaultRevision}
+            {t('Mode')} {modeLabels[observed.mode.mode]}{' '}
+            {testDiagnostics && `(${observed.mode.mode})`}{' '}
+            {testDiagnostics && (
+              <>
+                {t('revision')} {observed.mode.revision} {t('· scope')}{' '}
+                {terminalText(observed.mode.scopeSessionId)}{' '}
+              </>
+            )}
+            {t('· default')} {modeLabels[observed.mode.defaultMode]}{' '}
+            {testDiagnostics && `(${observed.mode.defaultMode})`}{' '}
+            {testDiagnostics && (
+              <>
+                {t('revision')} {observed.mode.defaultRevision}
+              </>
+            )}
           </Text>
           {modes.map((mode, i) => (
             <Text key={mode}>
@@ -81,11 +97,19 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
           <Text>
             {t('Workspace')} {terminalText(observed.trust.workspaceId)}
             {':'} {observed.trust.status}
-            {t(', revision')} {observed.trust.revision}
+            {testDiagnostics && (
+              <>
+                {t(', revision')} {observed.trust.revision}
+              </>
+            )}
           </Text>
           <Text>
-            {t('Identity')} {observed.trust.canonicalIdentity} {t('· read scope')}{' '}
-            {observed.trust.externalReadScopeDigest}
+            {t('Identity')} {observed.trust.canonicalIdentity}{' '}
+            {testDiagnostics && (
+              <>
+                {t('· read scope')} {observed.trust.externalReadScopeDigest}
+              </>
+            )}
           </Text>
           {observed.trust.readScopes.map((scope, i) => (
             <Text key={i}>
@@ -95,8 +119,13 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
           ))}
           <Text>{t('T review trust / U review untrust · trust does not approve every Tool')}</Text>
           <Text>
-            {t('Saved same_command grants:')} {observed.grants.items.length} {t('· revision')}{' '}
-            {observed.grants.revision} {t('· frozen upper')} {observed.grants.upperSeq}
+            {t('Saved same_command grants:')} {observed.grants.items.length}{' '}
+            {testDiagnostics && (
+              <>
+                {t('· revision')} {observed.grants.revision} {t('· frozen upper')}{' '}
+                {observed.grants.upperSeq}
+              </>
+            )}
           </Text>
           {observed.grants.items.map(({ grant }) => (
             <Text key={grant.id}>{terminalText(JSON.stringify(grant))}</Text>
@@ -110,18 +139,25 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
       )}
       {pending && (
         <Text color="yellow">
-          {t('Confirm original')} {terminalText(JSON.stringify(pending.choice))}{' '}
+          {t('Confirm original')}{' '}
+          {testDiagnostics
+            ? terminalText(JSON.stringify(pending.choice))
+            : pending.choice.kind === 'mode'
+              ? `${modeLabels[pending.choice.mode]} · ${t('Future Session default:')} ${t(pending.choice.makeDefault ? 'yes' : 'no')}`
+              : pending.choice.kind === 'trust'
+                ? t(pending.choice.trusted ? 'Trust' : 'Untrust')
+                : t('Saved same_command grants:') + ' 0'}{' '}
           {t('· Enter explicitly submits · Esc leaves unchanged')}
         </Text>
       )}
       {state.permissionOutcome && (
         <Text>
           {t('Original permission')}{' '}
-          {terminalText(state.permissionOutcome.intent.request.commandId)}{' '}
+          {testDiagnostics && terminalText(state.permissionOutcome.intent.request.commandId)}{' '}
           {state.permissionOutcome.intent.kind}
           {':'} {state.permissionOutcome.status} {t('(control saved is not dispatch success)')}
         </Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

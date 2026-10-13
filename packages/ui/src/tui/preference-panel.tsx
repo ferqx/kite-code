@@ -1,5 +1,6 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import type { TuiColorPreset, TuiLanguage } from './preferences';
 import { TuiText as Text, useTuiPresentation } from './presentation';
@@ -36,8 +37,7 @@ export function TuiPreferencePanel({ controller }: { controller: TuiController }
     }
   });
   return (
-    <Box flexDirection="column">
-      <Text bold>{t(language ? 'Language' : 'Theme')}</Text>
+    <TuiOverlayFrame title={<> {t(language ? 'Language' : 'Theme')} </>}>
       <Text>{t('Local client preferences; work and permissions remain unchanged.')}</Text>
       {options.map((value, i) => (
         <Text key={value} bold={index === i}>
@@ -74,6 +74,6 @@ export function TuiPreferencePanel({ controller }: { controller: TuiController }
                   )}
       </Text>
       {state.preferenceError && <Text color="red">{terminalText(state.preferenceError)}</Text>}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

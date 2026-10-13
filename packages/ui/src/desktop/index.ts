@@ -57,6 +57,7 @@ export {
   TooltipProvider,
   TooltipTrigger,
 } from './components/ui/tooltip';
+export { DesktopDiagnosticsProvider, useDesktopDiagnostics } from './diagnostics';
 export { FileChanges, FileDiff } from './FileChanges';
 export { MessageContent } from './MessageContent';
 export { MessageCopyButton } from './MessageCopyButton';
