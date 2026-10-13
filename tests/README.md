@@ -2,7 +2,9 @@
 
 本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
-最近一次完整默认证据为macOS clean `2e3c19bd` 的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1464.452秒，原4并发／604排空后7独占和全部原断言／预算保持。4493文件输入及11运行资产／HEAD／status零漂移，原Native问答失败修复后也在整轮通过；第一轮真实失败仍保留。同名临时fixture仅按冻结源码和父区间归属，不过滤正式失败、不改原runner或为统计重测。准确原始与独立审计证据归[当前整轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13普通调用者退役与-native-修复后的完整统一验证)。完整默认通过不解除原RSS／资源观测、Win/Linux原系统、助手实际粘贴或阶段退出门禁。
+当前最后完整默认为macOS `a99fdf29` 加本轮最终冻结改动的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1472.848秒，原四并发／604排空后7独占保持；4493输入、11资产、HEAD和Git零漂移。恢复Actions守卫、四份正式恢复、原Terminal／Web／80×24 TUI与Native头部错误／草稿完整文件均在该图内通过，原三轮失败及修复证据保留。准确冻结、原log与result归[集中收尾进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。最终结果归档仅补文档，不重新命名未变执行输入为新一轮测试；原RSS／完整资源与出生后代仍未闭合，wholeV13／phaseExit保持false，Win/Linux只有配置完成与未实测备注。
+
+此前完整默认证据为macOS clean `2e3c19bd` 的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1464.452秒，原4并发／604排空后7独占和全部原断言／预算保持。4493文件输入及11运行资产／HEAD／status零漂移，原Native问答失败修复后也在整轮通过；第一轮真实失败仍保留。同名临时fixture仅按冻结源码和父区间归属，不过滤正式失败、不改原runner或为统计重测。准确原始与独立审计证据归[当前整轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13普通调用者退役与-native-修复后的完整统一验证)。完整默认通过不解除原RSS／资源观测或阶段资格；助手 OS 字节未观测不记为通过，但再次人工粘贴不是新增独立门禁。Win/Linux 按用户2026-10-13最新范围只验收 Actions 接线与未实测备注，不把配置或本机通过写成原生执行结果。
 
 2026-10-13 在 macOS 的 clean `4eddd7cc` 执行原 `bun run test`，752 个完整文件组成609个正式作业，原四并发及最后七个独占作业全部通过，实际退出0。执行前后4483个文件输入和11个运行时／Web资产输入无漂移，准确原始日志、冻结与审计结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前代码完整默认回归与用户原文粘贴确认)。[测试运行器自测](isolated/scripts/test-suite-runner.test.ts)和[TUI运行器自测](isolated/unified-agent/unified-tui-runner.test.ts)会在所属临时目录运行预期失败及同名夹具，原始日志包含它们的子记录；核定完整默认结果须同时核正式冻结计划、父用例断言、实际退出码和原总结，不能只累计所有 `[test:…]` 文本。本次没有修改运行器或过滤测试；完整默认通过不解除原RSS／资源观测、Win/Linux原系统或阶段退出门禁。
 
@@ -21,6 +23,12 @@
 [Windows TUI 私有记录完整文件](../apps/cli/test/isolated/windows-tui-private-files.test.ts)归 CLI owner，九份 closed 文件、9 MiB 原记录／CAS、recovery 262144／config 8 MiB 边界和原 native hardlink／rebound 拒绝只能由实际 Windows 执行；本机另核非平台拒绝与验证期 Close mock，不能 availability skip 冒充通过。原九份 journal 单测和四份 Profile／路径邻接整文件分别保持原断言与预算。准确输入／日志与未执行范围见 [当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-installed-tui-私有持久化与正式调用者)；Win/Linux 实机按用户最新安排留到最后交 GitHub Actions，用户独立 Windows 验证不由本机 mock 代替，现有接线保留。
 
 Required CI、release/platform 与正式 soak 固定 Bun 1.4.2。性能或稳定性结果只适用于准确代码、运行时和平台；workflow 定义不等于执行证据。
+
+正式 Terminal wrapper 夹具的子环境保三端必要宿主变量及私有HOME／Profile，但清除测试运行器内部 `BUN_FEATURE_FLAG_NO_ORPHANS`：该模式只属于外层测试进程，不能传给短命CLI而提前关闭有明确stop责任的独立daemon。默认运行器原 `--no-orphans`、原完整文件／业务断言／预算及实际daemon stop保持；同默认flag的完整文件已验证此边界，不以关闭全局门禁或自动重试解决失败。
+
+Native 头部操作 DOM 完整用例在 React unmount 后，先等待 FocusScope 已安排的零延迟卸载事件，再关闭同一 DOM 和恢复全局 Event／CustomEvent。原错误弹窗、草稿、窗口调用与零工作九条断言保持；该清理仅覆盖实际下一轮事件，不声称排空任意未来timer，也不延长原预算。
+
+本轮 Win/Linux 无需实际运行，只要求 Actions 配置完整并注明未实测。[Runtime transport](../.github/workflows/runtime-transport-qualification.yml)在原 macOS／Linux／Windows 矩阵及八 workspace build 后，分别以独立 Bun 进程执行原 `run-resume`、`job-report-resume`、`job-reconcile` 和 `recovery-preparation-ownership` 四份完整文件，无过滤／容错或新增平台矩阵；原15分钟job、文件预算和全部断言保持。现有安装／版本／MCP／维护／保数据卸载链仍由各原工作流调度，本轮不 dispatch、不声称平台通过。
 
 共享行为测试保持三端同一业务断言、预算和完整文件；临时目录、file URL、依赖目录链接及 PTY 只适配平台原语，不用平台 skip 代替能力验证。[Runtime transport workflow](../.github/workflows/runtime-transport-qualification.yml)在 macOS／Linux／Windows 准备后构建当前八 workspace，执行原[草稿完整生命周期](../apps/cli/test/isolated/tui-drafts-host.test.ts)、[CLI Files 三范围恢复](../apps/cli/test/isolated/file-recovery-argv.test.ts)和[E13 完整扩展版本替换](isolated/unified-agent/extension-upgrade.test.ts)，另完整执行 [TUI Files both](../apps/cli/test/isolated/tui-file-recovery.test.ts)、[session／code](../apps/cli/test/isolated/tui-file-recovery-scopes.test.ts)、[物理丢回执](../apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts)、[两窗口强杀冷恢复](../apps/cli/test/isolated/tui-file-recovery-crash.test.ts)及[当前终端画面回归](../apps/cli/test/file-recovery-pty.test.ts)。Files 共享驱动保完整当前长卡与冷原请求／零POST，宿主和所属Service必须实际退出，方法与资格范围归[CLI Files owner](../apps/cli/README.md#files-三范围恢复-caller)。E13 消费已核制品声明的运行时入口，Windows 使用 junction 和必要系统环境；旧 Job 排空、新 Run 替换、冷读零重放与45／120秒预算保持。[CI guard](../scripts/check-unified-workspaces.ts)及[原 mutation 测试](integration/scripts/unified-ci.test.ts)拒绝删平台、漏文件、测试名过滤或不执行当前构建。草稿使用[Bun 原生 PTY／ConPTY](https://bun.com/docs/runtime/child-process)；Windows 受控强退与实际 OS 信号的验证边界归[CLI owner](../apps/cli/README.md#开发-tui-持久草稿)。本机 macOS 通过不计 Win/Linux 原生资格；其他既有 POSIX TUI 夹具未因此自动完成移植，平台专项用例保各自原适用条件。
 

@@ -2106,6 +2106,10 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.16 完整能力的当前退出顺序
 
+当前正式 root／Desktop release、build、default与CI已退出旧运行闭包，旧Desktop普通脚本明确拒绝；历史显式library／qualification／固定predecessor保留其实际消费者和出处。§29.6／§35.1要求正式无旧业务carrier／writer／fallback，§35.2保历史分支与旧数据，不能将删除全部历史源码新增为阶段验收。能力映射的退役列据此归位，37行partial仍保完整资格未闭合；后续只核残余正式运行／依赖，不从文件留存推新实施目标。
+
+用户2026-10-13进一步明确：Win/Linux 当前只要求 Actions 接线和未实测备注，不要求本轮原系统执行；本阶段按这一范围验收配置，不从接线推原生通过。当前实施集中收束 RSS／完整资源／出生后代与§35／最终退役，最后统一验证，原RSS和观测原断言不变。实际改动及结果归[集中收尾进度](unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)，下方历史平台待验记录保各自当时范围。
+
 2026-10-13 按原 §35／formal verifier 核回真实退出条件：历史 SIGTERM 首发送者未知与助手全文未直接观测 OS 粘贴字节继续如实保留，但不将“解释首发送者”和“用户必须再人工粘贴”作为新增独立门禁。当前已验证功能按准确源码、完整断言和既有结果收束，原 RSS／全资源／出生后代、后置 Win/Linux 实际资格和全部适用 T/E／最终退役仍保持。此次纠正不授平台、P5/P6 或整体完成，准确证据及仍待验范围见[门禁收束进度](unified-agent-refactor-v1-progress.md#2026-10-13回到原退出条件收束额外诊断依赖)。以下历史轮次保各自输入与当时状态。
 
 当前37行能力的正式入口、公共producer／consumer与原断言范围先由三组只读源码审查核对，再由两名新的非参与式审查者分别独立核第1–19、20–37行，未发现新的可复现macOS行为缺口；这不等于37能力或全部适用T/E完成，历史实现参与者的审查也不冒称全体非参与式审查。映射明确CLI原Job核实依可靠adapter，Native／TUI有限Run／report／interrupt及原申请查回不承诺通用Job核实；导出早期“正式入口未切换”保为当时范围。DB9资产恢复、安装版中断恢复和真实代码切换复用各自证据，不新建单一窗口作为门禁。原RSS失败尚无对应新资格，也未定位可安全修改的剩余分配持有链；全Runtime出生完整性及Bun资源／handles缺可靠来源，Windows原合同guard与后续Win/Linux Actions保持。审查范围、五项退出依赖及本地交付归[当前能力核对](unified-agent-refactor-v1-progress.md#2026-10-11正式能力源码与退出依赖核对)，37partial／wholeV13=false／phaseExit=false。

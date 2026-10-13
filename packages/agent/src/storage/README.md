@@ -30,7 +30,7 @@ Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-r
 
 ## Worker 请求内的原生语句
 
-`SqliteOperations` 持有同步请求创建的 `query` 和 `prepare` 原生语句，包括 Drizzle query helper 的 prepared statement。具名操作在事务结束后返回已物化的值；Worker 在成功或失败 ACK 前逐项 finalize，在 strict close 前先释放本请求语句。Bun 的 query cache 遇到已 finalize 的条目会重新 prepare，同一语句不会跨请求借用。连接初始化的原生语句仍由 strict close 收束。
+`SqliteOperations` 持有同步请求创建的 `query` 和 `prepare` 原生语句，包括 Drizzle query helper 的 prepared statement。`row/rows` 直接使用 operation-owned `prepare`：每次 ACK 已 finalize，缓存该包装不能复用原生语句，因此不再进入 Bun query cache。具名操作在事务结束后返回已物化的值；Worker 在成功或失败 ACK 前逐项 finalize，在 strict close 前先释放本请求语句。safeIntegers、SQL／参数及原计时保持，连接初始化的原生语句仍由 strict close 收束。这项缓存 owner 精简不独立证明 RSS 原因或改善。
 
 释放计入 Worker total timing；原 SQL/COMMIT 分项、事务回滚、Command 身份和提交未知时查询规则保持。释放失败不能发送成功 ACK，也不重发原操作或效果。[原生 Worker 回归](../../test/isolated/storage/statement-lifecycle.test.ts)以真实 statement 的 `isFinalized` 在响应发送前核成功、错误与关闭路径，继续查询、只读重开和 cursor 保持。采用请求边界的理由见[语句 owner Note](../../../../.agents/notes/implemented/bug-fix/2026-10-08-request-scoped-sql-statements.md)；这项释放不代表完整 RSS 或全部 Runtime 资源资格。
 

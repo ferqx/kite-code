@@ -223,12 +223,13 @@ export class SqliteOperations {
     });
   }
   row(sql: string, ...args: (string | number | bigint | null)[]): Row | null {
-    const query = this.db.query<Row, (string | number | bigint | null)[]>(sql);
+    // Operation-owned statements are finalized before ACK; do not cache finalized wrappers.
+    const query = this.db.prepare<Row, (string | number | bigint | null)[]>(sql);
     (query as typeof query & { safeIntegers(value: boolean): typeof query }).safeIntegers(true);
     return query.get(...args);
   }
   rows(sql: string, ...args: (string | number | bigint | null)[]): Row[] {
-    const query = this.db.query<Row, (string | number | bigint | null)[]>(sql);
+    const query = this.db.prepare<Row, (string | number | bigint | null)[]>(sql);
     (query as typeof query & { safeIntegers(value: boolean): typeof query }).safeIntegers(true);
     return query.all(...args);
   }

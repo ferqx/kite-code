@@ -20,7 +20,7 @@ import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 function childEnvironment(home: string): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: process.platform === 'win32' ? process.env.PATH : '/usr/bin:/bin',
     HOME: home,
@@ -33,6 +33,9 @@ function childEnvironment(home: string): NodeJS.ProcessEnv {
     LANG: 'C.UTF-8',
     TERM: 'xterm-256color',
   };
+  // Keep the test runner's orphan policy out of the deliberately detached daemon.
+  delete env.BUN_FEATURE_FLAG_NO_ORPHANS;
+  return env;
 }
 function ownedSocket(root: string, name: string) {
   return process.platform === 'win32'

@@ -128,6 +128,8 @@ test('actual Native page retains the original header filters, both double-click 
     ).toBe(true);
   } finally {
     await act(async () => root.unmount());
+    // FocusScope dispatches its unmount event on the next timer turn in this DOM realm.
+    await new Promise<void>((resolve) => dom.window.setTimeout(resolve, 0));
     dom.window.close();
     restore();
     Object.assign(globalThis, prior);

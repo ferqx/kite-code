@@ -10,7 +10,7 @@ Status: implemented
 
 [SqliteOperations](../../../../packages/agent/src/storage/sqlite/operations.ts)记录同步请求实际返回的 query/prepare statement；[Worker](../../../../packages/agent/src/storage/worker/main.ts)在成功或失败 ACK 前释放，在 strict close 前先释放。具名事务先完成提交或回滚，结果是物化 DTO，没有 statement 越过响应边界。保留 Drizzle schema/query helper、原 SQL/COMMIT timing、请求身份及错误查询规则；finalize 失败不重做原请求或业务效果。
 
-Bun query cache 中已 finalize 的条目在下次使用时重新 prepare，不建立第二份应用 cache。既有[备份关闭决定](../architecture/2026-10-02-offline-profile-backup.md)的 strict close 与锁释放理由继续有效；本决定补充连接仍打开时的请求 owner，并不取代关闭证明。
+2026-10-13 进一步由 `row/rows` 直接 prepare：Bun query cache 中已 finalize 的条目在下次使用时仍会重新 prepare，缓存包装不能复用本请求的原生句柄，因此移除这两处额外缓存 owner，不建立第二份应用 cache。原 query／prepare 统一追踪、每 ACK 全部 finalize、safeIntegers、事务及计时保持。固定 Bun 实现见[原版本源码](https://raw.githubusercontent.com/oven-sh/bun/744846f844374847c902b5e7fd59b4342a51ef99/src/js/bun/sqlite.ts)，没有据此声称 RSS 因果或门禁通过。既有[备份关闭决定](../architecture/2026-10-02-offline-profile-backup.md)的 strict close 与锁释放理由继续有效；本决定补充连接仍打开时的请求 owner，并不取代关闭证明。
 
 ## Alternatives considered
 

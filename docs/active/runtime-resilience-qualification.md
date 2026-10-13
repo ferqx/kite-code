@@ -8,7 +8,9 @@
 
 ## 当前 V1.3 owner 与资格边界
 
-按用户2026-10-12最新安排，当前优先闭合 macOS 可独立完成的能力，Windows/Linux 实际验证留到最后由 GitHub Actions 执行；已有接线保留，本轮不触发。用户后续独立 Windows 验证同样必须保原断言和门禁，任何 macOS 结果仍不授 Win/Linux 资格。
+本轮消除 SQL finalized statement 的额外缓存 owner 后，只执行一次原450秒／九点生命周期验证：7386 cycles／14772 Model调用、实际子进程退出0与双EOF，八个原测量点RSS增长 `+166.609375MiB >32MiB`，仍为真实失败。它只有一个outer，不授原八outer／60–168分钟或完整资源资格；与旧负载／输入不同，不推改善或恶化因果。准确新输入与原始证据归[集中收尾进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)，不追加参数对照或采集。
+
+按用户2026-10-13最新安排，Win/Linux 本轮只以 Actions 配置完成和明确未实测备注验收，不要求本地／远端实际执行，也不作为当前实施收尾前置；本轮不触发 Actions。正式安装、版本切换、MCP、维护恢复与保数据卸载的现有接线保持，transport 同一三端矩阵另补四份独立正式恢复整例。未运行的平台仍标未实测，任何 macOS 结果不授 Win/Linux 原生资格，Windows Shell 原合同 guard 和原断言保持。
 
 原 macOS RSS `+115.203125MiB >32MiB` 仍为真实失败。该指标来自[原 lifecycle probe](../../scripts/runtime/unified-soak-probe.ts)自身 PID：同进程 Runtime／HTTPService／Client 和 SQLite Worker 完成任务、取消、重连、删除；[原 sampler](../../scripts/runtime/unified-soak-cases.ts)读取 `process.memoryUsage().rss`。它与源码外两 Service 的[默认 Shell／Task／MCP continuous](../../tests/fixtures/unified-agent/soak/continuous-default-shell.ts)是不同负载，不能混称。旧原始临时目录目前缺失，历史数值仍保留为未闭合失败，不声称已重新核验旧 raw。一次有界 JS heap 持有链诊断没有定位可据此修复的业务持有链：root 可达字节略降，Worker 增长主要落在 JSC FunctionCodeBlock；快照引入 full GC、停顿和分配，且候选不是当前输入，不能替代原 RSS 证据。native live allocation owner 尚未确定，不再重复参数对照。全 Runtime 出生后代可靠 producer、Bun activeResources/handles 仍缺失，formal verifier 的原拒绝保持；当前准确输入、原始记录与限制归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-12原生命周期的-vm-调用观察与严格读取)。
 

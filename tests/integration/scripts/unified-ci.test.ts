@@ -162,6 +162,10 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
       'apps/cli/test/isolated/tui-models-host.test.ts',
       'apps/cli/test/isolated/tui-status-host.test.ts',
       'apps/cli/test/isolated/tui-scrollback-pty.test.ts',
+      'apps/service/test/isolated/run-resume.test.ts',
+      'apps/service/test/isolated/job-report-resume.test.ts',
+      'apps/service/test/isolated/job-reconcile.test.ts',
+      'apps/service/test/isolated/recovery-preparation-ownership.test.ts',
     ].flatMap((file) => {
       const run = `run: bun test --parallel=1 --max-concurrency=1 ${file}`;
       return [
@@ -204,6 +208,10 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
       'apps/cli/test/isolated/tui-models-host.test.ts',
       'apps/cli/test/isolated/tui-status-host.test.ts',
       'apps/cli/test/isolated/tui-scrollback-pty.test.ts',
+      'apps/service/test/isolated/run-resume.test.ts',
+      'apps/service/test/isolated/job-report-resume.test.ts',
+      'apps/service/test/isolated/job-reconcile.test.ts',
+      'apps/service/test/isolated/recovery-preparation-ownership.test.ts',
     ].map(
       (file) => (s: string) =>
         s

@@ -107,6 +107,14 @@ jobs:
       - name: Complete durable CLI library callers and local rejection contracts
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-library.test.ts
       - run: bun run test:runtime:transport
+      - name: Complete explicit Run recovery through the formal Service
+        run: bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/run-resume.test.ts
+      - name: Complete explicit Job report recovery through the formal Service
+        run: bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/job-report-resume.test.ts
+      - name: Complete explicit Job reconciliation through the formal Service
+        run: bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/job-reconcile.test.ts
+      - name: Preserve original recovery data and unconfirmed preparation owners
+        run: bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/recovery-preparation-ownership.test.ts
       - if: runner.os != 'Windows'
         name: POSIX Profile locks, maintenance and recovery
         run: >-

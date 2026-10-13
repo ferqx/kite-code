@@ -26,7 +26,9 @@ release candidate 在 macOS 与 Linux 运行原[完整 installed Terminal 测试
 
 ## Win/Linux 后续 Actions 接线
 
-下表记录当前已接的完整消费者及其验收范围。按用户最新安排，Windows/Linux 实际验证后置，Windows 由用户后续独立验证；现有 GitHub Actions 接线保留，本轮不触发，当前没有实际平台结果。正式安装／版本／维护链消费同一 release job 的准确 Terminal／Native 候选，MCP 使用独立 stdio job，避免前一安装步骤失败使该独立能力根本未执行。两者均绑定原 PR head repository／SHA、完整历史和关闭持久凭据。
+下表记录当前已接的完整消费者及其验收范围。按用户2026-10-13最新安排，Win/Linux 本阶段只验收 Actions 配置完整并注明未实测，无需本轮实际运行；不以原系统结果作为当前实施收尾前置。本轮不触发 Actions，也不将接线标为平台通过。正式安装／版本／维护链消费同一 release job 的准确 Terminal／Native 候选，MCP 使用独立 stdio job，避免前一安装步骤失败使该独立能力根本未执行。两者均绑定原 PR head repository／SHA、完整历史和关闭持久凭据。
+
+同一 transport 三端矩阵在八 workspace build 后独立执行原 Run 恢复、Job report 恢复、Job reconcile 与 `recovery-preparation-ownership` 四份完整文件，补齐 Windows 无根完整default job时遗漏的正式恢复消费者；原15分钟job、完整文件／断言／预算和所有原guard保持，没有新增矩阵或平台条件。实际执行状态为未运行，后续失败不得排除用例或改为容错。
 
 | 用户入口与完整能力 | Windows 消费者 | Linux 消费者 | 原验收条件 |
 | --- | --- | --- | --- |

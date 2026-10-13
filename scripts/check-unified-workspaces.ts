@@ -306,6 +306,12 @@ export function checkUnifiedFormalConsumers(root: string): {
             const transport = steps.findIndex(
               (step) => step.run === 'bun run test:runtime:transport' && unfiltered(step),
             );
+            const recoveryCallers = [
+              'apps/service/test/isolated/run-resume.test.ts',
+              'apps/service/test/isolated/job-report-resume.test.ts',
+              'apps/service/test/isolated/job-reconcile.test.ts',
+              'apps/service/test/isolated/recovery-preparation-ownership.test.ts',
+            ].map(callerIndex);
             const prepare = steps.findIndex(
               (step) =>
                 step.if === "runner.os == 'Windows'" &&
@@ -317,6 +323,7 @@ export function checkUnifiedFormalConsumers(root: string): {
               caller < 0 ||
               completeCallers.some((index) => index <= build || index >= caller) ||
               completeCallers.some((index) => index >= transport) ||
+              recoveryCallers.some((index) => index <= transport || index >= caller) ||
               candidateFiles.some(
                 (file) =>
                   callerIndex(file) >=
