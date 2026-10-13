@@ -6019,3 +6019,27 @@ Browser 增加固定 Session/Run GET 及可选 `runs` capability，Gateway 只�
 | 全能力迁移、旧消费者退役和收束 | 37能力的实际正式入口与仍消费旧producer的构建链 | 完成适用T001–T114/E01–E14、§35及当前完整回归；有完整替代证据后才退役旧consumer，P5/P6和整体不提前退出 |
 
 本轮范围为完整复制能力的正式接线、必要验证、文档和已授权本地提交；Goal 保持 active，无 push、PR、发布或 Actions 触发。
+
+## 2026-10-13：正式 Web 复制定位与阅读间距
+
+上一轮本地提交 `49c5e6ea` 是有效 progress，本轮从该 clean HEAD 复核实际剩余调用者。CLI／Terminal／Native 正式 build/install/版本切换/维护读取未发现新的确定源码缺口；Native 启动和退出沿已修的初始化／生命周期／读取代次边界，原 startup/current error 与 unknown mutation 不吞错，旧退出读取不误弹窗。用户截图 installed digest 尚未知，不能据现源码断言该安装包已含修复。旧 Desktop dev/build/prepare-service、打包与版本测试仍消费旧 producer，因此旧源码不能只因根正式入口已切就删除；这仍是§35/P6的实际退役依赖，静态无新缺口不证明完整产品资格。
+
+当前最高优先级的独立源码错误是正式 Web 复制布局：只给 user article 建 position:relative，却给所有复制按钮 absolute/right0/bottom2。实际当前编译资产／Cookie／SQLite 预览的两个助手按钮都在 x1256/y694，article 为 static／inside=false，Tab 虽聚焦也不归自己的最后回复。原失败坐标与截图保 `/private/tmp/kite-web-reply-layout-red-20261013.json`／`.png`，没有把 DOM 按钮存在当作完成定位。
+
+实施只在正式 Web 页面和可信 CSS 补消息容器、准确 final marker 与阅读 gap：全部 article 归自己的定位容器，去旧通用上下 padding／分隔线叠加；user／final 后32px、Tool→final16px、其余过程8px。final marker 来自准确 Run／Message 的 metadata entry，全文未读／loaded／Close 时保持同一最终段，复制资格仍沿原 reader，不借布局取得 authority。两轮准确正文、旧原文反馈、scope、读取消和 Native final-only合同保持；没有新公共API、Core/SQL、权限或旧入口删除。
+
+集中必要验证包含全部11个Web完整文件及原真实恢复整例，共12文件62pass/0fail/739条断言，结果 `/private/tmp/kite-web-reply-layout-delivery-20261013.json`。原全部断言保留；新增唯一紧凑三消息场景及 production `/app.css` 注入对应尚未闭合的定位／final身份／32-16-8合同，不扩大故障矩阵。真实 restore A→B 的 fullbody复制、关闭及sealed范围继续通过。Web typecheck与实际资产build通过；Client/Gateway/Core/Native未改输入和原证据按范围复用，边界／文档／正常提交门禁仍执行。
+
+修后实际本机1280×720 IAB中，两助手按钮分处各自 final article，inside=true，不再叠于页面角落；长正文滚动及两次真实Tab聚焦保inside／focus-visible／opacity1。浏览器核 user／final 的32px生产布局；过程8px与Tool→final16px及全文开关状态由真实生产CSS的便携DOM核，不冒称所有关系已有原生像素测量。准确截图 `/private/tmp/kite-web-reply-layout-green-20261013.png` 与 scrolled／first-focus JSON保本次证据。两次自有预览均Provider3/messages4/Runs2/Executions4/cursor45，正常stop后actual0，owned临时Profile清理；不读用户既有数据、不调用付费Provider。本次未再尝试OS字节核对的已拒路径，不由焦点或布局解除剪贴板门禁。
+
+Web owner同步实际负责边界；手册原定位、焦点及间距合同已匹配，无需改成较弱预期，跨包active和既有轮次决定按未变共享资格／来源核对。能力映射仍partial，当前完整默认回归尚未执行，本轮绿不授阶段退出。剩余依赖最多五项：
+
+| 剩余缺口 | 实际入口与完整行为 | 验收条件 |
+| --- | --- | --- |
+| 本机复制字节资格 | 正式Web原用户／已核整轮复制；Native完整最终段复制 | 必须有实际准确原文粘贴字节证据，DOM与本机定位绿不代证 |
+| 原Shell SIGTERM及完整观测 | 正式Job效果、准确停止、客户端／Service正常退出 | 解释原首停止／信号来源，补齐出生后代、资源／句柄观测；认证成功而原Bun非可调试签名仍held |
+| 原完整生命周期RSS | 同正式持续用户工作至正常退出 | 原8 outer／9点／60–168分钟／32MiB，+115.203125MiB原红保持，不参数对照或降限 |
+| Win/Linux正式系统资格 | 安装、版本切换、MCP完整连接调用取消退出、维护恢复、保数据卸载 | 后续Actions／用户Windows原系统验证，Windows Shell原guard保留；本轮不push或dispatch |
+| 全能力与旧消费者退出 | 37能力正式入口及仍实际消费旧producer的dev/build/版本链 | 适用T001–T114/E01–E14、§35与当前完整回归齐全，实际旧consumer替代后才退役，P5/P6／V1.3不提前退出 |
+
+本轮只闭合该正式阅读／复制源码缺口并已授权本地交付；Goal active，未push、PR、发布或触发Actions。

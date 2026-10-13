@@ -672,11 +672,20 @@ export function WebPage({
                     }}
                   >
                     {snapshot.messages.length === 0 && <p>No messages</p>}
-                    {snapshot.messages.map((message) => (
+                    {snapshot.messages.map((message, index) => (
                       <article
                         key={JSON.stringify([snapshot.view.storeId, update.sessionId, message.id])}
                         data-message-id={message.id}
                         data-message-role={message.role}
+                        data-final-reply={replies.has(message.id) || undefined}
+                        data-message-gap={
+                          message.role === 'user' || replies.has(message.id)
+                            ? 'turn'
+                            : message.role === 'tool' &&
+                                replies.has(snapshot.messages[index + 1]?.id ?? '')
+                              ? 'final'
+                              : 'process'
+                        }
                       >
                         {message.role === 'tool' ? (
                           <details

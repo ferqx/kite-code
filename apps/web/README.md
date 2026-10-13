@@ -47,6 +47,10 @@ History 为独立滚动区域，首次进入定位最新，向上阅读时刷新
 
 助手复制复用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts) 与正式 Native 的最终回复资格核验：只有当前 Session 未封存消息所属的准确 completed／inactive Run 才可合并，按原 Decimal64 seq 将全部助手正文以空行连接；中间助手的普通正文保留，Tool 参数、工具结果、reasoning、其他 Run 和子／封存消息不加入。最后助手仍须完整、支持格式且无后续 Tool；任一非零 `outputBody` 未经现有 reader 完整验证并显示，整轮按钮不可用，不拿预览补缺段，也不自动读 Model 正文。成功／失败交互继续共用 MessageCopyButton，关闭任一全文、隐藏、暂停、stale 或切换阅读身份撤销相应资格。
 
+History 每条消息在生产 CSS 中拥有自己的定位容器，复制按钮归所属消息底部；不会把多个助手按钮定位到页面同一角落。阅读间距按准确 final 身份与相邻 role 选择：user／final 后32px，Tool 后紧邻 final 为16px，其他过程间隔8px，顶端不叠加旧通用 padding／分隔线。final 身份取 `completeRunReplies` 的已核 metadata entry，不依赖全文是否已加载；读／Close 只改变复制资格，不重新定义最后回复或移动阅读间距。原 hover、Tab focus-visible 和两秒反馈保持，当前字段仅为 DOM 展示，不增加 Runtime 或来源 authority。
+
+2026-10-13 本机实际编译资产／Cookie／SQLite／固定模型预览中，修前两个助手按钮同时定位 x1256/y694，均不在自己的 article 内；修后两按钮各属于自己的 final article，长正文滚动和两次真实 Tab 聚焦保持 inside／focus-visible／opacity1。user／final 的生产布局 padding32已在浏览器核实，过程8和Tool→final16及全文开关身份在注入真实 `/app.css` 的便携 DOM 核实；不把 JSDOM 称为原生像素证据。观察仍为3次固定模型调用、4条消息、2个Run、4个Execution、cursor45，两次自有预览正常退出0。截图 `/private/tmp/kite-web-reply-layout-green-20261013.png` 仅证明当前定位与焦点，不代 OS 剪贴板原文字节；实际剪贴板门禁保持。必要组合为全部11个Web文件及原真实恢复整例，共12文件62pass／739断言，详细范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13正式-web-复制定位与阅读间距)。
+
 [run-facts](src/run-facts.ts)只为完整已读 History 中准确的未封存 Run 补 metadata。有限 View 已核项优先；超出最近200项时经具名 Browser `getRun(sessionId,runId)` GET 核当前 Store／准确 Run／Session，保合法恢复后的原 originStoreId。cache 只属于当前 Client／Store／Session／controller generation，completed／failed／cancelled 非活动事实可复用，active／interrupted／读取失败在新实际 snapshot 刷新时重核；View 新事实覆盖此前缓存。关闭、隐藏、页面暂停或不可读状态 abort 所属 GET；读取不提供执行、配置或凭据权。错误保原消息并说明整轮范围尚不可核，可沿原 Refresh history 重试。
 
 [整轮页面用例](test/isolated/assistant-copy.test.tsx)覆盖201条完整历史、有限 View 外 Run、中间 Tool call 的普通正文、每段已加载全文与切换迟到隔离；[原真实恢复整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)保原完整断言，并核实际 Cookie／Store A→B、原大正文加 inline 最终段的准确整轮复制、sealed 零按钮与关闭撤销。便携 DOM clipboard 使用内存端口，不能替代本机 OS 剪贴板字节或其他平台资格。

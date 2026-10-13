@@ -3,6 +3,7 @@ import type { BrowserView, Message, ModelOutputSnapshot } from '@kite-ai/client'
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { createTrustedAssets } from '../../src/assets';
 
 const first = 'First raw paragraph 🌿e\u0301\r\nEXACT first';
 const last = 'Final raw paragraph 東京\r\nEXACT last';
@@ -51,6 +52,10 @@ async function fixture(bodyMode = false) {
     '<!doctype html><html><head><meta name="kite-web-identity" content="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"></head><body><div id="root"></div></body></html>',
     { url: 'http://127.0.0.1:31000/', pretendToBeVisual: true },
   );
+  const productionAssets = await createTrustedAssets('');
+  const style = dom.window.document.createElement('style');
+  style.textContent = productionAssets.assets.get('/app.css')!.content;
+  dom.window.document.head.append(style);
   const previous = new Map<string, PropertyDescriptor | undefined>();
   for (const [key, value] of Object.entries({
     window: dom.window,
@@ -75,6 +80,7 @@ async function fixture(bodyMode = false) {
   }
   const { mountWebPage } = await import('../../src/mount');
   const state = {
+    compact: false,
     copied: '',
     pages: 0,
     runReads: [] as { sessionId: string; runId: string }[],
@@ -154,7 +160,7 @@ async function fixture(bodyMode = false) {
           reasoningBytes: String(new TextEncoder().encode('DO_NOT_COPY_REASONING').length),
           toolCallCount: index === 0 ? 1 : 0,
         };
-    return rows;
+    return state.compact ? [rows[0]!, rows[1]!, rows[200]!] : rows;
   };
   Object.defineProperty(dom.window.navigator, 'clipboard', {
     configurable: true,
@@ -288,6 +294,12 @@ test('Web copies the exact completed historical Run across all message pages inc
     expect(
       assistantButtons(f)[0]!.closest('[data-message-id]')?.getAttribute('data-message-id'),
     ).toBe('a-last');
+    const finalArticle = assistantButtons(f)[0]!.closest('article')!;
+    expect(finalArticle.getAttribute('data-final-reply')).toBe('true');
+    expect(f.dom.window.getComputedStyle(finalArticle).position).toBe('relative');
+    expect(f.dom.window.getComputedStyle(finalArticle).paddingBottom).toBe('32px');
+    const intermediate = f.dom.window.document.querySelector('[data-message-id="a-first"]')!;
+    expect(f.dom.window.getComputedStyle(intermediate).paddingBottom).toBe('8px');
     expect(f.state.pages).toBe(2);
     expect(f.state.runReads).toContainEqual({ sessionId: 'a', runId: 'original-run' });
     expect(f.state.outputReads).toHaveLength(0);
@@ -317,6 +329,9 @@ test('Web requires every exact original Model body and retires a late read when 
     expect(f.state.outputReads).toHaveLength(0);
     const read = (id: string) =>
       f.dom.window.document.querySelector(`[data-message-id="${id}"] button`) as HTMLButtonElement;
+    const finalArticle = () => f.dom.window.document.querySelector('[data-message-id="a-last"]')!;
+    await settle(() => finalArticle().getAttribute('data-final-reply') === 'true');
+    expect(f.dom.window.getComputedStyle(finalArticle()).paddingBottom).toBe('32px');
     await f.click(read('a-first'));
     await settle(() => f.state.outputReads.length === 1);
     expect(assistantButtons(f)).toHaveLength(0);
@@ -326,6 +341,16 @@ test('Web requires every exact original Model body and retires a late read when 
     await f.click(assistantButtons(f)[0]!);
     expect(f.state.copied).toBe(`${first}\n\n${last}`);
     expect(f.state.copied).not.toContain('DO_NOT_COPY_REASONING');
+    expect(finalArticle().getAttribute('data-final-reply')).toBe('true');
+    const closeFirst = [
+      ...f.dom.window.document.querySelectorAll<HTMLButtonElement>(
+        '[data-message-id="a-first"] button',
+      ),
+    ].find((button) => button.textContent === 'Close full Model output')!;
+    await f.click(closeFirst);
+    await settle(() => assistantButtons(f).length === 0);
+    expect(finalArticle().getAttribute('data-final-reply')).toBe('true');
+    expect(f.dom.window.getComputedStyle(finalArticle()).paddingBottom).toBe('32px');
     await f.choose('b');
     await settle(() => !!f.dom.window.document.querySelector('[data-message-id="b-last"]'));
     expect(assistantButtons(f)).toHaveLength(0);
@@ -371,5 +396,39 @@ test('Web never labels unfinished, unsuccessful, sealed, unsupported or incomple
     } finally {
       await f.close();
     }
+  }
+}, 10000);
+
+test('Web production CSS keeps process, tool-to-final and turn gaps through explicit full-body reading', async () => {
+  const f = await fixture(true);
+  try {
+    f.state.compact = true;
+    await f.click(f.button('Workspace'));
+    await settle(() => !!f.dom.window.document.querySelector('a[href="/sessions/a"]'));
+    await f.choose('a');
+    await settle(() => f.dom.window.document.querySelectorAll('[data-message-id]').length === 3);
+    const article = (part: string) =>
+      f.dom.window.document.querySelector(`[data-message-id="a-${part}"]`)!;
+    await settle(() => article('last').getAttribute('data-final-reply') === 'true');
+    expect(f.dom.window.getComputedStyle(article('first')).paddingBottom).toBe('8px');
+    expect(f.dom.window.getComputedStyle(article('tool')).paddingBottom).toBe('16px');
+    expect(f.dom.window.getComputedStyle(article('last')).paddingBottom).toBe('32px');
+    expect(assistantButtons(f)).toHaveLength(0);
+    for (const part of ['first', 'last']) {
+      const read = article(part).querySelector('button')!;
+      await f.click(read);
+    }
+    await settle(() => assistantButtons(f).length === 1);
+    expect(article('last').getAttribute('data-final-reply')).toBe('true');
+    expect(f.dom.window.getComputedStyle(article('last')).paddingBottom).toBe('32px');
+    const close = [...article('last').querySelectorAll('button')].find(
+      (button) => button.textContent === 'Close full Model output',
+    )!;
+    await f.click(close);
+    await settle(() => assistantButtons(f).length === 0);
+    expect(article('last').getAttribute('data-final-reply')).toBe('true');
+    expect(f.dom.window.getComputedStyle(article('tool')).paddingBottom).toBe('16px');
+  } finally {
+    await f.close();
   }
 }, 10000);
