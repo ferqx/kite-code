@@ -34,6 +34,7 @@ globalThis.fetch = Object.assign(
 const exit = new AbortController();
 process.once('SIGTERM', () => exit.abort());
 await runTUIHost({
+  testDiagnostics: true,
   exitSignal: exit.signal,
   onLaunched: ({ pid }) => writeFileSync(join(settings.root, 'owned-pid'), String(pid)),
   ...(settings.artifact ? { artifact: settings.artifact } : { server: settings.server }),

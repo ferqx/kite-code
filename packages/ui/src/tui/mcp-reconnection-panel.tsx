@@ -1,11 +1,14 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { OverlayListRow } from './ink/OverlayPrimitives';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** Separate Review/Confirm and original-ID navigation; no letter key dispatches business. */
 export function TuiMcpReconnectionPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation(),
+  const { t: originalLabel } = useInkI18n();
+  const { t, testDiagnostics } = useTuiPresentation(),
     state = controller.state;
   const [index, setIndex] = useState(0);
   const observed = state.mcpReconnectionObservation,
@@ -56,7 +59,7 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
   const offset = Math.max(0, Math.min(index - 2, actions.length - 5));
   const label = (row: Choice) =>
     row.kind === 'original'
-      ? `${t('Original forced reconnect:')} ${terminalText(row.id)}`
+      ? `${t('Original forced reconnect:')} ${testDiagnostics ? terminalText(row.id) : rows.findIndex((item) => item.intent.request.commandId === row.id) + 1}`
       : t(
           row.kind === 'check'
             ? 'Check original forced reconnect'
@@ -67,10 +70,24 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
                 : 'Back',
         );
   return (
-    <Box flexDirection="column">
-      <Text bold>
-        {t('Forced reconnects')} · {terminalText(state.snapshot?.view.session.workspaceId ?? '')}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        <>
+          {t('Forced reconnects')}{' '}
+          {testDiagnostics && terminalText(state.snapshot?.view.session.workspaceId ?? '')}
+        </>
+      }
+      meta={`${index + 1} / ${actions.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: 'Enter', label: originalLabel('common.confirm') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
+      }
+    >
       <Text>{t('Selecting an original ID does not query, reconnect or authorize tools.')}</Text>
       {state.mcpReconnectionObserving && <Text>{t('Reading current reconnect target')}</Text>}
       {observed && (
@@ -79,10 +96,12 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
             {t('Confirm forced reconnect:')} {terminalText(observed.carrier.request.input.serverId)}{' '}
             · {t('Session')} {terminalText(observed.carrier.sessionId)}
           </Text>
-          <Text>
-            {t('Original carrier:')} {terminalText(observed.carrier.request.commandId)} ·{' '}
-            {t('current generation')} {observed.target.currentGeneration}
-          </Text>
+          {testDiagnostics && (
+            <Text>
+              {t('Original carrier:')} {terminalText(observed.carrier.request.commandId)} ·{' '}
+              {t('current generation')} {observed.target.currentGeneration}
+            </Text>
+          )}
           <Text>
             {t('Replacement source:')}{' '}
             {t(
@@ -95,10 +114,12 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
             {' · '}
             {t('Replacement transport:')} {terminalText(replacementServer?.transport ?? '')}
           </Text>
-          <Text>
-            {t('Replacement configuration digest:')}{' '}
-            {terminalText(observed.replacement.expectedConfigDigest)}
-          </Text>
+          {testDiagnostics && (
+            <Text>
+              {t('Replacement configuration digest:')}{' '}
+              {terminalText(observed.replacement.expectedConfigDigest)}
+            </Text>
+          )}
           {observed.source?.items.find(
             (row) => row.id === observed.carrier.request.input.serverId,
           ) && (
@@ -120,18 +141,22 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
         </>
       )}
       {actions.slice(offset, offset + 5).map((row, i) => (
-        <Text key={row.kind === 'original' ? row.id : row.kind}>
-          {index === offset + i ? '›' : ' '} {label(row)}
-        </Text>
+        <OverlayListRow
+          key={row.kind === 'original' ? row.id : row.kind}
+          selected={index === offset + i}
+          primary={label(row)}
+        />
       ))}
       <Text>{t('↑/↓ choose · Enter select · Esc back')}</Text>
       {outcome && (
         <>
-          <Text>
-            {t('Original forced reconnect:')} {terminalText(outcome.intent.request.commandId)} ·{' '}
-            {t('Original Store:')} {terminalText(outcome.intent.request.expectedStoreId)} ·{' '}
-            {t('Session')} {terminalText(outcome.intent.sessionId)}
-          </Text>
+          {testDiagnostics && (
+            <Text>
+              {t('Original forced reconnect:')} {terminalText(outcome.intent.request.commandId)} ·{' '}
+              {t('Original Store:')} {terminalText(outcome.intent.request.expectedStoreId)} ·{' '}
+              {t('Session')} {terminalText(outcome.intent.sessionId)}
+            </Text>
+          )}
           <Text>
             {t(
               state.mcpReconnectionReading
@@ -156,7 +181,11 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
           </Text>
           <Text>
             {t(outcome.fact?.live ? 'Live replacement observed' : 'Live replacement not confirmed')}{' '}
-            · {t('current generation')} {outcome.fact?.currentGeneration ?? t('unavailable')}
+            {testDiagnostics && (
+              <>
+                · {t('current generation')} {outcome.fact?.currentGeneration ?? t('unavailable')}
+              </>
+            )}
           </Text>
         </>
       )}
@@ -168,6 +197,6 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
           {t('Error:')} {terminalText(state.error)}
         </Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

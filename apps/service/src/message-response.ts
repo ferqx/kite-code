@@ -76,6 +76,10 @@ export async function messageResponses(
 }
 
 export function executionResponse(execution: ExecutionRecord) {
+  // A Tool's model-facing arguments are display facts. Never publish Model
+  // request bodies, credential-bearing Job programs or recovery manifests here.
+  if (execution.kind === 'tool')
+    return { ...execution, toolCallId: execution.callId, toolInput: execution.input };
   const result = execution.result;
   if (!result || typeof result !== 'object' || Array.isArray(result) || !result.modelOutput)
     return execution;

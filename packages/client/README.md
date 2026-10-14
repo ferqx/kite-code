@@ -67,6 +67,8 @@ SDK 提供 workspace/session 创建及列表、`startRun`、`cancelCommand`、`c
 
 `listPendingInputs(sessionId,{storeId,kind?,targetRunId?,afterSeq?,limit?})` 要求 `inputs` capability，按生成 query 校验，最多 200 条。`afterSeq` 严格校验 Decimal64 范围，待输入的原 request 与未来响应字段保留，纯读取不推进 SSE 游标。公开消息的原命令、context、input kind 与 source IDs 用于追溯应用来源。child 可展示历史，但追加输入只能从原 root 发起。
 
+公开页保留同序列的 steer、follow-up 与待消费 `result.include`。后者只携原 selection／execution／result revision／target Run，不含文本 content，不是新的提示或写权限。生成联合与 Service schema 同步；调用者按每项原 seq 推进游标，不能因不展示 Context 纳入请求而丢弃它的分页位置。[真实 HTTP 回归](../../apps/service/test/isolated/pending-inputs.test.ts)核混合两页、完整原申请、受理与消费，以及旧 Tool 零重执行。
+
 [SDK 准入测试](test/inputs.test.ts) 验证未准入、缺可选能力、非法 authority/content/cursor 的零业务请求以及旧 Store/目标不重绑。[真实输入集成测试](../../tests/isolated/unified-agent/client-inputs.test.ts) 用实际 Service、SQLite Worker 和固定 Model 验证接收、同 Loop 应用、精准取消、独立后续 Run、child 权限及完整输入 frame；本次两文件合计六项、158 条断言通过，无付费模型调用。
 
 
@@ -202,3 +204,8 @@ Provider Settings 的 `getProviderSettings({storeId})` 与 `updateProviderSettin
 ## 完整后台执行目录
 
 `listBackgroundExecutions({storeId,workspaceId?,rootSessionId?,executionId?,afterSeq?,upperSeq?,snapshotCursor?,limit?})` 读取公开 `/v1/background-executions` 的原 Job 目录。`listAllBackgroundExecutions({workspaceId?,rootSessionId?,signal?})` 冻结当前连接 generation/Store，读取所有固定 Decimal64 upper 页面，并沿同一 snapshotCursor 核对；`directory_changed` 时丢弃整个前缀重新扫描，AbortSignal 可结束读取，无累计页数上限。返回 `BackgroundExecutionItem[]`，页面 Store 核当前准入；每项 Execution 保原 originStoreId，父 Run 与精确 child-start Run 按该原出处／root-work 核对，实际 Session/root/Workspace 保持。恢复根资格由 Store 的真实 root creator 与血缘证明决定，SDK不从旧来源推断控制许可。重复身份、错序、作用域和绑定冲突均拒绝完整结果。目录不包含 input/result/config/reference 正文，读取不发送 POST或推进ACK。[有限 Client 测试](test/background-directory.test.ts)覆盖重扫与完整身份反例；[真实 HTTP/Store](../../tests/isolated/unified-agent/background-directory.test.ts)覆盖超200原 Job、后代与公开物理恢复。
+
+
+## 终端展示的只读 metadata
+
+同源生成类型包含 Tool `toolCallId/toolInput`、实际 `compressionProgress`、模型 `connectionId`及 Files `textChange`。Files decoder 核 UTF-8、有界 preview、truncated 与实际行统计，不把展示片段当恢复 bytes；SessionLog 只放行类型／category均匹配的 `builtin.files/checkpoint/<64hex>/point`，其他动态 key 仍不可见。[Files](test/isolated/file-checkpoints.test.ts)与[SessionLog](test/isolated/session-logs.test.ts)保留原身份、分页、拒绝与零效果断言。

@@ -108,7 +108,7 @@ test('Ink saves selected theme/language only after persistence; switch retains t
   await tick();
   await f.controller.select('a');
   f.controller.setDraft('unsent original');
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   await tick();
   expect(ui.lastFrame()).toContain('EXACT_MODEL_BODY');
   await f.controller.routeCommand('/theme extra');
@@ -180,7 +180,7 @@ test('CAS failure retains old locale; Enter cannot retry until explicit R read, 
   const f = fixture();
   await tick();
   await f.controller.select('a');
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   await tick();
   await f.controller.routeCommand('/language');
   await tick();
@@ -290,7 +290,7 @@ test('all existing panel-owned headings use Chinese while public machine values 
     [TuiSkillsPanel, '知识 Skills'],
   ] as const) {
     const ui = render(
-      <TuiPresentationProvider value={{ preferences: facts }}>
+      <TuiPresentationProvider value={{ testDiagnostics: true, preferences: facts }}>
         <Panel controller={f.controller} />
       </TuiPresentationProvider>,
     );
@@ -300,7 +300,7 @@ test('all existing panel-owned headings use Chinese while public machine values 
   f.setFacts(facts);
   await f.controller.refreshPreferences();
   await f.controller.select('a');
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   await tick();
   await f.controller.routeCommand('/language');
   await tick();
@@ -336,7 +336,7 @@ test('publication uncertainty preserves last confirmed facts, never repeats save
     f.setFacts({ ...f.facts(), revision: 'f'.repeat(64), colorPreset: 'blue' });
     throw Error('tui_preferences_publication_uncertain');
   };
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   await tick();
   await f.controller.routeCommand('/theme');
   await tick();
@@ -445,7 +445,7 @@ test('populated model, permission and Skill panels translate owned instructions 
     ],
   ] as const) {
     const ui = render(
-      <TuiPresentationProvider value={{ preferences }}>
+      <TuiPresentationProvider value={{ preferences, testDiagnostics: true }}>
         <Panel controller={presented} />
       </TuiPresentationProvider>,
     );
@@ -587,13 +587,13 @@ test('saved language translates background and recovery instructions without tra
     ],
   ] as const) {
     const ui = render(
-      <TuiPresentationProvider value={{ preferences: english }}>
+      <TuiPresentationProvider value={{ testDiagnostics: true, preferences: english }}>
         <Panel controller={presented} />
       </TuiPresentationProvider>,
     );
     expect(ui.lastFrame()).toContain(heading);
     ui.rerender(
-      <TuiPresentationProvider value={{ preferences: chinese }}>
+      <TuiPresentationProvider value={{ testDiagnostics: true, preferences: chinese }}>
         <Panel controller={presented} />
       </TuiPresentationProvider>,
     );
@@ -601,14 +601,22 @@ test('saved language translates background and recovery instructions without tra
     for (const label of labels) expect(ui.lastFrame()).toContain(label);
     expect(ui.lastFrame()).not.toContain(heading);
     if (Panel === TuiExecutionPanel) {
-      expect(ui.lastFrame()).toContain(request.content);
+      expect(
+        ui
+          .lastFrame()!
+          .split('\n')
+          .map((line) => (line.startsWith(' ') ? line.slice(1) : line))
+          .join('\n'),
+      ).toContain(request.content);
       expect(ui.lastFrame()).toContain('Models [job-original] running');
       expect(ui.lastFrame()).toContain('stop-original: applied');
       expect(ui.lastFrame()).toContain('stdout · 1…1');
     } else {
       ui.stdin.write('\u0016');
       await tick();
-      expect(ui.lastFrame()?.replace(/\n/g, ' ')).toContain(JSON.stringify(request));
+      expect(ui.lastFrame()?.replace(/\s+/g, '')).toContain(
+        JSON.stringify(request).replace(/\s+/g, ''),
+      );
       expect(ui.lastFrame()).toContain('run.start · unknown · caller-original');
       expect(ui.lastFrame()).toContain('b'.repeat(64));
     }
@@ -644,11 +652,13 @@ test('composer and answer paste labels and file candidate hints follow locale wh
     />
   );
   const ui = render(
-    <TuiPresentationProvider value={{ preferences }}>{composer}</TuiPresentationProvider>,
+    <TuiPresentationProvider value={{ preferences, testDiagnostics: true }}>
+      {composer}
+    </TuiPresentationProvider>,
   );
   expect(ui.lastFrame()).toContain(`[已粘贴 ${Array.from(raw).length} 个字符]`);
   ui.rerender(
-    <TuiPresentationProvider value={{ preferences }}>
+    <TuiPresentationProvider value={{ preferences, testDiagnostics: true }}>
       <TuiAnswerInput buffer={buffer} />
     </TuiPresentationProvider>,
   );
@@ -667,7 +677,7 @@ test('composer and answer paste labels and file candidate hints follow locale wh
     unavailable: [],
   };
   const view = () => (
-    <TuiPresentationProvider value={{ preferences }}>
+    <TuiPresentationProvider value={{ preferences, testDiagnostics: true }}>
       <TuiComposer
         buffer={candidates}
         value={candidates.text}

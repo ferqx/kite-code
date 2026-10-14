@@ -25,6 +25,8 @@ export class ComposerBuffer {
   cursor = 0;
   private endAffinity = false;
   candidate = 0;
+  commands: readonly string[] = fixedTuiCommands;
+  commandDescriptions: Readonly<Record<string, string>> = {};
   dismissed = false;
   private history: Unit[][] = [];
   private historyIndex = -1;
@@ -206,8 +208,8 @@ export class ComposerBuffer {
     return true;
   }
   get candidates() {
-    if (this.dismissed || !/^\/[a-z]*$/i.test(this.text)) return [];
-    return fixedTuiCommands.filter((command) => command.startsWith(this.text.toLowerCase()));
+    if (this.dismissed || !/^\/[a-z0-9_-]*$/i.test(this.text)) return [];
+    return this.commands.filter((command) => command.startsWith(this.text.toLowerCase()));
   }
   complete() {
     const choice = this.candidates[this.candidate];

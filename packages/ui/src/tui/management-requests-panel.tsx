@@ -1,5 +1,6 @@
-import { Box, useInput, usePaste } from 'ink';
+import { useInput, usePaste } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
+import { TuiOverlayFrame } from './chrome';
 import { isCtrlCBatch } from './composer-input';
 import { type TuiController, terminalText } from './controller';
 import { TuiText as Text, useTuiPresentation } from './presentation';
@@ -27,8 +28,7 @@ export function TuiManagementRequestsPanel({ controller }: { controller: TuiCont
       setShowRequest((shown) => !shown);
   });
   return (
-    <Box flexDirection="column">
-      <Text bold>{t('Original management requests')}</Text>
+    <TuiOverlayFrame title={<> {t('Original management requests')} </>}>
       <Text>
         {t('↑/↓ choose · K/Enter query original · V request · Ctrl+C stop read · Esc close')}
       </Text>
@@ -79,6 +79,6 @@ export function TuiManagementRequestsPanel({ controller }: { controller: TuiCont
         </Text>
       )}
       {state.stale && <Text>{t('Stale')}</Text>}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

@@ -40,6 +40,8 @@
 
 `readPlanningState(read: ConditionReadContext, {runId,originStoreId})` 是有限可信宿主只读投影，返回 disabled/pending 或已核 approved 的 auto/accept_edits、原计划 ID/version/digest；它复用同一 proofValid，并读取准确 obligation/current/document/Run approval/Interaction/Execution。模式只是当前 Permissions 之外的上界，不授予能力、不能解除硬拒绝/trust/独立 Job 最低审批。Service 必须提供实际原 Store/Session/Run 的 scoped reader，不能直接把 raw record 或模式摘要作为 grant；最终 condition 仍收集实际读集并由 SQLite CAS，等待后 plan head 或 sealed obligation 漂移拒绝。
 
+`planning.progress.view@1({runId})` 是额外有限只读投影：从实际 `getRun` 取得原 Store／Session，再复用 `readPlanningState`／原批准 proof，核当前 document／progress 的 ID/version/digest。它提供实际已批准步骤与原失败／blocked／compensated 状态，不改变旧 `planning.status` 格式，不授权派发。[真实 ExtensionHost 回归](../../../test/isolated/business/planning-progress-view.test.ts)经过实际 write、用户批准再读取原步骤。
+
 `planning.status` 与 `validation.status` 只读公开 envelope；未知字段保留，未知 contentVersion 可公开原记录、写入与执行判定明确拒绝，不降级解释。扩展 records 使用已知 kind/字段 schema 并保留兼容未来字段。
 
 ## 当前证据与未闭合范围

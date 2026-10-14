@@ -12,6 +12,7 @@ export async function runTUIProcess(
     profile?: string;
     cwd?: string;
     onLaunched?: (value: { pid: number }) => void;
+    testDiagnostics?: boolean;
   } = {},
 ): Promise<number> {
   const args = parseTUIArguments(input.argv ?? process.argv.slice(2));
@@ -54,6 +55,7 @@ export async function runTUIProcess(
       ...(args.server ? { server: args.server } : {}),
       ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(input.onLaunched ? { onLaunched: input.onLaunched } : {}),
+      testDiagnostics: input.testDiagnostics ?? args.testDiagnostics,
       exitSignal: exit.signal,
     });
   } finally {

@@ -10,6 +10,7 @@ import type {
   NativeSelection,
 } from '../src/native-bridge';
 import { NativeContextView } from '../src/native-context';
+import { NativeDiagnosticsProvider } from '../src/native-diagnostics';
 
 test('Native Context DOM drops late old body, closes only original read and forwards the exact active Include scope', async () => {
   const dom = new JSDOM('<div id="root"></div>');
@@ -110,12 +111,14 @@ test('Native Context DOM drops late old body, closes only original read and forw
   });
   const render = (id: string) =>
     root.render(
-      <NativeContextView
-        bridge={bridge}
-        generation={1}
-        selection={selection(id)}
-        onRefresh={async () => {}}
-      />,
+      <NativeDiagnosticsProvider enabled>
+        <NativeContextView
+          bridge={bridge}
+          generation={1}
+          selection={selection(id)}
+          onRefresh={async () => {}}
+        />
+      </NativeDiagnosticsProvider>,
     );
   const button = (text: string) =>
     [...element.querySelectorAll('button')].find((value) => value.textContent === text)!;
@@ -241,15 +244,17 @@ test('restored same-Session compression exposes its exact Model input shortcut w
       interactionsAfterId: null,
     };
     root.render(
-      <NativeContextView
-        bridge={bridge}
-        generation={1}
-        selection={selection}
-        onInspectModel={(executionId) => inspected.push(executionId)}
-        onRefresh={async () => {
-          refreshed++;
-        }}
-      />,
+      <NativeDiagnosticsProvider enabled>
+        <NativeContextView
+          bridge={bridge}
+          generation={1}
+          selection={selection}
+          onInspectModel={(executionId) => inspected.push(executionId)}
+          onRefresh={async () => {
+            refreshed++;
+          }}
+        />
+      </NativeDiagnosticsProvider>,
     );
   };
   const button = (text: string) =>
@@ -400,12 +405,14 @@ test('Native Context next history button preserves its Context page and retires 
   });
   const render = (sessionId: string) =>
     root.render(
-      <NativeContextView
-        bridge={bridge}
-        generation={1}
-        selection={selection(sessionId)}
-        onRefresh={async () => {}}
-      />,
+      <NativeDiagnosticsProvider enabled>
+        <NativeContextView
+          bridge={bridge}
+          generation={1}
+          selection={selection(sessionId)}
+          onRefresh={async () => {}}
+        />
+      </NativeDiagnosticsProvider>,
     );
   const button = (text: string) =>
     [...element.querySelectorAll('button')].find((value) => value.textContent === text)!;

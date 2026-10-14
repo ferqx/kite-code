@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { ClientError, type Interaction, type Message } from '@kite-ai/client';
@@ -41,13 +42,19 @@ import { openMcpSourceApprovalJournal } from './mcp-source-approval-journal';
 import { openMcpSourceMutationJournal } from './mcp-source-mutation-journal';
 import { openRecoveryJournal } from './recovery-journal';
 import { connectSharedService } from './shared-service';
+import { createTuiDisplayReader, readTuiPendingInputs } from './tui-display';
 import { createTuiDraftPort } from './tui-draft-port';
 import { openTuiDraftFile } from './tui-drafts';
 import { createTuiExporter } from './tui-export';
+import { createTuiJobTailReader } from './tui-job-tails';
+import { readTuiLiveOutput } from './tui-live-output';
 import { createTuiMcpPort } from './tui-mcp';
 import { createTuiMcpAuthPort } from './tui-mcp-auth';
 import { prepareTuiObservationStart } from './tui-observation';
+import { createTuiOnboardingPort } from './tui-onboarding';
 import { openTuiPreferenceFile } from './tui-preferences';
+import { readTuiProgress } from './tui-progress';
+import { createTuiToolLabelsReader } from './tui-tool-labels';
 
 export { parseTUIArguments, type TUIArguments } from './tui-arguments';
 
@@ -56,14 +63,17 @@ function TerminalHost({
   onNew,
   onQuit,
   shared,
+  testDiagnostics = false,
 }: {
   controller: TuiController;
   onNew: () => Promise<string>;
   onQuit: () => void;
   shared: boolean;
+  testDiagnostics?: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const [notice, setNotice] = useState('');
+  const [ready, setReady] = useState(!controller.port.onboarding);
   const t = (label: string) => translateTuiLabel(label, state.preferences.resolvedLanguage);
   const original =
     /^Original Session creation unknown: ([A-Za-z0-9_-]+)(; Ctrl\+N reads this ID only)?$/.exec(
@@ -73,16 +83,23 @@ function TerminalHost({
     ? `${t('Original Session creation unknown:')} ${original[1]}${original[2] ? t(original[2]) : ''}`
     : t(notice);
   useInput((input, key) => {
-    if (key.ctrl && input === 'n') void onNew().then(setNotice);
+    if (ready && key.ctrl && input === 'n') void onNew().then(setNotice);
     if (key.ctrl && input === 'q') onQuit();
   });
   return (
     <Box flexDirection="column">
-      <Text>
-        {t('Development TUI · Ctrl+N new Workspace Session · Ctrl+Q')}{' '}
-        {shared ? t('disconnect shared service') : t('quit owned host')}
-      </Text>
-      <TuiSession controller={controller} />
+      {testDiagnostics && (
+        <Text>
+          {t('Development TUI · Ctrl+N new Workspace Session · Ctrl+Q')}{' '}
+          {shared ? t('disconnect shared service') : t('quit owned host')}
+        </Text>
+      )}
+      <TuiSession
+        controller={controller}
+        testDiagnostics={testDiagnostics}
+        onQuit={onQuit}
+        onReadinessChange={setReady}
+      />
       {notice && <Text>{shownNotice}</Text>}
       {state.intent?.phase === 'unknown' && (
         <Text>{t('Original outcome unknown: Ctrl+K only reads original Command')}</Text>
@@ -161,6 +178,8 @@ export interface TUIHostOptions {
   exitSignal?: AbortSignal;
   /** Private host test hook, never stdout bootstrap or public token. */
   onLaunched?: (value: { pid: number }) => void;
+  /** Explicit renderer option, also selected by the dedicated test UI argument. */
+  testDiagnostics?: boolean;
 }
 /** Native composition only; no Loop or Provider implementation. */
 export async function runTUIHost(input: TUIHostOptions): Promise<number> {
@@ -223,6 +242,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
   let recoveryOwner: ReturnType<typeof openRecoveryJournal> | undefined;
   let draftOwner: ReturnType<typeof createTuiDraftPort> | undefined;
   let preferenceOwner: ReturnType<typeof openTuiPreferenceFile> | undefined;
+  let jobTailOwner: ReturnType<typeof createTuiJobTailReader> | undefined;
+  let toolLabelsOwner: ReturnType<typeof createTuiToolLabelsReader> | undefined;
   const observer = new AbortController();
   let stop!: () => void;
   const stopped = new Promise<void>((resolve) => {
@@ -236,6 +257,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
     if (ended) return;
     ended = true;
     draftOwner?.flush();
+    jobTailOwner?.clear();
+    toolLabelsOwner?.clear();
     observer.abort();
     controller?.dispose();
     try {
@@ -336,7 +359,11 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       access: profileAccess,
       acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
     });
+    const readDisplay = createTuiDisplayReader(client, storeId);
+    const jobTails = createTuiJobTailReader(client, storeId);
+    jobTailOwner = jobTails;
     const port: TuiPort = {
+      onboarding: createTuiOnboardingPort(client, storeId),
       preferences: {
         async read() {
           return preferences.read();
@@ -514,7 +541,25 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         stop: (id, request) => client.cancelExecution(id, request),
         getCommand: (id, signal) => client.getCommand(id, { signal }),
       },
-      listSessions: (signal) => client.listAllSessions({ workspaceId, signal }),
+      async listSessions(signal) {
+        if (!client.serverInfo?.capabilities.includes('session_directory_activity'))
+          return client.listAllSessions({ workspaceId, signal });
+        const entries = await client.listAllSessionDirectory({ workspaceId, signal });
+        return entries.map(({ session, activity }) => ({
+          id: session.id,
+          title: session.title,
+          workspacePath: initial.workspace.rootUri,
+          ...(typeof activity?.updatedAt === 'number' ? { updatedAt: activity.updatedAt } : {}),
+          ...(activity?.run?.isActive
+            ? {
+                activity:
+                  activity.run.status === 'running' ? ('running' as const) : ('waiting' as const),
+              }
+            : activity?.queued
+              ? { activity: 'queued' as const }
+              : {}),
+        }));
+      },
       async readSession(sessionId, signal) {
         const view = await client.getView(sessionId, { signal });
         if (view.session.workspaceId !== workspaceId)
@@ -564,12 +609,98 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
             activeCommand.id !== active!.originCommandId)
         )
           throw new CLIHostError('active_command_identity_mismatch');
+        // Chrome uses public observed configuration. A failed optional read must not
+        // prevent the conversation or manufacture a configured model/permission.
+        const children = view.executions.filter(
+          (execution) =>
+            execution.kind === 'job' &&
+            execution.originStoreId === storeId &&
+            execution.sessionId === sessionId &&
+            execution.childSessionId !== null,
+        );
+        const [models, mode, pendingInputs, display, progress, live, tails, childViews, labels] =
+          await Promise.allSettled([
+            client.getModelSettings('workspace', { storeId, workspaceId, signal }),
+            client.getPermissionMode(sessionId, { storeId, signal }),
+            readTuiPendingInputs(client, storeId, sessionId, signal),
+            readDisplay(view, messages, signal),
+            readTuiProgress(client, view, storeId, signal),
+            readTuiLiveOutput(client, view, storeId, signal),
+            jobTails.read(view, signal),
+            Promise.allSettled(
+              children.map(async (carrier) => {
+                const child = await client.getView(carrier.childSessionId!, { signal });
+                if (
+                  child.storeId !== storeId ||
+                  child.session.id !== carrier.childSessionId ||
+                  child.session.parentSessionId !== sessionId ||
+                  child.session.rootSessionId !== view.session.rootSessionId ||
+                  child.session.workspaceId !== workspaceId
+                )
+                  throw new CLIHostError('child_view_identity_mismatch');
+                return { executionId: carrier.id, view: child };
+              }),
+            ),
+            toolLabelsOwner?.read(view, signal),
+          ]);
+        const modelFacts =
+          models.status === 'fulfilled' &&
+          models.value.storeId === storeId &&
+          models.value.workspaceId === workspaceId &&
+          models.value.scope === 'workspace'
+            ? models.value
+            : undefined;
+        const selectedModel = modelFacts?.models.find(
+          (model) => model.id === modelFacts.defaultModelId,
+        );
+        const permission =
+          mode.status === 'fulfilled' &&
+          mode.value.storeId === storeId &&
+          mode.value.sessionId === sessionId
+            ? mode.value.mode
+            : undefined;
         return {
           storeId,
           view,
           messages,
           interactions,
           ...(activeCommand ? { activeCommand } : {}),
+          ...(pendingInputs.status === 'fulfilled'
+            ? { pendingInputs: pendingInputs.value }
+            : { pendingInputsUnavailable: true }),
+          ...(display.status === 'fulfilled'
+            ? { executionTimings: display.value.executionTimings }
+            : {}),
+          ...(progress.status === 'fulfilled'
+            ? {
+                planProgress: progress.value.plan,
+                compactionPhase: progress.value.compactionPhase,
+              }
+            : {}),
+          ...(live.status === 'fulfilled' && live.value ? { liveModelOutput: live.value } : {}),
+          ...(tails.status === 'fulfilled' ? { jobTails: tails.value } : {}),
+          ...(labels.status === 'fulfilled' && labels.value ? { toolLabels: labels.value } : {}),
+          ...(childViews.status === 'fulfilled'
+            ? {
+                childViews: childViews.value.flatMap((result) =>
+                  result.status === 'fulfilled' ? [result.value] : [],
+                ),
+              }
+            : {}),
+          environment: {
+            workspacePath: initial.workspace.rootUri,
+            homeDirectory: homedir(),
+            ...(selectedModel
+              ? {
+                  modelName: selectedModel.model,
+                  effort: selectedModel.reasoningEffort ?? undefined,
+                }
+              : {}),
+            ...(permission ? { permissionMode: permission } : {}),
+            ...(display.status === 'fulfilled'
+              ? { runtimeModel: display.value.runtimeModel, usage: display.value.usage }
+              : {}),
+          },
         };
       },
       readModelOutput: (sessionId, executionId, signal) =>
@@ -599,6 +730,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         callers: port.callers,
         sources: port.mcp.source,
       });
+    if (port.mcp) toolLabelsOwner = createTuiToolLabelsReader(port.mcp, storeId);
     controller = new TuiController(port);
     await controller.restoreCallers();
     await controller.select(initial.session.id);
@@ -699,6 +831,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         onNew={createNew}
         onQuit={requestQuit}
         shared={!!input.server}
+        testDiagnostics={input.testDiagnostics}
       />,
       {
         exitOnCtrlC: false,
@@ -727,7 +860,13 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
               ? { startAfter }
               : {}),
             onChange: async (change) => {
-              if (change.sessionId === controller!.state.sessionId) await refresh();
+              if (
+                change.sessionId === controller!.state.sessionId ||
+                controller!.state.snapshot?.childViews?.some(
+                  (child) => child.view.session.id === change.sessionId,
+                )
+              )
+                await refresh();
             },
             onReady: (ready) => {
               if (!ended && !observer.signal.aborted) controller!.observationReady(ready.storeId);
@@ -807,6 +946,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       recoveryOwner?.close();
       preferenceOwner?.close();
       draftOwner?.close();
+      jobTailOwner?.clear();
+      toolLabelsOwner?.clear();
       observer.abort();
       controller?.dispose();
       process.stdin.removeListener('end', endInput);

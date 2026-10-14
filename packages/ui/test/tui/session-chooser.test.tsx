@@ -91,7 +91,7 @@ const settle = () => Bun.sleep(50);
 test('resume deletes the confirmed original row; default Enter retains it without changing the active selection', async () => {
   const f = fixture();
   await f.controller.select('a');
-  const app = render(<TuiSession controller={f.controller} />);
+  const app = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await settle();
     app.stdin.write('\u0012');
@@ -102,7 +102,7 @@ test('resume deletes the confirmed original row; default Enter retains it withou
     await settle();
     expect(app.lastFrame()).toContain('Delete Session?');
     expect(app.lastFrame()).toContain('另一会话🙂');
-    expect(app.lastFrame()).toContain('> Keep Session');
+    expect(app.lastFrame()).toContain('❯ Keep Session');
     expect(f.writes).toHaveLength(0);
     app.stdin.write('\r');
     await settle();
@@ -134,7 +134,7 @@ test('Unicode search, staged Escape and chooser Ctrl+C preserve the original dra
   const f = fixture();
   await f.controller.select('a');
   f.controller.setDraft('原草稿🙂');
-  const app = render(<TuiSession controller={f.controller} />);
+  const app = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await settle();
     app.stdin.write('\u0012');

@@ -184,7 +184,7 @@ async function open(f: ReturnType<typeof fixture>) {
 test('Ink HTTP detail requires independent Review and Enter; applied Command remains pending, no Model/answer/connect', async () => {
   const f = fixture();
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\r');
@@ -217,7 +217,7 @@ test('cold source failure keeps keyboard originals including foreign; selection 
   await open(f);
   f.sourceGone();
   await f.controller.openMcpSources();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     expect(ui.lastFrame()).toContain('Original authentication requests');
@@ -276,7 +276,7 @@ test('reader close/scope switch cannot cancel business or render private thrown 
     throw Error('https://private.invalid/?access_token=private-secret');
   });
   await f.controller.lookupMcpAuth();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     expect(ui.lastFrame()).toContain('Authentication unavailable');
@@ -293,7 +293,7 @@ test('clear/revoke and cancellation require separate confirmation; own original 
   const f = fixture([a]);
   await open(f);
   await f.controller.openMcpAuth(serverId);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\u001b[B');
@@ -413,7 +413,7 @@ test('Chinese Ink authentication confirms explicitly and checks the second cold 
   };
   await f.controller.refreshPreferences();
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\r');
@@ -457,7 +457,7 @@ test('Chinese Ink authentication confirms explicitly and checks the second cold 
   await open(cold);
   cold.sourceGone();
   await cold.controller.openMcpSources();
-  const coldUi = render(<TuiSession controller={cold.controller} />);
+  const coldUi = render(<TuiSession testDiagnostics controller={cold.controller} />);
   try {
     await tick();
     expect(coldUi.lastFrame()).toContain('原认证申请');
@@ -475,7 +475,7 @@ test('Chinese Ink authentication confirms explicitly and checks the second cold 
     await tick();
     coldUi.stdin.write('\u001b[A');
     await tick();
-    expect(coldUi.lastFrame()).toContain('› 查询原认证申请');
+    expect(coldUi.lastFrame()).toContain('❯ 查询原认证申请');
     coldUi.stdin.write('\r');
     await tick();
     expect(cold.lookup).toEqual([second]);

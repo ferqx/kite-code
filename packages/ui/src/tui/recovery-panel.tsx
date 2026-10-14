@@ -1,6 +1,7 @@
-import { Box, useInput, usePaste } from 'ink';
+import { useInput, usePaste } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
 import { callerKey } from './caller';
+import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 
@@ -70,10 +71,13 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
     else if (!key.ctrl && !key.meta) setText(text + input);
   });
   return (
-    <Box flexDirection="column">
-      <Text>
-        {t('Explicit recovery ·')} {terminalText(state.sessionId ?? '')}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        <>
+          {t('Explicit recovery ·')} {terminalText(state.sessionId ?? '')}
+        </>
+      }
+    >
       <Text>{t('run <original Run ID> / report <original report Command ID>')}</Text>
       <Text>
         {t(
@@ -150,6 +154,6 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
         </>
       )}
       {state.error && <Text>{terminalText(state.error)}</Text>}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

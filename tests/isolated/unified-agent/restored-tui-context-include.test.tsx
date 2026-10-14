@@ -293,7 +293,7 @@ test('restored TUI Context explicitly includes the original suppressed Job and t
     const mountContext = async (actual: ReturnType<typeof createClient>) => {
       controller = new TuiController(portFor(actual));
       await controller.select('session');
-      app = render(<TuiSession controller={controller} />);
+      app = render(<TuiSession testDiagnostics controller={controller} />);
       await Bun.sleep(20);
       controller.setDraft('/context');
       await Bun.sleep(20);

@@ -101,7 +101,7 @@ export async function runDevelopmentDesktop(
         },
       },
       outdir,
-      { ...renderer.configuration, control: control.configuration },
+      { development: { ...renderer.configuration, control: control.configuration } },
     );
     if (requested) return requested === 'SIGINT' ? 130 : 143;
     const env = { ...process.env };

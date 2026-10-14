@@ -102,6 +102,7 @@ if (!process.stdin.isTTY) {
   const exit = new AbortController();
   process.once('SIGTERM', () => exit.abort());
   process.exitCode = await runTUIHost({
+    testDiagnostics: true,
     artifact: settings.artifact,
     dataRoot: settings.dataRoot,
     profile: 'development',

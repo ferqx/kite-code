@@ -7,6 +7,7 @@ import type {
   NativeContextFacts,
   NativeSelection,
 } from './native-bridge';
+import { NativeDiagnostic, useNativeDiagnostics } from './native-diagnostics';
 
 /** This view forwards the shared Include scope unchanged; it never chooses an active Run. */
 export function NativeContextView({
@@ -26,6 +27,7 @@ export function NativeContextView({
   onInspectModel?: (executionId: string) => void;
   onRefresh: () => Promise<unknown>;
 }) {
+  const diagnostics = useNativeDiagnostics();
   const failure = (cause: unknown) => {
     const value =
       (cause as { code?: string; message?: string }).code ??
@@ -174,21 +176,24 @@ export function NativeContextView({
         <section aria-label="手动上下文压缩">
           {facts.page.compression ? (
             <div>
-              <p>
-                活动压缩记录 {facts.page.compression.id} · 原存储{' '}
-                {facts.page.compression.originStoreId} · 原会话{' '}
-                {facts.page.compression.originSessionId}
-              </p>
-              <p>
-                覆盖至消息序号 {facts.page.compression.coveredThroughSeq} · 发布序号{' '}
-                {facts.page.compression.publishedSeq} · 上一记录{' '}
-                {facts.page.compression.previousCompressionId ?? '无'}
-              </p>
-              <p>
-                实际模型执行 {facts.page.compression.modelExecutionId} · 原轮次{' '}
-                {facts.page.compression.runId} ·{' '}
-                {facts.page.compression.trigger === 'manual' ? '人工请求' : '自动请求'}
-              </p>
+              <NativeDiagnostic>
+                {' '}
+                <p>
+                  活动压缩记录 {facts.page.compression.id} · 原存储{' '}
+                  {facts.page.compression.originStoreId} · 原会话{' '}
+                  {facts.page.compression.originSessionId}
+                </p>
+                <p>
+                  覆盖至消息序号 {facts.page.compression.coveredThroughSeq} · 发布序号{' '}
+                  {facts.page.compression.publishedSeq} · 上一记录{' '}
+                  {facts.page.compression.previousCompressionId ?? '无'}
+                </p>
+                <p>
+                  实际模型执行 {facts.page.compression.modelExecutionId} · 原轮次{' '}
+                  {facts.page.compression.runId} ·{' '}
+                  {facts.page.compression.trigger === 'manual' ? '人工请求' : '自动请求'}
+                </p>
+              </NativeDiagnostic>
               {onInspectModel &&
                 facts.page.compression.originSessionId === selection.session.id && (
                   <button
@@ -254,7 +259,9 @@ export function NativeContextView({
       {compressionSubmissions.map((value) => (
         <div key={value.intent.commandId}>
           <p>
-            原压缩命令 {value.intent.commandId} · 原会话 {value.sessionId} ·{' '}
+            <NativeDiagnostic>
+              原压缩命令 {value.intent.commandId} · 原会话 {value.sessionId} ·{' '}
+            </NativeDiagnostic>
             {value.kind === 'compress' ? '手动压缩' : '压缩重置'}：{value.phase} · 完整重点{' '}
             {value.intent.focusBytes} 字节
           </p>
@@ -339,14 +346,17 @@ export function NativeContextView({
       )}
       {submissions.map((submission) => (
         <div key={submission.intent.commandId}>
-          <p>
-            原会话 {submission.sessionId} · 原存储 {submission.intent.expectedStoreId} · 原上下文{' '}
-            {submission.intent.expectedContextSelectionId}
-          </p>
+          <NativeDiagnostic>
+            {' '}
+            <p>
+              原会话 {submission.sessionId} · 原存储 {submission.intent.expectedStoreId} · 原上下文{' '}
+              {submission.intent.expectedContextSelectionId}
+            </p>
+          </NativeDiagnostic>
           <ContextSubmissionNotice
             submission={{
               kind: submission.kind,
-              commandId: submission.intent.commandId,
+              commandId: diagnostics ? submission.intent.commandId : '当前操作',
               phase: submission.phase,
               error: submission.error,
             }}

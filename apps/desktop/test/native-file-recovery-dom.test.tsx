@@ -8,6 +8,7 @@ import type {
   NativeRequest,
   NativeSelection,
 } from '../src/native-bridge';
+import { NativeDiagnosticsProvider } from '../src/native-diagnostics';
 import { NativeFileRecoveryPanel } from '../src/native-file-recovery';
 
 test('Native Files DOM binds explicit scope to observed point, edits/hide invalidate and late old detail never replaces another Session', async () => {
@@ -105,14 +106,16 @@ test('Native Files DOM binds explicit scope to observed point, edits/hide invali
   };
   const render = (id: string) =>
       root.render(
-        <NativeFileRecoveryPanel
-          bridge={bridge}
-          generation={1}
-          selection={selected(id)}
-          submissions={[]}
-          onRefresh={async () => {}}
-          onSelect={async () => {}}
-        />,
+        <NativeDiagnosticsProvider enabled>
+          <NativeFileRecoveryPanel
+            bridge={bridge}
+            generation={1}
+            selection={selected(id)}
+            submissions={[]}
+            onRefresh={async () => {}}
+            onSelect={async () => {}}
+          />
+        </NativeDiagnosticsProvider>,
       ),
     button = (text: string) =>
       [...element.querySelectorAll('button')].find((value) => value.textContent === text)!;

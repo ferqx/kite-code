@@ -1,9 +1,144 @@
 import { Text, type TextProps } from 'ink';
 import { createContext, useContext, useMemo } from 'react';
+import { enUS, type MessageKey, zhCN } from './ink/messages';
+import { getInkTheme, type InkTheme } from './ink/theme';
 import { defaultTuiPreferences } from './preferences';
 
 /** Only explicit UI-owned labels enter this catalog. Public machine values and body text do not. */
 export const tuiChinese: Readonly<Record<string, string>> = {
+  'Recorded tool arguments': '已保存工具参数',
+  'Only this exact command in the original Session; other commands still require approval.':
+    '只允许原会话中的这一准确命令；其他命令仍需审批。',
+  'Question: original-schema JSON.': '问题：原 schema JSON。',
+  'Alt+S: skip optional answer': 'Alt+S：跳过可选回答',
+  'Saved MCP prompts': '已保存 MCP prompts',
+  'Saved MCP resources': '已保存 MCP resources',
+  'Retained external data; reading does not connect or execute a prompt.':
+    '已保存的外部资料；阅读不连接服务器或执行 prompt。',
+  'Reading saved directory': '正在读取已保存目录',
+  'Saved directory unavailable; Enter retries': '已保存目录不可用；Enter 重试',
+  'No saved descriptors in this window': '此窗口没有已保存描述',
+  'Live binding': '当前连接绑定',
+  'Historical binding': '历史连接绑定',
+  'Next saved window': '下一个已保存窗口',
+  'Saved server': '已保存服务器',
+  'Read details': '读取详情',
+
+  'Command suggestions': '命令候选',
+  'Up/Down: choose · Tab/Enter: complete · Esc: close': '上下选择 · Tab/Enter 补全 · Esc 关闭',
+  'Revise plan': '补充或修改方案',
+  'Enter submits feedback · Shift+Enter newline · Esc returns to choices':
+    'Enter 提交反馈 · Shift+Enter 换行 · Esc 返回选项',
+  'Up/Down: choose · Enter: confirm · Esc: deny': '上下选择 · Enter 确认 · Esc 拒绝',
+  'Original outcome pending or unknown; check original before another answer':
+    '原答复仍在提交或结果未知，请先查询原申请',
+  'Session only': '仅会话',
+  'Code only': '仅文件',
+  'Session and code': '会话与文件',
+  'Recovery point': '恢复点',
+  'No recovery points': '没有恢复点',
+  'Reading state:': '读取状态：',
+  Files: '文件',
+  Conflicts: '冲突',
+  Preview: '预览',
+  'Original recovery': '原恢复申请',
+  Code: '文件',
+  '↑/↓ choose · Enter preview · 1 session · 2 code · 3 both · Esc back':
+    '上下选择 · Enter 预览 · 1 仅会话 · 2 仅文件 · 3 两者 · Esc 返回',
+  '←/→ more files': '左右查看更多文件',
+  'Choose recovery scope explicitly; files and conversation have separate results.':
+    '请明确选择恢复范围；文件与会话分别记录结果。',
+  'Enter confirms selected scope · Esc returns without submitting':
+    'Enter 确认所选范围 · Esc 返回且不提交',
+  'Execution details': '执行详情',
+  'Recorded execution result': '已保存执行结果',
+  'Tool result is read only; background output and child navigation require an exact Job':
+    '工具结果为只读；后台输出和子会话入口仅用于对应后台任务',
+  'Recorded tool calls': '已保存工具调用',
+  'Verified recorded tool calls': '已核实完整工具调用',
+  'Incomplete recorded result': '已保存结果尚不完整',
+  'Timing unavailable': '计时不可用',
+  Thinking: '思考中',
+  Thought: '思考',
+  'tool calls': '次工具调用',
+  'Verified recorded output': '已核实保存输出',
+  'Recorded phase': '已记录阶段',
+  'Recorded executions for this task': '本任务已保存执行',
+  'Tool calls not fully loaded; Ctrl+O reads verified full body':
+    '工具调用尚未完整读取，Ctrl+O 读取原完整内容',
+  'Recorded Model input': '来自已保存模型输入',
+  'Frozen Run selection': '来自本轮固定配置',
+  'Current model unavailable': '当前运行模型无法核实',
+  'Next model:': '下一轮模型：',
+  'Recorded usage:': '已保存用量：',
+  'input tokens': '输入 token',
+  'output tokens': '输出 token',
+  cache: '缓存',
+  'Pending input queue unavailable': '待处理输入队列暂无法读取',
+  'Last confirmed pending inputs': '上次确认的待处理输入',
+  'Pending inputs': '待处理输入',
+  'Guidance pending': '引导等待处理',
+  'Follow-up waiting': '后继输入等待开始',
+  'Recorded result': '已保存结果',
+  'Current task': '当前任务',
+  'Next task': '下一次任务',
+  'Context capacity estimate unavailable': '当前没有上下文容量估计',
+  'Model unavailable': '模型信息不可用',
+  'Workspace unavailable': '工作区信息不可用',
+  'Automatic review': '自动审核',
+  'Full access': '完全访问',
+  'Request approval': '请求批准',
+  'Shift+Tab: exit plan · /help': 'Shift+Tab 退出计划 · /help 帮助',
+  'Shift+Tab: plan · /help': 'Shift+Tab 计划 · /help 帮助',
+  'Tool result': '工具结果',
+  System: '系统',
+  'Incomplete response': '回答尚不完整',
+  Approval: '审批',
+  'Plan review': '方案审核',
+  'Files recovery': '文件恢复',
+  Context: '上下文',
+  'Session operation': '会话操作',
+  Submission: '提交状态',
+  'Ctrl+L: check the original request': 'Ctrl+L 查询原申请',
+  'Add guidance to the current task': '补充当前任务',
+  'Observation unknown: new writes disabled': '观察状态未知，暂不能提交新申请',
+  Loading: '读取中',
+  'Stop request': '停止申请',
+  'Background tasks': '后台任务',
+  'Child conversation': '子会话',
+  Trust: '信任',
+  Untrust: '撤销信任',
+  Help: '帮助',
+  '↑/↓ scroll · Home/End · Esc close': '上下滚动 · Home/End 跳转 · Esc 关闭',
+  'Model and reasoning settings': '模型与思考设置',
+  'Create or switch conversation': '新建或切换会话',
+  'Review a plan before work': '先审核计划',
+  'Permissions and workspace trust': '权限与工作区信任',
+  'Tools and Skills': '工具与 Skills',
+  'Background results and child logs': '后台结果与子日志',
+  'Context and original requests': '上下文与原申请',
+  'Files and execution recovery': '文件与执行恢复',
+  'Context maintenance': '上下文维护',
+  'Saved drafts': '已保存草稿',
+  'Session management': '会话管理',
+  'Appearance and language': '显示与语言',
+  'Connection, export and display': '连接、导出与显示',
+  'Exit the terminal': '退出终端',
+  'Ctrl+N new conversation · Ctrl+R sessions · Ctrl+B pending requests':
+    'Ctrl+N 新会话 · Ctrl+R 切换会话 · Ctrl+B 待决交互',
+  'Ctrl+O full output · Ctrl+T reasoning · Ctrl+E execution details · Ctrl+C cancel · Ctrl+Q exit':
+    'Ctrl+O 全文 · Ctrl+T 思考 · Ctrl+E 执行详情 · Ctrl+C 取消 · Ctrl+Q 退出',
+  'Ctrl+O full output · Ctrl+T reasoning · Ctrl+C cancel · Ctrl+Q exit':
+    'Ctrl+O 全文 · Ctrl+T 思考 · Ctrl+C 取消 · Ctrl+Q 退出',
+  succeeded: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+  outcome_unknown: '结果未知',
+  planned: '待执行',
+  dispatching: '派发中',
+  running: '执行中',
+  submitting: '提交中',
+  'Outcome unknown': '结果未知',
   Search: '搜索',
   'Delete Session?': '删除会话？',
   'Delete hides this Session and requests its work to stop. Workspace files stay unchanged.':
@@ -544,15 +679,69 @@ export type TuiTranslator = (label: string) => string;
 export function translateTuiLabel(label: string, language: 'zh-CN' | 'en-US'): string {
   return language === 'zh-CN' ? (tuiChinese[label] ?? label) : label;
 }
-const Presentation = createContext({ preferences: defaultTuiPreferences });
+const Presentation = createContext<{
+  preferences: typeof defaultTuiPreferences;
+  /** Trusted renderer option; development alone never enables test diagnostics. */
+  testDiagnostics?: boolean;
+}>({ preferences: defaultTuiPreferences });
 export const TuiPresentationProvider = Presentation.Provider;
 export function useTuiPresentation() {
-  const { preferences } = useContext(Presentation);
+  const { preferences, testDiagnostics = false } = useContext(Presentation);
   const t = useMemo<TuiTranslator>(
     () => (label) => translateTuiLabel(label, preferences.resolvedLanguage),
     [preferences.resolvedLanguage],
   );
-  return { t, preferences };
+  return { t, preferences, testDiagnostics };
+}
+export type { InkTheme } from './ink/theme';
+export interface InkI18n {
+  language: 'zh-CN' | 'en-US';
+  t: (key: MessageKey, values?: Record<string, string | number>) => string;
+  formatNumber: (value: number) => string;
+  formatDateTime: (value: number) => string;
+  formatElapsed: (milliseconds: number) => string;
+}
+export function useInkTheme(): InkTheme {
+  const { preferences } = useTuiPresentation();
+  return getInkTheme(preferences.theme, preferences.colorPreset);
+}
+/** Original Ink labels; service payloads, model text and paths never enter this catalog. */
+export function useInkI18n(): InkI18n {
+  const { preferences } = useTuiPresentation();
+  return useMemo(() => {
+    const language = preferences.resolvedLanguage;
+    const catalog = language === 'zh-CN' ? zhCN : enUS;
+    return {
+      language,
+      t: (key: MessageKey, values?: Record<string, string | number>) =>
+        catalog[key].replace(/\{(\w+)\}/g, (match, name: string) =>
+          values?.[name] === undefined ? match : String(values[name]),
+        ),
+      formatNumber: (value: number) => new Intl.NumberFormat(language).format(value),
+      formatDateTime: (value: number) => {
+        const date = new Date(value);
+        return Number.isNaN(date.getTime())
+          ? language === 'zh-CN'
+            ? '（未知）'
+            : '(unknown)'
+          : new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'medium' }).format(
+              date,
+            );
+      },
+      formatElapsed: (milliseconds: number) => {
+        const seconds = Math.max(1, Math.round(milliseconds / 1000));
+        const minutes = Math.floor(seconds / 60),
+          rest = seconds % 60;
+        return language === 'zh-CN'
+          ? minutes
+            ? `${minutes} 分 ${rest} 秒`
+            : `${seconds} 秒`
+          : minutes
+            ? `${minutes}m ${rest}s`
+            : `${seconds}s`;
+      },
+    };
+  }, [preferences.resolvedLanguage]);
 }
 const lightAccents = {
   teal: '#087E66',

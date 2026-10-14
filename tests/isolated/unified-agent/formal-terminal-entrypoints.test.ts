@@ -479,7 +479,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
       `import assert from 'node:assert/strict';
 import {existsSync,writeFileSync} from 'node:fs';
 import {ptyDeadline,spawnTuiPTY,terminateTuiTree} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, 'apps/cli/test/fixtures/tui-pty.ts')).href)};
-const owned=spawnTuiPTY({cmd:[${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],cwd:${JSON.stringify(workspace)}});
+const owned=spawnTuiPTY({cmd:[${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--test-ui-diagnostics','--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],cwd:${JSON.stringify(workspace)}});
 const cancelled=new AbortController();
 process.once('SIGTERM',()=>cancelled.abort(Error('owned PTY cancelled')));
 const cancellation=new Promise((_,reject)=>cancelled.signal.addEventListener('abort',()=>reject(cancelled.signal.reason),{once:true}));

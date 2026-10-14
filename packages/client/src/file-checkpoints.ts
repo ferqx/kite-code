@@ -42,6 +42,16 @@ export function verifyFileCheckpointPage(
     parseCursorSequence(item.revision);
     parseCursorSequence(item.checkpoint.boundary.messageSeq);
     parseCursorSequence(item.checkpoint.boundary.triggerSeq);
+    if (
+      item.recordedAt !== undefined &&
+      (item.checkpoint.boundary.storeId !== page.storeId ||
+        item.checkpoint.boundary.sessionId !== page.sessionId ||
+        item.revision !== '1' ||
+        !Number.isSafeInteger(item.recordedAt) ||
+        item.recordedAt < 0 ||
+        item.recordedAt > 8640000000000000)
+    )
+      throw new ClientError('invalid_file_checkpoint_page');
     previous = key;
   }
   if (
@@ -63,7 +73,24 @@ export function verifyFileCheckpointDetail(
     throw new ClientError('file_checkpoint_identity_mismatch');
   parseCursorSequence(detail.payload.checkpoint.boundary.messageSeq);
   parseCursorSequence(detail.payload.checkpoint.boundary.triggerSeq);
-  for (const file of detail.payload.files) parseCursorSequence(file.recordRevision);
+  for (const file of detail.payload.files) {
+    parseCursorSequence(file.recordRevision);
+    const change = file.textChange;
+    if (
+      change &&
+      (!['restore', 'remove', 'unchanged'].includes(file.status) ||
+        !Number.isSafeInteger(change.addedLines) ||
+        change.addedLines < 0 ||
+        !Number.isSafeInteger(change.removedLines) ||
+        change.removedLines < 0 ||
+        typeof change.preview !== 'string' ||
+        /[\uD800-\uDFFF]/u.test(change.preview) ||
+        new TextEncoder().encode(change.preview).byteLength > 65536 ||
+        typeof change.truncated !== 'boolean' ||
+        (file.status === 'unchanged' && (change.addedLines !== 0 || change.removedLines !== 0)))
+    )
+      throw new ClientError('file_checkpoint_preview_invalid');
+  }
   return detail;
 }
 export function verifyFileRestoreStatus(

@@ -11,7 +11,7 @@
 | `/permissions` | 无参数 | 当前模式、信任与准确授权事实 |
 | `/skills` | 无参数 | 当前知识和 Workflow 资格目录，只读不执行 |
 | `/mcp` | 无参数 | 安全 Server 目录与详情；明确用户或项目范围启停，查询原未知操作 |
-| `/background` | 可加 `stop/output/child <原executionId>` | 当前会话原后台执行目录、准确停止、完整输出或子日志；恢复历史只读，见[后台任务](../guides/tools-and-subagents.md#查看后台任务与恢复历史) |
+| `/background` | 可加 `stop/output/child <原executionId>` | 当前会话工具/后台执行详情；准确 Job 才能停止、读完整输出或子日志，恢复历史只读，见[后台任务](../guides/tools-and-subagents.md#查看后台任务与恢复历史) |
 | `/session rename <标题>` | 非空标题 | 原 Session/control revision 重命名 |
 | `/session delete confirm` | 必须明确 confirm | 保存删除与整组停止意图，受理不等于清理结束 |
 | `/session fork <标题>` | 非空标题 | 稳定原选择创建分支，不继承授权 |
@@ -25,10 +25,14 @@
 | `/export` | 无参数 | 当前已加载对话 Markdown，不代替完整 records export |
 | `/clear` | 无参数 | 清理本地正文展示，保留历史数据、草稿、待决审批和活动工作 |
 | `/status` | 无参数 | 实际 profile/实例/API/候选与执行、发行、遥测事实 |
-| `/help` | `/h`，无参数 | 当前命令帮助 |
+| `/help` | `/h`，无参数 | 当前命令帮助；上下滚动、Home/End 跳转、Esc 或 Ctrl+C 关闭，不取消任务 |
 | `/exit` | `/quit`、`/q`，无参数 | 明确结束本宿主 |
 
 未知 slash 不作为普通模型任务提交，固定命令优先于同名 Skill。只有当前编译目录中合格的 `/<Skill名称> [任务]` 才能显式激活 Workflow。`/mcp` 是固定无参数命令；当前有限目录与启停不等于完整认证、重连、增删或工具管理，差异见[MCP 指南](../guides/mcp-and-skills.md#通用-tui-的-mcp-目录与选择)。多余参数局部拒绝，不静默扩大操作。当前实现见[命令 owner](../../../../../packages/ui/src/tui/commands.ts)，详细按键见[键盘参考](keyboard.md)。
+
+## 测试诊断展示
+
+普通 `tui` 和 `tui:dev` 默认不显示测试诊断。自动化身份断言可明确添加启动参数 `--test-ui-diagnostics`；同一参数用于 macOS、Windows、Linux，不依赖开发环境变量。它只增加准确 ID、回执和完整协议对象的展示，不改变审批、权限、任务提交或数据范围。`/status` 和显式恢复详情在普通模式仍可用于核实；日常编辑无需开启此选项。
 
 ## 通用开发 TUI 草稿入口
 
@@ -45,6 +49,8 @@
 ## 通用开发 TUI 模型入口
 
 `/model`、`/effort` 均不接受参数。上下选择、Enter 核对再 Enter 保存；模型面板 E 核对启禁，R 读取，K 查询原操作，Esc 放弃确认或关闭。范围为当前 Workspace 项目设置，详情见[模型指南](../guides/models-and-settings.md#开发统一-tui-的模型设置)。
+
+目录初始定位实际 default model 或当前 effort，超过一屏时显示当前项所在窗口。`/rewind` 用原消息识别恢复点并显示真实文件影响，三范围需独立 Enter 确认；普通模式不显示整个内部申请对象，原未知申请仍按 L/R/C/A 核实。
 
 
 ## 通用开发 TUI 状态
@@ -65,3 +71,6 @@
 ## 通用开发 TUI 文件恢复
 
 `/rewind` 不接受参数，读取实际 Files 恢复点与保存申请。上下选择、Enter 预览，1/2/3 选仅会话/仅代码/两者，再 Enter 核对提交。L 查原保存申请，R 只读刷新，C 明确继续未开始的第二 leg，A 返回原独立审批，Esc/Ctrl+C 关闭本地读取。操作与部分完成含义见[恢复指南](../guides/cancellation-and-recovery.md#通用开发-tui-的-files-三范围操作)。
+
+
+正常命令菜单使用原说明／别名、ghost 和终端高度窗口；补全候选不会直接执行。实际合格 Workflow 与完整 live MCP prompt 目录可提供动态候选；`/mcp__<server>__<prompt>`仅保留原本地用户显示，不创建 Run／RPC，详见[目录说明](../guides/mcp-and-skills.md#原目录展示与动态-prompt-命令)。

@@ -469,6 +469,32 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
       }).payload,
     );
     expect(actualDetail.payload.checkpoint.boundary).toEqual(point.boundary);
+    const displayedChange = actualDetail.payload.files.find((file) => file.path === 'original.txt')!
+      .textChange!;
+    expect(displayedChange.addedLines).toBeGreaterThan(0);
+    expect(displayedChange.removedLines).toBeGreaterThan(0);
+    expect(Buffer.byteLength(displayedChange.preview)).toBeLessThanOrEqual(65536);
+    const logView = await browser.getView('s');
+    const pointLogs = await browser.listSessionLogs('s', {
+      afterCursor: '0',
+      upperCursor: logView.snapshotCursor,
+      limit: 200,
+    });
+    const pointRecord = pointLogs.entries.find(
+      (entry) => entry.objectId === `builtin.files/checkpoint/${point.id}/point`,
+    )!;
+    expect(pointRecord.type).toBe('extension.record_updated');
+    expect(pointRecord.revision).toBe('0');
+    expect(pointRecord.occurredAt).toBeGreaterThan(0);
+    expect(
+      pointLogs.entries
+        .filter(
+          (entry) =>
+            entry.type === 'extension.record_updated' &&
+            !/^builtin\.files\/checkpoint\/[a-f0-9]{64}\/point$/.test(entry.objectId),
+        )
+        .every((entry) => entry.objectId === 'unavailable'),
+    ).toBe(true);
     expect((await browser.listFileCheckpoints('other')).payload.items).toEqual([]);
     let foreignCode: string | undefined;
     try {
@@ -551,7 +577,20 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
     expect(await reader.getView('s')).toEqual(beforeRead);
     expect(requests).toHaveLength(8);
     expect(JSON.stringify(actualDetail)).not.toContain('ORIGINAL_CHECKPOINT_AGENT_SOURCE');
-    expect(JSON.stringify(actualDetail)).not.toContain('完整原始字节');
+    // Existing metadata remains content-free; only the explicit bounded preview carries text.
+    const originalMetadata = {
+      ...actualDetail,
+      payload: {
+        ...actualDetail.payload,
+        files: actualDetail.payload.files.map(({ textChange: _preview, ...file }) => file),
+      },
+    };
+    expect(JSON.stringify(originalMetadata)).not.toContain('完整原始字节');
+    expect(displayedChange.preview).toContain('完整原始字节');
+    expect(displayedChange.truncated).toBe(true);
+    expect(JSON.stringify(actualDetail)).not.toContain(
+      JSON.stringify(original.toString()).slice(1, -1),
+    );
     const input = {
       expectedStoreId: storeId,
       commandId: 'restore-original',

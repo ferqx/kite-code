@@ -1,13 +1,23 @@
 import type { ModelSettingsRequest, ModelSettingsView } from '@kite-ai/client';
-import { Box, useInput } from 'ink';
+import { Box, useInput, useStdout } from 'ink';
 import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
+import {
+  OverlayEmptyState,
+  OverlayListRow,
+  OverlayMessage,
+  OverlaySection,
+} from './ink/OverlayPrimitives';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 export function TuiModelPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation();
+  const { t: originalLabel, language: inkLanguage } = useInkI18n();
+  const { t, testDiagnostics } = useTuiPresentation();
   const state = controller.state,
     facts = state.models;
   const effortPanel = state.panel === 'effort';
+  const { stdout } = useStdout();
+  const page = Math.max(2, Math.min(8, (stdout.rows ?? 24) - 13));
   const rows = [...(facts?.models ?? [])].sort(
     (a, b) => (a.provider ?? '').localeCompare(b.provider ?? '') || a.id.localeCompare(b.id),
   );
@@ -18,7 +28,20 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     }>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new public observation invalidates the selected index and pending confirmation.
   useEffect(() => {
-    setIndex(0);
+    const selected = facts?.models.find((model) => model.id === facts.defaultModelId);
+    setIndex(
+      effortPanel
+        ? Math.max(
+            0,
+            [null, ...(selected?.reasoningEffortChoices ?? [])].indexOf(
+              selected?.reasoningEffort ?? null,
+            ),
+          )
+        : Math.max(
+            0,
+            rows.findIndex((model) => model.id === facts?.defaultModelId),
+          ),
+    );
     setPending(undefined);
   }, [facts, effortPanel]);
   useInput((input, key) => {
@@ -88,98 +111,192 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
         });
     }
   });
+  const offset = Math.max(0, Math.min(index - Math.floor(page / 2), rows.length - page));
+  const selectedModel = facts?.models.find((model) => model.id === facts.defaultModelId);
+  const efforts = [null, ...(selectedModel?.reasoningEffortChoices ?? [])];
+  const effortDescriptions: Record<string, string> = {
+    low: 'Faster responses with less reasoning.',
+    medium: 'Balanced reasoning and speed.',
+    high: 'More reasoning for difficult tasks.',
+    max: 'Maximum reasoning for demanding tasks.',
+    minimal: 'Minimal reasoning for simple tasks.',
+    xhigh: 'Extended reasoning for difficult tasks.',
+    none: 'Turn reasoning off.',
+  };
+  const displayModel = (id: string) => facts?.models.find((model) => model.id === id)?.model ?? id;
   return (
-    <Box flexDirection="column">
-      <Text bold>
-        {effortPanel ? t('Reasoning effort') : t('Models')} {t('· Workspace')}{' '}
-        {terminalText(facts?.workspaceId ?? t('unavailable'))}
-      </Text>
-      <Text>
-        {t(
-          'Saved project settings apply to later executions; active Run keeps its original model.',
-        )}
-      </Text>
+    <TuiOverlayFrame
+      title={
+        effortPanel
+          ? testDiagnostics
+            ? t('Reasoning effort')
+            : originalLabel('effort.title')
+          : testDiagnostics
+            ? t('Models')
+            : originalLabel('model.title')
+      }
+      meta={`${index + 1} / ${effortPanel ? efforts.length : rows.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: 'Enter', label: originalLabel('common.confirm') },
+            ...(!effortPanel ? [{ keys: 'E', label: t('Enable / Disable') }] : []),
+            { keys: 'R', label: t('Refresh') },
+            { keys: 'K', label: t('Check original request') },
+            { keys: 'Esc', label: t(pending ? 'Back' : 'Close') },
+          ]}
+        />
+      }
+    >
       {!facts ? (
-        <Text>{t('Reading actual configured models')}</Text>
+        <OverlayMessage tone="busy">{t('Reading actual configured models')}</OverlayMessage>
       ) : (
         <>
-          <Text>
-            {t('Desired default:')} {terminalText(facts.defaultModelId ?? t('none'))} {'·'}{' '}
-            {state.stale ? t('stale / read only') : t('available')}
-          </Text>
           {effortPanel ? (
             <>
-              <Text>
-                {t('Current effective effort:')}{' '}
-                {facts.models.find((m) => m.id === facts.defaultModelId)?.reasoningEffort ??
-                  t('unspecified')}
-              </Text>
-              {facts.models.find((m) => m.id === facts.defaultModelId)
-                ?.reasoningEffortReadonlyReason && (
-                <Text>
-                  {t('Read only:')}{' '}
-                  {terminalText(
-                    facts.models.find((m) => m.id === facts.defaultModelId)!
-                      .reasoningEffortReadonlyReason!,
-                  )}
-                </Text>
+              {selectedModel?.reasoningEffortReadonlyReason && (
+                <OverlayMessage tone="warning">
+                  {terminalText(selectedModel.reasoningEffortReadonlyReason)}
+                </OverlayMessage>
               )}
-              <Text>
-                {t('Adapter wire vocabulary only; actual provider may reject unsupported effort.')}
-              </Text>
-              {facts.models.find((m) => m.id === facts.defaultModelId)?.reasoningEffortSupport !==
-              'compatible_wire' ? (
-                <Text>{t('Reasoning effort unavailable for this model')}</Text>
+              {selectedModel?.reasoningEffortSupport !== 'compatible_wire' ? (
+                <OverlayEmptyState>
+                  {t('Reasoning effort unavailable for this model')}
+                </OverlayEmptyState>
               ) : (
-                [
-                  null,
-                  ...(facts.models.find((m) => m.id === facts.defaultModelId)
-                    ?.reasoningEffortChoices ?? []),
-                ].map((e, i) => (
-                  <Text key={e ?? 'clear'}>
-                    {index === i ? '›' : ' '}{' '}
-                    {e ?? t('clear project effort (read resulting value)')}
-                  </Text>
+                efforts.map((effort, i) => (
+                  <OverlayListRow
+                    key={effort ?? 'clear'}
+                    selected={index === i}
+                    primary={
+                      effort === null
+                        ? t('Default')
+                        : !testDiagnostics && ['low', 'medium', 'high', 'max'].includes(effort)
+                          ? originalLabel(
+                              `effort.${effort}` as
+                                | 'effort.low'
+                                | 'effort.medium'
+                                | 'effort.high'
+                                | 'effort.max',
+                            )
+                          : t(effort)
+                    }
+                    secondary={
+                      effort === null
+                        ? t('Use the configured default reasoning effort.')
+                        : ['low', 'medium', 'high', 'max'].includes(effort)
+                          ? originalLabel(
+                              `effort.${effort}Description` as
+                                | 'effort.lowDescription'
+                                | 'effort.mediumDescription'
+                                | 'effort.highDescription'
+                                | 'effort.maxDescription',
+                            )
+                          : t(
+                              effortDescriptions[effort] ??
+                                'Reasoning effort supported by this model.',
+                            )
+                    }
+                    trailing={
+                      <OverlayStatusColumn
+                        active={effort === (selectedModel?.reasoningEffort ?? null)}
+                        label={inkLanguage === 'zh-CN' ? '当前' : 'Current'}
+                      />
+                    }
+                  />
                 ))
               )}
             </>
           ) : (
-            <>
-              {rows.map((row, i) => (
-                <Text key={row.id}>
-                  {i === index ? '›' : ' '} {terminalText(row.provider ?? t('unavailable'))} {'/'}{' '}
-                  {terminalText(row.id)} {'·'} {terminalText(row.model ?? t('unavailable'))} {'·'}{' '}
-                  {row.enabled ? t('enabled') : t('disabled')} {'·'}{' '}
-                  {row.configured ? t('configured') : t('incomplete')}{' '}
-                  {terminalText(row.diagnostics.join(' '))}
-                </Text>
-              ))}
-            </>
+            <Box flexDirection="column">
+              {rows.slice(offset, offset + page).map((model, i) => {
+                const rowIndex = offset + i;
+                const duplicate = rows.some(
+                  (other) =>
+                    other.id !== model.id &&
+                    other.provider === model.provider &&
+                    other.model === model.model,
+                );
+                return (
+                  <Box key={model.id} flexDirection="column">
+                    {(i === 0 || rows[rowIndex - 1]?.provider !== model.provider) && (
+                      <OverlaySection first={i === 0}>
+                        {terminalText(model.provider ?? t('Unavailable'))}
+                      </OverlaySection>
+                    )}
+                    <OverlayListRow
+                      selected={index === rowIndex}
+                      primary={terminalText(model.model ?? model.id)}
+                      secondary={
+                        !model.configured
+                          ? t('Model configuration incomplete')
+                          : !model.enabled
+                            ? t('Disabled')
+                            : duplicate
+                              ? terminalText(model.id)
+                              : undefined
+                      }
+                      trailing={
+                        <OverlayStatusColumn
+                          active={model.id === facts.defaultModelId}
+                          label={inkLanguage === 'zh-CN' ? '当前' : 'Current'}
+                        />
+                      }
+                    />
+                    {testDiagnostics && (
+                      <Text>
+                        {terminalText(model.id)} · {t(model.enabled ? 'enabled' : 'disabled')} ·{' '}
+                        {t(model.configured ? 'configured' : 'incomplete')} ·{' '}
+                        {terminalText(model.diagnostics.join(' '))}
+                      </Text>
+                    )}
+                  </Box>
+                );
+              })}
+              {!rows.length && (
+                <OverlayEmptyState>{t('No configured models; unavailable')}</OverlayEmptyState>
+              )}
+            </Box>
           )}
-          {!rows.length && <Text>{t('No configured models; unavailable')}</Text>}
-          {facts.errors.map((e) => (
-            <Text key={e}>{terminalText(e)}</Text>
+          {facts.errors.map((error) => (
+            <OverlayMessage key={error} tone="error">
+              {terminalText(error)}
+            </OverlayMessage>
           ))}
-          <Text>
-            {effortPanel
-              ? t('↑↓ choose effort · Enter review effort')
-              : t('↑↓ select exact ID · Enter review default · E review enabled')}{' '}
-            {t('· R read · K original outcome · Esc close')}
-          </Text>
+          {state.stale && <OverlayMessage tone="warning">{t('stale / read only')}</OverlayMessage>}
+          {testDiagnostics && (
+            <Text>
+              {t(
+                effortPanel
+                  ? '↑↓ choose effort · Enter review effort'
+                  : '↑↓ select exact ID · Enter review default · E review enabled',
+              )}{' '}
+              · {t('Desired default:')} {terminalText(facts.defaultModelId ?? t('none'))} ·{' '}
+              {t('Adapter wire vocabulary only; actual provider may reject unsupported effort.')}
+            </Text>
+          )}
         </>
       )}
       {pending && (
-        <Text>
-          {t('Confirm original project change')} {terminalText(JSON.stringify(pending.operation))}
+        <OverlayMessage tone="warning" callout>
+          {t('Confirm original project change')}{' '}
+          {pending.operation.kind === 'default'
+            ? displayModel(pending.operation.modelId)
+            : pending.operation.kind === 'enabled'
+              ? `${displayModel(pending.operation.modelId)} · ${t(pending.operation.enabled ? 'enabled' : 'disabled')}`
+              : `${displayModel(pending.operation.modelId)} · ${pending.operation.reasoningEffort ?? t('Default')}`}
           {t('; Enter save / Esc abandon')}
-        </Text>
+          {testDiagnostics && terminalText(JSON.stringify(pending.operation))}
+        </OverlayMessage>
       )}
       {state.modelOutcome && (
-        <Text>
-          {t('Original')} {terminalText(state.modelOutcome.intent.request.commandId)}
-          {':'} {state.modelOutcome.status}
-        </Text>
+        <OverlayMessage tone="info">
+          {t('Original')}{' '}
+          {testDiagnostics && terminalText(state.modelOutcome.intent.request.commandId)}:{' '}
+          {state.modelOutcome.status}
+        </OverlayMessage>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

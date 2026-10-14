@@ -10,10 +10,12 @@ import {
   readMcpToolDescriptor,
 } from '@kite-ai/client';
 import {
+  decodeTuiMcpLabels,
   decodeTuiMcpSnapshot,
   type TuiMcpIntent,
   type TuiMcpOutcome,
   type TuiMcpPort,
+  type TuiMcpReadDirectory,
 } from '@kite-ai/ui/tui';
 import type { McpConnectionJournal } from './mcp-connection-journal';
 import type { McpReconnectionJournal } from './mcp-reconnection-journal';
@@ -251,6 +253,10 @@ export function createTuiMcpPort(
     sourceJournal && fullClient
       ? createTuiMcpSourceApprovalPort(fullClient, storeId, sourceJournal)
       : undefined;
+  const connection =
+    connectionJournal && fullClient
+      ? createTuiMcpConnectionPort(fullClient, storeId, connectionJournal)
+      : undefined;
   return {
     ...(source ? { source } : {}),
     ...(source && fullClient && sourceMutationJournal
@@ -263,8 +269,17 @@ export function createTuiMcpPort(
           ),
         }
       : {}),
-    ...(connectionJournal && fullClient
-      ? { connection: createTuiMcpConnectionPort(fullClient, storeId, connectionJournal) }
+    ...(connection
+      ? {
+          connection: {
+            ...connection,
+            submit(intent, observed) {
+              // Presentation labels are not part of the exact canonical configuration proof.
+              const { labels: _labels, ...canonical } = observed;
+              return connection.submit(intent, canonical);
+            },
+          },
+        }
       : {}),
     ...(connectionJournal && reconnectionJournal && fullClient
       ? {
@@ -276,6 +291,41 @@ export function createTuiMcpPort(
           ),
         }
       : {}),
+    async readDirectory(sessionId, family, signal, options = {}) {
+      toolsAdmission(sessionId, signal);
+      const before = await client.getView(sessionId, { signal });
+      const result = await client.queryExtension(
+        sessionId,
+        'builtin.mcp',
+        `mcp.${family}`,
+        {
+          ...(options.serverId ? { serverId: options.serverId } : {}),
+          ...(options.afterKey ? { afterKey: options.afterKey } : {}),
+          limit: 32,
+        },
+        { signal },
+      );
+      const after = await client.getView(sessionId, { signal });
+      toolsAdmission(sessionId, signal);
+      if (
+        before.storeId !== storeId ||
+        after.storeId !== storeId ||
+        before.session.id !== sessionId ||
+        after.session.id !== sessionId ||
+        before.session.deletedAt !== null ||
+        after.session.deletedAt !== null ||
+        before.session.workspaceId !== after.session.workspaceId
+      )
+        throw Error('mcp_read_directory_scope_mismatch');
+      return decodeRetainedMcpDirectory(
+        result,
+        family,
+        storeId,
+        sessionId,
+        after.session.workspaceId,
+        options,
+      );
+    },
     async readToolsSnapshots(sessionId, signal, options = {}) {
       toolsAdmission(sessionId, signal);
       const snapshots = decodeMcpToolsSnapshots(
@@ -369,6 +419,16 @@ export function createTuiMcpPort(
       );
       if (facts.storeId !== storeId || facts.sessionId !== sessionId)
         throw Error('mcp_directory_scope_mismatch');
+      if (source) {
+        try {
+          const labels = decodeTuiMcpLabels(facts, await source.read(sessionId, signal));
+          signal.throwIfAborted();
+          return { ...facts, labels };
+        } catch {
+          // Optional labels cannot invalidate canonical controls or promote a mismatched source.
+          signal.throwIfAborted();
+        }
+      }
       return facts;
     },
     async list() {
@@ -433,5 +493,119 @@ export function createTuiMcpPort(
         return { intent, phase: 'outcome_unknown' };
       }
     },
+  };
+}
+
+/** Cached directory only: exact original bindings and descriptor hashes, no remote request. */
+export function decodeRetainedMcpDirectory(
+  result: unknown,
+  family: 'resources' | 'prompts',
+  storeId: string,
+  sessionId: string,
+  workspaceId: string,
+  options: { serverId?: string; afterKey?: string } = {},
+): TuiMcpReadDirectory {
+  const invalid = (): never => {
+    throw Error('mcp_read_directory_invalid');
+  };
+  if (!Array.isArray(result) || result.length !== 1) return invalid();
+  const display = obj(result[0]),
+    payload = obj(display?.payload);
+  if (
+    display?.extensionId !== 'builtin.mcp' ||
+    display.contentType !== `builtin.mcp.${family}` ||
+    display.contentVersion !== 1 ||
+    !Array.isArray(display.actions) ||
+    display.actions.length ||
+    !Array.isArray(display.artifactRefs) ||
+    display.artifactRefs.length ||
+    !payload ||
+    !Array.isArray(payload.items) ||
+    payload.items.length > 32
+  )
+    return invalid();
+  const key = (value: unknown): value is string =>
+    typeof value === 'string' && new RegExp(`^${family}/[A-Za-z0-9_-]{1,128}$`).test(value);
+  if (payload.nextAfterKey !== null && !key(payload.nextAfterKey)) return invalid();
+  const items: TuiMcpReadDirectory['items'][number][] = [];
+  let previous = options.afterKey ?? '';
+  for (const raw of payload.items) {
+    const row = obj(raw),
+      record = obj(row?.record),
+      binding = obj(record?.binding);
+    if (
+      !row ||
+      !key(row.key) ||
+      row.key <= previous ||
+      typeof row.live !== 'boolean' ||
+      !record ||
+      !['list', family === 'prompts' ? 'get' : 'read'].includes(String(record.kind)) ||
+      !binding ||
+      typeof binding.executionId !== 'string' ||
+      row.key !== `${family}/${binding.executionId}` ||
+      typeof binding.serverId !== 'string' ||
+      !binding.serverId ||
+      typeof binding.configDigest !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(binding.configDigest) ||
+      !Number.isSafeInteger(binding.generation) ||
+      Number(binding.generation) < 1 ||
+      typeof binding.connectionExecutionId !== 'string' ||
+      !binding.connectionExecutionId ||
+      typeof binding.connectionKey !== 'string' ||
+      !binding.connectionKey ||
+      typeof binding.definitionId !== 'string' ||
+      !binding.definitionId.endsWith(
+        `mcp.${family}.${record.kind === 'list' ? 'list' : family === 'prompts' ? 'get' : 'read'}`,
+      ) ||
+      binding.definitionVersion !== '1'
+    )
+      return invalid();
+    previous = row.key;
+    // Forks and historical foreign bindings remain unavailable, never become current prompts.
+    if (binding.originalStoreId !== storeId || binding.sessionId !== sessionId) continue;
+    if (options.serverId && binding.serverId !== options.serverId) return invalid();
+    if (record.kind !== 'list') continue;
+    if (
+      !Array.isArray(record.descriptors) ||
+      !Array.isArray(record.descriptorDigests) ||
+      record.descriptors.length !== record.descriptorDigests.length ||
+      record.descriptors.length > 10000
+    )
+      return invalid();
+    const descriptorDigests = record.descriptorDigests;
+    const descriptors = record.descriptors.map((raw, index) => {
+      const descriptor = obj(raw);
+      if (
+        !descriptor ||
+        typeof descriptor.name !== 'string' ||
+        !descriptor.name ||
+        descriptor.name.length > 4096 ||
+        (family === 'resources' && (typeof descriptor.uri !== 'string' || !descriptor.uri)) ||
+        descriptorDigests[index] !== digest(descriptor)
+      )
+        return invalid();
+      return descriptor;
+    });
+    items.push({
+      key: row.key,
+      serverId: binding.serverId,
+      configDigest: binding.configDigest,
+      generation: Number(binding.generation),
+      live: row.live,
+      descriptors,
+      descriptorDigests: descriptorDigests as string[],
+    });
+  }
+  if (
+    payload.nextAfterKey !== null &&
+    (payload.nextAfterKey < previous || payload.nextAfterKey <= (options.afterKey ?? ''))
+  )
+    return invalid();
+  return {
+    family,
+    sessionId,
+    workspaceId,
+    items,
+    nextAfterKey: payload.nextAfterKey as string | null,
   };
 }

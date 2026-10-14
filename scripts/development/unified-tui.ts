@@ -27,11 +27,14 @@ export function runDevelopmentTUI(
     readonly argv?: readonly string[];
     readonly root?: string;
     readonly executable?: string;
+    /** Trusted test caller only; ordinary development stays in the user interface. */
+    readonly testDiagnostics?: boolean;
   } = {},
 ): Promise<number> {
-  return runTUIProcess(
-    selectDevelopmentTUI(input.argv ?? process.argv.slice(2), input.root, input.executable),
-  );
+  return runTUIProcess({
+    ...selectDevelopmentTUI(input.argv ?? process.argv.slice(2), input.root, input.executable),
+    testDiagnostics: input.testDiagnostics,
+  });
 }
 if (import.meta.main) {
   try {

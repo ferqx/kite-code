@@ -59,6 +59,8 @@ icacls.exe $electronDist /grant '*S-1-15-2-2:(OI)(CI)(RX)' /T
 
 该权限让其他受限应用包也能读取这些公开运行资源，不授予写入权限。范围只包含这份 npm Electron 发行目录；开发应用目录、Profile、数据库和正式候选仍按原私有 ACL 契约校验，不应扩大授权或关闭浏览器沙箱。重新安装或切换 Electron 版本后，按实际新目录重新核对。
 
+`tui:dev` 与 `desktop:dev` 默认使用普通用户界面，开发运行不自动启用测试诊断。TUI 自动化可明确加 `--test-ui-diagnostics`，或调用可信 host 的 `testDiagnostics:true`；Desktop 测试通过明确 builder／组件参数开启，普通命令不启用。测试诊断只影响展示，原权限、scope、未知结果和制品校验不变。
+
 `npm run agent`、`npm run tui`、`npm run desktop` 仍选择正式候选。首次运行这组命令，先执行 `npm run release:build`，再执行 `npm run release:build -- --product native` 生成 Desktop 候选。缺失候选时分别返回 `terminal_bundle_unavailable`／`native_bundle_unavailable` 和准备命令，未通过完整验证时不进入 Profile。源码变化不会自动更新候选；需要重新生成时，先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。构建不覆盖正在使用或已有的目录。
 
 旧 `apps/kite-desktop` 的 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 已退役，直接执行原开发／Electron构建／打包／服务准备脚本也返回 `legacy_desktop_entrypoint_retired` 和退出码2。诊断给出上表的当前 Native 构建、启动和验证命令；拒绝发生在读取旧archive、打开Profile、构建或启动服务之前。旧开发Vite热更新属于[历史实现](../../apps/kite-desktop/README.md)，当前正式候选仍固定资源；上面的开发热更新是新宿主的独立实现。旧源码和制品可追溯，当前数据不会交给旧writer；全部旧authority删除与阶段退出仍按原门禁核对。
@@ -71,7 +73,7 @@ icacls.exe $electronDist /grant '*S-1-15-2-2:(OI)(CI)(RX)' /T
 
 开发 CLI 的 `run/resume` 消费公开 Client；`resume` 在原 Session 输入新任务，冷接续原 Run 使用明确 recovery 命令。`--skill` 只选已配置知识，Workflow 使用明确 `--activate-skill`。首次 mutation 前保存完整原申请，回执未知只查原 ID。stdin EOF 保留原待人工作；Ctrl+C 精确取消原 work。显式 `--server` 连接所选 data root 的原共享服务，不读取本地 Service 资产。`caller list` 和 `files intents` 仍先连接服务，不是离线查询。参数和退出码见[CLI 手册](../handbook/cli/commands.md)，真实 argv 证据见[CLI owner](../../apps/cli/README.md)。
 
-开发 TUI 的 `Ctrl+R` 选择 Session，`Ctrl+N` 创建同 Workspace 新 Session，`Ctrl+K` 查原未知 Command，`Ctrl+C` 精确取消原工作。stdin EOF、PTY 关闭和 SIGHUP 停止输入与观察；`Ctrl+Q` 或明确 SIGTERM 关闭本宿主拥有的 paired Service。当前命令与持久草稿、Files 恢复和终态等待见[命令参考](../handbook/clients/tui/reference/commands.md)及[CLI/TUI owner](../../apps/cli/README.md)。macOS 的 28 文件真实 runner 已通过，不能据此取得 Linux/Windows 或完整 §35 资格。
+开发 TUI 的 `Ctrl+R` 选择 Session，`Ctrl+N` 创建同 Workspace 新 Session，`Ctrl+K` 查原未知 Command，`Ctrl+E` 选择执行详情。普通 Esc 或一次 Ctrl+C 精确取消活动原工作；一秒内两次独立 Ctrl+C 沿正常退出保存草稿，原生合并批次不当双击退出。Shift+Tab 在各面板焦点下只切下一次输入的计划意图。stdin EOF、PTY 关闭和 SIGHUP 停止输入与观察；`Ctrl+Q` 或明确 SIGTERM 关闭本宿主拥有的 paired Service。当前命令与持久草稿、Files 恢复和终态等待见[命令参考](../handbook/clients/tui/reference/commands.md)及[CLI/TUI owner](../../apps/cli/README.md)。macOS 的 28 文件真实 runner 已通过，不能据此取得 Linux/Windows 或完整 §35 资格。
 
 `web:dev` 使用新只读 Gateway，不发现旧 daemon。它只接受可选 `--data-root <绝对路径>`，stdout 输出 Browser 地址。关闭浏览器结束读取；launcher EOF、Ctrl+C 或 SIGTERM 清理其所属 Service/Gateway。只读范围和资产条件见[Web owner](../../apps/web/README.md#新开发-web-宿主入口)。
 

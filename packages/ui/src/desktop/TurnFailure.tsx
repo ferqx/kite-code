@@ -6,6 +6,7 @@ import {
   CollapsibleTrigger,
 } from './components/ui/collapsible';
 import { Marker, MarkerContent, MarkerIcon } from './components/ui/marker';
+import { useDesktopDiagnostics } from './diagnostics';
 import type { Message } from './types';
 import { Button } from './ui';
 
@@ -39,7 +40,7 @@ export function TurnFailure({
 }) {
   const summary =
     message.failure?.summary || message.text.trim().split('\n')[0] || '本轮回复未完成';
-  const development = process.env.NODE_ENV === 'development';
+  const development = useDesktopDiagnostics() ?? process.env.NODE_ENV === 'development';
   const detail = message.text || '当前记录未提供具体失败原因。';
   const outcome = message.failure?.outcome;
   return (

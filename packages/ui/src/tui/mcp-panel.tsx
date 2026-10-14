@@ -1,16 +1,20 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
+import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { OverlayListRow, OverlaySection } from './ink/OverlayPrimitives';
 import type { TuiMcpSnapshot } from './mcp';
+import { TuiMcpDirectoryPanel } from './mcp-directory-panel';
 import { TuiMcpReconnectionPanel } from './mcp-reconnection-panel';
 import { TuiMcpSourceMutationPanel } from './mcp-source-mutation-panel';
 import { TuiMcpSourcePanel } from './mcp-source-panel';
 import { TuiMcpToolsPanel } from './mcp-tools-panel';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** Visible choices use arrows, Enter and Esc; each mutation has a separate scope review. */
 export function TuiMcpPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation(),
+  const { t: originalLabel } = useInkI18n();
+  const { t, testDiagnostics } = useTuiPresentation(),
     state = controller.state,
     facts = state.mcp?.facts;
   const [index, setIndex] = useState(0),
@@ -22,8 +26,10 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
     scope: 'user' | 'workspace';
     observed: TuiMcpSnapshot;
   }>();
+  const [directory, setDirectory] = useState<'resources' | 'prompts'>();
   const rows = facts?.items ?? [];
   const server = rows.find((row) => row.id === detail);
+  const serverName = (id: string) => facts?.labels?.[id] ?? id;
   type Choice =
     | { kind: 'server' | 'saved'; id: string }
     | { kind: 'connectionSaved'; id: string }
@@ -40,7 +46,9 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           | 'sources'
           | 'reconnections'
           | 'reconnectReview'
-          | 'sourceMutations';
+          | 'sourceMutations'
+          | 'resources'
+          | 'prompts';
       };
   const actions: Choice[] = server
     ? [
@@ -81,6 +89,7 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           .filter((row) => row.intent.sessionId === state.sessionId)
           .map((row) => ({ kind: 'connectionSaved' as const, id: row.intent.request.commandId })),
       ];
+  if (controller.port.mcp?.readDirectory) actions.push({ kind: 'resources' }, { kind: 'prompts' });
   if (controller.port.mcp?.sourceMutation) actions.push({ kind: 'sourceMutations' });
   if (controller.port.mcp?.reconnection) {
     actions.push({ kind: 'reconnections' });
@@ -129,6 +138,10 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
       else if (key.return) {
         const action = actions[index];
         if (!action) return;
+        if (action.kind === 'resources' || action.kind === 'prompts') {
+          setDirectory(action.kind);
+          return;
+        }
         if (action.kind === 'reconnections') {
           void controller.openMcpReconnections();
           return;
@@ -204,12 +217,22 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
     },
     {
       isActive:
+        !directory &&
         !state.mcpTools &&
         !state.mcpSourceOpen &&
         !state.mcpReconnectionOpen &&
         !state.mcpMutationOpen,
     },
   );
+  if (directory)
+    return (
+      <TuiMcpDirectoryPanel
+        controller={controller}
+        family={directory}
+        serverId={server?.id}
+        onBack={() => setDirectory(undefined)}
+      />
+    );
   if (state.mcpMutationOpen) return <TuiMcpSourceMutationPanel controller={controller} />;
   if (state.mcpReconnectionOpen) return <TuiMcpReconnectionPanel controller={controller} />;
   if (state.mcpSourceOpen) return <TuiMcpSourcePanel controller={controller} />;
@@ -219,32 +242,53 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
     if (server && (action.kind === 'user' || action.kind === 'workspace'))
       return `${t(server.selected ? 'Disable' : 'Enable')} · ${t(action.kind === 'user' ? 'User settings' : 'Project settings')}`;
     if (action.kind === 'connectionSaved')
-      return `${t('Original connection:')} ${terminalText(action.id)}`;
+      return `${t('Original connection:')} ${testDiagnostics ? terminalText(action.id) : (state.mcpConnections ?? []).findIndex((row) => row.intent.request.commandId === action.id) + 1}`;
     if (action.kind === 'connection') return t('Request connection');
     if (action.kind === 'connectionLookup') return t('Check original connection');
-    if (action.kind === 'saved') return `${t('Original change:')} ${terminalText(action.id)}`;
+    if (action.kind === 'saved')
+      return `${t('Original change:')} ${testDiagnostics ? terminalText(action.id) : (state.mcpSaved ?? []).findIndex((row) => row.intent.request.commandId === action.id) + 1}`;
     if (action.kind === 'refresh') return t('Refresh servers');
     if (action.kind === 'lookup') return t('Check original change');
-    if (action.kind === 'back') return t('Back');
-    if (action.kind === 'sourceMutations') return t('Source entry changes');
+    if (action.kind === 'back') return originalLabel('common.back');
+    if (action.kind === 'sourceMutations') return t('Add / remove MCP server');
     if (action.kind === 'reconnections') return t('Forced reconnects');
     if (action.kind === 'reconnectReview') return t('Review forced reconnect');
     if (action.kind === 'sources') return t('Project sources');
+    if (action.kind === 'prompts') return t('Saved MCP prompts');
+    if (action.kind === 'resources') return t('Saved MCP resources');
     if (action.kind === 'tools') return t('Saved tool snapshots');
     const row = action.kind === 'server' ? rows.find((value) => value.id === action.id) : undefined;
     return row
-      ? `${terminalText(row.id)} · ${t(row.selected ? 'enabled' : 'disabled')} · ${t(row.available ? 'available' : 'unavailable')}`
+      ? `${terminalText(testDiagnostics ? row.id : serverName(row.id))} · ${t(row.selected ? 'enabled' : 'disabled')} · ${t(row.available ? 'available' : 'unavailable')}`
       : '';
   };
   return (
-    <Box flexDirection="column">
-      <Text bold>MCP · {terminalText(facts?.workspaceId ?? t('unavailable'))}</Text>
+    <TuiOverlayFrame
+      title={
+        server
+          ? `MCP · ${terminalText(testDiagnostics ? server.id : serverName(server.id))}`
+          : t('MCP servers')
+      }
+      meta={`${index + 1} / ${actions.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: 'Enter', label: originalLabel('common.confirm') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
+      }
+    >
+      {testDiagnostics && <Text>{terminalText(facts?.workspaceId ?? '')}</Text>}
       <Text>
         {t(
           'Selection applies to later work; active work and connections retain their configuration.',
         )}
       </Text>
-      <Text>{t('Reading this list does not connect or authorize tools.')}</Text>
+      {testDiagnostics && (
+        <Text>{t('Reading this list does not connect or authorize tools.')}</Text>
+      )}
       {state.mcp?.read === 'ready' && <Text>{t('Server list ready')}</Text>}
       {state.mcp?.read !== 'ready' && (
         <Text>
@@ -258,10 +302,19 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
       {server && (
         <>
           <Text>
-            {t('Server:')} {terminalText(server.id)} · {server.transport}
+            {t('Server:')} {terminalText(testDiagnostics ? server.id : serverName(server.id))} ·{' '}
+            {server.transport}
           </Text>
           <Text>
-            {t('Source:')} {terminalText(server.source.kind)} · {terminalText(server.source.id)}
+            {t('Source:')}{' '}
+            {t(
+              server.source.kind === 'workspace'
+                ? 'Project Source'
+                : server.source.kind === 'user'
+                  ? 'User Source'
+                  : 'Static registration',
+            )}
+            {testDiagnostics && <> · {terminalText(server.source.id)}</>}
           </Text>
           <Text>
             {t('State:')} {t(server.selected ? 'enabled' : 'disabled')} ·{' '}
@@ -276,23 +329,30 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
       )}
       {!rows.length && <Text>{t('No configured MCP servers')}</Text>}
       {state.mcpUnavailable && <Text>{terminalText(state.mcpUnavailable)}</Text>}
+      <OverlaySection>{t('Actions')}</OverlaySection>
       {actions.slice(offset, offset + 5).map((action, position) => (
-        <Text
+        <OverlayListRow
           key={
             action.kind === 'server' || action.kind === 'saved' || action.kind === 'connectionSaved'
               ? `${action.kind}:${action.id}`
               : action.kind
           }
-        >
-          {index === offset + position ? '›' : ' '} {label(action)}
-        </Text>
+          selected={index === offset + position}
+          primary={label(action)}
+        />
       ))}
       <Text>{t('↑/↓ choose · Enter select · Esc back')}</Text>
       {pending?.kind === 'connection' && (
         <Text>
-          {t('Confirm connection request:')} {terminalText(pending.serverId)} · {server?.transport}{' '}
-          · {t('Source:')} {terminalText(server?.source.kind ?? '')} · {t('Session')}{' '}
-          {terminalText(state.sessionId ?? '')} ·{' '}
+          {t('Confirm connection request:')}{' '}
+          {terminalText(testDiagnostics ? pending.serverId : serverName(pending.serverId))} ·{' '}
+          {server?.transport} · {t('Source:')} {terminalText(server?.source.kind ?? '')}{' '}
+          {testDiagnostics && (
+            <>
+              · {t('Session')} {terminalText(state.sessionId ?? '')}
+            </>
+          )}{' '}
+          ·{' '}
           {t(
             'Enter requests connection; Esc abandons. Independent approval required; no tool permission granted.',
           )}
@@ -300,7 +360,8 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
       )}
       {pending?.kind === 'selection' && (
         <Text>
-          {t('Confirm server change:')} {terminalText(pending.serverId)} ·{' '}
+          {t('Confirm server change:')}{' '}
+          {terminalText(testDiagnostics ? pending.serverId : serverName(pending.serverId))} ·{' '}
           {t(pending.enabled ? 'Enable' : 'Disable')} ·{' '}
           {t(pending.scope === 'user' ? 'User settings' : 'Project settings')} ·{' '}
           {t('Enter saves; Esc abandons')}
@@ -308,7 +369,8 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
       )}
       {state.mcpOutcome && (
         <Text>
-          {t('Original change:')} {terminalText(state.mcpOutcome.intent.request.commandId)} ·{' '}
+          {t('Original change:')}{' '}
+          {testDiagnostics && terminalText(state.mcpOutcome.intent.request.commandId)} ·{' '}
           {t(
             state.mcpOutcome.phase === 'applied'
               ? 'Selection saved'
@@ -326,8 +388,8 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
       {state.mcpConnection && (
         <>
           <Text>
-            {t('Original connection:')} {terminalText(state.mcpConnection.intent.request.commandId)}{' '}
-            ·{' '}
+            {t('Original connection:')}{' '}
+            {testDiagnostics && terminalText(state.mcpConnection.intent.request.commandId)} ·{' '}
             {t(
               state.mcpConnectionReading
                 ? 'Reading original connection'
@@ -355,8 +417,12 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
                     ? 'Reused original connection'
                     : 'Creation unknown',
               )}{' '}
-              · {t('current generation')}{' '}
-              {state.mcpConnection.fact.currentGeneration ?? t('unavailable')}
+              {testDiagnostics && (
+                <>
+                  · {t('current generation')}{' '}
+                  {state.mcpConnection.fact.currentGeneration ?? t('unavailable')}
+                </>
+              )}
             </Text>
           )}
         </>
@@ -366,6 +432,6 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           {t('Error:')} {terminalText(state.error)}
         </Text>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
 }

@@ -11,6 +11,7 @@ export async function startDesktopRenderer(root: string) {
     configFile: false,
     envFile: false,
     mode: 'development',
+    define: { __KITE_DESKTOP_TEST_DIAGNOSTICS__: 'false' },
     plugins: [react(), tailwindcss()],
     clearScreen: false,
     logLevel: 'warn',

@@ -10,6 +10,7 @@ import type {
   NativeResult,
   NativeSelection,
 } from '../../src/native-bridge';
+import { NativeDiagnosticsProvider } from '../../src/native-diagnostics';
 import { NativeRecoveryView } from '../../src/native-recovery';
 
 function fixture(prepare: (request: NativeRequest) => Promise<NativeResult>) {
@@ -51,37 +52,39 @@ function fixture(prepare: (request: NativeRequest) => Promise<NativeResult>) {
   const render = (sessionId: string) =>
     act(async () => {
       root.render(
-        <NativeRecoveryView
-          bridge={bridge}
-          generation={1}
-          selection={
-            {
-              storeId: 'store',
-              viewGeneration: sessionId === 'a' ? 1 : 2,
-              viewSelection: sessionId === 'a' ? 1 : 2,
-              canReadModelOutput: false,
-              session: {
-                id: sessionId,
-                rootSessionId: sessionId,
-                parentSessionId: null,
-                workspaceId: 'w',
-                title: sessionId,
-                controlRevision: '0',
-                contextSelectionId: `context-${sessionId}`,
-                nextSeq: '0',
-                deletedAt: null,
-              },
-              runs: [],
-              executions: [],
-              interactions: [],
-              interactionsAfterId: null,
-            } satisfies NativeSelection
-          }
-          submissions={[saved]}
-          onRefresh={async () => {
-            refreshes++;
-          }}
-        />,
+        <NativeDiagnosticsProvider enabled>
+          <NativeRecoveryView
+            bridge={bridge}
+            generation={1}
+            selection={
+              {
+                storeId: 'store',
+                viewGeneration: sessionId === 'a' ? 1 : 2,
+                viewSelection: sessionId === 'a' ? 1 : 2,
+                canReadModelOutput: false,
+                session: {
+                  id: sessionId,
+                  rootSessionId: sessionId,
+                  parentSessionId: null,
+                  workspaceId: 'w',
+                  title: sessionId,
+                  controlRevision: '0',
+                  contextSelectionId: `context-${sessionId}`,
+                  nextSeq: '0',
+                  deletedAt: null,
+                },
+                runs: [],
+                executions: [],
+                interactions: [],
+                interactionsAfterId: null,
+              } satisfies NativeSelection
+            }
+            submissions={[saved]}
+            onRefresh={async () => {
+              refreshes++;
+            }}
+          />
+        </NativeDiagnosticsProvider>,
       );
     });
   const chooseInterrupt = () =>

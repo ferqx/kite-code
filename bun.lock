@@ -179,6 +179,8 @@
         "clsx": "2.1.1",
         "cmdk": "1.1.1",
         "ink": "^7.1.1",
+        "ink-syntax-highlight": "^2.0.2",
+        "ink-text-input": "^6.0.0",
         "react-markdown": "10.1.0",
         "react-resizable-panels": "4.12.4",
         "remark-gfm": "4.0.1",

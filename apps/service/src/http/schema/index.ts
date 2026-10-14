@@ -694,6 +694,7 @@ export const schemas = {
         configured: z.boolean(),
         provider: z.string().optional(),
         model: z.string().optional(),
+        connectionId: etag.optional(),
         reasoningEffort: z
           .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
           .nullable()
@@ -937,6 +938,8 @@ export const schemas = {
     childSessionId: id.nullable().optional(),
     parentExecutionId: id.nullable().optional(),
     cancelWithParent: z.boolean().optional(),
+    toolCallId: z.string().min(1).max(512).optional(),
+    toolInput: json.optional(),
     sessionId: id,
     runId: id.nullable(),
     kind: z.enum(['model', 'tool', 'job']),
@@ -1231,7 +1234,17 @@ export const PendingInputPageSchema = z.object({
   commands: z.array(
     schemas.Command.extend({
       seq: sequence,
-      request: z.discriminatedUnion('kind', [steerInput, followUpInput]),
+      request: z.discriminatedUnion('kind', [
+        steerInput,
+        followUpInput,
+        z.strictObject({
+          kind: z.literal('result.include'),
+          expectedContextSelectionId: id,
+          executionId: id,
+          resultRevision: sequence,
+          targetRunId: id.nullable(),
+        }),
+      ]),
     }),
   ),
   nextAfterSeq: sequence.nullable(),
@@ -1244,6 +1257,13 @@ export const SessionViewSchema = z.object({
   messages: z.array(schemas.Message),
   snapshotCursor: sequence,
   storeId: id,
+  compressionProgress: z
+    .object({
+      runId: id,
+      originStoreId: id,
+      phase: z.enum(['preparing', 'summarizing', 'validating']),
+    })
+    .optional(),
 });
 export const SelectedContextPageSchema = z.object({
   selection: schemas.ContextSelection,

@@ -11,7 +11,7 @@ import type {
 } from '@kite-ai/client';
 import type { TuiMcpConnectionPort } from './mcp-connection';
 import type { TuiMcpReconnectionPort } from './mcp-reconnection';
-import type { TuiMcpSourceApprovalPort } from './mcp-source';
+import type { TuiMcpSourceApprovalPort, TuiMcpSourceSnapshot } from './mcp-source';
 import type { TuiMcpSourceMutationPort } from './mcp-source-mutation';
 
 export type TuiMcpReadSet = {
@@ -23,6 +23,8 @@ export type TuiMcpReadSet = {
   scopeDigest: string;
 };
 export interface TuiMcpSnapshot {
+  /** Exact read-only source labels; excluded from canonical settings, targets and intents. */
+  labels?: Readonly<Record<string, string>>;
   storeId: string;
   sessionId: string;
   workspaceId: string;
@@ -66,7 +68,28 @@ export interface TuiMcpOutcome {
   command?: Command;
   execution?: Execution;
 }
+export interface TuiMcpReadDirectory {
+  readonly family: 'resources' | 'prompts';
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly items: readonly {
+    readonly key: string;
+    readonly serverId: string;
+    readonly configDigest: string;
+    readonly generation: number;
+    readonly live: boolean;
+    readonly descriptors: readonly Readonly<Record<string, unknown>>[];
+    readonly descriptorDigests: readonly string[];
+  }[];
+  readonly nextAfterKey: string | null;
+}
 export interface TuiMcpPort {
+  readDirectory?(
+    sessionId: string,
+    family: 'resources' | 'prompts',
+    signal: AbortSignal,
+    options?: { serverId?: string; afterKey?: string },
+  ): Promise<TuiMcpReadDirectory>;
   connection?: TuiMcpConnectionPort;
   reconnection?: TuiMcpReconnectionPort;
   source?: TuiMcpSourceApprovalPort;
@@ -202,4 +225,52 @@ export function decodeTuiMcpSnapshot(result: QueryResponse): TuiMcpSnapshot {
     ids.add(server.id);
   }
   return structuredClone(row) as unknown as TuiMcpSnapshot;
+}
+
+/** Join source names only to the exact public registry identity; this never grants capability. */
+export function decodeTuiMcpLabels(
+  snapshot: TuiMcpSnapshot,
+  sources: TuiMcpSourceSnapshot,
+): Readonly<Record<string, string>> {
+  if (
+    sources.storeId !== snapshot.storeId ||
+    sources.sessionId !== snapshot.sessionId ||
+    sources.workspaceId !== snapshot.workspaceId ||
+    sources.workspaceIdentity !== snapshot.workspaceIdentity ||
+    !sources.readSet ||
+    !Array.isArray(sources.items) ||
+    sources.items.length > 8192
+  )
+    throw Error('mcp_labels_scope_mismatch');
+  const ids = new Set<string>();
+  const labels = Object.create(null) as Record<string, string>;
+  for (const item of sources.items) {
+    if (
+      ids.has(item.id) ||
+      typeof item.name !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(item.name)
+    )
+      throw Error('mcp_labels_invalid');
+    ids.add(item.id);
+    const server = snapshot.items.find((row) => row.id === item.id);
+    if (!server || server.source.kind === 'programmatic') continue;
+    const document =
+      item.source.kind === 'workspace' ? sources.readSet.workspace : sources.readSet.user;
+    if (
+      !document ||
+      document.error !== null ||
+      document.etag === null ||
+      document.identity.kind !== item.source.kind ||
+      document.identity.pathDigest !== item.source.pathDigest ||
+      document.identity.rootIdentity !== item.source.rootIdentity ||
+      server.source.kind !== item.source.kind ||
+      server.source.id !== item.source.pathDigest ||
+      server.source.revision !== item.rawEntryDigest ||
+      server.configDigest !== item.configDigest ||
+      server.transport !== item.transport
+    )
+      continue;
+    labels[server.id] = item.name;
+  }
+  return Object.freeze(labels);
 }

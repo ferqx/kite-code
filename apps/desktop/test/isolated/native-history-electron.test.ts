@@ -262,6 +262,7 @@ test.skipIf(process.platform !== 'darwin')(
         profile: { dataRoot: profile.dataRoot, profile: profile.profile },
       },
       outdir,
+      { testDiagnostics: true },
     );
     const instrumentation = await Bun.build({
       entrypoints: [resolve(import.meta.dir, '../native-history-network.fixture.ts')],

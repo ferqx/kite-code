@@ -57,7 +57,7 @@ test('empty Enter toggles only the original tail result; input, refresh and earl
     getCommand: forbidden,
   });
   await controller.select('a');
-  const ui = renderFrames(<TuiSession controller={controller} />);
+  const ui = renderFrames(<TuiSession testDiagnostics controller={controller} />);
   try {
     await pause();
     expect(ui.lastFrame()).toContain('TAIL_RESULT_原文🙂');
@@ -207,7 +207,7 @@ test('CtrlT reads original reasoning once, toggles only display and never carrie
   port.readModelOutput = undefined;
   const controller = new TuiController(port);
   await controller.select('a');
-  const ui = renderFrames(<TuiSession controller={controller} />);
+  const ui = renderFrames(<TuiSession testDiagnostics controller={controller} />);
   try {
     await pause();
     expect(ui.lastFrame()).not.toContain('REASON_a_');
@@ -325,7 +325,7 @@ test('interactive Ink emits completed bodies once across status/edit/append and 
   stdout.on('data', (data) => {
     bytes += data.toString();
   });
-  const app = render(<TuiSession controller={controller} />, {
+  const app = render(<TuiSession testDiagnostics controller={controller} />, {
     // Model only the Ink stream surface; actual PTY/VT behavior has separate evidence.
     stdout: stdout as unknown as WriteStream,
     stdin: stdin as unknown as ReadStream,
@@ -445,7 +445,7 @@ test('Ink preserves message and execution order across the first unsettled row a
     getCommand: forbidden,
   });
   await controller.select('a');
-  const app = renderFrames(<TuiSession controller={controller} />);
+  const app = renderFrames(<TuiSession testDiagnostics controller={controller} />);
   const ordered = (...markers: string[]) => {
     const frame = app.lastFrame() ?? '';
     const positions = markers.map((marker) => frame.indexOf(marker));
@@ -554,7 +554,7 @@ test('long original question after running Tool keeps material bytes stable on s
   stdout.on('data', (data) => {
     bytes += data.toString();
   });
-  const app = render(<TuiSession controller={controller} />, {
+  const app = render(<TuiSession testDiagnostics controller={controller} />, {
     stdout: stdout as unknown as WriteStream,
     stdin: stdin as unknown as ReadStream,
     stderr: new PassThrough() as unknown as WriteStream,

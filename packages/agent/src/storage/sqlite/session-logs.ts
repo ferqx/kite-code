@@ -360,7 +360,13 @@ export function getSessionLogs(
       return {
         cursor: String(row.cursor),
         sessionId: input.sessionId,
-        objectId: id(row.object_id) ? row.object_id : 'unavailable',
+        objectId:
+          id(row.object_id) ||
+          (type === 'extension.record_updated' &&
+            typeof row.object_id === 'string' &&
+            /^builtin\.files\/checkpoint\/[a-f0-9]{64}\/point$/.test(row.object_id))
+            ? (row.object_id as string)
+            : 'unavailable',
         type,
         revision: String(row.revision),
         occurredAt,

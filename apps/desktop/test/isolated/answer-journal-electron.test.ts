@@ -79,6 +79,7 @@ test.skipIf(process.platform !== 'darwin')(
           profile,
         },
         outdir,
+        { testDiagnostics: true },
       );
       const fixture = join(root, 'driver.ts');
       writeFileSync(

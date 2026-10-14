@@ -349,7 +349,7 @@ async function open(f: ReturnType<typeof fixture>) {
 }
 async function choose(ui: ReturnType<typeof render>, label: string) {
   for (let i = 0; i < 20; i++) {
-    if (ui.lastFrame()?.includes(`› ${label}`)) {
+    if (ui.lastFrame()?.includes(`❯ ${label}`)) {
       ui.stdin.write('\r');
       await tick();
       return;
@@ -502,7 +502,7 @@ for (const change of [
 test('real Ink Review then independent Confirm submits once, warm B remains distinct from original Job A; second R keeps only previous request', async () => {
   const f = fixture();
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     await choose(ui, 'Review forced reconnect');
@@ -553,7 +553,7 @@ for (const failed of [false, true])
     await f.controller.select('s');
     await f.controller.openMcp();
     await f.controller.openMcpReconnections();
-    const ui = render(<TuiSession controller={f.controller} />);
+    const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
     try {
       await tick();
       expect(f.lookups).toHaveLength(0);
@@ -671,7 +671,7 @@ test('Esc/CtrlC close owns only observe/lookup AbortSignal; late submit stays or
     f.signals.push(signal);
     return observation.promise;
   };
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     const work = f.controller.reviewMcpReconnection('connection');
     await tick();

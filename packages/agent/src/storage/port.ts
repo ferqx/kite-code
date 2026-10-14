@@ -609,6 +609,8 @@ export interface Store {
     input: OwnedWrite & {
       executionId: string;
       content: string;
+      /** Optional small prefix; unfinished Tool arguments are never published here. */
+      reasoning?: string;
       modelOutput?: import('../model-output').ModelOutputReference;
     },
   ): Promise<void>;

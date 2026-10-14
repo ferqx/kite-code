@@ -320,7 +320,9 @@ const port: TuiPort = {
 const controller = new TuiController(port);
 await controller.select('a');
 process.stdin.setRawMode(true);
-const terminal = render(<TuiSession controller={controller} />, { exitOnCtrlC: false });
+const terminal = render(<TuiSession testDiagnostics controller={controller} />, {
+  exitOnCtrlC: false,
+});
 let updating = false;
 let eventReader = new AbortController(),
   brokeObserver = false,

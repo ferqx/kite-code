@@ -1,18 +1,28 @@
-import { Box, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useEffect, useMemo, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
+import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { OverlayListRow } from './ink/OverlayPrimitives';
 import { mcpTextRows, mcpTextWindow } from './mcp-tools';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** All metadata is external text. Navigation never dispatches or restores a Tool. */
 export function TuiMcpToolsPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation();
+  const { t: originalLabel } = useInkI18n();
+  const { t, testDiagnostics } = useTuiPresentation();
   const state = controller.state.mcpTools!;
   const [selected, setSelected] = useState(0),
     [line, setLine] = useState(0);
   const text = useMemo(
-    () => (state.metadata ? terminalText(JSON.stringify(state.metadata, null, 2)) : ''),
-    [state.metadata],
+    () =>
+      state.metadata
+        ? terminalText(
+            testDiagnostics
+              ? JSON.stringify(state.metadata, null, 2)
+              : toolMetadataText(state.metadata),
+          )
+        : '',
+    [state.metadata, testDiagnostics],
   );
   const rows = useMemo(() => mcpTextRows(text), [text]);
   type Choice =
@@ -98,7 +108,9 @@ export function TuiMcpToolsPanel({ controller }: { controller: TuiController }) 
   const label = (choice: Choice): string => {
     if (choice.kind === 'snapshot') {
       const snapshot = state.snapshots!.items.find((value) => value.recordKey === choice.key)!;
-      return `${t('Generation')} ${snapshot.origin.generation} · ${snapshot.toolCount} ${t('tools')} · ${snapshot.availability} · ${snapshot.origin.serverId}`;
+      return testDiagnostics
+        ? `${t('Generation')} ${snapshot.origin.generation} · ${snapshot.toolCount} ${t('tools')} · ${snapshot.availability} · ${snapshot.origin.serverId}`
+        : `${snapshot.toolCount} ${t('tools')} · ${snapshot.availability} · ${snapshot.origin.serverId}`;
     }
     if (choice.kind === 'tool') {
       const entry = state.page!.entries.find((value) => value.index === choice.index)!;
@@ -110,24 +122,43 @@ export function TuiMcpToolsPanel({ controller }: { controller: TuiController }) 
       nextSnapshots: t('Next saved snapshots'),
       nextTools: t('Next tools'),
       previousTools: t('Previous tools'),
-      back: t('Back'),
+      back: originalLabel('common.back'),
       retry: t('Retry read'),
     }[choice.kind];
   };
   return (
-    <Box flexDirection="column">
-      <Text bold>{t('MCP Tools · saved metadata')}</Text>
-      <Text>{t('Reading does not connect or authorize tools.')}</Text>
+    <TuiOverlayFrame
+      title={state.screen === 'descriptor' ? t('Tool details') : t('MCP Tools · saved metadata')}
+      meta={state.screen === 'descriptor' ? undefined : `${selected + 1} / ${choices.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: t(state.screen === 'descriptor' ? 'Scroll' : 'Select') },
+            { keys: 'Enter', label: t('View') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
+      }
+    >
+      {testDiagnostics && <Text>{t('Reading does not connect or authorize tools.')}</Text>}
       {state.snapshot && (
         <Text>
-          {terminalText(state.snapshot.origin.serverId)} · {t('original generation')}{' '}
-          {state.snapshot.origin.generation}
+          {terminalText(state.snapshot.origin.serverId)}{' '}
+          {testDiagnostics && (
+            <>
+              · {t('original generation')} {state.snapshot.origin.generation}
+            </>
+          )}
         </Text>
       )}
       {state.page && (
         <Text>
-          {t(state.page.live ? 'Live connection observed' : 'Historical snapshot')} ·{' '}
-          {t('current generation')} {state.page.currentGeneration ?? t('unavailable')}
+          {t(state.page.live ? 'Live connection observed' : 'Historical snapshot')}{' '}
+          {testDiagnostics && (
+            <>
+              · {t('current generation')} {state.page.currentGeneration ?? t('unavailable')}
+            </>
+          )}
         </Text>
       )}
       {state.phase === 'reading' && <Text>{t('Reading original metadata · incomplete')}</Text>}
@@ -147,8 +178,10 @@ export function TuiMcpToolsPanel({ controller }: { controller: TuiController }) 
       )}
       {state.screen === 'descriptor' && state.metadata ? (
         <>
-          <Text>{t('Complete metadata · EOF and hash verified')}</Text>
-          {!('outputSchema' in state.metadata) && <Text>{t('outputSchema: absent')}</Text>}
+          {testDiagnostics && <Text>{t('Complete metadata · EOF and hash verified')}</Text>}
+          {!('outputSchema' in state.metadata) && testDiagnostics && (
+            <Text>{t('outputSchema: absent')}</Text>
+          )}
           {mcpTextWindow(text, rows, line).map((value, index) => (
             <Text key={`${line + index}`}>{value || ' '}</Text>
           ))}
@@ -159,22 +192,35 @@ export function TuiMcpToolsPanel({ controller }: { controller: TuiController }) 
         </>
       ) : (
         <>
-          {choices.slice(offset, offset + 5).map((choice, index) => (
-            <Text key={`${offset + index}`}>
-              {selected === offset + index ? '›' : ' '}{' '}
-              {
-                mcpTextWindow(
-                  terminalText(label(choice)),
-                  mcpTextRows(terminalText(label(choice)), 64),
-                  0,
-                  1,
-                )[0]
-              }
-            </Text>
+          {choices.slice(offset, offset + 5).map((choice, i) => (
+            <OverlayListRow
+              key={offset + i}
+              selected={selected === offset + i}
+              primary={label(choice)}
+            />
           ))}
           <Text>{t('↑/↓ choose · Enter read · Esc back')}</Text>
         </>
       )}
-    </Box>
+    </TuiOverlayFrame>
   );
+}
+
+/** Complete tool semantics remain readable without dumping protocol provenance. */
+export function toolMetadataText(metadata: unknown): string {
+  const lines: string[] = [];
+  const visit = (value: unknown, label: string, depth: number) => {
+    const prefix = '  '.repeat(depth);
+    if (value !== null && typeof value === 'object') {
+      const entries = Array.isArray(value)
+        ? value.map((item, index) => [String(index + 1), item] as const)
+        : Object.entries(value);
+      lines.push(`${prefix}${label}${entries.length ? ':' : ': (empty)'}`);
+      for (const [name, item] of entries) visit(item, name, depth + 1);
+    } else lines.push(`${prefix}${label}: ${String(value)}`);
+  };
+  if (metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    for (const [name, value] of Object.entries(metadata)) visit(value, name, 0);
+  } else visit(metadata, 'Tool', 0);
+  return lines.join('\n');
 }

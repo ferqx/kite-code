@@ -1,6 +1,7 @@
 import type { ExecutionOutputPage } from '@kite-ai/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeJobOutputScope, NativeSelection } from './native-bridge';
+import { NativeDiagnostic, useNativeDiagnostics } from './native-diagnostics';
 import { readNativeJobOutput } from './native-job-output';
 
 const safeError = (cause: unknown) => {
@@ -20,6 +21,7 @@ export function NativeJobOutputPanel(
     | { backgroundScope: NativeJobOutputScope }
   ),
 ) {
+  const diagnostics = useNativeDiagnostics();
   const { bridge, generation, executionId } = props;
   const background = 'backgroundScope' in props;
   const storeId = background ? props.backgroundScope.storeId : props.selection.storeId,
@@ -105,7 +107,7 @@ export function NativeJobOutputPanel(
     return () => abort.abort();
   }, [bridge, background, identity, readIdentity, isOpen]);
   return (
-    <section aria-label={`Job 已保存输出 · ${executionId}`}>
+    <section aria-label={diagnostics ? `Job 已保存输出 · ${executionId}` : 'Job 已保存输出'}>
       {!isOpen ? (
         <button type="button" onClick={() => setOpened(identity)}>
           读取完整已保存输出
@@ -133,7 +135,11 @@ export function NativeJobOutputPanel(
           )}
           {facts && (
             <>
-              <p>已完整读取截至输出序号 {facts.highWaterSeq} 的已保存内容。</p>
+              <p>
+                {diagnostics
+                  ? `已完整读取截至输出序号 ${facts.highWaterSeq} 的已保存内容。`
+                  : '已完整读取本次固定范围的已保存内容。'}
+              </p>
               {busy && <p>当前显示上次完整内容，正在核对最新输出。</p>}
               {!facts.items.length ? (
                 <p>此 Job 尚无已保存输出。</p>
@@ -150,8 +156,12 @@ export function NativeJobOutputPanel(
                         data-stream={item.stream}
                       >
                         <p>
-                          {item.stream} · 输出序号 {item.seq}
-                          {item.seq !== item.throughSeq ? `–${item.throughSeq}` : ''}
+                          {item.stream}
+                          <NativeDiagnostic>
+                            {' '}
+                            · 输出序号 {item.seq}
+                            {item.seq !== item.throughSeq ? `–${item.throughSeq}` : ''}
+                          </NativeDiagnostic>
                         </p>
                         {gap ? (
                           <p>

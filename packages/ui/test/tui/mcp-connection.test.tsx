@@ -144,14 +144,14 @@ async function open(f: ReturnType<typeof fixture>) {
 test('Ink Request connection has a distinct confirmation, mints once, passes original observation, and accepted remains pending', async () => {
   const f = fixture();
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\r');
     await tick();
     ui.stdin.write('\u001b[B'.repeat(5));
     await tick();
-    expect(ui.lastFrame()).toContain('› Request connection');
+    expect(ui.lastFrame()).toContain('❯ Request connection');
     ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain('Confirm connection request:');
@@ -188,19 +188,19 @@ for (const failed of [false, true])
       return { ...snapshot(id), items: [] };
     };
     await open(f);
-    const ui = render(<TuiSession controller={f.controller} />);
+    const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
     try {
       await tick();
       ui.stdin.write('\u001b[B'.repeat(4));
       await tick();
-      expect(ui.lastFrame()).toContain('› Original connection: second');
+      expect(ui.lastFrame()).toContain('❯ Original connection: second');
       ui.stdin.write('\r');
       await tick();
       expect(f.lookups).toHaveLength(0);
       expect(f.controller.state.mcpConnection?.intent.request.commandId).toBe('second');
       ui.stdin.write('\u001b[A'.repeat(2));
       await tick();
-      expect(ui.lastFrame()).toContain('› Check original connection');
+      expect(ui.lastFrame()).toContain('❯ Check original connection');
       ui.stdin.write('\r');
       await tick();
       expect(f.lookups.map((x) => x.request.commandId)).toEqual(['second']);
@@ -343,7 +343,7 @@ test('ready original fact displays warm reuse and cold nonlive separately; no re
     };
   };
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await f.controller.lookupMcpConnection();
     await tick();

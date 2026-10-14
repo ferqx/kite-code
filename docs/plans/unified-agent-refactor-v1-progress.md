@@ -6370,3 +6370,16 @@ Terminal路径选取现复用所属host的资产错误翻译，CLI／TUI保pure 
 原日志、各独立进程退出码／用时和SHA保本机 `D:\Code\kite-code\.cache\windows-v13-20261014\`，`native-batch-results.json`、`qualification-results.json`、`recovery-results.json`、`client-results.json`与`summary.json`分别保完整输入和统计，属于本机证据、不随Git交付。最终代码再次八workspace build0、根及八workspace typecheck0、六个代码文件Biome0、文档结构／实际影响检查0；全仓架构守卫在沙箱内及普通本机权限下均未完成，已准确停止所属检查进程，保两份不完整log，不记通过。公共接口、产品语义和模块边界未改，已核手册、Agent／Service owner与active原合同；不以本机红改写产品承诺。文档同步 `iteration_complete` 判定blocked，原因是Windows默认及专项仍有实际失败，不准备Git交付。本轮Windows已实际验证但未通过，37能力和wholeV13／phaseExit仍未闭合；未stage、commit、push、PR、安装发布或dispatch Actions。
 
 后续桌面开发与提交核对：用户已授权将当前全部改动一起提交。本机 MSVC／Windows SDK 已安装，显式 `desktop:dev` 自动准备构建环境，并支持 UI Fast Refresh 与 Service 源码新版本重载；准确实现和真实 Windows 窗口证据归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。提交检查另发现 Store／rollback 夹具的 POSIX 临时路径、目录权限及子进程 file URL 问题，改用系统 tmpdir、原私有目录端口与标准 file URL 后，原两份完整文件 13 项／52 条断言通过；原断言、Store 逻辑及安全约束不变。前述默认中断、媒体／Files／恢复失败仍保留，不把开发窗口或提交检查通过写成完整 Windows／三平台资格。
+
+
+## 2026-10-14 原 Ink UI 的完整迁入与新服务接线
+
+用户再次指出布局／功能与原 TUI 不同，要求全部迁 UI、服务继续新架构。本轮直接迁入原纯 Markdown／code／table、用户块、工具／Shell／diff、Thinking 聚合、单独与并发子任务、plan progress／compaction、主题／语言、原菜单和首次配置。主屏消费原 Static／动态区、菜单说明／alias／ghost／40行 editor，接回全部现有业务入口；没有引入旧 Runtime／provider／reducer、第二 Server 或权限分析。
+
+实际源码缺口已补：小段 reasoning 同原 cadence 保存；正式短 builtin 与 MCP 代理必须核准确来源后取原显示名；完整完成正文与必要附件在普通模式自动校验读取；Shell 从原 cursor 取有限五行 tail，child view、已批准 plan progress 与实际 compression phase 进入原展示。已有模型没有默认时可在原向导用 enabled/default CAS 恢复；Unknown 沿原 mutation／marker GET-only，秘密不进入冷 intent。Files 提供完整行统计／有界 UTF-8 预览和实际 immutable point 的记录时间，原 metadata 禁止正文断言仍保留，preview 是明确新只读字段、不进入恢复 digest。
+
+本轮完整 TUI 集合最终 **344pass／0fail／2899expects／34.32s**。初次6处失败保留并修正：未知工具参数是真实主屏／详情遗漏；其余为原表格边框、菜单文案、展示折行和新增只读目录预取计数。随后一处极简 fake View 缺 Session／messages，补齐真实只读合同后原 Tool只读／Job资格断言保持；没有删业务断言或排除测试。新增 Host adapters 27pass／177expects，Agent实际来源8pass／40expects；Client Files／SessionLog6pass／123expects，实际CookieFiles1pass／161expects，原恢复字节／权限／归属／零效果断言保持。最后 MCP代理真实名称 reader＋projection13pass／66expects，零连接／RPC。
+
+[普通真实 PTY](../../apps/cli/test/isolated/tui-ink-parity-host.test.ts)从未信任 Workspace 原 gate 明确确认，正式 runTUIProcess／默认 Service／Client／一次 compatible请求，完整用户和助手 bytes 保存、Run completed、正常退出和所属 Service消失，1pass／7外层断言。共用 POSIX／ConPTY，当前只实际运行macOS；driver只修实际普通提示／Help第一页／paste等待点，不改业务断言。完整8workspace build／typecheck、API同源／静态边界和文档检查归本轮提交门禁，hook仍独立执行。
+
+新增闭合的是原 TUI 用户展示和入口消费；正式／开发消费者共用新 UI／Client／Service／Agent。旧参考源码未新增正式调用，没有把本轮作为旧路径整体退役。开发范围继续完成；原RSS32MiB、完整Runtime资源／出生资格和V1.3阶段资格不变，wholeV13=false／phaseExit=false。Win/Linux实际验证仍由后置Actions／发布前安排，本轮不push、PR、发布或触发Actions。

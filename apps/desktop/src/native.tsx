@@ -48,6 +48,11 @@ import type {
 import { useNativeCacheMetrics } from './native-cache-metrics';
 import { NativeCallerView } from './native-caller';
 import { NativeContextView } from './native-context';
+import {
+  NativeDiagnostic,
+  NativeDiagnosticsProvider,
+  useNativeDiagnostics,
+} from './native-diagnostics';
 import { useNativeEnvironment } from './native-environment';
 import { NativeExtensions } from './native-extensions';
 import { NativeFileChanges } from './native-file-changes';
@@ -67,6 +72,7 @@ import { NativeModelSettings } from './native-model-settings';
 import { desktopDirectory, desktopMessages } from './native-presentation';
 import { NativeProviderSettings } from './native-provider-settings';
 import { NativeRecoveryView } from './native-recovery';
+import { NativeExecutionResult } from './native-result';
 import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
 import { NativeStartup } from './native-startup';
@@ -75,10 +81,12 @@ import { liveToolMessages, useNativeToolMessages } from './native-tool-messages'
 import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-transcript';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
-export function NativeDesktop() {
+export function NativeDesktop({ testDiagnostics = false }: { testDiagnostics?: boolean } = {}) {
   const bridge = window.kiteNative;
   return bridge ? (
-    <NativeDesktopContent bridge={bridge} />
+    <NativeDiagnosticsProvider enabled={testDiagnostics}>
+      <NativeDesktopContent bridge={bridge} />
+    </NativeDiagnosticsProvider>
   ) : (
     <NativeStartup phase="failed" error="原生桥不可用，请核对客户端资源。" />
   );
@@ -89,6 +97,7 @@ function NativeDesktopContent({
 }: {
   bridge: NativeBridge & Partial<import('./native-bridge').NativeStartupBridge>;
 }) {
+  const diagnostics = useNativeDiagnostics();
   const [interactionHistoryOpen, setInteractionHistoryOpen] = useState(false);
   const [startup, setStartup] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [startupError, setStartupError] = useState('');
@@ -1346,7 +1355,9 @@ function NativeDesktopContent({
                 })
               }
             >
-              草稿 {saved.rootSessionId} · 修订 {saved.revision}
+              {diagnostics
+                ? `草稿 ${saved.rootSessionId} · 修订 ${saved.revision}`
+                : '读取已保存草稿'}
             </button>
           ))}
           {savedDrafts?.nextId && (
@@ -1374,7 +1385,9 @@ function NativeDesktopContent({
                   : '原关联不可用，文本已保留，没有绑定当前会话。'}
               </p>
               <p>
-                原会话 {originalDraft.rootSessionId} · 修订 {originalDraft.revision}
+                {diagnostics
+                  ? `原会话 ${originalDraft.rootSessionId} · 修订 ${originalDraft.revision}`
+                  : '已保存的原关联草稿'}
               </p>
               <textarea aria-label="保留的原关联草稿" value={originalDraft.content} readOnly />
               <button type="button" onClick={() => setOriginalDraft(undefined)}>
@@ -1382,45 +1395,50 @@ function NativeDesktopContent({
               </button>
             </section>
           )}
-          {state?.creationSubmissions.map((submission) => (
-            <section key={submission.input.commandId} aria-label="会话创建意图">
-              <p>
-                原会话 {submission.input.sessionId} · 创建
-                {submission.phase === 'pending'
-                  ? '正在提交'
-                  : submission.phase === 'unknown'
-                    ? '结果待核实'
-                    : submission.phase === 'created'
-                      ? '已确认'
-                      : '被拒绝'}
-              </p>
-              <p>
-                原创建命令 {submission.input.commandId} · 原工作区 {submission.input.workspaceId}
-              </p>
-              <p>{submission.code}</p>
-              {(submission.phase === 'unknown' || submission.phase === 'pending') && (
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() =>
-                    void write(async () => {
-                      await bridge.request({
-                        method: 'lookupCreation',
-                        generation: generation.current,
-                        commandId: submission.input.commandId,
-                      });
-                      apply(
-                        await bridge.request({ method: 'state', generation: generation.current }),
-                      );
-                      await readDirectory();
-                    })
-                  }
-                >
-                  核实原创建命令
-                </button>
-              )}
-            </section>
-          ))}
+          {state?.creationSubmissions
+            .filter((submission) => diagnostics || submission.phase !== 'created')
+            .map((submission) => (
+              <section key={submission.input.commandId} aria-label="会话创建意图">
+                <p>
+                  {diagnostics ? `原会话 ${submission.input.sessionId} · 创建` : '创建会话：'}
+                  {submission.phase === 'pending'
+                    ? '正在提交'
+                    : submission.phase === 'unknown'
+                      ? '结果待核实'
+                      : submission.phase === 'created'
+                        ? '已确认'
+                        : '被拒绝'}
+                </p>
+                <NativeDiagnostic>
+                  <p>
+                    原创建命令 {submission.input.commandId} · 原工作区{' '}
+                    {submission.input.workspaceId}
+                  </p>
+                </NativeDiagnostic>
+                <p>{submission.code}</p>
+                {(submission.phase === 'unknown' || submission.phase === 'pending') && (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() =>
+                      void write(async () => {
+                        await bridge.request({
+                          method: 'lookupCreation',
+                          generation: generation.current,
+                          commandId: submission.input.commandId,
+                        });
+                        apply(
+                          await bridge.request({ method: 'state', generation: generation.current }),
+                        );
+                        await readDirectory();
+                      })
+                    }
+                  >
+                    核实原创建命令
+                  </button>
+                )}
+              </section>
+            ))}
         </section>
       </details>
       {state && directory && (
@@ -1444,9 +1462,13 @@ function NativeDesktopContent({
               initialExecutionId={modelInputTarget?.executionId}
             />
           )}
-          <section aria-label="Runtime logs">
-            <h2>Runtime logs · 已保存执行</h2>
-            <p>此处是已保存执行的有限投影，不是全部 Runtime 事件。</p>
+          <section aria-label={diagnostics ? 'Runtime logs' : '执行记录'}>
+            <h2>{diagnostics ? 'Runtime logs · 已保存执行' : '执行记录'}</h2>
+            <p>
+              {diagnostics
+                ? '此处是已保存执行的有限投影，不是全部 Runtime 事件。'
+                : '查看已保存的执行状态与结果。'}
+            </p>
             {selection.executions.map((execution) => (
               <details
                 key={`${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${selection.storeId}/${selection.session.id}/${execution.id}`}
@@ -1464,9 +1486,11 @@ function NativeDesktopContent({
                 <summary>
                   {execution.definitionId} · {execution.status}
                 </summary>
-                <p>
-                  原执行 {execution.id} · kind {execution.kind}
-                </p>
+                <NativeDiagnostic>
+                  <p>
+                    原执行 {execution.id} · kind {execution.kind}
+                  </p>
+                </NativeDiagnostic>
                 {execution.kind === 'model' && selection.canReadModelInput && (
                   <button
                     type="button"
@@ -1477,7 +1501,7 @@ function NativeDesktopContent({
                       }))
                     }
                   >
-                    检查原 Model 输入 · {execution.id}
+                    检查原 Model 输入{diagnostics ? ` · ${execution.id}` : ''}
                   </button>
                 )}
                 {execution.kind === 'job' &&
@@ -1512,7 +1536,7 @@ function NativeDesktopContent({
                         })
                       }
                     >
-                      停止原 Job · {execution.id}
+                      停止原 Job{diagnostics ? ` · ${execution.id}` : ''}
                     </button>
                   )}
                 {execution.kind === 'job' &&
@@ -1527,7 +1551,10 @@ function NativeDesktopContent({
                       executionId={execution.id}
                     />
                   )}
-                <pre>{JSON.stringify(execution.result, null, 2)}</pre>
+                <NativeExecutionResult
+                  result={execution.result}
+                  model={execution.kind === 'model'}
+                />
               </details>
             ))}
           </section>
@@ -1693,40 +1720,30 @@ function NativeDesktopContent({
         </section>
       )}
       {bridge && state && <NativeCallerView bridge={bridge} state={state} onRefresh={refresh} />}
-      {(state?.inputSubmissions ?? []).map((submission) => (
-        <div key={submission.intent.commandId}>
-          <p>
-            原命令 {submission.intent.commandId}：{submission.phase}
-          </p>
-          <button
-            type="button"
-            onClick={() =>
-              void report(async () => {
-                await bridge.request({
-                  method: 'lookupInput',
-                  generation: generation.current,
-                  commandId: submission.intent.commandId,
-                });
-                await refresh();
-              })
-            }
-          >
-            查询原命令
-          </button>
-          {submission.intent.kind !== 'command.cancel' &&
-            !(
-              selection?.storeId === submission.intent.expectedStoreId &&
-              selection.session.id === submission.sessionId &&
-              selection.interactions.some(
-                (card) => card.kind === 'question' && card.state === 'pending',
-              )
-            ) && (
+      {(state?.inputSubmissions ?? [])
+        .filter(
+          (submission) =>
+            diagnostics ||
+            ['submitting', 'unknown', 'accepted'].includes(submission.phase) ||
+            !!submission.error ||
+            !!submission.run?.isActive,
+        )
+        .map((submission) => (
+          <div key={submission.intent.commandId}>
+            <p>
+              {diagnostics
+                ? `原命令 ${submission.intent.commandId}：${submission.phase}`
+                : `提交状态：${submission.phase}`}
+            </p>
+            {(diagnostics ||
+              ['submitting', 'unknown', 'accepted'].includes(submission.phase) ||
+              !!submission.run?.isActive) && (
               <button
                 type="button"
                 onClick={() =>
                   void report(async () => {
                     await bridge.request({
-                      method: 'cancelInput',
+                      method: 'lookupInput',
                       generation: generation.current,
                       commandId: submission.intent.commandId,
                     });
@@ -1734,41 +1751,78 @@ function NativeDesktopContent({
                   })
                 }
               >
-                停止原命令
+                查询原命令
               </button>
             )}
-        </div>
-      ))}
+            {submission.error && <p role="alert">{submission.error}</p>}
+            {(diagnostics ||
+              ['submitting', 'unknown', 'accepted'].includes(submission.phase) ||
+              !!submission.run?.isActive) &&
+              submission.intent.kind !== 'command.cancel' &&
+              !(
+                selection?.storeId === submission.intent.expectedStoreId &&
+                selection.session.id === submission.sessionId &&
+                selection.interactions.some(
+                  (card) => card.kind === 'question' && card.state === 'pending',
+                )
+              ) && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void report(async () => {
+                      await bridge.request({
+                        method: 'cancelInput',
+                        generation: generation.current,
+                        commandId: submission.intent.commandId,
+                      });
+                      await refresh();
+                    })
+                  }
+                >
+                  停止原命令
+                </button>
+              )}
+          </div>
+        ))}
       {state?.answerUnavailable && <p role="status">原答复私有记录不可用；不发送新的答复。</p>}
-      {(state?.answerSubmissions ?? []).map((submission) => (
-        <div key={submission.request.commandId}>
-          <p>
-            持久原答复 {submission.request.commandId}：{submission.phase} · Store{' '}
-            {submission.scope.storeId} · Session {submission.scope.sessionId} · Interaction{' '}
-            {submission.interaction.id} · revision {submission.request.expectedRevision} ·{' '}
-            {submission.association}
-          </p>
-          <button
-            type="button"
-            onClick={() =>
-              void report(async () => {
-                try {
-                  await bridge.request({
-                    method: 'lookupInteraction',
-                    generation: generation.current,
-                    commandId: submission.request.commandId,
-                  });
-                } finally {
-                  await refresh();
-                }
-              })
-            }
-          >
-            只查原答复 · {submission.request.commandId}
-          </button>
-        </div>
-      ))}
+      {(state?.answerSubmissions ?? [])
+        .filter((submission) => diagnostics || submission.phase !== 'accepted')
+        .map((submission) => (
+          <div key={submission.request.commandId}>
+            <p>
+              {diagnostics ? (
+                <>
+                  持久原答复 {submission.request.commandId}：{submission.phase} · Store{' '}
+                  {submission.scope.storeId} · Session {submission.scope.sessionId} · Interaction{' '}
+                  {submission.interaction.id} · revision {submission.request.expectedRevision} ·{' '}
+                  {submission.association}
+                </>
+              ) : (
+                <>答复状态：{submission.phase}</>
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={() =>
+                void report(async () => {
+                  try {
+                    await bridge.request({
+                      method: 'lookupInteraction',
+                      generation: generation.current,
+                      commandId: submission.request.commandId,
+                    });
+                  } finally {
+                    await refresh();
+                  }
+                })
+              }
+            >
+              只查原答复{diagnostics ? ` · ${submission.request.commandId}` : ''}
+            </button>
+          </div>
+        ))}
       {(state?.interactionSubmissions ?? [])
+        .filter((submission) => diagnostics || !['accepted', 'applied'].includes(submission.phase))
         .filter(
           (submission) =>
             !state?.answerSubmissions?.some(
@@ -1778,7 +1832,9 @@ function NativeDesktopContent({
         .map((submission) => (
           <div key={submission.intent.commandId}>
             <p>
-              答复原命令 {submission.intent.commandId}：{submission.phase}
+              {diagnostics
+                ? `答复原命令 ${submission.intent.commandId}：${submission.phase}`
+                : `答复状态：${submission.phase}`}
             </p>
             {submission.phase === 'unknown' && (
               <button
@@ -1801,13 +1857,15 @@ function NativeDesktopContent({
         ))}
       {(state?.permissionSubmissions ?? []).map((submission) => (
         <div key={submission.intent.commandId}>
-          <p>
-            权限原会话 {submission.sessionId} · 根范围 {submission.rootSessionId} · 工作区{' '}
-            {submission.workspaceId} · Store {submission.intent.expectedStoreId}
-          </p>
+          <NativeDiagnostic>
+            <p>
+              权限原会话 {submission.sessionId} · 根范围 {submission.rootSessionId} · 工作区{' '}
+              {submission.workspaceId} · Store {submission.intent.expectedStoreId}
+            </p>
+          </NativeDiagnostic>
           <PermissionSubmissionStatus
             submission={{
-              commandId: submission.intent.commandId,
+              commandId: diagnostics ? submission.intent.commandId : '当前操作',
               phase: submission.phase,
               error: submission.error,
             }}
@@ -1833,13 +1891,15 @@ function NativeDesktopContent({
       ))}
       {(state?.grantSubmissions ?? []).map((submission) => (
         <section key={submission.intent.commandId} aria-label="原授权清除选择">
-          <p>
-            原会话 {submission.sessionId} · 工作区 {submission.workspaceId} · 原存储{' '}
-            {submission.intent.expectedStoreId} · 授权版本 {submission.intent.ifRevision}
-          </p>
+          <NativeDiagnostic>
+            <p>
+              原会话 {submission.sessionId} · 工作区 {submission.workspaceId} · 原存储{' '}
+              {submission.intent.expectedStoreId} · 授权版本 {submission.intent.ifRevision}
+            </p>
+          </NativeDiagnostic>
           <PermissionSubmissionStatus
             submission={{
-              commandId: submission.intent.commandId,
+              commandId: diagnostics ? submission.intent.commandId : '当前操作',
               phase: submission.phase,
               error: submission.error,
             }}
@@ -2177,7 +2237,7 @@ function NativeDesktopContent({
               <DesktopButton onClick={runMessages.retry}>重新核对本轮状态</DesktopButton>
             </p>
           )}
-          {cacheMetrics.error && (
+          {diagnostics && cacheMetrics.error && (
             <p role="status">
               {cacheMetrics.error}{' '}
               <DesktopButton onClick={cacheMetrics.retry}>重新读取缓存指标</DesktopButton>
@@ -2433,31 +2493,46 @@ function NativeDesktopContent({
         !preparing &&
         selection && (
           <>
-            <p role="status">
-              {selection.session.historyPurgedAt !== undefined
-                ? '此会话的历史正文已由离线维护清理；原操作回执和执行边界仍保留。'
-                : historyState.phase === 'complete'
-                  ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
-                  : historyState.phase === 'loading'
-                    ? '正在完整校准历史；已有正文仍可阅读。'
-                    : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
-            </p>
+            {(diagnostics ||
+              selection.session.historyPurgedAt !== undefined ||
+              historyState.phase !== 'complete') && (
+              <p role="status">
+                {selection.session.historyPurgedAt !== undefined
+                  ? '此会话的历史正文已由离线维护清理；原操作回执和执行边界仍保留。'
+                  : historyState.phase === 'complete'
+                    ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
+                    : historyState.phase === 'loading'
+                      ? '正在完整校准历史；已有正文仍可阅读。'
+                      : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
+              </p>
+            )}
             {historyState.phase === 'unavailable' && (
               <button type="button" onClick={() => void report(refresh)}>
                 重新加载会话
               </button>
             )}
-            {selection.runs.map((run) => (
-              <p key={run.id}>轮次：{run.status}</p>
-            ))}
-            <p role="status" aria-label="当前会话后台状态">
-              后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
-              {selection.viewLoading ||
+            {selection.runs
+              .filter(
+                (run) => diagnostics || run.status === 'failed' || run.status === 'interrupted',
+              )
+              .map((run) => (
+                <p key={run.id}>轮次：{run.status}</p>
+              ))}
+            {(diagnostics ||
+              unfinishedJobs > 0 ||
+              unknownJobs > 0 ||
+              selection.viewLoading ||
               selection.permissionUnavailable ||
-              state?.backgroundUnavailable
-                ? ' · 上次确认状态'
-                : ''}
-            </p>
+              state?.backgroundUnavailable) && (
+              <p role="status" aria-label="当前会话后台状态">
+                后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
+                {selection.viewLoading ||
+                selection.permissionUnavailable ||
+                state?.backgroundUnavailable
+                  ? ' · 上次确认状态'
+                  : ''}
+              </p>
+            )}
           </>
         )
       }

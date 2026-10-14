@@ -82,7 +82,7 @@ globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{
  }
  return result;
 },{preconnect:actual.preconnect});
-await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(pidPath)},String(pid))});`,
+await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(pidPath)},String(pid))});`,
       );
       const built = await compileFileRecoveryTUI(f.root, runner);
       if (!built.success)

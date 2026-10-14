@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeCallerMetadata, NativeState } from './native-bridge';
+import { useNativeDiagnostics } from './native-diagnostics';
+import { NativeExecutionResult } from './native-result';
 /** Public metadata and finite original body reads; no profile or execution authority. */
 export function NativeCallerView({
   bridge,
@@ -10,7 +12,9 @@ export function NativeCallerView({
   state: NativeState;
   onRefresh: () => Promise<unknown>;
 }) {
+  const diagnostics = useNativeDiagnostics();
   const [busy, setBusy] = useState(false);
+  const [showRecords, setShowRecords] = useState(false);
   const [body, setBody] = useState(''),
     [error, setError] = useState(''),
     [reading, setReading] = useState(false);
@@ -18,6 +22,14 @@ export function NativeCallerView({
     epoch = useRef(0),
     lastScope = useRef('');
   const scopeKey = `${state.generation}:${state.selection?.session.id ?? ''}`;
+  const viewedBody = useMemo(() => {
+    if (!body || diagnostics) return undefined;
+    try {
+      return JSON.parse(body) as unknown;
+    } catch {
+      return body;
+    }
+  }, [body, diagnostics]);
   useEffect(() => {
     if (lastScope.current === scopeKey) return;
     lastScope.current = scopeKey;
@@ -30,6 +42,7 @@ export function NativeCallerView({
         .catch(() => {});
     setReading(false);
     setBody('');
+    setShowRecords(false);
   }, [bridge, state.generation, scopeKey]);
   async function read(row: NativeCallerMetadata) {
     const previous = active.current;
@@ -115,23 +128,71 @@ export function NativeCallerView({
       setBusy(false);
     }
   }
+  const hasActiveExecution = (row: NativeCallerMetadata) =>
+    state.selection?.runs.some(
+      (run) => run.isActive && run.originCommandId === row.request.commandId,
+    ) ||
+    state.selection?.executions.some(
+      (execution) =>
+        row.target.kind === 'execution' &&
+        execution.id === row.target.id &&
+        ['planned', 'dispatching', 'running', 'outcome_unknown'].includes(execution.status),
+    );
+  const rows =
+    state.callerSubmissions?.filter(
+      (row) => diagnostics || showRecords || row.phase !== 'applied' || hasActiveExecution(row),
+    ) ?? [];
+  if (!diagnostics && !state.callerSubmissions?.length && !state.callerUnavailable && !error)
+    return null;
   return (
     <section aria-label="持久原申请">
-      <h2>持久原申请</h2>
+      {(diagnostics || rows.length > 0) && <h2>{diagnostics ? '持久原申请' : '提交状态'}</h2>}
+      {!diagnostics && state.callerSubmissions?.length && (
+        <button
+          type="button"
+          onClick={() => {
+            setShowRecords((value) => !value);
+            setBody('');
+            epoch.current++;
+            const id = active.current;
+            active.current = undefined;
+            setReading(false);
+            if (id)
+              void bridge.request({
+                method: 'caller.close',
+                generation: state.generation,
+                readId: id,
+              });
+          }}
+        >
+          {showRecords ? '关闭提交记录' : '查看提交记录'}
+        </button>
+      )}
       {state.callerUnavailable && <p>caller_storage_unavailable · 首次提交不可用</p>}
-      {state.callerSubmissions?.map((row) => (
+      {rows.map((row) => (
         <div key={row.request.commandId}>
           <p>
-            原申请 {row.request.commandId} · {row.request.kind} · {row.scope.sessionId} ·{' '}
-            {row.phase}
+            {diagnostics ? (
+              <>
+                原申请 {row.request.commandId} · {row.request.kind} · {row.scope.sessionId} ·{' '}
+                {row.phase}
+              </>
+            ) : (
+              <>原申请：{row.phase}</>
+            )}
           </p>
-          <button type="button" disabled={busy} onClick={() => void action('caller.lookup', row)}>
-            只查原申请 · {row.request.commandId}
-          </button>
+          {(diagnostics || ['submitting', 'unknown', 'accepted'].includes(row.phase)) && (
+            <button type="button" disabled={busy} onClick={() => void action('caller.lookup', row)}>
+              只查原申请{diagnostics ? ` · ${row.request.commandId}` : ''}
+            </button>
+          )}
           <button type="button" onClick={() => void read(row)}>
-            原完整请求 · {row.request.commandId}
+            {diagnostics ? `原完整请求 · ${row.request.commandId}` : '查看原提交内容'}
           </button>
-          {['run.start', 'input.steer', 'input.follow_up'].includes(row.request.kind) &&
+          {(diagnostics ||
+            ['submitting', 'unknown', 'accepted'].includes(row.phase) ||
+            hasActiveExecution(row)) &&
+            ['run.start', 'input.steer', 'input.follow_up'].includes(row.request.kind) &&
             !(
               state.selection?.storeId === row.scope.storeId &&
               state.selection.session.id === row.scope.sessionId &&
@@ -140,12 +201,12 @@ export function NativeCallerView({
               )
             ) && (
               <button type="button" disabled={busy} onClick={() => void action('cancelInput', row)}>
-                取消原申请 · {row.request.commandId}
+                取消原申请{diagnostics ? ` · ${row.request.commandId}` : ''}
               </button>
             )}
-          {['applied', 'rejected'].includes(row.phase) && (
+          {(diagnostics || showRecords) && ['applied', 'rejected'].includes(row.phase) && (
             <button type="button" disabled={busy} onClick={() => void action('caller.clear', row)}>
-              清除已核实申请 · {row.request.commandId}
+              {diagnostics ? `清除已核实申请 · ${row.request.commandId}` : '清理已核实提交记录'}
             </button>
           )}
         </div>
@@ -172,7 +233,7 @@ export function NativeCallerView({
       {error && <p role="alert">{error}</p>}
       {body && (
         <section aria-label="原申请全文">
-          <pre>{body}</pre>
+          {diagnostics ? <pre>{body}</pre> : <NativeExecutionResult result={viewedBody} />}
         </section>
       )}
     </section>

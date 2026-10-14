@@ -67,6 +67,7 @@ test.skipIf(process.platform !== 'darwin')(
       const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') }),
         req = createRequire(resolve(import.meta.dir, '../../package.json')),
         built = await buildNativeCandidate({
+          testDiagnostics: true,
           terminalRoot: terminal.root,
           electronDist: resolve(dirname(dirname(req('electron') as string)), '../..'),
           outdir: join(root, 'source'),

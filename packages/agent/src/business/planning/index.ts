@@ -2031,6 +2031,85 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
           ];
         },
       },
+      {
+        id: 'planning.progress.view',
+        version: '1',
+        description: 'Read exact approved current plan and Run-specific progress for display',
+        inputSchema: schema({ runId: text }),
+        outputSchema: { type: 'array', items: { type: 'object' } },
+        async execute(input, context) {
+          const runId = string(object(input).runId),
+            run = await context.getRun(runId);
+          if (
+            !run ||
+            run.sessionId !== context.sessionId ||
+            typeof run.originStoreId !== 'string' ||
+            !run.originStoreId
+          )
+            throw new Error('planning_run_mismatch');
+          const state = await readPlanningState(context, {
+            runId,
+            originStoreId: run.originStoreId,
+          });
+          let current: Json = null,
+            plan: Json = null,
+            progress: Json = null;
+          if (state.status === 'approved') {
+            const pointer = decode(await context.records.get('plan.current'));
+            if (
+              !pointer ||
+              ['planId', 'version', 'digest'].some(
+                (key) => pointer[key] !== state[key as 'planId' | 'version' | 'digest'],
+              )
+            )
+              throw new Error('plan_identity_mismatch');
+            const document = decode(await context.records.get(string(pointer.key)));
+            if (
+              !document ||
+              ['planId', 'version', 'digest'].some((key) => document[key] !== pointer[key])
+            )
+              throw new Error('plan_identity_mismatch');
+            const actual = decode(
+              await context.records.get(
+                `progress/${encodeURIComponent(state.planId)}/${state.version}`,
+              ),
+            );
+            if (actual && actual.runId === runId) {
+              if (
+                actual.kind !== 'plan_progress' ||
+                ['planId', 'version', 'digest'].some((key) => actual[key] !== pointer[key])
+              )
+                throw new Error('plan_identity_mismatch');
+              progress = actual;
+            }
+            if (canonical(decode(await context.records.get('plan.current'))) !== canonical(pointer))
+              throw new Error('plan_identity_mismatch');
+            current = pointer;
+            plan = document;
+          }
+          return [
+            {
+              extensionId: planningExtensionId,
+              contentType,
+              contentVersion: 1,
+              summary:
+                state.status === 'approved'
+                  ? 'Approved current plan progress'
+                  : 'Approved plan unavailable',
+              payload: {
+                runId,
+                originStoreId: run.originStoreId,
+                approvalStatus: state.status,
+                current,
+                plan,
+                progress,
+              },
+              artifactRefs: [],
+              actions: [],
+            },
+          ];
+        },
+      },
     ],
   };
   const query = extension.queries![0]!;

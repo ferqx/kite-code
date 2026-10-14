@@ -12,6 +12,7 @@ const settings = JSON.parse(process.env.TUI_PREFERENCES_SETTINGS!) as {
 const exit = new AbortController();
 process.once('SIGTERM', () => exit.abort());
 await runTUIHost({
+  testDiagnostics: true,
   exitSignal: exit.signal,
   onLaunched: ({ pid }) =>
     appendFileSync(join(settings.root, 'owned-pid'), `${pid}\n`, { mode: 0o600 }),

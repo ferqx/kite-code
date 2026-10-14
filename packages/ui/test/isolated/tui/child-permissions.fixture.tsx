@@ -224,7 +224,7 @@ function ChildPermissionsFixture() {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   return (
     <Box flexDirection="column">
-      <TuiSession controller={controller} />
+      <TuiSession testDiagnostics controller={controller} />
       {completePreview(state.snapshot) && (
         <Text>Original completed Run / complete output preview ready</Text>
       )}

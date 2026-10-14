@@ -1,12 +1,20 @@
 # Desktop 与 Native 制品
 
+## 普通客户端与测试诊断
+
+[统一展示 context](src/native-diagnostics.tsx)默认关闭测试诊断。`NativeDesktop({testDiagnostics:true})` 供明确 DOM fixture；可信 `buildNativeDesktop` 第三参数中的 `testDiagnostics:true`、`buildNativeCandidate` 输入的同名选项 只写入 renderer 构建常量，纳入实际制品字节指纹。正式和 `desktop:dev` 默认关闭，不依据 NODE_ENV、development 身份或 fixture 内容推断，也不改变 Main／IPC／Service 权限和恢复资格。
+
+普通界面使用“执行记录”，隐藏机器身份、泛化 Model result dump、已确认的创建／答案／交互账本，以及正常完成的历史校准、零后台计数和缓存诊断。未知、当前错误、未完成申请和取消未确认保持可查询；用户明确“查看提交记录”仍可读原申请全文并清理已核实记录，不清除 unknown。原全文继续核 EOF、完整字节、SHA 和准确命令，关闭／切 scope 只结束所属读取。非 Model [结果组件](src/native-result.tsx)逐字段保留全部业务正文，完整 Job／子日志、Model input、Context、恢复和配置操作继续可用。
+
+旧 Electron 身份断言在测试构建显式开启诊断；普通模式验证见[diagnostics DOM](test/isolated/native-diagnostics-dom.test.tsx)及原问答／计划 DOM。DOM 文件沿测试体系各自隔离运行，避免多个 JSDOM 共享 React DOM 的全局捕获。此展示调整不建立 Windows／Linux 实测或新的发布资格。
+
 本地开发先安装当前 workspace 依赖，使用根 `npm run build` 后 `npm run desktop:dev`。该[显式开发宿主](../../scripts/development/unified-desktop.ts)复用已构建的 workspace 运行资产、实际 Bun SHA、已有 Native development assets 与构建器，从当前 Service 源码构建独立开发版本，使用 checkout 的 `unified-development/development` profile。Windows x64 的[开发环境准备](../../scripts/development/windows-desktop-environment.ts)复用已初始化环境或通过已安装 vswhere／VsDevCmd 自动初始化，只导入本次进程的构建白名单；普通 PowerShell 无须手动配置 MSVC。每次构建到独立 `.cache/unified-desktop-*`，Windows 目录由原生权限接口创建并通过私有 ACL 校验，实际 Electron 退出后清理自己的应用目录；开发数据保留，活动应用目录不覆盖。纯帮助与严格参数拒绝先于资产读取／工具探测／构建／Profile 写入，缺 built Service 明确要求 `npm run build`；SIGINT／SIGTERM通过本次父连接请求所属进程收尾，菜单退出沿Native原收尾流程。操作步骤及 Windows C++ 工具安装要求归[本地开发](../../docs/development/local-development.md)。[开发入口测试](../../tests/isolated/unified-agent/development-desktop.test.ts)核对自动初始化、已有环境复用、缺工具／SDK／无效环境拒绝、帮助、缺资产、严格参数、独立私有应用目录及已有缓存保留。
 
 当前桌面构建与启动使用仓库根 `bun run release:build --product native` 和 `bun run desktop`，定向验证为 `bun run test:desktop:native`，安装／归档／版本选择见 `bun run release:native --help`。旧 `apps/kite-desktop` 的普通开发、服务准备和打包命令已给出明确退役诊断／退出码2；不再从当前checkout构建或启动旧writer。原Vite开发热更新只属历史实现，当前Native候选启动的具体行为仍按本页及[发布owner](docs/native-release.md)核对。此项调用者退役不表示全部旧源码或阶段已退出。
 
 ## 开发热更新与服务重载
 
-根 `desktop:dev` 在已准备 workspace 资产后，由[开发宿主](../../scripts/development/unified-desktop.ts)构建 Main／preload 和首个独立 Service 版本，再启动[本地 Vite renderer](scripts/development-renderer.ts)。[重载协调器](../../scripts/development/desktop-reload.ts)仅监听 `apps/service/src`，合并连续保存、串行构建并保留旧版本字节；构建失败保持旧服务，新字节与当前 SHA 相同时不重启。React 组件及 CSS 沿 Vite Fast Refresh，公共 UI 真实改动已核同窗口即时更新及未发送草稿保留。
+根 `desktop:dev` 在已准备 workspace 资产后，由[开发宿主](../../scripts/development/unified-desktop.ts)通过 builder 的 `development` 选项构建 Main／preload 和首个独立 Service 版本，再启动[本地 Vite renderer](scripts/development-renderer.ts)。[重载协调器](../../scripts/development/desktop-reload.ts)仅监听 `apps/service/src`，合并连续保存、串行构建并保留旧版本字节；构建失败保持旧服务，新字节与当前 SHA 相同时不重启。React 组件及 CSS 沿 Vite Fast Refresh，公共 UI 真实改动已核同窗口即时更新及未发送草稿保留。
 
 开发配置由 builder 固定且仅 `kind: development` 接受。[闭合配置／父通道](electron/development.ts)限定 renderer 为 `127.0.0.1` 的实际 HTTP 地址；script 用 Vite nonce，connect 只允许同源资源及该端口 WebSocket。Main 的沙箱、隔离、导航与准确窗口／主 frame 校验保持，Vite 文件服务只开放应用／workspace／依赖源码并拒绝仓库内 Profile、缓存、密钥及内部目录。正式候选不接受这份开发配置，继续 file renderer 和原 `connect-src 'none'`。
 

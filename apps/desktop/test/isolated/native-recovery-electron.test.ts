@@ -35,6 +35,7 @@ for (const kind of ['run', 'interrupt', 'report'])
             profile: { dataRoot: f.profile.dataRoot, profile: f.profile.profile },
           },
           outdir,
+          { testDiagnostics: true },
         );
         const built = await Bun.build({
           entrypoints: [resolve(import.meta.dir, '../native-recovery-electron.fixture.ts')],

@@ -37,18 +37,19 @@ import { probeNativeSqliteEngine } from './sqlite-engine';
 export async function buildNativeDesktop(
   input: NativeAssets,
   outdir: string,
-  development?: DesktopDevelopment,
+  options: { readonly development?: DesktopDevelopment; readonly testDiagnostics?: boolean } = {},
 ) {
   const assets = parseNativeAssets(input);
-  const prepared = parseDesktopDevelopment(development, assets.kind === 'development');
+  const prepared = parseDesktopDevelopment(options.development, assets.kind === 'development');
   if (!isAbsolute(outdir)) throw Error('native_outdir_must_be_absolute');
   verifyNativeAsset(assets.serviceEntrypoint, assets.serviceSha256);
   verifyNativeAsset(assets.bunExecutable, assets.bunSha256);
-  await buildNativeApp(assets, outdir, prepared);
+  await buildNativeApp(assets, outdir, options.testDiagnostics === true, prepared);
 }
 async function buildNativeApp(
   assets: NativeAssets | { kind: 'candidate' },
   outdir: string,
+  testDiagnostics = false,
   development: DesktopDevelopment | null = null,
 ) {
   if (process.platform === 'win32') privateDirectory(outdir);
@@ -108,6 +109,7 @@ async function buildNativeApp(
       base: './',
       clearScreen: false,
       logLevel: 'warn',
+      define: { __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics) },
       build: {
         target: 'es2022',
         outDir: outdir,
@@ -152,6 +154,8 @@ export async function buildNativeCandidate(input: {
   electronDist: string;
   outdir: string;
   windowsBuildPort?: WindowsNativeCandidateBuildPort;
+  /** Explicit renderer diagnostics for automated fixture candidates only. */
+  testDiagnostics?: boolean;
 }) {
   if (process.platform === 'win32' && !input.windowsBuildPort)
     throw Error('native_windows_build_port_required');
@@ -237,7 +241,7 @@ export async function buildNativeCandidate(input: {
     });
     if (verifyTerminalRuntimeBundle(join(root, 'terminal')).digest !== terminal.digest)
       throw Error('native_terminal_copy_mismatch');
-    await buildNativeApp({ kind: 'candidate' }, join(root, 'app'));
+    await buildNativeApp({ kind: 'candidate' }, join(root, 'app'), input.testDiagnostics === true);
     if (process.platform === 'win32') {
       await input.windowsBuildPort!.buildFrontdoors(
         root,

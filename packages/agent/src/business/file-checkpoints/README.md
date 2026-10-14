@@ -69,3 +69,8 @@ prepare 重建完整 preview、读原 records/list，并调用 scoped `requireEx
 [真实默认 A→B](../../../../../apps/service/test/isolated/file-checkpoint-restored-profile.test.ts)用公开offline backup/inspect/restore，原point/Model/Tool/Command/Artifact保A，当前B独立mode/trust CAS后形成新B ordinary Run。A last与B first精确衔接，早A经B独立Ask恢复完整184003字节原像并移除两轮创建文件；cold原ID保持Provider8且零重写。此前单例1/83与五文件19/506是当时冻结的资格，当前时间线更新后的邻接另按实际运行记录。取舍见[原来源与当前授权](../../../../../.agents/notes/implemented/architecture/2026-10-03-file-checkpoint-original-source-and-current-restore.md)。
 
 [完整设计](../../../../../.agents/notes/implemented/architecture/2026-10-03-sealed-readonly-fork-sources-and-file-restore.md)已交付通用 sealed 来源、Files 完整 snapshot/confirmed baseline、Web 只读观察与 CLI/TUI/Native 开发路径的三种范围、持久两步骤及原 ID 冷查询。Client 的 fresh detail 必须完整覆盖原 Code journal 路径，全部 unchanged；外部编辑或后来已完成 Run 即使未改 selector 也会阻止第二步，保留 Code 成功/Fork 未开始。正式入口与完整 Native 发行安装资格独立维护。原Run历史选择观察由[私有reader](../../storage/sqlite/context/README.md)按actual Run pin取得，当前selected资格独立核验；观察本身不是派发授权。
+
+
+## 只读文本预览
+
+公开 checkpoint preview 的 `textChange` 从已核 current／preimage 完整 UTF-8 复用 `computeLineDiff`，统计全部 added/removed lines；只有展示 preview 限 64KiB 并带 truncated。binary、非法 UTF-8、conflict／unavailable 不提供虚假行数。此字段独立于 restorePlan digest／writer／原持久记录，实际恢复继续核完整 bytes。[真实回归](../../../test/isolated/file-checkpoints/text-preview.test.ts)核完整统计、有界 Unicode、私有 bytes 与零业务写入。

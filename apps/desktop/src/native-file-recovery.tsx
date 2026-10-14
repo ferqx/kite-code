@@ -2,6 +2,7 @@ import type { FileCheckpointPage } from '@kite-ai/client';
 import type { FileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
 import { useEffect, useRef, useState } from 'react';
 import type { NativeBridge, NativeFileRecoveryObservation, NativeSelection } from './native-bridge';
+import { NativeDiagnostic, useNativeDiagnostics } from './native-diagnostics';
 
 export function NativeFileRecoveryPanel({
   bridge,
@@ -18,6 +19,7 @@ export function NativeFileRecoveryPanel({
   onRefresh: () => Promise<unknown>;
   onSelect: (id: string) => Promise<unknown>;
 }) {
+  const diagnostics = useNativeDiagnostics();
   const identity = JSON.stringify([
     generation,
     selection?.viewSelection,
@@ -198,13 +200,16 @@ export function NativeFileRecoveryPanel({
           </label>
           {facts && (
             <div>
-              <p>
-                当前来源 {facts.boundary.sessionId} · 选择 {facts.boundary.contextSelectionId}
-              </p>
-              <p>
-                原检查点 {facts.boundary.checkpoint.boundary.storeId}/
-                {facts.boundary.checkpoint.boundary.sessionId}
-              </p>
+              <NativeDiagnostic>
+                {' '}
+                <p>
+                  当前来源 {facts.boundary.sessionId} · 选择 {facts.boundary.contextSelectionId}
+                </p>
+                <p>
+                  原检查点 {facts.boundary.checkpoint.boundary.storeId}/
+                  {facts.boundary.checkpoint.boundary.sessionId}
+                </p>
+              </NativeDiagnostic>
               {facts.detail.payload.files.map((file) => (
                 <p key={file.path}>
                   {file.path} · {file.status}
@@ -261,79 +266,97 @@ export function NativeFileRecoveryPanel({
             : error}
         </p>
       )}
-      {submissions.map((intent) => {
-        const id = intent.code?.request.commandId ?? intent.fork!.request.commandId,
-          foreign = intent.storeId !== selection?.storeId;
-        return (
-          <div key={id}>
-            <p>
-              保存的恢复 {id} · {intent.scope} · 代码 {intent.code?.phase ?? '无'} · 会话{' '}
-              {intent.fork?.phase ?? '无'}
-              {foreign ? ' · 外部 Store 只读' : ''}
-            </p>
-            <button
-              type="button"
-              disabled={pending || foreign}
-              onClick={() =>
-                void action(async () => {
-                  const readId = crypto.randomUUID();
-                  read.current = readId;
-                  await bridge.request({
-                    method: 'fileRecovery.lookup',
-                    generation,
-                    intentId: id,
-                    readId,
-                  });
-                }, true)
-              }
-            >
-              查询原恢复
-            </button>
-            {intent.scope === 'both' &&
-              intent.code?.phase === 'succeeded' &&
-              intent.fork?.phase === 'not_started' && (
+      {submissions
+        .filter(
+          (intent) =>
+            diagnostics ||
+            intent.storeId !== selection?.storeId ||
+            !!intent.fork ||
+            intent.code?.phase !== 'succeeded',
+        )
+        .map((intent) => {
+          const id = intent.code?.request.commandId ?? intent.fork!.request.commandId,
+            foreign = intent.storeId !== selection?.storeId,
+            complete =
+              (!intent.code || intent.code.phase === 'succeeded') &&
+              (!intent.fork || intent.fork.phase === 'succeeded');
+          return (
+            <div key={id}>
+              {(diagnostics || foreign || !complete) && (
+                <p>
+                  保存的恢复<NativeDiagnostic> {id}</NativeDiagnostic> · {intent.scope} · 代码{' '}
+                  {intent.code?.phase ?? '无'} · 会话 {intent.fork?.phase ?? '无'}
+                  {foreign ? ' · 外部 Store 只读' : ''}
+                </p>
+              )}
+              {(diagnostics ||
+                [intent.code?.phase, intent.fork?.phase].some((phase) =>
+                  ['prepared', 'submitting', 'pending', 'unknown'].includes(phase ?? ''),
+                )) && (
                 <button
                   type="button"
-                  disabled={
-                    pending || readonly || foreign || selection?.session.id !== intent.sessionId
-                  }
+                  disabled={pending || foreign}
                   onClick={() =>
                     void action(async () => {
-                      const original = current.current,
-                        input = revision.current;
-                      const value = await bridge.request({
-                        method: 'fileRecovery.continue',
+                      const readId = crypto.randomUUID();
+                      read.current = readId;
+                      await bridge.request({
+                        method: 'fileRecovery.lookup',
                         generation,
                         intentId: id,
+                        readId,
                       });
-                      if (
-                        current.current === original &&
-                        revision.current === input &&
-                        value &&
-                        'version' in value &&
-                        value.version === 1 &&
-                        'fork' in value &&
-                        value.fork?.phase === 'succeeded'
-                      )
-                        await onSelect(value.fork.request.newSessionId);
                     }, true)
                   }
                 >
-                  明确继续原会话分支
+                  查询原恢复
                 </button>
               )}
-            {intent.fork?.phase === 'succeeded' && (
-              <button
-                type="button"
-                disabled={foreign || pending}
-                onClick={() => void onSelect(intent.fork!.request.newSessionId)}
-              >
-                打开恢复会话
-              </button>
-            )}
-          </div>
-        );
-      })}
+              {intent.scope === 'both' &&
+                intent.code?.phase === 'succeeded' &&
+                intent.fork?.phase === 'not_started' && (
+                  <button
+                    type="button"
+                    disabled={
+                      pending || readonly || foreign || selection?.session.id !== intent.sessionId
+                    }
+                    onClick={() =>
+                      void action(async () => {
+                        const original = current.current,
+                          input = revision.current;
+                        const value = await bridge.request({
+                          method: 'fileRecovery.continue',
+                          generation,
+                          intentId: id,
+                        });
+                        if (
+                          current.current === original &&
+                          revision.current === input &&
+                          value &&
+                          'version' in value &&
+                          value.version === 1 &&
+                          'fork' in value &&
+                          value.fork?.phase === 'succeeded'
+                        )
+                          await onSelect(value.fork.request.newSessionId);
+                      }, true)
+                    }
+                  >
+                    明确继续原会话分支
+                  </button>
+                )}
+              {intent.fork?.phase === 'succeeded' && (
+                <button
+                  type="button"
+                  disabled={foreign || pending}
+                  onClick={() => void onSelect(intent.fork!.request.newSessionId)}
+                >
+                  打开恢复会话
+                </button>
+              )}
+            </div>
+          );
+        })}
     </section>
   );
 }

@@ -8,12 +8,14 @@ import type { JobDefinition, ToolDefinition } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { readSessionLogs } from '@kite-ai/agent/storage';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { TuiController, type TuiPort } from '@kite-ai/ui/tui';
 import { openCallerJournal } from '../../host/caller-journal';
 import { createTuiCallerPort } from '../../host/caller-port';
+import { createTuiDisplayReader, readTuiPendingInputs } from '../../host/tui-display';
 
 function gate() {
   let release!: () => void;
@@ -125,6 +127,7 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     },
     instanceId: 'finishing-input',
     buildId: 'fixed',
+    sessionLogs: (input, options) => readSessionLogs(store, input, options),
   });
   const client = createClient({
     endpoint: service.endpoint,
@@ -156,6 +159,7 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     acquireWriteLock: () => acquireProfileDataLock(access, 'tui_private'),
   });
   const callers = createTuiCallerPort({ client, storeId, journal });
+  const readDisplay = createTuiDisplayReader(client, storeId);
   let controller: TuiController | undefined;
   let originalFailure: unknown;
   let failed = false;
@@ -248,6 +252,48 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     });
     const parent = background.items.find((item) => item.run?.id === originalRun.id);
     expect(parent?.run?.status).toBe('cancelling');
+    const displayView = await client.getView('a');
+    const display = await readDisplay(
+      displayView,
+      await client.listMessages('a'),
+      new AbortController().signal,
+    );
+    expect(display.runtimeModel?.source).toBe('model_input');
+    expect(display.runtimeModel?.runId).toBe(originalRun.id);
+    expect(display.usage?.inputTokens).toBe(1);
+    const firstModel = displayView.executions.find((execution) => execution.kind === 'model')!;
+    if (display.executionTimings[firstModel.id]?.availability !== 'recorded_dispatch') {
+      const logs = await client.listSessionLogs('a', {
+        afterCursor: '0',
+        upperCursor: displayView.snapshotCursor,
+        limit: 200,
+      });
+      console.error(
+        'timing source',
+        JSON.stringify({
+          model: {
+            id: firstModel.id,
+            status: firstModel.status,
+            definitionId: firstModel.definitionId,
+            definitionVersion: firstModel.definitionVersion,
+            runId: firstModel.runId,
+          },
+          floor: logs.replayFloor,
+          upper: logs.upperCursor,
+          complete: logs.complete,
+          events: logs.entries
+            .filter((entry) => entry.objectId === firstModel.id)
+            .map(({ type, recordedStatus, occurredAt, details, modelExecutionId }) => ({
+              type,
+              recordedStatus,
+              occurredAt,
+              details,
+              modelExecutionId,
+            })),
+        }),
+      );
+    }
+    expect(display.executionTimings[firstModel.id]?.availability).toBe('recorded_dispatch');
     const body = '完整中🙂e\u0301\r\nnext line\r\n';
     controller.setDraft(body);
     const sending = controller.send();
@@ -265,6 +311,11 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     expect(saved.intent.request.content === body).toBe(true);
     expect(saved.intent.request.afterRunId).toBe(originalRun.id);
     expect((await client.getCommand(saved.intent.request.commandId)).status).toBe('accepted');
+    expect(
+      (await readTuiPendingInputs(client, storeId, 'a', new AbortController().signal)).map(
+        (input) => input.request.content,
+      ),
+    ).toEqual([body]);
     await controller.select('b');
     controller.setDraft('B original draft');
     receiptReleased.release();
@@ -278,6 +329,9 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
       ),
     );
     const finalView = await client.getView('a');
+    expect(await readTuiPendingInputs(client, storeId, 'a', new AbortController().signal)).toEqual(
+      [],
+    );
     expect(finalView.runs.find((run) => run.id === originalRun.id)?.status).toBe('cancelled');
     expect(model.requests.length).toBe(2);
     expect(model.requests[1]!.messages.some((message) => message.content === body)).toBe(true);
