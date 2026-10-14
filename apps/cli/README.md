@@ -82,7 +82,7 @@ Ctrl+C 的整轮取消优先原活动 Run，而不是最近 pending steer/follow
 
 宿主复用公开 `@kite-ai/ui/tui` 的单一 controller，读取同 Workspace 的完整固定上界 Session 目录和会话历史；原审批附件与 Model 正文经公共 SDK 全量验证后才显示。活动输入封存准确 Run/context selection，空闲输入创建新 Run；批准保存不等于执行完成，未知仅查询原 Command，不换 ID 或重发。`Ctrl+R` 选已有 Session，`Ctrl+N` 创建同 Workspace 新 Session（未确认创建时再次按键只查询原 ID），`Ctrl+K` 查询原未知工作，`Ctrl+C` 精确取消原工作且不退出共享 Service。`Ctrl+Q` 或明确 SIGTERM 才退出并关闭本宿主拥有的 paired Service；stdin EOF 停止视图读与输入，保留原等待任务且不默认批准，直到明确宿主退出。切换会话不取消旧工作。
 
-本开发宿主新增下述有限 slash 路由；原 `tui`、旧 CLI/daemon/Electron 入口没有由此退役。复杂编辑、完整终端屏幕滚动/resize 与三平台资格仍未完成。开发入口的 buildId 只证明配套 Service entry 的准确 SHA，不是完整发行 candidate 身份。[test/isolated/tui-host.test.ts](test/isolated/tui-host.test.ts) 通过真实 argv/PTy 和构建 Service 验证宿主生命周期；平台与测试结果以实际验证记录为准。
+下述有限 slash 路由及紧随其后的 5 项／56 个断言记录早期开发宿主切片，只证明当时的宿主生命周期。当前 UI 功能以上述“当前正式与开发 TUI”说明和[UI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)为准，不再沿用早期切片的未完成状态。旧路径整体退役和三平台资格仍由整体门禁负责。开发入口的 buildId 只证明配套 Service entry 的准确 SHA，不是完整发行 candidate 身份。[test/isolated/tui-host.test.ts](test/isolated/tui-host.test.ts) 通过真实 argv/PTy 和构建 Service 验证宿主生命周期；平台与测试结果以实际验证记录为准。
 
 本切片在 macOS 的真实 POSIX PTY 验证为 5 项／56 个断言：纯参数与无终端前置拒绝；三条实际 `scripts/development/unified-tui.ts` 路径使用 built Service、临时 SQLite/profile、仅本机固定 compatible SDK。正常路径核实 9 MiB 文件的完整末尾进入下一实际 Model 请求、显式读取 360025 字节完整输出尾、同 Workspace 新 Session/已有 Session 选择；取消路径双次 Ctrl+C 不批准、不产生原文件效果；EOF 路径在明确退出前仍 `waiting_interaction`、零 accepted，SIGTERM 后由所属 Service drain。三个路径均核实原 Service PID 消失、同 profile 可重新准入且没有额外 Model 请求。PTY 主端关闭带来的 SIGHUP/输出 EIO 只结束观察，不冒充用户退出；SIGTERM listener 保留到异步清理完成，避免 Ink 信号转发提前结束 drain。此证据不覆盖 Linux/Windows、复杂输入/粘贴合并、多平台屏幕滚动或源码树外完整发行资格。
 
