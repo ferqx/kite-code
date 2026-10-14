@@ -4,6 +4,65 @@ import { defaultTuiPreferences } from './preferences';
 
 /** Only explicit UI-owned labels enter this catalog. Public machine values and body text do not. */
 export const tuiChinese: Readonly<Record<string, string>> = {
+  'Command suggestions': '命令候选',
+  'Up/Down: choose · Tab/Enter: complete · Esc: close': '上下选择 · Tab/Enter 补全 · Esc 关闭',
+  'Revise plan': '补充或修改方案',
+  'Enter submits feedback · Shift+Enter newline · Esc returns to choices':
+    'Enter 提交反馈 · Shift+Enter 换行 · Esc 返回选项',
+  'Up/Down: choose · Enter: confirm · Esc: deny': '上下选择 · Enter 确认 · Esc 拒绝',
+  'Original outcome pending or unknown; check original before another answer':
+    '原答复仍在提交或结果未知，请先查询原申请',
+  'Session only': '仅会话',
+  'Code only': '仅文件',
+  'Session and code': '会话与文件',
+  'Recovery point': '恢复点',
+  'No recovery points': '没有恢复点',
+  'Reading state:': '读取状态：',
+  Files: '文件',
+  Conflicts: '冲突',
+  Preview: '预览',
+  'Original recovery': '原恢复申请',
+  Code: '文件',
+  '↑/↓ choose · Enter preview · 1 session · 2 code · 3 both · Esc back':
+    '上下选择 · Enter 预览 · 1 仅会话 · 2 仅文件 · 3 两者 · Esc 返回',
+  '←/→ more files': '左右查看更多文件',
+  'Choose recovery scope explicitly; files and conversation have separate results.':
+    '请明确选择恢复范围；文件与会话分别记录结果。',
+  'Enter confirms selected scope · Esc returns without submitting':
+    'Enter 确认所选范围 · Esc 返回且不提交',
+  'Execution details': '执行详情',
+  'Recorded execution result': '已保存执行结果',
+  'Tool result is read only; background output and child navigation require an exact Job':
+    '工具结果为只读；后台输出和子会话入口仅用于对应后台任务',
+  'Recorded tool calls': '已保存工具调用',
+  'Verified recorded tool calls': '已核实完整工具调用',
+  'Incomplete recorded result': '已保存结果尚不完整',
+  'Timing unavailable': '计时不可用',
+  Thinking: '思考中',
+  Thought: '思考',
+  'tool calls': '次工具调用',
+  'Verified recorded output': '已核实保存输出',
+  'Recorded phase': '已记录阶段',
+  'Recorded executions for this task': '本任务已保存执行',
+  'Tool calls not fully loaded; Ctrl+O reads verified full body':
+    '工具调用尚未完整读取，Ctrl+O 读取原完整内容',
+  'Recorded Model input': '来自已保存模型输入',
+  'Frozen Run selection': '来自本轮固定配置',
+  'Current model unavailable': '当前运行模型无法核实',
+  'Next model:': '下一轮模型：',
+  'Recorded usage:': '已保存用量：',
+  'input tokens': '输入 token',
+  'output tokens': '输出 token',
+  cache: '缓存',
+  'Pending input queue unavailable': '待处理输入队列暂无法读取',
+  'Last confirmed pending inputs': '上次确认的待处理输入',
+  'Pending inputs': '待处理输入',
+  'Guidance pending': '引导等待处理',
+  'Follow-up waiting': '后继输入等待开始',
+  'Recorded result': '已保存结果',
+  'Current task': '当前任务',
+  'Next task': '下一次任务',
+  'Context capacity estimate unavailable': '当前没有上下文容量估计',
   'Model unavailable': '模型信息不可用',
   'Workspace unavailable': '工作区信息不可用',
   'Automatic review': '自动审核',
@@ -47,6 +106,8 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Exit the terminal': '退出终端',
   'Ctrl+N new conversation · Ctrl+R sessions · Ctrl+B pending requests':
     'Ctrl+N 新会话 · Ctrl+R 切换会话 · Ctrl+B 待决交互',
+  'Ctrl+O full output · Ctrl+T reasoning · Ctrl+E execution details · Ctrl+C cancel · Ctrl+Q exit':
+    'Ctrl+O 全文 · Ctrl+T 思考 · Ctrl+E 执行详情 · Ctrl+C 取消 · Ctrl+Q 退出',
   'Ctrl+O full output · Ctrl+T reasoning · Ctrl+C cancel · Ctrl+Q exit':
     'Ctrl+O 全文 · Ctrl+T 思考 · Ctrl+C 取消 · Ctrl+Q 退出',
   succeeded: '已完成',

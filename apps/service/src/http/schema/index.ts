@@ -1231,7 +1231,17 @@ export const PendingInputPageSchema = z.object({
   commands: z.array(
     schemas.Command.extend({
       seq: sequence,
-      request: z.discriminatedUnion('kind', [steerInput, followUpInput]),
+      request: z.discriminatedUnion('kind', [
+        steerInput,
+        followUpInput,
+        z.strictObject({
+          kind: z.literal('result.include'),
+          expectedContextSelectionId: id,
+          executionId: id,
+          resultRevision: sequence,
+          targetRunId: id.nullable(),
+        }),
+      ]),
     }),
   ),
   nextAfterSeq: sequence.nullable(),

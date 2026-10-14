@@ -13,6 +13,7 @@ import {
   interactionAttachment,
   type Message,
   type ModelOutputSnapshot,
+  type PendingInputPage,
   requiresInteractionAttachment,
   type SessionView,
   type StartCommandRequest,
@@ -114,6 +115,9 @@ export * from './recovery';
 export * from './skills';
 export * from './status';
 
+export type TuiPendingInput = Omit<PendingInputPage['commands'][number], 'request'> & {
+  request: Exclude<PendingInputPage['commands'][number]['request'], { kind: 'result.include' }>;
+};
 export interface TuiSnapshot {
   readonly storeId: string;
   readonly view: SessionView;
@@ -122,12 +126,38 @@ export interface TuiSnapshot {
   readonly interactions: readonly Interaction[];
   /** Actual active Run origin, read and identity-checked by the admitted host. */
   readonly activeCommand?: Command;
+  /** Current accepted inputs read from the public directory; a local receipt is not a queue. */
+  readonly pendingInputs?: readonly TuiPendingInput[];
+  readonly pendingInputsUnavailable?: boolean;
+  readonly executionTimings?: Readonly<
+    Record<
+      string,
+      {
+        startedAt?: number;
+        finishedAt?: number;
+        availability: 'recorded_dispatch' | 'unavailable';
+      }
+    >
+  >;
   /** Optional display facts read through the admitted host's public Client. */
   readonly environment?: {
     workspacePath: string;
     modelName?: string;
     effort?: string;
     permissionMode?: import('@kite-ai/client').PermissionModeState['mode'];
+    runtimeModel?: {
+      runId: string;
+      active: boolean;
+      modelName?: string;
+      effort?: string;
+      source: 'model_input' | 'run_configuration' | 'unavailable';
+    };
+    usage?: {
+      inputTokens: number;
+      outputTokens?: number;
+      cachedInputTokens?: number;
+      executionCount: number;
+    };
   };
 }
 function freezeIntent<T>(value: T): T {
@@ -240,6 +270,7 @@ export interface TuiState {
     child?: TuiChildLog;
     error?: string;
   };
+  readonly executionSelectedId?: string;
   status?: TuiStatusSnapshot;
   skills?: TuiSkillsSnapshot;
   models?: ModelSettingsView;
@@ -939,6 +970,15 @@ export class TuiController {
         snapshot.view.storeId !== this.port.storeId ||
         snapshot.view.session.id !== sessionId ||
         snapshot.messages.some((m) => m.sessionId !== sessionId) ||
+        snapshot.pendingInputs?.some(
+          (input) =>
+            input.sessionId !== sessionId ||
+            input.originStoreId !== this.port.storeId ||
+            input.status !== 'accepted' ||
+            input.cancelRequestedAt !== null ||
+            !['input.steer', 'input.follow_up'].includes(input.kind) ||
+            input.kind !== input.request.kind,
+        ) ||
         snapshot.interactions.some(
           (i) => i.originStoreId !== this.port.storeId || i.presentationSessionId !== sessionId,
         )
@@ -5072,7 +5112,12 @@ export class TuiController {
       return;
     }
     const snapshot = this.value.snapshot,
-      run = snapshot?.view.runs.find((r) => r.isActive);
+      run = snapshot?.view.runs.find(
+        (r) =>
+          r.isActive &&
+          r.sessionId === snapshot.view.session.id &&
+          r.originStoreId === this.port.storeId,
+      );
     const pending = this.value.intent;
     const originalCaller = [...this.value.callers.values()]
       .reverse()
@@ -5085,16 +5130,20 @@ export class TuiController {
           ['submitting', 'unknown', 'accepted'].includes(row.phase),
       );
     const target =
-      originalCaller?.intent.request.commandId ??
       run?.originCommandId ??
+      originalCaller?.intent.request.commandId ??
       (pending?.sessionId === snapshot?.view.session.id && pending?.kind === 'run.start'
         ? pending.commandId
         : undefined);
     if (!snapshot || !target || this.cancelled.has(target)) return;
     this.cancelled.add(target);
     const commandId = this.port.nextCommandId(),
-      sessionId = originalCaller?.intent.scope.sessionId ?? snapshot.view.session.id;
-    const cancelScope = originalCaller?.intent.scope ?? this.draftScope()!;
+      sessionId = run
+        ? snapshot.view.session.id
+        : (originalCaller?.intent.scope.sessionId ?? snapshot.view.session.id);
+    const cancelScope = run
+      ? this.draftScope()!
+      : (originalCaller?.intent.scope ?? this.draftScope()!);
     await this.write(
       sessionId,
       commandId,
@@ -5146,13 +5195,17 @@ export class TuiController {
     const unresolved = this.unknownIntents.values().next().value;
     if (unresolved) this.publish({ intent: unresolved });
   }
-  openExecutions() {
+  openExecutions(executionId?: string) {
     if (!this.port.executions) {
       this.publish({ error: 'tui_execution_reader_unavailable' });
       return;
     }
     this.closePanel();
-    this.publish({ panel: 'executions' });
+    const selected = this.value.snapshot?.view.executions.find(
+      (item) =>
+        item.id === executionId && item.kind !== 'model' && item.sessionId === this.value.sessionId,
+    );
+    this.publish({ panel: 'executions', executionSelectedId: selected?.id });
   }
   private jobTarget(id: string): TuiJobTarget | undefined {
     const snapshot = this.value.snapshot;

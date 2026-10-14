@@ -45,7 +45,7 @@ export function skillDetails(
   );
 }
 export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   const state = controller.state,
     snapshot = state.skills,
     facts = snapshot?.facts;
@@ -106,7 +106,7 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
             : t('Last confirmed catalogue (current unknown)')}
         </Text>
       )}
-      {facts && (
+      {facts && testDiagnostics && (
         <Text>
           {t('Revision:')} {facts.revision}
         </Text>

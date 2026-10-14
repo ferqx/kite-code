@@ -4,6 +4,14 @@
 
 [chrome](chrome.tsx)搬迁原 Header／Footer／OverlayFrame 的纯布局，当前 controller、ComposerBuffer 与公共 port 保留原行为；不导入旧 provider、projector 或 Runtime。Header 作为原 Static 第一项，实际环境／显示事实变化才替换展示代次，普通编辑和观察状态不重发正文。宿主可提供 snapshot.environment；模型与权限读失败只缺对应展示事实，不阻断完整会话读取。
 
+[transcript](transcript.tsx)消费已核完整 Model output 的 toolCalls、reasoning 和 complete；公开消息按 BigInt seq 排列，Tool 只匹配同原 Store/Session/Run 下唯一 toolCallId。Execution 由准确 sourceIds/parent 来源进入阶段，缺关系时单列本 Run 记录；不按同名工具或消息位置猜执行成功。工具参数、false/null、数组和原换行保留。Ctrl+E 由 [execution panel](execution-panel.tsx)选择中间非 Model 卡，Tool 只读结果，准确 Job 才能沿既有完整 output/child reader 或 stop；读结果必须匹配当前目标，旧输出不能冒称新卡内容。
+
+[plan review](plan-review-panel.tsx)提供原 offered 模式和反馈页，初始无批准；反馈由 Root 按完整 interactionKey 保存，卡版本改变废弃旧选择，unknown 只查原申请。[Files 面板](file-recovery-panel.tsx)以原 trigger Message 和实际文件 preview 提供三范围独立确认；公共 DTO 未提供旧 createdAt／目录行差异时不补造。模型／effort 面板定位实际当前选择，候选和目录按终端高度窗口化；CAS、两次确认和正文完整性不变。
+
+普通 Esc 由 editor 先处理候选，普通输入才请求原 work 取消，避免 Ink 子/父监听顺序导致一次按键同时关闭和取消。活动当前 Store Run 的 originCommandId 优先于最近持久 steer/follow-up；取消队列输入本身不能停止父 Run。两次独立 Ctrl+C 在一秒内调用宿主正常 quit，合并的原生批次仍只取消一次；Session 切换和其他按键清退出手势，EOF 不变。Shift+Tab 统一由 Root 处理，所有焦点只切下一草稿 planning。
+
+`pendingInputs` 只接公共已接受目录的完整分页，未知本地申请不进队列，页面观察漂移标 unavailable，切 scope 不复用。`environment.runtimeModel` 分别保 Model input 和 frozen Run 来源；Header 用当前 active 的原模型，Footer 另列下一默认，改模型不改活动事实。usage 按准确成功 Model/Run/message 唯一计数；无 cache 不显示 0%，无容量不造 context 利用率。`executionTimings` 仅接原日志 dispatch→finish；活动时钟从已记录 start 起算，history settled 只用真实两端，不用观察或打开时间冒充。
+
 普通消息隐藏机器身份，工具／Job 的[result](result.tsx)保留全部业务字段、原换行和 false/null 等值；审批审查材料、部分正文、未知和取消未确认继续可见。主输入使用 ❯ 和原横线布局；[help](help-panel.tsx)取得只读焦点，滚动或关闭不取消工作。选择与管理面板共用纯 frame，原 Review/Confirm、schema、scope、EOF 和持久申请逻辑不变。
 
 `TuiSession({testDiagnostics:true})` 或宿主明确测试参数才显示原 ID／协议 JSON／回执诊断，默认 false；development 本身不启用。恢复、状态和用户明确读取的原申请详情保持完整核实能力。现有原身份测试显式开启诊断，普通模式由[展示回归](../../test/tui/normal-presentation.test.tsx)覆盖，不以诊断模式测试代替普通界面。
@@ -22,7 +30,7 @@
 
 普通文本在真实可引导 active Run 上封存原 Store、Session、contextSelection 与 targetRunId 后调用 steer；idle 才创建新 Run。原 Run 为 `cancelling` 时，完整输入使用同原 Run/context selection 的 `input.follow_up`；服务端等待原停止后启动后继。维护压缩/reset Run 由宿主提供真实 activeCommand 后同样使用 follow-up，明确选择 Planning 保原扩展输入。其他不可引导状态或 stale 保留草稿。原 commandId 在提交前由宿主生成；响应不可核实时显示 unknown，lookup 只 GET 原 ID，不重发。晚回执显示原 Session，且只清理原提交版本，不覆盖另一会话的草稿。Ctrl+C 取消准确原 Run 的 originCommandId；尚未观测 Run 的新 start 仍使用已封存原 commandId，重复取消去重。回执 accepted/applied 不证明实际停止，只有新投影可显示 Cancelling/终态。[真实宿主链回归](../../../../apps/cli/test/isolated/tui-finishing-input-host.test.ts)消费正式 caller port、HTTP/SQLite/Runtime，核原停止屏障、后继完整正文与原请求零重发；它不依赖 Shell 或特定平台，也不代替真实 PTY 和三端原生资格。
 
-普通主区识别同一输入块内仅由多个真实 Ctrl+C 组成的批次，继续走已有取消分支和原 controller 的准确目标／去重；辅助面板的取消域不变。主区始终保有独立 paste listener，普通审批／计划／JSON 卡片把 literal paste 保存到原 answerBuffer，问卷仍写原步骤草稿，Composer 沿自己的 paste channel 保原文字；Chooser 与 Source Question 消费但不解释粘贴为按键。原生纯 C 批次在 [Composer](composer-input.tsx) 编辑前拒绝，不污染主草稿；未引入其他控制组合的通用路由。[controller 测试](../../test/tui/controller.test.tsx)核审批／Composer 的 literal paste 零取消、批次准确取消一次及后续单 C 去重，原 [TUI host](../../../../apps/cli/test/isolated/tui-host.test.ts) 的真实 PTY 保持期限与全部断言，实际阶段证据见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
+普通主区识别同一输入块内仅由多个真实 Ctrl+C 组成的批次，继续走已有取消分支和原 controller 的准确目标／去重；辅助面板的取消域不变。主区始终保有独立 paste listener，普通审批／JSON 卡片把 literal paste 保存到原 answerBuffer，计划反馈由独立面板保存同 key buffer，问卷仍写原步骤草稿，Composer 沿自己的 paste channel 保原文字；Chooser 与 Source Question 消费但不解释粘贴为按键。原生纯 C 批次在 [Composer](composer-input.tsx) 编辑前拒绝，不污染主草稿；未引入其他控制组合的通用路由。[controller 测试](../../test/tui/controller.test.tsx)核审批／Composer 的 literal paste 零取消、批次准确取消一次及后续单 C 去重，原 [TUI host](../../../../apps/cli/test/isolated/tui-host.test.ts) 的真实 PTY 保持期限与全部断言，实际阶段证据见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 审批输入 `approve` 缺省一次；只有原卡 request.grants 提供时可输入 `approve same_command`。Esc 只拒绝审批，Ctrl+C 是原 work 取消；普通 question 使用下述原 schema 步骤面板，复杂输入仍明确使用原 JSON，内部 choice ID 保留，服务端仍完整校验；计划批准只接受原 offered auto/accept_edits，不创建工具授权。空答案、EOF 和关闭没有默认批准。原卡附件必须经宿主公共完整 hash/UTF-8 reader 读取后才可答复，Ctrl+A 显式读取；未知回答只允许核实原 Command。保存答案并不代表 Core 已接纳或工具派发成功。
 

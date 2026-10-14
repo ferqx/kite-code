@@ -50,7 +50,9 @@ export function TuiHelpPanel({ controller }: { controller: TuiController }) {
         {t('Ctrl+N new conversation · Ctrl+R sessions · Ctrl+B pending requests')}
       </Text>
       <Text dimColor>
-        {t('Ctrl+O full output · Ctrl+T reasoning · Ctrl+C cancel · Ctrl+Q exit')}
+        {t(
+          'Ctrl+O full output · Ctrl+T reasoning · Ctrl+E execution details · Ctrl+C cancel · Ctrl+Q exit',
+        )}
       </Text>
     </TuiOverlayFrame>
   );

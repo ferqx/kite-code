@@ -1,5 +1,7 @@
 # 本机 Agent Service
 
+`GET /v1/sessions/{id}/inputs` 的有限 response request 联合包括 steer、follow-up 和 Core 已接受的 `result.include`；只读投影保原 selection／execution／result revision／target Run。原 Store reader 同时供 Runtime checkpoint消费，不能过滤掉 result include 来迁就客户端显示；接口 schema 负责正确投影，TUI 只把文本输入显示为队列并正常推进所有 cursor。原写路由、权限与 Core 应用顺序不变，[真实混合页回归](test/isolated/pending-inputs.test.ts)核完整原申请与零重执行。
+
 ## 默认装配与业务规则归属
 
 [默认配置](src/configuration.ts)读取实际 Profile、Workspace、当前身份和注册定义，装配唯一 Agent Runtime；固定内建能力效果和 Workflow 审批投影由[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一提供。正式 Run、恢复绑定与只读 Skill 目录共用工具版本校验和内建注册集合，各自的来源捕获、选中范围与资源释放时刻仍独立。Service 不维护第二份 Task、Shell、Files、Skills 或 Web 效果规则。

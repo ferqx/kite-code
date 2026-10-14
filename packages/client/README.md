@@ -67,6 +67,8 @@ SDK 提供 workspace/session 创建及列表、`startRun`、`cancelCommand`、`c
 
 `listPendingInputs(sessionId,{storeId,kind?,targetRunId?,afterSeq?,limit?})` 要求 `inputs` capability，按生成 query 校验，最多 200 条。`afterSeq` 严格校验 Decimal64 范围，待输入的原 request 与未来响应字段保留，纯读取不推进 SSE 游标。公开消息的原命令、context、input kind 与 source IDs 用于追溯应用来源。child 可展示历史，但追加输入只能从原 root 发起。
 
+公开页保留同序列的 steer、follow-up 与待消费 `result.include`。后者只携原 selection／execution／result revision／target Run，不含文本 content，不是新的提示或写权限。生成联合与 Service schema 同步；调用者按每项原 seq 推进游标，不能因不展示 Context 纳入请求而丢弃它的分页位置。[真实 HTTP 回归](../../apps/service/test/isolated/pending-inputs.test.ts)核混合两页、完整原申请、受理与消费，以及旧 Tool 零重执行。
+
 [SDK 准入测试](test/inputs.test.ts) 验证未准入、缺可选能力、非法 authority/content/cursor 的零业务请求以及旧 Store/目标不重绑。[真实输入集成测试](../../tests/isolated/unified-agent/client-inputs.test.ts) 用实际 Service、SQLite Worker 和固定 Model 验证接收、同 Loop 应用、精准取消、独立后续 Run、child 权限及完整输入 frame；本次两文件合计六项、158 条断言通过，无付费模型调用。
 
 

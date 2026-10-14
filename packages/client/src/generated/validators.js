@@ -89445,6 +89445,39 @@ var schema78 = {
                 required: ['kind', 'content', 'afterRunId', 'contextSelectionId'],
                 additionalProperties: true,
               },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', const: 'result.include' },
+                  expectedContextSelectionId: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
+                    pattern: '^[A-Za-z0-9_-]+$',
+                  },
+                  executionId: {
+                    type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
+                    pattern: '^[A-Za-z0-9_-]+$',
+                  },
+                  resultRevision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+                  targetRunId: {
+                    anyOf: [
+                      { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+                      { type: 'null' },
+                    ],
+                  },
+                },
+                required: [
+                  'kind',
+                  'expectedContextSelectionId',
+                  'executionId',
+                  'resultRevision',
+                  'targetRunId',
+                ],
+                additionalProperties: true,
+              },
             ],
           },
         },
@@ -92211,9 +92244,568 @@ function validate81(
                                                     props1 = true;
                                                   }
                                                 }
+                                                const _errs83 = errors;
+                                                if (errors === _errs83) {
+                                                  if (
+                                                    data15 &&
+                                                    typeof data15 == 'object' &&
+                                                    !Array.isArray(data15)
+                                                  ) {
+                                                    let missing6;
+                                                    if (
+                                                      (data15.kind === undefined &&
+                                                        (missing6 = 'kind')) ||
+                                                      (data15.expectedContextSelectionId ===
+                                                        undefined &&
+                                                        (missing6 =
+                                                          'expectedContextSelectionId')) ||
+                                                      (data15.executionId === undefined &&
+                                                        (missing6 = 'executionId')) ||
+                                                      (data15.resultRevision === undefined &&
+                                                        (missing6 = 'resultRevision')) ||
+                                                      (data15.targetRunId === undefined &&
+                                                        (missing6 = 'targetRunId'))
+                                                    ) {
+                                                      const err55 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/commands/' +
+                                                          i0 +
+                                                          '/request',
+                                                        schemaPath:
+                                                          '#/properties/commands/items/properties/request/oneOf/2/required',
+                                                        keyword: 'required',
+                                                        params: { missingProperty: missing6 },
+                                                        message:
+                                                          "must have required property '" +
+                                                          missing6 +
+                                                          "'",
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err55];
+                                                      } else {
+                                                        vErrors.push(err55);
+                                                      }
+                                                      errors++;
+                                                    } else {
+                                                      if (data15.kind !== undefined) {
+                                                        let data33 = data15.kind;
+                                                        const _errs86 = errors;
+                                                        if (typeof data33 !== 'string') {
+                                                          const err56 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/commands/' +
+                                                              i0 +
+                                                              '/request/kind',
+                                                            schemaPath:
+                                                              '#/properties/commands/items/properties/request/oneOf/2/properties/kind/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'string' },
+                                                            message: 'must be string',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err56];
+                                                          } else {
+                                                            vErrors.push(err56);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                        if (data33 !== 'result.include') {
+                                                          const err57 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/commands/' +
+                                                              i0 +
+                                                              '/request/kind',
+                                                            schemaPath:
+                                                              '#/properties/commands/items/properties/request/oneOf/2/properties/kind/const',
+                                                            keyword: 'const',
+                                                            params: {
+                                                              allowedValue: 'result.include',
+                                                            },
+                                                            message: 'must be equal to constant',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err57];
+                                                          } else {
+                                                            vErrors.push(err57);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                        var valid12 = _errs86 === errors;
+                                                      } else {
+                                                        var valid12 = true;
+                                                      }
+                                                      if (valid12) {
+                                                        if (
+                                                          data15.expectedContextSelectionId !==
+                                                          undefined
+                                                        ) {
+                                                          let data34 =
+                                                            data15.expectedContextSelectionId;
+                                                          const _errs88 = errors;
+                                                          if (errors === _errs88) {
+                                                            if (typeof data34 === 'string') {
+                                                              if (func2(data34) > 128) {
+                                                                const err58 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/commands/' +
+                                                                    i0 +
+                                                                    '/request/expectedContextSelectionId',
+                                                                  schemaPath:
+                                                                    '#/properties/commands/items/properties/request/oneOf/2/properties/expectedContextSelectionId/maxLength',
+                                                                  keyword: 'maxLength',
+                                                                  params: { limit: 128 },
+                                                                  message:
+                                                                    'must NOT have more than 128 characters',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err58];
+                                                                } else {
+                                                                  vErrors.push(err58);
+                                                                }
+                                                                errors++;
+                                                              } else {
+                                                                if (func2(data34) < 1) {
+                                                                  const err59 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/commands/' +
+                                                                      i0 +
+                                                                      '/request/expectedContextSelectionId',
+                                                                    schemaPath:
+                                                                      '#/properties/commands/items/properties/request/oneOf/2/properties/expectedContextSelectionId/minLength',
+                                                                    keyword: 'minLength',
+                                                                    params: { limit: 1 },
+                                                                    message:
+                                                                      'must NOT have fewer than 1 characters',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err59];
+                                                                  } else {
+                                                                    vErrors.push(err59);
+                                                                  }
+                                                                  errors++;
+                                                                } else {
+                                                                  if (!pattern4.test(data34)) {
+                                                                    const err60 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/commands/' +
+                                                                        i0 +
+                                                                        '/request/expectedContextSelectionId',
+                                                                      schemaPath:
+                                                                        '#/properties/commands/items/properties/request/oneOf/2/properties/expectedContextSelectionId/pattern',
+                                                                      keyword: 'pattern',
+                                                                      params: {
+                                                                        pattern: '^[A-Za-z0-9_-]+$',
+                                                                      },
+                                                                      message:
+                                                                        'must match pattern "' +
+                                                                        '^[A-Za-z0-9_-]+$' +
+                                                                        '"',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err60];
+                                                                    } else {
+                                                                      vErrors.push(err60);
+                                                                    }
+                                                                    errors++;
+                                                                  }
+                                                                }
+                                                              }
+                                                            } else {
+                                                              const err61 = {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/commands/' +
+                                                                  i0 +
+                                                                  '/request/expectedContextSelectionId',
+                                                                schemaPath:
+                                                                  '#/properties/commands/items/properties/request/oneOf/2/properties/expectedContextSelectionId/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'string' },
+                                                                message: 'must be string',
+                                                              };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err61];
+                                                              } else {
+                                                                vErrors.push(err61);
+                                                              }
+                                                              errors++;
+                                                            }
+                                                          }
+                                                          var valid12 = _errs88 === errors;
+                                                        } else {
+                                                          var valid12 = true;
+                                                        }
+                                                        if (valid12) {
+                                                          if (data15.executionId !== undefined) {
+                                                            let data35 = data15.executionId;
+                                                            const _errs90 = errors;
+                                                            if (errors === _errs90) {
+                                                              if (typeof data35 === 'string') {
+                                                                if (func2(data35) > 128) {
+                                                                  const err62 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/commands/' +
+                                                                      i0 +
+                                                                      '/request/executionId',
+                                                                    schemaPath:
+                                                                      '#/properties/commands/items/properties/request/oneOf/2/properties/executionId/maxLength',
+                                                                    keyword: 'maxLength',
+                                                                    params: { limit: 128 },
+                                                                    message:
+                                                                      'must NOT have more than 128 characters',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err62];
+                                                                  } else {
+                                                                    vErrors.push(err62);
+                                                                  }
+                                                                  errors++;
+                                                                } else {
+                                                                  if (func2(data35) < 1) {
+                                                                    const err63 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/commands/' +
+                                                                        i0 +
+                                                                        '/request/executionId',
+                                                                      schemaPath:
+                                                                        '#/properties/commands/items/properties/request/oneOf/2/properties/executionId/minLength',
+                                                                      keyword: 'minLength',
+                                                                      params: { limit: 1 },
+                                                                      message:
+                                                                        'must NOT have fewer than 1 characters',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err63];
+                                                                    } else {
+                                                                      vErrors.push(err63);
+                                                                    }
+                                                                    errors++;
+                                                                  } else {
+                                                                    if (!pattern4.test(data35)) {
+                                                                      const err64 = {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/commands/' +
+                                                                          i0 +
+                                                                          '/request/executionId',
+                                                                        schemaPath:
+                                                                          '#/properties/commands/items/properties/request/oneOf/2/properties/executionId/pattern',
+                                                                        keyword: 'pattern',
+                                                                        params: {
+                                                                          pattern:
+                                                                            '^[A-Za-z0-9_-]+$',
+                                                                        },
+                                                                        message:
+                                                                          'must match pattern "' +
+                                                                          '^[A-Za-z0-9_-]+$' +
+                                                                          '"',
+                                                                      };
+                                                                      if (vErrors === null) {
+                                                                        vErrors = [err64];
+                                                                      } else {
+                                                                        vErrors.push(err64);
+                                                                      }
+                                                                      errors++;
+                                                                    }
+                                                                  }
+                                                                }
+                                                              } else {
+                                                                const err65 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/commands/' +
+                                                                    i0 +
+                                                                    '/request/executionId',
+                                                                  schemaPath:
+                                                                    '#/properties/commands/items/properties/request/oneOf/2/properties/executionId/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'string' },
+                                                                  message: 'must be string',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err65];
+                                                                } else {
+                                                                  vErrors.push(err65);
+                                                                }
+                                                                errors++;
+                                                              }
+                                                            }
+                                                            var valid12 = _errs90 === errors;
+                                                          } else {
+                                                            var valid12 = true;
+                                                          }
+                                                          if (valid12) {
+                                                            if (
+                                                              data15.resultRevision !== undefined
+                                                            ) {
+                                                              let data36 = data15.resultRevision;
+                                                              const _errs92 = errors;
+                                                              if (errors === _errs92) {
+                                                                if (typeof data36 === 'string') {
+                                                                  if (!pattern18.test(data36)) {
+                                                                    const err66 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/commands/' +
+                                                                        i0 +
+                                                                        '/request/resultRevision',
+                                                                      schemaPath:
+                                                                        '#/properties/commands/items/properties/request/oneOf/2/properties/resultRevision/pattern',
+                                                                      keyword: 'pattern',
+                                                                      params: {
+                                                                        pattern:
+                                                                          '^(0|[1-9][0-9]*)$',
+                                                                      },
+                                                                      message:
+                                                                        'must match pattern "' +
+                                                                        '^(0|[1-9][0-9]*)$' +
+                                                                        '"',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err66];
+                                                                    } else {
+                                                                      vErrors.push(err66);
+                                                                    }
+                                                                    errors++;
+                                                                  }
+                                                                } else {
+                                                                  const err67 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/commands/' +
+                                                                      i0 +
+                                                                      '/request/resultRevision',
+                                                                    schemaPath:
+                                                                      '#/properties/commands/items/properties/request/oneOf/2/properties/resultRevision/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err67];
+                                                                  } else {
+                                                                    vErrors.push(err67);
+                                                                  }
+                                                                  errors++;
+                                                                }
+                                                              }
+                                                              var valid12 = _errs92 === errors;
+                                                            } else {
+                                                              var valid12 = true;
+                                                            }
+                                                            if (valid12) {
+                                                              if (
+                                                                data15.targetRunId !== undefined
+                                                              ) {
+                                                                let data37 = data15.targetRunId;
+                                                                const _errs94 = errors;
+                                                                const _errs95 = errors;
+                                                                let valid13 = false;
+                                                                const _errs96 = errors;
+                                                                if (errors === _errs96) {
+                                                                  if (typeof data37 === 'string') {
+                                                                    if (func2(data37) > 128) {
+                                                                      const err68 = {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/commands/' +
+                                                                          i0 +
+                                                                          '/request/targetRunId',
+                                                                        schemaPath:
+                                                                          '#/properties/commands/items/properties/request/oneOf/2/properties/targetRunId/anyOf/0/maxLength',
+                                                                        keyword: 'maxLength',
+                                                                        params: { limit: 128 },
+                                                                        message:
+                                                                          'must NOT have more than 128 characters',
+                                                                      };
+                                                                      if (vErrors === null) {
+                                                                        vErrors = [err68];
+                                                                      } else {
+                                                                        vErrors.push(err68);
+                                                                      }
+                                                                      errors++;
+                                                                    } else {
+                                                                      if (func2(data37) < 1) {
+                                                                        const err69 = {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/commands/' +
+                                                                            i0 +
+                                                                            '/request/targetRunId',
+                                                                          schemaPath:
+                                                                            '#/properties/commands/items/properties/request/oneOf/2/properties/targetRunId/anyOf/0/minLength',
+                                                                          keyword: 'minLength',
+                                                                          params: { limit: 1 },
+                                                                          message:
+                                                                            'must NOT have fewer than 1 characters',
+                                                                        };
+                                                                        if (vErrors === null) {
+                                                                          vErrors = [err69];
+                                                                        } else {
+                                                                          vErrors.push(err69);
+                                                                        }
+                                                                        errors++;
+                                                                      } else {
+                                                                        if (
+                                                                          !pattern4.test(data37)
+                                                                        ) {
+                                                                          const err70 = {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/commands/' +
+                                                                              i0 +
+                                                                              '/request/targetRunId',
+                                                                            schemaPath:
+                                                                              '#/properties/commands/items/properties/request/oneOf/2/properties/targetRunId/anyOf/0/pattern',
+                                                                            keyword: 'pattern',
+                                                                            params: {
+                                                                              pattern:
+                                                                                '^[A-Za-z0-9_-]+$',
+                                                                            },
+                                                                            message:
+                                                                              'must match pattern "' +
+                                                                              '^[A-Za-z0-9_-]+$' +
+                                                                              '"',
+                                                                          };
+                                                                          if (vErrors === null) {
+                                                                            vErrors = [err70];
+                                                                          } else {
+                                                                            vErrors.push(err70);
+                                                                          }
+                                                                          errors++;
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  } else {
+                                                                    const err71 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/commands/' +
+                                                                        i0 +
+                                                                        '/request/targetRunId',
+                                                                      schemaPath:
+                                                                        '#/properties/commands/items/properties/request/oneOf/2/properties/targetRunId/anyOf/0/type',
+                                                                      keyword: 'type',
+                                                                      params: { type: 'string' },
+                                                                      message: 'must be string',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err71];
+                                                                    } else {
+                                                                      vErrors.push(err71);
+                                                                    }
+                                                                    errors++;
+                                                                  }
+                                                                }
+                                                                var _valid3 = _errs96 === errors;
+                                                                valid13 = valid13 || _valid3;
+                                                                const _errs98 = errors;
+                                                                if (data37 !== null) {
+                                                                  const err72 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/commands/' +
+                                                                      i0 +
+                                                                      '/request/targetRunId',
+                                                                    schemaPath:
+                                                                      '#/properties/commands/items/properties/request/oneOf/2/properties/targetRunId/anyOf/1/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'null' },
+                                                                    message: 'must be null',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err72];
+                                                                  } else {
+                                                                    vErrors.push(err72);
+                                                                  }
+                                                                  errors++;
+                                                                }
+                                                                var _valid3 = _errs98 === errors;
+                                                                valid13 = valid13 || _valid3;
+                                                                if (!valid13) {
+                                                                  const err73 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/commands/' +
+                                                                      i0 +
+                                                                      '/request/targetRunId',
+                                                                    schemaPath:
+                                                                      '#/properties/commands/items/properties/request/oneOf/2/properties/targetRunId/anyOf',
+                                                                    keyword: 'anyOf',
+                                                                    params: {},
+                                                                    message:
+                                                                      'must match a schema in anyOf',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err73];
+                                                                  } else {
+                                                                    vErrors.push(err73);
+                                                                  }
+                                                                  errors++;
+                                                                } else {
+                                                                  errors = _errs95;
+                                                                  if (vErrors !== null) {
+                                                                    if (_errs95) {
+                                                                      vErrors.length = _errs95;
+                                                                    } else {
+                                                                      vErrors = null;
+                                                                    }
+                                                                  }
+                                                                }
+                                                                var valid12 = _errs94 === errors;
+                                                              } else {
+                                                                var valid12 = true;
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  } else {
+                                                    const err74 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/commands/' +
+                                                        i0 +
+                                                        '/request',
+                                                      schemaPath:
+                                                        '#/properties/commands/items/properties/request/oneOf/2/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'object' },
+                                                      message: 'must be object',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err74];
+                                                    } else {
+                                                      vErrors.push(err74);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                }
+                                                var _valid1 = _errs83 === errors;
+                                                if (_valid1 && valid5) {
+                                                  valid5 = false;
+                                                  passing0 = [passing0, 2];
+                                                } else {
+                                                  if (_valid1) {
+                                                    valid5 = true;
+                                                    passing0 = 2;
+                                                    if (props1 !== true) {
+                                                      props1 = true;
+                                                    }
+                                                  }
+                                                }
                                               }
                                               if (!valid5) {
-                                                const err55 = {
+                                                const err75 = {
                                                   instancePath:
                                                     instancePath + '/commands/' + i0 + '/request',
                                                   schemaPath:
@@ -92223,9 +92815,9 @@ function validate81(
                                                   message: 'must match exactly one schema in oneOf',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err55];
+                                                  vErrors = [err75];
                                                 } else {
-                                                  vErrors.push(err55);
+                                                  vErrors.push(err75);
                                                 }
                                                 errors++;
                                                 validate81.errors = vErrors;
@@ -92293,15 +92885,15 @@ function validate81(
         }
         if (valid0) {
           if (data.nextAfterSeq !== undefined) {
-            let data33 = data.nextAfterSeq;
-            const _errs83 = errors;
-            const _errs84 = errors;
-            let valid12 = false;
-            const _errs85 = errors;
-            if (errors === _errs85) {
-              if (typeof data33 === 'string') {
-                if (!pattern18.test(data33)) {
-                  const err56 = {
+            let data38 = data.nextAfterSeq;
+            const _errs100 = errors;
+            const _errs101 = errors;
+            let valid14 = false;
+            const _errs102 = errors;
+            if (errors === _errs102) {
+              if (typeof data38 === 'string') {
+                if (!pattern18.test(data38)) {
+                  const err76 = {
                     instancePath: instancePath + '/nextAfterSeq',
                     schemaPath: '#/properties/nextAfterSeq/anyOf/0/pattern',
                     keyword: 'pattern',
@@ -92309,14 +92901,14 @@ function validate81(
                     message: 'must match pattern "' + '^(0|[1-9][0-9]*)$' + '"',
                   };
                   if (vErrors === null) {
-                    vErrors = [err56];
+                    vErrors = [err76];
                   } else {
-                    vErrors.push(err56);
+                    vErrors.push(err76);
                   }
                   errors++;
                 }
               } else {
-                const err57 = {
+                const err77 = {
                   instancePath: instancePath + '/nextAfterSeq',
                   schemaPath: '#/properties/nextAfterSeq/anyOf/0/type',
                   keyword: 'type',
@@ -92324,18 +92916,18 @@ function validate81(
                   message: 'must be string',
                 };
                 if (vErrors === null) {
-                  vErrors = [err57];
+                  vErrors = [err77];
                 } else {
-                  vErrors.push(err57);
+                  vErrors.push(err77);
                 }
                 errors++;
               }
             }
-            var _valid3 = _errs85 === errors;
-            valid12 = valid12 || _valid3;
-            const _errs87 = errors;
-            if (data33 !== null) {
-              const err58 = {
+            var _valid4 = _errs102 === errors;
+            valid14 = valid14 || _valid4;
+            const _errs104 = errors;
+            if (data38 !== null) {
+              const err78 = {
                 instancePath: instancePath + '/nextAfterSeq',
                 schemaPath: '#/properties/nextAfterSeq/anyOf/1/type',
                 keyword: 'type',
@@ -92343,16 +92935,16 @@ function validate81(
                 message: 'must be null',
               };
               if (vErrors === null) {
-                vErrors = [err58];
+                vErrors = [err78];
               } else {
-                vErrors.push(err58);
+                vErrors.push(err78);
               }
               errors++;
             }
-            var _valid3 = _errs87 === errors;
-            valid12 = valid12 || _valid3;
-            if (!valid12) {
-              const err59 = {
+            var _valid4 = _errs104 === errors;
+            valid14 = valid14 || _valid4;
+            if (!valid14) {
+              const err79 = {
                 instancePath: instancePath + '/nextAfterSeq',
                 schemaPath: '#/properties/nextAfterSeq/anyOf',
                 keyword: 'anyOf',
@@ -92360,34 +92952,34 @@ function validate81(
                 message: 'must match a schema in anyOf',
               };
               if (vErrors === null) {
-                vErrors = [err59];
+                vErrors = [err79];
               } else {
-                vErrors.push(err59);
+                vErrors.push(err79);
               }
               errors++;
               validate81.errors = vErrors;
               return false;
             } else {
-              errors = _errs84;
+              errors = _errs101;
               if (vErrors !== null) {
-                if (_errs84) {
-                  vErrors.length = _errs84;
+                if (_errs101) {
+                  vErrors.length = _errs101;
                 } else {
                   vErrors = null;
                 }
               }
             }
-            var valid0 = _errs83 === errors;
+            var valid0 = _errs100 === errors;
           } else {
             var valid0 = true;
           }
           if (valid0) {
             if (data.snapshotCursor !== undefined) {
-              let data34 = data.snapshotCursor;
-              const _errs89 = errors;
-              if (errors === _errs89) {
-                if (typeof data34 === 'string') {
-                  if (!pattern18.test(data34)) {
+              let data39 = data.snapshotCursor;
+              const _errs106 = errors;
+              if (errors === _errs106) {
+                if (typeof data39 === 'string') {
+                  if (!pattern18.test(data39)) {
                     validate81.errors = [
                       {
                         instancePath: instancePath + '/snapshotCursor',
@@ -92412,7 +93004,7 @@ function validate81(
                   return false;
                 }
               }
-              var valid0 = _errs89 === errors;
+              var valid0 = _errs106 === errors;
             } else {
               var valid0 = true;
             }
@@ -108645,7 +109237,7 @@ function validate101(
 }
 validate101.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var response_ResumeJobReportResponse = validate104;
-var pattern646 = new RegExp('^[a-z0-9_]+$', 'u');
+var pattern650 = new RegExp('^[a-z0-9_]+$', 'u');
 function validate104(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -109313,7 +109905,7 @@ function validate104(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern646.test(data11)) {
+                                        if (!pattern650.test(data11)) {
                                           const err22 = {
                                             instancePath: instancePath + '/receipt/reason',
                                             schemaPath:
@@ -135890,7 +136482,7 @@ function validate155(
 }
 validate155.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var request_ConfigurationPatchRequest = validate156;
-var pattern829 = new RegExp(
+var pattern833 = new RegExp(
   '^(?!(?:__proto__|constructor|prototype)$)[^\\u0000-\\u001f\\u007f]+$',
   'u',
 );
@@ -136640,7 +137232,7 @@ function validate156(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern829.test(data8)) {
+                                                            if (!pattern833.test(data8)) {
                                                               const err8 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -137066,7 +137658,7 @@ function validate156(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern829.test(data12)) {
+                                                            if (!pattern833.test(data12)) {
                                                               const err24 = {
                                                                 instancePath:
                                                                   instancePath +

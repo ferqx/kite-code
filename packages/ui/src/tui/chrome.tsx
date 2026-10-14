@@ -38,6 +38,20 @@ export interface TuiChromeFacts {
   workspacePath?: string;
   sessionTitle?: string;
   permissionMode?: 'accept_edits' | 'auto' | 'full';
+  nextModelName?: string;
+  nextEffort?: string;
+  runtimeModel?: {
+    active: boolean;
+    modelName?: string;
+    effort?: string;
+    source: 'model_input' | 'run_configuration' | 'unavailable';
+  };
+  usage?: {
+    inputTokens: number;
+    outputTokens?: number;
+    cachedInputTokens?: number;
+    executionCount: number;
+  };
 }
 
 /** Static header: the host supplies observed display facts, never runtime authority. */
@@ -65,6 +79,17 @@ export function TuiHeader({ columns, ...facts }: TuiChromeFacts & { columns?: nu
       <Text bold>{truncateDisplayWidth('──◆ Kite Code', inner)}</Text>
       <Box height={1} />
       {row('model', model)}
+      {facts.runtimeModel?.active && (
+        <Text dimColor>
+          {t(
+            facts.runtimeModel.source === 'model_input'
+              ? 'Recorded Model input'
+              : facts.runtimeModel.source === 'run_configuration'
+                ? 'Frozen Run selection'
+                : 'Current model unavailable',
+          )}
+        </Text>
+      )}
       {row('workspace', facts.workspacePath ?? t('Workspace unavailable'))}
       {facts.sessionTitle && row(t('Session'), facts.sessionTitle)}
     </Box>
@@ -81,6 +106,22 @@ export function TuiRule() {
       borderLeft={false}
       borderRight={false}
     />
+  );
+}
+
+/** Clock from a committed dispatch timestamp, never from the first UI observation. */
+export function TuiRecordedPhaseTime({ startedAt, label }: { startedAt: number; label: string }) {
+  const { t } = useTuiPresentation();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <Text dimColor>
+      {t(label)} · {t('Recorded phase')}: {Math.max(0, (now - startedAt) / 1000).toFixed(1)}s
+    </Text>
   );
 }
 
@@ -134,6 +175,22 @@ export function TuiFooter({
       <TuiActivityLine activity={activity} />
       {notice}
       {inputActive && <TuiRule />}
+      {facts.runtimeModel?.active && facts.nextModelName && (
+        <Text dimColor>
+          {t('Next model:')}{' '}
+          {terminalText([facts.nextModelName, facts.nextEffort].filter(Boolean).join(' '))}
+        </Text>
+      )}
+      {facts.usage && (
+        <Text dimColor>
+          {t('Recorded usage:')} {facts.usage.inputTokens.toLocaleString()} {t('input tokens')}
+          {facts.usage.outputTokens !== undefined &&
+            ` · ${facts.usage.outputTokens.toLocaleString()} ${t('output tokens')}`}
+          {facts.usage.cachedInputTokens !== undefined &&
+            facts.usage.inputTokens > 0 &&
+            ` · ${Math.round((facts.usage.cachedInputTokens / facts.usage.inputTokens) * 100)}% ${t('cache')}`}
+        </Text>
+      )}
       {children}
       {inputActive && <TuiRule />}
       <Box flexWrap="wrap">

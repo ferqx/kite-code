@@ -6,7 +6,7 @@ import { TuiText as Text, useTuiPresentation } from './presentation';
 
 /** Separate Review/Confirm and original-ID navigation; no letter key dispatches business. */
 export function TuiMcpReconnectionPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation(),
+  const { t, testDiagnostics } = useTuiPresentation(),
     state = controller.state;
   const [index, setIndex] = useState(0);
   const observed = state.mcpReconnectionObservation,
@@ -83,10 +83,12 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
             {t('Confirm forced reconnect:')} {terminalText(observed.carrier.request.input.serverId)}{' '}
             · {t('Session')} {terminalText(observed.carrier.sessionId)}
           </Text>
-          <Text>
-            {t('Original carrier:')} {terminalText(observed.carrier.request.commandId)} ·{' '}
-            {t('current generation')} {observed.target.currentGeneration}
-          </Text>
+          {testDiagnostics && (
+            <Text>
+              {t('Original carrier:')} {terminalText(observed.carrier.request.commandId)} ·{' '}
+              {t('current generation')} {observed.target.currentGeneration}
+            </Text>
+          )}
           <Text>
             {t('Replacement source:')}{' '}
             {t(
@@ -99,10 +101,12 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
             {' · '}
             {t('Replacement transport:')} {terminalText(replacementServer?.transport ?? '')}
           </Text>
-          <Text>
-            {t('Replacement configuration digest:')}{' '}
-            {terminalText(observed.replacement.expectedConfigDigest)}
-          </Text>
+          {testDiagnostics && (
+            <Text>
+              {t('Replacement configuration digest:')}{' '}
+              {terminalText(observed.replacement.expectedConfigDigest)}
+            </Text>
+          )}
           {observed.source?.items.find(
             (row) => row.id === observed.carrier.request.input.serverId,
           ) && (
@@ -160,7 +164,11 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
           </Text>
           <Text>
             {t(outcome.fact?.live ? 'Live replacement observed' : 'Live replacement not confirmed')}{' '}
-            · {t('current generation')} {outcome.fact?.currentGeneration ?? t('unavailable')}
+            {testDiagnostics && (
+              <>
+                · {t('current generation')} {outcome.fact?.currentGeneration ?? t('unavailable')}
+              </>
+            )}
           </Text>
         </>
       )}

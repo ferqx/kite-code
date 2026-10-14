@@ -1,5 +1,5 @@
 import type { ModelSettingsRequest, ModelSettingsView } from '@kite-ai/client';
-import { useInput } from 'ink';
+import { useInput, useStdout } from 'ink';
 import { useEffect, useState } from 'react';
 import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
@@ -9,6 +9,8 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
   const state = controller.state,
     facts = state.models;
   const effortPanel = state.panel === 'effort';
+  const { stdout } = useStdout();
+  const page = Math.max(2, Math.min(8, (stdout.rows ?? 24) - 13));
   const rows = [...(facts?.models ?? [])].sort(
     (a, b) => (a.provider ?? '').localeCompare(b.provider ?? '') || a.id.localeCompare(b.id),
   );
@@ -19,7 +21,20 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     }>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new public observation invalidates the selected index and pending confirmation.
   useEffect(() => {
-    setIndex(0);
+    const selected = facts?.models.find((model) => model.id === facts.defaultModelId);
+    setIndex(
+      effortPanel
+        ? Math.max(
+            0,
+            [null, ...(selected?.reasoningEffortChoices ?? [])].indexOf(
+              selected?.reasoningEffort ?? null,
+            ),
+          )
+        : Math.max(
+            0,
+            rows.findIndex((model) => model.id === facts?.defaultModelId),
+          ),
+    );
     setPending(undefined);
   }, [facts, effortPanel]);
   useInput((input, key) => {
@@ -89,6 +104,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
         });
     }
   });
+  const offset = Math.max(0, Math.min(index - Math.floor(page / 2), rows.length - page));
   return (
     <TuiOverlayFrame
       title={
@@ -154,16 +170,22 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
             </>
           ) : (
             <>
-              {rows.map((row, i) => (
+              {rows.slice(offset, offset + page).map((row, i) => (
                 <Text key={row.id}>
-                  {i === index ? '›' : ' '} {terminalText(row.provider ?? t('unavailable'))} {'/'}{' '}
-                  {terminalText(row.id)} {'·'} {terminalText(row.model ?? t('unavailable'))} {'·'}{' '}
+                  {offset + i === index ? '›' : ' '}{' '}
+                  {terminalText(row.provider ?? t('unavailable'))} {'/'} {terminalText(row.id)}{' '}
+                  {'·'} {terminalText(row.model ?? t('unavailable'))} {'·'}{' '}
                   {row.enabled ? t('enabled') : t('disabled')} {'·'}{' '}
                   {row.configured ? t('configured') : t('incomplete')}{' '}
                   {terminalText(row.diagnostics.join(' '))}
                 </Text>
               ))}
             </>
+          )}
+          {!effortPanel && rows.length > 0 && (
+            <Text>
+              {index + 1}/{rows.length}
+            </Text>
           )}
           {!rows.length && <Text>{t('No configured models; unavailable')}</Text>}
           {facts.errors.map((e) => (

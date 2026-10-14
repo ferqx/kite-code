@@ -41,6 +41,7 @@ import { openMcpSourceApprovalJournal } from './mcp-source-approval-journal';
 import { openMcpSourceMutationJournal } from './mcp-source-mutation-journal';
 import { openRecoveryJournal } from './recovery-journal';
 import { connectSharedService } from './shared-service';
+import { createTuiDisplayReader, readTuiPendingInputs } from './tui-display';
 import { createTuiDraftPort } from './tui-draft-port';
 import { openTuiDraftFile } from './tui-drafts';
 import { createTuiExporter } from './tui-export';
@@ -86,7 +87,7 @@ function TerminalHost({
           {shared ? t('disconnect shared service') : t('quit owned host')}
         </Text>
       )}
-      <TuiSession controller={controller} testDiagnostics={testDiagnostics} />
+      <TuiSession controller={controller} testDiagnostics={testDiagnostics} onQuit={onQuit} />
       {notice && <Text>{shownNotice}</Text>}
       {state.intent?.phase === 'unknown' && (
         <Text>{t('Original outcome unknown: Ctrl+K only reads original Command')}</Text>
@@ -342,6 +343,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       access: profileAccess,
       acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
     });
+    const readDisplay = createTuiDisplayReader(client, storeId);
     const port: TuiPort = {
       preferences: {
         async read() {
@@ -572,9 +574,11 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           throw new CLIHostError('active_command_identity_mismatch');
         // Chrome uses public observed configuration. A failed optional read must not
         // prevent the conversation or manufacture a configured model/permission.
-        const [models, mode] = await Promise.allSettled([
+        const [models, mode, pendingInputs, display] = await Promise.allSettled([
           client.getModelSettings('workspace', { storeId, workspaceId, signal }),
           client.getPermissionMode(sessionId, { storeId, signal }),
+          readTuiPendingInputs(client, storeId, sessionId, signal),
+          readDisplay(view, messages, signal),
         ]);
         const modelFacts =
           models.status === 'fulfilled' &&
@@ -598,12 +602,21 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           messages,
           interactions,
           ...(activeCommand ? { activeCommand } : {}),
+          ...(pendingInputs.status === 'fulfilled'
+            ? { pendingInputs: pendingInputs.value }
+            : { pendingInputsUnavailable: true }),
+          ...(display.status === 'fulfilled'
+            ? { executionTimings: display.value.executionTimings }
+            : {}),
           environment: {
             workspacePath: initial.workspace.rootUri,
             ...(selectedModel
               ? { modelName: selectedModel.id, effort: selectedModel.reasoningEffort ?? undefined }
               : {}),
             ...(permission ? { permissionMode: permission } : {}),
+            ...(display.status === 'fulfilled'
+              ? { runtimeModel: display.value.runtimeModel, usage: display.value.usage }
+              : {}),
           },
         };
       },

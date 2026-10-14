@@ -1,6 +1,6 @@
 # UI
 
-当前 TUI 接回原 Ink 的纯展示骨架，正常与显式测试诊断由[终端 owner](src/tui/README.md#原-ink-展示与明确测试诊断)维护。Desktop 的[诊断展示 context](src/desktop/diagnostics.tsx)允许 Native 明确传入 false／true，回复失败详情与客户端面板共用该值；未指定的现有 Web 消费者保原环境行为，不扩大控制权限。
+当前 TUI 复用原 Ink 展示，输入、消息／工具阅读、审核和管理面板经公共 Server port 接入；功能迁移、普通模式与显式测试诊断由[终端 owner](src/tui/README.md#原-ink-展示与明确测试诊断)维护。Desktop 的[诊断展示 context](src/desktop/diagnostics.tsx)允许 Native 明确传入 false／true，回复失败详情与客户端面板共用该值；未指定的现有 Web 消费者保原环境行为，不扩大控制权限。
 
 ## 原桌面展示层
 

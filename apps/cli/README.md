@@ -72,6 +72,14 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 当前正式与开发 TUI 接回原 Ink 的纯展示骨架，业务仍通过公共 Server port：Header 使用实际 Workspace URI、公开模型配置和当前权限读取，局部不可用不造成功事实。主输入、选择面板、完整结果与帮助沿[UI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)。普通启动不常驻开发横幅、原回执和机器 ID；`--test-ui-diagnostics` 或可信 `testDiagnostics:true` 只切展示，严格拒绝重复参数和多余值。原 caller、审批、取消、草稿、观察与生命周期门禁不变，纯参数测试见[test/tui-arguments.test.ts](test/tui-arguments.test.ts)。
 
+[tui-display](host/tui-display.ts)经公共 Client 读取完整 pending-input 目录、准确 Model input 的有限模型/档位事实及已保存 usage；不保留请求正文，不读旧 metadata。目录无冻结上界参数，所以跨页 observation 变化明确 unavailable，不冒充完整队列。实际 active Run 与下一 Workspace 默认分开，optional display 读取失败不阻完整会话或创造配置。usage 按同一成功 Model/Run/message 去重，缺 cache 不补零。
+
+混合页中的 Context `result.include` 只推进原 cursor，不冒充用户正文；文本队列仍分别显示 steer/follow-up。公共 response 联合与真实原请求保持一致，修复原仅两种 request 造成的 503；Storage/Runtime 的原消费队列不被过滤或重写。
+
+[tui-timing](host/tui-timing.ts)穷尽固定 view.snapshotCursor 的公共 session log，仅保当前有限 view 执行的 dispatch/finish 时间；原 Store、定义/版本、Run 和两端必须一致，replay 缺口、无时间、旧 Store 及异常保持 unavailable。不采集系统或性能数据，不把 UI 第一次看到执行当开始。display reader 只保一份当前模型事实和一份执行版本相同的 timing，原请求与全量日志不进入缓存。
+
+Ctrl+C 的整轮取消优先原活动 Run，而不是最近 pending steer/follow-up；该输入 command 的取消 authority 只取消输入自身。两次独立 Ctrl+C 的 quit 使用既有宿主 draft flush/paired stop 或 shared disconnect，正常保存失败仍保编辑器；EOF/SIGHUP 仍只是输入结束。具体功能和普通/诊断分流由[UI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)负责。新增公共展示事实的分页、来源、有限缓存与去重验证见[display 测试](test/isolated/tui-display.test.ts)和[timing 测试](test/isolated/tui-timing.test.ts)，真实宿主仍用原 [tui-host](test/isolated/tui-host.test.ts)、[models-host](test/isolated/tui-models-host.test.ts)和[finishing-input](test/isolated/tui-finishing-input-host.test.ts)的全部断言；本机证据不扩大到 Win/Linux 实测或阶段退出。
+
 宿主复用公开 `@kite-ai/ui/tui` 的单一 controller，读取同 Workspace 的完整固定上界 Session 目录和会话历史；原审批附件与 Model 正文经公共 SDK 全量验证后才显示。活动输入封存准确 Run/context selection，空闲输入创建新 Run；批准保存不等于执行完成，未知仅查询原 Command，不换 ID 或重发。`Ctrl+R` 选已有 Session，`Ctrl+N` 创建同 Workspace 新 Session（未确认创建时再次按键只查询原 ID），`Ctrl+K` 查询原未知工作，`Ctrl+C` 精确取消原工作且不退出共享 Service。`Ctrl+Q` 或明确 SIGTERM 才退出并关闭本宿主拥有的 paired Service；stdin EOF 停止视图读与输入，保留原等待任务且不默认批准，直到明确宿主退出。切换会话不取消旧工作。
 
 本开发宿主新增下述有限 slash 路由；原 `tui`、旧 CLI/daemon/Electron 入口没有由此退役。复杂编辑、完整终端屏幕滚动/resize 与三平台资格仍未完成。开发入口的 buildId 只证明配套 Service entry 的准确 SHA，不是完整发行 candidate 身份。[test/isolated/tui-host.test.ts](test/isolated/tui-host.test.ts) 通过真实 argv/PTy 和构建 Service 验证宿主生命周期；平台与测试结果以实际验证记录为准。

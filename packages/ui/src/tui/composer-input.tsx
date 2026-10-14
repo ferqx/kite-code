@@ -1,12 +1,25 @@
 import { Box, Text, useInput, usePaste, useStdout } from 'ink';
 import { useEffect, useReducer } from 'react';
 import stringWidth from 'string-width';
+import { TuiOverlayFrame, truncateDisplayWidth } from './chrome';
 import { type ComposerBuffer, composerDisplay } from './composer';
 import type { TuiState } from './controller';
 import type { FileToken } from './file-candidates';
 import { TuiText as Label, useTuiPresentation } from './presentation';
 export function isCtrlCBatch(input: string): boolean {
   return input.length > 1 && [...input].every((control) => control === '\u0003');
+}
+export function candidateViewport(
+  count: number,
+  selected: number,
+  rows: number,
+  inputRows: number,
+) {
+  // Keep the editor, frame and footer visible; candidate text is one visual row.
+  const capacity = Math.max(1, Math.min(count, Math.floor(rows * 0.6), rows - inputRows - 9));
+  const index = count ? ((selected % count) + count) % count : 0;
+  const start = Math.max(0, Math.min(count - capacity, index - Math.floor(capacity / 2)));
+  return { index, start, end: Math.min(count, start + capacity) };
 }
 export function TuiComposer({
   buffer,
@@ -16,6 +29,7 @@ export function TuiComposer({
   onChange,
   onSubmit,
   onEmptyEnter,
+  onEscape,
   onTogglePlan,
   files,
   fileScope,
@@ -28,6 +42,7 @@ export function TuiComposer({
   onChange(text: string): void;
   onSubmit(): void;
   onEmptyEnter?(): void;
+  onEscape?(): void;
   onTogglePlan?(): void;
   files?: TuiState['fileCandidates'];
   fileScope?: string;
@@ -88,8 +103,10 @@ export function TuiComposer({
           : [];
       const candidates = currentPaths.length ? currentPaths : buffer.candidates;
       if (key.escape) {
+        const dismissing = !!currentToken || candidates.length > 0;
         buffer.dismissed = true;
         render();
+        if (!dismissing) onEscape?.();
         return;
       }
       if (key.tab) {
@@ -140,6 +157,13 @@ export function TuiComposer({
   const { lines, index } = buffer.row(width, display),
     start = Math.max(0, index - 2),
     visible = lines.slice(start, start + 5);
+  const candidates = filePaths.length ? filePaths : buffer.candidates;
+  const window = candidateViewport(
+    candidates.length,
+    buffer.candidate,
+    stdout.rows || 24,
+    visible.length + Number(start > 0) + Number(start + visible.length < lines.length),
+  );
   return (
     <Box flexDirection="column">
       {start > 0 && <Label dimColor>{t('↑ Earlier input')}</Label>}
@@ -176,16 +200,22 @@ export function TuiComposer({
           {t('File candidates incomplete:')} {files.unavailable.length} {t('unavailable paths')}
         </Text>
       )}
-      {(filePaths.length ? filePaths : buffer.candidates)
-        .slice(Math.max(0, buffer.candidate - 2), buffer.candidate + 3)
-        .map((command) => (
-          <Text key={command}>
-            {command === (filePaths.length ? filePaths : buffer.candidates)[buffer.candidate]
-              ? '› '
-              : '  '}
-            {composerDisplay({ text: command })}
-          </Text>
-        ))}
+      {candidates.length > 0 && (
+        <TuiOverlayFrame
+          title={`${t(filePaths.length ? 'Workspace file candidates' : 'Command suggestions')} · ${window.index + 1}/${candidates.length} · ${window.start + 1}–${window.end}`}
+          hint={t('Up/Down: choose · Tab/Enter: complete · Esc: close')}
+        >
+          {candidates.slice(window.start, window.end).map((command, n) => (
+            <Text key={`${window.start + n}:${command}`}>
+              {window.start + n === window.index ? '› ' : '  '}
+              {truncateDisplayWidth(
+                composerDisplay({ text: command }),
+                Math.max(1, (stdout.columns || 80) - 6),
+              )}
+            </Text>
+          ))}
+        </TuiOverlayFrame>
+      )}
     </Box>
   );
 }

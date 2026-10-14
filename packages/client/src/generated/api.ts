@@ -3122,6 +3122,13 @@ export type PendingInputPage = {
             definitionVersion: string;
             input: PendingInputPage___schema0;
           }>;
+        }
+      | {
+          kind: 'result.include';
+          expectedContextSelectionId: string;
+          executionId: string;
+          resultRevision: string;
+          targetRunId: string | null;
         };
   }>;
   nextAfterSeq: string | null;
