@@ -12,11 +12,14 @@ import {
   type NativeResult,
   type NativeStartupReply,
   type NativeThemePreference,
+  type NativeWindowAppearance,
+  type NativeWindowAppearanceReply,
   nativeChannel,
   nativeClipboardChannel,
   nativeStartupDiagnosticSaveChannel,
   nativeStartupStatusChannel,
   nativeThemeChannel,
+  nativeWindowAppearanceChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 import { parseNativeMcpOperation } from './mcp-input';
@@ -738,7 +741,24 @@ export function registerNativeWindowIpc(options: {
   window: () => BrowserWindow | undefined;
   rendererUrl: string;
   writeClipboardText: (text: string) => void;
+  getAppearance: () => NativeWindowAppearance;
 }) {
+  options.ipcMain.handle(
+    nativeWindowAppearanceChannel,
+    (event, payload: unknown): NativeWindowAppearanceReply => {
+      try {
+        assertNativeSender(event, options.window(), options.rendererUrl);
+        if (payload !== undefined) throw Error('invalid_native_request');
+        return { ok: true, value: options.getAppearance() };
+      } catch (error) {
+        const code = error instanceof Error ? error.message : '';
+        return {
+          ok: false,
+          code: /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : 'native_window_failed',
+        };
+      }
+    },
+  );
   options.ipcMain.handle(nativeClipboardChannel, (event, payload: unknown): NativeReply => {
     try {
       assertNativeSender(event, options.window(), options.rendererUrl);
@@ -775,6 +795,7 @@ export function registerNativeWindowIpc(options: {
   return () => {
     options.ipcMain.removeHandler(nativeClipboardChannel);
     options.ipcMain.removeHandler(nativeWindowMaximizeChannel);
+    options.ipcMain.removeHandler(nativeWindowAppearanceChannel);
   };
 }
 

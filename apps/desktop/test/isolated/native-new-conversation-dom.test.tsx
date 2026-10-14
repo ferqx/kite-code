@@ -320,6 +320,71 @@ function fixture(
   };
 }
 
+test('settings replace the painted page without remounting its draft or re-reading the selected conversation', async () => {
+  const f = fixture();
+  async function openSettings() {
+    await act(async () => {
+      const trigger = f.host.querySelector<HTMLButtonElement>('button[aria-label="用户菜单"]')!;
+      trigger.focus();
+      trigger.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await act(async () => {
+      const item = [...f.host.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (element) => element.textContent === '设置',
+      )!;
+      expect(item).toBeDefined();
+      item.click();
+    });
+  }
+  const conversationReads = () =>
+    f.calls.filter((call) => ['attach', 'select', 'messages', 'draft.read'].includes(call.method));
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('unsent settings draft 雪🙂', '当前会话私有草稿');
+    const input = f.input('当前会话私有草稿')!;
+    const page = f.host.querySelector<HTMLElement>('.client-panels')!;
+    const reads = [...conversationReads()];
+    await openSettings();
+    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    expect(page.style.opacity).toBe('0');
+    expect(page.style.pointerEvents).toBe('none');
+    expect(page.hasAttribute('inert')).toBe(true);
+    expect(page.getAttribute('aria-hidden')).toBe('true');
+    expect(f.host.querySelector('.fixed.inset-0')).toBeNull();
+    expect(f.input('当前会话私有草稿')).toBe(input);
+    expect(input.value).toBe('unsent settings draft 雪🙂');
+    await f.click('返回应用');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
+    expect(f.host.querySelector('.client-panels')).toBe(page);
+    expect(page.style.opacity).toBe('');
+    expect(page.style.pointerEvents).toBe('');
+    expect(page.hasAttribute('inert')).toBe(false);
+    expect(page.hasAttribute('aria-hidden')).toBe(false);
+    expect(f.input('当前会话私有草稿')).toBe(input);
+    expect(input.value).toBe('unsent settings draft 雪🙂');
+    expect(f.selected()).toBe('a');
+    expect(conversationReads()).toEqual(reads);
+    await openSettings();
+    await act(async () => {
+      f.host.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
+    expect(f.input('当前会话私有草稿')).toBe(input);
+    expect(input.value).toBe('unsent settings draft 雪🙂');
+    expect(conversationReads()).toEqual(reads);
+    expect(f.calls.some((call) => call.method === 'conversation.send')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
 test('original current-Session permission menu uses the observed command, preserves drafts and scopes Full confirmation', async () => {
   const f = fixture(true, false);
   const permission = () => f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!;
@@ -340,6 +405,13 @@ test('original current-Session permission menu uses the observed command, preser
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
+    expect(f.host.querySelector('.connection')).toBeNull();
+    expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
+    expect(f.host.body.textContent).not.toContain('会话工具');
+    const ordinaryCalls = [...f.calls];
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    expect(f.host.querySelector('input[aria-label="先审核计划"]')).not.toBeNull();
+    expect(f.calls).toEqual(ordinaryCalls);
     await f.edit('retained current draft 雪🙂', '当前会话私有草稿');
     expect(permission().getAttribute('aria-label')).toBe('Permission: Request Approval');
     expect(permission().disabled).toBe(true);

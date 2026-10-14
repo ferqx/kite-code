@@ -2185,6 +2185,7 @@ function NativeDesktopContent({
   return (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
+      covered={settingsOpen}
       writeClipboardText={window.kiteNative?.writeClipboardText}
       onHeaderMouseDown={(clickCount) => {
         if (clickCount === 2)
@@ -2329,11 +2330,13 @@ function NativeDesktopContent({
       }
       connected={generation.current > 0}
       connectionLabel={
-        generation.current > 0
-          ? directory?.unavailable
-            ? '本地 Agent · 目录状态待核实'
-            : '本地 Agent'
-          : '正在连接'
+        diagnostics
+          ? generation.current > 0
+            ? directory?.unavailable
+              ? '本地 Agent · 目录状态待核实'
+              : '本地 Agent'
+            : '正在连接'
+          : ''
       }
       mutationBusy={pending || !!removingWorkspace}
       defaultExpanded
@@ -2351,7 +2354,9 @@ function NativeDesktopContent({
           setScheduledTasksView(true);
         },
         theme,
-        connection: { label: '重新读取目录', run: () => void report(readDirectory) },
+        connection: diagnostics
+          ? { label: '重新读取目录', run: () => void report(readDirectory) }
+          : undefined,
       }}
       onOpen={(sessionId) => {
         const returning =
@@ -2424,17 +2429,21 @@ function NativeDesktopContent({
               </DesktopButton>
             )
           ) : (
-            <DesktopButton
-              variant="ghost"
-              aria-expanded={toolsOpen}
-              onClick={() => setToolsOpen(!toolsOpen)}
-            >
-              会话工具
-            </DesktopButton>
+            <NativeDiagnostic>
+              <DesktopButton
+                variant="ghost"
+                aria-expanded={toolsOpen}
+                onClick={() => setToolsOpen(!toolsOpen)}
+              >
+                会话工具
+              </DesktopButton>
+            </NativeDiagnostic>
           )}
-          <DesktopButton variant="ghost" onClick={() => setSettingsOpen(true)}>
-            设置
-          </DesktopButton>
+          <NativeDiagnostic>
+            <DesktopButton variant="ghost" onClick={() => setSettingsOpen(true)}>
+              设置
+            </DesktopButton>
+          </NativeDiagnostic>
         </>
       }
       beforeConversation={
@@ -2579,16 +2588,18 @@ function NativeDesktopContent({
                         )
                       }
                     />
-                    <label>
-                      <input
-                        type="checkbox"
-                        aria-label="先审核计划"
-                        checked={newPlanMode}
-                        onChange={(event) => setNewPlanMode(event.target.checked)}
-                        disabled={pending}
-                      />
-                      先审核计划
-                    </label>
+                    <NativeDiagnostic>
+                      <label>
+                        <input
+                          type="checkbox"
+                          aria-label="先审核计划"
+                          checked={newPlanMode}
+                          onChange={(event) => setNewPlanMode(event.target.checked)}
+                          disabled={pending}
+                        />
+                        先审核计划
+                      </label>
+                    </NativeDiagnostic>
                   </>
                 ),
               }
@@ -2677,26 +2688,28 @@ function NativeDesktopContent({
                           })
                         }
                       />
-                      <label>
-                        <input
-                          type="checkbox"
-                          aria-label="先审核计划"
-                          checked={planMode}
-                          disabled={pending}
-                          onChange={(event) => {
-                            setPlanMode(event.target.checked);
-                            planModes.current.set(
-                              JSON.stringify([
-                                selection.storeId,
-                                selection.session.workspaceId,
-                                selection.session.id,
-                              ]),
-                              event.target.checked,
-                            );
-                          }}
-                        />
-                        先审核计划
-                      </label>
+                      <NativeDiagnostic>
+                        <label>
+                          <input
+                            type="checkbox"
+                            aria-label="先审核计划"
+                            checked={planMode}
+                            disabled={pending}
+                            onChange={(event) => {
+                              setPlanMode(event.target.checked);
+                              planModes.current.set(
+                                JSON.stringify([
+                                  selection.storeId,
+                                  selection.session.workspaceId,
+                                  selection.session.id,
+                                ]),
+                                event.target.checked,
+                              );
+                            }}
+                          />
+                          先审核计划
+                        </label>
+                      </NativeDiagnostic>
                       <button
                         type="button"
                         disabled={pending}
@@ -2741,7 +2754,7 @@ function NativeDesktopContent({
             : undefined
       }
       detailPanel={
-        !childDetail && toolsOpen
+        diagnostics && !childDetail && toolsOpen
           ? {
               label: '会话与任务',
               content: (
@@ -2801,6 +2814,7 @@ function NativeDesktopContent({
               portalled={false}
               className="desktop-settings-dialog translate-x-0 translate-y-0"
               showCloseButton={false}
+              showOverlay={false}
             >
               <DialogHeader className="desktop-settings-header">
                 <DialogTitle>设置</DialogTitle>

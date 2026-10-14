@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
-import { homedir } from 'node:os';
+import { homedir, release } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -75,6 +75,7 @@ const windowsAsset =
       }
     : undefined);
 app.setName('kite-native');
+const mica = process.platform === 'win32' && Number(release().split('.')[2]) >= 22621;
 let window: BrowserWindow | undefined, caller: NativeCaller | undefined;
 let opening: Promise<NativeCaller> | undefined;
 let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
@@ -315,10 +316,18 @@ void app
       width: 1100,
       height: 780,
       ...(process.platform === 'darwin'
-        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 13, y: 19 } }
-        : {}),
+        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 13, y: 9 } }
+        : {
+            titleBarStyle: 'hidden' as const,
+            titleBarOverlay: {
+              color: '#00000000',
+              symbolColor: nativeTheme.shouldUseDarkColors ? '#eeeeee' : '#222222',
+              height: 32,
+            },
+          }),
       show: false,
-      backgroundColor: nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa',
+      ...(mica ? { backgroundMaterial: 'mica' as const } : {}),
+      backgroundColor: mica ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa',
       webPreferences: {
         preload: join(app.getAppPath(), 'preload.cjs'),
         contextIsolation: true,
@@ -327,9 +336,17 @@ void app
         webSecurity: true,
       },
     });
+    if (process.platform !== 'darwin') window.removeMenu();
     const updateSystemBackground = () => {
-      if (window && !window.isDestroyed())
-        window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa');
+      if (window && !window.isDestroyed()) {
+        window.setBackgroundColor(
+          mica ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa',
+        );
+        if (process.platform !== 'darwin')
+          window.setTitleBarOverlay({
+            symbolColor: nativeTheme.shouldUseDarkColors ? '#eeeeee' : '#222222',
+          });
+      }
     };
     nativeTheme.on('updated', updateSystemBackground);
     window.once('closed', () => nativeTheme.off('updated', updateSystemBackground));
@@ -367,6 +384,7 @@ void app
       ipcMain,
       window: () => window,
       rendererUrl,
+      getAppearance: () => ({ backgroundMaterial: mica ? 'mica' : 'none' }),
       writeClipboardText: (text) => clipboard.writeText(text),
     });
     registerNativeStartupIpc({

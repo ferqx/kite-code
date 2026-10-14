@@ -6,14 +6,20 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { registerNativeIpc, registerNativeWindowIpc } from '../electron/native-ipc';
 import {
   type NativeReply,
+  type NativeWindowAppearanceReply,
   nativeChannel,
   nativeClipboardChannel,
+  nativeWindowAppearanceChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 
-type Handler = (event: IpcMainInvokeEvent, payload: unknown) => NativeReply | Promise<NativeReply>;
+type WindowReply = NativeReply | NativeWindowAppearanceReply;
+type Handler = (event: IpcMainInvokeEvent, payload: unknown) => WindowReply | Promise<WindowReply>;
 
-function fixture(rendererUrl = pathToFileURL(join(tmpdir(), 'kite-native-ipc/index.html')).href) {
+function fixture(
+  rendererUrl = pathToFileURL(join(tmpdir(), 'kite-native-ipc/index.html')).href,
+  backgroundMaterial: 'mica' | 'none' = 'mica',
+) {
   const frame = { url: rendererUrl },
     contents = { mainFrame: frame },
     copied: string[] = [],
@@ -61,6 +67,7 @@ function fixture(rendererUrl = pathToFileURL(join(tmpdir(), 'kite-native-ipc/ind
       if (fail) throw Error('unrelated OS details /private/original');
       copied.push(text);
     },
+    getAppearance: () => ({ backgroundMaterial }),
   });
   return {
     rendererUrl,
@@ -89,6 +96,10 @@ test('original text and both zoom states use only the current window host, even 
     text = '完整原文\r\n雪🙂\n';
   expect(await f.send(nativeClipboardChannel, { text })).toEqual({ ok: true, value: null });
   expect(await f.send(nativeWindowMaximizeChannel)).toEqual({ ok: true, value: null });
+  expect(await f.send(nativeWindowAppearanceChannel)).toEqual({
+    ok: true,
+    value: { backgroundMaterial: 'mica' },
+  });
   expect(await f.send(nativeWindowMaximizeChannel)).toEqual({ ok: true, value: null });
   expect(f.copied).toEqual([text]);
   expect(f.zooms).toEqual([true, false]);
@@ -103,11 +114,16 @@ test('original text and both zoom states use only the current window host, even 
   f.close();
   expect(f.handlers.has(nativeClipboardChannel)).toBe(false);
   expect(f.handlers.has(nativeWindowMaximizeChannel)).toBe(false);
+  expect(f.handlers.has(nativeWindowAppearanceChannel)).toBe(false);
   expect(f.handlers.has(nativeChannel)).toBe(true);
 });
 
 test('development HTTP renderer retains exact main-frame, origin and document scope for window operations', async () => {
-  const f = fixture('http://127.0.0.1:43219/');
+  const f = fixture('http://127.0.0.1:43219/', 'none');
+  expect(await f.send(nativeWindowAppearanceChannel)).toEqual({
+    ok: true,
+    value: { backgroundMaterial: 'none' },
+  });
   expect(await f.send(nativeClipboardChannel, { text: 'development' })).toEqual({
     ok: true,
     value: null,
@@ -119,6 +135,10 @@ test('development HTTP renderer retains exact main-frame, origin and document sc
   ]) {
     f.frame.url = url;
     expect(await f.send(nativeClipboardChannel, { text: 'foreign' })).toEqual({
+      ok: false,
+      code: 'native_sender_denied',
+    });
+    expect(await f.send(nativeWindowAppearanceChannel)).toEqual({
       ok: false,
       code: 'native_sender_denied',
     });
@@ -149,6 +169,11 @@ test('original 1 MiB UTF-8 clipboard boundary and closed payloads reject without
       ok: false,
       code: 'invalid_native_request',
     });
+  for (const payload of [null, {}, 2])
+    expect(await f.send(nativeWindowAppearanceChannel, payload)).toEqual({
+      ok: false,
+      code: 'invalid_native_request',
+    });
   expect(f.copied).toEqual([atLimit]);
   expect(f.zooms).toEqual([]);
   expect(f.callerOpens).toBe(0);
@@ -162,6 +187,10 @@ test('foreign documents, subframes and closed windows cannot act; OS failures re
       code: 'native_sender_denied',
     });
     expect(await f.send(nativeWindowMaximizeChannel, undefined, sender)).toEqual({
+      ok: false,
+      code: 'native_sender_denied',
+    });
+    expect(await f.send(nativeWindowAppearanceChannel, undefined, sender)).toEqual({
       ok: false,
       code: 'native_sender_denied',
     });

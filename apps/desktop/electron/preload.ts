@@ -7,6 +7,7 @@ import {
   type NativeStartupBridge,
   type NativeStartupReply,
   type NativeThemeBridge,
+  type NativeWindowAppearanceReply,
   type NativeWindowBridge,
   nativeChannel,
   nativeClipboardChannel,
@@ -14,6 +15,7 @@ import {
   nativeStartupDiagnosticSaveChannel,
   nativeStartupStatusChannel,
   nativeThemeChannel,
+  nativeWindowAppearanceChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 
@@ -39,6 +41,15 @@ const bridge: NativeBridge & NativeThemeBridge & NativeWindowBridge & NativeStar
   async toggleWindowMaximize() {
     const reply = (await ipcRenderer.invoke(nativeWindowMaximizeChannel)) as NativeReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+  },
+  async getWindowAppearance() {
+    const reply = (await ipcRenderer.invoke(
+      nativeWindowAppearanceChannel,
+    )) as NativeWindowAppearanceReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (!['mica', 'none'].includes(reply.value?.backgroundMaterial))
+      throw Error('invalid_native_window_appearance');
+    return reply.value;
   },
   async setTheme(theme) {
     const reply = (await ipcRenderer.invoke(nativeThemeChannel, { theme })) as NativeReply;

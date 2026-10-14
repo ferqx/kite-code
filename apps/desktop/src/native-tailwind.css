@@ -35,29 +35,6 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   --sidebar: #242424;
 }
 
-html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) {
-  padding-block: 4px;
-}
-
-html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) {
-  -webkit-app-region: drag;
-}
-
-html[data-platform="macos"]
-  .kite-client
-  :is(.sidebar-header, .session-header)
-  :is(button, a, input, select, textarea, label, summary, [role="button"], [role="link"]) {
-  -webkit-app-region: no-drag;
-}
-
-html[data-platform="macos"] .kite-client .sidebar-header {
-  padding-left: 80px;
-}
-
-html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-header {
-  padding-left: 80px;
-}
-
 @theme inline {
   --color-background: var(--background);
   --color-card: var(--card);
@@ -245,7 +222,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
 .kite-client .settings-card {
   padding: 0 20px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--card);
 }
 .kite-client .desktop-settings .settings-row {
@@ -279,7 +256,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   min-width: 130px;
   padding: 5px 11px;
   border: 1px solid var(--input);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--card);
 }
 .kite-client .settings-value {
@@ -292,7 +269,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
 .kite-client .desktop-settings .settings-content fieldset,
 .kite-client .desktop-settings .extension-card {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--card);
   padding: 18px 20px;
   margin: 16px 0;
@@ -306,7 +283,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   min-height: 34px;
   padding: 5px 10px;
   border: 1px solid var(--input);
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: var(--card);
   color: var(--foreground);
 }
@@ -361,7 +338,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   min-height: 34px;
   padding: 6px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 12px;
   font-weight: 500;
   flex-shrink: 0;
@@ -397,7 +374,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   font-size: 13px;
   justify-content: space-between;
   padding: 8px 12px;
-  border-radius: 9px;
+  border-radius: var(--radius);
 }
 .kite-client .desktop-settings .settings-model-trigger > span {
   display: block;
@@ -413,12 +390,12 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
 .kite-client .desktop-settings .settings-model-menu {
   width: var(--radix-dropdown-menu-trigger-width);
   min-width: 0;
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 5px;
 }
 .kite-client .desktop-settings .settings-model-menu [role="menuitemradio"] {
   min-height: 36px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   overflow-wrap: anywhere;
 }
 .kite-client .desktop-settings .settings-model-section-heading {
@@ -439,7 +416,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   overflow: hidden;
   margin-bottom: 16px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--card);
 }
 .kite-client .desktop-settings .settings-model-provider-heading {
@@ -517,7 +494,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
 }
 .kite-client .desktop-settings .settings-model-default-badge {
   padding: 1px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--accent);
   color: var(--muted-foreground);
   font-size: 10px;
@@ -532,7 +509,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   margin: 0;
   padding: 2px;
   border: 1px solid var(--input);
-  border-radius: 20px;
+  border-radius: 999px;
   background: var(--accent);
   flex: none;
   cursor: pointer;
@@ -615,7 +592,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   min-height: 34px;
   padding: 5px 10px;
   border: 1px solid var(--input);
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: var(--card);
   color: var(--foreground);
 }
@@ -649,7 +626,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   min-height: 34px;
   padding: 6px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--card);
   color: var(--foreground);
 }
@@ -697,10 +674,114 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   }
 }
 
-html[data-platform="macos"] .kite-client .desktop-settings-header {
-  height: 88px;
-  padding-top: 46px;
+html[data-native-window] {
+  --native-titlebar-height: 32px;
+  --native-panel-inset: 6px;
 }
-html[data-platform="macos"] .kite-client .settings-sidebar {
-  padding-top: 88px;
+
+.native-window-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.native-window-titlebar {
+  position: relative;
+  z-index: 100;
+  flex: 0 0 var(--native-titlebar-height);
+  background: var(--background);
+  -webkit-app-region: drag;
+}
+
+.native-window-content {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+html[data-native-window] .native-window-content > .kite-client.shell {
+  height: 100%;
+}
+
+.native-window-content > .desktop-startup {
+  min-height: 100%;
+}
+
+.native-window-content .kite-client .desktop-settings-dialog {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.native-window-content [role="dialog"]:has(> .client-sidebar-panel.narrow) {
+  top: var(--native-titlebar-height);
+  height: calc(100dvh - var(--native-titlebar-height));
+}
+
+html[data-native-window][data-window-material="mica"] {
+  background: transparent;
+}
+
+html[data-native-window][data-window-material="mica"] #root,
+html[data-native-window][data-window-material="mica"]
+  :where(
+    body,
+    .native-window-titlebar,
+    .kite-client.shell,
+    .client-sidebar-panel,
+    .desktop-settings-dialog,
+    .desktop-settings-header,
+    .settings-sidebar,
+    [role="dialog"]:has(> .client-sidebar-panel.narrow)
+  ) {
+  background: transparent;
+}
+
+html[data-native-window][data-window-material="mica"]
+  .client-sidebar-panel
+  :where(.sidebar-header, .sidebar) {
+  background: transparent;
+}
+
+/* Balance the separator and content inset at the outer edge of the glass navigation. */
+html[data-native-window][data-window-material="mica"] .kite-client
+  #navigation
+  .client-sidebar-panel {
+  padding-left: calc(var(--native-panel-inset) + var(--resize-handle-width));
+}
+
+html[data-native-window][data-window-material="mica"] .kite-client .client-main-panel {
+  width: calc(100% - var(--native-panel-inset) * 2);
+  height: calc(100% - var(--native-panel-inset) * 2);
+  margin: var(--native-panel-inset);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+html[data-native-window][data-window-material="mica"] .kite-client #navigation-resize {
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
+html[data-native-window][data-window-material="mica"]
+  .kite-client
+  #navigation-resize:focus-visible
+  .resizable-grip {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--input);
+}
+
+html[data-native-window][data-window-material="mica"]
+  .kite-client
+  .desktop-settings
+  .settings-content {
+  background: var(--background);
+  height: calc(100% - var(--native-panel-inset) * 2);
+  margin: var(--native-panel-inset);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
 }

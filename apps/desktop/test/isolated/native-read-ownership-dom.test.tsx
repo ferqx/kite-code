@@ -174,7 +174,8 @@ function fixture(
     dom,
     calls,
     click,
-    render: () => act(async () => root.render(<NativeDesktop />)),
+    render: (testDiagnostics = false) =>
+      act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />)),
     notify: (event: NativeEvent = { generation: 1, kind: 'changed' }) =>
       act(async () => {
         for (const listener of listeners) listener(event);
@@ -285,7 +286,7 @@ test('a global directory failure remains visible after a same-generation session
     request.method === 'directory' && hold ? held.promise : undefined,
   );
   try {
-    await f.render();
+    await f.render(true);
     await f.click('Original A');
     hold = true;
     await f.click('重新读取目录');
@@ -372,7 +373,7 @@ for (const method of ['state', 'directory'] as const)
     let hold = false;
     const f = fixture((request) => (request.method === method && hold ? held.promise : undefined));
     try {
-      await f.render();
+      await f.render(method === 'directory');
       await f.click('Original A');
       hold = true;
       if (method === 'state') await f.notify();

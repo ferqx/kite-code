@@ -6,6 +6,7 @@ import type {
   NativeReasoningEffort,
   NativeSelection,
 } from './native-bridge';
+import { useNativeDiagnostics } from './native-diagnostics';
 
 export type NativeModelChoice = { modelId?: string; reasoningEffort?: NativeReasoningEffort };
 function errorCode(cause: unknown) {
@@ -31,6 +32,7 @@ export function NativeModelPicker({
   onChange: (value: NativeModelChoice) => void;
   onReady: (ready: boolean, choice?: NativeModelChoice) => void;
 }) {
+  const diagnostics = useNativeDiagnostics();
   const [facts, setFacts] = useState<NativeModelSettingsFacts>();
   const [error, setError] = useState(''),
     [reading, setReading] = useState(false);
@@ -145,7 +147,7 @@ export function NativeModelPicker({
       />
       {reading && <p role="status">正在读取可选模型。</p>}
       {error && <p role="alert">模型目录不可用：{error}</p>}
-      {!reading && !error && !selected && (
+      {!reading && !error && !selected && (requestedId || diagnostics) && (
         <p role="alert">
           {requestedId
             ? `所选模型 ${requestedId} 当前不可用，请重新选择。`

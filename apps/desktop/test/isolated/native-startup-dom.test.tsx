@@ -91,7 +91,8 @@ function fixture(
     host,
     root,
     calls,
-    render: () => act(async () => root.render(<NativeDesktop />)),
+    render: (testDiagnostics = false) =>
+      act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />)),
     notify: (generation: number) =>
       act(async () => {
         for (const listener of listeners) listener({ kind: 'changed', generation });
@@ -106,6 +107,8 @@ function fixture(
       }),
     async close() {
       await act(async () => root.unmount());
+      // FocusScope dispatches its unmount event on the next timer turn in this browser realm.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       dom.window.close();
       restore();
       Object.assign(globalThis, prior);
@@ -156,7 +159,33 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();
     expect(f.host.querySelector('.kite-client.shell')).not.toBeNull();
     expect(f.host.querySelector('textarea[aria-label="新对话草稿"]')).not.toBeNull();
+    expect(f.host.querySelector('.connection')).toBeNull();
+    expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
+    expect(f.host.textContent).not.toContain('本地 Agent');
+    expect(f.host.textContent).not.toContain('没有已启用且配置可用的默认模型，请选择模型。');
+    const button = (label: string) =>
+      [...f.host.querySelectorAll('button')].find(
+        (entry) => entry.textContent === label || entry.getAttribute('aria-label') === label,
+      );
+    expect(button('会话工具')).toBeUndefined();
+    expect(button('设置')).toBeUndefined();
+    expect(button('重新读取目录')).toBeUndefined();
+    expect(button('用户菜单')).toBeDefined();
+    expect(button('发送首条消息')?.disabled).toBe(true);
+    const ordinaryCalls = [...f.calls];
+    await f.render(true);
+    expect(button('会话工具')).toBeDefined();
+    expect(button('设置')).toBeDefined();
+    expect(button('重新读取目录')).toBeDefined();
+    expect(f.host.querySelector('input[aria-label="先审核计划"]')).not.toBeNull();
     expect(f.host.textContent).toContain('没有已启用且配置可用的默认模型，请选择模型。');
+    expect(button('发送首条消息')?.disabled).toBe(true);
+    expect(f.calls).toEqual(ordinaryCalls);
+    await f.render(false);
+    expect(f.host.querySelector('.connection')).toBeNull();
+    expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
+    expect(f.host.textContent).not.toContain('没有已启用且配置可用的默认模型，请选择模型。');
+    expect(f.calls).toEqual(ordinaryCalls);
     expect(
       f.calls.every((request) =>
         ['attach', 'directory', 'state', 'conversation.models.read'].includes(request.method),

@@ -83,6 +83,8 @@ export interface SessionPageProps {
   diagnosticView?: ReactNode;
   historyPanel?: { id: string; labelledBy: string };
   historyError?: { title: string; detail: string; retry: () => void };
+  /** Retain the page's layout and readers while a host view replaces its painted surface. */
+  covered?: boolean;
   overlays?: ReactNode;
   fileChanges?: readonly Message[];
   /** Host receipt reader rendered within the retained FileChanges sidebar. */
@@ -476,6 +478,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         orientation="horizontal"
         elementRef={panelGroupElement}
         className="client-panels"
+        aria-hidden={props.covered || undefined}
+        inert={props.covered}
+        style={props.covered ? { opacity: 0, pointerEvents: 'none' } : undefined}
         onLayoutChanged={(layout, meta) => {
           if (!meta.isUserInteraction || narrow) return;
           setSidebarOpen((layout.navigation ?? 0) > 0);
@@ -750,7 +755,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       </ResizablePanelGroup>
       {narrow && (
         <Sheet
-          open={sidebarOpen}
+          open={sidebarOpen && !props.covered}
           onOpenChange={(open) => {
             setDesktopSidebarOpen(open);
             if (open) return;
@@ -760,7 +765,14 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
             } else toggle.current?.focus();
           }}
         >
-          <SheetContent side="left" portalled={false} showCloseButton={false}>
+          <SheetContent
+            side="left"
+            portalled={false}
+            showCloseButton={false}
+            onCloseAutoFocus={(event) => {
+              if (props.covered) event.preventDefault();
+            }}
+          >
             <SheetTitle className="sr-only">空间与会话</SheetTitle>
             <SheetDescription className="sr-only">选择空间或会话</SheetDescription>
             {sidebarPanel}

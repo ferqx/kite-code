@@ -4,7 +4,15 @@
 
 ## 原桌面展示层
 
+亮色主题的 `--sidebar-accent` 直接引用共享 `--accent`，空间行、会话行、主要导航、用户按钮和设置返回区的悬停与选中色沿同一个变量，和普通控件保持一致。暗色主题继续使用原侧栏配色；玻璃容器的透明背景与各项交互不变。
+
+2026-10-14 Windows x64／Bun 1.4.2，当前 `006b79d3` 工作树上的该变量修改：实际 Chrome headless 载入当前 Tailwind 编译 CSS 及共享 Sidebar／Button 的静态标记，用鼠标悬停核亮／暗、Mica／实色四种组合。亮色空间、会话、主要导航、用户按钮及设置返回样式与普通按钮均为 `rgb(236,236,236)`，选中会话与设置分类沿同值；临时替换 `--accent` 后亮色侧栏与按钮同步变化。暗色保原侧栏 `rgb(48,48,48)`，Mica 侧栏承载层仍透明。定向 Biome 保原三项 `!important` 提示；此 CSS 核对不代证原生壁纸合成或完整客户端交互。
+
 `@kite-ai/ui/desktop` 的 [SessionPage](src/desktop/SessionPage.tsx)、Sidebar、Conversation、Composer、RightSidebar 与 shadcn 控件从原 kite-client-ui 展示源码迁入，保留原 CSS、交互和依赖版本；[样式导出](src/desktop/style.css)供正式 Native 的原 Vite/Tailwind 管线编译。此层不导入旧 workspace 或 Runtime，事实映射和写入 authority 属 [Desktop host](../../apps/desktop/README.md#复用原桌面展示层)。
+
+桌面圆角在[共享样式](src/desktop/style.css)的根变量 `--radius: 10px` 统一定义，沿用空间列表项的原值。面板、卡片、输入框、按钮、列表、菜单和提示框均引用该值；Tailwind 的 `--radius-xs` 到 `--radius-4xl` 也只作为同一变量的别名，避免 shadcn 弹层另用尺寸。圆形控件、滚动条、调宽把手保留圆形或胶囊轮廓，拼接内侧和全屏容器保留必要的直角；Native 设置样式、Mica 面板及正文排版也消费这一根变量。调整只改外观，不增加请求、写入或阅读权限；实际编译后的值和窗口验证归 [Native owner](../../apps/desktop/README.md#统一桌面圆角)。
+
+同一共享样式的 `--resize-handle-width: 1px` 管理调宽分隔的实际布局占位，宽度和 flex-basis 引用同一值；隐藏时仍沿原规则归零，命中区域与交互保持。Native Mica 以此值和内容留白计算玻璃导航的外侧间距，具体视觉边界与实窗证据由 [Native owner](../../apps/desktop/README.md#玻璃导航间距)维护。
 
 同一公共入口现导出原[Tooltip](src/desktop/components/ui/tooltip.tsx)四个组件，供[Web目录](../../apps/web/README.md)复用已有hover／focus／Escape和共享延迟行为；原组件、Radix依赖与Native Sidebar保持。Web负责准确公共activity、读取生命周期和本包scoped CSS，不引入第二份计时器、运行状态或业务authority。Web完整DOM、可信browser build与本机IAB证据归该owner和[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11web-完整工作区与会话目录)，不据新增export宣称全平台资格。
 
@@ -12,9 +20,11 @@
 
 [Desktop build](scripts/build-desktop.ts)将[唯一声明](scripts/bundled-dependencies.ts)的 `@hugeicons/core-free-icons` 内联到原浏览器产物；其余 npm 依赖、React peer、原导出及 CSS 保持。Terminal 的生成 package manifest 不再声明这条已内联依赖，复制器仍保留其他包真正需要的依赖边。原包许可和 NOTICE 完整复制；固定 4.3.2 npm 包实际缺许可正文时，仅对准确版本／MIT使用[附带官方原文](scripts/licenses/core-free-icons-4.3.2/LICENSE.md)和[固定来源](scripts/licenses/core-free-icons-4.3.2/SOURCE.json)，离线核 SHA，不替换其他包许可。制品全部生成文件仍进入完整 inventory，实际原窗口和默认回归结果归[普通启动进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
 
-有限 renderMessage、Composer 控件/输入标签/发送门禁 slot 和 detailPanel 让宿主接入已验证公共正文 reader、准确 controller 与原右侧栏；缺省保持原展示契约。侧栏开关不卸载 Conversation，宿主 detailPanel 关闭则卸载所属工具内容以释放原读取，不沿旧动画缓存保留隐藏 reader。UI 不读文件、发请求或取消业务。缺少真实操作回调时不从 view model 推造能力；Message completion 不能提升为 final reply 或旧 Tool grouping。
+有限 renderMessage、Composer 控件/输入标签/发送门禁 slot 和 detailPanel 让宿主接入已验证公共正文 reader、准确 controller 与原右侧栏；缺省保持原展示契约。侧栏开关不卸载 Conversation，宿主 detailPanel 关闭则卸载所属工具内容以释放原读取，不沿旧动画缓存保留隐藏 reader。Sidebar 在连接标签为空且未提供 connection action 时不生成连接行，用户菜单独立保留；Native 的测试辅助入口显示规则归 [Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)。UI 不读文件、发请求或取消业务。缺少真实操作回调时不从 view model 推造能力；Message completion 不能提升为 final reply 或旧 Tool grouping。
 
 原 [FileChanges／FileDiff](src/desktop/FileChanges.tsx)公开给宿主复用，`renderDetail` 只在展开项挂载、`loading` 表示宿主读取状态；原 messages／openFile 缺省展示保持。SessionPage 的 `fileChangesContent` 接原“文件变更”入口，关闭即卸载宿主内容；会话工具与文件变更切换先关闭原面板，各用途保独立 RightSidebar 身份，栏宽跟随总体开关。实际文件回执、读取释放和编辑器目标校验归 [Desktop owner](../../apps/desktop/README.md#原文件变更面板与编辑器)，此层不取得文件或执行权限。
+
+SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以opacity0／inert／aria-hidden退出绘制与交互；`overlays` 仍在同级可见层。窄侧栏模态在covered期间暂时关闭，记住原开关，避免旧模态与宿主新视图竞争焦点。该属性不关闭reader、取消任务或重新选择会话，默认不覆盖页面。原 [DialogContent](src/desktop/components/ui/dialog.tsx)新增可选 `showOverlay`，默认true保旧遮罩；Native全屏设置明确false，仍由原Radix内容保焦点、Escape与模态语义。具体玻璃层和状态恢复由 [Native owner](../../apps/desktop/README.md#windows-原生-mica)维护。
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
 

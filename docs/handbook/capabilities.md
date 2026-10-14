@@ -2,6 +2,8 @@
 
 根正式入口、默认测试与 CI 已切换通用 Agent V1.3 的八个新 workspace。下表描述当前消费者；“有条件”要求准确配置、授权、完整来源或可恢复数据。完整 37 项保真与三平台发行尚未完成，已确认目标及差异保留在[实施计划](../plans/unified-agent-refactor-v1.md)与[进度证据](../plans/unified-agent-refactor-v1-progress.md)，不能把入口切换视为全部交付。
 
+Native 普通启动和 `desktop:dev` 隐藏“会话工具”辅助侧栏及“先审核计划”选择；下表 Native 列涉及该侧栏的管理、Files、Context／压缩、显式单次 Plan／Workflow 和额外诊断入口仅供明确开启诊断的自动测试。普通界面仍可从用户菜单配置模型与扩展，沿主对话回答当前交互、读取完整消息及操作环境信息卡。具体入口以 [Native 指南](clients/desktop/README.md)为准。
+
 | 能力 | TUI | Web | CLI | Native |
 | --- | --- | --- | --- | --- |
 | 发起或继续任务 | 输入新任务，保持原 Session | 只读 | `run/resume`；resume 是新任务 | 原 Session 输入新任务 |

@@ -56,6 +56,7 @@ test('actual Native page retains the original header filters, both double-click 
   let zooms = 0,
     fail = false;
   const bridge: NativeBridge & NativeWindowBridge = {
+    getWindowAppearance: async () => ({ backgroundMaterial: 'none' }),
     request: async (request) => {
       calls.push(request);
       if (request.method === 'directory') return directory;
