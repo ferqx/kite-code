@@ -200,6 +200,8 @@ Native 原主题属于窗口 Host。preload 的固定主题端口只传暗／亮
 
 Native 原消息复制与标题栏缩放同属窗口 Host。preload 只提供固定文本复制／无参数缩放端口，Main 在宿主动作前核当前窗口、准确主 frame、renderer URL 和闭合 payload；复制保原 1 MiB UTF-8 上限，超限失败、不截断，缩放只按实际窗口状态切换。端口不取得 Store／Session／Service 或执行 authority，正文是否完整及当前可复制仍归原共享 UI／原 reader。失败不重发业务或丢弃草稿；实现与分层验证归[Native owner](../../apps/desktop/README.md#原消息复制与标题栏缩放)。
 
+Windows 顶栏菜单同属窗口 Host。有限 IPC 只接受四个菜单枚举、窗口内整数位置与页面可操作标记，Main 在原准确窗口／主 frame／renderer URL 校验后按真实缩放打开原生下拉；该标记不授予业务权限。文件项及三个固定快捷键只返回既有页面动作，renderer 复核当前启动、mutation 与退出状态后调用原 controller。编辑与窗口角色不打开 Service caller；隐藏和退出继续沿原生命周期，设置、目录选择及登记仍由原业务端口授权。当前实现与 Windows 有限窗口验证归[Native owner](../../apps/desktop/README.md#windows-顶栏菜单)，Core、公开 API 与私有格式保持。
+
 Native 明确退出的活动检查只读完整公共目录与 View；两秒超时仅撤销本次 GET，不能把未回答当无活动，也不撤销其他观察。原窗口隐藏／激活不停止 Service。原二十秒收尾决定由 Main 持有，继续等待复用同一清理 promise；紧急退出只调用当前配对 child 的直接进程句柄，不发现其他 PID，不给卸载或普通读取强杀资格。配对 launcher close 与实际退出状态分别核实，非零退出进入异常收尾提示；未知执行保持原事实，正常清理顺序和双层制品使用权不放宽；实现与有限故障／实际窗口范围见[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)。
 
 Main 通过原固定 channel 的闭合生命周期通知撤销 renderer 旧读取的展示归属；它不增加业务请求或执行权。退出期间暂停自动刷新，取消后沿同一 generation 恢复状态／目录／选择和原草稿读取，不重新 attach 或提交业务。该展示撤销不提前 close／detach caller，也不消除真实当前错误、已提交 mutation 的未知回执或异常收尾提示；原 frame 身份与退出资源门禁保持。

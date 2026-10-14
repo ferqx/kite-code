@@ -55,6 +55,52 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   --color-secondary-foreground: var(--foreground);
 }
 
+.native-window-menubar {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  height: 100%;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+}
+
+.native-window-menubar button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius, 10px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.native-window-menubar button:hover,
+.native-window-menubar button[aria-expanded="true"] {
+  background: var(--sidebar-accent);
+  color: var(--foreground);
+}
+
+.native-window-menubar button:focus-visible {
+  outline: 1px solid var(--foreground);
+  outline-offset: -2px;
+}
+
+.native-window-menu-error {
+  position: absolute;
+  top: 0;
+  left: 220px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  color: var(--foreground);
+  font-size: 12px;
+  -webkit-app-region: no-drag;
+}
+
 .kite-client .desktop-settings-dialog {
   left: 0;
   top: 0;

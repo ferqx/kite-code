@@ -8,6 +8,11 @@ import type {
   NativeState,
   NativeWindowBridge,
 } from '../../src/native-bridge';
+import type {
+  NativeWindowMenuAction,
+  NativeWindowMenuBridge,
+  NativeWindowMenuRequest,
+} from '../../src/native-menu-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
@@ -26,7 +31,7 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, originals);
 bootstrap.window.close();
 
-test('actual Native page retains the original header filters, both double-click callbacks and draft on host failure with zero work', async () => {
+test('actual Native page retains window actions and connects Windows menus to the existing controller without sending work', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
       url: 'http://localhost',
       pretendToBeVisual: true,
@@ -43,6 +48,7 @@ test('actual Native page retains the original header filters, both double-click 
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+  dom.window.document.documentElement.dataset.platform = 'windows';
   const directory: NativeDirectory = { storeId: 'store', workspaces: [], sessions: [] },
     state: NativeState = {
       generation: 1,
@@ -54,8 +60,21 @@ test('actual Native page retains the original header filters, both double-click 
     },
     calls: NativeRequest[] = [];
   let zooms = 0,
-    fail = false;
-  const bridge: NativeBridge & NativeWindowBridge = {
+    fail = false,
+    menuUnsubscribed = false;
+  let menuAction: ((action: NativeWindowMenuAction) => void) | undefined;
+  const menuRequests: NativeWindowMenuRequest[] = [];
+  const bridge: NativeBridge & NativeWindowBridge & NativeWindowMenuBridge = {
+    showWindowMenu: async (request) => {
+      menuRequests.push(request);
+    },
+    watchWindowMenuAction: (listener) => {
+      menuAction = listener;
+      return () => {
+        menuUnsubscribed = true;
+        menuAction = undefined;
+      };
+    },
     getWindowAppearance: async () => ({ backgroundMaterial: 'none' }),
     request: async (request) => {
       calls.push(request);
@@ -92,7 +111,7 @@ test('actual Native page retains the original header filters, both double-click 
       );
     });
   try {
-    await act(async () => root.render(<NativeDesktop />));
+    await act(async () => root.render(<NativeDesktop nativeWindow />));
     const header = host.querySelector('.session-header')!,
       sidebar = host.querySelector('.sidebar-header')!,
       draft = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="新对话草稿"]')!;
@@ -127,8 +146,37 @@ test('actual Native page retains the original header filters, both double-click 
         ['attach', 'directory', 'conversation.models.read', 'state'].includes(request.method),
       ),
     ).toBe(true);
+    const menus = Array.from(
+      host.querySelectorAll<HTMLButtonElement>('[role="menubar"] [role="menuitem"]'),
+    );
+    expect(menus.map((menu) => menu.textContent)).toEqual(['文件', '编辑', '视图', '帮助']);
+    await act(async () => menus[1]!.click());
+    expect(menuRequests).toEqual([{ menu: 'edit', x: 0, y: 0, applicationEnabled: true }]);
+    expect(calls.length).toBe(before);
+    await act(async () => menuAction!('new-conversation'));
+    expect(draft.value).toBe('原草稿\n雪🙂');
+    expect(calls.length).toBe(before);
+    await act(async () => menuAction!('settings'));
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    expect(menus[0]!.closest('[aria-hidden="true"]')).toBeNull();
+    await act(async () => menuAction!('add-workspace'));
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).toBeNull();
+    expect(
+      calls.slice(before).filter((request) => request.method === 'workspace.pick'),
+    ).toHaveLength(1);
+    expect(
+      calls.some((request) =>
+        ['conversation.submit', 'input.submit', 'session.create', 'cancel'].includes(
+          request.method,
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      host.querySelector<HTMLTextAreaElement>('textarea[aria-label="新对话草稿"]')!.value,
+    ).toBe('原草稿\n雪🙂');
   } finally {
     await act(async () => root.unmount());
+    expect(menuUnsubscribed).toBe(true);
     // FocusScope dispatches its unmount event on the next timer turn in this DOM realm.
     await new Promise<void>((resolve) => dom.window.setTimeout(resolve, 0));
     dom.window.close();

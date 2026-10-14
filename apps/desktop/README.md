@@ -2,7 +2,7 @@
 
 ## 普通客户端与测试诊断
 
-[统一展示 context](src/native-diagnostics.tsx)默认关闭测试诊断。`NativeDesktop({testDiagnostics:true})` 供明确 DOM fixture；可信 `buildNativeDesktop` 第三参数中的 `testDiagnostics:true`、`buildNativeCandidate` 输入的同名选项 只写入 renderer 构建常量，纳入实际制品字节指纹。正式和 `desktop:dev` 默认关闭，不依据 NODE_ENV、development 身份或 fixture 内容推断，也不改变 Main／IPC／Service 权限和恢复资格。顶部“会话工具／设置”、左栏连接标签与重读目录、两处 Composer 的“先审核计划”及缺默认模型辅助提示均只在此显式测试模式展示；普通界面的设置仍从“个人工作区”用户菜单进入。[Main](electron/main.ts)直接移除 Windows／Linux 窗口菜单栏，现有自动测试不需要保留菜单。
+[统一展示 context](src/native-diagnostics.tsx)默认关闭测试诊断。`NativeDesktop({testDiagnostics:true})` 供明确 DOM fixture；可信 `buildNativeDesktop` 第三参数中的 `testDiagnostics:true`、`buildNativeCandidate` 输入的同名选项 只写入 renderer 构建常量，纳入实际制品字节指纹。正式和 `desktop:dev` 默认关闭，不依据 NODE_ENV、development 身份或 fixture 内容推断，也不改变 Main／IPC／Service 权限和恢复资格。顶部“会话工具／设置”、左栏连接标签与重读目录、两处 Composer 的“先审核计划”及缺默认模型辅助提示均只在此显式测试模式展示；普通界面的设置仍从“个人工作区”用户菜单进入，Windows 另有[顶栏菜单](#windows-顶栏菜单)。[Main](electron/main.ts)移除 Linux 窗口菜单栏，Windows 隐藏独立系统菜单行并保留原生快捷键。
 
 普通界面隐藏机器身份、泛化 Model result dump、已确认的创建／答案／交互账本，以及正常完成的历史校准、零后台计数和缓存诊断。所保留的面板在未开启测试诊断时使用“执行记录”标签，未知、当前错误、未完成申请和取消未确认保持原查询合同；“查看提交记录”仍可读原申请全文并清理已核实记录，不清除 unknown。原全文继续核 EOF、完整字节、SHA 和准确命令，关闭／切 scope 只结束所属读取。非 Model [结果组件](src/native-result.tsx)逐字段保留全部业务正文；下文涉及“会话工具”的 Job／子日志、Model input、Context、恢复与管理面板由自动测试显式进入，配置另保普通用户菜单入口。
 
@@ -42,6 +42,10 @@ Windows Mica 窗口的[启动样式](src/native-startup.css)仅在 Main 已确�
 
 [NativeStartup](src/native-startup.tsx)迁入原 kite-desktop 的启动页布局、[图标](app-icon.svg)和[启动样式](src/native-startup.css)，按钮仍用原共享 Button。[正式入口](src/native.tsx)先完成现有 Main 的 attach 与首屏完整 Workspace／Session 目录观察，再显示原 SessionPage；尚未核实的目录不能进入，空目录与未配置模型可以进入处理。没有人为最短停留时间，不另建服务或执行路径。
 
+[窗口容器](src/native-window-frame.tsx)在准备中、启动失败和重试时使用 `showHeader=false`，不渲染自绘顶栏与 Windows 菜单，也不监听 F10／Alt 菜单导航；内容区使用整个窗口高度。缺 bridge 的失败页使用同一显示规则。完整首屏目录观察通过后恢复32px顶栏与菜单；进入主界面后的连接失败沿原逻辑保留页面和顶栏。Main 继续负责原生窗口按钮，服务准入、诊断、重试和退出沿原端口。
+
+2026-10-14 Windows x64／Bun 1.4.2，`5f41fc3d` 加菜单及启动 header 调整：[启动 DOM](test/isolated/native-startup-dom.test.tsx)与[窗口动作 DOM](test/isolated/native-window-actions-dom.test.tsx)两个完整文件4项／90断言通过，覆盖准备中及首屏目录等待、启动失败、重试、进入应用后恢复菜单、隐藏时菜单快捷键零宿主调用，以及迟到观察、后续连接错误和原草稿。Desktop typecheck、定向 Biome、文档结构与影响核对通过；Biome 保留原未改动 fragment 提示。本次未重新运行真实窗口或完整默认测试，下面既有窗口证据不代证本次启动 header 显隐。
+
 初始化失败保留启动页、公开错误分类和明确“重新尝试”。初始目录观察确认 unavailable 时显示 `native_directory_unavailable`，不会一直显示准备中；原 generation 后来取得完整可用目录仍自动进入。同步状态阻止重复点击；每次重试撤销旧观察、所属历史读取和旧 generation，迟到响应不能覆盖新的目录。Main 的 detach 只释放读取与选择，不停止 Service、Run 或重发业务。进入主界面后连接或目录读取失败保留原页面与草稿，不重新遮挡。缺 preload bridge 时沿同一启动页说明资源错误，不提供不能执行的重试。原“保存诊断”现已接回，范围见下节；完整安装恢复仍按原方案验收。
 
 [Main](electron/main.ts)从已完成真实身份准入的 paired Service 向 [NativeCaller](electron/native-caller.ts)交接同一个 Client 的一次初次许可，首次 attach 不再重复 `/v1/server`。许可消费前同步清空，Main 核原 paired Service 与退出状态；detach、网络释放和关闭都撤销未消费许可。standalone Client 的缓存 `serverInfo` 不能替代准入，后续重连仍沿 Client 完整身份核验。内部交接不增加 renderer／IPC 权利，不改变必需能力或超时；[真实 HTTP caller 测试](test/native-caller.test.ts)核一次交接、再次准入、错 Store／profile 和撤销，准确结果归[普通启动进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动目录恢复与准入交接)。
@@ -72,7 +76,7 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 
 ## 原消息复制与标题栏缩放
 
-Native 的沉浸式窗口顶栏单独占32px，由 [renderer 入口](src/native-main.tsx)在启动与业务页面外保留同一个 `native-window-frame/titlebar/content`。内容区从 y=32px 开始，项目侧栏位于其顶部，Mica 会话面板另按下文圆角留白内缩。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，原生窗口按钮只占窗口顶栏，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:9}`。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
+Native 主界面的沉浸式窗口顶栏单独占32px，[renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。主界面内容区从 y=32px 开始，项目侧栏位于其顶部，Mica 会话面板另按下文圆角留白内缩。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，原生窗口按钮只占窗口顶栏，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:9}`。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
 
 [Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和本地布局类限定窗口展示；共享 Web 页面不因此变为可拖拽。只有独立顶栏声明 drag，导航和右栏恢复原间距，移除此前为同一行叠层保留的横向按钮范围、macOS导航留白和设置页顶部补偿。内容区使用剩余高度，启动页与 SessionPage 不额外占完整 viewport；全屏设置相对内容区定位，窄侧栏浮层从顶栏下方开始。顶栏在 modal 遮罩之上保持独立，返回按钮及业务控件不进入拖拽区域。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
 
@@ -83,6 +87,20 @@ Native 的沉浸式窗口顶栏单独占32px，由 [renderer 入口](src/native-
 2026-10-14 独立顶栏初次验证（Mica 圆角内缩前）：Windows x64／Electron 44.3.0／Bun 1.4.2 的隔离实际窗口使用当时 Main／preload、普通模式 renderer 构建与真实配套 Service，顶栏与原生叠层均为 y=0、高32px，导航及侧栏 y=32px、高52px，导航恢复24px右侧间距。782px内容 viewport 下业务区与设置页均为750px、高度准确到窗口底部；500×720窄窗口的侧栏浮层从 y=32px 开始、高688px。实际主题菜单亮／暗、设置返回、侧栏展开／关闭、最大化／还原、零页面异常与 Main 正常退出0通过。原窗口 IPC／DOM 两个完整文件5项／53断言、Desktop typecheck与定向Biome通过；构建保原 CSS keyframes 优化与大chunk提示。此范围没有物理鼠标拖拽、Linux／macOS新窗口或正式安装制品资格，原平台门禁保持；当前 Mica 面板几何按下文验证。
 
 [Main 端口测试](test/native-window-ipc.test.ts)核原 Unicode／换行、UTF-8 边界、准确 frame、宿主失败、连接失败及零 caller；[实际 Native DOM](test/isolated/native-window-actions-dom.test.tsx)核原 header 过滤、双栏回调和失败时草稿，原[轮次 DOM](test/isolated/native-transcript-dom.test.tsx)保全文复制门禁。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)首次／冷启动以实际 Main 剪贴板读取核准确完整正文，浏览器 fallback 明确失败；测试的[剪贴板保护进程](test/native-clipboard-guard.fixture.jxa)仅在内存保留原各格式字节，stdin 关闭时恢复，不导出用户内容。header 的 DOM 事件验证真实 BrowserWindow 缩放，不代证物理鼠标双击或窗口拖拽；完整 PC 资格仍另核。准确输入、执行结果与未验范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原消息复制与标题栏缩放)。
+
+## Windows 顶栏菜单
+
+[窗口容器](src/native-window-frame.tsx)在进入主界面后，于 Windows 顶栏左侧绘制“文件、编辑、视图、帮助”，沿共享主题颜色和圆角，菜单按钮使用 `no-drag`，其余顶栏保持原拖动区域。菜单支持 F10、左右键与下键，以及 Alt+F／E／V／H；点击时保留原编辑器焦点与选区。macOS／Linux 主界面保留原顶栏。窗口布局由 `NativeDesktop` 明确启用，启动准备及失败页按[启动显示规则](#原启动页与初始化重试)隐藏 header，进入应用后全屏设置页继续保留菜单。
+
+[菜单 owner](electron/native-window-menu.ts)定义中文原生项，[Main](electron/main.ts)安装隐藏的窗口菜单以保留原生快捷键，再从相同模板通过 [Electron Menu.popup](https://www.electronjs.org/docs/latest/api/menu#menupopupoptions)打开对应下拉，不增加另一行菜单。编辑、缩放、全屏、隐藏与退出使用 Electron roles，退出仍经过原 `before-quit` 与 `settleDesktopQuit`。文件前三项沿固定事件返回原 renderer controller 的 `prepareConversation`、`addWorkspace` 与设置状态；Ctrl+N／O／, 在 Main 的 `before-input-event` 中按同一固定动作分发，拒绝组词、重复和额外修饰键，并阻止重复进入原生 accelerator。F10／Alt 导航留给 renderer。准备中、原 mutation 进行中或退出中不进入页面操作，迟到事件同样核当前状态。进入新对话保原草稿，不创建会话或发任务，添加空间保持原准确选择及登记路径。
+
+Windows Native 的全屏设置保留已有 `covered` 内容区的隐藏与 `inert`，设置 Dialog 使用非 modal 模式以保留顶栏的鼠标、键盘和可访问入口；顶栏交互不触发外部点击关闭，原返回与 Escape 仍可用。其他嵌入及平台保持原 modal 模式。
+
+[封闭菜单 bridge](src/native-menu-bridge.ts)只暴露四个 menu ID、整数位置与当前可操作状态，以及三个固定页面动作。[preload](electron/preload.ts)过滤未知事件并在卸载时移除监听；Main 核当前窗口、准确主 frame、renderer URL、Windows 平台、闭合 payload 和窗口边界，按实际页面缩放换算下拉位置，窗口菜单端口不打开 Service caller。宿主错误返回通用失败，顶栏允许再次打开。设置和目录仍由已有业务端口核权限。
+
+[菜单端口测试](test/native-window-menu.test.ts)覆盖页面缩放、禁用项、文件快捷键的修饰／组词／重复边界、外来窗口／frame／文档、开发 HTTP 边界、闭合参数和宿主错误；[窗口 DOM](test/isolated/native-window-actions-dom.test.tsx)核四个菜单、现有页面动作、设置页菜单可访问、设置返回、添加空间原请求、草稿保留及零任务提交。
+
+2026-10-14 Windows x64／Bun 1.4.2／Electron 44.3.0，`5f41fc3d` 加本次菜单 diff：使用当前 Main／preload、普通 renderer 构建与独立 Profile／真实配套 Service，实际窗口核四个入口、原生下拉、保留原输入焦点与全选、文件菜单进入设置／新对话、设置页继续打开菜单、草稿保留、Electron 输入端口的 Ctrl+, 与 F11 全屏／返回、F10／左右／下键与 Alt+H、实际放大／恢复、用户菜单暗／亮主题、32px初始内容起点及500px窄窗口。零页面异常、Main 正常退出0；文件快捷键验证使用 Electron 输入端口，原生项选择使用实际 MenuItem，不代证物理键盘／系统菜单鼠标点选。菜单端口、原窗口 IPC、窗口动作 DOM 与启动 DOM 四个完整文件13项／181断言通过；Desktop typecheck、定向 Biome、文档结构／影响核对和统一边界检查通过，Biome 保留原未改动 fragment 提示，构建保原 CSS keyframes 与大 chunk 提示。未运行完整默认测试、正式安装制品或其他平台新窗口；这项菜单改动不提升这些资格。
 
 ## Windows 原生 Mica
 

@@ -45,6 +45,7 @@ import type {
 } from './interaction-history-bridge';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
+import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
   NativeModelUsagePage,
@@ -804,7 +805,10 @@ export interface NativeBridge {
 declare global {
   interface Window {
     readonly kiteNative?: Readonly<
-      NativeBridge & Partial<NativeThemeBridge & NativeWindowBridge & NativeStartupBridge>
+      NativeBridge &
+        Partial<
+          NativeThemeBridge & NativeWindowBridge & NativeWindowMenuBridge & NativeStartupBridge
+        >
     >;
   }
 }

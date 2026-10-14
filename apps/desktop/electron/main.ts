@@ -12,8 +12,9 @@ import {
   PairedServiceError,
   type ServiceStartupDiagnostic,
 } from '@kite-ai/service/paired';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme } from 'electron';
 import { nativeEventChannel } from '../src/native-bridge';
+import { nativeWindowMenuActionChannel } from '../src/native-menu-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
 import {
   type DevelopmentServiceReload,
@@ -29,6 +30,11 @@ import {
   registerNativeThemeIpc,
   registerNativeWindowIpc,
 } from './native-ipc';
+import {
+  nativeWindowMenuShortcut,
+  nativeWindowMenuTemplate,
+  registerNativeWindowMenuIpc,
+} from './native-window-menu';
 import { spawnNodePairedChild } from './node-process';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
@@ -336,7 +342,55 @@ void app
         webSecurity: true,
       },
     });
-    if (process.platform !== 'darwin') window.removeMenu();
+    if (process.platform === 'win32') {
+      app.setAboutPanelOptions({ applicationName: 'kite', applicationVersion: app.getVersion() });
+      const menuOptions = {
+        applicationEnabled: true,
+        dispatch(action: import('../src/native-menu-bridge').NativeWindowMenuAction) {
+          if (
+            !quitting &&
+            window &&
+            !window.isDestroyed() &&
+            window.webContents.mainFrame.url.split('#')[0] === rendererUrl
+          )
+            window.webContents.send(nativeWindowMenuActionChannel, action);
+        },
+      };
+      // Retain native accelerators without adding a second row below the immersive titlebar.
+      window.setMenu(Menu.buildFromTemplate(nativeWindowMenuTemplate(menuOptions)));
+      window.setMenuBarVisibility(false);
+      window.webContents.on('before-input-event', (event, input) => {
+        // Let F10 and Alt navigation reach the immersive menu instead of the hidden system row.
+        window!.webContents.setIgnoreMenuShortcuts(input.alt || input.key === 'F10');
+        const action = nativeWindowMenuShortcut(input);
+        if (action) {
+          event.preventDefault();
+          menuOptions.dispatch(action);
+        }
+      });
+      registerNativeWindowMenuIpc({
+        ipcMain,
+        window: () => window,
+        rendererUrl,
+        platform: process.platform,
+        showMenu(host, request) {
+          const menu = Menu.buildFromTemplate(
+            nativeWindowMenuTemplate({
+              ...menuOptions,
+              applicationEnabled: request.applicationEnabled && !quitting,
+            }),
+          ).getMenuItemById(request.menu)!.submenu!;
+          return new Promise<void>((resolve) =>
+            menu.popup({
+              window: host,
+              x: request.x,
+              y: request.y,
+              callback: resolve,
+            }),
+          );
+        },
+      });
+    } else if (process.platform !== 'darwin') window.removeMenu();
     const updateSystemBackground = () => {
       if (window && !window.isDestroyed()) {
         window.setBackgroundColor(
