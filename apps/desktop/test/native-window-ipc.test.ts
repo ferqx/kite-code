@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { registerNativeIpc, registerNativeWindowIpc } from '../electron/native-ipc';
 import {
@@ -10,8 +13,8 @@ import {
 
 type Handler = (event: IpcMainInvokeEvent, payload: unknown) => NativeReply | Promise<NativeReply>;
 
-function fixture() {
-  const frame = { url: 'file:///private/tmp/native/index.html' },
+function fixture(rendererUrl = pathToFileURL(join(tmpdir(), 'kite-native-ipc/index.html')).href) {
+  const frame = { url: rendererUrl },
     contents = { mainFrame: frame },
     copied: string[] = [],
     zooms: boolean[] = [];
@@ -60,6 +63,7 @@ function fixture() {
     },
   });
   return {
+    rendererUrl,
     frame,
     event,
     copied,
@@ -100,6 +104,26 @@ test('original text and both zoom states use only the current window host, even 
   expect(f.handlers.has(nativeClipboardChannel)).toBe(false);
   expect(f.handlers.has(nativeWindowMaximizeChannel)).toBe(false);
   expect(f.handlers.has(nativeChannel)).toBe(true);
+});
+
+test('development HTTP renderer retains exact main-frame, origin and document scope for window operations', async () => {
+  const f = fixture('http://127.0.0.1:43219/');
+  expect(await f.send(nativeClipboardChannel, { text: 'development' })).toEqual({
+    ok: true,
+    value: null,
+  });
+  for (const url of [
+    'http://127.0.0.1:43220/',
+    'http://localhost:43219/',
+    'http://127.0.0.1:43219/foreign',
+  ]) {
+    f.frame.url = url;
+    expect(await f.send(nativeClipboardChannel, { text: 'foreign' })).toEqual({
+      ok: false,
+      code: 'native_sender_denied',
+    });
+  }
+  expect(f.copied).toEqual(['development']);
 });
 
 test('original 1 MiB UTF-8 clipboard boundary and closed payloads reject without truncation or host effects', async () => {
@@ -143,9 +167,9 @@ test('foreign documents, subframes and closed windows cannot act; OS failures re
     });
   };
   await denied({ ...f.event, senderFrame: { url: f.frame.url } } as IpcMainInvokeEvent);
-  f.frame.url = 'file:///private/tmp/foreign.html';
+  f.frame.url = pathToFileURL(join(tmpdir(), 'foreign.html')).href;
   await denied();
-  f.frame.url = 'file:///private/tmp/native/index.html';
+  f.frame.url = f.rendererUrl;
   f.fail();
   expect(await f.send(nativeClipboardChannel, { text: 'original' })).toEqual({
     ok: false,

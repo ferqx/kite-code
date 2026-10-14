@@ -6341,3 +6341,32 @@ Terminal路径选取现复用所属host的资产错误翻译，CLI／TUI保pure 
 本机实际 `npm run build` 八workspace0，默认Terminal candidate `b8f77fc55fbd8774b8cfbf74d7cd65b192c33b4420ff90bdfc22b54a97319206`、Native candidate `c0f6084fef21d50beeaa72bd4e6707a3d1da8199aebd754d6feb4dff35e6e11e` 已生成，未安装／发布。普通CLI help0，desktop:dev实际编译并启动Electron，一次实际退出0、再次启动供本机使用。完整默认Native的实际Playwright窗口核新对话、attach、显式directory可用、无启动／操作弹窗，真实close0／无signal／零Model；结果 `/private/tmp/kite-native-local-startup-clean-20261014.log`。前临时driver的变量遮蔽、误读directory回复形态和close后SDK handle读取失败raw保留，按实际契约修正driver后整体actual0，没有修改产品断言或将这些driver错误充作产品失败。
 
 本轮只闭合本地入口准备、缺资产可操作诊断和显式Desktop开发能力，不取得Win/Linux、RSS32MiB、完整资源／出生或正式阶段资格；无新增正式退役目标。文档同步和正常本地提交保留，不push、PR、发布或触发Actions。
+
+## 2026-10-14：Windows 本机首次实际验证
+
+用户明确要求基于 V1.3 在本机验证 Windows。本轮起点为 clean `351d266e9a33c9476029bbf9952149717cb972cd`／`el-refactor`，实际 Windows NT `10.0.26300.0`、win32/x64、Bun `1.4.2 (744846f84)`、Node `24.15.0`。先按原 `bun.lock` 执行 frozen install；沙箱内的临时目录 EBADF 和私有目录 EPERM 单独保留，下面原生结果来自沙箱外当前用户、各夹具自己的临时 Profile，不将沙箱拒绝算作产品通过或本机原生失败。
+
+**两项确定问题已局部修复。** 原八 workspace build 在 [Storage Worker builder](../../packages/agent/src/storage/worker/build-assets.ts) 将 file URL `.pathname` 作为 Windows 路径，实际以 `/D:/…` 报 EINVAL；改为 `fileURLToPath` 后八 workspace build 实际0。原[完整 built Store 测试](../../packages/agent/test/isolated/storage/build.test.ts)使用系统 tmpdir、私有新 data 子目录、Windows junction 和标准 file URL，原业务断言不删；现在能完成真实 built Worker／SQL／Store 准入，随后在原 Files 写入遇到下面独立的错误87，整文件仍失败。
+
+当前 Bun 的小 TypedArray 在第一次读取 `.buffer` 时可能移动底层存储：本机有界对照中 `new Uint8Array(44)` 的前后 `ptr` 不同，显式 ArrayBuffer backing 的前后地址相同。`TOKEN_USER` 返回的 SID 是缓冲区内的指针，事后 materialize 导致原地址失效。私有路径、媒体、候选 scope 和 daemon security 四个原 leaf 均改为在 `GetTokenInformation` 前分配 ArrayBuffer，保原 lifetime 引用、SID／DACL／identity 检查和关闭失败保留，不放宽权限、不修复既有对象 ACL。定位副本只增加失败位置，未替换产品或原测试；原失败保留。修复后原 private Profile/Worker/WAL/config/cold logs 和 unsafe ACL 拒绝两项实际通过，不能据此声称整个文件或 Windows 资格通过。
+
+**原始默认测试未通过。** `bun run test` 保原四槽调度及 Windows 串行合同，当前发现756文件／613作业（28并发作业、585独占）。首批四个 Desktop 作业中一个实际1，其他三个由 runner 收尾为143，后续609作业未派发。已见真实失败含 POSIX renderer file URL、固定 `/usr/bin/git`、`/private/tmp`、完整 descriptor 未到 verified，以及大附件等待超时；不把它们全部归为夹具问题。日志 `D:\Code\kite-code\.cache\windows-v13-20261014\default.log` SHA `d974c18c152fea069ef4720d3712ccd199814316bdb6b235f4a22fec047da853`。SID修复后没有盲重跑整轮，以下原完整专项仍有失败，wholeDefault=false。
+
+随后26份原完整文件各用独立 `bun test --parallel=1 --max-concurrency=1 <file>` 执行，保原预算和全部断言，无 test-name 过滤、平台替身或 availability skip。12文件退出0、14文件退出1；原文件最终总结合33pass／34fail／4个原非适用平台skip／2个未处理error／481expects，不与默认中断子记录叠加统计。
+
+| 实际范围 | 本机结果与仍未证明的部分 |
+| --- | --- |
+| 私有 daemon security／endpoint／record／pipe／process 五文件 | 全部文件通过，含真实当前SID pipe、完整单帧、原HANDLE birth／EOF退出及记录读写；不代 installed daemon 整链 |
+| Native runtime pins、文件候选 records／native、stdio MCP | 四文件通过；MCP实际连接、完整Tool输出与原Job树关闭通过，不授正式安装／跨代码／Shell资格 |
+| TUI九份私有记录、development-tui、development-desktop | 三文件通过；后两者只核准确资产选择／纯help／缺资产零写，未实际启动Desktop窗口或证明完整TUI |
+| 私有路径／MCP selection／候选scope／Files四文件 | 均仍失败：普通继承ACL Workspace配置写入不可用；候选目录rename未按断言被阻止、外来owner反例因本机权限不能设置；Files写入／恢复错误87 |
+| Windows维护、媒体、built Store三文件 | 均失败，媒体原HANDLE相对目录发布报Win32错误87；备份恢复／GC前置媒体发布未成，不能将后续断言记通过；媒体子例另保EBUSY清理失败 |
+| Native Node access | 1pass／7fail，实际 `windows_access_compiler_unavailable`；标准位置没有MSVC，原加载前拒绝负例通过不代后端正例 |
+| 四份Service正式恢复 | 全部文件失败；前三份主恢复在`/private/tmp`建根即ENOENT，第四份仍有私有目录ACL／broken pipe及2个error，未进入完整恢复证明 |
+| ConPTY scrollback、development-cli | 两文件失败；真实80×24ConPTY的完整material计数缺两项，CLI保目录symlink权限与Windows endpoint反例，不删检查点或放宽deadline |
+
+正式 `release:build --directory .cache/windows-v13-20261014/terminal-candidate` 实际1／`artifact_scope_denied`，该验证输出父目录保原继承ACL，未修ACL或放宽准入；不能由这次拒绝推候选本体已构建。Node原生测试另独立确认缺MSVC。未取得Terminal／Native候选，因此安装／升级回退／installed TUI／Native窗口与保数据卸载未执行。默认Shell的原Windows guard、原RSS32MiB／八outer和全资源／出生后代门禁保持，本轮不跑长时采集，不外推Linux或hosted Actions。
+
+原日志、各独立进程退出码／用时和SHA保本机 `D:\Code\kite-code\.cache\windows-v13-20261014\`，`native-batch-results.json`、`qualification-results.json`、`recovery-results.json`、`client-results.json`与`summary.json`分别保完整输入和统计，属于本机证据、不随Git交付。最终代码再次八workspace build0、根及八workspace typecheck0、六个代码文件Biome0、文档结构／实际影响检查0；全仓架构守卫在沙箱内及普通本机权限下均未完成，已准确停止所属检查进程，保两份不完整log，不记通过。公共接口、产品语义和模块边界未改，已核手册、Agent／Service owner与active原合同；不以本机红改写产品承诺。文档同步 `iteration_complete` 判定blocked，原因是Windows默认及专项仍有实际失败，不准备Git交付。本轮Windows已实际验证但未通过，37能力和wholeV13／phaseExit仍未闭合；未stage、commit、push、PR、安装发布或dispatch Actions。
+
+后续桌面开发与提交核对：用户已授权将当前全部改动一起提交。本机 MSVC／Windows SDK 已安装，显式 `desktop:dev` 自动准备构建环境，并支持 UI Fast Refresh 与 Service 源码新版本重载；准确实现和真实 Windows 窗口证据归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。提交检查另发现 Store／rollback 夹具的 POSIX 临时路径、目录权限及子进程 file URL 问题，改用系统 tmpdir、原私有目录端口与标准 file URL 后，原两份完整文件 13 项／52 条断言通过；原断言、Store 逻辑及安全约束不变。前述默认中断、媒体／Files／恢复失败仍保留，不把开发窗口或提交检查通过写成完整 Windows／三平台资格。

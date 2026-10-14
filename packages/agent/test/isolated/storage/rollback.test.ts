@@ -1,15 +1,23 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { UnifiedExecution } from '../../../src/execution';
 import { ExecutionResources } from '../../../src/execution/resources';
+import { privateDirectory } from '../../../src/platform/windows-path-security';
 import { openSqliteStore } from '../../../src/sqlite';
+
+function fixture(prefix: string) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const dataRoot = join(root, 'data');
+  privateDirectory(dataRoot);
+  return { root, dataRoot };
+}
 
 for (const failure of ['execution.planned', 'execution.dispatching'])
   test(`${failure} commit failure rolls back intent/dispatch and causes zero adapter I/O`, async () => {
-    const dataRoot = mkdtempSync('/private/tmp/kite-store-fault-');
-    chmodSync(dataRoot, 0o700);
+    const { root, dataRoot } = fixture('kite-store-fault-');
     const store = await openSqliteStore({ dataRoot, profile: 'test' });
     try {
       const expectedStoreId = (await store.getMetadata()).storeId;
@@ -85,13 +93,12 @@ for (const failure of ['execution.planned', 'execution.dispatching'])
       db.close();
     } finally {
       await store.close();
-      rmSync(dataRoot, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
 test('accepted work prevents release; acceptance after release can be owned by another Service', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-store-handoff-');
-  chmodSync(dataRoot, 0o700);
+  const { root, dataRoot } = fixture('kite-store-handoff-');
   const first = await openSqliteStore({ dataRoot, profile: 'test' });
   const second = await openSqliteStore({ dataRoot, profile: 'test' });
   try {
@@ -136,6 +143,6 @@ test('accepted work prevents release; acceptance after release can be owned by a
   } finally {
     await first.close();
     await second.close();
-    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   }
 });

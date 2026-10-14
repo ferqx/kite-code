@@ -2,6 +2,8 @@
 
 本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
+2026-10-14 已按用户要求在 Windows NT 10.0.26300.0／x64／Bun1.4.2 实际执行本机验证：修复Worker构建路径与四个TOKEN_USER缓冲区问题后，八workspace build通过；原默认首批Desktop作业失败并中断，后续未派发。另26份原完整专项各独立Bun进程，12文件通过／14文件失败，合33pass／34fail／4原平台skip／2error。通过范围含daemon原生叶子、stdio MCP、文件候选与TUI私有记录；Files／媒体发布错误87、普通Workspace配置、四份恢复、ConPTY内容、Desktop夹具和缺MSVC仍阻断完整验收。准确命令、原日志与局部修复归[Windows本机证据](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-14windows-本机首次实际验证)。以下旧“Win/Linux未实测”只描述各历史轮次，当前Windows已实测但未通过，Linux／hosted Actions及完整installed资格不由本轮替代。
+
 当前最后完整默认为macOS `a99fdf29` 加本轮最终冻结改动的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1472.848秒，原四并发／604排空后7独占保持；4493输入、11资产、HEAD和Git零漂移。恢复Actions守卫、四份正式恢复、原Terminal／Web／80×24 TUI与Native头部错误／草稿完整文件均在该图内通过，原三轮失败及修复证据保留。准确冻结、原log与result归[集中收尾进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。最终结果归档仅补文档，不重新命名未变执行输入为新一轮测试；原RSS／完整资源与出生后代仍未闭合，wholeV13／phaseExit保持false，Win/Linux只有配置完成与未实测备注。
 
 此前完整默认证据为macOS clean `2e3c19bd` 的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1464.452秒，原4并发／604排空后7独占和全部原断言／预算保持。4493文件输入及11运行资产／HEAD／status零漂移，原Native问答失败修复后也在整轮通过；第一轮真实失败仍保留。同名临时fixture仅按冻结源码和父区间归属，不过滤正式失败、不改原runner或为统计重测。准确原始与独立审计证据归[当前整轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13普通调用者退役与-native-修复后的完整统一验证)。完整默认通过不解除原RSS／资源观测或阶段资格；助手 OS 字节未观测不记为通过，但再次人工粘贴不是新增独立门禁。Win/Linux 按用户2026-10-13最新范围只验收 Actions 接线与未实测备注，不把配置或本机通过写成原生执行结果。

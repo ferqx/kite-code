@@ -2,6 +2,10 @@
 
 The Bun host selects a lazy, fixed native Windows x64 policy. Importing this leaf in Node or POSIX does not load a DLL or inspect a token. Windows uses kernel32 and the actual SystemDirectory advapi32, the current process token SID, and handle-based owner/DACL inspection. There is no configuration, Model, HTTP, arbitrary descriptor or SID input.
 
+`TOKEN_USER` 的 SID 指向原返回缓冲区内部；原生调用前即分配显式 ArrayBuffer backing，避免当前 Bun 小 TypedArray 首次读取 `.buffer` 时移动存储而使指针失效。私有路径、媒体、候选scope与daemon security同样保持这一要求，并保留原缓冲区到全部SID比较结束；不靠放宽owner／DACL检查或修复既有ACL解决失败。
+
+2026-10-14 Windows本机已实际通过原private Profile／Worker／WAL／config／cold logs和unsafe ACL拒绝两项，但完整原文件仍有媒体发布错误87及普通Workspace配置写入失败；这里的scope支持仍是应满足的合同，不能据源码接口当作本机已通过。原命令、有限通过和剩余缺口见[本机证据](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-14windows-本机首次实际验证)。后文旧“未运行”描述对应原轮次，完整维护／发行资格继续未取得。
+
 New managed directories and coordination files are created with an owner-only protected descriptor. Directory inheritance gives SQLite-created WAL/SHM and configuration temporary files their private initial ACL. Existing objects are verified, never repaired into apparent safety. Verification rejects reparse paths, hardlinked files, foreign owners, null DACLs, additional ACEs, and unexpected rights. A live lock compares the original handle's volume/file identity to the current path and checks both ACLs. Concurrent creation may adopt only an already-existing object that passes the same verification.
 
 Public Profile and configuration leaves choose this backend by default. Trusted explicit injection remains possible, but the fixed native Worker/lock checks still apply. SQLite validates profile/database/WAL/SHM and profile metadata before opening and after initialization. Private Profile and coordination directories still require the fixed current-user DACL.

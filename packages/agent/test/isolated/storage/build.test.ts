@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test';
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,13 +8,17 @@ import {
   rmSync,
   symlinkSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { privateDirectory } from '../../../src/platform/windows-path-security';
 import { buildStorageAssets } from '../../../src/storage/worker/build-assets';
 
 test('built sqlite entry opens with its bundled Worker and SQL asset', async () => {
-  const output = mkdtempSync('/private/tmp/kite-store-build-');
-  const dataRoot = mkdtempSync('/private/tmp/kite-store-built-profile-');
-  chmodSync(dataRoot, 0o700);
+  const output = realpathSync(mkdtempSync(join(tmpdir(), 'kite-store-build-')));
+  const profileRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kite-store-built-profile-')));
+  const dataRoot = join(profileRoot, 'data');
+  privateDirectory(dataRoot);
   try {
     const owner = resolve(import.meta.dir, '../../..');
     const repository = resolve(owner, '../..');
@@ -35,15 +38,19 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
       if (!installed) throw Error(`public_dependency_missing:${dependency}`);
       const target = join(output, 'node_modules', dependency);
       mkdirSync(dirname(target), { recursive: true });
-      symlinkSync(realpathSync(installed), target, 'dir');
+      symlinkSync(
+        realpathSync(installed),
+        target,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
     }
     const result = await Bun.build({
       entrypoints: [
-        new URL('../../../src/sqlite.ts', import.meta.url).pathname,
-        new URL('../../../src/profile.ts', import.meta.url).pathname,
-        new URL('../../../src/resources.ts', import.meta.url).pathname,
-        new URL('../../../src/files.ts', import.meta.url).pathname,
-        new URL('../../../src/artifacts.ts', import.meta.url).pathname,
+        fileURLToPath(new URL('../../../src/sqlite.ts', import.meta.url)),
+        fileURLToPath(new URL('../../../src/profile.ts', import.meta.url)),
+        fileURLToPath(new URL('../../../src/resources.ts', import.meta.url)),
+        fileURLToPath(new URL('../../../src/files.ts', import.meta.url)),
+        fileURLToPath(new URL('../../../src/artifacts.ts', import.meta.url)),
       ],
       outdir: output,
       target: 'bun',
@@ -51,20 +58,20 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
     });
     expect(result.success).toBe(true);
     const profile = (await import(
-      join(output, 'profile.js')
+      pathToFileURL(join(output, 'profile.js')).href
     )) as typeof import('../../../src/profile');
     const selected = profile.selectProfile({ dataRoot, profile: 'built' });
     expect(selected.databasePath).toBe(join(dataRoot, 'built', 'core.db'));
     expect((await import('node:fs')).existsSync(selected.coordinationPath)).toBe(false);
     await buildStorageAssets(output);
     const runner = (await import(
-      join(output, 'sqlite.js')
+      pathToFileURL(join(output, 'sqlite.js')).href
     )) as typeof import('../../../src/sqlite');
     const store = await runner.openSqliteStore({ dataRoot, profile: 'built' });
     try {
       expect((await store.getMetadata()).formatMajor).toBe(1);
       const filesEntry = (await import(
-        join(output, 'files.js')
+        pathToFileURL(join(output, 'files.js')).href
       )) as typeof import('../../../src/files');
       const files = filesEntry.createWorkspaceFiles({ root: dataRoot });
       try {
@@ -101,7 +108,7 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
         title: 'built',
       });
       const artifactsEntry = (await import(
-        join(output, 'artifacts.js')
+        pathToFileURL(join(output, 'artifacts.js')).href
       )) as typeof import('../../../src/artifacts');
       const artifacts = artifactsEntry.createArtifactStore({
         profile: { dataRoot, profile: 'built' },
@@ -123,7 +130,7 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
         await artifacts.close();
       }
       const resourceEntry = (await import(
-        join(output, 'resources.js')
+        pathToFileURL(join(output, 'resources.js')).href
       )) as typeof import('../../../src/resources');
       const locks = resourceEntry.createWorkspaceSerialLocks(selected);
       const release = await locks.acquire(
@@ -137,6 +144,6 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
     }
   } finally {
     rmSync(output, { recursive: true, force: true });
-    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(profileRoot, { recursive: true, force: true });
   }
 });

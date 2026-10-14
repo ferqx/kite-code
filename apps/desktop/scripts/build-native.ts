@@ -30,17 +30,27 @@ import {
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build as buildRenderer } from 'vite';
+import { type DesktopDevelopment, parseDesktopDevelopment } from '../electron/development';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
 import { buildWindowsAccess } from './build-windows-access';
 import { probeNativeSqliteEngine } from './sqlite-engine';
-export async function buildNativeDesktop(input: NativeAssets, outdir: string) {
+export async function buildNativeDesktop(
+  input: NativeAssets,
+  outdir: string,
+  development?: DesktopDevelopment,
+) {
   const assets = parseNativeAssets(input);
+  const prepared = parseDesktopDevelopment(development, assets.kind === 'development');
   if (!isAbsolute(outdir)) throw Error('native_outdir_must_be_absolute');
   verifyNativeAsset(assets.serviceEntrypoint, assets.serviceSha256);
   verifyNativeAsset(assets.bunExecutable, assets.bunSha256);
-  await buildNativeApp(assets, outdir);
+  await buildNativeApp(assets, outdir, prepared);
 }
-async function buildNativeApp(assets: NativeAssets | { kind: 'candidate' }, outdir: string) {
+async function buildNativeApp(
+  assets: NativeAssets | { kind: 'candidate' },
+  outdir: string,
+  development: DesktopDevelopment | null = null,
+) {
   if (process.platform === 'win32') privateDirectory(outdir);
   else await mkdir(outdir, { recursive: true });
   const root = resolve(import.meta.dir, '..');
@@ -80,6 +90,7 @@ async function buildNativeApp(assets: NativeAssets | { kind: 'candidate' }, outd
       naming: `${entry}.cjs`,
       define: {
         __KITE_DESKTOP_NATIVE_ASSETS__: JSON.stringify(assets),
+        __KITE_DESKTOP_DEVELOPMENT__: JSON.stringify(development),
         __KITE_DESKTOP_PROFILE_ACCESS__: JSON.stringify(profileAccessAsset),
         __KITE_DESKTOP_WINDOWS_ACCESS__: JSON.stringify(windowsAccessAsset),
       },
@@ -89,23 +100,24 @@ async function buildNativeApp(assets: NativeAssets | { kind: 'candidate' }, outd
   // Retain the original desktop renderer pipeline and its compiled CSS/fonts.
   // The already built Main, preload and helpers share this destination.
   if (process.platform === 'win32') privateDirectory(join(outdir, 'assets'));
-  await buildRenderer({
-    root,
-    configFile: false,
-    plugins: [react(), tailwindcss()],
-    base: './',
-    clearScreen: false,
-    logLevel: 'warn',
-    build: {
-      target: 'es2022',
-      outDir: outdir,
-      emptyOutDir: false,
-      rollupOptions: {
-        input: join(root, 'index.html'),
-        output: { entryFileNames: 'renderer.js' },
+  if (!development)
+    await buildRenderer({
+      root,
+      configFile: false,
+      plugins: [react(), tailwindcss()],
+      base: './',
+      clearScreen: false,
+      logLevel: 'warn',
+      build: {
+        target: 'es2022',
+        outDir: outdir,
+        emptyOutDir: false,
+        rollupOptions: {
+          input: join(root, 'index.html'),
+          output: { entryFileNames: 'renderer.js' },
+        },
       },
-    },
-  });
+    });
   await writeFile(
     join(outdir, 'package.json'),
     JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' }),

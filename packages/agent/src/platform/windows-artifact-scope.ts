@@ -81,7 +81,8 @@ function createBackend(): (
       const bytes = new Uint32Array(1);
       adv.symbols.GetTokenInformation(token[0]!, 1, null, 0, ptr(bytes));
       if (!bytes[0] || bytes[0] > 65536) fail();
-      user = new Uint8Array(bytes[0]!);
+      // Allocate stable backing before GetTokenInformation writes its embedded SID pointer.
+      user = new Uint8Array(new ArrayBuffer(bytes[0]!));
       if (!adv.symbols.GetTokenInformation(token[0]!, 1, ptr(user), user.length, ptr(bytes)))
         fail();
       sid = pointer(new DataView(user.buffer).getBigUint64(0, true));

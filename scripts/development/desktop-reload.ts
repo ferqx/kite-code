@@ -1,0 +1,285 @@
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createServer, type Socket } from 'node:net';
+import { join, relative } from 'node:path';
+import { Readable } from 'node:stream';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import type { DevelopmentServiceReload } from '../../apps/desktop/electron/development';
+
+export { startDesktopRenderer } from '../../apps/desktop/scripts/development-renderer';
+
+/** Private, per-launch parent control. Windows Electron GUI stdin is not a reliable pipe. */
+export async function startDesktopControl() {
+  const token = randomBytes(32).toString('hex');
+  let socket: Socket | undefined;
+  let accept: ((peer: Socket) => void) | undefined;
+  const ready = new Promise<Socket>((resolve) => {
+    accept = resolve;
+  });
+  const candidates = new Set<Socket>();
+  const server = createServer((peer) => {
+    candidates.add(peer);
+    let buffer = '';
+    const timeout = setTimeout(() => peer.destroy(), 3000);
+    const receive = (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      if (Buffer.byteLength(buffer) > 512) {
+        peer.destroy();
+        return;
+      }
+      const end = buffer.indexOf('\n');
+      if (end === -1) return;
+      let value: unknown;
+      try {
+        value = JSON.parse(buffer.slice(0, end));
+      } catch {
+        peer.destroy();
+        return;
+      }
+      if (
+        socket ||
+        !value ||
+        typeof value !== 'object' ||
+        Array.isArray(value) ||
+        Object.keys(value).length !== 2 ||
+        !('kind' in value) ||
+        value.kind !== 'desktop.ready' ||
+        !('token' in value) ||
+        typeof value.token !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(value.token) ||
+        !timingSafeEqual(Buffer.from(value.token), Buffer.from(token)) ||
+        buffer.slice(end + 1)
+      ) {
+        peer.destroy();
+        return;
+      }
+      clearTimeout(timeout);
+      peer.off('data', receive);
+      peer.pause();
+      socket = peer;
+      accept!(peer);
+    };
+    peer.on('data', receive);
+    peer.on('error', () => {});
+    peer.once('close', () => {
+      clearTimeout(timeout);
+      candidates.delete(peer);
+    });
+  });
+  server.maxConnections = 4;
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw Error('development_control_unavailable');
+  return {
+    configuration: { port: address.port, token },
+    async attach(exited: Promise<number>) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const peer = await Promise.race([
+          ready,
+          exited.then(() => {
+            throw Error('development_desktop_exited');
+          }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(Error('development_control_unavailable')), 15000);
+          }),
+        ]);
+        let writing = Promise.resolve();
+        return createDesktopReloadChannel({
+          stdin: {
+            write(value) {
+              writing = new Promise<void>((resolve, reject) =>
+                peer.write(value, (error) => (error ? reject(error) : resolve())),
+              );
+            },
+            flush: () => writing,
+          },
+          stdout: Readable.toWeb(peer),
+          exited,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    stop: () => socket?.end(),
+    async close() {
+      for (const peer of candidates) peer.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+export async function buildDevelopmentService(
+  root: string,
+  outdir: string,
+): Promise<DevelopmentServiceReload> {
+  const id = randomUUID().replaceAll('-', ''),
+    services = join(outdir, 'services'),
+    directory = join(services, id);
+  privateDirectory(outdir);
+  privateDirectory(services);
+  privateDirectory(directory);
+  let result: Awaited<ReturnType<typeof Bun.build>>;
+  try {
+    result = await Bun.build({
+      entrypoints: [join(root, 'apps/service/src/main.ts')],
+      target: 'bun',
+      packages: 'bundle',
+      external: ['@kite-ai/*'],
+      outdir: directory,
+      naming: 'main.js',
+    });
+  } catch (error) {
+    throw new AggregateError([error], 'development_service_build_failed');
+  }
+  if (!result.success) throw new AggregateError(result.logs, 'development_service_build_failed');
+  return {
+    id,
+    sha256: createHash('sha256')
+      .update(readFileSync(join(directory, 'main.js')))
+      .digest('hex'),
+  };
+}
+
+export function isDevelopmentServiceSource(root: string, file: string): boolean {
+  const path = relative(root, file).replaceAll('\\', '/');
+  return /^apps\/service\/src\/.*\.(?:[cm]?tsx?|json)$/.test(path);
+}
+
+/** Coalesce saves and serialize builds/reloads; a failed build can be retried by the next save. */
+export function createDesktopReloadQueue(input: {
+  reload: () => Promise<void>;
+  failed: (error: unknown) => void;
+  debounceMs?: number;
+}) {
+  let timer: ReturnType<typeof setTimeout> | undefined,
+    running: Promise<void> | undefined,
+    pending = false,
+    closed = false;
+  const drain = () => {
+    if (running || closed) return;
+    running = (async () => {
+      while (pending && !closed) {
+        pending = false;
+        try {
+          await input.reload();
+        } catch (error) {
+          input.failed(error);
+        }
+      }
+    })().finally(() => {
+      running = undefined;
+      if (pending && !closed) drain();
+    });
+  };
+  return {
+    changed() {
+      if (closed) return;
+      pending = true;
+      clearTimeout(timer);
+      timer = setTimeout(drain, input.debounceMs ?? 150);
+    },
+    async close() {
+      closed = true;
+      pending = false;
+      clearTimeout(timer);
+      await running;
+    },
+  };
+}
+
+/** A missing acknowledgement is unknown; do not issue another reload against that Main. */
+export function createDesktopReloadChannel(
+  child: {
+    stdin: { write(value: string): unknown; flush(): unknown };
+    stdout: {
+      getReader(): { read(): Promise<{ done?: boolean; value?: Uint8Array }>; releaseLock(): void };
+    };
+    exited: Promise<number>;
+  },
+  timeoutMs = 45000,
+) {
+  let pending: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined,
+    failure: Error | undefined;
+  const fail = (error: Error) => {
+    failure = error;
+    pending?.reject(error);
+    pending = undefined;
+  };
+  const read = (async () => {
+    const reader = child.stdout.getReader(),
+      decoder = new TextDecoder('utf-8', { fatal: true });
+    let buffer = '';
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        if (!chunk.value) throw Error('development_service_reload_unconfirmed');
+        buffer += decoder.decode(chunk.value, { stream: true });
+        if (Buffer.byteLength(buffer) > 16384)
+          throw Error('development_service_reload_unconfirmed');
+        for (;;) {
+          const index = buffer.indexOf('\n');
+          if (index === -1) break;
+          const line = buffer.slice(0, index);
+          buffer = buffer.slice(index + 1);
+          let value: unknown;
+          try {
+            value = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (
+            !value ||
+            typeof value !== 'object' ||
+            Array.isArray(value) ||
+            !('kind' in value) ||
+            value.kind !== 'service.reloaded' ||
+            !('id' in value) ||
+            value.id !== pending?.id ||
+            !('ok' in value) ||
+            typeof value.ok !== 'boolean' ||
+            Object.keys(value).length !== 3
+          )
+            continue;
+          if (!value.ok) fail(Error('development_service_reload_failed'));
+          else {
+            pending?.resolve();
+            pending = undefined;
+          }
+        }
+      }
+    } catch {
+      fail(Error('development_service_reload_unconfirmed'));
+    } finally {
+      reader.releaseLock();
+    }
+  })();
+  void child.exited.then(() => fail(Error('development_desktop_exited')));
+  return {
+    read,
+    async reload(request: DevelopmentServiceReload) {
+      if (failure) throw failure;
+      if (pending) throw Error('development_service_reload_busy');
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const acknowledged = new Promise<void>((resolve, reject) => {
+        pending = { id: request.id, resolve, reject };
+        timer = setTimeout(() => fail(Error('development_service_reload_unconfirmed')), timeoutMs);
+      });
+      void acknowledged.catch(() => {});
+      try {
+        child.stdin.write(`${JSON.stringify({ kind: 'service.reload', ...request })}\n`);
+        await child.stdin.flush();
+        await acknowledged;
+      } catch (error) {
+        if (pending) fail(Error('development_service_reload_unconfirmed'));
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
