@@ -178,14 +178,14 @@ async function open(f: ReturnType<typeof fixture>) {
 test('actual Ink Add edits separate buffers, explicit Review and Confirm submit once without answering or Model task', async () => {
   const f = fixture();
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     await press(ui, '\r');
     await tick();
-    await press(ui, 'new_owned');
     await press(ui, '\r');
     await tick();
+    await press(ui, 'new_owned');
     await press(ui, '\r');
     await tick();
     await press(ui, 'https://example.invalid/mcp');
@@ -217,7 +217,7 @@ test('actual Ink Add edits separate buffers, explicit Review and Confirm submit 
 test('actual Ink Remove works without admitted selection, shows revealed user and keeps confirmation independent', async () => {
   const f = fixture();
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     await press(ui, '\x1b[B');
@@ -247,7 +247,7 @@ test('actual Ink Remove works without admitted selection, shows revealed user an
 test('failed directory keeps second original keyboard reachable; selecting zero GET, explicit Check original session only', async () => {
   const f = fixture([saved('first'), saved('second')], true);
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     await press(ui, '\x1b[B');

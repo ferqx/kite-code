@@ -114,7 +114,10 @@ import {
   workspaceRemoval,
 } from './workspace-removal';
 
-type Input = { modelOutput?: import('../../model-output').ModelOutputReference } & OwnedWrite &
+type Input = {
+  modelOutput?: import('../../model-output').ModelOutputReference;
+  reasoning?: string;
+} & OwnedWrite &
   AcceptCommandInput &
   PlanExecutionInput &
   Omit<DispatchInput, 'requirements'> &
@@ -1627,6 +1630,7 @@ export class SqliteOperations {
           }
           const messageBody = {
             content: input.content,
+            ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
             sourceIds: [input.executionId],
             ...(input.modelOutput === undefined ? {} : { modelOutput: input.modelOutput }),
           } as unknown as Json;

@@ -156,6 +156,8 @@ export interface Extension {
   };
 }
 export interface PublicRun {
+  /** Read-only persisted provenance. Older external readers may omit it. */
+  readonly originStoreId?: string;
   waitingForResults: string[];
   id: string;
   sessionId: string;

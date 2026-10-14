@@ -1,11 +1,13 @@
 import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
-import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { OverlayListRow } from './ink/OverlayPrimitives';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** Separate Review/Confirm and original-ID navigation; no letter key dispatches business. */
 export function TuiMcpReconnectionPanel({ controller }: { controller: TuiController }) {
+  const { t: originalLabel } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation(),
     state = controller.state;
   const [index, setIndex] = useState(0);
@@ -57,7 +59,7 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
   const offset = Math.max(0, Math.min(index - 2, actions.length - 5));
   const label = (row: Choice) =>
     row.kind === 'original'
-      ? `${t('Original forced reconnect:')} ${terminalText(row.id)}`
+      ? `${t('Original forced reconnect:')} ${testDiagnostics ? terminalText(row.id) : rows.findIndex((item) => item.intent.request.commandId === row.id) + 1}`
       : t(
           row.kind === 'check'
             ? 'Check original forced reconnect'
@@ -71,8 +73,19 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
     <TuiOverlayFrame
       title={
         <>
-          {t('Forced reconnects')} · {terminalText(state.snapshot?.view.session.workspaceId ?? '')}
+          {t('Forced reconnects')}{' '}
+          {testDiagnostics && terminalText(state.snapshot?.view.session.workspaceId ?? '')}
         </>
+      }
+      meta={`${index + 1} / ${actions.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: 'Enter', label: originalLabel('common.confirm') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
       }
     >
       <Text>{t('Selecting an original ID does not query, reconnect or authorize tools.')}</Text>
@@ -128,18 +141,22 @@ export function TuiMcpReconnectionPanel({ controller }: { controller: TuiControl
         </>
       )}
       {actions.slice(offset, offset + 5).map((row, i) => (
-        <Text key={row.kind === 'original' ? row.id : row.kind}>
-          {index === offset + i ? '›' : ' '} {label(row)}
-        </Text>
+        <OverlayListRow
+          key={row.kind === 'original' ? row.id : row.kind}
+          selected={index === offset + i}
+          primary={label(row)}
+        />
       ))}
       <Text>{t('↑/↓ choose · Enter select · Esc back')}</Text>
       {outcome && (
         <>
-          <Text>
-            {t('Original forced reconnect:')} {terminalText(outcome.intent.request.commandId)} ·{' '}
-            {t('Original Store:')} {terminalText(outcome.intent.request.expectedStoreId)} ·{' '}
-            {t('Session')} {terminalText(outcome.intent.sessionId)}
-          </Text>
+          {testDiagnostics && (
+            <Text>
+              {t('Original forced reconnect:')} {terminalText(outcome.intent.request.commandId)} ·{' '}
+              {t('Original Store:')} {terminalText(outcome.intent.request.expectedStoreId)} ·{' '}
+              {t('Session')} {terminalText(outcome.intent.sessionId)}
+            </Text>
+          )}
           <Text>
             {t(
               state.mcpReconnectionReading

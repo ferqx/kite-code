@@ -1,16 +1,18 @@
 import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
-import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
+import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
+import { OverlayListRow, OverlayMessage } from './ink/OverlayPrimitives';
 import type { TuiColorPreset, TuiLanguage } from './preferences';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 const languages: readonly TuiLanguage[] = ['system', 'zh-CN', 'en-US'];
 const colors: readonly TuiColorPreset[] = ['teal', 'blue', 'purple', 'cyan', 'mono'];
 export function TuiPreferencePanel({ controller }: { controller: TuiController }) {
+  const { t: originalLabel, language: inkLanguage } = useInkI18n();
   const state = controller.state,
     facts = state.preferences;
-  const { t } = useTuiPresentation();
+  const { t, testDiagnostics } = useTuiPresentation();
   const language = state.panel === 'language';
   const options: readonly (TuiLanguage | TuiColorPreset)[] = language ? languages : colors;
   const current = language ? facts.language : facts.colorPreset;
@@ -36,44 +38,75 @@ export function TuiPreferencePanel({ controller }: { controller: TuiController }
       );
     }
   });
+  const labels = {
+    system: ['language.system', 'language.systemDescription'],
+    'zh-CN': ['language.zhCN', 'language.zhCNDescription'],
+    'en-US': ['language.enUS', 'language.enUSDescription'],
+    teal: ['theme.teal', 'theme.tealDescription'],
+    blue: ['theme.blue', 'theme.blueDescription'],
+    purple: ['theme.purple', 'theme.purpleDescription'],
+    cyan: ['theme.cyan', 'theme.cyanDescription'],
+    mono: ['theme.mono', 'theme.monoDescription'],
+  } as const;
   return (
-    <TuiOverlayFrame title={<> {t(language ? 'Language' : 'Theme')} </>}>
-      <Text>{t('Local client preferences; work and permissions remain unchanged.')}</Text>
+    <TuiOverlayFrame
+      title={
+        testDiagnostics
+          ? t(language ? 'Language' : 'Theme')
+          : originalLabel(language ? 'language.title' : 'theme.title')
+      }
+      meta={`${index + 1} / ${options.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: 'Enter', label: originalLabel('common.confirm') },
+            { keys: 'R', label: t('Refresh') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
+      }
+      message={
+        state.preferenceStatus !== 'confirmed' || state.preferenceSaved ? (
+          <OverlayMessage tone={state.preferenceError ? 'error' : 'info'}>
+            {state.preferenceStatus === 'confirmed'
+              ? t('Preference saved')
+              : state.preferenceStatus === 'loading'
+                ? t('Reading preferences')
+                : state.preferenceStatus === 'saving'
+                  ? t('Saving preference')
+                  : state.preferenceError === 'tui_preferences_publication_uncertain'
+                    ? t(
+                        'Save outcome unknown; last confirmed values retained. R rereads original preferences before another choice.',
+                      )
+                    : t(
+                        'Preference failed; previous values retained. R rereads before another choice.',
+                      )}
+            {state.preferenceError && ` · ${terminalText(state.preferenceError)}`}
+          </OverlayMessage>
+        ) : undefined
+      }
+    >
       {options.map((value, i) => (
-        <Text key={value} bold={index === i}>
-          {index === i ? '> ' : '  '}
-          {language
-            ? t(
-                value === 'system'
-                  ? 'System language'
-                  : value === 'zh-CN'
-                    ? 'Simplified Chinese'
-                    : 'English',
-              )
-            : value}{' '}
-          [{value}]{value === current ? ' ✓' : ''}
-        </Text>
+        <OverlayListRow
+          key={value}
+          selected={index === i}
+          primary={originalLabel(labels[value][0])}
+          secondary={originalLabel(labels[value][1])}
+          trailing={
+            <OverlayStatusColumn
+              active={value === current}
+              label={inkLanguage === 'zh-CN' ? '当前' : 'Current'}
+            />
+          }
+        />
       ))}
-      <Text>
-        {t('Effective language:')} {facts.resolvedLanguage} · {t('Base theme:')} {facts.theme}
-      </Text>
-      <Text>{t('↑↓ select · Enter save · R reread · Esc back')}</Text>
-      <Text>
-        {state.preferenceStatus === 'confirmed'
-          ? t(state.preferenceSaved ? 'Preference saved' : 'Confirmed preferences')
-          : state.preferenceStatus === 'loading'
-            ? t('Reading preferences')
-            : state.preferenceStatus === 'saving'
-              ? t('Saving preference')
-              : state.preferenceError === 'tui_preferences_publication_uncertain'
-                ? t(
-                    'Save outcome unknown; last confirmed values retained. R rereads original preferences before another choice.',
-                  )
-                : t(
-                    'Preference failed; previous values retained. R rereads before another choice.',
-                  )}
-      </Text>
-      {state.preferenceError && <Text color="red">{terminalText(state.preferenceError)}</Text>}
+      {testDiagnostics && (
+        <Text>
+          {t('Confirmed preferences')} · {language && t('System language')} ·{' '}
+          {t('Effective language:')} {facts.resolvedLanguage} · {t('Base theme:')} {facts.theme}
+        </Text>
+      )}
     </TuiOverlayFrame>
   );
 }

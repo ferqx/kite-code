@@ -213,16 +213,16 @@ test('Ink independent Project sources remains visible on failed management; sepa
   const f = fixture();
   await f.controller.select('a');
   await f.controller.openMcp();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
-    expect(ui.lastFrame()).toContain('› Project sources');
+    expect(ui.lastFrame()).toContain('❯ Project sources');
     ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain('Source list ready');
     ui.stdin.write('\r');
     await tick();
-    expect(ui.lastFrame()).toContain('› Review project source');
+    expect(ui.lastFrame()).toContain('❯ Review project source');
     ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain('Confirm project source review:');
@@ -295,12 +295,12 @@ for (const failed of [false, true])
     };
     await open(f);
     expect(f.lookups).toHaveLength(0);
-    const ui = render(<TuiSession controller={f.controller} />);
+    const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
     try {
       await tick();
       ui.stdin.write('\u001b[B'.repeat(2));
       await tick();
-      expect(ui.lastFrame()).toContain('› Original source decision: second');
+      expect(ui.lastFrame()).toContain('❯ Original source decision: second');
       ui.stdin.write('\r');
       await tick();
       expect(f.lookups).toHaveLength(0);
@@ -416,19 +416,19 @@ test('Ink finite local source pagination reaches row beyond management 32 items 
     return s;
   };
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     expect(ui.lastFrame()).not.toContain('external-60');
     ui.stdin.write('\u001b[B'.repeat(25));
     await tick();
-    expect(ui.lastFrame()).toContain('› Next project sources');
+    expect(ui.lastFrame()).toContain('❯ Next project sources');
     ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain('external-25');
     ui.stdin.write('\u001b[B'.repeat(26));
     await tick();
-    expect(ui.lastFrame()).toContain('› Next project sources');
+    expect(ui.lastFrame()).toContain('❯ Next project sources');
     ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain('external-50');
@@ -448,7 +448,7 @@ for (const [steps, decision] of [
     const f = fixture();
     f.cards([question()]);
     await f.controller.select('a');
-    const ui = render(<TuiSession controller={f.controller} />);
+    const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
     try {
       await tick();
       expect(ui.lastFrame()).toContain(
@@ -484,7 +484,7 @@ test('Source Question choice cannot cross revision or source/presentation identi
   const f = fixture();
   f.cards([question()]);
   await f.controller.select('a');
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\u001b[B');
@@ -611,7 +611,7 @@ test('Ink Chinese Source labels preserve external name and original IDs', async 
   };
   await f.controller.refreshPreferences();
   await open(f);
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     expect(ui.lastFrame()).toContain('项目来源');
@@ -619,7 +619,7 @@ test('Ink Chinese Source labels preserve external name and original IDs', async 
     expect(ui.lastFrame()).toContain(serverId);
     ui.stdin.write('\r');
     await tick();
-    expect(ui.lastFrame()).toContain('› 审查项目来源');
+    expect(ui.lastFrame()).toContain('❯ 审查项目来源');
     expect(f.counts()).toEqual({ minted: 0, business: 0 });
   } finally {
     ui.unmount();
@@ -630,7 +630,7 @@ test('exact Source Question Esc/Ctrl+C clear only this explicit selection and ne
   const f = fixture();
   f.cards([question()]);
   await f.controller.select('a');
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\u001b[B');
@@ -663,7 +663,7 @@ for (const phase of ['saved', 'failed', 'cancelled'] as const)
     const f = fixture([{ intent: original('terminal'), phase }]);
     await open(f);
     f.controller.selectMcpSourceOriginal('terminal');
-    const ui = render(<TuiSession controller={f.controller} />);
+    const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
     try {
       await tick();
       expect(ui.lastFrame()).toContain('Source outcome unknown; check original');

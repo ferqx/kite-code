@@ -173,3 +173,8 @@ Store 的锁与事务见[存储 owner](src/storage/README.md)。[Runtime 实测]
 [会话日志](src/storage/sqlite/session-logs.README.md)由现有 change_event 的私有有限 envelope 记录当时 metadata，原公开 payload/SSE 不变。`@kite-ai/agent/storage` 提供有限 `readSessionLogs`，精确原主体和 Store/Session，固定 Decimal64 上界；observer AbortSignal 不进入 Worker，也不取消业务。实际原 Model 导航只验证现有 immutable binding，不读取全文或授予权限；Core 最后 subject 三文件 14/231 与原邻接/恢复媒体证据分开记录，HTTP/SDK/UI 各由其 owner 提供消费资格。
 
 [Files](src/tools/files/README.md)公开可信完整`readBytes/restore/remove`，保原Workspace、finite maxBytes与发布后unknown。独立[checkpoint leaf](src/business/file-checkpoints/README.md)捕获原preimage/Model消费边界，跨Fork保存完整业务snapshot并通过通用private readonly来源核未选后像；restore v2保存实际新inode与逐文件effect ledger，旧v1只读不回填。Core不识别Files ID，仅提供通用group/context/records/projection最终SQL约束和actual Run派生的[原selection观察](src/storage/sqlite/context/README.md)。默认跨Fork、A→B和同Session selector变化、Web有限只读均有实际资格；CLI/TUI/Native三个恢复范围与组合unknown caller继续实施，不能用底层手动组合替代产品交付。
+
+
+## 终端只读展示来源
+
+[执行器](src/execution/index.ts)在原 100ms／32KiB 前缀保存节奏同时保存 small reasoning 和 content；失败保留实际前缀，未完整 Tool 参数仍不派发。optional reasoning 使用原 JSON message bytes，不改 DDL／format／备份合同，完整 reader 仍核原 scope／hash。Runtime 仅对实际压缩 Session 临时保存 preparing／summarizing／validating，公开 View 按原 active Run／Store投影，finally 清除；冷状态不造阶段。[真实 reasoning](test/isolated/model-output/live-reasoning.test.ts)及[压缩进度](test/isolated/context/compression-progress.test.ts)覆盖这两项来源。

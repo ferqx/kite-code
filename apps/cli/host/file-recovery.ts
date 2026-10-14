@@ -1,5 +1,10 @@
 import { pathToFileURL } from 'node:url';
-import { type AgentClient, requiresInteractionAttachment } from '@kite-ai/client';
+import {
+  type AgentClient,
+  type FileCheckpointPage,
+  requiresInteractionAttachment,
+  type SessionView,
+} from '@kite-ai/client';
 import {
   canonicalFileRecoveryIntent,
   type FileRecoveryIntent,
@@ -13,6 +18,96 @@ import {
 } from '@kite-ai/client/file-recovery-intent';
 import { createStdioInteractionHandler, type StdioInput } from '../src/stdio-interactions';
 import type { openFileRecoveryJournal } from './file-recovery-intents';
+
+function logCursor(value: string): bigint {
+  if (!/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > 9223372036854775807n)
+    throw Error('file_checkpoint_log_invalid');
+  return BigInt(value);
+}
+/** Optional recorded dates from one gap-free immutable public log window; no event history is retained. */
+export async function readFileCheckpointRecordedTimes(
+  client: Pick<AgentClient, 'listSessionLogs'>,
+  storeId: string,
+  view: SessionView,
+  points: FileCheckpointPage['payload']['items'],
+  signal?: AbortSignal,
+): Promise<Readonly<Record<string, number>>> {
+  const targets = new Map(
+    points
+      .filter(
+        (item) =>
+          item.revision === '1' &&
+          item.checkpoint.boundary.storeId === storeId &&
+          item.checkpoint.boundary.sessionId === view.session.id &&
+          item.checkpoint.boundary.workspaceId === view.session.workspaceId,
+      )
+      .map((item) => [`builtin.files/checkpoint/${item.checkpoint.id}/point`, item.checkpoint.id]),
+  );
+  if (!targets.size || view.storeId !== storeId) return {};
+  const dates = new Map<string, number>(),
+    invalid = new Set<string>();
+  try {
+    const upper = logCursor(view.snapshotCursor);
+    let after = '0';
+    for (;;) {
+      signal?.throwIfAborted();
+      const page = await client.listSessionLogs(view.session.id, {
+        expectedStoreId: storeId,
+        afterCursor: after,
+        upperCursor: view.snapshotCursor,
+        limit: 200,
+        signal,
+      });
+      signal?.throwIfAborted();
+      if (
+        page.storeId !== storeId ||
+        page.sessionId !== view.session.id ||
+        page.upperCursor !== view.snapshotCursor ||
+        logCursor(page.replayFloor) > logCursor(after) ||
+        logCursor(page.snapshotCursor) < upper ||
+        page.entries.length > 200 ||
+        page.complete !== (page.nextAfterCursor === null)
+      )
+        throw Error('file_checkpoint_log_invalid');
+      let previous = logCursor(after);
+      for (const entry of page.entries) {
+        const position = logCursor(entry.cursor);
+        logCursor(entry.revision);
+        if (entry.sessionId !== view.session.id || position <= previous || position > upper)
+          throw Error('file_checkpoint_log_invalid');
+        previous = position;
+        const pointId = targets.get(entry.objectId);
+        if (!pointId || entry.type !== 'extension.record_updated') continue;
+        if (
+          dates.has(pointId) ||
+          entry.revision !== '0' ||
+          entry.category !== 'extension' ||
+          entry.recordedStatus !== null ||
+          Object.keys(entry.details).length ||
+          entry.modelExecutionId !== null ||
+          entry.occurredAt === null ||
+          !Number.isSafeInteger(entry.occurredAt) ||
+          entry.occurredAt < 0 ||
+          entry.occurredAt > 8640000000000000
+        )
+          invalid.add(pointId);
+        else dates.set(pointId, entry.occurredAt);
+      }
+      if (page.complete) break;
+      if (
+        !page.entries.length ||
+        page.nextAfterCursor !== page.entries.at(-1)!.cursor ||
+        previous >= upper
+      )
+        throw Error('file_checkpoint_log_invalid');
+      after = page.nextAfterCursor!;
+    }
+    return Object.fromEntries([...dates].filter(([id]) => !invalid.has(id)));
+  } catch {
+    signal?.throwIfAborted();
+    return {};
+  }
+}
 
 export function createFileRecoveryPort(input: {
   client: AgentClient;
@@ -82,7 +177,24 @@ export function createFileRecoveryPort(input: {
   return {
     listPoints: async (sessionId: string, signal?: AbortSignal) => {
       const before = await identity(sessionId, signal);
+      const view = await client.getView(sessionId, { signal });
+      if (
+        view.storeId !== before.storeId ||
+        view.session.id !== before.sessionId ||
+        view.session.workspaceId !== before.workspaceId ||
+        view.session.contextSelectionId !== before.contextSelectionId
+      )
+        throw Error('file_recovery_observation_changed');
       let page = await client.listFileCheckpoints(sessionId, { limit: 200, signal });
+      const verifyPage = () => {
+        if (
+          page.storeId !== before.storeId ||
+          page.sessionId !== before.sessionId ||
+          page.workspaceId !== before.workspaceId
+        )
+          throw Error('file_recovery_observation_changed');
+      };
+      verifyPage();
       const items = [...page.payload.items];
       while (page.payload.nextAfterKey !== null) {
         page = await client.listFileCheckpoints(sessionId, {
@@ -90,11 +202,34 @@ export function createFileRecoveryPort(input: {
           afterKey: page.payload.nextAfterKey,
           signal,
         });
+        verifyPage();
         items.push(...page.payload.items);
       }
+      const dates = await readFileCheckpointRecordedTimes(
+        client,
+        before.storeId,
+        view,
+        items,
+        signal,
+      );
       if (JSON.stringify(before) !== JSON.stringify(await identity(sessionId, signal)))
         throw Error('file_recovery_observation_changed');
-      return { ...page, payload: { ...page.payload, items, nextAfterKey: null } };
+      return {
+        ...page,
+        payload: {
+          ...page.payload,
+          items: items.map((item) => {
+            const { recordedAt: _unverified, ...original } = item;
+            return {
+              ...original,
+              ...(dates[item.checkpoint.id] === undefined
+                ? {}
+                : { recordedAt: dates[item.checkpoint.id] }),
+            };
+          }),
+          nextAfterKey: null,
+        },
+      };
     },
     readPoint: async (sessionId: string, pointId: string, signal?: AbortSignal) => {
       const actual = await identity(sessionId, signal),

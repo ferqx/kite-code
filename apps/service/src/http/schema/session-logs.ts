@@ -26,7 +26,7 @@ export const SessionLogDetailsSchema = z.strictObject({
 export const SessionLogEntrySchema = z.strictObject({
   cursor: sequence,
   sessionId: id,
-  objectId: id,
+  objectId: z.union([id, z.string().regex(/^builtin\.files\/checkpoint\/[a-f0-9]{64}\/point$/)]),
   type: z.string().regex(/^[a-z][a-z0-9_.]{0,127}$/),
   revision: sequence,
   occurredAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),

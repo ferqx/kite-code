@@ -1,0 +1,361 @@
+import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import type {
+  Execution,
+  Interaction,
+  Message,
+  ModelOutputSnapshot,
+  SessionView,
+} from '@kite-ai/client';
+import { render } from 'ink-testing-library';
+import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
+import type { TuiMcpReadDirectory, TuiMcpSnapshot } from '../../src/tui/mcp';
+
+const tick = () => Bun.sleep(40);
+const view = (executions: Execution[] = []): SessionView => ({
+  storeId: 'store',
+  snapshotCursor: '1',
+  session: {
+    id: 's',
+    workspaceId: 'w',
+    parentSessionId: null,
+    rootSessionId: 's',
+    title: 'original',
+    controlRevision: '1',
+    contextSelectionId: 'selection',
+    nextSeq: '2',
+    deletedAt: null,
+  },
+  messages: [],
+  executions,
+  runs: [],
+});
+const forbidden = async () => {
+  throw Error('display must not execute');
+};
+const port = (read: () => TuiSnapshot, extra: Partial<TuiPort> = {}): TuiPort => ({
+  storeId: 'store',
+  nextCommandId: () => 'original',
+  listSessions: async () => [],
+  readSession: async () => read(),
+  submit: forbidden,
+  answer: forbidden,
+  cancel: forbidden,
+  getCommand: forbidden,
+  ...extra,
+});
+const model: Execution = {
+  id: 'model',
+  originStoreId: 'store',
+  sessionId: 's',
+  runId: 'run',
+  kind: 'model',
+  definitionId: 'model',
+  definitionVersion: '1',
+  status: 'succeeded',
+  result: null,
+  resultRevision: '1',
+  cancelRequestedAt: null,
+  parentExecutionId: null,
+  childSessionId: null,
+};
+
+function output(body: ModelOutputSnapshot['output']): ModelOutputSnapshot {
+  const bytes = Buffer.from(JSON.stringify(body));
+  return {
+    storeId: 'store',
+    sessionId: 's',
+    rootSessionId: 's',
+    runId: 'run',
+    executionId: 'model',
+    originCommandId: 'work',
+    rootWorkCommandId: 'work',
+    rootWorkSeq: '1',
+    attempt: 1,
+    status: body.complete ? 'succeeded' : 'running',
+    snapshotCursor: '1',
+    bodyHash: createHash('sha256').update(bytes).digest('hex'),
+    bodyBytes: String(bytes.byteLength),
+    contentBytes: String(Buffer.byteLength(body.content)),
+    reasoningBytes: String(Buffer.byteLength(body.reasoning)),
+    output: body,
+  };
+}
+
+test('normal main screen automatically reads one complete original body and retains literal user Markdown', async () => {
+  const body = output({
+    content:
+      '# Original complete answer\n\n| Name | Value |\n|---|---|\n| 原文 | preserved |\n\n```ts\nconst actual = 1;\n```\n\nCOMPLETE_TAIL',
+    reasoning: 'saved thinking',
+    toolCalls: [],
+    complete: true,
+  });
+  const message: Message = {
+    id: 'answer',
+    seq: '2',
+    sessionId: 's',
+    runId: 'run',
+    role: 'assistant',
+    status: 'complete',
+    content: 'preview',
+    sourceIds: ['model'],
+    outputBody: {
+      kind: 'model_output',
+      executionId: 'model',
+      complete: true,
+      contentBytes: body.contentBytes,
+      reasoningBytes: body.reasoningBytes,
+      toolCallCount: 0,
+    },
+  };
+  const snapshot: TuiSnapshot = {
+    storeId: 'store',
+    view: view([model]),
+    interactions: [],
+    messages: [
+      {
+        id: 'user',
+        seq: '1',
+        sessionId: 's',
+        runId: 'run',
+        role: 'user',
+        status: 'complete',
+        content: '**literal user**',
+      },
+      message,
+    ],
+  };
+  let reads = 0;
+  const controller = new TuiController(
+    port(() => snapshot, {
+      readModelOutput: async (session, execution) => {
+        reads++;
+        expect([session, execution]).toEqual(['s', 'model']);
+        return body;
+      },
+    }),
+  );
+  await controller.select('s');
+  const app = render(<TuiSession controller={controller} />);
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('❯ **literal user**');
+    expect(app.lastFrame()).toContain('COMPLETE_TAIL');
+    expect(app.lastFrame()).toContain('const actual = 1;');
+    expect(app.lastFrame()).toContain('preserved');
+    expect(app.lastFrame()).not.toContain('preview only');
+    controller.setDraft('editing without output replay');
+    await tick();
+    await controller.select('s');
+    await tick();
+    expect(reads).toBe(1);
+    expect(controller.state.loadedOutputBodies.get('answer')).toEqual(body.output);
+  } finally {
+    app.unmount();
+    controller.dispose();
+  }
+});
+
+test('live small reasoning uses the actual running Model before a terminal result and remains mutable', async () => {
+  const live = output({
+    content: 'streamed answer',
+    reasoning: 'actual small thinking line',
+    toolCalls: [],
+    complete: false,
+  });
+  let snapshot: TuiSnapshot = {
+    storeId: 'store',
+    view: view([{ ...model, status: 'running', result: null }]),
+    interactions: [],
+    liveModelOutput: live,
+    messages: [
+      {
+        id: 'prefix',
+        seq: '1',
+        sessionId: 's',
+        runId: 'run',
+        role: 'assistant',
+        status: 'incomplete',
+        content: 'old preview',
+        sourceIds: ['model'],
+      },
+    ],
+  };
+  const controller = new TuiController(port(() => snapshot));
+  await controller.select('s');
+  const app = render(<TuiSession controller={controller} />);
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('actual small thinking line');
+    expect(app.lastFrame()).toContain('streamed answer');
+    expect(app.lastFrame()).not.toContain('Incomplete response');
+    snapshot = {
+      ...snapshot,
+      liveModelOutput: output({ ...live.output, reasoning: 'actual updated thinking line' }),
+    };
+    await controller.select('s');
+    await tick();
+    expect(app.lastFrame()).toContain('actual updated thinking line');
+    expect(app.lastFrame()).not.toContain('actual small thinking line');
+  } finally {
+    app.unmount();
+    controller.dispose();
+  }
+});
+
+test('prompt registry selection rechecks its actual retained source and only creates the original local display', async () => {
+  const facts = {
+    storeId: 'store',
+    sessionId: 's',
+    workspaceId: 'w',
+    labels: { server: 'ActualName' },
+    items: [
+      {
+        id: 'server',
+        configDigest: 'a'.repeat(64),
+        admitted: true,
+        selected: true,
+        available: true,
+      },
+    ],
+  } as unknown as TuiMcpSnapshot;
+  const page: TuiMcpReadDirectory = {
+    family: 'prompts',
+    sessionId: 's',
+    workspaceId: 'w',
+    nextAfterKey: null,
+    items: [
+      {
+        key: 'prompts/001',
+        serverId: 'server',
+        configDigest: 'a'.repeat(64),
+        generation: 1,
+        live: true,
+        descriptors: [{ name: 'original', description: 'actual retained description' }],
+        descriptorDigests: ['b'.repeat(64)],
+      },
+    ],
+  };
+  const snapshot: TuiSnapshot = { storeId: 'store', view: view(), messages: [], interactions: [] };
+  let reads = 0;
+  const controller = new TuiController(
+    port(() => snapshot, {
+      mcp: {
+        read: async () => facts,
+        readDirectory: async () => {
+          reads++;
+          return page;
+        },
+        submit: forbidden,
+        lookup: forbidden,
+      },
+    }),
+  );
+  await controller.select('s');
+  const app = render(<TuiSession controller={controller} />);
+  try {
+    await tick();
+    controller.setDraft('/mcp__');
+    await tick();
+    expect(app.lastFrame()).toContain('/mcp__ActualName__original');
+    expect(app.lastFrame()).toContain('actual retained description');
+    await controller.routeCommand('/mcp__ActualName__original');
+    await tick();
+    expect(reads).toBe(2);
+    expect(app.lastFrame()).toContain('❯ /mcp__ActualName__original');
+    expect(controller.state.snapshot?.view.runs).toHaveLength(0);
+    expect(controller.state.intent).toBeUndefined();
+    facts.items[0]!.available = false;
+    await controller.routeCommand('/mcp__ActualName__original');
+    await tick();
+    expect(controller.state.mcpPromptSelections).toHaveLength(1);
+    expect(controller.state.error).toBe('mcp_prompt_unavailable');
+  } finally {
+    app.unmount();
+    controller.dispose();
+  }
+});
+
+test('first question Escape cancels the exact presented original execution once', async () => {
+  const card: Interaction = {
+    id: 'question',
+    originStoreId: 'store',
+    sessionId: 'child',
+    presentationSessionId: 's',
+    runId: 'child-run',
+    executionId: 'original-question-tool',
+    attempt: 1,
+    ancestry: ['s', 'child'],
+    kind: 'question',
+    definitionId: 'ask_user',
+    definitionVersion: '1',
+    inputDigest: 'hash',
+    policyRevision: '1',
+    requiredRefs: [],
+    request: { schema: { type: 'string', title: 'Original child question' } },
+    answer: null,
+    revision: '1',
+    acceptedDecisionRevision: null,
+    state: 'pending',
+  };
+  const snapshot: TuiSnapshot = {
+    storeId: 'store',
+    view: view(),
+    messages: [],
+    interactions: [card],
+  };
+  const requests: unknown[] = [];
+  const controller = new TuiController(
+    port(() => snapshot, {
+      executions: {
+        getExecution: forbidden,
+        output: forbidden,
+        getView: forbidden,
+        getRun: forbidden,
+        messages: forbidden,
+        modelOutput: forbidden,
+        getCommand: forbidden,
+        stop: async (session, request) => {
+          requests.push({ session, request });
+          return {
+            id: request.commandId,
+            sessionId: session,
+            originStoreId: 'store',
+            kind: 'execution.cancel',
+            status: 'applied',
+            cancelRequestedAt: null,
+            receipt: {
+              outcome: 'cancel_requested',
+              executionId: request.executionId,
+              affectedCount: 1,
+            },
+          };
+        },
+      },
+    }),
+  );
+  await controller.select('s');
+  const app = render(<TuiSession controller={controller} />);
+  try {
+    await tick();
+    app.stdin.write('\u001b');
+    await tick();
+    app.stdin.write('\u001b');
+    await tick();
+    expect(requests).toEqual([
+      {
+        session: 'child',
+        request: {
+          kind: 'execution.cancel',
+          expectedStoreId: 'store',
+          commandId: 'original',
+          executionId: 'original-question-tool',
+        },
+      },
+    ]);
+    expect(controller.state.intent?.phase).toBe('applied');
+  } finally {
+    app.unmount();
+    controller.dispose();
+  }
+});

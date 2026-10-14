@@ -559,6 +559,40 @@ test('actual Files Tool receipts seal first full preimage and last postimage; re
     ]);
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
     expect(f.calls).toBe(modelCalls);
+    const textChange = preview.files.find((file) => file.path === 'original')!.textChange!;
+    expect(textChange.addedLines).toBe(40000);
+    expect(textChange.removedLines).toBe(1);
+    expect(textChange.truncated).toBe(true);
+    expect(Buffer.byteLength(textChange.preview)).toBeLessThanOrEqual(65536);
+    expect(preview.files.find((file) => file.path === 'created')!.textChange).toMatchObject({
+      addedLines: 0,
+      removedLines: 1,
+    });
+    const logs = await f.store.getSessionLogs({
+      expectedStoreId: f.storeId,
+      sessionId: 's',
+      subjectId: 'owner',
+      afterCursor: '0',
+      upperCursor: cursor,
+      limit: 200,
+    });
+    const recorded = logs.entries.filter(
+      (entry) => entry.objectId === `builtin.files/checkpoint/${id}/point`,
+    );
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.type).toBe('extension.record_updated');
+    expect(recorded[0]!.revision).toBe('0');
+    expect(recorded[0]!.occurredAt).toBeGreaterThan(0);
+    expect(
+      logs.entries
+        .filter(
+          (entry) =>
+            entry.type === 'extension.record_updated' && entry.objectId !== recorded[0]!.objectId,
+        )
+        .every((entry) => entry.objectId === 'unavailable'),
+    ).toBe(true);
+    expect(JSON.stringify(logs)).not.toContain('完整预像');
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
     for (const drift of ['hash', 'ref', 'source', 'post', 'revision'] as const) {
       const changed: ReadContext = {
         ...f.read,

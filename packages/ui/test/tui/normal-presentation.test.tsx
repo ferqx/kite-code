@@ -68,6 +68,26 @@ test('ordinary Ink keeps the original conversation layout and complete result; d
   };
   const port: TuiPort = {
     storeId: 'private-store',
+    executions: {
+      getExecution: async () => snapshot.view.executions[0]!,
+      output: async () => {
+        throw Error('no Job');
+      },
+      getView: async () => snapshot.view,
+      getRun: async () => {
+        throw Error('no Run');
+      },
+      messages: async () => [],
+      modelOutput: async () => {
+        throw Error('no Model');
+      },
+      stop: async () => {
+        throw Error('Tool is read only');
+      },
+      getCommand: async () => {
+        throw Error('no Command');
+      },
+    },
     nextCommandId: () => 'private-command',
     listSessions: async () => [],
     readSession: async () => snapshot,
@@ -97,10 +117,17 @@ test('ordinary Ink keeps the original conversation layout and complete result; d
     expect(app.lastFrame()).toContain('actual-model high');
     expect(app.lastFrame()).toContain('/owned/workspace');
     expect(app.lastFrame()).toContain('Original complete answer');
-    expect(app.lastFrame()).toContain('files.read succeeded');
+    expect(app.lastFrame()).toContain('● files.read');
+    expect(app.lastFrame()).toContain('more lines');
+    // The original compact card keeps a bounded preview; its real detail reader retains every field.
+    app.stdin.write('\u0005');
+    await tick();
+    expect(app.lastFrame()).toContain('Recorded execution result');
     expect(app.lastFrame()).toContain('完整🙂line2');
     expect(app.lastFrame()).toContain('false');
     expect(app.lastFrame()).toContain('null');
+    app.stdin.write('\u001b');
+    await tick();
     expect(app.lastFrame()).toContain('❯');
     for (const identity of [
       'private-store',

@@ -41,11 +41,25 @@ export const FileCheckpointSchema = z.strictObject({
   workspace: z.strictObject({ device: decimal, inode: decimal }),
 });
 const directory = z.strictObject({
-  items: z.array(z.strictObject({ checkpoint: FileCheckpointSchema, revision: sequence })).max(200),
+  items: z
+    .array(
+      z.strictObject({
+        checkpoint: FileCheckpointSchema,
+        revision: sequence,
+        recordedAt: z.number().int().min(0).max(8640000000000000).optional(),
+      }),
+    )
+    .max(200),
   nextAfterKey: z
     .string()
     .regex(/^checkpoint\/[a-f0-9]{64}\/point$/)
     .nullable(),
+});
+export const FileCheckpointTextChangeSchema = z.strictObject({
+  addedLines: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  removedLines: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  preview: z.string().max(65536),
+  truncated: z.boolean(),
 });
 const preview = z.strictObject({
   checkpoint: FileCheckpointSchema,
@@ -58,6 +72,7 @@ const preview = z.strictObject({
       preimage: FileCheckpointArtifactSchema.nullable(),
       original: FileCheckpointBaselineSchema.nullable(),
       expected: FileCheckpointBaselineSchema.nullable(),
+      textChange: FileCheckpointTextChangeSchema.nullable().optional(),
     }),
   ),
 });

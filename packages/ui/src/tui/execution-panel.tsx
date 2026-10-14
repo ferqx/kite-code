@@ -1,8 +1,9 @@
 import { Box, useInput, useStdout } from 'ink';
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { TuiChildSessionPanel } from './child-session-panel';
 import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
-import { TerminalMarkdown } from './markdown';
+import { inkToolArguments } from './execution-projection';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 import { TuiResult } from './result';
 
@@ -21,11 +22,13 @@ export function TuiExecutionPanel({
       (execution) => execution.kind !== 'model' && execution.sessionId === state.sessionId,
     ) ?? [];
   const [selected, setSelected] = useState<string | undefined>(initialExecutionId),
-    [confirm, setConfirm] = useState<string>();
+    [confirm, setConfirm] = useState<string>(),
+    [childDetail, setChildDetail] = useState(false);
   useEffect(() => {
     void state.sessionId;
     setSelected(initialExecutionId);
     setConfirm(undefined);
+    setChildDetail(false);
   }, [initialExecutionId, state.sessionId]);
   const index = Math.max(
       0,
@@ -35,6 +38,7 @@ export function TuiExecutionPanel({
   const page = Math.max(1, Math.min(10, (stdout.rows || 24) - 15));
   const start = Math.max(0, Math.min(jobs.length - page, index - Math.floor(page / 2)));
   useInput((input, key) => {
+    if (childDetail) return;
     if (key.escape || (key.ctrl && input === 'c')) {
       controller.closePanel();
       return;
@@ -106,6 +110,18 @@ export function TuiExecutionPanel({
     originalRead.target.definitionVersion === job.definitionVersion
       ? originalRead
       : undefined;
+  useEffect(() => {
+    if (reading?.phase === 'ready' && reading.child) setChildDetail(true);
+  }, [reading]);
+  if (childDetail && reading?.child)
+    return (
+      <TuiChildSessionPanel
+        key={`${reading.child.view.session.id}/${reading.child.view.session.nextSeq}`}
+        child={reading.child}
+        onBack={() => setChildDetail(false)}
+        onRefresh={() => void controller.readExecution(reading.target.executionId, true)}
+      />
+    );
   return (
     <TuiOverlayFrame
       title={
@@ -138,6 +154,22 @@ export function TuiExecutionPanel({
         </Text>
       )}
       {!jobs.length && <Text>{t('No verified execution in the current snapshot')}</Text>}
+      {job?.kind === 'tool' &&
+        state.snapshot &&
+        inkToolArguments(job, state.snapshot, state.loadedOutputBodies) && (
+          <Box flexDirection="column">
+            <Text bold>{t('Recorded tool arguments')}</Text>
+            <TuiResult
+              value={
+                inkToolArguments(
+                  job,
+                  state.snapshot,
+                  state.loadedOutputBodies,
+                )! as import('@kite-ai/client').Execution['result']
+              }
+            />
+          </Box>
+        )}
       {job && (
         <Box flexDirection="column">
           <Text bold>{t('Recorded execution result')}</Text>
@@ -179,7 +211,7 @@ export function TuiExecutionPanel({
         <Text>
           {t('Original read')}{' '}
           {testDiagnostics && <>[{terminalText(reading.target.executionId)}]</>}: {reading.phase}
-          {reading.error ? ' · ' + terminalText(reading.error) : ''}
+          {reading.error ? ` · ${terminalText(reading.error)}` : ''}
         </Text>
       )}
       {reading?.output && (
@@ -216,86 +248,7 @@ export function TuiExecutionPanel({
         </Box>
       )}
       {reading?.child && (
-        <Box flexDirection="column">
-          <Text bold>
-            {testDiagnostics ? (
-              <>
-                {t('Original child')} [{terminalText(reading.child.view.session.id)}]
-                {t(' · parent carrier [')}
-                {terminalText(reading.child.carrier.id)}]{t(' · selection')}{' '}
-                {terminalText(reading.child.view.session.contextSelectionId)}
-                {t(' · frozen history through')} {reading.child.view.session.nextSeq}
-              </>
-            ) : (
-              t('Child conversation')
-            )}
-          </Text>
-          {reading.child.messages.map((message) => {
-            const full = reading.child!.modelOutputs.get(message.id);
-            return (
-              <Box key={message.id} flexDirection="column">
-                <Text>
-                  {message.role}{' '}
-                  {testDiagnostics && (
-                    <>
-                      [{terminalText(message.id)}] {t('· seq')} {message.seq} ·{' '}
-                    </>
-                  )}
-                  {message.status}
-                </Text>
-                <TerminalMarkdown content={full?.output.content ?? message.content} />
-                {testDiagnostics && message.toolCallId && (
-                  <Text>
-                    {t('Original tool call')} [{terminalText(message.toolCallId)}]
-                  </Text>
-                )}
-                {!full &&
-                  message.toolCalls &&
-                  (testDiagnostics ? (
-                    <Text>{terminalText(JSON.stringify(message.toolCalls))}</Text>
-                  ) : (
-                    message.toolCalls.map((call) => (
-                      <Text key={call.id}>
-                        {terminalText(call.name)}
-                        {'\n'}
-                        {terminalText(call.arguments)}
-                      </Text>
-                    ))
-                  ))}
-                {full && (
-                  <>
-                    <Text>
-                      {t('Verified recorded Model body ·')}
-                      {testDiagnostics && (
-                        <>
-                          {full.contentBytes} {t('content bytes')} ·{' '}
-                        </>
-                      )}
-                      {full.output.complete ? t('complete') : t('incomplete recorded prefix')}
-                    </Text>
-                    <Text>{terminalText(full.output.reasoning)}</Text>
-                    {testDiagnostics ? (
-                      <Text>{terminalText(JSON.stringify(full.output.toolCalls))}</Text>
-                    ) : (
-                      full.output.toolCalls.map((call) => (
-                        <Text key={call.id}>
-                          {terminalText(call.name)}
-                          {'\n'}
-                          {terminalText(call.arguments)}
-                        </Text>
-                      ))
-                    )}
-                  </>
-                )}
-                {message.outputBody && !full && (
-                  <Text>
-                    {t('Full Model reader unsupported; showing original message projection')}
-                  </Text>
-                )}
-              </Box>
-            );
-          })}
-        </Box>
+        <Text dimColor>{t('Child conversation')} · read-only history · C reopens the reader</Text>
       )}
     </TuiOverlayFrame>
   );

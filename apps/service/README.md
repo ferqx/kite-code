@@ -582,3 +582,8 @@ Session closed query 新增可选 `snapshotCursor`；续页元数据变化返回
 公开只读 `GET /v1/background-executions` 使用 closed 查询和有限 `BackgroundExecutionPage`：subject 仅由当前宿主准入填入，页面 Store必须匹配当前连接；root所有权、恢复根内旧来源、未删除状态、真实来源／root-work／child-start 与 Workspace/root/Execution过滤由Store在分页前核对。完整 Job目录包含 child/task carrier及其后代，原 originStoreId 不改成新 Store；读取资格不授予历史取消或重放许可。`snapshotCursor`冲突返回409 `directory_changed`，不产生新Command或业务效果。正文和输出沿原接口按需读取；Browser gateway未增加控制或目录准入。原身份、父/child Run、取消守卫和分页契约见[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)，实际协议见[测试](../../tests/isolated/unified-agent/background-directory.test.ts)。
 
 [web-permissions](test/isolated/web-permissions.test.ts)实际验证默认授权入口的人工卡前零 DNS/socket、Auto 原 Model 批准/拒绝与原因、Full 常规 fetch，以及网络关闭/SSRF 不被模式放宽。局部与完整 macOS 证据归[当前切片](../../docs/plans/shell-permission-scopes.md)，Linux/Windows 原生资格与 RSS/完整观测门禁保留。
+
+
+## 终端展示的新增只读字段
+
+`Execution` 仅对 Tool 投影原 `toolCallId/toolInput`，不公开 Model／Job private intent；SessionView 可携实际 Runtime 的 `compressionProgress`。模型目录的 optional `connectionId`使用既有准确 Provider connection 身份，供首次配置选择原发现模型，不按同名模型猜路由。Files preview 的 `textChange` 和 SessionLog 的准确 immutable point 白名单由同源 schema／响应校验传递。Service 不新增权限分析、运行器或恢复判定，客户端仍核原身份和完整字段；[HTTP Files 回归](test/isolated/file-checkpoint-browser.test.ts)保原字节／权限／归属断言。

@@ -293,7 +293,6 @@ test('ordinary main transcript keeps exact same-name calls, source-ordered resul
     for (const body of [
       '"original":"first"',
       '"original":"second"',
-      '[false,null]',
       'first result',
       'second result',
     ])
@@ -310,6 +309,8 @@ test('ordinary main transcript keeps exact same-name calls, source-ordered resul
     app.stdin.write('\u001b[A');
     await tick();
     expect(app.lastFrame()).toContain('first result');
+    expect(app.lastFrame()).toContain('[false,null]');
+    expect(app.lastFrame()).toContain('first');
     app.stdin.write('o');
     app.stdin.write('c');
     app.stdin.write('s');

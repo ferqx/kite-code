@@ -1,11 +1,12 @@
 import type { Interaction } from '@kite-ai/client';
-import { useInput, usePaste, useStdout } from 'ink';
+import { Box, useInput, usePaste, useStdout } from 'ink';
 import { useState } from 'react';
-import { TuiOverlayFrame } from './chrome';
 import { type ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch } from './composer-input';
 import { terminalText } from './controller';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import OverlayChoiceList from './ink/OverlayChoiceList';
+import OverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 import { TuiAnswerInput } from './question-panel';
 
 export function TuiPlanReviewPanel({
@@ -22,8 +23,10 @@ export function TuiPlanReviewPanel({
   error?: string;
 }) {
   const { t } = useTuiPresentation();
+  const { t: translate } = useInkI18n();
   const { stdout } = useStdout();
   const [editing, setEditing] = useState(false);
+  const [showEmptyHint, setShowEmptyHint] = useState(false);
   const [selected, setSelected] = useState<number>();
   const [, render] = useState(0);
   const request = card.request;
@@ -38,10 +41,19 @@ export function TuiPlanReviewPanel({
   const choices = [
     ...modes.map((mode) => ({
       answer: `approve ${mode}`,
-      label: mode === 'auto' ? t('自动审核') : t('请求批准'),
+      label:
+        mode === 'auto'
+          ? `${translate('planReview.auto')}${translate('common.recommended')}`
+          : translate('planReview.acceptEdits'),
+      description: translate(
+        mode === 'auto' ? 'planReview.autoDescription' : 'planReview.acceptEditsDescription',
+      ),
     })),
-    { answer: 'revise', label: t('Revise plan') },
-    { answer: 'deny', label: t('deny') },
+    {
+      answer: 'revise',
+      label: translate('planReview.feedback'),
+      description: translate('planReview.feedbackDescription'),
+    },
   ];
   const mutable = !busy && card.state === 'pending';
   usePaste((text) => {
@@ -64,7 +76,7 @@ export function TuiPlanReviewPanel({
             ? key.downArrow
               ? 0
               : choices.length - 1
-            : (value + (key.downArrow ? 1 : choices.length - 1)) % choices.length,
+            : Math.max(0, Math.min(choices.length - 1, value + (key.downArrow ? 1 : -1))),
         );
       else if (key.return && selected !== undefined) {
         const choice = choices[selected]!;
@@ -77,6 +89,7 @@ export function TuiPlanReviewPanel({
       display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
     if (key.return && !key.shift && !key.meta) {
       if (feedback.text.trim()) onAnswer(`revise ${feedback.text}`);
+      else setShowEmptyHint(true);
       return;
     }
     if (key.return) feedback.insert('\n');
@@ -92,20 +105,48 @@ export function TuiPlanReviewPanel({
     render((n) => n + 1);
   });
   return (
-    <TuiOverlayFrame title={t('Plan review')}>
+    <OverlayFrame
+      title={translate('planReview.title')}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={
+            editing
+              ? [
+                  { keys: 'Enter', label: translate('help.submit') },
+                  { keys: 'Esc', label: translate('common.back') },
+                ]
+              : [
+                  { keys: '↑↓', label: translate('common.navigate') },
+                  { keys: 'Enter', label: translate('common.confirm') },
+                  { keys: 'Esc', label: translate('common.cancel') },
+                ]
+          }
+        />
+      }
+    >
       {editing ? (
         <>
+          <Text>{translate('planReview.enterFeedback')}</Text>
           <TuiAnswerInput buffer={feedback} />
+          {showEmptyHint && !feedback.text.trim() && (
+            <Text color="red">{translate('input.emptyAnswer')}</Text>
+          )}
           <Text>{t('Enter submits feedback · Shift+Enter newline · Esc returns to choices')}</Text>
         </>
       ) : (
         <>
-          {choices.map((choice, index) => (
-            <Text key={choice.answer}>
-              {selected === index ? '› ' : '  '}
-              {choice.label}
-            </Text>
-          ))}
+          <Text>{translate('planReview.choose')}</Text>
+          <Box marginTop={1}>
+            <OverlayChoiceList
+              options={choices.map((choice) => ({
+                id: choice.answer,
+                label: choice.label,
+                description: choice.description,
+              }))}
+              selectedId={selected === undefined ? undefined : choices[selected]?.answer}
+              numbered
+            />
+          </Box>
           <Text>{t('Up/Down: choose · Enter: confirm · Esc: deny')}</Text>
           {selected === undefined && <Text>{t('none (Enter has no answer)')}</Text>}
         </>
@@ -116,6 +157,6 @@ export function TuiPlanReviewPanel({
         </Text>
       )}
       {error && <Text color="red">{terminalText(error)}</Text>}
-    </TuiOverlayFrame>
+    </OverlayFrame>
   );
 }

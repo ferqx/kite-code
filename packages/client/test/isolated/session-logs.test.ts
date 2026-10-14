@@ -226,3 +226,45 @@ test('Native and Browser log methods retain original query, fail closed before I
     await server.stop(true);
   }
 });
+
+test('only the exact Files point key is permitted as read-only extension log identity; unrelated private keys remain invalid', () => {
+  const original = page();
+  const point = {
+    ...original,
+    entries: [
+      {
+        ...original.entries[0]!,
+        objectId: `builtin.files/checkpoint/${'a'.repeat(64)}/point`,
+        type: 'extension.record_updated',
+        category: 'extension' as const,
+        modelExecutionId: null,
+        recordedStatus: null,
+        revision: '0',
+        details: {},
+      },
+    ],
+  };
+  expect(
+    verifySessionLogPage(
+      decodeResponse('SessionLogPage', point),
+      { storeId: 'store', sessionId: 'session' },
+      query,
+    ),
+  ).toEqual(point);
+  for (const objectId of [
+    'builtin.files/private-secret-key',
+    `builtin.files/checkpoint/${'a'.repeat(64)}/file/${'b'.repeat(64)}`,
+    `builtin.other/checkpoint/${'a'.repeat(64)}/point`,
+  ]) {
+    expect(() =>
+      decodeResponse('SessionLogPage', { ...point, entries: [{ ...point.entries[0]!, objectId }] }),
+    ).toThrow();
+  }
+  expect(() =>
+    verifySessionLogPage(
+      { ...point, entries: [{ ...point.entries[0]!, type: 'execution.finished' }] },
+      { storeId: 'store', sessionId: 'session' },
+      query,
+    ),
+  ).toThrow('invalid_session_log_page');
+});

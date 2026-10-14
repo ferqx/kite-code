@@ -677,14 +677,18 @@ export class UnifiedExecution {
             64 * 1024
         )
           await activateOutput();
-        if (!output && (content.length - savedLength >= 32768 || Date.now() - savedAt >= 100)) {
+        if (
+          !output &&
+          (content.length + reasoning.length - savedLength >= 32768 || Date.now() - savedAt >= 100)
+        ) {
           await this.options.store.persistModelPartial({
             expectedStoreId: scope.run.originStoreId,
             owner: scope.owner,
             executionId,
             content,
+            reasoning,
           });
-          savedLength = content.length;
+          savedLength = content.length + reasoning.length;
           savedAt = Date.now();
         }
       }
@@ -721,13 +725,14 @@ export class UnifiedExecution {
       });
       return { content, reasoning, toolCalls: calls, usage: finish.usage, executionId };
     } catch (error) {
-      if (dispatched && content && !output)
+      if (dispatched && (content || reasoning) && !output)
         await this.options.store
           .persistModelPartial({
             expectedStoreId: scope.run.originStoreId,
             owner: scope.owner,
             executionId,
             content,
+            reasoning,
           })
           .catch(() => {});
       await this.options.store

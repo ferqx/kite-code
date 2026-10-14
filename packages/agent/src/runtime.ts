@@ -402,6 +402,15 @@ export class AgentRuntime {
   readonly supportsExtensionInputs: boolean;
   private readonly instanceId: string;
   private readonly tools = new Map<string, ToolDefinition>();
+  /** Hot readonly UI facts only; one actual compression per active Session, never retained on disk. */
+  private readonly compressionProgress = new Map<
+    string,
+    {
+      runId: string;
+      originStoreId: string;
+      phase: 'preparing' | 'summarizing' | 'validating';
+    }
+  >();
   private readonly extensions: readonly Extension[];
   private readonly toolExtensions = new Map<string, string>();
   private readonly childConfigurations = new Map<
@@ -2259,8 +2268,24 @@ export class AgentRuntime {
   getChanges(input: Parameters<Store['getChanges']>[0]) {
     return this.options.store.getChanges(input);
   }
-  getView(id: string) {
-    return this.options.store.getView(id);
+  async getView(id: string): Promise<
+    Awaited<ReturnType<Store['getView']>> & {
+      compressionProgress?: {
+        runId: string;
+        originStoreId: string;
+        phase: 'preparing' | 'summarizing' | 'validating';
+      };
+    }
+  > {
+    const view = await this.options.store.getView(id);
+    const progress = this.compressionProgress.get(id);
+    return progress &&
+      view.runs.some(
+        (run) =>
+          run.id === progress.runId && run.originStoreId === progress.originStoreId && run.isActive,
+      )
+      ? { ...view, compressionProgress: { ...progress } }
+      : view;
   }
   getSession(id: string) {
     return this.options.store.getSession(id);
@@ -4105,12 +4130,18 @@ export class AgentRuntime {
         let stage: 'pure' | 'model' | 'store' = 'pure';
         let attemptedExecutionId: string | undefined;
         let providerFailure: unknown;
+        const progress: {
+          runId: string;
+          originStoreId: string;
+          phase: 'preparing' | 'summarizing' | 'validating';
+        } = { runId: run.id, originStoreId: run.originStoreId, phase: 'preparing' };
         try {
           if (
             trigger === 'automatic' &&
             (await selectedCompressor.shouldCompress?.(input)) !== true
           )
             return false;
+          this.compressionProgress.set(session.id, progress);
           const prepared = await selectedCompressor.prepare(input);
           if (!prepared) {
             if (trigger === 'manual') throw new AgentError('compression_not_reducible');
@@ -4170,6 +4201,7 @@ export class AgentRuntime {
               throw new AgentError('compression_summary_invalid');
             },
             executeModel: async (request, stepId) => {
+              progress.phase = 'summarizing';
               const response = await this.execution.model(
                 { ...scope, compressionId: pending.id, decisionSources: captured, checkFreshness },
                 compressionModel,
@@ -4179,6 +4211,7 @@ export class AgentRuntime {
               if (!response.content.trim() && !response.toolCalls.length)
                 throw new AgentError('compression_summary_invalid');
               stage = 'pure';
+              progress.phase = 'validating';
               if (
                 !response.toolCalls.length &&
                 selectedCompressor.validateSummary &&
@@ -4192,6 +4225,7 @@ export class AgentRuntime {
             },
           });
           stage = 'store';
+          progress.phase = 'validating';
           await checkFreshness();
           await this.options.store.commitCompression({
             expectedStoreId: run.originStoreId,
@@ -4246,6 +4280,9 @@ export class AgentRuntime {
           }
           lastAutomaticFailure = fingerprint;
           return false;
+        } finally {
+          if (this.compressionProgress.get(session.id) === progress)
+            this.compressionProgress.delete(session.id);
         }
       };
       const messages = async () => {

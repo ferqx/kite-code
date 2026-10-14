@@ -85,6 +85,13 @@ export interface FileCheckpointRecord {
   pending: CheckpointPreimage | null;
   state: 'pending' | 'captured' | 'failed' | 'unknown';
 }
+export interface FileCheckpointTextChange {
+  addedLines: number;
+  removedLines: number;
+  /** Bounded current-to-restored text preview, never a restore plan or full file body. */
+  preview: string;
+  truncated: boolean;
+}
 export interface FileCheckpointPreview {
   checkpoint: FileCheckpoint;
   files: {
@@ -95,6 +102,7 @@ export interface FileCheckpointPreview {
     preimage: ArtifactRef | null;
     original: FileBaseline | null;
     expected: FileBaseline | null;
+    textChange?: FileCheckpointTextChange | null;
   }[];
 }
 export interface FileCheckpointRestoreJournal {

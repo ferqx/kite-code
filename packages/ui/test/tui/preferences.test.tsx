@@ -601,14 +601,22 @@ test('saved language translates background and recovery instructions without tra
     for (const label of labels) expect(ui.lastFrame()).toContain(label);
     expect(ui.lastFrame()).not.toContain(heading);
     if (Panel === TuiExecutionPanel) {
-      expect(ui.lastFrame()).toContain(request.content);
+      expect(
+        ui
+          .lastFrame()!
+          .split('\n')
+          .map((line) => (line.startsWith(' ') ? line.slice(1) : line))
+          .join('\n'),
+      ).toContain(request.content);
       expect(ui.lastFrame()).toContain('Models [job-original] running');
       expect(ui.lastFrame()).toContain('stop-original: applied');
       expect(ui.lastFrame()).toContain('stdout · 1…1');
     } else {
       ui.stdin.write('\u0016');
       await tick();
-      expect(ui.lastFrame()?.replace(/\n/g, ' ')).toContain(JSON.stringify(request));
+      expect(ui.lastFrame()?.replace(/\s+/g, '')).toContain(
+        JSON.stringify(request).replace(/\s+/g, ''),
+      );
       expect(ui.lastFrame()).toContain('run.start · unknown · caller-original');
       expect(ui.lastFrame()).toContain('b'.repeat(64));
     }

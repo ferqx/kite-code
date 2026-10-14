@@ -1,11 +1,14 @@
-import { useInput, usePaste, useStdout } from 'ink';
+import { Box, useInput, usePaste, useStdout } from 'ink';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import stringWidth from 'string-width';
-import { TuiOverlayFrame } from './chrome';
 import { ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch } from './composer-input';
 import { type TuiController, terminalText } from './controller';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import OverlayChoiceList from './ink/OverlayChoiceList';
+import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
+import { OverlayEmptyState, OverlayImpactNotice, OverlayListRow } from './ink/OverlayPrimitives';
+import OverlaySearchInput from './ink/OverlaySearchInput';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** Search and confirmation stay local; the controller owns the original deletion identity. */
 export function TuiSessionChooser({
@@ -18,11 +21,22 @@ export function TuiSessionChooser({
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const { t, testDiagnostics } = useTuiPresentation(),
     { stdout } = useStdout();
+  const { t: originalLabel, language: inkLanguage } = useInkI18n();
   const buffer = useRef(new ComposerBuffer()).current;
   const [query, setQuery] = useState(''),
     [focus, setFocus] = useState<'search' | 'list'>('list');
   const [selectedId, setSelectedId] = useState(state.sessionId);
   const [remove, setRemove] = useState(false);
+  const [loadingSessionId, setLoadingSessionId] = useState<string>();
+  const [selectionError, setSelectionError] = useState<string>();
+  const selecting = useRef<string | undefined>(undefined);
+  const alive = useRef(true);
+  useEffect(
+    () => () => {
+      alive.current = false;
+    },
+    [],
+  );
   const deletion = state.sessionDeletion;
   const sessions = state.sessions.filter((session) =>
     `${session.title}\n${session.id}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
@@ -86,9 +100,40 @@ export function TuiSessionChooser({
     } else if (key.tab) setFocus((value) => (value === 'search' ? 'list' : 'search'));
     else if (key.return) {
       if (focus === 'search') setFocus('list');
-      else if (item) {
-        void controller.select(item.id);
-        close();
+      else if (item && !selecting.current && item.id !== state.sessionId) {
+        const targetId = item.id;
+        selecting.current = targetId;
+        setLoadingSessionId(targetId);
+        setSelectionError(undefined);
+        void controller
+          .select(targetId)
+          .then(() => {
+            if (!alive.current || selecting.current !== targetId) return;
+            if (
+              controller.state.sessionId === targetId &&
+              controller.state.snapshot &&
+              !controller.state.stale
+            )
+              close();
+            else
+              setSelectionError(
+                controller.state.error ?? t('Could not open Session; retry after refreshing.'),
+              );
+          })
+          .catch((error: unknown) => {
+            if (alive.current)
+              setSelectionError(
+                error instanceof Error
+                  ? error.message
+                  : t('Could not open Session; retry after refreshing.'),
+              );
+          })
+          .finally(() => {
+            if (alive.current && selecting.current === targetId) {
+              selecting.current = undefined;
+              setLoadingSessionId(undefined);
+            }
+          });
       }
     } else if (focus === 'list') {
       if (!query && input.toLowerCase() === 'd' && item)
@@ -109,7 +154,23 @@ export function TuiSessionChooser({
   });
   if (deletion)
     return (
-      <TuiOverlayFrame title={<> {t('Delete Session?')} </>}>
+      <TuiOverlayFrame
+        title={t('Delete Session?')}
+        footer={
+          <OverlayShortcutBar
+            shortcuts={[
+              { keys: '↑↓', label: t('Select') },
+              { keys: 'Enter', label: t('Confirm') },
+              { keys: 'Esc', label: t('Back') },
+            ]}
+          />
+        }
+      >
+        <OverlayImpactNotice>
+          {t(
+            'Delete hides this Session and requests its work to stop. Workspace files stay unchanged.',
+          )}
+        </OverlayImpactNotice>
         <Text wrap="truncate">{terminalText(deletion.title)}</Text>
         {testDiagnostics && (
           <Text>
@@ -125,14 +186,26 @@ export function TuiSessionChooser({
           <Text>{t('Reading original Session control…')}</Text>
         ) : deletion.phase === 'ready' ? (
           <>
-            <Text>
-              {remove ? '  ' : '> '}
-              {t('Keep Session')}
-            </Text>
-            <Text>
-              {remove ? '> ' : '  '}
-              {t('Delete Session')}
-            </Text>
+            <OverlayChoiceList
+              selectedId={remove ? 'delete' : 'keep'}
+              selectionBackground={false}
+              options={[
+                {
+                  id: 'keep',
+                  label: t('Keep Session'),
+                  description: t('Return without changing this Session.'),
+                },
+                {
+                  id: 'delete',
+                  label: t('Delete Session'),
+                  description: t(
+                    'Delete hides this Session and requests its work to stop. Workspace files stay unchanged.',
+                  ),
+                  destructive: true,
+                  separatorBefore: true,
+                },
+              ]}
+            />
             <Text>{t('Up/Down: choose · Enter: confirm · Esc/Ctrl+C: keep')}</Text>
           </>
         ) : (
@@ -154,33 +227,105 @@ export function TuiSessionChooser({
     display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t),
     row = buffer.row(Math.max(24, (stdout.columns ?? 80) - stringWidth(prefix) - 1), display),
     line = row.lines[row.index]!;
-  const start = Math.max(0, selected - 2);
+  const displayDate = (value: number) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? inkLanguage === 'zh-CN'
+        ? '（未知）'
+        : '(unknown)'
+      : new Intl.DateTimeFormat(inkLanguage, {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).format(date);
+  };
+  const page = Math.max(2, Math.min(8, (stdout.rows ?? 24) - 13));
+  const listStart = Math.max(0, Math.min(selected - Math.floor(page / 2), sessions.length - page));
   return (
-    <TuiOverlayFrame title={<> {t('Select Session (arrows/Enter, Esc)')} </>}>
-      <Text>
-        {prefix}
-        {buffer.parts.slice(line.start, line.end).map((part, offset) => (
-          <Text
-            key={line.start + offset}
-            inverse={focus === 'search' && buffer.cursor === line.start + offset}
-          >
-            {display(part)}
+    <TuiOverlayFrame
+      title={
+        testDiagnostics ? t('Select Session (arrows/Enter, Esc)') : originalLabel('session.title')
+      }
+      meta={
+        focus === 'search'
+          ? t('Search')
+          : `${sessions.length ? selected + 1 : 0} / ${sessions.length}`
+      }
+      footer={
+        <OverlayShortcutBar
+          shortcuts={
+            focus === 'search'
+              ? [
+                  { keys: t('Type'), label: t('Search') },
+                  { keys: 'Enter / ↓', label: t('Sessions') },
+                  { keys: 'Esc', label: t(query ? 'Clear search' : 'Back') },
+                ]
+              : [
+                  { keys: '↑↓', label: t('Select') },
+                  { keys: 'Enter', label: t('Open') },
+                  { keys: 'D', label: t('Delete') },
+                  { keys: 'Esc', label: t('Close') },
+                ]
+          }
+        />
+      }
+    >
+      <OverlaySearchInput
+        value={query}
+        onChange={() => undefined}
+        active={focus === 'search'}
+        label={t('Search')}
+        editor={
+          <Text>
+            {buffer.parts.slice(line.start, line.end).map((part, offset) => (
+              <Text key={line.start + offset} inverse={buffer.cursor === line.start + offset}>
+                {display(part)}
+              </Text>
+            ))}
+            {buffer.cursor === line.end ? <Text inverse> </Text> : null}
           </Text>
+        }
+      />
+      <Box flexDirection="column" marginTop={1}>
+        {sessions.slice(listStart, listStart + page).map((session, offset) => (
+          <OverlayListRow
+            key={session.id}
+            selected={focus === 'list' && listStart + offset === selected}
+            indicator={loadingSessionId === session.id ? <Text>◌ </Text> : undefined}
+            primary={
+              terminalText(session.title.replace(/[\r\n]/g, ' ')) +
+              (testDiagnostics ? ` [${terminalText(session.id)}]` : '')
+            }
+            trailing={
+              <Box>
+                <OverlayStatusColumn
+                  active={session.id === state.sessionId}
+                  label={inkLanguage === 'zh-CN' ? '当前' : 'Current'}
+                />
+                {session.updatedAt !== undefined && (
+                  <Box width={22} paddingLeft={3}>
+                    <Text dimColor>{displayDate(session.updatedAt)}</Text>
+                  </Box>
+                )}
+              </Box>
+            }
+          />
         ))}
-        {focus === 'search' && buffer.cursor === line.end ? <Text inverse> </Text> : null}
-      </Text>
-      {sessions.slice(start, start + 5).map((session, offset) => (
-        <Text key={session.id} wrap="truncate">
-          {focus === 'list' && start + offset === selected ? '> ' : '  '}
-          {terminalText(session.title.replace(/[\r\n]/g, ' '))}
-          {testDiagnostics ? ` [${terminalText(session.id)}]` : ''}
+        {!sessions.length && (
+          <OverlayEmptyState>
+            {t(query ? 'No matching Sessions' : 'No session history')}
+          </OverlayEmptyState>
+        )}
+      </Box>
+      {selectionError && <Text color="red">{terminalText(selectionError)}</Text>}
+      {testDiagnostics && (
+        <Text dimColor>
+          {t('Up/Down: search/list · Enter: open · D: delete with empty search · Esc: clear/back')}
         </Text>
-      ))}
-      {!sessions.length && <Text>{t('No matching Sessions')}</Text>}
-      <Text dimColor>
-        {sessions.length ? `${selected + 1}/${sessions.length}` : '0/0'} ·{' '}
-        {t('Up/Down: search/list · Enter: open · D: delete with empty search · Esc: clear/back')}
-      </Text>
+      )}
     </TuiOverlayFrame>
   );
 }

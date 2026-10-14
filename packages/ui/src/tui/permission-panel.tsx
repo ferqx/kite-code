@@ -1,9 +1,10 @@
 import { useInput } from 'ink';
-import { useState } from 'react';
-import { TuiOverlayFrame } from './chrome';
+import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
+import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
+import { OverlayListRow, OverlaySection } from './ink/OverlayPrimitives';
 import type { TuiPermissionSnapshot } from './permissions';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 const modes = ['accept_edits', 'auto', 'full'] as const;
 const modeLabels = {
@@ -16,12 +17,24 @@ type Choice =
   | { kind: 'trust'; trusted: boolean }
   | { kind: 'clear' };
 export function TuiPermissionPanel({ controller }: { controller: TuiController }) {
+  const { t: originalLabel, language: inkLanguage } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation();
   const state = controller.state,
     observed = state.permissions;
   const [index, setIndex] = useState(0),
     [makeDefault, setDefault] = useState(false),
     [pending, setPending] = useState<{ choice: Choice; observed: TuiPermissionSnapshot }>();
+  const observedMode = observed?.mode.mode;
+  useEffect(() => {
+    if (observedMode) setIndex(Math.max(0, modes.indexOf(observedMode)));
+  }, [observedMode]);
+  const descriptions = {
+    accept_edits: t(
+      'Workspace writes are allowed. External writes and internet access require approval.',
+    ),
+    auto: t('The model reviews commands and denies unsafe operations with a reason.'),
+    full: t('Access files and the network freely; extremely dangerous operations remain denied.'),
+  };
   useInput((input, key) => {
     if (key.ctrl) return;
     if (key.escape) {
@@ -63,6 +76,18 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
           {testDiagnostics && terminalText(state.sessionId ?? t('unavailable'))}
         </>
       }
+      meta={`${index + 1} / ${modes.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: 'Enter', label: originalLabel('common.confirm') },
+            { keys: 'C', label: t('Clear Session grants') },
+            { keys: 'R', label: t('Refresh') },
+            { keys: 'Esc', label: originalLabel('common.close') },
+          ]}
+        />
+      }
     >
       {!observed ? (
         <Text>{t('Reading actual permission controls')}</Text>
@@ -86,16 +111,26 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
             )}
           </Text>
           {modes.map((mode, i) => (
-            <Text key={mode}>
-              {i === index ? '›' : ' '} {modeLabels[mode]}
-            </Text>
+            <OverlayListRow
+              key={mode}
+              selected={i === index}
+              primary={modeLabels[mode]}
+              secondary={descriptions[mode]}
+              trailing={
+                <OverlayStatusColumn
+                  active={mode === observed.mode.mode}
+                  label={inkLanguage === 'zh-CN' ? '当前' : 'Current'}
+                />
+              }
+            />
           ))}
           <Text>
             {t('Future Session default:')} {makeDefault ? t('yes') : t('no')}{' '}
             {t('· D toggle · Enter review mode choice')}
           </Text>
+          <OverlaySection>{t('Workspace trust')}</OverlaySection>
           <Text>
-            {t('Workspace')} {terminalText(observed.trust.workspaceId)}
+            {t('Workspace')} {testDiagnostics && terminalText(observed.trust.workspaceId)}
             {':'} {observed.trust.status}
             {testDiagnostics && (
               <>
@@ -127,9 +162,10 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
               </>
             )}
           </Text>
-          {observed.grants.items.map(({ grant }) => (
-            <Text key={grant.id}>{terminalText(JSON.stringify(grant))}</Text>
-          ))}
+          {testDiagnostics &&
+            observed.grants.items.map(({ grant }) => (
+              <Text key={grant.id}>{terminalText(JSON.stringify(grant))}</Text>
+            ))}
           <Text>
             {t(
               'C review clear this exact Session only; earlier effects remain · R refresh · K original outcome lookup · Esc close',

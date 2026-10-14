@@ -15,6 +15,7 @@ import type {
 import { canonicalJson } from '../../json';
 import { AgentError } from '../../storage/types';
 import { createWorkspaceFiles, type FileBaseline, type WorkspaceFiles } from '../../tools/files';
+import { computeLineDiff } from '../../tools/files-diff';
 import { createFileTools, type FileMutationCapture } from '../../tools/files-tools';
 import {
   fileCheckpointLocalEvents,
@@ -54,6 +55,7 @@ import type {
   FileCheckpointRecoveryBoundary,
   FileCheckpointRestoreEffect,
   FileCheckpointRestoreJournal,
+  FileCheckpointTextChange,
 } from './types';
 
 export type {
@@ -68,6 +70,50 @@ export type {
   FileCheckpointRestoreJournal,
   FileCheckpointSelectedLineage,
 } from './types';
+
+/** Metadata from complete verified text; binary and invalid UTF-8 remain unavailable. */
+export function checkpointTextChange(
+  current: Uint8Array | null,
+  restored: Uint8Array | null,
+): FileCheckpointTextChange | null {
+  const decode = (bytes: Uint8Array | null) => {
+    if (bytes === null) return '';
+    if (bytes.some((byte) => byte < 32 && ![9, 10, 13].includes(byte))) return null;
+    try {
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+      return null;
+    }
+  };
+  const before = decode(current),
+    after = decode(restored);
+  if (before === null || after === null) return null;
+  const diff = computeLineDiff(before, after, 1);
+  const parts: string[] = [];
+  let remaining = 65536,
+    truncated = false;
+  for (const line of diff.lines) {
+    const text = `${line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '} ${line.text}\n`;
+    let prefix = text.slice(0, remaining);
+    if (/[\uD800-\uDBFF]$/.test(prefix)) prefix = prefix.slice(0, -1);
+    const bytes = Buffer.from(prefix);
+    let end = Math.min(remaining, bytes.length);
+    while (end < bytes.length && end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
+    const part = bytes.subarray(0, end).toString('utf8');
+    parts.push(part);
+    remaining -= end;
+    if (part.length !== text.length) {
+      truncated = true;
+      break;
+    }
+  }
+  return {
+    addedLines: diff.addedLines,
+    removedLines: diff.removedLines,
+    preview: parts.join(''),
+    truncated,
+  };
+}
 
 const equal = (a: unknown, b: unknown) => canonicalJson(a as Json) === canonicalJson(b as Json);
 function fail(code: string): never {
@@ -827,7 +873,11 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
       trigger: { ...trigger.current },
     };
   }
-  async function restorePlan(context: FileCheckpointReadContext, pointId: string) {
+  async function restorePlan(
+    context: FileCheckpointReadContext,
+    pointId: string,
+    includeTextChanges = false,
+  ) {
     const target = await readPoint(context, pointId);
     if (
       !options.readSelectedLineage ||
@@ -1015,6 +1065,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
     }
     const preview: FileCheckpointPreview = { checkpoint: target.checkpoint, files: [] };
     const bodies = new Map<string, Uint8Array>();
+    const textChanges = new Map<string, FileCheckpointTextChange | null>();
     for (const [path, entry] of [...rows].sort(([a], [b]) => a.localeCompare(b))) {
       const item: FileCheckpointPreview['files'][number] = {
         path,
@@ -1049,8 +1100,11 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
         }
         readingFile = true;
         let current: FileBaseline | null;
+        let currentBytes: Uint8Array | null = null;
         try {
-          current = (await files.readBytes(path, { maxBytes })).baseline;
+          const snapshot = await files.readBytes(path, { maxBytes });
+          current = snapshot.baseline;
+          currentBytes = snapshot.bytes;
         } catch (error) {
           if ((error as { code?: string }).code !== 'ENOENT' || entry.expected !== null)
             throw error;
@@ -1071,6 +1125,8 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
             : current === null
               ? 'unchanged'
               : 'remove';
+        if (includeTextChanges && item.status !== 'conflict')
+          textChanges.set(path, checkpointTextChange(currentBytes, bodies.get(path) ?? null));
       } catch (error) {
         item.reason = error instanceof AgentError ? error.code : 'checkpoint_read_unavailable';
         if (readingFile) item.status = 'conflict';
@@ -1083,6 +1139,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
     return {
       preview,
       bodies,
+      textChanges,
       planDigest: digest({ lineage: selectedHistory, proofs, preview } as unknown as Json),
     };
   }
@@ -1091,7 +1148,14 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
     pointId: string,
   ): Promise<FileCheckpointPreview> {
     try {
-      return (await restorePlan(context, pointId)).preview;
+      const plan = await restorePlan(context, pointId, true);
+      return {
+        ...plan.preview,
+        files: plan.preview.files.map((file) => ({
+          ...file,
+          textChange: plan.textChanges.get(file.path) ?? null,
+        })),
+      };
     } catch (error) {
       const target = await readPoint(context, pointId);
       return {
@@ -1104,6 +1168,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
           preimage: entry.first?.artifact ?? null,
           original: entry.first?.baseline ?? null,
           expected: entry.last?.baseline ?? null,
+          textChange: null,
         })),
       };
     }

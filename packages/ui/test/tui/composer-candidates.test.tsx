@@ -54,7 +54,7 @@ test('framed original file candidates navigate, complete whole references and di
     app.stdin.write('\u001b[A');
     await tick();
     expect(app.lastFrame()).toContain('30/30');
-    expect(app.lastFrame()).toContain('› 目录/file 29🙂.ts');
+    expect(app.lastFrame()).toMatch(/❯ file 29🙂\.ts\s+目录\/file 29🙂\.ts/);
     app.stdin.write('\u001b');
     await tick();
     expect(buffer.text).toBe('@');

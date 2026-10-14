@@ -271,10 +271,10 @@ test('actual Ink navigation reaches Server 32 and refresh/user IDs remain Server
   const f = fixture();
   await f.controller.select('a');
   await f.controller.openMcp();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
-    expect(ui.lastFrame()).toContain('› refresh ·');
+    expect(ui.lastFrame()).toContain('❯ refresh ·');
     ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain('Server: refresh');
@@ -292,7 +292,7 @@ test('actual Ink navigation reaches Server 32 and refresh/user IDs remain Server
     await tick();
     ui.stdin.write('\u001b[B'.repeat(31));
     await tick();
-    expect(ui.lastFrame()).toContain('› server-31 ·');
+    expect(ui.lastFrame()).toContain('❯ server-31 ·');
     ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain('Server: server-31');
@@ -331,7 +331,7 @@ test('actual Ink navigation reaches Server 32 and refresh/user IDs remain Server
     expect(f.controller.state.mcpOutcome!.phase).toBe('outcome_unknown');
     ui.stdin.write('\u001b[B');
     await tick();
-    expect(ui.lastFrame()).toContain('› Check original change');
+    expect(ui.lastFrame()).toContain('❯ Check original change');
     ui.stdin.write('\r');
     await tick();
     expect(f.lookups).toEqual([f.sent[0]!]);
@@ -352,7 +352,7 @@ test('Ink Ctrl+C aborts only the active directory read; late response cannot reo
     return late.promise;
   };
   const opening = f.controller.openMcp(),
-    ui = render(<TuiSession controller={f.controller} />);
+    ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     expect(ui.lastFrame()).toContain('Reading servers');
@@ -609,7 +609,7 @@ test('new Ink observation abandons an old scope review and Enter cannot submit i
   const f = fixture();
   await f.controller.select('a');
   await f.controller.openMcp();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\r');
@@ -636,7 +636,7 @@ test('Ink list keeps original unknown lookup reachable after Server removal and 
   const f = fixture();
   await f.controller.select('a');
   await f.controller.openMcp();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     for (let enter = 0; enter < 3; enter++) {
@@ -649,13 +649,13 @@ test('Ink list keeps original unknown lookup reachable after Server removal and 
     f.port.mcp!.read = async () => decodeTuiMcpSnapshot(query({ ...observed(), items: [] }));
     ui.stdin.write('\u001b[B'.repeat(3));
     await tick();
-    expect(ui.lastFrame()).toContain('› Refresh servers');
+    expect(ui.lastFrame()).toContain('❯ Refresh servers');
     ui.stdin.write('\r');
     await tick();
     expect(f.controller.state.mcp!.read).toBe('ready');
     expect(f.controller.state.mcp!.facts!.items).toEqual([]);
     expect(ui.lastFrame()).toContain('No configured MCP servers');
-    expect(ui.lastFrame()).toContain('› Check original change');
+    expect(ui.lastFrame()).toContain('❯ Check original change');
     expect(ui.lastFrame()).not.toContain('Server: refresh');
     ui.stdin.write('\r');
     await tick();
@@ -674,7 +674,7 @@ test('Ink list keeps original unknown lookup reachable after Server removal and 
     expect(ui.lastFrame()).toContain('Server list unknown; refresh to verify');
     ui.stdin.write('\u001b[A');
     await tick();
-    expect(ui.lastFrame()).toContain('› Check original change');
+    expect(ui.lastFrame()).toContain('❯ Check original change');
     ui.stdin.write('\r');
     await tick();
     expect(f.lookups).toEqual([original, original]);
@@ -711,7 +711,7 @@ test('cold saved original IDs remain selectable with failed directory; restore p
   await cold.controller.chooseMcp('user', true, 'workspace');
   expect(cold.sent).toHaveLength(0);
   expect(cold.controller.state.error).toBe('mcp_original_outcome_required');
-  const ui = render(<TuiSession controller={cold.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={cold.controller} />);
   try {
     for (const window of ['empty', 'failed'] as const) {
       cold.port.mcp!.read = async () => {
@@ -723,12 +723,12 @@ test('cold saved original IDs remain selectable with failed directory; restore p
       expect(cold.controller.state.mcp!.read).toBe(window === 'empty' ? 'ready' : 'failed');
       expect(cold.controller.state.mcp!.facts!.items).toEqual([]);
       expect(ui.lastFrame()).toContain('Original change: cold-second');
-      expect(ui.lastFrame()).toContain('› Check original change');
+      expect(ui.lastFrame()).toContain('❯ Check original change');
       for (let step = 0; step < 3; step++) {
         ui.stdin.write('\u001b[B');
         await tick();
       }
-      expect(ui.lastFrame()).toContain('› Original change: cold-second');
+      expect(ui.lastFrame()).toContain('❯ Original change: cold-second');
       const before = cold.lookups.length;
       ui.stdin.write('\r');
       await tick();
@@ -739,7 +739,7 @@ test('cold saved original IDs remain selectable with failed directory; restore p
         ui.stdin.write('\u001b[A');
         await tick();
       }
-      expect(ui.lastFrame()).toContain('› Check original change');
+      expect(ui.lastFrame()).toContain('❯ Check original change');
       ui.stdin.write('\r');
       await tick();
       expect(cold.lookups.at(-1)).toEqual(second);

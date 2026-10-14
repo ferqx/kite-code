@@ -1,11 +1,15 @@
 import { useInput, usePaste } from 'ink';
 import { useEffect, useRef, useState } from 'react';
-import { TuiOverlayFrame } from './chrome';
-import { ComposerBuffer } from './composer';
+import { ComposerBuffer, composerDisplay } from './composer';
 import { type TuiController, terminalText } from './controller';
+import OverlayChoiceList from './ink/OverlayChoiceList';
+import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { OverlayListRow } from './ink/OverlayPrimitives';
+import OverlaySearchInput from './ink/OverlaySearchInput';
 import type { TuiMcpSourceSnapshot } from './mcp-source';
 import type { TuiMcpSourceEntryPreview, TuiMcpSourceMutationInput } from './mcp-source-mutation';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import { toolMetadataText } from './mcp-tools-panel';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 type Review = {
   action: 'mcp.source.add' | 'mcp.source.remove';
@@ -14,8 +18,9 @@ type Review = {
   preview?: TuiMcpSourceEntryPreview;
 };
 export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiController }) {
+  const { t: originalLabel } = useInkI18n();
   const state = controller.state,
-    { t } = useTuiPresentation(),
+    { t, testDiagnostics } = useTuiPresentation(),
     facts = state.mcpMutationFacts;
   const [index, setIndex] = useState(0),
     [step, setStep] = useState<'list' | 'name' | 'type' | 'value' | 'scope' | 'review' | 'confirm'>(
@@ -48,12 +53,12 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
     ...(state.mcpMutationSaved ?? []).map((row) => ({
       kind: 'original' as const,
       id: row.intent.request.commandId,
-      label: `${t('Original source change:')} ${row.intent.request.commandId}`,
+      label: `${t('Original source change:')} ${testDiagnostics ? row.intent.request.commandId : (state.mcpMutationSaved ?? []).indexOf(row) + 1}`,
     })),
     ...(state.mcpMutationOutcome
       ? [{ kind: 'check' as const, label: t('Check original source change') }]
       : []),
-    { kind: 'back' as const, label: t('Back') },
+    { kind: 'back' as const, label: originalLabel('common.back') },
   ];
   const editable = step === 'name' || step === 'value';
   buffer.current.sync(step === 'name' ? name : value);
@@ -77,7 +82,7 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
     { isActive: editable },
   );
   const full = review
-    ? JSON.stringify(
+    ? (testDiagnostics ? JSON.stringify : (value: unknown) => toolMetadataText(value))(
         {
           scope: review.input.scope,
           ...('name' in review.input
@@ -102,7 +107,16 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
       }
       if (step === 'confirm') setStep('review');
       else if (step === 'review') setStep(review?.action === 'mcp.source.add' ? 'scope' : 'list');
-      else setStep('list');
+      else
+        setStep(
+          step === 'scope'
+            ? 'value'
+            : step === 'value'
+              ? 'name'
+              : step === 'name'
+                ? 'type'
+                : 'list',
+        );
       return;
     }
     if (key.ctrl || key.meta || reading) return;
@@ -117,7 +131,7 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
             return;
           }
           setError(undefined);
-          setStep('type');
+          setStep('value');
         } else {
           let valid = false;
           if (transport === 'http') {
@@ -160,7 +174,7 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
     }
     if (step === 'type') {
       if (key.upArrow || key.downArrow) setTransport((v) => (v === 'http' ? 'stdio' : 'http'));
-      else if (key.return) setStep('value');
+      else if (key.return) setStep('name');
       return;
     }
     if (step === 'scope') {
@@ -209,7 +223,7 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
           setError(t('Source directory unavailable'));
           return;
         }
-        setStep('name');
+        setStep('type');
         setError(undefined);
       } else if (facts?.readSet) {
         const row = facts.items.find((r) => r.id === choice.id);
@@ -240,8 +254,28 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
     }
   });
   const start = Math.max(0, index - 2);
+  const editingRow = buffer.current.row(64, (part) => composerDisplay(part, t));
+  const editingLine = editingRow.lines[editingRow.index]!;
   return (
-    <TuiOverlayFrame title={<> {t('Source entry changes')} </>}>
+    <TuiOverlayFrame
+      title={
+        step === 'list'
+          ? t('MCP server configuration')
+          : review?.action === 'mcp.source.remove'
+            ? t('Remove MCP server')
+            : t('Add MCP server')
+      }
+      meta={step === 'list' ? `${index + 1} / ${choices.length}` : undefined}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: t(editable ? 'Edit' : 'Select') },
+            { keys: 'Enter', label: originalLabel('rewind.continue') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
+      }
+    >
       <Text>
         {t(
           'Removal clears owned OAuth credentials locally; shared credentials are retained. Connection status is separate.',
@@ -257,44 +291,75 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
       {step === 'list' ? (
         <>
           {choices.slice(start, start + 5).map((row, i) => (
-            <Text
+            <OverlayListRow
               key={
                 row.kind === 'remove' || row.kind === 'original'
                   ? `${row.kind}:${row.id}`
                   : row.kind
               }
-            >
-              {index === start + i ? '›' : ' '} {row.label}
-            </Text>
+              selected={index === start + i}
+              primary={row.label}
+            />
           ))}
           <Text>{t('↑/↓ choose · Enter select · Esc back')}</Text>
         </>
       ) : step === 'name' || step === 'value' ? (
         <>
-          <Text>
-            {t(step === 'name' ? 'Source entry name' : 'Source entry value')}:{' '}
-            {terminalText(
-              Array.from(step === 'name' ? name : value)
-                .slice(-64)
-                .join(''),
+          <OverlaySearchInput
+            active
+            value={step === 'name' ? name : value}
+            onChange={() => undefined}
+            label={t(
+              step === 'name'
+                ? 'Source entry name'
+                : transport === 'http'
+                  ? 'Server URL'
+                  : 'Server command',
             )}
-          </Text>
+            editor={
+              <Text>
+                {buffer.current.parts.slice(editingLine.start, editingLine.end).map((part, i) => (
+                  <Text
+                    key={editingLine.start + i}
+                    inverse={buffer.current.cursor === editingLine.start + i}
+                  >
+                    {composerDisplay(part, t)}
+                  </Text>
+                ))}
+                {buffer.current.cursor === editingLine.end && <Text inverse> </Text>}
+              </Text>
+            }
+          />
           <Text>{t('Enter continues; no configuration is submitted.')}</Text>
         </>
       ) : step === 'type' ? (
-        <>
-          <Text>{transport === 'http' ? '›' : ' '} HTTP</Text>
-          <Text>{transport === 'stdio' ? '›' : ' '} STDIO</Text>
-        </>
+        <OverlayChoiceList
+          selectedId={transport}
+          options={[
+            { id: 'http', label: 'HTTP', description: t('Connect to an MCP server at a URL.') },
+            {
+              id: 'stdio',
+              label: 'STDIO',
+              description: t('Launch an MCP server as a local process.'),
+            },
+          ]}
+        />
       ) : step === 'scope' ? (
-        <>
-          <Text>
-            {scope === 'workspace' ? '›' : ' '} {t('Current project')}
-          </Text>
-          <Text>
-            {scope === 'user' ? '›' : ' '} {t('All projects')}
-          </Text>
-        </>
+        <OverlayChoiceList
+          selectedId={scope}
+          options={[
+            {
+              id: 'workspace',
+              label: t('Current project'),
+              description: t('Make this MCP server available in the current project.'),
+            },
+            {
+              id: 'user',
+              label: t('All projects'),
+              description: t('Make this MCP server available in all projects.'),
+            },
+          ]}
+        />
       ) : (
         <>
           <Text bold>
@@ -318,16 +383,31 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
       ) : null}
       {state.mcpMutationOutcome && step === 'list' ? (
         <>
+          {testDiagnostics && (
+            <Text>
+              {t('Original source change:')}{' '}
+              {terminalText(state.mcpMutationOutcome.intent.request.commandId)}
+            </Text>
+          )}
+          {testDiagnostics && (
+            <Text>
+              {t('Original Store:')}{' '}
+              {terminalText(state.mcpMutationOutcome.intent.request.expectedStoreId)} ·{' '}
+              {t('Session')} {terminalText(state.mcpMutationOutcome.intent.sessionId)}
+            </Text>
+          )}
           <Text>
-            {t('Original source change:')}{' '}
-            {terminalText(state.mcpMutationOutcome.intent.request.commandId)}
+            {t(
+              {
+                pending: 'Waiting for configuration change',
+                completed: 'Configuration change saved',
+                saved: 'Configuration change saved',
+                failed: 'Configuration change failed',
+                cancelled: 'Configuration change cancelled',
+                outcome_unknown: 'Configuration change outcome unknown',
+              }[state.mcpMutationOutcome.phase] ?? state.mcpMutationOutcome.phase,
+            )}
           </Text>
-          <Text>
-            {t('Original Store:')}{' '}
-            {terminalText(state.mcpMutationOutcome.intent.request.expectedStoreId)} · {t('Session')}{' '}
-            {terminalText(state.mcpMutationOutcome.intent.sessionId)}
-          </Text>
-          <Text>{terminalText(state.mcpMutationOutcome.phase)}</Text>
           {state.mcpMutationOutcome.fact?.credentialCleanup && (
             <Text>
               {t('Credential cleanup:')}{' '}

@@ -1,9 +1,15 @@
 import type { SkillCataloguePage } from '@kite-ai/client';
 import { useInput } from 'ink';
 import { useEffect, useMemo, useState } from 'react';
-import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
-import { TuiText as Text, type TuiTranslator, useTuiPresentation } from './presentation';
+import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { OverlayListRow, OverlaySection } from './ink/OverlayPrimitives';
+import {
+  TuiText as Text,
+  type TuiTranslator,
+  useInkI18n,
+  useTuiPresentation,
+} from './presentation';
 import { manualWorkflow } from './skills';
 
 type SkillEntry = SkillCataloguePage['entries'][number];
@@ -11,20 +17,25 @@ type SkillEntry = SkillCataloguePage['entries'][number];
 export function skillDetails(
   entry: SkillEntry,
   t: TuiTranslator = (label) => label,
+  testDiagnostics = true,
 ): readonly string[] {
   const text = [
     `${t('Name:')} ${entry.name ?? 'unavailable'}`,
-    `${t('ID:')} ${entry.id}`,
+    ...(testDiagnostics ? [`${t('ID:')} ${entry.id}`] : []),
     `${t('State:')} ${entry.state} ${t('· Reason:')} ${entry.reason ?? 'none'}`,
-    `${t('Version:')} ${entry.version ?? 'unavailable'}`,
+    ...(testDiagnostics ? [`${t('Version:')} ${entry.version ?? 'unavailable'}`] : []),
     `${t('Required capabilities:')} ${entry.requiredCapabilities.join(', ') || 'none'}`,
     `${t('Missing capabilities:')} ${entry.missingCapabilities.join(', ') || 'none'}`,
     `${t('Description:')} ${entry.description ?? 'unavailable'}`,
     ...(entry.workflow
       ? [
           `${t('Workflow:')} ${entry.workflow.state} · ${entry.workflow.reason ?? 'none'}`,
-          `${t('Manual:')} ${entry.workflow.manualAllowed} · ${t('Input {}:')} ${entry.workflow.emptyInputValid}`,
-          `${t('Workflow version:')} ${entry.workflow.revision ?? 'unavailable'}`,
+          ...(testDiagnostics
+            ? [
+                `${t('Manual:')} ${entry.workflow.manualAllowed} · ${t('Input {}:')} ${entry.workflow.emptyInputValid}`,
+                `${t('Workflow version:')} ${entry.workflow.revision ?? 'unavailable'}`,
+              ]
+            : []),
         ]
       : []),
   ].join('\n');
@@ -45,6 +56,7 @@ export function skillDetails(
   );
 }
 export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
+  const { t: originalLabel } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation();
   const state = controller.state,
     snapshot = state.skills,
@@ -54,7 +66,10 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
     [detailPage, setDetailPage] = useState(0);
   const index = Math.max(0, Math.min(selected, entries.length - 1)),
     entry = entries[index];
-  const details = useMemo(() => (entry ? skillDetails(entry, t) : []), [entry, t]);
+  const details = useMemo(
+    () => (entry ? skillDetails(entry, t, testDiagnostics) : []),
+    [entry, t, testDiagnostics],
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: a different Skill fact resets the local detail page.
   useEffect(() => {
     setDetailPage(0);
@@ -79,6 +94,17 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
           {facts?.availability === 'available' ? entries.length : 'unknown'}
         </>
       }
+      meta={`${entry ? index + 1 : 0} / ${entries.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: '←→', label: t('Details') },
+            { keys: 'R', label: t('Refresh') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
+      }
     >
       <Text>
         {t(
@@ -94,10 +120,12 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
           <Text>{`/${entry.workflow.name} [task]`}</Text>
         )}
       <Text>{t('Discovery does not grant tool permissions')}</Text>
-      <Text>
-        {t('Catalog read:')} {snapshot?.read ?? 'unknown'} {t('· Observation:')}{' '}
-        {state.observationState}
-      </Text>
+      {testDiagnostics && (
+        <Text>
+          {t('Catalog read:')} {snapshot?.read ?? 'unknown'} {t('· Observation:')}{' '}
+          {state.observationState}
+        </Text>
+      )}
       <Text>{t('↑/↓ entries · ←/→ details · R refresh · Esc back')}</Text>
       {facts && (
         <Text>
@@ -123,17 +151,22 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
             .replaceAll('\n', '\\n'),
         );
         return (
-          <Text key={value.id}>
-            {start + offset === index ? '› ' : '  '}
-            {name.slice(0, 28).join('')}
-            {name.length > 28 ? '…' : ''} {'['}
-            {value.state}
-            {']'}
-          </Text>
+          <OverlayListRow
+            key={value.id}
+            selected={start + offset === index}
+            primary={
+              name.slice(0, 28).join('') +
+              (name.length > 28 ? '…' : '') +
+              (testDiagnostics ? ` [${value.state}]` : '')
+            }
+            secondary={value.description ?? undefined}
+            trailing={!testDiagnostics && <Text>{t(value.state)}</Text>}
+          />
         );
       })}
       {entry ? (
         <>
+          <OverlaySection>{t('Details')}</OverlaySection>
           <Text>
             {t('Details page')} {Math.min(detailPage + 1, details.length)}
             {'/'}

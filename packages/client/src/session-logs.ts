@@ -43,6 +43,12 @@ export function verifySessionLogPage(
       const position = parseCursorSequence(entry.cursor);
       parseCursorSequence(entry.revision);
       if (
+        (!/^[A-Za-z0-9_-]{1,128}$/.test(entry.objectId) &&
+          !(
+            entry.type === 'extension.record_updated' &&
+            entry.category === 'extension' &&
+            /^builtin\.files\/checkpoint\/[a-f0-9]{64}\/point$/.test(entry.objectId)
+          )) ||
         entry.sessionId !== target.sessionId ||
         position <= previous ||
         position > upper ||

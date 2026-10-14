@@ -191,7 +191,7 @@ test('Ink arrows navigate entries, detail pages preserve full text and local Ctr
   expect(ui.lastFrame()).toContain('Skill 301 [disabled]');
   ui.stdin.write('r');
   await tick();
-  expect(f.counts().reads).toBe(2);
+  expect(f.counts().reads).toBe(3);
   expect(f.counts().effects).toBe(0);
   let resolve!: (page: SkillCataloguePage) => void, signal!: AbortSignal;
   f.port.skills!.read = (_id, _workspace, readSignal) => {

@@ -1,11 +1,12 @@
 import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
 import { callerKey } from './caller';
-import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
+import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { OverlayListRow, OverlaySection } from './ink/OverlayPrimitives';
 import { mcpAuthRequest, type TuiMcpAuthAction } from './mcp-auth';
 import type { TuiMcpSourceSnapshot } from './mcp-source';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 const names: Record<TuiMcpAuthAction, string> = {
   'mcp.auth.login': 'Login',
@@ -14,7 +15,8 @@ const names: Record<TuiMcpAuthAction, string> = {
   'mcp.auth.revoke': 'Revoke remote credentials',
 };
 export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation(),
+  const { t: originalLabel } = useInkI18n();
+  const { t, testDiagnostics } = useTuiPresentation(),
     state = controller.state,
     status = state.mcpAuthStatus;
   const [index, setIndex] = useState(0),
@@ -123,7 +125,7 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
     choice.kind === 'action'
       ? `${t('Review')} ${t(names[choice.action])}`
       : choice.kind === 'original'
-        ? `${t('Original authentication:')} ${terminalText(state.callers.get(choice.key)?.intent.request.commandId ?? '')}`
+        ? `${t('Original authentication:')} ${testDiagnostics ? terminalText(state.callers.get(choice.key)?.intent.request.commandId ?? '') : originals.findIndex((row) => callerKey(row.intent) === choice.key) + 1}`
         : t(
             {
               check: 'Check original authentication',
@@ -133,7 +135,19 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
           );
   const offset = Math.max(0, Math.min(index - 2, actions.length - 5));
   return (
-    <TuiOverlayFrame title={<> {t('MCP authentication')} </>}>
+    <TuiOverlayFrame
+      title={t('MCP authentication')}
+      meta={`${index + 1} / ${actions.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: 'Enter', label: originalLabel('common.confirm') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
+      }
+    >
       <Text>{t('Authentication does not reconnect or replay tools.')}</Text>
       {state.mcpAuthServerId && (
         <Text>
@@ -146,10 +160,13 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
           {t(status.credentialPresent ? 'Credentials present' : 'No credentials')}
         </Text>
       )}
+      <OverlaySection>{t('Actions')}</OverlaySection>
       {actions.slice(offset, offset + 5).map((choice, i) => (
-        <Text key={choice.kind === 'original' ? choice.key : `${choice.kind}:${offset + i}`}>
-          {offset + i === index ? '›' : ' '} {label(choice)}
-        </Text>
+        <OverlayListRow
+          key={choice.kind === 'original' ? choice.key : `${choice.kind}:${offset + i}`}
+          selected={offset + i === index}
+          primary={label(choice)}
+        />
       ))}
       <Text>{t('↑/↓ choose · Enter select · Esc back')}</Text>
       {pending && (
@@ -161,13 +178,17 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
       )}
       {original && (
         <>
-          <Text>
-            {t('Original authentication:')} {terminalText(original.intent.request.commandId)}
-          </Text>
-          <Text>
-            {t('Original Store:')} {terminalText(original.intent.scope.storeId)} · {t('Session')}{' '}
-            {terminalText(original.intent.scope.sessionId)}
-          </Text>
+          {testDiagnostics && (
+            <Text>
+              {t('Original authentication:')} {terminalText(original.intent.request.commandId)}
+            </Text>
+          )}
+          {testDiagnostics && (
+            <Text>
+              {t('Original Store:')} {terminalText(original.intent.scope.storeId)} · {t('Session')}{' '}
+              {terminalText(original.intent.scope.sessionId)}
+            </Text>
+          )}
           <Text>{t(phase)}</Text>
         </>
       )}

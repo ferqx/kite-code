@@ -87,6 +87,7 @@ export interface ModelSettingsView extends ConfigurationLocation {
     configured: boolean;
     provider?: string;
     model?: string;
+    connectionId?: string;
     reasoningEffort?: ReasoningEffort | null;
     reasoningEffortChoices?: ReasoningEffort[];
     reasoningEffortSupport?: 'compatible_wire' | 'unsupported';
@@ -586,6 +587,9 @@ export function createConfigurationManagement(options: {
               configured: diagnostics.length === 0,
               ...(typeof model.provider === 'string' ? { provider: model.provider } : {}),
               ...(typeof model.model === 'string' ? { model: model.model } : {}),
+              ...(typeof model.baseURL === 'string' && isSupportedModelProvider(model.provider)
+                ? { connectionId: providerConnectionId(model) }
+                : {}),
               reasoningEffort:
                 diagnostics.length === 0
                   ? (parseModelPreset(model.options).reasoningEffort ?? null)

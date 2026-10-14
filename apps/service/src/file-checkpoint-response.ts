@@ -87,5 +87,19 @@ export async function fileCheckpointResponse(
       : operation === 'detail'
         ? FileCheckpointDetailSchema
         : FileRestoreStatusSchema;
-  return schema.parse(value);
+  const parsed = schema.parse(value);
+  if (operation === 'detail') {
+    const detail = FileCheckpointDetailSchema.parse(parsed);
+    for (const file of detail.payload.files) {
+      const change = file.textChange;
+      if (
+        change &&
+        (!['restore', 'remove', 'unchanged'].includes(file.status) ||
+          new TextEncoder().encode(change.preview).byteLength > 65536 ||
+          (file.status === 'unchanged' && (change.addedLines !== 0 || change.removedLines !== 0)))
+      )
+        throw new ClientError('file_checkpoint_response_invalid');
+    }
+  }
+  return parsed;
 }

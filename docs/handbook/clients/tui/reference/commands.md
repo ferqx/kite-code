@@ -71,3 +71,6 @@
 ## 通用开发 TUI 文件恢复
 
 `/rewind` 不接受参数，读取实际 Files 恢复点与保存申请。上下选择、Enter 预览，1/2/3 选仅会话/仅代码/两者，再 Enter 核对提交。L 查原保存申请，R 只读刷新，C 明确继续未开始的第二 leg，A 返回原独立审批，Esc/Ctrl+C 关闭本地读取。操作与部分完成含义见[恢复指南](../guides/cancellation-and-recovery.md#通用开发-tui-的-files-三范围操作)。
+
+
+正常命令菜单使用原说明／别名、ghost 和终端高度窗口；补全候选不会直接执行。实际合格 Workflow 与完整 live MCP prompt 目录可提供动态候选；`/mcp__<server>__<prompt>`仅保留原本地用户显示，不创建 Run／RPC，详见[目录说明](../guides/mcp-and-skills.md#原目录展示与动态-prompt-命令)。

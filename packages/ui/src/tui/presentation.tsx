@@ -1,9 +1,29 @@
 import { Text, type TextProps } from 'ink';
 import { createContext, useContext, useMemo } from 'react';
+import { enUS, type MessageKey, zhCN } from './ink/messages';
+import { getInkTheme, type InkTheme } from './ink/theme';
 import { defaultTuiPreferences } from './preferences';
 
 /** Only explicit UI-owned labels enter this catalog. Public machine values and body text do not. */
 export const tuiChinese: Readonly<Record<string, string>> = {
+  'Recorded tool arguments': '已保存工具参数',
+  'Only this exact command in the original Session; other commands still require approval.':
+    '只允许原会话中的这一准确命令；其他命令仍需审批。',
+  'Question: original-schema JSON.': '问题：原 schema JSON。',
+  'Alt+S: skip optional answer': 'Alt+S：跳过可选回答',
+  'Saved MCP prompts': '已保存 MCP prompts',
+  'Saved MCP resources': '已保存 MCP resources',
+  'Retained external data; reading does not connect or execute a prompt.':
+    '已保存的外部资料；阅读不连接服务器或执行 prompt。',
+  'Reading saved directory': '正在读取已保存目录',
+  'Saved directory unavailable; Enter retries': '已保存目录不可用；Enter 重试',
+  'No saved descriptors in this window': '此窗口没有已保存描述',
+  'Live binding': '当前连接绑定',
+  'Historical binding': '历史连接绑定',
+  'Next saved window': '下一个已保存窗口',
+  'Saved server': '已保存服务器',
+  'Read details': '读取详情',
+
   'Command suggestions': '命令候选',
   'Up/Down: choose · Tab/Enter: complete · Esc: close': '上下选择 · Tab/Enter 补全 · Esc 关闭',
   'Revise plan': '补充或修改方案',
@@ -672,6 +692,56 @@ export function useTuiPresentation() {
     [preferences.resolvedLanguage],
   );
   return { t, preferences, testDiagnostics };
+}
+export type { InkTheme } from './ink/theme';
+export interface InkI18n {
+  language: 'zh-CN' | 'en-US';
+  t: (key: MessageKey, values?: Record<string, string | number>) => string;
+  formatNumber: (value: number) => string;
+  formatDateTime: (value: number) => string;
+  formatElapsed: (milliseconds: number) => string;
+}
+export function useInkTheme(): InkTheme {
+  const { preferences } = useTuiPresentation();
+  return getInkTheme(preferences.theme, preferences.colorPreset);
+}
+/** Original Ink labels; service payloads, model text and paths never enter this catalog. */
+export function useInkI18n(): InkI18n {
+  const { preferences } = useTuiPresentation();
+  return useMemo(() => {
+    const language = preferences.resolvedLanguage;
+    const catalog = language === 'zh-CN' ? zhCN : enUS;
+    return {
+      language,
+      t: (key: MessageKey, values?: Record<string, string | number>) =>
+        catalog[key].replace(/\{(\w+)\}/g, (match, name: string) =>
+          values?.[name] === undefined ? match : String(values[name]),
+        ),
+      formatNumber: (value: number) => new Intl.NumberFormat(language).format(value),
+      formatDateTime: (value: number) => {
+        const date = new Date(value);
+        return Number.isNaN(date.getTime())
+          ? language === 'zh-CN'
+            ? '（未知）'
+            : '(unknown)'
+          : new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'medium' }).format(
+              date,
+            );
+      },
+      formatElapsed: (milliseconds: number) => {
+        const seconds = Math.max(1, Math.round(milliseconds / 1000));
+        const minutes = Math.floor(seconds / 60),
+          rest = seconds % 60;
+        return language === 'zh-CN'
+          ? minutes
+            ? `${minutes} 分 ${rest} 秒`
+            : `${seconds} 秒`
+          : minutes
+            ? `${minutes}m ${rest}s`
+            : `${seconds}s`;
+      },
+    };
+  }, [preferences.resolvedLanguage]);
 }
 const lightAccents = {
   teal: '#087E66',

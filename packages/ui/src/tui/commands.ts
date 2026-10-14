@@ -33,7 +33,8 @@ export type TuiCommand =
 export function parseTuiCommand(text: string): TuiCommand {
   const parts = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/i.exec(text.trim());
   if (!parts) throw new Error('invalid_tui_command');
-  const name = parts[1]!.toLowerCase(),
+  const rawName = parts[1]!.toLowerCase(),
+    name = rawName === 'bg' ? 'background' : rawName === 'c' ? 'clear' : rawName,
     tail = parts[2]?.trim() ?? '';
   if (name === 'context' && tail.toLowerCase() === 'requests')
     return { kind: 'management_requests' };
@@ -95,6 +96,7 @@ export function parseTuiCommand(text: string): TuiCommand {
 export function isFixedTuiCommandName(name: string): boolean {
   return [
     'background',
+    'bg',
     'plan',
     'theme',
     'language',
@@ -115,6 +117,7 @@ export function isFixedTuiCommandName(name: string): boolean {
     'skills',
     'permissions',
     'clear',
+    'c',
     'export',
     'drafts',
     'draft',

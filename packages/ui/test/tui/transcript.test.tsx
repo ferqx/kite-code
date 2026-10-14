@@ -166,7 +166,13 @@ test('execution reader accepts a selected Tool result but only exact Jobs can in
       sessionId: 'session',
       snapshot: {
         storeId: 'store',
-        view: { executions: [execution('job', 'job'), execution('tool', 'tool')] },
+        view: {
+          storeId: 'store',
+          session: { id: 'session', workspaceId: 'w' },
+          runs: [],
+          executions: [execution('job', 'job'), execution('tool', 'tool')],
+        },
+        messages: [],
       },
       jobStops: new Map(),
       executionReading: {

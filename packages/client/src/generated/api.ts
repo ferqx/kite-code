@@ -124,6 +124,7 @@ export type FileCheckpointPage = {
         workspace: { device: string; inode: string };
       };
       revision: string;
+      recordedAt?: number;
     }>;
     nextAfterKey: string | null;
   };
@@ -161,6 +162,12 @@ export type FileCheckpointDetail = {
       } | null;
       original: { hash: string; size: number; device: string; inode: string } | null;
       expected: { hash: string; size: number; device: string; inode: string } | null;
+      textChange?: {
+        addedLines: number;
+        removedLines: number;
+        preview: string;
+        truncated: boolean;
+      } | null;
     }>;
   };
 };
@@ -298,7 +305,7 @@ export type SessionLogDetails = {
 export type SessionLogEntry = {
   cursor: string;
   sessionId: string;
-  objectId: string;
+  objectId: string | string;
   type: string;
   revision: string;
   occurredAt: number | null;
@@ -359,7 +366,7 @@ export type SessionLogPage = {
   entries: Array<{
     cursor: string;
     sessionId: string;
-    objectId: string;
+    objectId: string | string;
     type: string;
     revision: string;
     occurredAt: number | null;
@@ -1297,6 +1304,7 @@ export type ModelSettingsView = {
     configured: boolean;
     provider?: string;
     model?: string;
+    connectionId?: string;
     reasoningEffort?: ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max') | null;
     reasoningEffortChoices?: Array<
       'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -1664,6 +1672,8 @@ export type Execution = {
   childSessionId?: string | null;
   parentExecutionId?: string | null;
   cancelWithParent?: boolean;
+  toolCallId?: string;
+  toolInput?: Execution___schema0;
   sessionId: string;
   runId: string | null;
   kind: 'model' | 'tool' | 'job';
@@ -2283,6 +2293,13 @@ export type BrowserSessionList = Array<{
   deletedAt: number | null;
   historyPurgedAt?: number;
 }>;
+type BrowserView___schema0 =
+  | string
+  | number
+  | boolean
+  | null
+  | Array<BrowserView___schema0>
+  | { [key: string]: BrowserView___schema0 };
 export type BrowserView = {
   session: {
     id: string;
@@ -2348,6 +2365,8 @@ export type BrowserView = {
     childSessionId?: string | null;
     parentExecutionId?: string | null;
     cancelWithParent?: boolean;
+    toolCallId?: string;
+    toolInput?: BrowserView___schema0;
     sessionId: string;
     runId: string | null;
     kind: 'model' | 'tool' | 'job';
@@ -2826,6 +2845,8 @@ export type SessionView = {
     childSessionId?: string | null;
     parentExecutionId?: string | null;
     cancelWithParent?: boolean;
+    toolCallId?: string;
+    toolInput?: SessionView___schema0;
     sessionId: string;
     runId: string | null;
     kind: 'model' | 'tool' | 'job';
@@ -2873,6 +2894,11 @@ export type SessionView = {
   }>;
   snapshotCursor: string;
   storeId: string;
+  compressionProgress?: {
+    runId: string;
+    originStoreId: string;
+    phase: 'preparing' | 'summarizing' | 'validating';
+  };
 };
 type CommandRequest___schema0 =
   | string

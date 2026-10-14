@@ -102,7 +102,7 @@ test('resume deletes the confirmed original row; default Enter retains it withou
     await settle();
     expect(app.lastFrame()).toContain('Delete Session?');
     expect(app.lastFrame()).toContain('另一会话🙂');
-    expect(app.lastFrame()).toContain('> Keep Session');
+    expect(app.lastFrame()).toContain('❯ Keep Session');
     expect(f.writes).toHaveLength(0);
     app.stdin.write('\r');
     await settle();

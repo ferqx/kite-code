@@ -1,15 +1,17 @@
 import { useInput } from 'ink';
 import { useEffect, useState } from 'react';
-import { TuiOverlayFrame } from './chrome';
 import { type TuiController, terminalText } from './controller';
+import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { OverlayListRow, OverlaySection } from './ink/OverlayPrimitives';
 import { TuiMcpAuthPanel } from './mcp-auth-panel';
 import type { TuiMcpSourceSnapshot } from './mcp-source';
 import { reviewableMcpSource } from './mcp-source-question';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** Host supplies a complete snapshot; Ink renders only a finite local page. */
 export function TuiMcpSourcePanel({ controller }: { controller: TuiController }) {
-  const { t } = useTuiPresentation(),
+  const { t: originalLabel } = useInkI18n();
+  const { t, testDiagnostics } = useTuiPresentation(),
     state = controller.state,
     facts = state.mcpSource?.facts;
   const [index, setIndex] = useState(0),
@@ -109,11 +111,13 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
   const label = (choice: Choice) => {
     if (choice.kind === 'server') {
       const row = rows.find((r) => r.id === choice.id);
-      return row ? `${terminalText(row.id)} · ${terminalText(row.name)}` : '';
+      return row
+        ? `${testDiagnostics ? `${terminalText(row.id)} · ` : ''}${terminalText(row.name)}`
+        : '';
     }
     if (choice.kind === 'saved') {
       const original = originals.find((row) => row.intent.request.commandId === choice.id);
-      return `${t('Original source decision:')} ${terminalText(choice.id)} · ${t('Original Store:')} ${terminalText(original?.intent.request.expectedStoreId ?? '')}`;
+      return `${t('Original source decision:')} ${testDiagnostics ? terminalText(choice.id) : originals.indexOf(original!) + 1}${testDiagnostics ? ` · ${terminalText(original?.intent.request.expectedStoreId ?? '')}` : ''}`;
     }
     return t(
       (
@@ -162,8 +166,19 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
     <TuiOverlayFrame
       title={
         <>
-          {t('Project sources')} · {terminalText(state.snapshot?.view.session.workspaceId ?? '')}
+          {t('Project sources')}{' '}
+          {testDiagnostics && terminalText(state.snapshot?.view.session.workspaceId ?? '')}
         </>
+      }
+      meta={`${index + 1} / ${actions.length}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: originalLabel('common.select') },
+            { keys: 'Enter', label: originalLabel('common.confirm') },
+            { keys: 'Esc', label: originalLabel('common.back') },
+          ]}
+        />
       }
     >
       <Text>
@@ -182,7 +197,8 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
       {server && (
         <>
           <Text>
-            {t('Server:')} {terminalText(server.id)} · {terminalText(server.name)}
+            {t('Server:')} {testDiagnostics && <>{terminalText(server.id)} · </>}
+            {terminalText(server.name)}
           </Text>
           <Text>
             {t('Source:')} {terminalText(server.source.kind)} ·{' '}
@@ -195,10 +211,13 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
           {server.reason && <Text>{terminalText(server.reason)}</Text>}
         </>
       )}
+      <OverlaySection>{t('Actions')}</OverlaySection>
       {actions.slice(offset, offset + 5).map((choice, i) => (
-        <Text key={'id' in choice ? `${choice.kind}:${choice.id}` : `${choice.kind}:${offset + i}`}>
-          {index === offset + i ? '›' : ' '} {label(choice)}
-        </Text>
+        <OverlayListRow
+          key={'id' in choice ? `${choice.kind}:${choice.id}` : `${choice.kind}:${offset + i}`}
+          selected={index === offset + i}
+          primary={label(choice)}
+        />
       ))}
       <Text>{t('↑/↓ choose · Enter select · Esc back')}</Text>
       {pending && (
@@ -211,11 +230,13 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
       )}
       {outcome && (
         <>
-          <Text>
-            {t('Original source decision:')} {terminalText(outcome.intent.request.commandId)} ·{' '}
-            {t('Original Store:')} {terminalText(outcome.intent.request.expectedStoreId)} ·{' '}
-            {t('Session')} {terminalText(outcome.intent.sessionId)}
-          </Text>
+          {testDiagnostics && (
+            <Text>
+              {t('Original source decision:')} {terminalText(outcome.intent.request.commandId)} ·{' '}
+              {t('Original Store:')} {terminalText(outcome.intent.request.expectedStoreId)} ·{' '}
+              {t('Session')} {terminalText(outcome.intent.sessionId)}
+            </Text>
+          )}
           <Text>{t(phase)}</Text>
         </>
       )}

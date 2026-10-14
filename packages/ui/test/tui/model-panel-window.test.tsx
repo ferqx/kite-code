@@ -32,7 +32,7 @@ test('model window starts at actual default and effort, exact two-step review pr
   const ui = render(<TuiModelPanel controller={controller} />);
   try {
     await tick();
-    expect(ui.lastFrame()).toContain('› provider / model-15');
+    expect(ui.lastFrame()).toContain('❯ Name 15');
     expect(ui.lastFrame()).not.toContain('Name 0');
     ui.stdin.write('\r');
     await tick();
@@ -43,7 +43,7 @@ test('model window starts at actual default and effort, exact two-step review pr
     state.panel = 'effort';
     ui.rerender(<TuiModelPanel controller={controller} />);
     await tick();
-    expect(ui.lastFrame()).toContain('› high');
+    expect(ui.lastFrame()).toContain('❯ High');
     ui.stdin.write('\r');
     await tick();
     ui.stdin.write('\r');

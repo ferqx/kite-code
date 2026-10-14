@@ -135,3 +135,10 @@ CLI 的 `--skill` 仍用于选择本次 Run 可以按需使用的知识；显式
 认证参数与敏感值优先通过提供的管理动作维护。项目声明改变后，旧批准不能自动适用于新命令、地址或环境。添加后先查看连接和工具清单，再执行具体任务。
 
 当前默认源接受 none、已独立绑定的有限 Bearer credential 和 OAuth metadata。OAuth 的 credentialRef 是 profile label，clientSecretRef 必须是 opaque credential:<uuid>；命名手工 secret、inline secret 或其他 header/scheme 不因此可用。省略 auth 的 HTTP 只有观察到当前准确来源的真实 401 后才允许显式 Login；none/manual 不升级。配置字段不会自动打开浏览器。当前安全来源与支持范围见[MCP 配置边界](../../../../active/mcp-config-management.md)。
+
+
+## 原目录展示与动态 prompt 命令
+
+MCP 面板提供 Saved prompts／resources，读取已保存 list Record 的原描述和全部 arguments 等字段；历史绑定与当前 live 绑定分别标示。分页、详情和关闭不连接服务器、读取远端正文或执行 prompt。
+
+命令候选包含当前完整目录中唯一且准确匹配的 `/mcp__<server>__<prompt>`。选择前重新核对目录及 live／配置绑定；与原 TUI 一致，只在当前会话显示该原命令，没有 Run 或远端 RPC。动态 Workflow 仍使用独立的新服务调用和权限校验，两种选择不混用。

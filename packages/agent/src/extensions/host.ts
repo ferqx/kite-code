@@ -52,6 +52,7 @@ function publicRun(run: Awaited<ReturnType<Store['getRun']>>): PublicRun | null 
   return {
     id: run.id,
     sessionId: run.sessionId,
+    originStoreId: run.originStoreId,
     status: run.status,
     isActive: run.isActive,
     createdAt: run.createdAt,

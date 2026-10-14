@@ -299,3 +299,6 @@ Native Provider/Model 的完整设置消费者由 Main 冻结原观察，热秘�
 
 
 Native MCP 的 renderer通过固定IPC提交有限参数，Main固定真实观察、完整Source read-set和原Store/subject/Session/Workspace身份。来源、认证、连接与Tool授权分别核实；原非秘密申请在第一次POST前FULL保存，冷/foreign只读不重发，迟到GET不能把已确认终态降级。Profile无三项raw MCP文件时DB7使用manifest15，独立codec和原字节上界归[maintenance](../../packages/agent/src/maintenance/README.md#desktop-db7-与-manifest-v15)；实际任一raw文件存在则优先使用[manifest16](../../packages/agent/src/maintenance/README.md#profile-mcp-配置资产与-manifest-v16)，保原声明、决定、引用与UI资产，恢复后的来源准入仍核当前Store和物理scope。UI保存的意图不成为Core或Host权威。可信loopback/公开证书测试装配须在制品构建前固定并入摘要，不进入普通配置/环境，不放宽默认浏览器、Vault或权限。
+
+
+终端原 Ink UI 在 `packages/ui/src/tui/ink` 保留纯展示算法，正式／开发宿主均只消费新 Client 事实。只读 planning progress、compression phase、Tool call/input、Files 文本预览与 point 日志时间补齐原界面所需来源；不引入 UI 权限规则、旧 Runtime、第二 Store 或派发 fallback。Source 与完整性仍由 Agent／Service／Client 核实，UI 聚合不授予执行或恢复资格。实现与验证范围归 [TUI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)。

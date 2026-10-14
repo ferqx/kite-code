@@ -316,3 +316,95 @@ test('Cookie SDK finite read targets and optional query values, wrong scopes and
     server.stop(true);
   }
 });
+
+test('read-only text-change metadata and same-source recorded time are bounded and never turn conflicts or restored history into display facts', () => {
+  const original = page().payload.items[0]!.checkpoint;
+  const detail = decodeResponse('FileCheckpointDetail', {
+    storeId: 'store',
+    sessionId: 's',
+    workspaceId: 'w',
+    payload: {
+      checkpoint: original,
+      files: [
+        {
+          path: 'src/main.ts',
+          recordRevision: '1',
+          status: 'restore',
+          reason: null,
+          preimage: {
+            id: 'original-bytes',
+            mediaType: 'application/octet-stream',
+            size: '4',
+            scope: { kind: 'execution', id: 'tool' },
+          },
+          original: { hash: 'b'.repeat(64), size: 4, device: '1', inode: '2' },
+          expected: { hash: 'c'.repeat(64), size: 4, device: '1', inode: '2' },
+          textChange: {
+            addedLines: 1,
+            removedLines: 1,
+            preview: '- new\n+ old\n',
+            truncated: false,
+          },
+        },
+      ],
+    },
+  });
+  expect(verifyFileCheckpointDetail(detail, id)).toEqual(detail);
+  for (const patch of [
+    { status: 'conflict' as const },
+    { status: 'unchanged' as const },
+    { textChange: { ...detail.payload.files[0]!.textChange!, preview: '😀'.repeat(20000) } },
+    { textChange: { ...detail.payload.files[0]!.textChange!, preview: '\uD800' } },
+  ]) {
+    expect(() =>
+      verifyFileCheckpointDetail(
+        {
+          ...detail,
+          payload: { ...detail.payload, files: [{ ...detail.payload.files[0]!, ...patch }] },
+        },
+        id,
+      ),
+    ).toThrow('file_checkpoint_preview_invalid');
+  }
+  const recorded = {
+    ...page(),
+    payload: {
+      ...page().payload,
+      items: [
+        {
+          ...page().payload.items[0]!,
+          revision: '1',
+          recordedAt: 2000,
+          checkpoint: {
+            ...original,
+            boundary: { ...original.boundary, storeId: 'store', sessionId: 's' },
+          },
+        },
+      ],
+    },
+  };
+  expect(
+    verifyFileCheckpointPage(decodeResponse('FileCheckpointPage', recorded), { limit: 1 }),
+  ).toEqual(recorded);
+  expect(() =>
+    verifyFileCheckpointPage(
+      {
+        ...recorded,
+        payload: { ...recorded.payload, items: [{ ...recorded.payload.items[0]!, revision: '2' }] },
+      },
+      { limit: 1 },
+    ),
+  ).toThrow();
+  expect(() =>
+    verifyFileCheckpointPage(
+      {
+        ...recorded,
+        payload: {
+          ...recorded.payload,
+          items: [{ ...recorded.payload.items[0]!, checkpoint: original }],
+        },
+      },
+      { limit: 1 },
+    ),
+  ).toThrow();
+});

@@ -152,12 +152,12 @@ test('Ink opens cold removed snapshot through visible list, reaches later Tool p
   const f = fixture();
   await f.controller.select('a');
   await f.controller.openMcp();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\u001b[B');
     await tick();
-    expect(ui.lastFrame()).toContain('› Saved tool snapshots');
+    expect(ui.lastFrame()).toContain('❯ Saved tool snapshots');
     ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain('Generation 1 · 40 tools · available');
@@ -167,7 +167,7 @@ test('Ink opens cold removed snapshot through visible list, reaches later Tool p
     expect(ui.lastFrame()).toContain('[name preview]');
     ui.stdin.write('\u001b[B'.repeat(32));
     await tick();
-    expect(ui.lastFrame()).toContain('› Next tools');
+    expect(ui.lastFrame()).toContain('❯ Next tools');
     ui.stdin.write('\r');
     await tick();
     expect(f.readPages).toEqual([0, 32]);
@@ -243,7 +243,7 @@ test('locale changes owned Tools labels without rereading or translating origina
   await f.controller.refreshPreferences();
   await f.controller.select('a');
   await f.controller.openMcp();
-  const ui = render(<TuiSession controller={f.controller} />);
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
   try {
     await tick();
     ui.stdin.write('\u001b[B');
@@ -261,7 +261,7 @@ test('locale changes owned Tools labels without rereading or translating origina
     expect({ snapshots, pages: f.readPages, descriptors: f.descriptors }).toEqual(before);
     ui.stdin.write('\u001b[B'.repeat(32));
     await tick();
-    expect(ui.lastFrame()).toContain('› 下一页工具');
+    expect(ui.lastFrame()).toContain('❯ 下一页工具');
     ui.stdin.write('\r');
     await tick();
     expect(f.readPages).toEqual([0, 32]);
@@ -361,10 +361,10 @@ for (const forwards of [false, true])
     await f.controller.select('a');
     await f.controller.openMcp();
     await f.controller.openMcpTools();
-    const ui = render(<TuiSession controller={f.controller} />);
+    const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
     try {
       await tick();
-      expect(ui.lastFrame()).toContain('› Next saved snapshots');
+      expect(ui.lastFrame()).toContain('❯ Next saved snapshots');
       ui.stdin.write('\r');
       await tick();
       expect(cursors).toEqual([undefined, first]);

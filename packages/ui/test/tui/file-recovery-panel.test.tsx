@@ -87,3 +87,81 @@ test('Files reader windows exact original points, previews real file impact and 
     ui.unmount();
   }
 });
+
+test('original rewind shows verified recorded date, code statistics and read-only bounded text preview without submitting recovery', async () => {
+  const point = { id: 'p', boundary: { triggerMessageId: 'm' } };
+  const calls: string[] = [];
+  const state = {
+    snapshot: { messages: [{ id: 'm', content: 'Original task' }] },
+    fileRecovery: {
+      phase: 'ready',
+      points: { payload: { items: [{ checkpoint: point, revision: '1', recordedAt: 2000 }] } },
+      saved: [],
+      detail: undefined as unknown,
+    },
+  };
+  const controller = {
+    state,
+    readFileRecoveryPoint: async () => {
+      calls.push('read');
+    },
+    chooseFileRecoveryScope: (scope: string) => calls.push(`scope:${scope}`),
+    startFileRecovery: async () => calls.push('begin'),
+    closePanel: () => {},
+    observeFileRecovery: async () => {},
+    selectSavedFileRecovery: () => {},
+  } as unknown as TuiController;
+  const ui = render(<TuiFileRecoveryPanel controller={controller} />);
+  try {
+    await tick();
+    expect(ui.lastFrame()).toContain('Recorded at:');
+    ui.stdin.write('\r');
+    await tick();
+    state.fileRecovery.detail = {
+      boundary: { checkpoint: point },
+      preview: {
+        payload: {
+          files: [
+            {
+              path: 'src/main.ts',
+              status: 'restore',
+              reason: null,
+              textChange: {
+                addedLines: 2,
+                removedLines: 1,
+                preview: Array.from({ length: 15 }, (_, i) => `+ original line ${i}`).join('\n'),
+                truncated: true,
+              },
+            },
+          ],
+        },
+      },
+    };
+    ui.rerender(<TuiFileRecoveryPanel controller={controller} />);
+    await tick();
+    expect(ui.lastFrame()).toContain('+2 −1');
+    ui.stdin.write('2');
+    await tick();
+    ui.stdin.write('v');
+    await tick();
+    expect(ui.lastFrame()).toContain('original line 0');
+    expect(ui.lastFrame()).toContain('Bounded preview; line counts use complete text.');
+    ui.stdin.write('\u001b[F');
+    await tick();
+    expect(ui.lastFrame()).toContain('original line 14');
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls).toEqual(['read', 'scope:code']);
+    ui.stdin.write('\u001b');
+    await tick();
+    expect(ui.lastFrame()).not.toContain('original line 14');
+    ui.stdin.write('\u001b');
+    await tick();
+    ui.stdin.write('1');
+    await tick();
+    expect(ui.lastFrame()).toContain('Code will remain unchanged.');
+    expect(calls).not.toContain('begin');
+  } finally {
+    ui.unmount();
+  }
+});

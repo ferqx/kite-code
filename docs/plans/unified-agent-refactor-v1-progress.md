@@ -6341,3 +6341,16 @@ Terminal路径选取现复用所属host的资产错误翻译，CLI／TUI保pure 
 本机实际 `npm run build` 八workspace0，默认Terminal candidate `b8f77fc55fbd8774b8cfbf74d7cd65b192c33b4420ff90bdfc22b54a97319206`、Native candidate `c0f6084fef21d50beeaa72bd4e6707a3d1da8199aebd754d6feb4dff35e6e11e` 已生成，未安装／发布。普通CLI help0，desktop:dev实际编译并启动Electron，一次实际退出0、再次启动供本机使用。完整默认Native的实际Playwright窗口核新对话、attach、显式directory可用、无启动／操作弹窗，真实close0／无signal／零Model；结果 `/private/tmp/kite-native-local-startup-clean-20261014.log`。前临时driver的变量遮蔽、误读directory回复形态和close后SDK handle读取失败raw保留，按实际契约修正driver后整体actual0，没有修改产品断言或将这些driver错误充作产品失败。
 
 本轮只闭合本地入口准备、缺资产可操作诊断和显式Desktop开发能力，不取得Win/Linux、RSS32MiB、完整资源／出生或正式阶段资格；无新增正式退役目标。文档同步和正常本地提交保留，不push、PR、发布或触发Actions。
+
+
+## 2026-10-14 原 Ink UI 的完整迁入与新服务接线
+
+用户再次指出布局／功能与原 TUI 不同，要求全部迁 UI、服务继续新架构。本轮直接迁入原纯 Markdown／code／table、用户块、工具／Shell／diff、Thinking 聚合、单独与并发子任务、plan progress／compaction、主题／语言、原菜单和首次配置。主屏消费原 Static／动态区、菜单说明／alias／ghost／40行 editor，接回全部现有业务入口；没有引入旧 Runtime／provider／reducer、第二 Server 或权限分析。
+
+实际源码缺口已补：小段 reasoning 同原 cadence 保存；正式短 builtin 与 MCP 代理必须核准确来源后取原显示名；完整完成正文与必要附件在普通模式自动校验读取；Shell 从原 cursor 取有限五行 tail，child view、已批准 plan progress 与实际 compression phase 进入原展示。已有模型没有默认时可在原向导用 enabled/default CAS 恢复；Unknown 沿原 mutation／marker GET-only，秘密不进入冷 intent。Files 提供完整行统计／有界 UTF-8 预览和实际 immutable point 的记录时间，原 metadata 禁止正文断言仍保留，preview 是明确新只读字段、不进入恢复 digest。
+
+本轮完整 TUI 集合最终 **344pass／0fail／2899expects／34.32s**。初次6处失败保留并修正：未知工具参数是真实主屏／详情遗漏；其余为原表格边框、菜单文案、展示折行和新增只读目录预取计数。随后一处极简 fake View 缺 Session／messages，补齐真实只读合同后原 Tool只读／Job资格断言保持；没有删业务断言或排除测试。新增 Host adapters 27pass／177expects，Agent实际来源8pass／40expects；Client Files／SessionLog6pass／123expects，实际CookieFiles1pass／161expects，原恢复字节／权限／归属／零效果断言保持。最后 MCP代理真实名称 reader＋projection13pass／66expects，零连接／RPC。
+
+[普通真实 PTY](../../apps/cli/test/isolated/tui-ink-parity-host.test.ts)从未信任 Workspace 原 gate 明确确认，正式 runTUIProcess／默认 Service／Client／一次 compatible请求，完整用户和助手 bytes 保存、Run completed、正常退出和所属 Service消失，1pass／7外层断言。共用 POSIX／ConPTY，当前只实际运行macOS；driver只修实际普通提示／Help第一页／paste等待点，不改业务断言。完整8workspace build／typecheck、API同源／静态边界和文档检查归本轮提交门禁，hook仍独立执行。
+
+新增闭合的是原 TUI 用户展示和入口消费；正式／开发消费者共用新 UI／Client／Service／Agent。旧参考源码未新增正式调用，没有把本轮作为旧路径整体退役。开发范围继续完成；原RSS32MiB、完整Runtime资源／出生资格和V1.3阶段资格不变，wholeV13=false／phaseExit=false。Win/Linux实际验证仍由后置Actions／发布前安排，本轮不push、PR、发布或触发Actions。

@@ -781,10 +781,10 @@ test('independent Markdown AST renders structures and keeps HTML, media, relativ
   const frame = terminal.lastFrame()!;
   expect(frame).toContain('Title');
   expect(frame).toContain('const x=1;');
-  expect(frame).toContain('left | right');
+  expect(frame).toContain('│ left │ right │');
   expect(frame).toContain('<script>unsafe()</script>');
   expect(frame).toContain('./relative.ts');
-  expect(frame).toContain('image: alt');
+  expect(frame).toContain('!alt (https://invalid.example/image)');
   expect(frame).toContain('\\u001b]8;;https://invalid.example\\u0007full tail');
   terminal.unmount();
 });
@@ -1162,7 +1162,7 @@ test('open pending chooser freezes exact original rows when the paged directory 
     cards = [{ ...cards[0]! }, { ...cards[1]!, revision: '8' }, { ...card, id: 'new-card' }];
     await c.select('a');
     await Bun.sleep(20);
-    expect(app.lastFrame()).toContain('changed; reopen to select');
+    expect(app.lastFrame()!.replace(/\s+/g, ' ')).toContain('changed; reopen to select');
     await key('\r');
     expect(app.lastFrame()).toContain('approval [one]');
     expect(app.lastFrame()).not.toContain('approval [new-card]');
