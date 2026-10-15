@@ -186,6 +186,22 @@ try {
   await fetch(`${control}/release`);
   await page.getByText('轮次：completed', { exact: true }).waitFor();
   eq(await count(), 1);
+  // The formal compressor requires older settled user history to reduce.
+  // Produce that history through the same actual Native input path.
+  await page
+    .getByRole('textbox', { name: '当前会话私有草稿' })
+    .fill('Qualifying second settled user turn');
+  await page.getByRole('button', { name: '发送明确的新轮次' }).click();
+  await page
+    .getByTestId('content')
+    .getByText('Second actual answer completing the settled history', { exact: false })
+    .waitFor();
+  await waitState(
+    page,
+    (value) =>
+      value.selection?.runs.length === 2 && value.selection.runs.every((run) => !run.isActive),
+  );
+  eq(await count(), 2);
   let panel = page.getByRole('region', { name: '当前所选上下文' });
   await panel.getByRole('button', { name: '读取当前所选上下文' }).click();
   const focus = `${'完整说明。'.repeat(3000)} FULL_FOCUS_TAIL`;
@@ -227,10 +243,10 @@ try {
     followRequest.kind === 'input.follow_up' && followRequest.contextSelectionId,
     queued.selection!.session.contextSelectionId,
   );
-  eq(await count(), 2);
+  eq(await count(), 3);
   await fetch(`${control}/release-compression`);
   await page.getByText('Next actual answer', { exact: false }).first().waitFor();
-  eq(await count(), 3);
+  eq(await count(), 4);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
   await openSessionTools(page);
@@ -252,7 +268,7 @@ try {
   );
   eq(original.compressionSubmissions?.[0]?.sessionId, 's');
   eq(original.compressionSubmissions?.[0]?.run?.status, 'completed');
-  eq(await count(), 3);
+  eq(await count(), 4);
   eq(await app.evaluate('globalThis.__compactPosts'), 1);
   await app.evaluate('globalThis.fetch=globalThis.__compactOriginal');
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
@@ -301,7 +317,7 @@ try {
     true,
   );
   const bodies = await (await fetch(`${control}/requests`)).json();
-  eq(JSON.stringify(bodies[1]).includes(focus), true);
+  eq(JSON.stringify(bodies[2]).includes(focus), true);
   eq(
     (await page.locator('main').innerText()).includes(
       'Original actual answer with preserved source',
@@ -313,12 +329,12 @@ try {
   await waitState(
     page,
     (value) =>
-      value.selection?.runs.length === 4 && value.selection.runs.every((run) => !run.isActive),
+      value.selection?.runs.length === 5 && value.selection.runs.every((run) => !run.isActive),
   );
-  eq(await count(), 4);
+  eq(await count(), 5);
   const nextBodies = await (await fetch(`${control}/requests`)).json();
   eq(
-    JSON.stringify(nextBodies[3]).includes('Factual recorded summary of original user and answer'),
+    JSON.stringify(nextBodies[4]).includes('Factual recorded summary of original user and answer'),
     true,
   );
   const recorded = await page.evaluate(async (storeId) => {
@@ -405,7 +421,7 @@ try {
   await panel.getByRole('button', { name: '读取当前所选上下文' }).click();
   await panel.getByText(/活动压缩记录/).waitFor();
   eq((await panel.innerText()).includes(compression.id), true);
-  eq(await count(), 4);
+  eq(await count(), 5);
   await quitOwned();
   app = await launch();
   page = await app.firstWindow();
@@ -418,7 +434,7 @@ try {
   await panel.getByText(/活动压缩记录/).waitFor();
   await panel.getByText(/活动压缩记录/).waitFor();
   eq((await panel.innerText()).includes(compression.id), true);
-  eq(await count(), 4);
+  eq(await count(), 5);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
   await openSessionTools(page);
@@ -462,7 +478,7 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   await panel.getByText(/压缩原轮次：completed/).waitFor();
-  eq(await count(), 4);
+  eq(await count(), 5);
   await quitOwned();
   console.log(
     'Native Compression Node assertions:',

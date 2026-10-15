@@ -31,8 +31,7 @@ const control = async (path: string) => {
   return (await response.json()) as { commandId: string };
 };
 const key = (value: string) => active!.key(value);
-const wait = async (text: string, compact = false) => {
-  const deadline = Date.now() + 10000;
+const wait = async (text: string, compact = false, deadline = Date.now() + 10000) => {
   for (;;) {
     const frame = await current();
     if (frame.fresh && (compact ? frame.text.replaceAll(' ', '') : frame.text).includes(text))
@@ -42,16 +41,26 @@ const wait = async (text: string, compact = false) => {
     await Bun.sleep(50);
   }
 };
-const choose = async (label: string) => {
-  // Use the current parsed choice, including restored original requests.
+const choose = async (label: string, top = 'Project sources') => {
   const deadline = Date.now() + 10000;
-  if (!(await current()).text.includes('› Project sources')) {
-    await key('\x1b[A'.repeat(32));
-    await wait('› Project sources');
+  const selection = async () => {
+    for (;;) {
+      const frame = await current();
+      if (frame.text.includes('❯')) return frame;
+      if (Date.now() > deadline) throw Error(`owned_selection_absent:${label}`);
+      if (active!.ended) throw Error('owned_pty_eof');
+      await Bun.sleep(50);
+    }
+  };
+  const initial = await selection();
+  if (initial.text.replaceAll(' ', '').includes(`❯${label.replaceAll(' ', '')}`)) return;
+  if (!initial.text.includes(`❯ ${top}`)) {
+    await active!.keyUnlessVisible('\x1b[A'.repeat(32), `❯ ${top}`);
+    await wait(`❯ ${top}`, false, deadline);
   }
   for (let index = 0; index < 32; index++) {
-    const before = await current();
-    if (before.fresh && before.text.replaceAll(' ', '').includes(`›${label.replaceAll(' ', '')}`))
+    const before = await selection();
+    if (before.fresh && before.text.replaceAll(' ', '').includes(`❯${label.replaceAll(' ', '')}`))
       return;
     await key('\x1b[B');
     for (;;) {
@@ -85,13 +94,13 @@ const requestConnection = async () => {
   await wait('New Run > /mcp');
   await key('\r');
   await wait('Server list ready');
-  await key('\x1b[B');
-  await wait(`›${settings.selectedServerId}·enabled·available`, true);
+  await choose(`${settings.selectedServerId} · enabled · available`);
+  await wait(`❯${settings.selectedServerId}·enabled·available`, true);
   await key('\r');
   await wait(`Server:${settings.selectedServerId}·http`, true);
   await wait('Source:');
-  await key('\x1b[B'.repeat(6));
-  await wait('› Request connection');
+  await choose('Request connection');
+  await wait('❯ Request connection');
   await key('\r');
   await wait('Confirm connection request:');
   await key('\r');

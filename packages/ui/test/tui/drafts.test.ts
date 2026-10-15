@@ -277,3 +277,114 @@ test('accepted Fork consumes only its original typed slash draft after selection
   expect(f.writes()).toBe(0);
   f.c.dispose();
 });
+
+test('successful exit consumes only its exact submitted slash draft before host quit and a blocked exit preserves it', async () => {
+  const f = fixture();
+  const seenAtQuit: Array<{ memory: string; stored: string | undefined }> = [];
+  f.port.management = {
+    manage: async () => {
+      throw Error('unused');
+    },
+    lookup: async () => {
+      throw Error('unused');
+    },
+    newSession: async () => {
+      throw Error('unused');
+    },
+    readContext: async () => {
+      throw Error('unused');
+    },
+    quit: () => {
+      seenAtQuit.push({ memory: f.c.state.draft, stored: f.rows.get('a') });
+      return false;
+    },
+  };
+  await f.c.select('a');
+  f.c.setDraft('/exit');
+  await f.c.send();
+  expect(f.c.state.draft).toBe('/exit');
+  expect(f.rows.get('a')).toBe('/exit');
+  expect(seenAtQuit).toEqual([{ memory: '', stored: '' }]);
+  f.port.management.quit = () => {
+    seenAtQuit.push({ memory: f.c.state.draft, stored: f.rows.get('a') });
+    return true;
+  };
+  await f.c.send();
+  expect(f.c.state.draft).toBe('');
+  expect(f.rows.get('a')).toBe('');
+  f.c.setDraft('independent unsent text');
+  await f.c.routeCommand('/exit');
+  expect(f.c.state.draft).toBe('independent unsent text');
+  expect(f.rows.get('a')).toBe('independent unsent text');
+  expect(seenAtQuit).toEqual([
+    { memory: '', stored: '' },
+    { memory: '', stored: '' },
+    { memory: 'independent unsent text', stored: 'independent unsent text' },
+  ]);
+  expect(f.writes()).toBe(0);
+  f.c.dispose();
+});
+
+test('exit exact-command consumption refusal blocks quit without clearing either original draft', async () => {
+  const f = fixture();
+  let quits = 0;
+  f.port.management = {
+    manage: async () => {
+      throw Error('unused');
+    },
+    lookup: async () => {
+      throw Error('unused');
+    },
+    newSession: async () => {
+      throw Error('unused');
+    },
+    readContext: async () => {
+      throw Error('unused');
+    },
+    quit: () => {
+      quits++;
+      return true;
+    },
+  };
+  await f.c.select('a');
+  f.c.setDraft('/exit');
+  f.rows.set('a', 'other editor unsent original');
+  f.port.drafts!.accepted = () => false;
+  await f.c.send();
+  expect(quits).toBe(0);
+  expect(f.c.state.draft).toBe('/exit');
+  expect(f.rows.get('a')).toBe('other editor unsent original');
+  expect(f.c.state.error).toBe('tui_draft_save_failed_exit_blocked');
+  expect(f.writes()).toBe(0);
+  f.c.dispose();
+});
+
+test('blocked host quit cannot restore its consumed command over a new user draft', async () => {
+  const f = fixture();
+  f.port.management = {
+    manage: async () => {
+      throw Error('unused');
+    },
+    lookup: async () => {
+      throw Error('unused');
+    },
+    newSession: async () => {
+      throw Error('unused');
+    },
+    readContext: async () => {
+      throw Error('unused');
+    },
+    quit: () => {
+      expect(f.c.state.draft).toBe('');
+      f.c.setDraft('new complete user正文\n');
+      return false;
+    },
+  };
+  await f.c.select('a');
+  f.c.setDraft('/exit');
+  await f.c.send();
+  expect(f.c.state.draft).toBe('new complete user正文\n');
+  expect(f.rows.get('a')).toBe('new complete user正文\n');
+  expect(f.writes()).toBe(0);
+  f.c.dispose();
+});

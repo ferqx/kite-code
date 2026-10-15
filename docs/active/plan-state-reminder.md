@@ -4,7 +4,7 @@
 
 读取时机：修改模型消息顺序、Runtime context、Plan/Mode/Authorization 提醒、上下文压缩或 prompt cache 布局时。
 
-验证：`bun test tests/integration/builtin-runtime/context.test.ts tests/integration/builtin-runtime/runtime-context.test.ts tests/integration/runtime/plan-transcript.test.ts apps/kite-service/test/runtime/context-compaction-auto.test.ts apps/kite-service/test/runtime/context-compaction-manual.test.ts apps/kite-service/test/model.test.ts`、`bun run typecheck`。
+验证：当前通用基线执行 `bun test packages/agent/test/isolated/context/model-context.test.ts packages/agent/test/isolated/context/sources.test.ts packages/agent/test/isolated/context/compression.test.ts packages/agent/test/isolated/business/planning.test.ts`、原生产 [Prompt 真实终端旅程](../../tests/tui-system/scenarios/prompt-contract-v2-production.test.ts)与 `bun run typecheck`；旧 Runtime 专项仍由各历史 owner 的原测试解释，不代替当前基线证据。
 
 相关：[Agent Note 0021](../../.agents/notes/implemented/feature/2026-07-23-context-compaction-checkpoint.md)、[Agent Note 0022](../../.agents/notes/implemented/simplification/2026-07-23-context-compaction-single-narrative.md)、[Agent Note 0024](../../.agents/notes/implemented/simplification/2026-07-23-context-compaction-manual-auto-only.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)。
 
@@ -13,6 +13,8 @@
 ## 规则
 
 静态 Agent contract 与 cacheable Runtime context 必须保持稳定。Plan、phase、interaction mode、authorization、sandbox、verification repair 等高频动态事实应由当前 `RuntimeState` 投影到会话尾部，不能写入静态 system prompt 前缀。
+
+通用新基线由 [Agent 模型上下文](../../packages/agent/src/model-context.ts)负责位置组装：默认 Service 只装配 Agent 的纯静态工厂，项目文件为历史之后的带出处 user 来源；[Planning 业务叶](../../packages/agent/src/business/planning/README.md#计划与真实来源)按 Core 当前 Run 与实际批准证明贡献唯一动态尾部。新增内部 `placement` 与 `runId` 不改变 HTTP／Store 格式，不授权限；无 placement 的既有来源保原前缀。普通、压缩和展开共用组装，实际权限、业务必要条件及完整来源 freshness 仍独立核验。下面旧 RuntimeState／epoch／事件名称不能作为读取旧 Store 的入口，D08 新数据基线保持。
 
 推荐消息顺序：
 

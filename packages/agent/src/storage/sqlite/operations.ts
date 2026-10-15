@@ -87,6 +87,7 @@ import {
   verifyJobReportRecovery,
 } from './job-report-operations';
 import { verifyModelBody } from './model-body';
+import { modelFirstOutput } from './model-first-output';
 import { getModelInputSnapshot, listModelInputs } from './model-input-operations';
 import { getModelOutputSnapshot, modelOutputOf, verifyModelOutput } from './model-output';
 import {
@@ -107,6 +108,7 @@ import { storageMeta } from './schema';
 import { callSessionExport } from './session-export';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
 import { manageSession } from './session-management-operations';
+import { applyFirstUserSessionTitle } from './session-titles';
 import {
   readWorkspaceRemoval,
   removeWorkspace,
@@ -117,6 +119,7 @@ import {
 type Input = {
   modelOutput?: import('../../model-output').ModelOutputReference;
   reasoning?: string;
+  firstOutput?: 'content' | 'reasoning' | 'tool_calls';
 } & OwnedWrite &
   AcceptCommandInput &
   PlanExecutionInput &
@@ -645,6 +648,9 @@ export class SqliteOperations {
       status: row.status as MessageRecord['status'],
       role: row.role as MessageRecord['role'],
       content: String(source.content ?? ''),
+      ...(['content', 'reasoning', 'tool_calls'].includes(String(source.firstOutput))
+        ? { firstOutput: source.firstOutput as MessageRecord['firstOutput'] }
+        : {}),
       ...(source.modelOutput
         ? { modelOutput: source.modelOutput as unknown as MessageRecord['modelOutput'] }
         : {}),
@@ -679,6 +685,7 @@ export class SqliteOperations {
       sessionId,
     );
     this.run('INSERT INTO message_part VALUES(?,0,?,1,0,?)', id, 'text', canonicalJson(content));
+    if (role === 'user') applyFirstUserSessionTitle(this, sessionId, id);
     this.event(sessionId, id, 'message.updated');
     return id;
   }
@@ -782,6 +789,7 @@ export class SqliteOperations {
       case 'ensureOperation':
       case 'getOperation':
       case 'planAction':
+      case 'acceptNestedAction':
       case 'applyExtensionAction':
       case 'stopActionPreparation':
         return callExtension(this, method, args);
@@ -1567,14 +1575,21 @@ export class SqliteOperations {
             const partial =
               execution.kind === 'model' && status === 'succeeded'
                 ? this.row(
-                    "SELECT id FROM message WHERE id=? AND session_id=? AND run_id=? AND role='assistant' AND status='incomplete'",
+                    "SELECT id,source_json FROM message WHERE id=? AND session_id=? AND run_id=? AND role='assistant' AND status='incomplete'",
                     `partial_${input.executionId}`,
                     execution.session_id!,
                     execution.run_id!,
                   )
                 : undefined;
             if (partial) {
-              const body = canonicalJson(input.message as unknown as Json);
+              const firstOutput = modelFirstOutput(
+                parse(partial.source_json),
+                input.message.firstOutput,
+              );
+              const body = canonicalJson({
+                ...input.message,
+                ...(firstOutput === undefined ? {} : { firstOutput }),
+              } as unknown as Json);
               this.run(
                 "UPDATE message SET source_json=?,status='complete' WHERE id=?",
                 body,
@@ -1628,14 +1643,19 @@ export class SqliteOperations {
             const output = verifyModelOutput(this, input.modelOutput, execution);
             if (output.complete) throw new AgentError('model_output_invalid');
           }
+          const id = `partial_${input.executionId}`;
+          const prior = this.row('SELECT * FROM message WHERE id=?', id);
+          const firstOutput = modelFirstOutput(
+            prior ? parse(prior.source_json) : null,
+            input.firstOutput,
+          );
           const messageBody = {
             content: input.content,
+            ...(firstOutput === undefined ? {} : { firstOutput }),
             ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
             sourceIds: [input.executionId],
             ...(input.modelOutput === undefined ? {} : { modelOutput: input.modelOutput }),
           } as unknown as Json;
-          const id = `partial_${input.executionId}`;
-          const prior = this.row('SELECT * FROM message WHERE id=?', id);
           if (input.modelOutput !== undefined && prior) {
             const oldValue = modelOutputOf(parse(prior.source_json));
             if (oldValue !== undefined) {

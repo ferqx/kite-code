@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -196,9 +197,11 @@ async function fixture(
   return {
     root,
     runtime,
+    store,
     client,
     requests,
     expectedStoreId,
+    databasePath: profile.databasePath,
     disableQuestions() {
       writeFileSync(
         join(profile.profilePath, 'config.jsonc'),
@@ -221,6 +224,73 @@ async function start(f: Awaited<ReturnType<typeof fixture>>) {
     content: 'Ask exact questions',
   });
 }
+async function assertUnavailableRecovery(
+  f: Awaited<ReturnType<typeof fixture>>,
+  sessionId: string,
+  requests: Record<string, unknown>[],
+) {
+  expect(requests).toHaveLength(2);
+  const view = await f.runtime.getView(sessionId);
+  expect(view.runs).toHaveLength(1);
+  const run = view.runs[0]!;
+  expect(run.status).toBe('completed');
+  const models = view.executions.filter((execution) => execution.kind === 'model');
+  expect(models).toHaveLength(2);
+  expect(
+    models.every(
+      (execution) =>
+        execution.status === 'succeeded' &&
+        execution.runId === run.id &&
+        execution.originStoreId === f.expectedStoreId,
+    ),
+  ).toBe(true);
+  const tools = view.executions.filter((execution) => execution.kind === 'tool');
+  expect(tools).toHaveLength(1);
+  const failed = tools[0]!;
+  expect(failed).toMatchObject({
+    definitionId: 'ask_user',
+    definitionVersion: 'unavailable',
+    status: 'failed',
+    sessionId,
+    runId: run.id,
+    originStoreId: f.expectedStoreId,
+    authorization: { dispatched: false },
+    result: { content: 'tool_not_available', details: { code: 'tool_not_available' } },
+  });
+  const messages = await f.runtime.listMessages(sessionId);
+  const answer = messages.find((message) => message.role === 'tool');
+  expect(answer).toBeDefined();
+  expect(answer!.sourceIds).toEqual([failed.id]);
+  const first = messages.find(
+    (message) => message.role === 'assistant' && message.toolCalls?.length,
+  );
+  expect(first!.sourceIds).toEqual([models[0]!.id]);
+  expect(answer!.toolCallId).toBe(first!.toolCalls![0]!.id);
+  expect(first!.toolCalls![0]!.name).toBe('ask_user');
+  expect(
+    messages.filter((message) => message.role === 'assistant' && message.content === 'Finished'),
+  ).toMatchObject([{ runId: run.id, sourceIds: [models[1]!.id] }]);
+  const delivered = (
+    requests[1]!.messages as { role: string; tool_call_id?: string; content: string }[]
+  ).filter((message) => message.role === 'tool');
+  expect(delivered).toHaveLength(1);
+  expect(delivered[0]!.tool_call_id).toBe(answer!.toolCallId);
+  expect(delivered[0]!.content).toContain('tool_not_available');
+  expect(
+    (await f.store.listInteractions({ sessionId, expectedStoreId: f.expectedStoreId }))
+      .interactions,
+  ).toHaveLength(0);
+  expect(await f.runtime.getCommand('answer')).toBeNull();
+  const database = new Database(f.databasePath, { readonly: true });
+  try {
+    expect(
+      database.query("SELECT id FROM command WHERE kind='interaction.answer'").all(),
+    ).toHaveLength(0);
+  } finally {
+    database.close();
+  }
+}
+
 for (const mode of ['accept_edits', 'auto', 'full'] as const)
   test(`default ask_user uses actual compatible schema and public answer in ${mode}`, async () => {
     const f = await fixture({ mode, planning: mode === 'accept_edits' });
@@ -257,7 +327,7 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         answer: { kind: 'question', answers: { q1: 'q1-o1', q2: { text: 'q1-o1' } } },
       });
       await f.runtime.waitForCommand('run', { timeoutMs: 5000 });
-      expect(f.requests).toHaveLength(2);
+      expect(f.requests).toHaveLength(mode === 'accept_edits' ? 3 : 2);
       const messages = f.requests[1]!.messages as { role: string; content: string }[];
       expect(JSON.parse(messages.find((item) => item.role === 'tool')!.content)).toMatchObject({
         answer: 'First?: q1-o2\nFree?: q1-o1',
@@ -265,6 +335,51 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
       });
       expect((await f.client.getExecution(card.executionId!)).status).toBe('succeeded');
       const run = (await f.client.getView('s')).runs[0]!;
+      if (mode === 'accept_edits') {
+        // The third request is actual required-plan completion governance, not a
+        // question retry. The already answered interaction remains the only question.
+        const view = await f.runtime.getView('s');
+        const models = view.executions.filter((execution) => execution.kind === 'model');
+        expect(models).toHaveLength(3);
+        expect(
+          models.every((execution) => execution.status === 'succeeded' && execution.attempt === 1),
+        ).toBe(true);
+        const sources = (execution: (typeof models)[number]) =>
+          (
+            execution.decisionSource as {
+              sources?: { id: string; kind: string; scope: string; digest: string }[];
+            }
+          ).sources ?? [];
+        const completionModels = models.filter((execution) =>
+          sources(execution).some((source) => source.kind === 'completion'),
+        );
+        expect(completionModels).toHaveLength(1);
+        const completion = completionModels[0]!;
+        expect(completion.runId).toBe(run.id);
+        expect(completion.sessionId).toBe('s');
+        expect(completion.originStoreId).toBe(f.expectedStoreId);
+        expect(sources(completion).filter((source) => source.kind === 'completion')).toMatchObject([
+          { id: `builtin.planning:completion:${run.id}`, scope: 's' },
+        ]);
+        expect(
+          new Set(
+            models.flatMap((execution) =>
+              sources(execution)
+                .filter((source) => source.id.startsWith('builtin.planning:runtime:'))
+                .map((source) => source.digest),
+            ),
+          ).size,
+        ).toBe(1);
+        expect(
+          view.executions
+            .filter((execution) => execution.definitionId === 'ask_user')
+            .map((execution) => execution.id),
+        ).toEqual([card.executionId!]);
+        const interactions = (await f.client.listInteractions('s', { storeId: f.expectedStoreId }))
+          .interactions;
+        expect(interactions).toHaveLength(1);
+        expect(interactions[0]).toMatchObject({ id: card.id, state: 'answered' });
+      }
       // Required planning can still reject completion; it did not block the question.
       expect(run.status).toBe(mode === 'accept_edits' ? 'failed' : 'completed');
       expect(
@@ -315,9 +430,7 @@ for (const entry of [
       if ('enabled' in entry || 'remove' in entry) {
         const tools = f.requests[0]!.tools as { function: { name: string } }[] | undefined;
         expect(tools?.some((tool) => tool.function.name === 'ask_user') ?? false).toBe(false);
-        expect((await f.client.getView('s')).executions).toMatchObject([
-          { kind: 'model', status: 'failed', result: { code: 'model_failed' } },
-        ]);
+        await assertUnavailableRecovery(f, 's', f.requests);
       } else {
         expect(f.requests).toHaveLength(0);
         expect((await f.client.getCommand('run')).status).toBe('rejected');
@@ -340,7 +453,7 @@ for (const explicitChild of [false, true])
       )
         await Bun.sleep(10);
       const child = f.requests.filter((body) => body.model === 'child');
-      expect(child).toHaveLength(1);
+      expect(child).toHaveLength(2);
       const tools = child[0]!.tools as { function: { name: string } }[] | undefined;
       expect(tools?.some((tool) => tool.function.name === 'ask_user') ?? false).toBe(false);
       const rootView = await f.client.getView('s');
@@ -349,12 +462,7 @@ for (const explicitChild of [false, true])
       )?.childSessionId;
       expect(childSessionId).toBeDefined();
       const view = await f.client.getView(childSessionId!);
-      expect(view.executions).toMatchObject([
-        { kind: 'model', status: 'failed', result: { code: 'model_failed' } },
-      ]);
-      expect(view.executions.some((execution) => execution.definitionId === 'ask_user')).toBe(
-        false,
-      );
+      await assertUnavailableRecovery(f, childSessionId!, child);
       const configuration = view.runs[0]!.configuration as { tools: { id: string }[] };
       expect(configuration.tools.some((tool) => tool.id === 'ask_user')).toBe(false);
       expect(

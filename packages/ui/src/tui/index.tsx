@@ -5,7 +5,7 @@ import {
   requiresInteractionAttachment,
   type SessionView,
 } from '@kite-ai/client';
-import { Box, Static, useInput, usePaste, useStdout } from 'ink';
+import { Box, Static, useApp, useInput, usePaste, useStdout } from 'ink';
 import {
   type ReactNode,
   useCallback,
@@ -19,37 +19,52 @@ import {
 import { TuiApprovalPanel } from './approval-panel';
 import { interactionKey } from './cards';
 import {
+  hasPendingRootCancellation,
   type TuiChromeFacts,
   TuiFooter,
   TuiHeader,
   TuiOverlayFrame,
   TuiRecordedPhaseTime,
 } from './chrome';
-import { fixedTuiCommands } from './commands';
+import { additionalTuiCommands, fixedTuiCommands } from './commands';
 import { ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch, TuiComposer } from './composer-input';
-import { activity, type TuiController, terminalText } from './controller';
+import { activity, currentActivityVerified, type TuiController, terminalText } from './controller';
 import { TuiExecutionPanel } from './execution-panel';
 import {
+  frozenBuiltin,
   InkExecution,
   InkExecutionGroupView,
   InkTaskProgress,
   InkThought,
+  inkShellCarrier,
+  inkShellParent,
+  projectInkChild,
   projectInkExecutionGroups,
 } from './execution-projection';
+import { projectInkExplorationPhases } from './exploration-phases';
 import type { FileToken } from './file-candidates';
 import { TuiFileRecoveryPanel } from './file-recovery-panel';
 import { TuiHelpPanel } from './help-panel';
 import CompactionProgress from './ink/CompactionProgress';
+import { type MarkdownParseCache, updateMarkdownParseCache } from './ink/MarkdownBlock';
 import { wrapDisplayLines } from './ink/soft-wrap';
-import ToolSummaryBlock from './ink/ToolSummaryBlock';
 import UserMessageBlock from './ink/UserMessageBlock';
 import { useInkWindowSize } from './ink/window-size';
+import { partitionLiveMarkdown } from './live-markdown';
 import { TuiManagementRequestsPanel } from './management-requests-panel';
 import { TerminalMarkdown } from './markdown';
 import { TuiMcpPanel } from './mcp-panel';
+import { isMcpProviderQuestion } from './mcp-provider-question';
 import { isMcpSourceQuestion, sourceDecisions } from './mcp-source-question';
 import { TuiModelPanel } from './model-panel';
+import {
+  advanceInkModelStream,
+  type InkModelStreamState,
+  inkModelStreamVisibility,
+  observedModelRetry,
+  settleInkModelStream,
+} from './model-stream-presentation';
 import { TuiOnboarding } from './onboarding-panel';
 import { TuiPermissionPanel } from './permission-panel';
 import { TuiPlanReviewPanel } from './plan-review-panel';
@@ -115,10 +130,16 @@ export function TuiSession({
   const workspaceId = state.snapshot?.view.session.workspaceId;
   const gated = controller.port.onboarding && workspaceId && admittedWorkspace !== workspaceId;
   useEffect(() => {
-    onReadinessChange?.(!gated);
-  }, [gated, onReadinessChange]);
+    onReadinessChange?.(!gated && !state.snapshot?.environment?.observer);
+  }, [gated, onReadinessChange, state.snapshot?.environment?.observer]);
   return (
-    <TuiPresentationProvider value={{ preferences: state.preferences, testDiagnostics }}>
+    <TuiPresentationProvider
+      value={{
+        preferences: state.preferences,
+        testDiagnostics,
+        activityVerified: currentActivityVerified(state.snapshot),
+      }}
+    >
       {gated ? (
         <TuiOnboarding
           key={workspaceId}
@@ -131,6 +152,14 @@ export function TuiSession({
           }}
           onExit={onQuit ?? (() => void controller.routeCommand('/exit'))}
         />
+      ) : state.snapshot?.environment?.observer === 'workspace_missing' ? (
+        <Box flexDirection="column">
+          <Text color="yellow">
+            Workspace is unavailable · read-only recovery. History and original requests remain
+            readable; new execution and management writes are disabled.
+          </Text>
+          <TuiSessionView controller={controller} onQuit={onQuit} />
+        </Box>
       ) : (
         <TuiSessionView controller={controller} onQuit={onQuit} />
       )}
@@ -253,17 +282,16 @@ function TuiHistory({
   form,
   step,
   collapsed,
-  showReasoning,
 }: {
   controller: TuiController;
   card?: Interaction;
   form?: ReturnType<typeof questionForm>;
   step?: number;
   collapsed: ReadonlySet<string>;
-  showReasoning: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const { stdout, write } = useStdout();
+  const { waitUntilRenderFlush } = useApp();
   const { columns, rows } = useInkWindowSize();
   const { t, testDiagnostics } = useTuiPresentation();
   const { snapshot, models, permissions } = state;
@@ -278,8 +306,12 @@ function TuiHistory({
     state.preferences.resolvedLanguage,
     state.preferences.theme,
     state.preferences.colorPreset,
+    facts.modelName,
+    facts.effort,
     testDiagnostics,
     columns,
+    controller.displayGeneration,
+    [...collapsed],
   ]);
   const messages = controller.visibleMessages;
   const loadedOutputs = useMemo(
@@ -287,9 +319,95 @@ function TuiHistory({
     [snapshot, state.loadedOutputBodies],
   );
   const executions = controller.visibleExecutions;
+  const localMessages = state.localMessages ?? [];
+  const streams = useRef(new Map<string, InkModelStreamState>());
+  const markdownStreams = useRef(new Map<string, MarkdownParseCache>());
+  const [streamRender, setStreamRender] = useState(0);
   const items: HistoryItem[] = useMemo(() => {
-    const results = executions.filter((execution) => execution.kind !== 'model');
+    void streamRender;
+    const results = executions.filter((execution) => {
+      if (execution.kind === 'model')
+        return (
+          execution.status === 'failed' &&
+          !messages.some(
+            (message) =>
+              message.sessionId === execution.sessionId &&
+              message.runId === execution.runId &&
+              (message.outputBody?.executionId === execution.id ||
+                message.sourceIds?.includes(execution.id)),
+          )
+        );
+      if (
+        !testDiagnostics &&
+        snapshot &&
+        (frozenBuiltin(execution, snapshot, 'builtin.shell', 'shell.launch') ||
+          frozenBuiltin(execution, snapshot, 'builtin.shell', 'shell.execute'))
+      ) {
+        const children = executions.filter(
+          (child) =>
+            child.kind === 'job' &&
+            inkShellCarrier(execution, snapshot)?.id === child.id &&
+            child.originStoreId === execution.originStoreId &&
+            child.sessionId === execution.sessionId,
+        );
+        if (children.length === 1) return false;
+      }
+      return true;
+    });
     const transcript = projectTuiMessages(messages, loadedOutputs);
+    const exploration =
+      !testDiagnostics && snapshot
+        ? projectInkExplorationPhases({ ...snapshot, messages }, loadedOutputs)
+        : undefined;
+    const streamViews = new Map<
+      string,
+      ReturnType<typeof inkModelStreamVisibility> & {
+        mode: InkModelStreamState['mode'];
+        finalReasoning?: string;
+      }
+    >();
+    const currentStreams = new Set<string>();
+    const markdownIdentity = (message: Message) =>
+      JSON.stringify([snapshot?.storeId, message.sessionId, message.runId, message.id]);
+    const visibleMarkdown = new Set(messages.map(markdownIdentity));
+    for (const key of markdownStreams.current.keys())
+      if (!visibleMarkdown.has(key)) markdownStreams.current.delete(key);
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue;
+      const identity = JSON.stringify([
+        snapshot?.storeId,
+        message.sessionId,
+        message.runId,
+        message.outputBody?.executionId ?? message.sourceIds,
+      ]);
+      currentStreams.add(identity);
+      const body = loadedOutputs.get(message.id);
+      const stream = advanceInkModelStream(streams.current.get(identity), {
+        identity,
+        content: state.fullOutputs.get(message.id) ?? body?.content ?? message.content,
+        reasoning: body?.reasoning ?? '',
+        // Producer completion settles the preview stream. Full-body reading
+        // keeps its independent EOF, bytes and original-reference checks.
+        complete:
+          body?.complete ??
+          (message.status === 'complete' && (message.outputBody?.complete ?? true)),
+        firstOutput: message.firstOutput,
+        toolCallCount: body?.complete
+          ? body.toolCalls.length
+          : message.status === 'complete'
+            ? (message.outputBody?.toolCallCount ?? message.toolCalls?.length ?? 0)
+            : undefined,
+        explorationOwner: exploration?.bufferedAnswerMessageIds.has(message.id),
+      });
+      streams.current.set(identity, stream);
+      streamViews.set(message.id, {
+        ...inkModelStreamVisibility(stream),
+        mode: stream.mode,
+        ...(stream.finalReasoningPreview ? { finalReasoning: stream.reasoning } : {}),
+      });
+    }
+    for (const identity of streams.current.keys())
+      if (!currentStreams.has(identity)) streams.current.delete(identity);
     const phaseKey = (message: Message) =>
       JSON.stringify([
         message.originMessage?.storeId ?? snapshot?.storeId,
@@ -299,8 +417,10 @@ function TuiHistory({
     const lastMessage = new Map(transcript.map((item, index) => [phaseKey(item.message), index]));
     const groups =
       !testDiagnostics && snapshot
-        ? projectInkExecutionGroups(snapshot, loadedOutputs, true).filter((group) =>
-            group.executionIds.every((id) => results.some((execution) => execution.id === id)),
+        ? projectInkExecutionGroups(snapshot, loadedOutputs, false).filter(
+            (group) =>
+              group.kind !== 'readonly_tools' &&
+              group.executionIds.every((id) => results.some((execution) => execution.id === id)),
           )
         : [];
     const grouped = new Map(
@@ -308,10 +428,45 @@ function TuiHistory({
     );
     const renderedGroups = new Set<string>();
     const placed = new Set<string>();
-    const belongs = (message: Message, execution: Execution) =>
-      execution.sessionId === (message.originMessage?.sessionId ?? message.sessionId) &&
-      execution.runId === (message.originMessage ? message.originMessage.runId : message.runId) &&
-      execution.originStoreId === (message.originMessage?.storeId ?? snapshot?.storeId);
+    const phaseByExecution = new Map(
+      exploration?.phases.flatMap((phase) =>
+        phase.executionIds.map((id) => [id, phase] as const),
+      ) ?? [],
+    );
+    const localItems = (afterMessageId: string | null): HistoryItem[] =>
+      localMessages
+        .filter(
+          (local) =>
+            local.sessionId === state.sessionId &&
+            (messages.some((message) => message.id === local.afterMessageId)
+              ? local.afterMessageId
+              : null) === afterMessageId,
+        )
+        .map((local) => ({
+          key: `local:${local.id}`,
+          version: JSON.stringify(local),
+          node:
+            local.role === 'user' ? (
+              <UserMessageBlock content={terminalText(local.content)} columns={columns} />
+            ) : (
+              <Text dimColor>{terminalText(local.content)}</Text>
+            ),
+        }));
+    const callOwner = (execution: Execution) => {
+      if (execution.runId !== null || !snapshot) return execution;
+      const parent = inkShellParent(execution, snapshot);
+      return parent && inkShellCarrier(parent, snapshot)?.id === execution.id ? parent : execution;
+    };
+    const belongs = (message: Message, execution: Execution) => {
+      // An ordinary Shell Job owns no Run row. Its verified foreground parent
+      // locates it in the original Run, never after later unrelated messages.
+      const source = callOwner(execution);
+      return (
+        source.sessionId === (message.originMessage?.sessionId ?? message.sessionId) &&
+        source.runId === (message.originMessage ? message.originMessage.runId : message.runId) &&
+        source.originStoreId === (message.originMessage?.storeId ?? snapshot?.storeId)
+      );
+    };
     const executionItem = (execution: Execution): HistoryItem => ({
       key: `execution:${execution.id}`,
       version: JSON.stringify([
@@ -335,6 +490,38 @@ function TuiHistory({
     });
     const executionItems = (list: readonly Execution[]): HistoryItem[] =>
       list.flatMap((execution) => {
+        const phase = phaseByExecution.get(execution.id);
+        if (phase) {
+          if (renderedGroups.has(phase.key)) return [];
+          renderedGroups.add(phase.key);
+          const standalone =
+            !phase.block.active &&
+            !phase.block.hasThinking &&
+            phase.block.tools.length === 1 &&
+            !['error', 'exhausted', 'rejected', 'cancelled', 'timeout'].includes(
+              phase.block.tools[0]!.status,
+            )
+              ? executionItem(execution)
+              : undefined;
+          return [
+            {
+              key: `phase:${phase.key}`,
+              version: standalone
+                ? JSON.stringify([phase.block, standalone.version])
+                : JSON.stringify(phase.block),
+              mutable: phase.block.active,
+              node: (
+                <Box flexDirection="column">
+                  <InkExecutionGroupView
+                    group={{ ...phase, kind: 'readonly_tools' }}
+                    columns={columns}
+                  />
+                  {standalone?.node}
+                </Box>
+              ),
+            },
+          ];
+        }
         const group = grouped.get(execution.id);
         if (!group) return [executionItem(execution)];
         if (renderedGroups.has(group.key)) return [];
@@ -356,6 +543,7 @@ function TuiHistory({
         version: JSON.stringify([facts.modelName, facts.effort, facts.workspacePath]),
         node: <TuiHeader {...facts} />,
       },
+      ...localItems(null),
       ...transcript.flatMap((item, index): HistoryItem[] => {
         const message = item.message;
         const timing =
@@ -367,18 +555,29 @@ function TuiHistory({
             (entry.id === message.outputBody?.executionId ||
               (message.sourceIds ?? []).includes(entry.id)),
         );
-        const related = results.filter(
-          (execution) =>
+        const related = results.filter((execution) => {
+          const owner = callOwner(execution);
+          return (
             !placed.has(execution.id) &&
             belongs(message, execution) &&
             (item.sourceIds.includes(execution.id) ||
+              item.sourceIds.includes(owner.id) ||
               (message.outputBody !== undefined &&
                 execution.parentExecutionId === message.outputBody.executionId) ||
-              (execution.kind === 'tool' &&
-                execution.toolCallId !== undefined &&
+              (owner.kind === 'tool' &&
+                owner.toolCallId !== undefined &&
                 item.kind === 'message' &&
-                item.toolCalls.some((call) => call.id === execution.toolCallId))),
-        );
+                item.toolCalls.some((call) => call.id === owner.toolCallId)))
+          );
+        });
+        if (item.kind === 'message') {
+          const order = new Map(item.toolCalls.map((call, position) => [call.id, position]));
+          related.sort(
+            (first, second) =>
+              (order.get(callOwner(first).toolCallId ?? '') ?? Infinity) -
+              (order.get(callOwner(second).toolCallId ?? '') ?? Infinity),
+          );
+        }
         for (const candidate of results) {
           if (
             !placed.has(candidate.id) &&
@@ -406,56 +605,163 @@ function TuiHistory({
           results.some(
             (execution) =>
               belongs(message, execution) &&
-              (item.sourceIds.includes(execution.id) || execution.toolCallId === item.call.id),
+              (item.sourceIds.includes(execution.id) ||
+                item.sourceIds.includes(callOwner(execution).id) ||
+                callOwner(execution).toolCallId === item.call.id),
           );
         const body = loadedOutputs.get(message.id);
+        const stream = streamViews.get(message.id);
+        const hideContent =
+          !testDiagnostics &&
+          (!!exploration?.suppressedNarrationMessageIds.has(message.id) ||
+            (stream?.mode !== 'answer' && !!stream?.buffered));
+        const suppressThought =
+          !testDiagnostics &&
+          (stream?.mode === 'answer' || !!exploration?.thoughtConsumedMessageIds.has(message.id));
+        const hiddenSettledMessage =
+          hideContent &&
+          suppressThought &&
+          message.status === 'complete' &&
+          model?.status === 'succeeded' &&
+          !model.modelRetry &&
+          (!message.outputBody || body?.complete === true);
+        const renderMessage = (hideBody: boolean, hideHeading = false) =>
+          item.kind === 'message' ? (
+            <TuiMessage
+              message={message}
+              hideHeading={hideHeading}
+              controller={controller}
+              fullOutput={state.fullOutputs.get(message.id) ?? body?.content}
+              reasoning={item.reasoning}
+              transcript={item}
+              snapshot={snapshot}
+              loadedOutputs={loadedOutputs}
+              hasReadGroup={groups.some(
+                (group) => group.messageId === message.id && group.kind === 'readonly_tools',
+              )}
+              modelStatus={currentActivityVerified(snapshot) ? model?.status : undefined}
+              modelRetry={observedModelRetry(model, snapshot?.view.executions ?? [])}
+              modelError={
+                model?.status === 'failed' &&
+                model.result &&
+                typeof model.result === 'object' &&
+                !Array.isArray(model.result) &&
+                typeof model.result.code === 'string'
+                  ? model.result.code
+                  : undefined
+              }
+              elapsedMs={phaseElapsed(timing || undefined)}
+              hideContent={hideBody}
+              suppressThought={suppressThought}
+              finalReasoning={stream?.finalReasoning}
+            />
+          ) : (
+            <TuiToolResult item={item} />
+          );
         return [
-          ...(!testDiagnostics && ownedResult
+          ...(!testDiagnostics && (ownedResult || hiddenSettledMessage)
             ? []
             : [
                 {
                   key: `message:${message.id}`,
                   mutable:
                     message.status === 'incomplete' ||
+                    stream?.buffered ||
                     (!!model && executionLive(model)) ||
-                    related.some(executionLive) ||
-                    (!!message.outputBody &&
-                      !state.fullOutputs.has(message.id) &&
-                      message.outputBody.readAvailability !== 'unsupported' &&
-                      BigInt(message.outputBody.contentBytes) >
-                        BigInt(new TextEncoder().encode(message.content).byteLength)),
+                    related.some(executionLive),
+                  // Completed previews seal in source order. An explicit full
+                  // read changes this version and rebuilds the static prefix.
                   version: JSON.stringify([
                     item,
                     state.fullOutputs.get(message.id),
                     body,
                     related,
-                    showReasoning,
                     timing,
                     model?.status,
+                    model?.modelRetry,
+                    model?.result,
+                    hideContent,
+                    suppressThought,
+                    stream?.mode,
+                    stream?.finalReasoning,
                   ]),
                   node:
                     item.kind === 'tool-result' ? (
                       <TuiToolResult item={item} />
                     ) : (
-                      <TuiMessage
-                        message={message}
-                        controller={controller}
-                        fullOutput={state.fullOutputs.get(message.id) ?? body?.content}
-                        reasoning={item.reasoning}
-                        transcript={item}
-                        snapshot={snapshot}
-                        loadedOutputs={loadedOutputs}
-                        showReasoning={showReasoning}
-                        hasReadGroup={groups.some(
-                          (group) =>
-                            group.messageId === message.id && group.kind === 'readonly_tools',
-                        )}
-                        modelStatus={model?.status}
-                        elapsedMs={phaseElapsed(timing || undefined)}
-                      />
+                      renderMessage(hideContent)
                     ),
                 },
-              ]),
+              ].flatMap((entry): HistoryItem[] => {
+                const identity = markdownIdentity(message);
+                const prior = markdownStreams.current.get(identity);
+                const content = terminalText(
+                  state.fullOutputs.get(message.id) ?? body?.content ?? message.content,
+                );
+                const eligible =
+                  item.kind === 'message' &&
+                  message.role === 'assistant' &&
+                  !hideContent &&
+                  stream?.mode === 'answer' &&
+                  !item.toolCalls.length &&
+                  (message.outputBody?.toolCallCount ?? 0) === 0 &&
+                  (prior !== undefined || message.status === 'incomplete');
+                if (!eligible) {
+                  markdownStreams.current.delete(identity);
+                  return [entry];
+                }
+                const parsed = updateMarkdownParseCache(prior, content);
+                const parts = partitionLiveMarkdown(parsed);
+                if (!prior && !parts.stable.length) return [entry];
+                // Without an exact live producer, this is a recorded preview version,
+                // not a growing Model stream. Publish its bytes without claiming EOF.
+                const recordedPreview = !model && !message.outputBody;
+                const stableParts =
+                  recordedPreview && parts.tail ? [...parts.stable, parts.tail] : parts.stable;
+                const liveTail = recordedPreview ? undefined : parts.tail;
+                markdownStreams.current.set(identity, parsed);
+                const bodyNode = (part: NonNullable<typeof parts.tail>) => (
+                  <Box paddingLeft={testDiagnostics ? 0 : 2}>
+                    <TerminalMarkdown
+                      content=""
+                      parsedSlice={part.slice}
+                      maxWidth={Math.max(1, columns - (testDiagnostics ? 0 : 2))}
+                    />
+                  </Box>
+                );
+                return [
+                  ...(testDiagnostics
+                    ? [
+                        {
+                          key: `message:${message.id}:heading`,
+                          version: JSON.stringify([message.role, message.id]),
+                          node: (
+                            <Text bold>
+                              {message.role} [{terminalText(message.id)}]
+                            </Text>
+                          ),
+                        },
+                      ]
+                    : []),
+                  ...stableParts.map((part) => ({
+                    key: `message:${message.id}:body:${part.key}`,
+                    version: part.version,
+                    node: bodyNode(part),
+                  })),
+                  {
+                    key: `message:${message.id}:tail:${liveTail?.key ?? 'state'}`,
+                    version: JSON.stringify([entry.version, liveTail?.version]),
+                    mutable: entry.mutable,
+                    node: (
+                      <Box flexDirection="column">
+                        {liveTail && bodyNode(liveTail)}
+                        {testDiagnostics && <Text dimColor>{message.status}</Text>}
+                        {renderMessage(true, true)}
+                      </Box>
+                    ),
+                  },
+                ];
+              })),
           ...executionItems(related),
           ...(remainder.length
             ? [
@@ -470,6 +776,7 @@ function TuiHistory({
                 ...executionItems(remainder),
               ]
             : []),
+          ...localItems(message.id),
         ];
       }),
       ...executionItems(results.filter((execution) => !placed.has(execution.id))),
@@ -510,23 +817,37 @@ function TuiHistory({
                       )
                     )}
                   </Text>
-                  {form &&
-                    Object.entries(card.request as Record<string, unknown>)
-                      .filter(
-                        ([key, value]) =>
-                          ['title', 'question', 'description'].includes(key) &&
-                          typeof value === 'string',
-                      )
-                      .map(([key, value]) => <Text key={key}>{terminalText(String(value))}</Text>)}
+                  {Object.entries(card.request as Record<string, unknown>)
+                    .filter(
+                      ([key, value]) =>
+                        ['title', 'question', 'description'].includes(key) &&
+                        typeof value === 'string',
+                    )
+                    .map(([key, value]) => (
+                      <Text key={key}>{terminalText(String(value))}</Text>
+                    ))}
                   {form && step !== undefined ? (
                     <QuestionMaterial form={form} step={step} />
                   ) : testDiagnostics ? (
-                    <Text>{terminalText(JSON.stringify(card.request, null, 2))}</Text>
+                    <Text>
+                      {terminalText(
+                        JSON.stringify(
+                          Object.fromEntries(
+                            Object.entries(card.request as Record<string, unknown>).filter(
+                              ([key, value]) =>
+                                !(
+                                  ['title', 'question', 'description'].includes(key) &&
+                                  typeof value === 'string'
+                                ),
+                            ),
+                          ),
+                          null,
+                          2,
+                        ),
+                      )}
+                    </Text>
                   ) : (
                     <TuiResult value={card.request} />
-                  )}
-                  {state.attachments.get(interactionKey(card)) && (
-                    <Text>{terminalText(state.attachments.get(interactionKey(card))!)}</Text>
                   )}
                 </Box>
               ),
@@ -541,44 +862,101 @@ function TuiHistory({
     loadedOutputs,
     state.attachments,
     state.mcpPromptSelections,
+    localMessages,
+    state.sessionId,
     card,
     form,
     step,
     controller,
     t,
     collapsed,
-    showReasoning,
     facts,
     testDiagnostics,
     snapshot,
     columns,
     rows,
+    streamRender,
   ]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: New timeline items mutate the stream refs and must schedule their final reasoning flush.
+  useEffect(() => {
+    const pending = [...streams.current.values()].filter((stream) => stream.finalReasoningPreview);
+    if (!pending.length) return;
+    let current = true;
+    void waitUntilRenderFlush()
+      .then(() => {
+        if (!current) return;
+        let settled = false;
+        for (const stream of pending) {
+          if (streams.current.get(stream.identity) !== stream) continue;
+          streams.current.set(stream.identity, settleInkModelStream(stream));
+          settled = true;
+        }
+        if (settled) setStreamRender((version) => version + 1);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [items, waitUntilRenderFlush]);
   // Preserve the original Ink ownership split: immutable prefix goes to native
   // scrollback once; the first mutable item and following rows remain live.
   const mutableIndex = items.findIndex((item) => item.mutable);
   const materialStatic =
-    testDiagnostics || (!!card && longQuestionMaterial(form, step, columns, rows));
+    !!card && (testDiagnostics || longQuestionMaterial(form, step, columns, rows));
   const sealed = materialStatic || mutableIndex < 0 ? items : items.slice(0, mutableIndex);
   const live = materialStatic || mutableIndex < 0 ? [] : items.slice(mutableIndex);
+  const attachment = card && state.attachments.get(interactionKey(card));
+  const attachmentItem: HistoryItem | undefined =
+    card && attachment !== undefined
+      ? {
+          key: `attachment:${interactionKey(card)}`,
+          version: attachment,
+          node: (
+            <Box flexDirection="column">
+              <Text bold>{t('Approval material')}</Text>
+              <Text>{terminalText(attachment)}</Text>
+            </Box>
+          ),
+        }
+      : undefined;
   const [committed, setCommitted] = useState({ scope, items: sealed, epoch: 0 });
-  const replace =
-    committed.scope !== scope ||
-    committed.items.some(
-      (item, index) => sealed[index]?.key !== item.key || sealed[index]?.version !== item.version,
-    );
+  const replace = committed.scope !== scope;
   let history = committed;
-  if (replace) {
-    history = { scope, items: sealed, epoch: committed.epoch + 1 };
+  const changedPrefix = committed.items
+    .filter((item) => !item.key.startsWith('attachment:'))
+    .some((previous, index) => {
+      const next = items[index];
+      return (
+        !next ||
+        previous.key !== next.key ||
+        ((!previous.mutable || previous.key.startsWith('card:')) &&
+          previous.version !== next.version)
+      );
+    });
+  if (replace || changedPrefix) {
+    // Verified late bodies and source-order changes cannot keep an old Static
+    // node. Ordinary mutable status updates stay live and never replay history.
+    history = {
+      scope,
+      items: [...sealed, ...(attachmentItem ? [attachmentItem] : [])],
+      epoch: committed.epoch + 1,
+    };
     setCommitted(history);
-  } else if (sealed.length !== committed.items.length) {
-    history = { ...committed, items: sealed };
-    setCommitted(history);
+  } else {
+    const committedKeys = new Set(committed.items.map((item) => item.key));
+    // Ink owns one Static node. Attachments join that append-only output stream
+    // so opening and closing their card cannot detach the transcript's writer.
+    const additions = [...sealed, ...(attachmentItem ? [attachmentItem] : [])].filter(
+      (item) => !committedKeys.has(item.key),
+    );
+    if (additions.length) {
+      history = { ...committed, items: [...committed.items, ...additions] };
+      setCommitted(history);
+    }
   }
   useInsertionEffect(() => {
     if (history.epoch && stdout.isTTY) write('\u001b[2J\u001b[3J\u001b[H');
   }, [history.epoch, stdout, write]);
-  const attachment = card && state.attachments.get(interactionKey(card));
   return (
     <Box
       flexDirection="column"
@@ -594,30 +972,30 @@ function TuiHistory({
             </Box>
           )}
         </Static>
-        {!testDiagnostics && card && attachment && (
-          <Static key={`attachment:${scope}:${interactionKey(card)}`} items={[attachment]}>
-            {(body, index) => (
-              <Box key={index} flexDirection="column">
-                <Text bold>{t('Approval material')}</Text>
-                <Text>{terminalText(body)}</Text>
-              </Box>
-            )}
-          </Static>
-        )}
       </Box>
-      {live.length > 0 && (
+      {live.some(
+        (item) =>
+          !history.items.some((saved) => saved.key === item.key && saved.version === item.version),
+      ) && (
         <Box
           flexDirection="column"
           flexShrink={1}
           minHeight={0}
-          maxHeight={Math.max(1, rows - 7)}
+          maxHeight={Math.max(1, rows - 8)}
           overflowY="hidden"
         >
-          {live.map((item) => (
-            <Box key={item.key} flexDirection="column">
-              {item.node}
-            </Box>
-          ))}
+          {live
+            .filter(
+              (item) =>
+                !history.items.some(
+                  (saved) => saved.key === item.key && saved.version === item.version,
+                ),
+            )
+            .map((item) => (
+              <Box key={item.key} flexDirection="column">
+                {item.node}
+              </Box>
+            ))}
         </Box>
       )}
       {snapshot?.planProgress && <InkTaskProgress plan={snapshot.planProgress} />}
@@ -634,11 +1012,17 @@ function TuiMessage({
   snapshot,
   loadedOutputs,
   modelStatus,
+  modelRetry,
+  modelError,
   elapsedMs,
-  showReasoning,
   hasReadGroup,
+  hideContent = false,
+  suppressThought = false,
+  finalReasoning,
+  hideHeading = false,
 }: {
   message: Message;
+  hideHeading?: boolean;
   controller: TuiController;
   fullOutput?: string;
   reasoning?: string;
@@ -646,39 +1030,49 @@ function TuiMessage({
   snapshot?: import('./controller').TuiSnapshot;
   loadedOutputs?: ReadonlyMap<string, ModelOutputSnapshot['output']>;
   modelStatus?: Execution['status'];
+  modelRetry?: Execution['modelRetry'];
+  modelError?: string;
   elapsedMs?: number;
-  showReasoning: boolean;
   hasReadGroup?: boolean;
+  hideContent?: boolean;
+  suppressThought?: boolean;
+  finalReasoning?: string;
 }) {
   const { t, testDiagnostics } = useTuiPresentation();
   const { stdout } = useStdout();
+  const paddingLeft = !testDiagnostics && message.role === 'assistant' ? 2 : 0;
+  const maxWidth = Math.max(1, (stdout.columns || 80) - paddingLeft);
   return (
-    <Box
-      flexDirection="column"
-      marginBottom={1}
-      paddingLeft={!testDiagnostics && message.role === 'assistant' ? 2 : 0}
-    >
-      {testDiagnostics ? (
-        <Text bold>
-          {message.role} {'['}
-          {terminalText(message.id)}
-          {']'} {message.status}
+    <Box flexDirection="column" marginBottom={1} paddingLeft={paddingLeft}>
+      {!hideHeading &&
+        (testDiagnostics ? (
+          <Text bold>
+            {message.role} {'['}
+            {terminalText(message.id)}
+            {']'} {message.status}
+          </Text>
+        ) : (
+          message.role !== 'assistant' &&
+          message.role !== 'user' && (
+            <Text bold>{t(message.role === 'tool' ? 'Tool result' : 'System')}</Text>
+          )
+        ))}
+      {modelRetry && (
+        <Text color="yellow">
+          {t('Retrying')} {modelRetry.attempt}/{modelRetry.maxAttempts}
         </Text>
-      ) : (
-        message.role !== 'assistant' &&
-        message.role !== 'user' && (
-          <Text bold>{t(message.role === 'tool' ? 'Tool result' : 'System')}</Text>
-        )
       )}
+      {modelError && <Text color="red">{terminalText(modelError)}</Text>}
       {!testDiagnostics &&
+        !modelError &&
         message.status === 'incomplete' &&
         !['planned', 'dispatching', 'running'].includes(modelStatus ?? '') && (
           <Text color="yellow">{t('Incomplete response')}</Text>
         )}
       {message.role === 'assistant' &&
+        !suppressThought &&
         (reasoning ||
           transcript.toolCalls.length > 0 ||
-          showReasoning ||
           (message.outputBody && message.outputBody.reasoningBytes !== '0')) && (
           <Box flexDirection="column">
             {testDiagnostics ? (
@@ -690,7 +1084,7 @@ function TuiMessage({
                   !!modelStatus &&
                   ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(modelStatus)
                 }
-                expanded={showReasoning}
+                expanded={false}
                 timing={elapsedMs === undefined ? undefined : { elapsedMs }}
               />
             ) : (
@@ -701,42 +1095,39 @@ function TuiMessage({
                   snapshot={snapshot}
                   loadedOutputs={loadedOutputs}
                   columns={stdout.columns || 80}
+                  finalReasoning={finalReasoning}
                 />
               )
             )}
-            {!testDiagnostics && showReasoning && reasoning && (
-              <TerminalMarkdown content={reasoning} streaming={modelStatus === 'running'} />
-            )}
-            {showReasoning && reasoning === undefined && message.outputBody && (
-              <Text dimColor>
-                {message.outputBody.reasoningBytes === '0'
-                  ? t('No recorded reasoning in this snapshot')
-                  : `${t('Recorded reasoning not loaded;')} ${
-                      message.outputBody.readAvailability === 'unsupported' ||
-                      message.contentFormat === 'unsupported'
-                        ? t('full read unsupported')
-                        : controller.port.readModelOutput
-                          ? t('Ctrl+O reads verified full body')
-                          : t('full reader unavailable')
-                    }`}
-              </Text>
-            )}
           </Box>
         )}
-      {!testDiagnostics && message.role === 'user' ? (
-        <UserMessageBlock
-          content={terminalText(fullOutput ?? message.content)}
-          columns={stdout.columns || 80}
-        />
-      ) : (
-        <TerminalMarkdown
-          content={fullOutput ?? message.content}
-          streaming={
-            message.status === 'incomplete' &&
-            ['planned', 'dispatching', 'running'].includes(modelStatus ?? '')
-          }
-        />
-      )}
+      {!hideContent &&
+        (!testDiagnostics && message.role === 'user' ? (
+          <UserMessageBlock
+            content={terminalText(fullOutput ?? message.content)}
+            columns={stdout.columns || 80}
+          />
+        ) : (
+          <Box
+            marginTop={
+              !testDiagnostics &&
+              !suppressThought &&
+              message.role === 'assistant' &&
+              (reasoning || (message.outputBody && message.outputBody.reasoningBytes !== '0'))
+                ? 1
+                : 0
+            }
+          >
+            <TerminalMarkdown
+              content={fullOutput ?? message.content}
+              maxWidth={maxWidth}
+              streaming={
+                message.status === 'incomplete' &&
+                ['planned', 'dispatching', 'running'].includes(modelStatus ?? '')
+              }
+            />
+          </Box>
+        ))}
       {testDiagnostics && <TuiToolCalls item={transcript} />}
 
       {message.outputBody && message.outputBody.toolCallCount > transcript.toolCalls.length && (
@@ -789,13 +1180,36 @@ function TuiExecution({
 }) {
   const { t, testDiagnostics } = useTuiPresentation();
   const { stdout } = useStdout();
+  if (execution.kind === 'model' && snapshot) {
+    const retry = observedModelRetry(execution, snapshot.view.executions);
+    const result = execution.result;
+    return (
+      <Box flexDirection="column" marginBottom={1}>
+        {retry && (
+          <Text color="yellow">
+            {t('Retrying')} {retry.attempt}/{retry.maxAttempts}
+          </Text>
+        )}
+        <Text color="red">
+          {terminalText(
+            result &&
+              typeof result === 'object' &&
+              !Array.isArray(result) &&
+              typeof result.code === 'string'
+              ? result.code
+              : t('Model failed'),
+          )}
+        </Text>
+      </Box>
+    );
+  }
   if (!testDiagnostics && snapshot)
     return (
       <InkExecution
         execution={execution}
         snapshot={snapshot}
         loadedOutputs={loadedOutputs}
-        expanded={!collapsed}
+        expanded={collapsed ? false : undefined}
         columns={stdout.columns || 80}
       />
     );
@@ -844,7 +1258,7 @@ function TuiSessionView({
   onQuit?: () => void;
 }) {
   const { stdout } = useStdout();
-  useInkWindowSize();
+  const { rows } = useInkWindowSize();
   const fileQuery = useCallback(
     (token?: FileToken) => {
       void controller.readFileCandidates(token);
@@ -865,11 +1279,10 @@ function TuiSessionView({
   const [savedDisplay, setResultDisplay] = useState({
     scope: resultScope,
     collapsed: new Set<string>(),
-    showReasoning: false,
   });
   let resultDisplay = savedDisplay;
   if (savedDisplay.scope !== resultScope) {
-    resultDisplay = { scope: resultScope, collapsed: new Set(), showReasoning: false };
+    resultDisplay = { scope: resultScope, collapsed: new Set() };
     setResultDisplay(resultDisplay);
   } else if ([...savedDisplay.collapsed].some((key) => !resultKeys.has(key))) {
     resultDisplay = {
@@ -878,6 +1291,8 @@ function TuiSessionView({
     };
     setResultDisplay(resultDisplay);
   }
+  const resultDisplayRef = useRef(resultDisplay);
+  resultDisplayRef.current = resultDisplay;
   const jobs =
     state.snapshot?.view.executions.filter(
       (execution) =>
@@ -910,6 +1325,7 @@ function TuiSessionView({
       : [];
   composer.commands = [
     ...fixedTuiCommands,
+    ...(state.draft.trim().length > 1 ? additionalTuiCommands : []),
     ...skillCommands,
     ...[...(state.mcpPromptCommands?.keys() ?? [])].map((name) => `/${name}`),
   ];
@@ -939,8 +1355,28 @@ function TuiSessionView({
   const [cardOptions, setCardOptions] = useState<readonly Interaction[]>([]);
   const [selectedCard, setSelectedCard] = useState<string>();
   const cardDrafts = useRef(new Map<string, ComposerBuffer>());
-  const [sourceChoices, setSourceChoices] = useState(new Map<string, number>());
-  const [approvalChoices, setApprovalChoices] = useState(new Map<string, number>());
+  const sourceChoiceRef = useRef(new Map<string, number>());
+  const approvalChoiceRef = useRef(new Map<string, number>());
+  const [sourceChoices, renderSourceChoices] = useState(sourceChoiceRef.current);
+  const [approvalChoices, renderApprovalChoices] = useState(approvalChoiceRef.current);
+  // Native keys can arrive before React paints the next selection. Enter must
+  // use the answer selected by those keys, never a stale approval default.
+  const setSourceChoices = useCallback(
+    (update: Map<string, number> | ((value: Map<string, number>) => Map<string, number>)) => {
+      sourceChoiceRef.current =
+        typeof update === 'function' ? update(sourceChoiceRef.current) : update;
+      renderSourceChoices(sourceChoiceRef.current);
+    },
+    [],
+  );
+  const setApprovalChoices = useCallback(
+    (update: Map<string, number> | ((value: Map<string, number>) => Map<string, number>)) => {
+      approvalChoiceRef.current =
+        typeof update === 'function' ? update(approvalChoiceRef.current) : update;
+      renderApprovalChoices(approvalChoiceRef.current);
+    },
+    [],
+  );
   const questionDrafts = useRef(new Map<string, QuestionDraft>());
   const [, renderQuestion] = useState(0);
   const [panelIndex, setPanelIndex] = useState(0);
@@ -952,6 +1388,7 @@ function TuiSessionView({
   }, [state.sessionId]);
   useEffect(() => {
     if (state.chooserRequested) {
+      void controller.list();
       setChooser(true);
       controller.closePanel();
     }
@@ -974,6 +1411,10 @@ function TuiSessionView({
       (i) => JSON.stringify(JSON.parse(interactionKey(i)).slice(0, 4)) === selectedTarget,
     ) ??
     cards[0];
+  // An explicitly opened management page owns focus until its own close/back
+  // gesture. Pending cards remain unchanged and become actionable on the main
+  // screen; they cannot silently hide a still-mounted navigation stack.
+  const blockingPanel = state.panel;
   const fullReadAttempts = useRef(new Set<string>());
   const attachmentReadAttempts = useRef(new Set<string>());
   useEffect(() => {
@@ -1022,25 +1463,159 @@ function TuiSessionView({
     cardDrafts.current.set(approvalKey, answerBuffer);
   const answer = answerBuffer.text;
   const sourceQuestion = card && isMcpSourceQuestion(card);
+  const providerQuestion =
+    !!card &&
+    !!state.sessionId &&
+    isMcpProviderQuestion(card, controller.port.storeId, state.sessionId);
+  const reconnectingCard = card?.definitionId === 'builtin.mcp/mcp.reconnect';
+  const connectionDefinition = reconnectingCard
+    ? 'builtin.mcp/mcp.reconnect'
+    : 'builtin.mcp/mcp.connect';
+  const connectionOutcome = reconnectingCard ? state.mcpReconnection : state.mcpConnection;
+  const connectionFact = connectionOutcome?.fact;
+  const observedConnectionExecutions =
+    state.snapshot?.view.executions.filter(
+      (execution) =>
+        execution.id === card?.executionId &&
+        execution.rootWorkCommandId === connectionOutcome?.intent.request.commandId &&
+        execution.parentExecutionId === null &&
+        execution.runId === null,
+    ) ?? [];
+  const connectionExecution =
+    connectionFact?.execution ??
+    (observedConnectionExecutions.length === 1 ? observedConnectionExecutions[0] : undefined);
+  const connectionCommand = connectionOutcome?.command;
+  const connectionReceipt = connectionCommand?.receipt;
+  const connectionReceiptExecution =
+    connectionReceipt && typeof connectionReceipt === 'object' && !Array.isArray(connectionReceipt)
+      ? connectionReceipt.executionId
+      : undefined;
+  const originalConnection =
+    testDiagnostics &&
+    card &&
+    connectionOutcome &&
+    connectionExecution &&
+    ['approval', 'question'].includes(card.kind) &&
+    card.state === 'pending' &&
+    card.originStoreId === controller.port.storeId &&
+    card.sessionId === state.sessionId &&
+    card.presentationSessionId === state.sessionId &&
+    card.executionId === connectionExecution.id &&
+    card.definitionId === connectionDefinition &&
+    card.definitionVersion === '1' &&
+    connectionOutcome.intent.sessionId === state.sessionId &&
+    connectionOutcome.intent.workspaceId === state.snapshot?.view.session.workspaceId &&
+    connectionOutcome.intent.request.expectedStoreId === controller.port.storeId &&
+    (connectionFact
+      ? connectionFact.storeId === controller.port.storeId &&
+        connectionFact.sessionId === state.sessionId
+      : connectionCommand?.id === connectionOutcome.intent.request.commandId &&
+        connectionCommand.originStoreId === controller.port.storeId &&
+        connectionCommand.sessionId === state.sessionId &&
+        connectionCommand.kind === 'extension.invoke' &&
+        (connectionReceiptExecution === connectionExecution.id ||
+          (connectionCommand.status === 'accepted' && connectionReceiptExecution === undefined))) &&
+    connectionExecution.originStoreId === controller.port.storeId &&
+    connectionExecution.sessionId === state.sessionId &&
+    connectionExecution.definitionId === card.definitionId &&
+    connectionExecution.definitionVersion === '1' &&
+    connectionExecution.kind === 'job' &&
+    (connectionFact
+      ? connectionFact.execution.originCommandId === connectionOutcome.intent.request.commandId
+      : observedConnectionExecutions.length === 1)
+      ? connectionOutcome.intent.request.commandId
+      : undefined;
+  const sourceOutcome = state.mcpSourceOutcome;
+  const sourceFact = sourceOutcome?.fact;
+  const observedSourceExecutions =
+    state.snapshot?.view.executions.filter(
+      (execution) =>
+        execution.id === card?.executionId &&
+        execution.rootWorkCommandId === sourceOutcome?.intent.request.commandId &&
+        execution.parentExecutionId === null &&
+        execution.runId === null,
+    ) ?? [];
+  const sourceExecution =
+    sourceFact?.execution ??
+    (observedSourceExecutions.length === 1 ? observedSourceExecutions[0] : undefined);
+  const sourceCommand = sourceFact?.command ?? sourceOutcome?.command;
+  const sourceReceipt = sourceOutcome?.command?.receipt;
+  const sourceReceiptExecution =
+    sourceReceipt && typeof sourceReceipt === 'object' && !Array.isArray(sourceReceipt)
+      ? sourceReceipt.executionId
+      : undefined;
+  const originalSourceDecision =
+    testDiagnostics &&
+    card &&
+    sourceOutcome &&
+    sourceExecution &&
+    sourceCommand &&
+    ['approval', 'question'].includes(card.kind) &&
+    card.state === 'pending' &&
+    card.originStoreId === controller.port.storeId &&
+    card.sessionId === state.sessionId &&
+    card.presentationSessionId === state.sessionId &&
+    card.executionId === sourceExecution.id &&
+    card.definitionId === 'builtin.mcp.sources/mcp.source.approve' &&
+    card.definitionVersion === '1' &&
+    sourceOutcome.intent.sessionId === state.sessionId &&
+    sourceOutcome.intent.workspaceId === state.snapshot?.view.session.workspaceId &&
+    sourceOutcome.intent.request.expectedStoreId === controller.port.storeId &&
+    (!sourceFact ||
+      (sourceFact.storeId === controller.port.storeId &&
+        sourceFact.sessionId === state.sessionId)) &&
+    sourceExecution.originStoreId === controller.port.storeId &&
+    sourceExecution.sessionId === state.sessionId &&
+    sourceExecution.definitionId === card.definitionId &&
+    sourceExecution.definitionVersion === '1' &&
+    sourceExecution.kind === 'job' &&
+    sourceCommand.kind === 'extension.invoke' &&
+    sourceCommand.originStoreId === controller.port.storeId &&
+    sourceCommand.sessionId === state.sessionId &&
+    (sourceFact?.command
+      ? sourceFact.command.executionId === sourceExecution.id
+      : sourceReceiptExecution === sourceExecution.id ||
+        (sourceCommand.status === 'accepted' && sourceReceiptExecution === undefined)) &&
+    sourceCommand.id === sourceOutcome.intent.request.commandId &&
+    (sourceFact?.execution
+      ? sourceFact.execution.originCommandId === sourceCommand.id
+      : observedSourceExecutions.length === 1) &&
+    (!sourceFact || sourceFact.serverId === sourceOutcome.intent.request.input.serverId)
+      ? sourceCommand.id
+      : undefined;
   const form =
     card?.kind === 'question' && !sourceQuestion ? questionForm(card.request) : undefined;
+  const questionSubmission = card?.kind === 'question' ? controller.answerPhase(card) : undefined;
   let question = questionDrafts.current.get(approvalKey);
   if (form && !question) {
     question = questionDraft(form);
+    if (providerQuestion) question.fields[0]!.selected = 0;
     questionDrafts.current.set(approvalKey, question);
   }
-  const questionActive = !!form && !!question && !state.panel && !chooser && !cardChooser;
+  const questionActive = !!form && !!question && !blockingPanel && !chooser && !cardChooser;
   const jsonQuestion = card?.kind === 'question' && !sourceQuestion && !form;
   const plainAnswerActive =
     !!card &&
     card.kind !== 'plan_review' &&
     !sourceQuestion &&
     !form &&
-    !state.panel &&
+    !blockingPanel &&
     !chooser &&
     !cardChooser;
   const selectedSource = sourceChoices.get(approvalKey);
-  const selectedApproval = approvalChoices.get(approvalKey);
+  const offersSameCommand =
+    card?.kind === 'approval' &&
+    card.request !== null &&
+    typeof card.request === 'object' &&
+    !Array.isArray(card.request) &&
+    Array.isArray(card.request.grants) &&
+    card.request.grants.includes('same_command');
+  const approvalAnswers = offersSameCommand
+    ? ['approve', 'approve same_command', 'deny']
+    : ['approve', 'deny'];
+  const selectedApproval =
+    approvalChoices.get(approvalKey) ??
+    (card?.kind === 'approval' && !offersSameCommand ? 0 : undefined);
   const setAnswer = (value: string | ((previous: string) => string)) => {
     answerBuffer.sync(typeof value === 'function' ? value(answerBuffer.text) : value);
     renderQuestion((n) => n + 1);
@@ -1070,11 +1645,11 @@ function TuiSessionView({
     }
     setApprovalChoices((previous) => new Map([...previous].filter(([key]) => !obsolete(key))));
     setSourceChoices((previous) => new Map([...previous].filter(([key]) => !obsolete(key))));
-  }, [state.snapshot]);
+  }, [state.snapshot, setApprovalChoices, setSourceChoices]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Leaving the presentation Session clears its explicit Source decision.
   useEffect(() => {
     setSourceChoices(new Map());
-  }, [state.sessionId]);
+  }, [state.sessionId, setSourceChoices]);
   useEffect(() => {
     void controller.list();
   }, [controller]);
@@ -1085,7 +1660,9 @@ function TuiSessionView({
         renderQuestion((n) => n + 1);
         return;
       }
-      if (!questionActive || !form || !question) return;
+      const submission = card && controller.answerPhase(card);
+      if (!questionActive || !form || !question || (submission && submission !== 'rejected'))
+        return;
       const field = form.fields[question.step]!,
         draft = question.fields[question.step]!;
       if (field.text && (!field.choices.length || draft.selected === field.choices.length)) {
@@ -1096,318 +1673,318 @@ function TuiSessionView({
     },
     // Keep literal paste on this channel even when a card chooser ignores it.
     // With no listener Ink otherwise forwards paste as native keyboard input.
-    { isActive: !state.panel },
+    { isActive: !blockingPanel },
   );
-  useInput((input, key) => {
-    if (key.tab && key.shift) {
-      lastCancelKey.current = undefined;
-      controller.togglePlanning();
-      return;
-    }
-    const majorCancel =
-      !chooser &&
-      !cardChooser &&
-      !state.panel &&
-      !sourceQuestion &&
-      ((key.ctrl && input === 'c') || isCtrlCBatch(input));
-    if (majorCancel) {
-      const now = Date.now();
-      // Coalesced native cancellation bytes are one request, never an exit gesture.
-      if (
-        !isCtrlCBatch(input) &&
-        lastCancelKey.current !== undefined &&
-        now - lastCancelKey.current < 1000
-      ) {
+  useInput(
+    (input, key) => {
+      if (key.tab && key.shift) {
         lastCancelKey.current = undefined;
-        if (onQuit) onQuit();
-        else void controller.routeCommand('/exit');
+        controller.togglePlanning();
         return;
       }
-      lastCancelKey.current = isCtrlCBatch(input) ? undefined : now;
-    } else lastCancelKey.current = undefined;
-    if (chooser) return;
-    const cancelKey = (key.ctrl && input === 'c') || (!state.panel && isCtrlCBatch(input));
-    if (state.panel === 'recovery') return;
-    if (state.panel === 'management_requests') return;
-    if (state.panel === 'executions') return;
-    if (state.panel === 'mcp') return;
-    if (state.panel === 'skills' || state.panel === 'theme' || state.panel === 'language') return;
-    if (state.panel === 'status') {
-      if (key.escape || cancelKey) controller.closePanel();
-      else if (input.toLowerCase() === 'r') void controller.openStatus();
-      return;
-    }
-    if (state.panel === 'help') return;
-    if (cancelKey) {
-      if (sourceQuestion) {
-        setSourceChoices((previous) => {
-          const next = new Map(previous);
-          next.delete(approvalKey);
-          return next;
-        });
-        setAnswer('');
-        controller.closePanel();
-        return;
-      }
-      if (state.panel === 'rewind') {
-        controller.closePanel();
-        return;
-      }
-      if (!card && !chooser && !cardChooser && composer.fileToken) {
-        composer.dismissed = true;
-        void controller.readFileCandidates();
-        return;
-      }
-      void controller.cancel();
-      return;
-    }
-    if (state.panel === 'permissions' || state.panel === 'models' || state.panel === 'effort')
-      return;
-    if (state.panel === 'rewind') return;
-    if (state.panel) {
-      const items = state.snapshot?.view.executions.filter((e) => e.resultRevision !== null);
-      if (key.escape) controller.closePanel();
-      else if (key.upArrow) setPanelIndex((i) => Math.max(0, i - 1));
-      else if (key.downArrow)
-        setPanelIndex((i) => Math.min(Math.max(0, (items?.length ?? 0) - 1), i + 1));
-      else if (state.panel === 'context' && !key.ctrl && !key.meta && input.toLowerCase() === 'k')
-        controller.openManagementRequests();
-      else if (state.panel === 'context' && input === 'i') {
-        const item = state.snapshot?.view.executions.filter((e) => e.resultRevision !== null)[
-          panelIndex
-        ];
-        if (item) void controller.includeExecution(item.id);
-      }
-      return;
-    }
-    if (cardChooser) {
-      if (key.escape) setCardChooser(false);
-      else if (key.upArrow) setCardIndex((n) => Math.max(0, n - 1));
-      else if (key.downArrow)
-        setCardIndex((n) => Math.min(Math.max(0, cardOptions.length - 1), n + 1));
-      else if (key.return && cardOptions[cardIndex]) {
-        const key = interactionKey(cardOptions[cardIndex]!);
-        if (cards.some((item) => interactionKey(item) === key)) setSelectedCard(key);
-        setCardChooser(false);
-      }
-      return;
-    }
-    if (key.ctrl && input === 'b') {
-      setCardIndex(
-        Math.max(
-          0,
-          cards.findIndex((item) => interactionKey(item) === approvalKey),
-        ),
-      );
-      setCardOptions(cards);
-      setCardChooser(true);
-      return;
-    }
-    if (key.ctrl && input === 'r') {
-      void controller.list();
-      setChooser(true);
-      return;
-    }
-    if (key.ctrl && input === 'l') {
-      const sessionId = state.sessionId;
-      if (sessionId)
-        void (async () => {
-          await controller.lookup();
-          if (controller.state.sessionId === sessionId) await controller.select(sessionId);
-          if (controller.state.sessionId === sessionId) controller.clearDisplay();
-        })();
-      return;
-    }
-    if (key.ctrl && input === 'o') {
-      const message = state.snapshot?.messages.find(
-        (m) =>
-          m.outputBody &&
-          m.outputBody.readAvailability !== 'unsupported' &&
-          m.contentFormat !== 'unsupported' &&
-          !state.fullOutputs.has(m.id),
-      );
-      if (message) void controller.loadOutput(message);
-      return;
-    }
-    if (key.ctrl && input === 't') {
-      if (card || state.panel || chooser || cardChooser) return;
-      setResultDisplay({ ...resultDisplay, showReasoning: !resultDisplay.showReasoning });
-      if (!resultDisplay.showReasoning) {
-        const message = controller.visibleMessages
-          .filter((item) => item.role === 'assistant' && item.outputBody)
-          .at(-1);
+      const majorCancel =
+        !chooser &&
+        !cardChooser &&
+        !blockingPanel &&
+        !sourceQuestion &&
+        ((key.ctrl && input === 'c') || isCtrlCBatch(input));
+      if (majorCancel) {
+        const now = Date.now();
+        // Coalesced native cancellation bytes are one request, never an exit gesture.
         if (
-          message?.outputBody &&
-          message.outputBody.reasoningBytes !== '0' &&
-          !state.loadedOutputBodies.has(message.id)
-        )
-          void controller.loadOutput(message);
-      }
-      return;
-    }
-    if (key.ctrl && input === 'a' && card) {
-      void controller.loadAttachment(card);
-      return;
-    }
-    if (!card && key.escape) {
-      // The editor owns candidate Escape. Its optional callback handles an
-      // ordinary Escape once, independent of Ink listener registration order.
-      return;
-    }
-    if (!card && key.ctrl && input === 'e') {
-      controller.openExecutions(tail?.id);
-      return;
-    }
-    if (card) {
-      if (card.kind === 'plan_review') return;
-      if (form && question) {
-        if (key.meta && input === 'a' && form.alternative) {
-          if (!state.stale && !state.loading)
-            void controller.answer(card, JSON.stringify(form.alternative.value));
+          !isCtrlCBatch(input) &&
+          lastCancelKey.current !== undefined &&
+          now - lastCancelKey.current < 1000
+        ) {
+          lastCancelKey.current = undefined;
+          if (onQuit) onQuit();
+          else void controller.routeCommand('/exit');
           return;
         }
-        const field = form.fields[question.step]!,
-          draft = question.fields[question.step]!;
-        const editing =
-          field.text && (!field.choices.length || draft.selected === field.choices.length);
-        if (key.meta && input.toLowerCase() === 's' && !field.required) {
-          draft.skipped = !draft.skipped;
+        lastCancelKey.current = isCtrlCBatch(input) ? undefined : now;
+      } else lastCancelKey.current = undefined;
+      if (chooser) return;
+      const cancelKey = (key.ctrl && input === 'c') || (!blockingPanel && isCtrlCBatch(input));
+      if (state.panel === 'recovery') return;
+      if (state.panel === 'management_requests') return;
+      if (state.panel === 'executions') return;
+      if (blockingPanel === 'mcp') return;
+      if (state.panel === 'skills' || state.panel === 'theme' || state.panel === 'language') return;
+      if (state.panel === 'status') {
+        if (key.escape || cancelKey) controller.closePanel();
+        else if (input.toLowerCase() === 'r') void controller.openStatus();
+        return;
+      }
+      if (state.panel === 'help') return;
+      if (cancelKey) {
+        if (sourceQuestion) {
+          setSourceChoices((previous) => {
+            const next = new Map(previous);
+            next.delete(approvalKey);
+            return next;
+          });
+          setAnswer('');
+          controller.closePanel();
+          return;
+        }
+        if (state.panel === 'rewind') {
+          controller.closePanel();
+          return;
+        }
+        if (!card && !chooser && !cardChooser && composer.fileToken) {
+          composer.dismissed = true;
+          void controller.readFileCandidates();
+          return;
+        }
+        void controller.cancel();
+        return;
+      }
+      if (state.panel === 'permissions' || state.panel === 'models' || state.panel === 'effort')
+        return;
+      if (state.panel === 'rewind') return;
+      if (blockingPanel) {
+        const items = state.snapshot?.view.executions.filter((e) => e.resultRevision !== null);
+        if (key.escape) controller.closePanel();
+        else if (key.upArrow) setPanelIndex((i) => Math.max(0, i - 1));
+        else if (key.downArrow)
+          setPanelIndex((i) => Math.min(Math.max(0, (items?.length ?? 0) - 1), i + 1));
+        else if (state.panel === 'context' && !key.ctrl && !key.meta && input.toLowerCase() === 'k')
+          controller.openManagementRequests();
+        else if (state.panel === 'context' && input === 'i') {
+          const item = state.snapshot?.view.executions.filter((e) => e.resultRevision !== null)[
+            panelIndex
+          ];
+          if (item) void controller.includeExecution(item.id);
+        }
+        return;
+      }
+      if (cardChooser) {
+        if (key.escape) setCardChooser(false);
+        else if (key.upArrow) setCardIndex((n) => Math.max(0, n - 1));
+        else if (key.downArrow)
+          setCardIndex((n) => Math.min(Math.max(0, cardOptions.length - 1), n + 1));
+        else if (key.return && cardOptions[cardIndex]) {
+          const key = interactionKey(cardOptions[cardIndex]!);
+          if (cards.some((item) => interactionKey(item) === key)) setSelectedCard(key);
+          setCardChooser(false);
+        }
+        return;
+      }
+      if (key.ctrl && input === 'b') {
+        setCardIndex(
+          Math.max(
+            0,
+            cards.findIndex((item) => interactionKey(item) === approvalKey),
+          ),
+        );
+        setCardOptions(cards);
+        setCardChooser(true);
+        return;
+      }
+      if (key.ctrl && input === 'r') {
+        void controller.list();
+        setChooser(true);
+        return;
+      }
+      if (key.ctrl && input === 'l') {
+        const sessionId = state.sessionId;
+        if (sessionId)
+          void (async () => {
+            await controller.lookup();
+            if (controller.state.sessionId === sessionId) await controller.select(sessionId);
+          })();
+        return;
+      }
+      if (key.ctrl && input === 'o') {
+        const message = state.snapshot?.messages.find(
+          (m) =>
+            m.outputBody &&
+            m.outputBody.readAvailability !== 'unsupported' &&
+            m.contentFormat !== 'unsupported' &&
+            !state.fullOutputs.has(m.id),
+        );
+        if (message) void controller.loadOutput(message);
+        return;
+      }
+      if (key.ctrl && input === 'a' && card) {
+        void controller.loadAttachment(card);
+        return;
+      }
+      if (!card && key.escape) {
+        // The editor owns candidate Escape. Its optional callback handles an
+        // ordinary Escape once, independent of Ink listener registration order.
+        return;
+      }
+      if (!card && key.ctrl && input === 'e') {
+        controller.openExecutions(tail?.id);
+        return;
+      }
+      if (card) {
+        if (card.kind === 'plan_review') return;
+        if (form && question) {
+          const submission = controller.answerPhase(card);
+          if (submission && submission !== 'rejected') return;
+          if (key.meta && input === 'a' && form.alternative) {
+            if (!state.stale && !state.loading)
+              void controller.answer(card, JSON.stringify(form.alternative.value));
+            return;
+          }
+          const field = form.fields[question.step]!,
+            draft = question.fields[question.step]!;
+          const editing =
+            field.text && (!field.choices.length || draft.selected === field.choices.length);
+          if (key.meta && input.toLowerCase() === 's' && !field.required) {
+            draft.skipped = !draft.skipped;
+            renderQuestion((n) => n + 1);
+            return;
+          }
+          if (key.ctrl || (key.meta && !key.return)) return;
+          if (key.escape) {
+            if (question.step > 0) question.step--;
+            else void controller.cancelInteraction(card);
+          } else if (key.tab && field.text && field.choices.length) {
+            draft.selected = editing ? 0 : field.choices.length;
+            draft.skipped = false;
+          } else if (key.tab && !field.required) {
+            draft.skipped = !draft.skipped;
+          } else if (!editing && field.choices.length && (key.upArrow || key.downArrow)) {
+            const count = field.choices.length + (field.text ? 1 : 0);
+            draft.selected =
+              draft.selected === undefined
+                ? key.downArrow
+                  ? 0
+                  : count - 1
+                : (draft.selected + (key.downArrow ? 1 : count - 1)) % count;
+            draft.skipped = false;
+          } else if (key.return && !key.shift && !key.meta) {
+            if (!questionValue(field, draft)) {
+              draft.attempted = true;
+              renderQuestion((n) => n + 1);
+              return;
+            }
+            if (question.step < form.fields.length - 1) question.step++;
+            else {
+              const value = questionAnswer(form, question);
+              if (value !== undefined && !state.stale && !state.loading)
+                void controller.answer(card, value);
+            }
+          } else if (editing) {
+            const width = questionInputWidth(stdout.columns, t('Answer'));
+            if (key.leftArrow) draft.buffer.horizontal(-1);
+            else if (key.rightArrow) draft.buffer.horizontal(1);
+            else if (key.home) draft.buffer.boundary(false, width, display);
+            else if (key.end) draft.buffer.boundary(true, width, display);
+            else if (key.upArrow) draft.buffer.vertical(-1, width, display);
+            else if (key.downArrow) draft.buffer.vertical(1, width, display);
+            else if (key.backspace) draft.buffer.remove(true);
+            else if (key.delete) draft.buffer.remove(false);
+            else if (key.return) draft.buffer.insert('\n');
+            else if (input) draft.buffer.insert(input);
+            draft.skipped = false;
+          }
           renderQuestion((n) => n + 1);
           return;
         }
-        if (key.ctrl || (key.meta && !key.return)) return;
-        if (key.escape) {
-          if (question.step > 0) question.step--;
-          else void controller.cancelInteraction(card);
-        } else if (key.tab && field.text && field.choices.length) {
-          draft.selected = editing ? 0 : field.choices.length;
-          draft.skipped = false;
-        } else if (key.tab && !field.required) {
-          draft.skipped = !draft.skipped;
-        } else if (!editing && field.choices.length && (key.upArrow || key.downArrow)) {
-          const count = field.choices.length + (field.text ? 1 : 0);
-          draft.selected =
-            draft.selected === undefined
-              ? key.downArrow
-                ? 0
-                : count - 1
-              : (draft.selected + (key.downArrow ? 1 : count - 1)) % count;
-          draft.skipped = false;
-        } else if (key.return && !key.shift && !key.meta) {
-          if (!questionValue(field, draft)) return;
-          if (question.step < form.fields.length - 1) question.step++;
-          else {
-            const value = questionAnswer(form, question);
-            if (value !== undefined && !state.stale && !state.loading)
-              void controller.answer(card, value);
-          }
-        } else if (editing) {
-          const width = questionInputWidth(stdout.columns, t('Answer'));
-          if (key.leftArrow) draft.buffer.horizontal(-1);
-          else if (key.rightArrow) draft.buffer.horizontal(1);
-          else if (key.home) draft.buffer.boundary(false, width, display);
-          else if (key.end) draft.buffer.boundary(true, width, display);
-          else if (key.upArrow) draft.buffer.vertical(-1, width, display);
-          else if (key.downArrow) draft.buffer.vertical(1, width, display);
-          else if (key.backspace) draft.buffer.remove(true);
-          else if (key.delete) draft.buffer.remove(false);
-          else if (key.return) draft.buffer.insert('\n');
-          else if (input) draft.buffer.insert(input);
-          draft.skipped = false;
-        }
-        renderQuestion((n) => n + 1);
-        return;
-      }
-      if (sourceQuestion && key.escape) {
-        setSourceChoices((previous) => {
-          const next = new Map(previous);
-          next.delete(approvalKey);
-          return next;
-        });
-        setAnswer('');
-        return;
-      }
-      if (sourceQuestion && (key.upArrow || key.downArrow)) {
-        setSourceChoices((previous) => {
-          const next = new Map(previous),
-            selected = previous.get(approvalKey);
-          next.set(
-            approvalKey,
-            selected === undefined
-              ? key.downArrow
-                ? 0
-                : 2
-              : (selected + (key.downArrow ? 1 : 2)) % 3,
-          );
-          return next;
-        });
-        return;
-      }
-      const offered =
-        card.kind === 'approval' &&
-        card.request !== null &&
-        typeof card.request === 'object' &&
-        !Array.isArray(card.request) &&
-        Array.isArray(card.request.grants) &&
-        card.request.grants.includes('same_command');
-      const choices = offered ? ['approve', 'approve same_command', 'deny'] : ['approve', 'deny'];
-      if (card.kind === 'approval' && (key.upArrow || key.downArrow)) {
-        setApprovalChoices((previous) => {
-          const next = new Map(previous),
-            index = previous.get(approvalKey);
-          next.set(
-            approvalKey,
-            index === undefined
-              ? 0
-              : (index + (key.downArrow ? 1 : choices.length - 1)) % choices.length,
-          );
-          return next;
-        });
-        return;
-      }
-
-      if (key.escape && card.kind === 'approval') {
-        void controller.answer(card, 'deny');
-        return;
-      }
-      if (key.return && (!jsonQuestion || (!key.shift && !key.meta))) {
-        const currentAnswer = answerBuffer.text;
-        if (currentAnswer.trim().startsWith('/')) {
-          void controller.routeCommand(currentAnswer);
+        if (sourceQuestion && key.escape) {
+          setSourceChoices((previous) => {
+            const next = new Map(previous);
+            next.delete(approvalKey);
+            return next;
+          });
           setAnswer('');
-        } else
-          void controller.answer(
-            card,
-            (sourceQuestion && selectedSource !== undefined
-              ? JSON.stringify({ decision: sourceDecisions[selectedSource] })
-              : currentAnswer) ||
-              (card.kind === 'approval' && selectedApproval !== undefined
-                ? choices[selectedApproval]!
-                : ''),
-          );
-        return;
-      }
-      if (jsonQuestion) {
-        if (key.ctrl || (key.meta && !key.return)) return;
-        const width = questionInputWidth(stdout.columns, t('Answer'));
+          return;
+        }
+        if (sourceQuestion && (key.upArrow || key.downArrow)) {
+          setSourceChoices((previous) => {
+            const next = new Map(previous),
+              selected = previous.get(approvalKey);
+            next.set(
+              approvalKey,
+              selected === undefined
+                ? key.downArrow
+                  ? 0
+                  : 2
+                : (selected + (key.downArrow ? 1 : 2)) % 3,
+            );
+            return next;
+          });
+          return;
+        }
+        if (card.kind === 'approval' && (key.upArrow || key.downArrow)) {
+          setApprovalChoices((previous) => {
+            const next = new Map(previous),
+              index = previous.get(approvalKey) ?? (offersSameCommand ? undefined : 0);
+            next.set(
+              approvalKey,
+              index === undefined
+                ? key.downArrow
+                  ? 0
+                  : approvalAnswers.length - 1
+                : (index + (key.downArrow ? 1 : approvalAnswers.length - 1)) %
+                    approvalAnswers.length,
+            );
+            return next;
+          });
+          return;
+        }
+
+        if (key.escape && card.kind === 'approval') {
+          void controller.cancel();
+          return;
+        }
+        if (key.return && (!jsonQuestion || (!key.shift && !key.meta))) {
+          const currentAnswer = answerBuffer.text;
+          const source = sourceChoiceRef.current.get(approvalKey);
+          const approval =
+            approvalChoiceRef.current.get(approvalKey) ??
+            (card.kind === 'approval' && !offersSameCommand ? 0 : undefined);
+          if (card.kind === 'approval' && !currentAnswer.trim() && approval === undefined) return;
+          if (currentAnswer.trim().startsWith('/')) {
+            void controller.routeCommand(currentAnswer);
+            setAnswer('');
+          } else
+            void controller.answer(
+              card,
+              (sourceQuestion && source !== undefined
+                ? JSON.stringify({ decision: sourceDecisions[source] })
+                : currentAnswer) ||
+                (card.kind === 'approval' && approval !== undefined
+                  ? approvalAnswers[approval]!
+                  : ''),
+            );
+          return;
+        }
+        if (jsonQuestion) {
+          if (key.ctrl || (key.meta && !key.return)) return;
+          const width = questionInputWidth(stdout.columns, t('Answer'));
+          if (key.leftArrow) answerBuffer.horizontal(-1);
+          else if (key.rightArrow) answerBuffer.horizontal(1);
+          else if (key.home) answerBuffer.boundary(false, width, display);
+          else if (key.end) answerBuffer.boundary(true, width, display);
+          else if (key.upArrow) answerBuffer.vertical(-1, width, display);
+          else if (key.downArrow) answerBuffer.vertical(1, width, display);
+          else if (key.backspace) answerBuffer.remove(true);
+          else if (key.delete) answerBuffer.remove(false);
+          else if (key.return) answerBuffer.insert('\n');
+          else if (input) answerBuffer.insert(input);
+          renderQuestion((n) => n + 1);
+          return;
+        }
+        if (key.ctrl || key.meta) return;
+        const width = questionInputWidth(stdout.columns, t('Command or private draft'));
         if (key.leftArrow) answerBuffer.horizontal(-1);
         else if (key.rightArrow) answerBuffer.horizontal(1);
         else if (key.home) answerBuffer.boundary(false, width, display);
         else if (key.end) answerBuffer.boundary(true, width, display);
-        else if (key.upArrow) answerBuffer.vertical(-1, width, display);
-        else if (key.downArrow) answerBuffer.vertical(1, width, display);
         else if (key.backspace) answerBuffer.remove(true);
         else if (key.delete) answerBuffer.remove(false);
-        else if (key.return) answerBuffer.insert('\n');
         else if (input) answerBuffer.insert(input);
         renderQuestion((n) => n + 1);
         return;
       }
-      if (key.backspace || key.delete) setAnswer((t) => t.slice(0, -1));
-      else if (!key.ctrl && !key.meta) setAnswer((t) => t + input);
-      return;
-    }
-  });
+    },
+    { isActive: blockingPanel !== 'mcp' },
+  );
   const history = (
     <TuiHistory
       controller={controller}
@@ -1415,7 +1992,6 @@ function TuiSessionView({
       form={form}
       step={question?.step}
       collapsed={resultDisplay.collapsed}
-      showReasoning={resultDisplay.showReasoning}
     />
   );
   const withHistory = (panel: ReactNode) => (
@@ -1430,7 +2006,7 @@ function TuiSessionView({
     );
   if (state.panel === 'rewind')
     return withHistory(<TuiFileRecoveryPanel controller={controller} />);
-  if (state.panel === 'mcp')
+  if (blockingPanel === 'mcp')
     return withHistory(<TuiMcpPanel key={state.sessionId} controller={controller} />);
   if (state.panel === 'theme' || state.panel === 'language')
     return withHistory(<TuiPreferencePanel key={state.panel} controller={controller} />);
@@ -1444,14 +2020,38 @@ function TuiSessionView({
   if (state.panel === 'help') return withHistory(<TuiHelpPanel controller={controller} />);
   const running = activity(state.snapshot);
   const focused = !!card || !!state.panel || chooser || cardChooser;
+  const childOwnsActivity =
+    !!state.snapshot &&
+    state.snapshot.view.executions.some((execution) => {
+      if (execution.kind !== 'job') return false;
+      const block = projectInkChild(execution, state.snapshot!);
+      return (
+        block?.kind === 'subagent' && ['creating', 'running', 'suspended'].includes(block.status)
+      );
+    });
+  const currentCancelling = state.snapshot?.view.runs.some(
+    (run) =>
+      run.isActive &&
+      run.status === 'cancelling' &&
+      run.originStoreId === controller.port.storeId &&
+      run.sessionId === state.sessionId,
+  );
   const activeLine =
-    !focused &&
-    !state.stale &&
-    ['Working', 'Cancelling', 'Waiting for required result'].includes(running)
-      ? (running as 'Working' | 'Cancelling' | 'Waiting for required result')
+    !focused && !state.stale
+      ? hasPendingRootCancellation(state, controller.port.storeId) &&
+        !currentCancelling &&
+        running !== 'Cancelling'
+        ? ('Cancelling · cancellation requested' as const)
+        : currentCancelling || running === 'Cancelling'
+          ? ('Cancelling' as const)
+          : !childOwnsActivity && ['Working', 'Waiting for required result'].includes(running)
+            ? (running as 'Working' | 'Waiting for required result')
+            : undefined
       : undefined;
-  const activeModel = state.snapshot?.view.executions
-    .filter(
+  const activeModel = (
+    currentActivityVerified(state.snapshot) ? state.snapshot?.view.executions : undefined
+  )
+    ?.filter(
       (item) =>
         item.kind === 'model' &&
         item.runId === state.snapshot?.view.runs.find((run) => run.isActive)?.id &&
@@ -1460,7 +2060,12 @@ function TuiSessionView({
     .at(-1);
   const activeTiming = activeModel && state.snapshot?.executionTimings?.[activeModel.id];
   return (
-    <Box flexDirection="column">
+    <Box
+      flexDirection="column"
+      maxHeight={focused ? undefined : Math.max(1, rows - 1)}
+      overflowY={focused ? undefined : 'hidden'}
+      justifyContent="flex-end"
+    >
       {history}
       {testDiagnostics ? (
         <Text bold>
@@ -1481,32 +2086,25 @@ function TuiSessionView({
           {state.loading && <Text dimColor>{t('Loading')}</Text>}
         </>
       )}
-      {!testDiagnostics &&
-        activeModel &&
-        !state.snapshot?.messages.some(
-          (message) =>
-            message.role === 'assistant' &&
-            message.runId === activeModel.runId &&
-            ((message.sourceIds ?? []).includes(activeModel.id) ||
-              message.outputBody?.executionId === activeModel.id),
-        ) && (
-          <ToolSummaryBlock
-            block={{
-              id: 0,
-              kind: 'tool_summary',
-              tools: [],
-              summaryLine: '',
-              active: true,
-              hasThought: false,
-              hasThinking: true,
-              createdAt: activeTiming?.startedAt ?? 0,
-              ...(activeTiming?.availability === 'recorded_dispatch' &&
-              activeTiming.startedAt !== undefined
-                ? { liveModelStartedAt: activeTiming.startedAt }
-                : {}),
-            }}
-            columns={stdout.columns || 80}
-          />
+      {state.snapshot && !currentActivityVerified(state.snapshot) && (
+        <Text color="yellow">
+          {t(
+            'This connection cannot verify activity; work may still be executing in another owner.',
+          )}
+        </Text>
+      )}
+      {state.snapshot &&
+        !state.stale &&
+        !state.snapshotStale &&
+        state.snapshot.storeId === controller.port.storeId &&
+        state.snapshot.view.session.id === state.sessionId &&
+        !state.snapshot.view.runs.some((run) => run.isActive) &&
+        state.snapshot.view.runs.at(-1)?.status === 'cancelled' &&
+        state.snapshot.view.runs.at(-1)?.originStoreId === controller.port.storeId &&
+        state.snapshot.view.runs.at(-1)?.sessionId === state.sessionId && (
+          <Text dimColor>
+            {t('Current task')} · {t('Cancelled')}
+          </Text>
         )}
       {(unfinishedJobs > 0 || unknownJobs > 0) && (
         <Text>
@@ -1562,12 +2160,14 @@ function TuiSessionView({
           ))}
         </TuiOverlayFrame>
       )}
-      {card && !cardChooser && !chooser && !state.panel && (
+      {card && !cardChooser && !chooser && !blockingPanel && (
         <Box flexDirection="column">
           {form && question && (
             <QuestionPanel
               form={form}
               draft={question}
+              submission={questionSubmission}
+              providerAction={providerQuestion}
               compactMaterial={
                 testDiagnostics ||
                 longQuestionMaterial(form, question.step, stdout.columns || 80, stdout.rows || 24)
@@ -1577,15 +2177,7 @@ function TuiSessionView({
           {card.kind === 'approval' && (
             <TuiApprovalPanel
               card={card}
-              choices={
-                card.request &&
-                typeof card.request === 'object' &&
-                !Array.isArray(card.request) &&
-                Array.isArray(card.request.grants) &&
-                card.request.grants.includes('same_command')
-                  ? ['approve', 'approve same_command', 'deny']
-                  : ['approve', 'deny']
-              }
+              choices={approvalAnswers}
               selected={selectedApproval}
               busy={
                 state.loading ||
@@ -1611,13 +2203,36 @@ function TuiSessionView({
           )}
           {(sourceQuestion || jsonQuestion) && (
             <TuiOverlayFrame title={t('Question')}>
-              {sourceQuestion && (
+              {sourceQuestion && testDiagnostics && (
                 <Text>
                   {t('Up/Down explicit source decision:')}{' '}
                   {selectedSource === undefined
                     ? t('none (Enter has no answer)')
                     : t(sourceDecisions[selectedSource]!)}
                 </Text>
+              )}
+              {sourceQuestion && !testDiagnostics && (
+                <Box flexDirection="column">
+                  <Text>
+                    {selectedSource === undefined ? '❯ ' : '  '}
+                    {t('Decide later')}
+                  </Text>
+                  {sourceDecisions.map((decision, index) => (
+                    <Text key={decision}>
+                      {selectedSource === index ? '❯ ' : '  '}
+                      {t(
+                        decision === 'approved'
+                          ? 'Approve and connect'
+                          : decision === 'rejected'
+                            ? 'Reject'
+                            : 'Cancel',
+                      )}
+                    </Text>
+                  ))}
+                  {selectedSource === undefined && (
+                    <Text dimColor>{t('none (Enter has no answer)')}</Text>
+                  )}
+                </Box>
               )}
               {jsonQuestion && (
                 <>
@@ -1630,6 +2245,26 @@ function TuiSessionView({
               )}
               {sourceQuestion && <Text>{terminalText(answer)}</Text>}
             </TuiOverlayFrame>
+          )}
+          {testDiagnostics &&
+            card.originStoreId === controller.port.storeId &&
+            card.sessionId === state.sessionId &&
+            card.presentationSessionId === state.sessionId && (
+              <Text>
+                {card.kind} [{terminalText(card.id)}] {t('original Session')}{' '}
+                {terminalText(card.sessionId)} · {card.state} · {t('revision')} {card.revision}
+              </Text>
+            )}
+          {originalConnection && (
+            <Text>
+              {t(reconnectingCard ? 'Original forced reconnect:' : 'Original connection:')}{' '}
+              {terminalText(originalConnection)}
+            </Text>
+          )}
+          {originalSourceDecision && (
+            <Text>
+              {t('Original source decision:')} {terminalText(originalSourceDecision)}
+            </Text>
           )}
           {requiresInteractionAttachment(card) && !state.attachments.has(approvalKey) && (
             <Text color="yellow">{t('Ctrl+A: read required attachment.')}</Text>
@@ -1736,7 +2371,7 @@ function TuiSessionView({
                   .map((part) => (part.label ? t(part.text) : part.text))
                   .join('')
               : state.notice.startsWith('Exported loaded conversation:')
-                ? t('Exported loaded conversation:') +
+                ? (testDiagnostics ? t('Exported loaded conversation:') : 'Session exported:') +
                   state.notice.slice('Exported loaded conversation:'.length)
                 : state.notice,
           )}
@@ -1803,19 +2438,12 @@ function TuiSessionView({
           )}
         </Text>
       )}
-      {testDiagnostics && !card && !state.panel && !chooser && !cardChooser && (
+      {testDiagnostics && tail && !card && !state.panel && !chooser && !cardChooser && (
         <Text dimColor>
-          {tail &&
-            t(
-              resultDisplay.collapsed.has(executionDisplayKey(tail))
-                ? 'Empty Enter expands the current tail result'
-                : 'Empty Enter collapses the current tail result',
-            )}
-          {tail && ' · '}
           {t(
-            resultDisplay.showReasoning
-              ? 'Ctrl+T hides recorded reasoning'
-              : 'Ctrl+T shows recorded reasoning',
+            resultDisplay.collapsed.has(executionDisplayKey(tail))
+              ? 'Empty Enter expands the current tail result'
+              : 'Empty Enter collapses the current tail result',
           )}
         </Text>
       )}
@@ -1832,18 +2460,21 @@ function TuiSessionView({
       )}
       {state.snapshot?.pendingInputs && state.snapshot.pendingInputs.length > 0 && (
         <Box flexDirection="column">
-          <Text dimColor>
-            {t(state.stale ? 'Last confirmed pending inputs' : 'Pending inputs')} ·{' '}
-            {state.snapshot.pendingInputs.length}
-          </Text>
+          {(testDiagnostics || state.stale) && (
+            <Text dimColor>
+              {t(state.stale ? 'Last confirmed pending inputs' : 'Pending inputs')} ·{' '}
+              {state.snapshot.pendingInputs.length}
+            </Text>
+          )}
           {state.snapshot.pendingInputs.map((input, index) => (
             <Box key={input.id} flexDirection="column">
               <Text dimColor>
-                ↵ {index + 1} ·{' '}
-                {t(input.kind === 'input.steer' ? 'Guidance pending' : 'Follow-up waiting')}
-                {testDiagnostics && ` [${terminalText(input.id)}]`}
+                ↵{' '}
+                {testDiagnostics
+                  ? `${index + 1} · ${t(input.kind === 'input.steer' ? 'Guidance pending' : 'Follow-up waiting')} [${terminalText(input.id)}]`
+                  : terminalText(input.request.content)}
               </Text>
-              <Text>{terminalText(input.request.content)}</Text>
+              {testDiagnostics && <Text>{terminalText(input.request.content)}</Text>}
             </Box>
           ))}
         </Box>
@@ -1854,6 +2485,15 @@ function TuiSessionView({
         planning={state.planning}
         inputActive={!focused}
       >
+        {card?.kind === 'approval' &&
+          !state.panel &&
+          !chooser &&
+          !cardChooser &&
+          (testDiagnostics ? (
+            <Text>{terminalText(answer)}</Text>
+          ) : (
+            <TuiAnswerInput buffer={answerBuffer} label="Command or private draft" />
+          ))}
         {testDiagnostics &&
           !focused &&
           (state.planning || state.snapshot?.view.runs.some((r) => r.isActive)) && (
@@ -1896,11 +2536,15 @@ function TuiSessionView({
               executionDisplayKey(current) !== executionDisplayKey(tail)
             )
               return;
-            const collapsed = new Set(resultDisplay.collapsed),
+            const display = resultDisplayRef.current;
+            if (display.scope !== resultScope) return;
+            const collapsed = new Set(display.collapsed),
               key = executionDisplayKey(tail);
             if (collapsed.has(key)) collapsed.delete(key);
             else collapsed.add(key);
-            setResultDisplay({ ...resultDisplay, collapsed });
+            const next = { ...display, collapsed };
+            resultDisplayRef.current = next;
+            setResultDisplay(next);
           }}
         />
       </TuiFooter>

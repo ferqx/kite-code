@@ -48,6 +48,7 @@ export async function connectSharedService(input: {
   signal?: AbortSignal;
 }): Promise<{
   mode: 'shared';
+  transport: 'unix' | 'pipe';
   client: AgentClient;
   bootstrap: ServerInfo;
   fixedWorkspace: string;
@@ -66,19 +67,16 @@ export async function connectSharedService(input: {
   };
   const capabilities = [...input.requiredCapabilities];
   let native: Awaited<ReturnType<typeof import('@kite-ai/service/daemon').requestDaemonBootstrap>>;
+  let transport: 'unix' | 'pipe' = 'unix';
   try {
     // This private native dependency is loaded only after shared mode is selected.
     const { selectDaemonEndpoint, requestDaemonBootstrap } = await import(
       '@kite-ai/service/daemon'
     );
     checkAbort();
-    native = await requestDaemonBootstrap(
-      selectDaemonEndpoint({
-        profileAccessKey,
-        explicitSocket: server,
-      }),
-      expectedProfile,
-    );
+    const endpoint = selectDaemonEndpoint({ profileAccessKey, explicitSocket: server });
+    transport = endpoint.transport === 'windows-pipe' ? 'pipe' : 'unix';
+    native = await requestDaemonBootstrap(endpoint, expectedProfile);
   } catch {
     checkAbort();
     throw new SharedConnectionError('shared_bootstrap_failed');
@@ -112,6 +110,7 @@ export async function connectSharedService(input: {
   let completion: Promise<void> | undefined;
   return {
     mode: 'shared',
+    transport,
     client,
     bootstrap,
     fixedWorkspace,

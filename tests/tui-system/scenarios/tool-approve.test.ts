@@ -90,6 +90,7 @@ describe('TUI PTY System — Tool Approve', () => {
 
       // Wait for approval block to render
       await waitForText(() => tui.viewport(), '工具授权', 15000);
+      await waitForText(() => tui.viewport(), '允许一次', 15000);
 
       const beforeOutput = tui.viewport();
       expect(screenContains(beforeOutput, '工具授权')).toBe(true);
@@ -118,7 +119,7 @@ describe('TUI PTY System — Tool Approve', () => {
       expect(readFileSync(approvalMarkerPath, 'utf8')).toBe('TUI_APPROVAL_EXECUTED\n');
       expect(screenContains(afterOutput, 'APPROVAL_FLOW_COMPLETE')).toBe(true);
       expect(clean.match(/APPROVAL_FLOW_COMPLETE/g) ?? []).toHaveLength(1);
-      expect(clean.match(/Workspace file changed\./g) ?? []).toHaveLength(1);
+      expect(clean.match(/External file changed\./g) ?? []).toHaveLength(1);
 
       // TUI should recover — prompt visible
       expect(screenContains(afterOutput, '❯')).toBe(true);

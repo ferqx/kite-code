@@ -350,10 +350,14 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
         JSON.stringify({
           storeId,
           calls,
-          rows: readFileSync(ledger, 'utf8')
-            .trim()
-            .split('\n')
-            .map((line) => JSON.parse(line)),
+          rows: existsSync(ledger)
+            ? readFileSync(ledger, 'utf8')
+                .trim()
+                .split('\n')
+                .filter(Boolean)
+                .map((line) => JSON.parse(line))
+            : null,
+          ledgerMissing: !existsSync(ledger),
         }),
       );
       if (exit) console.error(out, err);

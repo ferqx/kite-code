@@ -67,7 +67,7 @@ B仅修改manifest版本标签，TUI仅help/version；此工具即使通过也�
 
 独立 [完整 TUI qualification](../../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)消费 release job 的准确 Terminal／Native 已构建候选，先安装 Terminal，再把 Native 注册到同一个稳定 `kite-tui.exe`。两种选择各使用实际所选候选内的 SQLite reader／Bun／TUI／Service，分别核同一 Store 的独立原会话；不借源码 Store 或全局 Bun。前门环境和 Workspace 预加载污染不进入产品，用户 HOME／Profile 保持私有。原仅 help/version 的 Windows installation 工具仍保其原范围，完整 PTY 由这条单独必需调用者负责。
 
-每种选择沿真实键盘完成普通任务、Ctrl+O 全文、Ctrl+T 思考显示／隐藏、已加载 Markdown 导出、准确原第二项任务 Ctrl+C、未提交 Unicode 草稿及 Ctrl+Q 正常退出；同一稳定前门冷启动读原草稿、全文／思考和完整 Command／Run／Execution，Provider／持久游标／journal／配置零重放与原字节保持。最新 VT 解析缓冲按原 complete Message 核思考，长正文前的思考不能要求出现在底部 24 行，也不能拿历史 stdout 确认当前画面。第二项已取消 Model 的合法未完成 preview 保留。
+每种选择沿真实键盘完成普通任务、Ctrl+O 完整输出、含已加载原思考的 Markdown 导出、准确原第二项任务 Ctrl+C、未提交 Unicode 草稿及 Ctrl+Q 正常退出；同一稳定前门冷启动读原草稿、全文／思考和完整 Command／Run／Execution，Provider／持久游标／journal／配置零重放与原字节保持。最新 VT 解析缓冲按原 complete Message 核完成后的 Thinking 摘要；完整思考以原输出及导出逐字核验，不要求屏幕展开，也不能拿历史 stdout 确认当前画面。第二项已取消 Model 的合法未完成 preview 保留。
 
 [ConPTY driver](../../../tests/fixtures/unified-agent/windows-installed-tui-pty-driver.ts)由 [PTY owner](../../../tests/fixtures/unified-agent/windows-installed-tui-pty.ts)通过创建前原 Windows Job 启动，再执行真实 80×24 `Bun.Terminal`。原成员 HANDLE／FILETIME／映像核 TUI／Service 和注册 Native 前门归属，数字 PID 只定位已证成员；普通退出须产品／PTY exit0、全部有序输出和 EOF、原 Job0／wait／strict Close 且未请求 Terminate，强制收尾不计成功。各模式独立 120 秒、每 PTY 30 秒、写操作最多 10 秒，失败保首次错误和原 owner。
 

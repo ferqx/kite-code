@@ -341,7 +341,23 @@ test('restored TUI background directory and complete output/child readers preser
       expect(directory).toContain(savedCarrier.definitionId);
       expect(directory).toContain(jobId);
       expect(directory).toContain(childJobId);
-      expect(directory.match(/restored\s+history;\s+read\s+only/g)).toHaveLength(2);
+      const listing = directory.split('Recorded execution result')[0]!;
+      const rows = controller.state
+        .snapshot!.view.executions.filter(
+          (execution) => execution.kind !== 'model' && execution.sessionId === 'session',
+        )
+        .map((execution) => ({ execution, start: listing.indexOf(`[${execution.id}]`) }))
+        .sort((left, right) => left.start - right.start);
+      expect(rows.every((row) => row.start >= 0)).toBe(true);
+      const jobRows = rows.flatMap((row, index) => {
+        const text = listing.slice(row.start, rows[index + 1]?.start);
+        if (row.execution.id === jobId || row.execution.id === childJobId) return [text];
+        expect(row.execution.kind).toBe('tool');
+        expect(text).toMatch(/restored\s+history;\s+read\s+only/);
+        return [];
+      });
+      expect(jobRows).toHaveLength(2);
+      expect(jobRows.join('\n').match(/restored\s+history;\s+read\s+only/g)).toHaveLength(2);
       await controller.routeCommand(`/background output ${jobId}`);
       const output = controller.state.executionReading;
       expect(output?.phase).toBe('ready');
@@ -374,7 +390,16 @@ test('restored TUI background directory and complete output/child readers preser
       expect(full).toEqual({ ...savedOutput, storeId, snapshotCursor: full.snapshotCursor });
       expect(full.output.content).toBe(childContent);
       await Bun.sleep(50);
+      // The child reader preserves its original list/detail navigation. Select
+      // the actual assistant Message, open it, then inspect its complete tail.
+      app.stdin.write('\u001b[B');
+      await Bun.sleep(20);
+      app.stdin.write('\r');
+      await Bun.sleep(20);
+      app.stdin.write('\u001b[F');
+      await Bun.sleep(20);
       expect(app.lastFrame()).toContain('TUI_RESTORED_CHILD_COMPLETE_TAIL');
+      expect(app.lastFrame()).toContain(childReasoning);
       const beforeStop = methods.length;
       await controller.routeCommand(`/background stop ${jobId}`);
       await controller.routeCommand(`/background stop ${childJobId}`);

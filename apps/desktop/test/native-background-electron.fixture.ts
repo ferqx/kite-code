@@ -186,8 +186,9 @@ try {
   async function fullLog(id: string) {
     await log(id).getByRole('button', { name: '读取完整子日志', exact: true }).click();
     await log(id)
-      .getByText(/^已完整读取子会话 /)
+      .getByText(/^已完整读取子会话日志。/)
       .waitFor();
+    assert.ok((await log(id).innerText()).includes(`原会话 ${completed.childSessionId} 截至序号`));
     const texts = await log(id).locator('article > pre').allTextContents();
     assert.ok(
       texts.includes(unicode),
@@ -485,7 +486,7 @@ try {
     .getByText('正在读取完整子会话日志…', { exact: true })
     .waitFor({ state: 'hidden' });
   await log(completed.id)
-    .getByText(/^已完整读取子会话 /)
+    .getByText(/^已完整读取子会话日志。/)
     .waitFor();
   assert.equal(await log(completed.id).getByRole('alert').count(), 0);
   assert.ok((await log(completed.id).locator('article > pre').allTextContents()).includes(unicode));

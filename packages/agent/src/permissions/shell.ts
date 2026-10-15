@@ -13,6 +13,7 @@ import { AgentError } from '../storage/types';
 import { shellToolCapability as describe } from './capabilities';
 import type { CapabilityDescription } from './index';
 import { createShellCommandPolicy } from './shell-command-policy';
+import { shellExplorationPresentation } from './shell-presentation';
 
 export interface ShellConfigurationOptions {
   /** Trusted platform assembly; command input cannot choose an OS boundary. */
@@ -34,7 +35,13 @@ export interface ShellConfigurationOptions {
     readonly runtimeReadOnlyRoots: readonly string[];
   };
 }
-export const shellToolIds = ['shell.launch', 'shell.read', 'shell.wait', 'shell.stop'] as const;
+export const shellToolIds = [
+  'shell.execute',
+  'shell.launch',
+  'shell.read',
+  'shell.wait',
+  'shell.stop',
+] as const;
 /** Interpret only the original accepted default-policy tree, including delegated AND policies. */
 function acceptedScopeLeaves(context: JobContext, definitionId: string) {
   const authorization = context.dispatchAuthorization;
@@ -143,7 +150,7 @@ const permissionsSchema = {
 function commandRequest(request: AuthorizationRequest, scoped: boolean) {
   const tool =
     request.kind === 'tool' &&
-    request.definitionId === 'shell.launch' &&
+    ['shell.execute', 'shell.launch'].includes(request.definitionId) &&
     request.definitionVersion === '1';
   const job =
     request.kind === 'job' &&
@@ -162,10 +169,22 @@ function commandRequest(request: AuthorizationRequest, scoped: boolean) {
       (key) =>
         !(
           tool
-            ? ['key', 'command', 'cancellation', ...(scoped ? ['permissions'] : [])]
+            ? [
+                'key',
+                'command',
+                'cancellation',
+                ...(request.definitionId === 'shell.execute' ? ['timeoutMs'] : []),
+                ...(scoped ? ['permissions'] : []),
+              ]
             : ['command', ...(scoped ? ['permissions'] : [])]
         ).includes(key),
     ) ||
+    (request.definitionId === 'shell.execute' &&
+      value.timeoutMs !== undefined &&
+      (typeof value.timeoutMs !== 'number' ||
+        !Number.isInteger(value.timeoutMs) ||
+        value.timeoutMs < 1 ||
+        value.timeoutMs > 3600000)) ||
     (tool &&
       value.cancellation !== undefined &&
       !['attached', 'detached'].includes(String(value.cancellation)))
@@ -185,6 +204,7 @@ function commandRequest(request: AuthorizationRequest, scoped: boolean) {
   return {
     command: value.command,
     cancellation: tool ? (value.cancellation ?? 'attached') : null,
+    timeoutMs: request.definitionId === 'shell.execute' ? (value.timeoutMs ?? 600000) : null,
     executionScope:
       scope === undefined
         ? { filesystem: 'workspace_write' as const, network: 'none' as const }
@@ -306,6 +326,12 @@ export async function createShellConfiguration(input: {
           : createShellJob(jobOptions);
     const extension = createShellExtension({
       ...(host ? { permissionsSchema } : {}),
+      async classifyPresentation(command) {
+        const classified = await commandPolicy.classify(command);
+        return classified.hardDenied
+          ? 'standalone'
+          : shellExplorationPresentation(classified.plainCommands);
+      },
       job: {
         ...job,
         ...(host
@@ -384,7 +410,8 @@ export async function createShellConfiguration(input: {
       async describeRequest(
         request: AuthorizationRequest,
       ): Promise<Partial<CapabilityDescription> | undefined> {
-        if (!['shell.launch', 'shell.command'].includes(request.definitionId)) return undefined;
+        if (!['shell.execute', 'shell.launch', 'shell.command'].includes(request.definitionId))
+          return undefined;
         const value = commandRequest(request, !!host);
         if (!value) return { hardAllowed: false, denialReason: 'invalid_shell_arguments' };
         const classified = await commandPolicy.classify(value.command);
@@ -410,6 +437,7 @@ export async function createShellConfiguration(input: {
               configurationId: options.configurationId,
               command: value.command,
               cancellation: value.cancellation,
+              timeoutMs: value.timeoutMs,
               executionScope: host ? value.executionScope : null,
               cwd,
               env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),

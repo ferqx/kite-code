@@ -7,6 +7,8 @@
 
 ## 一个 Vault 与准确 owned 域
 
+Run 中的 Login 仍是同一个普通 Action：Agent 的 nested Action 端口在 Store 事务核父 Tool、Actor、root work 与活动 Run，并记录父取消边；Service 只装配 HTTP／OAuth port。保存准入不表示认证完成，冷记录缺原热 binding 时仅可观察，不能按当前默认配置重新派发。[真实 nested 验证](../../packages/agent/test/isolated/extensions/nested-actions.test.ts)与[原完整认证终端场景](../../tests/tui-system/scenarios/mcp-authentication.test.ts)覆盖该调用者路径。
+
 生产沿默认 Service 的同一个 [CredentialVault](../../packages/agent/src/config/credentials.ts) 与 [native backend](../../packages/agent/src/config/os-credentials.ts)，只用 `@napi-rs/keyring`，没有 CLI、明文文件或自建加密 fallback。backend 的 available、locked、unavailable 来自实际操作；不可用时 OAuth 依赖局部拒绝，不阻断无关普通任务和 SQL 历史读取。factory/import 不读取保险库。
 
 手工 secret 继续使用 `credential:<uuid>`。OAuth 使用同 Vault 的闭合 `mcp.oauth` owned scope，account 是 domain-separated SHA-256；普通 UUID 接口不能访问它。Service 从真实 Profile access key、原 Store、Workspace/physical identity、Source identity、Server、raw/transport digest 和 auth profile 导出 owned 身份。同 Workspace 后续 Session 可复用准确材料，Session/Execution/当前权限仍独立核验；新 Store、同路径换根或 Source 漂移不自动承接旧材料。
@@ -53,3 +55,5 @@ Native MCP 设置通过有限 Main manager封存完整非秘密原申请；四Au
 
 
 [Native人工系统浏览器入口](../../apps/desktop/scripts/qualify-native-mcp-browser.ts)已取得本机macOS默认Chrome与默认OS vault组合资格：四项Auth、准确原Login取消、真实document导航/PKCE、fresh Service复用、冷原GET零POST和清理后fresh absence全部通过最终passed及原wire/report。自有HTTPS准备页到达后才启动原Login的默认opener与120秒callback；若出现浏览器证书提示仍由用户处理，没有fetch callback替代或系统信任修改。本机固定loopback/测试证书不代表生产默认网络、外部AS/账号或其他平台；完整边界归[Desktop owner](../../apps/desktop/README.md#native-mcp-完整设置)，准确运行证据归[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-chrome-与默认-vault-验收)。
+
+目录自动观察通过严格可选 onlyLoginEligible=true 消费既有目标登录资格；不具资格的未 challenge auto HTTP 返回有限 eligible:false，而不是凭据缺失或失败结论，保持零 Vault 读取。显式安全状态、Remove 清理和原 ID 结果查询保原输入及行为。CLI 完整 envelope 与 Source／目标 Scope 校验继续有效；过滤只归 Service 接口装配，不产生 Agent 权限策略。

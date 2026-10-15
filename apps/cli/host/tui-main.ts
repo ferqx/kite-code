@@ -41,6 +41,7 @@ export async function runTUIProcess(
   const exit = new AbortController();
   const stop = () => exit.abort();
   process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
   try {
     const { runTUIHost } = await import('./tui');
     return await runTUIHost({
@@ -60,6 +61,7 @@ export async function runTUIProcess(
     });
   } finally {
     process.removeListener('SIGTERM', stop);
+    process.removeListener('SIGINT', stop);
   }
 }
 if (import.meta.main) {

@@ -100,6 +100,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'ensureOperation',
   'getOperation',
   'planAction',
+  'acceptNestedAction',
   'applyExtensionAction',
   'stopActionPreparation',
   'recoverSession',

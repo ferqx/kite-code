@@ -140,7 +140,29 @@ const start = async (phase: string) => {
   } finally {
     closeSync(fd);
   }
-  await wait('New Run >');
+  const end = Date.now() + 10000;
+  const first = await waitFor(
+    'workspace-trust-or-main',
+    (frame) =>
+      frame.fresh &&
+      (frame.text.includes('New Run >') ||
+        (frame.text.includes('Open this workspace?') && frame.text.includes('› Exit Kite Code'))),
+    end,
+  );
+  if (!first.text.includes('New Run >')) {
+    await key('\x1b[A');
+    await waitFor(
+      'explicit-workspace-trust',
+      (frame) => frame.fresh && frame.text.includes('› Trust this workspace and continue'),
+      end,
+    );
+    await key('\r');
+    await waitFor(
+      'main-after-workspace-trust',
+      (frame) => frame.fresh && frame.text.includes('New Run >'),
+      end,
+    );
+  }
 };
 const choose = async (label: string, top = 'Project sources', settleMcp = false) => {
   const end = Date.now() + 10000;
@@ -154,19 +176,30 @@ const choose = async (label: string, top = 'Project sources', settleMcp = false)
     );
     note('mcp-navigation-read-settled', { frame: frame.text.slice(-32768) });
   }
-  if ((await current()).text.includes(`› ${label}`)) return;
-  if (!latestFrame.includes(`› ${top}`)) {
-    await key('\x1b[A'.repeat(64));
+  const initial = await waitFor(
+    `navigation-selection:${label}`,
+    (frame) => frame.text.includes('❯'),
+    end,
+  );
+  if (initial.text.includes(`❯ ${label}`)) return;
+  if (!initial.text.includes(`❯ ${top}`)) {
+    retainedFrame = undefined;
+    note('navigate-top', { target: top });
+    await active!.keyUnlessVisible('\x1b[A'.repeat(64), `❯ ${top}`);
     await waitFor(
       `navigation-top:${top}`,
-      (frame) => frame.fresh && frame.text.includes(`› ${top}`),
+      (frame) => frame.fresh && frame.text.includes(`❯ ${top}`),
       end,
     );
   }
   for (;;) {
     const frame = await current();
-    if (frame.text.includes(`› ${label}`)) return;
+    if (frame.text.includes(`❯ ${label}`)) return;
     if (Date.now() > end) throw Error(`owned_reconnection_navigation_deadline:${label}`);
+    if (!frame.text.includes('❯')) {
+      await Bun.sleep(50);
+      continue;
+    }
     await key('\x1b[B');
     await waitFor(`navigation-frame:${label}`, (next) => next.fresh && next.text.length > 0, end);
   }
@@ -251,7 +284,7 @@ try {
   await key('\r');
   await wait('Confirm forced reconnect:');
   await wait(`Original carrier: ${second}`);
-  await wait('› Confirm forced reconnect');
+  await wait('❯ Confirm forced reconnect');
   await control('before-confirm');
   await key('\r');
   const submittedReady = await waitNewReconnection([]);
@@ -269,7 +302,7 @@ try {
   await key('\r');
   await wait('Confirm forced reconnect:');
   await wait(`Original carrier: ${ready}`);
-  await wait('› Confirm forced reconnect');
+  await wait('❯ Confirm forced reconnect');
   await control('before-second-confirm');
   await key('\r');
   const submittedDenied = await waitNewReconnection([ready]);

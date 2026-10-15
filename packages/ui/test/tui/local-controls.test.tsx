@@ -3,6 +3,7 @@ import type { Command, Interaction, PendingInputPage, SessionView } from '@kite-
 import { render } from 'ink-testing-library';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
 import { callerTarget, type TuiCallerIntent, type TuiCallerRequest } from '../../src/tui/caller';
+import { hasPendingRootCancellation } from '../../src/tui/chrome';
 
 const tick = () => Bun.sleep(25);
 function fixture() {
@@ -95,6 +96,59 @@ function fixture() {
       ),
   };
 }
+
+test('pending approval keeps command and private-draft editing visible without answering or changing work', async () => {
+  const f = fixture();
+  Object.assign(f.snapshot, {
+    interactions: [
+      {
+        id: 'original-approval',
+        kind: 'approval',
+        state: 'pending',
+        revision: '1',
+        originStoreId: 'store',
+        sessionId: 'a',
+        presentationSessionId: 'a',
+        executionId: 'original-tool',
+        runId: 'a-run',
+        definitionId: 'files.write_path',
+        request: { description: 'Original decision' },
+      } as unknown as Interaction,
+    ],
+  });
+  await f.controller.select('a');
+  const app = f.app();
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('Command or private draft >');
+    app.stdin.write('/clear');
+    await tick();
+    expect(app.lastFrame()).toContain('/clear');
+    app.stdin.write('\r');
+    await tick();
+    app.stdin.write('PRIVATE👩‍💻');
+    await tick();
+    expect(app.lastFrame()).toContain('PRIVATE👩‍💻');
+    app.stdin.write('\x7f');
+    await tick();
+    expect(app.lastFrame()).toContain('PRIVATE');
+    expect(app.lastFrame()).not.toContain('👩');
+    app.stdin.write('\x0c');
+    await tick();
+    expect(app.lastFrame()).toContain('PRIVATE');
+    expect(f.controller.state.snapshot!.interactions[0]).toMatchObject({
+      id: 'original-approval',
+      state: 'pending',
+      revision: '1',
+    });
+    expect(f.posts).toEqual([]);
+    expect(f.cancels).toEqual([]);
+    expect(f.controller.state.draft).toBe('');
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
 
 test('Esc respects candidates; ordinary cancellation and explicit double Ctrl+C retain the original draft and quit host once', async () => {
   const f = fixture();
@@ -462,6 +516,193 @@ test('pending inputs are actual accepted directory facts; beginning work removes
     expect(app.lastFrame()).not.toContain('Pending inputs');
     expect(f.cancels).toEqual([]);
   } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('explicit MCP navigation owns pending-card focus and CtrlC closes child then parent without answering or cancelling', async () => {
+  const f = fixture();
+  let managementEffects = 0;
+  const forbidden = async () => {
+    managementEffects++;
+    throw Error('No effect is authorized by navigation');
+  };
+  f.port.mcp = {
+    read: async () => {
+      throw Error('directory unavailable');
+    },
+    submit: forbidden,
+    lookup: forbidden,
+    reconnection: {
+      list: async () => [],
+      observe: forbidden,
+      submit: forbidden,
+      lookup: forbidden,
+    },
+  };
+  f.snapshots.set('a', {
+    ...f.snapshot,
+    interactions: [
+      {
+        id: 'original-pending-approval',
+        originStoreId: 'store',
+        sessionId: 'a',
+        presentationSessionId: 'a',
+        ancestry: ['a'],
+        runId: null,
+        executionId: 'original-action',
+        kind: 'approval',
+        state: 'pending',
+        revision: '1',
+        definitionId: 'builtin.mcp/mcp.reconnect',
+        definitionVersion: '1',
+        request: { grants: ['approve_once'] },
+        answer: null,
+      },
+    ] as unknown as TuiSnapshot['interactions'],
+  });
+  await f.controller.select('a');
+  await f.controller.openMcp();
+  await f.controller.openMcpReconnections();
+  const app = f.app();
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('Forced reconnects');
+    expect(app.lastFrame()).not.toContain('Approve this execution only');
+    app.stdin.write('\x03');
+    await tick();
+    expect(f.controller.state.panel).toBe('mcp');
+    expect(f.controller.state.mcpReconnectionOpen).toBe(false);
+    expect(app.lastFrame()).toContain('MCP servers');
+    expect(app.lastFrame()).not.toContain('Approve this execution only');
+    expect(f.cancels).toEqual([]);
+    app.stdin.write('\x03');
+    await tick();
+    expect(f.controller.state.panel).toBeUndefined();
+    expect(app.lastFrame()).toContain('Approve this execution only');
+    expect(f.controller.state.snapshot!.interactions[0]).toMatchObject({
+      id: 'original-pending-approval',
+      state: 'pending',
+      revision: '1',
+      answer: null,
+    });
+    expect(f.cancels).toEqual([]);
+    expect(f.posts).toEqual([]);
+    expect(f.quits).toEqual([]);
+    expect(managementEffects).toBe(0);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('exact active-root cancellation gives immediate request feedback, never successor or unknown completion evidence', async () => {
+  const f = fixture();
+  const scope = { storeId: 'store', sessionId: 'a', workspaceId: 'workspace' };
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.port.callers = {
+    list: async () => [],
+    prepare: async (_scope, request) => ({
+      scope,
+      request,
+      target: callerTarget(scope, request),
+      subjectId: 'subject',
+      bodyDigest: 'a'.repeat(64),
+      requestDigest: 'b'.repeat(64),
+    }),
+    submit: async (intent) => {
+      await held;
+      return { intent, phase: 'unknown' };
+    },
+    lookup: async () => {
+      throw Error('no original GET gesture');
+    },
+    clear: async () => {
+      throw Error('must preserve cancellation original');
+    },
+  };
+  await f.controller.select('a');
+  const app = f.app();
+  let cancellation: Promise<void> | undefined;
+  try {
+    cancellation = f.controller.cancel();
+    await tick();
+    expect(app.lastFrame()).toContain('Cancelling · cancellation requested');
+    expect(f.controller.state.snapshot?.view.runs[0]?.status).toBe('running');
+    expect(hasPendingRootCancellation(f.controller.state, 'store')).toBe(true);
+    const own = [...f.controller.state.callers.entries()][0]!;
+    const changed = (intent: TuiCallerIntent) => ({
+      ...f.controller.state,
+      callers: new Map([[own[0], { intent, phase: 'submitting' as const }]]),
+    });
+    expect(
+      hasPendingRootCancellation(
+        changed({ ...own[1].intent, scope: { ...scope, storeId: 'foreign' } }),
+        'store',
+      ),
+    ).toBe(false);
+    expect(
+      hasPendingRootCancellation(
+        changed({ ...own[1].intent, scope: { ...scope, sessionId: 'b' } }),
+        'store',
+      ),
+    ).toBe(false);
+    expect(
+      hasPendingRootCancellation(
+        changed({ ...own[1].intent, scope: { ...scope, workspaceId: 'foreign' } }),
+        'store',
+      ),
+    ).toBe(false);
+    expect(
+      hasPendingRootCancellation(
+        changed({
+          ...own[1].intent,
+          request: {
+            expectedStoreId: 'store',
+            commandId: 'cancel-queued',
+            kind: 'command.cancel',
+            targetCommandId: 'queued',
+          },
+          target: { kind: 'command', id: 'queued' },
+        }),
+        'store',
+      ),
+    ).toBe(false);
+    const snapshot = f.controller.state.snapshot!;
+    expect(
+      hasPendingRootCancellation(
+        {
+          ...f.controller.state,
+          snapshot: {
+            ...snapshot,
+            view: {
+              ...snapshot.view,
+              runs: snapshot.view.runs.map((run) => ({
+                ...run,
+                id: 'successor',
+                originCommandId: 'successor-work',
+              })),
+            },
+          },
+        },
+        'store',
+      ),
+    ).toBe(false);
+    release();
+    await cancellation;
+    await tick();
+    expect(hasPendingRootCancellation(f.controller.state, 'store')).toBe(false);
+    expect(app.lastFrame()).not.toContain('cancellation requested');
+    expect(f.controller.state.intent?.phase).toBe('unknown');
+    expect(f.controller.state.callers.size).toBe(1);
+    expect(f.posts).toEqual([]);
+  } finally {
+    release();
+    await cancellation;
     app.unmount();
     f.controller.dispose();
   }

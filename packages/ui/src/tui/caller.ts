@@ -1,4 +1,4 @@
-import type { Command, canonicalCallerCommandRequest } from '@kite-ai/client';
+import type { Command, canonicalCallerCommandRequest, Interaction } from '@kite-ai/client';
 import type { TuiDraftScope } from './drafts';
 export type TuiCallerRequest = Parameters<typeof canonicalCallerCommandRequest>[0];
 export type TuiCallerIntent = Readonly<{
@@ -23,7 +23,11 @@ export type TuiCallerRecord = Readonly<{
 export type TuiCallerOutcome = TuiCallerRecord & Readonly<{ command?: Command; error?: string }>;
 export interface TuiCallerPort {
   list(): Promise<readonly TuiCallerRecord[]>;
-  prepare(scope: TuiDraftScope, request: TuiCallerRequest): Promise<TuiCallerIntent>;
+  prepare(
+    scope: TuiDraftScope,
+    request: TuiCallerRequest,
+    question?: Pick<Interaction, 'id' | 'revision' | 'presentationSessionId'>,
+  ): Promise<TuiCallerIntent>;
   submit(intent: TuiCallerIntent): Promise<TuiCallerOutcome>;
   lookup(intent: TuiCallerIntent, signal: AbortSignal): Promise<TuiCallerOutcome>;
   clear(intent: TuiCallerIntent): Promise<void>;

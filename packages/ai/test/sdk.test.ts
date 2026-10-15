@@ -371,3 +371,73 @@ test('compatible effort is frozen and transmitted once; unsupported bindings fai
     }),
   ).toThrow('invalid_model_options');
 });
+
+test('HTTP 500 is explicitly classified without hidden retry or leaking Provider details', async () => {
+  const data = endpoint(
+    () => new Response(JSON.stringify({ error: { message: 'fixture-secret' } }), { status: 500 }),
+  );
+  try {
+    const result = await collect(data.adapter);
+    expect(String(result.error)).toContain('MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable');
+    expect(String(result.error)).not.toContain('fixture-secret');
+    expect(data.calls).toBe(1);
+  } finally {
+    await data.close();
+  }
+});
+
+test('a finished malformed Tool argument reaches Core unchanged for rejection; an unfinished call is withheld', async () => {
+  const raw = '{"value":';
+  const data = endpoint(() =>
+    sse(
+      chunk({
+        tool_calls: [
+          {
+            index: 0,
+            id: 'malformed',
+            type: 'function',
+            function: { name: 'fixture.count', arguments: raw },
+          },
+        ],
+      }) +
+        chunk({}, 'tool_calls') +
+        'data: [DONE]\n\n',
+    ),
+  );
+  try {
+    const result = await collect(data.adapter);
+    expect(result.error).toBeNull();
+    expect(result.events.filter((event) => event.type === 'tool_call')).toEqual([
+      { type: 'tool_call', id: 'malformed', name: 'fixture.count', arguments: raw },
+    ]);
+    expect(data.calls).toBe(1);
+  } finally {
+    await data.close();
+  }
+});
+
+test('actual HTTP stream closure preserves partial text, withholds calls, and classifies native connection code once', async () => {
+  const data = endpoint(
+    () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(chunk({ content: 'Actual partial' })));
+            setTimeout(() => controller.error(new Error('fixture connection closure')), 20);
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+  );
+  try {
+    const result = await collect(data.adapter);
+    expect(result.events).toContainEqual({ type: 'text_delta', text: 'Actual partial' });
+    expect(String(result.error)).toContain('MODEL_ATTEMPT_RETRYABLE_FAILURE:connection_failed');
+    expect(
+      result.events.filter((event) => event.type === 'tool_call' || event.type === 'finish'),
+    ).toHaveLength(0);
+    expect(data.calls).toBe(1);
+  } finally {
+    await data.close();
+  }
+});

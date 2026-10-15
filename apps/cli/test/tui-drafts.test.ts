@@ -5,10 +5,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
@@ -16,7 +18,7 @@ import { createTuiDraftPort } from '../host/tui-draft-port';
 import { openTuiDraftFile, TuiDraftError } from '../host/tui-drafts';
 
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-tui-draft-');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-draft-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'draft' };
   const access = acquireProfileAccess(profile);
   mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
@@ -188,6 +190,77 @@ test('failed initial storage never masquerades as a saved empty editor at close'
     expect(adapter.close()).toBe(false);
     expect(adapter.port.read(scope)).toBe('only memory original');
     expect(readFileSync(f.path, 'utf8')).toBe('{broken');
+  } finally {
+    f.close();
+  }
+});
+
+test('independent same-scope editors coalesce only a locked identical full draft at exit', () => {
+  const f = fixture();
+  try {
+    const codes: string[] = [];
+    const editor = () =>
+      createTuiDraftPort({
+        file: f.open(),
+        notify: (code) => codes.push(code),
+        association: async () => 'current',
+        delayMs: 10000,
+      });
+    const a = editor(),
+      b = editor();
+    expect(a.port.read(scope)).toBe('');
+    expect(b.port.read(scope)).toBe('');
+    // Both UI instances clear their own unchanged empty draft on acceptance.
+    expect(b.port.accepted(scope, b.port.version(scope))).toBe(true);
+    const bytes = readFileSync(f.path);
+    expect(a.port.accepted(scope, a.port.version(scope))).toBe(true);
+    expect(readFileSync(f.path)).toEqual(bytes);
+    expect(a.close()).toBe(true);
+    expect(b.close()).toBe(true);
+    const c = editor(),
+      d = editor();
+    const fullText = 'same full Markdown\n\n中🙂  tail\n';
+    c.port.edit(scope, fullText);
+    d.port.edit(scope, fullText);
+    expect(c.flush()).toBe(true);
+    const saved = f.open().load(scope),
+      savedBytes = readFileSync(f.path);
+    expect(d.close()).toBe(true);
+    expect(f.open().load(scope)).toEqual(saved);
+    expect(readFileSync(f.path)).toEqual(savedBytes);
+    expect(codes).toEqual([]);
+    expect(c.close()).toBe(true);
+  } finally {
+    f.close();
+  }
+});
+
+test('same-content coalescing never clears a different concurrent draft or adopts foreign scope', () => {
+  const f = fixture();
+  try {
+    const codes: string[] = [];
+    const a = createTuiDraftPort({
+      file: f.open(),
+      notify: (code) => codes.push(code),
+      association: async () => 'current',
+      delayMs: 10000,
+    });
+    expect(a.port.read(scope)).toBe('');
+    const file = f.open();
+    const foreign = { ...scope, sessionId: 'other' };
+    file.save(foreign, '0', '');
+    const original = file.save(scope, '0', 'other editor unsent body\n');
+    const bytes = readFileSync(f.path);
+    expect(a.port.accepted(scope, a.port.version(scope))).toBe(false);
+    expect(a.close()).toBe(false);
+    expect(file.load(scope)).toEqual(original);
+    expect(readFileSync(f.path)).toEqual(bytes);
+    expect(codes).toContain('tui_draft_revision_conflict');
+    expect(() => file.save(scope, '99', original.text)).toThrow('tui_draft_revision_conflict');
+    expect(file.load(foreign).text).toBe('');
+    expect(file.load({ ...scope, storeId: 'other-store' }).revision).toBe('0');
+    expect(file.load({ ...scope, workspaceId: 'other-workspace' }).revision).toBe('0');
+    file.close();
   } finally {
     f.close();
   }

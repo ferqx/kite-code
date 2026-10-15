@@ -132,7 +132,15 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
         const value = (await request.json()) as {
           messages: { role: string; content: string }[];
         };
-        const task = value.messages.filter((message) => message.role === 'user').at(-1)?.content;
+        const task = [...value.messages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === 'user' &&
+              cases.some(
+                (item) => item.work === message.content || item.cancel === message.content,
+              ),
+          )?.content;
         const scenario = cases.find((item) => item.work === task || item.cancel === task);
         assert(scenario && task, 'provider_must_receive_exact_real_tui_work');
         calls.set(task, (calls.get(task) ?? 0) + 1);
@@ -519,9 +527,9 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       return { pty, screen, frame, waitFrame, idle, revision: () => revision, selected };
     };
     type Window = Awaited<ReturnType<typeof start>>;
-    // A user scrolls the parsed, current terminal buffer to the latest rendering of
-    // the exact original Message. Long complete bodies put reasoning above the bottom
-    // 24 rows; matching historical raw stdout would falsely confirm a hidden view.
+    // Read the latest rendering of the exact original Message from the parsed
+    // terminal buffer. The completed Thought summary remains visible; complete
+    // reasoning is qualified through the saved output and Markdown export.
     const originalOutputFrame = (window: Window, message: { id: string; status: string }) => {
       assert.equal(message.status, 'complete');
       const expectedHeader = compact(`assistant [${message.id}] ${message.status}`);
@@ -609,16 +617,9 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
           !value.includes('Recorded Model output preview only;'),
         previewRevision,
       );
-      const loadedRevision = warm.revision();
-      await warm.pty.write('\x14');
-      await warm.waitFrame(
-        'original_reasoning_mode_visible',
-        (value) => warm.idle(value) && value.includes('Ctrl+T hides recorded reasoning'),
-        loadedRevision,
-      );
-      const reasoningFrame = originalOutputFrame(warm, originalMessage);
-      assert(reasoningFrame.includes(scenario.reasoning));
-      assert(reasoningFrame.includes('Recorded reasoning · complete'));
+      const completedFrame = originalOutputFrame(warm, originalMessage);
+      assert(!completedFrame.includes(scenario.reasoning));
+      assert(completedFrame.includes('Thought · Recorded phase:'));
       const exportsBefore = new Set(
         readdirSync(profile.profilePath).filter(
           (name) => name.startsWith('session-') && name.endsWith('.md'),
@@ -653,20 +654,6 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
         !exported.includes('Loaded preview only;') &&
           !exported.includes('Loaded incomplete prefix'),
       );
-      const shownRevision = warm.revision();
-      await warm.pty.write('\x14');
-      await warm.waitFrame(
-        'reasoning_hidden_body_retained',
-        (value) =>
-          warm.idle(value) &&
-          value.includes(`FULL_INSTALLED_TUI_${scenario.phase}_TAIL`) &&
-          !value.includes(scenario.reasoning) &&
-          value.includes('Ctrl+T shows recorded reasoning'),
-        shownRevision,
-      );
-      const hiddenFrame = originalOutputFrame(warm, originalMessage);
-      assert(!hiddenFrame.includes(scenario.reasoning));
-      assert(!hiddenFrame.includes('Recorded reasoning · complete'));
       assert.equal(calls.get(scenario.work), 1);
       record('complete_work_body_reasoning_export', {
         commandId: completed.commands[0]!.id,
@@ -676,8 +663,7 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
         reasoningSha256: sha(Buffer.from(complete.full.reasoning)),
         exportSha256: sha(Buffer.from(exported)),
         originalMessageId: originalMessage.id,
-        reasoningFrame,
-        hiddenFrame,
+        completedFrame,
       });
       await warm.pty.write(scenario.cancel);
       await warm.waitFrame('exact_cancel_editor', (value) =>
@@ -787,14 +773,8 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       );
       const coldCompletedFrame = originalOutputFrame(cold, originalMessage);
       assert(!coldCompletedFrame.includes('Recorded Model output preview only;'));
-      await cold.pty.write('\x14');
-      await cold.waitFrame(
-        'cold_original_reasoning_mode',
-        (value) => cold.idle(value) && value.includes('Ctrl+T hides recorded reasoning'),
-      );
-      const coldReasoningFrame = originalOutputFrame(cold, originalMessage);
-      assert(coldReasoningFrame.includes(scenario.reasoning));
-      assert(coldReasoningFrame.includes('Recorded reasoning · complete'));
+      assert(!coldCompletedFrame.includes(scenario.reasoning));
+      assert(coldCompletedFrame.includes('Thought · Recorded phase:'));
       await quit(cold, 'cold_normal_quit_full_original_job');
       const afterCold = await history(selectedSqlite, scenario.sessionId);
       for (const field of ['runs', 'messages', 'executions', 'commands'] as const)

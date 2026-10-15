@@ -905,6 +905,25 @@ export async function startService(options: ServiceOptions) {
       ),
     );
   });
+  app.post('/v1/config/user/providers/discover', async (context) => {
+    context.header('cache-control', 'no-store');
+    const input = await readBusinessBody(
+      context.req.raw,
+      schemas.ProviderDiscoveryRequest,
+      options.maxBodyBytes ?? 1048576,
+    );
+    try {
+      return context.json(
+        schemas.ProviderDiscoveryView.parse(
+          await management().discoverProviders({ ...input, signal: context.req.raw.signal }),
+        ),
+      );
+    } catch (error) {
+      if (error instanceof AgentError && error.code.startsWith('provider_discovery_'))
+        throw new HttpFailure(error.code, 400);
+      throw error;
+    }
+  });
   app.post('/v1/config/user/providers', async (context) => {
     const input = await readBusinessBody(
       context.req.raw,

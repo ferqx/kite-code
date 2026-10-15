@@ -38,8 +38,10 @@ for (const { guardedReset, rejectedSummary } of [
           requests.length === 1
             ? 'Original actual answer'
             : requests.length === 2
-              ? 'Factual recorded summary of original user and answer'
-              : 'Next actual answer';
+              ? 'Additional settled answer'
+              : requests.length === 3
+                ? 'Factual recorded summary of original user and answer'
+                : 'Next actual answer';
         const chunk = (delta: unknown, finish_reason: string | null) =>
           `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
         return new Response(`${chunk({ content }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`, {
@@ -196,11 +198,18 @@ for (const { guardedReset, rejectedSummary } of [
         content: 'Original actual user',
       });
       await runtime.waitForCommand('work', { timeoutMs: 5000 });
+      await client.startRun('s', {
+        expectedStoreId,
+        commandId: 'additional-history',
+        kind: 'run.start',
+        content: 'Additional settled user turn',
+      });
+      await runtime.waitForCommand('additional-history', { timeoutMs: 5000 });
       const history = await client.listMessages('s'),
         original = await client.getContext('s', { storeId: expectedStoreId });
       expect((await client.getView('s')).runs[0]!.status).toBe('completed');
-      expect(history).toHaveLength(2);
-      expect(requests).toHaveLength(1);
+      expect(history).toHaveLength(4);
+      expect(requests).toHaveLength(2);
       expect(original.compression).toBeUndefined();
       const intent = {
         expectedStoreId,
@@ -236,20 +245,29 @@ for (const { guardedReset, rejectedSummary } of [
         expect(summaryChecks).toBe(1);
         expect(compact.selection.id).toBe(original.selection.id);
         expect(compact.compression).toBeUndefined();
-        expect((await client.listMessages('s')).slice(0, 2)).toEqual(history);
+        expect((await client.listMessages('s')).slice(0, 4)).toEqual(history);
         const recorded = (await client.listModelInputs('s')).items.find(
           (item) => item.originCommandId === 'compact',
         )!;
-        expect(
-          (await client.getModelInput('s', recorded.executionId)).request.messages.at(-1)!.content,
-        ).toEndWith(`Focus (user data): ${intent.focus}`);
+        const failedExecution = await store.getExecution(recorded.executionId);
+        const compressionId = (failedExecution!.decisionSource as { compressionId: string })
+          .compressionId;
+        expect(typeof compressionId).toBe('string');
+        const instructions = (
+          await client.getModelInput('s', recorded.executionId)
+        ).request.messages.filter(
+          (message) => message.sourceIds?.length === 1 && message.sourceIds[0] === compressionId,
+        );
+        expect(instructions).toHaveLength(1);
+        expect(instructions[0]!.role).toBe('user');
+        expect(instructions[0]!.content).toEndWith(`Focus (user data): ${intent.focus}`);
         expect((await client.getModelOutput('s', recorded.executionId)).output.content).toBe(
           'Factual recorded summary of original user and answer',
         );
         const receipt = await client.getCommand(intent.commandId);
         await client.compressContext('s', intent);
         expect((await client.getCommand(intent.commandId)).receipt).toEqual(receipt.receipt);
-        expect(requests).toHaveLength(2);
+        expect(requests).toHaveLength(3);
         await client.startRun('s', {
           expectedStoreId,
           commandId: 'next',
@@ -257,7 +275,7 @@ for (const { guardedReset, rejectedSummary } of [
           content: 'Next explicit work',
         });
         await runtime.waitForCommand('next', { timeoutMs: 5000 });
-        expect(requests).toHaveLength(3);
+        expect(requests).toHaveLength(4);
         const next = (await client.listModelInputs('s')).items.find(
           (item) => item.originCommandId === 'next',
         )!;
@@ -282,7 +300,7 @@ for (const { guardedReset, rejectedSummary } of [
             (await cold.getSelectedContext({ expectedStoreId, sessionId: 's' })).compression,
           ).toBeUndefined();
           expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
-          expect(requests).toHaveLength(3);
+          expect(requests).toHaveLength(4);
         } finally {
           await cold.close();
         }
@@ -306,20 +324,23 @@ for (const { guardedReset, rejectedSummary } of [
       expect(
         saved.request.messages.some((message) => message.content === 'Original actual answer'),
       ).toBe(true);
-      expect(saved.request.messages.at(-1)!.content).toEndWith(
-        `Focus (user data): ${intent.focus}`,
+      const instructions = saved.request.messages.filter(
+        (message) => message.sourceIds?.length === 1 && message.sourceIds[0] === compression.id,
       );
-      expect(saved.request.messages.at(-1)!.sourceIds).toEqual([compression.id]);
+      expect(instructions).toHaveLength(1);
+      expect(instructions[0]!.role).toBe('user');
+      expect(instructions[0]!.content).toEndWith(`Focus (user data): ${intent.focus}`);
+      expect(instructions[0]!.sourceIds).toEqual([compression.id]);
       expect((await client.getModelOutput('s', compression.modelExecutionId)).output.content).toBe(
         'Factual recorded summary of original user and answer',
       );
-      expect((await client.listMessages('s')).slice(0, 2)).toEqual(history);
-      expect(requests).toHaveLength(2);
+      expect((await client.listMessages('s')).slice(0, 4)).toEqual(history);
+      expect(requests).toHaveLength(3);
       const receipt = await client.getCommand(intent.commandId);
       if (!guardedReset) await client.compressContext('s', intent);
       expect((await client.getCommand(intent.commandId)).receipt).toEqual(receipt.receipt);
       if (guardedReset) expect(posts.get(intent.commandId)).toBe(1);
-      expect(requests).toHaveLength(2);
+      expect(requests).toHaveLength(3);
       await client.startRun('s', {
         expectedStoreId,
         commandId: 'next',
@@ -327,7 +348,7 @@ for (const { guardedReset, rejectedSummary } of [
         content: 'Next explicit work',
       });
       await runtime.waitForCommand('next', { timeoutMs: 5000 });
-      expect(requests).toHaveLength(3);
+      expect(requests).toHaveLength(4);
       const nextInput = (await client.listModelInputs('s')).items.find(
         (item) => item.originCommandId === 'next',
       )!;
@@ -362,7 +383,7 @@ for (const { guardedReset, rejectedSummary } of [
         (run) => run.originCommandId === 'reset',
       )!;
       const resetContext = await client.getContext('s', { storeId: expectedStoreId });
-      expect(requests).toHaveLength(3);
+      expect(requests).toHaveLength(4);
       if (guardedReset) {
         expect(preflights).toBe(1);
         expect(resetRun.reason).toBeNull();
@@ -390,7 +411,7 @@ for (const { guardedReset, rejectedSummary } of [
           (await cold.getSelectedContext({ expectedStoreId, sessionId: 's' })).compression,
         ).toEqual(resetContext.compression);
         expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
-        expect(requests).toHaveLength(3);
+        expect(requests).toHaveLength(4);
       } finally {
         await cold.close();
       }
@@ -403,3 +424,19 @@ for (const { guardedReset, rejectedSummary } of [
       rmSync(root, { recursive: true, force: true });
     }
   }, 30000);
+
+test('default reduction preflight refuses one recent user turn even with Tool steps or user-role source material', async () => {
+  const compressor = createSummaryCompressor();
+  const input = {
+    messages: [
+      { role: 'user', content: 'one actual user', sourceIds: ['message'] },
+      { role: 'assistant', content: 'actual answer' },
+      { role: 'tool', content: 'actual saved output' },
+      { role: 'assistant', content: 'additional model step' },
+      { role: 'user', content: 'remote quoted source', sourceIds: ['remote-source'] },
+    ],
+    sources: [{ id: 'remote-source' }],
+    signal: new AbortController().signal,
+  } as unknown as Parameters<ContextCompressor['prepare']>[0];
+  expect(await compressor.prepare(input)).toBeNull();
+});

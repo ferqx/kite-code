@@ -152,3 +152,131 @@ test('existing disabled models offer enable/use and provider configuration inste
     ui.unmount();
   }
 });
+
+test('Escape cancels only the pending discovery, restores the masked original form and ignores its late ready result', async () => {
+  const source = port(async () => ({ trusted: true, hasModels: false, readScopes: [] }));
+  let signal: AbortSignal | undefined,
+    finish!: (result: import('../../src/tui/onboarding').TuiOnboardingResult) => void;
+  let ready = 0,
+    exits = 0;
+  source.connect = async (_workspaceId, input, aborted, onPhase) => {
+    expect(input.apiKey).toBe('temporary-key');
+    signal = aborted;
+    onPhase?.('discovering');
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  };
+  const ui = render(
+    <TuiOnboarding
+      port={source}
+      workspaceId="w"
+      path="/workspace"
+      onReady={() => ready++}
+      onExit={() => exits++}
+    />,
+  );
+  try {
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    ui.stdin.write('temporary-key');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(ui.lastFrame()).toContain('Connecting to DeepSeek');
+    ui.stdin.write('\u001b');
+    await tick();
+    expect(signal?.aborted).toBe(true);
+    expect(ui.lastFrame()).toContain('Connect to DeepSeek');
+    expect(ui.lastFrame()).not.toContain('temporary-key');
+    expect(exits).toBe(0);
+    finish({ status: 'ready', modelName: 'late' });
+    await tick();
+    expect(ready).toBe(0);
+    expect(ui.lastFrame()).toContain('Connect to DeepSeek');
+  } finally {
+    ui.unmount();
+  }
+});
+
+test('Escape after publication has begun retains the original unknown and permits only its GET recovery', async () => {
+  const source = port(async () => ({ trusted: true, hasModels: false, readScopes: [] }));
+  let connects = 0,
+    gets = 0,
+    exits = 0;
+  source.connect = async (_workspaceId, _input, _signal, onPhase) => {
+    connects++;
+    onPhase?.('publishing');
+    return new Promise(() => {});
+  };
+  source.recover = async () => {
+    gets++;
+    return { status: 'unknown' };
+  };
+  const ui = render(
+    <TuiOnboarding
+      port={source}
+      workspaceId="w"
+      path="/workspace"
+      onReady={() => {}}
+      onExit={() => exits++}
+    />,
+  );
+  try {
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    ui.stdin.write('temporary-key');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    ui.stdin.write('\u001b');
+    await tick();
+    expect(ui.lastFrame()).toContain('The original write needs confirmation');
+    expect(exits).toBe(0);
+    ui.stdin.write('\r');
+    await tick();
+    expect(gets).toBe(1);
+    expect(connects).toBe(1);
+    expect(ui.lastFrame()).not.toContain('temporary-key');
+  } finally {
+    ui.unmount();
+  }
+});
+
+test('verified observer admission opens saved history without trust or model readiness mutations', async () => {
+  let admissions = 0;
+  let writes = 0;
+  const source = port(async () => ({
+    observer: 'workspace_missing',
+    trusted: false,
+    hasModels: false,
+    readScopes: [],
+  }));
+  source.trust =
+    source.selectModel =
+    source.connect =
+      async () => {
+        writes++;
+        return { status: 'failed', code: 'unexpected_write' };
+      };
+  const ui = render(
+    <TuiOnboarding
+      port={source}
+      workspaceId="w"
+      path="/missing"
+      onReady={() => admissions++}
+      onExit={() => {}}
+    />,
+  );
+  try {
+    await tick();
+    expect(admissions).toBe(1);
+    expect(writes).toBe(0);
+    expect(ui.lastFrame()).not.toContain('Trust this workspace');
+    expect(ui.lastFrame()).not.toContain('Configuration could not be loaded');
+  } finally {
+    ui.unmount();
+  }
+});

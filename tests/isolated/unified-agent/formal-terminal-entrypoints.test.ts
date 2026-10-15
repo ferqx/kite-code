@@ -295,7 +295,12 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
         }
       }
       const body = (await request.json()) as { messages: { role: string; content: string }[] };
-      const user = body.messages.filter((m) => m.role === 'user').at(-1)!.content;
+      const user = [...body.messages]
+        .reverse()
+        .find(
+          (m) => m.role === 'user' && ['formal source task', 'formal TUI task'].includes(m.content),
+        )?.content;
+      if (user === undefined) return new Response('unexpected original work', { status: 500 });
       expect(['formal source task', 'formal TUI task'].includes(user)).toBe(true);
       calls++;
       if (user === 'formal TUI task') {
@@ -503,6 +508,23 @@ async function readUntil(text,seconds){
  }
 }
 async function key(value,text){action=true;await owned.key(value);await readUntil(text,10);}
+async function selectDeleteTarget(){
+ const end=Date.now()+10000;
+ for(;;){
+  cancelled.signal.throwIfAborted();
+  await owned.drain();
+  const frame=owned.viewport();
+  const rows=frame.split('\\n');
+  const target=rows.findIndex(line=>line.includes('Directory delete target'));
+  const selected=rows.findIndex(line=>line.includes('❯ '));
+  if(target>=0&&target===selected)return;
+  assert.ok(Date.now()<end,'formal Session target selection deadline '+frame);
+  if(!frame.includes('Loading session history')&&target>=0&&selected>=0){
+   action=true;await owned.key(target<selected?'\\x1b[A':'\\x1b[B');
+  }
+  await Bun.sleep(20);
+ }
+}
 try{
  await readUntil('FORMAL CLI COMPLETE',10);
  await readUntil('New Run >',10);
@@ -517,17 +539,25 @@ try{
   await owned.drain();await Bun.sleep(20);
  }
  await key('\\x12','Select Session (arrows/Enter, Esc)');
- await readUntil('Directory delete target [resume-delete-target]',10);
- await key('\\x1b[B','> Directory delete target');
- await key('d','Delete Session?');await readUntil('> Keep Session',10);
+ await readUntil('Directory delete target',10);
+ await selectDeleteTarget();
+ await key('d','Delete Session?');await readUntil('Original Session [resume-delete-target]',10);await readUntil('❯ Keep Session',10);
  await key('\\r','Select Session (arrows/Enter, Esc)');
  await observeDirectory();
- await key('d','Delete Session?');await readUntil('> Keep Session',10);
- await key('\\x1b[B','> Delete Session');
+ await key('d','Delete Session?');await readUntil('Original Session [resume-delete-target]',10);await readUntil('❯ Keep Session',10);
+ await key('\\x1b[B','❯ Delete Session');
  await key('\\r','delete_requested');await readUntil('stop unconfirmed',10);
  await observeDirectory();
- await key('\\x1b','Select Session (arrows/Enter, Esc)');
- await key('\\x1b','Working');
+ // The confirmed original deletion and refreshed directory close the chooser.
+ // Wait for its real main-screen handoff; Escape there would cancel held work.
+ const closedDeadline=Date.now()+10000;
+ for(;;){
+  cancelled.signal.throwIfAborted();await owned.drain();
+  const frame=owned.viewport();
+  if(frame.includes('Working')&&!frame.includes('Select Session (arrows/Enter, Esc)')&&!frame.includes('Delete Session?'))break;
+  assert.ok(Date.now()<closedDeadline,'confirmed directory deletion did not return to original main '+frame);
+  await Bun.sleep(20);
+ }
  writeFileSync(${JSON.stringify(join(root, 'release-tui-model'))},'explicit fixture release');
  await readUntil('FORMAL TUI COMPLETE',10);
  await owned.key('\\x11');

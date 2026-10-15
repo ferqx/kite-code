@@ -48,10 +48,25 @@ function fixture() {
           ]
         : [],
     }),
+    discoverProviderSettings: async (
+      request: import('@kite-ai/client').ProviderDiscoveryRequest,
+      options: { signal?: AbortSignal } = {},
+    ) => {
+      options.signal?.throwIfAborted();
+      expect(request.secret).toBe('secret-only-memory');
+      expect(request.expectedReadSet).toEqual({ ...readSet, workspaceEtag: null });
+      expect(writes).toEqual([]);
+      return {
+        storeId: request.expectedStoreId,
+        readSet: request.expectedReadSet,
+        operation: request.operation,
+        modelNames: ['discovered'],
+      };
+    },
     updateProviderSettings: async (request: ProviderSettingsRequest) => {
       writes.push('provider');
       expect(request.secret).toBe('secret-only-memory');
-      expect(request.operation.modelNames).toEqual([]);
+      expect(request.operation.modelNames).toEqual(['discovered']);
       hasModel = true;
       mutations.set(request.commandId, {
         commandId: request.commandId,
@@ -292,5 +307,51 @@ test('a known input rejection remains editable rather than an unresolvable unkno
     status: 'ready',
     modelName: 'discovered',
   });
+  expect(source.writes).toEqual(['provider', 'enabled', 'default']);
+});
+
+test('cancelling explicit discovery creates no pending write and a later explicit connection can publish once', async () => {
+  const source = fixture();
+  let discoveries = 0;
+  const original = source.client.discoverProviderSettings.bind(source.client);
+  let started!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  source.client.discoverProviderSettings = async (_request, options = {}) => {
+    discoveries++;
+    started();
+    return new Promise((_, reject) => {
+      options.signal!.addEventListener(
+        'abort',
+        () => reject(new ClientError('network_outcome_unknown')),
+        { once: true },
+      );
+    });
+  };
+  const port = createTuiOnboardingPort(source.client, 'store');
+  const controller = new AbortController();
+  const phases: string[] = [];
+  const input = {
+    provider: 'deepseek' as const,
+    baseURL: 'https://api.deepseek.com/v1',
+    apiKey: 'secret-only-memory',
+  };
+  const pending = port.connect('workspace', input, controller.signal, (phase) =>
+    phases.push(phase),
+  );
+  await entered;
+  controller.abort();
+  expect(await pending).toEqual({ status: 'cancelled' });
+  expect(source.writes).toEqual([]);
+  expect(phases).toEqual(['discovering']);
+  expect(await port.recover('workspace')).toEqual({ status: 'model-required' });
+  source.client.discoverProviderSettings = original;
+  expect(await port.connect('workspace', input, undefined, (phase) => phases.push(phase))).toEqual({
+    status: 'ready',
+    modelName: 'discovered',
+  });
+  expect(phases).toEqual(['discovering', 'discovering', 'publishing']);
+  expect(discoveries).toBe(1);
   expect(source.writes).toEqual(['provider', 'enabled', 'default']);
 });

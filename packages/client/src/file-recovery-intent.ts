@@ -558,6 +558,9 @@ function currentCodeDetail(
       'preimage',
       'original',
       'expected',
+      // The public schema verifies this optional bounded display proof. It
+      // never replaces the unchanged status or original baseline checks.
+      ...('textChange' in file ? ['textChange'] : []),
     ]);
     if (file.status !== 'unchanged') invalid();
     for (const baseline of [file.original, file.expected])

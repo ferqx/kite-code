@@ -58,7 +58,7 @@ def wait(text,ready=False):
    except OSError: raise RuntimeError('PTY ended '+tail)
 try:
  wait('New Run');matching='';os.write(master,b'work');wait('New Run > work');os.write(master,b'\\r');wait('approval [')
- ${mode === 'complete' ? `matching='';os.write(master,b'approve');wait('feedback / deny. approve');os.write(master,b'\\r');wait('Original choice ID');matching='';os.write(master,b'\\x1b[B');wait('Question 1/1 · Selection: 1',ready=True);os.write(master,b'\\r');matching='';wait('Original completed Run / complete output preview ready');os.write(master,b'\\x0f');wait('VERIFIED TAIL')` : mode === 'cancel' ? `matching='';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle')` : `os.close(master);master=-1;time.sleep(.3)`}
+ ${mode === 'complete' ? `wait('❯ Allow once',ready=True);matching='';os.write(master,b'\\x1b[B');wait('❯ Deny',ready=True);matching='';os.write(master,b'\\x1b[A');wait('❯ Allow once',ready=True);os.write(master,b'\\r');wait('Original choice ID');matching='';os.write(master,b'\\x1b[B');wait('❯ 1. internal-choice',ready=True);os.write(master,b'\\r');matching='';wait('Original completed Run / complete output preview ready');os.write(master,b'\\x0f');wait('VERIFIED TAIL')` : mode === 'cancel' ? `matching='';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle')` : `os.close(master);master=-1;time.sleep(.3)`}
  os.kill(p.pid,signal.SIGTERM)
  deadline=time.monotonic()+5
  while not eof_mode and p.poll() is None and time.monotonic()<deadline:

@@ -344,6 +344,105 @@ test('unknown answer freezes original request and Ctrl+L only queries original c
   app.unmount();
 });
 
+test('submitting and unknown answers freeze only their original question draft until the exact receipt', async () => {
+  const schema = { type: 'string', title: 'Original question', minLength: 1 };
+  const f = fixture(schema);
+  let fail!: (error: Error) => void;
+  const pending = new Promise<never>((_, reject) => {
+    fail = reject;
+  });
+  f.port.answer = async (_sessionId, _id, request) => {
+    f.answers.push(request);
+    return pending;
+  };
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    expect(app.lastFrame()).not.toContain('Answer needs at least');
+    app.stdin.write('exact original 🙂');
+    await tick();
+    app.stdin.write('\r');
+    app.stdin.write('must-not-change');
+    app.stdin.write('\u001b[200~must-not-paste\u001b[201~');
+    await tick();
+    expect(app.lastFrame()).toContain('Submitting answer');
+    expect(app.lastFrame()).toContain('exact original 🙂');
+    expect(app.lastFrame()).not.toContain('must-not-');
+    expect(app.lastFrame()).not.toContain('Enter Submit answer');
+    expect(f.answers).toHaveLength(1);
+    expect(f.answers[0]!.answer).toEqual({ kind: 'question', answers: 'exact original 🙂' });
+    fail(Error('lost receipt'));
+    await tick();
+    app.stdin.write('\t');
+    app.stdin.write('\u001b');
+    app.stdin.write('must-not-change');
+    app.stdin.write('\r');
+    await tick();
+    expect(app.lastFrame()).toContain('Answer receipt unknown');
+    expect(app.lastFrame()).toContain('Ctrl+L checks this original submission');
+    expect(app.lastFrame()).not.toContain('must-not-');
+    expect(f.answers).toHaveLength(1);
+    const other = { ...question(schema, 'other'), sessionId: 'b', presentationSessionId: 'b' };
+    f.cards([question(schema), other]);
+    await f.controller.select('b');
+    await tick();
+    app.stdin.write('other question draft');
+    await tick();
+    expect(app.lastFrame()).toContain('other question draft');
+    expect(f.controller.answerPhase(other)).toBeUndefined();
+    await f.controller.select('a');
+    await tick();
+    expect(app.lastFrame()).toContain('exact original 🙂');
+    expect(app.lastFrame()).not.toContain('other question draft');
+    app.stdin.write('\u000c');
+    await tick();
+    expect(f.reads).toEqual(['answer-1']);
+    expect(app.lastFrame()).toContain('Answer submitted');
+    app.stdin.write('must-not-change');
+    app.stdin.write('\r');
+    await tick();
+    expect(app.lastFrame()).not.toContain('must-not-');
+    expect(f.answers).toHaveLength(1);
+    expect(f.commandCount()).toBe(1);
+  } finally {
+    app.unmount();
+  }
+});
+
+test('an answer known not to have been submitted remains editable and permits one corrected submission', async () => {
+  const f = fixture({ type: 'string', title: 'Original question', minLength: 1 });
+  const answer = f.port.answer;
+  let attempts = 0;
+  f.port.answer = async (...args) => {
+    if (++attempts === 1)
+      throw Object.assign(Error('answer_not_submitted'), { notSubmitted: true });
+    return answer(...args);
+  };
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    app.stdin.write('original');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(f.controller.answerPhase(question({ type: 'string' }))).toBe('rejected');
+    expect(app.lastFrame()).toContain('Answer was not accepted');
+    expect(app.lastFrame()).toContain('Enter Submit answer');
+    app.stdin.write(' corrected');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(attempts).toBe(2);
+    expect(f.answers).toHaveLength(1);
+    expect(f.answers[0]!.answer).toEqual({ kind: 'question', answers: 'original corrected' });
+    expect(app.lastFrame()).toContain('Answer submitted');
+  } finally {
+    app.unmount();
+  }
+});
+
 test('closed enum never offers custom; explicit anyOf string union allows original text', async () => {
   const f = fixture({ anyOf: [{ const: 'wire-id', title: 'Named option' }, { type: 'string' }] });
   await f.controller.select('a');
@@ -687,9 +786,10 @@ test('existing Workflow decision and bounded detail schema is a wizard with loca
   await tick();
   app.stdin.write('\r');
   await tick();
-  expect(app.lastFrame()).toContain('Answer needs at least 1 characters (0 entered).');
+  expect(app.lastFrame()).not.toContain('Answer needs at least 1 characters (0 entered).');
   app.stdin.write('\r');
   await tick();
+  expect(app.lastFrame()).toContain('Answer needs at least 1 characters (0 entered).');
   expect(f.answers).toHaveLength(0);
   app.stdin.write(' 原原因 ');
   await tick();
@@ -859,6 +959,10 @@ test('question language refresh translates owned labels and length hints while p
   app.stdin.write('\r');
   await tick();
   expect(app.lastFrame()).toContain('需要你的回答 · Answer');
+  expect(app.lastFrame()).not.toContain('回答至少需要 2 个字符 (0 已输入)');
+  expect(app.lastFrame()).toContain('Enter 提交回答');
+  app.stdin.write('\r');
+  await tick();
   expect(app.lastFrame()).toContain('回答至少需要 2 个字符 (0 已输入)');
   language = 'en-US';
   await f.controller.refreshPreferences();

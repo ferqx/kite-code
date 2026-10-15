@@ -39,7 +39,7 @@ async function until<T>(read: () => Promise<T | null>) {
 }
 async function fixture(
   transport: 'http' | 'stdio' = 'http',
-  flow: 'all' | 'connect' = 'connect',
+  flow: 'all' | 'connect' | 'selected-resources' = 'connect',
   externalDelegate = false,
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-mcp-data-'))),
@@ -266,8 +266,58 @@ async function fixture(
       const body = (await req.json()) as Record<string, unknown>;
       providerBodies.push(body);
       const step = providerBodies.length - 1;
+      let modelResourceCall: { name: string; input: Json } | null = null;
+      if (flow === 'selected-resources' && [1, 2].includes(step)) {
+        const messages = body.messages as { role: string; content: string }[];
+        const facts = messages.flatMap((message) => {
+          try {
+            const value = JSON.parse(message.content);
+            return value.source === 'mcp_selected_connection_refs' ? [value] : [];
+          } catch {
+            return [];
+          }
+        });
+        expect(facts).toHaveLength(1);
+        const actual = facts[0].connections[0];
+        expect(actual).toMatchObject({
+          originalStoreId: expectedStoreId,
+          sessionId: 'a',
+          serverId: 'local',
+          connectionKey: 'first',
+        });
+        const selectedBinding = {
+          serverId: actual.serverId,
+          connectionKey: actual.connectionKey,
+          configDigest: actual.configDigest,
+          generation: actual.generation,
+        };
+        const selectedTools = body.tools as { function: { name: string } }[];
+        expect(selectedTools.some((tool) => tool.function.name === 'mcp.resources.list')).toBe(
+          true,
+        );
+        expect(selectedTools.some((tool) => tool.function.name === 'mcp.resources.read')).toBe(
+          true,
+        );
+        if (step === 1) modelResourceCall = { name: 'mcp.resources.list', input: selectedBinding };
+        else {
+          const catalogue = JSON.parse(
+            messages.filter((message) => message.role === 'tool').at(-1)!.content,
+          );
+          expect(catalogue.binding.runId).toBe(actual.runId);
+          modelResourceCall = {
+            name: 'mcp.resources.read',
+            input: {
+              ...selectedBinding,
+              uri: catalogue.descriptors[0].descriptor.uri,
+              catalogueExecutionId: catalogue.binding.executionId,
+              descriptorDigest: catalogue.descriptors[0].descriptorDigest,
+            },
+          };
+        }
+      }
       const call =
-        step === 0
+        modelResourceCall ??
+        (step === 0
           ? { name: 'mcp.connect', input: { serverId: 'local', key: 'first' } }
           : flow === 'all' && step === 1
             ? { name: 'mcp.resources.list', input: await binding() }
@@ -283,7 +333,7 @@ async function fixture(
                       name: 'mcp.prompts.get',
                       input: { ...(await binding()), ...(await target('prompts')) },
                     }
-                  : null;
+                  : null);
       const chunk = {
         id: 'fixed',
         object: 'chat.completion.chunk',
@@ -322,7 +372,10 @@ async function fixture(
       models: [
         { id: 'local', provider: 'compatible', model: 'local', baseURL: `${provider.url.href}v1` },
       ],
-      tools: ['mcp.connect', ...mcpReadToolIds].map((id) => ({ id, definitionVersion: '1' })),
+      tools: (flow === 'selected-resources'
+        ? ['mcp.connect']
+        : ['mcp.connect', ...mcpReadToolIds]
+      ).map((id) => ({ id, definitionVersion: '1' })),
       mcp: [{ id: 'local' }],
     }),
   );
@@ -854,3 +907,37 @@ test('cancel before durable prompt permission sends no RPC; a cancelled issued r
     await f.close();
   }
 }, 20000);
+
+test('actual selected Model uses its captured connection facts and real list identity to read resources without explicit resource Tool configuration', async () => {
+  const f = await fixture('http', 'selected-resources');
+  try {
+    await f.run();
+    const view = await f.runtime.getView('a');
+    expect(view.runs.find((run) => run.originCommandId === 'work')?.status).toBe('completed');
+    expect(f.wire.filter((call) => call.method === 'resources/list')).toHaveLength(1);
+    expect(f.wire.filter((call) => call.method === 'resources/read')).toHaveLength(1);
+    expect(
+      view.executions
+        .filter((execution) =>
+          ['mcp.resources.list', 'mcp.resources.read'].includes(execution.definitionId),
+        )
+        .map((execution) => execution.status),
+    ).toEqual(['succeeded', 'succeeded']);
+    expect(f.providerBodies).toHaveLength(4);
+    const toolText = (f.providerBodies.at(-1)!.messages as { role: string; content: string }[])
+      .filter((message) => message.role === 'tool')
+      .at(-1)!.content;
+    const original = JSON.parse(toolText);
+    expect(original.source).toBe('external_mcp_data');
+    expect(original.binding).toMatchObject({
+      originalStoreId: f.scope.expectedStoreId,
+      sessionId: 'a',
+      serverId: 'local',
+    });
+    expect(original.result.contents[0].uri).toBe(f.resource.uri);
+    expect(original.result.contents[0].text).toBe('complete resource body');
+    expect(original.result.contents[1].blob).toBe('AAECAw==');
+  } finally {
+    await f.close();
+  }
+});

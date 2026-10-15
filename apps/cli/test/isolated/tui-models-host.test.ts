@@ -254,6 +254,7 @@ for (const mode of ['paired', 'shared'] as const)
           fileURLToPath(new URL('../fixtures/tui-models-driver.ts', import.meta.url)),
           JSON.stringify({
             runner,
+            storeId,
             databasePath: profile.databasePath,
             count,
             callsURL: provider.url.href + 'calls',

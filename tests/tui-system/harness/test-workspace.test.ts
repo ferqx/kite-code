@@ -1,12 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  createSqliteRuntimeStorage,
-  SQLITE_RUNTIME_FORMAT_EPOCH,
-  SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-} from '@kite-ai/runtime-storage-sqlite';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import {
   createTestWorkspace,
   observePersistedCommandSession,
@@ -15,72 +11,12 @@ import {
   observePersistedSessionIds,
   observePersistedSessionSummaries,
   observePersistedTurnEvents,
+  persistedRuntimePath,
+  readPersistedPlanArtifacts,
+  requirePersistedRuntimeReady,
   type TestWorkspace,
+  translateOriginalTestConfig,
 } from './test-workspace';
-
-function writeStoreObserverFixture(
-  databasePath: string,
-  sessionId: string,
-  events: readonly Record<string, unknown>[],
-  name = '',
-) {
-  type State = {
-    schemaVersion: number;
-    formatEpoch: string;
-    revision: number;
-    session: {
-      threadId: string;
-      projectId: string;
-      canonicalWorkspaceDigest: string;
-    };
-  };
-  const storage = createSqliteRuntimeStorage<Record<string, unknown>, State>({
-    databasePath,
-    codec: {
-      encodeEvent: JSON.stringify,
-      decodeEvent: (json: string) => JSON.parse(json) as Record<string, unknown>,
-      encodeState: JSON.stringify,
-      decodeState: <T>(json: string) => JSON.parse(json) as T,
-      snapshotMetadata: (state) => ({
-        stateRevision: state.revision,
-        schemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-      }),
-      sessionIdentity: (state) => ({
-        projectId: state.session.projectId,
-        canonicalWorkspaceDigest: state.session.canonicalWorkspaceDigest,
-      }),
-      rebindForkState: (state, targetSessionId) => ({
-        ...state,
-        session: { ...state.session, threadId: targetSessionId },
-      }),
-    },
-    options: { journalMode: 'delete' },
-  });
-  storage.transactions.commitDecision({
-    sessionId,
-    events,
-    snapshot: {
-      schemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
-      revision: events.length,
-      session: {
-        threadId: sessionId,
-        projectId: `project_${sessionId}`,
-        canonicalWorkspaceDigest: `sha256:${'a'.repeat(64)}`,
-      },
-    },
-    metadata: events.map((_event, index) => ({
-      eventId: `${sessionId}:event:${index + 1}`,
-      revision: index + 1,
-    })),
-  });
-  if (name) storage.sessions.setSessionName(sessionId, name);
-  return storage;
-}
-
-function runtimePath(workspace: Pick<TestWorkspace, 'home'>): string {
-  return join(workspace.home, '.kite-code', 'kite.sqlite');
-}
 
 describe('TUI persisted Runtime observers', () => {
   let workspace: TestWorkspace | undefined;
@@ -113,7 +49,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database path is a directory', () => {
     workspace = createTestWorkspace();
-    const databasePath = runtimePath(workspace);
+    const databasePath = persistedRuntimePath(workspace);
     mkdirSync(databasePath);
 
     expect(() => observePersistedSessionIds(workspace!)).toThrow(
@@ -123,7 +59,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('treats an existing database without Runtime schema as not ready', () => {
     workspace = createTestWorkspace();
-    const databasePath = runtimePath(workspace);
+    const databasePath = persistedRuntimePath(workspace);
     new Database(databasePath).close();
 
     expect(observePersistedSessionIds(workspace)).toMatchObject({ status: 'initializing' });
@@ -144,7 +80,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database is corrupt', () => {
     workspace = createTestWorkspace();
-    const databasePath = runtimePath(workspace);
+    const databasePath = persistedRuntimePath(workspace);
     writeFileSync(databasePath, 'not a sqlite database');
 
     expect(() => observePersistedSessionSummaries(workspace!)).toThrow(
@@ -152,139 +88,200 @@ describe('TUI persisted Runtime observers', () => {
     );
   });
 
-  test('reads exact persistence evidence without competing with the child writer', () => {
+  test('reads exact new Store persistence without competing with the child writer', async () => {
     workspace = createTestWorkspace();
-    const databasePath = runtimePath(workspace);
-    const store = writeStoreObserverFixture(
-      databasePath,
-      'thread-a',
-      [
-        {
-          type: 'user.command_invoked',
-          commandId: 'command-a',
-          command: '/compact marker',
-        },
-        {
-          type: 'user.message_appended',
-          messageId: 'message-a',
-          content: 'turn marker',
-        },
-        { type: 'turn.started', turnId: 'turn-a' },
-        {
-          type: 'completion.blocked',
-          turnId: 'turn-a',
-          guardVersion: 'completion_guard_v1',
-          code: 'plan_draft_pending',
-          nextAction: 'submit_plan',
-          planning: 'planning_draft',
-          correctionAttempt: 1,
-        },
-        { type: 'model.requested', requestId: 'correction-request-a' },
-        {
-          type: 'run.completed',
-          turnId: 'turn-a',
-          output: 'completed',
-          completionGuardVersion: 'completion_guard_v1',
-        },
-        { type: 'turn.completed', turnId: 'turn-a' },
-      ],
-      'Command session',
-    );
-    store.close();
-
-    // BEGIN IMMEDIATE holds the single writer slot. A harness observer that
-    // reran RuntimeStore initialization would contend here; readonly queries
-    // must remain available while the real child owns that slot.
-    const writer = new Database(databasePath);
-    writer.run('PRAGMA journal_mode = WAL');
-    writer.run('BEGIN IMMEDIATE');
+    const store = await openSqliteStore({
+      dataRoot: workspace.dataRoot,
+      profile: workspace.profile,
+    });
     try {
-      expect(observePersistedSessionIds(workspace)).toMatchObject({
-        status: 'ready',
-        value: ['thread-a'],
+      const expectedStoreId = (await store.getMetadata()).storeId;
+      await store.createWorkspace({
+        expectedStoreId,
+        id: 'w',
+        rootUri: 'file:///fixture',
+        name: 'w',
       });
-      expect(observePersistedSessionSummaries(workspace)).toMatchObject({
-        status: 'ready',
-        value: [{ threadId: 'thread-a', name: 'Command session' }],
+      await store.createSession({
+        expectedStoreId,
+        sessionId: 'thread-a',
+        workspaceId: 'w',
+        commandId: 'create',
+        subjectId: 'owner',
+        title: 'Command session',
       });
-      expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
-        status: 'ready',
-        value: { threadId: 'thread-a', name: 'Command session' },
+      await store.acceptCommand({
+        expectedStoreId,
+        sessionId: 'thread-a',
+        commandId: 'work',
+        subjectId: 'owner',
+        request: { kind: 'run.start', content: 'turn marker' },
       });
-      expect(observePersistedCommandSession(workspace, '/compact other')).toMatchObject({
-        status: 'ready',
-        value: undefined,
+      const owner = (await store.acquireSessionOwner('thread-a', 'host'))!;
+      const run = await store.startRun({
+        expectedStoreId,
+        owner,
+        commandId: 'work',
+        configuration: { modelId: 'fixed' },
       });
-      expect(
-        observePersistedSessionCommandEvents(workspace, 'thread-a', '/compact marker'),
-      ).toMatchObject({
-        status: 'ready',
-        value: [
-          { type: 'user.command_invoked', commandId: 'command-a' },
-          { type: 'user.message_appended', messageId: 'message-a' },
-          { type: 'turn.started', turnId: 'turn-a' },
-          { type: 'completion.blocked', turnId: 'turn-a' },
-          { type: 'model.requested', requestId: 'correction-request-a' },
-          { type: 'run.completed', turnId: 'turn-a' },
-          { type: 'turn.completed', turnId: 'turn-a' },
-        ],
-      });
-      expect(
-        observePersistedSessionCommandEvents(workspace, 'thread-other', '/compact marker'),
-      ).toMatchObject({ status: 'ready', value: undefined });
-      expect(observePersistedSessionEvents(workspace, 'thread-a')).toMatchObject({
-        status: 'ready',
-        value: [
-          { type: 'user.command_invoked', commandId: 'command-a' },
-          { type: 'user.message_appended', messageId: 'message-a' },
-          { type: 'turn.started', turnId: 'turn-a' },
-          { type: 'completion.blocked', turnId: 'turn-a' },
-          { type: 'model.requested', requestId: 'correction-request-a' },
-          { type: 'run.completed', turnId: 'turn-a' },
-          { type: 'turn.completed', turnId: 'turn-a' },
-        ],
-      });
-      expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
-        status: 'ready',
-        value: {
-          threadId: 'thread-a',
-          turnId: 'turn-a',
-          events: [
-            { type: 'turn.started', turnId: 'turn-a' },
-            {
-              type: 'completion.blocked',
-              turnId: 'turn-a',
-              code: 'plan_draft_pending',
-              correctionAttempt: 1,
-            },
-            { type: 'model.requested', requestId: 'correction-request-a' },
-            { type: 'run.completed', turnId: 'turn-a' },
-            { type: 'turn.completed', turnId: 'turn-a' },
-          ],
+      await store.acceptCommand({
+        expectedStoreId,
+        sessionId: 'thread-a',
+        commandId: 'plan-write',
+        subjectId: 'owner',
+        request: {
+          kind: 'extension.invoke',
+          extensionId: 'builtin.planning',
+          actionId: 'fixture',
+          definitionVersion: '1',
+          input: {},
         },
       });
+      await store.writeExtensionRecord({
+        expectedStoreId,
+        owner,
+        sessionId: 'thread-a',
+        extensionId: 'builtin.planning',
+        originCommandId: 'plan-write',
+        write: {
+          key: 'plan/p/1',
+          expectedRevision: null,
+          contentType: 'builtin.planning.record',
+          contentVersion: 1,
+          value: {
+            kind: 'plan_document',
+            planId: 'p',
+            version: 1,
+            title: 'Title',
+            body: 'Original plan\nwith all lines',
+            steps: [],
+          },
+          executable: true,
+        },
+      });
+      await store.finishRun({
+        expectedStoreId,
+        owner,
+        runId: run.id,
+        status: 'completed',
+        requirements: [],
+      });
+      const session = await store.getSession('thread-a');
+      await store.acceptCommand({
+        expectedStoreId,
+        sessionId: 'thread-a',
+        commandId: 'command-a',
+        subjectId: 'owner',
+        request: {
+          kind: 'context.compress',
+          expectedContextSelectionId: session!.contextSelectionId,
+          focus: 'marker',
+        },
+      });
+      const writer = new Database(workspace.databasePath);
+      writer.run('BEGIN IMMEDIATE');
+      try {
+        expect(observePersistedSessionIds(workspace)).toMatchObject({
+          status: 'ready',
+          value: ['thread-a'],
+        });
+        expect(observePersistedSessionSummaries(workspace)).toMatchObject({
+          status: 'ready',
+          value: [{ threadId: 'thread-a', name: 'Command session' }],
+        });
+        expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
+          status: 'ready',
+          value: { threadId: 'thread-a', name: 'Command session' },
+        });
+        expect(observePersistedCommandSession(workspace, '/compact other')).toMatchObject({
+          status: 'ready',
+          value: undefined,
+        });
+        expect(observePersistedCommandSession(workspace, '/unknown marker')).toMatchObject({
+          status: 'ready',
+          value: undefined,
+        });
+        expect(
+          observePersistedSessionCommandEvents(workspace, 'thread-other', '/compact marker'),
+        ).toMatchObject({ status: 'ready', value: undefined });
+        const suffix = requirePersistedRuntimeReady(
+          observePersistedSessionCommandEvents(workspace, 'thread-a', '/compact marker'),
+        )!;
+        expect(suffix[0]).toMatchObject({
+          type: 'command.accepted',
+          objectId: 'command-a',
+          sourceType: 'command.accepted',
+        });
+        const events = requirePersistedRuntimeReady(
+          observePersistedSessionEvents(workspace, 'thread-a'),
+        );
+        expect(
+          events.some((e) => e.type === 'message.updated' && e.content === 'turn marker'),
+        ).toBe(true);
+        const turn = requirePersistedRuntimeReady(
+          observePersistedTurnEvents(workspace, 'turn marker'),
+        )!;
+        expect(turn.threadId).toBe('thread-a');
+        expect(turn.turnId).toBe(run.id);
+        expect(turn.events.map((e) => e.type)).toContain('run.started');
+        expect(turn.events.map((e) => e.type)).toContain('run.finished');
+        expect(turn.events.every((e) => e.turnId === run.id && e.sourceType === e.type)).toBe(true);
+        expect(
+          turn.events.some((e) => e.type === 'turn.completed' || e.type === 'completion.blocked'),
+        ).toBe(false);
+        expect(observePersistedTurnEvents(workspace, 'not persisted')).toMatchObject({
+          status: 'ready',
+          value: undefined,
+        });
+        expect(readPersistedPlanArtifacts(workspace)).toEqual([
+          {
+            path: `${workspace.databasePath}#builtin.planning/thread-a/plan/p/1`,
+            content: 'Original plan\nwith all lines',
+          },
+        ]);
+      } finally {
+        writer.run('ROLLBACK');
+        writer.close();
+      }
     } finally {
-      writer.run('ROLLBACK');
-      writer.close();
+      await store.close();
     }
   });
 
-  test('matches RuntimeStore name fallback when the first user message is empty', () => {
+  test('uses the actual Session identity when title and first message are empty', async () => {
     workspace = createTestWorkspace();
-    const databasePath = runtimePath(workspace);
-    const store = writeStoreObserverFixture(databasePath, 'thread-empty', [
-      {
-        type: 'user.message_appended',
-        messageId: 'message-empty',
-        content: '',
-      },
-      {
-        type: 'user.command_invoked',
-        commandId: 'command-empty',
-        command: '/compact empty',
-      },
-    ]);
+    const store = await openSqliteStore({
+      dataRoot: workspace.dataRoot,
+      profile: workspace.profile,
+    });
     try {
+      const expectedStoreId = (await store.getMetadata()).storeId;
+      await store.createWorkspace({
+        expectedStoreId,
+        id: 'w',
+        rootUri: 'file:///fixture',
+        name: 'w',
+      });
+      await store.createSession({
+        expectedStoreId,
+        sessionId: 'thread-empty',
+        workspaceId: 'w',
+        commandId: 'create',
+        subjectId: 'owner',
+        title: '',
+      });
+      const session = await store.getSession('thread-empty');
+      await store.acceptCommand({
+        expectedStoreId,
+        sessionId: 'thread-empty',
+        commandId: 'compact',
+        subjectId: 'owner',
+        request: {
+          kind: 'context.compress',
+          expectedContextSelectionId: session!.contextSelectionId,
+          focus: 'empty',
+        },
+      });
       expect(observePersistedSessionSummaries(workspace)).toMatchObject({
         status: 'ready',
         value: [{ threadId: 'thread-empty', name: 'thread-empty' }],
@@ -294,7 +291,44 @@ describe('TUI persisted Runtime observers', () => {
         value: { threadId: 'thread-empty', name: 'thread-empty' },
       });
     } finally {
-      store.close();
+      await store.close();
     }
+  });
+
+  test('creates a new isolated development profile and translates the original test provider', () => {
+    workspace = createTestWorkspace({
+      configOverrides: {
+        model: { default: { provider: 'mock', name: 'fixture' } },
+        provider: { mock: { baseURL: 'http://127.0.0.1:3210/v1', apiKey: 'test' } },
+        interactionMode: 'auto',
+      },
+      projectMcpServers: { fixture: { command: 'fixture', args: [] } },
+    });
+    expect(workspace.databasePath).toBe(
+      join(workspace.home, '.kite-code', 'development', 'core.db'),
+    );
+    expect(workspace.configPath).toBe(join(workspace.profilePath, 'config.jsonc'));
+    expect(JSON.parse(readFileSync(workspace.configPath, 'utf8'))).toMatchObject({
+      modelId: 'fixture',
+      models: [
+        {
+          id: 'fixture',
+          provider: 'compatible',
+          model: 'fixture',
+          baseURL: 'http://127.0.0.1:3210/v1',
+        },
+      ],
+    });
+    expect(
+      JSON.parse(readFileSync(join(workspace.profilePath, 'ui', 'preferences.jsonc'), 'utf8'))
+        .language,
+    ).toBe('zh-CN');
+    expect(workspace.permissionMode).toBe('auto');
+    expect(
+      JSON.parse(readFileSync(join(workspace.workspace, '.kite-code', 'mcp.json'), 'utf8')),
+    ).toEqual({ mcpServers: { fixture: { command: 'fixture', args: [] } } });
+    expect(() => translateOriginalTestConfig({ interactionMode: 'strict' })).toThrow(
+      'test_permission_mode_invalid',
+    );
   });
 });

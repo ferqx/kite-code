@@ -461,3 +461,19 @@ test('a model lookup uses the current saved terminal fact when the reopened pane
     }
   }
 });
+
+test('original effort ordering retains every actual adapter choice and clear without inventing availability', async () => {
+  const { orderedTuiEfforts } = await import('../../src/tui/model-panel');
+  expect(orderedTuiEfforts(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])).toEqual([
+    'low',
+    'medium',
+    'high',
+    'max',
+    null,
+    'none',
+    'minimal',
+    'xhigh',
+  ]);
+  expect(orderedTuiEfforts(['high', 'low'])).toEqual(['low', 'high', null]);
+  expect(orderedTuiEfforts([])).toEqual([null]);
+});

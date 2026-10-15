@@ -8,7 +8,9 @@
 
 `planning.write@1` 保存不可变正文版本及 CAS `plan.current`；`planning.read@1` 读取；`planning.review@1` 审阅准确 ID/version/digest，保存真实 accepted informational receipt 与 `auto`/`accept_edits` 执行方式。写入与审阅是两次独立调用。批准保存 `run/<actualRunId>/approval/<planId>/<version>` 不可变记录，核对原 accepted Interaction、批准 Execution 的实际 Run/Session/Store 与当前完整 plan digest；同 Session 后继 Run、旧版计划、旧答案或 runless 用户 Action 不能取得后继 Run 批准。旧 `approval/<planId>/<version>` 历史保持只读，新的 `approval.current/...` 仅用于上下文投影，不是派发 grant。批准不授予 Tool 权限，所有调用继续经过宿主 Permissions。正文、标题须非空、step IDs 唯一，不添加旧的 30,000 字/12 步/replan reason 长度产品限制；持久记录及公共 frame 的现有有限传输边界仍适用。
 
-扩展的纯 `context.capture` 自动贡献当前计划与批准凭据的 canonical 数据，来源 ID 为 `builtin.planning:<session>:<plan>:<version>`，摘要覆盖完整当前计划和批准身份。公共 SourceRequest 当前没有 Run 字段；贡献仅在记录指向的实际批准 Run 仍 active、同 Session、Run 专属证明与 accepted Interaction 全等时显示批准，否则 approval=null，不从 input 或模型猜目标。Core 把业务贡献放在 user 数据位置，不把内容当 system 权限。`sourcesFor` 是需要显式宿主组合时的同一贡献实现，不应再重复装配同一来源。
+扩展的纯 `context.capture` 自动贡献当前计划与批准凭据的 canonical 数据，来源 ID 为 `builtin.planning:<session>:<plan>:<version>`，摘要覆盖完整当前计划和批准身份。贡献仅在记录指向的实际批准 Run 仍 active、同 Session、Run 专属证明与 accepted Interaction 全等时显示批准，否则 approval=null，不从 input 或模型猜目标。计划资料标为 `user/after_history`，不获得 system 权限。`sourcesFor` 是需要显式宿主组合时的同一贡献实现，不应再重复装配同一来源。
+
+内部 `SourceRequest.runId` 由 Core 以实际当前 Run 覆盖。`captureModelContext` 核实际 Run／Session，再复用 `readPlanningState` 的原记录与批准证明，贡献一个 `user/runtime` 来源：pending 显示 planning，未启用或已批准显示 building；完整原 state 与来源摘要保留。无 Run 的既有来源捕获只提供计划资料，不补造当前 phase。动态观察与静态 Agent 合同分开，普通请求、压缩和展开复用[同一组装](../../model-context.ts)，不增加 grant 或替代最终 record read-set、审批与派发门禁。
 
 历史 receipt 校验独立于当前信息贡献：`matchesPlanSource` 从实际 Execution 的原 Session/Store/Run（runless Job 沿既有限父链）读取当前完整计划与该原 Run 不可变 accepted 审批，复用同一纯 canonical payload 重建执行时来源 digest。原 Run 已完成不会让准确原 receipt 失效，但不会恢复 inactive Run 的普通批准贡献；新 Run 不沿用旧审批，plan/head/accepted proof 或封存执行来源变化仍拒绝。同 Session 派生报告继承原 plan.required ref 后不能借原 Run 的待审批 Model 管理豁免，最后 completion 重读完整原计划、审批、progress 和原 receipt；这些 record 继续进入最终事务 read-set CAS。
 

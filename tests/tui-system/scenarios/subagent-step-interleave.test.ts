@@ -6,6 +6,7 @@
  * interleave while the parent still owns one aggregation group.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
@@ -20,6 +21,7 @@ import {
 } from '../harness/terminal-screen';
 import {
   createTestWorkspace,
+  observePersistedSessionEvents,
   observePersistedTurnEvents,
   requirePersistedRuntimeReady,
 } from '../harness/test-workspace';
@@ -244,7 +246,68 @@ describe('TUI PTY System — concurrent same-name Subagent steps', () => {
         observePersistedTurnEvents(workspace, 'Run interleaved same-name child steps'),
       );
       if (!persisted) throw new Error('Expected persisted same-name child turn.');
-      const serialized = JSON.stringify(persisted.events);
+      // Core keeps each child's events in its own original Session/Run. Resolve
+      // the actual carrier chain before observing those logs, rather than
+      // treating root-Run events as a flattened legacy descendant journal.
+      using database = new Database(workspace.databasePath, { readonly: true });
+      const children = database
+        .query<
+          {
+            parent_call_id: string;
+            carrier_id: string;
+            child_session_id: string;
+            child_run_id: string;
+            state: string;
+          },
+          [string, string]
+        >(`
+          SELECT p.call_id AS parent_call_id,c.id AS carrier_id,
+            c.child_session_id,r.id AS child_run_id,c.state
+          FROM execution p JOIN run root ON root.id=p.run_id AND root.session_id=p.session_id
+          JOIN execution c ON c.parent_execution_id=p.id AND c.kind='job'
+          JOIN session s ON s.id=c.child_session_id AND s.parent_id=p.session_id
+          JOIN session parent ON parent.id=p.session_id
+          JOIN run r ON r.session_id=s.id
+          WHERE p.session_id=? AND p.run_id=? AND p.kind='tool'
+            AND p.call_id IN ('same-name-alpha-parent','same-name-beta-parent')
+            AND c.origin_store_id=p.origin_store_id AND p.origin_store_id=root.origin_store_id
+            AND r.origin_store_id=root.origin_store_id
+            AND c.root_work_command_id=p.root_work_command_id
+            AND c.root_work_seq=p.root_work_seq
+            AND p.root_work_command_id=root.root_work_command_id
+            AND p.root_work_seq=root.root_work_seq
+            AND r.root_work_command_id=root.root_work_command_id
+            AND r.root_work_seq=root.root_work_seq
+            AND c.root_session_id=p.root_session_id AND s.root_id=p.root_session_id
+            AND parent.root_id=p.root_session_id
+            AND s.workspace_id=parent.workspace_id
+        `)
+        .all(persisted.threadId, persisted.turnId);
+      expect(children).toHaveLength(2);
+      expect(new Set(children.map((child) => child.parent_call_id))).toEqual(
+        new Set(['same-name-alpha-parent', 'same-name-beta-parent']),
+      );
+      expect(new Set(children.map((child) => child.carrier_id)).size).toBe(2);
+      expect(new Set(children.map((child) => child.child_session_id)).size).toBe(2);
+      expect(new Set(children.map((child) => child.child_run_id)).size).toBe(2);
+      const descendantEvents = children.flatMap((child) => {
+        expect(child.state).toBe('succeeded');
+        const events = requirePersistedRuntimeReady(
+          observePersistedSessionEvents(workspace, child.child_session_id),
+        ).filter((event) => event.turnId === child.child_run_id);
+        const alpha = child.parent_call_id === 'same-name-alpha-parent';
+        const ownCall = alpha ? 'same-name-alpha-step-tool' : 'same-name-beta-step-tool';
+        const otherCall = alpha ? 'same-name-beta-step-tool' : 'same-name-alpha-step-tool';
+        const finished = events.filter(
+          (event) => event.sourceType === 'execution.finished' && event.callId === ownCall,
+        );
+        expect(finished).toHaveLength(1);
+        expect(finished[0]!.status).toBe('succeeded');
+        expect(JSON.stringify(events)).toContain(alpha ? 'ALPHA_STEP_DONE' : 'BETA_STEP_DONE');
+        expect(JSON.stringify(events)).not.toContain(otherCall);
+        return events;
+      });
+      const serialized = JSON.stringify([...persisted.events, ...descendantEvents]);
       expect(serialized).toContain('same-name-alpha-step-tool');
       expect(serialized).toContain('same-name-beta-step-tool');
       expect(serialized).toContain('ALPHA_STEP_DONE');

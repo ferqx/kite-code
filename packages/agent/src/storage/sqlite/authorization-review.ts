@@ -736,7 +736,9 @@ export function executionAuthorizationObservation(
       };
     }
   } catch {}
-  return observed.review || observed.human ? observed : undefined;
+  // The persisted dispatch bit is a complete fact even when no reviewer or
+  // human interaction was needed. Recovery must not infer it from Tool output.
+  return observed;
 }
 
 export function getAuthorizationReview(
@@ -844,6 +846,12 @@ export function authorizationReviewContextSession(
         return null;
     }
     const response = object(JSON.parse(String(model.result_json)));
+    if (
+      response.firstOutput !== undefined &&
+      (typeof response.firstOutput !== 'string' ||
+        !['content', 'reasoning', 'tool_calls'].includes(response.firstOutput))
+    )
+      return null;
     const expectedMessages: Json[] = [
       {
         content: canonicalJson(payload),
@@ -851,6 +859,7 @@ export function authorizationReviewContextSession(
       },
       {
         role: 'assistant',
+        ...(response.firstOutput !== undefined ? { firstOutput: response.firstOutput } : {}),
         content: response.content!,
         toolCalls: [],
         sourceIds: [String(model.id)],

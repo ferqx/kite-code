@@ -6,13 +6,18 @@ import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NativeBackgroundPanel } from '../src/native-background-panel';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../src/native-bridge';
+import { NativeDiagnosticsProvider } from '../src/native-diagnostics';
 import { environmentDisplay, useNativeEnvironment } from '../src/native-environment';
 import { backgroundItem } from './background-item.fixture';
 
 async function fixture(
   run: (
     host: HTMLElement,
-    render: (port: NativeBridge, scope?: { generation: number; storeId: string }) => Promise<void>,
+    render: (
+      port: NativeBridge,
+      scope?: { generation: number; storeId: string },
+      testDiagnostics?: boolean,
+    ) => Promise<void>,
   ) => Promise<void>,
   surface?: (bridge: NativeBridge, scope: { generation: number; storeId: string }) => ReactNode,
 ) {
@@ -33,23 +38,28 @@ async function fixture(
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   try {
-    await run(host, async (bridge, scope = { generation: 1, storeId: 'store' }) => {
-      await act(async () =>
-        root.render(
-          surface ? (
-            surface(bridge, scope)
-          ) : (
-            <NativeBackgroundPanel
-              bridge={bridge}
-              generation={scope.generation}
-              storeId={scope.storeId}
-              unavailable={false}
-              onChanged={async () => undefined}
-            />
+    await run(
+      host,
+      async (bridge, scope = { generation: 1, storeId: 'store' }, testDiagnostics = false) => {
+        await act(async () =>
+          root.render(
+            <NativeDiagnosticsProvider enabled={testDiagnostics}>
+              {surface ? (
+                surface(bridge, scope)
+              ) : (
+                <NativeBackgroundPanel
+                  bridge={bridge}
+                  generation={scope.generation}
+                  storeId={scope.storeId}
+                  unavailable={false}
+                  onChanged={async () => undefined}
+                />
+              )}
+            </NativeDiagnosticsProvider>,
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
@@ -342,7 +352,7 @@ test('Native background DOM publishes only complete pages, shows original parent
         return null;
       },
     };
-    await render(bridge);
+    await render(bridge, undefined, true);
     expect(calls).toHaveLength(0);
     await click(host, '打开后台总览');
     expect(pending).toBeDefined();
@@ -405,12 +415,12 @@ test('Native background attach replacement clears the old complete facts and ref
         };
       },
     };
-    await render(bridge);
+    await render(bridge, undefined, true);
     await click(host, '打开后台总览');
     expect(host.textContent).toContain('原执行 job-1');
     wait = true;
     await click(host, '刷新后台总览');
-    await render(bridge, { generation: 2, storeId: 'other-store' });
+    await render(bridge, { generation: 2, storeId: 'other-store' }, true);
     expect(host.textContent).not.toContain('原执行 job-1');
     expect(host.textContent).not.toContain('后台目录已完整读取');
     expect(host.textContent).toContain('打开后台总览');
@@ -453,7 +463,7 @@ test('restored background DOM retains original Store and read-only history while
         };
       },
     };
-    await render(bridge);
+    await render(bridge, undefined, true);
     await click(host, '打开后台总览');
     const oldCard = host.querySelector<HTMLElement>('[data-execution-id="job-1"]')!;
     expect(oldCard.textContent).toContain('原 Store original-store');
@@ -466,6 +476,15 @@ test('restored background DOM retains original Store and read-only history while
     ).toBe(false);
     expect(host.querySelector('[data-execution-id="job-2"]')!.textContent).toContain(
       '停止后台执行 · job-2',
+    );
+    expect(calls.some((request) => request.method === 'background.stop')).toBe(false);
+    await render(bridge);
+    expect(host.textContent).not.toContain('original-store');
+    expect(host.textContent).not.toContain('parent-run');
+    expect(host.textContent).not.toContain('job-1');
+    expect(oldCard.textContent).toContain('恢复历史，只读');
+    expect(host.querySelector('[data-execution-id="job-2"]')!.textContent).toContain(
+      '停止后台执行',
     );
     expect(calls.some((request) => request.method === 'background.stop')).toBe(false);
   }));

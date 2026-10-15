@@ -51,7 +51,7 @@ const selectedLabel = (text: string) =>
   text
     .split('\n')
     .map((line) => line.trim())
-    .find((line) => line.startsWith('› '))
+    .find((line) => line.startsWith('❯ '))
     ?.slice(2);
 const wait = async (text: string, absent?: string) => {
   const end = Date.now() + 10000;
@@ -69,15 +69,35 @@ const key = async (value: string, preserveCurrentDetail = false) => {
   retained = preserveCurrentDetail ? (await current()).text : undefined;
   await active!.key(value);
 };
-const choose = async (label: string) => {
+const choose = async (label: string, top = 'Project sources', prefix = false) => {
   const end = Date.now() + 10000;
-  if (selectedLabel((await current()).text) === label) return;
-  if (selectedLabel((await current()).text) !== 'Project sources') {
-    await key('\x1b[A'.repeat(64));
-    await wait('› Project sources');
+  const matches = (selected?: string) =>
+    prefix ? selected?.startsWith(label) === true : selected === label;
+  const selection = async () => {
+    for (;;) {
+      const frame = await current();
+      if (selectedLabel(frame.text) !== undefined) return frame;
+      if (Date.now() > end) throw Error(`original MCP selection absent: ${label}`);
+      if (active!.ended) throw Error('original MCP host ended');
+      await Bun.sleep(50);
+    }
+  };
+  const initial = await selection();
+  if (matches(selectedLabel(initial.text))) return;
+  if (selectedLabel(initial.text) !== top) {
+    retained = undefined;
+    await active!.keyUnlessVisible('\x1b[A'.repeat(64), `❯ ${top}`);
+    for (;;) {
+      const frame = await current();
+      if (frame.fresh && selectedLabel(frame.text) === top) break;
+      if (Date.now() > end) throw Error(`original MCP top unavailable: ${top}`);
+      await Bun.sleep(50);
+    }
   }
-  while (selectedLabel((await current()).text) !== label) {
-    const previous = selectedLabel((await current()).text);
+  for (;;) {
+    const before = await selection();
+    if (matches(selectedLabel(before.text))) return;
+    const previous = selectedLabel(before.text);
     await key('\x1b[B');
     for (;;) {
       const frame = await current();
@@ -151,19 +171,19 @@ try {
     await key('\r');
     await wait('owned-server', 'Reading servers');
     await wait('Server list ready');
-    await key('\x1b[B');
-    await wait('› owned-server ·');
+    await choose('owned-server ·', 'Project sources', true);
+    await wait('❯ owned-server ·');
     await key('\r');
     await wait('Server: owned-server');
-    await key('\x1b[B');
-    await wait(`› ${ordinal === 1 ? 'Enable' : 'Disable'} · User settings`);
+    await choose(`${ordinal === 1 ? 'Enable' : 'Disable'} · User settings`);
+    await wait(`❯ ${ordinal === 1 ? 'Enable' : 'Disable'} · User settings`);
     await key('\r');
     await wait('Confirm server change:');
     await key('\r');
     await wait('Waiting for original result');
     await check(`approve-${ordinal}`);
-    await key('\x1b[B'.repeat(2));
-    await wait('› Check original change');
+    await choose('Check original change');
+    await wait('❯ Check original change');
     await key('\r');
     await wait('Selection saved');
     await key('\x1b');
@@ -178,9 +198,9 @@ try {
   await wait('/mcp');
   await key('\r');
   await wait('No configured MCP servers');
-  await wait(`Original change: ${second}`);
   await check('cold-open');
   await choose(`Original change: ${second}`);
+  await wait(`Original change: ${second}`);
   const detail = `Original change: ${second} · Outcome unknown; check original change`;
   // Enter can be an unchanged selection. Preserve only the exact current detail.
   const known = normalized((await current()).text).includes(detail);

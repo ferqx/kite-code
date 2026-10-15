@@ -19,6 +19,7 @@ import {
   type StartCommandRequest,
   type SteerCommandRequest,
 } from '@kite-ai/client';
+import { canonicalFileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
 import {
   callerKey,
   type TuiCallerIntent,
@@ -121,6 +122,10 @@ export type TuiPendingInput = Omit<PendingInputPage['commands'][number], 'reques
 };
 export interface TuiSnapshot {
   readonly storeId: string;
+  /** Authenticated public ServerInfo instance for this exact connection. Observation only. */
+  readonly connectionInstanceId?: string;
+  /** Exact owner fact supplied by a qualified public reader, never inferred from Run status. */
+  readonly activityOwner?: { readonly instanceId: string | null; readonly generation: string };
   readonly view: SessionView;
   /** Complete fixed-water history, not the first page from getView. */
   readonly messages: readonly Message[];
@@ -161,6 +166,7 @@ export interface TuiSnapshot {
   readonly compactionPhase?: 'preparing' | 'summarizing' | 'validating';
   /** Optional display facts read through the admitted host's public Client. */
   readonly environment?: {
+    observer?: 'workspace_missing';
     workspacePath: string;
     homeDirectory?: string;
     modelName?: string;
@@ -189,6 +195,8 @@ function freezeIntent<T>(value: T): T {
   return value;
 }
 export interface TuiPort {
+  /** The terminal's original busy composer queues the next turn; other embeddings may steer. */
+  activeInputKind?: 'input.follow_up';
   onboarding?: import('./onboarding').TuiOnboardingPort;
   preferences?: TuiPreferencePort;
   models?: TuiModelPort;
@@ -242,7 +250,18 @@ export interface TuiIntent {
   readonly kind: string;
   readonly phase: 'submitting' | 'accepted' | 'applied' | 'unknown' | 'rejected';
 }
+export interface TuiLocalMessage {
+  /** Original visible message boundary at insertion; null precedes the first message. */
+  readonly afterMessageId: string | null;
+  readonly id: string;
+  readonly sessionId: string;
+  readonly role: 'user' | 'assistant';
+  readonly content: string;
+}
+
 export interface TuiState {
+  /** Local UI commands and receipts; never public Runtime messages. */
+  readonly localMessages: readonly TuiLocalMessage[];
   readonly callers: ReadonlyMap<string, TuiCallerOutcome>;
   readonly callerUnavailable?: string;
   readonly callerReading?: string;
@@ -306,6 +325,8 @@ export interface TuiState {
   skills?: TuiSkillsSnapshot;
   models?: ModelSettingsView;
   modelOutcome?: TuiModelOutcome;
+  mcpDetailServerId?: string;
+  mcpSourceEntry?: 'directory';
   mcp?: { facts?: TuiMcpSnapshot; read: 'reading' | 'ready' | 'failed' };
   mcpOutcome?: TuiMcpOutcome;
   mcpSaved?: readonly TuiMcpOutcome[];
@@ -329,6 +350,8 @@ export interface TuiState {
   mcpMutationError?: string;
   mcpMutationFactsReading?: boolean;
   mcpMutationReading?: boolean;
+  mcpDirectoryAuth?: Readonly<Record<string, TuiMcpAuthStatus>>;
+  mcpAuthEntry?: 'directory' | 'source';
   mcpAuthOpen?: boolean;
   mcpAuthServerId?: string;
   mcpAuthStatus?: TuiMcpAuthStatus;
@@ -349,6 +372,8 @@ export interface TuiState {
   readonly sessionId?: string;
   readonly snapshot?: TuiSnapshot;
   readonly sessions: readonly TuiSessionEntry[];
+  readonly sessionDirectoryLoading: boolean;
+  readonly sessionDirectoryError?: string;
   readonly draft: string;
   readonly planning: boolean;
   readonly loading: boolean;
@@ -408,8 +433,21 @@ export function interactionAnswer(
     return { kind: 'plan_review', decision: 'approve', mode };
   return undefined;
 }
+/** Legacy ports without connection identity retain their existing observation contract. */
+export function currentActivityVerified(snapshot?: TuiSnapshot): boolean {
+  if (!snapshot?.connectionInstanceId || !snapshot.activityOwner) return true;
+  if (
+    !snapshot.view.runs.some((run) => run.isActive) &&
+    !snapshot.view.executions.some((execution) =>
+      ['planned', 'dispatching', 'running'].includes(execution.status),
+    )
+  )
+    return true;
+  return snapshot.connectionInstanceId === snapshot.activityOwner.instanceId;
+}
 export function activity(snapshot?: TuiSnapshot): string {
   if (!snapshot) return 'Unavailable';
+  if (!currentActivityVerified(snapshot)) return 'Unknown — verify original work';
   if (
     snapshot.view.executions.some((e) => e.status === 'outcome_unknown') ||
     snapshot.view.runs.some((r) => r.status === 'interrupted')
@@ -431,9 +469,11 @@ export function activity(snapshot?: TuiSnapshot): string {
 
 export class TuiController {
   private value: TuiState = {
+    localMessages: [],
     preferences: defaultTuiPreferences,
     preferenceStatus: 'loading',
     sessions: [],
+    sessionDirectoryLoading: false,
     draft: '',
     planning: false,
     loading: false,
@@ -447,6 +487,7 @@ export class TuiController {
     callers: new Map(),
   };
   private listeners = new Set<() => void>();
+  private displayClearGeneration = 0;
   private clearedDisplay?: {
     sessionId: string;
     messages: Map<
@@ -464,6 +505,7 @@ export class TuiController {
     executions: Map<string, { status: string; resultRevision: string | null }>;
   };
   private reads = new Set<AbortController>();
+  private directoryRead?: AbortController;
   private fileRead?: AbortController;
   private generation = 0;
   private historyGeneration = 0;
@@ -503,7 +545,11 @@ export class TuiController {
   private disposed = false;
   get statusHost() {
     return this.port.status
-      ? { mode: this.port.status.mode, profile: this.port.status.profile }
+      ? {
+          mode: this.port.status.mode,
+          transport: this.port.status.transport,
+          profile: this.port.status.profile,
+        }
       : undefined;
   }
   private busy = false;
@@ -519,6 +565,18 @@ export class TuiController {
   };
   private hasUnknownAnswer() {
     return this.answerIntent?.phase === 'unknown';
+  }
+  /** The exact original answer, including a receipt that outlives the displayed Session. */
+  answerPhase(card: Interaction): TuiIntent['phase'] | undefined {
+    const intent = this.answerIntent;
+    return intent &&
+      card.originStoreId === this.port.storeId &&
+      intent.request.expectedStoreId === card.originStoreId &&
+      intent.sessionId === card.presentationSessionId &&
+      intent.interactionId === card.id &&
+      intent.request.expectedRevision === card.revision
+      ? intent.phase
+      : undefined;
   }
   private answered = new Set<string>();
   private attachmentProofs = new Map<string, string>();
@@ -653,6 +711,8 @@ export class TuiController {
       edit.value === this.value.preferences[edit.key]
     )
       return;
+    const originalSessionId = this.value.sessionId,
+      originalGeneration = this.generation;
     this.preferenceSaving = true;
     ++this.preferenceGeneration;
     this.publish({
@@ -670,6 +730,33 @@ export class TuiController {
         preferenceError: undefined,
         preferenceSaved: true,
       });
+      if (
+        edit.key === 'colorPreset' &&
+        originalSessionId === this.value.sessionId &&
+        originalGeneration === this.generation &&
+        !this.disposed &&
+        originalSessionId
+      ) {
+        this.publish({
+          localMessages: [
+            ...this.value.localMessages,
+            {
+              id: crypto.randomUUID(),
+              sessionId: originalSessionId,
+              afterMessageId: this.visibleMessages.at(-1)?.id ?? null,
+              role: 'user',
+              content: `/theme ${edit.value}`,
+            },
+            {
+              id: crypto.randomUUID(),
+              sessionId: originalSessionId,
+              afterMessageId: this.visibleMessages.at(-1)?.id ?? null,
+              role: 'assistant',
+              content: `  ⎿  Theme set to ${edit.value}`,
+            },
+          ],
+        });
+      }
     } catch (error) {
       this.publish({
         preferenceStatus: 'failed',
@@ -682,11 +769,15 @@ export class TuiController {
   get state() {
     return this.value;
   }
+  get displayGeneration() {
+    return this.displayClearGeneration;
+  }
   /** Hide only the exact observed display; the complete history remains available to readers. */
   clearDisplay(): void {
-    this.publish({ mcpPromptSelections: undefined });
+    this.publish({ mcpPromptSelections: undefined, localMessages: [] });
     const snapshot = this.value.snapshot;
     if (this.disposed || !snapshot || snapshot.view.session.id !== this.value.sessionId) return;
+    this.displayClearGeneration++;
     this.clearedDisplay = {
       sessionId: snapshot.view.session.id,
       messages: new Map(
@@ -733,6 +824,21 @@ export class TuiController {
       );
     });
   }
+  /** Keep local-only UI receipts at their original position without inventing Runtime facts. */
+  get visibleTranscript(): readonly (Message | TuiLocalMessage)[] {
+    const messages = this.visibleMessages;
+    const locals = this.value.localMessages.filter(
+      (message) => message.sessionId === this.value.sessionId,
+    );
+    const ids = new Set(messages.map((message) => message.id));
+    const after = (id: string | null) => locals.filter((message) => message.afterMessageId === id);
+    return [
+      ...locals.filter(
+        (message) => message.afterMessageId === null || !ids.has(message.afterMessageId),
+      ),
+      ...messages.flatMap((message) => [message, ...after(message.id)]),
+    ];
+  }
   get visibleExecutions(): readonly SessionView['executions'][number][] {
     const snapshot = this.value.snapshot,
       cleared = this.clearedDisplay;
@@ -771,15 +877,25 @@ export class TuiController {
   }
   async list() {
     if (this.disposed) return;
+    this.directoryRead?.abort();
     const read = this.reading();
+    this.directoryRead = read;
+    this.publish({ sessionDirectoryLoading: true, sessionDirectoryError: undefined });
     try {
       const sessions = await this.port.listSessions(read.signal);
-      if (!read.signal.aborted) this.publish({ sessions });
+      if (!read.signal.aborted && this.directoryRead === read)
+        this.publish({ sessions, sessionDirectoryError: undefined });
     } catch (error) {
-      if (!read.signal.aborted)
-        this.publish({ error: error instanceof Error ? error.message : 'directory_failed' });
+      if (!read.signal.aborted && this.directoryRead === read)
+        this.publish({
+          sessionDirectoryError: error instanceof Error ? error.message : 'directory_failed',
+        });
     } finally {
       this.reads.delete(read);
+      if (this.directoryRead === read) {
+        this.directoryRead = undefined;
+        this.publish({ sessionDirectoryLoading: false });
+      }
     }
   }
   observationUnavailable(code: string) {
@@ -918,6 +1034,7 @@ export class TuiController {
     this.fileRead?.abort();
     this.publish({ fileCandidates: undefined });
     const same = this.value.sessionId === sessionId;
+    const selectingHistory = this.value.sessionId !== undefined && !same;
     const preserveReconnectionReview =
       same && options.preserveReconnectionReview && !this.value.stale;
     if (!preserveReconnectionReview) this.mcpReconnectionRead?.abort();
@@ -934,6 +1051,7 @@ export class TuiController {
     const historyGeneration = ++this.historyGeneration;
     this.publish({
       sessionId,
+      localMessages: same ? this.value.localMessages : [],
       snapshot: same ? this.value.snapshot : undefined,
       fullOutputs: same ? this.value.fullOutputs : new Map(),
       loadedOutputBodies: same ? this.value.loadedOutputBodies : new Map(),
@@ -966,6 +1084,8 @@ export class TuiController {
       mcpMutationOutcome: same ? this.value.mcpMutationOutcome : undefined,
       mcpMutationFactsReading: same ? this.value.mcpMutationFactsReading : false,
       mcpMutationReading: same ? this.value.mcpMutationReading : false,
+      mcpDetailServerId: same ? this.value.mcpDetailServerId : undefined,
+      mcpDirectoryAuth: same ? this.value.mcpDirectoryAuth : undefined,
       mcpAuthOpen: same ? this.value.mcpAuthOpen : false,
       mcpAuthServerId: same ? this.value.mcpAuthServerId : undefined,
       mcpAuthStatus: same ? this.value.mcpAuthStatus : undefined,
@@ -988,7 +1108,7 @@ export class TuiController {
       chooserRequested: false,
       notice: same ? this.value.notice : undefined,
       draft: this.drafts.get(sessionId) ?? '',
-      loading: true,
+      loading: !same || !this.value.snapshot,
       error: undefined,
     });
     const read = this.reading();
@@ -1121,6 +1241,20 @@ export class TuiController {
             ? this.value.context
             : undefined,
       });
+      // An explicit history selection may carry accepted requests from the old
+      // process. Resolve their original public IDs once; never submit them again.
+      if (selectingHistory && this.port.callers) {
+        const pending = [...this.value.callers.values()].filter(
+          (row) =>
+            row.intent.scope.storeId === this.port.storeId &&
+            row.intent.scope.sessionId === sessionId &&
+            ['unknown', 'submitting'].includes(row.phase),
+        );
+        for (const row of pending) {
+          if (read.signal.aborted || generation !== this.generation || this.disposed) break;
+          await this.lookupCaller(callerKey(row.intent));
+        }
+      }
     } catch (error) {
       if (
         !read.signal.aborted &&
@@ -1253,9 +1387,7 @@ export class TuiController {
         generation === this.generation &&
         sessionId === this.value.sessionId
       ) {
-        this.publish({
-          fileRecovery: { ...this.value.fileRecovery, intent: result, phase: 'ready' },
-        });
+        this.publishFileRecoveryResult(result);
         await this.applyFileRecoverySession(result);
       }
     } catch (error) {
@@ -1266,14 +1398,87 @@ export class TuiController {
         });
     }
   }
+  private publishFileRecoveryResult(
+    intent: import('@kite-ai/client/file-recovery-intent').FileRecoveryIntent,
+  ) {
+    const identity = canonicalFileRecoveryIntent(intent);
+    this.publish({
+      fileRecovery: {
+        ...this.value.fileRecovery,
+        intent,
+        saved: this.value.fileRecovery?.saved?.map((saved) =>
+          canonicalFileRecoveryIntent(saved) === identity ? intent : saved,
+        ),
+        phase: 'ready',
+      },
+    });
+  }
   private async applyFileRecoverySession(
     intent: import('@kite-ai/client/file-recovery-intent').FileRecoveryIntent,
   ) {
-    if (intent.fork?.phase === 'succeeded' && this.value.sessionId === intent.sessionId) {
-      await this.list();
-      await this.select(intent.fork.request.newSessionId);
+    if (intent.fork?.phase !== 'succeeded' || this.value.sessionId !== intent.sessionId) return;
+    const generation = this.generation,
+      read = this.fileRecoveryRead;
+    const original = this.value.snapshot?.view.session;
+    const current = () =>
+      !this.disposed &&
+      !read?.signal.aborted &&
+      generation === this.generation &&
+      this.value.sessionId === intent.sessionId &&
+      this.value.snapshot?.storeId === intent.storeId &&
+      intent.storeId === this.port.storeId &&
+      original?.workspaceId === intent.workspaceId &&
+      this.value.snapshot?.view.session.workspaceId === intent.workspaceId &&
+      this.value.fileRecovery?.intent !== undefined &&
+      canonicalFileRecoveryIntent(this.value.fileRecovery.intent) ===
+        canonicalFileRecoveryIntent(intent);
+    if (!current()) return;
+    this.publish({ fileRecovery: { ...this.value.fileRecovery, phase: 'submitting' } });
+    let restoredFiles: number | undefined;
+    if (intent.scope === 'both') {
+      if (intent.code?.phase !== 'succeeded' || !this.port.fileRecovery?.readCompletion)
+        throw Error('file_recovery_completion_unavailable');
+      const completion = await this.port.fileRecovery.readCompletion(intent, read?.signal);
+      if (!current()) return;
+      if (
+        canonicalFileRecoveryIntent(completion.intent) !== canonicalFileRecoveryIntent(intent) ||
+        !Number.isSafeInteger(completion.restoredFiles) ||
+        completion.restoredFiles < 0
+      )
+        throw Error('file_recovery_completion_mismatch');
+      restoredFiles = completion.restoredFiles;
+    }
+    await this.list();
+    if (!current()) return;
+    const newSessionId = intent.fork.request.newSessionId;
+    await this.select(newSessionId);
+    if (
+      this.disposed ||
+      this.value.sessionId !== newSessionId ||
+      this.value.snapshot?.storeId !== intent.storeId ||
+      this.value.snapshot?.view.session.workspaceId !== intent.workspaceId
+    )
+      return;
+    this.closePanel();
+    if (restoredFiles !== undefined) {
+      this.publish({
+        localMessages: [
+          ...this.value.localMessages,
+          {
+            id: `file-recovery-${intent.fork.request.commandId}`,
+            sessionId: newSessionId,
+            afterMessageId: this.visibleMessages.at(-1)?.id ?? null,
+            role: 'assistant',
+            content:
+              this.value.preferences.resolvedLanguage === 'zh-CN'
+                ? `已从检查点创建新会话，并恢复 ${restoredFiles} 个文件`
+                : `Created a new Session from the checkpoint and restored ${restoredFiles} files.`,
+          },
+        ],
+      });
     }
   }
+
   async observeFileRecovery(continueLeg = false) {
     const intent = this.value.fileRecovery?.intent;
     if (!intent || !this.port.fileRecovery || this.value.fileRecovery?.phase === 'submitting')
@@ -1288,9 +1493,7 @@ export class TuiController {
         ? this.port.fileRecovery.continue(intent, read.signal)
         : this.port.fileRecovery.lookup(intent, read.signal));
       if (!read.signal.aborted && generation === this.generation) {
-        this.publish({
-          fileRecovery: { ...this.value.fileRecovery, intent: result, phase: 'ready' },
-        });
+        this.publishFileRecoveryResult(result);
         await this.applyFileRecoverySession(result);
       }
     } catch (error) {
@@ -1488,12 +1691,16 @@ export class TuiController {
         ['submitting', 'unknown'].includes(row.phase),
     );
   }
-  private async submitCaller(scope: TuiDraftScope, request: TuiCallerRequest): Promise<Command> {
+  private async submitCaller(
+    scope: TuiDraftScope,
+    request: TuiCallerRequest,
+    question?: Pick<Interaction, 'id' | 'revision' | 'presentationSessionId'>,
+  ): Promise<Command> {
     const port = this.port.callers;
     if (!port) throw Error('caller_port_unavailable');
     let intent: TuiCallerIntent;
     try {
-      intent = await port.prepare(scope, request);
+      intent = await port.prepare(scope, request, question);
       if (
         intent.scope.storeId !== scope.storeId ||
         intent.scope.sessionId !== scope.sessionId ||
@@ -3230,7 +3437,7 @@ export class TuiController {
     const session = this.value.snapshot?.view.session,
       port = this.port.mcpAuth,
       observed = this.value.mcpSource?.facts;
-    if (!session || !port || !this.value.mcpSourceOpen || this.disposed) return;
+    if (!session || !port || this.value.panel !== 'mcp' || this.disposed) return;
     if (
       serverId &&
       (!observed ||
@@ -3244,6 +3451,7 @@ export class TuiController {
       generation = this.generation;
     this.mcpAuthRead = read;
     this.publish({
+      mcpAuthEntry: this.value.mcpSourceOpen ? 'source' : 'directory',
       mcpAuthOpen: true,
       mcpAuthServerId: serverId,
       mcpAuthStatus: undefined,
@@ -3422,9 +3630,52 @@ export class TuiController {
         callerKey(this.value.mcpAuthOutcome.intent) !== key
       )
         return;
+      let refreshedAuth: TuiMcpAuthStatus | undefined;
+      const source = this.value.mcpSource?.facts;
+      const authRequest = mcpAuthRequest(original.intent);
+      if (
+        this.value.mcpAuthEntry === 'directory' &&
+        source &&
+        authRequest &&
+        ['completed', 'failed', 'cancelled'].includes(outcome.phase)
+      ) {
+        try {
+          const status = await port.read(source, String(authRequest.input.serverId), read.signal);
+          if (
+            status.serverId === authRequest.input.serverId &&
+            status.workspaceId === source.workspaceId &&
+            ['available', 'locked', 'unavailable'].includes(status.status) &&
+            ['oauth', 'auto'].includes(status.policy) &&
+            typeof status.loginAllowed === 'boolean' &&
+            typeof status.credentialPresent === 'boolean'
+          )
+            refreshedAuth = freezeIntent(structuredClone(status));
+        } catch {
+          /* A changed source invalidates this cached status; refresh requires a new original read. */
+        }
+        if (
+          this.disposed ||
+          read.signal.aborted ||
+          generation !== this.generation ||
+          this.mcpAuthRead !== read ||
+          !this.value.mcpAuthOpen ||
+          this.value.mcpSource?.facts !== source ||
+          !this.value.mcpAuthOutcome ||
+          callerKey(this.value.mcpAuthOutcome.intent) !== key
+        )
+          return;
+      }
+      const directoryAuth = { ...this.value.mcpDirectoryAuth };
+      if (this.value.mcpAuthEntry === 'directory' && authRequest && outcome.phase !== 'pending') {
+        delete directoryAuth[String(authRequest.input.serverId)];
+        if (refreshedAuth) directoryAuth[refreshedAuth.serverId] = refreshedAuth;
+      }
       this.publish({
         mcpAuthOutcome: outcome,
         mcpAuthReading: false,
+        ...(this.value.mcpAuthEntry === 'directory' && outcome.phase !== 'pending'
+          ? { mcpDirectoryAuth: Object.freeze(directoryAuth), mcpAuthStatus: refreshedAuth }
+          : {}),
         ...(outcome.caller
           ? { callers: new Map(this.value.callers).set(key, outcome.caller) }
           : {}),
@@ -3476,7 +3727,7 @@ export class TuiController {
     this.mcpAuthRead?.abort();
     this.mcpSourceRead?.abort();
     this.mcpSourceLookupRead?.abort();
-    this.publish({ mcpSourceOpen: false, mcpSourceReading: false });
+    this.publish({ mcpSourceOpen: false, mcpSourceReading: false, mcpSourceEntry: undefined });
   }
   selectMcpSourceOriginal(commandId: string) {
     const outcome = this.mcpSourceIntents.get(commandId);
@@ -3489,6 +3740,22 @@ export class TuiController {
       return;
     this.mcpSourceLookupRead?.abort();
     this.publish({ mcpSourceOutcome: outcome, mcpSourceReading: false });
+  }
+  async requestMcpSourceApprovalFromDirectory(serverId: string) {
+    const observed = this.value.mcpSource?.facts;
+    if (
+      !observed ||
+      this.value.mcpSource?.read !== 'ready' ||
+      this.value.panel !== 'mcp' ||
+      this.value.mcpDetailServerId !== serverId ||
+      !reviewableMcpSource(
+        observed.items.find((row) => row.id === serverId),
+        observed,
+      )
+    )
+      return;
+    this.publish({ mcpSourceOpen: true, mcpSourceEntry: 'directory' });
+    await this.requestMcpSourceApproval(serverId, observed);
   }
   async requestMcpSourceApproval(serverId: string, observed = this.value.mcpSource?.facts) {
     const session = this.value.snapshot?.view.session,
@@ -3587,6 +3854,7 @@ export class TuiController {
     )
       return;
     this.publish({ mcpSourceOutcome: outcome });
+    await this.finishMcpDirectorySource(outcome, generation, session.id, session.workspaceId);
   }
   async lookupMcpSourceApproval() {
     const original = this.value.mcpSourceOutcome,
@@ -3634,6 +3902,33 @@ export class TuiController {
     )
       return;
     this.publish({ mcpSourceOutcome: outcome, mcpSourceReading: false });
+    await this.finishMcpDirectorySource(outcome, generation, sessionId, workspaceId);
+  }
+  private async finishMcpDirectorySource(
+    outcome: TuiMcpSourceApprovalOutcome,
+    generation: number,
+    sessionId: string | undefined,
+    workspaceId: string | undefined,
+  ) {
+    if (
+      this.value.mcpSourceEntry === 'directory' &&
+      outcome.phase === 'saved' &&
+      outcome.fact?.phase === 'saved' &&
+      outcome.fact.decision === 'approved'
+    ) {
+      const serverId = outcome.intent.request.input.serverId;
+      const name = this.value.mcpSource?.facts?.items.find((row) => row.id === serverId)?.name;
+      await this.openMcp();
+      if (
+        generation === this.generation &&
+        this.value.panel === 'mcp' &&
+        this.value.sessionId === sessionId &&
+        this.value.snapshot?.view.session.workspaceId === workspaceId
+      ) {
+        this.selectMcpServerDetail(serverId);
+        this.publish({ notice: `Approved project MCP server ${terminalText(name ?? serverId)}.` });
+      }
+    }
   }
   async openMcpTools(afterKey?: string) {
     this.closeMcpReconnections();
@@ -3753,6 +4048,21 @@ export class TuiController {
       });
     else this.publish({ mcpTools: undefined });
   }
+  selectMcpServerDetail(serverId?: string) {
+    const facts = this.value.mcp?.facts,
+      session = this.value.snapshot?.view.session;
+    if (
+      serverId &&
+      (!session ||
+        !facts ||
+        facts.storeId !== this.port.storeId ||
+        facts.sessionId !== session.id ||
+        facts.workspaceId !== session.workspaceId ||
+        !facts.items.some((item) => item.id === serverId))
+    )
+      return;
+    this.publish({ mcpDetailServerId: serverId });
+  }
   async openMcp() {
     const session = this.value.snapshot?.view.session,
       port = this.port.mcp;
@@ -3771,6 +4081,8 @@ export class TuiController {
     this.publish({
       panel: 'mcp',
       mcpTools: undefined,
+      mcpDetailServerId: undefined,
+      mcpDirectoryAuth: undefined,
       mcp: { facts: this.value.mcp?.facts, read: 'reading' },
       mcpOutcome: [...this.mcpIntents.values()].find(
         (outcome) =>
@@ -3840,6 +4152,57 @@ export class TuiController {
       )
         throw Error('mcp_directory_scope_mismatch');
       this.publish({ mcp: { facts: freezeIntent(structuredClone(facts)), read: 'ready' } });
+      const sourcePort = port.source,
+        authPort = this.port.mcpAuth;
+      if (sourcePort && authPort?.readDirectory) {
+        // Only a genuinely login-eligible target can expose a directory credential fact.
+        // Explicit authentication and original-request recovery use their independent reads.
+        const source = await sourcePort.read(session.id, read.signal);
+        if (
+          read.signal.aborted ||
+          generation !== this.generation ||
+          this.value.panel !== 'mcp' ||
+          this.value.sessionId !== session.id ||
+          source.storeId !== this.port.storeId ||
+          source.sessionId !== session.id ||
+          source.workspaceId !== session.workspaceId
+        )
+          return;
+        const auth: Record<string, TuiMcpAuthStatus> = {};
+        await Promise.all(
+          source.items
+            .filter((item) => item.transport === 'http')
+            .slice(0, 25)
+            .map(async (item) => {
+              try {
+                const status = await authPort.readDirectory!(source, item.id, read.signal);
+                if (!status) return;
+                if (
+                  status.serverId === item.id &&
+                  status.workspaceId === session.workspaceId &&
+                  ['oauth', 'auto'].includes(status.policy) &&
+                  ['available', 'locked', 'unavailable'].includes(status.status) &&
+                  typeof status.credentialPresent === 'boolean' &&
+                  status.loginAllowed === true
+                )
+                  auth[item.id] = freezeIntent(structuredClone(status));
+              } catch {
+                /* Unknown stays unknown; it never promotes authentication or connection health. */
+              }
+            }),
+        );
+        if (
+          !read.signal.aborted &&
+          generation === this.generation &&
+          this.value.panel === 'mcp' &&
+          this.value.sessionId === session.id &&
+          this.value.snapshot?.view.session.workspaceId === session.workspaceId
+        )
+          this.publish({
+            mcpDirectoryAuth: Object.freeze(auth),
+            mcpSource: { facts: freezeIntent(structuredClone(source)), read: 'ready' },
+          });
+      }
     } catch (error) {
       if (!read.signal.aborted && generation === this.generation && this.value.panel === 'mcp')
         this.publish({
@@ -4607,7 +4970,37 @@ export class TuiController {
       return;
     }
     if (command.kind === 'exit' && management) {
-      management.quit();
+      const isTypedCommand =
+        !!commandSession &&
+        this.drafts.get(commandSession) === text &&
+        (this.draftVersions.get(commandSession) ?? 0) === commandDraftVersion;
+      // Consume this exact control command before the host flushes unsent text.
+      // Otherwise '/exit' itself competes with another UI's saved empty draft.
+      consumeCommand();
+      const consumed =
+        isTypedCommand &&
+        this.drafts.get(commandSession!) === '' &&
+        this.draftVersions.get(commandSession!) === commandDraftVersion + 1;
+      if (isTypedCommand && !consumed) {
+        this.draftUnavailable('tui_draft_save_failed_exit_blocked');
+        return;
+      }
+      let exited = false;
+      try {
+        exited = management.quit() !== false;
+      } finally {
+        // A blocked exit retains its control command only if no newer edit or
+        // scope switch occurred. Independent user text was never consumed.
+        if (
+          !exited &&
+          consumed &&
+          this.value.sessionId === commandSession &&
+          this.drafts.get(commandSession!) === '' &&
+          this.draftVersions.get(commandSession!) === commandDraftVersion + 1 &&
+          JSON.stringify(this.draftScope()) === JSON.stringify(commandScope)
+        )
+          this.setDraft(text);
+      }
       return;
     }
     if (command.kind === 'rewind') {
@@ -4623,10 +5016,6 @@ export class TuiController {
       snapshot.view.session.rootSessionId !== snapshot.view.session.id
     ) {
       this.publish({ error: 'management_unavailable' });
-      return;
-    }
-    if (command.kind === 'exit') {
-      management.quit();
       return;
     }
     if (command.kind === 'new') {
@@ -4772,21 +5161,33 @@ export class TuiController {
       storeId: this.port.storeId,
       sessionId,
       generation,
-      messages: snapshot.messages.flatMap((message) => {
-        if (message.role !== 'user' && message.role !== 'assistant') return [];
-        const loaded = this.value.loadedOutputBodies.get(message.id);
-        return [
-          {
-            id: message.id,
-            seq: message.seq,
-            role: message.role,
-            content: loaded?.content ?? message.content,
-            ...(loaded?.reasoning ? { reasoning: loaded.reasoning } : {}),
-            previewOnly: Boolean(message.outputBody && !loaded),
-            complete: loaded?.complete ?? message.status === 'complete',
-          },
-        ];
-      }),
+      messages: this.visibleTranscript.flatMap<TuiLoadedTextExport['messages'][number]>(
+        (message) => {
+          if (message.role !== 'user' && message.role !== 'assistant') return [];
+          if ('afterMessageId' in message)
+            return [
+              {
+                id: message.id,
+                seq: 'local',
+                role: message.role,
+                content: message.content,
+                complete: true,
+              },
+            ];
+          const loaded = this.value.loadedOutputBodies.get(message.id);
+          return [
+            {
+              id: message.id,
+              seq: message.seq,
+              role: message.role,
+              content: loaded?.content ?? message.content,
+              ...(loaded?.reasoning ? { reasoning: loaded.reasoning } : {}),
+              previewOnly: Boolean(message.outputBody && !loaded),
+              complete: loaded?.complete ?? message.status === 'complete',
+            },
+          ];
+        },
+      ),
     });
     const read = this.reading();
     this.publish({ notice: undefined, error: undefined });
@@ -4932,6 +5333,8 @@ export class TuiController {
         'notSubmitted' in error &&
         error.notSubmitted === true
       ) {
+        if (kind === 'interaction.answer' && this.answerIntent?.request.commandId === commandId)
+          this.answerIntent.phase = 'rejected';
         this.publish({
           intent: { sessionId, commandId, kind, phase: 'rejected' },
           error: error instanceof Error ? error.message : 'caller_prepare_failed',
@@ -5131,7 +5534,8 @@ export class TuiController {
         }
       : {};
     const intent: StartCommandRequest | SteerCommandRequest | FollowUpCommandRequest = freezeIntent(
-      run && (maintenance || cancelling || planning)
+      run &&
+        (maintenance || cancelling || planning || this.port.activeInputKind === 'input.follow_up')
         ? {
             kind: 'input.follow_up',
             expectedStoreId: this.port.storeId,
@@ -5262,7 +5666,11 @@ export class TuiController {
       async () => {
         try {
           return this.port.callers
-            ? await this.submitCaller(scope, request)
+            ? await this.submitCaller(scope, request, {
+                id: current.id,
+                revision: current.revision,
+                presentationSessionId: current.presentationSessionId,
+              })
             : port.stop(scope.sessionId, request);
         } catch (error) {
           if (error instanceof Error && 'notSubmitted' in error) this.cancelled.delete(key);
@@ -5296,8 +5704,11 @@ export class TuiController {
           row.intent.scope.storeId === this.port.storeId &&
           (row.intent.scope.sessionId === snapshot?.view.session.id ||
             row.intent.request.commandId === pending?.commandId) &&
-          ['run.start', 'input.steer', 'input.follow_up'].includes(row.intent.request.kind) &&
-          ['submitting', 'unknown', 'accepted'].includes(row.phase),
+          row.intent.request.kind === 'run.start' &&
+          ['submitting', 'unknown', 'accepted'].includes(row.phase) &&
+          !snapshot?.view.runs.some(
+            (saved) => saved.originCommandId === row.intent.request.commandId && !saved.isActive,
+          ),
       );
     const target =
       run?.originCommandId ??
@@ -5414,6 +5825,7 @@ export class TuiController {
     const old = this.value.executionReading;
     this.publish({
       panel: 'executions',
+      executionSelectedId: target.executionId,
       executionReading: {
         target,
         phase: 'reading',

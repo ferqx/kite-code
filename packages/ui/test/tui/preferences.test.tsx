@@ -713,3 +713,32 @@ test('composer and answer paste labels and file candidate hints follow locale wh
   list.unmount();
   f.controller.dispose();
 });
+
+test('ordinary successful theme selection closes the original selector and records exact local success only once', async () => {
+  const f = fixture();
+  await tick();
+  await f.controller.select('a');
+  const ui = render(<TuiSession controller={f.controller} />);
+  await f.controller.routeCommand('/theme');
+  await tick();
+  ui.stdin.write('\u001b[B');
+  await tick();
+  ui.stdin.write('\r');
+  await tick();
+  expect(f.controller.state.panel).toBeUndefined();
+  expect(f.controller.state.localMessages.map((item) => item.content)).toEqual([
+    '/theme blue',
+    '  ⎿  Theme set to blue',
+  ]);
+  expect(f.edits).toHaveLength(1);
+  await f.controller.routeCommand('/theme');
+  await tick();
+  ui.stdin.write('\r');
+  await tick();
+  expect(f.controller.state.panel).toBeUndefined();
+  expect(f.controller.state.localMessages).toHaveLength(2);
+  expect(f.edits).toHaveLength(1);
+  expect(f.counts().effects).toBe(0);
+  ui.unmount();
+  f.controller.dispose();
+});

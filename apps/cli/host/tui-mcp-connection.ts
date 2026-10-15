@@ -228,6 +228,9 @@ export function createTuiMcpConnectionPort(
       throw Error('mcp_connection_original_command_mismatch');
   };
   async function scope(intent: TuiMcpConnectionIntent, observed: TuiMcpSnapshot) {
+    // These two Host display fields carry no configuration authority. All
+    // remaining snapshot bytes must still match the fresh Source exactly.
+    const { labels: _labels, liveServerIds: _liveServerIds, ...canonicalObserved } = observed;
     admission(intent);
     const view = await client.getView(intent.sessionId);
     admission(intent);
@@ -265,7 +268,7 @@ export function createTuiMcpConnectionPort(
       fresh.sessionId !== intent.sessionId ||
       fresh.workspaceId !== intent.workspaceId ||
       fresh.workspaceIdentity !== intent.workspaceIdentity ||
-      mcpCanonical(fresh) !== mcpCanonical(observed) ||
+      mcpCanonical(fresh) !== mcpCanonical(canonicalObserved) ||
       !server?.admitted ||
       !server.selected ||
       !server.available
@@ -368,6 +371,7 @@ export function createTuiMcpConnectionPort(
     async submit(raw, observed) {
       const intent = parseMcpConnectionIntent(raw);
       let prepared: ReturnType<typeof createMcpConnectionRecord> | undefined;
+      let acceptedCommand: Command | undefined;
       try {
         admission(intent);
         const record = createMcpConnectionRecord(intent, subject()!);
@@ -388,6 +392,7 @@ export function createTuiMcpConnectionPort(
         if (subject() !== record.subjectId) throw Error('mcp_connection_subject_changed');
         const command = await client.invokeExtension(intent.sessionId, intent.request);
         original(intent, command);
+        acceptedCommand = command;
         const result = await outcome(intent);
         journal.record(record, result.phase);
         return result;
@@ -397,7 +402,11 @@ export function createTuiMcpConnectionPort(
             journal.record(prepared, 'outcome_unknown');
           } catch {}
         }
-        return { intent, phase: 'outcome_unknown' };
+        return {
+          intent,
+          phase: 'outcome_unknown',
+          ...(acceptedCommand ? { command: acceptedCommand } : {}),
+        };
       }
     },
     async lookup(raw, signal) {

@@ -148,7 +148,7 @@ export function createTuiCallerPort(input: {
         phase: ['applied', 'rejected'].includes(row.phase) ? row.phase : 'unknown',
       }));
     },
-    async prepare(scope, rawRequest) {
+    async prepare(scope, rawRequest, question) {
       // Match the public validated wire body: optional undefined fields are omitted by JSON.
       const requestDigest = callerRequestDigest(rawRequest);
       const request = JSON.parse(JSON.stringify(rawRequest)) as typeof rawRequest;
@@ -213,11 +213,48 @@ export function createTuiCallerPort(input: {
           job.id !== request.executionId ||
           job.originStoreId !== scope.storeId ||
           job.sessionId !== scope.sessionId ||
-          job.kind !== 'job' ||
           !['planned', 'dispatching', 'running'].includes(job.status) ||
           job.cancelRequestedAt !== null
         )
           throw Error('caller_job_scope_unavailable');
+        if (question) {
+          // A Question may belong to an ordinary Tool or Action. Re-read that
+          // exact original card; its revision and presentation are not Job scope.
+          const card = await input.client.getInteraction(
+            question.presentationSessionId,
+            question.id,
+            { storeId: scope.storeId, origin: 'current' },
+            { signal: input.signal },
+          );
+          if (
+            card.id !== question.id ||
+            card.revision !== question.revision ||
+            card.presentationSessionId !== question.presentationSessionId ||
+            card.originStoreId !== scope.storeId ||
+            card.sessionId !== scope.sessionId ||
+            card.executionId !== job.id ||
+            card.runId !== job.runId ||
+            card.definitionId !== job.definitionId ||
+            card.definitionVersion !== job.definitionVersion ||
+            card.kind !== 'question' ||
+            card.state !== 'pending'
+          )
+            throw Error('caller_question_scope_unavailable');
+          if (question.presentationSessionId !== scope.sessionId) {
+            const presentation = await input.client.getView(question.presentationSessionId, {
+              signal: input.signal,
+            });
+            if (
+              presentation.storeId !== scope.storeId ||
+              presentation.session.id !== question.presentationSessionId ||
+              presentation.session.workspaceId !== scope.workspaceId ||
+              presentation.session.deletedAt !== null ||
+              (view.session.rootSessionId ?? view.session.id) !==
+                (presentation.session.rootSessionId ?? presentation.session.id)
+            )
+              throw Error('caller_question_scope_unavailable');
+          }
+        } else if (job.kind !== 'job') throw Error('caller_job_scope_unavailable');
       }
       if (request.kind === 'command.cancel') {
         const target = await input.client.getCommand(request.targetCommandId, {
@@ -289,6 +326,7 @@ export class CLICallerPrepareError extends Error {
         'caller_scope_unavailable',
         'caller_cancel_scope_unavailable',
         'caller_job_scope_unavailable',
+        'caller_question_scope_unavailable',
       ].includes(error.message)
         ? error.message
         : 'caller_prepare_unavailable';

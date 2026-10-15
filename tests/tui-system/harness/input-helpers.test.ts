@@ -611,8 +611,8 @@ describe('TUI input helpers', () => {
 
   test('waitForRequestMessage ignores matching requests before the supplied baseline', async () => {
     const requests = [
-      { body: {}, messages: [{ content: 'target' }] },
-      { body: {}, messages: [{ content: 'other' }] },
+      { body: {}, messages: [{ role: 'user', content: 'target' }] },
+      { body: {}, messages: [{ role: 'user', content: 'other' }] },
     ];
     const server = {
       baseURL: 'http://127.0.0.1/v1',
@@ -635,16 +635,63 @@ describe('TUI input helpers', () => {
     );
   });
 
+  test('waitForRequestMessage binds full original user text after history while synthetic user tails remain data', async () => {
+    const target = 'Original complete\nUnicode 用户 task';
+    const requests = [
+      {
+        body: {},
+        messages: [
+          { role: 'user', content: target },
+          { role: 'assistant', content: 'Previous answer' },
+          { role: 'user', content: 'Another current task' },
+          { role: 'user', content: '<runtime-state>current state</runtime-state>' },
+        ],
+      },
+    ];
+    const server = {
+      getRequestCount: () => requests.length,
+      getRequests: () => requests,
+    } as unknown as MockModelServer;
+    await expect(waitForRequestMessage(server, target, 10, { since: 0 })).rejects.toThrow(
+      'Saw 1 new request(s)',
+    );
+    requests.push({
+      body: {},
+      messages: [
+        { role: 'assistant', content: target },
+        { role: 'user', content: `${target} suffix` },
+      ],
+    });
+    await expect(waitForRequestMessage(server, target, 10, { since: 1 })).rejects.toThrow(
+      'Saw 1 new request(s)',
+    );
+    requests.push({
+      body: {},
+      messages: [
+        { role: 'user', content: 'Earlier task' },
+        { role: 'assistant', content: 'Earlier answer' },
+        { role: 'user', content: target.replaceAll('\n', '\r\n') },
+        { role: 'user', content: '<project-instructions>complete project</project-instructions>' },
+        { role: 'user', content: '{"kind":"current_plan","approval":null}' },
+        { role: 'user', content: '<runtime-state>phase: planning</runtime-state>' },
+      ],
+    });
+    await waitForRequestMessage(server, target, 10, { since: 2 });
+    expect(requests).toHaveLength(3);
+  });
+
   test('submitUserMessage confirms both terminal receipt and a new model request', async () => {
     let rendered = '';
-    const requests: Array<{ body: Record<string, never>; messages: Array<{ content: string }> }> =
-      [];
+    const requests: Array<{
+      body: Record<string, never>;
+      messages: Array<{ role: 'user'; content: string }>;
+    }> = [];
     let pending = '';
     let currentInput = '';
     const tui = fakePty(
       (data) => {
         if (data === '\r') {
-          requests.push({ body: {}, messages: [{ content: pending }] });
+          requests.push({ body: {}, messages: [{ role: 'user', content: pending }] });
           pending = '';
           currentInput = '';
           return;
@@ -681,8 +728,10 @@ describe('TUI input helpers', () => {
   test('deferred message submission separates the local queue receipt from Runtime delivery', async () => {
     let currentInput = '';
     let queued = false;
-    const requests: Array<{ body: Record<string, never>; messages: Array<{ content: string }> }> =
-      [];
+    const requests: Array<{
+      body: Record<string, never>;
+      messages: Array<{ role: 'user'; content: string }>;
+    }> = [];
     let submittedText = '';
     const tui = fakePty(
       (data) => {
@@ -721,7 +770,7 @@ describe('TUI input helpers', () => {
 
     expect(delivery.requestBaseline).toBe(0);
     expect(requests).toHaveLength(0);
-    requests.push({ body: {}, messages: [{ content: submittedText }] });
+    requests.push({ body: {}, messages: [{ role: 'user', content: submittedText }] });
     await delivery.waitForRuntimeRequest();
     expect(requests[0]?.messages[0]?.content).toBe('next');
   });

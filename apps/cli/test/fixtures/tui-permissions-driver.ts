@@ -6,6 +6,7 @@ import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
   runner: string;
+  storeId: string;
   root: string;
   databasePath: string;
   workspace: string;
@@ -81,22 +82,45 @@ let failure: unknown;
 let normal = false;
 let servicePid: number | undefined;
 try {
+  await wait('› Exit Kite Code');
+  await key('\x1b[B');
+  await wait('› Trust this workspace and continue');
+  await key('\r');
   await wait('New Run');
   servicePid = Number(readFileSync(join(input.root, 'owned-service-pid'), 'utf8'));
   assert.ok(Number.isSafeInteger(servicePid) && servicePid > 0);
   process.kill(servicePid, 0);
   await send('/permissions');
   await wait('Saved same_command grants: 0');
-  await key('t');
-  await wait('Confirm original');
-  await key('\r');
-  await wait('workspace.trust: applied');
-  await wait('trusted, revision');
+  await wait('Workspace w: trusted, revision 1');
+  const trustRows = rows(
+    "SELECT id,origin_store_id,scope,state,safe_request_json,receipt_json FROM host_mutation WHERE kind='workspace.trust'",
+  ) as {
+    id: string;
+    origin_store_id: string;
+    scope: string;
+    state: string;
+    safe_request_json: string;
+    receipt_json: string;
+  }[];
+  assert.equal(trustRows.length, 1);
+  const originalTrust = trustRows[0]!,
+    trustRequest = JSON.parse(originalTrust.safe_request_json),
+    trustReceipt = JSON.parse(originalTrust.receipt_json);
+  assert.equal(originalTrust.origin_store_id, input.storeId);
+  assert.equal(originalTrust.scope, 'workspace:w');
+  assert.equal(originalTrust.state, 'applied');
+  assert.equal(trustRequest.workspaceId, 'w');
+  assert.equal(trustRequest.trusted, true);
+  assert.equal(trustRequest.ifRevision, '0');
+  assert.equal(trustReceipt.trusted, true);
+  assert.equal(trustReceipt.revision, '1');
+  assert.equal(trustReceipt.canonicalIdentity, trustRequest.canonicalIdentity);
+  assert.equal(trustReceipt.externalReadScopeDigest, trustRequest.externalReadScopeDigest);
   await pump();
   // Formal request approval admits workspace writes. Explicit Auto with an actual
   // ask_user review exercises the original two independent same-command cards.
-  await key('\x1b[B');
-  await wait('› 自动审核');
+  await wait('❯ 自动审核');
   await key('\r');
   await wait('Confirm original');
   await key('\r');
@@ -104,7 +128,7 @@ try {
   await key('\x1b');
   await wait('New Run >');
   await send('owned-1');
-  await wait('same_command');
+  await wait('same command in original Session');
   await key('\r');
   await pump();
   assert.equal(
@@ -156,7 +180,7 @@ try {
   await key('\x1b');
   await wait('New Run >');
   await send('owned-3');
-  await wait('same_command');
+  await wait('same command in original Session');
   await key('\x03');
   await pump();
   await key('\x11');

@@ -53,8 +53,8 @@ const waitSelection = async (current: string, target: string) => {
     if (
       frame.fresh &&
       lines.some((line) => line.startsWith(`Session ${current} · `)) &&
-      lines.includes('Select Session (arrows/Enter, Esc)') &&
-      lines.includes(`> ${target}`)
+      lines.some((line) => line.includes('Select Session (arrows/Enter, Esc)')) &&
+      lines.some((line) => line.trimStart().startsWith(`❯ ${target}`))
     ) {
       console.log(`COMPOSER_SELECTION_FRAME ${current} -> ${target}`);
       return;
@@ -146,7 +146,10 @@ try {
   writeFileSync(join(input.root, 'composer-model-release'), 'explicit owned model release');
   await wait('approval [');
   await key('\x1b[B');
-  await wait('only this call');
+  await wait('❯ Deny');
+  await key('\x1b[B');
+  await wait('❯ Allow once');
+  await wait('Approve this execution only');
   await key('\r');
   await wait('RECOVERED_ORIGINAL_DONE');
   assert.equal(writes().length, 2);
@@ -157,7 +160,7 @@ try {
   assert.equal(writes().length, 2);
   await key('\x12');
   await wait('Select Session');
-  await key('\x1b[A');
+  await key('\x1b[B');
   await waitSelection('composer', 'Original recovery [s]');
   await key('\r');
   await wait('Session s');
@@ -165,7 +168,7 @@ try {
   await wait('ORIGINAL_SCOPE_TEXT');
   await key('\x12');
   await wait('Select Session');
-  await key('\x1b[B');
+  await key('\x1b[A');
   await waitSelection('s', 'Composer [composer]');
   await key('\r');
   await wait('Session composer');
@@ -173,7 +176,7 @@ try {
   await wait('COMPOSER_SCOPE_TEXT');
   await key('\x12');
   await wait('Select Session');
-  await key('\x1b[A');
+  await key('\x1b[B');
   await waitSelection('composer', 'Original recovery [s]');
   await key('\r');
   await wait('Session s');

@@ -53,7 +53,23 @@ try {
   assert.ok(help.includes('Help'));
   await key('\u001b');
   await key(`\u001b[200~${input.original}\u001b[201~`);
-  await wait('[Pasted');
+  const editing = await wait('console.log("user literal");');
+  for (const line of input.original.split('\n').filter(Boolean)) assert.ok(editing.includes(line));
+  const beforeSubmit = new Database(input.databasePath, { readonly: true });
+  try {
+    assert.equal(
+      (beforeSubmit.query('SELECT count(*) AS count FROM run').get() as { count: number }).count,
+      0,
+    );
+    assert.equal(
+      (beforeSubmit.query('SELECT count(*) AS count FROM execution').get() as { count: number })
+        .count,
+      0,
+    );
+  } finally {
+    beforeSubmit.close();
+  }
+
   await key('\r');
   const completed = await wait(input.responseMarker);
   assert.ok(completed.includes('**literal user**'));

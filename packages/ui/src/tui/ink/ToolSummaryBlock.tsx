@@ -1,7 +1,7 @@
 import { Box, Text } from 'ink';
 import { memo, useMemo } from 'react';
 import stringWidth from 'string-width';
-import { useInkTheme } from '../presentation';
+import { useInkI18n, useInkTheme, useTuiPresentation } from '../presentation';
 import { activityDot } from './activity-dot';
 import {
   actionName,
@@ -134,6 +134,8 @@ function latestActivityLabel(
 interface ToolSummaryBlockProps {
   block: Extract<OutputBlock, { kind: 'tool_summary' }>;
   columns: number;
+  /** Verified terminal suffix, displayed once before its immutable summary is committed. */
+  finalReasoning?: string;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -157,11 +159,16 @@ interface StepRowProps {
 }
 
 const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps) {
+  const { t: translate } = useInkI18n();
   const isError = step.status === 'error' || step.status === 'exhausted';
   const lineColor = isError ? dt.error : dt.dim;
   const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
   const stepPreW = stringWidth(`${connector}${stepActionName(step)}`);
-  const errSummary = failureSummary(step, 32);
+  const failure = failureSummary(step, 32);
+  const errSummary =
+    step.name === 'ask_user' && failure === 'invalid_tool_arguments'
+      ? `${translate('tool.askUserInvalidArguments')} (${failure})`
+      : failure;
   const stepSufW = isError ? stringWidth(errSummary) + 1 : 0;
   const fitLabel = rawLabel
     ? truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - stepSufW - 2))
@@ -202,10 +209,15 @@ function ThinkingWindow({ lines }: { lines: string[] }) {
   );
 }
 
-export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlockProps) {
+export default memo(function ToolSummaryBlock({
+  block,
+  columns,
+  finalReasoning,
+}: ToolSummaryBlockProps) {
   const dt = useInkTheme();
   const col = columns > 0 ? columns : (process.stdout.columns ?? 80);
 
+  const { activityVerified } = useTuiPresentation();
   const isRunning = block.active;
 
   // Preview elapsed time locally; Runtime duration remains the settled authority.
@@ -227,7 +239,10 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   const skipped = Math.max(0, stepCount - MAX_VISIBLE_STEPS);
   const hasSkipped = skipped > 0;
   const thinkingText =
-    isRunning && block.latestActivity?.kind === 'thinking' ? block.latestActivity.text : undefined;
+    finalReasoning ??
+    (isRunning && block.latestActivity?.kind === 'thinking'
+      ? block.latestActivity.text
+      : undefined);
   const thinkingLines = useMemo(() => {
     if (!thinkingText?.trim()) return [];
     const compactText = thinkingText
@@ -256,13 +271,16 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // elapsed = model-call duration (rule 22). col-2 扣除圆点列宽。
   const hasThink = block.hasThinking === true;
   const hasTools = block.tools.length > 0;
-  const summaryLabel = hasThink
-    ? thinkingLabel(elapsedStr, summaryLine, hasTools, col - 2)
-    : hasTools
-      ? summaryLine
-      : elapsedStr
-        ? `Thinking ${elapsedStr}`
-        : 'Thinking';
+  const summaryLabel =
+    block.active && !activityVerified
+      ? `Activity unverified${hasTools ? ` · ${summaryLine}` : ''}`
+      : hasThink
+        ? thinkingLabel(elapsedStr, summaryLine, hasTools, col - 2)
+        : hasTools
+          ? summaryLine
+          : elapsedStr
+            ? `Thinking ${elapsedStr}`
+            : 'Thinking';
 
   // ── Step connector ──
   // A compact detail group has one entry branch. Its later sibling rows align
@@ -281,7 +299,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // with tool-block names. Placed after all hooks (rules-of-hooks).
   // A sealed summary is not a visual expansion state. The first visible text
   // event has already ended the Thought from the user's perspective.
-  if (!isRunning) {
+  if (!isRunning && !finalReasoning) {
     return (
       <Box flexDirection="column">
         <Box>

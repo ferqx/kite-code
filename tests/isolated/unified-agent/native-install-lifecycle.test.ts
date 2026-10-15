@@ -178,9 +178,11 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           }
         }
         const body = (await request.json()) as { messages: { role: string; content: string }[] };
-        expect(body.messages.filter((m) => m.role === 'user').at(-1)!.content).toBe(
-          'real installed Native task',
+        const originalUsers = body.messages.filter(
+          (m) => m.role === 'user' && m.content === 'real installed Native task',
         );
+        expect(originalUsers).toHaveLength(1);
+        expect(originalUsers[0]!.content).toBe('real installed Native task');
         providerCalls++;
         const frame = (delta: unknown, finish_reason: string | null) =>
           `data: ${JSON.stringify({ id: 'native-install', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
@@ -237,6 +239,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
             : dirname(electronExecutable);
       const built = await prep('first_candidate_build', () =>
         buildNativeCandidate({
+          testDiagnostics: true,
           terminalRoot: terminal.root,
           electronDist,
           outdir: join(root, 'source'),
@@ -278,6 +281,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         const v2Terminal = verifyTerminalRuntimeBundle(synthetic);
         const second = await prep('second_candidate_build', () =>
           buildNativeCandidate({
+            testDiagnostics: true,
             terminalRoot: synthetic,
             electronDist,
             outdir: join(root, 'second-source'),

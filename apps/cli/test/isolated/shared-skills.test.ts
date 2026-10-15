@@ -27,6 +27,11 @@ import { selectWorkflowActivations } from '../../host/workflow-activations';
 import { run } from '../../src';
 import { parseCLIArguments } from '../../src/arguments';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
+import {
+  type OriginalMessage,
+  originalLastIndex,
+  originalToolResults,
+} from '../fixtures/original-tool-results';
 import { workflowManifest } from '../fixtures/workflow-manifest';
 
 const nativeTest = process.platform === 'darwin' ? test : test.skip;
@@ -76,7 +81,8 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
   let stopDaemon: (() => Promise<unknown>) | undefined;
   const entered = gate(),
     release = gate();
-  const requests: { messages: { role: string; content: unknown }[] }[] = [];
+  const requests: { messages: OriginalMessage[] }[] = [];
+  const issuedCalls = new Map<string, string>();
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -84,7 +90,47 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
       const body = (await request.json()) as (typeof requests)[number];
       requests.push(body);
       const text = JSON.stringify(body.messages);
-      const toolReply = body.messages.at(-1)?.role === 'tool';
+      const db = new Database(profile.databasePath, { readonly: true });
+      let human: string;
+      try {
+        const rows = db
+          .query(
+            'SELECT command.request_json FROM run JOIN command ON command.id=run.origin_command_id WHERE run.is_active=1',
+          )
+          .all() as { request_json: string }[];
+        const tasks = rows
+          .map((row) => JSON.parse(row.request_json).content)
+          .filter((content): content is string => typeof content === 'string');
+        const current = body.messages
+          .slice()
+          .reverse()
+          .find(
+            (message) => message.role === 'user' && tasks.includes(String(message.content)),
+          )?.content;
+        if (typeof current !== 'string') throw Error('original_skill_work_missing');
+        human = current;
+      } finally {
+        db.close();
+      }
+      const latest = body.messages
+        .slice(
+          originalLastIndex(
+            body.messages,
+            (message) => message.role === 'user' && message.content === human,
+          ) + 1,
+        )
+        .reverse()
+        .find((message) => message.role === 'assistant');
+      const calls = latest?.tool_calls ?? [];
+      if (calls.some((call) => issuedCalls.get(call.id) !== call.function.name))
+        throw Error('original_skill_call_not_issued');
+      const toolReply =
+        calls.length > 0 &&
+        originalToolResults(
+          body.messages,
+          human,
+          calls.map((call) => ({ id: call.id, name: call.function.name })),
+        );
       const chosen = text.includes('BetaSkill') && !text.includes('AlphaSkill') ? 'beta' : 'alpha';
       const delta = toolReply
         ? { content: 'done' }
@@ -104,6 +150,13 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
               },
             ],
           };
+      if (!toolReply)
+        issuedCalls.set(
+          `load-${requests.length}`,
+          workflow && text.includes('SHARED_WORKFLOW_INLINE_ORIGINAL_BODY')
+            ? 'complete_skill'
+            : 'skills.load',
+        );
       const held = !toolReply && text.includes('HOLD_ALPHA');
       return new Response(
         new ReadableStream<Uint8Array>({

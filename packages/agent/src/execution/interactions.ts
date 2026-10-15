@@ -25,6 +25,15 @@ export class AuthorizationDeniedError extends AgentError {
   }
 }
 
+/** Exact saved cancellation of an information-only Question, never an effect result. */
+export class QuestionCancelledError extends AgentError {
+  readonly interaction: Readonly<InteractionRecord>;
+  constructor(interaction: Readonly<InteractionRecord>) {
+    super('execution_cancel_requested');
+    this.interaction = interaction;
+  }
+}
+
 export interface InteractionScope {
   final?: boolean;
   previousReview?: ReadAuthorizationReviewInput;
@@ -86,7 +95,15 @@ export class InteractionGate {
       interaction = current;
     }
     scope.signal.throwIfAborted();
-    if (interaction.state === 'cancelled') throw new AgentError('cancelled_before_dispatch');
+    if (interaction.state === 'cancelled') {
+      if (
+        interaction.kind === 'question' &&
+        interaction.originStoreId === scope.expectedStoreId &&
+        interaction.executionId === scope.executionId
+      )
+        throw new QuestionCancelledError(interaction);
+      throw new AgentError('cancelled_before_dispatch');
+    }
     return interaction;
   }
 

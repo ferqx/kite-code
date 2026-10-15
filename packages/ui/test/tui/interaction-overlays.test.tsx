@@ -110,3 +110,26 @@ test('wizard review shows semantic option labels and full original feedback with
     ui.unmount();
   }
 });
+
+test('actual approval card displays exact canonical tool and target without leaking file body', () => {
+  const card = {
+    kind: 'approval',
+    definitionId: 'files.write_path',
+    request: {
+      definitionId: 'files.write_path',
+      definitionVersion: '1',
+      input: { path: '/owned/home/external.txt', content: 'private draft contents', base: null },
+      grants: ['approve_once'],
+      policy: { effects: ['external'] },
+    },
+  } as unknown as Interaction;
+  const ui = render(<TuiApprovalPanel card={card} choices={['approve', 'deny']} selected={0} />);
+  try {
+    expect(ui.lastFrame()).toContain('files.write_path');
+    expect(ui.lastFrame()).toContain('/owned/home/external.txt');
+    expect(ui.lastFrame()).not.toContain('private draft contents');
+    expect(ui.lastFrame()).not.toContain('same command');
+  } finally {
+    ui.unmount();
+  }
+});

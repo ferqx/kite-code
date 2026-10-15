@@ -38,6 +38,34 @@ export function TuiSessionChooser({
     [],
   );
   const deletion = state.sessionDeletion;
+  useEffect(() => {
+    const outcome = state.management;
+    if (
+      deletion?.phase === 'delete_requested' &&
+      deletion.intent?.kind === 'session.delete' &&
+      outcome?.status === 'delete_requested' &&
+      outcome.intent.kind === 'session.delete' &&
+      outcome.intent.request.commandId === deletion.intent.request.commandId &&
+      outcome.intent.sessionId === deletion.sessionId &&
+      outcome.intent.request.expectedStoreId === controller.port.storeId &&
+      deletion.sourceSessionId === state.sessionId &&
+      !state.sessionDirectoryLoading &&
+      !state.sessionDirectoryError &&
+      !state.sessions.some((session) => session.id === deletion.sessionId)
+    ) {
+      controller.closeSessionDeletion();
+      close();
+    }
+  }, [
+    close,
+    controller,
+    deletion,
+    state.management,
+    state.sessionId,
+    state.sessionDirectoryLoading,
+    state.sessionDirectoryError,
+    state.sessions,
+  ]);
   const sessions = state.sessions.filter((session) =>
     `${session.title}\n${session.id}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   );
@@ -91,6 +119,10 @@ export function TuiSessionChooser({
       return;
     }
     if (key.ctrl || key.meta) return;
+    if (focus === 'list' && state.sessionDirectoryError && input.toLowerCase() === 'r') {
+      void controller.list();
+      return;
+    }
     if (key.upArrow) {
       if (selected === 0) setFocus('search');
       else setSelectedId(sessions[selected - 1]?.id);
@@ -155,7 +187,8 @@ export function TuiSessionChooser({
   if (deletion)
     return (
       <TuiOverlayFrame
-        title={t('Delete Session?')}
+        title={testDiagnostics ? t('Delete Session?') : originalLabel('session.title')}
+        meta={testDiagnostics ? undefined : originalLabel('session.deleteConfirm')}
         footer={
           <OverlayShortcutBar
             shortcuts={[
@@ -197,7 +230,9 @@ export function TuiSessionChooser({
                 },
                 {
                   id: 'delete',
-                  label: t('Delete Session'),
+                  label: testDiagnostics
+                    ? t('Delete Session')
+                    : originalLabel('session.deletePermanently'),
                   description: t(
                     'Delete hides this Session and requests its work to stop. Workspace files stay unchanged.',
                   ),
@@ -233,14 +268,7 @@ export function TuiSessionChooser({
       ? inkLanguage === 'zh-CN'
         ? '（未知）'
         : '(unknown)'
-      : new Intl.DateTimeFormat(inkLanguage, {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        }).format(date);
+      : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
   };
   const page = Math.max(2, Math.min(8, (stdout.rows ?? 24) - 13));
   const listStart = Math.max(0, Math.min(selected - Math.floor(page / 2), sessions.length - page));
@@ -250,9 +278,11 @@ export function TuiSessionChooser({
         testDiagnostics ? t('Select Session (arrows/Enter, Esc)') : originalLabel('session.title')
       }
       meta={
-        focus === 'search'
-          ? t('Search')
-          : `${sessions.length ? selected + 1 : 0} / ${sessions.length}`
+        state.sessionDirectoryError
+          ? t('History unverified')
+          : focus === 'search'
+            ? t('Search')
+            : `${sessions.length ? selected + 1 : 0} / ${sessions.length}`
       }
       footer={
         <OverlayShortcutBar
@@ -264,9 +294,12 @@ export function TuiSessionChooser({
                   { keys: 'Esc', label: t(query ? 'Clear search' : 'Back') },
                 ]
               : [
-                  { keys: '↑↓', label: t('Select') },
-                  { keys: 'Enter', label: t('Open') },
-                  { keys: 'D', label: t('Delete') },
+                  { keys: '↑↓', label: originalLabel('common.navigate') },
+                  { keys: 'Enter', label: originalLabel('common.select') },
+                  { keys: 'D', label: originalLabel('common.delete') },
+                  ...(state.sessionDirectoryError
+                    ? [{ keys: 'R', label: t('Retry history read') }]
+                    : []),
                   { keys: 'Esc', label: t('Close') },
                 ]
           }
@@ -296,8 +329,10 @@ export function TuiSessionChooser({
             selected={focus === 'list' && listStart + offset === selected}
             indicator={loadingSessionId === session.id ? <Text>◌ </Text> : undefined}
             primary={
-              terminalText(session.title.replace(/[\r\n]/g, ' ')) +
-              (testDiagnostics ? ` [${terminalText(session.id)}]` : '')
+              terminalText(
+                session.title.replace(/[\r\n]/g, ' ') ||
+                  (inkLanguage === 'zh-CN' ? '新会话' : 'New conversation'),
+              ) + (testDiagnostics ? ` [${terminalText(session.id)}]` : '')
             }
             trailing={
               <Box>
@@ -314,12 +349,20 @@ export function TuiSessionChooser({
             }
           />
         ))}
-        {!sessions.length && (
+        {!sessions.length && !state.sessionDirectoryLoading && !state.sessionDirectoryError && (
           <OverlayEmptyState>
             {t(query ? 'No matching Sessions' : 'No session history')}
           </OverlayEmptyState>
         )}
       </Box>
+      {state.sessionDirectoryLoading && <Text dimColor>{t('Loading session history')}</Text>}
+      {state.sessionDirectoryError && (
+        <>
+          <Text color="red">{t('Error: Could not load session history; please retry.')}</Text>
+          <Text>{t('R retries this read; saved history remains unchanged.')}</Text>
+          {testDiagnostics && <Text dimColor>{terminalText(state.sessionDirectoryError)}</Text>}
+        </>
+      )}
       {selectionError && <Text color="red">{terminalText(selectionError)}</Text>}
       {testDiagnostics && (
         <Text dimColor>

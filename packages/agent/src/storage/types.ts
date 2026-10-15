@@ -417,6 +417,8 @@ export interface StoredModelInput {
   snapshotCursor: string;
 }
 export interface MessageContent {
+  /** The first nonempty channel observed from this exact Model stream. */
+  firstOutput?: 'content' | 'reasoning' | 'tool_calls';
   /** Exact sealed output; content is an explicitly incomplete preview when present. */
   modelOutput?: import('../model-output').ModelOutputReference;
   contextSelectionId?: string;

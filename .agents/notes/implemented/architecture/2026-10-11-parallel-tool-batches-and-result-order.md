@@ -8,6 +8,8 @@ V1.3 的 T048 要求同一完整模型回复的工具能够并行、乱序完成
 
 ## Decision
 
+默认产品的原 TUI 迁移另保人工审批等待期间未准入兄弟不执行的行为：Agent 默认 Permissions 声明 `toolDispatchOrder: model`，该标记冻结在实际 Run 配置中。只序列化准入，dispatch 之后执行仍并发；明确拒绝取消真实尚未准入调用，不抹去已合法开始的效果。自定义 Permissions 缺此标记时保本记录的独立并行审批和混合检查点行为；T048 的通用能力继续存在。此限定由用户要求完整迁入原 TUI 行为及其真实终端断言支持，接口、实际机制与最终范围分别见[Agent owner](../../../../packages/agent/README.md#同一-step-的并行工具批次)和[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
 Runtime 在任何调用执行前按原声明顺序登记完整 source requests，每个调用冻结自己的输入、来源和 bindings，沿现有权限、freshness、串行键与槽位执行。单一 Loop 并行推进同批工具，首个致命结果取消本批；父 Run 取消仍沿原信号传播。所有已启动调用 settled 后才能继续模型、终结 Run 或释放绑定。不同 rejection 原因用 AggregateError 保留，首因作为 cause；相同 error 身份的 abort 传播去重，独立后发 AgentError 在 Run.reason 保留。
 
 物理 Message/Execution seq 保留真实完成顺序。仅在准备下一 Model 的同一 assistant 工具结果槽位中按原 call ID 配对完整结果，不重排其他消息。显式接续逐项核原 Model、step、定义、输入与终态；可复用已结算 B，同时接续可证明未派发的 A，保原审批和执行身份并核当前权限。dispatching/running/outcome_unknown 继续拒绝接续。

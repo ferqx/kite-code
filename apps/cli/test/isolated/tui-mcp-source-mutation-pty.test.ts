@@ -301,6 +301,18 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       workspaceId: 'w',
       title: 'Owned Source entries',
     });
+    // Establish the existing Workspace prerequisite through its real public
+    // identity before the PTY wire baseline; this admits no MCP Source or Tool.
+    const trust = await seed.client.getWorkspaceTrust('w', { storeId });
+    await seed.client.setWorkspaceTrust('w', {
+      expectedStoreId: storeId,
+      commandId: randomUUID(),
+      trusted: true,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      ifRevision: trust.revision,
+    });
+    expect((await seed.client.getWorkspaceTrust('w', { storeId })).trusted).toBe(true);
     await seed.close();
     expect(await seed.exited).toBe(0);
     seed = undefined;

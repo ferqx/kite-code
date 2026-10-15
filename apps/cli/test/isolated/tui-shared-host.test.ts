@@ -55,6 +55,21 @@ nativeTest(
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });
+    writeFileSync(
+      join(profile.profilePath, 'config.jsonc'),
+      JSON.stringify({
+        modelId: 'fixed-daemon',
+        models: [
+          {
+            id: 'fixed-daemon',
+            provider: 'compatible',
+            model: 'fixed-daemon',
+            baseURL: 'http://127.0.0.1:1/v1',
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
     const host = Object.fromEntries(
       ['configured', 'models', 'entered', 'effects', 'cancelled'].map((key) => [
         key,
@@ -64,7 +79,7 @@ nativeTest(
     const socket = join(root, 'd.sock');
     const instanceId = randomUUID();
     const daemon = Bun.spawn(
-      [process.execPath, join(repository, 'apps/service/test/fixtures/daemon-process-child.ts')],
+      [process.execPath, join(repository, 'apps/cli/test/fixtures/tui-shared-daemon-child.ts')],
       {
         stdin: 'pipe',
         stdout: 'pipe',
@@ -112,6 +127,19 @@ nativeTest(
         rootUri: pathToFileURL(workspace).href,
         name: 'Shared workspace',
       });
+      const trust = await client.getWorkspaceTrust('w', { storeId });
+      expect(
+        (
+          await client.setWorkspaceTrust('w', {
+            expectedStoreId: storeId,
+            commandId: 'trust-original-shared-workspace',
+            ifRevision: trust.revision,
+            trusted: true,
+            canonicalIdentity: trust.canonicalIdentity,
+            externalReadScopeDigest: trust.externalReadScopeDigest,
+          })
+        ).state,
+      ).toBe('applied');
       for (const id of ['held', 'visible'])
         await client.createSession({
           expectedStoreId: storeId,
@@ -137,7 +165,7 @@ nativeTest(
 def interrupted(*args):raise SystemExit(130)
 signal.signal(signal.SIGTERM,interrupted)
 bun=${JSON.stringify(process.execPath)};entry=${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))}
-base=[bun,entry,'--server',${JSON.stringify(socket)},'--data-root',${JSON.stringify(profile.dataRoot)},'--thread','visible']
+base=[bun,entry,'--test-ui-diagnostics','--server',${JSON.stringify(socket)},'--data-root',${JSON.stringify(profile.dataRoot)},'--thread','visible']
 def run(mode,extra=[]):
  master,slave=pty.openpty()
  fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
@@ -158,7 +186,7 @@ def run(mode,extra=[]):
    end=time.monotonic()+10
    while p.poll() is None and time.monotonic()<end:pump()
    p.wait(timeout=1);assert p.returncode==1;assert b'shared_workspace_mismatch' in buffer;print('WORKSPACE_REJECTED');return
-  wait('New Run');wait('disconnect shared service')
+  wait('New Run');wait('Ctrl+Q disconnect shared')
   children=[line.decode(errors='replace') for line in subprocess.check_output(['/bin/ps','-axo','pid,ppid,command']).splitlines()[1:] if len(line.split(None,2))>=2 and line.split(None,2)[1]==str(p.pid).encode()];assert not children,children
   os.write(master,('draft-'+mode).encode());wait('draft-'+mode)
   if mode=='loss':

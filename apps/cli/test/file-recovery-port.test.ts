@@ -5,6 +5,7 @@ import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/pro
 import type { AgentClient } from '@kite-ai/client';
 import {
   type FileRecoveryIntent,
+  parseFileRecoveryIntent,
   planFileRecoveryIntent,
 } from '@kite-ai/client/file-recovery-intent';
 import { createFileRecoveryPort } from '../host/file-recovery';
@@ -153,6 +154,50 @@ test('closed journal and foreign Store observer cannot issue a cold mutation', a
     await expect(port.continue(initial)).rejects.toThrow('readonly');
     journal.close();
     await expect(port.lookup(initial)).rejects.toThrow();
+  } finally {
+    journal.close();
+    f.close();
+  }
+});
+
+test('saved completed phases never substitute for fresh original completion proof or change the journal', async () => {
+  const f = fixture(),
+    journal = f.open();
+  try {
+    const initial = await intent('completion');
+    const completed = await parseFileRecoveryIntent({
+      ...initial,
+      code: { ...initial.code, phase: 'succeeded' },
+      fork: { ...initial.fork, phase: 'succeeded' },
+    });
+    await journal.prepare(completed);
+    const before = readFileSync(f.path);
+    const client = {
+      serverInfo: { storeId: completed.storeId, subjectId: completed.subjectId },
+      getView: async () => ({
+        storeId: completed.storeId,
+        session: {
+          id: completed.sessionId,
+          rootSessionId: completed.sessionId,
+          parentSessionId: null,
+          deletedAt: null,
+          workspaceId: completed.workspaceId,
+          contextSelectionId: completed.contextSelectionId,
+        },
+      }),
+      getCommand: async () => ({}),
+      getFileRestoreStatus: async () => ({
+        payload: {
+          journal: { phase: 'restored', files: [{ operation: 'restore', state: 'restored' }] },
+        },
+      }),
+    } as unknown as AgentClient;
+    await expect(
+      createFileRecoveryPort({ client, journal }).readCompletion(completed),
+    ).rejects.toThrow('file_recovery_completion_unavailable');
+    expect(readFileSync(f.path)).toEqual(before);
+    expect((await journal.list())[0]!.code!.phase).toBe('succeeded');
+    expect((await journal.list())[0]!.fork!.phase).toBe('succeeded');
   } finally {
     journal.close();
     f.close();

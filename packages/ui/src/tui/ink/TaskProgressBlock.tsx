@@ -1,4 +1,5 @@
 import { Box, Text } from 'ink';
+import { terminalText } from '../controller';
 import { useInkTheme } from '../presentation';
 import type { AgentPlan, PlanStatus } from './types';
 
@@ -70,6 +71,7 @@ export default function TaskProgressBlock({ plan }: TaskProgressBlockProps) {
 
   return (
     <Box flexDirection="column" marginX={1}>
+      {plan.title && <Text bold>{terminalText(plan.title)}</Text>}
       {headSkipped > 0 && <Text color={t.dim}>··· {headSkipped} earlier steps</Text>}
       {visible.map((s) => (
         <Text key={`${s.step}-${s.idx}`} color={statusColor(s.status, t)}>

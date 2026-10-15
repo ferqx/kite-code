@@ -16,6 +16,8 @@ import type { SourceRequest } from '../../../src/context';
 import { createProjectSources } from '../../../src/sources';
 
 const roots: string[] = [];
+const projectText = (path: string, body: string) =>
+  `<project-instructions role="workspace-context">\n${path}\n${body}\n</project-instructions>`;
 const request: SourceRequest = {
   workspaceId: 'workspace',
   sessionId: 'session',
@@ -68,6 +70,9 @@ test('captures only root and trusted target ancestry in stable root-to-leaf orde
       (source) => source.kind === 'project_instruction' && /^[a-f0-9]{64}$/.test(source.digest),
     ),
   ).toBe(true);
+  expect(
+    snapshot.every((source) => source.role === 'user' && source.placement === 'after_history'),
+  ).toBe(true);
   expect(await data.capture()).toEqual(snapshot);
   const rootOnly = createProjectSources({
     async workspaceRoot() {
@@ -75,8 +80,8 @@ test('captures only root and trusted target ancestry in stable root-to-leaf orde
     },
   });
   expect((await rootOnly.capture(request)).map((source) => source.content)).toEqual([
-    'root Claude',
-    'root Agents',
+    projectText('CLAUDE.md', 'root Claude'),
+    projectText('AGENTS.md', 'root Agents'),
   ]);
 });
 
@@ -97,7 +102,7 @@ test('re-discovers addition, same-size rewrite with restored mtime, and deletion
   utimesSync(path, originalStat.atime, originalStat.mtime);
   expect(statSync(path).size).toBe(originalStat.size);
   const rewritten = await data.capture();
-  expect(rewritten[1]!.content).toBe('new rule');
+  expect(rewritten[1]!.content).toBe(projectText('src/AGENTS.md', 'new rule'));
   expect(rewritten[1]!.digest).not.toBe(added[1]!.digest);
   rmSync(path);
   expect(await data.capture()).toEqual(initial);
@@ -110,8 +115,8 @@ test('discovers new target ancestry without recursively scanning other directori
   writeFileSync(join(data.root, 'future/AGENTS.md'), 'new ancestor');
   writeFileSync(join(data.root, 'future/deep/AGENTS.md'), 'new target');
   expect((await data.capture()).map((source) => source.content)).toEqual([
-    'new ancestor',
-    'new target',
+    projectText('future/AGENTS.md', 'new ancestor'),
+    projectText('future/deep/AGENTS.md', 'new target'),
   ]);
 });
 
@@ -196,13 +201,16 @@ test('batch preserves per-request limits, all target ancestry and fresh bytes wi
   const batch = (values: readonly SourceRequest[]) => sources.captureBatch!(values);
   const initial = await batch(requests);
   expect(initial.map((source) => [source.id, source.content])).toEqual([
-    ['project:workspace:AGENTS.md', 'original root instructions'],
+    ['project:workspace:AGENTS.md', projectText('AGENTS.md', 'original root instructions')],
   ]);
   writeFileSync(finalPath, 'last original rule');
   const added = await batch(requests);
   expect(added.map((source) => [source.id, source.content])).toEqual([
-    ['project:workspace:AGENTS.md', 'original root instructions'],
-    [`project:workspace:${finalDirectory}/AGENTS.md`, 'last original rule'],
+    ['project:workspace:AGENTS.md', projectText('AGENTS.md', 'original root instructions')],
+    [
+      `project:workspace:${finalDirectory}/AGENTS.md`,
+      projectText(`${finalDirectory}/AGENTS.md`, 'last original rule'),
+    ],
   ]);
   const originalStat = statSync(finalPath);
   writeFileSync(finalPath, 'last modified rule');
@@ -210,8 +218,8 @@ test('batch preserves per-request limits, all target ancestry and fresh bytes wi
   expect(statSync(finalPath).size).toBe(originalStat.size);
   const rewritten = await batch(requests);
   expect(rewritten.map((source) => source.content)).toEqual([
-    'original root instructions',
-    'last modified rule',
+    projectText('AGENTS.md', 'original root instructions'),
+    projectText(`${finalDirectory}/AGENTS.md`, 'last modified rule'),
   ]);
   expect(rewritten[1]!.digest).not.toBe(added[1]!.digest);
   const outside = fixture();

@@ -589,7 +589,7 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
     }
   }
 }, 15000);
-test('approved accept_edits under current Full independently challenges Task/carrier then permits zero-source ordinary child read/write', async () => {
+test('approved accept_edits under current Full independently challenges Task/carrier then permits ordinary child read/write with only its own base sources', async () => {
   const f = await fixture('approved');
   try {
     await f.submit();
@@ -624,7 +624,10 @@ test('approved accept_edits under current Full independently challenges Task/car
       sessionId: child.sessionId,
       executionId: childModel.id,
     });
-    expect(originalInput.metadata.context?.sources).toHaveLength(0);
+    const sources = originalInput.metadata.context?.sources;
+    const baseSourceIds = ['agent:contract', `${planningExtensionId}:runtime:${child.id}`];
+    expect(sources?.map((source) => source.id)).toEqual(baseSourceIds);
+    expect(sources?.filter((source) => !baseSourceIds.includes(source.id))).toHaveLength(0);
     const cards = (await f.client.listInteractions('s', { storeId: f.expectedStoreId }))
       .interactions;
     expect(cards.filter((card) => card.kind === 'plan_review')).toHaveLength(1);

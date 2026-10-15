@@ -13,7 +13,7 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import Ajv from 'ajv';
-import type { JobDefinition, Json, ToolDefinition, ToolResult } from '../extensions';
+import type { JobDefinition, Json, ToolContext, ToolDefinition, ToolResult } from '../extensions';
 import { createTaskBinding } from './tasks';
 import { BoundedStdioTransport, boundedFetch } from './transport';
 
@@ -40,6 +40,12 @@ export type McpReadRequest =
   | { method: 'resources/read'; uri: string }
   | { method: 'prompts/get'; name: string; arguments: Record<string, string> };
 export interface McpAdapterOptions {
+  /** Trusted scoped recovery for an actual HTTP authentication rejection; never an automatic retry. */
+  onAuthFailure?: (
+    code: 'mcp_oauth_login_required' | 'mcp_oauth_reauth_required',
+    context: ToolContext,
+    rejection?: McpHttpAuthRejection['rejection'],
+  ) => Promise<ToolResult>;
   id: string;
   /** Lifecycle-only ordinary Job registration; direct adapters remain synchronous by default. */
   tasks?: boolean;
@@ -63,6 +69,26 @@ export class McpAdapterError extends Error {
   constructor(code: string) {
     super(code);
     this.code = code;
+  }
+}
+/** A trusted HTTP transport's exact negative authentication response to this RPC. */
+export class McpHttpAuthRejection extends McpAdapterError {
+  readonly rejection: Readonly<{
+    httpStatus: 401;
+    rpcMethod: 'tools/call';
+    requestId: string | number;
+    serverId: string;
+    connectionExecutionId: string;
+    originalStoreId: string;
+    sessionId: string;
+    configDigest: string;
+  }>;
+  constructor(
+    code: 'mcp_oauth_login_required' | 'mcp_oauth_reauth_required',
+    rejection: McpHttpAuthRejection['rejection'],
+  ) {
+    super(code);
+    this.rejection = Object.freeze({ ...rejection });
   }
 }
 function digest(value: unknown) {
@@ -509,6 +535,25 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                     details: JSON.parse(JSON.stringify(result)) as Json,
                   };
                 } catch (error) {
+                  if (
+                    attempted &&
+                    !context.signal.aborted &&
+                    error instanceof McpAdapterError &&
+                    ['mcp_oauth_login_required', 'mcp_oauth_reauth_required'].includes(
+                      error.code,
+                    ) &&
+                    options.onAuthFailure
+                  )
+                    return options.onAuthFailure(
+                      error.code as 'mcp_oauth_login_required' | 'mcp_oauth_reauth_required',
+                      context,
+                      error instanceof McpHttpAuthRejection &&
+                        error.rejection.serverId === serverId &&
+                        error.rejection.configDigest === identity &&
+                        error.rejection.sessionId === context.sessionId
+                        ? error.rejection
+                        : undefined,
+                    );
                   return {
                     outcome: attempted
                       ? 'outcome_unknown'
@@ -912,6 +957,7 @@ export type {
   McpReconnectionReplacement,
   McpReconnectionTarget,
 } from './reconnection-types';
+export { createMcpResourceModelSource, mcpResourceModelToolIds } from './resource-model-source';
 export {
   createMcpStdioTransportPort,
   McpStdioPortError,

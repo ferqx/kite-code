@@ -25,27 +25,10 @@ if (!process.stdin.isTTY) {
   const temporary = createTemporaryCredentialBackend();
   await runServiceProcess({
     configure(startup, context) {
-      return createDefaultProcessConfiguration({
+      const configuration = createDefaultProcessConfiguration({
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
         observerSubjectId: context.subjectId,
-        permissions: {
-          async authorize(request) {
-            log('permissions.jsonl', {
-              kind: request.kind,
-              executionId: request.executionId,
-              definitionId: request.definitionId,
-            });
-            if (request.kind === 'model') throw Error('owned_auth_model_forbidden');
-            return request.kind === 'job'
-              ? {
-                  allowed: false,
-                  revision: 'owned-auth-ordinary-ask',
-                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
-                }
-              : { allowed: true, revision: 'owned-auth-read' };
-          },
-        },
         credentialBackend: {
           kind: 'temporary',
           async put(id, value) {
@@ -81,6 +64,29 @@ if (!process.stdin.isTTY) {
           },
         },
       });
+      const permissions = configuration.permissions;
+      if (!permissions) throw Error('owned_auth_default_permissions_unavailable');
+      return {
+        ...configuration,
+        permissions: {
+          ...permissions,
+          async authorize(request: Parameters<typeof permissions.authorize>[0]) {
+            log('permissions.jsonl', {
+              kind: request.kind,
+              executionId: request.executionId,
+              definitionId: request.definitionId,
+            });
+            if (request.kind === 'model') throw Error('owned_auth_model_forbidden');
+            return request.kind === 'job'
+              ? {
+                  allowed: false,
+                  revision: 'owned-auth-ordinary-ask',
+                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
+                }
+              : { allowed: true, revision: 'owned-auth-read' };
+          },
+        },
+      };
     },
   });
   log('service-exits.jsonl', { exitCode: process.exitCode ?? 0, returnedAfterCleanup: true });

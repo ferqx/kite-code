@@ -113,16 +113,21 @@ const choose = async (label: string) => {
   for (let step = 0; step < 32; step++) {
     const frame = (await current()).text.replace(/ /g, '');
     const target = label.replace(/ /g, '');
-    if (frame.includes(`›${target}`)) {
+    if (frame.includes(`❯${target}`)) {
       chosenOriginalId = label.startsWith('Original authentication: ')
         ? label.slice('Original authentication: '.length)
         : undefined;
       note('choice', { label, frame: latestFrame.slice(-32768) });
       return;
     }
-    const selectedAt = frame.indexOf('›'),
+    const selectedAt = frame.indexOf('❯'),
       targetAt = frame.indexOf(target);
-    if (selectedAt < 0) throw Error('owned_auth_selection_absent');
+    if (selectedAt < 0) {
+      if (Date.now() > end) throw Error('owned_auth_selection_absent');
+      await Bun.sleep(50);
+      step--;
+      continue;
+    }
     await key(
       targetAt < 0
         ? label.startsWith('Original authentication:')
@@ -237,7 +242,7 @@ try {
     await leave(true);
     const actual = await control(`finish/${n}`);
     ids.push(actual.commandId);
-    await wait(`builtin.mcp.sources/mcp.auth.${actions[i]} [${actual.executionId}] succeeded`);
+    await wait(`builtin.mcp.sources/mcp.auth.${actions[i]}[${actual.executionId}]succeeded`, true);
     await wait('New Run >');
     await auth();
     await choose(`Original authentication: ${actual.commandId}`);

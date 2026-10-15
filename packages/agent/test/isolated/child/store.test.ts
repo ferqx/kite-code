@@ -115,6 +115,8 @@ async function prepared(
   requirements: RequirementEvaluation[] = [],
 ) {
   const ref = await f.store.ensureOperation({ ...f.request, ...options });
+  const request = options.request ?? f.request.request;
+  const childInput = request.kind === 'agent' ? request.input : { task: 'review' };
   await f.store.planExecution({
     expectedStoreId: f.expectedStoreId,
     owner: f.owner,
@@ -129,7 +131,7 @@ async function prepared(
     cancelWithParent: options.cancellation !== 'detached',
     definitionId: 'agent/reviewer',
     definitionVersion: '1',
-    input: { task: 'review' },
+    input: childInput,
     decisionSource: f.source,
   });
   await f.store.markDispatching({
@@ -140,7 +142,7 @@ async function prepared(
       allowed: true,
       revision: '1',
       definitionVersion: '1',
-      inputDigest: await semanticDigest({ task: 'review' }),
+      inputDigest: await semanticDigest(childInput),
     },
     requirements,
     freshness: { checked: true, source: f.source },
@@ -724,6 +726,54 @@ test('large trusted child configuration is sealed whole, activated exactly and r
     expect((await readonly.getMetadata()).lastChangeCursor).toBe(coldCursor);
   } finally {
     await readonly?.close();
+    await f.close();
+  }
+});
+
+test('closed child display input names the real Session and preserves sealed input while only content enters the Model message', async () => {
+  const f = await fixture();
+  try {
+    const input = {
+      content: 'Exact child instructions\nwith original newlines',
+      name: 'Readable child name',
+    };
+    const ref = await prepared(f, {
+      request: { kind: 'agent', configurationId: 'reviewer', input },
+    });
+    expect((await f.store.getSession(ref.childSessionId!))!.title).toBe(input.name);
+    const active = await f.store.activateChildRun(activation(f, ref.executionId!));
+    const message = f.db
+      .query(
+        "SELECT p.json FROM message m JOIN message_part p ON p.message_id=m.id WHERE m.session_id=? AND m.role='user'",
+      )
+      .get(ref.childSessionId!) as { json: string };
+    expect(JSON.parse(message.json).content).toBe(input.content);
+    expect((active.command.request as { input: unknown }).input).toEqual(input);
+  } finally {
+    await f.close();
+  }
+});
+
+test('custom child inputs with additional business fields remain complete JSON and cannot repurpose their name field', async () => {
+  const f = await fixture();
+  try {
+    const input = {
+      content: 'Custom instructions',
+      name: 'Business field',
+      options: { write: false },
+    };
+    const ref = await prepared(f, {
+      request: { kind: 'agent', configurationId: 'reviewer', input },
+    });
+    expect((await f.store.getSession(ref.childSessionId!))!.title).toBe('Child reviewer');
+    await f.store.activateChildRun(activation(f, ref.executionId!));
+    const message = f.db
+      .query(
+        "SELECT p.json FROM message m JOIN message_part p ON p.message_id=m.id WHERE m.session_id=? AND m.role='user'",
+      )
+      .get(ref.childSessionId!) as { json: string };
+    expect(JSON.parse(JSON.parse(message.json).content)).toEqual(input);
+  } finally {
     await f.close();
   }
 });

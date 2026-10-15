@@ -5,6 +5,7 @@ import { TuiChildSessionPanel } from '../../src/tui/child-session-panel';
 import type { TuiSnapshot } from '../../src/tui/controller';
 import {
   InkExecution,
+  inkShellCarrier,
   inkToolArguments,
   inkToolName,
   projectInkChild,
@@ -18,6 +19,8 @@ const execution = (id: string, extra: Partial<Execution> = {}): Execution => ({
   originStoreId: 'store',
   sessionId: 'parent',
   runId: 'run',
+  rootWorkCommandId: 'work',
+  rootWorkSeq: '1',
   kind: 'tool',
   definitionId: 'builtin.files/files.read',
   definitionVersion: '1',
@@ -53,7 +56,20 @@ const view = (id = 'parent', extra: Partial<SessionView> = {}): SessionView => (
     nextSeq: '30',
     deletedAt: null,
   },
-  runs: [],
+  runs: [
+    {
+      id: 'run',
+      sessionId: 'parent',
+      originStoreId: 'store',
+      originCommandId: 'work',
+      status: 'running',
+      isActive: true,
+      createdAt: 1,
+      finishedAt: null,
+      reason: null,
+      configuration: {},
+    },
+  ],
   executions: [],
   messages: [],
   ...extra,
@@ -63,6 +79,40 @@ const snapshot = (executions: Execution[], messages: Message[] = []): TuiSnapsho
   view: view('parent', { executions }),
   messages,
   interactions: [],
+});
+test('only actual same-scope failed pre-dispatch approval denial receives the user rejection message', () => {
+  const denied = execution('denied', {
+    definitionId: 'builtin.files/files.write',
+    definitionVersion: '2',
+    status: 'failed',
+    result: {
+      outcome: 'failed',
+      content: 'approval_denied',
+      details: { code: 'approval_denied', dispatchCommitted: false, adapterAttempted: false },
+    },
+  });
+  expect(projectInkTool(denied, snapshot([denied])).summary).toBe(
+    'Tool approval rejected by user.',
+  );
+  const foreign = { ...denied, originStoreId: 'foreign' };
+  expect(projectInkTool(foreign, snapshot([foreign])).summary).not.toBe(
+    'Tool approval rejected by user.',
+  );
+  const unknown = { ...denied, status: 'outcome_unknown' as const };
+  expect(projectInkTool(unknown, snapshot([unknown])).summary).toBe(
+    'Outcome unknown; original work remains unverified.',
+  );
+  const attempted = {
+    ...denied,
+    result: {
+      outcome: 'failed',
+      content: 'approval_denied',
+      details: { code: 'approval_denied', dispatchCommitted: true, adapterAttempted: true },
+    },
+  };
+  expect(projectInkTool(attempted, snapshot([attempted])).summary).not.toBe(
+    'Tool approval rejected by user.',
+  );
 });
 test('original Tool input is scoped and call arguments use only a unique exact source identity', () => {
   const source = execution('tool', { toolCallId: 'original-call' }),
@@ -104,13 +154,21 @@ test('original builtin friendly card uses actual content and only confirmed exec
     app.unmount();
   }
 });
-test('child tree requires exact task carrier relationship, and public child scope validates before steps', () => {
+test.each([
+  'builtin.task/task',
+  'builtin.task/task.execute',
+])('child tree %s requires exact carrier relationship, and public child scope validates before steps', (definitionId) => {
   const parent = execution('task', {
-      definitionId: 'builtin.task/task',
-      toolInput: { role: 'explore', key: 'original-task', input: 'Investigate original' },
+      definitionId,
+      toolInput: {
+        role: definitionId.endsWith('task.execute') ? 'agent/explore' : 'explore',
+        key: 'original-task',
+        input: 'Investigate original',
+      },
     }),
     carrier = execution('carrier', {
       kind: 'job',
+      runId: null,
       definitionId: 'agent/explore',
       parentExecutionId: 'task',
       childSessionId: 'child',
@@ -154,6 +212,10 @@ test('child tree requires exact task carrier relationship, and public child scop
     steps: [{ stepId: 'child-tool', toolArgs: { path: 'src/child.ts' } }],
   });
   expect(projectInkChild({ ...carrier, parentExecutionId: 'other' }, facts)).toBeUndefined();
+  expect(projectInkChild({ ...carrier, rootWorkCommandId: 'other-work' }, facts)).toBeUndefined();
+  expect(projectInkChild({ ...carrier, rootWorkSeq: '2' }, facts)).toBeUndefined();
+  expect(projectInkChild({ ...carrier, runId: 'foreign-run' }, facts)).toBeUndefined();
+  expect(projectInkChild(carrier, { ...facts, view: { ...facts.view, runs: [] } })).toBeUndefined();
   expect(
     projectInkChild(carrier, {
       ...facts,
@@ -315,6 +377,23 @@ test('formal short builtin IDs use frozen registered extension proof instead of 
   ];
   expect(projectInkTool(read, facts).name).toBe('read_file');
   expect(projectInkTool(read, snapshot([read])).name).toBe('files.read');
+});
+test('a child builtin label uses exact Core-frozen registered tools when its role has no planning binding', () => {
+  const search = execution('search', {
+    definitionId: 'files.search',
+    definitionVersion: '2',
+    toolInput: { path: '.', query: 'source' },
+  });
+  const facts = snapshot([search]);
+  facts.view.runs[0]!.configuration = {
+    tools: [{ id: 'files.search', version: '2', extensionId: 'builtin.files' }],
+  };
+  expect(projectInkTool(search, facts).name).toBe('search_content');
+  expect(projectInkTool({ ...search, definitionVersion: '1' }, facts).name).toBe('files.search');
+  facts.view.runs[0]!.configuration = {
+    tools: [{ id: 'files.search', version: '2', extensionId: 'custom.files' }],
+  };
+  expect(projectInkTool(search, facts).name).toBe('files.search');
 });
 
 test('readonly aggregation consumes consecutive exact original calls and frozen read-only definitions', async () => {
@@ -583,4 +662,359 @@ test('MCP friendly names require all original Execution label identities; missin
       toolLabels: [{ ...facts.toolLabels[0]!, definitionVersion: 'other' }],
     }).name,
   ).toBe(source.definitionId);
+});
+test('actual MCP proxy cards keep call bodies private and use only scoped catalogue discovery for names', () => {
+  const id = `mcp.mcp-${'a'.repeat(64)}.${'b'.repeat(32)}`;
+  const tool = execution('proxy', {
+    definitionId: id,
+    toolInput: { message: 'private input' },
+    result: { content: 'private remote body' },
+  });
+  const facts = {
+    ...snapshot([tool]),
+    toolLabels: [
+      {
+        executionId: tool.id,
+        originStoreId: 'store',
+        sessionId: 'parent',
+        definitionId: id,
+        definitionVersion: '1',
+        label: 'private source label',
+      },
+    ],
+  };
+  expect(projectInkTool(tool, facts)).toMatchObject({ name: 'mcp_tool', args: {}, summary: '' });
+  const search = execution('search', {
+    definitionId: 'mcp.tools.search',
+    result: {
+      content: JSON.stringify({
+        source: 'frozen_selected_mcp_catalogue',
+        items: [
+          {
+            serverId: `mcp-${'a'.repeat(64)}`,
+            definitionId: id,
+            definitionVersion: '1',
+            remoteName: 'search documentation / latest',
+          },
+        ],
+      }),
+    },
+  });
+  const discovered = { ...facts, view: { ...facts.view, executions: [search, tool] } };
+  expect(projectInkTool(tool, discovered)).toMatchObject({
+    name: 'mcp:dynamic_tool',
+    preview: 'search documentation / latest',
+    detail: 'search documentation / latest',
+    args: {},
+    summary: '',
+  });
+  const app = render(
+    <InkExecution execution={tool} snapshot={discovered} expanded columns={100} />,
+  );
+  expect(app.lastFrame()).toContain('mcp:dynamic_tool');
+  expect(app.lastFrame()).toContain('search documentation / latest');
+  expect(app.lastFrame()).not.toContain('private input');
+  expect(app.lastFrame()).not.toContain('private remote body');
+  app.unmount();
+  expect(
+    projectInkTool(tool, {
+      ...discovered,
+      view: { ...facts.view, executions: [{ ...search, sessionId: 'foreign' }, tool] },
+    }).preview,
+  ).toBeUndefined();
+  expect(
+    projectInkTool(tool, {
+      ...discovered,
+      view: { ...facts.view, executions: [{ ...search, sessionId: 'foreign' }, tool] },
+    }).detail,
+  ).toBeUndefined();
+});
+test('MCP resource references require the exact source receipt while resource contents remain private', () => {
+  const binding = {
+    executionId: 'resources',
+    runId: 'run',
+    originalStoreId: 'store',
+    sessionId: 'parent',
+    definitionId: 'mcp.resources.list',
+    definitionVersion: '1',
+    inputDigest: 'a'.repeat(64),
+    serverId: 'actual-server',
+    connectionKey: 'connection',
+    configDigest: 'b'.repeat(64),
+    generation: 1,
+  };
+  const tool = execution('resources', {
+    definitionId: binding.definitionId,
+    toolInput: {
+      serverId: binding.serverId,
+      connectionKey: binding.connectionKey,
+      configDigest: binding.configDigest,
+      generation: binding.generation,
+    },
+    result: {
+      content: 'private resource contents',
+      details: {
+        binding,
+        recordKey: 'resources/resources',
+        descriptors: [{ descriptor: { uri: 'docs://overview' }, descriptorDigest: 'digest' }],
+      },
+    },
+  });
+  const facts = snapshot([tool]);
+  expect(projectInkTool(tool, facts)).toMatchObject({
+    name: 'list_mcp_resources',
+    summary: '',
+    resourceReferences: ['docs://overview'],
+  });
+  const app = render(<InkExecution execution={tool} snapshot={facts} columns={100} />);
+  expect(app.lastFrame()).toContain('docs://overview');
+  expect(app.lastFrame()).not.toContain('private resource contents');
+  app.unmount();
+  expect(
+    projectInkTool(
+      {
+        ...tool,
+        result: {
+          details: {
+            binding: { ...binding, originalStoreId: 'foreign' },
+            descriptors: [{ descriptor: { uri: 'docs://overview' } }],
+          },
+        },
+      },
+      facts,
+    ).resourceReferences,
+  ).toBeUndefined();
+});
+test('child display uses its actual input name and dispatch duration without fabricating missing timing', () => {
+  const parent = execution('named-task', {
+    definitionId: 'builtin.task/task',
+    toolInput: {
+      role: 'explore',
+      key: 'named',
+      input: { name: 'Same-name tool child', content: 'Read the original file' },
+    },
+  });
+  const child = execution('named-carrier', {
+    kind: 'job',
+    definitionId: 'agent/explore',
+    parentExecutionId: parent.id,
+    childSessionId: 'named-child',
+  });
+  const facts = snapshot([parent, child]);
+  expect(projectInkChild(child, facts)).toMatchObject({ task: 'Same-name tool child' });
+  expect(projectInkChild(child, facts)?.durationMs).toBeUndefined();
+  const timed = {
+    ...facts,
+    executionTimings: {
+      [child.id]: { availability: 'recorded_dispatch' as const, startedAt: 100, finishedAt: 350 },
+    },
+  };
+  expect(projectInkChild(child, timed)).toMatchObject({ startedAt: 100, durationMs: 250 });
+  expect(
+    projectInkChild(child, {
+      ...timed,
+      executionTimings: { [child.id]: { availability: 'unavailable' } },
+    })?.startedAt,
+  ).toBeUndefined();
+});
+
+test('Shell foreground carrier uses a unique exact saved reference and rejects foreign or ambiguous producers', () => {
+  const ref = {
+    executionId: 'carrier',
+    originStoreId: 'store',
+    sessionId: 'parent',
+    extensionId: 'builtin.shell',
+    commandId: 'command',
+    key: 'original',
+  };
+  const producer = execution('producer', {
+    definitionId: 'builtin.shell/shell.execute',
+    toolInput: { command: 'printf original' },
+    result: { details: { ref } },
+  });
+  const carrier = execution('carrier', {
+    kind: 'job',
+    definitionId: 'shell.command',
+    result: { content: 'original stdout' },
+  });
+  const original = snapshot([producer, carrier]);
+  expect(projectInkTool(carrier, original).name).toBe('shell_execute');
+  expect(projectInkTool(carrier, original).args.command).toBe('printf original');
+  expect(projectInkTool(producer, original).name).toBe('shell_execute');
+  const nestedCarrier = { ...carrier, runId: null, parentExecutionId: producer.id };
+  expect(inkShellCarrier(producer, snapshot([producer, nestedCarrier]))?.id).toBe('carrier');
+  expect(projectInkTool(nestedCarrier, snapshot([producer, nestedCarrier])).summary).toBe(
+    'original stdout',
+  );
+  expect(
+    inkShellCarrier(
+      producer,
+      snapshot([producer, { ...nestedCarrier, rootWorkCommandId: 'foreign' }]),
+    ),
+  ).toBeUndefined();
+  expect(
+    inkShellCarrier(
+      producer,
+      snapshot([producer, nestedCarrier, { ...nestedCarrier, id: 'second-carrier' }]),
+    ),
+  ).toBeUndefined();
+  const foreign = execution('producer', {
+    ...producer,
+    result: { details: { ref: { ...ref, originStoreId: 'foreign' } } },
+  });
+  expect(projectInkTool(carrier, snapshot([foreign, carrier])).name).toBe('shell.command');
+  const duplicate = execution('duplicate', { ...producer, id: 'duplicate' });
+  expect(projectInkTool(carrier, snapshot([producer, duplicate, carrier])).name).toBe(
+    'shell.command',
+  );
+});
+
+test('file changed display requires a successful scoped builtin receipt and both exact input/output baselines', () => {
+  const after = { hash: 'a'.repeat(64), size: 1, device: '1', inode: '2' };
+  const source = execution('write', {
+    definitionId: 'builtin.files/files.write',
+    definitionVersion: '2',
+    toolInput: { path: 'original.txt', base: null },
+    result: {
+      outcome: 'succeeded',
+      content: JSON.stringify({ path: 'original.txt', baseline: after }),
+      details: {
+        fileChange: {
+          version: 1,
+          format: 'file_content',
+          path: 'original.txt',
+          before: null,
+          after,
+          text: 'original text',
+          truncated: false,
+        },
+      },
+    },
+  });
+  expect(projectInkTool(source, snapshot([source])).summary).toBe('Workspace file changed.');
+  expect(
+    projectInkTool(source, {
+      ...snapshot([source]),
+      environment: { workspacePath: 'file:///original%20workspace' },
+    }).summary,
+  ).toBe('Workspace file changed.');
+  expect(
+    projectInkTool(source, {
+      ...snapshot([source]),
+      environment: { workspacePath: 'file:///C:/original%20workspace' },
+    }).summary,
+  ).toBe('Workspace file changed.');
+  for (const expanded of [false, true]) {
+    const app = render(
+      <InkExecution
+        execution={source}
+        snapshot={snapshot([source])}
+        expanded={expanded}
+        columns={80}
+      />,
+    );
+    try {
+      expect(app.lastFrame()?.split('Workspace file changed.')).toHaveLength(2);
+    } finally {
+      app.unmount();
+    }
+  }
+  const unknown = execution('write', { ...source, status: 'outcome_unknown' });
+  expect(projectInkTool(unknown, snapshot([unknown])).summary).not.toBe('Workspace file changed.');
+  const foreign = execution('write', { ...source, originStoreId: 'foreign' });
+  expect(projectInkTool(foreign, snapshot([foreign])).summary).not.toBe('Workspace file changed.');
+  const mismatched = execution('write', {
+    ...source,
+    result: {
+      ...(source.result as object),
+      content: JSON.stringify({
+        path: 'original.txt',
+        baseline: { ...after, hash: 'b'.repeat(64) },
+      }),
+    },
+  });
+  expect(projectInkTool(mismatched, snapshot([mismatched])).summary).not.toBe(
+    'Workspace file changed.',
+  );
+  const path = 'C:\\external\\original.txt';
+  const external = execution('external', {
+    ...source,
+    id: 'external',
+    toolInput: { path, base: null },
+    result: {
+      outcome: 'succeeded',
+      content: JSON.stringify({ path, baseline: after }),
+      details: {
+        fileChange: {
+          version: 1,
+          format: 'file_content',
+          path,
+          before: null,
+          after,
+          text: 'original text',
+          truncated: false,
+        },
+      },
+    },
+  });
+  expect(
+    projectInkTool(external, {
+      ...snapshot([external]),
+      environment: { workspacePath: 'C:\\workspace' },
+    }).summary,
+  ).toBe('External file changed.');
+  const noOp = execution('unchanged', {
+    ...source,
+    id: 'unchanged',
+    toolInput: { path: 'original.txt', base: after },
+    result: {
+      outcome: 'succeeded',
+      content: JSON.stringify({
+        path: 'original.txt',
+        baseline: after,
+        summary: 'Wrote 1 lines to original.txt (content unchanged)',
+      }),
+      details: {
+        fileChange: {
+          version: 1,
+          format: 'line_diff',
+          path: 'original.txt',
+          before: after,
+          after,
+          text: '',
+          truncated: false,
+        },
+      },
+    },
+  });
+  expect(projectInkTool(noOp, snapshot([noOp]))).toMatchObject({
+    summary: 'File content unchanged.',
+    fileNotice: 'File content unchanged.',
+    fileAction: 'Write',
+  });
+  const noOpApp = render(<InkExecution execution={noOp} snapshot={snapshot([noOp])} />);
+  try {
+    expect(noOpApp.lastFrame()).toContain('File content unchanged.');
+    expect(noOpApp.lastFrame()).toContain('Write');
+    expect(noOpApp.lastFrame()).not.toContain('(content unchanged)');
+    expect(noOpApp.lastFrame()).not.toContain('"baseline"');
+    expect(noOpApp.lastFrame()).not.toContain('Workspace file changed.');
+  } finally {
+    noOpApp.unmount();
+  }
+  for (const invalid of [
+    { ...noOp, originStoreId: 'foreign' },
+    { ...noOp, status: 'outcome_unknown' as const },
+    { ...noOp, toolInput: { path: 'other.txt', base: after } },
+    { ...noOp, toolInput: { path: 'original.txt', base: null } },
+    {
+      ...noOp,
+      result: {
+        ...(noOp.result as object),
+        content: JSON.stringify({ path: 'original.txt', baseline: { ...after, inode: '99' } }),
+      },
+    },
+  ]) {
+    expect(projectInkTool(invalid, snapshot([invalid])).fileNotice).toBeUndefined();
+  }
 });

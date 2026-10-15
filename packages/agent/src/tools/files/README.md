@@ -2,6 +2,18 @@
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
+## 绝对用户文件
+
+同一公开入口的 [createPathFileTools](../path-files.ts) 新增 `files.read_path/files.write_path/files.edit_path`，定义版本1，由正式宿主注册为 `builtin.files.path`。原 WorkspaceFiles 的 relative-only 路径合同不变；绝对 Tool 不是 Model 自报 root 或回退旧 filesystem authority。工厂冻结可信 `qualifiedPlatforms/protectedRoots`；保护根先逐项通过原路径校验，再按精确字符串去重、稳定排序，classifier 和快照使用同一集合边界。排列或重复不改变保护目标，真正增删目标仍改变快照；不宽松比较 Run 配置或自动迁移旧快照。只有显式合格的当前 native 平台才能执行；源码存在不提供 Win/Linux 实测资格。
+
+[路径 request classifier](../../permissions/files-request.ts) 选择 canonical 绝对路径的真实物理父目录，核 parent device/inode、目标 regular file 身份、本人 owner、单链接及完整原输入，并将其与可信边界一起纳入 revision。父链符号链接、目标 symlink／hardlink、私有 Profile／凭据／控制资产和危险系统写入目标在 Full 模式也拒绝。实际派发证明由 UnifiedExecution 注入，Tool 逐项核全部父子 policy snapshot 的准确定义、版本、信任、hardAllowed 和同一 revision，再打开并锚定 native parent，重核身份；宿主或 Model 输入不能伪造该证明。
+
+这些 Tool 复用原 `createFileTools/createWorkspaceFiles` 的完整 UTF-8、Artifact、文件 baseline 和原子 IO。仅把固定 basename 交给已选定物理 parent，不建立第二个写入引擎。绝对读取启用可信 `strictReads`，在原 FD 的读前／后核 owner 和单链接；这个选项不改变普通 Workspace 默认读取合同。write 的 `base=null` 只创建，existing base 核完整字节／hash／size／device／inode；edit 保原精确字面匹配和 occurrences，父对象或目标改绑拒绝。派发前取消零效果，发布后的同步或核实错误仍 `file_publish_outcome_unknown`，不能因包装成绝对路径降格为无效果失败。当前机制仍不承诺不合作外部编辑器的任意 rename／编辑原子 CAS。
+
+read 请求的固定效果是安全 `read`；write/edit 是 `external`。请求批准对外部写入要求实际人类决定，自动审核使用真实 reviewer，Full 保危险／私有／native 资格等硬门槛；child 另受准确父工具集合和全部权限 ceiling。完整策略由[权限 owner](../../permissions/README.md)维护。结果中的 path 与 fileChange 是实际绝对路径，保存的 `fileScope=external_path/workspaceCheckpoint=false` 明确排除 Workspace checkpoint 捕获、恢复和回退；外部文件成功不冒认为 Workspace 恢复点。
+
+本次 macOS 当前工作树执行 [path-files](../../../test/isolated/files/path-files.test.ts) 与原 [files](../../../test/isolated/files/files.test.ts) 完整叶文件，共9项、77断言通过：真实 native IO／Runtime 派发、完整 BOM／CRLF、create/edit/CAS、父目标换绑、Profile symlink／hardlink 别名、交集漂移、取消和未合格平台拒绝。原 [subagent 终端](../../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 整文件9项120断言及 [tool-approve](../../../../../tests/tui-system/scenarios/tool-approve.test.ts) 整文件1项12断言证明正式 Service 真实批准／自动审核后写入、拒绝零效果和外部摘要不泄露正文。Win/Linux 的实际验证依用户安排后置，发布 RSS／观测和整体阶段门禁不由这些本机证据解除。
+
 `read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 3，write/edit/search/glob 为 2，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并同步，再次验证基线，最后原子替换或 create-only 发布并核实原对象。POSIX 使用文件 fsync、create-only hardlink 和目录 fsync；Windows 的同步与发布边界见下节。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
 
 POSIX 使用目录 FD 与 no-follow openat 逐段锚定路径，macOS 调用非 variadic `__openat`。相对路径禁止 `..`、`.`、绝对路径和反斜线；根与目标链均不跟随符号链接，不读取设备/FIFO/目录作为正文。根目录替换后原对象不被重新解释成另一权限目标。临时文件清理不会覆盖原发布结果。目录描述符设置 close-on-exec。Windows x64 的独立原 HANDLE 后端见下节，其他不支持的平台仍明确 `file_platform_unsupported`。
@@ -30,7 +42,9 @@ search 未指定 limit 返回全部匹配；显式 limit<=200 给出完整 next 
 
 普通 UTF-8 write/edit 在最后一次基线验证保存实际完整 preimage，publish/fsync 后读取实际 postimage，并核其完整内容和发布 FD 的 dev/inode；确认漂移保留 `file_publish_outcome_unknown`。成功 [FileSnapshot](../files.ts)带 `change`，由迁入的原 [共同前后缀行差异](../files-diff.ts)生成行号与增删内容。新建或内容不变展示真实写入内容；不是 Git diff、LCS 或 Shell/外部编辑捕获。每次操作独立保存，不合并为累计贡献。
 
-[Tool wrapper](../files-tools.ts)保持 write/edit 版本2及原 Model `content:{path,baseline}`，只将可选中立 `FileChangePreview` 放入 `ToolResult.details.fileChange`：version1、format、path、before/after 完整 baseline、text 和 truncated。预览最多65536 UTF-8 bytes，截在完整字符边界；这个额度只限制展示 receipt，不限制文件 IO、完整 baseline、Model 读写正文或 Artifact。before/after capture 最后保存失败和派发后确认失败仍 unknown，不发布可用成功预览；read/search/glob、字节恢复及未装配该预览的工具不伪造记录。消费者须核原 succeeded Execution/Run/结果 revision，旧或未知格式明确不可读。
+[Tool wrapper](../files-tools.ts)保持 write/edit 版本2及原 Model 的 `path/baseline` 字段，将可选中立 `FileChangePreview` 放入 `ToolResult.details.fileChange`：version1、format、path、before/after 完整 baseline、text 和 truncated。预览最多65536 UTF-8 bytes，截在完整字符边界；这个额度只限制展示 receipt，不限制文件 IO、完整 baseline、Model 读写正文或 Artifact。before/after capture 最后保存失败和派发后确认失败仍 unknown，不发布可用成功预览；read/search/glob、字节恢复及未装配该预览的工具不伪造记录。消费者须核原 succeeded Execution/Run/结果 revision，旧或未知格式明确不可读。
+
+read/write/edit 的 Model JSON 结果另带当前真实 `executionId/runId`，供计划 receipt 等消费者定位准确保存记录；ID 本身不证明成功、授权、验证结果或 Workspace checkpoint。消费者仍须读取并核准确原定义、Run／Session／Store、终态和结果 revision，不能用同名 call 或最新执行替换。
 
 没有新增 SQL 表、Store major、维护资产或 Model 工具权限。恢复检查点保首 preimage 与末 postimage，只服务准确恢复，不能冒充每次操作的差异。长期边界见[迁移决定](../../../../../.agents/notes/implemented/architecture/2026-10-08-native-file-change-receipts.md)。[真实预览与 Core receipt 测试](../../../test/isolated/files/change-preview.test.ts)核完整 BOM/CRLF pre/post、外部后改不改变历史、数 MiB 完整写入与 UTF-8 截断、失败/unknown 不保存成功预览，以及跨 Run 重复 call ID 的唯一原 source；各客户端实际资格由 owner 和进度维护。
 

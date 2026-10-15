@@ -2,21 +2,47 @@
 
 ## 原 Ink 展示与明确测试诊断
 
+原真实终端场景经[统一 runner](../../../../scripts/run-unified-tui-system-tests.ts)逐整文件消费当前 UI／CLI Host／公共 Client／默认 Service。原参数与模型声明在[测试协议映射](../../../../tests/tui-system/harness/original-tool-contract.ts)准确转换，不生产旧 Runtime 事件或伪造结果；不导入历史 Store9/11／State26。原 Store9/11 旧格式转换不在 D08 范围；对应历史／维护旅程改验新 Store／Profile，State26 则保实际旧文件隔离反例。这是测试范围迁移，不是旧格式转换或兼容通过。完整执行证据及后置平台范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
+短暂观察刷新保留同会话的可操作快照；明确重选会话时只查询保存的原未知请求，不重发。主屏的后继输入、后台任务和取消各自绑定原 Run，连续取消不会误取消已接受的下一任务。当前 Run 的已确认取消与历史 unknown 并列展示，不把旧未知改写为成功。审核选择在 native 键到达时更新，快速方向键／Enter 使用当前原卡的明确选择，原 revision、附件与重复提交门禁仍有效。
+
+Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认证连接实例；[活动资格](controller.ts)只在有未终结记录时比较它们。不同实例显示当前连接无法核实、仍可能在另一执行者运行，停止 Working／Thinking 及工具／子任务活动动画，保完整正文与原状态；不声明 owner 死亡、任务已中断或取消已完成，不自动恢复。缺少这些可选事实的旧 Port 保原观察行为，已经完成的历史不因此标未知。
+
+模型重试提示只消费同 Store／Session／Run／root work 的实际失败前驱与有限 `modelRetry` 元数据；没有消息正文的真实模型失败仍显示。活动思考的尾段在完整回答之前收束一次，原 Static 历史不因进度、输入或菜单刷新重复输出。已批准计划进度保留实际标题及步骤，真实 Files 效果和 Core CAS 收据才能完成步骤。
+
+探索阶段仅在真实工具归属与 Thought 或连续工具调用模型均成立时消费过程旁白；独立问题、写操作和无 Thought 的单次读取保留原模型文字在交互／工具之前的顺序，未知或混合归属不能隐藏正文。待审批卡的命令与私人草稿使用原卡／revision 的独立 ComposerBuffer；打开 MCP、清理显示及刷新不回答、取消或重绑原审批。诊断模式只优先展示原结果已有的 Execution 身份及 toolsMetadata，完整字段不删减，普通结果展示不变。
+
+真实子任务属于某个 Model 不构成隐藏该 Model 正文的条件；思考在前、任务旁白和完整回复按原来源顺序保留。已由准确 carrier 展示的 Tool 协议结果仍独立去重，原完整输出读取不变。纯展示滚动夹具沿当前公开 work／parent／runless carrier 事实及实际 Delegating 活动测试，不能从这些画面推定 Runtime 执行或完整资源资格。
+
+无 Thinking 的单次只读调用保留原统计，阶段收束后补充普通工具卡结果；活动时保留原 StepRow，已有失败／取消卡不重复。卡片 node 与来源 version 使用同一个执行投影，不能只用 phase 摘要代替完整结果与引用版本。合法的 runless Shell carrier 只经唯一、准确的父 Tool 归到原 Run；同一调用来源用于消息顺序和结果去重，保留 Bash 后探索顺序，取消前驱的历史不会浮到后继输入之后。foreign 或多个 carrier 不推定归属，完整 Job 输出读取入口不变。MCP 原名称经同一 Scope／catalogue／definition／name hash 校验后同时提供运行预览和终态详情；已确认工具失败与传输后的未知效果分别保留，未知不自动续跑。
+
+已核实的完整附件与历史共用单一 Static 输出队列，关闭审批卡仍继续输出后续回复。真实 producer 完成后，有界预览可按来源顺序封存；显式全文读取继续独立核 EOF、字节和原引用，后来完整正文变化沿原版本重建。Ctrl+L 查询原申请并刷新，显式 `/clear` 清理当前显示。提供 `same_command` 的审批要求先明确选择范围，初始空 Enter 不发送回答。
+
+活动 Markdown 复用原增量解析缓存，由 [live-markdown](live-markdown.ts) 按原行偏移分出稳定段落和仍变化的尾段；稳定段落进入同一 Static 队列，完整来源变化才重建。已输出材料不因动态尾段暂时缩短而回放，reason-first 缓冲和真实工具归属仍决定正文顺序。Question 的完整材料保留原换行，输入窗口按实际内容列宽计算光标；只有 Question 明确使用完整宽度，其他 Overlay 的默认内边距保持。
+
 原 `apps/kite-cli/src/tui` 的纯 UI 已迁入 [ink](ink/MarkdownBlock.tsx)：Markdown 的增量闭合缓存、代码语言框与高亮、表格边框和中英文宽度，用户原文背景块与 30 行首尾窗口，工具五行预览／Shell tail、文件 diff、Thinking 聚合、子任务树、ConcurrentSubAgent、计划步骤与压缩阶段。主题色板、语言目录、frame、选择行、搜索框和首次配置保留原展示算法；不导入旧 Runtime、provider、reducer 或旧客户端。
 
 [index](index.tsx)负责完整主屏消费。普通界面把完成内容一次写入终端原生历史，第一项仍变化的内容及其后续行留在动态区；列宽／会话／语言等语义变化才替换展示代次。长问题的完整材料进入原生历史，底部保留有限选择和输入窗口；编辑和观察状态变化不重发材料。主 composer 使用原双横线、❯、ghost 补全、命令说明／别名和 40 行光标窗口。Tab／首次 Enter 只补全，下一次 Enter 才提交；候选包括实际合格 Workflow 和当前完整 MCP prompt 目录。
 
-[execution projection](execution-projection.tsx)只把已有公共事实转成原 renderer model。Tool input 来自同 Store／Session 的实际执行，或同 Run 唯一 callId／准确结果 sourceIds；正式短 builtin ID 须由冻结 Run 的 extension／definition／version 证明后才使用友好名称。MCP 代理名称只从同 Store／Session 的原 metadata snapshot／index 绑定与准确 definition/version 读取，再核 name hash；当前 Server label 还需 configDigest 匹配，历史使用 MCP 加真实工具名。只读聚合使用原冻结 `readOnlyDefinitions`，并发使用同 Model 批次的 task／carrier 关系以及实际生命周期交叠。无证明者单列，失败、取消和 unknown 不折成成功。未知工具参数保留有界卡片预览及完整详情，Ctrl+E 可选中间卡片；准确 Job 才取得完整输出、child 阅读和停止入口。
+[execution projection](execution-projection.tsx)只把已有公共事实转成原 renderer model。Tool input 来自同 Store／Session 的实际执行，或同 Run 唯一 callId／准确结果 sourceIds；正式短 builtin ID 须由冻结 Run 的 extension／definition／version 证明后才使用友好名称。MCP 代理名称只从同 Store／Session 的原 metadata snapshot／index 绑定与准确 definition/version 读取，再核 name hash；当前 Server label 还需 configDigest 匹配，历史使用 MCP 加真实工具名。只读聚合使用原冻结 `readOnlyDefinitions`；Shell 另需准确注册的 builtin/version、同 Scope／Run／原工作、唯一 carrier 和已保存终态结果中的呈现分类，不能从 UI 命令拼写或自定义 Tool 字段猜只读资格。分类由 Agent 的既有参数分析产生，只影响展示，不授文件或执行权限；取消、拒绝和未派发项不计已完成探索。并发使用同 Model 批次的 task／carrier 关系以及实际生命周期交叠。无证明者单列，失败、取消和 unknown 不折成成功。未知工具参数保留有界卡片预览及完整详情，Ctrl+E 可选中间卡片；准确 Job 才取得完整输出、child 阅读和停止入口。
 
-宿主在原 refresh 中读取准确活动 Model 前缀、已验证 child views、有限 Shell tail、已批准计划及真实压缩阶段，没有独立轮询器。正常完成 Model 的全文和必要交互附件自动使用现有完整 reader；保留原 Store／Session／Run／Execution、UTF-8、EOF/hash 与未完整读取不得答复的门禁。失败可以 Ctrl+O／Ctrl+A 明确重读，未来或不支持的格式不猜正文。思考正文可 Ctrl+T 展开，完整读取只读、不派发 Tool。
+宿主在原 refresh 中读取准确活动 Model 前缀、已验证 child views、有限 Shell tail、已批准计划及真实压缩阶段，没有独立轮询器。正常完成 Model 的全文和必要交互附件自动使用现有完整 reader；保留原 Store／Session／Run／Execution、UTF-8、EOF/hash 与未完整读取不得答复的门禁。失败可以 Ctrl+O／Ctrl+A 明确重读，未来或不支持的格式不猜正文。完整思考保持收起，完整 reader 同时保留正文与 reasoning 供已加载导出使用；读取只读、不派发 Tool。
 
 [首次配置](onboarding-panel.tsx)沿原 Trust／Provider／Connection／Manual Model 流程接新的 [onboarding port](onboarding.ts)。没有可用默认时可配置 Provider，也可用原 enabled/default CAS 选已有模型。秘密仅在遮罩输入和一次热 POST 内，unknown 只 GET 原 mutation；输入、配置和身份校验仍由新 Service／Agent 完成。
 
 模型、权限、会话、Files、MCP、Skills、语言、主题、帮助与交互面板使用原纯 frame／行布局，完整目录及描述保留。原 CAS、独立确认、来源绑定、原 ID 查询和局部取消不变。Question Tab 在选项与自定义编辑间切换；可选的纯输入题仍用 Tab 跳过，混合题用 Alt+S；多步骤 Esc 返回，第一步 Esc 精确取消原 Question Execution。计划意图和权限仍独立，Shift+Tab 只切换下一草稿 planning，不改活动 Run。
 
+Question 的取消 caller 向 Host 提供当前卡的准确 ID／revision／presentation 范围，Host 重新核原 pending Question 与 Execution 后才准备同一持久 `execution.cancel`。普通 Job 停止仍保 Job 专属核验；错卡、错 Scope、已终结或无法核实不取得 POST 资格。纯 `ask_user` 的实际原执行取消结果允许同 Run 继续，不能将其他 Tool 的 abort 或未知副作用当成问答取消成功。
+
+Question 的可编辑状态取自 Controller 保存的准确原 Answer，匹配 Store／presentation Session／Interaction ID／revision；提交中、unknown 和保存已确认但卡片尚未更新时冻结原选项、正文与步骤，保 Ctrl+L 原查询、会话目录及整轮取消。明确未提交和 rejected 可编辑重试，不把另一卡的回执套到当前卡。新空草稿不立即报长度错误，原不合格提交、Unicode 长度和零 POST 门禁仍适用；问卷使用专用“提交回答”文案。失败 `ask_user` 保实际参数错误及原代码，并说明该调用未创建问卷，后续合法调用保持独立状态。
+
+Files 预览先选择范围，再独立 Enter 申请；空 Enter 不提交或重读目录。继承的恢复点标题按唯一原 message 出处绑定，不猜当前位置。完整“代码和会话”成功后，Controller 仍需 Host 的只读完成证明、准确原 intent／Scope 和读取代次才切换新会话、关闭面板并显示实际恢复数量；preview 数量或历史成功不足以代替当前证明。关闭、切范围和迟到结果不污染后来会话，代码审批及第二步继续仍需各自明确操作，详见[恢复指南](../../../../docs/handbook/clients/tui/guides/cancellation-and-recovery.md)。
+
 `TuiSession({testDiagnostics:true})` 或明确测试参数才显示 ID／协议 JSON／回执诊断；development 默认使用普通界面。诊断模式保留手动全文／附件读取，便于核原门禁；正常界面保留真实失败、未知、部分内容与取消未确认。两种模式使用同一新 Client／Service／Agent 业务链。
 
 原 renderer／panel 与必要来源测试见 [Ink renderer](../../test/tui/ink-renderers.test.tsx)、[主屏集成](../../test/tui/ink-main-integration.test.tsx)、[source projection](../../test/tui/execution-ink-projection.test.tsx)、[scrollback](../../test/tui/scrollback.test.tsx)。实际终端和跨平台资格归 [CLI owner](../../../../apps/cli/README.md)及[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不从复制组件推导阶段退出。
+
+缺失工作区的已保存会话可以由 Host 明确准入 `workspace_missing` observer；主屏显示只读恢复提示，首次配置不把它当 Trust 或 Model ready，新会话 readiness 保持 false。管理面板打开时持有自己的导航焦点，Ctrl+C 逐级关闭后才回到主屏待审批；关闭不回答审批、不取消业务。执行和配置权限继续由 Host／Agent 保持，界面标记不是授权。
 
 ## MCP 安全目录与原选择意图
 
@@ -55,6 +81,8 @@ controller的SourceReader沿Abort、generation、原S/W、panel及原Command ID�
 
 ## MCP HTTP 认证与原申请
 
+Run 中的真实认证需要调用正式普通 Login Action，父 Tool 与 nested Action 在 Store 中绑定相同 root work、Actor 和取消边；这不替代独立认证审批。认证断言和实际 HTTP 范围由[原认证整文件](../../../../tests/tui-system/scenarios/mcp-authentication.test.ts)及[嵌套 Action](../../../../packages/agent/test/isolated/extensions/nested-actions.test.ts)覆盖。
+
 [Auth DTO](mcp-auth.ts)与[panel](mcp-auth-panel.tsx)通过可选TuiPort.mcpAuth接当前HTTP Source和原Caller。完整fresh Source/read-set只用于新Review/独立Enter确认，Login/Refresh/Clear/Revoke均普通申请；UI不持Vault、网络、callback或热POST权。仅显示safe backend/presence/有限状态及原IDs，authenticated提示另行重连，不将Command.applied显示成功。
 
 复用原Caller map/journal和execution.cancel。冷原ID/选择零GET，明确Check才caller.lookup+原结果Query；空/failed/removed Source仍保历史。unknown阻同scope冲突，不淘汰记录。Abort/generation/原Store/S/W/selected ID隔离Reader，迟到提交只保存原记录；关闭/Ctrl+C/切S不取消业务，取消需核准确原Execution再独立确认。
@@ -82,3 +110,13 @@ Remove 先让Host以原scope/serverId/raw digest/read-set读取安全preview，R
 controller 隔离原 scope/generation/Abort/selected Command。来源目录与 preview/原申请查回使用各自有界 Reader；选择或查回原 ID 不取消目录读取，各自的 Reading 状态直到所属读取结束。同 Session 历史刷新保留这两种在途状态；关闭、切 Session/Workspace 取消两者，刷新目录只取消旧目录 Reader，忽略其迟到事实。原 ID 列表包含跨 Session 的相关 user/project来源意图；选择只切本地记录，明确 Check 才 lookup。cold/foreign 和不完整原事实保持 outcome_unknown；late submit 只回原 Map，不覆盖后来 Session 或所选原 ID。Esc 回表单步骤或父面板，Ctrl+C 只结束所属读取，已提交工作与普通审批继续。原 phase、ID、reason、来源 JSON、URL 和 command 保持原文；固定自有提示沿 [presentation catalog](presentation.tsx)提供三 locale。
 
 [真实 Ink/controller 测试](../../test/tui/mcp-source-mutation.test.tsx)覆盖逐键编辑、空值零 submit、独立 Review/Confirm、fallback、原选择零 lookup、late/scope 和已关闭读取；HTTP、持久 journal、物理丢回复、源码外 PTY 与正常资源关闭分别由[CLI owner](../../../../apps/cli/README.md#tui-mcp-来源条目增删与原申请)和[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)提供实际证据。本地 UI 断言不代替 Service publication、OS vault、异常 cleanup、完整管理或三平台资格。
+
+自动 MCP 目录观察只调用可选目录专用 `readDirectory`，没有该端口时不代用显式 Auth reader。不具真实 loginAllowed 的目标不取得凭据状态，未知仍未知；打开 Auth、Remove 和查询原请求分别保原独立行为。
+
+取消反馈可以来自同 Scope、准确当前活动 Run 目标的真实已准备 caller 请求；它明确表示请求中，不补服务端 accepted 或 terminal。unknown、排队和后继目标不显示该活动反馈，子任务活动不会遮掉当前取消请求；原远端状态及实际清理仍独立核对。
+
+后台详情读取同时选中准确原 Execution，目录中的其他 Tool／Job 不会遮住已读取的原输出或子会话。超长纯文本段落在进入 Ink 测量前按同一换行语义拆行，保留完整字符及 Unicode 边界；其他 Markdown 路径、原正文、完整读取与导出不变。完成正文留在终端原生历史，后续折叠和状态更新不要求重新打印原全文。
+
+文件恢复的原请求观察更新当前详情和同一 canonical 原请求的已保存目录行，已确认成功不会仍显示旧 pending；其他请求保持原状态。此同步只消费已核回执，不提交恢复、不继续另一段，也不切换仅恢复代码的原会话。
+
+尾部结果折叠在原键到达时更新同 Scope 的显示状态，连续 Enter 不依赖上一帧闭包；仅改变阅读状态，完整正文与原执行事实保持。按用户确认移除 Ctrl+T 入口及其显示状态，帮助和测试诊断不再提示该快捷键；完整 reader 和 serializer 仍核实、保存并导出原 reasoning。

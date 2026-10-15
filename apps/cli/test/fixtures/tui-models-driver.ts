@@ -6,6 +6,7 @@ import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 type Input = {
   runner: string;
+  storeId: string;
   databasePath: string;
   count: string;
   callsURL: string;
@@ -81,7 +82,42 @@ const cleanup = async () => {
   pty.close();
 };
 try {
+  await wait('› Exit Kite Code');
+  await key('\x1b[B');
+  await wait('› Trust this workspace and continue');
+  await key('\r');
   await wait('New Run');
+  const trustDb = new Database(input.databasePath, { readonly: true });
+  try {
+    const saved = trustDb
+      .query(
+        "SELECT id,origin_store_id,scope,state,safe_request_json,receipt_json FROM host_mutation WHERE kind='workspace.trust'",
+      )
+      .all() as {
+      id: string;
+      origin_store_id: string;
+      scope: string;
+      state: string;
+      safe_request_json: string;
+      receipt_json: string;
+    }[];
+    assert.equal(saved.length, 1);
+    const original = saved[0]!;
+    assert.equal(original.origin_store_id, input.storeId);
+    assert.equal(original.scope, 'workspace:w');
+    assert.equal(original.state, 'applied');
+    const request = JSON.parse(original.safe_request_json),
+      receipt = JSON.parse(original.receipt_json);
+    assert.equal(request.workspaceId, 'w');
+    assert.equal(request.trusted, true);
+    assert.equal(request.ifRevision, '0');
+    assert.equal(receipt.trusted, true);
+    assert.equal(receipt.revision, '1');
+    assert.equal(receipt.canonicalIdentity, request.canonicalIdentity);
+    assert.equal(receipt.externalReadScopeDigest, request.externalReadScopeDigest);
+  } finally {
+    trustDb.close();
+  }
   if (input.mode === 'paired') {
     service = JSON.parse(readFileSync(input.ownedPath, 'utf8'));
     if (!service || typeof service.start !== 'string')
@@ -90,11 +126,7 @@ try {
     if (owner.inspect() !== 'alive') throw Error('models original Service not alive');
   }
   await send('/permissions');
-  await wait('Workspace w: untrusted');
-  await key('t');
-  await wait('Confirm original');
-  await key('\r');
-  await wait('workspace.trust: applied');
+  await wait('Workspace w: trusted, revision 1');
   await key('\x1b');
   await wait('New Run');
   await send('held-original');
@@ -108,7 +140,8 @@ try {
   await send('/model');
   await wait('Desired default: one');
   await key('\x1b[B');
-  await wait('› compatible / two');
+  await wait('compatible');
+  await wait('❯ two');
   await key('\r');
   await wait('Confirm original project change');
   await key('\r');
@@ -123,15 +156,23 @@ try {
   await key('\x1b');
   await wait('Steer original active Run >');
   await send('/effort');
-  await wait('clear project effort');
-  for (const value of ['none', 'minimal', 'low', 'medium', 'high']) {
+  await wait('❯ Default');
+  for (const value of ['none', 'minimal']) {
     await key('\x1b[B');
-    await wait(`› ${value}`);
+    await wait(`❯ ${value}`);
+  }
+  for (const value of ['none', 'Default', 'max', 'high', 'medium', 'low']) {
+    await key('\x1b[A');
+    await wait(`❯ ${value}`);
+  }
+  for (const value of ['medium', 'high']) {
+    await key('\x1b[B');
+    await wait(`❯ ${value}`);
   }
   await key('\r');
   await wait('Confirm original project change');
   await key('\r');
-  await wait('Current effective effort: high');
+  await wait('high Current');
   assert.deepEqual(await requests(), [{ model: 'one' }]);
   await key('\x1b');
   await (await fetch(input.releaseURL)).text();

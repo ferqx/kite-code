@@ -173,7 +173,10 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
       async fetch(request) {
         const body = (await request.json()) as { messages: { role: string; content: unknown }[] };
         const task = text(
-          body.messages.filter((message) => message.role === 'user').at(-1)?.content,
+          [...body.messages]
+            .reverse()
+            .find((message) => message.role === 'user' && tasks.includes(text(message.content)))
+            ?.content,
         );
         const index = tasks.indexOf(task);
         if (index !== requestFacts.length || index < 0)

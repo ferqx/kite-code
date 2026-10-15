@@ -12,12 +12,16 @@ test('small live reasoning prefix is publicly readable before finish without rel
     store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   const expectedStoreId = (await store.getMetadata()).storeId;
   let release!: () => void,
+    releaseFirst!: () => void,
+    startedFirst!: () => void,
     started!: () => void,
     active = 0,
     effects = 0,
     requests = 0;
   const held = new Promise<void>((resolve) => (release = resolve)),
-    ready = new Promise<void>((resolve) => (started = resolve));
+    ready = new Promise<void>((resolve) => (started = resolve)),
+    firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve)),
+    firstReady = new Promise<void>((resolve) => (startedFirst = resolve));
   const reasoning = 'actual Unicode reasoning 中文🙂';
   const model: ModelAdapter = {
     async *stream() {
@@ -26,6 +30,8 @@ test('small live reasoning prefix is publicly readable before finish without rel
       try {
         if (requests === 1) {
           yield { type: 'reasoning_delta', text: reasoning };
+          startedFirst();
+          await firstHeld;
           yield { type: 'tool_call', id: 'original-call', name: 'local.check', arguments: '{}' };
           await Bun.sleep(110);
           yield { type: 'reasoning_delta', text: ' continued' };
@@ -88,9 +94,29 @@ test('small live reasoning prefix is publicly readable before finish without rel
       commandId: 'work',
       request: { kind: 'run.start', content: 'local' },
     });
-    await ready;
+    // The first small event must be visible while the producer is held before
+    // any second event can cause the old elapsed-time checkpoint to fire.
+    await firstReady;
     const inputs = await runtime.listModelInputs(scope),
       executionId = inputs.items[0]!.executionId;
+    const first = await runtime.readModelOutput({ ...scope, executionId });
+    expect(first.output).toEqual({ content: '', reasoning, toolCalls: [], complete: false });
+    expect(first).toMatchObject({
+      storeId: expectedStoreId,
+      sessionId: scope.sessionId,
+      executionId,
+      originCommandId: 'work',
+      status: 'dispatching',
+      reasoningBytes: String(Buffer.byteLength(reasoning)),
+    });
+    expect(
+      (await runtime.listMessages('session')).find((message) =>
+        message.sourceIds?.includes(executionId),
+      )?.firstOutput,
+    ).toBe('reasoning');
+    expect(effects).toBe(0);
+    releaseFirst();
+    await ready;
     const prefix = await runtime.readModelOutput({ ...scope, executionId });
     expect(prefix.output).toEqual({
       content: '',
@@ -102,6 +128,11 @@ test('small live reasoning prefix is publicly readable before finish without rel
     expect(prefix.status).toBe('dispatching');
     expect(active).toBe(1);
     expect(effects).toBe(0);
+    expect(
+      (await runtime.listMessages('session')).find((message) =>
+        message.sourceIds?.includes(executionId),
+      )?.firstOutput,
+    ).toBe('reasoning');
     release();
     await runtime.waitForCommand('work');
     expect((await runtime.readModelOutput({ ...scope, executionId })).output).toMatchObject({
@@ -111,8 +142,14 @@ test('small live reasoning prefix is publicly readable before finish without rel
       toolCalls: [{ id: 'original-call' }],
     });
     expect(effects).toBe(1);
+    expect(
+      (await runtime.listMessages('session')).find((message) =>
+        message.sourceIds?.includes(executionId),
+      )?.firstOutput,
+    ).toBe('reasoning');
     expect(active).toBe(0);
   } finally {
+    releaseFirst();
     release();
     await runtime.close();
     rmSync(root, { recursive: true, force: true });

@@ -115,6 +115,45 @@ test('original file tool renderer preserves full diff rows and tool-specific fri
   }
 });
 
+test('failed and active questions keep distinct call states without inventing an unanswered result', () => {
+  const args = { questions: [{ question: 'Exact original question', options: [] }] };
+  const view = render(
+    <ToolCardBlock
+      block={tool({
+        name: 'ask_user',
+        args,
+        status: 'error',
+        summary: 'invalid_tool_arguments',
+        expanded: true,
+      })}
+      columns={120}
+    />,
+  );
+  try {
+    expect(view.lastFrame()).toContain('Question parameters invalid; no question opened');
+    expect(view.lastFrame()).toContain('invalid_tool_arguments');
+    expect(view.lastFrame()).toContain('Exact original question');
+    view.rerender(
+      <ToolCardBlock
+        block={tool({
+          callId: 'second-original',
+          name: 'ask_user',
+          args,
+          status: 'running',
+          expanded: true,
+        })}
+        columns={120}
+        awaitingInput
+      />,
+    );
+    expect(view.lastFrame()).toContain('(awaiting input)');
+    expect(view.lastFrame()).not.toContain('invalid_tool_arguments');
+    expect(view.lastFrame()).not.toContain('(no answer)');
+  } finally {
+    view.unmount();
+  }
+});
+
 const child = (id: string): Extract<OutputBlock, { kind: 'subagent' }> => ({
   id: Number(id),
   kind: 'subagent',

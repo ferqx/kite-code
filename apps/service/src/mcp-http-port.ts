@@ -9,6 +9,7 @@ import {
   McpCredentialError,
   type McpCredentialIdentity,
   type McpCredentialRef,
+  McpHttpAuthRejection,
   type McpLifecycleTransportPort,
 } from '@kite-ai/agent/mcp';
 import { extractWWWAuthenticateParams } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -456,7 +457,38 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
                     code = 'mcp_oauth_scope_changed';
                   }
                   authorizationFailure = code;
-                  reject(new McpAdapterError(code));
+                  let rpc: Record<string, unknown> | undefined;
+                  try {
+                    const parsed = bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null;
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+                      rpc = parsed;
+                  } catch {
+                    /* No qualified RPC identity: preserve ordinary uncertainty. */
+                  }
+                  const negative =
+                    code !== 'mcp_oauth_scope_changed' &&
+                    init?.method === 'POST' &&
+                    rpc?.jsonrpc === '2.0' &&
+                    rpc.method === 'tools/call' &&
+                    (typeof rpc.id === 'string' ||
+                      (typeof rpc.id === 'number' && Number.isSafeInteger(rpc.id)));
+                  reject(
+                    negative
+                      ? new McpHttpAuthRejection(
+                          code as 'mcp_oauth_login_required' | 'mcp_oauth_reauth_required',
+                          {
+                            httpStatus: 401,
+                            rpcMethod: 'tools/call',
+                            requestId: rpc!.id as string | number,
+                            serverId: binding.serverId,
+                            connectionExecutionId: binding.executionId,
+                            originalStoreId: binding.originalStoreId,
+                            sessionId: binding.sessionId,
+                            configDigest: binding.configDigest,
+                          },
+                        )
+                      : new McpAdapterError(code),
+                  );
                   incoming.destroy();
                   request.destroy();
                   return;

@@ -38,6 +38,24 @@ const wait = async (text: string) => {
     await Bun.sleep(50);
   }
 };
+const waitOriginalAttachment = async () => {
+  const end = Date.now() + 8000;
+  for (;;) {
+    const frame = await current();
+    // The whole verified attachment is emitted into real terminal scrollback.
+    // Its EOF need not share the finite viewport with the answer choices.
+    const emitted = pty.text();
+    if (
+      frame.fresh &&
+      emitted.includes('ORIGINAL_PLAN_UTF8') &&
+      emitted.includes('ORIGINAL_PLAN_FULL_TAIL')
+    )
+      return;
+    if (Date.now() > end) throw Error('original complete Plan attachment was not emitted');
+    if (pty.ended) throw Error('original Planning host ended');
+    await Bun.sleep(50);
+  }
+};
 const key = async (value: string) => {
   await pty.key(value);
   // Preserve the original key's 100ms pump window while native PTY callbacks drain.
@@ -46,17 +64,23 @@ const key = async (value: string) => {
 };
 const choose = async (id: string, title: string) => {
   await key('\x12');
-  await wait(title);
-  for (const direction of [undefined, '\x1b[B', '\x1b[A']) {
-    if (direction) await key(direction);
+  await wait('Select Session');
+  await key('\t');
+  await key(title);
+  await wait(`Search: ${title}`);
+  await key('\x1b[B');
+  const end = Date.now() + 8000;
+  for (;;) {
     const frame = await current();
-    if (frame.fresh && frame.text.split('\n').includes(`> ${title} [${id}]`)) {
+    if (frame.fresh && frame.text.replace(/\s+/g, ' ').includes(`❯ ${title} [${id}]`)) {
       await key('\r');
       await wait(`Session ${id} ·`);
       return;
     }
+    if (Date.now() > end) throw Error(`original Session target not selected ${id}`);
+    if (pty.ended) throw Error('original Planning host ended');
+    await Bun.sleep(50);
   }
-  throw Error(`original Session target not selected ${id}`);
 };
 const planningTask = 'original single plan 中文🙂';
 const slash = async () => {
@@ -137,9 +161,10 @@ try {
     'effect existed before user approval',
   );
   await key('\x01');
-  await wait('ORIGINAL_PLAN_FULL_TAIL');
-  await key('approve accept_edits');
-  await wait('approve accept_edits');
+  await waitOriginalAttachment();
+  await key('\x1b[B');
+  await key('\x1b[B');
+  await wait('❯ 2. Start execution in Accept edits mode');
   await key('\r');
   await wait('interaction.answer: unknown');
   await key('\x0c');
@@ -179,6 +204,42 @@ try {
   console.log('ORIGINAL_PLAN_PT Y_COMPLETE');
 } catch (error) {
   failure = error;
+  try {
+    const source = readDatabase((database) => ({
+      runs: database.query("SELECT id,status,reason FROM run WHERE session_id='s'").all(),
+      models: database
+        .query(
+          "SELECT id,state,result_json FROM execution WHERE session_id='s' AND kind='model' ORDER BY rowid DESC LIMIT 1",
+        )
+        .all(),
+      messages: database
+        .query("SELECT id,role,status,source_json FROM message WHERE session_id='s' ORDER BY seq")
+        .all()
+        .map((row) => {
+          const message = row as { id: string; role: string; status: string; source_json: string };
+          const source = JSON.parse(message.source_json);
+          return {
+            id: message.id,
+            role: message.role,
+            status: message.status,
+            source: {
+              ...source,
+              content:
+                typeof source.content === 'string' ? source.content.slice(0, 256) : source.content,
+              toolCalls: Array.isArray(source.toolCalls)
+                ? source.toolCalls.map((call: { id: string; name: string }) => ({
+                    id: call.id,
+                    name: call.name,
+                  }))
+                : source.toolCalls,
+            },
+          };
+        }),
+    }));
+    writeFileSync(`${input.transcript}.failure-source.json`, JSON.stringify(source, null, 2));
+  } catch {
+    // Preserve the original failure even if its diagnostic Store is unavailable.
+  }
 } finally {
   process.removeListener('SIGINT', interrupted);
   process.removeListener('SIGTERM', interrupted);

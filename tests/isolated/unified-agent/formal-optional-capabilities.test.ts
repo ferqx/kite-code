@@ -57,9 +57,17 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       async fetch(request) {
         const body = (await request.json()) as (typeof requests)[number];
         requests.push(body);
-        const shell =
-          body.messages.filter((message) => message.role === 'user').at(-1)?.content ===
-          'Optional Shell selected';
+        const task = [...body.messages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === 'user' &&
+              ['Optional Shell selected', 'Ordinary Files', 'No optional tools'].includes(
+                message.content,
+              ),
+          )?.content;
+        if (task === undefined) return new Response('unexpected original work', { status: 500 });
+        const shell = task === 'Optional Shell selected';
         if (shell) shellCalls++;
         else fileCalls++;
         const call = shell

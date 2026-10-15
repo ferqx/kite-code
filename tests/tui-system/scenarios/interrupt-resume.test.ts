@@ -17,7 +17,10 @@
  * interrupt handling coverage.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -225,7 +228,13 @@ describe('TUI PTY System — Interrupt Resume', () => {
     'restart and load the interrupted session → historical content remains but no running state survives',
     async () => {
       server.setResponses([]);
-      tui3 = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+      tui3 = await spawnReadyTui({
+        cols: 120,
+        rows: 40,
+        mockServer: server,
+        workspace,
+        entryPath: join(import.meta.dir, '../fixtures/interrupt-owner-observation-tui.ts'),
+      });
       await submitCommand(tui3, '/resume');
       await waitForCondition(
         () =>
@@ -248,12 +257,38 @@ describe('TUI PTY System — Interrupt Resume', () => {
       await waitForCondition(
         () =>
           screenContains(tui3.viewport(), 'Interrupted model turn before restart') &&
-          screenContains(tui3.viewport(), '❯'),
+          screenContains(tui3.viewport(), '❯') &&
+          !screenContains(tui3.viewport(), '会话列表'),
         'post-recovery Session event tail to finish replaying',
         15_000,
       );
 
+      console.log(
+        'Original interrupted public owner observations:',
+        readFileSync(`${workspace.dataRoot}-interrupt-owner.jsonl`, 'utf8'),
+      );
       const restored = tui3.viewport();
+      if (screenContains(restored, 'Working') || screenContains(restored, 'Thinking')) {
+        const database = new Database(workspace.databasePath, { readonly: true });
+        try {
+          console.error('Original interrupted restore viewport:', restored);
+          console.error(
+            'Original interrupted restore sources:',
+            JSON.stringify({
+              runs: database
+                .query('SELECT id,session_id,status,reason FROM run ORDER BY rowid')
+                .all(),
+              executions: database
+                .query(
+                  "SELECT id,session_id,run_id,kind,state FROM execution WHERE kind='model' ORDER BY rowid",
+                )
+                .all(),
+            }),
+          );
+        } finally {
+          database.close();
+        }
+      }
       expect(screenContains(restored, 'Hello from tui1')).toBe(true);
       expect(screenContains(restored, 'Interrupted model turn before restart')).toBe(true);
       expect(screenContains(restored, 'This response must not survive the terminated owner.')).toBe(

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -87,6 +87,8 @@ function seal<T>(value: T): T {
 }
 type Host = Pick<
   AgentRuntime,
+  | 'submitCommand'
+  | 'invokeActionFromTool'
   | 'getMetadata'
   | 'getSession'
   | 'getWorkspace'
@@ -1584,6 +1586,86 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       replacements.set(own.id, Object.freeze(binding));
     }
     return Object.freeze({
+      label: entry.server.name,
+      async loginAfterToolFailure(
+        toolContext: import('@kite-ai/agent/extensions').ToolContext,
+      ): Promise<Json> {
+        fresh({ signal: toolContext.signal });
+        const actualTool = await source.host.getExecution(toolContext.executionId);
+        const actualRun = actualTool?.runId ? await source.host.getRun(actualTool.runId) : null;
+        const actor = actualRun ? await source.host.getCommand(actualRun.originCommandId) : null;
+        if (
+          actualTool?.kind !== 'tool' ||
+          actualTool.originStoreId !== source.sourceScope.storeId ||
+          actualTool.sessionId !== source.session.id ||
+          toolContext.sessionId !== source.session.id ||
+          !actualRun ||
+          !actor ||
+          actor.subjectId !== options.observerSubjectId ||
+          !['dispatching', 'running'].includes(actualTool.status) ||
+          actualTool.cancelRequestedAt !== null
+        )
+          throw new McpAdapterError('mcp_provider_action_scope_invalid');
+        const authSource = await scope(toolContext.sessionId);
+        const observed = observe(authSource);
+        const configured = observed.capture.servers.find((server) => server.id === input.serverId);
+        if (!configured?.admitted || configured.configDigest !== configDigest)
+          throw new McpAdapterError('mcp_provider_action_source_changed');
+        const target = oauthTarget(
+          authSource,
+          observed.state.entries.find((entry) => entry.server.id === input.serverId)!,
+          observed.capture.readSet,
+        );
+        if (!target?.loginAllowed) throw new McpAdapterError('mcp_oauth_login_unavailable');
+        const authCommand = await source.host.invokeActionFromTool({
+          parentExecutionId: toolContext.executionId,
+          expectedStoreId: source.sourceScope.storeId,
+          commandId: randomUUID(),
+          sessionId: source.session.id,
+          subjectId: actor.subjectId,
+          request: {
+            kind: 'extension.invoke',
+            extensionId: mcpSourcesExtensionId,
+            actionId: 'mcp.auth.login',
+            definitionVersion: '1',
+            input: {
+              serverId: input.serverId,
+              expectedReadSet: observed.capture.readSet as unknown as Json,
+            },
+          },
+        });
+        const deadline = Date.now() + 180000;
+        while (Date.now() < deadline) {
+          toolContext.signal.throwIfAborted();
+          const current = await source.host.getCommand(authCommand.id);
+          const executionId = object(current?.receipt).executionId;
+          if (typeof executionId === 'string') {
+            const execution = await source.host.getExecution(executionId);
+            if (
+              execution &&
+              execution.originStoreId === source.sourceScope.storeId &&
+              execution.sessionId === source.session.id &&
+              execution.definitionId === `${mcpSourcesExtensionId}/mcp.auth.login` &&
+              execution.definitionVersion === '1' &&
+              ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status)
+            )
+              return { commandId: authCommand.id, executionId, status: execution.status };
+          }
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => {
+              clearTimeout(timer);
+              reject(toolContext.signal.reason);
+            };
+            const timer = setTimeout(() => {
+              toolContext.signal.removeEventListener('abort', abort);
+              resolve();
+            }, 100);
+            if (toolContext.signal.aborted) abort();
+            else toolContext.signal.addEventListener('abort', abort, { once: true });
+          });
+        }
+        return { commandId: authCommand.id, status: 'outcome_unknown' };
+      },
       server: seal({
         id: input.serverId,
         transport,

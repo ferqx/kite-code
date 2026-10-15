@@ -27,8 +27,17 @@ export function spawnTuiPTY(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   onData?: (bytes: Uint8Array) => void;
+  /** Explicit raw-material consumer; provides no cursor or screen projection. */
+  observation?: 'screen' | 'stream';
 }) {
-  const screen = new Terminal({ cols: 80, rows: 24, scrollback: 1000, allowProposedApi: true });
+  const screen =
+    input.observation === 'stream'
+      ? undefined
+      : new Terminal({ cols: 80, rows: 24, scrollback: 1000, allowProposedApi: true });
+  const requireScreen = () => {
+    if (!screen) throw Error('stream_observation_has_no_screen');
+    return screen;
+  };
   const output: Uint8Array[] = [];
   let parsed = Promise.resolve();
   let revision = 0;
@@ -54,11 +63,13 @@ export function spawnTuiPTY(input: {
         output.push(copy);
         input.onData?.(copy);
         byteLength += copy.byteLength;
-        parsed = parsed
-          .then(() => new Promise<void>((resolve) => screen.write(copy, resolve)))
-          .then(() => {
-            revision++;
-          });
+        if (screen) {
+          parsed = parsed
+            .then(() => new Promise<void>((resolve) => screen.write(copy, resolve)))
+            .then(() => {
+              revision++;
+            });
+        } else revision++;
       },
       exit() {
         resolveEOF();
@@ -76,23 +87,43 @@ export function spawnTuiPTY(input: {
     },
     text: () => Buffer.concat(output).toString('utf8'),
     sinceAction: () => Buffer.concat(output).subarray(actionOffset).toString('utf8'),
-    viewport: () =>
-      Array.from(
+    viewport: () => {
+      const actual = requireScreen();
+      return Array.from(
         { length: 24 },
         (_, row) =>
-          screen.buffer.active
-            .getLine(screen.buffer.active.viewportY + row)
+          actual.buffer.active
+            .getLine(actual.buffer.active.viewportY + row)
             ?.translateToString(true) ?? '',
-      ).join('\n'),
+      ).join('\n');
+    },
     async key(value: string) {
       await parsed;
       actionRevision = revision;
       actionOffset = byteLength;
       host.terminal!.write(value);
     },
-    async projection() {
+    /** Navigation only: do not turn an already painted target into a no-op action. */
+    async keyUnlessVisible(value: string, target: string) {
+      const actual = requireScreen();
       await parsed;
-      return { fresh: revision > actionRevision, text: readTuiRender(screen) };
+      const viewport = Array.from(
+        { length: 24 },
+        (_, row) =>
+          actual.buffer.active
+            .getLine(actual.buffer.active.viewportY + row)
+            ?.translateToString(true) ?? '',
+      ).join('\n');
+      if (viewport.includes(target)) return false;
+      actionRevision = revision;
+      actionOffset = byteLength;
+      host.terminal!.write(value);
+      return true;
+    },
+    async projection() {
+      const actual = requireScreen();
+      await parsed;
+      return { fresh: revision > actionRevision, text: readTuiRender(actual) };
     },
     async drain() {
       await parsed;
@@ -101,7 +132,7 @@ export function spawnTuiPTY(input: {
       if (closed) return;
       closed = true;
       host.terminal?.close();
-      screen.dispose();
+      screen?.dispose();
     },
   };
 }

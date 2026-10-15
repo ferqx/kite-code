@@ -8,7 +8,7 @@ export type TuiPlanProgressStatus =
   | 'blocked'
   | 'compensated';
 export type TuiProgress = {
-  plan?: { steps: { step: string; status: TuiPlanProgressStatus }[] };
+  plan?: { title?: string; steps: { step: string; status: TuiPlanProgressStatus }[] };
   compactionPhase?: 'preparing' | 'summarizing' | 'validating';
 };
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -117,7 +117,13 @@ export async function readTuiProgress(
       });
     }
     if (Object.keys(states).some((key) => !seen.has(key))) return result;
-    return { ...result, plan: { steps } };
+    return {
+      ...result,
+      plan: {
+        ...(typeof plan.title === 'string' && plan.title.trim() ? { title: plan.title } : {}),
+        steps,
+      },
+    };
   } catch {
     return result;
   }

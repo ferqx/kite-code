@@ -299,6 +299,48 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
           stage === 'custom'
         ) {
           original ??= await pending();
+          if (stage === 'initial') {
+            const client = await connected();
+            const view = await client.getView(sessionId);
+            const workspaceId = view.session.workspaceId;
+            const trust = await client.getWorkspaceTrust(workspaceId, { storeId });
+            expect(trust).toMatchObject({
+              storeId,
+              workspaceId,
+              trusted: true,
+              status: 'trusted',
+              revision: '1',
+            });
+            const trustPosts = wire().filter(
+              (row) =>
+                row.method === 'POST' &&
+                row.path === `/v1/workspaces/${encodeURIComponent(workspaceId)}/trust`,
+            );
+            expect(trustPosts).toHaveLength(1);
+            const saved = trustPosts[0]!.body!;
+            expect(saved).toMatchObject({
+              expectedStoreId: storeId,
+              trusted: true,
+              ifRevision: '0',
+              canonicalIdentity: trust.canonicalIdentity,
+              externalReadScopeDigest: trust.externalReadScopeDigest,
+            });
+            expect(typeof saved.commandId).toBe('string');
+            const mutation = await client.getPermissionMutation(String(saved.commandId), {
+              storeId,
+            });
+            expect(mutation).toMatchObject({
+              commandId: saved.commandId,
+              kind: 'workspace.trust',
+              state: 'applied',
+              receipt: {
+                trusted: true,
+                canonicalIdentity: trust.canonicalIdentity,
+                externalReadScopeDigest: trust.externalReadScopeDigest,
+                revision: trust.revision,
+              },
+            });
+          }
           const offered = modelRequests[0]!.tools!.find(
             (tool) => tool.function.name === 'ask_user',
           )!.function;

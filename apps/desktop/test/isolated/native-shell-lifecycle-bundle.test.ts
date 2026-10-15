@@ -227,7 +227,13 @@ test.skipIf(process.platform !== 'darwin')(
         const body = (await request.json()) as {
           messages: { role: string; content: unknown }[];
         };
-        const latest = body.messages.filter((message) => message.role === 'user').at(-1),
+        const latest = [...body.messages]
+            .reverse()
+            .find(
+              (message) =>
+                message.role === 'user' &&
+                ['HOST_FIRST', 'HOST_SERVICE'].includes(String(message.content)),
+            ),
           marker =
             typeof latest?.content === 'string' ? latest.content : JSON.stringify(latest?.content),
           start = body.messages.lastIndexOf(latest!),

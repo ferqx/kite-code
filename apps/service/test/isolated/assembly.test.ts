@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { agentContractSource } from '@kite-ai/agent/sources';
 import { createWorkspaceAssembly } from '../../src/assembly';
 
 function fixture() {
@@ -131,7 +132,9 @@ test('configuration cannot invent Tool IDs or trusted Skill roots, and disabled 
       skills: [{ id: 'disabled', enabled: false, path: outside }],
     });
     expect(assembly.snapshotFacts.skills).toEqual([]);
-    expect(await assembly.sources.capture(request)).toEqual([]);
+    expect(await assembly.sources.capture(request)).toEqual([
+      agentContractSource(realpathSync(f.workspace)),
+    ]);
   } finally {
     await assembly?.dispose();
     f.close();
@@ -182,7 +185,9 @@ test('private Skill selection resolves one canonical ID/name and narrows all cat
     await assembly.dispose();
     assembly = await createWorkspaceAssembly({ ...options, selectedSkills: [] });
     expect(assembly.snapshotFacts.skills).toEqual([]);
-    expect(await assembly.sources.capture(request)).toEqual([]);
+    expect(await assembly.sources.capture(request)).toEqual([
+      agentContractSource(realpathSync(f.workspace)),
+    ]);
   } finally {
     await assembly?.dispose();
     f.close();

@@ -166,7 +166,22 @@ const runtime = createRuntime({
               question: 'Original root independent question',
             });
             const ended = await Promise.all(
-              [...children, verifier].map((ref) => ctx.operations.wait(ref)),
+              [...children, verifier].map(async (ref) => {
+                for (;;) {
+                  try {
+                    return await ctx.operations.wait(ref, { timeoutMs: 10000, signal: ctx.signal });
+                  } catch (error) {
+                    if (!(error instanceof Error) || error.message !== 'wait_timeout') throw error;
+                    // A bounded observation timeout does not settle an original
+                    // operation while its independent human decision is pending.
+                    const current = await ctx.operations.get(ref);
+                    if (!current) throw Error('original_pending_operation_unavailable');
+                    if (!['planned', 'dispatching', 'running'].includes(current.status))
+                      return current;
+                    ctx.signal.throwIfAborted();
+                  }
+                }
+              }),
             );
             await question;
             return {

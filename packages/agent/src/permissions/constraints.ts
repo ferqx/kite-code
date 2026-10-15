@@ -124,6 +124,7 @@ export function createPlanningPermissionPolicy(options: {
   describe: (request: AuthorizationRequest) => CapabilityDescription | null;
 }): Permissions {
   return {
+    toolDispatchOrder: options.current.toolDispatchOrder,
     async authorize(request) {
       request.signal.throwIfAborted();
       const current = await options.current.authorize(request);

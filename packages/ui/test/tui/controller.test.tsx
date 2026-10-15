@@ -561,6 +561,72 @@ for (const surface of ['approval', 'composer'] as const) {
     }
   });
 }
+test('rapid native approval selection and Enter deny the offered execution rather than using a stale approve default', async () => {
+  const f = fixture();
+  f.port.readSession = async () => ({ ...snapshot(), interactions: [card] });
+  const c = new TuiController(f.port);
+  await c.select('a');
+  const app = render(<TuiSession testDiagnostics controller={c} />);
+  try {
+    await Bun.sleep(20);
+    expect(app.lastFrame()).toContain('same command in original Session');
+    expect(f.writes).toHaveLength(0);
+    // This offered three-option menu begins unselected: first Down selects
+    // once, second selects same_command, third selects deny. Keep the native
+    // keys back-to-back so Enter still detects a stale selection closure.
+    app.stdin.write('\u001b[B');
+    app.stdin.write('\u001b[B');
+    app.stdin.write('\u001b[B');
+    app.stdin.write('\r');
+    await Bun.sleep(30);
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({
+      card: 'card',
+      intent: { answer: { kind: 'approval', decision: 'deny' } },
+    });
+    expect(f.cancels).toHaveLength(0);
+  } finally {
+    app.unmount();
+    app.cleanup();
+    c.dispose();
+  }
+});
+test('actual latest Run cancellation remains visible alongside historical unknown, while active work is not labelled cancelled', async () => {
+  const f = fixture();
+  let current = snapshot('a', false);
+  const original = snapshot().view.runs[0]!;
+  current.view.runs = [
+    { ...original, id: 'historical', status: 'interrupted', isActive: false, finishedAt: 2 },
+    { ...original, id: 'latest', status: 'cancelled', isActive: false, finishedAt: 3 },
+  ];
+  f.port.readSession = async () => current;
+  const c = new TuiController(f.port);
+  await c.select('a');
+  const app = render(<TuiSession testDiagnostics controller={c} />);
+  try {
+    await Bun.sleep(20);
+    expect(app.lastFrame()).toContain('Unknown — verify original work');
+    expect(app.lastFrame()).toContain('Current task · Cancelled');
+    current = {
+      ...current,
+      view: {
+        ...current.view,
+        runs: [
+          current.view.runs[0]!,
+          { ...original, id: 'current-active', status: 'running', isActive: true },
+        ],
+      },
+    };
+    await c.select('a');
+    await Bun.sleep(20);
+    expect(app.lastFrame()).toContain('Unknown — verify original work');
+    expect(app.lastFrame()).not.toContain('Current task · Cancelled');
+  } finally {
+    app.unmount();
+    app.cleanup();
+    c.dispose();
+  }
+});
 test('only original offered approval grants, EOF/blank and question never default approve; saved receipt is not success', async () => {
   expect(interactionAnswer(card, '')).toBeUndefined();
   expect(interactionAnswer(card, 'approve')).toEqual({
@@ -869,7 +935,7 @@ for (const mismatch of [
   });
 }
 
-test('Ink Ctrl+L restores the frozen answer GET before refreshing and clearing only the terminal display', async () => {
+test('Ink Ctrl+L restores the frozen answer GET and refreshes without clearing; explicit /clear changes only display', async () => {
   const f = fixture();
   let terminal = false;
   const events: string[] = [];
@@ -904,8 +970,20 @@ test('Ink Ctrl+L restores the frozen answer GET before refreshing and clearing o
   expect(c.state.sessionId).toBe('b');
   expect(c.state.intent).toMatchObject({ sessionId: 'a', phase: 'applied' });
   expect(c.state.snapshot?.messages).toHaveLength(1);
+  expect(c.visibleMessages).toHaveLength(1);
+  expect(rendered.lastFrame()).toContain('full正文尾部');
+  expect(f.writes).toEqual([]);
+  expect(f.cancels).toEqual([]);
+  rendered.stdin.write('/clear\r');
+  await Bun.sleep(40);
+  expect(events).toEqual([`get:a:${original.commandId}`, 'read:b']);
+  expect(c.state.sessionId).toBe('b');
+  expect(c.state.intent).toMatchObject({ sessionId: 'a', phase: 'applied' });
+  expect(c.state.snapshot?.messages).toHaveLength(1);
   expect(c.visibleMessages).toHaveLength(0);
   expect(rendered.lastFrame()).not.toContain('full正文尾部');
+  expect(f.writes).toEqual([]);
+  expect(f.cancels).toEqual([]);
   rendered.unmount();
   c.dispose();
 });

@@ -637,6 +637,7 @@ test.skipIf(process.platform !== 'darwin')(
           completeHash?: string;
           commandId: string;
         }[];
+        planningExecutions: import('@kite-ai/client').Execution[];
         filesApprovals: {
           id: string;
           runId: string;
@@ -663,6 +664,7 @@ test.skipIf(process.platform !== 'darwin')(
           cancelId: 0,
         },
       });
+      expect(report.management).toHaveLength(0);
       expect(report.filesApprovals).toHaveLength(2);
       const reviewedFile = report.filesApprovals.find((approval) => approval.sessionId === 'a')!;
       const originalFileReviews = reviewRequests.filter(
@@ -716,6 +718,42 @@ test.skipIf(process.platform !== 'darwin')(
           expect(target?.authorization?.review?.executionId).toBeDefined();
           const child = await cold.getExecution(target!.authorization!.review!.executionId);
           expect(child).toMatchObject({ status: 'succeeded', originStoreId: storeId });
+        }
+        for (const definitionId of ['planning.write', 'planning.review', 'planning.update'])
+          expect(
+            report.planningExecutions.some(
+              (execution) =>
+                execution.definitionId === definitionId && execution.status === 'succeeded',
+            ),
+          ).toBe(true);
+        for (const original of report.planningExecutions) {
+          const run = report.runs.find((run) => run.id === original.runId)!;
+          expect(run).toBeDefined();
+          expect(original.sessionId).toBe(run.sessionId);
+          const execution = await cold.getExecution(original.id);
+          expect(execution).toMatchObject({
+            id: original.id,
+            originStoreId: storeId,
+            sessionId: run.sessionId,
+            runId: run.id,
+            kind: 'tool',
+            definitionId: original.definitionId,
+            definitionVersion: '1',
+            status: original.status,
+            resultRevision: original.resultRevision,
+            authorization: { dispatched: true },
+          });
+          expect(execution?.result).toEqual(original.result);
+          const actualRun = await cold.getRun(run.id);
+          expect(execution?.rootWorkCommandId).toBe(actualRun?.rootWorkCommandId);
+          expect(execution?.rootWorkSeq).toBe(actualRun?.rootWorkSeq);
+          expect(
+            (
+              await cold.listInteractions({ expectedStoreId: storeId, sessionId: run.sessionId })
+            ).interactions.filter(
+              (card) => card.kind === 'approval' && card.executionId === original.id,
+            ),
+          ).toHaveLength(0);
         }
         for (const original of report.management) {
           const card = (

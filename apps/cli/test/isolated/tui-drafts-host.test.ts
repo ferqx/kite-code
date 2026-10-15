@@ -82,6 +82,19 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
         workspaceId: 'w',
         title: 'owned',
       });
+      const trust = await seed.client.getWorkspaceTrust('w', { storeId });
+      expect(
+        (
+          await seed.client.setWorkspaceTrust('w', {
+            expectedStoreId: storeId,
+            commandId: 'trust-owned-draft-workspace',
+            trusted: true,
+            ifRevision: trust.revision,
+            canonicalIdentity: trust.canonicalIdentity,
+            externalReadScopeDigest: trust.externalReadScopeDigest,
+          })
+        ).state,
+      ).toBe('applied');
     } finally {
       await seed.close();
     }

@@ -422,8 +422,31 @@ nativeTest(
       await setMode('auto', 'child-auto');
       f.a.command(`printf denied > '${outside}'; printf ask >> effect`);
       await f.submit('grant-child');
-      await f.approve('task', 'child-approve-task');
-      await f.approve('agent/worker', 'child-approve-carrier');
+      // Unchanged finite default roles create only internal records; their
+      // real Shell effects still require their own Auto fallback decisions.
+      const pending = await until(async () => {
+        for (const session of await f.store.listSessions()) {
+          const cards = (
+            await f.store.listInteractions({ ...f.base, sessionId: session.id, state: 'pending' })
+          ).interactions;
+          if (cards.length) return cards;
+        }
+        return undefined;
+      });
+      expect(pending.map((card) => card.definitionId)).toEqual(['shell.launch']);
+      expect(
+        (await f.store.listExecutions('s')).filter(
+          (row) =>
+            row.rootWorkCommandId === 'grant-child' &&
+            ['task', 'agent/worker'].includes(row.definitionId),
+        ),
+      ).toEqual([
+        expect.objectContaining({ definitionId: 'task', authorization: { dispatched: true } }),
+        expect.objectContaining({
+          definitionId: 'agent/worker',
+          authorization: { dispatched: true },
+        }),
+      ]);
       await f.approve('shell.launch', 'child-approve-launch');
       const card = await f.card('shell.command');
       expect(card.presentationSessionId).toBe('s');

@@ -1,6 +1,6 @@
 import type { Interaction } from '@kite-ai/client';
 import { Box, useInput, usePaste, useStdout } from 'ink';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { type ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch } from './composer-input';
 import { terminalText } from './controller';
@@ -56,39 +56,62 @@ export function TuiPlanReviewPanel({
     },
   ];
   const mutable = !busy && card.state === 'pending';
+  // Ink's actual terminal listener may outlive the render that selected a row.
+  // Keep the explicit user choice, rather than reading an old callback index.
+  const explicitChoice = useRef<string | undefined>(undefined);
+  const current = useRef({ mutable, editing, choices, onAnswer });
+  current.current = { mutable, editing, choices, onAnswer };
+  const shownChoice =
+    selected === undefined
+      ? undefined
+      : choices.find((choice) => choice.answer === explicitChoice.current);
   usePaste((text) => {
-    if (editing && mutable) {
+    if (current.current.editing && current.current.mutable) {
       feedback.insert(text, true);
       render((n) => n + 1);
     }
   });
   useInput((input, key) => {
-    if (key.ctrl || isCtrlCBatch(input) || (key.tab && key.shift) || !mutable) return;
+    const active = current.current;
+    if (key.ctrl || isCtrlCBatch(input) || (key.tab && key.shift) || !active.mutable) return;
     if (key.escape) {
-      if (editing) setEditing(false);
-      else onAnswer('deny');
+      if (active.editing) {
+        current.current.editing = false;
+        setEditing(false);
+      } else active.onAnswer('deny');
       return;
     }
-    if (!editing) {
-      if (key.upArrow || key.downArrow)
-        setSelected((value) =>
-          value === undefined
+    if (!active.editing) {
+      if (key.upArrow || key.downArrow) {
+        const previous = active.choices.findIndex(
+          (choice) => choice.answer === explicitChoice.current,
+        );
+        const next =
+          previous < 0
             ? key.downArrow
               ? 0
-              : choices.length - 1
-            : Math.max(0, Math.min(choices.length - 1, value + (key.downArrow ? 1 : -1))),
+              : active.choices.length - 1
+            : Math.max(0, Math.min(active.choices.length - 1, previous + (key.downArrow ? 1 : -1)));
+        explicitChoice.current = active.choices[next]?.answer;
+        setSelected(next);
+      } else if (key.return && explicitChoice.current !== undefined) {
+        const choice = active.choices.find(
+          (candidate) => candidate.answer === explicitChoice.current,
         );
-      else if (key.return && selected !== undefined) {
-        const choice = choices[selected]!;
-        if (choice.answer === 'revise') setEditing(true);
-        else onAnswer(choice.answer);
+        if (!choice) {
+          explicitChoice.current = undefined;
+          setSelected(undefined);
+        } else if (choice.answer === 'revise') {
+          current.current.editing = true;
+          setEditing(true);
+        } else active.onAnswer(choice.answer);
       }
       return;
     }
     const width = Math.max(24, (stdout.columns ?? 80) - 12),
       display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
     if (key.return && !key.shift && !key.meta) {
-      if (feedback.text.trim()) onAnswer(`revise ${feedback.text}`);
+      if (feedback.text.trim()) active.onAnswer(`revise ${feedback.text}`);
       else setShowEmptyHint(true);
       return;
     }
@@ -143,12 +166,12 @@ export function TuiPlanReviewPanel({
                 label: choice.label,
                 description: choice.description,
               }))}
-              selectedId={selected === undefined ? undefined : choices[selected]?.answer}
+              selectedId={shownChoice?.answer}
               numbered
             />
           </Box>
           <Text>{t('Up/Down: choose · Enter: confirm · Esc: deny')}</Text>
-          {selected === undefined && <Text>{t('none (Enter has no answer)')}</Text>}
+          {!shownChoice && <Text>{t('none (Enter has no answer)')}</Text>}
         </>
       )}
       {busy && (

@@ -1,6 +1,15 @@
 import { canonicalJson } from '../../json';
 import { AgentError, type RequirementEvaluation } from '../../storage/types';
 import type { Extension, Json, OperationRef, ToolContext, ToolResult } from '../index';
+import { completeForegroundTask } from './foreground';
+
+export { createDefaultTaskRequestClassifier } from '../../permissions/task-request';
+export {
+  defaultTaskRoles,
+  isReadOnlyTaskTool,
+  isRootOnlyTaskTool,
+  readOnlyTaskToolIds,
+} from './roles';
 
 export interface TaskRole {
   readonly id: string;
@@ -66,6 +75,13 @@ export function createTaskExtension(options: TaskOptions): Extension {
       throw new AgentError('invalid_task_roles');
     roles.set(role.id, Object.freeze(role));
   }
+  const roleSchema = {
+    type: 'string',
+    enum: [...roles.keys()],
+    description: `Type of sub-agent, selected from the trusted roles below.\n${[...roles.values()].map((role) => `${role.id}: ${role.description}`).join('\n')}`,
+  };
+  const delegationGuidance =
+    'Delegate concrete scoped subtasks when independent work benefits from an isolated sub-agent; isolation here is a separate child Session with the same parent capability ceiling, not additional filesystem access. Retain direct work for small sequential tasks. Use code only when the user task calls for implementation; use plan for read-only architecture or design planning, explore for repository investigation, and review for read-only code inspection, when those roles are registered. For multiple independent sibling task calls, the shared Loop can execute them concurrently within the child-slot limit; avoid dependent or overlapping work. A role never grants tools or permission beyond the actual parent selection and child ceiling.';
   const extension: Extension = {
     id: extensionId,
     version: '1',
@@ -199,11 +215,11 @@ export function createTaskExtension(options: TaskOptions): Extension {
       {
         id: 'task',
         version: '1',
-        description: 'Create a child Agent using a trusted role. Creation is not completion.',
+        description: `Create a child Agent using a trusted role. Creation is not completion. ${delegationGuidance}`,
         inputSchema: object(
           {
             key: idSchema,
-            role: { type: 'string', enum: [...roles.keys()] },
+            role: roleSchema,
             input: {},
             cancellation: { enum: ['attached', 'detached'] },
             resultDisposition: {
@@ -472,11 +488,40 @@ export function createTaskExtension(options: TaskOptions): Extension {
       },
     ],
   };
+  const create = extension.tools!.find((tool) => tool.id === 'task')!;
   const wait = extension.tools!.find((tool) => tool.id === 'task_wait')!;
   return {
     ...extension,
     tools: [
       ...extension.tools!,
+      {
+        ...create,
+        id: 'task.execute',
+        description: `Run an attached child using a trusted role; return its actual complete terminal summary before the next parent Model turn. ${delegationGuidance}`,
+        inputSchema: object(
+          {
+            key: idSchema,
+            role: roleSchema,
+            input: {},
+            cancellation: { enum: ['attached'] },
+          },
+          ['key', 'role', 'input'],
+        ),
+        async execute(input, context) {
+          const args = value(input);
+          if (args.cancellation !== undefined && args.cancellation !== 'attached')
+            throw new AgentError('invalid_task_arguments');
+          // The foreground Tool itself returns the exact terminal child body; a second
+          // completion requirement would redeliver it and force an extra parent Model.
+          const created = await create.execute(
+            { ...args, resultDisposition: 'background' },
+            context,
+          );
+          if (created.outcome !== 'succeeded') return created;
+          const ref = await reference(context, text(args, 'key'));
+          return completeForegroundTask(ref, context);
+        },
+      },
       {
         ...wait,
         id: 'wait_agents',

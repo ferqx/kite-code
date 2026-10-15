@@ -76,11 +76,14 @@ test('presentation is explicitly bounded on UTF-8 boundaries while complete writ
     } as Parameters<typeof tool.execute>[1]);
     expect(result.outcome).toBe('succeeded');
     const modelResult = JSON.parse(result.content);
-    expect(Object.keys(modelResult).sort()).toEqual(['baseline', 'path']);
+    expect(Object.keys(modelResult).sort()).toEqual(['baseline', 'fileChange', 'path', 'summary']);
     expect(modelResult.baseline.size).toBe(Buffer.byteLength(content));
     expect(modelResult.baseline.hash).toBe(hash(content));
     expect(readFileSync(join(f.root, 'large'), 'utf8')).toBe(content);
     const preview = (result.details as unknown as { fileChange: FileChangePreview }).fileChange;
+    expect(modelResult.fileChange).toEqual(preview);
+    expect(modelResult.path).toBe('large');
+    expect(modelResult.summary).toBe('Wrote 1 lines to large');
     expect(preview.truncated).toBe(true);
     expect(Buffer.byteLength(preview.text)).toBeLessThanOrEqual(65536);
     expect(preview.text).not.toContain('\ufffd');

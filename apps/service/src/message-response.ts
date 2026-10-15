@@ -76,13 +76,45 @@ export async function messageResponses(
 }
 
 export function executionResponse(execution: ExecutionRecord) {
+  const source = execution.decisionSource;
+  const retry =
+    execution.kind === 'model' &&
+    source &&
+    typeof source === 'object' &&
+    !Array.isArray(source) &&
+    source.kind === 'model_request'
+      ? source.retry
+      : undefined;
+  const publicExecution =
+    retry &&
+    typeof retry === 'object' &&
+    !Array.isArray(retry) &&
+    typeof retry.previousExecutionId === 'string' &&
+    typeof retry.attempt === 'number' &&
+    Number.isInteger(retry.attempt) &&
+    retry.attempt >= 2 &&
+    retry.attempt <= 5 &&
+    retry.maxAttempts === 5 &&
+    ['provider_unavailable', 'connection_failed', 'stream_incomplete'].includes(
+      String(retry.reason),
+    )
+      ? {
+          ...execution,
+          modelRetry: {
+            previousExecutionId: retry.previousExecutionId,
+            attempt: retry.attempt,
+            maxAttempts: 5 as const,
+            reason: retry.reason,
+          },
+        }
+      : execution;
   // A Tool's model-facing arguments are display facts. Never publish Model
   // request bodies, credential-bearing Job programs or recovery manifests here.
   if (execution.kind === 'tool')
-    return { ...execution, toolCallId: execution.callId, toolInput: execution.input };
+    return { ...publicExecution, toolCallId: execution.callId, toolInput: execution.input };
   const result = execution.result;
   if (!result || typeof result !== 'object' || Array.isArray(result) || !result.modelOutput)
-    return execution;
+    return publicExecution;
   const output = result.modelOutput as unknown as NonNullable<MessageRecord['modelOutput']>;
   if (
     output.head?.scope.kind !== 'execution' ||
@@ -93,7 +125,7 @@ export function executionResponse(execution: ExecutionRecord) {
     throw new AgentError('model_output_invalid');
   const { modelOutput: _privateOutput, ...publicResult } = result;
   return {
-    ...execution,
+    ...publicExecution,
     result: {
       ...publicResult,
       outputBody: {

@@ -310,11 +310,15 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
             value={step === 'name' ? name : value}
             onChange={() => undefined}
             label={t(
-              step === 'name'
-                ? 'Source entry name'
-                : transport === 'http'
-                  ? 'Server URL'
-                  : 'Server command',
+              testDiagnostics
+                ? step === 'name'
+                  ? 'Source entry name'
+                  : 'Source entry value'
+                : step === 'name'
+                  ? 'Source entry name'
+                  : transport === 'http'
+                    ? 'Server URL'
+                    : 'Server command',
             )}
             editor={
               <Text>
@@ -397,16 +401,18 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
             </Text>
           )}
           <Text>
-            {t(
-              {
-                pending: 'Waiting for configuration change',
-                completed: 'Configuration change saved',
-                saved: 'Configuration change saved',
-                failed: 'Configuration change failed',
-                cancelled: 'Configuration change cancelled',
-                outcome_unknown: 'Configuration change outcome unknown',
-              }[state.mcpMutationOutcome.phase] ?? state.mcpMutationOutcome.phase,
-            )}
+            {testDiagnostics
+              ? state.mcpMutationOutcome.phase
+              : t(
+                  {
+                    pending: 'Waiting for configuration change',
+                    completed: 'Configuration change saved',
+                    saved: 'Configuration change saved',
+                    failed: 'Configuration change failed',
+                    cancelled: 'Configuration change cancelled',
+                    outcome_unknown: 'Configuration change outcome unknown',
+                  }[state.mcpMutationOutcome.phase] ?? state.mcpMutationOutcome.phase,
+                )}
           </Text>
           {state.mcpMutationOutcome.fact?.credentialCleanup && (
             <Text>

@@ -61,7 +61,7 @@ const selectedLabel = (text: string) =>
   text
     .split('\n')
     .map((line) => line.trim())
-    .find((line) => line.startsWith('› '))
+    .find((line) => line.startsWith('❯ '))
     ?.slice(2);
 const control = async (path: string) => {
   const frame = active!.ended ? latestFrame : (await current()).text;
@@ -112,19 +112,30 @@ const key = async (value: string, retain = false) => {
 };
 const choose = async (label: string, top = 'Add source entry') => {
   const end = Date.now() + 10000;
-  if (normalized((await current()).text).includes(`› ${label}`)) return;
-  if (!normalized((await current()).text).includes(`› ${top}`)) {
-    await key('\x1b[A'.repeat(64));
+  const selection = async () => {
     for (;;) {
       const frame = await current();
-      if (frame.fresh && normalized(frame.text).includes(`› ${top}`)) break;
+      if (selectedLabel(frame.text) !== undefined) return frame;
+      if (Date.now() > end) throw Error(`owned_source_mutation_selection_absent:${label}`);
+      await Bun.sleep(50);
+    }
+  };
+  const initial = await selection();
+  if (normalized(initial.text).includes(`❯ ${label}`)) return;
+  if (!normalized(initial.text).includes(`❯ ${top}`)) {
+    retained = undefined;
+    note('navigate-top', { target: top });
+    await active!.keyUnlessVisible('\x1b[A'.repeat(64), `❯ ${top}`);
+    for (;;) {
+      const frame = await current();
+      if (frame.fresh && normalized(frame.text).includes(`❯ ${top}`)) break;
       if (Date.now() > end) throw Error(`owned_source_mutation_top_deadline:${top}`);
       await Bun.sleep(50);
     }
   }
   for (;;) {
-    const before = await current();
-    if (before.fresh && normalized(before.text).includes(`› ${label}`)) return;
+    const before = await selection();
+    if (before.fresh && normalized(before.text).includes(`❯ ${label}`)) return;
     if (Date.now() > end) throw Error(`owned_source_mutation_navigation_deadline:${label}`);
     const previous = selectedLabel(before.text);
     await key('\x1b[B');
@@ -213,6 +224,8 @@ try {
   await changes();
   await choose('Add source entry');
   await key('\r');
+  await wait('❯ HTTP');
+  await key('\r');
   await wait('Source entry name:');
   await key('\r');
   await wait('Invalid source entry name');
@@ -222,13 +235,11 @@ try {
     await wait('Source entry name:');
   }
   await key('\r');
-  await wait('› HTTP');
-  await key('\r');
   await wait('Source entry value:');
   await key('https://controlled.invalid/project');
   await wait('https://controlled.invalid/project');
   await key('\r');
-  await wait('› Current project');
+  await wait('❯ Current project');
   await key('\r');
   await wait('Review source entry change');
   await control('add-review');
@@ -240,7 +251,7 @@ try {
   await leave('MCP · w', true);
   const addedFact = await control('approve-add');
   const added = addedFact.commandId;
-  await wait(`builtin.mcp.sources/mcp.source.add [${addedFact.executionId}] succeeded`);
+  await wait(`builtin.mcp.sources/mcp.source.add[${addedFact.executionId}]succeeded`, true);
   await wait('New Run >');
   await changes();
   await selectOriginal(added);
@@ -262,7 +273,7 @@ try {
   await leave('MCP · w', true);
   const removedFact = await control('approve-remove');
   const removed = removedFact.commandId;
-  await wait(`builtin.mcp.sources/mcp.source.remove [${removedFact.executionId}] succeeded`);
+  await wait(`builtin.mcp.sources/mcp.source.remove[${removedFact.executionId}]succeeded`, true);
   await wait('New Run >');
   await changes();
   await selectOriginal(removed);

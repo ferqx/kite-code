@@ -23,27 +23,10 @@ if (!process.stdin.isTTY) {
   const { runServiceProcess } = await import('@kite-ai/service/main');
   await runServiceProcess({
     configure(startup, context) {
-      return createDefaultProcessConfiguration({
+      const configuration = createDefaultProcessConfiguration({
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
         observerSubjectId: context.subjectId,
-        permissions: {
-          async authorize(request) {
-            log('permissions.jsonl', {
-              kind: request.kind,
-              executionId: request.executionId,
-              definitionId: request.definitionId,
-            });
-            if (request.kind === 'model') throw Error('owned_source_model_forbidden');
-            return request.kind === 'job'
-              ? {
-                  allowed: false,
-                  revision: 'owned-source-ordinary-ask',
-                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
-                }
-              : { allowed: true, revision: 'owned-source-read' };
-          },
-        },
         credentialBackend: {
           kind: 'temporary',
           async put() {
@@ -70,11 +53,70 @@ if (!process.stdin.isTTY) {
           },
         },
       });
+      const permissions = configuration.permissions;
+      if (!permissions) throw Error('owned_source_default_permissions_unavailable');
+      return {
+        ...configuration,
+        permissions: {
+          ...permissions,
+          async authorize(request: Parameters<typeof permissions.authorize>[0]) {
+            log('permissions.jsonl', {
+              kind: request.kind,
+              executionId: request.executionId,
+              definitionId: request.definitionId,
+            });
+            if (request.kind === 'model') throw Error('owned_source_model_forbidden');
+            return request.kind === 'job'
+              ? {
+                  allowed: false,
+                  revision: 'owned-source-ordinary-ask',
+                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
+                }
+              : { allowed: true, revision: 'owned-source-read' };
+          },
+        },
+      };
     },
   });
   log('service-exits.jsonl', { exitCode: process.exitCode ?? 0, returnedAfterCleanup: true });
 } else {
   const { runTUIHost } = await import('@kite-ai/cli/tui-host');
+  const { TuiController } = await import('@kite-ai/ui/tui');
+  const originalSelect = TuiController.prototype.select;
+  let selectionCompletion = 0;
+  // Test-only observation of the original Promise, not a state or readiness
+  // override. A same-value refresh need not produce a new terminal paint.
+  TuiController.prototype.select = function (...args) {
+    const pending = originalSelect.apply(this, args);
+    void pending.then(
+      () => {
+        const state = this.state;
+        log('selection-completions.jsonl', {
+          completion: ++selectionCompletion,
+          requestedSessionId: args[0],
+          storeId: this.port.storeId,
+          sessionId: state.sessionId,
+          loading: state.loading,
+          stale: state.stale,
+          snapshotStale: state.snapshotStale,
+          cards: state.snapshot?.interactions.map((card) => ({
+            id: card.id,
+            revision: card.revision,
+            storeId: card.originStoreId,
+            sessionId: card.presentationSessionId,
+          })),
+        });
+      },
+      () => {
+        log('selection-completions.jsonl', {
+          completion: ++selectionCompletion,
+          requestedSessionId: args[0],
+          rejected: true,
+        });
+      },
+    );
+    return pending;
+  };
   const original = globalThis.fetch;
   globalThis.fetch = Object.assign(
     async (...args: Parameters<typeof fetch>) => {

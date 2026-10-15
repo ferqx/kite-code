@@ -46,6 +46,7 @@ export function OverlayStatusColumn({
 }
 
 interface OverlayFrameProps {
+  contentPaddingX?: number;
   title: ReactNode;
   hint?: string;
   meta?: ReactNode;
@@ -55,6 +56,7 @@ interface OverlayFrameProps {
 }
 
 export default function OverlayFrame({
+  contentPaddingX = 1,
   title,
   meta,
   hint,
@@ -96,7 +98,7 @@ export default function OverlayFrame({
           </>
         )}
       </Box>
-      <Box flexDirection="column" paddingX={1}>
+      <Box flexDirection="column" paddingX={contentPaddingX}>
         <Box marginTop={1} flexDirection="column">
           {children}
         </Box>

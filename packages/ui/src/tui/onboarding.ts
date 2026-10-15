@@ -1,5 +1,6 @@
 export type TuiOnboardingProvider = 'deepseek' | 'openai' | 'compatible';
 export type TuiOnboardingSnapshot = {
+  observer?: 'workspace_missing';
   trusted: boolean;
   readScopes: readonly { kind: string; description: string }[];
   modelName?: string;
@@ -10,6 +11,7 @@ export type TuiOnboardingResult =
   | { status: 'ready'; modelName: string }
   | { status: 'model-required'; stage?: 'provider' }
   | { status: 'unknown'; canContinue?: boolean }
+  | { status: 'cancelled' }
   | { status: 'failed'; code: string };
 export type TuiOnboardingConnection = {
   provider: TuiOnboardingProvider;
@@ -17,6 +19,7 @@ export type TuiOnboardingConnection = {
   baseURL: string;
   modelName?: string;
 };
+export type TuiOnboardingConnectPhase = 'discovering' | 'publishing';
 export interface TuiOnboardingPort {
   read(workspaceId: string, signal?: AbortSignal): Promise<TuiOnboardingSnapshot>;
   trust(workspaceId: string, signal?: AbortSignal): Promise<TuiOnboardingResult>;
@@ -29,6 +32,7 @@ export interface TuiOnboardingPort {
     workspaceId: string,
     input: TuiOnboardingConnection,
     signal?: AbortSignal,
+    onPhase?: (phase: TuiOnboardingConnectPhase) => void,
   ): Promise<TuiOnboardingResult>;
   /** Reads only the original mutation. Never repeats a write after an unknown result. */
   recover(workspaceId: string, signal?: AbortSignal): Promise<TuiOnboardingResult>;

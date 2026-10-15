@@ -284,7 +284,8 @@ export async function ensureSession(
   write: (line: string) => void,
   signal?: AbortSignal,
 ): Promise<{ session: Session; workspace: Workspace }> {
-  const sessions = await client.listAllSessions({ signal });
+  // Starting a fresh conversation does not require any historical page.
+  const sessions = args.thread ? await client.listAllSessions({ signal }) : [];
   const sessionId = args.thread ?? crypto.randomUUID();
   const original = sessions.find((item) => item.id === sessionId);
   const workspaces = await client.listAllWorkspaces({ signal });
@@ -308,7 +309,7 @@ export async function ensureSession(
     commandId,
     sessionId,
     workspaceId: workspace.id,
-    title: args.task.slice(0, 120) || 'CLI Session',
+    title: args.task === '' ? '' : args.task.slice(0, 120),
   });
   write(
     `session intent ${JSON.stringify({ storeId, commandId, sessionId, workspaceId: workspace.id })}`,

@@ -43,6 +43,7 @@ await runServiceProcess({
         read: readonly,
         updateModels: readonly,
         readProviders: readonly,
+        discoverProviders: readonly,
         updateProviders: readonly,
         patch: readonly,
         repair: readonly,

@@ -1,8 +1,7 @@
-import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { acquireKiteSessionStoreMaintenance } from '../../../packages/runtime-storage-sqlite/src/kite-session-maintenance';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -49,27 +48,10 @@ async function existingHistory() {
     await submitCommand(first, '/exit');
     expect(await first.waitForExit()).toBe(0);
 
-    const canonical = join(workspace.home, '.kite-code', 'kite-session.sqlite');
-    const historical = join(
-      workspace.home,
-      '.kite-code',
-      'source-profiles',
-      '2'.repeat(32),
-      'kite-session.sqlite',
-    );
-    mkdirSync(dirname(historical), { recursive: true, mode: 0o700 });
-    chmodSync(join(workspace.home, '.kite-code', 'source-profiles'), 0o700);
-    chmodSync(dirname(historical), 0o700);
-    // The source is an exact SQLite snapshot of real TUI-authored rows. Keeping
-    // canonical too exercises the supported equal-content schema-10 merge path.
-    const source = new Database(canonical, { readonly: true });
-    try {
-      source.query('VACUUM main INTO ?').run(historical);
-    } finally {
-      source.close();
-    }
-    chmodSync(historical, 0o600);
-    expect(existsSync(historical)).toBe(true);
+    const canonical = workspace.databasePath;
+    // Actual selected Core/Profile data, authored by the first real TUI. D08
+    // excludes foreign historical source conversion from this waiting journey.
+    expect(existsSync(canonical)).toBe(true);
     server.setResponses([]);
     return { workspace, server, tuis, canonical, sessionId };
   } catch (error) {
@@ -78,12 +60,15 @@ async function existingHistory() {
   }
 }
 
-function holdStore(canonical: string, readyPath: string) {
-  return Bun.spawn([process.execPath, holderFixture, canonical, readyPath], {
-    stdin: 'pipe',
-    stdout: 'ignore',
-    stderr: 'pipe',
-  });
+function holdStore(workspace: ReturnType<typeof createTestWorkspace>, readyPath: string) {
+  return Bun.spawn(
+    [process.execPath, holderFixture, workspace.dataRoot, workspace.profile, readyPath],
+    {
+      stdin: 'pipe',
+      stdout: 'ignore',
+      stderr: 'pipe',
+    },
+  );
 }
 
 async function waitForHolder(readyPath: string): Promise<void> {
@@ -102,13 +87,13 @@ async function cleanupHolder(holder: ReturnType<typeof holdStore> | undefined): 
   await holder.exited;
 }
 
-describe.skipIf(process.platform !== 'darwin')('TUI startup Store maintenance wait', () => {
+describe('TUI startup Store maintenance wait', () => {
   test('one TUI visibly waits for a different lock holder, then opens the original history without restarting', async () => {
     const fixture = await existingHistory();
     let holder: ReturnType<typeof holdStore> | undefined;
     try {
       const readyPath = join(fixture.workspace.home, 'holder-ready-1');
-      holder = holdStore(fixture.canonical, readyPath);
+      holder = holdStore(fixture.workspace, readyPath);
       await waitForHolder(readyPath);
       const waiting = await spawnPreInkTui(
         {
@@ -162,7 +147,7 @@ describe.skipIf(process.platform !== 'darwin')('TUI startup Store maintenance wa
     let holder: ReturnType<typeof holdStore> | undefined;
     try {
       const readyPath = join(fixture.workspace.home, 'holder-ready-2');
-      holder = holdStore(fixture.canonical, readyPath);
+      holder = holdStore(fixture.workspace, readyPath);
       await waitForHolder(readyPath);
       const waiting = await spawnPreInkTui(
         {
@@ -179,7 +164,12 @@ describe.skipIf(process.platform !== 'darwin')('TUI startup Store maintenance wa
       await waitForCondition(() => waiting.exited, 'waiting TUI to exit after Ctrl+C', 20_000);
       expect([0, 1]).toContain(await waiting.waitForExit());
       expect(holder.exitCode).toBeNull();
-      expect(() => acquireKiteSessionStoreMaintenance(fixture.canonical, 'shared')).toThrow('busy');
+      expect(() =>
+        acquireProfileAccess({
+          dataRoot: fixture.workspace.dataRoot,
+          profile: fixture.workspace.profile,
+        }),
+      ).toThrow('busy');
       await releaseHolder(holder);
       const restarted = await spawnReadyTui({
         cols: 120,

@@ -9,6 +9,7 @@ import ManualModelScreen from './ink/first-run/ManualModelScreen';
 import ProviderScreen from './ink/first-run/ProviderScreen';
 import {
   type ConnectionError,
+  classifyError,
   getErrorActions,
   PROVIDERS,
   type ProviderDefinition,
@@ -57,11 +58,17 @@ export function TuiOnboarding({
   const mounted = useRef(true),
     busy = useRef(false);
   const abort = useRef<AbortController | undefined>(undefined);
+  const operationGeneration = useRef(0);
+  // Ports without explicit phase evidence remain conservatively a possible publication.
+  const connectionPhase = useRef<'discovering' | 'publishing'>('publishing');
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   function apply(result: TuiOnboardingResult) {
     if (!mounted.current) return;
-    if (result.status === 'ready') {
+    if (result.status === 'cancelled') {
+      setEditing(undefined);
+      setPhase('connection');
+    } else if (result.status === 'ready') {
       setForm({ apiKey: '', baseURL: '' });
       cachedForms.current.clear();
       onReadyRef.current();
@@ -71,15 +78,22 @@ export function TuiOnboarding({
       setPhase('unknown');
     } else {
       setSelected(0);
-      setConnectionError({
-        kind:
-          result.code === 'provider_discovery_invalid' ||
-          result.code === 'provider_discovery_too_large'
-            ? 'incompatible'
-            : 'generic',
-        message:
-          'The connection could not be completed. Review the endpoint and API key, or enter a model name manually.',
-      });
+      const generic =
+        'The connection could not be completed. Review the endpoint and API key, or enter a model name manually.';
+      setConnectionError(
+        result.code === 'provider_discovery_auth_failed'
+          ? classifyError(401, generic, form.baseURL)
+          : [
+                'provider_discovery_failed',
+                'provider_discovery_invalid',
+                'provider_discovery_empty',
+                'provider_discovery_too_large',
+              ].includes(result.code)
+            ? classifyError(undefined, generic, form.baseURL)
+            : result.code === 'provider_discovery_unavailable'
+              ? classifyError(undefined, 'Could not fetch the model list.', form.baseURL)
+              : { kind: 'generic', message: generic },
+      );
       setPhase('error');
     }
   }
@@ -87,22 +101,34 @@ export function TuiOnboarding({
     if (busy.current) return;
     busy.current = true;
     setPhase('loading');
+    const generation = ++operationGeneration.current;
     const controller = new AbortController();
     abort.current = controller;
     try {
       const next = await port.read(workspaceId, controller.signal);
-      if (!mounted.current) return;
+      if (
+        !mounted.current ||
+        controller.signal.aborted ||
+        generation !== operationGeneration.current
+      )
+        return;
       setSnapshot(next);
-      if (!next.trusted) setPhase('trust');
+      if (next.observer === 'workspace_missing') onReadyRef.current();
+      else if (!next.trusted) setPhase('trust');
       else if (next.modelName) onReadyRef.current();
       else if (next.hasModels) {
         setSelected(0);
         setPhase('models');
       } else setPhase('provider');
     } catch {
-      if (mounted.current) setPhase('configuration-error');
+      if (
+        mounted.current &&
+        !controller.signal.aborted &&
+        generation === operationGeneration.current
+      )
+        setPhase('configuration-error');
     } finally {
-      busy.current = false;
+      if (generation === operationGeneration.current) busy.current = false;
     }
   }, [port, workspaceId]);
   async function run(
@@ -113,9 +139,16 @@ export function TuiOnboarding({
     busy.current = true;
     setPhase(trusting ? 'trust-saving' : 'connecting');
     const controller = new AbortController();
+    const generation = ++operationGeneration.current;
     abort.current = controller;
     try {
       const result = await action(controller.signal);
+      if (
+        !mounted.current ||
+        controller.signal.aborted ||
+        generation !== operationGeneration.current
+      )
+        return;
       if (result.status === 'model-required' && (trusting || result.stage === 'provider')) {
         const next = await port.read(workspaceId, controller.signal);
         if (mounted.current) {
@@ -126,9 +159,14 @@ export function TuiOnboarding({
       } else if (trusting && result.status === 'failed') setPhase('configuration-error');
       else apply(result);
     } catch {
-      if (mounted.current) setPhase('configuration-error');
+      if (
+        mounted.current &&
+        !controller.signal.aborted &&
+        generation === operationGeneration.current
+      )
+        setPhase('configuration-error');
     } finally {
-      busy.current = false;
+      if (generation === operationGeneration.current) busy.current = false;
     }
   }
   useEffect(() => {
@@ -166,8 +204,9 @@ export function TuiOnboarding({
       );
     if (phase === 'unknown' && key.escape) onExit();
   });
-  const connect = (apiKey = form.apiKey, baseURL = form.baseURL, manual?: string) =>
-    run((signal) =>
+  const connect = (apiKey = form.apiKey, baseURL = form.baseURL, manual?: string) => {
+    connectionPhase.current = 'publishing';
+    return run((signal) =>
       port.connect(
         workspaceId,
         {
@@ -177,8 +216,12 @@ export function TuiOnboarding({
           ...(manual ? { modelName: manual } : {}),
         },
         signal,
+        (next) => {
+          if (!signal.aborted) connectionPhase.current = next;
+        },
       ),
     );
+  };
   if (phase === 'loading')
     return (
       <FirstRunShell footer="">
@@ -245,8 +288,16 @@ export function TuiOnboarding({
         provider={provider}
         stage="models"
         onCancel={() => {
+          ++operationGeneration.current;
           abort.current?.abort();
-          onExit();
+          busy.current = false;
+          if (connectionPhase.current === 'publishing') {
+            setCanContinue(false);
+            setPhase('unknown');
+          } else {
+            setEditing(undefined);
+            setPhase('connection');
+          }
         }}
       />
     );
@@ -282,10 +333,13 @@ export function TuiOnboarding({
         selectedAction={selected}
         onSelectAction={setSelected}
         onConfirmAction={(index) => {
-          const action = getErrorActions(connectionError)[index]?.action;
+          const action = getErrorActions(connectionError, provider)[index]?.action;
           if (action === 'enter-model') setPhase('manual');
           else if (action === 'back-to-provider') setPhase('provider');
-          else setPhase('connection');
+          else {
+            setEditing(provider.connectionForm === 'custom-endpoint' ? 'baseURL' : 'apiKey');
+            setPhase('connection');
+          }
         }}
         onBack={() => setPhase('connection')}
         onExit={onExit}

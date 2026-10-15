@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -58,9 +59,35 @@ export class ProcessServiceCleanupError extends Error {
 
 export interface ProcessServiceOptions {
   configure?: ConfigureProcessHost;
+  /** Concrete host ports; never accepted from startup JSON, workspace configuration or HTTP. */
+  mcpSources?: NonNullable<Parameters<typeof createDefaultProcessConfiguration>[0]['mcpSources']>;
+  credentialBackend?: NonNullable<
+    Parameters<typeof createDefaultProcessConfiguration>[0]['credentialBackend']
+  >;
+  /** Trusted composition only; unavailable to startup JSON, configuration and HTTP callers. */
+  decorateConfiguration?: (
+    configuration: Awaited<ReturnType<ConfigureProcessHost>>,
+  ) =>
+    | Awaited<ReturnType<ConfigureProcessHost>>
+    | Promise<Awaited<ReturnType<ConfigureProcessHost>>>;
   /** Trusted observer identity; never read from startup/configuration JSON. */
   subjectId?: string;
   beforeResourceClose?: () => Promise<void>;
+}
+
+/** Standard development hosts share one service module and protect both actual entries. */
+function defaultRuntimeAssets(entrypoint: string | undefined): string[] {
+  if (!entrypoint || !isAbsolute(entrypoint)) return [];
+  const module = fileURLToPath(import.meta.url);
+  const suffix = module.endsWith('.ts') ? '.ts' : '.js';
+  const entries = ['main', 'daemon-main'].map((name) => join(dirname(module), name + suffix));
+  if (!entries.includes(entrypoint)) return [entrypoint];
+  for (const path of entries) {
+    if (!existsSync(path)) return [entrypoint];
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink() || realpathSync(path) !== path) return [entrypoint];
+  }
+  return entries;
 }
 
 /** One selected profile, Runtime and HTTP listener; the caller owns process liveness. */
@@ -86,7 +113,7 @@ export async function assembleProcessService(
   )
     throw new Error('profile_identity_mismatch');
   let runtimeAssetAccess: { release(): void } | undefined;
-  let runtimeAssets = entrypoint && isAbsolute(entrypoint) ? [entrypoint] : [];
+  let runtimeAssets = startup.runtimeProtection ? [] : defaultRuntimeAssets(entrypoint);
   if (startup.runtimeProtection) {
     const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
     const windowsFiles: ReturnType<typeof retainWindowsTerminalRuntimeFiles>[] = [];
@@ -148,10 +175,13 @@ export async function assembleProcessService(
           profile: selected,
           observerSubjectId: subjectId,
           hostConfiguration: startup.hostConfiguration,
-          mcpSources: packagedMcpSourceAssets(),
+          mcpSources: { ...packagedMcpSourceAssets(), ...options.mcpSources },
+          ...(options.credentialBackend ? { credentialBackend: options.credentialBackend } : {}),
           runtimeAssets,
           shell: packagedShellAssets(selected, runtimeAssets),
         });
+    if (options.decorateConfiguration)
+      configuration = await options.decorateConfiguration(configuration);
   } catch (error) {
     try {
       assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);

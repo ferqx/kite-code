@@ -33,16 +33,26 @@ function streamingTail(prefix: string, finalMarker: string, middleCount = 10): s
   ];
 }
 
-async function moveSelectorDownTo(tui: PtyProcess, selectedLabel: string): Promise<void> {
+async function moveSelectorDownTo(
+  tui: PtyProcess,
+  selectedLabel: string,
+  title = '语言',
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (screenContains(tui.viewport(), `❯ ${selectedLabel}`)) return;
     tui.write('\x1b[B');
     try {
-      await waitForText(() => tui.viewport(), `❯ ${selectedLabel}`, 1_500);
+      await waitForText(
+        () => tui.viewport(),
+        `❯ ${selectedLabel}`,
+        Math.min(1_500, deadline - Date.now()),
+      );
       return;
     } catch (error) {
       lastError = error;
-      await waitForText(() => tui.viewport(), '语言', 5_000);
+      await waitForText(() => tui.viewport(), title, Math.max(1, deadline - Date.now()));
     }
   }
   throw lastError;
@@ -58,6 +68,13 @@ describe('TUI PTY System — active Run model selection', () => {
     workspace = createTestWorkspace({
       configOverrides: {
         language: 'en-US',
+        modelId: 'mock-model',
+        models: ['mock-model', 'next-model'].map((model) => ({
+          id: model,
+          provider: 'compatible',
+          model,
+          baseURL: server.baseURL,
+        })),
         sandbox: { enabled: false },
         provider: {
           mock: {
@@ -109,6 +126,8 @@ describe('TUI PTY System — active Run model selection', () => {
       );
       tui.write('\x1b[B');
       await waitForText(() => tui.viewport(), '❯ next-model', 5_000);
+      tui.write('\r');
+      await waitForText(() => tui.viewport(), 'Confirm original project change', 5_000);
       tui.write('\r');
       await waitForCondition(
         () =>
@@ -201,8 +220,7 @@ describe('TUI PTY System — active Run theme and language changes', () => {
 
       await submitCommand(tui, '/theme');
       await waitForText(() => tui.viewport(), '选择色彩主题', 10_000);
-      tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '❯ 紫', 5_000);
+      await moveSelectorDownTo(tui, '紫', '选择色彩主题');
       tui.write('\r');
       await waitForTextGone(() => tui.viewport(), '选择色彩主题', 10_000);
       await waitForCondition(

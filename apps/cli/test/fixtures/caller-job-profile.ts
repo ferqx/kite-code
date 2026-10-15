@@ -20,6 +20,7 @@ import {
   promptWorkspaceTrust,
 } from '../../src/permissions';
 import { buildOwnedDaemon } from './daemon-host-build';
+import { type OriginalMessage, originalToolResults } from './original-tool-results';
 import { untilRecovery } from './recovery-profile';
 
 /** Formal default paired Service, public trusted Full mode and actual compatible SDK; two independent ordinary Shell Jobs. */
@@ -43,8 +44,12 @@ export async function callerJobProfile() {
     port: 0,
     async fetch(req) {
       calls++;
-      const body = (await req.json()) as { messages: { role: string }[] };
-      const done = body.messages.at(-1)?.role === 'tool';
+      const body = (await req.json()) as { messages: OriginalMessage[] };
+      const done = originalToolResults(
+        body.messages,
+        'two owned jobs',
+        ['a', 'b'].map((key) => ({ id: `launch-${key}`, name: 'shell.launch' })),
+      );
       const delta = done
         ? { content: 'PARENT_DONE_TWO_INDEPENDENT_JOBS' }
         : {

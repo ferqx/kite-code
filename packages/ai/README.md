@@ -12,6 +12,8 @@
 
 测试使用带测试凭据的本地模拟 HTTP endpoint，证明传输映射与每次流尝试只发一个网络请求；不建立生产 Provider 兼容性、可用性或付费模型行为资格。
 
+[ModelAttemptError](src/model-attempt.ts)仅归一化已知传输中断、Provider unavailable 和流不完整的有限公开原因；不按远端正文猜失败或重试资格。SDK 每次仍是零内部重试；Agent 在真实原 Execution 已失败、关闭及来源资格保持时决定有限下一尝试，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。
+
 验证：`bun test packages/ai/test/` 和 `bun run --cwd packages/ai typecheck`。
 
 `createSdkModelAdapter` 可选接受按模型划分的 `presets` 映射，字段包括 `temperature`、`topP`、`maxOutputTokens` 和有限的 `reasoningEffort`。绑定时校验、复制并冻结条目；支持的数值传递给那一次实际 SDK Provider 请求。不支持的字段和非法数值在任何尝试前拒绝。这个仅供宿主使用的绑定使中立 ModelRequest 不包含凭据或可变配置，同时保留 Tool 描述。默认 Service 装配为每个新 Run 选择新绑定，并在生效快照中记录同样的受支持非秘密选项。

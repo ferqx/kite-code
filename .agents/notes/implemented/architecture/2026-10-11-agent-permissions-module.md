@@ -16,12 +16,18 @@ Shell 工厂保留原 `@kite-ai/agent/jobs/shell` 与 `/shell` 公共原语装�
 
 固定 parser 依赖与两个公共 build entry 属于 Agent。正式 Terminal/Native 沿原 workspace manifest 与依赖图包含 WASM；predecessor 守卫只接纳本次准确 exports/build/owner 字节增量，不放宽任意版本或未知依赖。静态守卫沿真实 exports/barrel 拒绝权限模块反向依赖 Service，以及 Service 自有 parser npm 和原策略/范围工厂实现。
 
+审核材料以实际 Run 身份、原任务、计划和同范围其他执行的历史拒绝构成，仍经实时只读 Scope／主体／root work 核验；当前目标自己的新拒绝与自身人工等待进度不能反向改变自己的请求。否则实际审核或人工接纳完成后会因自引用产生不同 hash，吞掉原拒绝 reason 或拒绝原已回答审批。只排除这两种由当前审核自身产生的材料变化，不冻结整体读者、不宽松比较绑定；Core 的完整 hash、actual input、active／取消／owner fencing 继续独立执行。当前验证归[权限 owner](../../../../packages/agent/src/permissions/README.md)和原 [Service Shell 整文件](../../../../apps/service/test/isolated/shell-configuration.test.ts)。
+
+Path Files 的可信保护根是拒绝目标的集合；全部原路径校验先于精确去重和稳定排序，实际 classifier 与封存 boundary 共用这一规范化结果。Service 标准开发双入口提供两个真实受保护文件，避免 paired／daemon 当前 argv 和 Bun 内联 module 的重复／排列污染同制品配置身份；不删除任何保护目标、放宽 Core 完整配置比对或自动迁移旧快照。完整候选仍使用原持锁闭包验证，开发路径发现不给发布资格。
+
 ## Alternatives considered
 
 - 只搬三策略和 AST 两个文件：会在 Service 留下批准范围、命令摘要、启动前硬拒绝和审批组合，不满足已确认边界。
 - 把产品模式硬编码进唯一 Loop：会让通用执行核心反向依赖产品规则；保留既有 Permissions 注入接口。
 - 在 Service 留兼容转发文件：延续旧 owner 入口、增加双位置；正式调用者直接使用 Agent public exports。
 - 将全部配置、来源与宿主身份读取一并迁出：超出本次策略边界，且混入无关业务装配；只搬规则与 Shell 工厂，原可信事实读者保持。
+
+子任务的权限交集还需准确能力上限。Core 传递原父调用当前步骤的冻结工具身份（id／version／owner），Service 据此装配；父初始 Run 配置会遗漏后来合法连接取得的 MCP proxy，不能作为当前表。子任务独立连接取得定义，再经 Core 完整身份比较；不复制父 live connection、人工批准或派发授权。该接口只传事实，不把 Service 变为权限规则 owner。
 
 ## Consequences
 

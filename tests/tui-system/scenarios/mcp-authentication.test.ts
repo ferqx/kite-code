@@ -57,7 +57,13 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
+    tui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      mockServer: modelServer,
+      workspace,
+      entryPath: join(import.meta.dir, '../fixtures/mcp-auth-tui.tsx'),
+    });
     await waitForCondition(() => mcpRequests > 0, 'initial MCP connection attempt', 5_000);
     expect(mcpRequests).toBeGreaterThan(0);
     expect(authorizationRequests).toBe(0);
@@ -91,7 +97,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
           metadataRequests += 1;
           return Response.json({
             issuer: baseUrl,
-            authorization_endpoint: 'ftp://127.0.0.1/authorize',
+            authorization_endpoint: 'https://127.0.0.1/authorize',
             token_endpoint: `${baseUrl}/token`,
             response_types_supported: ['code'],
             grant_types_supported: ['authorization_code'],
@@ -211,146 +217,198 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     expect(events.value.some((event) => event.type === 'provider.admission_required')).toBe(false);
   }, 50_000);
 
-  test('a failed MCP Tool Call offers Provider Action and Later continues without replay', async () => {
-    let toolCalls = 0;
-    authServer = startTestHttpServer({
-      fetch: async (request) => {
-        if (request.method === 'GET' || request.method === 'DELETE') {
-          return new Response(null, { status: 405 });
-        }
-        const message = (await request.json()) as {
-          id?: string | number;
-          method?: string;
-          params?: { protocolVersion?: string };
-        };
-        if (message.method === 'initialize') {
-          return Response.json({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: {
-              protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
-              capabilities: { tools: {} },
-              serverInfo: { name: 'provider-action-fixture', version: '1.0.0' },
-            },
-          });
-        }
-        if (message.method === 'tools/list') {
-          return Response.json({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: {
-              tools: [
-                {
-                  name: 'echo',
-                  description: 'Echo a message.',
-                  inputSchema: {
-                    type: 'object',
-                    properties: { message: { type: 'string' } },
-                    required: ['message'],
+  test.each([
+    ['a failed MCP Tool Call offers Provider Action and Later continues without replay', 'later'],
+    ['Run login uses the ordinary AuthAction approval and continues without replay', 'login'],
+  ] as const)(
+    '%s',
+    async (_name, choice) => {
+      let toolCalls = 0;
+      let metadataRequests = 0;
+      let baseUrl = '';
+      authServer = startTestHttpServer({
+        fetch: async (request) => {
+          const url = new URL(request.url);
+          if (choice === 'login' && url.pathname === '/resource-metadata') {
+            metadataRequests += 1;
+            return Response.json({ resource: `${baseUrl}/mcp`, authorization_servers: [baseUrl] });
+          }
+          if (choice === 'login' && url.pathname === '/.well-known/oauth-authorization-server') {
+            metadataRequests += 1;
+            return Response.json({
+              issuer: baseUrl,
+              authorization_endpoint: 'https://127.0.0.1/authorize',
+              token_endpoint: `${baseUrl}/token`,
+              registration_endpoint: `${baseUrl}/register`,
+              response_types_supported: ['code'],
+              grant_types_supported: ['authorization_code'],
+              code_challenge_methods_supported: ['S256'],
+              token_endpoint_auth_methods_supported: ['none'],
+            });
+          }
+          if (choice === 'login' && url.pathname === '/register')
+            return Response.json({ client_id: 'owned-test-client' });
+          if (request.method === 'GET' || request.method === 'DELETE') {
+            return new Response(null, { status: 405 });
+          }
+          const message = (await request.json()) as {
+            id?: string | number;
+            method?: string;
+            params?: { protocolVersion?: string };
+          };
+          if (message.method === 'initialize') {
+            return Response.json({
+              jsonrpc: '2.0',
+              id: message.id,
+              result: {
+                protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
+                capabilities: { tools: {} },
+                serverInfo: { name: 'provider-action-fixture', version: '1.0.0' },
+              },
+            });
+          }
+          if (message.method === 'tools/list') {
+            return Response.json({
+              jsonrpc: '2.0',
+              id: message.id,
+              result: {
+                tools: [
+                  {
+                    name: 'echo',
+                    description: 'Echo a message.',
+                    inputSchema: {
+                      type: 'object',
+                      properties: { message: { type: 'string' } },
+                      required: ['message'],
+                    },
                   },
+                ],
+              },
+            });
+          }
+          if (message.method === 'prompts/list') {
+            return Response.json({ jsonrpc: '2.0', id: message.id, result: { prompts: [] } });
+          }
+          if (message.method === 'resources/list') {
+            return Response.json({ jsonrpc: '2.0', id: message.id, result: { resources: [] } });
+          }
+          if (message.method === 'tools/call') {
+            toolCalls += 1;
+            return new Response('Unauthorized', {
+              status: 401,
+              ...(choice === 'login'
+                ? {
+                    headers: {
+                      'WWW-Authenticate': `Bearer resource_metadata="${baseUrl}/resource-metadata"`,
+                    },
+                  }
+                : {}),
+            });
+          }
+          return new Response(null, { status: 202 });
+        },
+      });
+      baseUrl = authServer.url.origin;
+      modelServer = createMockModelServer();
+      modelServer.setResponses([
+        {
+          message: {
+            tool_calls: [
+              {
+                id: 'capability-search',
+                name: 'tool_search',
+                args: { query: 'recoverable echo' },
+              },
+            ],
+          },
+        },
+        {
+          expectedRequest: {
+            toolResults: [{ toolCallId: 'capability-search', contentIncludes: ['recoverable'] }],
+          },
+          message: {
+            tool_calls: [
+              {
+                id: 'mcp-call',
+                name: 'mcp__recoverable__echo',
+                args: { message: 'hello' },
+              },
+            ],
+          },
+        },
+        {
+          expectedRequest: {
+            toolResults: [
+              {
+                toolCallId: 'mcp-call',
+                contentIncludes: ['provider_auth_required'],
+              },
+            ],
+          },
+          message: { content: 'continued after deferring provider login' },
+        },
+      ]);
+      workspace = createTestWorkspace({
+        configOverrides: {
+          features: {
+            capabilityCatalog: true,
+            mcpRuntimeBinding: true,
+            mcpProviderAction: true,
+          },
+          mcpServers: {
+            recoverable: {
+              type: 'http',
+              url: `${authServer.url.origin}/mcp`,
+              trust: 'trusted',
+              tools: {
+                echo: {
+                  effects: { filesystem: 'none', network: 'none', externalState: 'read' },
+                  minimumApproval: 'none',
+                  retry: 'never',
                 },
-              ],
-            },
-          });
-        }
-        if (message.method === 'prompts/list') {
-          return Response.json({ jsonrpc: '2.0', id: message.id, result: { prompts: [] } });
-        }
-        if (message.method === 'resources/list') {
-          return Response.json({ jsonrpc: '2.0', id: message.id, result: { resources: [] } });
-        }
-        if (message.method === 'tools/call') {
-          toolCalls += 1;
-          return new Response('Unauthorized', { status: 401 });
-        }
-        return new Response(null, { status: 202 });
-      },
-    });
-    modelServer = createMockModelServer();
-    modelServer.setResponses([
-      {
-        message: {
-          tool_calls: [
-            {
-              id: 'capability-search',
-              name: 'tool_search',
-              args: { query: 'recoverable echo' },
-            },
-          ],
-        },
-      },
-      {
-        expectedRequest: {
-          toolResults: [{ toolCallId: 'capability-search', contentIncludes: ['recoverable'] }],
-        },
-        message: {
-          tool_calls: [
-            {
-              id: 'mcp-call',
-              name: 'mcp__recoverable__echo',
-              args: { message: 'hello' },
-            },
-          ],
-        },
-      },
-      {
-        expectedRequest: {
-          toolResults: [
-            {
-              toolCallId: 'mcp-call',
-              contentIncludes: ['provider_auth_required'],
-            },
-          ],
-        },
-        message: { content: 'continued after deferring provider login' },
-      },
-    ]);
-    workspace = createTestWorkspace({
-      configOverrides: {
-        features: {
-          capabilityCatalog: true,
-          mcpRuntimeBinding: true,
-          mcpProviderAction: true,
-        },
-        mcpServers: {
-          recoverable: {
-            type: 'http',
-            url: `${authServer.url.origin}/mcp`,
-            trust: 'trusted',
-            tools: {
-              echo: {
-                effects: { filesystem: 'none', network: 'none', externalState: 'read' },
-                minimumApproval: 'none',
-                retry: 'never',
               },
             },
           },
         },
-      },
-      projectConfigOverrides: {},
-    });
-    tui = await spawnReadyTui({
-      cols: 120,
-      rows: 40,
-      mockServer: modelServer,
-      workspace,
-    });
-    await submitUserMessage(tui, modelServer, 'call the recoverable echo tool', {
-      timeout: 15_000,
-    });
-    await waitForText(
-      () => tui!.outputSinceLastAction(),
-      "MCP provider 'recoverable' requires login.",
-      15_000,
-    );
-    expect(toolCalls).toBe(1);
-    expect(modelServer.getRequestCount()).toBe(2);
-    await waitForText(() => tui!.viewport(), '❯ 1. Run login', 5_000);
-    tui.write('\x1b[B');
-    await waitForText(() => tui!.viewport(), '❯ 2. Later', 5_000);
-    tui.write('\r');
-    await waitForText(() => tui!.viewport(), 'continued after deferring provider login', 15_000);
-    expect(toolCalls).toBe(1);
-    expect(modelServer.getRequestCount()).toBe(3);
-  }, 50_000);
+        projectConfigOverrides: {},
+      });
+      tui = await spawnReadyTui({
+        cols: 120,
+        rows: 40,
+        mockServer: modelServer,
+        workspace,
+        entryPath: join(import.meta.dir, '../fixtures/mcp-auth-tui.tsx'),
+      });
+      await submitUserMessage(tui, modelServer, 'call the recoverable echo tool', {
+        timeout: 15_000,
+      });
+      await waitForText(
+        () => tui!.outputSinceLastAction(),
+        "MCP provider 'recoverable' requires login.",
+        15_000,
+      );
+      expect(toolCalls).toBe(1);
+      expect(modelServer.getRequestCount()).toBe(2);
+      await waitForText(() => tui!.viewport(), '❯ 1. Run login', 5_000);
+      if (choice === 'later') {
+        tui.write('\x1b[B');
+        await waitForText(() => tui!.viewport(), '❯ 2. Later', 5_000);
+        tui.write('\r');
+      } else {
+        tui.write('\x1b[B');
+        await waitForText(() => tui!.viewport(), '❯ 2. Later', 5_000);
+        tui.write('\x1b[A');
+        await waitForText(() => tui!.viewport(), '❯ 1. Run login', 5_000);
+        tui.write('\r');
+        await waitForText(() => tui!.viewport(), 'builtin.mcp.sources/mcp.auth.login', 10_000);
+        // This is the ordinary pending AuthAction approval, answered by real terminal input.
+        tui.write('\r');
+      }
+      await waitForText(() => tui!.viewport(), 'continued after deferring provider login', 15_000);
+      if (choice === 'login') expect(metadataRequests).toBeGreaterThanOrEqual(2);
+      expect(toolCalls).toBe(1);
+      expect(modelServer.getRequestCount()).toBe(3);
+    },
+    50_000,
+  );
 });

@@ -54,7 +54,9 @@ async function main(settings: Settings) {
         candidate.replace(/\s+/g, ' ').includes(text) &&
         (!latestReady ||
           (lines.includes('Session s · Waiting for answer') &&
-            lines.includes('Question 2/2') &&
+            lines.some(
+              (line) => line.includes('Your answer is needed') && line.includes('2 / 2'),
+            ) &&
             lines.includes(`Answer > ${text}`)))
       )
         return;
@@ -99,8 +101,10 @@ async function main(settings: Settings) {
   };
   const approve = async (definition: string) => {
     await card('approval', definition);
-    await key('\x1b[B');
-    await wait('only this call');
+    // The original Ink approval panel focuses its first explicit choice.
+    // Confirm the actual once-only choice, rather than moving onto Deny.
+    await wait('❯ Allow once');
+    await wait('Approve this execution only');
     await key('\r');
   };
   const snapshot = (stage: string) => {
@@ -163,12 +167,14 @@ async function main(settings: Settings) {
         'original Run cancellation not confirmed',
       );
     } else {
-      await wait('Question 1/2 · Selection: No selection (Enter has no answer)');
+      await wait('Your answer is needed · decision');
+      await wait('1 / 2');
+      await wait('No selection (Enter has no answer)');
       const selection = settings.scenario === 'replan' ? 1 : 2;
       await key('\x1b[B'.repeat(selection));
-      await wait(`Question 1/2 · Selection: ${selection}`);
+      await wait(`❯ ${selection}. ${settings.scenario}`);
       await key('\r');
-      await wait('Question 2/2');
+      await wait('2 / 2');
       const detail = 'original explicit user instruction';
       await key(detail);
       await wait(detail, true);

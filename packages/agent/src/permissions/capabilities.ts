@@ -22,10 +22,12 @@ export function planningEffect(id: string): CapabilityEffect {
 }
 export function hostReadOnlyTool(extensionId: string, toolId: string) {
   return (
+    (extensionId === 'builtin.files.path' && toolId === 'files.read_path') ||
     (extensionId === 'builtin.files' &&
       ['files.read', 'files.list', 'files.glob', 'files.search'].includes(toolId)) ||
     (extensionId === 'builtin.skills' && ['skills.load', 'skills.resource'].includes(toolId)) ||
     (extensionId === 'builtin.mcp.sources' && toolId === 'mcp.sources.list') ||
+    (extensionId === 'builtin.mcp.discovery' && toolId === 'mcp.tools.search') ||
     (extensionId === 'builtin.planning' && toolId === 'planning.read') ||
     (extensionId === 'builtin.ask-user' && toolId === 'ask_user')
   );
@@ -66,7 +68,7 @@ export function shellToolCapability(id: string): {
   safeRead: boolean;
 } {
   if (id === 'shell.read' || id === 'shell.wait') return { effects: ['read'], safeRead: true };
-  if (id === 'shell.launch')
+  if (id === 'shell.execute' || id === 'shell.launch')
     return { effects: ['process', 'unknown', 'record_write'], safeRead: false };
   return { effects: ['process', 'unknown'], safeRead: false };
 }
@@ -78,7 +80,7 @@ export function builtinCapability(
   kind: 'tool' | 'job' | 'action',
   planningId: string,
   definitionVersion?: string,
-): { effects: readonly CapabilityEffect[]; safeRead: boolean } {
+): { effects: readonly CapabilityEffect[]; safeRead: boolean; internalRecordOnly?: true } {
   if (kind === 'action' && extensionId === planningId)
     return { effects: [planningEffect(definitionId)], safeRead: false };
   if (kind === 'action' && extensionId === 'builtin.files')
@@ -89,6 +91,17 @@ export function builtinCapability(
       safeRead: false,
     };
   const toolId = definitionId;
+  if (
+    extensionId === 'builtin.planning' &&
+    extensionId === planningId &&
+    definitionVersion === '1' &&
+    ['planning.write', 'planning.review', 'planning.update'].includes(toolId)
+  )
+    return { effects: ['record_write'], safeRead: false, internalRecordOnly: true };
+  if (extensionId === 'builtin.files.path')
+    return definitionVersion === '1' && toolId === 'files.read_path'
+      ? { effects: ['read'], safeRead: true }
+      : { effects: ['external'], safeRead: false };
   if (extensionId === 'builtin.task') return taskToolCapability(toolId);
   if (extensionId === 'builtin.web' && toolId === 'web_fetch' && definitionVersion === '1')
     return { effects: ['network', 'unknown'], safeRead: false };

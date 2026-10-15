@@ -12,6 +12,7 @@ const forceExit = (message: unknown) => {
 if (process.platform === 'win32') process.on('message', forceExit);
 try {
   process.exitCode = await runTUIProcess({
+    testDiagnostics: true,
     artifact: input.artifact,
     profile: 'draft',
     argv: ['--workspace', input.workspace, '--thread', 'a', '--data-root', input.dataRoot],

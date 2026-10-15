@@ -59,9 +59,14 @@ test.skipIf(process.platform !== 'darwin')(
       async fetch(request): Promise<Response> {
         const body = (await request.json()) as ProviderBody;
         requests.push(body);
-        const user =
-          body.messages.filter((message) => message.role === 'user').at(-1)?.content ?? '';
-        const key = user.includes('SECOND_ACTUAL_RUN') ? 'second' : 'first',
+        const user = [...body.messages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === 'user' && /^(FIRST|SECOND|LATER)_ACTUAL_RUN:/.test(message.content),
+          )?.content;
+        expect(user).toBeDefined();
+        const key = user!.includes('SECOND_ACTUAL_RUN') ? 'second' : 'first',
           step = steps.get(key) ?? 0;
         steps.set(key, step + 1);
         let call: { name: string; input: Json } | null = null;

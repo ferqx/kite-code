@@ -15,6 +15,7 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
     test(`${mode} dynamic frames preserve scrolled history at ${rows} rows`, async () => {
       const workspace = createTestWorkspace();
       workspace.env.KITE_LIVE_SCROLL_CASE = mode;
+      const initialActivity = mode === 'subagents' || mode === 'mixed' ? 'Delegating' : 'Working';
       const tui = await spawnReadyTui({
         cols: 80,
         rows,
@@ -25,7 +26,7 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
           waitForQuiescence: false,
           isReady: (candidate) =>
             candidate.viewportPosition().baseY > 20 &&
-            screenContains(candidate.viewport(), 'Working'),
+            screenContains(candidate.viewport(), initialActivity),
         },
       });
       let sampler: ReturnType<typeof setInterval> | undefined;
@@ -74,7 +75,7 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
         }, 25);
         await waitForText(
           () => tui.viewport(),
-          mode === 'approved-shells' ? 'Bash' : 'Working',
+          mode === 'approved-shells' ? 'Bash' : initialActivity,
           5_000,
         );
         await tui.settleScreen();

@@ -9,6 +9,12 @@
  */
 
 import { startTestHttpServer } from '../../helpers/test-http-server';
+import {
+  migrateOriginalToolCall,
+  type OriginalToolCall,
+  type OriginalToolWorkspace,
+  originalToolName,
+} from './original-tool-contract';
 
 // Reuse the MockResponse shape from the existing mock model
 export interface MockResponse {
@@ -80,7 +86,15 @@ export interface DraftSavedPlanIdentity {
 
 /** Parse the canonical identity returned by a successful write_plan save action. */
 export function parseDraftSavedPlan(content: unknown): DraftSavedPlanIdentity {
-  const value: unknown = JSON.parse(String(content));
+  const parsed: unknown = JSON.parse(String(content));
+  const value: unknown =
+    parsed && typeof parsed === 'object' && 'planId' in parsed && 'digest' in parsed
+      ? {
+          plan_id: parsed.planId,
+          version: 'version' in parsed ? parsed.version : undefined,
+          structural_digest: parsed.digest,
+        }
+      : parsed;
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -101,6 +115,9 @@ export function parseDraftSavedPlan(content: unknown): DraftSavedPlanIdentity {
 }
 
 export interface MockModelServer {
+  /** Explicitly select new Service/Agent fixture contracts for this test-owned workspace. */
+  bindWorkspace(scope: OriginalToolWorkspace): void;
+  getToolContractMigrations(): readonly { original: OriginalToolCall; emitted: OriginalToolCall }[];
   /** Base URL for OpenAI-compatible API (e.g. "http://127.0.0.1:3456/v1") */
   baseURL: string;
   /** Port the server is listening on */
@@ -134,6 +151,8 @@ export interface MockModelServer {
  * (text/event-stream SSE) responses based on the request's `stream` field.
  */
 export function createMockModelServer(): MockModelServer {
+  let workspaceScope: OriginalToolWorkspace | undefined;
+  const toolMigrations: { original: OriginalToolCall; emitted: OriginalToolCall }[] = [];
   let responses: MockResponse[] = [];
   let responseCursor = 0;
   let callCount = 0;
@@ -308,8 +327,38 @@ export function createMockModelServer(): MockModelServer {
           resolvedResponse.message?.reasoning_content ??
           resolvedResponse.message?.reasoning_chunks?.join('') ??
           '';
-        const toolCalls = resolvedResponse.message?.tool_calls;
-        const invalidToolCalls = resolvedResponse.message?.invalid_tool_calls;
+        let toolCalls = resolvedResponse.message?.tool_calls;
+        let invalidToolCalls = resolvedResponse.message?.invalid_tool_calls;
+        if (workspaceScope) {
+          try {
+            toolCalls = await Promise.all(
+              (toolCalls ?? []).map(async (original) => {
+                const emitted = await migrateOriginalToolCall(original, workspaceScope!, {
+                  body: bodyRecord,
+                  messages,
+                });
+                toolMigrations.push({
+                  original: structuredClone(original),
+                  emitted: structuredClone(emitted),
+                });
+                return emitted;
+              }),
+            );
+            invalidToolCalls = invalidToolCalls?.map((call) => ({
+              ...call,
+              name: originalToolName(call.name),
+            }));
+          } catch (error) {
+            const violation = `response ${idx + 1} tool contract migration failed: ${error instanceof Error ? error.message : String(error)}`;
+            contractViolations.push(violation);
+            return new Response(
+              JSON.stringify({
+                error: { message: violation, type: 'test_fixture_contract_error' },
+              }),
+              { status: 422, headers: { 'content-type': 'application/json' } },
+            );
+          }
+        }
         const emittedToolCallIds = [
           ...(toolCalls ?? []).map((toolCall) => toolCall.id),
           ...(invalidToolCalls ?? []).map((toolCall) => toolCall.id),
@@ -447,16 +496,7 @@ export function createMockModelServer(): MockModelServer {
             writeContentFrames();
           }
 
-          if (resolvedResponse.disconnect_after_content) {
-            write(
-              `data: ${JSON.stringify({
-                error: {
-                  message: 'socket ECONNRESET: model stream disconnected',
-                  type: 'server_error',
-                },
-              })}\n\n`,
-            );
-          } else {
+          if (!resolvedResponse.disconnect_after_content) {
             // Done
             write(
               `data: ${JSON.stringify({
@@ -470,22 +510,27 @@ export function createMockModelServer(): MockModelServer {
           const hasFrameDelay =
             (resolvedResponse.chunk_delay !== undefined && resolvedResponse.chunk_delay > 0) ||
             resolvedResponse.stream_frame_delays !== undefined;
-          const body = hasFrameDelay
-            ? new ReadableStream<Uint8Array>({
-                async start(controller) {
-                  const encoder = new TextEncoder();
-                  for (const [frameIndex, frame] of sseFrames.entries()) {
-                    controller.enqueue(encoder.encode(frame));
-                    const delay =
-                      resolvedResponse.stream_frame_delays?.[frameIndex] ??
-                      resolvedResponse.chunk_delay ??
-                      0;
-                    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
-                  }
-                  controller.close();
-                },
-              })
-            : sseFrames.join('');
+          const body =
+            hasFrameDelay || resolvedResponse.disconnect_after_content
+              ? new ReadableStream<Uint8Array>({
+                  async start(controller) {
+                    const encoder = new TextEncoder();
+                    for (const [frameIndex, frame] of sseFrames.entries()) {
+                      controller.enqueue(encoder.encode(frame));
+                      const delay =
+                        resolvedResponse.stream_frame_delays?.[frameIndex] ??
+                        resolvedResponse.chunk_delay ??
+                        0;
+                      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+                    }
+                    if (resolvedResponse.disconnect_after_content) {
+                      // End a real HTTP stream without a finish frame. Provider text is
+                      // not a transport receipt and must never authorize a retry.
+                      controller.error(new Error('owned_mock_connection_closed'));
+                    } else controller.close();
+                  },
+                })
+              : sseFrames.join('');
           return new Response(body, {
             headers: { 'content-type': 'text/event-stream' },
           });
@@ -550,6 +595,11 @@ export function createMockModelServer(): MockModelServer {
   return {
     baseURL,
     port,
+    bindWorkspace(scope) {
+      if (callCount || workspaceScope) throw Error('mock_workspace_binding_already_active');
+      workspaceScope = { ...scope };
+    },
+    getToolContractMigrations: () => structuredClone(toolMigrations),
     setResponses(r: MockResponse[]) {
       if (responseCursor < responses.length) {
         throw new Error(

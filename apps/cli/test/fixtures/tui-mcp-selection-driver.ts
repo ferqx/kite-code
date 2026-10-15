@@ -71,6 +71,62 @@ const key = async (value: string) => {
   abort.signal.throwIfAborted();
   await owned.key(value);
 };
+const choose = async (label: string, prefix = false) => {
+  const end = Date.now() + 10000;
+  const current = async () => {
+    const frame = await owned.projection();
+    return { fresh: frame.fresh, text: owned.viewport() };
+  };
+  const selectedLabel = (text: string) =>
+    text
+      .split('\n')
+      .map((row) => row.trim())
+      .find((row) => row.startsWith('❯ '))
+      ?.slice(2);
+  const matches = (value?: string) =>
+    prefix ? value?.startsWith(label) === true : value === label;
+  const selected = async () => {
+    for (;;) {
+      abort.signal.throwIfAborted();
+      const frame = await current();
+      if (selectedLabel(frame.text) !== undefined) return frame;
+      if (owned.ended) throw Error('original MCP host ended during navigation');
+      if (Date.now() > end) throw Error(`expected original MCP selection: ${label} ${frame.text}`);
+      await Bun.sleep(50);
+    }
+  };
+  const initial = await selected();
+  if (matches(selectedLabel(initial.text))) return;
+  if (selectedLabel(initial.text) !== 'Project sources') {
+    await owned.keyUnlessVisible('\x1b[A'.repeat(32), '❯ Project sources');
+    for (;;) {
+      const frame = await current();
+      if (selectedLabel(frame.text) === 'Project sources') break;
+      if (Date.now() > end) throw Error(`expected original MCP top ${frame.text}`);
+      if (owned.ended) throw Error('original MCP host ended during navigation');
+      await Bun.sleep(50);
+    }
+  }
+  for (let n = 0; n < 32; n++) {
+    const before = await selected();
+    if (matches(selectedLabel(before.text))) return;
+    await key('\x1b[B');
+    for (;;) {
+      const frame = await current();
+      if (
+        frame.fresh &&
+        selectedLabel(frame.text) !== undefined &&
+        selectedLabel(frame.text) !== selectedLabel(before.text)
+      )
+        break;
+      if (Date.now() > end)
+        throw Error(`original MCP selection did not move: ${label} ${frame.text}`);
+      if (owned.ended) throw Error('original MCP host ended during navigation');
+      await Bun.sleep(50);
+    }
+  }
+  throw Error(`original MCP choice unavailable: ${label}`);
+};
 const check = async (path: string) => {
   controls.push(path);
   await ptyDeadline(
@@ -98,14 +154,14 @@ try {
   await wait('owned-server');
   await wait('Reading this list does not connect');
   await wait('Server list ready');
-  await key('\x1b[B');
-  await wait('› owned-server ·');
+  await choose('owned-server ·', true);
+  await wait('❯ owned-server ·');
   await key('\r');
   await wait('Server: owned-server');
   await wait('User settings');
   await wait('Project settings');
-  await key('\x1b[B');
-  await wait('› Enable · User settings');
+  await choose('Enable · User settings');
+  await wait('❯ Enable · User settings');
   await check('read-detail');
   await key('\r');
   await wait('Confirm server change:');
@@ -114,8 +170,8 @@ try {
   await key('\r');
   await wait('Waiting for original result');
   await check('approve-job');
-  await key('\x1b[B'.repeat(2));
-  await wait('› Check original change');
+  await choose('Check original change');
+  await wait('❯ Check original change');
   await key('\r');
   await wait('Selection saved');
   await key('\x1b');
@@ -128,23 +184,25 @@ try {
   await key('\r');
   await wait('owned-server');
   await wait('Server list ready');
-  await key('\x1b[B');
-  await wait('› owned-server ·');
+  await choose('owned-server ·', true);
+  await wait('❯ owned-server ·');
   await key('\r');
   await wait('Server: owned-server');
-  await key('\x1b[B'.repeat(3));
-  await wait('› Refresh servers');
+  await choose('Refresh servers');
+  await wait('❯ Refresh servers');
   await key('\r');
   await wait('owned-server');
   await check('refresh');
   await key('\x03');
-  await wait('Up/Down explicit approval selection: none');
+  await wait('Approve this execution only');
+  await wait('pending · revision 1');
   await check('ctrl-c');
   assert.ok(Buffer.concat(output).includes(Buffer.from('ORIGINAL_COMPLETE_HISTORY_TAIL')));
   await key('/clear');
   await wait('/clear');
   await key('\r');
-  await wait('Up/Down explicit approval selection: none');
+  await wait('Approve this execution only');
+  await wait('pending · revision 1');
   await check('clear');
   assert.equal(
     owned.sinceAction().replace(ansi, '').includes('ORIGINAL_COMPLETE_HISTORY_TAIL'),

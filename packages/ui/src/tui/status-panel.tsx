@@ -1,10 +1,11 @@
 import { TuiOverlayFrame } from './chrome';
 import { activity, type TuiController, terminalText } from './controller';
-import { TuiText as Text, useTuiPresentation } from './presentation';
+import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** Explicit fields only: never stringify a diagnostic object into the terminal. */
 export function TuiStatusPanel({ controller }: { controller: TuiController }) {
   const { t } = useTuiPresentation();
+  const original = useInkI18n();
   const state = controller.state,
     status = state.status,
     facts = status?.facts;
@@ -15,6 +16,12 @@ export function TuiStatusPanel({ controller }: { controller: TuiController }) {
   );
   return (
     <TuiOverlayFrame title={<> {t('Host status · Esc back · R refresh')} </>}>
+      <Text>
+        {original.t('appServerStatus.transport')}: {host?.transport ?? 'unknown'}
+      </Text>
+      {host?.mode === 'paired' && status?.connection === 'verified' && (
+        <Text>{original.t('appServerStatus.paired')}</Text>
+      )}
       <Text>
         {t('Connection:')} {status?.connection ?? 'unknown'} {'·'} {host?.mode ?? 'unknown'}{' '}
         {t('· Profile:')} {terminalText(host?.profile ?? 'unknown')}

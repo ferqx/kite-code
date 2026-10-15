@@ -453,7 +453,14 @@ test('actual development wrapper new argv binds original Work, cold caller, File
     async fetch(request) {
       const body = (await request.json()) as { messages: { role: string; content: string }[] };
       requests++;
-      const user = body.messages.filter((m) => m.role === 'user').at(-1)!.content;
+      const user = [...body.messages]
+        .reverse()
+        .find(
+          (m) =>
+            m.role === 'user' &&
+            ['seed actual checkpoint', '完整 wrapper work 😀\r\n'].includes(m.content),
+        )?.content;
+      if (user === undefined) return new Response('unexpected original work', { status: 500 });
       let call: { name: string; input: unknown } | undefined;
       if (user === 'seed actual checkpoint') {
         if (seedStep === 0)

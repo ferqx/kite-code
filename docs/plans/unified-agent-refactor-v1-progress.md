@@ -6351,6 +6351,148 @@ Terminal路径选取现复用所属host的资产错误翻译，CLI／TUI保pure 
 
 本轮完整 TUI 集合最终 **344pass／0fail／2899expects／34.32s**。初次6处失败保留并修正：未知工具参数是真实主屏／详情遗漏；其余为原表格边框、菜单文案、展示折行和新增只读目录预取计数。随后一处极简 fake View 缺 Session／messages，补齐真实只读合同后原 Tool只读／Job资格断言保持；没有删业务断言或排除测试。新增 Host adapters 27pass／177expects，Agent实际来源8pass／40expects；Client Files／SessionLog6pass／123expects，实际CookieFiles1pass／161expects，原恢复字节／权限／归属／零效果断言保持。最后 MCP代理真实名称 reader＋projection13pass／66expects，零连接／RPC。
 
-[普通真实 PTY](../../apps/cli/test/isolated/tui-ink-parity-host.test.ts)从未信任 Workspace 原 gate 明确确认，正式 runTUIProcess／默认 Service／Client／一次 compatible请求，完整用户和助手 bytes 保存、Run completed、正常退出和所属 Service消失，1pass／7外层断言。共用 POSIX／ConPTY，当前只实际运行macOS；driver只修实际普通提示／Help第一页／paste等待点，不改业务断言。完整8workspace build／typecheck、API同源／静态边界和文档检查归本轮提交门禁，hook仍独立执行。
+[普通真实 PTY](../../apps/cli/test/isolated/tui-ink-host.test.ts)从未信任 Workspace 原 gate 明确确认，正式 runTUIProcess／默认 Service／Client／一次 compatible请求，完整用户和助手 bytes 保存、Run completed、正常退出和所属 Service消失，1pass／7外层断言。共用 POSIX／ConPTY，当前只实际运行macOS；driver只修实际普通提示／Help第一页／paste等待点，不改业务断言。完整8workspace build／typecheck、API同源／静态边界和文档检查归本轮提交门禁，hook仍独立执行。
 
 新增闭合的是原 TUI 用户展示和入口消费；正式／开发消费者共用新 UI／Client／Service／Agent。旧参考源码未新增正式调用，没有把本轮作为旧路径整体退役。开发范围继续完成；原RSS32MiB、完整Runtime资源／出生资格和V1.3阶段资格不变，wholeV13=false／phaseExit=false。Win/Linux实际验证仍由后置Actions／发布前安排，本轮不push、PR、发布或触发Actions。
+
+
+## 2026-10-14：原真实终端旅程迁入当前 UI 与服务
+
+用户在实际使用中指出原 TUI 功能不同步，要求原真实终端 E2E 在新架构通过。本轮统一入口逐整文件发现全部原 52 个 scenario，文件库存与实施前一致；原超时、终端视口、业务效果、原 ID／Scope、独立审批、完整正文及所属进程清理门禁继续保留。参数映射和保存收据转换仅接当前公共 Client／默认 Service／Agent，不产生旧 Runtime 事件或伪造结果；共享 Daemon 用真实 shared connector，两客户端关闭不关闭 Daemon，paired 仍各自关闭所属 Service。
+
+D08 明确排除旧 Kite Store/State 导入。旧 Store9/11 确属旧格式，其转换前提按本方案不适用，对应旅程改验新 Core／Profile 的历史持久化、重开及维护恢复；State26 保实际旧文件不读取、不覆盖的隔离反例。这是测试范围迁移，不宣称旧格式兼容已取得。当前新 Store 的版本校验、升级／回滚与保数据恢复资格不因此退役。可选旧 lifecycle 诊断 fixture 和 in-process connector 仍为历史参考，不是正式调用者或完整资源／出生后代观测来源。
+
+实际补齐了原输入与管理流程、同值共享草稿保存及准确 `/exit` 消费、完整历史分页、后继输入与原取消、计划标题与实际 Files 收据完成步骤、默认子任务和 Shell 前台取消、MCP 工具发现／资源原收据和 nested Auth Action。默认 Tool 批次只按模型顺序准入，dispatch 后仍可并发；明确人工拒绝、未知和取消停止尚未准入项，自定义未声明顺序的策略保持原 T048 并行能力。模型适配器不内层重试，Agent 只接已证明失败前驱的有限重试；首非空思考／内容即保存，活动原尾部和正文沿原完整 reader 展示。
+
+首次完整 TUI 回归真实失败：原 52 个文件中 51 通过，Thought 整文件 7 pass／6 fail，另两 CLI MCP 真实终端宿主失败；默认回归也因普通问题卡识别、完成工具正文、Static 更新及面板高度问题失败，其余作业未完整执行。原日志保留在 `/private/tmp/kite-original-tui-complete-final-integration.log` 和 `/private/tmp/kite-original-tui-final-default-regression.log`，不将未启动作业计通过。修复后原 Thought 整文件 13 pass／133 assertions／0 fail，包含原最终视口、活动思考、唯一统计和真实失败 Shell 详情；MCP 显式管理导航关闭不取消待审批的源回归 58 pass／356 assertions，原 Host canonical 5 pass／102 assertions。证据只覆盖其实际范围。
+
+提交前检查将 UI 的 node:path 依赖改为纯展示路径关系，文件权限仍由 Agent 判定；三个现有测试名称按 current domain 规范改名，断言未变。真实维护锁与 CLI 等待的跨 owner 测试归根 isolated 集成目录，并继续在同一 TUI 库存明确选择；原 runner 与启动等待 8 pass／233 assertions。缺失 Workspace 的已有会话现由独立 Host observer 准入，严格核原 Store／Session／Workspace／rootUri、真实 ENOENT 与正常用户配置，明确只读且不补 Trust／Model ready，所有业务、审批、配置写入及未知 Client 方法拒绝；18 pass／165 assertions 的必要叶与原 Source 282／Reconnect 226 assertions 完整 PTY 已通过。
+
+
+随后全库存 TUI 回归保留真实第二轮失败：已完成 7 作业中 4 通过、3 个 CLI MCP 失败，其余未启动；原 Thought 已在这一组合再次 13／133 通过，不能把本轮记为完整通过。原日志 `/private/tmp/kite-original-tui-whole-111-final-20261014.log` 保留；文件名中的 111 是当时统计误写，当前实际发现为 112 文件／112 作业（58 CLI、52 原 scenario、2 根集成），未排除任何原文件。实际修复了另两个夹具的正式默认权限／公开 Trust 前提、原管理向导和诊断标签、80 列物理折行、终端解析后无效导航键重置 freshness 的竞态；所有原身份、效果、凭据读取和新帧断言继续保留。目录自动 status 还定位到未 challenge auto HTTP 条目提前访问 Vault 的实际源码问题，现通过原 target.loginAllowed 的严格可选目录资格 Query 过滤；不具资格返回有限 eligible:false，不补凭据状态，显式 Auth／Remove／原结果查询不变。
+
+修复后的原 Reconnect 226、Auth 102、SourceMutation 275 assertions 完整 PTY 均通过；Mutation 保增添／预览期间 credential 0、仅 Remove 时恰 2 次，以及冷 GET-only／foreign 门禁。目录资格三整叶 37 pass／309 assertions、严格 boolean 反例与 CLI／Service 类型检查通过。原失败证据与日志均保留，只在已记录目录身份和全部 owned PID 退出均确认后清理本任务临时根。当前实现冻结，正在执行最后完整 TUI，随后顺序运行默认回归与正常提交门禁；阶段和正式发布资格未升级。
+
+
+第三轮整体失败仅 Source Approval 冷 foreign 菜单半帧：已通过的完整保存结果不能代替当前新帧，但标题先于选中标记解析也不能立即判选择不存在。原完整日志 `/private/tmp/kite-original-tui-whole-current-complete-20261014.log` 保留；原 Source 282 assertions 整文件修后再次通过，另三个 MCP driver 的同机制分支按同一原 10 秒观察窗口同步等待真实 marker，不伪造 revision，不向半帧发键，不改变业务或审批。当前重新冻结该同步点后执行全部库存；此前局部及组合通过均不冒称整体完成。
+
+
+第四轮组合真实失败为原 subagent-approval 9 例中的终态前 1 秒取消反馈，8 pass／1 fail／96 assertions；日志 `/private/tmp/kite-original-tui-whole-final-all-20261014.log` 保留。主屏原来仅依赖远端 cancelling 快照，现从真实已准备的同 Store／Session／Workspace、准确活动 Run 原 Command 的请求显示明确“取消请求中”，unknown／排队／后继目标不借反馈；9 pass／88 assertions 的必要 UI 叶及类型检查通过。原专属四子任务夹具加入真正 child Model abort finally 的 150ms 清理，以观察真实 pending cleanup；没有生产延迟、事件伪造或原 scenario 修改。原整文件随后 9 pass／120 assertions／0 fail，1 秒、终态前、四身份、真实清理及后继顺序全部保持。源码再次冻结后运行最终全库存，完整结果仍以实际整轮退出为准。
+
+
+第五轮实际完成 9 作业中 7 通过，失败是另一个 Connection 的旧首次启动前提，以及 formal PTY 对固定目录顺序／ASCII marker／长 ID 全行显示的旧假设；原日志 `/private/tmp/kite-original-tui-full-inventory-acceptance-20261014.log` 保留，其余未启动不计通过。生产 Chooser 原来已保 selected Session 身份，驱动现按真实目标行／❯导航，并在两次未截断删除确认核完整原 ID；原 formal 两整例 2 pass／87 assertions／0 fail，正常 Run／共享 Daemon Web／默认保留／精确 CAS 删除和两次 Model 均保持。新增真实目录重排叶 8 pass／66 assertions，无生产 Chooser 改动。Connection 与同源 Cold／Tools 夹具继续以正式默认装配、公开 Trust 及真实受控配置建立既有前提，原业务权限／零 Model 和远端调用门禁保持；最终整体资格继续待完整退出。
+
+后续组合继续保留真实失败，分别记录在 `/private/tmp/kite-original-tui-whole-112-acceptance-final.log`、`/private/tmp/kite-original-tui-complete-112-final.log` 和 `/private/tmp/kite-original-tui-all-112-prioritized-final.log`。实际闭合的是工具旁白顺序、正式首次启动与原菜单、审批范围明确选择、审批中的命令／私人草稿、完成正文的唯一 Static 输出、最新会话目录与删除返回、长活动正文／Question 材料及光标宽度。52 个原文件和原行为断言未排除；旧转换前提仅按上述 D08 改验新数据基线。
+
+完成正文问题已由实际 HTTP 原读取和真实终端帧交叉定位：最终 Model 已存在，但第二个 Static 节点夺取 Ink 的唯一历史输出节点，且 Ctrl+L 后误清显示。现附件与历史共用一个 writer，producer 完成独立于全文读取 EOF，显式 `/clear` 才清显示。原 Planning 完整文件 4 pass／143 assertions、Permissions 完整文件及其 7 个正常 Model／3 个审查 Model／两个真实写入通过；空范围选择 Enter 零回答，同命令授权清除及取消保留。Session Lifecycle 七步完整旅程 1 pass／28 assertions，最新目录、两会话隔离、准确 CAS 删除、默认安全取消均通过。
+
+活动 Markdown 复用既有解析缓存，将稳定原段落与未完成尾段分开，避免有限动态区裁剪整篇正文；已输出材料不因暂时缩短的 sealed 前缀重放。Question 保原换行并按实际 80 列内容宽度定位光标，其他 Overlay 默认布局不变。原 Scrollback 文件／驱动／夹具逐字未改，完整 1 pass／169 assertions／16.14 秒，40 个活动标记、35 段问题、60 段选项、90 段历史、31 checkpoints、零重放／零业务变更和原时限全部保留；日志 `/private/tmp/kite-scrollback-width-consistent-original-final.log`，最终来源叶 26 pass／152 assertions。
+
+最新全库存 `/private/tmp/kite-tui-migration-whole-112-original-first-final.log` 定位原 MCP management 的真实远端工具名遗漏：原调用与最终回复已完成，运行态的已校验名称却未传给终态 detail。现两态复用同一准确 Scope／catalogue／definition／name hash 名称，不展示远端输入或结果；原整文件 3 pass／38 assertions，来源叶 19 pass／106 assertions，原缺名断言与 foreign 拒绝均保留。
+
+后续原场景整轮 `/private/tmp/kite-tui-migration-original-52-frozen-final.log` 的 13 个已执行文件中 12 通过，Plan Policy 原 50 条成功断言后的基线文件名断言失败；未启动文件不计通过。无 Thinking 的单个只读调用被探索聚合吞掉结果，现保原统计并追加同源普通工具卡，真实 Thinking／多工具及失败卡不重复。原 Policy 整文件 1 pass／54 assertions，必要 UI 叶 16 pass／85 assertions，同时保 `read 1 file`、真实结果、原叙述与答案。
+
+只读最终审查核 HEAD 和当前原 52 文件集合完全相同，无新增 skip／only 或原 case 时限放宽。D08 旧 Store 转换、D17 隐藏累计轮数及审核前 Shell 不执行沿已确认新合同迁移；原计划只读能力改验真实 Files baseline，不宣称取得原 Shell sandbox probe 资格。MCP 已知 `isError:true` 失败后继续与派发后 HTTP500 传输未知分别核验，不能以前者替代原未知门禁；D14 不允许将未知效果改成已知失败或继续自动派发。
+
+原 HTTP500 已补回同一 MCP 第三旅程末尾，完整文件 3 pass／49 assertions／7.97 秒、第三旅程 3.49 秒，原 40 秒预算及已有成功／已知失败／资源／次数断言保持。真实远端一次调用，准确原 Session／Run／Store／root work 的 Tool dispatched=1 且 outcome_unknown，Run 不再活动，模型总数恰 11 且无后续调用，实际中文未知提示和原工具未知正文均确认。首轮期待错误语言的红日志 `/private/tmp/kite-original-mcp-http500-gate-final.log` 保留，最终绿日志 `/private/tmp/kite-original-mcp-http500-gate-complete-pass.log`。单次读取追加卡片的 node／version 也已统一来源，Thinking／多工具原版本规则保持；必要叶最终 16 pass／85 assertions，源码冻结后才执行最后两组。
+
+最终验证顺序收束为全部 52 个原真实终端文件，再执行原 `bun run test` 的完整 810 文件／637 作业（630 并发、7 独占）；库存核对证明其余 60 个 TUI 文件都在默认集合，没有漏项，避免额外重复一轮宿主集合。当前局部证据不登记为整体通过；8 workspace build／typecheck 与静态检查沿实际源码范围核对，正常 hook 独立执行。不新增性能采集，不 push、PR、发布或触发 Actions，原发布资格与阶段退出状态保持。
+
+冷 Interrupt Resume 随后核到真实源码缺口：持久 Run／Model 活态不证明当前连接仍拥有执行，普通 SessionView 原来又未传递 Store 已有的 owner 字段。现只在该 View 增可选 owner 实例／generation，Host 绑定已认证连接，UI 停止无法确认的 Working／Thinking／共享活动动画并保正文与原状态；不同实例不推死亡或中断，也不提交恢复或重放。原 1 pass／18 assertions 与真实不同实例、原 Run 仍 running 证据归 `/private/tmp/kite-original-interrupt-resume-public-owner-final.log`；Service 原恢复／多实例 2 pass／102 assertions，UI 原渲染及同／异 owner／旧字段 12 pass／61 assertions，类型与同源生成通过。必要 UI 来源叶加入后当前默认发现为 810 文件／637 作业。
+
+再执行全部原库存的 `/private/tmp/kite-tui-migration-original-52-owner-final.log` 时，上述修复及前序旅程在组合通过；继续到原未覆盖的子任务后代来源、活动中模型／主题操作和文件回退，出现真实失败，保持原断言与时限继续闭合。子步骤不能由只含父 Run 的通知替代；连续导航不能丢按键；中文恢复操作须完整显示，原 Files 三范围与实际数据效果仍是验收。其余未启动不记通过，源码边界修复与原来源迁移分别核实后才作最终完整结论。
+
+## 2026-10-15：完整 TUI 旅程收尾
+
+子步骤按真实父 Task、child Session 与 child Run 读取各自原通知，不把父 Run 通知当后代历史；原交叠完整文件 1 pass／23 assertions。活动模型和主题切换只修正旧夹具的正式模型声明、真实菜单选择与独立确认，产品面板无需修改；原完整文件 2 pass／16 assertions，活动 Run 不重启、下一 Run 路由及恰两次模型请求保持。
+
+Files 连续 V4 → V3 → V2 恢复、两个新会话、恢复点来源、真实恢复数量与返回输入已在原完整旅程 1 pass／16 assertions／7.76 秒通过。Host 只读核原两腿成功、实际 journal 与当前身份，UI 在准确范围才切换会话；第二阶段继续独立明确操作。原结果的正式可选 `textChange` 不再被额外七字段守卫误拒，Schema、原文件与漂移检查保持。Client／Host／Controller／面板 23 pass／246 assertions，原实际第二阶段漂移 2 pass／20 assertions；证据为 `/private/tmp/kite-original-file-rewind-scope-complete.log`、`/private/tmp/kite-file-recovery-proof-closure-complete.log` 和 `/private/tmp/kite-rewind-actual-second-leg-final.log`。
+
+取消后继的原完整旅程 1 pass／112 assertions／9.75 秒通过，真实取消确认前窗口、后继排队、旧 Job 清理顺序和每帧唯一活动卡保持。单次只读补充卡只在阶段收束后出现；合法 runless Shell carrier 依准确父 Tool 归回原 Run，取消历史不浮到后继输入之后。必要来源叶 36 pass／199 assertions；证据为 `/private/tmp/kite-successor-original-complete-final.log` 和 `/private/tmp/kite-successor-final-ui-leaves.log`。
+
+随后整轮 `/private/tmp/kite-tui-migration-original-52-delivery-final.log` 实际启动 16 个文件，15 通过，Thought Lifecycle 为 11 pass／2 fail；其余尚未启动不计通过。真实红为 Shell 后探索分组顺序以及后继排队时活动 Thinking 行缺失，继续定位实际来源和修复，原断言与预算保留。8 workspace build／typecheck 已在该整轮前通过，不从这些结果宣布完整迁移或阶段退出。历史 Store9/11 按 D08 不导入；新 Store 自身的版本、升级和维护恢复合同继续适用。
+
+两红随后沿真实来源闭合：runless Shell 的归位、按原 Model Toolcall 排序及结果去重统一使用已经严格核实的唯一父 Tool；foreign／多个 carrier 保独立展示，完整 Job 输出 reader 不变。原 Thought 整文件 13 pass／133 assertions／52.29 秒，场景、夹具、断言和预算未改；必要来源叶 36 pass／201 assertions，UI 类型与格式通过。证据为 `/private/tmp/kite-thought-source-order-original-final.log` 与 `/private/tmp/kite-thought-source-order-leaves-final.log`。源码已冻结，`/private/tmp/kite-tui-original-52-frozen-source-complete-20261015.log` 正在顺序覆盖全部原 52 文件；原默认完整回归及提交门禁随后执行。
+
+该整轮实际退出 1：23 文件通过，FileDiff／生产 Prompt 两文件失败，27 未启动。FileDiff 的 no-op 原成功回执被早退逻辑丢掉，错误回落到展开协议 JSON；现先保持完整来源／CAS／发布后基线核验，再显示准确未变化摘要。原场景和断言未改，完整 1 pass／19 assertions，来源叶 19 pass／121 assertions；证据为 `/private/tmp/kite-file-noop-compact-original-final.log`。
+
+生产 Prompt 旅程改接真实计划身份与工作回执后，六次实际 Model、审核、执行和唯一 Core completed 已走通，原分层断言随即证明真实源码缺口：项目指导被提升为 system，稳定静态规则、尾部动态状态及完整 plan／review Task 角色尚未装配。原红 `/private/tmp/kite-original-prompt-v2-current-protocol-source.log` 保留；按现有产品及 active 合同继续在 Agent source／上下文和 Task 角色 owner 实施，Service 只装配，不以夹具注入或删除断言绕过。这些闭合前，不登记完整迁移通过或阶段退出。
+
+实际生产缺口现已闭合：Agent 的通用来源位置与唯一组装保持静态前缀、完整历史、项目 user 和真实当前 Run 动态尾部，普通／压缩／展开沿同一来源和 freshness；默认 Task 保留 worker／code，补齐 explore／plan／review 的严格冻结只读定义交集，新增角色不增加三个默认槽位。原生产 Prompt 完整文件 1 pass／33 assertions／2.74 秒，计划前后静态／完整工具面相等、六次 Model、实际 AGENTS 读取及准确 progress 回执保持；来源／压缩 36 pass／314 assertions、Planning 33 pass／339 assertions、Task 五整文件 31 pass／318 assertions。证据为 `/private/tmp/kite-original-prompt-v2-production-complete.log`、`/private/tmp/kite-model-context-source-compression-final.log`、`/private/tmp/kite-model-context-planning-final.log` 与 `/private/tmp/kite-task-complete-roles-whole-leaves.log`。
+
+8 workspace build／typecheck 随新 Source 与角色再次通过。原 52 新整轮 `/private/tmp/kite-tui-original-52-final-context-20261015.log` 实际 16 文件通过、Plan Policy 一文件失败、35 未启动：目标后续用户消息已进入实际 HTTP 且业务普通完成，但测试观察助手误把新的 synthetic user 尾部当成真正用户输入，等待原目标耗尽。只修正实际观察前提、保原时限和原计划断言后复用本轮证据，继续未覆盖文件；默认发现现为 811 文件／638 作业（631 并发、7 独占），新增一份当前来源合同叶，完整默认仍待最终退出。
+
+输入观察助手现以原请求基线之后、实际 HTTP 的新 user 段完整原文确认目标，不将末尾合成资料当人类输入；原 general Mock contract 和历史负例保持。没有生产或原场景变更，Plan Policy 完整文件 1 pass／54 assertions／3.61 秒，既有观察叶 39 pass／69 assertions；证据为 `/private/tmp/kite-original-plan-policy-observation-complete.log` 与 `/private/tmp/kite-input-request-observation-final.log`。其余 35 个原文件沿原逐整文件 runner／四并发／原预算在 `/private/tmp/kite-tui-original-remaining-35-final-20261015.log` 执行；与上述同生产源码 16 个完整通过和已修原完整一文件合计精确 52，不以排除失败或未启动冒称通过。
+
+
+原 52 文件现由四轮未完成组合及七份修复后的完整文件精确覆盖，集合无缺项、重复计数或新增排除：原组合分别实际通过 16、6、15、8 文件，Plan Policy、取消后继、Live Scroll、Thought Scroll、参数错误、MCP Project Approval 和 Question Esc 的真实红均以原完整文件复验闭合。组合日志仍保实际退出 1，不将它们改写成单次全 52 退出 0。最后父 Task 叙述来源修复后，三个受影响的原子任务／Thinking 文件也再次完整通过，证据为 `/private/tmp/kite-tui-final-task-narration-affected-originals-20261015.log`。
+
+实际用户能力继续闭合：Live Scroll 的 24／40 行、混合工具与子任务完整文件 12 pass／162 assertions；父任务准确叙述不因存在后代而隐藏，Thought Scroll 1 pass／12 assertions、413 帧无错位和重复。取消后继先证明原 Shell Job 真正 running 且保存了原启动输出，再在原预算内验证精确取消、250ms 未确认窗口及五秒延迟，1 pass／106 assertions；不将只有 Tool 标题当作已经启动。参数错误保持零 Shell 派发、同 Run 模型纠正与下一输入，1 pass／14 assertions。MCP 项目来源旅程现在完全经真实键盘决定，无自动回答替身，1 pass／14 assertions，独立 source 批准、实际保存回执、零 stdio 启动和零 Model 门禁保持。
+
+Question Esc 的真实 `caller_job_scope_unavailable` 已在正式链闭合：只有当前、同范围、同修订的 pending Question 证明可由原 `execution.cancel` 取消所属 Tool／Action；普通 Job 停止和外国／过期证明仍拒绝。Agent 仅识别原精确取消 reason 或真实已取消的问题记录，同 Run 继续，不推导通用未知效果。原终端完整文件 1 pass／5 assertions，Agent 12 pass／94 assertions、Host 2 pass／78 assertions；证据为 `/private/tmp/kite-question-esc-original-final.log`、`/private/tmp/kite-question-execution-cancel-agent-final.log` 与 `/private/tmp/kite-question-caller-host-final.log`。Ctrl+L 继续只刷新和保草稿，显式 `/clear` 才清输入；原 Controller／Local Controls 52 pass／438 assertions。
+
+完整默认回归仍按原 811 文件／638 作业运行，真实失败保留并逐一核对：普通 TUI MCP 标签替身缺正式 Controller 方法、Composer 额外命令未装配、Desktop 诊断用例未显式开启测试诊断以及 CLI 只读 MCP catalogue 被替身误计效果均已在所属原整文件修复；生产安全行为未因此放宽。原零 effects、canonical 配置 CAS、普通模式隐藏机器 ID、完整输出与停止能力断言保持。第四轮 `/private/tmp/kite-tui-final-default-all-811-20261015.log` 实际退出 1，原 Service Shell 整文件两处权限审核失败仍在定位；其他未启动作业不计通过，不宣布完整默认或阶段退出。8 workspace build、API 同源、架构边界、测试归属及当前文档检查已通过，正常提交 hook 继续独立执行。
+
+
+原 Service Shell 两个失败已闭合：准确审核请求不再被当前目标自己的新拒绝理由或人工等待进度反向改变，实际 Run／Scope／主体／root work／计划和其他拒绝材料继续核实，完整请求 hash、实际审核输入、审批、active／取消和 fencing 守卫保持。默认有限 Task 内部记录准入由真实当前 root work 的派发事实确认，其 Shell Tool／Job 仍分别人工批准，不恢复旧无效果创建审批。原整文件 15 pass／215 assertions／13.38 秒，原 8 秒等待保持；既有审阅上下文整文件 5 pass／17 assertions、Agent／Service 类型与格式通过。证据为 `/private/tmp/kite-shell-configuration-stable-review-complete-final.log` 与 `/private/tmp/kite-review-context-stable-identity-final.log`。
+
+
+受影响的原 Sub-agent Approval 整文件再次暴露并发夹具错误：empty-search 后续请求可在全局第五次到达，原第五／第六固定回应使真实结果合同错配。仅该旅程按准确子任务原文与原 tool call ID 绑定四份首次响应及一次 continuation，未知或重复来源直接失败，不修改生产调度和通用 Mock 合同。完整 9 pass／120 assertions／24.17 秒，原四个 carrier、300ms 取消窗口、30 秒预算、排队后继及完整终态来源保持；证据为 `/private/tmp/kite-original-subagent-cancel-source-matched-final.log`，原红保留在 `/private/tmp/kite-tui-original-stable-review-affected-20261015.log`。
+
+最终八 workspace build 与根／八 workspace 类型检查实际退出 0。已核普通 `npm run tui` 的本地候选不会自动随源码更新，当前 Terminal 候选重新生成并完整验证，在原、新候选 exclusive 使用锁下切到 `dist/unified-terminal`；原完整候选保存在 `.cache/unified-terminal-before-tui-20261015`，没有停止用户进程或更改 Profile。当前 candidate 为 `28f819c4e2799a3f1c8382eced92cf3d78c67365aeff80e2a9ccf4a344563498`，原选择为 `3d19878ea3d77e24279a1dbb06bbe0d83afdf840ddea8987ff92ff3254583733`；构建／选择证据为 `/private/tmp/kite-tui-current-local-terminal-build-20261015.log` 与 `/private/tmp/kite-tui-current-local-terminal-selected-20261015.log`。这是本地候选准备，不是安装、发布或新阶段资格。
+
+
+第五轮完整默认 `/private/tmp/kite-tui-final-default-stable-review-811-20261015.log` 保留实际退出 1：新源码合同还暴露了 Provider 最新真人／最后 Tool 假设、无效果 Planning 普通审批、显式 Model 重试及压缩消费来源前提。按实际已批准合同逐原完整文件修正，同来源的剩余夹具一次静态核对后集中迁移，不用连续盲跑全量定位。Files 六整文件 11 pass／882 assertions、Native 五整文件 7 pass／1370 assertions、原 unified-soak 48 pass／167 assertions。SDK 一次 Provider 尝试由每个真实 Model Execution ID、HTTP、partial／typed failure 和原可见重试链独立证明，不将 Run 总请求五次伪装成一次；原资源／RSS／正式资格拒绝断言保持，未新增性能采集。
+
+压缩后 Files 的 `checkpoint_compression_unverifiable` 是真实来源位置缺口，已在完整 origin／Model／Session／body 守卫之后按唯一 `sourceIds=[compressionId]` 找生成指令，准确移除这一条而保所有真实 User 与碰撞材料。原两压缩整文件 6 pass／257 assertions；缺少第二个真实轮次的旧前提以一次真实完成 preface 补足，原八请求业务旅程、两压缩、三 writer、完整字节及冷零重放保持。证据为 `/private/tmp/kite-compression-exact-origin-complete-final.log`，新 Runtime source 不计作真人轮次。
+
+正式 CLI/TUI、注册、开发、optional 和 A→B→冷回退 A 五完整文件以及原前驱输入守卫共 16 pass／848 assertions。原固定前驱 commit、SQL baseline、十一项输入 SHA 和锁哈希保持，只允许已审查的 UI 两个现有锁定依赖声明与一个 Desktop 开发脚本的精确增量；未知版本／完整性／非 UI 变更／额外命令继续拒绝。Windows 相同已审查输入 pure 守卫 4 pass／120 assertions，仅本机纯验证，不运行 Windows 或 Actions。实际完整旧回退证据为 `/private/tmp/kite-terminal-cross-version-reviewed-source-final.log`，Windows pure 为 `/private/tmp/kite-windows-predecessor-reviewed-inputs-final.log`。
+
+shared cold-run 的 `run_configuration_mismatch` 继续沿实际差异定位，而非删快照：标准开发双入口共同保护两个实际文件，Bun 内联 module 造成的重复／排列由 Agent 在严格路径校验后按集合规范化，完整 Core 配置守卫未改，真正增删保护目标仍改变快照。原 Recovery 完整文件 7 pass／212 assertions／10.34 秒，Path Files 5 pass／52 assertions，真实同拒绝／增删范围及原字节反例保持；证据为 `/private/tmp/kite-recovery-canonical-protected-set-final.log` 与 `/private/tmp/kite-path-files-stable-boundary-final.log`。全部临时 Runtime／consumer 诊断撤回，Agent／Service 类型通过；其余已绿 CLI 完整文件复用，菜单和当前卡的真实观察已修正。
+
+用户随后提供真实 Question 画面，按其准确输入读取本机开发 Store，证实两个不同 Model／call ID／Execution：第一将 `recommended` 错放在题目层，派发前校验失败且零 Interaction；第二合法调用才创建唯一问题，后来随原 Run 取消正确收敛。没有放宽闭合 schema、合并调用或隐藏真实失败。两次只读审查闭合三个实际 UI 缺口：新空自由输入不提前报错；末题明确“提交回答”；按准确 Store／presentation Session／Interaction ID／revision 冻结提交、未知及已确认原答案，明确未提交的失败仍可修正。键盘与粘贴使用即时原答复状态，不依赖旧渲染闭包；Ctrl+L、会话目录和整轮取消保持。
+
+完整 Question／Overlay／renderer 三文件 40 pass／248 assertions，新增真实异步提交、丢回执、原查询、其他会话草稿隔离与已知未提交后一次修正；原零字长度断言移到实际无效 Enter 后保留，长度、Unicode、空答案零 POST、原 ID 和取消断言不删除。受影响原 Question Esc 和 Tool Parse Error 两完整终端文件 2 pass／19 assertions；证据为 `/private/tmp/kite-tui-user-question-review-leaf-complete-20261015.log` 与 `/private/tmp/kite-tui-user-review-original-question-errors-20261015.log`。根及八 workspace 类型检查、八 workspace build 通过，后续只读复核没有发现这三项的剩余缺陷。
+
+当前普通 `npm run tui` 的本地 Terminal 已用同一最终源码重建并经原／新候选 exclusive 使用锁完整核验后更新；candidate 为 `f680e256e7d723362597a2842fc7d6c37ab9e958fcc7a004519e18e739d09d78`，此前完整候选保留在 `.cache/unified-terminal-before-question-review-20261015`。没有停止用户进程或更改 Profile，选择证据为 `/private/tmp/kite-tui-user-review-selected-terminal-20261015.log`。最终完整默认回归正在 `/private/tmp/kite-tui-final-default-reviewed-complete-811-20261015.log` 运行；未取得完整回归结果前不宣布完整交付，Win/Linux 原生、32MiB RSS 和完整资源／出生观测继续保留后置发布资格。
+
+
+第六轮完整默认 `/private/tmp/kite-tui-final-default-reviewed-complete-811-20261015.log` 实际退出 1 并完成排空：Required 五例是旧 child User JSON 包装假设，按准确双来源和原裸文迁移后原完整 12 pass／146 assertions；原等待时限、同一 completion candidate、零轮询及取消范围保留。after-turn 的明确夹具人类 ceiling 保 Task／carrier 两个独立真实审批，默认产品不恢复严格审批；由此定位实际计划 child 装配缺口。现默认角色先经 Agent 排除准确根问答定义，自动 Planning 工具仅凭父冻结 owner／ID／version、当前真实定义及未显式禁用装配，未知工具原拒绝保持。原 after-turn、per-run Planning child 及角色三完整文件 20 pass／214 assertions；child 的两基础来源按准确合同与自身 Run ID 核验，不借父计划来源。独立只读复核未发现该资格修复的剩余缺口，Core 完整配置比较不变。证据为 `/private/tmp/kite-task-required-exact-child-input-final.log` 与 `/private/tmp/kite-default-child-qualified-tools-complete-final-20261015.log`。
+
+Source Approval 原 PTY 完整旅程 1 pass／282 assertions／22.82 秒，五个所属 Service 正常退出及清理全部确认。真实问题是 driver 把 Ctrl+L 后保留的同帧当成新输入已完成；owned test fixture 透明观察原 select Promise 的实际同 Scope 完成后才继续 Enter，保原返回值、状态、10 秒预算及完整业务断言。原管理关闭、三种 Source 决定、准确材料／CAS／ID、冷 GET-only 和 foreign Store 仍全部核实；临时字节、answer 和 close 诊断全撤回，生产审批未变。证据 `/private/tmp/kite-cli-source-approval-exact-refresh-complete.log`，CLI 类型与两夹具格式通过。
+
+按新真实来源修正 Native 三文件对“最后 User 就是真人”的假设：只核原准确任务标记；Native stdin 完整通过，原安装驱动明确测试诊断模式后 1 pass／35 assertions，正常产品不显示这些诊断。Native 真版本回退的旧 DTO 缺少新 Message／Execution 字段，真实 SQL 原数据未丢；专属 probe 补准确持久字段及原完整字节／hash证明，保全部原四目录比较与未知字段守卫，原完整版本用例仍在必要验收。未修改固定前驱或实际旧制品。
+
+新 child 资格修复后的原生产 Prompt 与 Sub-agent Approval 两整文件再次 10 pass／153 assertions，根及八 workspace 类型、八 workspace build 与架构检查通过；其余未受影响原 52 文件证据复用。普通本地 Terminal 当前 candidate 为 `3287efabc2b28566980911cac9fc4c024a3bf86baf72d0aec9d79e5d24788523`，经完整校验及原／新 exclusive 使用锁选择，前一完整候选保留于 `.cache/unified-terminal-before-child-qualification-20261015`。新完整默认 `/private/tmp/kite-tui-final-default-qualified-complete-811-20261015.log` 正在以原 811 文件／638 jobs 运行，结果未完成前不计整体通过。
+
+
+第七轮完整默认在 Workflow 的旧失败终态断言处实际退出 1；随后只补跑原未启动的 595 个正式作业，全部排空，558 pass／37 fail，最后七个 exclusive 均已实际执行。两段合计覆盖原 811 文件／638 作业，原失败完整保留，不能记作一次全绿。用户明确选择保持已知工具错误后的恢复：越界 Tool 必须 failed、零 dispatch／零副作用，只有准确回灌原 call 后的合法 Model 结果才可继续。Workflow、禁用／child AskUser 与新禁用 Files 的冲突测试按此合同补准确历史、Scope、零问卷／答复或零文件效果证明；没有修改生产权限规则来迎合旧终态预期。
+
+本轮新增源码闭合为：私有审核按正式 producer 的合法 firstOutput 精确重建消息，保完整 canonical／hash／parts／quiescence；child 配置传当前父步骤冻结的工具身份，补齐独立 MCP 连接后的真实能力，保父子 schema／description／resources 和只读／禁用门禁；后台读取选中准确 Execution；超长普通 Markdown 段落保持原 Ink 换行语义并完整输出，原 20 秒恢复全文旅程约 2.3 秒通过。对应原七个 Agent 完整文件 61 pass／1076 assertions、恢复 TUI 两文件及换行语义叶 7 pass／245 assertions、MCPSource 与 AskUser 原整文件 14 pass／386 assertions、Workflow 12 pass／198 assertions；各组合可能重叠，不相加作为唯一用例总数。证据保留于 `/private/tmp/kite-review-source-placement-original-five-final.log`、`kite-restored-tui-qualified-render-complete-final.log`、`kite-mcp-ask-current-final-wholes.log` 和 `kite-workflow-recovery-contract-whole.log`。
+
+其余当前合同夹具已按完整来源 wrapper／实际 Run ID／真实 Artifact 装配、有效压缩历史和准确原 call 身份迁移。三份来源完整文件 5 pass／3051 assertions，保 257 次实际 Files 读取、18 次 Model、全文字节／hash、源外资产和冷零重放。Native Caller 原五条丢回执／强杀旅程以及 Native 压缩完整旅程通过；四卡审批、完整后台输出／子消息阅读、Skills 全 304 项、偏好持久化和普通 Ink 完整 Markdown 通过。原预算、原效果、未知和清理断言保留；当前终端文案及 Static 历史的准确观察替代已退役诊断行，不以 API 成功代替用户可见正文。
+
+正式 Native A→B→A 原完整版本回退 1 pass／1228 assertions／271.95 秒（原 420 秒预算），全部四目录、未来字段、352041 字节正文、实际回退窗口、维护与保数据卸载通过，证据为 `/private/tmp/kite-native-cross-version-original-facts-complete-final.log`；只补实际 SQL 持久事实证明旧 DTO 缺字段，未更换前驱代码或放宽守卫。正式导出和余下 CLI 启动／恢复旅程仍在修复，最终统一验证与本地提交尚未完成。当前本地默认候选仍是前述 3287…8523，不能称其已包含本轮后来修复；将在源码收束后重建和核验。Win/Linux 未实测、正式 32MiB RSS 与完整资源／出生来源仍保后置发布资格，wholeV13／phaseExit 不取得资格。
+
+
+Files 三范围、丢回执及两次强杀窗口的四原完整文件随后全部通过；源码另复现并修复同原恢复结果已成功但 saved 目录仍 pending，更新只按 canonical 原请求匹配，零新提交、其他原请求不变。原 FileRecovery／Panel／恢复全文四文件 10 pass／299 assertions。长段落按普通界面实际缩进后的可用宽度处理，避免二次换行；原默认 screen／换行／窗口三文件 9 pass／35 assertions。证据 `/private/tmp/kite-root-files-current-complete-final-20261015.log` 与 `kite-tui-final-saved-row-and-reader-originals-20261015.log`。
+
+巨正文导出的有限真实阶段又定位键盘闭包缺口：同次重绘前两次 Enter／Ctrl+T 都只基于旧显示位计算。原 scrollback 新增准确连续按键后，两条现象先失败；当前同 Store／Session 的即时显示状态修复后，scrollback 与恢复 Model 原整文件 6 pass／261 assertions，零新工作／额外全文读取、会话切换隔离和完整原正文保持。证据为 `/private/tmp/kite-tui-rapid-display-before-fix-20261015.log` 与 `kite-tui-rapid-display-originals-final-20261015.log`。导出 driver 另以本次原完整正文后的 composer 与真实同步帧结束衔接下一按键，旧 90 秒超时和真实阶段材料保留，尚待该原完整旅程的最终结果。没有为了通过而提高预算或截短三百万字符。
+
+
+### 2026-10-15 按用户决定移除 Ctrl+T 并收束 TUI 验证
+
+用户明确不需要 Ctrl+T，现移除正式／开发共享消费者的处理器、帮助提示及无入口的思考展示状态，不再继续该切换的输入或重绘诊断。此前两次 Enter／Ctrl+T 的闭包问题和正式导出 90 秒失败记录保留为历史事实；本次不把超时描述为已定位的另一故障。普通 Thinking、正常完成全文自动读取、显式 Ctrl+O、原 reasoning 保存及 `/export` 继续保留。
+
+原 Ctrl+T 屏幕显隐要求按这次明确产品决定迁移：共享 scrollback、恢复主会话／sealed Fork、正式导出和 Windows installed qualification 均通过原全文 reader 同时核正文与 reasoning。保持完整读取身份／UTF-8／EOF／hash、首次导出冻结、三百万字符真实终端输出、空 Enter 尾部结果、完整导出、零工作重放、取消与正常清理；没有以导出代替终端正文。Windows fixture 只做源码／类型检查，不声称系统实测。原 52 个终端场景没有 Ctrl+T 依赖。
+
+
+无 Ctrl+T 后受影响的 scrollback 与恢复原 Model 两完整文件 6 pass／277 assertions／10.93 秒；原正式 Terminal 导出完整文件 1 pass／20 assertions／61.23 秒，actual 0。三百万字符终端正文、空 Enter 两向、原 Artifact refs、首次文件冻结、第二份超过 8MiB 的正文与 reasoning、两文件 0600、准确两次 Model／零审核、Scope／零重放和所属 Service 正常退出全部保留，PTY 明确 normal=true／code=0／failure=null。证据为 `/private/tmp/kite-no-ctrl-t-reading-original-wholes-20261015.log` 与 `/private/tmp/kite-export-no-ctrl-t-original-whole.log`；未提高 30／90 秒预算。
+
+根与八 workspace 类型、八 workspace build、边界／workspace／API／测试归属及文档检查通过。最终本地 Terminal 由当前冻结源码构建并按原使用锁校验选择，candidate=`86b51b37674f9585e7850888562345087003ae3bc4627c73d10df7cb50add538`，前一候选保留于 `.cache/unified-terminal-before-tui-final-20261015`；未停止用户进程或更改 Profile。当前 `bun run test:tui:system` 正以全库存 112 文件（含全部原 52 旅程）统一运行，结果未完成前不计完整通过。Win/Linux 只配置 Actions 与备注，原 32MiB RSS／完整资源／出生观测继续保留为未取得的发布资格，不启动新的采集或宣布 V1.3 阶段退出。
+
+
+最终统一 TUI 首轮实际 75 个完整文件通过、项目 MCP 审批一例失败，其余 36 个未启动，命令退出 1；没有记作一次全绿。失败发生在已保存准确原决定后，夹具只等旧 Source 页也含有的服务器名便按 Enter，新目录事实到达使早选详情失效。现只把最后一步迁到“当前 MCP 目录＋真实 ready 计数＋准确选中服务器行”后独立 Enter，全部原批准、mutation、零模型／零 stdio 进程和最后重试连接断言与 10／30 秒预算保留，无产品源码变化。原完整文件复验 1 pass／14 assertions／3.79 秒，actual 0；证据 `/private/tmp/kite-mcp-project-ready-directory-final.log`。其余 75 文件证据继续适用，仅补跑原库存中尚未启动的 36 文件，选择脚本核全 112 库存、准确原失败与已通过身份，不过滤任何未解决失败。
+
+
+剩余 36 个原未启动完整文件全部通过并排空，actual 0；原 live-scroll 的 12 条真实动态／滚动场景及 162 assertions 也在其中。由此本次全 112 个 TUI 文件均已有当前实现的完整通过证据：首轮 75、原 MCP 审批修正后 1、未启动 36，包含全部原 52 个真实终端文件；不能称原 `test:tui:system` 单次命令全绿。最终完整正式导出在首轮集成中亦以 65.09 秒通过。原失败保留，只复验受影响文件，不重跑已通过库存。补跑证据 `/private/tmp/kite-tui-final-unstarted-36-20261015.log`；首轮及准确原失败见 `/private/tmp/kite-tui-final-complete-no-ctrl-t-112-20261015.log`。当前本地候选与验证源码一致；后续只执行文档／本地提交强制门禁。默认全库存的此前失败已逐受影响完整文件闭合，本次不声称重新取得一条完整 default 全绿命令，亦不宣布全 V1.3／阶段退出。

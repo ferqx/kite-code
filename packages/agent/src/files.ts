@@ -27,3 +27,4 @@ export {
 } from './tools/files';
 export type { FileMutationCapture } from './tools/files-tools';
 export { createFileTools } from './tools/files-tools';
+export { createPathFileTools } from './tools/path-files';

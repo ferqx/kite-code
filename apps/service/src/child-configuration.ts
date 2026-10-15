@@ -1,5 +1,6 @@
 import { AgentError, type RunConfiguration, type RuntimeOptions } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
+import { isReadOnlyTaskTool, isRootOnlyTaskTool } from '@kite-ai/agent/task';
 
 export interface SkillSelection {
   readonly requested: readonly string[] | null;
@@ -44,11 +45,14 @@ export interface ChildRole {
   readonly version: string;
   readonly modelId?: string;
   readonly toolIds?: readonly string[];
+  readonly toolPolicy?: 'parent' | 'read_only';
+  readonly description?: string;
 }
 type ChildInput = Parameters<NonNullable<RuntimeOptions['resolveChildRunConfiguration']>>[0];
 export interface ChildSelection {
   readonly role: ChildRole;
   readonly modelId: string;
+  readonly inheritDynamicMcp: boolean;
 }
 
 export function createChildConfiguration(options: {
@@ -60,12 +64,20 @@ export function createChildConfiguration(options: {
   for (const input of options.roles ?? []) {
     if (
       !input ||
-      Object.keys(input).some((key) => !['id', 'version', 'modelId', 'toolIds'].includes(key)) ||
+      Object.keys(input).some(
+        (key) =>
+          !['id', 'version', 'modelId', 'toolIds', 'toolPolicy', 'description'].includes(key),
+      ) ||
       !/^[A-Za-z0-9_.-]{1,128}$/.test(input.id) ||
       roles.has(input.id) ||
       typeof input.version !== 'string' ||
       !input.version ||
       input.version.length > 128 ||
+      (input.toolPolicy !== undefined && !['parent', 'read_only'].includes(input.toolPolicy)) ||
+      (input.description !== undefined &&
+        (typeof input.description !== 'string' ||
+          !input.description.trim() ||
+          input.description.length > 4096)) ||
       (input.modelId !== undefined &&
         (typeof input.modelId !== 'string' || !input.modelId || input.modelId.length > 256)) ||
       (input.toolIds !== undefined &&
@@ -99,7 +111,10 @@ export function createChildConfiguration(options: {
         type: 'object',
         required: ['content'],
         additionalProperties: false,
-        properties: { content: { type: 'string' } },
+        properties: {
+          content: { type: 'string' },
+          name: { type: 'string', minLength: 1, maxLength: 120 },
+        },
       },
       snapshot: { roleId: role.id, roleVersion: role.version, unresolved: true },
     })),
@@ -114,9 +129,44 @@ export function createChildConfiguration(options: {
           : undefined;
       const modelId = role.modelId ?? parentModelId;
       if (typeof modelId !== 'string' || !modelId) throw new AgentError('child_model_unavailable');
-      const configuration = await options.resolve(input, { role, modelId });
+      let selectedRole = role;
+      if (role.toolPolicy) {
+        const parentTools = input.parentTools;
+        if (
+          !Array.isArray(parentTools) ||
+          parentTools.some(
+            (tool) =>
+              !tool ||
+              typeof tool.id !== 'string' ||
+              typeof tool.version !== 'string' ||
+              (tool.extensionId !== null && typeof tool.extensionId !== 'string'),
+          )
+        )
+          throw new AgentError('child_tool_source_unavailable');
+        const toolIds = parentTools
+          .filter(
+            (tool) =>
+              !isRootOnlyTaskTool(tool as Record<string, Json>) &&
+              (role.toolPolicy !== 'read_only' ||
+                isReadOnlyTaskTool(tool as Record<string, Json>)) &&
+              (!role.toolIds || role.toolIds.includes((tool as { id: string }).id)),
+          )
+          .map((tool) => (tool as { id: string }).id);
+        selectedRole = Object.freeze({ ...role, toolIds: Object.freeze([...new Set(toolIds)]) });
+      }
+      const configuration = await options.resolve(input, {
+        role: selectedRole,
+        modelId,
+        inheritDynamicMcp: role.toolPolicy === 'parent' && role.toolIds === undefined,
+      });
       try {
         input.signal.throwIfAborted();
+        if (
+          role.toolPolicy &&
+          (!Array.isArray(configuration.toolIds) ||
+            configuration.toolIds.some((id) => !selectedRole.toolIds!.includes(id)))
+        )
+          throw new AgentError('child_tool_binding_mismatch');
         if (!configuration.model) throw new AgentError('child_model_unavailable');
         if (configuration.modelId !== modelId) throw new AgentError('child_model_binding_mismatch');
         return {
@@ -135,7 +185,7 @@ export function createChildConfiguration(options: {
             roleId: role.id,
             roleVersion: role.version,
             roleModelId: role.modelId ?? null,
-            roleToolIds: role.toolIds ? [...role.toolIds] : null,
+            roleToolIds: selectedRole.toolIds ? [...selectedRole.toolIds] : null,
             configuration: configuration.snapshot,
           },
         };

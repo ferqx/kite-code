@@ -1,4 +1,4 @@
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runTUIHost } from '../../host/tui';
 
@@ -11,7 +11,7 @@ const settings = JSON.parse(process.env.TUI_SKILLS_SETTINGS!) as {
   control: string;
 };
 const actual = globalThis.fetch;
-let starts = 0;
+
 globalThis.fetch = Object.assign(
   async (...args: Parameters<typeof fetch>) => {
     const response = await actual(...args);
@@ -22,7 +22,9 @@ globalThis.fetch = Object.assign(
         join(settings.root, 'catalogue-reads'),
         `${JSON.stringify({ url: url.pathname, query: url.search, value })}\n`,
       );
-      if (!url.searchParams.has('afterId') && ++starts === 2) {
+      const arm = join(settings.root, 'arm-owned-page');
+      if (!url.searchParams.has('afterId') && existsSync(arm)) {
+        unlinkSync(arm);
         writeFileSync(join(settings.root, 'held-page'), 'held');
         await actual(`${settings.control}held-page`);
       }

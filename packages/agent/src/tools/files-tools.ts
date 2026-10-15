@@ -291,14 +291,33 @@ export function createFileTools(
         return { outcome: 'cancelled', content: 'cancelled_before_file_io' };
       try {
         const value = await d.call(object(input), context);
+        const mutationResult =
+          d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot) : undefined;
+        const change = mutationResult?.change;
         const publicValue =
           d.name === 'write' || d.name === 'edit'
             ? {
                 path: (value as { path: string }).path,
                 baseline: (value as { baseline: unknown }).baseline,
+                ...(change
+                  ? {
+                      fileChange: change,
+                      summary: `Wrote ${mutationResult!.content.split('\n').length - Number(mutationResult!.content.endsWith('\n'))} lines to ${change.path}${
+                        change.before?.hash === change.after.hash ? ' (content unchanged)' : ''
+                      }`,
+                    }
+                  : {}),
               }
             : value;
-        const content = JSON.stringify(publicValue);
+        const content = JSON.stringify(
+          ['read', 'write', 'edit'].includes(d.name)
+            ? {
+                ...(publicValue as Record<string, unknown>),
+                executionId: context.executionId,
+                runId: context.runId,
+              }
+            : publicValue,
+        );
         if (Buffer.byteLength(content) > 1024 * 1024) {
           if (!context.artifacts) throw new AgentError('artifact_publication_unavailable');
           const snapshot = publicValue as {
@@ -333,8 +352,6 @@ export function createFileTools(
             modelContent: { kind: 'artifact', reference, encoding: 'utf-8' },
           };
         }
-        const change =
-          d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot).change : undefined;
         return {
           outcome: 'succeeded',
           content,

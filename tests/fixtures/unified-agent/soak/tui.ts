@@ -165,7 +165,7 @@ def snapshot(key):
 try:
  wait(b'New Run');os.write(m,b'Owned soak terminal input');wait(b'Owned soak terminal input');os.write(m,b'\\r');wait(b'OWNED_SOAK_PTY_COMPLETE')
  for sequence in range(${cycles}):
-  before=snapshot(str(sequence)+'-before');start=time.monotonic();b=b'';os.write(m,b'/rewind');wait(b'/rewind');b=b'';os.write(m,b'\\r');wait(b'Files recovery:');wait(b'Esc closes.');b=b'';os.write(m,b'\\x1b');wait(b'New Run');after=snapshot(str(sequence)+'-after')
+  before=snapshot(str(sequence)+'-before');start=time.monotonic();b=b'';os.write(m,b'/rewind');wait(b'/rewind');b=b'';os.write(m,b'\\r');wait(b'Files recovery');wait(b'Reading state: ready');wait(b'Esc Close');b=b'';os.write(m,b'\\x1b');wait(b'New Run');after=snapshot(str(sequence)+'-after')
   points.append({'sequence':sequence,'before':before,'after':after,'durationMs':(time.monotonic()-start)*1000,'focus':True})
  os.write(m,b'\\x11');deadline=time.monotonic()+6
  while p.poll() is None and time.monotonic()<deadline:

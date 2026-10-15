@@ -343,6 +343,60 @@ export function createFileRecoveryPort(input: {
       return lookup(intent, signal);
     },
     lookup,
+    readCompletion: async (raw: FileRecoveryIntent, signal?: AbortSignal) => {
+      const intent = await persisted(raw),
+        actual = await identity(intent.sessionId, signal);
+      if (
+        intent.scope !== 'both' ||
+        intent.code?.phase !== 'succeeded' ||
+        intent.fork?.phase !== 'succeeded' ||
+        !isFileRecoveryIdentity(intent, actual)
+      )
+        throw Error('file_recovery_completion_unavailable');
+      const codeProof = await proof(intent, signal);
+      const reads = {
+        getCommand: (id: string) =>
+          id === intent.code!.request.commandId
+            ? Promise.resolve(codeProof.command)
+            : client.getCommand(id, { signal }),
+        getRestoreStatus: () => Promise.resolve(codeProof.restoreStatus),
+      };
+      // Historical succeeded phases intentionally never regress. Requalify
+      // this read on private unknown copies instead of mistaking those saved
+      // phases for a fresh proof; never write these copies to the journal.
+      const freshCode = await parseFileRecoveryIntent({
+        ...intent,
+        code: { ...intent.code, phase: 'unknown' },
+        fork: { ...intent.fork, phase: 'not_started' },
+      });
+      let confirmed = await lookupFileRecoveryLeg(freshCode, 'code', actual, reads);
+      if (confirmed.code?.phase !== 'succeeded')
+        throw Error('file_recovery_completion_unavailable');
+      const freshFork = await parseFileRecoveryIntent({
+        ...confirmed,
+        fork: { ...confirmed.fork, phase: 'unknown' },
+      });
+      confirmed = await lookupFileRecoveryLeg(freshFork, 'fork', actual, reads);
+      if (confirmed.fork?.phase !== 'succeeded')
+        throw Error('file_recovery_completion_unavailable');
+      signal?.throwIfAborted();
+      if (
+        canonicalFileRecoveryIntent(confirmed) !== canonicalFileRecoveryIntent(intent) ||
+        JSON.stringify(actual) !== JSON.stringify(await identity(intent.sessionId, signal))
+      )
+        throw Error('file_recovery_completion_unavailable');
+      const journal = codeProof.restoreStatus.payload.journal;
+      // lookupFileRecoveryLeg above verifies the exact original Command,
+      // Execution, checkpoint, restore ID, actual terminal and every postimage.
+      // Count actual restored/removed effects, never the earlier preview size.
+      if (journal?.phase !== 'restored') throw Error('file_recovery_completion_unavailable');
+      return {
+        intent: confirmed,
+        restoredFiles: journal.files.filter(
+          (file) => file.operation !== 'unchanged' && ['restored', 'removed'].includes(file.state),
+        ).length,
+      };
+    },
     listSaved: () => journal.list(),
   };
 }

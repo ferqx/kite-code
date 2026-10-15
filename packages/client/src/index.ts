@@ -46,6 +46,7 @@ import type {
   JobReconcileCommand,
   ModelSettingsRequest,
   PermissionMutation,
+  ProviderDiscoveryRequest,
   ProviderSettingsRequest,
   ReconcileJobRequest,
   RecoverSessionRequest,
@@ -709,6 +710,47 @@ export class AgentClient {
     )
       throw new ClientError('invalid_response');
     await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return result;
+  }
+  /** Explicit read-only network discovery. No Command, mutation or credential publication is created. */
+  async discoverProviderSettings(
+    input: ProviderDiscoveryRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    validateRequest('ProviderDiscoveryRequest', input);
+    this.managementStore(input.expectedStoreId);
+    const generation = this.connectionGeneration;
+    await this.verifyConnection(options);
+    const result = await this.fetchJSON(
+      '/v1/config/user/providers/discover',
+      'ProviderDiscoveryView',
+      { method: 'POST', body: input, signal: options.signal },
+    );
+    const normalize = (url: string) => new URL(url).href.replace(/\/$/, '');
+    if (
+      result.storeId !== input.expectedStoreId ||
+      Object.keys(input.expectedReadSet).some(
+        (key) =>
+          result.readSet[key as keyof typeof result.readSet] !==
+          input.expectedReadSet[key as keyof typeof input.expectedReadSet],
+      ) ||
+      result.operation.provider !== input.operation.provider ||
+      result.operation.connectionId !== input.operation.connectionId ||
+      result.operation.credential !== input.operation.credential ||
+      normalize(result.operation.baseURL) !== normalize(input.operation.baseURL) ||
+      new Set(result.modelNames).size !== result.modelNames.length ||
+      result.modelNames.some(
+        (name) =>
+          name.trim() !== name ||
+          name.includes('\r') ||
+          name.includes('\n') ||
+          name.includes(String.fromCharCode(0)) ||
+          new TextDecoder('utf-8', { fatal: true }).decode(new TextEncoder().encode(name)) !== name,
+      )
+    )
+      throw new ClientError('provider_discovery_scope_mismatch');
+    await this.verifyConnection(options);
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
     return result;
   }

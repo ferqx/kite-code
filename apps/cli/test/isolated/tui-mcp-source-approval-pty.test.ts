@@ -307,6 +307,19 @@ test('80x24 Source Review independently confirms Action and original Question de
       workspaceId: 'w',
       title: 'Owned Source decisions',
     });
+    // The original MCP journey starts with an established Workspace. Establish
+    // its ordinary trust prerequisite through the public API before the PTY
+    // wire baseline; this grants no MCP Source admission or Tool permission.
+    const trust = await seed.client.getWorkspaceTrust('w', { storeId });
+    await seed.client.setWorkspaceTrust('w', {
+      expectedStoreId: storeId,
+      commandId: randomUUID(),
+      trusted: true,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      ifRevision: trust.revision,
+    });
+    expect((await seed.client.getWorkspaceTrust('w', { storeId })).trusted).toBe(true);
     const directory = decodeMcpSourcePage(
       await seed.client.queryExtension('a', 'builtin.mcp.sources', 'mcp.sources', { limit: 25 }),
     );
@@ -942,6 +955,10 @@ test('80x24 Source Review independently confirms Action and original Question de
       );
     }
   }
-  if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'owned_source_cleanup_failed');
+  if (cleanupErrors.length)
+    throw new AggregateError(
+      failure ? [failure, ...cleanupErrors] : cleanupErrors,
+      'owned_source_cleanup_failed',
+    );
   if (failure) throw failure;
 }, 180000);

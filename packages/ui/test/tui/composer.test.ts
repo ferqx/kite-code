@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { additionalTuiCommands, fixedTuiCommands } from '../../src/tui/commands';
 import { ComposerBuffer, composerDisplay } from '../../src/tui/composer';
 import { translateTuiLabel } from '../../src/tui/presentation';
 
@@ -51,7 +52,12 @@ test('atomic paste keeps exact UTF8 and deletes one whole block without placehol
 });
 test('fixed candidates are completions only, dismissal survives navigation and editing reopens', () => {
   const b = new ComposerBuffer();
-  b.insert('/rec');
+  b.sync('/');
+  expect(b.candidates).toEqual([...fixedTuiCommands]);
+  b.sync('/rec');
+  // The ordinary TuiSession supplies additional formal readers only after
+  // a nonempty prefix; the original root menu remains exactly 18 commands.
+  b.commands = [...fixedTuiCommands, ...additionalTuiCommands];
   expect(b.candidates).toEqual(['/recovery']);
   expect(b.complete()).toBe(true);
   expect(b.text).toBe('/recovery');

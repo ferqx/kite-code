@@ -75,7 +75,14 @@ test.skipIf(process.platform !== 'darwin')(
           return Response.json({ removed: true });
         }
         const body = (await request.json()) as { messages: { role: string; content: string }[] };
-        const content = body.messages.filter((message) => message.role === 'user').at(-1)!.content;
+        const content = [...body.messages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === 'user' &&
+              ['完整 Native CLI 申请\r\n中🪁', 'Registered TUI task'].includes(message.content),
+          )?.content;
+        if (content === undefined) return new Response('unexpected original work', { status: 500 });
         expect(['完整 Native CLI 申请\r\n中🪁', 'Registered TUI task']).toContain(content);
         calls++;
         const registrationBefore = readCLIRegistration(
@@ -264,7 +271,16 @@ def read_until(text, seconds):
   if time.monotonic()>end:raise RuntimeError('registered PTY deadline '+buffer[-4000:].decode(errors='replace'))
   if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
 try:
- read_until('Registered Native complete',20)
+ # The formal TUI requires an explicit human Workspace trust decision.
+ # All startup observations share the original twenty-second deadline.
+ startup_end=time.monotonic()+20
+ def startup_wait(text):read_until(text,max(0,startup_end-time.monotonic()))
+ startup_wait('是否打开此工作区？')
+ startup_wait('› 退出 Kite Code')
+ os.write(master,b'\\x1b[A')
+ startup_wait('› 信任此工作区并继续')
+ os.write(master,b'\\r')
+ startup_wait('Registered Native complete')
  os.write(master,b'Registered TUI task')
  read_until('Registered TUI task',10)
  os.write(master,b'\\r')

@@ -1,13 +1,18 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { exposedMcpToolName } from '@kite-ai/builtin-runtime/mcp';
+import { join } from 'node:path';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
-import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedTurnEvents,
+  type TestWorkspace,
+} from '../harness/test-workspace';
 
 describe('TUI PTY System — MCP Select management', () => {
   let tui: PtyProcess | undefined;
@@ -64,7 +69,13 @@ describe('TUI PTY System — MCP Select management', () => {
       projectConfigOverrides: {},
     });
     expect(readFileSync(workspace.configPath, 'utf-8')).not.toContain('mcpServers');
-    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      mockServer: server,
+      workspace,
+      entryPath: join(import.meta.dir, '../fixtures/mcp-management-tui.tsx'),
+    });
 
     await submitCommand(tui, '/mcp', 20);
     await waitForText(() => tui!.viewport(), 'MCP 服务器', 15_000);
@@ -83,7 +94,7 @@ describe('TUI PTY System — MCP Select management', () => {
   test('sends inspected remote MCP arguments without a separate permit protocol', async () => {
     let toolCalls = 0;
     const remoteToolName = 'remote echo';
-    const exposedToolName = exposedMcpToolName('closed', remoteToolName);
+    const exposedToolName = `mcp__closed__${remoteToolName}`;
     mcpServer = startTestHttpServer({
       fetch: async (request) => {
         if (request.method === 'GET' || request.method === 'DELETE') {
@@ -180,7 +191,13 @@ describe('TUI PTY System — MCP Select management', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      mockServer: server,
+      workspace,
+      entryPath: join(import.meta.dir, '../fixtures/mcp-management-tui.tsx'),
+    });
 
     await submitUserMessage(tui, server, 'call the closed remote MCP tool', {
       delayMs: 20,
@@ -199,8 +216,11 @@ describe('TUI PTY System — MCP Select management', () => {
 
   test('discovers, binds, and executes an MCP tool during a real TUI conversation', async () => {
     let toolCalls = 0;
+    let resourceReads = 0;
+    let transportFailure = false;
+    let failedTransportCalls = 0;
     const remoteToolName = 'search documentation / latest';
-    const exposedToolName = exposedMcpToolName('docs', remoteToolName);
+    const exposedToolName = `mcp__docs__${remoteToolName}`;
     mcpServer = startTestHttpServer({
       fetch: async (request) => {
         if (request.method === 'GET' || request.method === 'DELETE') {
@@ -261,6 +281,7 @@ describe('TUI PTY System — MCP Select management', () => {
           });
         }
         if (message.method === 'resources/read') {
+          resourceReads++;
           return Response.json({
             jsonrpc: '2.0',
             id: message.id,
@@ -277,8 +298,19 @@ describe('TUI PTY System — MCP Select management', () => {
         }
         if (message.method === 'tools/call') {
           toolCalls += 1;
-          if (toolCalls > 1) {
+          if (transportFailure) {
+            failedTransportCalls++;
             return new Response('deliberate MCP failure', { status: 500 });
+          }
+          if (toolCalls > 1) {
+            return Response.json({
+              jsonrpc: '2.0',
+              id: message.id,
+              result: {
+                isError: true,
+                content: [{ type: 'text', text: 'provider_unavailable: deliberate MCP failure' }],
+              },
+            });
           }
           return Response.json({
             jsonrpc: '2.0',
@@ -412,12 +444,24 @@ describe('TUI PTY System — MCP Select management', () => {
           toolResults: [
             {
               toolCallId: 'read-missing-mcp-resource',
-              contentIncludes: ['not present in the current discovery snapshot'],
+              contentIncludes: ['mcp_descriptor_stale'],
             },
           ],
         },
         message: {
           content: 'RESOURCE_FAILURE_RECOVERED: the conversation continued after the read error.',
+        },
+      },
+      {
+        toolContinuation: 'aborted',
+        message: {
+          tool_calls: [
+            {
+              id: 'call-http500-mcp-tool',
+              name: exposedToolName,
+              args: { query: 'actual HTTP500 unknown effect' },
+            },
+          ],
         },
       },
     ]);
@@ -444,6 +488,7 @@ describe('TUI PTY System — MCP Select management', () => {
       rows: 40,
       mockServer: server,
       workspace,
+      entryPath: join(import.meta.dir, '../fixtures/mcp-management-tui.tsx'),
     });
 
     const conversationFrames = tui.markScreen();
@@ -475,10 +520,25 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(screenContains(tui.viewport(), '❯')).toBe(true);
     const requests = server.getRequests();
     expect(requests).toHaveLength(3);
-    expect(JSON.stringify(requests[0]?.body)).toContain('tool_search');
+    expect(JSON.stringify(requests[0]?.body)).toContain('mcp.tools.search');
     // Small catalogs (≤ 20 tools) bind directly alongside tool_search, so the
     // MCP tool name may appear in the first request's tool list in 'all' mode.
-    expect(JSON.stringify(requests[1]?.body)).toContain(exposedToolName);
+    const discovered = requests[1]?.messages
+      .filter((message) => message.role === 'tool')
+      .flatMap((message) => {
+        try {
+          const result = JSON.parse(String(message.content));
+          return result.source === 'frozen_selected_mcp_catalogue' && Array.isArray(result.items)
+            ? result.items
+            : [];
+        } catch {
+          return [];
+        }
+      })
+      .filter((item) => item.serverName === 'docs' && item.remoteName === remoteToolName);
+    expect(discovered).toHaveLength(1);
+    expect(discovered[0].definitionId).toMatch(/^mcp\.mcp-[a-f0-9]{64}\.[a-f0-9]{32}$/);
+    expect(JSON.stringify(requests[1]?.body)).toContain(discovered[0].definitionId);
     expect(JSON.stringify(requests[2]?.messages)).toContain('documentation result from MCP');
     const clientConversation = tui.screenFramesSince(conversationFrames).join('\n');
     // Dynamic MCP execution must retain a concrete label; it must not regress
@@ -528,6 +588,7 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(JSON.stringify(resourceRequests[7]?.messages)).toContain(
       'LangGraph resource content from MCP resources/read.',
     );
+    expect(resourceReads).toBe(1);
 
     await submitUserMessage(tui, server, 'try a missing MCP resource and continue', {
       delayMs: 20,
@@ -540,8 +601,56 @@ describe('TUI PTY System — MCP Select management', () => {
     );
     const failureRequests = server.getRequests();
     expect(failureRequests).toHaveLength(10);
-    expect(JSON.stringify(failureRequests[9]?.messages)).toContain(
-      'not present in the current discovery snapshot',
+    expect(JSON.stringify(failureRequests[9]?.messages)).toContain('mcp_descriptor_stale');
+    expect(resourceReads).toBe(1);
+
+    // Restore the original transport failure separately from the known isError
+    // result above: a dispatched HTTP500 cannot prove that the remote effect
+    // did not happen, so it must not be fed to another Model as a safe retry.
+    transportFailure = true;
+    const beforeFailure = toolCalls;
+    const prompt = 'retain the original MCP HTTP500 uncertainty without retry';
+    await submitUserMessage(tui, server, prompt, { delayMs: 20, timeout: 15_000 });
+    await waitForCondition(
+      () => {
+        const observation = observePersistedTurnEvents(workspace!, prompt);
+        if (observation.status !== 'ready' || !observation.value) return false;
+        using db = new Database(workspace!.databasePath, { readonly: true });
+        const run = db
+          .query<{ is_active: number }, [string, string]>(
+            'SELECT is_active FROM run WHERE id=? AND session_id=?',
+          )
+          .get(observation.value.turnId, observation.value.threadId);
+        return run?.is_active === 0;
+      },
+      'the original HTTP500 Run reaches its durable terminal without a continuation',
+      15_000,
     );
+    const observation = observePersistedTurnEvents(workspace, prompt);
+    expect(observation.status).toBe('ready');
+    if (observation.status !== 'ready' || !observation.value)
+      throw Error('http500_original_run_missing');
+    using db = new Database(workspace.databasePath, { readonly: true });
+    const actual = db
+      .query<{ state: string; result_json: string; dispatched: number }, [string, string]>(`
+      SELECT e.state,e.result_json,e.dispatched FROM execution e JOIN run r ON r.id=e.run_id
+      WHERE e.run_id=? AND e.session_id=? AND e.call_id='call-http500-mcp-tool' AND e.kind='tool'
+        AND e.origin_store_id=r.origin_store_id AND e.root_work_command_id=r.root_work_command_id
+        AND e.root_work_seq=r.root_work_seq
+    `)
+      .all(observation.value.turnId, observation.value.threadId);
+    expect(actual).toHaveLength(1);
+    expect(actual[0]!.state).toBe('outcome_unknown');
+    expect(actual[0]!.dispatched).toBe(1);
+    expect(JSON.parse(actual[0]!.result_json)).toMatchObject({ outcome: 'outcome_unknown' });
+    expect(failedTransportCalls).toBe(1);
+    expect(toolCalls).toBe(beforeFailure + 1);
+    expect(server.getRequestCount()).toBe(11);
+    await waitForText(() => tui!.viewport(), '未知 — 核实原任务', 5_000);
+    expect(
+      screenContains(tui.viewport(), 'Outcome unknown; original work remains unverified.'),
+    ).toBe(true);
+    expect(server.getRequestCount()).toBe(11);
+    expect(failedTransportCalls).toBe(1);
   }, 40_000);
 });

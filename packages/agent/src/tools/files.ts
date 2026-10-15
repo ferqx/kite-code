@@ -129,6 +129,8 @@ function pageLimit(value = 100): number {
 export function createWorkspaceFiles(options: {
   root: string;
   maxFileBytes?: number;
+  /** Trusted absolute user-file assembly: reject foreign-owner and hardlink read aliases. */
+  strictReads?: boolean;
   /** Trusted relative roots denied to byte recovery operations (including descendants). */
   protectedPaths?: readonly string[];
   /** Trusted host may apply the same deny scope to ordinary Tools as well as byte recovery. */
@@ -206,11 +208,15 @@ export function createWorkspaceFiles(options: {
     if (failed) throw failure;
     return result!;
   }
-  function readAt(path: number, name: string, logical: string): FileSnapshot {
+  function readAt(path: number, name: string, logical: string, expectedLinks = 1n): FileSnapshot {
     const fd = io.openAt(path, name, 'read');
     try {
       const before = io.stat(fd);
       if (!before.isFile()) fail('file_not_regular');
+      if (options.strictReads) {
+        io.verifyOwner(fd);
+        if (before.nlink !== expectedLinks) fail('file_owner_invalid');
+      }
       if (max !== undefined && before.size > BigInt(max)) fail('file_too_large');
       const buffer = Buffer.alloc(64 * 1024);
       const digest = createHash('sha256');
@@ -233,6 +239,10 @@ export function createWorkspaceFiles(options: {
         if (count === read) checkTextSample(bytes);
       }
       const after = io.stat(fd);
+      if (options.strictReads) {
+        io.verifyOwner(fd);
+        if (after.nlink !== expectedLinks) fail('file_owner_invalid');
+      }
       if (
         before.dev !== after.dev ||
         before.ino !== after.ino ||
@@ -308,7 +318,13 @@ export function createWorkspaceFiles(options: {
           io.publishAt(parent, temp, name, input.base === null);
           published = true;
           io.sync(parent);
-          const after = readAt(parent, name, input.path);
+          // POSIX create-only publication temporarily retains exactly our known temp hardlink.
+          const after = readAt(
+            parent,
+            name,
+            input.path,
+            input.base === null && io.createOnlyLeavesTemporary ? 2n : 1n,
+          );
           const publishedFile = io.stat(fd);
           if (
             after.content !== input.content ||

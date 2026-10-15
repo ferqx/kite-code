@@ -532,7 +532,38 @@ export async function waitForRequestMessage(
   const since = options.since;
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
-    if (server.hasRequestMessage(text, since)) return;
+    const expected = text.replaceAll('\r\n', '\n');
+    const matched = server
+      .getRequests()
+      .slice(since)
+      .some((request) => {
+        // The original submitted turn follows the settled assistant/Tool history.
+        // Project, plan and Runtime observations may follow it as user-role data;
+        // their position must not redefine the original submitted message.
+        const priorHistory = request.messages.findLastIndex(
+          (message) => message.role === 'assistant' || message.role === 'tool',
+        );
+        return request.messages.slice(priorHistory + 1).some((message) => {
+          if (message.role !== 'user') return false;
+          const content =
+            typeof message.content === 'string'
+              ? message.content
+              : Array.isArray(message.content)
+                ? message.content
+                    .map((part) =>
+                      part &&
+                      typeof part === 'object' &&
+                      'text' in part &&
+                      typeof part.text === 'string'
+                        ? part.text
+                        : '',
+                    )
+                    .join('')
+                : undefined;
+          return content?.replaceAll('\r\n', '\n') === expected;
+        });
+      });
+    if (matched) return;
     await sleep(interval);
   }
   const requestCount = server.getRequestCount();
@@ -678,7 +709,7 @@ export async function submitCurrentInput(
     }
   }
   throw new Error(
-    `PTY input submission failed after ${INPUT_SUBMIT_ATTEMPTS} Enter attempt(s): ${JSON.stringify(submitted.value)}`,
+    `PTY input submission failed after ${INPUT_SUBMIT_ATTEMPTS} Enter attempt(s): ${JSON.stringify(submitted.value)}; settled viewport: ${JSON.stringify(stripAnsi(tui.viewport()).slice(-3000))}`,
   );
 }
 

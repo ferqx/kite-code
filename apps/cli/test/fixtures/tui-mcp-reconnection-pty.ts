@@ -23,27 +23,10 @@ if (!process.stdin.isTTY) {
   const { runServiceProcess } = await import('@kite-ai/service/main');
   await runServiceProcess({
     configure(startup, context) {
-      return createDefaultProcessConfiguration({
+      const configuration = createDefaultProcessConfiguration({
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
         observerSubjectId: context.subjectId,
-        permissions: {
-          async authorize(request) {
-            log('permissions.jsonl', {
-              kind: request.kind,
-              executionId: request.executionId,
-              definitionId: request.definitionId,
-            });
-            if (request.kind === 'model') throw Error('owned_reconnection_model_forbidden');
-            return request.kind === 'job'
-              ? {
-                  allowed: false,
-                  revision: 'owned-reconnection-ordinary-ask',
-                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
-                }
-              : { allowed: true, revision: 'owned-reconnection-read' };
-          },
-        },
         credentialBackend: {
           kind: 'temporary',
           async put() {
@@ -70,6 +53,29 @@ if (!process.stdin.isTTY) {
           },
         },
       });
+      const permissions = configuration.permissions;
+      if (!permissions) throw Error('owned_reconnection_default_permissions_unavailable');
+      return {
+        ...configuration,
+        permissions: {
+          ...permissions,
+          async authorize(request: Parameters<typeof permissions.authorize>[0]) {
+            log('permissions.jsonl', {
+              kind: request.kind,
+              executionId: request.executionId,
+              definitionId: request.definitionId,
+            });
+            if (request.kind === 'model') throw Error('owned_reconnection_model_forbidden');
+            return request.kind === 'job'
+              ? {
+                  allowed: false,
+                  revision: 'owned-reconnection-ordinary-ask',
+                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
+                }
+              : { allowed: true, revision: 'owned-reconnection-read' };
+          },
+        },
+      };
     },
   });
   log('service-exits.jsonl', { exitCode: process.exitCode ?? 0, returnedAfterCleanup: true });

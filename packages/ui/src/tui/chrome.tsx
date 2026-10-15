@@ -1,7 +1,7 @@
 import { Box, useStdout } from 'ink';
 import { type ReactNode, useEffect, useState } from 'react';
 import stringWidth from 'string-width';
-import { terminalText } from './controller';
+import { type TuiState, terminalText } from './controller';
 import OverlayFrame from './ink/OverlayFrame';
 import { TuiText as Text, useInkI18n, useInkTheme, useTuiPresentation } from './presentation';
 
@@ -134,13 +134,15 @@ export function TuiRule() {
 
 /** Clock from a committed dispatch timestamp, never from the first UI observation. */
 export function TuiRecordedPhaseTime({ startedAt, label }: { startedAt: number; label: string }) {
-  const { t } = useTuiPresentation();
+  const { t, activityVerified } = useTuiPresentation();
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
+    if (!activityVerified) return;
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [activityVerified]);
+  if (!activityVerified) return null;
   return (
     <Text dimColor>
       {t(label)} · {t('Recorded phase')}: {Math.max(0, (now - startedAt) / 1000).toFixed(1)}s
@@ -148,24 +150,55 @@ export function TuiRecordedPhaseTime({ startedAt, label }: { startedAt: number; 
   );
 }
 
+/** A local request is feedback only, never proof that the Runtime has begun or finished stopping. */
+export function hasPendingRootCancellation(state: TuiState, storeId: string): boolean {
+  const snapshot = state.snapshot;
+  if (
+    !snapshot ||
+    snapshot.storeId !== storeId ||
+    snapshot.view.storeId !== storeId ||
+    snapshot.view.session.id !== state.sessionId
+  )
+    return false;
+  const active = snapshot.view.runs.filter(
+    (run) => run.isActive && run.originStoreId === storeId && run.sessionId === state.sessionId,
+  );
+  if (active.length !== 1) return false;
+  const target = active[0]!.originCommandId;
+  return [...state.callers.values()].some(
+    ({ intent, phase }) =>
+      ['submitting', 'accepted', 'applied'].includes(phase) &&
+      intent.scope.storeId === storeId &&
+      intent.scope.sessionId === state.sessionId &&
+      intent.scope.workspaceId === snapshot.view.session.workspaceId &&
+      intent.request.kind === 'command.cancel' &&
+      intent.request.expectedStoreId === storeId &&
+      intent.request.targetCommandId === target &&
+      intent.target.kind === 'command' &&
+      intent.target.id === target,
+  );
+}
+
 export type TuiActivity =
   | 'Working'
   | 'Cancelling'
+  | 'Cancelling · cancellation requested'
   | 'Retrying'
   | 'Waiting for required result'
   | 'Waiting · background results';
 export function TuiActivityLine({ activity }: { activity?: TuiActivity }) {
   const theme = useInkTheme();
+  const { activityVerified } = useTuiPresentation();
   const [frame, setFrame] = useState(0);
   useEffect(() => {
-    if (!activity) return;
+    if (!activity || !activityVerified) return;
     const timer = setInterval(() => setFrame((value) => (value + 1) % 4), 250);
     return () => clearInterval(timer);
-  }, [activity]);
-  return activity ? (
+  }, [activity, activityVerified]);
+  return activity && activityVerified ? (
     <Text
       color={
-        activity === 'Cancelling' || activity === 'Retrying'
+        activity.startsWith('Cancelling') || activity === 'Retrying'
           ? theme.warning
           : activity.startsWith('Waiting')
             ? theme.muted
@@ -195,16 +228,14 @@ export function TuiFooter({
 }) {
   const { t, testDiagnostics } = useTuiPresentation();
   const theme = useInkTheme(),
-    { t: translate, formatNumber } = useInkI18n();
+    { t: translate, formatNumber, language } = useInkI18n();
   const { stdout } = useStdout();
   const permission = facts.permissionMode
-    ? translate(
-        facts.permissionMode === 'auto'
-          ? 'stats.auto'
-          : facts.permissionMode === 'full'
-            ? 'stats.fullAccess'
-            : 'stats.acceptEdits',
-      )
+    ? (language === 'zh-CN'
+        ? { accept_edits: '请求批准', auto: '自动审核', full: '完全访问' }
+        : { accept_edits: 'Request approval', auto: 'Automatic review', full: 'Full access' })[
+        facts.permissionMode
+      ]
     : undefined;
   const permissionColor =
     facts.permissionMode === 'auto'

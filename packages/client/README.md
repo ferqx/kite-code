@@ -1,5 +1,11 @@
 # Client
 
+## 模型尝试与原工作身份
+
+公共 Execution 可保留原 `rootWorkCommandId`／`rootWorkSeq`，以及 Model 的有限 `modelRetry`：准确失败前驱、2 至 5 的当前尝试、固定上限 5 和三类已定义原因。字段沿同一 Service schema 生成并验证；缺字段不补重试事实，不公开私有 `decisionSource`、请求正文或凭据。TUI 必须在同 Store／Session／Run／原工作内关联前驱；SDK 不执行模型重试，也不因观察到失败而重发 Command。实际尝试与资格归 [Agent](../agent/README.md)和[模型适配器](../ai/README.md)。
+
+`SessionView.session` 的可选 `ownerInstanceId`／`ownerGeneration` 是同一公开视图的只读事实，普通 Session DTO 不扩。客户端与已认证 ServerInfo 比较时仍绑定原 Store／Session／Workspace；不匹配只能说明当前连接无法核实活动，不能推断死亡或完成，也不是恢复／派发许可。缺字段保旧消费者的观察合同，不能补造 owner。
+
 ## 只读授权观察
 
 `getExecution`／`getView` 的生成 Execution 类型可带有限 `authorization`，分别保原自动审查、人工答案保存／accepted revision 与派发事实。生成 schema／validator 同步，不新增路由、写操作或 capability；缺字段不补审批结论，批准不等于执行成功，观察不能作派发资格。当前协议与 private 字段边界归 [Service owner](../../apps/service/README.md#只读授权观察)，原实时／历史证据见[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)。
@@ -192,7 +198,9 @@ Bearer `AgentClient` 的 `file_recovery` 能力提供四个有限方法：`listF
 
 Code 的成功需原 Command 身份/subject/raw SHA/receipt 与原 v2 journal、实际 succeeded runless carrier、rootWorkSeq 和逐文件 confirmedPost 一致。Fork 的成功需原 Command、新 Session、原 selection/cut 和 closed 八字段 namespaceReport 一致，`omittedExtensionState:false` 是合法值；报告 mode 仅 copy/rebuild/omit。冷 `lookupFileRecoveryLeg` 只调用原 Command/status GET，缺失、malformed 或 foreign 保 unknown/read-only，不自动 POST，也不把已知终态降级。
 
-both 的 Fork 还要求当前 `codeProof` 与实际新读 `currentDetail`：closed outer current Store/S/W、完整原 checkpoint canonical 一致、全部文件 unchanged，路径唯一且覆盖原 succeeded Code journal 的每个路径。允许真实 empty journal/detail 和额外 unchanged 路径，不增加 quota 或要求等长。原 Code 历史成功不足以证明当前磁盘；外部编辑或后来 completed Run 仍可使第二步不可继续。该纯输入校验补结构与已知路径完整性，不对注入数据来源作密码学证明；实际 CLI/Native driver 使用原有限 GET，并核前后 scope/selector。最后读取至 Fork 的变化、跨文件/跨 leg 原子均不由 SDK 保证。
+both 的 Fork 还要求当前 `codeProof` 与实际新读 `currentDetail`：closed outer current Store/S/W、完整原 checkpoint canonical 一致、全部文件 unchanged，路径唯一且覆盖原 succeeded Code journal 的每个路径。当前公开 Schema 已验证的可选 `textChange` 可随文件详情保留；它是有界展示资料，不替代 unchanged 状态、原基线或逐文件成功证明，其他未声明字段仍拒绝。允许真实 empty journal/detail 和额外 unchanged 路径，不增加 quota 或要求等长。原 Code 历史成功不足以证明当前磁盘；外部编辑或后来 completed Run 仍可使第二步不可继续。该纯输入校验补结构与已知路径完整性，不对注入数据来源作密码学证明；实际 CLI/Native driver 使用原有限 GET，并核前后 scope/selector。最后读取至 Fork 的变化、跨文件/跨 leg 原子均不由 SDK 保证。
+
+历史已知终态不会因读取失败降级，调用者不能据 `lookupFileRecoveryLeg` 保留的旧 succeeded phase 推造新的完整成功提示或文件数量。[CLI Host 的只读完成读取](../../apps/cli/README.md#files-三范围恢复-caller)在私有观察副本上重新核两腿的准确原证明，缺证明仍不发布完整成功；计数来自该次已核验 restore journal 的实际文件终态，不来自预览。此读取不改变 SDK 的 hot permit、显式第二步或持久身份合同。
 
 [纯合同测试](test/isolated/file-recovery-intent.test.ts)当前 13 项 180 条断言；[真实 packaged default](test/isolated/file-recovery-intent-default.test.ts)当前 1 项 165 条断言，2026-10-04 组合 14/345/0。actual source candidate `terminal-d2889750326d67556f4f4c0034e9f0d7e99cba0a3a52780c5377fc2e00fd3003` 核三范围、独立 Ask、两次物理 POST 丢回执、一次 GET 正文丢失、冷原 GET-only、完整 364003 字节 BOM/CRLF 与真实新 inode；后续同 S distinct completed Run/selector 未变及外部编辑均阻止 Fork，零新恢复 POST、保 Code succeeded/Fork not_started。Provider 36、五个恢复 POST 各原 ID 一次、冷 cursor 512 不变；仅固定本机 loopback Provider，不代替实际 CLI/TUI/Native 窗口、独立安装或全 §35。
 

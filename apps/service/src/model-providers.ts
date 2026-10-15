@@ -39,6 +39,7 @@ export type ProviderSettingsOperation = {
   modelNames: string[];
   credential: 'keep' | 'replace' | 'none';
 };
+export type ProviderDiscoveryOperation = Omit<ProviderSettingsOperation, 'modelNames'>;
 export type ProviderSettingsConnection = {
   id: string;
   baseURL: string;
@@ -120,9 +121,16 @@ export function providerModelNames(names: readonly string[]): string[] {
   return result;
 }
 /** An explicit discovery request. Reads/cold startup never call this transport. */
-export async function discoverProviderModels(baseURL: string, apiKey?: string): Promise<string[]> {
+export async function discoverProviderModels(
+  baseURL: string,
+  apiKey?: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
   const endpoint = `${safeProviderEndpoint(baseURL)}/models`;
   const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetch(endpoint, {
@@ -130,10 +138,18 @@ export async function discoverProviderModels(baseURL: string, apiKey?: string): 
         accept: 'application/json',
         ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
       },
-      redirect: 'error',
+      // Observe and reject redirects; never forward a Vault key to another endpoint.
+      redirect: 'manual',
       signal: controller.signal,
     });
-    if (!response.ok) throw new AgentError('provider_discovery_failed');
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new AgentError(
+        response.status === 401 || response.status === 403
+          ? 'provider_discovery_auth_failed'
+          : 'provider_discovery_failed',
+      );
+    }
     const reader = response.body?.getReader();
     if (!reader) throw new AgentError('provider_discovery_invalid');
     const chunks: Uint8Array[] = [];
@@ -149,7 +165,12 @@ export async function discoverProviderModels(baseURL: string, apiKey?: string): 
     } finally {
       await reader.cancel().catch(() => {});
     }
-    const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    let body: unknown;
+    try {
+      body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
+    } catch {
+      throw new AgentError('provider_discovery_invalid');
+    }
     if (
       !body ||
       typeof body !== 'object' ||
@@ -165,9 +186,11 @@ export async function discoverProviderModels(baseURL: string, apiKey?: string): 
     if (!names.length) throw new AgentError('provider_discovery_empty');
     return names;
   } catch (error) {
+    if (signal?.aborted) throw new AgentError('provider_discovery_cancelled');
     if (error instanceof AgentError) throw error;
     throw new AgentError('provider_discovery_unavailable');
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
 }

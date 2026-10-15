@@ -852,7 +852,16 @@ export class ExtensionHost {
     if ((await semanticDigest(json(current))) !== (await semanticDigest(json(captured))))
       throw new AgentError('context_refresh_required');
   }
-  async run(command: CommandRecord, owner: OwnerRef, controller: AbortController): Promise<void> {
+  async run(
+    command: CommandRecord,
+    owner: OwnerRef,
+    controller: AbortController,
+    parent?: {
+      executionId: string;
+      bindings: NonNullable<StandaloneScope['bindings']>;
+      assertFresh(): Promise<void>;
+    },
+  ): Promise<void> {
     const request = command.request as {
       extensionId: string;
       actionId: string;
@@ -945,8 +954,12 @@ export class ExtensionHost {
           owner,
           workspaceId: session.workspaceId,
           signal: controller.signal,
-          checkFreshness: () => this.checkFreshness(stamps, sourceRequest, captured),
-          bindings: this.options.actionBindings,
+          checkFreshness: async () => {
+            await parent?.assertFresh();
+            await this.checkFreshness(stamps, sourceRequest, captured);
+          },
+          bindings: parent?.bindings ?? this.options.actionBindings,
+          ...(parent ? { parentExecutionId: parent.executionId, cancelWithParent: true } : {}),
           captureDispatchReadSet: async (actualExecutionId) => {
             if (actualExecutionId !== executionId)
               throw new AgentError('dispatch_read_set_invalid');
@@ -1008,7 +1021,10 @@ export class ExtensionHost {
                     ...scope,
                     signal,
                     // Dispatch consumed preparation record preconditions; child effects still authorize independently.
-                    checkFreshness: () => this.checkFreshness([], sourceRequest, captured),
+                    checkFreshness: async () => {
+                      await parent?.assertFresh();
+                      await this.checkFreshness([], sourceRequest, captured);
+                    },
                   },
                   extension,
                   definition,

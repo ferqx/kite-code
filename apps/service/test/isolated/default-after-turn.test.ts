@@ -400,7 +400,7 @@ async function fixture(
       afterTurn: { allowed: true, revision: 'json-forgery' },
     }),
   );
-  // No options.child or options.afterTurn: exercise the actual default factory registration.
+  // Preserve actual default roles and after-turn registration; the fixture adds an explicit human ceiling below.
   const host = createDefaultProcessConfiguration({
     profile,
     credentialBackend: {
@@ -518,10 +518,43 @@ async function fixture(
       };
     },
   });
+  // Default finite-role record creation is normally allowed. This trusted fixture adds
+  // two ordinary human gates to prove the factory honors an explicit dispatch ceiling.
+  const requireOriginalApproval = (base: NonNullable<typeof host.permissions>) => ({
+    ...base,
+    async authorize(request: Parameters<typeof base.authorize>[0]) {
+      const decision = await base.authorize(request);
+      const original =
+        request.definitionVersion === '1' &&
+        ((request.kind === 'tool' && request.definitionId === 'task') ||
+          (request.kind === 'job' && request.definitionId === 'agent/worker'));
+      if (!decision.allowed || !original) return decision;
+      return {
+        ...decision,
+        allowed: false,
+        approval: {
+          request: {
+            title: 'Explicit fixture approval for the original Task or carrier',
+            definitionId: request.definitionId,
+            definitionVersion: request.definitionVersion,
+            input: request.input,
+          },
+        },
+      };
+    },
+  });
+  const resolveRun = host.resolveRunConfiguration!;
   const runtime = createRuntime({
     ...host,
+    resolveRunConfiguration: async (...args: Parameters<typeof resolveRun>) => {
+      const binding = await resolveRun(...args);
+      return {
+        ...binding,
+        permissions: requireOriginalApproval(binding.permissions ?? host.permissions!),
+      };
+    },
     store: coordinatedStore,
-    permissions: host.permissions!,
+    permissions: requireOriginalApproval(host.permissions!),
     modelConcurrency: planning && !singleSlot ? 2 : 1,
   });
   const permissionManagement = host.permissionManagement?.(runtime);
@@ -673,7 +706,7 @@ async function fixture(
     },
   };
 }
-test('default factory independently approves original Task/carrier and reports exactly once without recursive after_turn', async () => {
+test('default factory honors an explicit human ceiling independently for original Task/carrier and reports exactly once without recursive after_turn', async () => {
   const f = await fixture('after_turn', true, true);
   try {
     await f.start();

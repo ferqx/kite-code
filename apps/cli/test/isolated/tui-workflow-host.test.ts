@@ -9,6 +9,7 @@ import { bootstrapSchema } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
+import { type OriginalMessage, originalToolResults } from '../fixtures/original-tool-results';
 import { workflowManifest } from '../fixtures/workflow-manifest';
 
 const repo = resolve(import.meta.dir, '../../../..');
@@ -39,7 +40,7 @@ for (const mode of ['paired', 'shared'] as const)
         }),
         { mode: 0o600 },
       );
-      const observed: { messages: { role: string; content: unknown }[] }[] = [];
+      const observed: { messages: OriginalMessage[] }[] = [];
       const forkOutput = {
         answer: `ORIGINAL_FORK_RESULT_${'exact child output '.repeat(150)}_TAIL`,
       };
@@ -68,7 +69,11 @@ for (const mode of ['paired', 'shared'] as const)
           if (!child) parentCalls++;
           const done =
             child ||
-            (contextMode === 'fork' ? parentCalls === 3 : input.messages.at(-1)?.role === 'tool');
+            (contextMode === 'fork'
+              ? parentCalls === 3
+              : originalToolResults(input.messages, 'original task', [
+                  { id: 'original-1', name: 'complete_skill' },
+                ]));
           const delta = child
             ? { content: JSON.stringify(forkOutput) }
             : done

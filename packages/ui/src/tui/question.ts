@@ -15,7 +15,12 @@ export {
 
 export type QuestionDraft = {
   step: number;
-  fields: { selected?: number; buffer: ComposerBuffer; skipped?: boolean }[];
+  fields: {
+    selected?: number;
+    buffer: ComposerBuffer;
+    skipped?: boolean;
+    attempted?: boolean;
+  }[];
 };
 
 export function questionDraft(form: QuestionForm): QuestionDraft {

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { useTuiPresentation } from '../presentation';
 
 // One clock for mounted live indicators. It updates their small React subtrees,
 // never Runtime state, and stops when the last active indicator leaves.
@@ -25,10 +26,12 @@ function subscribe(listener: () => void): () => void {
 const inactiveSubscribe = () => () => {};
 const snapshot = () => now;
 const inactiveSnapshot = () => 0;
-export function useActivityClock(active: boolean): number {
-  return useSyncExternalStore(
-    active ? subscribe : inactiveSubscribe,
-    active ? snapshot : inactiveSnapshot,
+export function useActivityClock(active: boolean): number | null {
+  const { activityVerified } = useTuiPresentation();
+  const now = useSyncExternalStore(
+    active && activityVerified ? subscribe : inactiveSubscribe,
+    active && activityVerified ? snapshot : inactiveSnapshot,
     inactiveSnapshot,
   );
+  return active && !activityVerified ? null : now;
 }

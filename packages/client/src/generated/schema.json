@@ -7408,6 +7408,170 @@
     "required": ["storeId", "readSet", "providers", "errors"],
     "additionalProperties": false
   },
+  "ProviderDiscoveryRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "expectedStoreId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "expectedReadSet": {
+        "type": "object",
+        "properties": {
+          "userEtag": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "workspaceEtag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "explicitDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "effectiveDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+        "additionalProperties": false
+      },
+      "operation": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["openai", "deepseek", "compatible", "ollama"]
+          },
+          "connectionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "baseURL": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "credential": {
+            "type": "string",
+            "enum": ["keep", "replace", "none"]
+          }
+        },
+        "required": ["provider", "connectionId", "baseURL", "credential"],
+        "additionalProperties": false
+      },
+      "secret": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 65536
+      }
+    },
+    "required": ["expectedStoreId", "expectedReadSet", "operation"],
+    "additionalProperties": false
+  },
+  "ProviderDiscoveryView": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "readSet": {
+        "type": "object",
+        "properties": {
+          "userEtag": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "workspaceEtag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "explicitDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "effectiveDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+        "additionalProperties": false
+      },
+      "operation": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["openai", "deepseek", "compatible", "ollama"]
+          },
+          "connectionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "baseURL": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "credential": {
+            "type": "string",
+            "enum": ["keep", "replace", "none"]
+          }
+        },
+        "required": ["provider", "connectionId", "baseURL", "credential"],
+        "additionalProperties": false
+      },
+      "modelNames": {
+        "minItems": 1,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "required": ["storeId", "readSet", "operation", "modelNames"],
+    "additionalProperties": false
+  },
   "ProviderSettingsRequest": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -9185,6 +9349,42 @@
         "maxLength": 128,
         "pattern": "^[A-Za-z0-9_-]+$"
       },
+      "rootWorkCommandId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "rootWorkSeq": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "modelRetry": {
+        "type": "object",
+        "properties": {
+          "previousExecutionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 5
+          },
+          "maxAttempts": {
+            "type": "number",
+            "const": 5
+          },
+          "reason": {
+            "type": "string",
+            "enum": ["provider_unavailable", "connection_failed", "stream_incomplete"]
+          }
+        },
+        "required": ["previousExecutionId", "attempt", "maxAttempts", "reason"],
+        "additionalProperties": false
+      },
       "childSessionId": {
         "anyOf": [
           {
@@ -9486,6 +9686,10 @@
       },
       "content": {
         "type": "string"
+      },
+      "firstOutput": {
+        "type": "string",
+        "enum": ["content", "reasoning", "tool_calls"]
       },
       "originMessage": {
         "type": "object",
@@ -13098,6 +13302,42 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_-]+$"
             },
+            "rootWorkCommandId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "rootWorkSeq": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "modelRetry": {
+              "type": "object",
+              "properties": {
+                "previousExecutionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 5
+                },
+                "maxAttempts": {
+                  "type": "number",
+                  "const": 5
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": ["provider_unavailable", "connection_failed", "stream_incomplete"]
+                }
+              },
+              "required": ["previousExecutionId", "attempt", "maxAttempts", "reason"],
+              "additionalProperties": false
+            },
             "childSessionId": {
               "anyOf": [
                 {
@@ -13508,6 +13748,10 @@
             },
             "content": {
               "type": "string"
+            },
+            "firstOutput": {
+              "type": "string",
+              "enum": ["content", "reasoning", "tool_calls"]
             },
             "originMessage": {
               "type": "object",
@@ -15496,6 +15740,10 @@
         "content": {
           "type": "string"
         },
+        "firstOutput": {
+          "type": "string",
+          "enum": ["content", "reasoning", "tool_calls"]
+        },
         "originMessage": {
           "type": "object",
           "properties": {
@@ -15703,6 +15951,23 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "ownerInstanceId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ownerGeneration": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
           }
         },
         "required": [
@@ -15933,6 +16198,42 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_-]+$"
             },
+            "rootWorkCommandId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "rootWorkSeq": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "modelRetry": {
+              "type": "object",
+              "properties": {
+                "previousExecutionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 5
+                },
+                "maxAttempts": {
+                  "type": "number",
+                  "const": 5
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": ["provider_unavailable", "connection_failed", "stream_incomplete"]
+                }
+              },
+              "required": ["previousExecutionId", "attempt", "maxAttempts", "reason"],
+              "additionalProperties": false
+            },
             "childSessionId": {
               "anyOf": [
                 {
@@ -16109,6 +16410,10 @@
             },
             "content": {
               "type": "string"
+            },
+            "firstOutput": {
+              "type": "string",
+              "enum": ["content", "reasoning", "tool_calls"]
             },
             "originMessage": {
               "type": "object",

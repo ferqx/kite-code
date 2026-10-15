@@ -130,6 +130,8 @@ function fixture() {
       queries.push({ extension, query, input, signal: options?.signal });
       if (query === 'mcp.servers')
         return envelope('builtin.mcp.management', 'builtin.mcp.servers', facts);
+      if (extension === 'builtin.mcp' && query === 'mcp.catalogue')
+        return envelope('builtin.mcp', 'builtin.mcp.catalogue', { items: [], nextAfterKey: null });
       if (query === 'mcp.sources') {
         if (failLabels) throw Error('source_temporarily_unavailable');
         await sourceHook?.(options?.signal);
@@ -199,11 +201,13 @@ test('first MCP directory reads actual source names and keeps canonical settings
     const actual = await f.port.read('a', signal);
     expect(actual.labels?.[f.id]).toBe(f.name);
     expect(Object.isFrozen(actual.labels)).toBe(true);
-    const { labels: _labels, ...canonical } = actual;
+    const { labels: _labels, liveServerIds: _live, ...canonical } = actual;
+    expect(actual.liveServerIds).toEqual([]);
     expect(canonical).toEqual(before);
     expect(f.facts).toEqual(before);
     expect(f.queries.map(({ extension, query, input }) => ({ extension, query, input }))).toEqual([
       { extension: 'builtin.mcp.management', query: 'mcp.servers', input: {} },
+      { extension: 'builtin.mcp', query: 'mcp.catalogue', input: { limit: 100 } },
       { extension: 'builtin.mcp.sources', query: 'mcp.sources', input: { limit: 25 } },
     ]);
     expect(f.queries.every((request) => request.signal === signal)).toBe(true);
@@ -250,12 +254,19 @@ test('source labels require the same Store, Session, Workspace and exact registe
   }
 });
 
-test('unavailable optional names preserve accurate registry IDs without another query; cancellation aborts the owned name read', async () => {
+test('unavailable optional names preserve accurate registry IDs without retrying queries; cancellation aborts the owned name read', async () => {
   const failed = fixture();
   try {
     failed.failLabels();
-    expect(await failed.port.read('a', new AbortController().signal)).toEqual(failed.facts);
-    expect(failed.queries).toHaveLength(2);
+    expect(await failed.port.read('a', new AbortController().signal)).toEqual({
+      ...failed.facts,
+      liveServerIds: [],
+    });
+    expect(failed.queries.map(({ query }) => query)).toEqual([
+      'mcp.servers',
+      'mcp.catalogue',
+      'mcp.sources',
+    ]);
     expect(failed.effects()).toBe(0);
   } finally {
     failed.close();
@@ -329,6 +340,7 @@ test('read-only labels are excluded from connection CAS, while a real canonical 
     });
     expect(posts).toHaveLength(1);
     expect(records).toHaveLength(1);
+    expect(f.queries.filter(({ query }) => query === 'mcp.servers')).toHaveLength(3);
     expect(f.effects()).toBe(0);
   } finally {
     f.close();

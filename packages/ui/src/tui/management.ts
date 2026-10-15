@@ -43,7 +43,8 @@ export interface TuiManagementPort {
   manage(intent: TuiManagementIntent): Promise<TuiManagementOutcome>;
   lookup(intent: TuiManagementIntent, signal?: AbortSignal): Promise<TuiManagementOutcome>;
   newSession(): Promise<string>;
-  quit(): void;
+  /** False means the Host blocked exit; retain the original unsent command. */
+  quit(): void | boolean;
 }
 
 export interface TuiSessionDeletion {
@@ -84,5 +85,13 @@ export interface TuiFileRecoveryPort {
     intent: import('@kite-ai/client/file-recovery-intent').FileRecoveryIntent,
     signal?: AbortSignal,
   ): Promise<import('@kite-ai/client/file-recovery-intent').FileRecoveryIntent>;
+  /** Read-only confirmation of the original successful code and fork legs. */
+  readCompletion?(
+    intent: import('@kite-ai/client/file-recovery-intent').FileRecoveryIntent,
+    signal?: AbortSignal,
+  ): Promise<{
+    intent: import('@kite-ai/client/file-recovery-intent').FileRecoveryIntent;
+    restoredFiles: number;
+  }>;
   listSaved(): Promise<import('@kite-ai/client/file-recovery-intent').FileRecoveryIntent[]>;
 }

@@ -1,7 +1,7 @@
 import { Box, useStdout } from 'ink';
 import stringWidth from 'string-width';
 import { type ComposerBuffer, composerDisplay } from './composer';
-import { terminalText } from './controller';
+import { type TuiIntent, terminalText } from './controller';
 import OverlayChoiceList from './ink/OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
 import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
@@ -54,11 +54,17 @@ export function QuestionMaterial({ form, step }: { form: QuestionForm; step: num
 }
 
 /** The session owns input and the original draft; this renders its finite window. */
-export function TuiAnswerInput({ buffer }: { buffer: ComposerBuffer }) {
+export function TuiAnswerInput({
+  buffer,
+  label = 'Answer',
+}: {
+  buffer: ComposerBuffer;
+  label?: string;
+}) {
   const { t } = useTuiPresentation();
   const { stdout } = useStdout();
-  const prefix = `${t('Answer')} > `;
-  const width = questionInputWidth(stdout.columns, t('Answer'));
+  const prefix = `${t(label)} > `;
+  const width = questionInputWidth(stdout.columns, t(label));
   const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const { lines, index } = buffer.row(width, display),
     start = Math.max(0, index - 2),
@@ -67,18 +73,22 @@ export function TuiAnswerInput({ buffer }: { buffer: ComposerBuffer }) {
     <Box flexDirection="column">
       {start > 0 && <Text dimColor>{t('↑ Earlier input')}</Text>}
       {visible.map((line, n) => (
-        <Text key={start + n}>
-          {n === 0 ? prefix : ' '.repeat(stringWidth(prefix))}
-          {buffer.parts.slice(line.start, line.end).map((part, i) => (
-            <Text
-              key={line.start + i}
-              inverse={start + n === index && buffer.cursor === line.start + i}
-            >
-              {display(part)}
-            </Text>
-          ))}
-          {start + n === index && buffer.cursor === line.end && <Text inverse> </Text>}
-        </Text>
+        <Box key={start + n}>
+          <Box width={stringWidth(prefix)} flexShrink={0}>
+            {n === 0 && <Text>{prefix}</Text>}
+          </Box>
+          <Text wrap="truncate-end">
+            {buffer.parts.slice(line.start, line.end).map((part, i) => (
+              <Text
+                key={line.start + i}
+                inverse={start + n === index && buffer.cursor === line.start + i}
+              >
+                {display(part)}
+              </Text>
+            ))}
+            {start + n === index && buffer.cursor === line.end && <Text inverse> </Text>}
+          </Text>
+        </Box>
       ))}
       {start + visible.length < lines.length && <Text dimColor>{t('↓ Later input')}</Text>}
     </Box>
@@ -90,10 +100,15 @@ export function QuestionPanel({
   form,
   draft,
   compactMaterial = false,
+  providerAction = false,
+  submission,
 }: {
   form: QuestionForm;
   draft: QuestionDraft;
   compactMaterial?: boolean;
+  /** Root supplies this only for a qualified original MCP provider-action Question. */
+  providerAction?: boolean;
+  submission?: TuiIntent['phase'];
 }) {
   const { t } = useTuiPresentation();
   const { t: translate } = useInkI18n();
@@ -102,10 +117,13 @@ export function QuestionPanel({
   const editing =
     field.text && (!field.choices.length || current.selected === field.choices.length);
   const lengthError = questionLengthError(field, current.buffer.text);
+  const frozen = submission !== undefined && submission !== 'rejected';
   const options = [
     ...field.choices.map((choice, index) => ({
       id: String(index),
-      label: `${index + 1}. ${terminalText(choice.title)}`,
+      label: providerAction
+        ? terminalText(choice.title)
+        : `${index + 1}. ${terminalText(choice.title)}`,
       description:
         !compactMaterial && choice.description ? terminalText(choice.description) : undefined,
     })),
@@ -122,34 +140,43 @@ export function QuestionPanel({
   ];
   return (
     <OverlayFrame
-      title={translate('input.answerNeeded', {
-        question: field.title === undefined ? t('Answer') : terminalText(field.title),
-      })}
+      contentPaddingX={0}
+      title={
+        providerAction && form.title
+          ? terminalText(form.title)
+          : translate('input.answerNeeded', {
+              question: field.title === undefined ? t('Answer') : terminalText(field.title),
+            })
+      }
       meta={form.fields.length > 1 ? `${draft.step + 1} / ${form.fields.length}` : undefined}
       footer={
-        <OverlayShortcutBar
-          shortcuts={[
-            ...(!editing && field.choices.length
-              ? [{ keys: '↑↓', label: translate('common.navigate') }]
-              : []),
-            {
-              keys: 'Enter',
-              label: translate(draft.step < form.fields.length - 1 ? 'input.next' : 'help.submit'),
-            },
-            ...(field.text && field.choices.length
-              ? [
-                  {
-                    keys: 'Tab',
-                    label: translate(editing ? 'input.backOptions' : 'input.customInput'),
-                  },
-                ]
-              : []),
-            {
-              keys: 'Esc',
-              label: translate(draft.step > 0 ? 'input.previous' : 'common.cancel'),
-            },
-          ]}
-        />
+        frozen ? undefined : (
+          <OverlayShortcutBar
+            shortcuts={[
+              ...(!editing && field.choices.length
+                ? [{ keys: '↑↓', label: translate('common.navigate') }]
+                : []),
+              {
+                keys: 'Enter',
+                label: translate(
+                  draft.step < form.fields.length - 1 ? 'input.next' : 'input.submitAnswer',
+                ),
+              },
+              ...(field.text && field.choices.length
+                ? [
+                    {
+                      keys: 'Tab',
+                      label: translate(editing ? 'input.backOptions' : 'input.customInput'),
+                    },
+                  ]
+                : []),
+              {
+                keys: 'Esc',
+                label: translate(draft.step > 0 ? 'input.previous' : 'common.cancel'),
+              },
+            ]}
+          />
+        )
       }
     >
       {!compactMaterial && form.description && (
@@ -168,11 +195,11 @@ export function QuestionPanel({
       ) : (
         <TuiAnswerInput buffer={current.buffer} />
       )}
-      {current.selected === undefined && field.choices.length > 0 && (
+      {!frozen && current.selected === undefined && field.choices.length > 0 && (
         <Text dimColor>{t('No selection (Enter has no answer)')}</Text>
       )}
-      {form.alternative && <Text>Alt+A: {terminalText(form.alternative.title)}</Text>}
-      {!field.required && (
+      {!frozen && form.alternative && <Text>Alt+A: {terminalText(form.alternative.title)}</Text>}
+      {!frozen && !field.required && (
         <Text dimColor>
           {current.skipped ? '› ' : '  '}
           {t(
@@ -182,10 +209,26 @@ export function QuestionPanel({
           )}
         </Text>
       )}
-      {editing && lengthError && (
-        <Text color="yellow">
-          {t(lengthError.kind === 'minimum' ? 'Answer needs at least' : 'Answer allows at most')}{' '}
-          {lengthError.bound} {t('characters')} ({lengthError.length} {t('entered')}).
+      {!frozen &&
+        editing &&
+        lengthError &&
+        (current.attempted || current.buffer.text.length > 0) && (
+          <Text color="yellow">
+            {t(lengthError.kind === 'minimum' ? 'Answer needs at least' : 'Answer allows at most')}{' '}
+            {lengthError.bound} {t('characters')} ({lengthError.length} {t('entered')}).
+          </Text>
+        )}
+      {submission && (
+        <Text color={submission === 'unknown' || submission === 'rejected' ? 'yellow' : undefined}>
+          {translate(
+            submission === 'unknown'
+              ? 'input.answerUnknown'
+              : submission === 'rejected'
+                ? 'input.answerRejected'
+                : submission === 'applied'
+                  ? 'input.submitted'
+                  : 'input.submitting',
+          )}
         </Text>
       )}
     </OverlayFrame>
@@ -211,7 +254,7 @@ export function QuestionReviewPanel({
         submitted ? undefined : (
           <OverlayShortcutBar
             shortcuts={[
-              { keys: 'Enter', label: translate('help.submit') },
+              { keys: 'Enter', label: translate('input.submitAnswer') },
               { keys: 'Esc', label: translate('input.previous') },
             ]}
           />

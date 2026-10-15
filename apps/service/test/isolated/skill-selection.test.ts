@@ -387,6 +387,7 @@ test('parent marker is closed and exact inherited IDs never reinterpret a matchi
         configurationId: 'worker',
         parentExecution: parent.executions[0]!,
         parentRun: { ...parent.runs[0]!, configuration: {} },
+        parentTools: [],
         records: {
           forExtension() {
             throw Error('unexpected_record_read');

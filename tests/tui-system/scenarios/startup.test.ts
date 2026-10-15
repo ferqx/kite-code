@@ -8,7 +8,6 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { sqliteRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
@@ -33,9 +32,7 @@ describe('TUI PTY System — Startup', () => {
 
     // Seed an incompatible Runtime Store so startup listSessions() fails in a
     // deterministic way without making the TUI process itself fail to mount.
-    const runtimeStorePath = sqliteRuntimeStorePath(
-      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
-    );
+    const runtimeStorePath = join(workspace.home, '.kite-code', 'kite.sqlite');
     const database = new Database(runtimeStorePath);
     database.run('CREATE TABLE runtime_store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     database.run("INSERT INTO runtime_store_meta (key, value) VALUES ('format_version', '999')");

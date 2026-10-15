@@ -463,3 +463,50 @@ test('Web network effects require the exact registered builtin Tool identity and
     );
   }
 });
+
+test('explicit trusted internal record-only facts bypass approval in three modes without changing generic record-write behavior', async () => {
+  for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+    const f = await fixture(mode);
+    try {
+      f.capability = {
+        ...f.capability,
+        effects: ['record_write'],
+        safeRead: false,
+        internalRecordOnly: true,
+      };
+      await f.submit();
+      await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      expect(f.effects).toBe(1);
+      expect(f.reviews).toBe(0);
+      expect(
+        (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+          .interactions,
+      ).toHaveLength(0);
+      const execution = (await f.store.listExecutions('s')).find(
+        (item) => item.definitionId === 'fixture.effect',
+      )!;
+      expect(execution.status).toBe('succeeded');
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('internal-record fact cannot conceal external/process/unknown effects or bypass hard gates', async () => {
+  for (const effect of ['external', 'process', 'unknown', 'network', 'workspace_write'] as const) {
+    const f = await fixture('full');
+    try {
+      f.capability = { ...f.capability, effects: [effect], internalRecordOnly: true };
+      await f.submit();
+      await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      expect(f.effects).toBe(0);
+      expect(f.reviews).toBe(0);
+      expect(
+        (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+          .interactions,
+      ).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  }
+});

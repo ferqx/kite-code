@@ -16,6 +16,7 @@ type Client = Pick<
   AgentClient,
   | 'getProviderSettings'
   | 'updateProviderSettings'
+  | 'discoverProviderSettings'
   | 'getHostMutation'
   | 'getModelSettings'
   | 'updateModelSettings'
@@ -50,7 +51,11 @@ function sameEndpoint(first: string, second: string | undefined): boolean {
   }
 }
 /** No local journal, secrets, or replay of original mutations. Public CAS owns publication. */
-export function createTuiOnboardingPort(client: Client, storeId: string): TuiOnboardingPort {
+export function createTuiOnboardingPort(
+  client: Client,
+  storeId: string,
+  observeUnavailableWorkspace?: (workspaceId: string, signal?: AbortSignal) => Promise<boolean>,
+): TuiOnboardingPort {
   let pending: Pending | undefined;
   let inFlight = false;
   async function exclusive(
@@ -321,6 +326,8 @@ export function createTuiOnboardingPort(client: Client, storeId: string): TuiOnb
   }
   return {
     async read(workspaceId, signal) {
+      if (await observeUnavailableWorkspace?.(workspaceId, signal))
+        return { trusted: false, readScopes: [], hasModels: false, observer: 'workspace_missing' };
       const trust = await client.getWorkspaceTrust(workspaceId, { storeId, signal });
       if (!trust.trusted) return { trusted: false, readScopes: trust.readScopes, hasModels: false };
       const state = await models(workspaceId, signal);
@@ -381,9 +388,10 @@ export function createTuiOnboardingPort(client: Client, storeId: string): TuiOnb
         return finish(workspaceId, signal);
       });
     },
-    async connect(workspaceId, input, signal) {
+    async connect(workspaceId, input, signal, onPhase) {
       return exclusive(async () => {
         if (pending) return { status: 'unknown' };
+        onPhase?.('discovering');
         const trust = await client.getWorkspaceTrust(workspaceId, { storeId, signal });
         if (!trust.trusted) return { status: 'failed', code: 'workspace_untrusted' };
         const state = await client.getProviderSettings({ storeId, signal });
@@ -409,6 +417,40 @@ export function createTuiOnboardingPort(client: Client, storeId: string): TuiOnb
         originalConnectionId = connection?.id;
         if (connection && !connection.canWrite)
           return { status: 'failed', code: 'provider_readonly' };
+        const operation = {
+          provider: input.provider,
+          connectionId: connection?.id ?? null,
+          baseURL: input.baseURL,
+          credential: input.apiKey
+            ? ('replace' as const)
+            : connection?.hasCredential
+              ? ('keep' as const)
+              : ('none' as const),
+        };
+        let names = input.modelName ? [input.modelName] : undefined;
+        if (!names) {
+          try {
+            const discovered = await client.discoverProviderSettings(
+              {
+                expectedStoreId: storeId,
+                expectedReadSet: state.readSet,
+                operation,
+                ...(input.apiKey ? { secret: input.apiKey } : {}),
+              },
+              { signal },
+            );
+            if (signal?.aborted) return { status: 'cancelled' };
+            names = discovered.modelNames;
+          } catch (error) {
+            if (signal?.aborted) return { status: 'cancelled' };
+            return {
+              status: 'failed',
+              code: error instanceof ClientError ? error.code : 'provider_discovery_unavailable',
+            };
+          }
+        }
+        if (signal?.aborted) return { status: 'cancelled' };
+        onPhase?.('publishing');
         const result = await publish(
           workspaceId,
           'provider',
@@ -418,17 +460,7 @@ export function createTuiOnboardingPort(client: Client, storeId: string): TuiOnb
                 expectedStoreId: storeId,
                 commandId,
                 expectedReadSet: state.readSet!,
-                operation: {
-                  provider: input.provider,
-                  connectionId: connection?.id ?? null,
-                  baseURL: input.baseURL,
-                  modelNames: input.modelName ? [input.modelName] : [],
-                  credential: input.apiKey
-                    ? 'replace'
-                    : connection?.hasCredential
-                      ? 'keep'
-                      : 'none',
-                },
+                operation: { ...operation, modelNames: names },
                 ...(input.apiKey ? { secret: input.apiKey } : {}),
               },
               { signal },

@@ -239,7 +239,7 @@ test('restored compression opens the exact sensitive original input through the 
       expect(alert.textContent).toContain('draft_storage_unavailable');
       await click('确定', alert);
     };
-    await act(async () => rendered!.render(<NativeDesktop />));
+    await act(async () => rendered!.render(<NativeDesktop testDiagnostics />));
     await select('Original compression');
     await settle(() => !!button('会话工具'));
     await click('会话工具');

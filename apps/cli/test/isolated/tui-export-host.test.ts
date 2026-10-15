@@ -207,6 +207,9 @@ for (const mode of ['complete'] as readonly string[]) {
             profilePath: profile.profilePath,
             evidence,
             tail,
+            bodyText: '正文',
+            bodyRepeats: 1500000,
+            databasePath: profile.databasePath,
           }),
         ],
         {
@@ -250,7 +253,7 @@ for (const mode of ['complete'] as readonly string[]) {
           expect(out).toContain('FULL_TAIL_OBSERVED True');
           expect(out).toContain('EXPORT_FULL_TAIL_REASON_0600');
           expect(out).toContain('TAIL_RESULT_COLLAPSE_EXPAND_ORIGINAL_ARTIFACT_REFS');
-          expect(out).toContain('RECORDED_REASON_SHOW_HIDE_ORIGINAL_CONTENT');
+          expect(out).toContain('LOADED_REASON_EXPORTED_WITHOUT_SCREEN_TOGGLE');
           expect(completeSource).toBe(true);
           expect(database.query('SELECT count(*) AS n FROM session').get()).toEqual({ n: 1 });
         } else

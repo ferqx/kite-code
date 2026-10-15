@@ -533,7 +533,8 @@ test('checkpoint batches preserve distinct Tool inputs and refreshed business fa
   );
   try {
     await f.submit('batch-work');
-    expect((await f.done('batch-work'))!.status).toBe('completed');
+    const completedRun = (await f.done('batch-work'))!;
+    expect(completedRun.status).toBe('completed');
     expect(effects).toBe(0);
     for (const batches of [hostBatches, extensionBatches]) {
       const complete = batches.find((requests) =>
@@ -546,12 +547,25 @@ test('checkpoint batches preserve distinct Tool inputs and refreshed business fa
       expect(complete).toEqual([
         {
           sessionId: 's',
+          runId: completedRun.id,
           workspaceId: 'w',
           definitionId: 'fixed',
           input: { kind: 'model_request' },
         },
-        { sessionId: 's', workspaceId: 'w', definitionId: 'fixture.work', input: { ordinal: 1 } },
-        { sessionId: 's', workspaceId: 'w', definitionId: 'fixture.work', input: { ordinal: 2 } },
+        {
+          sessionId: 's',
+          runId: completedRun.id,
+          workspaceId: 'w',
+          definitionId: 'fixture.work',
+          input: { ordinal: 1 },
+        },
+        {
+          sessionId: 's',
+          runId: completedRun.id,
+          workspaceId: 'w',
+          definitionId: 'fixture.work',
+          input: { ordinal: 2 },
+        },
       ]);
     }
     expect(f.model.requests).toHaveLength(2);

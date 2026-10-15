@@ -72,6 +72,8 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 审批与问题的权威事实由[Interaction 事务](src/storage/sqlite/interactions/README.md)保存。宿主权限判断可返回 `approval`，Core 在获取 Tool/Job 资源前登记准确参数、定义版本、policy revision、来源和必要 refs；等待不持有该执行资源。超过有限卡预算的完整人工请求由可信 sealer 发布到准确原 Execution scope Artifact，有限卡复用 `policy.review` 完整附件协议；接受及最终授权均核原内容与当前准确 policy/input，卡预算不扩大，正文不截断。根入口回答保存同一请求的答案，实际 owner 复核当前权限和新鲜度后接纳，`markDispatching` 还要求准确决定引用。子请求从真实 ancestry 派生根展示投影，公开 child 入口不能直接回答。拒绝只取消该请求的原工作身份；批准、接纳和执行是不同事实。`ToolContext.requestInput` 登记当前已派发 attempt 的有界问题，使用实际每 Run permission binding 与 control-read stamp，schema 校验和接纳后返回信息，不获得其他执行权限；等待期间 stamp 漂移拒绝接受，迟到答案保留历史而不复活取消的工作。
 
+纯 [ask_user](src/tools/ask-user/index.ts) 区分准确执行取消与整 Run 取消：只认相同本执行 signal.reason 的已定义取消代码，或 [InteractionGate](src/execution/interactions.ts) 从已保存、准确同 Scope 的 cancelled Question 生成的类型化证据。该叶返回真实取消信息并让同 Run 继续；空答案取消和整 Run Ctrl+C 保原行为，foreign／错误 kind／未确认的 abort 不借此变成成功。Core 通用已尝试适配器的 unknown 分类不变，不能将无副作用问答的有限证据推广到文件、Shell 或网络效果。
+
 宿主也可显式注入 `authorizationReview: {id, version, modelId, model}`，并让纯权限分类返回 `review: {request}`。Core 在目标资源前建立专用持久 `authorization.review` carrier 和 child Session，复用唯一 Loop、共享 Model 槽位；该用途不占普通子 Agent 数量许可，真实工具目录、扩展、业务必要义务和额外来源均为空。审查最多一次实际 Model 调用，只接受闭合 `approve_once/reject/ask_user` 与非空 reason。SQL 从原目标保存输入、来源、策略版本、attempt、定义、Store、主体、根工作及真实原命令请求；Tool 决策的 `decisionContext` 只从同 Session/Store/根工作的实际成功 Model 输入派生，包含已应用的 steer 正文和准确来源身份，Action 无该 Model 依据时为 null。最终派发再核实唯一成功 Model、完成 child 和成功 carrier，文字中的自报引用不能授予权限。拒绝结束该请求的原工作；明确拒绝不转人工，原 reason 由公共 authorization.review 保存，并在普通 Tool 的 result.details.reason 展示。只有授权拒绝专用错误公开该原因，普通适配器私有错误仍只保存原固定 code。失败、不可核实或 ask_user 回退真实人工审批。资源持有阶段只读已有审查或已接纳人工决定，不创建审查或卡片等待。已有冷 carrier 只供观察，不自动重启 Model；取消沿准确 attached 关系传播。完整审核请求以[Model 正文交接](src/model-body/README.md)封存与展开，不再用 900 KiB 总量拒绝；成功 Model 的实际 `result.modelInputBodyHash` 与原 carrier 绑定共同进入最终 proof。大请求的真实人工回退卡保存完整原请求附件，客户端完整加载资格仍需分别验证。默认 Service SDK 装配已有[真实测试](../../apps/service/test/isolated/auto-configuration.test.ts)，付费 Provider 窗口与其他平台资格单独记录。
 
 [输入事务](src/storage/sqlite/inputs/README.md)区分准确活动 Run 的 `input.steer` 与独立 `input.follow_up`。Core 在安全检查点按持久顺序应用 steer，尚未派发的旧模型、工具和审批保存 `superseded_by_user_input` 与准确的工具响应配对；已派发调用保留原参数、来源和真实结果。最终派发与 Run 完成事务复查 pending 输入，完成附近到达的 steer 仍继续同一个 Run。follow-up 保留自己的命令和原 afterRun 关系，不因后来工作或原 Run 取消而换目标；单独取消未应用输入不会生成消息。公开 child 输入目前仍限制在宿主受控路径，完整业务追加消息继续按方案实施。
@@ -85,6 +87,10 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 模型来源变化时旧工具不派发，唯一 Loop 的下一次请求看到刷新后的实际指令。无模型 Action 的旧未派发 freshness attempt 先结算，最多重新准备一次并重新授权新的执行 ID，原 Command 输入与旧来源保持不变；`preparingNextAttempt` 回执随事务提交，等待者不能把旧 attempt 的失败当作原命令最终完成。再变化或重新准备失败保留明确失败/需核实。文件系统复查与 SQLite、外部 I/O 不是原子事务。
 
 主 Run 的来源请求按定义及完整输入语义摘要保留，不以累计 256 次请求结束长任务。`ContextSources.captureBatch` 可在一个检查点接收全部原请求；未提供时仍逐项调用 `capture`。Core 继续核每个实际 source 的格式、同 ID 摘要一致性及当前最多 256 个唯一来源，不丢弃旧路径或不同输入。默认项目捕获只在该次调用内复用实际目录核验与指令字节，下一检查点重新读取；请求各自的路径、目标、目录及字节门禁保持。取舍见[完整来源捕获 Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)。
+
+[模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主显式装配纯 `agentContractSource`，静态规则及可缓存工作区事实不混入动态计划状态。[项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，放在真实历史之后。`ContextSource.placement` 仅允许 user 的 `after_history` 或 `runtime`；最多一个 runtime 来源组成唯一尾部观察块，非法或冲突明确拒绝。无 placement 的既有来源保原前缀行为；原 source IDs、完整工具配对、摘要及派发前 freshness 不变。
+
+内部 `SourceRequest.runId` 由 Core 的当前捕获边界覆盖，不从模型参数推定。[Planning](src/business/planning/README.md#计划与真实来源)按实际 Run 与原批准证明贡献动态 phase；来源位置和描述均不授执行权，权限与业务必要条件仍独立核验。该合同不改变 HTTP schema、Store 格式或旧数据基线。来源／组装／压缩回归见 [model-context](test/isolated/context/model-context.test.ts)与[生产 Prompt 原旅程](../../tests/tui-system/scenarios/prompt-contract-v2-production.test.ts)。
 
 `resolveRunConfiguration` 在新 Run 激活前解析实际模型与工具选择，原子保存脱敏配置和准确 Tool 版本；旧 Run 继续使用自己的绑定。宿主可返回每 Run 的 `extensions/sources/dispose`，Core 复制并冻结 schema、资源声明及定义集合；模型目录、自有 namespace 和子操作使用同一绑定。后台 Job 保留该绑定 lease，最后一个真实任务结束后才释放资源，新 Run 的定义或来源不会替换旧任务。未知或重复选择在模型调用前局部拒绝，只有实际清理成功才释放失败准入资源；准备清理双失败通过 `ConfigurationPreparationCleanupError` 保原错误及资源并阻止关闭，具体五个接收点和可信producer合同归[生命周期owner](src/lifecycle.README.md)。权限请求明确区分 model/tool/job，模型权限不会因同名 Tool 被复用。普通 Tool 的 progress 合并为一个待写点，以 100ms 起测间隔写入，单点最多 32 KiB；终态前排空。观察写入失败记录在真实结果中，不把已知效果改写为未知或再次执行。
 
@@ -117,6 +123,8 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 可选 `Extension.context.captureBatch` 接收该检查点同一 Session 的全部完整请求及一个只读 context；全部 Session scope 在贡献回调前核实，返回最多 128 个自有 namespace 来源，Core 强制 `user` 并核总唯一来源。未选择批量回调的扩展保持逐项捕获；Planning 的批量贡献只在当前检查点读取一次真实计划，不跨检查点缓存。[扩展回归](test/isolated/extensions/context-contributions.test.ts)核完整不同输入、下一检查点刷新、scope/namespace/数量和冲突拒绝，原单项贡献合同保持。
 
 ## 同一 Step 的并行工具批次
+
+默认产品权限使用可信 `toolDispatchOrder: model`：同一 Model 批次按声明顺序完成准入，前项等待人工决定时后项不派发；实际准入后各 Tool 的执行仍并发，拒绝终止未准入兄弟而不伪造其效果。策略进入原冻结 Run 配置并参与恢复核对，Model 输入不能选择该标记。自定义 Permissions 未声明它时保持下述独立并行行为与已开始调用的清理约束；真实乱序、接续及 T048 能力不由 TUI 推造。
 
 [唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行；没有新增工具数量或累计预算。拒绝或未知结果停止该批，已启动的调用全部结束后才允许 Run 终结和 binding release。独立的后发持久化失败保留真实错误，不能被首个业务失败覆盖；同一 abort reason 的传播不虚构第二次独立失败。
 

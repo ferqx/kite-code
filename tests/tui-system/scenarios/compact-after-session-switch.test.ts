@@ -18,6 +18,7 @@ import {
   observePersistedSessionCommandEvents,
   observePersistedSessionEvents,
   observePersistedSessionIds,
+  observePersistedUserMessageSession,
   type PersistedTurnEvent,
 } from '../harness/test-workspace';
 
@@ -31,6 +32,7 @@ describe('TUI PTY System — /compact after session switch', () => {
   let workspace: ReturnType<typeof createTestWorkspace>;
   let sessionIdsBeforeNew: string[] = [];
   let sessionOneEventCount = 0;
+  let sessionOneId: string;
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -56,7 +58,11 @@ describe('TUI PTY System — /compact after session switch', () => {
       await waitForCondition(
         () => {
           const observation = observePersistedSessionIds(workspace);
-          if (observation.status !== 'ready' || observation.value.length !== 1) return false;
+          const original = observePersistedUserMessageSession(workspace, 'Session 1 message');
+          if (observation.status !== 'ready' || original.status !== 'ready' || !original.value)
+            return false;
+          sessionOneId = original.value.threadId;
+          if (!observation.value.includes(sessionOneId)) return false;
           sessionIdsBeforeNew = observation.value;
           return true;
         },
@@ -64,12 +70,17 @@ describe('TUI PTY System — /compact after session switch', () => {
         20_000,
       );
 
-      const events = await submitCompactAndObserve(sessionIdsBeforeNew[0]!);
+      const events = await submitCompactAndObserve(sessionOneId);
       expect(events).toContainEqual(
-        expect.objectContaining({ type: 'user.command_invoked', command: '/compact' }),
+        expect.objectContaining({
+          type: 'command.accepted',
+          sourceType: 'command.accepted',
+          kind: 'context.compress',
+          request: expect.objectContaining({ kind: 'context.compress' }),
+        }),
       );
       expectCompactFailure(events);
-      const sessionEvents = observePersistedSessionEvents(workspace, sessionIdsBeforeNew[0]!);
+      const sessionEvents = observePersistedSessionEvents(workspace, sessionOneId);
       if (sessionEvents.status !== 'ready') {
         throw new Error('Session 1 durable event observation was lost.');
       }
@@ -106,10 +117,15 @@ describe('TUI PTY System — /compact after session switch', () => {
       expect(sessionIdsBeforeNew).not.toContain(observed.sessionId);
       const events = observed.events;
       expect(events).toContainEqual(
-        expect.objectContaining({ type: 'context.compaction_requested', reason: 'manual' }),
+        expect.objectContaining({
+          type: 'command.accepted',
+          sourceType: 'command.accepted',
+          kind: 'context.compress',
+          request: expect.objectContaining({ kind: 'context.compress' }),
+        }),
       );
       expectCompactFailure(events);
-      const oldSessionEvents = observePersistedSessionEvents(workspace, sessionIdsBeforeNew[0]!);
+      const oldSessionEvents = observePersistedSessionEvents(workspace, sessionOneId);
       if (oldSessionEvents.status !== 'ready') {
         throw new Error('Session 1 durable event observation was lost after /new.');
       }
@@ -132,8 +148,7 @@ describe('TUI PTY System — /compact after session switch', () => {
         if (observation.status !== 'ready' || !observation.value) return false;
         const terminal = observation.value.find(
           (event) =>
-            event.type === 'context.compaction_failed' ||
-            event.type === 'context.compaction_completed',
+            event.type === 'run.finished' && ['failed', 'completed'].includes(String(event.status)),
         );
         if (!terminal) return false;
         events = observation.value;
@@ -164,8 +179,8 @@ describe('TUI PTY System — /compact after session switch', () => {
           if (
             !events.value.some(
               (event) =>
-                event.type === 'context.compaction_failed' ||
-                event.type === 'context.compaction_completed',
+                event.type === 'run.finished' &&
+                ['failed', 'completed'].includes(String(event.status)),
             )
           ) {
             return false;
@@ -204,13 +219,21 @@ describe('TUI PTY System — /compact after session switch', () => {
   }
 
   function expectCompactFailure(events: PersistedTurnEvent[]): void {
-    const terminal = events.find((event) => event.type === 'context.compaction_failed');
-    expect(terminal).toMatchObject({
-      type: 'context.compaction_failed',
-      retryable: false,
-    });
-    expect(String(terminal?.message)).toMatch(
-      /(?:Not enough reducible context|No settled historical turn)/,
+    const accepted = events.find(
+      (event) => event.type === 'command.accepted' && event.kind === 'context.compress',
     );
+    expect(accepted).toBeDefined();
+    const terminal = events.find(
+      (event) => event.type === 'run.finished' && event.originCommandId === accepted?.objectId,
+    );
+    expect(terminal).toMatchObject({
+      type: 'run.finished',
+      sourceType: 'run.finished',
+      status: 'failed',
+      reason: 'compression_not_reducible',
+    });
+    // The old retryable:false boolean is replaced by the actual refused Run
+    // reason and an exact zero-new-Provider assertion, not a fabricated event.
+    expect(server.getRequestCount()).toBe(1);
   }
 });

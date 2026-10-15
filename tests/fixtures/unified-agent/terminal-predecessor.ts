@@ -27,6 +27,38 @@ const workspaces = [
 ] as const;
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
+/** Remove only the reviewed UI workspace declarations; resolved packages stay byte-exact. */
+export function withoutReviewedTuiLockDeclarations(current: Uint8Array): Uint8Array | undefined {
+  const text = Buffer.from(current).toString('utf8');
+  const startAnchor = '    "packages/ui": {\n';
+  if (text.split(startAnchor).length !== 2) return undefined;
+  const start = text.indexOf(startAnchor),
+    end = text.indexOf('\n    },\n', start);
+  if (end < 0) return undefined;
+  const workspace = text.slice(start, end);
+  const anchor = '        "ink": "^7.1.1",\n';
+  const increment =
+    anchor +
+    '        "ink-syntax-highlight": "^2.0.2",\n' +
+    '        "ink-text-input": "^6.0.0",\n';
+  if (workspace.split(increment).length !== 2) return undefined;
+  return Buffer.from(text.slice(0, start) + workspace.replace(increment, anchor) + text.slice(end));
+}
+export function withoutReviewedDesktopDevelopmentScript(
+  current: Uint8Array,
+): Uint8Array | undefined {
+  const text = Buffer.from(current).toString('utf8');
+  const startAnchor = '  "scripts": {\n';
+  if (text.split(startAnchor).length !== 2) return undefined;
+  const start = text.indexOf(startAnchor),
+    end = text.indexOf('\n  },\n', start);
+  if (end < 0) return undefined;
+  const scripts = text.slice(start, end);
+  const increment = '    "desktop:dev": "bun run scripts/development/unified-desktop.ts",\n';
+  if (scripts.split(increment).length !== 2) return undefined;
+  return Buffer.from(text.slice(0, start) + scripts.replace(increment, '') + text.slice(end));
+}
+
 /** Verify exact source and dependency increments; never rewrite predecessor manifests or locks. */
 export function matchTerminalPredecessorInput(
   path: string,
@@ -39,12 +71,43 @@ export function matchTerminalPredecessorInput(
   | 'runtime_stdio_validation_script_increment'
   | 'shell_parser_locked_dependency_increment'
   | 'process_observation_and_shell_parser_increment'
+  | 'shell_parser_and_tui_workspace_dependency_increment'
+  | 'tui_workspace_dependency_increment'
+  | 'runtime_stdio_and_desktop_development_script_increment'
   | undefined {
   const oldBytes = Buffer.from(previous),
     currentBytes = Buffer.from(current);
   if (oldBytes.equals(currentBytes)) return 'identical';
-  if (path === 'bun.lock') return matchPredecessorShellParserInput(path, previous, current);
-  if (path === 'package.json') return matchPredecessorStdioInput(path, previous, current);
+  if (path === 'bun.lock') {
+    const originalMatch = matchPredecessorShellParserInput(path, previous, current);
+    if (originalMatch) return originalMatch;
+    const reviewed = withoutReviewedTuiLockDeclarations(current);
+    return reviewed && matchPredecessorShellParserInput(path, previous, reviewed)
+      ? 'shell_parser_and_tui_workspace_dependency_increment'
+      : undefined;
+  }
+  if (path === 'package.json') {
+    const originalMatch = matchPredecessorStdioInput(path, previous, current);
+    if (originalMatch) return originalMatch;
+    const reviewed = withoutReviewedDesktopDevelopmentScript(current);
+    return reviewed && matchPredecessorStdioInput(path, previous, reviewed)
+      ? 'runtime_stdio_and_desktop_development_script_increment'
+      : undefined;
+  }
+  if (path === 'packages/ui/package.json') {
+    const original = oldBytes.toString('utf8');
+    const anchor = '    "tailwind-merge": "3.6.0"\n';
+    if (original.split(anchor).length !== 2) return undefined;
+    const expected = original.replace(
+      anchor,
+      '    "tailwind-merge": "3.6.0",\n' +
+        '    "ink-syntax-highlight": "^2.0.2",\n' +
+        '    "ink-text-input": "^6.0.0"\n',
+    );
+    return Buffer.from(expected).equals(currentBytes)
+      ? 'tui_workspace_dependency_increment'
+      : undefined;
+  }
   if (path === 'apps/service/package.json') {
     const original = oldBytes.toString('utf8'),
       exportAnchor = '    "./native-runtime-assets": "./src/native-runtime-assets.ts",\n',
@@ -190,13 +253,7 @@ export async function materializeTerminalPredecessor(input: {
     path: string;
     sha256: string;
     currentSha256: string;
-    match:
-      | 'identical'
-      | 'process_observation_source_entry'
-      | 'windows_native_bootstrap_source_entry'
-      | 'runtime_stdio_validation_script_increment'
-      | 'shell_parser_locked_dependency_increment'
-      | 'process_observation_and_shell_parser_increment';
+    match: NonNullable<ReturnType<typeof matchTerminalPredecessorInput>>;
   }[] = [];
   for (const path of inputs) {
     if (!inside(repository, resolve(repository, path)))

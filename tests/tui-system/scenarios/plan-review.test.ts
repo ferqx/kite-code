@@ -10,24 +10,14 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { basename } from 'node:path';
+import { assertCurrentPlanCompletion, currentPlanWorkResponses } from '../harness/current-plan';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
-import {
-  screenContains,
-  stripAnsi,
-  waitForCondition,
-  waitForText,
-} from '../harness/terminal-screen';
-import {
-  createTestWorkspace,
-  observePersistedTurnEvents,
-  readPersistedPlanArtifacts,
-  requirePersistedRuntimeReady,
-} from '../harness/test-workspace';
+import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { createTestWorkspace, readPersistedPlanArtifacts } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -69,7 +59,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
       },
       {
         expectedRequest: {
-          toolResults: [{ toolCallId: 'call_write_1', contentIncludes: ['draft_saved'] }],
+          toolResults: [{ toolCallId: 'call_write_1', contentIncludes: ['"planId"'] }],
         },
         message: { content: 'Plan draft saved. Ready for review when you are.' },
       },
@@ -81,7 +71,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
           const { plan_id, version, structural_digest } = parseDraftSavedPlan(result?.content);
           return {
             expectedRequest: {
-              toolResults: [{ toolCallId: 'call_write_1', contentIncludes: ['draft_saved'] }],
+              toolResults: [{ toolCallId: 'call_write_1', contentIncludes: ['"planId"'] }],
             },
             message: {
               tool_calls: [
@@ -95,44 +85,11 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
           };
         },
       },
-      {
-        response(request) {
-          const result = request.messages.find(
-            (message) => message.role === 'tool' && message.tool_call_id === 'call_submit_1',
-          );
-          const plan = parseDraftSavedPlan(result?.content);
-          return {
-            expectedRequest: {
-              toolResults: [
-                { toolCallId: 'call_submit_1', contentIncludes: ['"status":"approved"'] },
-              ],
-            },
-            message: {
-              tool_calls: [
-                {
-                  id: 'call_complete_1',
-                  name: 'update_plan',
-                  args: {
-                    plan_id: plan.plan_id,
-                    version: plan.version,
-                    structural_digest: plan.structural_digest,
-                    updates: [
-                      { step_id: 'setup', status: 'completed' },
-                      { step_id: 'core', status: 'completed' },
-                      { step_id: 'test', status: 'completed' },
-                    ],
-                    complete_plan: true,
-                  },
-                },
-              ],
-            },
-          };
-        },
-      },
+      ...currentPlanWorkResponses('call_submit_1', ['setup', 'core', 'test']),
       {
         expectedRequest: {
           toolResults: [
-            { toolCallId: 'call_complete_1', contentIncludes: ['"plan_completed":true'] },
+            { toolCallId: 'call_submit_1-progress-2', contentIncludes: ['"completePlan":true'] },
           ],
         },
         message: { content: 'Plan completed successfully.' },
@@ -161,9 +118,15 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
       // Wait for the plan draft follow-up text
       await waitForText(() => tui.outputSinceLastAction(), 'Plan draft saved', 15000);
       await waitForText(() => tui.viewport(), '方案审核', 15_000);
+      // The current review contract requires an explicit mode; no empty Enter approval.
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '❯', 5_000);
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '2. 在接受编辑模式下开始执行', 5_000);
+      await tui.settleScreen();
       tui.write('\r');
       await waitForText(() => tui.viewport(), 'Plan completed successfully.', 15_000);
-      await assertCompletedPlanTurn(workspace, 'Draft a plan for testing');
+      await assertCurrentPlanCompletion(workspace, 'Draft a plan for testing', server);
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
@@ -174,13 +137,13 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
 
       const artifacts = readPersistedPlanArtifacts(workspace);
       expect(artifacts).toHaveLength(1);
-      expect(basename(artifacts[0]!.path)).toBe('v1.md');
-      expect(artifacts[0]!.content).toContain('# Test Draft Plan');
+      expect(artifacts[0]!.version).toBe(1);
+      expect(artifacts[0]!.title).toBe('Test Draft Plan');
       expect(artifacts[0]!.content).toContain(
         'Implement the feature step by step with careful testing.',
       );
-      expect(artifacts[0]!.content).toContain('"id":"setup"');
-      expect(artifacts[0]!.content).toContain('"title":"Write tests"');
+      expect(JSON.stringify(artifacts[0]!.steps)).toContain('"id":"setup"');
+      expect(JSON.stringify(artifacts[0]!.steps)).toContain('"title":"Write tests"');
 
       // The review overlay was observed and accepted above; it must close before idle.
       expect(clean.includes('方案审核')).toBe(false);
@@ -216,37 +179,3 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
   );
 });
-
-async function assertCompletedPlanTurn(
-  workspace: ReturnType<typeof createTestWorkspace>,
-  userMessage: string,
-): Promise<void> {
-  await waitForCondition(
-    () => {
-      const observation = observePersistedTurnEvents(workspace, userMessage);
-      if (observation.status !== 'ready' || !observation.value) return false;
-      return observation.value.events.some((event) => event.type === 'turn.completed');
-    },
-    `durable completion for ${userMessage}`,
-    10_000,
-  );
-  const observed = requirePersistedRuntimeReady(observePersistedTurnEvents(workspace, userMessage));
-  expect(observed).toBeDefined();
-  const events = observed!.events;
-  const blocked = events.filter((event) => event.type === 'completion.blocked');
-  expect(blocked).toHaveLength(1);
-  expect(blocked[0]).toMatchObject({
-    code: 'plan_draft_pending',
-    planning: 'planning_draft',
-    correctionAttempt: 1,
-  });
-  const blockerIndex = events.indexOf(blocked[0]!);
-  const continuationIndex = events.findIndex(
-    (event, index) => index > blockerIndex && event.type === 'model.requested',
-  );
-  const runCompletedIndex = events.findIndex((event) => event.type === 'run.completed');
-  const turnCompletedIndex = events.findIndex((event) => event.type === 'turn.completed');
-  expect(continuationIndex).toBeGreaterThan(blockerIndex);
-  expect(runCompletedIndex).toBeGreaterThan(continuationIndex);
-  expect(turnCompletedIndex).toBeGreaterThan(runCompletedIndex);
-}

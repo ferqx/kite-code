@@ -335,7 +335,10 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
       try {
         const body = (await request.json()) as { messages: { role: string; content: unknown }[] };
         const task = text(
-            body.messages.filter((message) => message.role === 'user').at(-1)?.content,
+            [...body.messages]
+              .reverse()
+              .find((message) => message.role === 'user' && tasks.includes(text(message.content)))
+              ?.content,
           ),
           index = tasks.indexOf(task);
         assert.equal(index, requestFacts.length);

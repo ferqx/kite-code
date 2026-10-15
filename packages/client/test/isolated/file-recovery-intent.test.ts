@@ -434,6 +434,26 @@ test('both explicit Fork requires closed current unchanged detail without downgr
   const i = await plan(),
     known = observeFileRecoveryLeg(i, 'code', identity, proof(i));
   const detail = currentDetail(i);
+  // Public bounded text statistics are display-only; the exact unchanged
+  // status, original scope and postimages remain the authorization proof.
+  const textIntent = await plan();
+  const textKnown = observeFileRecoveryLeg(textIntent, 'code', identity, proof(textIntent));
+  const withText = currentDetail(textIntent);
+  Object.assign(withText.payload.files[0]!, {
+    textChange: {
+      addedLines: 0,
+      removedLines: 0,
+      preview: '',
+      truncated: false,
+    },
+  });
+  expect(
+    prepareFileRecoveryLeg(textKnown, 'fork', identity, {
+      explicitContinue: true,
+      codeProof: proof(textIntent),
+      currentDetail: withText,
+    }).intent.fork!.phase,
+  ).toBe('prepared');
   const variants: unknown[] = [
     undefined,
     { ...detail, storeId: 'foreign' },

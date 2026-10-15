@@ -27,6 +27,7 @@ test('Shell Tool factory is pure and includes the exact selected Job rather than
   const extension = createShellExtension({ job });
   expect(extension.jobs).toEqual([job]);
   expect(extension.tools?.map((tool) => [tool.id, tool.version])).toEqual([
+    ['shell.execute', '1'],
     ['shell.launch', '1'],
     ['shell.read', '1'],
     ['shell.wait', '1'],

@@ -1,5 +1,7 @@
 import type { ModelAdapterSnapshot } from './request-snapshot';
 
+export { ModelAttemptError } from './model-attempt';
+
 export {
   type ModelAdapterSnapshot,
   type ReasoningEffort,

@@ -17,6 +17,7 @@ export type PlanStatus =
   | 'blocked'
   | 'compensated';
 export interface AgentPlan {
+  title?: string;
   steps: Array<{ step: string; status: PlanStatus }>;
 }
 export type ContextCompactionProgressPhase = 'preparing' | 'summarizing' | 'validating';
@@ -49,6 +50,7 @@ export interface ConsolidatedToolEntry {
 }
 export type ThoughtActivity = { kind: 'thinking'; text: string } | { kind: 'tool'; callId: string };
 export interface SubAgentStepRecord {
+  fileNotice?: string;
   stepId: string;
   toolCallId: string;
   toolName: string;
@@ -62,6 +64,10 @@ export type OutputBlock =
   | {
       id: number;
       kind: 'tool_card';
+      /** Qualified original file-mutation receipt; never inferred from text or arguments alone. */
+      fileAction?: 'Create' | 'Write';
+      fileNotice?: string;
+      resourceReferences?: readonly string[];
       callId: string;
       name: string;
       args: Record<string, unknown>;

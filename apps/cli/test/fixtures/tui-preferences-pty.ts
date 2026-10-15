@@ -47,6 +47,31 @@ async function main(settings: Settings) {
     }
     throw Error(`expected ${text} tail=${active.text().slice(-7000)}`);
   };
+  const choice = async (
+    label: string,
+    options: { selected?: boolean; current?: 'Current' | '当前' } = {},
+  ) => {
+    const end = Date.now() + 10000;
+    for (;;) {
+      const frame = await active.projection();
+      if (
+        frame.fresh &&
+        frame.text.split('\n').some((line) => {
+          const normalized = line.trim().replace(/\s+/g, ' ');
+          const selected = normalized.startsWith('❯ ');
+          if (options.selected !== undefined && selected !== options.selected) return false;
+          const body = selected ? normalized.slice(2) : normalized;
+          return body === `${label}${options.current ? ` ${options.current}` : ''}`;
+        })
+      )
+        return;
+      if (active.ended || Date.now() > end)
+        throw Error(
+          `expected preference row ${label} ${JSON.stringify(options)} tail=${active.text().slice(-7000)}`,
+        );
+      await Bun.sleep(50);
+    }
+  };
   const key = (value: string) => active.key(value);
   const counts = () => {
     const db = new Database(settings.databasePath, { readonly: true });
@@ -94,13 +119,13 @@ async function main(settings: Settings) {
     await key('/theme');
     await wait('/theme');
     await key('\r');
-    await wait('[teal]');
+    await choice('Teal', { selected: true, current: 'Current' });
     await wait('Confirmed preferences');
     color('teal');
     await key('\x1b[B');
-    await wait('> blue');
+    await choice('Blue', { selected: true });
     await key('\r');
-    await wait('blue [blue] ✓');
+    await choice('Blue', { selected: true, current: 'Current' });
     await wait('Preference saved');
     color('blue');
     assert.equal(preference().colorPreset, 'blue');
@@ -112,10 +137,10 @@ async function main(settings: Settings) {
     await key('\r');
     await wait('Language');
     await key('\x1b[A');
-    await wait('> Simplified Chinese [zh-CN]');
+    await choice('简体中文', { selected: true });
     await key('\r');
     await wait('偏好已保存');
-    await wait('简体中文 [zh-CN]');
+    await choice('简体中文', { selected: true, current: '当前' });
     assert.equal(preference().language, 'zh-CN');
     await key('\x1b');
     await wait('会话 a');
@@ -128,7 +153,7 @@ async function main(settings: Settings) {
     await wait('/background');
     await key('\r');
     await wait('原后台任务 · 会话 a');
-    await wait('当前快照中没有已核验的 Job');
+    await wait('当前快照中没有已核验的执行');
     await key('\x1b');
     await wait('会话 a');
     await wait('新 Run >');
@@ -143,12 +168,14 @@ async function main(settings: Settings) {
     await key('/rewind');
     await wait('/rewind');
     await key('\r');
-    await wait('文件恢复：');
-    await wait('Enter 确认所选范围');
+    await wait('文件恢复');
+    await wait('没有恢复点');
+    await wait('读取状态： ready');
+    await wait('Enter 继续');
     await key('\x1b');
     await wait('会话 a');
     await wait('新 Run >');
-    const paste = 'Theme Language /Original/path\n中文🙂e\u0301';
+    const paste = 'Theme Language /Original/path\n中文🙂e\u0301'.repeat(4);
     await key(`\x1b[200~${paste}\x1b[201~`);
     await wait(`[已粘贴 ${Array.from(paste).length} 个字符]`);
     await key('\x7f');
@@ -159,21 +186,21 @@ async function main(settings: Settings) {
     await wait('/theme');
     await key('\r');
     await wait('主题');
-    await wait('blue [blue] ✓');
+    await choice('蓝', { current: '当前' });
     renameSync(settings.preferencePath, `${settings.preferencePath}.saved`);
     mkdirSync(settings.preferencePath, { mode: 0o700 });
     await key('\x1b[B');
-    await wait('> purple');
+    await choice('紫', { selected: true });
     await key('\r');
     await wait('tui_preferences_unavailable');
     await wait('保留原值');
-    await wait('blue [blue] ✓');
+    await choice('蓝', { current: '当前' });
     color('blue');
     assert.deepEqual(counts(), baseline);
     rmdirSync(settings.preferencePath);
     renameSync(`${settings.preferencePath}.saved`, settings.preferencePath);
     await key('r');
-    await wait('blue [blue] ✓');
+    await choice('蓝', { current: '当前' });
     await key('\x1b');
     await wait('会话 a');
     await wait('新 Run >');
@@ -186,7 +213,7 @@ async function main(settings: Settings) {
     await wait('/theme');
     await key('\r');
     await wait('主题');
-    await wait('blue [blue] ✓');
+    await choice('蓝', { current: '当前' });
     color('blue');
     await key('\x1b');
     await wait('会话 a');
@@ -195,7 +222,7 @@ async function main(settings: Settings) {
     await wait('/language');
     await key('\r');
     await wait('语言');
-    await wait('简体中文 [zh-CN]');
+    await choice('简体中文', { selected: true, current: '当前' });
     await key('\x1b');
     await wait('会话 a');
     await wait('新 Run >');

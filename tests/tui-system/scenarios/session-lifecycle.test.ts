@@ -197,7 +197,12 @@ describe('TUI PTY System — Session Lifecycle', () => {
         },
         'session selector to load both persisted sessions',
         10_000,
-      );
+      ).catch((error) => {
+        throw new Error(
+          `Original Session selector did not expose both durable Sessions. Viewport:\n${tui.viewport()}\nStore observation:\n${JSON.stringify(observePersistedSessionIds(workspace))}`,
+          { cause: error },
+        );
+      });
 
       const panelOutput = tui.viewport();
       expect(screenContains(panelOutput, '会话列表')).toBe(true);
@@ -262,7 +267,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       // Press D to trigger delete confirmation
       tui.write('D');
-      await waitForText(() => tui.viewport(), '确认', 5000);
+      await waitForText(() => tui.viewport(), '删除确认', 5000);
 
       const confirmOutput = tui.viewport();
       // Confirmation dialog should appear
@@ -343,7 +348,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       // Press D to trigger delete confirmation
       tui.write('D');
-      await waitForText(() => tui.viewport(), '确认', 5000);
+      await waitForText(() => tui.viewport(), '删除确认', 5000);
 
       const confirmOutput = tui.viewport();
       expect(screenContains(confirmOutput, '删除确认')).toBe(true);

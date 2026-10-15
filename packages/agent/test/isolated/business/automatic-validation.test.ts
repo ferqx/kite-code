@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { createArtifactStore } from '../../../src/artifacts';
 import { createPlanningValidation } from '../../../src/business/planning';
 import type { ToolContext, ToolResult } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
@@ -33,7 +34,9 @@ async function fixture(
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-auto-validation-'))),
-    store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' }),
+    profile = { dataRoot: join(root, 'data'), profile: 'new' },
+    store = await openSqliteStore(profile),
+    artifacts = createArtifactStore({ profile, store }),
     files = createWorkspaceFiles({ root });
   const planning = createPlanningValidation({
     ...(options.enabled === false
@@ -58,6 +61,7 @@ async function fixture(
   };
   const runtime = createRuntime({
     store,
+    artifacts,
     model,
     modelId: 'fixed',
     modelConcurrency: 1,
@@ -165,6 +169,7 @@ async function fixture(
     },
     async close() {
       await runtime.close();
+      await files.close();
       await store.close();
       rmSync(root, { recursive: true, force: true });
     },

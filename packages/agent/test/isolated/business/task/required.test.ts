@@ -14,6 +14,21 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
+// Closed Task content envelopes are displayed verbatim. Select the actual child
+// start/carrier source, never a project/runtime user-role context instruction.
+function childHoldKey(request: ModelRequest): string {
+  const inputs = request.messages.filter((message) => {
+    const ids = message.sourceIds;
+    return message.role === 'user' && ids?.length === 2 && ids[0] === `child-start-${ids[1]}`;
+  });
+  expect(inputs).toHaveLength(1);
+  const content = inputs[0]!.content;
+  expect(['1', '2']).toContain(content);
+  expect(request.tools.some((tool) => tool.id === 'hold' && tool.definitionVersion === '1')).toBe(
+    true,
+  );
+  return content;
+}
 const call = (name: string, input: unknown): ModelEvent[] => [
   { type: 'tool_call', id: crypto.randomUUID(), name, arguments: JSON.stringify(input) },
   { ...finish, reason: 'tool_calls' },
@@ -201,10 +216,7 @@ test('default required children hold the same completion candidate, staggered re
         yield finish;
         return;
       }
-      const input = JSON.parse(
-        request.messages.find((message) => message.role === 'user')!.content,
-      );
-      for (const event of call('hold', { key: input.content })) yield event;
+      for (const event of call('hold', { key: childHoldKey(request) })) yield event;
     },
   };
   const parent: ModelAdapter = {
@@ -483,8 +495,7 @@ for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
           return;
         }
         for (const event of call('hold', {
-          key: JSON.parse(request.messages.find((message) => message.role === 'user')!.content)
-            .content,
+          key: childHoldKey(request),
         }))
           yield event;
       },

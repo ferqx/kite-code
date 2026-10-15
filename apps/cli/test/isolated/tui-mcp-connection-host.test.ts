@@ -352,6 +352,25 @@ async function fixture(ask = false) {
   }
 }
 
+test('directory presentation labels and current connection status do not become canonical dispatch source fields', async () => {
+  const f = await fixture(true);
+  try {
+    const directory = createTuiMcpPort(f.tracked, f.storeId, undefined, f.journal);
+    const facts = await directory.read('s', new AbortController().signal);
+    expect(facts.liveServerIds).toEqual([]);
+    const shown = { ...facts, labels: { [facts.items[0]!.id]: 'Owned display name' } };
+    const intent = original(facts, 'displayed-source');
+    const pending = await directory.connection!.submit(intent, shown);
+    expect(pending.phase).toBe('pending');
+    expect(f.posts).toBe(1);
+    expect(f.rpc).toEqual([]);
+    await f.approve(intent.request.commandId, 'builtin.mcp/mcp.connect');
+    await f.approve(intent.request.commandId, 'mcp.source.connection');
+    expect((await f.ready(intent, directory.connection)).phase).toBe('ready');
+  } finally {
+    await f.close();
+  }
+});
 test('actual default Action and connection Job need two original approvals, preserve original ready and warm reuse, and cold lookup only reads', async () => {
   const f = await fixture(true);
   try {

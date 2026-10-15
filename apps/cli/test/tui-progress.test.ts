@@ -16,6 +16,7 @@ const body = () => ({
   plan: {
     ...current,
     kind: 'plan_document',
+    title: 'Original approved plan',
     steps: [
       { id: 'a', title: 'Original first step' },
       { id: 'b', title: 'Original second step' },
@@ -52,6 +53,7 @@ test('progress reads one public query and projects only exact approved current R
   expect(await readTuiProgress(source.reader, view, 'store', new AbortController().signal)).toEqual(
     {
       plan: {
+        title: 'Original approved plan',
         steps: [
           { step: 'Original first step', status: 'completed' },
           { step: 'Original second step', status: 'in_progress' },

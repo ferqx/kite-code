@@ -51,6 +51,7 @@ let childPid: number | undefined;
 const cards: any[] = [],
   runs: any[] = [],
   management: any[] = [],
+  planningExecutions: import('@kite-ai/client').Execution[] = [],
   filesApprovals: any[] = [];
 try {
   app = await _electron.launch({
@@ -486,6 +487,18 @@ try {
         row.sessionId === id && row.intent.kind === (id === 'b' ? 'input.follow_up' : 'run.start'),
     )!;
     runs.push({ sessionId: id, id: runId, status, commandId: submission.intent.commandId });
+    for (const execution of current.selection!.executions.filter(
+      (execution) =>
+        execution.runId === runId &&
+        execution.kind === 'tool' &&
+        ['planning.write', 'planning.review', 'planning.update'].includes(execution.definitionId),
+    )) {
+      assert.equal(execution.originStoreId, storeId);
+      assert.equal(execution.sessionId, id);
+      assert.equal(execution.definitionVersion, '1');
+      assert.equal(execution.authorization?.dispatched, true);
+      planningExecutions.push(execution);
+    }
     await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).waitFor();
     assert.equal(
       await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).inputValue(),
@@ -703,9 +716,22 @@ try {
     Number(await (await fetch(`${control}/count`)).text()),
     providerRequestsBeforeCancel,
   );
-  assert.ok(management.some((row) => row.definitionId === 'planning.write'));
-  assert.ok(management.some((row) => row.definitionId === 'planning.review'));
-  assert.ok(management.some((row) => row.definitionId === 'planning.update'));
+  assert.ok(
+    planningExecutions.some(
+      (row) => row.definitionId === 'planning.write' && row.status === 'succeeded',
+    ),
+  );
+  assert.ok(
+    planningExecutions.some(
+      (row) => row.definitionId === 'planning.review' && row.status === 'succeeded',
+    ),
+  );
+  assert.ok(
+    planningExecutions.some(
+      (row) => row.definitionId === 'planning.update' && row.status === 'succeeded',
+    ),
+  );
+  assert.equal(management.length, 0, 'record-only Planning Tools need no ordinary human approval');
   assert.equal(filesApprovals.length, 2);
   const expectedPosts = management.length + 4 + filesApprovals.length; // Every actual management approval, four Plan answers, two independent Files Ask approvals.
   assert.equal(await posts(), expectedPosts);
@@ -780,6 +806,7 @@ try {
       cards,
       runs,
       management,
+      planningExecutions,
       filesApprovals,
       expectedPosts,
       childPid,

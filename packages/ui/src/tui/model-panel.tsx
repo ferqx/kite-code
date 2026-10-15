@@ -10,6 +10,20 @@ import {
   OverlaySection,
 } from './ink/OverlayPrimitives';
 import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
+/** Preserve original four-choice navigation while retaining every actually offered new effort. */
+export function orderedTuiEfforts(
+  choices: ModelSettingsView['models'][number]['reasoningEffortChoices'],
+) {
+  const originalOrder = ['low', 'medium', 'high', 'max'];
+  const offered = choices ?? [];
+  return [
+    ...offered
+      .filter((choice) => originalOrder.includes(choice))
+      .sort((a, b) => originalOrder.indexOf(a) - originalOrder.indexOf(b)),
+    null,
+    ...offered.filter((choice) => !originalOrder.includes(choice)),
+  ];
+}
 export function TuiModelPanel({ controller }: { controller: TuiController }) {
   const { t: originalLabel, language: inkLanguage } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation();
@@ -33,7 +47,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
       effortPanel
         ? Math.max(
             0,
-            [null, ...(selected?.reasoningEffortChoices ?? [])].indexOf(
+            orderedTuiEfforts(selected?.reasoningEffortChoices).indexOf(
               selected?.reasoningEffort ?? null,
             ),
           )
@@ -63,7 +77,22 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     if (!facts) return;
     if (pending) {
       if (key.return) {
-        void controller.chooseModel(pending.operation, pending.observed);
+        const original = pending,
+          originalSessionId = state.sessionId,
+          panel = state.panel;
+        const previousCommandId = state.modelOutcome?.intent.request.commandId;
+        void controller.chooseModel(original.operation, original.observed).then(() => {
+          const outcome = controller.state.modelOutcome;
+          if (
+            !testDiagnostics &&
+            controller.state.sessionId === originalSessionId &&
+            controller.state.panel === panel &&
+            outcome?.status === 'applied' &&
+            outcome.intent.request.commandId !== previousCommandId &&
+            JSON.stringify(outcome.intent.request.operation) === JSON.stringify(original.operation)
+          )
+            controller.closePanel();
+        });
         setPending(undefined);
       }
       return;
@@ -89,7 +118,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
           selected.reasoningEffortReadonlyReason
         )
           return;
-        const choices = [null, ...(selected.reasoningEffortChoices ?? [])];
+        const choices = orderedTuiEfforts(selected.reasoningEffortChoices);
         if (key.return && index >= 0 && index < choices.length)
           setPending({
             observed: facts,
@@ -113,7 +142,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
   });
   const offset = Math.max(0, Math.min(index - Math.floor(page / 2), rows.length - page));
   const selectedModel = facts?.models.find((model) => model.id === facts.defaultModelId);
-  const efforts = [null, ...(selectedModel?.reasoningEffortChoices ?? [])];
+  const efforts = orderedTuiEfforts(selectedModel?.reasoningEffortChoices);
   const effortDescriptions: Record<string, string> = {
     low: 'Faster responses with less reasoning.',
     medium: 'Balanced reasoning and speed.',

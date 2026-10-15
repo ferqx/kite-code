@@ -12,6 +12,8 @@ Runtime保留定义ID与完整输入语义摘要对应的原请求，移除请�
 
 默认项目来源只在一次批量捕获内复用可信Workspace root、已核目标链/目录和实际指令字节。每个原请求保路径/NUL/越界/depth/target/directory/byte限制；目录并集不冒充单请求，实际字节仍核nofollow、原文件实体和UTF8。下一检查点重新捕获，新增指令和同mtime/大小的重写不会借跨检查点缓存获得资格。Service同次复用Skill catalogue及已加载正文，Planning同次读取真实计划；所选MCP仍逐原请求走原scope/read-set，Workflow fence保持。
 
+原 TUI 生产请求迁移又证实来源捕获与消息位置必须分别建模：未指定 role 的项目正文曾被默认提升为 system，所有来源统一置于历史前也破坏了稳定前缀和动态状态顺序。现以通用 `ContextSource.placement` 表示可信 user 来源的 after_history／runtime 位置，Core 不识别业务 Tool ID；Planning 根据 Core 覆盖的实际 Run 贡献状态，Service 只装配 Agent 的纯静态合同工厂。普通、压缩和展开共用同一组装，比在各路径复制位置判断或在夹具补提示词更能保持真实请求和完整来源一致。旧无 placement 的自定义来源保原前缀，最多一个 runtime 来源且不授权限；准确当前合同与验证归[Agent owner](../../../../packages/agent/README.md)和[Planning owner](../../../../packages/agent/src/business/planning/README.md#计划与真实来源)。
+
 安全接续完整旧来源与全历史CAS归[原Run决定](2026-10-02-durable-run-resume-checkpoints.md)，不在此增加恢复资格。当前实现由[Runtime owner](../../../../packages/agent/README.md)、[Service owner](../../../../apps/service/README.md)与[跨包边界](../../../../docs/active/unified-agent-boundary.md)维护。
 
 ## Alternatives considered

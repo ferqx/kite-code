@@ -6,11 +6,11 @@
  * HTTP model discovery, cancellation, and persisted configuration.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitCurrentInput, typeMaskedText, typeText } from '../harness/input-helpers';
-import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { type PtyProcess, spawnTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -47,6 +47,11 @@ describe('first-run — connection boundaries', () => {
         },
       },
     });
+    // A first-run fixture starts with the actual new configuration containing no models.
+    const configuration = JSON.parse(readFileSync(workspace.configPath, 'utf8'));
+    delete configuration.modelId;
+    configuration.models = [];
+    writeFileSync(workspace.configPath, JSON.stringify(configuration, null, 2));
     workspace.env.CI = 'true';
     workspace.env.DEEPSEEK_API_KEY = '';
     workspace.env.OPENAI_API_KEY = '';
@@ -57,14 +62,20 @@ describe('first-run — connection boundaries', () => {
   });
 
   async function openCustomEndpointForm(): Promise<void> {
-    tui = await spawnReadyTui({
+    tui = spawnTui({
       cols: 100,
       rows: 40,
       mockServer: server,
       workspace,
       noPreConfig: true,
-      readiness: 'first-run-provider',
     });
+    tui.setRawMode(true);
+    try {
+      await waitForTuiReady(tui, 'first-run-provider', workspace);
+    } catch (error) {
+      console.error('Failed first-run actual viewport:', tui.viewport());
+      throw error;
+    }
     await waitForText(() => output(), '› DeepSeek', 5_000);
     tui.write('\x1b[B');
     await waitForText(() => output(), '› OpenAI', 5_000);
@@ -120,7 +131,8 @@ describe('first-run — connection boundaries', () => {
   test(
     'discovers local models, persists the full list, and completes setup',
     async () => {
-      server.setModelsResponse({ models: ['local-model-a', 'local-model-b'] });
+      // Exercise a real HTTP credential rejection; compatible endpoints may allow blank keys.
+      server.setModelsResponse({ status: 401 });
       const modelRequestBaseline = server.getModelRequests().length;
       await connectCustomEndpoint(server.baseURL);
 
@@ -140,6 +152,7 @@ describe('first-run — connection boundaries', () => {
       await waitForText(() => output(), '█', 5_000);
       await typeMaskedText(tui, 'local-key');
       await waitForText(() => output(), '*********', 5_000);
+      server.setModelsResponse({ status: 200, models: ['local-model-a', 'local-model-b'] });
       await submitCurrentInput(tui, {
         acceptWhen: (viewport) =>
           screenContains(viewport, 'Connecting to Custom endpoint') ||

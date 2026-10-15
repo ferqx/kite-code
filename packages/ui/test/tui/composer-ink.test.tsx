@@ -175,3 +175,86 @@ test('original multiline editor displays complete short input and a centered for
     ui.unmount();
   }
 });
+
+test('default fixed command menu retains the complete original 18 command order', () => {
+  expect(fixedTuiCommands).toEqual([
+    '/effort',
+    '/model',
+    '/theme',
+    '/language',
+    '/resume',
+    '/new',
+    '/plan',
+    '/compact',
+    '/permissions',
+    '/mcp',
+    '/rewind',
+    '/export',
+    '/context',
+    '/status',
+    '/background',
+    '/clear',
+    '/help',
+    '/exit',
+  ]);
+});
+
+test('ordinary small multiline paste stays visible and editable while the original 100-character threshold folds large bodies', async () => {
+  const buffer = new ComposerBuffer();
+  const submitted: string[] = [];
+  const small = 'Line1\nLine2🙂é';
+  function Entry() {
+    const [value, setValue] = useState('');
+    return (
+      <TuiComposer
+        buffer={buffer}
+        value={value}
+        active
+        label="New Run"
+        onChange={setValue}
+        onSubmit={() => submitted.push(buffer.text)}
+      />
+    );
+  }
+  const app = render(<Entry />);
+  try {
+    app.stdin.write(`\u001b[200~${small}\u001b[201~`);
+    await tick();
+    expect(buffer.text).toBe(small);
+    expect(app.lastFrame()).toContain('Line1');
+    expect(app.lastFrame()).toContain('Line2🙂é');
+    expect(app.lastFrame()).not.toContain('[Pasted');
+    app.stdin.write('\r');
+    await tick();
+    expect(submitted).toEqual([small]);
+  } finally {
+    app.unmount();
+  }
+  const large = 'a'.repeat(100);
+  const folded = new ComposerBuffer();
+  function LargeEntry() {
+    const [value, setValue] = useState('');
+    return (
+      <TuiComposer
+        buffer={folded}
+        value={value}
+        active
+        label="New Run"
+        onChange={setValue}
+        onSubmit={() => submitted.push(folded.text)}
+      />
+    );
+  }
+  const largeApp = render(<LargeEntry />);
+  try {
+    largeApp.stdin.write(`\u001b[200~${large}\u001b[201~`);
+    await tick();
+    expect(folded.text).toBe(large);
+    expect(largeApp.lastFrame()).toContain('[Pasted 100 characters]');
+    largeApp.stdin.write('\r');
+    await tick();
+    expect(submitted).toEqual([small, large]);
+  } finally {
+    largeApp.unmount();
+  }
+});

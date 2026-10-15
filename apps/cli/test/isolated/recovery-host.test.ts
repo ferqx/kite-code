@@ -176,6 +176,19 @@ for (const mode of ['paired', 'shared'] as const)
         );
         writeFileSync(join(web, 'manifest.json'), raw);
         const daemonEntry = join(f.root, 'artifact/node_modules/@kite-ai/service/daemon-main.js');
+        const originalRow = f.rows("SELECT config_json FROM run WHERE origin_command_id='work'")[0];
+        if (
+          !originalRow ||
+          typeof originalRow !== 'object' ||
+          !('config_json' in originalRow) ||
+          typeof originalRow.config_json !== 'string'
+        )
+          throw Error('recovery_run_configuration_unavailable');
+        const original = JSON.parse(originalRow.config_json);
+        const protectedEntries = original.snapshot.pathFiles.boundary.protectedRoots as string[];
+        expect(protectedEntries).toContain(f.artifact.entrypoint);
+        expect(protectedEntries).toContain(daemonEntry);
+
         const daemon = (action: 'start' | 'stop') =>
           runSelectedDaemon({
             arguments: { kind: 'server', action, server: socket, cancel: false, json: false },

@@ -64,7 +64,42 @@ const closeService = () => {
   }
 };
 try {
+  await wait('› Exit Kite Code');
+  await key('\x1b[B');
+  await wait('› Trust this workspace and continue');
+  await key('\r');
   await wait('New Run >');
+  const trustDb = new Database(input.databasePath, { readonly: true });
+  try {
+    const saved = trustDb
+      .query(
+        "SELECT id,origin_store_id,scope,state,safe_request_json,receipt_json FROM host_mutation WHERE kind='workspace.trust'",
+      )
+      .all() as {
+      id: string;
+      origin_store_id: string;
+      scope: string;
+      state: string;
+      safe_request_json: string;
+      receipt_json: string;
+    }[];
+    assert.equal(saved.length, 1);
+    const original = saved[0]!;
+    assert.equal(original.origin_store_id, input.storeId);
+    assert.equal(original.scope, 'workspace:w');
+    assert.equal(original.state, 'applied');
+    const request = JSON.parse(original.safe_request_json),
+      receipt = JSON.parse(original.receipt_json);
+    assert.equal(request.workspaceId, 'w');
+    assert.equal(request.trusted, true);
+    assert.equal(request.ifRevision, '0');
+    assert.equal(receipt.trusted, true);
+    assert.equal(receipt.revision, '1');
+    assert.equal(receipt.canonicalIdentity, request.canonicalIdentity);
+    assert.equal(receipt.externalReadScopeDigest, request.externalReadScopeDigest);
+  } finally {
+    trustDb.close();
+  }
   if (input.mode === 'paired') {
     const record = JSON.parse(readFileSync(input.ownedService, 'utf8'));
     servicePid = record.pid;

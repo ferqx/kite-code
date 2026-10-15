@@ -1,4 +1,4 @@
-import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
+import { type ModelAdapter, ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
 import Ajv from 'ajv';
 import type { ContextSource } from '../context';
 import type {
@@ -42,6 +42,7 @@ import {
 } from './interactions';
 import { createProgressWriter } from './progress';
 import type { ExecutionResources } from './resources';
+import { type ToolDispatchAdmission, ToolDispatchCancelledError } from './tool-dispatch-admission';
 
 export interface ModelResponse {
   content: string;
@@ -51,6 +52,8 @@ export interface ModelResponse {
   executionId: string;
 }
 export interface ExecutionScope {
+  toolAdmission?: ToolDispatchAdmission;
+  modelRetry?: import('../model-attempt').ModelRetrySource;
   compressionId?: string;
   run: RunRecord;
   owner: OwnerRef;
@@ -566,6 +569,7 @@ export class UnifiedExecution {
       ? structuredClone(planned.decisionSource)
       : {
           kind: 'model_request',
+          ...(scope.modelRetry ? { retry: { ...scope.modelRetry } } : {}),
           ...(scope.compressionId ? { compressionId: scope.compressionId } : {}),
           requestId: executionId,
           sourceIds: request.messages.flatMap((message) => message.sourceIds ?? []),
@@ -609,6 +613,7 @@ export class UnifiedExecution {
     let dispatched = false;
     let content = '';
     let reasoning = '';
+    let firstOutput: 'content' | 'reasoning' | 'tool_calls' | undefined;
     const calls: ToolCall[] = [];
     let output: ModelOutputWriter | undefined;
     const preview = () => content.slice(0, 4096);
@@ -618,6 +623,7 @@ export class UnifiedExecution {
         owner: scope.owner,
         executionId,
         content: preview(),
+        ...(firstOutput ? { firstOutput } : {}),
         modelOutput: ref,
       });
     };
@@ -659,12 +665,15 @@ export class UnifiedExecution {
         if (finish) throw new AgentError('model_event_after_finish');
         scope.signal.throwIfAborted();
         if (event.type === 'text_delta') {
+          if (event.text.length) firstOutput ??= 'content';
           content += event.text;
           if (output) await output.text('text', event.text);
         } else if (event.type === 'reasoning_delta') {
+          if (event.text.length) firstOutput ??= 'reasoning';
           reasoning += event.text;
           if (output) await output.text('reasoning', event.text);
         } else if (event.type === 'tool_call') {
+          firstOutput ??= 'tool_calls';
           const call = { id: event.id, name: event.name, arguments: event.arguments };
           calls.push(call);
           if (output) await output.call(call);
@@ -679,7 +688,9 @@ export class UnifiedExecution {
           await activateOutput();
         if (
           !output &&
-          (content.length + reasoning.length - savedLength >= 32768 || Date.now() - savedAt >= 100)
+          ((savedLength === 0 && content.length + reasoning.length > 0) ||
+            content.length + reasoning.length - savedLength >= 32768 ||
+            Date.now() - savedAt >= 100)
         ) {
           await this.options.store.persistModelPartial({
             expectedStoreId: scope.run.originStoreId,
@@ -687,6 +698,7 @@ export class UnifiedExecution {
             executionId,
             content,
             reasoning,
+            ...(firstOutput ? { firstOutput } : {}),
           });
           savedLength = content.length + reasoning.length;
           savedAt = Date.now();
@@ -704,6 +716,7 @@ export class UnifiedExecution {
         result: {
           content: output ? preview() : content,
           reasoning: output ? '' : reasoning,
+          ...(firstOutput ? { firstOutput } : {}),
           toolCalls: output ? [] : calls.map((call) => ({ ...call })),
           ...(output ? { modelOutput: output.descriptor(true) as unknown as Json } : {}),
           usage: finish.usage,
@@ -717,6 +730,7 @@ export class UnifiedExecution {
         },
         message: {
           role: 'assistant',
+          ...(firstOutput ? { firstOutput } : {}),
           content: output ? preview() : content,
           toolCalls: output ? [] : calls,
           sourceIds: [executionId],
@@ -733,6 +747,7 @@ export class UnifiedExecution {
             executionId,
             content,
             reasoning,
+            ...(firstOutput ? { firstOutput } : {}),
           })
           .catch(() => {});
       await this.options.store
@@ -742,10 +757,16 @@ export class UnifiedExecution {
           executionId,
           status: scope.signal.aborted ? 'cancelled' : 'failed',
           result: {
-            code: error instanceof AgentError ? error.code : 'model_failed',
+            code:
+              error instanceof AgentError
+                ? error.code
+                : ModelAttemptError.isInstance(error)
+                  ? error.message
+                  : 'model_failed',
             incomplete: true,
             content: output ? preview() : content.slice(0, 64 * 1024),
             reasoning: output ? '' : reasoning.slice(0, 64 * 1024),
+            ...(firstOutput ? { firstOutput } : {}),
             ...(output?.descriptor()
               ? { modelOutput: output.descriptor() as unknown as Json }
               : {}),
@@ -767,18 +788,27 @@ export class UnifiedExecution {
     planned?: ExecutionRecord,
   ): Promise<ToolResult> {
     const executionId = planned?.id ?? crypto.randomUUID();
-    return this.liveScope(scope, executionId, (bound) =>
-      this.performTool(
-        bound,
-        definition,
-        call,
-        stepId,
-        sourceExecutionId,
-        executionId,
-        planned?.decisionSource ?? decisionSource,
-        planned,
-      ),
-    );
+    let result: ToolResult | undefined, failure: unknown;
+    try {
+      result = await this.liveScope(scope, executionId, (bound) =>
+        this.performTool(
+          bound,
+          definition,
+          call,
+          stepId,
+          sourceExecutionId,
+          executionId,
+          planned?.decisionSource ?? decisionSource,
+          planned,
+        ),
+      );
+      return result;
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      if ('run' in scope) scope.toolAdmission?.settled(result, failure);
+    }
   }
   private async performTool(
     scope: ToolScope,
@@ -859,6 +889,7 @@ export class UnifiedExecution {
       }),
     );
     try {
+      if ('run' in scope) await scope.toolAdmission?.wait();
       {
         const references =
           'run' in scope
@@ -909,8 +940,16 @@ export class UnifiedExecution {
         { sessionId: work.sessionId, workspaceId: scope.workspaceId },
         scope.signal,
       );
-      await this.dispatch(scope, executionId, definition.id, definition.version, input, source);
+      const dispatchAuthorization = await this.dispatch(
+        scope,
+        executionId,
+        definition.id,
+        definition.version,
+        input,
+        source,
+      );
       dispatched = true;
+      if ('run' in scope) scope.toolAdmission?.dispatched();
       scope.signal.throwIfAborted();
       const context = this.options.toolContext
         ? await this.options.toolContext(scope, definition, executionId, source)
@@ -929,6 +968,7 @@ export class UnifiedExecution {
       };
       result = await definition.execute(input, {
         ...context,
+        dispatchAuthorization,
         runId: work.runId,
         reportProgress: progress.report,
         requestInput: (request) => requestInteraction({ kind: 'question', request }),
@@ -965,9 +1005,22 @@ export class UnifiedExecution {
               : scope.signal.aborted
                 ? 'cancelled'
                 : 'failed',
-        content: error instanceof AgentError ? error.code : 'tool_failed',
+        content:
+          !attempted &&
+          !dispatched &&
+          error instanceof AuthorizationDeniedError &&
+          error.reason === 'plan_approval_required'
+            ? 'Plan mode is read-only. This Tool was not dispatched. No file was written by this call.'
+            : error instanceof ToolDispatchCancelledError
+              ? error.code
+              : error instanceof AgentError
+                ? error.code
+                : 'tool_failed',
         details: {
-          code: error instanceof AgentError ? error.code : 'tool_failed',
+          code:
+            error instanceof AgentError || error instanceof ToolDispatchCancelledError
+              ? error.code
+              : 'tool_failed',
           dispatchCommitted: dispatched,
           adapterAttempted: attempted,
           ...(error instanceof AuthorizationDeniedError ? { reason: error.reason } : {}),
@@ -1435,6 +1488,7 @@ export class UnifiedExecution {
       definitionVersion: input.definition.version,
       input: input.prepared,
       decisionSource: input.decisionSource,
+      ...(scope.parentExecutionId ? { parentExecutionId: scope.parentExecutionId } : {}),
       ...(input.predecessorExecutionId
         ? { predecessorExecutionId: input.predecessorExecutionId, attempt: input.attempt }
         : {}),

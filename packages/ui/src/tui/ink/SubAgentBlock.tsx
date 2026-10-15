@@ -230,6 +230,13 @@ export default function SubAgentBlock({
         <Text color={dt.primary}>{label}</Text>
         <Text color={dt.muted}> · {fitTask}</Text>
       </Box>
+      {block.steps
+        .filter((step) => step.fileNotice)
+        .map((step) => (
+          <Box key={`receipt-${step.stepId}`} paddingLeft={3}>
+            <Text color={dt.dim}>{step.fileNotice}</Text>
+          </Box>
+        ))}
       {skipped > 0 && (
         <Box paddingLeft={3}>
           <Text color={dt.dim}>

@@ -152,7 +152,16 @@ test.each([
     const originalModel = await store.getExecution(model.requests[0]!.requestId);
     expect(originalModel!.decisionSource).toMatchObject({
       kind: 'model_request',
-      sources: [{ content: 'old rule' }],
+      sources: [
+        {
+          id: 'project:workspace:AGENTS.md',
+          kind: 'project_instruction',
+          role: 'user',
+          placement: 'after_history',
+          content:
+            '<project-instructions role="workspace-context">\nAGENTS.md\nold rule\n</project-instructions>',
+        },
+      ],
     });
     if (change === 'addition') writeFileSync(join(root, 'src/AGENTS.md'), 'new rule');
     else if (change === 'rewrite') {
@@ -167,20 +176,46 @@ test.each([
     expect(executions).toEqual([{ path: 'src/output.txt', value: finalValue }]);
     expect(readFileSync(ledger, 'utf8').trim().split('\n')).toHaveLength(1);
     expect(model.requests).toHaveLength(relevant ? 3 : 2);
-    const nextInstructions = model.requests[1]!.messages.filter(
-      (message) => message.role === 'system',
-    ).map((message) => message.content);
-    expect(nextInstructions).toEqual(
+    const expectedRules =
       change === 'addition'
-        ? ['old rule', 'new rule']
+        ? [
+            ['AGENTS.md', 'old rule'],
+            ['src/AGENTS.md', 'new rule'],
+          ]
         : change === 'deletion'
           ? []
-          : [relevant ? 'new rule' : 'old rule'],
+          : [['AGENTS.md', relevant ? 'new rule' : 'old rule']];
+    const expectedSources = expectedRules.map(([local, rule]) => ({
+      id: `project:workspace:${local}`,
+      kind: 'project_instruction',
+      role: 'user' as const,
+      placement: 'after_history',
+      content: `<project-instructions role="workspace-context">\n${local}\n${rule}\n</project-instructions>`,
+    }));
+    const nextInstructions = model.requests[1]!.messages.filter((message) =>
+      message.sourceIds?.some((id) => id.startsWith('project:workspace:')),
+    );
+    expect(nextInstructions).toEqual(
+      expectedSources.map((source) => ({
+        role: source.role,
+        content: source.content,
+        sourceIds: [source.id],
+      })),
     );
     expect(await store.getExecution(model.requests[0]!.requestId)).toEqual(originalModel);
     const nextModel = await store.getExecution(model.requests[1]!.requestId);
-    const source = nextModel!.decisionSource as { sources: { content: string }[] };
-    expect(source.sources.map((item) => item.content)).toEqual(nextInstructions);
+    const source = nextModel!.decisionSource as {
+      sources: { id: string; kind: string; role: string; placement: string; content: string }[];
+    };
+    expect(
+      source.sources.map(({ id, kind, role, placement, content }) => ({
+        id,
+        kind,
+        role,
+        placement,
+        content,
+      })),
+    ).toEqual(expectedSources);
     const view = await store.getView('session');
     expect(view.runs).toHaveLength(1);
     expect(view.runs[0]!.status).toBe('completed');

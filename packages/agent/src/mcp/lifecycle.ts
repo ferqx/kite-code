@@ -9,6 +9,7 @@ import type {
   Json,
   OperationRef,
   StopConfirmation,
+  ToolContext,
   ToolResult,
 } from '../extensions';
 import { readConnection } from './connection-query';
@@ -19,6 +20,7 @@ import {
   type McpReadRequest,
   type McpTransportConfiguration,
 } from './index';
+import { requestMcpProviderAction } from './provider-action';
 import {
   confirmedStop,
   decodeReconnectionInput,
@@ -44,6 +46,12 @@ import {
   readToolsSnapshot,
   toolsSnapshotType,
 } from './tools-metadata';
+import {
+  createMcpToolsSearchTool,
+  type McpSearchSource,
+  mcpToolsSearchExtensionId,
+  mcpToolsSearchId,
+} from './tools-search';
 
 export const mcpLifecycleExtensionId = 'builtin.mcp';
 const contentType = 'builtin.mcp.catalogue';
@@ -180,6 +188,9 @@ export interface McpLifecycleOptions {
 }
 export const mcpSourceConnectionJobId = 'mcp.source.connection';
 export interface McpScopedSourceResolution {
+  /** Actual source display name only; never authorization evidence. */
+  label?: string;
+  loginAfterToolFailure?: (context: ToolContext) => Promise<Json>;
   server: McpLifecycleOptions['servers'][number];
   captureDigest: string;
   /** Same selected snapshot identity only; never a bootstrap permit. */
@@ -655,6 +666,25 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           transport: server.transport,
           limits: server.limits,
           tasks: true,
+          ...(source?.loginAfterToolFailure
+            ? {
+                onAuthFailure: (
+                  code: 'mcp_oauth_login_required' | 'mcp_oauth_reauth_required',
+                  toolContext: ToolContext,
+                  rejection?: import('./index').McpHttpAuthRejection['rejection'],
+                ) =>
+                  requestMcpProviderAction(
+                    {
+                      serverId: server.id,
+                      serverName: source.label ?? server.id,
+                      code,
+                      ...(rejection ? { rejection } : {}),
+                      login: source.loginAfterToolFailure!,
+                    },
+                    toolContext,
+                  ),
+              }
+            : {}),
           admitToolCall: async () => {
             await confirmPublication(entry);
             wireFresh(entry);
@@ -2450,12 +2480,17 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     async readStepCapabilities(input: {
       command: { originStoreId: string };
       session: { id: string };
+      run?: { id: string };
+      /** Trusted selected Run assembly narrows the local live catalogue. */
+      selectedServerIds?: readonly string[];
     }) {
       const extensions: Extension[] = [];
       const toolIds: string[] = [];
       const facts: Json[] = [];
+      const searchSources: McpSearchSource[] = [];
       if (closed) return { extensions, toolIds, snapshot: { mcp: facts } as Json };
       for (const entry of live.values()) {
+        if (input.selectedServerIds && !input.selectedServerIds.includes(entry.serverId)) continue;
         try {
           await confirmPublication(entry);
           wireFresh(entry);
@@ -2482,6 +2517,34 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         }
         const catalogue = entry.adapter.getCatalogue();
         const tools = entry.scope.getCachedTools();
+        searchSources.push({
+          names: new Map(
+            entry.adapter
+              .getToolsMetadata()
+              .tools.map((metadata) => [metadata.definitionId, metadata.descriptor.name]),
+          ),
+          serverId: entry.serverId,
+          label: entry.source?.label ?? entry.serverId,
+          tools,
+          async assertFresh() {
+            await confirmPublication(entry);
+            wireFresh(entry);
+            entry.source?.assertFresh({ signal: entry.signal });
+            const current = entry.adapter?.getCatalogue();
+            if (
+              !current ||
+              current.configDigest !== catalogue.configDigest ||
+              current.generation !== catalogue.generation
+            )
+              throw new McpAdapterError('mcp_search_catalogue_changed');
+            if (
+              closed ||
+              entry.terminal ||
+              tickets.has(scopeKey(entry.storeId, entry.sessionId, entry.serverId))
+            )
+              throw new McpAdapterError('mcp_search_source_changed');
+          },
+        });
         extensions.push({
           id: `builtin.mcp.remote.${entry.serverId}`,
           version: String(catalogue.generation),
@@ -2492,11 +2555,34 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         toolIds.push(...tools.map((tool) => tool.id));
         facts.push({
           serverId: entry.serverId,
+          serverName: entry.source?.label ?? entry.serverId,
+          sessionId: entry.sessionId,
+          runId: input.run?.id ?? null,
+          connectionKey: entry.key,
+          connectionExecutionId: entry.executionId,
           configDigest: catalogue.configDigest,
           generation: catalogue.generation,
           definitions: catalogue.definitions,
           originalStoreId: entry.storeId,
         });
+      }
+      // Discovery is a Model-step capability, bound to the trusted selected Run assembly.
+      // A catalogue read without that assembly retains only its original remote definitions.
+      if (searchSources.length && input.run && input.selectedServerIds) {
+        extensions.push({
+          id: mcpToolsSearchExtensionId,
+          version: '1',
+          apiMajor: 1,
+          tools: [
+            createMcpToolsSearchTool(
+              input.command.originStoreId,
+              input.session.id,
+              searchSources,
+              input.run?.id,
+            ),
+          ],
+        });
+        toolIds.push(mcpToolsSearchId);
       }
       return { extensions, toolIds, snapshot: { mcp: facts } as Json };
     },

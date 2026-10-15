@@ -3,6 +3,7 @@ import type { HostStatus } from '@kite-ai/client';
 /** Host-local connection mode and profile name; credentials and endpoint never enter UI state. */
 export interface TuiStatusPort {
   readonly mode: 'paired' | 'shared';
+  readonly transport?: 'stdio' | 'unix' | 'pipe';
   readonly profile: string;
   read(sessionId: string, workspaceId: string, signal: AbortSignal): Promise<HostStatus>;
 }

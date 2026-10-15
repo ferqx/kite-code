@@ -1,6 +1,8 @@
 # TUI 系统测试规范
 
-本页是 `apps/kite-cli` 的 owner-local current authority，覆盖真实 PTY journey、harness、smoke 与资源清理。
+本页保留旧 `apps/kite-cli` 测试边界的历史说明。当前正式 TUI owner 为[独立 CLI](../../cli/README.md)，展示 owner 为[独立 UI](../../../packages/ui/src/tui/README.md)；真实 PTY journey 的执行归[当前测试入口](../../../tests/README.md)和[统一 runner](../../../scripts/run-unified-tui-system-tests.ts)。下述 RuntimeClient／旧 reducer／旧资源诊断描述不再是新架构实现依据。
+
+原 52 个场景文件已接当前 UI／Client／默认 Service，保持原用户行为断言与清理预算。原 Store9/11 旧格式转换按 D08 不适用，对应旅程改验新 Store／Profile；State26 只保旧文件隔离反例，不增加旧数据导入。可选旧 lifecycle fixture 和 in-process connector 保为历史参考，没有正式调用者或完整资源资格；当前实际结果及仍未取得的发布门禁归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 ## 套件边界
 

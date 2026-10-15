@@ -352,6 +352,18 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       workspaceId: 'w',
       title: 'Owned Source decisions',
     });
+    // Establish the existing Workspace prerequisite through its real public
+    // identity before the PTY wire baseline; this admits no MCP Source or Tool.
+    const trust = await seed.client.getWorkspaceTrust('w', { storeId });
+    await seed.client.setWorkspaceTrust('w', {
+      expectedStoreId: storeId,
+      commandId: randomUUID(),
+      trusted: true,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      ifRevision: trust.revision,
+    });
+    expect((await seed.client.getWorkspaceTrust('w', { storeId })).trusted).toBe(true);
     const directory = decodeMcpSourcePage(
       await seed.client.queryExtension('a', 'builtin.mcp.sources', 'mcp.sources', { limit: 25 }),
     );
@@ -785,6 +797,10 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       );
     }
   }
-  if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'owned_auth_cleanup_failed');
+  if (cleanupErrors.length)
+    throw new AggregateError(
+      failure ? [failure, ...cleanupErrors] : cleanupErrors,
+      'owned_auth_cleanup_failed',
+    );
   if (failure) throw failure;
 }, 180000);

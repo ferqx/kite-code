@@ -391,7 +391,9 @@ test('restored shared TUI reads plain and sealed original Model bodies with real
         expect(exports.at(-1)!.text).toContain('Loaded preview only');
         expect(exports.at(-1)!.text).not.toContain('TUI_RESTORED_EXACT_TAIL');
         expect(reads).toHaveLength(before);
-        await key(id === 'source' ? '\x0f' : '\x14');
+
+        await key('\x0f');
+
         await settle(
           () => controller!.state.loadedOutputBodies.has(message.id) || !!controller!.state.error,
         );
@@ -407,15 +409,11 @@ test('restored shared TUI reads plain and sealed original Model bodies with real
         expect(controller!.state.fullOutputs.get(message.id)).toBe(content);
         expect(controller!.state.loadedOutputBodies.get(message.id)).toEqual(saved.output);
         await settle(() => app!.lastFrame()!.includes('TUI_RESTORED_EXACT_TAIL'));
-        if (id === 'source') {
-          expect(app!.lastFrame()).not.toContain('TUI_ORIGINAL_REASONING_TAIL');
-          await key('\x14');
-        }
-        await settle(() => app!.lastFrame()!.includes('TUI_ORIGINAL_REASONING_TAIL'));
+        expect(app!.lastFrame()).not.toContain('TUI_ORIGINAL_REASONING_TAIL');
+        expect(app!.lastFrame()).not.toContain('Ctrl+T');
         await key('\x14');
-        await settle(() => !app!.lastFrame()!.includes('TUI_ORIGINAL_REASONING_TAIL'));
-        await key('\x14');
-        await settle(() => app!.lastFrame()!.includes('TUI_ORIGINAL_REASONING_TAIL'));
+        expect(app!.lastFrame()).not.toContain('TUI_ORIGINAL_REASONING_TAIL');
+        expect(controller!.state.loadedOutputBodies.get(message.id)).toEqual(saved.output);
         expect(reads).toHaveLength(before + 1);
         await key('/export\r');
         await settle(() => exports.length === (id === 'source' ? 2 : 4));

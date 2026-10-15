@@ -15,6 +15,24 @@ import { sealAfterTurn } from './job-report-operations';
 import type { SqliteOperations } from './operations';
 import { prepareResultRequirement, sealResultRequirement } from './result-requirements';
 
+/** A closed display envelope; arbitrary custom inputs retain their original JSON body. */
+function displayInput(input: Json): { content: string; name?: string } | undefined {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input) ||
+    Object.keys(input).some((key) => key !== 'content' && key !== 'name') ||
+    typeof input.content !== 'string' ||
+    (input.name !== undefined &&
+      (typeof input.name !== 'string' || !input.name.length || input.name.length > 120))
+  )
+    return undefined;
+  return {
+    content: input.content,
+    ...(typeof input.name === 'string' ? { name: input.name } : {}),
+  };
+}
+
 const digest = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 /** Rechecked inside the carrier and activation transactions, from trusted captured metadata. */
 function assertConfigurationReads(
@@ -327,6 +345,7 @@ export function ensureAgent(
       input.sessionId,
       input.operationKey,
     );
+    const display = displayInput(input.request.input);
     if (!reusedChild) {
       db.run(
         'INSERT INTO session(id,workspace_id,parent_id,root_id,title,context_selection_id,next_seq) VALUES(?,?,?,?,?,?,2)',
@@ -334,7 +353,7 @@ export function ensureAgent(
         current.workspace_id,
         input.sessionId,
         input.owner.sessionId,
-        `Child ${configuration.id}`,
+        display?.name ?? `Child ${configuration.id}`,
         randomUUID(),
       );
     }
@@ -598,7 +617,10 @@ export function activateChildRun(
       String(job.child_session_id),
       runId,
       {
-        content: typeof start.input === 'string' ? start.input : canonicalJson(start.input),
+        content:
+          typeof start.input === 'string'
+            ? start.input
+            : (displayInput(start.input)?.content ?? canonicalJson(start.input)),
         sourceIds: [String(command.id), input.executionId],
       },
       'user',

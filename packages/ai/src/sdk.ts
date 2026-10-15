@@ -3,6 +3,7 @@ import {
   type OpenAICompatibleProviderSettings,
 } from '@ai-sdk/openai-compatible';
 import {
+  APICallError,
   jsonSchema,
   type LanguageModel,
   type ModelMessage as SdkMessage,
@@ -12,6 +13,7 @@ import {
   tool,
 } from 'ai';
 import type { ModelAdapter, ModelRequest } from './index';
+import { ModelAttemptError } from './model-attempt';
 import {
   type ModelAdapterSnapshot,
   type ReasoningEffort,
@@ -38,7 +40,13 @@ function messages(request: ModelRequest): SdkMessage[] {
               type: 'tool-call' as const,
               toolCallId: call.id,
               toolName: call.name,
-              input: JSON.parse(call.arguments),
+              input: (() => {
+                try {
+                  return JSON.parse(call.arguments);
+                } catch {
+                  return call.arguments;
+                }
+              })(),
             };
           }),
         ],
@@ -145,6 +153,7 @@ export function createSdkModelAdapter(options: {
       let finished = false;
       const argumentsById = new Map<string, string>();
       const emittedCalls = new Set<string>();
+      const completedCalls: import('./index').ModelToolCall[] = [];
       try {
         const { reasoningEffort, ...settings } = presets.get(request.modelId) ?? {};
         const response = streamText({
@@ -177,19 +186,17 @@ export function createSdkModelAdapter(options: {
               argumentsById.set(part.id, (argumentsById.get(part.id) ?? '') + part.delta);
               break;
             case 'tool-call': {
-              if (part.invalid || part.providerExecuted || emittedCalls.has(part.toolCallId))
+              if (part.providerExecuted || emittedCalls.has(part.toolCallId))
                 throw new Error('invalid_model_tool_call');
               const argumentsText =
                 argumentsById.get(part.toolCallId) ?? JSON.stringify(part.input);
               if (typeof argumentsText !== 'string') throw new Error('invalid_model_tool_call');
-              JSON.parse(argumentsText);
               emittedCalls.add(part.toolCallId);
-              yield {
-                type: 'tool_call',
+              completedCalls.push({
                 id: part.toolCallId,
                 name: part.toolName,
                 arguments: argumentsText,
-              };
+              });
               break;
             }
             case 'finish': {
@@ -201,9 +208,14 @@ export function createSdkModelAdapter(options: {
                     : part.finishReason === 'length'
                       ? 'length'
                       : null;
-              if (!reason || finished) throw new Error('model_finish_unavailable');
+              if (!reason) {
+                if (part.rawFinishReason !== undefined) throw new Error('model_finish_unavailable');
+                throw new ModelAttemptError('stream_incomplete');
+              }
+              if (finished) throw new Error('model_finish_unavailable');
               finished = true;
               const usage = part.totalUsage;
+              for (const call of completedCalls) yield { type: 'tool_call', ...call };
               yield {
                 type: 'finish',
                 reason,
@@ -223,7 +235,12 @@ export function createSdkModelAdapter(options: {
             case 'abort':
               throw new Error('model_cancelled');
             case 'error':
-              throw new Error('model_transport_failed');
+              throw part.error;
+            case 'tool-error':
+              // SDK schema rejection is not a Tool execution. Preserve the original
+              // completed call for Core's own rejected-call/result transaction.
+              if (!emittedCalls.has(part.toolCallId)) throw new Error('invalid_model_tool_call');
+              break;
             case 'start':
             case 'start-step':
             case 'finish-step':
@@ -238,9 +255,28 @@ export function createSdkModelAdapter(options: {
               throw new Error('unsupported_model_event');
           }
         }
-        if (!finished) throw new Error('model_finish_unavailable');
+        if (!finished) throw new ModelAttemptError('stream_incomplete');
       } catch (error) {
         signal.throwIfAborted();
+        if (ModelAttemptError.isInstance(error)) throw error;
+        if (APICallError.isInstance(error) && error.statusCode === 500)
+          throw new ModelAttemptError('provider_unavailable');
+        if (APICallError.isInstance(error) && error.statusCode === undefined && error.isRetryable)
+          throw new ModelAttemptError('connection_failed');
+        if (error instanceof TypeError) {
+          const code = (error as TypeError & { code?: unknown }).code;
+          const cause = error.cause;
+          const causeCode =
+            cause instanceof Error ? (cause as Error & { code?: unknown }).code : null;
+          if (
+            [code, causeCode].some(
+              (value) =>
+                typeof value === 'string' &&
+                ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT'].includes(value),
+            )
+          )
+            throw new ModelAttemptError('connection_failed');
+        }
         // Provider errors may contain request bodies/URLs. Do not expose them at
         // this neutral boundary, include them as causes, or print them.
         if (

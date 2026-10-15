@@ -49,7 +49,10 @@ const facts = (sessionId = 'a'): HostStatus => ({
     reason: 'exporter_not_configured',
   },
 });
-function fixture() {
+function fixture(
+  mode: 'paired' | 'shared' = 'shared',
+  transport: 'stdio' | 'unix' | 'pipe' = 'unix',
+) {
   let reads = 0,
     effects = 0;
   const effect = async (): Promise<never> => {
@@ -77,7 +80,8 @@ function fixture() {
     cancel: effect,
     getCommand: effect,
     status: {
-      mode: 'shared',
+      mode,
+      transport,
       profile: 'development',
       read: async (id) => {
         reads++;
@@ -161,4 +165,39 @@ test('close, switch, wrong scope and disposal isolate late diagnostic responses'
   resolve(facts('b'));
   await disposing;
   expect(f.counts().effects).toBe(0);
+});
+
+test('original status exposes actual control transport and confirms only verified paired identity', async () => {
+  for (const [mode, transport] of [
+    ['paired', 'stdio'],
+    ['shared', 'unix'],
+    ['shared', 'pipe'],
+  ] as const) {
+    const f = fixture(mode, transport);
+    await f.controller.select('a');
+    await f.controller.openStatus();
+    const ui = render(<TuiSession controller={f.controller} />);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(ui.lastFrame()).toContain(transport);
+      const confirmation =
+        /客户端与 App Server 已精确配对|Client and App Server are exactly paired/.test(
+          ui.lastFrame()!,
+        );
+      expect(confirmation).toBe(mode === 'paired');
+      expect(ui.lastFrame()).not.toContain('Service PID');
+      expect(ui.lastFrame()).not.toContain('PRIVATE_KEY');
+      f.controller.observationUnavailable('owned disconnect');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(
+        /客户端与 App Server 已精确配对|Client and App Server are exactly paired/.test(
+          ui.lastFrame()!,
+        ),
+      ).toBe(false);
+      expect(f.counts().effects).toBe(0);
+    } finally {
+      ui.unmount();
+      f.controller.dispose();
+    }
+  }
 });

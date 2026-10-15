@@ -46,14 +46,14 @@ describe('TUI PTY System — Sandbox Mode', () => {
     async () => {
       await submitCommand(tui, '/permissions', undefined, {
         requireAcceptWhen: true,
-        acceptWhen: (viewport) => screenContains(viewport, '选择权限模式'),
+        acceptWhen: (viewport) => screenContains(viewport, '权限 · 原会话'),
       });
-      await waitForText(() => tui.viewport(), '选择权限模式', 10000);
-      await waitForText(() => tui.viewport(), '完全权限', 10000);
+      await waitForText(() => tui.viewport(), '权限 · 原会话', 10000);
+      await waitForText(() => tui.viewport(), '完全访问', 10000);
       expect(screenContains(tui.viewport(), '当前未在沙箱环境开启')).toBe(false);
       expect(screenContains(tui.viewport(), 'Execution boundary: not admitted')).toBe(false);
       tui.write('\u001b');
-      await waitForTextGone(() => tui.viewport(), '选择权限模式', 10_000);
+      await waitForTextGone(() => tui.viewport(), '权限 · 原会话', 10_000);
 
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },

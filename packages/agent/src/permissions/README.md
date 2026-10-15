@@ -1,8 +1,20 @@
 # 权限策略与 Shell 授权
 
+默认产品策略声明可信 `toolDispatchOrder: model`，由 Agent 冻结为 Run 的批次准入顺序；审批等待不能让后续免审工具提前派发，拒绝取消真实未开始兄弟。实际 dispatch 后仍可并发执行，不增加累计 Tool 数量门槛。子权限与 planning 包装保该标记，Service 只透传装配；自定义 Permissions 没有声明时保通用独立并行能力。普通已知参数／策略失败仍可交给模型纠正，不能混同用户明确拒绝、未知效果或取消。
+
 本模块拥有 Kite 的三策略规则与 Shell 命令分析，公开入口为 `@kite-ai/agent/permissions` 和 `@kite-ai/agent/permissions/shell`。Service 读取可信宿主事实并装配这些工厂；HTTP、客户端和配置正文不产生权限。用户合同归[工具和授权](../../../../docs/handbook/features/tools-and-approvals.md)，本次边界及证据归[实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 [index.ts](index.ts) 的 `createPermissionPolicy` 接收 `readPolicy/describeCapability/readReviewContext?`，按请求批准、自动审核、完全访问返回通用 `PermissionDecision`。当前模式、工作区信任、真实能力、控制 revision 与准确命令身份共同参与摘要。硬拒绝先于模式；旧 raw `ask` 拒绝。import 和工厂创建不读取宿主资源，真正审核、人工决定、原接纳与派发复核继续由 [Execution](../execution/interactions.ts) 与 Store 执行。
+
+`CapabilityDescription.internalRecordOnly=true` 是可信分类事实，只接纳非空且全部为 `read/record_write` 的效果，并进入原 revision／快照摘要。硬拒绝、真实注册、信任和控制核验仍先执行；普通 `record_write`、unknown 或混入 external／process／network／workspace 的描述不能借此免审批。默认 [Task classifier](task-request.ts) 仅匹配完整且未覆写的有限正式角色声明、原请求输入和实际已注册定义；custom 配置来源仍保守。Service 只装配实际来源，Model 的角色名或配置正文不授予这项事实。前台与后台结果处置归 [Task owner](../extensions/task/README.md#前台完整结果与后台处置)。
+
+[review-context.ts](review-context.ts) 的 `createPermissionReviewContextReader` 通过只读 Runtime 接口核实际 Execution／Run／Command／Session／Workspace、主体、root work 和真实 carrier 父子链，形成 `rootUserTask/parentUserTask/isChild/role` 及准确计划观察。身份或来源不完整时返回 unknown，不按同名任务、客户端标签或 fixture 元数据推导。读取前后核取消；审阅材料只保存稳定 Run 身份，不把自身审批等待进度纳入请求绑定；Core 仍独立核当前 active／取消／fencing。历史拒绝只取同范围中其他执行的已保存拒绝，不将当前被审核执行的结果反向加入自身请求，保证完成后的绑定复核仍是同一审阅材料。task、plan 和历史拒绝原因始终是低信任审阅材料，不是授权或派发命令。
+
+父子权限交集沿 [Runtime.childPermissions](../runtime.ts) 保留每一方的实际策略。自动审核策略同时提供 review 和审核不可用时的人工 fallback；fallback 不表示每次审核成功后还必须人工批准。只有某一方明确 `approval` 且没有 review，或 review 明确 `requireApproval=true`，才形成强制人工 ceiling，与原 [constraints](constraints.ts) 的组合规则一致。真实 reviewer 的 `approve_once` 仍不能覆盖硬拒绝、父人工要求或 Workflow minimum；审阅失败继续走原人工／拒绝合同，不制造自动成功。
+
+[files-request.ts](files-request.ts) 只为准确绝对路径 Files Tool 版本1建立当前物理父目录和目标身份摘要，并校验最终实际 `dispatchAuthorization` 的全部父子叶证明。请求批准模式对外部写入要求人工；自动审核交实际模型决定；完全访问只移除普通审批，仍保 protected/private、危险目标及未合格平台拒绝。读与 mutation 的完整路径、CAS 和 checkpoint 边界归 [Files owner](../tools/files/README.md#绝对用户文件)。
+
+本次 macOS 当前工作树复用 [policy](../../test/isolated/permissions/policy.test.ts)、[Task 分类](../../test/isolated/permissions/task-request.test.ts) 和 [只读审阅上下文](../../test/isolated/permissions/review-context.test.ts) 的实际叶证据；另运行 [Task 整文件](../../test/isolated/business/task/task.test.ts)，11 项、74 断言通过，其中真实父人工／子自动组合证明审核后零效果、实际批准后效果一次且不重放 reviewer。原 [subagent 终端整文件](../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 9 项、120 断言通过，证明自动审核实际外部写入与人类拒绝／取消。局部证据不代替全体客户端或发布门禁。
 
 [capabilities.ts](capabilities.ts) 的 `builtinCapability` 统一实际 Tool、Job 与 Action 的固定效果和 safeRead；权限装配与 `workflowCapabilityDescription` 使用同一份分类，Shell 工厂也复用原 Shell 分类。Workflow 的 Job 三维 unknown、最低人工审批和未知 Files 的保守 write 投影保持，不能据此给执行策略补写入授权。MCP source/auth 分类只接收宿主原三个已注册定义 ID；Service 仍提供实际注册、选中 server、transport 可用性和网络配置事实。[constraints.ts](constraints.ts) 组合当前策略与原计划约束、Workflow 最低人工审批、明确文件恢复审批。宿主提供已校验的原状态和身份，约束不能放宽硬拒绝或改变原授权范围。既有 reason、revision/快照格式、单次与同命令授权、取消/恢复语义保持。
 
@@ -22,4 +34,4 @@ Shell 工厂通过本包既有 `@kite-ai/agent/jobs/shell` 与 `/shell` 公共�
 
 [原策略测试](../../test/isolated/permissions/policy.test.ts)、[独立解析与资产篡改测试](../../test/isolated/permissions/shell-command-policy.test.ts)、[独立范围测试](../../test/isolated/permissions/shell-scoped-permissions.test.ts)从原 Service owner 迁入，原用例及断言保持；策略测试另通过真实 Core 核同名扩展不能借只读权限、Workflow Job 不降格。实际 macOS [Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[网络审批](../../../../apps/service/test/isolated/web-permissions.test.ts)继续验证正式调用链。边界检查沿公开导出和 barrel 拒绝本模块反向依赖 Service、Service 直接解析依赖或重新实现原工厂。
 
-Linux/Windows 真实执行依用户安排后置，Windows 正式 Shell 后端仍缺失；RSS 真实超限、完整 Runtime 观测缺项及 V1.3 阶段退出门禁保留。源码迁移和本机通过不改变这些资格。
+Linux/Windows 真实执行依用户安排后置，Windows 正式 Shell 后端仍缺失；发布 RSS 稳定性、完整 Runtime 观测资格及 V1.3 阶段退出门禁保留。当前开发阶段的正常运行和内存稳定证据不等同于取得这些正式资格，源码迁移和本机通过也不解除它们。

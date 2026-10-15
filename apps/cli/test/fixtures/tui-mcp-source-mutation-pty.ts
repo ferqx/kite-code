@@ -24,27 +24,10 @@ if (!process.stdin.isTTY) {
   const credentials = createTemporaryCredentialBackend();
   await runServiceProcess({
     configure(startup, context) {
-      return createDefaultProcessConfiguration({
+      const configuration = createDefaultProcessConfiguration({
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
         observerSubjectId: context.subjectId,
-        permissions: {
-          async authorize(request) {
-            log('permissions.jsonl', {
-              kind: request.kind,
-              definitionId: request.definitionId,
-              executionId: request.executionId,
-            });
-            if (request.kind === 'model') throw Error('owned_source_mutation_model_forbidden');
-            return request.kind === 'job'
-              ? {
-                  allowed: false,
-                  revision: 'owned-source-mutation-ask',
-                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
-                }
-              : { allowed: true, revision: 'owned-source-mutation-read' };
-          },
-        },
         credentialBackend: {
           kind: 'temporary',
           async status() {
@@ -74,6 +57,29 @@ if (!process.stdin.isTTY) {
           },
         },
       });
+      const permissions = configuration.permissions;
+      if (!permissions) throw Error('owned_source_mutation_default_permissions_unavailable');
+      return {
+        ...configuration,
+        permissions: {
+          ...permissions,
+          async authorize(request: Parameters<typeof permissions.authorize>[0]) {
+            log('permissions.jsonl', {
+              kind: request.kind,
+              definitionId: request.definitionId,
+              executionId: request.executionId,
+            });
+            if (request.kind === 'model') throw Error('owned_source_mutation_model_forbidden');
+            return request.kind === 'job'
+              ? {
+                  allowed: false,
+                  revision: 'owned-source-mutation-ask',
+                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
+                }
+              : { allowed: true, revision: 'owned-source-mutation-read' };
+          },
+        },
+      };
     },
   });
   log('service-exits.jsonl', { exitCode: process.exitCode ?? 0, returnedAfterCleanup: true });

@@ -244,35 +244,8 @@ test('source-free default Task preserves full child result and emits exactly one
         commandId: work,
         content: `PACKAGED_PARENT_${scenario}`,
       });
-      const cards = [];
-      for (const definitionId of ['task', 'agent/worker']) {
-        const card = await until(
-          `approval-${scenario}-${definitionId}`,
-          () => client.listInteractions(sessionId, { storeId: expectedStoreId, state: 'pending' }),
-          (page) => page.interactions.some((card) => card.definitionId === definitionId),
-        );
-        const actual = card.interactions.find((card) => card.definitionId === definitionId)!;
-        cards.push(actual);
-        expect(actual.kind).toBe('approval');
-        expect(actual.definitionVersion).toBe('1');
-        expect(actual.originStoreId).toBe(expectedStoreId);
-        expect(actual.sessionId).toBe(sessionId);
-        expect(actual.presentationSessionId).toBe(sessionId);
-        if (definitionId === 'task') expect(actual.runId).toBeTruthy();
-        else expect(actual.runId).toBeNull();
-        expect(childCalls).toBe(0);
-        expect(
-          (
-            await client.answerInteraction(sessionId, actual.id, {
-              expectedStoreId,
-              commandId: `answer-${actual.id}`,
-              expectedRevision: actual.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
-            })
-          ).status,
-        ).toBe('applied');
-      }
-      expect(cards[0]!.executionId).not.toBe(cards[1]!.executionId);
+      // Default finite-role creation has two independent record-only dispatch decisions.
+      // It does not invent human cards for internal records or approve any child effect.
       await until(
         `child-entered-${scenario}`,
         async () => childCalls,
@@ -297,7 +270,93 @@ test('source-free default Task preserves full child result and emits exactly one
       )!;
       expect(carrier.childSessionId).toBeTruthy();
       expect(carrier.runId).toBeNull();
-      expect(carrier.parentExecutionId).toBe(cards[0]!.executionId);
+      const task = held.executions.find(
+        (execution) => execution.definitionId === 'task' && execution.runId === heldParent.id,
+      )!;
+      expect(task).toBeDefined();
+      expect(task.id).not.toBe(carrier.id);
+      expect(task.status).toBe('succeeded');
+      expect(carrier.parentExecutionId).toBe(task.id);
+      const workSeq = String(
+        (database.query('SELECT seq FROM command WHERE id=?').get(work) as { seq: string }).seq,
+      );
+      const currentMode = await client.getPermissionMode(sessionId, { storeId: expectedStoreId });
+      const currentTrust = await client.getWorkspaceTrust('w', { storeId: expectedStoreId });
+      for (const execution of [task, carrier]) {
+        expect(execution.originStoreId).toBe(expectedStoreId);
+        expect(execution.sessionId).toBe(sessionId);
+        expect(execution.rootWorkCommandId).toBe(work);
+        expect(execution.rootWorkSeq).toBe(workSeq);
+        expect(execution.definitionVersion).toBe('1');
+        expect(execution.authorization?.dispatched).toBe(true);
+        const row = database
+          .query(
+            'SELECT dispatched,dispatch_authorization_json,intent_json FROM execution WHERE id=?',
+          )
+          .get(execution.id) as {
+          dispatched: number;
+          dispatch_authorization_json: string;
+          intent_json: string;
+        };
+        expect(row.dispatched).toBe(1);
+        const authorization = JSON.parse(row.dispatch_authorization_json);
+        expect(authorization.allowed).toBe(true);
+        expect(authorization.revision.length).toBeGreaterThan(0);
+        expect(authorization.definitionVersion).toBe('1');
+        expect(authorization.inputDigest).toBe(hash(canonical(JSON.parse(row.intent_json))));
+        expect(authorization.snapshot).toMatchObject({
+          namespace: 'builtin.permissions',
+          version: '1',
+          data: {
+            mode: 'accept_edits',
+            workspaceTrust: true,
+            capability: {
+              kind: execution.kind,
+              definitionId: execution.definitionId,
+              definitionVersion: '1',
+              internalRecordOnly: true,
+              effects: ['record_write'],
+            },
+          },
+        });
+        expect(authorization.controlReads).toContainEqual({
+          kind: 'permission.mode',
+          scope: `session:${sessionId}`,
+          revision: currentMode.revision,
+        });
+        expect(authorization.controlReads).toContainEqual({
+          kind: 'workspace.trust',
+          scope: 'workspace:w',
+          revision: currentTrust.revision,
+        });
+        expect(authorization.interactionId).toBeUndefined();
+      }
+      const accepted = JSON.parse((task.result as { content: string }).content);
+      expect(accepted.accepted).toBe(true);
+      expect(accepted.ref).toMatchObject({
+        originStoreId: expectedStoreId,
+        sessionId,
+        extensionId: 'builtin.task',
+        key: 'original',
+        executionId: carrier.id,
+        childSessionId: carrier.childSessionId,
+        commandId: (
+          database.query('SELECT origin_command_id FROM execution WHERE id=?').get(carrier.id) as {
+            origin_command_id: string;
+          }
+        ).origin_command_id,
+      });
+      expect((await client.getCommand(accepted.ref.commandId)).receipt).toMatchObject({
+        executionId: carrier.id,
+      });
+      expect(
+        (await client.listInteractions(sessionId, { storeId: expectedStoreId })).interactions,
+      ).toHaveLength(0);
+      expect(
+        database
+          .query("SELECT id FROM command WHERE session_id=? AND kind='interaction.answer'")
+          .all(sessionId),
+      ).toHaveLength(0);
       expect(
         held.executions.find((execution) => execution.id === carrier.parentExecutionId)!.runId,
       ).toBe(heldParent.id);
@@ -315,7 +374,7 @@ test('source-free default Task preserves full child result and emits exactly one
       // Required result delivery adds the post-delivery completion step; the earlier completion proposal cannot finish the parent.
       expect(parentCalls).toBe(scenario === 'required' ? 3 : 2);
       expect(childCalls).toBe(1);
-      // Persisted Ask/minimum-user approval dispatches no reviewer Model; both cards are actual SDK approvals.
+      // Independent default record-only authorizations dispatch no reviewer Model or human answer; child effects retain their own ordinary gates.
       expect(reviews).toBe(0);
       expect(reports).toBe(scenario === 'after_turn' ? 1 : 0);
       const parent = view.runs.find((run) => run.originCommandId === work)!;

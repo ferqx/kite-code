@@ -166,11 +166,20 @@ export function classifyError(
   };
 }
 
-export function getErrorActions(error: ConnectionError): ErrorActionDef[] {
+export function getErrorActions(
+  error: ConnectionError,
+  provider?: ProviderDefinition,
+): ErrorActionDef[] {
   switch (error.kind) {
     case 'auth':
       return [
-        { action: 'edit-key', label: 'Edit API key' },
+        {
+          action: 'edit-key',
+          label:
+            provider?.connectionForm === 'custom-endpoint'
+              ? 'Edit connection settings'
+              : 'Edit API key',
+        },
         { action: 'back-to-provider', label: 'Choose another provider' },
       ];
     case 'unreachable':

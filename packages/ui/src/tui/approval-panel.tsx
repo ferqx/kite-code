@@ -22,9 +22,19 @@ export function TuiApprovalPanel({
   const { t } = useTuiPresentation();
   const { t: translate } = useInkI18n();
   const request = card.request;
+  const input =
+    request &&
+    typeof request === 'object' &&
+    !Array.isArray(request) &&
+    request.input &&
+    typeof request.input === 'object' &&
+    !Array.isArray(request.input)
+      ? request.input
+      : undefined;
+  const target = input && typeof input.path === 'string' ? input.path : undefined;
   const summary =
     request && typeof request === 'object' && !Array.isArray(request)
-      ? [request.command, request.title, request.summary, request.description].find(
+      ? [request.command, request.title, request.summary, request.description, input?.command].find(
           (value) => typeof value === 'string',
         )
       : undefined;
@@ -66,6 +76,10 @@ export function TuiApprovalPanel({
         />
       }
     >
+      {typeof card.definitionId === 'string' && (
+        <Text dimColor>{terminalText(card.definitionId)}</Text>
+      )}
+      {target && <Text>{terminalText(target)}</Text>}
       {typeof summary === 'string' && (
         <Box
           marginLeft={1}

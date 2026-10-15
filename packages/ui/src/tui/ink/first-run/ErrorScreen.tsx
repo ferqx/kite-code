@@ -24,7 +24,7 @@ export default function ErrorScreen({
   onExit = () => undefined,
 }: ErrorScreenProps) {
   const t = useTheme();
-  const actions = getErrorActions(error);
+  const actions = getErrorActions(error, provider);
 
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {

@@ -48,6 +48,8 @@ export interface ProcessHostConfiguration {
   modelId?: string;
   permissions?: RuntimeOptions['permissions'];
   authorizationReview?: RuntimeOptions['authorizationReview'];
+  /** Trusted host construction only; startup JSON and Model configuration cannot set it. */
+  maxConcurrentSubagents?: RuntimeOptions['maxConcurrentSubagents'];
   conditions?: RuntimeOptions['conditions'];
   initializeRunRequirements?: RuntimeOptions['initializeRunRequirements'];
   extensions?: RuntimeOptions['extensions'];

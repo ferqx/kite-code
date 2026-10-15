@@ -1359,6 +1359,38 @@ export type ProviderSettingsView = {
   }>;
   errors: Array<string>;
 };
+export type ProviderDiscoveryRequest = {
+  expectedStoreId: string;
+  expectedReadSet: {
+    userEtag: string;
+    workspaceEtag: string | null;
+    explicitDigest: string;
+    effectiveDigest: string;
+  };
+  operation: {
+    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    connectionId: string | null;
+    baseURL: string;
+    credential: 'keep' | 'replace' | 'none';
+  };
+  secret?: string;
+};
+export type ProviderDiscoveryView = {
+  storeId: string;
+  readSet: {
+    userEtag: string;
+    workspaceEtag: string | null;
+    explicitDigest: string;
+    effectiveDigest: string;
+  };
+  operation: {
+    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    connectionId: string | null;
+    baseURL: string;
+    credential: 'keep' | 'replace' | 'none';
+  };
+  modelNames: Array<string>;
+};
 export type ProviderSettingsRequest = {
   expectedStoreId: string;
   commandId: string;
@@ -1669,6 +1701,14 @@ export type Execution = {
     };
   };
   originStoreId?: string;
+  rootWorkCommandId?: string;
+  rootWorkSeq?: string;
+  modelRetry?: {
+    previousExecutionId: string;
+    attempt: number;
+    maxAttempts: 5;
+    reason: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
+  };
   childSessionId?: string | null;
   parentExecutionId?: string | null;
   cancelWithParent?: boolean;
@@ -1720,6 +1760,7 @@ export type Message = {
   status: 'complete' | 'incomplete';
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  firstOutput?: 'content' | 'reasoning' | 'tool_calls';
   originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
   contentFormat?: 'unsupported';
   outputBody?: {
@@ -2362,6 +2403,14 @@ export type BrowserView = {
       };
     };
     originStoreId?: string;
+    rootWorkCommandId?: string;
+    rootWorkSeq?: string;
+    modelRetry?: {
+      previousExecutionId: string;
+      attempt: number;
+      maxAttempts: 5;
+      reason: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
+    };
     childSessionId?: string | null;
     parentExecutionId?: string | null;
     cancelWithParent?: boolean;
@@ -2437,6 +2486,7 @@ export type SelectedContextPage = {
     status: 'complete' | 'incomplete';
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
+    firstOutput?: 'content' | 'reasoning' | 'tool_calls';
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';
     outputBody?: {
@@ -2754,6 +2804,7 @@ export type MessageList = Array<{
   status: 'complete' | 'incomplete';
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  firstOutput?: 'content' | 'reasoning' | 'tool_calls';
   originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
   contentFormat?: 'unsupported';
   outputBody?: {
@@ -2791,6 +2842,8 @@ export type SessionView = {
     nextSeq: string;
     deletedAt: number | null;
     historyPurgedAt?: number;
+    ownerInstanceId?: string | null;
+    ownerGeneration?: string;
   };
   runs: Array<{
     id: string;
@@ -2842,6 +2895,14 @@ export type SessionView = {
       };
     };
     originStoreId?: string;
+    rootWorkCommandId?: string;
+    rootWorkSeq?: string;
+    modelRetry?: {
+      previousExecutionId: string;
+      attempt: number;
+      maxAttempts: 5;
+      reason: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
+    };
     childSessionId?: string | null;
     parentExecutionId?: string | null;
     cancelWithParent?: boolean;
@@ -2874,6 +2935,7 @@ export type SessionView = {
     status: 'complete' | 'incomplete';
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
+    firstOutput?: 'content' | 'reasoning' | 'tool_calls';
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';
     outputBody?: {

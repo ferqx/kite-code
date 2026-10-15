@@ -8,11 +8,13 @@ import type {
 } from '../extensions';
 import { canonicalJson } from '../json';
 import { AgentError } from '../storage/types';
+import { completeForegroundShell } from './shell-foreground';
 
 export interface ShellToolsOptions {
   readonly job: JobDefinition;
   /** Only trusted scope-aware host assembly registers this optional request. */
   readonly permissionsSchema?: Json;
+  readonly classifyPresentation?: (command: string) => Promise<'exploration' | 'standalone'>;
 }
 const idSchema = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$' };
 const decimal = { type: 'string', pattern: '^(0|[1-9][0-9]{0,18})$' };
@@ -50,6 +52,52 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     ...(options.job.resources ? { resources: structuredClone(options.job.resources) } : {}),
   });
   if (job.id !== 'shell.command') throw new AgentError('invalid_shell_job');
+  const schema = (foreground: boolean) =>
+    object(
+      {
+        key: idSchema,
+        command: { type: 'string', minLength: 1, maxLength: 262144 },
+        cancellation: { enum: ['attached', 'detached'] },
+        ...(foreground ? { timeoutMs: { type: 'integer', minimum: 1, maximum: 3600000 } } : {}),
+        ...(options.permissionsSchema ? { permissions: options.permissionsSchema } : {}),
+      },
+      ['key', 'command'],
+    );
+  async function launch(input: Json, context: ToolContext) {
+    const inputArgs = args(input),
+      key = text(inputArgs, 'key'),
+      command = text(inputArgs, 'command');
+    const presentation = (await options.classifyPresentation?.(command)) ?? 'standalone';
+    const ref = await context.operations.ensure({
+      key,
+      request: {
+        kind: 'job',
+        definitionId: job.id,
+        definitionVersion: job.version,
+        input: {
+          command,
+          ...(options.permissionsSchema && inputArgs.permissions !== undefined
+            ? { permissions: inputArgs.permissions }
+            : {}),
+        },
+      },
+      cancellation: inputArgs.cancellation === 'detached' ? 'detached' : 'attached',
+    });
+    const saved = { ref: ref as unknown as Json },
+      prior = await context.records.get(`shell/${key}`);
+    if (prior) {
+      if (canonicalJson(prior.value) !== canonicalJson(saved))
+        throw new AgentError('shell_reference_conflict');
+    } else
+      await context.records.write({
+        key: `shell/${key}`,
+        expectedRevision: null,
+        contentType,
+        contentVersion: 1,
+        value: saved,
+      });
+    return { accepted: true, shellId: key, ref: ref as unknown as Json, presentation };
+  }
   return {
     id: 'builtin.shell',
     version: '1',
@@ -60,50 +108,28 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     ],
     tools: [
       {
+        id: 'shell.execute',
+        version: '1',
+        description:
+          'Execute one supervised Shell Job, wait for its actual terminal state and read its durable output. A deadline requests cancellation and still waits for the original stop evidence; large output is an explicit preview with the original Job reference.',
+        inputSchema: schema(true),
+        async execute(input, context) {
+          const launched = await launch(input, context);
+          return completeForegroundShell(
+            launched.ref as unknown as OperationRef,
+            context,
+            typeof args(input).timeoutMs === 'number' ? Number(args(input).timeoutMs) : 600000,
+            launched.presentation,
+          );
+        },
+      },
+      {
         id: 'shell.launch',
         version: '1',
         description: `Start one exact supervised Shell Job. Acceptance is not completion.${options.permissionsSchema ? ' Default: workspace writes, no network. Request permissions explicitly for outside writes or Internet; the request still requires policy authorization. A failed command is never automatically rerun with wider permissions.' : ''}`,
-        inputSchema: object(
-          {
-            key: idSchema,
-            command: { type: 'string', minLength: 1, maxLength: 262144 },
-            cancellation: { enum: ['attached', 'detached'] },
-            ...(options.permissionsSchema ? { permissions: options.permissionsSchema } : {}),
-          },
-          ['key', 'command'],
-        ),
+        inputSchema: schema(false),
         async execute(input, context) {
-          const inputArgs = args(input);
-          const key = text(inputArgs, 'key');
-          const ref = await context.operations.ensure({
-            key,
-            request: {
-              kind: 'job',
-              definitionId: job.id,
-              definitionVersion: job.version,
-              input: {
-                command: text(inputArgs, 'command'),
-                ...(options.permissionsSchema && inputArgs.permissions !== undefined
-                  ? { permissions: inputArgs.permissions }
-                  : {}),
-              },
-            },
-            cancellation: inputArgs.cancellation === 'detached' ? 'detached' : 'attached',
-          });
-          const saved = { ref: ref as unknown as Json };
-          const prior = await context.records.get(`shell/${key}`);
-          if (prior) {
-            if (canonicalJson(prior.value) !== canonicalJson(saved))
-              throw new AgentError('shell_reference_conflict');
-          } else
-            await context.records.write({
-              key: `shell/${key}`,
-              expectedRevision: null,
-              contentType,
-              contentVersion: 1,
-              value: saved,
-            });
-          return result({ accepted: true, shellId: key, ref: ref as unknown as Json });
+          return result(await launch(input, context));
         },
       },
       {

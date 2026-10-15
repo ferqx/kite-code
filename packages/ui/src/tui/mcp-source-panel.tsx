@@ -18,6 +18,13 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
     [page, setPage] = useState(0),
     [detail, setDetail] = useState<string>();
   const [pending, setPending] = useState<{ serverId: string; observed: TuiMcpSourceSnapshot }>();
+  useEffect(() => {
+    if (state.mcpSourceEntry !== 'directory' || state.mcpSourceOutcome?.phase !== 'pending') return;
+    const timer = setInterval(() => {
+      if (!controller.state.mcpSourceReading) void controller.lookupMcpSourceApproval();
+    }, 150);
+    return () => clearInterval(timer);
+  }, [controller, state.mcpSourceEntry, state.mcpSourceOutcome?.phase]);
   const rows = facts?.items ?? [],
     server = rows.find((row) => row.id === detail);
   const originals = (state.mcpSourceSaved ?? []).filter(
@@ -217,6 +224,7 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
           key={'id' in choice ? `${choice.kind}:${choice.id}` : `${choice.kind}:${offset + i}`}
           selected={index === offset + i}
           primary={label(choice)}
+          content={testDiagnostics ? <Text>{label(choice)}</Text> : undefined}
         />
       ))}
       <Text>{t('↑/↓ choose · Enter select · Esc back')}</Text>

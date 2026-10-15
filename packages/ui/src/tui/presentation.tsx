@@ -6,6 +6,30 @@ import { defaultTuiPreferences } from './preferences';
 
 /** Only explicit UI-owned labels enter this catalog. Public machine values and body text do not. */
 export const tuiChinese: Readonly<Record<string, string>> = {
+  'Recovery request in progress': '正在处理恢复申请',
+  Continue: '继续',
+  Close: '关闭',
+  'Recorded at:': '记录时间：',
+  'Recorded time unavailable': '记录时间不可用',
+  'Reading file preview': '正在读取文件预览',
+  'Restore workspace files and return to the conversation before this message.':
+    '恢复工作区文件并回到此消息之前的会话。',
+  'Return to the conversation before this message; keep workspace files.':
+    '回到此消息之前的会话，保留工作区文件。',
+  'Restore workspace files; keep the current conversation.': '恢复工作区文件，保留当前会话。',
+  'Recorded text changes:': '已记录的文本变化：',
+  'Some text statistics unavailable': '部分文本统计不可用',
+  'Text statistics unavailable': '文本统计不可用',
+  'V: read text preview': 'V：读取文本预览',
+  'Complete text preview': '完整文本预览',
+  'Bounded preview; line counts use complete text.': '预览有长度限制；行数统计依据完整文本。',
+  '↑/↓ scroll · Home/End · Esc back': '↑/↓ 滚动 · Home/End 跳转 · Esc 返回',
+  'A: approvals · R: check progress · C: continue remaining part':
+    'A：查看审批 · R：核实进度 · C：继续尚未完成的部分',
+  restore: '待恢复',
+  unchanged: '无需更改',
+  conflict: '冲突',
+  'Command or private draft': '命令或私人草稿',
   'Recorded tool arguments': '已保存工具参数',
   'Only this exact command in the original Session; other commands still require approval.':
     '只允许原会话中的这一准确命令；其他命令仍需审批。',
@@ -22,6 +46,8 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Historical binding': '历史连接绑定',
   'Next saved window': '下一个已保存窗口',
   'Saved server': '已保存服务器',
+  'Decide later': '稍后决定',
+  'Approve and connect': '批准并连接',
   'Read details': '读取详情',
 
   'Command suggestions': '命令候选',
@@ -36,6 +62,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Code only': '仅文件',
   'Session and code': '会话与文件',
   'Recovery point': '恢复点',
+  Checkpoints: '检查点',
   'No recovery points': '没有恢复点',
   'Reading state:': '读取状态：',
   Files: '文件',
@@ -126,10 +153,6 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Exit the terminal': '退出终端',
   'Ctrl+N new conversation · Ctrl+R sessions · Ctrl+B pending requests':
     'Ctrl+N 新会话 · Ctrl+R 切换会话 · Ctrl+B 待决交互',
-  'Ctrl+O full output · Ctrl+T reasoning · Ctrl+E execution details · Ctrl+C cancel · Ctrl+Q exit':
-    'Ctrl+O 全文 · Ctrl+T 思考 · Ctrl+E 执行详情 · Ctrl+C 取消 · Ctrl+Q 退出',
-  'Ctrl+O full output · Ctrl+T reasoning · Ctrl+C cancel · Ctrl+Q exit':
-    'Ctrl+O 全文 · Ctrl+T 思考 · Ctrl+C 取消 · Ctrl+Q 退出',
   succeeded: '已完成',
   failed: '失败',
   cancelled: '已取消',
@@ -151,6 +174,11 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Original deletion:': '原删除申请：',
   'R: query original deletion · Esc/Ctrl+C: close': 'R 查询原删除申请 · Esc/Ctrl+C 关闭',
   'No matching Sessions': '没有匹配的会话',
+  'History unverified': '历史目录未核实',
+  'Loading session history': '正在读取历史会话',
+  'Retry history read': '重新读取历史',
+  'Error: Could not load session history; please retry.': '错误：无法加载历史会话，请稍后重试。',
+  'R retries this read; saved history remains unchanged.': '按 R 重新读取；已保存的历史保持原样。',
   'Up/Down: search/list · Enter: open · D: delete with empty search · Esc: clear/back':
     '上下键切换搜索和列表 · Enter 打开 · 搜索为空时 D 删除 · Esc 清空或返回',
   Question: '问题',
@@ -171,14 +199,10 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   characters: '个字符',
   Pasted: '已粘贴',
   'Recorded reasoning': '已保存思考正文',
-  'No recorded reasoning in this snapshot': '当前快照未保存思考正文',
-  'Recorded reasoning not loaded;': '思考正文尚未读取；',
   'Recorded reasoning is empty': '已保存思考正文为空',
   'Result collapsed': '结果已收起',
   'Empty Enter expands the current tail result': '空输入 Enter 展开当前尾部结果',
   'Empty Enter collapses the current tail result': '空输入 Enter 收起当前尾部结果',
-  'Ctrl+T hides recorded reasoning': 'Ctrl+T 隐藏已保存思考',
-  'Ctrl+T shows recorded reasoning': 'Ctrl+T 查看已保存思考',
   'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command':
     'Ctrl+B 待决卡片 · Ctrl+R 会话 · Ctrl+L 刷新 · Ctrl+O 完整输出 · Ctrl+C 取消准确原 Command',
   'Queue Planning after original Run': '在原 Run 后排队计划',
@@ -211,6 +235,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
     '上下键选择目标 · O 读取已保存完整输出 · C 子日志 · S 后按 Enter 停止原 Job · R 刷新 · Ctrl+L 查询原回执 · Esc/Ctrl+C 关闭读取',
   ' · cancel requested; cleanup not confirmed': ' · 取消已请求；清理尚未确认',
   'No verified Job in the current snapshot': '当前快照中没有已核验的 Job',
+  'No verified execution in the current snapshot': '当前快照中没有已核验的执行',
   'Confirm stop original Job': '确认停止原 Job',
   ' · Enter submits once; Esc closes': ' · Enter 提交一次；Esc 关闭',
   '/ stop Command': '/ 停止 Command',
@@ -665,8 +690,8 @@ export const tuiChinese: Readonly<Record<string, string>> = {
     '终端界面 · Ctrl+N 新工作区会话 · Ctrl+Q',
   'disconnect shared service': '断开共享服务',
   'quit owned host': '退出当前宿主',
-  'Original outcome unknown: Ctrl+K only reads original Command':
-    '原结果未知：Ctrl+K 只读取原 Command',
+  'Original outcome unknown: Ctrl+L only reads original Command':
+    '原结果未知：Ctrl+L 只读取原 Command',
   'Session creation already in progress': '会话创建正在进行',
   'Original Session creation rejected': '原会话创建已拒绝',
   'Original Session creation unknown:': '原会话创建结果未知：',
@@ -674,6 +699,8 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Original Session creation applied': '原会话创建已应用',
   'New Workspace Session selected': '已选择新工作区会话',
   'Session creation unavailable': '会话创建不可用',
+  'This connection cannot verify activity; work may still be executing in another owner.':
+    '当前连接无法核实活动；任务仍可能在另一执行者中运行。',
 };
 export type TuiTranslator = (label: string) => string;
 export function translateTuiLabel(label: string, language: 'zh-CN' | 'en-US'): string {
@@ -683,15 +710,21 @@ const Presentation = createContext<{
   preferences: typeof defaultTuiPreferences;
   /** Trusted renderer option; development alone never enables test diagnostics. */
   testDiagnostics?: boolean;
+  /** False means this connection cannot verify the persisted owner's live activity. */
+  activityVerified?: boolean;
 }>({ preferences: defaultTuiPreferences });
 export const TuiPresentationProvider = Presentation.Provider;
 export function useTuiPresentation() {
-  const { preferences, testDiagnostics = false } = useContext(Presentation);
+  const {
+    preferences,
+    testDiagnostics = false,
+    activityVerified = true,
+  } = useContext(Presentation);
   const t = useMemo<TuiTranslator>(
     () => (label) => translateTuiLabel(label, preferences.resolvedLanguage),
     [preferences.resolvedLanguage],
   );
-  return { t, preferences, testDiagnostics };
+  return { t, preferences, testDiagnostics, activityVerified };
 }
 export type { InkTheme } from './ink/theme';
 export interface InkI18n {

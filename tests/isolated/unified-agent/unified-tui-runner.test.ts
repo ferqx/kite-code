@@ -15,22 +15,45 @@ import {
   runUnifiedTuiSystemTests,
   selectUnifiedTuiTests,
   unifiedTuiInventory,
+  unifiedTuiTestPlan,
 } from '../../../scripts/run-unified-tui-system-tests';
-import { planTestSuites } from '../../../scripts/test-plan';
 import { collectTestFiles } from '../../../scripts/test-suite';
 
 const root = resolve(import.meta.dir, '../../..');
 const formal = 'tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts';
-test('four exact deterministic shards cover all current CLI TUI owner tests and formal wrapper once, with no legacy scenario paths', () => {
+const startup = 'tests/isolated/unified-agent/tui-startup-wait.test.ts';
+test('four exact deterministic shards cover every original terminal scenario, current CLI owner and formal wrapper once', () => {
   const inventory = unifiedTuiInventory(root);
   const expected = collectTestFiles(join(root, 'apps/cli/test'))
     .filter((file) => /\/tui[^/]*\.test\.ts$/.test(file.replaceAll('\\', '/')))
     .map((file) => file.slice(root.length + 1).replaceAll('\\', '/'));
-  expect(inventory).toEqual([...expected, formal].sort());
-  expect(inventory.length).toBeGreaterThan(20);
-  expect(inventory.every((file) => file.startsWith('apps/cli/test/') || file === formal)).toBe(
-    true,
+  const original = collectTestFiles(join(root, 'tests/tui-system/scenarios')).map((file) =>
+    file.slice(root.length + 1).replaceAll('\\', '/'),
   );
+  expect(original).toHaveLength(52);
+  expect(inventory).toEqual([...expected, ...original, formal, startup].sort());
+  expect(inventory.length).toBeGreaterThan(20);
+  expect(
+    inventory.every(
+      (file) =>
+        file.startsWith('apps/cli/test/') ||
+        file.startsWith('tests/tui-system/scenarios/') ||
+        file === formal ||
+        file === startup,
+    ),
+  ).toBe(true);
+  const plan = unifiedTuiTestPlan(root, inventory, 4);
+  const originalJobs = plan.concurrent.filter((job) => job.label.startsWith('original-tui:'));
+  expect(originalJobs).toHaveLength(original.length);
+  for (const job of originalJobs) {
+    expect(job.files).toHaveLength(1);
+    expect(job.drainOnFailure).toBe(true);
+    expect(job.command).toEqual([
+      process.execPath,
+      join(root, 'scripts/run-tui-system-tests.ts'),
+      job.files[0]!.split('/').at(-1)!,
+    ]);
+  }
   const shards = Array.from(
     { length: 4 },
     (_, index) => selectUnifiedTuiTests(root, [], `${index}/4`).files,
@@ -155,9 +178,15 @@ test.skipIf(process.platform === 'win32')(
         `import {test} from 'bun:test'; import {writeFileSync} from 'node:fs'; test('exclusive must not run',()=>writeFileSync(${JSON.stringify(marker('exclusive'))},'unexpected'));`,
       );
       add(formal, "import {test} from 'bun:test'; test('finite formal selection only',()=>{});");
+      add(startup, "import {test} from 'bun:test'; test('finite startup selection only',()=>{});");
+      add(
+        'tests/tui-system/scenarios/runner-fixture.test.ts',
+        "import {test} from 'bun:test'; test('finite original selection only',()=>{});",
+      );
+      add('scripts/run-tui-system-tests.ts', 'process.exitCode=0;');
       const selected = unifiedTuiInventory(owned);
-      const plan = planTestSuites(owned, selected, 4);
-      expect(plan.counts).toEqual({ parallel: 0, isolated: 3, exclusive: 1 });
+      const plan = unifiedTuiTestPlan(owned, selected, 4);
+      expect(plan.counts).toEqual({ parallel: 0, isolated: 5, exclusive: 1 });
       expect(
         plan.concurrent.every((job) => job.maxConcurrency === 1 && job.drainOnFailure === true),
       ).toBe(true);

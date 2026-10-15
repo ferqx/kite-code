@@ -23,6 +23,7 @@ import {
   promptWorkspaceTrust,
 } from '../../src/permissions';
 import { buildOwnedDaemon } from './daemon-host-build';
+import { type OriginalMessage, originalToolResults } from './original-tool-results';
 
 export async function untilRecovery(check: () => Promise<boolean>) {
   const end = Date.now() + 5000;
@@ -52,20 +53,37 @@ export async function recoveryProfile() {
         port: 0,
         async fetch(request) {
           const body = (await request.json()) as Record<string, unknown>;
-          const messages = body.messages as { role: string; content: string }[];
+          const messages = body.messages as OriginalMessage[];
           let input: Record<string, unknown> | undefined;
           try {
             const candidate = JSON.parse(
-              messages
+              (messages
                 .slice()
                 .reverse()
-                .find((message) => message.role === 'user')?.content ?? '',
+                .find((message) => message.role === 'user')?.content as string) ?? '',
             );
             if (candidate.purpose === 'authorization_review') input = candidate;
           } catch {}
           if (input) reviews.push({ body, input });
           else calls++;
-          const complete = messages.at(-1)?.role === 'tool';
+          let complete = false;
+          if (!input) {
+            const db = new Database(profile.databasePath, { readonly: true });
+            try {
+              const row = db
+                .query(
+                  'SELECT command.request_json FROM run JOIN command ON command.id=run.origin_command_id WHERE run.is_active=1 ORDER BY command.seq DESC LIMIT 1',
+                )
+                .get() as { request_json: string } | null;
+              const human = row && JSON.parse(row.request_json).content;
+              if (typeof human !== 'string') throw Error('original_recovery_work_missing');
+              complete = originalToolResults(messages, human, [
+                { id: 'original-file', name: 'files.write' },
+              ]);
+            } finally {
+              db.close();
+            }
+          }
           if (!input) appendFileSync(ledger, complete ? 'completion\n' : 'decision\n');
           const delta = input
             ? {

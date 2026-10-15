@@ -903,7 +903,7 @@ test.each([
           throw Error(
             `large_fork_failed:${JSON.stringify(view.executions.map((execution) => ({ definitionId: execution.definitionId, status: execution.status, result: execution.result })))}`,
           );
-        expect(run.status).toBe(malicious ? 'failed' : 'completed');
+        expect(run.status).toBe(scenario === 'drift' ? 'failed' : 'completed');
         break;
       }
       if (Date.now() > end)
@@ -915,9 +915,50 @@ test.each([
     const agent = (await store.listExecutions('s')).find(
       (execution) => execution.definitionId === 'agent/code',
     )!;
-    expect(agent.status).toBe(malicious ? 'failed' : 'succeeded');
+    expect(agent.status).toBe(scenario === 'drift' ? 'failed' : 'succeeded');
     expect(agent.childSessionId).toBeTruthy();
     const childView = await store.getView(agent.childSessionId!);
+    if (scenario === 'mutation') {
+      // The unavailable write is a known, undispatched Tool error. Only the actual
+      // subsequent valid child summary can complete this read-only fork.
+      const run = childView.runs[0]!;
+      expect(run.status).toBe('completed');
+      const tools = childView.executions.filter((execution) => execution.kind === 'tool');
+      expect(tools).toHaveLength(1);
+      const denied = tools[0]!;
+      expect(denied).toMatchObject({
+        definitionId: 'files.write',
+        definitionVersion: 'unavailable',
+        status: 'failed',
+        originStoreId: expectedStoreId,
+        sessionId: agent.childSessionId,
+        runId: run.id,
+        authorization: { dispatched: false },
+        result: { content: 'tool_not_available', details: { code: 'tool_not_available' } },
+      });
+      const models = childView.executions.filter((execution) => execution.kind === 'model');
+      expect(models).toHaveLength(2);
+      expect(
+        models.every((execution) => execution.status === 'succeeded' && execution.runId === run.id),
+      ).toBe(true);
+      const messages = await store.listMessages(agent.childSessionId!);
+      const toolMessage = messages.find((message) => message.role === 'tool');
+      expect(toolMessage!.sourceIds).toEqual([denied.id]);
+      const call = messages.find(
+        (message) => message.role === 'assistant' && message.toolCalls?.length,
+      )!;
+      expect(call.sourceIds).toEqual([models[0]!.id]);
+      expect(call.toolCalls![0]!.name).toBe('files.write');
+      expect(toolMessage!.toolCallId).toBe(call.toolCalls![0]!.id);
+      expect(
+        messages.filter((message) => message.role === 'assistant' && message.content === '{}'),
+      ).toMatchObject([{ runId: run.id, sourceIds: [models[1]!.id] }]);
+      expect(requests).toHaveLength(4);
+      expect(readFileSync(join(f.skill, 'SKILL.md'), 'utf8')).toContain(
+        'Original workflow instructions',
+      );
+    }
+
     const manifest = childView.runs[0]!.configuration as {
       tools: { extensionId: string; id: string; version: string }[];
     };

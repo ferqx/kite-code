@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
+import { type acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { ClientError, type Interaction, type Message } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { TuiController, type TuiPort, TuiSession, translateTuiLabel } from '@kite-ai/ui/tui';
@@ -54,7 +54,9 @@ import { prepareTuiObservationStart } from './tui-observation';
 import { createTuiOnboardingPort } from './tui-onboarding';
 import { openTuiPreferenceFile } from './tui-preferences';
 import { readTuiProgress } from './tui-progress';
+import { waitForTuiProfileAccess } from './tui-startup-wait';
 import { createTuiToolLabelsReader } from './tui-tool-labels';
+import { createTuiWorkspaceObserver } from './tui-workspace-observer';
 
 export { parseTUIArguments, type TUIArguments } from './tui-arguments';
 
@@ -102,7 +104,7 @@ function TerminalHost({
       />
       {notice && <Text>{shownNotice}</Text>}
       {state.intent?.phase === 'unknown' && (
-        <Text>{t('Original outcome unknown: Ctrl+K only reads original Command')}</Text>
+        <Text>{t('Original outcome unknown: Ctrl+L only reads original Command')}</Text>
       )}
     </Box>
   );
@@ -206,12 +208,20 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         cwd: input.cwd,
         signal: input.exitSignal,
       });
-      access = acquireProfileAccess(profile);
+      access = await waitForTuiProfileAccess(profile, {
+        signal: input.exitSignal,
+        onWait: () =>
+          process.stdout.write('会话数据正在维护，正在自动重试；超时后请按提示重试。\n'),
+      });
     } else {
       const artifact = parseCLIServiceArtifact(input.artifact);
       verifyArtifact(artifact.entrypoint, artifact.entrypointSha256, false);
       verifyArtifact(artifact.executable, artifact.executableSha256, true);
-      access = acquireProfileAccess(profile);
+      access = await waitForTuiProfileAccess(profile, {
+        signal: input.exitSignal,
+        onWait: () =>
+          process.stdout.write('会话数据正在维护，正在自动重试；超时后请按提示重试。\n'),
+      });
       paired = await launchPairedService({
         profile,
         entrypoint: artifact.entrypoint,
@@ -271,9 +281,10 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
   const requestQuit = () => {
     if (draftOwner && !draftOwner.flush()) {
       controller?.draftUnavailable('tui_draft_save_failed_exit_blocked');
-      return;
+      return false;
     }
     stop();
+    return true;
   };
   const onExit = () => stop();
   input.exitSignal?.addEventListener('abort', onExit, { once: true });
@@ -286,24 +297,37 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
   try {
     input.exitSignal?.throwIfAborted();
     if (paired) input.onLaunched?.({ pid: paired.pid });
-    const { client, bootstrap } = connection;
+    const { client: originalClient, bootstrap } = connection;
     if (bootstrap.dataAvailability !== 'available') throw new CLIHostError('data_unavailable');
     const storeId = bootstrap.storeId;
     const initial = await ensureSession(
       {
         kind: input.thread ? 'resume' : 'run',
-        task: 'TUI Session',
+        task: '',
         ...(input.thread ? { thread: input.thread } : {}),
         ...(workspace ? { workspace } : {}),
         trustWorkspace: false,
         skills: [],
       },
-      client,
+      originalClient,
       storeId,
       input.cwd ?? process.cwd(),
       () => {},
     );
     const workspaceId = initial.workspace.id;
+    const workspaceObserver = createTuiWorkspaceObserver(
+      originalClient,
+      input.thread
+        ? {
+            storeId,
+            sessionId: initial.session.id,
+            workspaceId,
+            rootUri: initial.workspace.rootUri,
+          }
+        : undefined,
+    );
+    await workspaceObserver.read(workspaceId, input.exitSignal);
+    const client = workspaceObserver.client;
     fileRecoveryOwner = openFileRecoveryJournal({
       access: profileAccess,
       acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
@@ -363,7 +387,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
     const jobTails = createTuiJobTailReader(client, storeId);
     jobTailOwner = jobTails;
     const port: TuiPort = {
-      onboarding: createTuiOnboardingPort(client, storeId),
+      onboarding: createTuiOnboardingPort(client, storeId, workspaceObserver.read),
       preferences: {
         async read() {
           return preferences.read();
@@ -389,6 +413,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       },
       status: {
         mode: input.server ? 'shared' : 'paired',
+        transport: 'fixedWorkspace' in connection ? connection.transport : 'stdio',
         profile: bootstrap.profile.name,
         async read(sessionId, workspaceId, signal) {
           const facts = await client.getHostStatus({ sessionId, workspaceId, signal });
@@ -437,7 +462,11 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       management: {
         async readSessionControl(sessionId, signal) {
           const view = await client.getView(sessionId, { signal });
-          if (view.session.workspaceId !== workspaceId)
+          if (
+            view.storeId !== storeId ||
+            view.session.id !== sessionId ||
+            view.session.workspaceId !== workspaceId
+          )
             throw new CLIHostError('management_scope_unavailable');
           return { storeId: view.storeId, session: view.session };
         },
@@ -529,6 +558,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           };
         },
       },
+      activeInputKind: 'input.follow_up',
       nextCommandId: () => crypto.randomUUID(),
       executions: {
         getExecution: (id, signal) => client.getExecution(id, { signal }),
@@ -545,24 +575,32 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         if (!client.serverInfo?.capabilities.includes('session_directory_activity'))
           return client.listAllSessions({ workspaceId, signal });
         const entries = await client.listAllSessionDirectory({ workspaceId, signal });
-        return entries.map(({ session, activity }) => ({
-          id: session.id,
-          title: session.title,
-          workspacePath: initial.workspace.rootUri,
-          ...(typeof activity?.updatedAt === 'number' ? { updatedAt: activity.updatedAt } : {}),
-          ...(activity?.run?.isActive
-            ? {
-                activity:
-                  activity.run.status === 'running' ? ('running' as const) : ('waiting' as const),
-              }
-            : activity?.queued
-              ? { activity: 'queued' as const }
-              : {}),
-        }));
+        return [...entries]
+          .reverse()
+          .sort((a, b) => (b.activity?.updatedAt ?? 0) - (a.activity?.updatedAt ?? 0))
+          .map(({ session, activity }) => ({
+            id: session.id,
+            title: session.title,
+            workspacePath: initial.workspace.rootUri,
+            ...(workspaceObserver.active ? { observer: 'workspace_missing' as const } : {}),
+            ...(typeof activity?.updatedAt === 'number' ? { updatedAt: activity.updatedAt } : {}),
+            ...(activity?.run?.isActive
+              ? {
+                  activity:
+                    activity.run.status === 'running' ? ('running' as const) : ('waiting' as const),
+                }
+              : activity?.queued
+                ? { activity: 'queued' as const }
+                : {}),
+          }));
       },
       async readSession(sessionId, signal) {
         const view = await client.getView(sessionId, { signal });
-        if (view.session.workspaceId !== workspaceId)
+        if (
+          view.storeId !== storeId ||
+          view.session.id !== sessionId ||
+          view.session.workspaceId !== workspaceId
+        )
           throw new CLIHostError('workspace_identity_mismatch');
         const messages: Message[] = [],
           interactions: Interaction[] = [];
@@ -661,6 +699,16 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
             : undefined;
         return {
           storeId,
+          connectionInstanceId: client.serverInfo!.instanceId,
+          ...(view.session.ownerInstanceId !== undefined &&
+          view.session.ownerGeneration !== undefined
+            ? {
+                activityOwner: {
+                  instanceId: view.session.ownerInstanceId,
+                  generation: view.session.ownerGeneration,
+                },
+              }
+            : {}),
           view,
           messages,
           interactions,
@@ -689,6 +737,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
             : {}),
           environment: {
             workspacePath: initial.workspace.rootUri,
+            ...(workspaceObserver.active ? { observer: 'workspace_missing' as const } : {}),
             homeDirectory: homedir(),
             ...(selectedModel
               ? {
@@ -770,7 +819,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         const result = await ensureSession(
           {
             kind: 'run',
-            task: 'TUI Session',
+            task: '',
             ...(workspace ? { workspace } : {}),
             trustWorkspace: false,
             skills: [],
@@ -835,6 +884,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       />,
       {
         exitOnCtrlC: false,
+        // Admission already requires a real terminal, including CI-owned PTYs.
+        interactive: true,
       },
     );
     const lookup = (chunk: string | Buffer) => {

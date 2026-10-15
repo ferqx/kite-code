@@ -85,7 +85,8 @@ export function TuiComposer({
   };
   usePaste(
     (text) => {
-      buffer.insert(text, true);
+      // Original InputLine folds only large pastes; small multiline text stays editable.
+      buffer.insert(text, text.length >= 100);
       update();
     },
     { isActive: active },
@@ -284,11 +285,11 @@ export function TuiComposer({
               title={
                 slash
                   ? i18n.t('slash.matches')
-                  : `${t('Workspace file candidates')} @${token?.query ?? ''}`
+                  : `${i18n.language === 'zh-CN' ? '文件匹配' : 'File matches'} @${token?.query ?? ''}`
               }
               meta={
                 <Text color={theme.dim}>
-                  {window.index + 1}/{suggestions.length}
+                  {window.index + 1} / {suggestions.length}
                 </Text>
               }
               footer={

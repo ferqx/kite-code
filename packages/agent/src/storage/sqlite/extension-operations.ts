@@ -19,6 +19,7 @@ type Method =
   | 'ensureOperation'
   | 'getOperation'
   | 'planAction'
+  | 'acceptNestedAction'
   | 'applyExtensionAction'
   | 'stopActionPreparation';
 const terminal = ['succeeded', 'failed', 'cancelled', 'outcome_unknown'];
@@ -36,6 +37,34 @@ function scope(db: SqliteOperations, extensionId: string, sessionId: string): vo
     !db.row('SELECT id FROM session WHERE id=? AND delete_requested=0', sessionId)
   )
     throw new AgentError('invalid_extension_scope');
+}
+function nestedParent(
+  db: SqliteOperations,
+  input: Pick<
+    Parameters<Store['acceptNestedAction']>[0],
+    'owner' | 'expectedStoreId' | 'sessionId' | 'subjectId' | 'parentExecutionId'
+  >,
+) {
+  db.identity(input.expectedStoreId);
+  db.owner(input.owner, input.sessionId);
+  const parent = db.row(
+    'SELECT e.*,c.subject_id,c.cancel_requested_at AS command_cancel,r.is_active,r.cancel_requested_at AS run_cancel FROM execution e JOIN command c ON c.id=e.origin_command_id JOIN run r ON r.id=e.run_id WHERE e.id=?',
+    input.parentExecutionId,
+  );
+  if (
+    parent?.kind !== 'tool' ||
+    parent.origin_store_id !== input.expectedStoreId ||
+    parent.session_id !== input.sessionId ||
+    parent.subject_id !== input.subjectId ||
+    !['dispatching', 'running'].includes(String(parent.state)) ||
+    Number(parent.dispatched) !== 1 ||
+    Number(parent.is_active) !== 1 ||
+    parent.cancel_requested_at !== null ||
+    parent.command_cancel !== null ||
+    parent.run_cancel !== null
+  )
+    throw new AgentError('nested_action_scope_invalid');
+  return parent;
 }
 export function record(row: Record<string, string | number | bigint | null>): ExtensionRecord {
   return {
@@ -212,6 +241,48 @@ function writeRecord(
 }
 export function callExtension(db: SqliteOperations, method: Method, args: unknown[]): unknown {
   switch (method) {
+    case 'acceptNestedAction': {
+      const input = args[0] as Parameters<Store['acceptNestedAction']>[0];
+      return db.tx(() => {
+        const parent = nestedParent(db, input);
+        if (input.request.kind !== 'extension.invoke')
+          throw new AgentError('nested_action_scope_invalid');
+        const requestDigest = digest(input.request as unknown as Json);
+        const prior = db.row('SELECT * FROM command WHERE id=?', input.commandId);
+        if (prior) {
+          const receipt = JSON.parse(String(prior.receipt_json)) as Record<string, Json>;
+          const planned = db.row(
+            'SELECT parent_execution_id FROM execution WHERE origin_command_id=?',
+            input.commandId,
+          );
+          if (
+            prior.session_id !== input.sessionId ||
+            prior.subject_id !== input.subjectId ||
+            prior.request_digest !== requestDigest ||
+            prior.root_work_command_id !== parent.root_work_command_id ||
+            prior.root_work_seq !== parent.root_work_seq ||
+            (receipt.parentExecutionId !== input.parentExecutionId &&
+              planned?.parent_execution_id !== input.parentExecutionId)
+          )
+            throw new AgentError('command_conflict');
+          return db.command(prior);
+        }
+        assertNoExecutionGroupFence(db, input.sessionId);
+        db.insertCommand(input, input.request as unknown as Json, requestDigest, 'accepted', {
+          kind: 'nested_action',
+          commandId: input.commandId,
+          parentExecutionId: input.parentExecutionId,
+        });
+        db.run(
+          'UPDATE command SET root_work_command_id=?,root_work_seq=? WHERE id=?',
+          parent.root_work_command_id,
+          parent.root_work_seq,
+          input.commandId,
+        );
+        db.event(input.sessionId, input.commandId, 'command.accepted');
+        return db.command(db.row('SELECT * FROM command WHERE id=?', input.commandId)!);
+      });
+    }
     case 'getExtensionRecord': {
       const input = args[0] as Parameters<Store['getExtensionRecord']>[0];
       scope(db, input.extensionId, input.sessionId);
@@ -428,6 +499,26 @@ export function callExtension(db: SqliteOperations, method: Method, args: unknow
       return db.tx(() => {
         db.identity(input.expectedStoreId);
         const command = db.active(input.owner, input.commandId);
+        const receiptBinding = JSON.parse(String(command.receipt_json)) as Record<string, Json>;
+        if (
+          receiptBinding.kind === 'nested_action' &&
+          receiptBinding.parentExecutionId !== input.parentExecutionId
+        )
+          throw new AgentError('nested_action_scope_invalid');
+        if (input.parentExecutionId) {
+          const parent = nestedParent(db, {
+            owner: input.owner,
+            expectedStoreId: input.expectedStoreId,
+            sessionId: String(command.session_id),
+            subjectId: String(command.subject_id),
+            parentExecutionId: input.parentExecutionId,
+          });
+          if (
+            parent.root_work_command_id !== command.root_work_command_id ||
+            parent.root_work_seq !== command.root_work_seq
+          )
+            throw new AgentError('nested_action_scope_invalid');
+        }
         assertNoExecutionGroupFence(db, String(command.session_id), input.executionId);
         const request = object(JSON.parse(String(command.request_json)) as Json);
         scope(db, input.extensionId, String(command.session_id));
@@ -531,7 +622,9 @@ export function callExtension(db: SqliteOperations, method: Method, args: unknow
           input.predecessorExecutionId ?? null,
         );
         executionGuard(db, db.row('SELECT * FROM execution WHERE id=?', input.executionId)!);
-        const carrier = db.childCarrier(command);
+        const carrier = input.parentExecutionId
+          ? { id: input.parentExecutionId }
+          : db.childCarrier(command);
         if (carrier)
           db.run(
             'UPDATE execution SET parent_execution_id=? WHERE id=?',

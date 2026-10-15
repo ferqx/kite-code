@@ -50,6 +50,13 @@ type StoredFacts = {
   runs: { id: string; status: string; originCommandId: string }[];
   commands: { id: string; status: string; originStoreId: string }[];
   messages: { id: string }[];
+  persistedExecutions: { id: string; rowJson: string; rowBytes: number; rowSha256: string }[];
+  persistedMessages: {
+    id: string;
+    sourceJson: string;
+    sourceBytes: number;
+    sourceSha256: string;
+  }[];
   executions: Execution[];
   extensionCommands: Command[];
   outputs: { identity: { executionId: string }; snapshotCursor: string }[];
@@ -321,6 +328,26 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
                 for (const name of ['commands', 'runs', 'messages', 'executions'] as const)
                   for (const prior of facts.at(-1)![name])
                     expect(result[name].find((value) => value.id === prior.id)).toEqual(prior);
+              expect(result.persistedMessages).toHaveLength(result.messages.length);
+              for (const row of result.persistedMessages) {
+                expect(row.sourceBytes).toBe(Buffer.byteLength(row.sourceJson));
+                expect(row.sourceSha256).toBe(hash(row.sourceJson));
+              }
+              if (facts.length)
+                for (const prior of facts.at(-1)!.persistedMessages)
+                  expect(result.persistedMessages.find((row) => row.id === prior.id)).toEqual(
+                    prior,
+                  );
+              expect(result.persistedExecutions).toHaveLength(result.executions.length);
+              for (const row of result.persistedExecutions) {
+                expect(row.rowBytes).toBe(Buffer.byteLength(row.rowJson));
+                expect(row.rowSha256).toBe(hash(row.rowJson));
+              }
+              if (facts.length)
+                for (const prior of facts.at(-1)!.persistedExecutions)
+                  expect(result.persistedExecutions.find((row) => row.id === prior.id)).toEqual(
+                    prior,
+                  );
               // Stored output heads/segments retain the original scope/hash/ref, including unknown fields.
               if (facts.length)
                 for (const prior of facts.at(-1)!.outputs) {
@@ -390,7 +417,11 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
                   ? value.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('')
                   : '';
             const task = text(
-                body.messages.filter((value) => value.role === 'user').at(-1)?.content,
+                body.messages
+                  .slice()
+                  .reverse()
+                  .find((value) => value.role === 'user' && tasks.includes(text(value.content)))
+                  ?.content,
               ),
               index = tasks.indexOf(task);
             expect(index).toBe(requests.length);

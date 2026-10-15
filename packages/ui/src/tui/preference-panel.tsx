@@ -26,16 +26,32 @@ export function TuiPreferencePanel({ controller }: { controller: TuiController }
     else if (key.upArrow) setIndex((i) => (i + options.length - 1) % options.length);
     else if (key.downArrow) setIndex((i) => (i + 1) % options.length);
     else if (key.return && state.preferenceStatus === 'confirmed') {
-      const value = options[index]!;
-      void controller.savePreference(
-        language
-          ? { expectedRevision: facts.revision, key: 'language', value: value as TuiLanguage }
-          : {
-              expectedRevision: facts.revision,
-              key: 'colorPreset',
-              value: value as TuiColorPreset,
-            },
-      );
+      const value = options[index]!,
+        originalSessionId = state.sessionId;
+      if (!testDiagnostics && value === current) {
+        controller.closePanel();
+        return;
+      }
+      void controller
+        .savePreference(
+          language
+            ? { expectedRevision: facts.revision, key: 'language', value: value as TuiLanguage }
+            : {
+                expectedRevision: facts.revision,
+                key: 'colorPreset',
+                value: value as TuiColorPreset,
+              },
+        )
+        .then(() => {
+          if (
+            !testDiagnostics &&
+            controller.state.sessionId === originalSessionId &&
+            controller.state.preferenceStatus === 'confirmed' &&
+            controller.state.preferenceSaved &&
+            controller.state.panel === (language ? 'language' : 'theme')
+          )
+            controller.closePanel();
+        });
     }
   });
   const labels = {

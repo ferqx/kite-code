@@ -86,7 +86,11 @@ async function drive(config: Configuration) {
   let failure: unknown;
   try {
     launch();
-    await wait(config.mode === 'report' || config.cold ? 'Session s' : 'Waiting for answer');
+    await wait(
+      config.mode === 'report' || config.cold
+        ? 'Session s'
+        : `approval [${config.cardId}] original Session s`,
+    );
     await enterRecovery();
     const input =
       config.mode === 'run'
@@ -163,10 +167,13 @@ async function drive(config: Configuration) {
       );
       if (config.mode === 'run') {
         await key('\x1b');
-        await wait(config.cardId!.slice(0, 24), true);
-        await wait('Up/Down explicit approval selection: none (Enter has no answer)');
+        await wait('Tool approval');
+        await wait(config.cardId!.slice(0, 24));
         await key('\x1b[B');
-        await wait('only this call');
+        await wait('❯ Deny');
+        await key('\x1b[B');
+        await wait('❯ Allow once');
+        await wait('Approve this execution only');
         await key('\r');
         await wait('RECOVERED_ORIGINAL_DONE', true);
       } else if (config.mode === 'report') {

@@ -1,12 +1,14 @@
 import { expect, test } from 'bun:test';
+import type { SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
-import type { TuiController } from '../../src/tui/controller';
+import { TuiController, type TuiPort } from '../../src/tui/controller';
 import OverlayChoiceList from '../../src/tui/ink/OverlayChoiceList';
 import OverlayFrame, {
   OverlayShortcutBar,
   OverlayStatusColumn,
 } from '../../src/tui/ink/OverlayFrame';
 import { OverlayListRow } from '../../src/tui/ink/OverlayPrimitives';
+import type { TuiMcpSnapshot } from '../../src/tui/mcp';
 import { toolMetadataText } from '../../src/tui/mcp-tools-panel';
 import { TuiModelPanel } from '../../src/tui/model-panel';
 import { TuiPermissionPanel } from '../../src/tui/permission-panel';
@@ -294,33 +296,76 @@ test('ordinary MCP menu and detail use verified read-only labels while retaining
   const { TuiMcpPanel } = await import('../../src/tui/mcp-panel');
   const id = `mcp-${'a'.repeat(64)}`;
   let effects = 0;
-  const controller = {
-    state: {
-      mcp: {
-        read: 'ready',
-        facts: {
-          workspaceId: 'private-workspace',
-          labels: { [id]: 'ActualMcpName' },
-          readSet: { workspaceEtag: null },
-          items: [
-            {
-              id,
-              source: { kind: 'user', id: 'private-source-digest' },
-              transport: 'http',
-              admitted: true,
-              selected: true,
-              available: true,
-              reason: null,
-            },
-          ],
-        },
+  const facts: TuiMcpSnapshot = {
+    storeId: 'store',
+    sessionId: 's',
+    workspaceId: 'private-workspace',
+    workspaceIdentity: 'private-workspace-identity',
+    workspacePath: '/owned/workspace',
+    registryRevision: '1',
+    labels: { [id]: 'ActualMcpName' },
+    readSet: {
+      userEtag: 'a'.repeat(64),
+      workspaceEtag: null,
+      explicitDigest: 'b'.repeat(64),
+      registryDigest: 'c'.repeat(64),
+      registryRevision: '1',
+      scopeDigest: 'd'.repeat(64),
+    },
+    items: [
+      {
+        id,
+        configDigest: 'e'.repeat(64),
+        source: { kind: 'user', id: 'private-source-digest', revision: '1' },
+        transport: 'http',
+        admitted: true,
+        selected: true,
+        available: true,
+        reason: null,
       },
+    ],
+  };
+  const forbidden = async (): Promise<never> => {
+    effects++;
+    throw Error('read-only label presentation must not submit business work');
+  };
+  const port: TuiPort = {
+    storeId: 'store',
+    nextCommandId: () => 'unused',
+    listSessions: async () => [],
+    readSession: async () => ({
+      storeId: 'store',
+      view: {
+        storeId: 'store',
+        session: {
+          id: 's',
+          workspaceId: 'private-workspace',
+          rootSessionId: 's',
+          parentSessionId: null,
+        },
+        runs: [],
+        executions: [],
+        messages: [],
+      } as unknown as SessionView,
+      messages: [],
+      interactions: [],
+    }),
+    submit: forbidden,
+    answer: forbidden,
+    cancel: forbidden,
+    getCommand: forbidden,
+    mcp: {
+      read: async (sessionId) => {
+        expect(sessionId).toBe('s');
+        return facts;
+      },
+      submit: forbidden,
+      lookup: forbidden,
     },
-    port: { mcp: {} },
-    chooseMcp: async () => {
-      effects++;
-    },
-  } as unknown as TuiController;
+  };
+  const controller = new TuiController(port);
+  await controller.select('s');
+  await controller.openMcp();
   const ui = render(
     <TuiPresentationProvider value={{ preferences, testDiagnostics: false }}>
       <TuiMcpPanel controller={controller} />
@@ -335,8 +380,12 @@ test('ordinary MCP menu and detail use verified read-only labels while retaining
     await tick();
     expect(ui.lastFrame()).toContain('MCP · ActualMcpName');
     expect(ui.lastFrame()).not.toContain('private-source-digest');
+    expect(controller.state.mcpDetailServerId).toBe(id);
+    expect(controller.state.mcp?.facts?.items[0]?.configDigest).toBe(facts.items[0]!.configDigest);
+    expect(controller.state.mcp?.facts?.labels).toEqual({ [id]: 'ActualMcpName' });
     expect(effects).toBe(0);
   } finally {
     ui.unmount();
+    controller.dispose();
   }
 });

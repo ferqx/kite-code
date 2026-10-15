@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { closeSync, constants, fsyncSync, openSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fsyncSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ptyDeadline, spawnTuiPTY, type TuiPTY, terminateTuiTree } from './tui-pty';
 
@@ -47,6 +47,30 @@ const note = (kind: string, values: Record<string, unknown> = {}) => {
   if (trace.length > 512) trace.shift();
 };
 const normalized = (text: string) => text.replace(/\s+/g, ' ');
+type SelectionCompletion = {
+  phase: string;
+  completion: number;
+  requestedSessionId: string;
+  storeId?: string;
+  sessionId?: string;
+  loading?: boolean;
+  stale?: boolean;
+  snapshotStale?: boolean;
+  rejected?: boolean;
+  cards?: { id: string; revision: string; storeId: string; sessionId: string }[];
+};
+const selections = (): SelectionCompletion[] => {
+  try {
+    return readFileSync(join(root, 'selection-completions.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as SelectionCompletion);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+};
 const current = async () => {
   abort.signal.throwIfAborted();
   if (decodeFailure) throw decodeFailure;
@@ -130,13 +154,21 @@ const chooseSource = async (label: string) => {
   for (let step = 0; step < 16; step++) {
     const frame = (await current()).text.replaceAll(' ', '');
     const target = label.replaceAll(' ', '');
-    if (frame.includes(`›${target}`)) {
+    if (frame.includes(`❯${target}`)) {
       note('source-choice', { label, frame: (await current()).text.slice(-32768) });
       return;
     }
-    const selectedAt = frame.indexOf('›');
+    const selectedAt = frame.indexOf('❯');
     const targetAt = frame.indexOf(target);
-    if (selectedAt < 0) throw Error('owned_source_selection_absent');
+    if (selectedAt < 0) {
+      // A PTY data chunk may end between Ink clearing and painting its menu.
+      // Require the real selected row within the original navigation deadline;
+      // an incomplete paint consumes no key and grants no retained observation.
+      if (Date.now() > end) throw Error('owned_source_selection_absent');
+      await Bun.sleep(50);
+      step--;
+      continue;
+    }
     if (targetAt < 0 && label !== 'Check original source decision')
       throw Error(`owned_source_choice_absent:${label}`);
     await key(targetAt < 0 || targetAt < selectedAt ? '\x1b[A' : '\x1b[B');
@@ -172,13 +204,31 @@ const start = async (phase: string) => {
     `${JSON.stringify({ phase, pid: active.host.pid })}\n`,
     'a',
   );
-  await wait('New Run >');
+  const end = Date.now() + 10000;
+  for (;;) {
+    const frame = await current();
+    if (frame.fresh && frame.text.includes('New Run >')) break;
+    if (
+      frame.fresh &&
+      frame.text.includes('Open this workspace?') &&
+      frame.text.includes('› Exit Kite Code')
+    ) {
+      await key('\x1b[A');
+      await wait('› Trust this workspace and continue', false, end);
+      await key('\r');
+      await wait('New Run >', false, end);
+      break;
+    }
+    if (Date.now() > end) throw Error('owned_frame_deadline:workspace-trust-or-main');
+    if (active!.ended) throw Error('owned_pty_eof');
+    await Bun.sleep(50);
+  }
 };
 const sources = async () => {
   await key('/mcp');
   await wait('New Run > /mcp');
   await key('\r');
-  await wait('› Project sources');
+  await wait('❯ Project sources');
   await key('\r');
   await wait('Project sources');
 };
@@ -208,18 +258,97 @@ try {
     await sources();
     await wait('Source list ready');
     await key('\r');
-    await wait('› Review project source');
+    await wait('❯ Review project source');
     await key('\r');
     await wait('Confirm project source review:');
     await control(`before-confirm/${n}`);
     await key('\r');
     const originalId = await waitNewOriginal(ids);
-    await key('\x03');
     const ordinary = await control(`ordinary/${n}`);
     assert.equal(ordinary.commandId, originalId);
-    await wait(`approval[${ordinary.id}]originalSessiona`, true);
-    await key('approve');
-    await wait('revise feedback / deny. approve');
+    // Close management before another control key. An original ID is not a
+    // completed navigation, and adjacent Ctrl+C/Ctrl+L can be one input batch.
+    const navigationDeadline = Date.now() + 10000;
+    await key('\x03');
+    for (;;) {
+      const frame = await current();
+      const viewport = normalized(active!.viewport());
+      if (
+        frame.fresh &&
+        viewport.includes('Session a · Idle') &&
+        !viewport.includes('Project sources')
+      )
+        break;
+      if (Date.now() > navigationDeadline)
+        throw Error(`owned_source_management_close_deadline:${viewport}`);
+      await Bun.sleep(50);
+    }
+    // Refresh the exact original public work after the observed close, within
+    // the original card-read deadline; no approval or Source answer is sent.
+    await wait(`approval[${ordinary.id}]originalSessiona`, true, navigationDeadline);
+    // A read-only lookup may preserve this exact already painted card. Retain
+    // only its proven main-screen observation; any later paint supersedes it.
+    const completionBefore =
+      selections()
+        .filter((row) => row.phase === 'warm')
+        .at(-1)?.completion ?? 0;
+    await key('\x0c', true);
+    for (;;) {
+      const completion = selections().find(
+        (row) =>
+          row.phase === 'warm' &&
+          row.completion > completionBefore &&
+          row.requestedSessionId === 'a' &&
+          row.sessionId === 'a' &&
+          row.storeId === storeId &&
+          !row.rejected &&
+          row.loading === false &&
+          row.stale === false &&
+          row.snapshotStale === false &&
+          row.cards?.some(
+            (card) =>
+              card.id === ordinary.id &&
+              card.revision === '1' &&
+              card.storeId === storeId &&
+              card.sessionId === 'a',
+          ),
+      );
+      if (completion) break;
+      if (Date.now() > navigationDeadline)
+        throw Error('owned_source_original_refresh_completion_deadline');
+      await Bun.sleep(5);
+    }
+    await wait(`approval[${ordinary.id}]originalSessiona`, true, navigationDeadline);
+    if ((await current()).text.includes('Ctrl+A: read required attachment.')) {
+      await key('\x01');
+      const deadline = Date.now() + 10000;
+      for (;;) {
+        const frame = await current();
+        if (frame.fresh && !frame.text.includes('Ctrl+A: read required attachment.')) break;
+        if (Date.now() > deadline) throw Error('owned_source_attachment_read_deadline');
+        await Bun.sleep(5);
+      }
+    }
+    // The ordinary production approval panel uses an explicit selected action.
+    // Preserve this original card's identity and independent approval before
+    // the Source-specific Question becomes actionable.
+    const approvalDeadline = Date.now() + 10000;
+    for (;;) {
+      const frame = await current();
+      const viewport = normalized(active!.viewport());
+      if (
+        frame.fresh &&
+        viewport.includes('❯ Allow once') &&
+        !viewport.includes('Project sources') &&
+        !viewport.includes('Original outcome pending or unknown') &&
+        !viewport.includes('Loading')
+      )
+        break;
+      if (Date.now() > approvalDeadline)
+        throw Error(`owned_source_approval_focus_deadline:${viewport}`);
+      await Bun.sleep(50);
+    }
+    await wait('Approve this execution only');
     await key('\r');
     const question = await control(`question/${n}`);
     await wait(`question[${question.id}]originalSessiona`, true);

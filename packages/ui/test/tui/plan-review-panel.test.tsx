@@ -69,3 +69,53 @@ test('pending or unknown original outcome blocks all new decisions and edits', a
     ui.unmount();
   }
 });
+
+test('actual input batch confirms the last explicit choice, never the listener initial selection', async () => {
+  const answers: string[] = [];
+  const ui = render(
+    <TuiPlanReviewPanel
+      card={{ ...card, request: { allowedModes: ['auto', 'accept_edits'] } }}
+      feedback={new ComposerBuffer()}
+      onAnswer={(answer) => answers.push(answer)}
+    />,
+  );
+  try {
+    await tick();
+    ui.stdin.write('\u001b[B\u001b[B\r');
+    await tick();
+    expect(answers).toEqual(['approve accept_edits']);
+  } finally {
+    ui.unmount();
+  }
+});
+
+test('an offered mode removed after selection cannot approve another row through its former index', async () => {
+  const answers: string[] = [],
+    feedback = new ComposerBuffer();
+  const ui = render(
+    <TuiPlanReviewPanel
+      card={card}
+      feedback={feedback}
+      onAnswer={(answer) => answers.push(answer)}
+    />,
+  );
+  try {
+    await tick();
+    ui.stdin.write('\u001b[B');
+    await tick();
+    ui.rerender(
+      <TuiPlanReviewPanel
+        card={{ ...card, request: { allowedModes: ['auto'] } }}
+        feedback={feedback}
+        onAnswer={(answer) => answers.push(answer)}
+      />,
+    );
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(answers).toEqual([]);
+    expect(ui.lastFrame()).toContain('none (Enter has no answer)');
+  } finally {
+    ui.unmount();
+  }
+});

@@ -3,7 +3,11 @@ import { planTestSuites, runTestPlan } from './test-plan';
 import { collectTestFiles, testParallelism } from './test-suite';
 
 export const UNIFIED_TUI_SHARD_ENV = 'KITE_TUI_SYSTEM_SHARD';
-const formal = 'tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts';
+const formal = [
+  'tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts',
+  'tests/isolated/unified-agent/tui-startup-wait.test.ts',
+] as const;
+const originalScenarios = 'tests/tui-system/scenarios/';
 
 export function parseUnifiedTuiShard(value: string | undefined) {
   if (value === undefined) return undefined;
@@ -12,14 +16,21 @@ export function parseUnifiedTuiShard(value: string | undefined) {
   return Object.freeze({ index: Number(value[0]), count: 4 });
 }
 
-/** Current CLI owner tests plus the formal candidate wrapper; no legacy scenario harness. */
+/** Original terminal journeys now use the current UI/Service, alongside owner and formal checks. */
 export function unifiedTuiInventory(root: string): string[] {
   const cli = collectTestFiles(resolve(root, 'apps/cli/test'))
     .filter((file) => /^tui.*\.test\.ts$/.test(basename(file)))
     .map((file) => relative(root, file).replaceAll('\\', '/'));
-  if (cli.length === 0 || collectTestFiles(resolve(root, formal)).length !== 1)
+  const original = collectTestFiles(resolve(root, originalScenarios)).map((file) =>
+    relative(root, file).replaceAll('\\', '/'),
+  );
+  if (
+    cli.length === 0 ||
+    original.length === 0 ||
+    formal.some((file) => collectTestFiles(resolve(root, file)).length !== 1)
+  )
     throw Error('unified_tui_test_inventory_unavailable');
-  return [...cli, formal].sort();
+  return [...cli, ...original, ...formal].sort();
 }
 
 export function selectUnifiedTuiTests(
@@ -34,6 +45,26 @@ export function selectUnifiedTuiTests(
     (_, index) => !shard || index % shard.count === shard.index,
   );
   return Object.freeze({ list: args[0] === '--list', shard, files: Object.freeze(files) });
+}
+
+export function unifiedTuiTestPlan(root: string, files: readonly string[], concurrency: number) {
+  const plan = planTestSuites(
+    root,
+    files.filter((file) => !file.startsWith(originalScenarios)),
+    concurrency,
+  );
+  for (const file of files.filter((candidate) => candidate.startsWith(originalScenarios))) {
+    plan.concurrent.push({
+      label: `original-tui:${basename(file)}`,
+      files: [resolve(root, file)],
+      // Retain the original per-file, test, journey and owned-process teardown budgets.
+      command: [process.execPath, resolve(root, 'scripts/run-tui-system-tests.ts'), basename(file)],
+      maxConcurrency: 1,
+      drainOnFailure: true,
+    });
+    plan.counts.isolated++;
+  }
+  return plan;
 }
 
 export async function runUnifiedTuiSystemTests(
@@ -53,7 +84,7 @@ export async function runUnifiedTuiSystemTests(
     return 0;
   }
   const concurrency = testParallelism();
-  const plan = planTestSuites(root, selection.files, concurrency);
+  const plan = unifiedTuiTestPlan(root, selection.files, concurrency);
   console.log(`[unified-tui] parallelism=${concurrency} shard=${shardValue ?? 'all'}`);
   return await runTestPlan(root, plan, concurrency);
 }

@@ -211,16 +211,18 @@ export function createDefaultFileCheckpointConfiguration(options: {
           subjectId,
           compressionId,
         });
-        const instruction = entries.at(-1);
+        const instructions = entries.filter(
+          (entry) => entry.sourceIds?.length === 1 && entry.sourceIds[0] === compressionId,
+        );
         if (
           origin.modelExecutionId !== input.executionId ||
           origin.originSessionId !== input.sessionId ||
-          instruction?.sourceIds?.length !== 1 ||
-          instruction.sourceIds[0] !== compressionId
+          instructions.length !== 1
         )
           fail('checkpoint_compression_unverifiable');
-        // Core appends one generated compression instruction. It is not a consumed user Message.
-        entries.pop();
+        // Source material may follow Core's generated instruction. Remove only
+        // that exact origin-bound entry; real colliding User messages remain.
+        entries.splice(entries.indexOf(instructions[0]!), 1);
       }
       let summaryRemoved = false;
       for (const entry of entries) {

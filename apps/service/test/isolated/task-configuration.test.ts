@@ -20,7 +20,7 @@ async function until<T>(read: () => Promise<T | undefined>) {
     await Bun.sleep(5);
   }
 }
-function endpoint() {
+function endpoint(role = 'worker') {
   const requests: Record<string, unknown>[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -29,7 +29,12 @@ function endpoint() {
       const body = (await request.json()) as Record<string, unknown>;
       requests.push(body);
       const messages = body.messages as { role: string; content: string | null }[];
-      const parent = body.model === 'parent';
+      const parent =
+        body.model === 'parent' &&
+        messages.some(
+          (message) =>
+            message.role === 'user' && ['work', 'second'].includes(message.content ?? ''),
+        );
       const cut = parent
         ? messages.reduce(
             (found, message, at) =>
@@ -52,7 +57,7 @@ function endpoint() {
             name: 'task',
             input: {
               key,
-              role: 'worker',
+              role,
               input: { content: 'read full actual input' },
               cancellation: 'detached',
             },
@@ -94,7 +99,12 @@ function endpoint() {
   };
 }
 async function fixture(
-  options: { roles?: boolean; mode?: 'full' | 'accept_edits'; deny?: 'task' | 'carrier' } = {},
+  options: {
+    roles?: boolean;
+    mode?: 'full' | 'accept_edits';
+    deny?: 'task' | 'carrier';
+    defaultRole?: 'plan' | 'review';
+  } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-default-task-'));
   const workspace = join(root, 'workspace');
@@ -102,7 +112,7 @@ async function fixture(
   writeFileSync(join(workspace, 'input.txt'), 'actual complete private input');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
-  const a = endpoint(),
+  const a = endpoint(options.defaultRole),
     b = endpoint();
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   const configuration = {
@@ -111,9 +121,16 @@ async function fixture(
       { id: 'parent', provider: 'compatible', model: 'parent', baseURL: a.baseURL },
       { id: 'child', provider: 'compatible', model: 'child-v1', baseURL: a.baseURL },
     ],
-    tools: ['task', 'task_read', 'task_wait', 'task_cancel', 'files.read'].map((id) => ({
+    tools: [
+      'task',
+      'task_read',
+      'task_wait',
+      'task_cancel',
+      'files.read',
+      ...(options.defaultRole ? ['files.write'] : []),
+    ].map((id) => ({
       id,
-      definitionVersion: id === 'files.read' ? '3' : '1',
+      definitionVersion: id === 'files.read' ? '3' : id === 'files.write' ? '2' : '1',
     })),
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
@@ -124,7 +141,9 @@ async function fixture(
       child:
         options.roles === false
           ? []
-          : [{ id: 'worker', version: roleVersion, modelId: 'child', toolIds: ['files.read'] }],
+          : options.defaultRole
+            ? undefined
+            : [{ id: 'worker', version: roleVersion, modelId: 'child', toolIds: ['files.read'] }],
       permissionPolicy: {
         readPolicy: () => ({
           mode: options.mode ?? 'full',
@@ -142,7 +161,7 @@ async function fixture(
               : [
                   {
                     kind: 'job' as const,
-                    definitionId: 'agent/worker',
+                    definitionId: `agent/${options.defaultRole ?? 'worker'}`,
                     definitionVersion: roleVersion,
                   },
                 ]),
@@ -374,6 +393,7 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
   }
   expect(createTaskConfiguration([]).extension).toBeUndefined();
   for (const id of [
+    'task.execute',
     'send_message',
     'followup_task',
     'list_agents',
@@ -389,6 +409,7 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
   expect(task.snapshot.tools.map((row) => row.id).sort()).toEqual(
     [
       'task',
+      'task.execute',
       'task_read',
       'task_wait',
       'task_cancel',
@@ -498,3 +519,63 @@ test('selected collaboration additions expose exact closed schemas to the real S
     await f.close();
   }
 }, 10000);
+
+test('default plan and review run through the real Task carrier and expose only frozen parent-selected reads', async () => {
+  for (const role of ['plan', 'review'] as const) {
+    const f = await fixture({ defaultRole: role });
+    try {
+      await f.submit();
+      expect((await f.done()).status).toBe('applied');
+      const carrier = await until(async () =>
+        (await f.store.listExecutions('s')).find(
+          (row) => row.definitionId === `agent/${role}` && row.status === 'succeeded',
+        ),
+      );
+      expect(carrier.childSessionId).toBeTruthy();
+      expect(carrier.originStoreId).toBe(f.base.expectedStoreId);
+      const parent = (await f.store.listExecutions('s')).find(
+        (row) => row.id === carrier.parentExecutionId,
+      )!;
+      expect(parent.definitionId).toBe('task');
+      expect(carrier.rootWorkCommandId).toBe(parent.rootWorkCommandId);
+      expect(carrier.rootWorkSeq).toBe(parent.rootWorkSeq);
+      const child = await f.store.getView(carrier.childSessionId!);
+      expect(child.session.parentSessionId).toBe('s');
+      expect(child.runs[0]!.configuration).toMatchObject({
+        snapshot: { roleId: role, roleVersion: '1', roleToolIds: ['files.read'] },
+        tools: [{ id: 'files.read', version: '3', extensionId: 'builtin.files' }],
+      });
+      const childRequests = f.a.requests.filter((request) =>
+        (request.messages as { role: string; content: unknown }[]).some(
+          (message) => message.role === 'user' && message.content === 'read full actual input',
+        ),
+      );
+      expect(childRequests).toHaveLength(2);
+      for (const request of childRequests) {
+        expect(
+          (request.tools as { function: { name: string } }[]).map((tool) => tool.function.name),
+        ).toEqual(['files.read']);
+      }
+      const executions = await f.store.listExecutions(carrier.childSessionId!);
+      expect(
+        executions
+          .filter((row) => row.kind === 'tool')
+          .map((row) => [row.definitionId, row.status]),
+      ).toEqual([['files.read', 'succeeded']]);
+      const record = await f.store.getExtensionRecord({
+        sessionId: 's',
+        extensionId: 'builtin.task',
+        key: 'task/work',
+      });
+      expect(record?.value).toMatchObject({
+        role,
+        ref: { executionId: carrier.id, originStoreId: f.base.expectedStoreId },
+      });
+      expect(readFileSync(join(f.workspace, 'input.txt'), 'utf8')).toBe(
+        'actual complete private input',
+      );
+    } finally {
+      await f.close();
+    }
+  }
+}, 15000);

@@ -1,10 +1,26 @@
 # Task 子协作叶子
 
-`createTaskExtension({roles})` 显式装配 `task/task_read/task_wait/task_cancel/send_message/followup_task/list_agents/interrupt_agent/wait_agents/wait_agent` ordinary Tools。可信宿主选择 role→已注册 child configuration，模型不能提交新配置、权限或 Provider；构造/import 不执行 I/O。定义继续经过统一 Tool 权限与执行路径，child 使用既有 `operations.ensure(kind:agent)` 和唯一 Loop。
+`createTaskExtension({roles})` 显式装配 `task/task.execute/task_read/task_wait/task_cancel/send_message/followup_task/list_agents/interrupt_agent/wait_agents/wait_agent` ordinary Tools。可信宿主选择 role→已注册 child configuration，模型不能提交新配置、权限或 Provider；构造/import 不执行 I/O。定义继续经过统一 Tool 权限与执行路径，child 使用既有 `operations.ensure(kind:agent)` 和唯一 Loop。
+
+[默认角色](roles.ts)保留 worker／code，并提供完整 explore／plan／review 只读分析能力。Task 与前台 Task 的实际 role schema 和说明包含五个角色、实施任务适用条件以及独立兄弟任务并行语义；描述不是权限。三个只读角色只取父调用当前步骤的冻结工具身份与可信角色范围的交集，再由 Agent 纯 `isReadOnlyTaskTool` 核冻结定义的 extension owner、ID 与版本；同名自定义工具、未来版本、文件写入、进程／联网派发及未知 MCP 不能借角色名称进入 child。新增角色不增加默认三个槽位，也不替代父子权限、计划、取消和真实记录核验。[真实默认角色测试](../../../../../apps/service/test/isolated/default-task-roles.test.ts)覆盖 plan／review 的实际 child、读取、Scope、记录与完整结果。
 
 原调用 key/Store/主体/父 execution 由 Host 绑定；leaf 在自己的 namespace 保存 immutable 原 OperationRef。重复原调用只查回原 carrier，同 key 不能更换角色、输入、父关系或取消域。创建回执只表示 accepted，read/wait 返回真实 carrier；timeout 不停止 child，cancel 回执仅为 cancel_requested，停止以持久终态或 unknown 为准。正常 detached child 可在父完成后继续，读取历史不调用模型。
 
+默认 child 的父工具交集先经 Agent 的纯 `isRootOnlyTaskTool` 排除准确 `builtin.ask-user/ask_user@1`，保留根 Agent 的人类澄清入口。父计划阶段自动加入的合法 Planning 工具由 Service 核原父冻结 owner／ID／version 与当前真实注册定义后装配，当前显式禁用仍拒绝；未知工具不取得这项例外。child 的基础合同和自身 Run 状态来源不等于继承父计划意图，原 requirements、parent AND current permission 和独立实际效果许可继续适用。
+
 当前 leaf 的角色、同调用去重、共享单模型槽等待、父权限拒绝零 child Model、detached 后台继续及准确取消已由[真实 Core/SQLite 测试](../../../test/isolated/business/task/task.test.ts)验证。默认结果义务与事件驱动等待由 [required.test.ts](../../../test/isolated/business/task/required.test.ts) 的真实 Core/SQLite 场景验证；QueueOnly 邮件的当前边界见下文。
+
+## 前台完整结果与后台处置
+
+正式前台 `task.execute` 复用原 role、key、immutable OperationRef 和真实 child carrier，由 [foreground.ts](foreground.ts) 等待该准确 carrier 的实际终态；创建 accepted 不作为完成。原父 Tool call ID 收到完整 child 总结后，父 Model 才继续。同一批多个前台 Task 可以并发创建独立 child，仍服从实际 ChildSlots 和父工具集合／权限交集。大正文核原 carrier 的准确 Artifact scope、完整 UTF-8 和大小，再发布到当前 Tool scope；不截断或复制整个 child 历史。
+
+前台 Tool 内部以 `resultDisposition=background` 创建 carrier，因为该 Tool 已负责等待并返回同一结果，不再登记第二份 required result 来重复续轮。这个内部处置不使前台 Task detached，也不开放 Model 的后台／after_turn 参数。原 `task`、`followup_task` 的 accepted、required、显式 background／after_turn 合同保留，见下文。
+
+普通 child carrier 可以是 `runId=null` 的实际 Job；准确父 Tool、原 Store／Session／root work 和独立 child Session／Run 提供血缘，不能将 carrier 的 null Run 冒认为父 Run。取消沿原 attached 域传播；前台等待只观察原 ref 的真实终态，未确认或 unknown 保原未知，不造 cleanup 成功。明确人类拒绝须由 carrier 保存结果、实际 child Session／Run、终态与同一 resultRevision 证明 `approval_denied`，才向父 Tool 传递该类型，使原父批次停止而不再请求 Model；普通失败、模型文字或 stderr 不取得这项资格。
+
+默认有限角色的准确创建调用可由 [Task request classifier](../../permissions/task-request.ts) 标为纯内部记录能力；只限未覆写的正式角色声明及已注册 `task`／`task.execute`／对应 `agent/<role>` carrier。custom 角色、配置覆写、未知定义和其他 mutation 仍保守。创建许可不批准 child 的真实 Files、Shell 或联网效果，三策略与父子 ceiling 由[权限 owner](../../permissions/README.md)统一解释。
+
+本次 macOS 当前工作树实际运行 `bun test packages/agent/test/isolated/business/task/task.test.ts`：11 项、74 断言通过，含原后台／default-three 拒第四、真实并发前台、完整大正文、取消、人类拒绝，以及父人工 ceiling 与子自动审核相交后仍需实际人工批准。原终端 [subagent-approval](../../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 整文件 9 项、120 断言通过，含真实外部写入、自动审核和四 child 取消后继顺序；四 child 用例显式选择可信测试宿主四槽配置，不改变正式默认三槽。该证据不证明其余 TUI 全集、Win/Linux 原生资格或整体阶段退出。
 
 ## 通用接口接入状态
 

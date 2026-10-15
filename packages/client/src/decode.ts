@@ -14,6 +14,7 @@ export interface Responses {
   ShutdownServiceResponse: API.ShutdownServiceResponse;
   ModelSettingsView: API.ModelSettingsView;
   ProviderSettingsView: API.ProviderSettingsView;
+  ProviderDiscoveryView: API.ProviderDiscoveryView;
   ConfigurationView: API.ConfigurationView;
   HostMutation: API.HostMutation;
   SessionExportManifest: API.SessionExportManifest;
@@ -97,6 +98,7 @@ export function validateRequest(
     | 'ShutdownServiceRequest'
     | 'ModelSettingsRequest'
     | 'ProviderSettingsRequest'
+    | 'ProviderDiscoveryRequest'
     | 'ConfigurationReadQuery'
     | 'HostMutationQuery'
     | 'ConfigurationPatchRequest'

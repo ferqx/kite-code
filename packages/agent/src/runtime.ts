@@ -25,6 +25,7 @@ import { ChangeWaits } from './execution/change-waits';
 import { ChildSlots } from './execution/child-slots';
 import type { WorkspaceSerialLocks } from './execution/resource-port';
 import { ExecutionResources } from './execution/resources';
+import { createToolDispatchBatch } from './execution/tool-dispatch-admission';
 import type {
   AuthorizationRequest,
   Extension,
@@ -41,9 +42,15 @@ import { sealForkRule } from './extensions/fork';
 import { type PublicForkInput, prepareNamespaceFork } from './extensions/fork-preparation';
 import { ExtensionHost } from './extensions/host';
 import { canonicalJson, semanticDigest } from './json';
-
 import { defaultLoop, type LoopContext } from './loop';
+import {
+  MODEL_MAX_ATTEMPTS,
+  type ModelRetrySource,
+  modelRetryReason,
+  waitForModelRetry,
+} from './model-attempt';
 import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './model-body';
+import { assembleModelContext, modelHistory } from './model-context';
 import { modelOutputReference, readModelOutput } from './model-output';
 import { type ModelInputMetadata, modelInputMetadata } from './model-snapshot';
 import type {
@@ -331,6 +338,11 @@ export interface RuntimeOptions {
     readonly configurationId: string;
     readonly parentExecution: Readonly<ExecutionRecord>;
     readonly parentRun: Readonly<RunRecord> | null;
+    readonly parentTools: readonly Readonly<{
+      id: string;
+      version: string;
+      extensionId: string | null;
+    }>[];
     readonly parentSession: Readonly<SessionRecord>;
     readonly workspace: Readonly<WorkspaceRecord>;
     readonly command: CommandRecord;
@@ -463,7 +475,12 @@ export class AgentRuntime {
       owner: OwnerRef;
       controller: AbortController;
       subjectId: string;
+      scope: ToolScope;
     }
+  >();
+  private readonly nestedActions = new Map<
+    string,
+    { fingerprint: string; work: Promise<CommandRecord> }
   >();
   private readonly wakeups = new Set<string>();
   private readonly pendingSessions = new Set<string>();
@@ -561,6 +578,7 @@ export class AgentRuntime {
             configuration.maxConcurrentSubagents,
             captured.extensionIds,
             captured.extensions,
+            configuration.permissions,
           ),
         },
         inputSchema: structuredClone(
@@ -903,9 +921,13 @@ export class AgentRuntime {
     limit?: number,
     extensionIds = this.toolExtensions,
     registeredExtensions = this.extensions,
+    permissions: Permissions | undefined = this.options.permissions,
   ): Json {
     return {
       modelId,
+      ...(permissions?.toolDispatchOrder
+        ? { toolDispatchOrder: permissions.toolDispatchOrder }
+        : {}),
       ...(snapshot === null ? {} : { snapshot: structuredClone(snapshot) }),
       maxConcurrentSubagents: this.childLimit(limit),
       extensions: registeredExtensions.map(({ id, version }) => ({ id, version })),
@@ -1076,6 +1098,7 @@ export class AgentRuntime {
   private childPermissions(parent: Permissions, child: Permissions | undefined): Permissions {
     const policies = child && child !== parent ? [parent, child] : [parent];
     return {
+      toolDispatchOrder: parent.toolDispatchOrder ?? child?.toolDispatchOrder,
       async authorize(request) {
         const decisions: PermissionDecision[] = [];
         for (const policy of policies) {
@@ -1204,7 +1227,7 @@ export class AgentRuntime {
                 })),
               } as Json,
               requireApproval:
-                approvals.length > 0 ||
+                decisions.some((decision) => !!decision.approval && !decision.review) ||
                 reviews.some((decision) => decision.review?.requireApproval),
             }
           : undefined;
@@ -1297,6 +1320,8 @@ export class AgentRuntime {
     const workspace = await this.options.store.getWorkspace(session.workspaceId);
     if (!workspace) throw new AgentError('workspace_not_found');
     const nearest = await this.nearestParentRun(execution);
+    const parentBindings = parent.bindings;
+    if (!parentBindings) throw new AgentError('child_parent_binding_unavailable');
     const allowedExtensions = new Set(
       nearest.run ? (parent.bindings?.extensions ?? []).map((item) => item.id) : [],
     );
@@ -1343,6 +1368,16 @@ export class AgentRuntime {
           configurationId,
           parentExecution: freeze(structuredClone(execution)),
           parentRun: freeze(structuredClone(nearest.run)),
+          parentTools: freeze(
+            [...parentBindings.tools.values()].map((tool) => ({
+              id: tool.id,
+              version: tool.version,
+              extensionId:
+                parentBindings.extensions.find((extension) =>
+                  extension.tools?.some((candidate) => candidate.id === tool.id),
+                )?.id ?? null,
+            })),
+          ),
           parentSession: freeze(structuredClone(session)),
           workspace: freeze(structuredClone(workspace)),
           command: freeze(structuredClone(parent.command)),
@@ -1387,6 +1422,7 @@ export class AgentRuntime {
               configuration.maxConcurrentSubagents,
               captured.extensionIds,
               captured.extensions,
+              configuration.permissions,
             ),
           },
           binding: {
@@ -1514,6 +1550,15 @@ export class AgentRuntime {
         definitions: new Map(template.binding.definitions),
         jobs: new Map(template.binding.jobs),
         extensions: template.binding.extensions ?? this.extensions,
+      },
+    };
+    configured.configuration = {
+      ...configured.configuration,
+      snapshot: {
+        ...(configured.configuration.snapshot as Record<string, Json>),
+        ...(configured.binding.permissions?.toolDispatchOrder
+          ? { toolDispatchOrder: configured.binding.permissions.toolDispatchOrder }
+          : {}),
       },
     };
     if (!reviewConfiguration && template.binding.readStepCapabilities) {
@@ -1690,6 +1735,7 @@ export class AgentRuntime {
           childSessionId: activation.session.id,
           runId: activation.run.id,
           status: current?.status ?? 'unavailable',
+          reason: current?.reason ?? null,
           ...(reviewOutput ? { authorizationReviewOutput: reviewOutput } : {}),
         },
       };
@@ -1908,6 +1954,7 @@ export class AgentRuntime {
       subjectId: work.subjectId,
       owner: scope.owner,
       controller,
+      scope,
     });
     this.watchControls();
     return () => this.activeExecutions.delete(id);
@@ -2474,7 +2521,11 @@ export class AgentRuntime {
         throw new AgentError('resume_checkpoint_unavailable');
     }
     const tools = new Map<string, ExecutionRecord>();
-    const settled: { callId: string; result: import('./extensions').ToolResult }[] = [];
+    const settled: {
+      callId: string;
+      result: import('./extensions').ToolResult;
+      dispatched?: boolean;
+    }[] = [];
     const callIds = new Set<string>();
     for (const call of output.toolCalls) {
       if (callIds.has(call.id)) throw new AgentError('resume_checkpoint_unavailable');
@@ -2500,6 +2551,7 @@ export class AgentRuntime {
         settled.push({
           callId: call.id,
           result: existing.result as unknown as import('./extensions').ToolResult,
+          dispatched: existing.authorization?.dispatched,
         });
       else throw new AgentError('resume_checkpoint_unavailable');
     }
@@ -2605,6 +2657,7 @@ export class AgentRuntime {
           resolved?.maxConcurrentSubagents,
           catalogue.extensionIds,
           catalogue.extensions,
+          resolved?.permissions,
         );
         if (canonicalJson(configuration) !== canonicalJson(state.run.configuration))
           throw new AgentError('run_configuration_mismatch');
@@ -3126,6 +3179,7 @@ export class AgentRuntime {
           limit,
           catalogue.extensionIds,
           catalogue.extensions,
+          binding.permissions,
         );
         if (canonicalJson(configuration) !== canonicalJson(parent.configuration))
           throw new AgentError('report_configuration_mismatch');
@@ -3255,6 +3309,108 @@ export class AgentRuntime {
       this.watchControls();
     }
     return command;
+  }
+  /** Trusted host port for an ordinary Action requested by an exact live Model Tool.
+   * It retains that Tool's permission ceiling rather than re-entering the Session pump. */
+  invokeActionFromTool(
+    input: AcceptCommandInput & { parentExecutionId: string },
+  ): Promise<CommandRecord> {
+    const fingerprint = canonicalJson(input as unknown as Json);
+    const existing = this.nestedActions.get(input.commandId);
+    if (existing)
+      return existing.fingerprint === fingerprint
+        ? existing.work
+        : Promise.reject(new AgentError('command_conflict'));
+    const work = this.dispatchNestedAction(input);
+    this.nestedActions.set(input.commandId, { fingerprint, work });
+    void work.finally(() => this.nestedActions.delete(input.commandId)).catch(() => {});
+    return work;
+  }
+  private async dispatchNestedAction(
+    input: AcceptCommandInput & { parentExecutionId: string },
+  ): Promise<CommandRecord> {
+    const live = this.activeExecutions.get(input.parentExecutionId);
+    const scope = live?.scope;
+    if (
+      this.closing ||
+      !live ||
+      !scope ||
+      !('run' in scope) ||
+      !scope.bindings ||
+      live.subjectId !== input.subjectId ||
+      live.originStoreId !== input.expectedStoreId ||
+      live.sessionId !== input.sessionId ||
+      input.request.kind !== 'extension.invoke'
+    )
+      throw new AgentError('nested_action_scope_invalid');
+    this.extensionHost.validateAction(input.request);
+    const parent = await this.options.store.getExecution(input.parentExecutionId);
+    const assertFresh = async () => {
+      live.controller.signal.throwIfAborted();
+      if (this.closing || this.activeExecutions.get(input.parentExecutionId) !== live)
+        throw new AgentError('nested_action_scope_invalid');
+      const actual = await this.options.store.getExecution(input.parentExecutionId);
+      const run = await this.options.store.getRun(scope.run.id);
+      const origin = await this.options.store.getCommand(scope.run.originCommandId);
+      if (
+        !parent ||
+        !actual ||
+        actual.kind !== 'tool' ||
+        !['dispatching', 'running'].includes(actual.status) ||
+        actual.id !== parent.id ||
+        actual.runId !== scope.run.id ||
+        actual.originStoreId !== input.expectedStoreId ||
+        actual.sessionId !== input.sessionId ||
+        actual.definitionId !== parent.definitionId ||
+        actual.definitionVersion !== parent.definitionVersion ||
+        actual.attempt !== parent.attempt ||
+        actual.rootWorkCommandId !== parent.rootWorkCommandId ||
+        actual.rootWorkSeq !== parent.rootWorkSeq ||
+        actual.cancelRequestedAt !== null ||
+        !run?.isActive ||
+        run.originStoreId !== input.expectedStoreId ||
+        run.sessionId !== input.sessionId ||
+        !origin ||
+        origin.subjectId !== input.subjectId ||
+        origin.cancelRequestedAt !== null
+      )
+        throw new AgentError('nested_action_scope_invalid');
+      live.controller.signal.throwIfAborted();
+    };
+    await assertFresh();
+    const bindings = scope.bindings;
+    const releaseBinding = bindings.retain();
+    const controller = new AbortController();
+    const abort = () => controller.abort(live.controller.signal.reason);
+    live.controller.signal.addEventListener('abort', abort, { once: true });
+    if (live.controller.signal.aborted) abort();
+    let release: (() => void) | undefined;
+    let command: CommandRecord | undefined;
+    try {
+      command = await this.options.store.acceptNestedAction({ ...input, owner: scope.owner });
+      if (command.status !== 'accepted') return command;
+      await assertFresh();
+      release = this.trackLive(command, scope.owner, controller);
+      await this.extensionHost.run(command, scope.owner, controller, {
+        executionId: input.parentExecutionId,
+        bindings,
+        assertFresh,
+      });
+      return (await this.options.store.getCommand(command.id))!;
+    } catch (error) {
+      if (command && (await this.options.store.getCommand(command.id))?.status === 'accepted')
+        await this.options.store.rejectCommand({
+          expectedStoreId: input.expectedStoreId,
+          owner: scope.owner,
+          commandId: command.id,
+          reason: error instanceof AgentError ? error.code : 'action_preparation_failed',
+        });
+      throw error;
+    } finally {
+      release?.();
+      live.controller.signal.removeEventListener('abort', abort);
+      await releaseBinding();
+    }
   }
   private watchControls() {
     if (
@@ -3408,6 +3564,22 @@ export class AgentRuntime {
             continue;
           }
           if (command.kind === 'extension.invoke') {
+            const receipt = command.receipt;
+            if (
+              receipt &&
+              typeof receipt === 'object' &&
+              !Array.isArray(receipt) &&
+              receipt.kind === 'nested_action'
+            ) {
+              await this.options.store.rejectCommand({
+                expectedStoreId: command.originStoreId,
+                owner,
+                commandId: command.id,
+                reason: 'nested_action_recovery_required',
+                needsReview: true,
+              });
+              continue;
+            }
             const controller = new AbortController();
             const release = this.trackLive(command, owner, controller);
             try {
@@ -3701,6 +3873,7 @@ export class AgentRuntime {
         maxConcurrentSubagents,
         bindings.extensionIds,
         bindings.extensions,
+        permissions,
       );
       const write = {
         expectedStoreId: command.originStoreId,
@@ -3754,6 +3927,11 @@ export class AgentRuntime {
     resumed?: RunExecutionCheckpoint,
   ): Promise<void> {
     const { model, modelId, definitions } = binding;
+    const orderedToolAdmission =
+      run.configuration !== null &&
+      typeof run.configuration === 'object' &&
+      !Array.isArray(run.configuration) &&
+      run.configuration.toolDispatchOrder === 'model';
     let users = 1;
     let disposed = false;
     const releaseBinding = async () => {
@@ -4061,7 +4239,7 @@ export class AgentRuntime {
         bindings = scope.bindings,
       ) => {
         const sources = new Map<string, ContextSource>();
-        const requestList = [...requests];
+        const requestList = [...requests].map((request) => ({ ...request, runId: run.id }));
         const addHostSources = (hostSources: ContextSource[]) => {
           if (!Array.isArray(hostSources) || hostSources.length > 256)
             throw new AgentError('context_source_budget_exceeded');
@@ -4189,14 +4367,15 @@ export class AgentRuntime {
             modelId,
             signal: controller.signal,
             getTools: () => [],
-            getMessages: async () => [
-              ...originalMessages,
-              {
-                role: 'user',
-                content: prepared.instructions + (focus ? `\nFocus (user data): ${focus}` : ''),
-                sourceIds: [pending.id],
-              },
-            ],
+            getMessages: async () =>
+              assembleModelContext(captured, [
+                ...modelHistory(captured, originalMessages),
+                {
+                  role: 'user',
+                  content: prepared.instructions + (focus ? `\nFocus (user data): ${focus}` : ''),
+                  sourceIds: [pending.id],
+                },
+              ]),
             executeTool: async () => {
               throw new AgentError('compression_summary_invalid');
             },
@@ -4291,36 +4470,28 @@ export class AgentRuntime {
         await selectCapabilities();
         capturedInputVersion = inputVersion;
         captured = await capture();
-        const assembled: ModelMessage[] = [
-          ...captured.map((source) => ({
-            role: source.role ?? ('system' as const),
-            content: source.content,
-            sourceIds: [source.id],
-          })),
-          ...(await this.modelMessages(
+        const assembled = assembleModelContext(
+          captured,
+          await this.modelMessages(
             run.sessionId,
             run.originStoreId,
             controller.signal,
             command.subjectId,
-          )),
-        ];
+          ),
+        );
         if (
           !['context.compress', 'context.compression.reset'].includes(command.kind) &&
           (await compress(assembled, 'automatic'))
         )
-          return [
-            ...captured.map((source) => ({
-              role: source.role ?? ('system' as const),
-              content: source.content,
-              sourceIds: [source.id],
-            })),
-            ...(await this.modelMessages(
+          return assembleModelContext(
+            captured,
+            await this.modelMessages(
               run.sessionId,
               run.originStoreId,
               controller.signal,
               command.subjectId,
-            )),
-          ];
+            ),
+          );
         return assembled;
       };
       const checkFreshness = async () => {
@@ -4359,6 +4530,7 @@ export class AgentRuntime {
           });
         }
       };
+      let toolAdmission: ReturnType<typeof createToolDispatchBatch> | undefined;
       const loopContext: LoopContext = {
         checkpoint: resumed?.loop,
         modelId,
@@ -4366,26 +4538,77 @@ export class AgentRuntime {
         getMessages: messages,
         getTools: modelTools,
         prepareToolCalls: registerToolRequests,
+        beginToolBatch: (calls, signal, cancel) => {
+          if (!orderedToolAdmission) return undefined;
+          const current = createToolDispatchBatch(
+            calls.map((call) => call.id),
+            signal,
+            cancel,
+          );
+          toolAdmission = current;
+          return {
+            settled: current.settled,
+            finish() {
+              current.finish();
+              if (toolAdmission === current) toolAdmission = undefined;
+            },
+          };
+        },
         executeModel: async (request, stepId) => {
-          if (resumed?.plannedModel?.id === request.requestId)
-            return this.execution.model(
-              { ...scope, decisionSources: captured, checkFreshness },
-              model!,
-              request,
-              stepId,
-              resumed.plannedModel,
-            );
           let current = request;
           let attempt = 0;
+          let providerAttempt = 1;
+          let modelRetry: ModelRetrySource | undefined;
           while (true) {
             try {
               return await this.execution.model(
-                { ...scope, decisionSources: captured, checkFreshness },
+                {
+                  ...scope,
+                  decisionSources: captured,
+                  checkFreshness,
+                  ...(modelRetry ? { modelRetry } : {}),
+                },
                 model!,
                 current,
                 attempt === 0 ? stepId : `${stepId}:refresh:${attempt}`,
+                attempt === 0 && resumed?.plannedModel?.id === request.requestId
+                  ? resumed.plannedModel
+                  : undefined,
               );
             } catch (error) {
+              const retryReason = modelRetryReason(error);
+              if (retryReason && providerAttempt < MODEL_MAX_ATTEMPTS) {
+                controller.signal.throwIfAborted();
+                const previous = await this.options.store.getExecution(current.requestId);
+                controller.signal.throwIfAborted();
+                // A failed close/publication is not a confirmed retry boundary.
+                if (
+                  previous?.status !== 'failed' ||
+                  previous.kind !== 'model' ||
+                  previous.sessionId !== scope.run.sessionId ||
+                  previous.runId !== scope.run.id ||
+                  previous.originStoreId !== scope.run.originStoreId ||
+                  previous.originCommandId !== scope.run.originCommandId ||
+                  previous.rootWorkCommandId !== scope.run.rootWorkCommandId ||
+                  previous.rootWorkSeq !== scope.run.rootWorkSeq ||
+                  !previous.result ||
+                  typeof previous.result !== 'object' ||
+                  Array.isArray(previous.result) ||
+                  previous.result.incomplete !== true
+                )
+                  throw error;
+                providerAttempt++;
+                modelRetry = {
+                  previousExecutionId: previous.id,
+                  attempt: providerAttempt,
+                  maxAttempts: MODEL_MAX_ATTEMPTS,
+                  reason: retryReason,
+                };
+                await waitForModelRetry(providerAttempt, controller.signal);
+                current = { ...current, requestId: crypto.randomUUID() };
+                attempt++;
+                continue;
+              }
               if (
                 !(error instanceof AgentError) ||
                 ![
@@ -4438,6 +4661,7 @@ export class AgentRuntime {
               bindings: decisionBindings,
               decisionSources,
               checkFreshness: checkToolDecision,
+              toolAdmission: toolAdmission?.forCall(call.id),
             },
             decisionBindings.tools.get(call.name),
             call,
@@ -4573,16 +4797,7 @@ export class AgentRuntime {
               command: freeze(structuredClone(command)),
               run: freeze(structuredClone(run)),
               session: freeze(structuredClone(session)),
-              messages: freeze(
-                structuredClone([
-                  ...captured.map((source) => ({
-                    role: source.role ?? ('system' as const),
-                    content: source.content,
-                    sourceIds: [source.id],
-                  })),
-                  ...expanded,
-                ]),
-              ),
+              messages: freeze(structuredClone(assembleModelContext(captured, expanded))),
               sources: freeze(structuredClone(captured)),
               trigger: 'manual',
               focus: null,

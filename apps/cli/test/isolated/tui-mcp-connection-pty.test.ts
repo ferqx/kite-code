@@ -238,6 +238,16 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
       workspaceId: 'w',
       title: 'Owned MCP Tools',
     });
+    const trust = await seed.client.getWorkspaceTrust('w', { storeId });
+    await seed.client.setWorkspaceTrust('w', {
+      expectedStoreId: storeId,
+      commandId: randomUUID(),
+      trusted: true,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      ifRevision: trust.revision,
+    });
+    expect((await seed.client.getWorkspaceTrust('w', { storeId })).trusted).toBe(true);
     const directory = await createTuiMcpPort(seed.client, storeId).read('a', businessAbort.signal);
     expect(directory.items).toHaveLength(1);
     const selectedServerId = directory.items[0]!.id;

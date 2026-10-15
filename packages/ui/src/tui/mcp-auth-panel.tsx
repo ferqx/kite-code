@@ -15,7 +15,7 @@ const names: Record<TuiMcpAuthAction, string> = {
   'mcp.auth.revoke': 'Revoke remote credentials',
 };
 export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
-  const { t: originalLabel } = useInkI18n();
+  const { t: originalLabel, language } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation(),
     state = controller.state,
     status = state.mcpAuthStatus;
@@ -58,6 +58,25 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
     setIndex(0);
     setPending(undefined);
   }, [state.sessionId, state.mcpAuthServerId, status]);
+  useEffect(() => {
+    if (
+      state.mcpAuthEntry !== 'directory' ||
+      !state.mcpAuthOpen ||
+      state.mcpAuthReading ||
+      state.mcpAuthOutcome?.phase !== 'pending'
+    )
+      return;
+    const timer = setTimeout(() => {
+      void controller.lookupMcpAuth();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [
+    controller,
+    state.mcpAuthEntry,
+    state.mcpAuthOpen,
+    state.mcpAuthReading,
+    state.mcpAuthOutcome,
+  ]);
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
       controller.closeMcpAuth();
@@ -82,9 +101,11 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
     else if (key.return) {
       const choice = actions[index];
       if (!choice) return;
-      if (choice.kind === 'action' && state.mcpSource?.facts)
-        setPending({ action: choice.action, observed: state.mcpSource.facts });
-      else if (choice.kind === 'original') controller.selectMcpAuthOriginal(choice.key);
+      if (choice.kind === 'action' && state.mcpSource?.facts) {
+        if (choice.action === 'mcp.auth.login' && state.mcpAuthEntry === 'directory')
+          void controller.requestMcpAuth(choice.action, state.mcpSource.facts);
+        else setPending({ action: choice.action, observed: state.mcpSource.facts });
+      } else if (choice.kind === 'original') controller.selectMcpAuthOriginal(choice.key);
       else if (choice.kind === 'check') void controller.lookupMcpAuth();
       else if (choice.kind === 'cancel') setPending({ cancel: true });
       else if (choice.kind === 'back') controller.closeMcpAuth();
@@ -123,7 +144,13 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
             : 'Authentication outcome unknown; check original';
   const label = (choice: Choice) =>
     choice.kind === 'action'
-      ? `${t('Review')} ${t(names[choice.action])}`
+      ? choice.action === 'mcp.auth.login'
+        ? testDiagnostics
+          ? `${t('Review')} ${t(names[choice.action])}`
+          : language === 'zh-CN'
+            ? '打开浏览器 · 审查 登录'
+            : 'Open browser · Review Login'
+        : `${t('Review')} ${t(names[choice.action])}`
       : choice.kind === 'original'
         ? `${t('Original authentication:')} ${testDiagnostics ? terminalText(state.callers.get(choice.key)?.intent.request.commandId ?? '') : originals.findIndex((row) => callerKey(row.intent) === choice.key) + 1}`
         : t(
@@ -136,7 +163,11 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
   const offset = Math.max(0, Math.min(index - 2, actions.length - 5));
   return (
     <TuiOverlayFrame
-      title={t('MCP authentication')}
+      title={
+        language === 'zh-CN'
+          ? 'MCP 认证 · 认证 MCP 服务器'
+          : 'MCP authentication · Authenticate MCP server'
+      }
       meta={`${index + 1} / ${actions.length}`}
       footer={
         <OverlayShortcutBar
@@ -151,7 +182,15 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
       <Text>{t('Authentication does not reconnect or replay tools.')}</Text>
       {state.mcpAuthServerId && (
         <Text>
-          {t('Server:')} {terminalText(state.mcpAuthServerId)}
+          {t('Server:')}{' '}
+          {terminalText(
+            testDiagnostics
+              ? state.mcpAuthServerId
+              : (state.mcp?.facts?.labels?.[state.mcpAuthServerId] ??
+                  state.mcpSource?.facts?.items.find((item) => item.id === state.mcpAuthServerId)
+                    ?.name ??
+                  state.mcpAuthServerId),
+          )}
         </Text>
       )}
       {status && (
@@ -168,7 +207,11 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
           primary={label(choice)}
         />
       ))}
-      <Text>{t('↑/↓ choose · Enter select · Esc back')}</Text>
+      <Text>
+        {language === 'zh-CN'
+          ? '↑↓ 导航  Enter 确认  Esc 返回'
+          : '↑↓ navigate  Enter confirm  Esc back'}
+      </Text>
       {pending && (
         <Text>
           {t('Confirm authentication:')}{' '}
@@ -190,6 +233,15 @@ export function TuiMcpAuthPanel({ controller }: { controller: TuiController }) {
             </Text>
           )}
           <Text>{t(phase)}</Text>
+          {verified && fact?.reason && (
+            <Text>
+              {terminalText(
+                fact.reason === 'mcp_oauth_browser_unavailable'
+                  ? 'browser_open_failed'
+                  : fact.reason,
+              )}
+            </Text>
+          )}
         </>
       )}
       {!original && state.mcpAuthReading && <Text>{t('Reading authentication')}</Text>}

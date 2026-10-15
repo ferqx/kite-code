@@ -25,6 +25,8 @@ export type TuiMcpReadSet = {
 export interface TuiMcpSnapshot {
   /** Exact read-only source labels; excluded from canonical settings, targets and intents. */
   labels?: Readonly<Record<string, string>>;
+  /** Actual same-Session current catalogue observations; selection is not connection. */
+  liveServerIds?: readonly string[];
   storeId: string;
   sessionId: string;
   workspaceId: string;

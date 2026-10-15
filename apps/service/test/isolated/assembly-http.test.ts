@@ -392,12 +392,52 @@ test('a newly disabled file capability affects the next Run while an admitted wa
     expect(future.configuration).toMatchObject({
       tools: [{ id: 'ask_user', version: '1' }],
     });
+    expect(future.status).toBe('completed');
+    const actual = await f.store.getView('session');
+    const futureTools = actual.executions.filter(
+      (execution) => execution.runId === future.id && execution.kind === 'tool',
+    );
+    expect(futureTools).toHaveLength(1);
+    const unavailable = futureTools[0]!;
+    expect(unavailable).toMatchObject({
+      definitionId: 'files.write',
+      definitionVersion: 'unavailable',
+      status: 'failed',
+      sessionId: 'session',
+      runId: future.id,
+      originStoreId: f.storeId,
+      authorization: { dispatched: false },
+      result: { content: 'tool_not_available', details: { code: 'tool_not_available' } },
+    });
+    const futureModels = actual.executions.filter(
+      (execution) => execution.runId === future.id && execution.kind === 'model',
+    );
+    expect(futureModels).toHaveLength(2);
+    expect(futureModels.every((execution) => execution.status === 'succeeded')).toBe(true);
+    const messages = (await f.store.listMessages('session')).filter(
+      (message) => message.runId === future.id,
+    );
+    const call = messages.find(
+      (message) => message.role === 'assistant' && message.toolCalls?.length,
+    )!;
+    expect(call.sourceIds).toEqual([futureModels[0]!.id]);
+    expect(call.toolCalls).toMatchObject([{ id: 'call-3', name: 'files.write' }]);
+    expect(messages.filter((message) => message.role === 'tool')).toMatchObject([
+      { toolCallId: 'call-3', sourceIds: [unavailable.id] },
+    ]);
     expect(
-      current.executions.filter(
-        (execution) => execution.runId === future.id && execution.kind === 'tool',
-      ),
-    ).toHaveLength(0);
-    expect(provider.requests).toHaveLength(3);
+      messages.filter((message) => message.role === 'assistant' && message.content === 'done'),
+    ).toMatchObject([{ sourceIds: [futureModels[1]!.id] }]);
+    expect(provider.requests).toHaveLength(4);
+    expect(
+      (provider.requests[3]!.messages as { role: string; tool_call_id?: string; content: string }[])
+        .filter((message) => message.role === 'tool')
+        .at(-1),
+    ).toMatchObject({
+      tool_call_id: 'call-3',
+      content: expect.stringContaining('tool_not_available'),
+    });
+    expect(readFileSync(join(f.workspace, 'old.txt'), 'utf8')).toBe('old binding');
     expect(provider.requests[2]!.tools).toEqual([
       expect.objectContaining({
         type: 'function',

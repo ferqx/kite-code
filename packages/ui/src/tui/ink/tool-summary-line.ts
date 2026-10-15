@@ -9,6 +9,9 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   let ranCommands = 0;
 
   for (const tool of tools) {
+    // A declared, queued or cancelled call is not a performed exploration.
+    // Keep its row and terminal state, without claiming a read/search happened.
+    if (['queued', 'rejected', 'cancelled'].includes(tool.status)) continue;
     if (tool.name === 'read_file') readFiles += 1;
     else if (tool.name === 'search_content') searched += 1;
     else if (tool.name === 'search_files') filePatterns += 1;

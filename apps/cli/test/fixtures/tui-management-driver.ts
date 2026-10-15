@@ -52,6 +52,7 @@ const open = () => {
       '--preload',
       input.preload,
       input.script,
+      '--test-ui-diagnostics',
       '--thread',
       'a',
       '--data-root',
@@ -138,6 +139,9 @@ try {
   await send('Owned ordinary task');
   await wait('ORIGINAL_FULL_TAIL');
   await pump();
+  await send('Qualifying historical task');
+  await wait('QUALIFYING_SETTLED_HISTORY');
+  await pump();
   await send('/session rename Managed title');
   await wait('session.rename: applied');
   await pump();
@@ -148,6 +152,11 @@ try {
   await pump();
   await send('/compact preserve original facts');
   await wait('context.compress: accepted');
+  const compressionMaterial = (await active!.projection()).text.replace(/\s+/g, ' ');
+  const compressionOriginal = compressionMaterial.match(
+    /Original management a \/ ([a-f0-9-]{36}) context\.compress: accepted/,
+  );
+  assert.ok(compressionOriginal, 'management_original_compression_identity_unavailable');
   await pump();
   await send('Queued after maintenance');
   await wait('input.follow_up');
@@ -156,8 +165,11 @@ try {
   await key('\x0b');
   await wait('FOLLOWUP_COMPLETED');
   await pump();
-  await key('\x0b');
-  await wait('context.compress: applied');
+  // An already observed original receipt is stable. Repeating its read can
+  // correctly leave Ink unchanged, so retain that exact painted qualification.
+  const completedCompression = `Original management a / ${compressionOriginal[1]} context.compress: applied`;
+  if (!active!.viewport().replace(/\s+/g, ' ').includes(completedCompression)) await key('\x0b');
+  await wait(completedCompression);
   await pump();
   await send('/compact reset');
   await pump();
@@ -172,8 +184,9 @@ try {
   };
   await observe();
   await send('/rewind');
-  await wait('Files recovery:');
-  await wait('R reloads readonly directory. Esc closes.');
+  await wait('Files recovery');
+  await wait('No recovery points');
+  await wait('Reading state: ready');
   await key('\x1b');
   await pump();
   await observe();

@@ -24,14 +24,20 @@ import {
   readConfigurationFile,
   resolveConfiguration,
 } from '@kite-ai/agent/config';
-import type { Json } from '@kite-ai/agent/extensions';
-import type { McpLifecycleOptions } from '@kite-ai/agent/mcp';
+import { defineExtension, type Extension, type Json } from '@kite-ai/agent/extensions';
+import { createPathFileTools } from '@kite-ai/agent/files';
+import {
+  createMcpResourceModelSource,
+  type McpLifecycleOptions,
+  mcpResourceModelToolIds,
+} from '@kite-ai/agent/mcp';
 import {
   builtinCapability,
   type CapabilityDescription,
   type CapabilityIdentity,
   createDefaultAfterTurnPolicy,
   createPermissionPolicy,
+  createPermissionReviewContextReader,
   createPlanningPermissionPolicy,
   hostReadOnlyTool,
   type PermissionPolicyOptions,
@@ -49,6 +55,7 @@ import { createPlanningValidation, type PlanningOptions } from '@kite-ai/agent/p
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
+import { createDefaultTaskRequestClassifier } from '@kite-ai/agent/task';
 import { webExtractorAssets } from '@kite-ai/agent/web-fetch';
 import {
   createCompatibleModelBinding,
@@ -96,7 +103,7 @@ import {
   workflowSnapshotDigest,
   workflowToolIds,
 } from './skill-workflow-configuration';
-import { createTaskConfiguration } from './task-configuration';
+import { createTaskConfiguration, defaultTaskRoles } from './task-configuration';
 import {
   createWebFetchConfiguration,
   type WebFetchConfigurationOptions,
@@ -258,7 +265,7 @@ export function createDefaultProcessConfiguration(options: {
     options.permissions !== undefined || options.permissionPolicy !== undefined;
   const explicit = structuredClone(options.hostConfiguration);
   explicitConfiguration(explicit);
-  const planningOptions = structuredClone(options.planning ?? {});
+  const planningOptions = structuredClone({ completionGuidance: true, ...options.planning });
   const workflowUserDecisions: WorkflowUserDecisions = Object.freeze(
     structuredClone(
       options.skillWorkflow?.userDecisions ?? {
@@ -269,7 +276,8 @@ export function createDefaultProcessConfiguration(options: {
       },
     ),
   );
-  const childRoles = structuredClone(options.child ?? [{ id: 'worker', version: '1' }]);
+  const childRoles = structuredClone(options.child ?? defaultTaskRoles);
+  const describeDefaultTask = createDefaultTaskRequestClassifier(options.child ? [] : childRoles);
   const shellOptions = options.shell ? structuredClone(options.shell) : undefined;
   const afterTurn = options.afterTurn
     ? Object.freeze({ authorize: options.afterTurn.authorize.bind(options.afterTurn) })
@@ -349,33 +357,44 @@ export function createDefaultProcessConfiguration(options: {
       ? options.mcp({ profile: Object.freeze({ ...options.profile }), credentialVault: vault })
       : options.mcp;
   let policyRuntime: AgentRuntime | undefined;
+  const runtimeAssets = () => {
+    const storage = sqliteStorageAssets();
+    const extractor = webExtractorAssets();
+    return [
+      process.execPath,
+      fileURLToPath(import.meta.url),
+      fileURLToPath(storage.module),
+      fileURLToPath(storage.worker),
+      fileURLToPath(storage.baseline),
+      fileURLToPath(storage.preload),
+      ...storage.observerModules.map((module) => fileURLToPath(module)),
+      ...(options.shell
+        ? [options.shell.supervisorPath, options.shell.bunExecutable, options.shell.shellExecutable]
+        : []),
+      ...(options.mcpSources?.stdio
+        ? [options.mcpSources.stdio.guardianPath, options.mcpSources.stdio.bunExecutable]
+        : []),
+      ...(options.webFetch?.extractor ? [] : [extractor.worker, extractor.checksum]),
+      ...(options.runtimeAssets ?? []),
+    ];
+  };
+  const pathFiles = createPathFileTools({
+    qualifiedPlatforms: ['darwin', 'linux', 'win32'],
+    protectedRoots: [
+      options.profile.dataRoot,
+      options.profile.coordinationPath,
+      ...runtimeAssets(),
+    ],
+  });
+  const pathFilesExtension: Extension = defineExtension({
+    id: 'builtin.files.path',
+    version: '1',
+    apiMajor: 1,
+    tools: pathFiles.tools,
+  });
   const files = createDefaultFileCheckpointConfiguration({
     profile: options.profile,
-    runtimeAssets: () => {
-      const storage = sqliteStorageAssets();
-      const extractor = webExtractorAssets();
-      return [
-        process.execPath,
-        fileURLToPath(import.meta.url),
-        fileURLToPath(storage.module),
-        fileURLToPath(storage.worker),
-        fileURLToPath(storage.baseline),
-        fileURLToPath(storage.preload),
-        ...storage.observerModules.map((module) => fileURLToPath(module)),
-        ...(options.shell
-          ? [
-              options.shell.supervisorPath,
-              options.shell.bunExecutable,
-              options.shell.shellExecutable,
-            ]
-          : []),
-        ...(options.mcpSources?.stdio
-          ? [options.mcpSources.stdio.guardianPath, options.mcpSources.stdio.bunExecutable]
-          : []),
-        ...(options.webFetch?.extractor ? [] : [extractor.worker, extractor.checksum]),
-        ...(options.runtimeAssets ?? []),
-      ];
-    },
+    runtimeAssets,
     runtime: () => {
       if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
       return policyRuntime;
@@ -386,6 +405,7 @@ export function createDefaultProcessConfiguration(options: {
     askUser,
     planning.extension,
     files.extension,
+    pathFilesExtension,
     ...(task.extension ? [task.extension] : []),
   ];
   const sourceOptions = options.mcpSources;
@@ -626,6 +646,10 @@ export function createDefaultProcessConfiguration(options: {
         roleVersion: string;
       };
       mcpParent?: Parameters<typeof mcpSources.deriveChildSelection>[0];
+      parentTools?: Parameters<
+        NonNullable<RuntimeOptions['resolveChildRunConfiguration']>
+      >[0]['parentTools'];
+      inheritDynamicMcp?: boolean;
     },
     recovery?: {
       digest: string;
@@ -701,9 +725,61 @@ export function createDefaultProcessConfiguration(options: {
       const toolIds =
         effective.tools?.filter((tool) => tool.enabled !== false).map((tool) => tool.id) ?? [];
       if (selection?.toolIds) {
-        if (selection.toolIds.some((id) => !toolIds.includes(id)))
+        const parentTools = selection.parentTools ?? [];
+        assertSelectedToolVersions(selection.toolIds, effective.tools, [parentTools]);
+        const inheritedDynamic = (id: string) =>
+          selection.inheritDynamicMcp === true &&
+          !effective.tools?.some((tool) => tool.id === id && tool.enabled === false) &&
+          parentTools.some(
+            (tool) =>
+              tool.id === id &&
+              ((tool.extensionId?.startsWith('builtin.mcp.remote.') &&
+                tool.extensionId.length > 'builtin.mcp.remote.'.length) ||
+                (tool.extensionId === 'builtin.mcp.discovery' &&
+                  tool.id === 'mcp.tools.search' &&
+                  tool.version === '1')),
+          );
+        const inheritedBuiltin = (id: string) => {
+          const sourceExtension =
+            id === 'mcp.sources.list'
+              ? mcpSources.extension.id === 'builtin.mcp.sources' &&
+                mcpSources.extension.version === '1'
+                ? mcpSources.extension
+                : undefined
+              : ['mcp.connect', ...mcpResourceModelToolIds].includes(id)
+                ? mcp.extension?.id === 'builtin.mcp' && mcp.extension.version === '1'
+                  ? mcp.extension
+                  : undefined
+                : undefined;
+          const definition =
+            businessTools.get(id) ??
+            sourceExtension?.tools?.find((tool) => tool.id === id && tool.version === '1');
+          const owner = businessTools.has(id) ? planning.extension.id : sourceExtension?.id;
+          return (
+            definition !== undefined &&
+            !effective.tools?.some((tool) => tool.id === id && tool.enabled === false) &&
+            parentTools.some(
+              (tool) =>
+                tool &&
+                typeof tool === 'object' &&
+                !Array.isArray(tool) &&
+                tool.id === id &&
+                tool.version === definition.version &&
+                tool.extensionId === owner,
+            )
+          );
+        };
+        if (
+          selection.toolIds.some(
+            (id) => !toolIds.includes(id) && !inheritedBuiltin(id) && !inheritedDynamic(id),
+          )
+        )
           throw new AgentError('child_tool_unavailable');
-        toolIds.splice(0, toolIds.length, ...selection.toolIds);
+        toolIds.splice(
+          0,
+          toolIds.length,
+          ...selection.toolIds.filter((id) => !inheritedDynamic(id)),
+        );
       }
       // Root recovery also carries a persisted Model/Skill selection. Only a new child
       // binding suppresses the root human question capability.
@@ -765,6 +841,7 @@ export function createDefaultProcessConfiguration(options: {
         askUserTools.values(),
         businessTools.values(),
         fileTools.values(),
+        pathFiles.tools,
         task.tools.values(),
         shellTools.values(),
         webTools.values(),
@@ -774,7 +851,7 @@ export function createDefaultProcessConfiguration(options: {
         workspaceRoot: root,
         profile: options.profile,
         externallyRegisteredFileTools: files.tools,
-        externallyRegisteredExtensions: [askUser],
+        externallyRegisteredExtensions: [askUser, pathFilesExtension],
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,
@@ -857,6 +934,7 @@ export function createDefaultProcessConfiguration(options: {
           ...effective,
           skills: assembly.skillConfigurations,
         });
+        let mcpResourceSource: ContextSource | null = null;
         const runExtensions = [...builtinExtensions, ...assembly.extensions];
         const readOnlyDefinitions = [...runExtensions, mcpSources.extension].flatMap((extension) =>
           (extension.tools ?? [])
@@ -878,6 +956,7 @@ export function createDefaultProcessConfiguration(options: {
           policy: {
             automaticValidation: planningOptions.automaticValidation ?? null,
             requiredValidation: planningOptions.requiredValidation === true,
+            completionGuidance: planningOptions.completionGuidance === true,
             allowWaiver: planningOptions.allowWaiver === true,
             requiredReceiptDefinitions: planningOptions.requiredReceiptDefinitions ?? [],
             fileHashChecker: planningOptions.fileHashChecker ?? null,
@@ -1066,6 +1145,11 @@ export function createDefaultProcessConfiguration(options: {
         const classifiedPermissions =
           options.permissions ??
           createPermissionPolicy({
+            readReviewContext: createPermissionReviewContextReader({
+              readRuntime: () => policyRuntime ?? null,
+              subjectId: command.subjectId,
+              originStoreId: command.originStoreId,
+            }),
             readPolicy:
               options.permissionPolicy?.readPolicy ??
               ((request) =>
@@ -1095,6 +1179,8 @@ export function createDefaultProcessConfiguration(options: {
                 ? {
                     ...description,
                     ...(await shell.describeRequest(request)),
+                    ...(await pathFiles.describeRequest(request)),
+                    ...describeDefaultTask(request),
                     ...(commandDigest ? { commandDigest } : {}),
                   }
                 : (mcpSources.describe(request) ?? selectedMcp.describe(request));
@@ -1146,6 +1232,7 @@ export function createDefaultProcessConfiguration(options: {
           },
         });
         const permissions: RuntimeOptions['permissions'] = {
+          toolDispatchOrder: planningPermissions.toolDispatchOrder,
           async authorize(request) {
             if (
               'assertExecutionScope' in selectedSources &&
@@ -1311,12 +1398,32 @@ export function createDefaultProcessConfiguration(options: {
             input: Parameters<NonNullable<RunConfiguration['readStepCapabilities']>>[0],
           ) => {
             const step = await selectedMcp.readStepCapabilities(input);
+            mcpResourceSource = createMcpResourceModelSource({
+              storeId: input.command.originStoreId,
+              sessionId: input.session.id,
+              runId: input.run.id,
+              facts:
+                step.snapshot && typeof step.snapshot === 'object' && !Array.isArray(step.snapshot)
+                  ? (step.snapshot.cached ?? [])
+                  : [],
+            });
             return {
               extensions: [...assembly.extensions, ...(step.extensions ?? [])],
               toolIds: [
                 ...assembly.toolIds,
+                ...(mcpResourceSource
+                  ? mcpResourceModelToolIds.filter(
+                      (id) =>
+                        !assembly.toolIds.includes(id) &&
+                        (!selection?.toolIds || selection.toolIds.includes(id)),
+                    )
+                  : []),
                 ...(step.toolIds ?? []).filter(
-                  (id) => !selection?.toolIds || selection.toolIds.includes(id),
+                  (id) =>
+                    (!selection?.toolIds ||
+                      selection.toolIds.includes(id) ||
+                      selection.inheritDynamicMcp === true) &&
+                    !effective.tools?.some((tool) => tool.id === id && tool.enabled === false),
                 ),
               ],
               snapshot: step.snapshot,
@@ -1331,6 +1438,7 @@ export function createDefaultProcessConfiguration(options: {
               return [
                 ...(await assembly.sources.capture(request)),
                 ...(await selectedSources.sources.capture(request)),
+                ...(mcpResourceSource ? [mcpResourceSource] : []),
               ];
             },
             async captureBatch(
@@ -1357,6 +1465,7 @@ export function createDefaultProcessConfiguration(options: {
               else for (const request of requests) append(await assembly.sources.capture(request));
               for (const request of requests)
                 append(await selectedSources.sources.capture(request));
+              if (mcpResourceSource) append([mcpResourceSource]);
               return [...sources.values()];
             },
           },
@@ -1375,6 +1484,7 @@ export function createDefaultProcessConfiguration(options: {
             actualCapabilities: assembly.snapshotFacts,
             mcp: { ...selectedMcp.snapshot, sources: selectedSources.snapshot },
             shell: shell.snapshot,
+            pathFiles: pathFiles.snapshot,
             web: assembly.toolIds.includes('web_fetch') ? web.snapshot : null,
             task: {
               ...task.snapshot,
@@ -1593,6 +1703,8 @@ export function createDefaultProcessConfiguration(options: {
                   roleVersion: selection.role.version,
                 }
               : undefined,
+            parentTools: input.parentTools,
+            inheritDynamicMcp: selection.inheritDynamicMcp,
             mcpParent: {
               parentExecution: input.parentExecution,
               parentRun: input.parentRun,
@@ -1641,7 +1753,7 @@ export function createDefaultProcessConfiguration(options: {
           workspaceRoot,
           profile: options.profile,
           externallyRegisteredFileTools: files.tools,
-          externallyRegisteredExtensions: [askUser],
+          externallyRegisteredExtensions: [askUser, pathFilesExtension],
           toolIds,
           toolConfigurations: effective.tools,
           skills: [],
@@ -1663,6 +1775,7 @@ export function createDefaultProcessConfiguration(options: {
             askUserTools.values(),
             businessTools.values(),
             fileTools.values(),
+            pathFiles.tools,
             task.tools.values(),
             ...assembly.extensions.map((extension) => extension.tools ?? []),
             mcp.tools.values(),
@@ -1729,6 +1842,7 @@ export function createDefaultProcessConfiguration(options: {
       }),
     permissionManagement,
     permissions: {
+      toolDispatchOrder: (options.permissions ?? globalDefaultPolicy).toolDispatchOrder,
       async authorize(request) {
         if (
           request.kind === 'job' &&

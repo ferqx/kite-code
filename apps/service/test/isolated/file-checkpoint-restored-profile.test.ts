@@ -85,9 +85,22 @@ test('default Files original capture survives public offline restore to a new pr
     async fetch(request): Promise<Response> {
       const body = (await request.json()) as ProviderBody;
       requests.push(body);
-      const user = body.messages.filter((message) => message.role === 'user').at(-1)?.content ?? '';
-      const key = user.includes('SECOND_ACTUAL_RUN') ? 'second' : 'first',
-        step = steps.get(key) ?? 0;
+      const user = body.messages
+        .slice()
+        .reverse()
+        .find(
+          (message) =>
+            message.role === 'user' && /^(FIRST|SECOND)_ACTUAL_RUN:/.test(message.content),
+        )?.content;
+      const markers: Record<string, string> = {
+        'FIRST_ACTUAL_RUN: read then update original and create first file': 'first',
+        'SECOND_ACTUAL_RUN: read then update original and create second file': 'second',
+        'SECOND_ACTUAL_RUN: read actual A postimage then update and create in B': 'second',
+      };
+      const key = user === undefined ? undefined : markers[user];
+      if (!key) throw Error('actual_file_user_marker_unavailable');
+      const step = steps.get(key) ?? 0;
+      if (step >= 4) throw Error('actual_file_model_route_exhausted');
       steps.set(key, step + 1);
       let call: { name: string; input: Json } | null = null;
       if (step === 0) call = { name: 'files.read', input: { path: 'original.txt', limit: 10000 } };

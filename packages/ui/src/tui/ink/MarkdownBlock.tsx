@@ -2,6 +2,7 @@ import { Box, Text } from 'ink';
 import React, { useMemo, useRef } from 'react';
 import terminalStringWidth from 'string-width';
 import { type InkTheme, useInkTheme } from '../presentation';
+import { wrapPlainText } from './plain-text-wrap';
 import { useInkWindowSize } from './window-size';
 
 interface MarkdownBlockProps {
@@ -10,6 +11,7 @@ interface MarkdownBlockProps {
   color?: string;
   /** 覆盖 useInkWindowSize 的 columns，用于容器已缩进时限制可用宽度 */
   maxWidth?: number;
+  parsedSlice?: MarkdownRenderSlice;
 }
 
 export interface InlineSegment {
@@ -678,6 +680,13 @@ export type LineGroup =
   | { kind: 'code'; lines: string[]; lang: string; startIndex: number }
   | { kind: 'table'; lines: string[]; startIndex: number };
 
+/** Internal display slice of the original parser; no additional terminal writer. */
+export interface MarkdownRenderSlice {
+  groups: readonly LineGroup[];
+  previousGroup?: LineGroup;
+  previousBlanks: number;
+}
+
 function groupSourceIndex(group: LineGroup): number {
   return group.kind === 'single' ? group.index : group.startIndex;
 }
@@ -977,16 +986,22 @@ const QuoteRow = React.memo(function QuoteRow({ line, color }: { line: string; c
 
 // ── main component ──
 
-export default React.memo(function MarkdownBlock({ content, color, maxWidth }: MarkdownBlockProps) {
+export default React.memo(function MarkdownBlock({
+  content,
+  color,
+  maxWidth,
+  parsedSlice,
+}: MarkdownBlockProps) {
   const t = useInkTheme();
   const { columns: termColumns } = useInkWindowSize();
   const columns = maxWidth ?? termColumns;
   const parseCache = useRef<MarkdownParseCache | undefined>(undefined);
   const groups = useMemo(() => {
+    if (parsedSlice) return parsedSlice.groups;
     const next = updateMarkdownParseCache(parseCache.current, content);
     parseCache.current = next;
     return next.groups;
-  }, [content]);
+  }, [content, parsedSlice]);
 
   const nonBlank = groups.reduce<{ group: LineGroup; blanksBefore: number }[]>((acc, g) => {
     if (isBlankGroup(g)) {
@@ -1036,7 +1051,7 @@ export default React.memo(function MarkdownBlock({ content, color, maxWidth }: M
       }
 
       if (group.kind === 'paragraph') {
-        return <MarkdownLine content={group.lines.join('\n')} color={color} />;
+        return <MarkdownLine content={group.lines.join('\n')} color={color} maxWidth={columns} />;
       }
 
       if (group.kind === 'list') {
@@ -1146,13 +1161,13 @@ export default React.memo(function MarkdownBlock({ content, color, maxWidth }: M
         );
       }
 
-      return <MarkdownLine content={line} color={color} />;
+      return <MarkdownLine content={line} color={color} maxWidth={columns} />;
     },
     [color, columns, t.dim, t.muted, t.primary],
   );
 
-  let prevGroup: LineGroup | undefined;
-  let prevBlanks = 0;
+  let prevGroup: LineGroup | undefined = parsedSlice?.previousGroup;
+  let prevBlanks = parsedSlice?.previousBlanks ?? 0;
   return (
     <Box flexDirection="column">
       {nonBlank.map(({ group, blanksBefore }) => {
@@ -1172,7 +1187,15 @@ export default React.memo(function MarkdownBlock({ content, color, maxWidth }: M
   );
 });
 
-function MarkdownLine({ content, color }: { content: string; color?: string }) {
+function MarkdownLine({
+  content,
+  color,
+  maxWidth,
+}: {
+  content: string;
+  color?: string;
+  maxWidth?: number;
+}) {
   const t = useInkTheme();
   const segments = parseInline(content);
 
@@ -1183,7 +1206,13 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
     !segments[0]!.code &&
     !segments[0]!.strikethrough
   ) {
-    return <Text color={color}>{segments[0]!.text}</Text>;
+    return (
+      <Text color={color}>
+        {maxWidth && content.length > 8192
+          ? wrapPlainText(segments[0]!.text, maxWidth)
+          : segments[0]!.text}
+      </Text>
+    );
   }
 
   return (

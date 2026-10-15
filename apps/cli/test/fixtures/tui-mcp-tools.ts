@@ -20,27 +20,11 @@ if (!process.stdin.isTTY) {
   const { createDefaultProcessConfiguration } = await import('@kite-ai/service/configuration');
   const { runServiceProcess } = await import('@kite-ai/service/main');
   await runServiceProcess({
-    configure(startup) {
-      return createDefaultProcessConfiguration({
+    configure(startup, context) {
+      const configuration = createDefaultProcessConfiguration({
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
-        permissions: {
-          async authorize(request) {
-            log('permissions.jsonl', {
-              kind: request.kind,
-              executionId: request.executionId,
-              definitionId: request.definitionId,
-            });
-            if (request.kind === 'model') throw Error('owned_tools_model_forbidden');
-            return request.kind === 'job'
-              ? {
-                  allowed: false,
-                  revision: 'owned-tools-ask',
-                  approval: { request: { effects: ['external'] }, grants: ['approve_once'] },
-                }
-              : { allowed: true, revision: 'owned-tools-read' };
-          },
-        },
+        observerSubjectId: context.subjectId,
         credentialBackend: {
           kind: 'temporary',
           async put() {
@@ -67,6 +51,29 @@ if (!process.stdin.isTTY) {
           },
         },
       });
+      const permissions = configuration.permissions;
+      if (!permissions) throw Error('owned_tools_default_permissions_unavailable');
+      return {
+        ...configuration,
+        permissions: {
+          ...permissions,
+          async authorize(request: Parameters<typeof permissions.authorize>[0]) {
+            log('permissions.jsonl', {
+              kind: request.kind,
+              executionId: request.executionId,
+              definitionId: request.definitionId,
+            });
+            if (request.kind === 'model') throw Error('owned_tools_model_forbidden');
+            return request.kind === 'job'
+              ? {
+                  allowed: false,
+                  revision: 'owned-tools-ask',
+                  approval: { request: { effects: ['external'] }, grants: ['approve_once'] },
+                }
+              : { allowed: true, revision: 'owned-tools-read' };
+          },
+        },
+      };
     },
   });
 } else {

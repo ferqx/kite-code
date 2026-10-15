@@ -327,3 +327,38 @@ test('only verified terminal original allows a new durable prepare; each prepare
   expect(f.counters.post).toBe(1);
   expect(f.counters.callerGet).toBe(2);
 });
+
+test('directory-only eligibility preserves exact scope and never invents a credential absence', async () => {
+  const f = fixture();
+  f.client.queryExtension = async (_session, _extension, query, input) => {
+    expect(query).toBe('mcp.auth.status');
+    expect(input).toEqual(
+      JSON.parse(
+        JSON.stringify({ serverId, expectedReadSet: snapshot.readSet, onlyLoginEligible: true }),
+      ),
+    );
+    return display('builtin.mcp.auth.status', {
+      serverId,
+      workspaceId: 'workspace',
+      eligible: false,
+    });
+  };
+  expect(
+    await f.port.readDirectory!(snapshot, serverId, new AbortController().signal),
+  ).toBeUndefined();
+  f.client.queryExtension = async () =>
+    display('builtin.mcp.auth.status', { serverId, workspaceId: 'foreign', eligible: false });
+  await expect(
+    f.port.readDirectory!(snapshot, serverId, new AbortController().signal),
+  ).rejects.toThrow();
+  f.client.queryExtension = async () =>
+    display('builtin.mcp.auth.status', {
+      serverId,
+      workspaceId: 'workspace',
+      eligible: false,
+      credentialPresent: false,
+    });
+  await expect(
+    f.port.readDirectory!(snapshot, serverId, new AbortController().signal),
+  ).rejects.toThrow();
+});

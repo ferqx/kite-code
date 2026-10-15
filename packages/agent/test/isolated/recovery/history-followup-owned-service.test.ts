@@ -29,7 +29,7 @@ test('actual owned Service and 80x24 PTY accept new input in the original explic
     const runner = join(f.root, 'followup-runner.ts');
     writeFileSync(
       runner,
-      `import{appendFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
+      `import{appendFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
     );
     const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);full=b'';buffer=b''
@@ -46,7 +46,7 @@ def key(value):
  global buffer
  buffer=b'';os.write(master,value);pump()
 try:
- wait('New Run');key(b'Follow after explicit recovery');wait('Follow after explicit recovery');key(b'\\r');wait('approval [');key(b'\\x1b[B');wait('only this call');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE');key(b'\\x11');deadline=time.monotonic()+6
+ wait('New Run');key(b'Follow after explicit recovery');wait('Follow after explicit recovery');key(b'\\r');wait('approval [');wait('❯ Allow once');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE');key(b'\\x11');deadline=time.monotonic()+6
  while p.poll() is None and time.monotonic()<deadline:pump()
  p.wait(timeout=3);assert p.returncode==0;print('ORIGINAL_SESSION_HISTORY_PTY_OK')
 finally:

@@ -23,6 +23,7 @@ import {
   discoverProviderModels,
   isSupportedModelProvider,
   modelProviders,
+  type ProviderDiscoveryOperation,
   type ProviderSettingsOperation,
   providerConnectionId,
   providerModelNames,
@@ -110,6 +111,12 @@ export interface ProviderSettingsView {
   providers: ReturnType<typeof providerSettingsFacts>;
   errors: string[];
 }
+export interface ProviderDiscoveryView {
+  storeId: string;
+  readSet: ModelSettingsReadSet;
+  operation: ProviderDiscoveryOperation;
+  modelNames: string[];
+}
 type CredentialState = 'unchanged' | 'stored' | 'outcome_unknown';
 type ConfigurationState = 'not_attempted' | 'published' | 'outcome_unknown';
 class ProviderMutationFailure extends AgentError {
@@ -141,6 +148,13 @@ export interface ConfigurationManagementPort {
       },
   ): Promise<ManagementMutation>;
   readProviders(input: { expectedStoreId: string }): Promise<ProviderSettingsView>;
+  discoverProviders(input: {
+    expectedStoreId: string;
+    expectedReadSet: ModelSettingsReadSet;
+    operation: ProviderDiscoveryOperation;
+    secret?: string;
+    signal?: AbortSignal;
+  }): Promise<ProviderDiscoveryView>;
   updateProviders(
     input: MutationIdentity & {
       expectedReadSet: ModelSettingsReadSet;
@@ -416,6 +430,38 @@ export function createConfigurationManagement(options: {
       throw new ConfigurationError('configuration_read_set_conflict');
     return observed;
   }
+  function prepareProvider(input: {
+    expectedReadSet: ModelSettingsReadSet;
+    operation: ProviderDiscoveryOperation;
+    secret?: string;
+  }) {
+    const operation = input.operation;
+    const state = assertReadSet({ scope: 'user' }, userPath, input.expectedReadSet);
+    const provider = modelProviders.find((entry) => entry.id === operation.provider);
+    if (!provider || input.expectedReadSet.workspaceEtag !== null)
+      throw new AgentError('invalid_request');
+    const baseURL = safeProviderEndpoint(operation.baseURL);
+    const facts = providerSettingsFacts(state.user.value, state.effective.models ?? []);
+    const connection = facts
+      .find((entry) => entry.id === provider.id)
+      ?.connections.find((entry) => entry.id === operation.connectionId);
+    if (operation.connectionId !== null && !connection?.canWrite)
+      throw new AgentError('provider_settings_override');
+    const raw = (state.user.value.models ?? []) as JsonObject[];
+    const existing =
+      operation.connectionId === null
+        ? []
+        : raw.filter((entry) => providerConnectionId(entry) === operation.connectionId);
+    const originalRef = existing[0]?.credentialRef;
+    if (
+      (operation.credential === 'replace') !== (input.secret !== undefined) ||
+      (operation.credential === 'replace' && !input.secret?.trim()) ||
+      (operation.credential === 'keep' && typeof originalRef !== 'string') ||
+      (provider.requiresCredential && operation.credential === 'none')
+    )
+      throw new AgentError('provider_credential_required');
+    return { state, provider, baseURL, connection, raw, existing, originalRef };
+  }
   async function mutate(
     input: MutationIdentity,
     kind: ManagementMutation['kind'],
@@ -654,6 +700,43 @@ export function createConfigurationManagement(options: {
         };
       }
     },
+    async discoverProviders(input) {
+      try {
+        if (
+          !options.runtime ||
+          (await options.runtime.getMetadata()).storeId !== input.expectedStoreId
+        )
+          throw new AgentError('store_mismatch');
+        input.signal?.throwIfAborted();
+        const { baseURL, connection, originalRef } = prepareProvider(input);
+        // A read cannot send an existing Vault key to a newly supplied endpoint.
+        if (
+          input.operation.credential === 'keep' &&
+          safeProviderEndpoint(connection!.baseURL) !== baseURL
+        )
+          throw new AgentError('provider_discovery_endpoint_mismatch');
+        const secret =
+          input.operation.credential === 'replace'
+            ? input.secret
+            : input.operation.credential === 'keep'
+              ? await options.vault.resolve(originalRef as string)
+              : undefined;
+        input.signal?.throwIfAborted();
+        assertReadSet({ scope: 'user' }, userPath, input.expectedReadSet);
+        const modelNames = await discoverProviderModels(baseURL, secret, input.signal);
+        input.signal?.throwIfAborted();
+        const actual = assertReadSet({ scope: 'user' }, userPath, input.expectedReadSet);
+        return {
+          storeId: input.expectedStoreId,
+          readSet: actual.readSet,
+          operation: { ...input.operation, baseURL },
+          modelNames,
+        };
+      } catch (error) {
+        if (input.signal?.aborted) throw new AgentError('provider_discovery_cancelled');
+        throw publicError(error);
+      }
+    },
     async updateProviders(input) {
       const location = { scope: 'user' as const };
       const ifMatch = input.expectedReadSet.userEtag;
@@ -681,30 +764,10 @@ export function createConfigurationManagement(options: {
           let configurationState: ConfigurationState = 'not_attempted';
           let storedRef: string | undefined;
           try {
-            const state = assertReadSet(location, userPath, input.expectedReadSet);
-            const provider = modelProviders.find((entry) => entry.id === operation.provider);
-            if (!provider || input.expectedReadSet.workspaceEtag !== null)
-              throw new AgentError('invalid_request');
-            const baseURL = safeProviderEndpoint(operation.baseURL);
-            const facts = providerSettingsFacts(state.user.value, state.effective.models ?? []);
-            const connection = facts
-              .find((entry) => entry.id === provider.id)
-              ?.connections.find((entry) => entry.id === operation.connectionId);
-            if (operation.connectionId !== null && (!connection || !connection.canWrite))
-              throw new AgentError('provider_settings_override');
-            const raw = (state.user.value.models ?? []) as JsonObject[];
-            const existing =
-              operation.connectionId === null
-                ? []
-                : raw.filter((entry) => providerConnectionId(entry) === operation.connectionId);
-            const originalRef = existing[0]?.credentialRef;
-            if (
-              (operation.credential === 'replace') !== (input.secret !== undefined) ||
-              (operation.credential === 'replace' && !input.secret?.trim()) ||
-              (operation.credential === 'keep' && typeof originalRef !== 'string') ||
-              (provider.requiresCredential && operation.credential === 'none')
-            )
-              throw new AgentError('provider_credential_required');
+            const { state, provider, baseURL, raw, existing, originalRef } = prepareProvider({
+              ...input,
+              operation,
+            });
             let names = providerModelNames(operation.modelNames);
             if (!names.length) {
               const secret =

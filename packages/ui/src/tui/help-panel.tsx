@@ -36,7 +36,6 @@ export function TuiHelpPanel({ controller }: { controller: TuiController }) {
       rows: [
         ['Shift+Tab', 'Review a plan before work'],
         ['Ctrl+C', 'Cancel current work; press again to exit'],
-        ['Ctrl+T', 'Toggle reasoning'],
         ['Ctrl+O', 'Full output'],
         ['Ctrl+E', 'Execution details'],
         ['Ctrl+N', 'New conversation'],

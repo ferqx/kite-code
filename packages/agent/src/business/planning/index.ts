@@ -49,6 +49,8 @@ type Target = {
   resultRevision: string;
 };
 export interface PlanningOptions {
+  /** Trusted host opt-in: a premature completion returns one keyed planning diagnostic. */
+  completionGuidance?: boolean;
   automaticValidation?: AutomaticValidationOptions;
   requirePlan?: boolean;
   requiredValidation?: boolean;
@@ -652,7 +654,18 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         const current = await context.records.get('plan.current');
         const pointer = decode(current);
         const plan = pointer ? await context.records.get(string(pointer.key)) : null;
-        return result({ current: current?.value ?? null, plan: plan?.value ?? null });
+        const own = await context.getExecution(context.executionId);
+        const progress = pointer
+          ? await context.records.get(
+              `progress/${encodeURIComponent(string(pointer.planId))}/${pointer.version}`,
+            )
+          : null;
+        return result({
+          current: current?.value ?? null,
+          plan: plan?.value ?? null,
+          runId: own?.runId ?? null,
+          progress: progress ? { revision: progress.revision, value: progress.value } : null,
+        });
       },
     },
     'planning.write': {
@@ -1860,6 +1873,52 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
           conditions,
         }
       : {}),
+    ...(options.completionGuidance
+      ? {
+          completionGovernance: {
+            async prepare(input) {
+              const ref = input.requirements.find(
+                (value) =>
+                  value.extensionId === planningExtensionId &&
+                  value.definitionVersion === '1' &&
+                  value.requirementId === 'plan.required' &&
+                  value.runId === input.runId,
+              );
+              if (
+                ref &&
+                typeof ref.originStoreId === 'string' &&
+                input.evaluations.some(
+                  (evaluation) =>
+                    evaluation.requirement.recordKey === ref.recordKey &&
+                    evaluation.requirement.originStoreId === ref.originStoreId &&
+                    evaluation.outcome === 'unsatisfied',
+                )
+              ) {
+                const read = await input.context.forRequirement(ref);
+                const state = await readPlanningState(read, {
+                  runId: ref.runId,
+                  originStoreId: ref.originStoreId,
+                });
+                if (state.status === 'pending') {
+                  const current = await read.records.get('plan.current');
+                  return {
+                    kind: 'continue',
+                    key: `plan-review:${ref.recordKey}:${current?.revision ?? 'missing'}`,
+                    content: canonical({
+                      code: 'plan_draft_pending',
+                      planning: 'planning_draft',
+                      current: current?.value ?? null,
+                      instruction:
+                        'The required plan is not approved. Save a complete plan and request planning.review for its exact version and digest. Text claiming completion cannot approve a plan or dispatch work.',
+                    }),
+                  };
+                }
+              }
+              return automatic ? automatic.completion.prepare(input) : null;
+            },
+          } satisfies import('../../extensions').CompletionGovernance,
+        }
+      : {}),
     id: planningExtensionId,
     version: '1',
     apiMajor: 1,
@@ -2386,6 +2445,7 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         id: `${planningExtensionId}:${sessionId}:${pointer.planId}:${pointer.version}`,
         kind: 'planning',
         role: 'user',
+        placement: 'after_history',
         scope: sessionId,
         digest: hash,
         content: canonical(content),
@@ -2446,6 +2506,38 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
       (source) => source.id === expected[0]!.id && source.digest === expected[0]!.digest,
     );
   }
+  async function captureModelContext(
+    request: import('../../context').SourceRequest,
+    context: ReadContext,
+  ): Promise<ContextSource[]> {
+    const result = await capturePlan(request.sessionId, context);
+    if (!request.runId) return result;
+    const run = await context.getRun(request.runId);
+    if (!run || run.sessionId !== request.sessionId || !run.originStoreId)
+      throw new Error('planning_run_mismatch');
+    const state = await readPlanningState(context, {
+      runId: run.id,
+      originStoreId: run.originStoreId,
+    });
+    const content = [
+      `phase: ${state.status === 'pending' ? 'planning' : 'building'}`,
+      `run: ${run.id}`,
+      `planning: ${canonical(state as unknown as Json)}`,
+      'This is Runtime-generated observation, not a user request or execution grant.',
+    ].join('\n');
+    return [
+      ...result,
+      {
+        id: `${planningExtensionId}:runtime:${run.id}`,
+        kind: 'runtime_state',
+        role: 'user',
+        placement: 'runtime',
+        scope: request.sessionId,
+        digest: await digest(content),
+        content,
+      },
+    ];
+  }
   function sourcesFor(
     readRecords: (
       sessionId: string,
@@ -2462,14 +2554,21 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
       ...extendedExtension,
       context: {
         async capture(request, context) {
-          return capturePlan(request.sessionId, context);
+          return captureModelContext(request, context);
         },
         async captureBatch(requests, context) {
           for (const request of requests)
             if (request.sessionId !== context.sessionId)
               throw new AgentError('invalid_extension_scope');
           if (!requests.length) return [];
-          return capturePlan(context.sessionId, context);
+          const model = requests.find(
+            (request) =>
+              request.input &&
+              typeof request.input === 'object' &&
+              !Array.isArray(request.input) &&
+              request.input.kind === 'model_request',
+          );
+          return captureModelContext(model ?? requests[0]!, context);
         },
       },
     } satisfies Extension,

@@ -84,7 +84,7 @@ async function drive(config: Configuration) {
       if (
         (options.material || frame.fresh) &&
         normalized(candidate).includes(normalized(text)) &&
-        (!options.approval || !frame.text.includes('Files recovery:'))
+        (!options.approval || !frame.text.includes('Files recovery'))
       )
         return;
       if (text === checkpoint && active.sinceAction().includes('server_reset')) await key('r');
@@ -106,11 +106,20 @@ async function drive(config: Configuration) {
   };
   const approveCode = async () => {
     await wait('pending approval panel');
-    await wait('none (Enter has no answer)');
+    const postCount = () =>
+      readFileSync(wire, 'utf8')
+        .trimEnd()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .filter((row) => row.method === 'POST').length;
+    const beforeAnswer = postCount();
     await key('a');
-    await wait('none (Enter has no answer)', { approval: true });
+    await wait('❯ Allow once', { approval: true });
     await key('\x1b[B');
-    await wait('only this call', { approval: true });
+    await wait('❯ Deny', { approval: true });
+    await key('\x1b[A');
+    await wait('❯ Allow once', { approval: true });
+    assert.equal(postCount(), beforeAnswer, 'Viewing and selecting do not approve recovery');
     await key('\r');
     await wait('restored', { material: true });
     await wait('New Run >');
@@ -140,13 +149,22 @@ async function drive(config: Configuration) {
     await key('/rewind');
     await wait('/rewind');
     await key('\r');
-    await wait('Files recovery:');
+    await wait('Files recovery');
     await wait(checkpoint);
     await key('\r');
-    await wait('preimage');
+    await wait('original.txt');
+    await wait('V: read text preview');
+    await key('v');
+    await wait('original bytes');
+    await wait('Complete text preview');
+    await key('\x1b');
+    await wait('Choose recovery scope explicitly');
     const scope = config.mode === 'session' ? 'session' : config.mode === 'code' ? 'code' : 'both';
     await key(scope === 'session' ? '1' : scope === 'code' ? '2' : '3');
-    await wait(`Confirm ${scope}`);
+    await wait(
+      `❯ ${scope === 'session' ? '1. Session only' : scope === 'code' ? '2. Code only' : '3. Session and code'}`,
+    );
+    await wait('Enter confirms selected scope');
     await key('\r');
     if (config.mode === 'before_post') {
       await until(
@@ -199,7 +217,11 @@ async function drive(config: Configuration) {
         (records) => records[0]?.[scope === 'code' ? 'code' : 'fork']?.phase === 'succeeded',
         'second leg not succeeded',
       );
-      await wait(scope === 'code' ? 'Session s' : selected[0]!.fork!.request.newSessionId!);
+      if (scope === 'code') {
+        await key('\x1b');
+        await wait('Session s');
+        await wait('New Run >');
+      } else await wait(selected[0]!.fork!.request.newSessionId!);
     }
     await key('\x11');
     const end = Date.now() + 10000;

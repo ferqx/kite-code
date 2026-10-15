@@ -53,6 +53,8 @@ export interface ToolResult {
 }
 export interface ToolContext extends ActionContext {
   readonly runId: string | null;
+  /** Final Store-accepted dispatch evidence; this metadata never grants permission itself. */
+  readonly dispatchAuthorization?: JobContext['dispatchAuthorization'];
   reportProgress(update: Json): void;
   /** Persist a question for this exact live attempt and return its accepted information. */
   requestInput(request: Json): Promise<Json>;
@@ -451,6 +453,8 @@ export interface PermissionDecision {
   review?: { request: Json; requireApproval?: boolean };
 }
 export interface Permissions {
+  /** Trusted owner policy; model/configuration data cannot select this scheduling contract. */
+  readonly toolDispatchOrder?: 'model';
   authorize(request: AuthorizationRequest): Promise<PermissionDecision>;
 }
 export interface NecessaryConditions {

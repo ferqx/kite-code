@@ -304,7 +304,12 @@ export async function qualifyWindowsNativeInstallation(
         const task = tasks[providerCalls];
         assert(task, 'cold_reads_must_not_replay_model');
         assert.equal(
-          value.messages.filter((message) => message.role === 'user').at(-1)?.content,
+          [...value.messages]
+            .reverse()
+            .find(
+              (message) =>
+                message.role === 'user' && tasks.some((item) => item.input === message.content),
+            )?.content,
           task.input,
         );
         for (const prior of tasks.slice(0, providerCalls))
@@ -317,7 +322,12 @@ export async function qualifyWindowsNativeInstallation(
         providerCalls++;
       } else {
         assert.equal(
-          value.messages.filter((message) => message.role === 'user').at(-1)?.content,
+          [...value.messages]
+            .reverse()
+            .find(
+              (message) =>
+                message.role === 'user' && tasks.some((item) => item.input === message.content),
+            )?.content,
           input,
         );
         assert.equal(++providerCalls, 1, 'cold_reads_must_not_replay_model');

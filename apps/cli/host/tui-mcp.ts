@@ -269,18 +269,7 @@ export function createTuiMcpPort(
           ),
         }
       : {}),
-    ...(connection
-      ? {
-          connection: {
-            ...connection,
-            submit(intent, observed) {
-              // Presentation labels are not part of the exact canonical configuration proof.
-              const { labels: _labels, ...canonical } = observed;
-              return connection.submit(intent, canonical);
-            },
-          },
-        }
-      : {}),
+    ...(connection ? { connection } : {}),
     ...(connectionJournal && reconnectionJournal && fullClient
       ? {
           reconnection: createTuiMcpReconnectionPort(
@@ -419,17 +408,69 @@ export function createTuiMcpPort(
       );
       if (facts.storeId !== storeId || facts.sessionId !== sessionId)
         throw Error('mcp_directory_scope_mismatch');
+      let liveServerIds: string[] | undefined;
+      try {
+        const response = await client.queryExtension(
+          sessionId,
+          'builtin.mcp',
+          'mcp.catalogue',
+          { limit: 100 },
+          { signal },
+        );
+        const views = Array.isArray(response) ? response : [];
+        const matches = views.filter((value) => {
+          const row = obj(value);
+          return (
+            row?.extensionId === 'builtin.mcp' &&
+            row.contentType === 'builtin.mcp.catalogue' &&
+            row.contentVersion === 1
+          );
+        });
+        const payload = matches.length === 1 ? obj(obj(matches[0])?.payload) : undefined;
+        if (Array.isArray(payload?.items)) {
+          const selected = new Set<string>();
+          for (const item of payload.items) {
+            const row = obj(item),
+              record = obj(row?.record),
+              current = obj(row?.currentCatalogue),
+              ref = obj(record?.operationRef);
+            if (
+              row?.originStoreId !== storeId ||
+              row.live !== true ||
+              record?.originalStoreId !== storeId ||
+              typeof record.serverId !== 'string' ||
+              current?.serverId !== record.serverId ||
+              current.available !== true ||
+              current.configDigest !== record.configDigest ||
+              !Number.isSafeInteger(current.generation) ||
+              ref?.originStoreId !== storeId ||
+              ref.sessionId !== sessionId ||
+              ref.extensionId !== 'builtin.mcp' ||
+              typeof ref.executionId !== 'string' ||
+              !facts.items.some(
+                (server) =>
+                  server.id === record.serverId && server.configDigest === current.configDigest,
+              )
+            )
+              continue;
+            selected.add(record.serverId);
+          }
+          liveServerIds = [...selected];
+        }
+      } catch {
+        signal.throwIfAborted();
+      }
       if (source) {
         try {
           const labels = decodeTuiMcpLabels(facts, await source.read(sessionId, signal));
           signal.throwIfAborted();
-          return { ...facts, labels };
+          return { ...facts, labels, ...(liveServerIds ? { liveServerIds } : {}) };
         } catch {
           // Optional labels cannot invalidate canonical controls or promote a mismatched source.
           signal.throwIfAborted();
         }
       }
-      return facts;
+      return { ...facts, ...(liveServerIds ? { liveServerIds } : {}) };
     },
     async list() {
       if (!journal) throw Error('mcp_selection_journal_unavailable');

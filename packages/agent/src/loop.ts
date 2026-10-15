@@ -10,6 +10,13 @@ export interface LoopContext {
   getTools(): readonly ModelTool[];
   executeModel(request: ModelRequest, stepId: string): Promise<ModelResponse>;
   prepareToolCalls?(calls: readonly ToolCall[]): Promise<void>;
+  beginToolBatch?(
+    calls: readonly ToolCall[],
+    signal: AbortSignal,
+    cancel: (reason: unknown) => void,
+  ):
+    | { settled(callId: string, result: ToolResult, dispatched?: boolean): void; finish(): void }
+    | undefined;
   executeTool(
     call: ToolCall,
     stepId: string,
@@ -24,7 +31,7 @@ export interface LoopContext {
         kind: 'response';
         stepId: string;
         response: ModelResponse;
-        settledCalls: readonly { callId: string; result: ToolResult }[];
+        settledCalls: readonly { callId: string; result: ToolResult; dispatched?: boolean }[];
       };
 }
 
@@ -57,6 +64,9 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
     const abort = () => batch.abort(context.signal.reason);
     context.signal.addEventListener('abort', abort, { once: true });
     if (context.signal.aborted) abort();
+    const admission = context.beginToolBatch?.(response.toolCalls, batch.signal, (reason) =>
+      batch.abort(reason),
+    );
     let failed = false,
       failure: unknown;
     let outcomes: PromiseSettledResult<void>[] = [];
@@ -79,6 +89,8 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
               throw new AgentError('approval_denied');
             if (result.outcome === 'outcome_unknown')
               throw new Error('Execution outcome requires reconciliation.');
+            if (settled) admission?.settled(call.id, result, settled.dispatched);
+            if (admission) batch.signal.throwIfAborted();
           } catch (error) {
             if (!failed) {
               failed = true;
@@ -91,6 +103,7 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
       );
     } finally {
       context.signal.removeEventListener('abort', abort);
+      admission?.finish();
     }
     if (failed) {
       const failures = [

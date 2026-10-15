@@ -272,18 +272,36 @@ test('one ordinary Run retains complete project sources across 257 distinct File
     expect(offsets).toEqual(Array.from({ length: 257 }, (_, index) => index + 1));
     for (const request of requests) {
       expect(
-        request.messages.some((message) => message.role === 'system' && message.content === agents),
-      ).toBe(true);
+        request.messages.filter(
+          (message) =>
+            message.content ===
+            `<project-instructions role="workspace-context">\nAGENTS.md\n${agents}\n</project-instructions>`,
+        ),
+      ).toEqual([
+        {
+          role: 'user',
+          content: `<project-instructions role="workspace-context">\nAGENTS.md\n${agents}\n</project-instructions>`,
+        },
+      ]);
       expect(request.tools.map((tool) => tool.function.name)).toEqual(['files.read']);
     }
     for (const execution of models) {
       expect(execution.status).toBe('succeeded');
       const input = await client.getModelInput('s', execution.id);
       expect(
-        input.request.messages.some(
-          (message) => message.role === 'system' && message.content === agents,
+        input.request.messages.filter((message) =>
+          message.sourceIds?.includes('project:w:AGENTS.md'),
         ),
-      ).toBe(true);
+      ).toEqual([
+        {
+          role: 'user',
+          content: `<project-instructions role="workspace-context">\nAGENTS.md\n${agents}\n</project-instructions>`,
+          sourceIds: ['project:w:AGENTS.md'],
+        },
+      ]);
+      expect(
+        input.metadata.context?.sources.filter((source) => source.id === 'project:w:AGENTS.md'),
+      ).toEqual([{ id: 'project:w:AGENTS.md', digest: originalHash }]);
       expect(input.runId).toBe(runId);
     }
     expect(allMessages.filter((message) => message.role === 'user')).toHaveLength(1);

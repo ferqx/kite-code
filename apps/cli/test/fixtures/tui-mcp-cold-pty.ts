@@ -19,22 +19,12 @@ if (!process.stdin.isTTY) {
   const { createMcpHttpTransportPort } = await import('@kite-ai/service/mcp-http-port');
   appendFileSync(join(settings.root, 'startup-ledger'), 'service imports ready\n');
   await runServiceProcess({
-    configure(startup) {
+    configure(startup, context) {
       appendFileSync(join(settings.root, 'startup-ledger'), 'configure reached\n');
-      return createDefaultProcessConfiguration({
+      const configuration = createDefaultProcessConfiguration({
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
-        permissions: {
-          async authorize(request) {
-            return request.kind === 'job'
-              ? {
-                  allowed: false,
-                  revision: 'owned-cold-ask',
-                  approval: { request: { effects: ['workspace_write'] }, grants: ['approve_once'] },
-                }
-              : { allowed: true, revision: 'owned-cold-read' };
-          },
-        },
+        observerSubjectId: context.subjectId,
         credentialBackend: {
           kind: 'temporary',
           async put() {
@@ -66,6 +56,24 @@ if (!process.stdin.isTTY) {
           }),
         },
       });
+      const permissions = configuration.permissions;
+      if (!permissions) throw Error('owned_cold_default_permissions_unavailable');
+      return {
+        ...configuration,
+        permissions: {
+          ...permissions,
+          async authorize(request: Parameters<typeof permissions.authorize>[0]) {
+            if (request.kind === 'model') throw Error('owned_cold_model_forbidden');
+            return request.kind === 'job'
+              ? {
+                  allowed: false,
+                  revision: 'owned-cold-ask',
+                  approval: { request: { effects: ['workspace_write'] }, grants: ['approve_once'] },
+                }
+              : { allowed: true, revision: 'owned-cold-read' };
+          },
+        },
+      };
     },
   });
 } else {

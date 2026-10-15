@@ -213,7 +213,10 @@ test('real HTTP exposes projected facts, distinguishes initialization writes and
     expect((await data.store.getMetadata()).lastChangeCursor).toBe(before.lastChangeCursor);
     expect(data.model.requests).toHaveLength(0);
     const view = await (await data.request('/v1/sessions/session/view')).json();
-    expect(view.session.ownerGeneration).toBeUndefined();
+    const storedSession = (await data.store.getSession('session'))!;
+    expect(storedSession.ownerGeneration).toBe('0');
+    expect(view.session.ownerGeneration).toBe(storedSession.ownerGeneration);
+    expect((await data.store.getMetadata()).lastChangeCursor).toBe(before.lastChangeCursor);
     expect(view.session.rootSessionId).toBe('session');
     const forged = await data.post('/v1/sessions/session/commands', {
       expectedStoreId: data.startup.storeId,

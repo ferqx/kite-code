@@ -8,9 +8,13 @@ export interface ContextSource {
   content: string;
   /** Trusted host placement: executable evidence and remote content use user data. */
   role?: 'system' | 'user';
+  /** Trusted data placement; never an execution capability. Runtime fragments form one user block. */
+  placement?: 'after_history' | 'runtime';
 }
 export interface SourceRequest {
   sessionId: string;
+  /** Supplied by the actual Core capture boundary, never by Model input. */
+  runId?: string;
   workspaceId: string;
   definitionId: string;
   input: Json;
@@ -21,13 +25,15 @@ export function assertContextSource(source: ContextSource): void {
     typeof source !== 'object' ||
     Array.isArray(source) ||
     Object.keys(source).some(
-      (key) => !['id', 'kind', 'scope', 'digest', 'content', 'role'].includes(key),
+      (key) => !['id', 'kind', 'scope', 'digest', 'content', 'role', 'placement'].includes(key),
     ) ||
     [source.id, source.kind, source.scope, source.digest].some(
       (value) => typeof value !== 'string' || value.length < 1 || value.length > 4096,
     ) ||
     typeof source.content !== 'string' ||
-    (source.role !== undefined && !['system', 'user'].includes(source.role))
+    (source.role !== undefined && !['system', 'user'].includes(source.role)) ||
+    (source.placement !== undefined &&
+      (!['after_history', 'runtime'].includes(source.placement) || source.role !== 'user'))
   )
     throw new AgentError('context_source_invalid');
 }

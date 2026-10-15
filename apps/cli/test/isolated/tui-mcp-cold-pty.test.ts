@@ -135,7 +135,7 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
     mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
     writeFileSync(
       configPath,
-      '// USER COMMENT\n{"unknown":{"keep":true},"mcp":[{"id":"owned-server","enabled":false}]}\n',
+      `// USER COMMENT\n${JSON.stringify({ unknown: { keep: true }, modelId: 'forbidden', models: [{ id: 'forbidden', provider: 'compatible', model: 'forbidden', baseURL: `${remote.url.href}v1` }], mcp: [{ id: 'owned-server', enabled: false }] })}\n`,
       { mode: 0o600 },
     );
     writeFileSync(projectPath, '// PROJECT COMMENT\n{"unknown":42}\n', { mode: 0o600 });
@@ -164,6 +164,16 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
         workspaceId: 'w',
         title: 'cold original choices',
       });
+      const trust = await seed.client.getWorkspaceTrust('w', { storeId });
+      await seed.client.setWorkspaceTrust('w', {
+        expectedStoreId: storeId,
+        commandId: randomUUID(),
+        trusted: true,
+        canonicalIdentity: trust.canonicalIdentity,
+        externalReadScopeDigest: trust.externalReadScopeDigest,
+        ifRevision: trust.revision,
+      });
+      expect((await seed.client.getWorkspaceTrust('w', { storeId })).trusted).toBe(true);
     } finally {
       await seed.close();
       expect(() => process.kill(seed.pid, 0)).toThrow();
@@ -260,9 +270,13 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
             observer = undefined;
             // Remove only the owned catalogue/selection after both original effects are verified.
             phase = 'cold';
-            writeFileSync(configPath, '// USER COMMENT\n{"unknown":{"keep":true},"mcp":[]}\n', {
-              mode: 0o600,
-            });
+            writeFileSync(
+              configPath,
+              `// USER COMMENT\n${JSON.stringify({ unknown: { keep: true }, modelId: 'forbidden', models: [{ id: 'forbidden', provider: 'compatible', model: 'forbidden', baseURL: `${remote.url.href}v1` }], mcp: [] })}\n`,
+              {
+                mode: 0o600,
+              },
+            );
             publish();
             receipts.push({ stage: path, servicePid, exited: true, originals });
           } else if (path === '/cold-open') {

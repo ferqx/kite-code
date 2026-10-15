@@ -774,3 +774,64 @@ test('corrupt cold journal blocks fresh submit and delayed restoration cannot re
   noWork(f);
   f.controller.dispose();
 });
+
+test('ordinary MCP add entry is visible immediately and opens the actual source-mutation form without writes', async () => {
+  const f = fixture();
+  let sourceReads = 0,
+    writes = 0;
+  const forbidden = async (): Promise<never> => {
+    writes++;
+    throw Error('unexpected source mutation');
+  };
+  f.port.mcp!.sourceMutation = {
+    read: async (sessionId) => {
+      sourceReads++;
+      return {
+        storeId: 'store',
+        sessionId,
+        workspaceId: 'w',
+        workspaceIdentity: 'file:///owned/w',
+        readSet: {
+          scopeDigest: 'a'.repeat(64),
+          user: {
+            identity: { kind: 'user', pathDigest: 'b'.repeat(64), rootIdentity: 'c'.repeat(64) },
+            etag: 'd'.repeat(64),
+            error: null,
+          },
+          workspace: null,
+          approvalEtag: null,
+          bindingEtag: null,
+          variablesDigest: 'e'.repeat(64),
+        },
+        registryRevision: 'registry-1',
+        items: [],
+        errors: [],
+      };
+    },
+    list: async () => [],
+    preview: forbidden,
+    submit: forbidden,
+    lookup: forbidden,
+  };
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await f.controller.routeCommand('/mcp');
+    await tick();
+    expect(app.lastFrame()).toContain('Add MCP server');
+    app.stdin.write('\r');
+    await tick();
+    expect(f.controller.state.mcpMutationOpen).toBe(true);
+    expect(app.lastFrame()).toContain('Add source entry');
+    app.stdin.write('\r');
+    await tick();
+    expect(app.lastFrame()).toContain('HTTP');
+    expect(app.lastFrame()).toContain('STDIO');
+    expect(sourceReads).toBe(1);
+    expect(writes).toBe(0);
+    noWork(f);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});

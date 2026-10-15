@@ -123,6 +123,9 @@ test('resume deletes the confirmed original row; default Enter retains it withou
     ]);
     expect(f.controller.state.sessionId).toBe('a');
     expect(f.controller.state.sessions.map((item) => item.id)).toEqual(['a']);
+    expect(app.lastFrame()).not.toContain('Delete Session?');
+    expect(f.controller.state.sessionDeletion).toBeUndefined();
+    expect(app.lastFrame()).not.toContain('Select Session (arrows/Enter, Esc)');
     expect(f.counts).toEqual({ cancellations: 0, models: 0, created: 0 });
   } finally {
     app.unmount();
@@ -233,6 +236,138 @@ test('closing or switching while control metadata is pending invalidates the ori
       expect(signal.aborted).toBe(true);
       expect(f.controller.state.sessionDeletion).toBeUndefined();
     }
+    f.controller.dispose();
+  }
+});
+
+test('ordinary session chooser retains original navigation and safe deletion labels with the new CAS intent', async () => {
+  const f = fixture();
+  f.port.preferences = {
+    read: async () => ({
+      revision: 'a'.repeat(64),
+      language: 'zh-CN',
+      resolvedLanguage: 'zh-CN',
+      colorPreset: 'teal',
+      theme: 'dark',
+    }),
+    save: async () => {
+      throw Error('unexpected_preference_save');
+    },
+  };
+  await f.controller.refreshPreferences();
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    app.stdin.write('\u0012');
+    await settle();
+    expect(app.lastFrame()).toContain('会话列表');
+    expect(app.lastFrame()).toContain('导航');
+    app.stdin.write('d');
+    await settle();
+    expect(app.lastFrame()).toContain('删除确认');
+    expect(app.lastFrame()).toContain('❯ 保留会话');
+    expect(app.lastFrame()).toContain('永久删除');
+    expect(f.writes).toHaveLength(0);
+    app.stdin.write('\r');
+    await settle();
+    expect(app.lastFrame()).not.toContain('删除确认');
+    expect(f.writes).toHaveLength(0);
+    expect(f.counts).toEqual({ cancellations: 0, models: 0, created: 0 });
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('directory failure is unknown history, preserves saved rows, and R retries only the read', async () => {
+  const f = fixture();
+  await f.controller.list();
+  f.port.listSessions = async () => {
+    throw Error('service_unavailable');
+  };
+  await f.controller.list();
+  const app = render(<TuiSession testDiagnostics controller={f.controller} />);
+  try {
+    await settle();
+    app.stdin.write('\u0012');
+    await settle();
+    expect(app.lastFrame()).toContain('Could not load session history; please retry.');
+    expect(app.lastFrame()).not.toContain('No session history');
+    expect(f.controller.state.sessions.map((session) => session.id)).toEqual(['a', 'b']);
+    expect(f.controller.state.sessionDirectoryLoading).toBe(false);
+    f.port.listSessions = async () => [...f.sessions.values()];
+    app.stdin.write('r');
+    await settle();
+    expect(f.controller.state.sessionDirectoryError).toBeUndefined();
+    expect(app.lastFrame()).not.toContain('Could not load session history; please retry.');
+    expect(f.counts).toEqual({ cancellations: 0, models: 0, created: 0 });
+    expect(f.writes).toHaveLength(0);
+  } finally {
+    app.unmount();
+    app.cleanup();
+    await f.controller.dispose();
+  }
+});
+
+test('a late failed directory read cannot replace a newer successful read', async () => {
+  const f = fixture();
+  let reject!: (reason: Error) => void;
+  f.port.listSessions = async () =>
+    new Promise((_resolve, failure) => {
+      reject = failure;
+    });
+  const old = f.controller.list();
+  f.port.listSessions = async () => [...f.sessions.values()];
+  await f.controller.list();
+  reject(new Error('old failed read'));
+  await old;
+  expect(f.controller.state.sessions.map((session) => session.id)).toEqual(['a', 'b']);
+  expect(f.controller.state.sessionDirectoryError).toBeUndefined();
+  expect(f.controller.state.sessionDirectoryLoading).toBe(false);
+  await f.controller.dispose();
+});
+
+test('directory reorder preserves selected Session identity through default retention and exact CAS deletion', async () => {
+  const f = fixture();
+  await f.controller.select('a');
+  const app = render(<TuiSession testDiagnostics controller={f.controller} />);
+  try {
+    await settle();
+    app.stdin.write('\u0012');
+    await settle();
+    app.stdin.write('\u001b[B');
+    await settle();
+    expect(app.lastFrame()).toContain('❯ 另一会话🙂 [b]');
+    f.port.listSessions = async () => [...f.sessions.values()].reverse();
+    await f.controller.list();
+    await settle();
+    expect(app.lastFrame()).toContain('❯ 另一会话🙂 [b]');
+    app.stdin.write('d');
+    await settle();
+    expect(app.lastFrame()).toContain('Original Session [b]');
+    expect(app.lastFrame()).toContain('❯ Keep Session');
+    app.stdin.write('\r');
+    await settle();
+    expect(f.writes).toEqual([]);
+    app.stdin.write('d');
+    await settle();
+    expect(app.lastFrame()).toContain('Original Session [b]');
+    app.stdin.write('\u001b[B');
+    await settle();
+    expect(app.lastFrame()).toContain('❯ Delete Session');
+    app.stdin.write('\r');
+    await settle();
+    expect(f.writes).toEqual([
+      {
+        kind: 'session.delete',
+        sessionId: 'b',
+        request: { expectedStoreId: 'store', commandId: 'id-1', ifRevision: '7' },
+      },
+    ]);
+    expect(f.controller.state.sessionId).toBe('a');
+    expect(f.counts).toEqual({ cancellations: 0, models: 0, created: 0 });
+  } finally {
+    app.unmount();
     f.controller.dispose();
   }
 });

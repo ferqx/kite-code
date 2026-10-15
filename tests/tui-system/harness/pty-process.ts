@@ -11,7 +11,7 @@
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
-import { trustWorkspace } from '#kite-service/config/workspace-trust';
+import { selectProfile } from '@kite-ai/agent/profile';
 import {
   currentTuiSystemStepSignal,
   throwIfTuiSystemStepAborted,
@@ -28,6 +28,7 @@ import {
   waitForOutputQuiescence,
 } from './terminal-screen';
 import type { TestWorkspace } from './test-workspace';
+import { translateOriginalTestConfig } from './test-workspace';
 
 export interface PtyProcessOptions {
   /** Terminal columns (default 120) */
@@ -49,6 +50,7 @@ export interface PtyProcessOptions {
   /** Explicit release-entrypoint arguments such as a selected daemon endpoint. */
   args?: readonly string[];
 }
+const modelWorkspaces = new WeakMap<MockModelServer, string>();
 
 export interface TuiReadinessProbe {
   readonly description: string;
@@ -348,7 +350,7 @@ export function resolveTuiLaunchPaths(
     entryPath:
       opts.executablePath ??
       opts.entryPath ??
-      join(projectRoot, 'scripts/release/entrypoints/tui.ts'),
+      join(projectRoot, 'tests/tui-system/fixtures/current-tui.ts'),
   };
 }
 
@@ -378,13 +380,9 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // trusted" fast path; no env bypass exists because Bun auto-injects
   // `<cwd>/.env*` and an env switch could be forged by workspace files.
   // Scenarios testing the gate itself pass enforceWorkspaceTrust: true.
-  if (opts.workspace && !opts.workspace.enforceWorkspaceTrust) {
-    trustWorkspace({
-      workspace: cwd,
-      source: 'test',
-      storePath: join(opts.workspace.home, '.kite-code', 'workspace-trust.jsonc'),
-    });
-  }
+  const profile = opts.workspace
+    ? selectProfile({ dataRoot: join(opts.workspace.home, '.kite-code'), profile: 'development' })
+    : undefined;
 
   // If a mock server is provided, write config that points to it.
   // Config is written to BOTH the home-level (~/.kite-code/) AND the
@@ -392,6 +390,17 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // We set KITE_CODE_HOME env var so defaultConfigPath() resolves correctly.
   // Skip when noPreConfig is set — used for first-run/setup tests.
   if (opts.mockServer && opts.workspace && !opts.noPreConfig) {
+    const binding = JSON.stringify([opts.workspace.workspace, opts.workspace.home]);
+    const prior = modelWorkspaces.get(opts.mockServer);
+    if (prior !== undefined && prior !== binding)
+      throw Error('original_tui_mock_workspace_changed');
+    if (prior === undefined) {
+      opts.mockServer.bindWorkspace({
+        workspace: opts.workspace.workspace,
+        home: opts.workspace.home,
+      });
+      modelWorkspaces.set(opts.mockServer, binding);
+    }
     const baseMockConfig = {
       provider: {
         mock: {
@@ -408,29 +417,28 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       },
     };
     const userConfigStr = JSON.stringify(
-      { ...baseMockConfig, ...(opts.workspace.configOverrides ?? {}) },
+      translateOriginalTestConfig({ ...baseMockConfig, ...(opts.workspace.configOverrides ?? {}) })
+        .configuration,
       null,
       2,
     );
     const projectConfigStr = JSON.stringify(
-      {
+      translateOriginalTestConfig({
         ...baseMockConfig,
         ...(opts.workspace.projectConfigOverrides ?? opts.workspace.configOverrides ?? {}),
-      },
+      }).configuration,
       null,
       2,
     );
 
     // User-level config at KITE_CODE_HOME/.kite-code/
-    const homeDir = join(opts.workspace.home, '.kite-code');
+    const homeDir = profile!.profilePath;
     mkdirSync(homeDir, { recursive: true });
-    const configFilePath = join(homeDir, 'kite-code.jsonc');
+    const configFilePath = join(homeDir, 'config.jsonc');
     writeFileSync(configFilePath, userConfigStr);
     // Also write to workspace dir's .kite-code/ (project-level config,
     // resolved via projectConfigPath() if cwd is set to workspace)
-    const wsDir = join(opts.workspace.workspace, '.kite-code');
-    mkdirSync(wsDir, { recursive: true });
-    writeFileSync(join(wsDir, 'kite-code.jsonc'), projectConfigStr);
+    writeFileSync(join(opts.workspace.workspace, 'kite-agent.jsonc'), projectConfigStr);
   }
 
   const outputBuffer = createPtyOutputBuffer();
@@ -477,6 +485,9 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // so make ANSI deterministic for this test-owned PTY instead of probing the
   // user's input with a character that could arrive after its cleanup.
   childEnv.FORCE_COLOR = '3';
+  if (profile && !opts.workspace?.enforceWorkspaceTrust) childEnv.KITE_TUI_SYSTEM_PRETRUST = '1';
+  if (opts.workspace?.permissionMode)
+    childEnv.KITE_TUI_SYSTEM_PERMISSION_MODE = opts.workspace.permissionMode;
   const detachTuiProcess = shouldDetachTuiProcess(
     process.platform,
     childEnv.KITE_FAULT_SOAK_PROCESS_NONCE,
@@ -487,16 +498,20 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     cmd: opts.executablePath
       ? [
           entryPath,
-          '--kite-home',
+          '--data-root',
           join(opts.workspace?.home ?? userInfo().homedir, '.kite-code'),
+          '--workspace',
+          cwd,
           ...(opts.args ?? []),
         ]
       : [
           process.execPath,
           'run',
           entryPath,
-          '--kite-home',
+          '--data-root',
           join(opts.workspace?.home ?? userInfo().homedir, '.kite-code'),
+          '--workspace',
+          cwd,
           ...(opts.args ?? []),
         ],
     cwd,
@@ -770,17 +785,21 @@ export async function waitForTuiReady(
   workspace?: TestWorkspace,
 ): Promise<void> {
   const workspacePath = workspace ? realpathSync(workspace.workspace) : undefined;
+  // The original banner belongs to terminal scrollback after a long journey;
+  // readiness still requires the current empty composer and actual footer.
+  let bannerObserved = screenContains(tui.transcript(), 'Kite Code');
   await waitForCondition(
     () => {
       if (typeof readiness !== 'string') return readiness.isReady(tui);
       const viewport = tui.viewport();
       if (readiness === 'main') {
+        bannerObserved ||= screenContains(viewport, 'Kite Code');
         const input = activeInput(tui.inputViewport());
         return (
           input?.kind === 'main' &&
           input.value === '' &&
           screenContains(viewport, '❯') &&
-          screenContains(viewport, 'Kite Code') &&
+          bannerObserved &&
           screenContains(viewport, 'mock-model') &&
           !screenContains(viewport, 'Loading...') &&
           !screenContains(viewport, 'Open this workspace?') &&

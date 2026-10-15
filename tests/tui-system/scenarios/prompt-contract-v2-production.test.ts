@@ -7,12 +7,17 @@
  * phase-stable tool disclosure plus Runtime-owned phase policy.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { currentPlanWorkResponses } from '../harness/current-plan';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
+import {
+  createTestWorkspace,
+  observePersistedTurnEvents,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30_000;
 const PROJECT_MARKER = 'V2 production PTY project instruction marker.';
@@ -58,7 +63,12 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
           const { plan_id, version, structural_digest } = parseDraftSavedPlan(result?.content);
           return {
             expectedRequest: {
-              toolResults: [{ toolCallId: 'v2-plan-save', contentIncludes: ['draft_saved'] }],
+              toolResults: [
+                {
+                  toolCallId: 'v2-plan-save',
+                  contentIncludes: ['"planId"', '"version"', '"digest"'],
+                },
+              ],
             },
             message: {
               tool_calls: [
@@ -72,40 +82,14 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
           };
         },
       },
-      {
-        response(request) {
-          const result = request.messages.find(
-            (message) => message.role === 'tool' && message.tool_call_id === 'v2-plan-submit',
-          );
-          const plan = parseDraftSavedPlan(result?.content);
-          return {
-            expectedRequest: {
-              toolResults: [
-                { toolCallId: 'v2-plan-submit', contentIncludes: ['"status":"approved"'] },
-              ],
-            },
-            message: {
-              tool_calls: [
-                {
-                  id: 'v2-plan-complete',
-                  name: 'update_plan',
-                  args: {
-                    plan_id: plan.plan_id,
-                    version: plan.version,
-                    structural_digest: plan.structural_digest,
-                    updates: [{ step_id: 'inspect', status: 'completed' }],
-                    complete_plan: true,
-                  },
-                },
-              ],
-            },
-          };
-        },
-      },
+      ...currentPlanWorkResponses('v2-plan-submit', ['inspect'], {
+        kind: 'read',
+        path: 'AGENTS.md',
+      }),
       {
         expectedRequest: {
           toolResults: [
-            { toolCallId: 'v2-plan-complete', contentIncludes: ['"plan_completed":true'] },
+            { toolCallId: 'v2-plan-submit-progress-0', contentIncludes: ['"completePlan":true'] },
           ],
         },
         message: { content: 'Production V2 request completed.' },
@@ -127,10 +111,36 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       const userPrompt = 'Inspect the project rules and propose a plan.';
       await submitUserMessage(tui, server, userPrompt, { timeout: 15_000 });
       await waitForText(() => tui.viewport(), '方案审核', 15_000);
+      // The current review starts unselected; choose the explicit Accept Edits mode.
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '❯ 1. 在 Auto 模式下开始执行', 5_000);
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '❯ 2. 在接受编辑模式下开始执行', 5_000);
       tui.write('\r');
       await waitForText(() => tui.viewport(), 'Production V2 request completed.', 15_000);
       expect(screenContains(tui.viewport(), 'Production V2 request completed.')).toBe(true);
 
+      await waitForCondition(
+        () => {
+          const observed = observePersistedTurnEvents(workspace, userPrompt);
+          return (
+            observed.status === 'ready' &&
+            observed.value?.events.some(
+              (event) => event.type === 'run.finished' && event.status === 'completed',
+            ) === true
+          );
+        },
+        'actual production planning Run completed',
+        10_000,
+      );
+      const actual = requirePersistedRuntimeReady(
+        observePersistedTurnEvents(workspace, userPrompt),
+      );
+      expect(actual).toBeDefined();
+      expect(actual!.events.filter((event) => event.type === 'run.finished')).toEqual([
+        expect.objectContaining({ type: 'run.finished', status: 'completed' }),
+      ]);
+      expect(server.getRequestCount()).toBe(6);
       const request = server.getRequests()[0];
       expect(request).toBeDefined();
       const messages = request!.messages.map((message) => ({
@@ -160,6 +170,23 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       expect(runtimeMessages[0]!.role).toBe('user');
       expect(runtimeMessages[0]!.content).toContain('phase: planning');
       expect(messages.at(-1)?.content).toBe(runtimeMessages[0]!.content);
+      const approved = server.getRequests()[2]!;
+      expect(approved.body.tools).toEqual(request!.body.tools);
+      expect(approved.messages.filter((message) => message.role === 'system')).toEqual(
+        request!.messages.filter((message) => message.role === 'system'),
+      );
+      expect(String(approved.messages.at(-1)?.content)).toContain('phase: building');
+      expect(
+        server
+          .getRequests()
+          .flatMap((item) => item.messages)
+          .some(
+            (message) =>
+              message.role === 'tool' &&
+              message.tool_call_id === 'v2-plan-submit-work-0' &&
+              String(message.content).includes(PROJECT_MARKER),
+          ),
+      ).toBe(true);
 
       const tools = Array.isArray(request!.body.tools)
         ? (request!.body.tools as Array<{
@@ -168,36 +195,35 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
               description?: string;
               parameters?: {
                 properties?: {
-                  subagent_type?: { description?: string; enum?: string[] };
+                  role?: { description?: string; enum?: string[] };
                 };
               };
             };
           }>)
         : [];
       const toolNames = tools.map((tool) => tool.function?.name).filter(Boolean);
-      expect(toolNames).toContain('read_file');
-      expect(toolNames).toContain('write_plan');
-      expect(toolNames).toContain('edit_file');
-      expect(toolNames).toContain('write_file');
-      expect(toolNames).toContain('shell_execute');
+      expect(toolNames).toContain('files.read');
+      expect(toolNames).toContain('planning.write');
+      expect(toolNames).toContain('files.edit');
+      expect(toolNames).toContain('files.write');
+      expect(toolNames).toContain('shell.execute');
       expect(
-        tools.find((tool) => tool.function?.name === 'read_file')?.function?.description,
-      ).toContain('Returns text:');
-      const task = tools.find((tool) => tool.function?.name === 'task')?.function;
+        tools.find((tool) => tool.function?.name === 'files.read')?.function?.description,
+      ).toContain('complete bodies or explicit immutable Artifact references');
+      const task = tools.find((tool) => tool.function?.name === 'task.execute')?.function;
       expect(task?.description).toContain('benefits from an isolated sub-agent');
       expect(task?.description).toContain('code only when the user task calls for implementation');
       expect(task?.description).toContain('plan for read-only architecture or design planning');
       expect(task?.description).toContain('multiple independent sibling task calls');
       expect(task?.description).toContain('execute them concurrently');
-      expect(task?.parameters?.properties?.subagent_type?.enum).toEqual([
+      expect(task?.parameters?.properties?.role?.enum).toEqual([
+        'worker',
+        'code',
         'explore',
         'plan',
-        'code',
         'review',
       ]);
-      expect(task?.parameters?.properties?.subagent_type?.description).toContain(
-        'Type of sub-agent',
-      );
+      expect(task?.parameters?.properties?.role?.description).toContain('Type of sub-agent');
     },
     TIMEOUT,
   );

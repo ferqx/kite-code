@@ -131,7 +131,10 @@ export function fileChangePreview(
   const unchanged = diff && diff.addedLines === 0 && diff.removedLines === 0;
   const format = !diff || unchanged ? 'file_content' : 'line_diff';
   if (format === 'file_content') {
-    const lines = after.content.split('\n');
+    // A final newline terminates the last line; it does not create another empty line.
+    const lines = (after.content.endsWith('\n') ? after.content.slice(0, -1) : after.content).split(
+      '\n',
+    );
     const pad = Math.max(2, String(lines.length).length);
     append(
       `Wrote ${lines.length} lines to ${after.path}${unchanged ? ' (content unchanged)' : ''}\n`,

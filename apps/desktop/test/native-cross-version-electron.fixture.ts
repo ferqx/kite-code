@@ -547,7 +547,10 @@ try {
       // GET /executions/:id uses the complete public Execution schema, not the Core record.
       {
         id: db9.execution.id,
+        authorization: db9.execution.authorization,
         originStoreId: db9.execution.originStoreId,
+        rootWorkCommandId: db9.execution.rootWorkCommandId,
+        rootWorkSeq: db9.execution.rootWorkSeq,
         childSessionId: db9.execution.childSessionId,
         parentExecutionId: db9.execution.parentExecutionId,
         cancelWithParent: db9.execution.cancelWithParent,

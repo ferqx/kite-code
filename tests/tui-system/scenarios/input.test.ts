@@ -5,6 +5,7 @@
  * and full message send → agent response cycle.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -60,7 +61,27 @@ describe('TUI PTY System — Input & Message', () => {
     'send message → agent responds with mock text',
     async () => {
       server.setResponses([{ message: { content: 'I received your message!' }, delay: 50 }]);
-      await submitUserMessage(tui, server, 'Test message from PTY', { timeout: 15000 });
+      try {
+        await submitUserMessage(tui, server, 'Test message from PTY', { timeout: 15000 });
+      } catch (error) {
+        console.error('Failed input viewport:', tui.viewport(), 'Requests:', server.getRequests());
+        const db = new Database(workspace.databasePath, { readonly: true });
+        try {
+          console.error(
+            'Actual command/run/execution facts:',
+            JSON.stringify({
+              commands: db.query('SELECT id,kind,status,receipt_json FROM command').all(),
+              runs: db.query('SELECT id,status,reason FROM run').all(),
+              executions: db
+                .query('SELECT id,kind,adapter_id,state,result_json FROM execution')
+                .all(),
+            }),
+          );
+        } finally {
+          db.close();
+        }
+        throw error;
+      }
 
       // Wait for the mock model response
       await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);

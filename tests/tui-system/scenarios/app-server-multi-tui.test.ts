@@ -7,6 +7,7 @@ import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
+  stripAnsi,
   waitForCondition,
   waitForText,
 } from '../harness/terminal-screen';
@@ -68,13 +69,54 @@ describe('TUI PTY System — parent-owned App Servers', () => {
 
       await submitCommand(first, '/status');
       await waitForText(() => first.outputSinceLastAction(), 'App Server 传输: stdio', 10_000);
+      await waitForText(() => first.viewport(), '客户端与 App Server 已精确配对', 5_000);
       expect(screenContains(first.viewport(), '客户端与 App Server 已精确配对')).toBe(true);
       expect(screenContains(first.viewport(), 'Service PID')).toBe(false);
       expect(screenContains(first.viewport(), 'Kite Web')).toBe(false);
+      const firstStatus = stripAnsi(first.viewport());
+      const firstInstance = firstStatus.match(/(?:实例：|Instance:)\s*(\S+)/)?.[1];
+      const firstStore = firstStatus.match(/(?:Store：|Store:)\s*(\S+)/)?.[1];
+      expect(firstInstance).toBeDefined();
+      expect(firstStore).toBeDefined();
 
       await submitCommand(second, '/status');
       await waitForText(() => second.outputSinceLastAction(), 'App Server 传输: stdio', 10_000);
+      await waitForText(() => second.viewport(), '客户端与 App Server 已精确配对', 5_000);
       expect(screenContains(second.viewport(), '客户端与 App Server 已精确配对')).toBe(true);
+      const secondStatus = stripAnsi(second.viewport());
+      const secondInstance = secondStatus.match(/(?:实例：|Instance:)\s*(\S+)/)?.[1];
+      const secondStore = secondStatus.match(/(?:Store：|Store:)\s*(\S+)/)?.[1];
+      expect(secondInstance).toBeDefined();
+      expect(secondInstance).not.toBe(firstInstance);
+      expect(secondStore).toBe(firstStore);
+      expect(server.getRequestCount()).toBe(1);
+
+      first.write('\x1b');
+      await waitForCondition(
+        () => first!.focusedMainInputReady(),
+        'status closes back to the original main input',
+        5_000,
+      );
+      await submitCommand(first, '/exit');
+      expect(await first.waitForExit()).toBe(0);
+      second.write('\x1b');
+      await waitForCondition(
+        () => second.focusedMainInputReady(),
+        'second paired TUI remains live after first closes',
+        5_000,
+      );
+      await submitCommand(second, '/status');
+      await waitForText(() => second.viewport(), secondInstance!, 5_000);
+      await waitForText(() => second.viewport(), '客户端与 App Server 已精确配对', 5_000);
+      expect(screenContains(second.viewport(), '客户端与 App Server 已精确配对')).toBe(true);
+      second.write('\x1b');
+      await waitForCondition(
+        () => second!.focusedMainInputReady(),
+        'status closes back to the original main input',
+        5_000,
+      );
+      await submitCommand(second, '/exit');
+      expect(await second.waitForExit()).toBe(0);
     },
     TIMEOUT,
   );

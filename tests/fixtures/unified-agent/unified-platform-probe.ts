@@ -49,9 +49,16 @@ const provider = Bun.serve({
     const raw = (await request.json()) as { messages: { role: string; content: unknown }[] };
     if (!Array.isArray(raw.messages)) throw Error('fixed_provider_bad_request');
     calls++;
-    const shell =
-      raw.messages.filter((message) => message.role === 'user').at(-1)?.content ===
-      'Selected default Shell.';
+    const task = [...raw.messages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === 'user' &&
+          (message.content === 'Selected default Shell.' ||
+            message.content === 'Ordinary Files and protected runtime assets.'),
+      )?.content;
+    if (!task) throw Error('fixed_provider_actual_task_unavailable');
+    const shell = task === 'Selected default Shell.';
     if (shell) shellCalls++;
     else fileCalls++;
     const call = shell

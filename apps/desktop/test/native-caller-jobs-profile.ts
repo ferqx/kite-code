@@ -13,8 +13,55 @@ export async function nativeCallerJobsProfile() {
     port: 0,
     async fetch(req) {
       calls++;
-      const body = (await req.json()) as { messages: { role: string }[] };
-      const done = body.messages.at(-1)?.role === 'tool';
+      const body = (await req.json()) as {
+        messages: {
+          role: string;
+          content?: string;
+          tool_call_id?: string;
+          tool_calls?: { id: string; function: { name: string; arguments: string } }[];
+        }[];
+      };
+      let taskIndex = -1;
+      for (let index = body.messages.length - 1; index >= 0; index--) {
+        const message = body.messages[index]!;
+        if (
+          message.role === 'user' &&
+          message.content === 'two explicitly configured independent jobs'
+        ) {
+          taskIndex = index;
+          break;
+        }
+      }
+      if (taskIndex < 0) throw Error('native_jobs_original_task_unavailable');
+      const history = body.messages.slice(taskIndex + 1);
+      const launched = history.flatMap((message) =>
+        message.role === 'assistant' ? (message.tool_calls ?? []) : [],
+      );
+      const results = history.filter((message) => message.role === 'tool');
+      const done = launched.length === 2 && results.length === 2;
+      if (launched.length || results.length) {
+        if (
+          !done ||
+          !['a', 'b'].every((key) => {
+            const id = `native-launch-${key}`;
+            const call = launched.filter((candidate) => candidate.id === id);
+            const result = results.filter((candidate) => candidate.tool_call_id === id);
+            if (
+              call.length !== 1 ||
+              result.length !== 1 ||
+              call[0]!.function.name !== 'shell.launch'
+            )
+              return false;
+            const input = JSON.parse(call[0]!.function.arguments) as { key?: string };
+            const output = JSON.parse(result[0]!.content!) as {
+              accepted?: boolean;
+              shellId?: string;
+            };
+            return input.key === key && output.accepted === true && output.shellId === key;
+          })
+        )
+          throw Error('native_jobs_original_tool_results_unavailable');
+      }
       const delta = done
         ? { content: 'NATIVE_PARENT_DONE_TWO_JOBS' }
         : {

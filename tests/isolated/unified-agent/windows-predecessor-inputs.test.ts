@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  withoutReviewedDesktopDevelopmentScript,
+  withoutReviewedTuiLockDeclarations,
+} from '../../fixtures/unified-agent/terminal-predecessor';
+import {
   assertWindowsPredecessorLockedInput,
   materializeWindowsPredecessor,
   WINDOWS_PREDECESSOR_COMMIT,
@@ -49,31 +53,90 @@ test('real Windows predecessor retains exactly its original eleven locked input 
   }
 });
 
-test('current Windows inputs retain all original bytes except the exact CI stdio and locked parser increments', () => {
+test('current Windows inputs retain all original bytes except the exact reviewed scripts, parser and UI declarations', () => {
   for (const [path, expected] of Object.entries(previousInputs)) {
     const original = Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
       cwd: root,
     });
     expect(original.exitCode).toBe(0);
     const current = readFileSync(resolve(root, path));
+    const refined =
+      path === 'package.json'
+        ? withoutReviewedDesktopDevelopmentScript(current)!
+        : path === 'bun.lock'
+          ? withoutReviewedTuiLockDeclarations(current)!
+          : path === 'packages/ui/package.json'
+            ? Buffer.from(
+                current
+                  .toString()
+                  .replace(
+                    '    "tailwind-merge": "3.6.0",\n    "ink-syntax-highlight": "^2.0.2",\n    "ink-text-input": "^6.0.0"\n',
+                    '    "tailwind-merge": "3.6.0"\n',
+                  ),
+              )
+            : current;
+    // Preserve every pre-refinement SHA; the new declarations do not replace the original lock proof.
+    expect(createHash('sha256').update(refined).digest('hex')).toBe(
+      path === 'package.json'
+        ? '3743d37499030ce97f727b5a72e9c84d59d6a6a6ad41f8708530d661f899ba2a'
+        : path === 'bun.lock'
+          ? '748e6ff66e8d3ca2ab4f27b83c9105aae05dc45cdca14edf6560200d5dcb1f91'
+          : path === 'packages/agent/package.json'
+            ? 'fdb805e391c6772a2b8e8217a31f17ec14949e084e343287634a0976ff783cc2'
+            : expected,
+    );
     expect(assertWindowsPredecessorLockedInput(path, original.stdout, current)).toEqual({
       path,
       sha256: expected,
-      currentSha256:
-        path === 'package.json'
-          ? '3743d37499030ce97f727b5a72e9c84d59d6a6a6ad41f8708530d661f899ba2a'
-          : path === 'bun.lock'
-            ? '748e6ff66e8d3ca2ab4f27b83c9105aae05dc45cdca14edf6560200d5dcb1f91'
-            : path === 'packages/agent/package.json'
-              ? 'fdb805e391c6772a2b8e8217a31f17ec14949e084e343287634a0976ff783cc2'
-              : expected,
+      currentSha256: createHash('sha256').update(current).digest('hex'),
       match:
         path === 'package.json'
-          ? 'runtime_stdio_validation_script_increment'
-          : path === 'bun.lock' || path === 'packages/agent/package.json'
-            ? 'shell_parser_locked_dependency_increment'
-            : 'identical',
+          ? 'runtime_stdio_and_desktop_development_script_increment'
+          : path === 'bun.lock'
+            ? 'shell_parser_and_tui_workspace_dependency_increment'
+            : path === 'packages/ui/package.json'
+              ? 'tui_workspace_dependency_increment'
+              : path === 'packages/agent/package.json'
+                ? 'shell_parser_locked_dependency_increment'
+                : 'identical',
     });
+    if (['bun.lock', 'package.json', 'packages/ui/package.json'].includes(path)) {
+      const text = current.toString();
+      const mutations =
+        path === 'package.json'
+          ? [
+              text.replace(
+                'scripts/development/unified-desktop.ts',
+                'scripts/development/unified-desktop.ts && echo injected',
+              ),
+            ]
+          : [
+              text.replace('"ink-text-input": "^6.0.0"', '"ink-text-input": "^6.0.1"'),
+              text.replace('"ink-syntax-highlight": "^2.0.2"', '"ink-syntax-highlight": "^2.0.3"'),
+            ];
+      if (path === 'bun.lock') {
+        const start = text.indexOf('    "packages/ui": {');
+        mutations.push(
+          text.slice(0, start) +
+            text.slice(start).replace('"ink-text-input": "^6.0.0"', '"ink-text-input": "^6.0.1"'),
+        );
+        mutations.push(text.replace('sha512-aiBrZ/', 'sha512-xiBrZ/'));
+        mutations.push(
+          text.replace(
+            '        "react-markdown": "10.1.0",',
+            '        "unknown": "1.0.0",\n        "react-markdown": "10.1.0",',
+          ),
+        );
+      }
+      if (path === 'packages/ui/package.json')
+        mutations.push(text.replace('"react-markdown": "10.1.0"', '"react-markdown": "10.1.1"'));
+      for (const changed of mutations) {
+        expect(changed).not.toBe(text);
+        expect(() =>
+          assertWindowsPredecessorLockedInput(path, original.stdout, Buffer.from(changed)),
+        ).toThrow(`windows_predecessor_dependency_input_changed:${path}`);
+      }
+    }
     if (path === 'packages/agent/package.json') {
       const text = current.toString('utf8');
       for (const changed of [

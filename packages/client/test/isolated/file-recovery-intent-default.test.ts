@@ -61,9 +61,25 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
     async fetch(request) {
       const body = (await request.json()) as { messages: { role: string; content: string }[] };
       providerBodies.push(body);
-      const user = body.messages.filter((m) => m.role === 'user').at(-1)!.content,
-        key = user.split(':')[0]!,
+      const user = body.messages
+        .slice()
+        .reverse()
+        .find(
+          (message) =>
+            message.role === 'user' &&
+            /^(session|code|both|drift)_(FIRST|SECOND|LATER):/.test(message.content),
+        )?.content;
+      if (
+        !user ||
+        !(
+          /^(session|code|both|drift)_(FIRST|SECOND): actual read\/write\/create$/.test(user) ||
+          user === 'drift_LATER: actual later write'
+        )
+      )
+        throw Error('actual_file_recovery_user_marker_unavailable');
+      const key = user.split(':')[0]!,
         step = steps.get(user) ?? 0;
+      if (step >= 4) throw Error('actual_file_recovery_model_route_exhausted');
       steps.set(user, step + 1);
       const session = key.split('_')[0]!,
         round = key.includes('SECOND') ? 'second' : 'first';

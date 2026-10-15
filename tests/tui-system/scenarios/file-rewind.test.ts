@@ -29,6 +29,7 @@ import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../h
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
+  stripAnsi,
   waitForCondition,
   waitForOutputQuiescence,
   waitForText,
@@ -146,6 +147,109 @@ describe('TUI PTY System — File Rewind', () => {
     TIMEOUT,
   );
 
+  async function selectOriginalPoint(message: string) {
+    // Locate the exact user boundary inside the actual directory, never the
+    // same text in a historical user bubble. Each native key must be painted
+    // before the next navigation decision; draining the terminal alone does
+    // not prove that the application has consumed its stdin key.
+    const selected = () =>
+      stripAnsi(tui.viewport())
+        .split('回退 · 检查点')
+        .at(-1)!
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.startsWith('❯ '));
+    await waitForCondition(
+      () => selected() !== undefined,
+      'the original recovery directory has a selected row',
+      5000,
+    );
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = selected();
+      if (before === `❯ ${message}`) return;
+      tui.write('\x1b[B');
+      await waitForCondition(
+        () => selected() !== undefined && selected() !== before,
+        'the original recovery directory paints its next explicit selection',
+        5000,
+      ).catch((error) => {
+        console.error('Original boundary selection:', before, message, tui.viewport());
+        throw error;
+      });
+    }
+    expect(selected()).toBe(`❯ ${message}`);
+  }
+
+  async function continueConfirmedCode(expected: string, sessions: number) {
+    await waitForText(() => tui.viewport(), '原恢复申请', 5000);
+    // The actual restore Action has its own approval. Leaving this read-only
+    // preview does not approve it or create the later fork.
+    tui.write('a');
+    await waitForText(() => tui.viewport(), 'builtin.files/files.checkpoint.restore', 5000);
+    await waitForText(() => tui.viewport(), '允许一次', 5000);
+    tui.write('\r');
+    await waitForCondition(
+      () => !screenContains(tui.viewport(), '工具授权'),
+      'the original restore approval settles before reopening its saved result',
+      5000,
+    );
+    await submitCommand(tui, '/rewind');
+    await waitForText(() => tui.viewport(), 'L 查询所选原申请', 5000);
+    tui.write('l');
+    await waitForText(() => tui.viewport(), '原恢复申请', 5000);
+    // R only reads the original result; the fork leg still requires C.
+    await waitForCondition(
+      () => {
+        const frame = tui.viewport();
+        if (
+          screenContains(frame, '文件: succeeded') &&
+          screenContains(frame, '会话: not_started') &&
+          !screenContains(frame, '正在处理恢复申请')
+        )
+          return true;
+        if (!screenContains(frame, '正在处理恢复申请')) tui.write('r');
+        return false;
+      },
+      'actual code restoration succeeds before explicitly continuing the fork',
+      5000,
+      100,
+    ).catch((error) => {
+      console.error('Original recovery viewport:', tui.viewport());
+      throw error;
+    });
+    expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(expected);
+    expect(requirePersistedRuntimeReady(observePersistedSessionIds(workspace))).toHaveLength(
+      sessions,
+    );
+    expect(server.getRequestCount()).toBe(6);
+    tui.write('c');
+    let continuationObserved = false;
+    await waitForCondition(
+      () => {
+        const frame = tui.viewport();
+        if (screenContains(frame, '已从检查点创建新会话，并恢复 1 个文件')) return true;
+        if (
+          screenContains(frame, '正在处理恢复申请') ||
+          /会话: (pending|unknown|succeeded|failed)/u.test(frame)
+        )
+          continuationObserved = true;
+        if (
+          continuationObserved &&
+          screenContains(frame, '原恢复申请') &&
+          !screenContains(frame, '正在处理恢复申请')
+        )
+          tui.write('r');
+        return false;
+      },
+      'the explicitly continued original fork and code proof produce a confirmed completion',
+      5000,
+      100,
+    ).catch((error) => {
+      console.error('Original completed recovery viewport:', tui.viewport());
+      throw error;
+    });
+  }
+
   // ── First /rewind: latest actionable point restores V3 ──────
 
   step(
@@ -156,11 +260,17 @@ describe('TUI PTY System — File Rewind', () => {
       await waitForText(() => tui.viewport(), '回退', 15000);
       await waitForText(() => tui.viewport(), 'Enter 继续', 15000);
 
-      // Enter 只进入确认层；默认选择恢复代码和会话。
+      await selectOriginalPoint('Update my notes a third time');
+      // Enter reads the actual boundary; scope selection and submission are separate.
       tui.write('\r');
       await waitForText(() => tui.viewport(), '回退 · 恢复到此消息之前', 15000);
       await waitForText(() => tui.viewport(), '代码将恢复 +1 −1，涉及 notes.md', 15000);
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(THIRD_NOTES_UPDATE);
+      tui.write('3');
+      await waitForText(() => tui.viewport(), 'Enter 确认所选范围', 5000);
       tui.write('\r');
+
+      await continueConfirmedCode(SECOND_NOTES_UPDATE, 1);
 
       // 恢复提示（LOCAL_TEXT）/ restore note
       await waitForText(
@@ -190,11 +300,17 @@ describe('TUI PTY System — File Rewind', () => {
       await submitCommand(tui, '/rewind');
       await waitForText(() => tui.viewport(), '回退', 15000);
       await waitForText(() => tui.viewport(), 'Enter 继续', 15000);
+      await selectOriginalPoint('Update my notes again');
 
       tui.write('\r');
       await waitForText(() => tui.viewport(), '回退 · 恢复到此消息之前', 15000);
       await waitForText(() => tui.viewport(), '代码将恢复 +1 −1，涉及 notes.md', 15000);
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(SECOND_NOTES_UPDATE);
+      tui.write('3');
+      await waitForText(() => tui.viewport(), 'Enter 确认所选范围', 5000);
       tui.write('\r');
+
+      await continueConfirmedCode(FIRST_NOTES_UPDATE, 2);
 
       await waitForCondition(() => {
         const observed = observePersistedSessionIds(workspace);

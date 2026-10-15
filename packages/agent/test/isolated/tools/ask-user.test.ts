@@ -6,6 +6,7 @@ import { createAskUserExtension } from '@kite-ai/agent/ask-user';
 import type { Json, ToolContext, ToolResult } from '@kite-ai/agent/extensions';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
+import { QuestionCancelledError } from '../../../src/execution/interactions';
 import { openSqliteStore } from '../../../src/sqlite';
 import { AgentError, type InteractionRecord } from '../../../src/storage/types';
 
@@ -339,6 +340,36 @@ test('cancelling only the original questionnaire saves null and lets the same Ru
   }
 }, 10000);
 
+test('exact Question Execution cancellation preserves the root Run and continues with its cancelled Tool result', async () => {
+  const f = await fixture();
+  try {
+    const card = await f.pending();
+    await f.runtime.cancelExecution({
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'cancel-question',
+      sessionId: 's',
+      subjectId: 'owner',
+      executionId: card.executionId,
+    });
+    await f.runtime.waitForCommand('work');
+    const execution = await f.store.getExecution(card.executionId);
+    expect(execution?.status).toBe('cancelled');
+    expect(execution?.result).toEqual({
+      outcome: 'cancelled',
+      content: 'execution_cancel_requested',
+    });
+    expect((await f.interactions()).interactions).toHaveLength(1);
+    expect((await f.interactions()).interactions[0]?.state).toBe('cancelled');
+    expect((await f.store.getRun(card.runId!))?.status).toBe('completed');
+    expect(f.model.requests).toHaveLength(2);
+    expect(
+      f.model.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => m.content),
+    ).toContain('execution_cancel_requested');
+  } finally {
+    await f.close();
+  }
+}, 10000);
+
 test('real ordinary Tool cancellation produces no successful answer and does not ask again', async () => {
   const f = await fixture();
   try {
@@ -465,6 +496,7 @@ test('only the exact original cancel_requested exception becomes a cancelled res
   });
   for (const other of [
     new AgentError('cancel_requested'),
+    new AgentError('execution_cancel_requested'),
     new AgentError('service_shutdown'),
     new Error('unrelated'),
   ]) {
@@ -475,6 +507,46 @@ test('only the exact original cancel_requested exception becomes a cancelled res
       thrown = error;
     }
     expect(thrown).toBe(other);
+  }
+});
+
+test('saved Question cancellation evidence must match this exact current Tool and Run', async () => {
+  const record = {
+    kind: 'question',
+    state: 'cancelled',
+    sessionId: 's',
+    executionId: 'e',
+    runId: 'r',
+  } as InteractionRecord;
+  const context = {
+    sessionId: 's',
+    executionId: 'e',
+    runId: 'r',
+    signal: new AbortController().signal,
+    async requestInput() {
+      throw new QuestionCancelledError(record);
+    },
+  } as unknown as ToolContext;
+  expect(await tool.execute(input, context)).toEqual({
+    outcome: 'cancelled',
+    content: 'execution_cancel_requested',
+  });
+  for (const wrong of [
+    { sessionId: 'other' },
+    { executionId: 'sibling' },
+    { runId: 'other' },
+    { kind: 'approval' },
+    { state: 'pending' },
+  ]) {
+    const error = new QuestionCancelledError({ ...record, ...wrong } as InteractionRecord);
+    await expect(
+      tool.execute(input, {
+        ...context,
+        async requestInput() {
+          throw error;
+        },
+      }),
+    ).rejects.toBe(error);
   }
 });
 

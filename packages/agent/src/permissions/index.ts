@@ -41,6 +41,8 @@ export interface CapabilityDescription extends CapabilityIdentity {
   readonly effects: readonly CapabilityEffect[];
   readonly hardAllowed: boolean;
   readonly safeRead: boolean;
+  /** Trusted builtin record-only operation; never applies to arbitrary/custom Task effects. */
+  readonly internalRecordOnly?: true;
 }
 export interface AutoReviewContext {
   readonly task: Json;
@@ -128,7 +130,11 @@ function validDescription(description: CapabilityDescription) {
     Array.isArray(description.effects) &&
     description.effects.length <= effects.size &&
     description.effects.every((effect) => effects.has(effect)) &&
-    new Set(description.effects).size === description.effects.length
+    new Set(description.effects).size === description.effects.length &&
+    (description.internalRecordOnly === undefined ||
+      (description.internalRecordOnly === true &&
+        description.effects.length > 0 &&
+        description.effects.every((effect) => effect === 'read' || effect === 'record_write')))
   );
 }
 function revision(policy: PermissionPolicySnapshot, description: CapabilityDescription | null) {
@@ -157,6 +163,7 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
           description.commandDigest ?? null,
           description.executionScope ?? null,
           description.denialReason ?? null,
+          description.internalRecordOnly ?? null,
         ],
       }),
     )
@@ -166,6 +173,7 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
 /** Pure classification over freshly read host facts; import/factory creation performs no I/O. */
 export function createPermissionPolicy(options: PermissionPolicyOptions): Permissions {
   return {
+    toolDispatchOrder: 'model',
     async authorize(request): Promise<PermissionDecision> {
       request.signal.throwIfAborted();
       const policy = structuredClone(await options.readPolicy(request));
@@ -204,6 +212,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
                   effects: [...description.effects],
                   hardAllowed: description.hardAllowed,
                   safeRead: description.safeRead,
+                  ...(description.internalRecordOnly ? { internalRecordOnly: true } : {}),
                   ...(description.executionScope
                     ? { executionScope: description.executionScope }
                     : {}),
@@ -240,7 +249,11 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       const scopedWorkspace =
         description.executionScope?.filesystem === 'workspace_write' &&
         description.executionScope.network === 'none';
-      if (safeRead || (policy.mode === 'accept_edits' && (workspaceEdit || scopedWorkspace)))
+      if (
+        safeRead ||
+        description.internalRecordOnly === true ||
+        (policy.mode === 'accept_edits' && (workspaceEdit || scopedWorkspace))
+      )
         return { ...controlProof, allowed: true, revision: boundRevision };
       if (policy.mode === 'auto') {
         const context = options.readReviewContext
@@ -322,3 +335,5 @@ export {
   requireFileRestoreApproval,
   requireWorkflowApproval,
 } from './constraints';
+
+export { createPermissionReviewContextReader } from './review-context';

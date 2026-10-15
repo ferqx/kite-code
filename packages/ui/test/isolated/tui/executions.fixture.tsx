@@ -379,7 +379,9 @@ const timer = setInterval(() => {
         observation: controller.state.observationState,
         read,
         jobStops: [...controller.state.jobStops.values()],
-        panelJobs: controller.state.snapshot?.view.executions.filter((e) => e.kind === 'job'),
+        panelJobs: controller.state.snapshot?.view.executions.filter(
+          (e) => e.kind !== 'model' && e.sessionId === controller.state.sessionId,
+        ),
         scopeProof: {
           viewStore: controller.state.snapshot?.view.storeId,
           viewSession: controller.state.snapshot?.view.session.id,

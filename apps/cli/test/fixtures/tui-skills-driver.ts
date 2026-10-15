@@ -76,6 +76,16 @@ let failure: unknown;
 try {
   await wait('New Run >');
   const baseline = counts();
+  // Startup command completion also reads the catalogue. Finish that real read
+  // before measuring the explicit panel's independent, complete pagination.
+  const initialReadDeadline = Date.now() + 5000;
+  while (!existsSync(input.ledger) || !rows().at(-1)?.value.complete) {
+    abort.signal.throwIfAborted();
+    if (Date.now() > initialReadDeadline) throw Error('startup catalogue did not finish');
+    await Bun.sleep(10);
+  }
+  const firstPanelPage = rows().length;
+
   await key('/skills');
   await wait('/skills');
   await key('\r');
@@ -92,7 +102,7 @@ try {
   await key('\x1b[A'.repeat(303));
   await wait('Entry 1/304');
   await wait('Guide000 [available]');
-  const original = rows();
+  const original = rows().slice(firstPanelPage);
   assert.ok(original.length > 1);
   const entries = original.flatMap((page) => page.value.entries);
   assert.equal(entries.length, 304);
@@ -107,6 +117,7 @@ try {
   await key('\r');
   await Bun.sleep(100);
   assert.deepEqual(counts(), baseline);
+  writeFileSync(join(input.root, 'arm-owned-page'), 'next original refresh first page');
   await key('r');
   const held = Date.now() + 5000;
   while (!existsSync(join(input.root, 'held-page'))) {
@@ -118,8 +129,8 @@ try {
   await wait('New Run >');
   await key('\x12');
   await wait('Select Session');
-  await key('\x1b[A');
-  await wait('> Beta [b]', true);
+  await key('\x1b[B');
+  await wait('❯ Beta [b]');
   await key('\r');
   await wait('Session b · Idle');
   writeFileSync(

@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMcpAdapter } from '@kite-ai/agent/mcp';
-import type { ModelEvent } from '@kite-ai/ai';
+import { ModelAttemptError, type ModelEvent } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import type {
   CaseEvidence,
@@ -414,6 +414,9 @@ async function childCancel(root: string, e: CaseEvidence) {
 async function modelFault(root: string, e: CaseEvidence) {
   let calls = 0,
     transportAborted = false;
+  type Attempt = { id: string; http: number[]; text: string; failure?: string };
+  const attempts: Attempt[] = [];
+  let activeAttempt: Attempt | undefined;
   const chunk = (delta: unknown, reason: string | null) =>
     `data: ${JSON.stringify({ id: 'owned', object: 'chat.completion.chunk', created: 1, model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
   const server = Bun.serve({
@@ -421,13 +424,15 @@ async function modelFault(root: string, e: CaseEvidence) {
     port: 0,
     async fetch(request) {
       calls++;
+      if (!activeAttempt) throw new Error('provider_request_without_model_attempt');
+      activeAttempt.http.push(calls);
       const input = JSON.stringify(await request.json());
       if (input.includes('actual-429'))
         return Response.json({ error: { message: 'owned rate limit' } }, { status: 429 });
       if (input.includes('actual-503'))
         return Response.json({ error: { message: 'owned unavailable' } }, { status: 503 });
       if (input.includes('partial-drop'))
-        return new Response(chunk({ content: 'actual partial' }, null), {
+        return new Response(chunk({ content: `actual partial provider-${calls}` }, null), {
           headers: { 'content-type': 'text/event-stream' },
         });
       return new Response(
@@ -453,10 +458,90 @@ async function modelFault(root: string, e: CaseEvidence) {
     modelId: 'fixed',
     apiKey: 'owned-local',
   });
+  const sdk = createSdkModelAdapter({ models: new Map([['fixed', binding]]) });
   const f = await fixture(root, {
     modelId: 'fixed',
-    model: createSdkModelAdapter({ models: new Map([['fixed', binding]]) }),
+    model: {
+      describeRequest: sdk.describeRequest?.bind(sdk),
+      async *stream(request, options) {
+        if (activeAttempt) throw new Error('overlapping_fault_provider_attempts');
+        const observed: Attempt = { id: request.requestId, http: [], text: '' };
+        attempts.push(observed);
+        activeAttempt = observed;
+        try {
+          for await (const event of sdk.stream(request, options)) {
+            if (event.type === 'text_delta') observed.text += event.text;
+            yield event;
+          }
+        } catch (error) {
+          observed.failure = ModelAttemptError.isInstance(error)
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'unknown';
+          throw error;
+        } finally {
+          activeAttempt = undefined;
+        }
+      },
+    },
   });
+  // requestId is the actual Model Execution ID. Observe SDK/HTTP without changing
+  // either result, then verify each independent persisted attempt and retry edge.
+  const verifyAttempts = async (
+    sessionId: string,
+    runId: string,
+    count: number,
+    partial: boolean,
+  ) => {
+    const executions = (await f.store.getView(sessionId)).executions.filter(
+      (execution) => execution.kind === 'model' && execution.runId === runId,
+    );
+    const observed = attempts.filter((attempt) =>
+      executions.some((execution) => execution.id === attempt.id),
+    );
+    let proved =
+      executions.length === count &&
+      observed.length === count &&
+      new Set(observed.map((attempt) => attempt.id)).size === count;
+    for (const [index, attempt] of observed.entries()) {
+      const execution = executions.find((value) => value.id === attempt.id)!;
+      const result = execution.result as Record<string, unknown> | null;
+      const source = execution.decisionSource as Record<string, unknown> | null;
+      const retry = source?.retry as Record<string, unknown> | undefined;
+      proved &&=
+        execution.originStoreId === f.storeId &&
+        execution.sessionId === sessionId &&
+        execution.status === 'failed' &&
+        source?.kind === 'model_request' &&
+        source.requestId === attempt.id &&
+        result?.incomplete === true &&
+        result.code ===
+          (attempt.failure?.startsWith('MODEL_ATTEMPT_RETRYABLE_FAILURE:')
+            ? attempt.failure
+            : 'model_failed') &&
+        (partial || attempt.failure === 'model_transport_failed') &&
+        attempt.http.length === 1 &&
+        (index === 0
+          ? retry === undefined
+          : retry?.previousExecutionId === observed[index - 1]!.id &&
+            retry.attempt === index + 1 &&
+            retry.maxAttempts === 5 &&
+            retry.reason === 'stream_incomplete');
+      if (partial)
+        proved &&=
+          attempt.failure === 'MODEL_ATTEMPT_RETRYABLE_FAILURE:stream_incomplete' &&
+          attempt.text === `actual partial provider-${attempt.http[0]}` &&
+          result?.content === attempt.text;
+    }
+    check(
+      e.assertions,
+      `${partial ? 'partial' : sessionId}_provider_execution_proof`,
+      proved,
+      true,
+    );
+    return observed.every((attempt) => attempt.http.length === 1) ? 1 : 0;
+  };
   try {
     const s = await f.session('partial');
     const run = await f.start(s, 'partial-drop');
@@ -475,12 +560,19 @@ async function modelFault(root: string, e: CaseEvidence) {
         (await f.client.getView(s)).messages.some((m) => m.status === 'incomplete'),
       true,
     );
-    check(e.assertions, 'single_attempt_no_hidden_retry', calls, 1);
+    check(e.assertions, 'partial_visible_retry_http_count', calls, 5);
+    check(
+      e.assertions,
+      'single_attempt_no_hidden_retry',
+      await verifyAttempts(s, run.runId, 5, true),
+      1,
+    );
+    const beforeHold = calls;
     const held = await f.session('abort');
     const work = await f.start(held, 'held-transport');
     await until(
       async () => calls,
-      (v) => v === 2,
+      (v) => v === beforeHold + 1,
     );
     await f.client.cancelCommand(held, {
       kind: 'command.cancel',
@@ -500,7 +592,13 @@ async function modelFault(root: string, e: CaseEvidence) {
       const attempt = await f.start(sessionId, `actual-${status}`);
       const failed = await f.finish(attempt.runId);
       check(e.assertions, `http_${status}_terminal`, failed?.status ?? 'missing', 'failed');
-      check(e.assertions, `http_${status}_single_attempt`, calls - before, 1);
+      check(e.assertions, `http_${status}_provider_http_count`, calls - before, 1);
+      check(
+        e.assertions,
+        `http_${status}_single_attempt`,
+        await verifyAttempts(sessionId, attempt.runId, 1, false),
+        1,
+      );
     }
   } finally {
     await f.close();

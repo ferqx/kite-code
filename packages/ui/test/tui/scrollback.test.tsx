@@ -69,6 +69,12 @@ test('empty Enter toggles only the original tail result; input, refresh and earl
     expect(ui.lastFrame()).toContain('MODEL_HISTORY_ORIGINAL');
     expect(writes).toHaveLength(0);
     expect(reads).toBe(1);
+    ui.stdin.write('\r');
+    ui.stdin.write('\r');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_原文🙂');
+    expect(ui.lastFrame()).toContain('EARLIER_RESULT_原文🙂');
+    expect(writes).toHaveLength(0);
     controller.setDraft('typed queued 原文🙂');
     await pause();
     expect(ui.lastFrame()).not.toContain('TAIL_RESULT_原文🙂');
@@ -117,7 +123,7 @@ test('empty Enter toggles only the original tail result; input, refresh and earl
   }
 });
 
-test('CtrlT reads original reasoning once, toggles only display and never carries it to another Session', async () => {
+test('CtrlO loads original body and reasoning without a CtrlT shortcut or cross-Session leakage', async () => {
   let reads = 0;
   let pending = false;
   const reasoning = (id: string) => `REASON_${id}_原文🙂 /Theme/Language\u001b[2J`;
@@ -211,26 +217,24 @@ test('CtrlT reads original reasoning once, toggles only display and never carrie
   try {
     await pause();
     expect(ui.lastFrame()).not.toContain('REASON_a_');
+    expect(ui.lastFrame()).not.toContain('Ctrl+T');
     ui.stdin.write('\u0014');
     await pause();
-    expect(ui.lastFrame()).toContain('Recorded reasoning not loaded; full reader unavailable');
     expect(reads).toBe(0);
-    ui.stdin.write('\u0014');
-    await pause();
+    expect(controller.state.draft).toBe('');
+    expect(ui.lastFrame()).toContain('full reader unavailable');
     port.readModelOutput = reader;
-    ui.stdin.write('\u0014');
-    await pause();
-    expect(ui.lastFrame()).toContain('REASON_a_原文🙂 /Theme/Language\\u001b[2J');
-    expect(ui.lastFrame()).toContain('FULL_CONTENT_ORIGINAL');
-    expect(reads).toBe(1);
-    const original = JSON.stringify([...controller.state.loadedOutputBodies]);
-    ui.stdin.write('\u0014');
+    ui.stdin.write('\u000f');
     await pause();
     expect(ui.lastFrame()).not.toContain('REASON_a_');
     expect(ui.lastFrame()).toContain('FULL_CONTENT_ORIGINAL');
+    expect(reads).toBe(1);
+    expect(controller.state.loadedOutputBodies.get('message-0')?.reasoning).toBe(reasoning('a'));
+    const original = JSON.stringify([...controller.state.loadedOutputBodies]);
+    ui.stdin.write('\u0014');
     ui.stdin.write('\u0014');
     await pause();
-    expect(ui.lastFrame()).toContain('REASON_a_');
+    expect(ui.lastFrame()).not.toContain('REASON_a_');
     expect(reads).toBe(1);
     expect(JSON.stringify([...controller.state.loadedOutputBodies])).toBe(original);
     pending = true;
@@ -239,23 +243,27 @@ test('CtrlT reads original reasoning once, toggles only display and never carrie
     expect(ui.lastFrame()).toContain('ORIGINAL_QUESTION');
     ui.stdin.write('\u0014');
     await pause();
-    expect(ui.lastFrame()).toContain('REASON_a_');
+    expect(ui.lastFrame()).not.toContain('REASON_a_');
     expect(reads).toBe(1);
+    expect(JSON.stringify([...controller.state.loadedOutputBodies])).toBe(original);
     pending = false;
     await controller.select('b');
     await pause();
     expect(ui.lastFrame()).not.toContain('REASON_a_');
     expect(ui.lastFrame()).not.toContain('REASON_b_');
-    ui.stdin.write('\u0014');
+    expect(controller.state.loadedOutputBodies.size).toBe(0);
+    ui.stdin.write('\u000f');
     await pause();
-    expect(ui.lastFrame()).toContain('REASON_b_');
+    expect(controller.state.loadedOutputBodies.get('message-0')?.reasoning).toBe(reasoning('b'));
     expect(ui.lastFrame()).not.toContain('REASON_a_');
+    expect(ui.lastFrame()).not.toContain('REASON_b_');
     expect(reads).toBe(2);
     await controller.select('c');
     await pause();
-    ui.stdin.write('\u0014');
+    ui.stdin.write('\u000f');
     await pause();
-    expect(ui.lastFrame()).toContain('Recorded reasoning not loaded; full read unsupported');
+    expect(ui.lastFrame()).toContain('full read unsupported');
+    expect(controller.state.loadedOutputBodies.size).toBe(0);
     expect(reads).toBe(2);
   } finally {
     ui.unmount();

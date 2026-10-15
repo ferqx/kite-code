@@ -31,7 +31,7 @@ export interface TuiMcpAuthFact {
     originStoreId: string;
     sessionId: string;
     originCommandId: string;
-    parentExecutionId: null;
+    parentExecutionId: string | null;
     kind: 'job';
     definitionId: string;
     definitionVersion: string;
@@ -68,6 +68,12 @@ export interface TuiMcpAuthOutcome {
   caller?: TuiCallerOutcome;
 }
 export interface TuiMcpAuthPort {
+  /** Directory-only eligibility check; ineligible targets expose no credential fact. */
+  readDirectory?(
+    observed: TuiMcpSourceSnapshot,
+    serverId: string,
+    signal: AbortSignal,
+  ): Promise<TuiMcpAuthStatus | undefined>;
   read(
     observed: TuiMcpSourceSnapshot,
     serverId: string,

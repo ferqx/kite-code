@@ -222,9 +222,13 @@ export function openTuiDraftFile(input: {
       const original = read(),
         id = scopeId(selected),
         previous = original.document.drafts.find((row) => row.id === id);
+      // The locked reread is an exact acknowledgement of this scope's full
+      // desired text. Another editor may already have published that value.
+      // Coalesce stale revisions only; never adopt a different draft or scope.
+      if (previous?.text === text && BigInt(previous.revision) >= BigInt(expectedRevision))
+        return previous;
       if ((previous?.revision ?? '0') !== expectedRevision)
         throw new TuiDraftError('tui_draft_revision_conflict');
-      if (previous?.text === text) return previous;
       const saved = { ...selected, id, revision: next(expectedRevision), text };
       const rows = original.document.drafts.filter((row) => row.id !== id);
       rows.push(saved);

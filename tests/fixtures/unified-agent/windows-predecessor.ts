@@ -10,6 +10,7 @@ import {
 } from '../../../packages/agent/src/platform/process/windows-owned-child';
 import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
+import { matchTerminalPredecessorInput } from './terminal-predecessor';
 
 export const WINDOWS_PREDECESSOR_COMMIT = '837a2b8cde946d70d00920941a1a3e5e7c684f5d';
 const workspaces = [
@@ -46,7 +47,10 @@ export function assertWindowsPredecessorLockedInput(
 ) {
   const match =
     matchPredecessorStdioInput(path, previous, current) ??
-    matchPredecessorShellParserInput(path, previous, current);
+    matchPredecessorShellParserInput(path, previous, current) ??
+    (['bun.lock', 'package.json', 'packages/ui/package.json'].includes(path)
+      ? matchTerminalPredecessorInput(path, previous, current)
+      : undefined);
   if (!match) throw Error(`windows_predecessor_dependency_input_changed:${path}`);
   return { path, sha256: sha(previous), currentSha256: sha(current), match };
 }

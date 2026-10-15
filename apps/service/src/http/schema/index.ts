@@ -744,6 +744,18 @@ export const schemas = {
       .length(4),
     errors: z.array(z.string().regex(/^[a-z0-9_]{1,128}$/)),
   }),
+  ProviderDiscoveryRequest: z.strictObject({
+    expectedStoreId: id,
+    expectedReadSet: modelSettingsReadSet,
+    operation: providerSettingsOperation.omit({ modelNames: true }),
+    secret: z.string().min(1).max(65536).optional(),
+  }),
+  ProviderDiscoveryView: z.object({
+    storeId: id,
+    readSet: modelSettingsReadSet,
+    operation: providerSettingsOperation.omit({ modelNames: true }),
+    modelNames: z.array(z.string().min(1).max(256)).min(1),
+  }),
   ProviderSettingsRequest: z.strictObject({
     expectedStoreId: id,
     commandId: id,
@@ -935,6 +947,16 @@ export const schemas = {
       })
       .optional(),
     originStoreId: id.optional(),
+    rootWorkCommandId: id.optional(),
+    rootWorkSeq: sequence.optional(),
+    modelRetry: z
+      .object({
+        previousExecutionId: id,
+        attempt: z.number().int().min(2).max(5),
+        maxAttempts: z.literal(5),
+        reason: z.enum(['provider_unavailable', 'connection_failed', 'stream_incomplete']),
+      })
+      .optional(),
     childSessionId: id.nullable().optional(),
     parentExecutionId: id.nullable().optional(),
     cancelWithParent: z.boolean().optional(),
@@ -962,6 +984,7 @@ export const schemas = {
     status: z.enum(['complete', 'incomplete']),
     role: z.enum(['system', 'user', 'assistant', 'tool']),
     content: z.string(),
+    firstOutput: z.enum(['content', 'reasoning', 'tool_calls']).optional(),
     originMessage: z
       .object({
         storeId: id,
@@ -1251,7 +1274,11 @@ export const PendingInputPageSchema = z.object({
   snapshotCursor: sequence,
 });
 export const SessionViewSchema = z.object({
-  session: schemas.Session,
+  session: schemas.Session.extend({
+    /** Read-only ownership facts from the same fixed Store view; never a recovery grant. */
+    ownerInstanceId: id.nullable().optional(),
+    ownerGeneration: sequence.optional(),
+  }),
   runs: z.array(schemas.Run),
   executions: z.array(schemas.Execution),
   messages: z.array(schemas.Message),
@@ -1637,6 +1664,12 @@ export const apiRoutes = [
     path: '/v1/config/user/providers',
     request: 'ProviderSettingsRequest',
     response: 'HostMutation',
+  },
+  {
+    method: 'post',
+    path: '/v1/config/user/providers/discover',
+    request: 'ProviderDiscoveryRequest',
+    response: 'ProviderDiscoveryView',
   },
   {
     method: 'get',

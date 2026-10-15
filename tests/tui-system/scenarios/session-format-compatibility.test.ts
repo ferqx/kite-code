@@ -1,10 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { LEGACY_STATE26_FORMAT_EPOCH, LEGACY_STATE26_SCHEMA_VERSION } from '@kite-ai/agent-kernel';
-import { resolveProjectIdentity } from '@kite-ai/runtime-host';
-import { SQLITE_RUNTIME_DDL, sqliteRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -16,6 +14,29 @@ import {
   observePersistedSessionIds,
   requirePersistedRuntimeReady,
 } from '../harness/test-workspace';
+
+// Frozen historical input only; no legacy writer, runtime or importer is started.
+const LEGACY_STATE26_SCHEMA_VERSION = 26;
+const LEGACY_STATE26_FORMAT_EPOCH = 'kite-runtime-modularization-v1-2026-08-19';
+function historicalStorePath(checkpointPath: string) {
+  return `${checkpointPath.replace(/\.sqlite$/u, '')}.runtime-state-store.db`;
+}
+function historicalWorkspaceIdentity(workspace: string) {
+  const hash = createHash('sha256').update(realpathSync(workspace)).digest('hex');
+  return { projectId: `project_${hash}`, workspaceDigest: `sha256:${hash}` };
+}
+const SQLITE_RUNTIME_DDL = Object.freeze([
+  'CREATE TABLE runtime_store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+  'CREATE TABLE runtime_events (session_id TEXT NOT NULL, event_id TEXT NOT NULL, sequence INTEGER NOT NULL, schema_version INTEGER NOT NULL, event_json TEXT NOT NULL, causation_id TEXT, occurred_at TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (session_id, event_id), UNIQUE (session_id, sequence))',
+  "CREATE TABLE runtime_sessions (session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, workspace_digest TEXT NOT NULL, state_schema INTEGER NOT NULL, format_epoch TEXT NOT NULL, revision INTEGER NOT NULL, name TEXT NOT NULL DEFAULT '', model_provider TEXT, model_name TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()))",
+  "CREATE TABLE runtime_snapshots (session_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL, format_epoch TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_checksum TEXT NOT NULL DEFAULT '', created_at INTEGER DEFAULT (unixepoch()))",
+  'CREATE TABLE runtime_named_snapshots (session_id TEXT NOT NULL, name TEXT NOT NULL, schema_version INTEGER NOT NULL, format_epoch TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_checksum TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (session_id, name))',
+  'CREATE TABLE runtime_file_preimages (session_id TEXT NOT NULL, path TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, content TEXT, existed INTEGER NOT NULL DEFAULT 1, post_hash TEXT, post_existed INTEGER, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (session_id, path, event_position))',
+  "CREATE TABLE runtime_effect_leases (session_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL, lease_revision INTEGER NOT NULL DEFAULT 0, certainty TEXT NOT NULL DEFAULT 'certain', expires_at_ms INTEGER NOT NULL, PRIMARY KEY (session_id, effect_id))",
+  'CREATE TABLE runtime_command_receipts (scope_session_id TEXT NOT NULL, command_id TEXT NOT NULL, request_digest TEXT NOT NULL, target_session_id TEXT NOT NULL, original_receipt_json TEXT NOT NULL, committed_revision INTEGER NOT NULL, committed_at INTEGER NOT NULL, PRIMARY KEY (scope_session_id, command_id))',
+  'CREATE INDEX runtime_events_session_sequence ON runtime_events(session_id, sequence)',
+  'CREATE INDEX runtime_file_preimages_position ON runtime_file_preimages(session_id, event_position)',
+] as const);
 
 const SESSION_ID = 'legacy-session-1';
 const SESSION_NAME = 'Original compatible session';
@@ -145,9 +166,9 @@ function insertState26Session(
 }
 
 function seedState26Session(checkpointPath: string, workspace: string): string {
-  const sourcePath = sqliteRuntimeStorePath(checkpointPath);
+  const sourcePath = historicalStorePath(checkpointPath);
   const seedPath = `${sourcePath}.seed`;
-  const identity = resolveProjectIdentity(workspace);
+  const identity = historicalWorkspaceIdentity(workspace);
   const event = {
     type: 'user.message_appended',
     messageId: 'legacy-message-1',
@@ -277,8 +298,8 @@ function seedState26Session(checkpointPath: string, workspace: string): string {
 }
 
 function seedMalformedState26Session(checkpointPath: string, workspace: string): string {
-  const sourcePath = sqliteRuntimeStorePath(checkpointPath);
-  const identity = resolveProjectIdentity(workspace);
+  const sourcePath = historicalStorePath(checkpointPath);
+  const identity = historicalWorkspaceIdentity(workspace);
   const stateJson = '{}';
   const database = new Database(sourcePath);
   for (const ddl of SQLITE_RUNTIME_DDL) database.run(ddl);

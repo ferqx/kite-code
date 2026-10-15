@@ -113,7 +113,7 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
     else if (key.upArrow) select((n) => Math.max(0, n - 1));
     else if (key.downArrow)
       select((n) => Math.min(Math.max(0, Math.max(items.length, saved.length) - 1), n + 1));
-    else if (key.return && items[index]) {
+    else if (key.return && !previewing && items[index]) {
       setPreviewing(true);
       setReadingDiff(false);
       setDiffLine(0);
@@ -122,11 +122,22 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
       void controller.readFileRecoveryPoint(items[index]!.checkpoint.id);
     }
   });
-  const label = (id: string, ordinal: number) => {
-    const checkpoint = items.find((item) => item.checkpoint.id === id)?.checkpoint;
-    const message = state.snapshot?.messages.find(
-      (message) => message.id === checkpoint?.boundary.triggerMessageId,
+  const boundaryMessage = (checkpoint: (typeof items)[number]['checkpoint'] | undefined) => {
+    if (!checkpoint) return undefined;
+    const boundary = checkpoint.boundary;
+    const matches = state.snapshot?.messages.filter(
+      (message) =>
+        (message.id === boundary.triggerMessageId &&
+          message.sessionId === boundary.sessionId &&
+          state.snapshot?.storeId === boundary.storeId) ||
+        (message.originMessage?.messageId === boundary.triggerMessageId &&
+          message.originMessage.sessionId === boundary.sessionId &&
+          message.originMessage.storeId === boundary.storeId),
     );
+    return matches?.length === 1 ? matches[0] : undefined;
+  };
+  const label = (id: string, ordinal: number) => {
+    const message = boundaryMessage(items.find((item) => item.checkpoint.id === id)?.checkpoint);
     return message
       ? truncateDisplayWidth(
           message.content.replace(/[\r\n]/g, ' '),
@@ -139,11 +150,7 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
     session: t('Return to the conversation before this message; keep workspace files.'),
     code: t('Restore workspace files; keep the current conversation.'),
   };
-  const quote = detail
-    ? state.snapshot?.messages.find(
-        (message) => message.id === detail.boundary.checkpoint.boundary.triggerMessageId,
-      )?.content
-    : undefined;
+  const quote = boundaryMessage(detail?.boundary.checkpoint)?.content;
   return (
     <TuiOverlayFrame
       title={
@@ -151,7 +158,7 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
           ? originalLabel('rewind.beforeMessage')
           : testDiagnostics
             ? t('Files recovery')
-            : originalLabel('rewind.title')
+            : `${originalLabel('rewind.title')} · ${t('Checkpoints')}`
       }
       meta={
         !previewing
@@ -188,7 +195,11 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
                 .join(' · ')}
             />
           ))}
-          {!items.length && <OverlayEmptyState>{t('No recovery points')}</OverlayEmptyState>}
+          {!items.length && (
+            <OverlayEmptyState>
+              {testDiagnostics ? t('No recovery points') : originalLabel('rewind.empty')}
+            </OverlayEmptyState>
+          )}
         </>
       )}
       {previewing && !detail && (
@@ -235,9 +246,17 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
               <Text>{originalLabel('rewind.codeUnchanged')}</Text>
             ) : files.some((file) => file.textChange) ? (
               <Text>
-                {t('Recorded text changes:')} +
-                {files.reduce((total, file) => total + (file.textChange?.addedLines ?? 0), 0)} −
-                {files.reduce((total, file) => total + (file.textChange?.removedLines ?? 0), 0)}
+                {originalLabel('rewind.restoreLines', {
+                  added: files.reduce(
+                    (total, file) => total + (file.textChange?.addedLines ?? 0),
+                    0,
+                  ),
+                  removed: files.reduce(
+                    (total, file) => total + (file.textChange?.removedLines ?? 0),
+                    0,
+                  ),
+                  files: files.map((file) => terminalText(file.path)).join(', '),
+                })}
                 {files.some((file) => !file.textChange)
                   ? ` · ${t('Some text statistics unavailable')}`
                   : ''}
@@ -299,6 +318,9 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
             </Box>
           )}
         </>
+      )}
+      {recovery?.phase === 'submitting' && (
+        <OverlayMessage tone="busy">{t('Recovery request in progress')}</OverlayMessage>
       )}
       {recovery?.intent && (
         <OverlayMessage tone={recovery.phase === 'failed' ? 'error' : 'info'}>

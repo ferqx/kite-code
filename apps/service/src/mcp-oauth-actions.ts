@@ -80,12 +80,39 @@ function executionMatches(command: CommandRecord, execution: ExecutionRecord, ac
     execution.sessionId === command.sessionId &&
     execution.kind === 'job' &&
     execution.runId === null &&
-    execution.parentExecutionId === null &&
     execution.definitionId === `${extensionId}/${action}` &&
     execution.definitionVersion === '1' &&
     execution.rootWorkCommandId === command.rootWorkCommandId &&
     execution.rootWorkSeq === command.rootWorkSeq &&
     equal(execution.input, object(command.request).input)
+  );
+}
+async function parentMatches(
+  host: Host,
+  command: CommandRecord,
+  execution: ExecutionRecord,
+  live = false,
+) {
+  if (execution.parentExecutionId === null) return true;
+  const parent = await host.getExecution(execution.parentExecutionId);
+  const origin = parent && (await host.getCommand(parent.originCommandId));
+  return (
+    !!parent &&
+    parent.kind === 'tool' &&
+    parent.runId !== null &&
+    parent.originStoreId === command.originStoreId &&
+    parent.sessionId === command.sessionId &&
+    parent.rootWorkCommandId === execution.rootWorkCommandId &&
+    parent.rootWorkSeq === execution.rootWorkSeq &&
+    !!origin &&
+    origin.subjectId === command.subjectId &&
+    origin.originStoreId === command.originStoreId &&
+    origin.rootWorkCommandId === command.rootWorkCommandId &&
+    origin.rootWorkSeq === command.rootWorkSeq &&
+    (!live ||
+      (['dispatching', 'running'].includes(parent.status) &&
+        parent.cancelRequestedAt === null &&
+        origin.cancelRequestedAt === null))
   );
 }
 function binding(
@@ -190,6 +217,7 @@ export function createMcpOAuthActions(options: {
           command.sessionId !== context.sessionId ||
           object(command.receipt).executionId !== own.id ||
           !executionMatches(command, own, action) ||
+          !(await parentMatches(host, command, own, true)) ||
           !['dispatching', 'running'].includes(own.status) ||
           !equal(input, own.input)
         )
@@ -216,6 +244,7 @@ export function createMcpOAuthActions(options: {
           freshSession.workspaceId !== current.workspaceId ||
           !request(freshCommand) ||
           !executionMatches(freshCommand, freshExecution, action) ||
+          !(await parentMatches(host, freshCommand, freshExecution, true)) ||
           !equal(freshCommand.request, command.request) ||
           freshCommand.subjectId !== options.observerSubjectId ||
           object(freshCommand.receipt).executionId !== own.id ||
@@ -323,7 +352,10 @@ export function createMcpOAuthActions(options: {
         id: 'mcp.auth.status',
         version: '1',
         description: 'Read safe authentication status independently from connection health',
-        inputSchema: schema,
+        inputSchema: {
+          ...schema,
+          properties: { ...schema.properties, onlyLoginEligible: { type: 'boolean' } },
+        },
         outputSchema: { type: 'array' },
         async execute(input, context) {
           if (!options.observerSubjectId) throw new AgentError('mcp_auth_observer_unavailable');
@@ -333,6 +365,12 @@ export function createMcpOAuthActions(options: {
             String(value.serverId),
             value.expectedReadSet as unknown as McpSourceReadSet,
           );
+          if (value.onlyLoginEligible === true && !target.loginAllowed)
+            return display('builtin.mcp.auth.status', {
+              serverId: value.serverId!,
+              workspaceId: target.workspaceId,
+              eligible: false,
+            });
           const signal = new AbortController().signal;
           return display('builtin.mcp.auth.status', {
             serverId: value.serverId!,
@@ -404,13 +442,19 @@ export function createMcpOAuthActions(options: {
           }
           const own = await host.getExecution(receipt.executionId),
             session = await host.getSession(context.sessionId);
-          if (!own || !session || !executionMatches(command, own, original.action)) return output();
+          if (
+            !own ||
+            !session ||
+            !executionMatches(command, own, original.action) ||
+            !(await parentMatches(host, command, own))
+          )
+            return output();
           payload.execution = {
             id: own.id,
             originStoreId: own.originStoreId,
             sessionId: own.sessionId,
             originCommandId: own.originCommandId,
-            parentExecutionId: null,
+            parentExecutionId: own.parentExecutionId,
             kind: 'job',
             definitionId: own.definitionId,
             definitionVersion: own.definitionVersion,

@@ -255,3 +255,95 @@ test('actual owned caller port freezes large UTF8 Plan, steer, followup and orig
     f.close();
   }
 }, 30000);
+
+test('Question cancellation rechecks its exact card while ordinary Job stop still rejects Tools', async () => {
+  const scope = { storeId: 'store', workspaceId: 'workspace', sessionId: 'session' };
+  const proof = { id: 'question', revision: '3', presentationSessionId: 'session' };
+  const execution = {
+    id: 'tool',
+    originStoreId: scope.storeId,
+    sessionId: scope.sessionId,
+    runId: 'run',
+    definitionId: 'builtin.ask-user/ask_user',
+    definitionVersion: '1',
+    kind: 'tool',
+    status: 'dispatching',
+    cancelRequestedAt: null,
+  };
+  let card = {
+    ...proof,
+    originStoreId: scope.storeId,
+    sessionId: scope.sessionId,
+    executionId: execution.id,
+    runId: execution.runId,
+    definitionId: execution.definitionId,
+    definitionVersion: execution.definitionVersion,
+    kind: 'question',
+    state: 'pending',
+  };
+  let prepared = 0;
+  const reads: unknown[] = [];
+  type Input = Parameters<typeof createTuiCallerPort>[0];
+  const client = {
+    serverInfo: { storeId: scope.storeId, subjectId: 'owner' },
+    getView: async () => ({
+      storeId: scope.storeId,
+      session: {
+        id: scope.sessionId,
+        workspaceId: scope.workspaceId,
+        deletedAt: null,
+      },
+    }),
+    getExecution: async () => execution,
+    getInteraction: async (...args: unknown[]) => {
+      reads.push(args);
+      return card;
+    },
+  } as unknown as Input['client'];
+  const journal = {
+    list: () => [],
+    prepare: () => {
+      prepared++;
+      return true;
+    },
+  } as unknown as Input['journal'];
+  const port = createTuiCallerPort({ client, journal, storeId: scope.storeId });
+  const request = {
+    kind: 'execution.cancel' as const,
+    expectedStoreId: scope.storeId,
+    commandId: 'cancel-question',
+    executionId: execution.id,
+  };
+  await expect(port.prepare(scope, request)).rejects.toThrow('caller_job_scope_unavailable');
+  expect(prepared).toBe(0);
+  for (const wrong of [
+    { revision: '4' },
+    { presentationSessionId: 'other' },
+    { originStoreId: 'foreign' },
+    { sessionId: 'other' },
+    { executionId: 'sibling' },
+    { runId: 'another-run' },
+    { definitionId: 'different' },
+    { definitionVersion: '2' },
+    { kind: 'approval' },
+    { state: 'answered' },
+  ]) {
+    const original = card;
+    card = { ...card, ...wrong };
+    await expect(port.prepare(scope, request, proof)).rejects.toThrow(
+      'caller_question_scope_unavailable',
+    );
+    card = original;
+  }
+  expect(prepared).toBe(0);
+  const intent = await port.prepare(scope, request, proof);
+  expect(intent.request).toEqual(request);
+  expect(intent.scope).toEqual(scope);
+  expect(prepared).toBe(1);
+  expect(reads.at(-1)).toEqual([
+    proof.presentationSessionId,
+    proof.id,
+    { storeId: scope.storeId, origin: 'current' },
+    { signal: undefined },
+  ]);
+});

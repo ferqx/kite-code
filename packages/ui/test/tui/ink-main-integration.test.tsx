@@ -187,7 +187,8 @@ test('live small reasoning uses the actual running Model before a terminal resul
   try {
     await tick();
     expect(app.lastFrame()).toContain('actual small thinking line');
-    expect(app.lastFrame()).toContain('streamed answer');
+    // The reason-first response keeps answer bytes buffered until classified.
+    expect(app.lastFrame()).not.toContain('streamed answer');
     expect(app.lastFrame()).not.toContain('Incomplete response');
     snapshot = {
       ...snapshot,
@@ -197,6 +198,33 @@ test('live small reasoning uses the actual running Model before a terminal resul
     await tick();
     expect(app.lastFrame()).toContain('actual updated thinking line');
     expect(app.lastFrame()).not.toContain('actual small thinking line');
+    snapshot = {
+      ...snapshot,
+      liveModelOutput: undefined,
+      view: view([
+        {
+          ...model,
+          status: 'succeeded',
+          result: {
+            content: 'streamed answer',
+            reasoning: 'actual updated thinking line',
+            toolCalls: [],
+          },
+        },
+      ]),
+      messages: [
+        {
+          ...snapshot.messages[0]!,
+          status: 'complete',
+          firstOutput: 'reasoning',
+          content: 'streamed answer',
+        },
+      ],
+    };
+    await controller.select('s');
+    await tick();
+    expect(app.lastFrame()).toContain('streamed answer');
+    expect(app.lastFrame()).not.toContain('actual updated thinking line');
   } finally {
     app.unmount();
     controller.dispose();
@@ -354,6 +382,109 @@ test('first question Escape cancels the exact presented original execution once'
       },
     ]);
     expect(controller.state.intent?.phase).toBe('applied');
+  } finally {
+    app.unmount();
+    controller.dispose();
+  }
+});
+
+test('a completed Model retains its original delegation caption before its qualified child result', async () => {
+  const call = {
+    id: 'call-child',
+    name: 'task.execute',
+    arguments: JSON.stringify({
+      role: 'agent/explore',
+      key: 'child',
+      input: { name: 'Child task', content: 'Inspect only' },
+    }),
+  };
+  const originalModel: Execution = {
+    ...model,
+    rootWorkCommandId: 'work',
+    rootWorkSeq: '1',
+    result: {
+      content: 'ORIGINAL_DELEGATION_CAPTION',
+      reasoning: 'Original private reasoning',
+      toolCalls: [call],
+    },
+  };
+  const task: Execution = {
+    ...originalModel,
+    id: 'task',
+    kind: 'tool',
+    definitionId: 'builtin.task/task.execute',
+    parentExecutionId: 'model',
+    toolCallId: call.id,
+    toolInput: JSON.parse(call.arguments),
+    result: { content: 'Child started' },
+  };
+  const child: Execution = {
+    ...task,
+    id: 'carrier',
+    kind: 'job',
+    definitionId: 'agent/explore',
+    runId: null,
+    parentExecutionId: task.id,
+    childSessionId: 'child',
+    result: { content: 'Child complete' },
+  };
+  const parentView = view([originalModel, task, child]);
+  parentView.runs = [
+    {
+      id: 'run',
+      originStoreId: 'store',
+      sessionId: 's',
+      originCommandId: 'work',
+      status: 'completed',
+      isActive: false,
+      createdAt: 1,
+      finishedAt: 2,
+      reason: null,
+    },
+  ];
+  const childView = view();
+  childView.session = {
+    ...childView.session,
+    id: 'child',
+    parentSessionId: 's',
+    rootSessionId: 's',
+  };
+  const snapshot: TuiSnapshot = {
+    storeId: 'store',
+    view: parentView,
+    interactions: [],
+    messages: [
+      {
+        id: 'caption',
+        seq: '1',
+        sessionId: 's',
+        runId: 'run',
+        role: 'assistant',
+        status: 'complete',
+        firstOutput: 'reasoning',
+        content: 'ORIGINAL_DELEGATION_CAPTION',
+        sourceIds: ['model'],
+        toolCalls: [call],
+      },
+    ],
+    childViews: [{ executionId: child.id, view: childView }],
+    executionTimings: {
+      model: { availability: 'recorded_dispatch', startedAt: 1, finishedAt: 1001 },
+    },
+  };
+  const controller = new TuiController(port(() => snapshot));
+  await controller.select('s');
+  const app = render(<TuiSession controller={controller} />);
+  try {
+    await tick();
+    const rendered = app.lastFrame()!;
+    expect(rendered.split('ORIGINAL_DELEGATION_CAPTION')).toHaveLength(2);
+    expect(rendered.indexOf('Thinking')).toBeLessThan(
+      rendered.indexOf('ORIGINAL_DELEGATION_CAPTION'),
+    );
+    expect(rendered).not.toContain('Original private reasoning');
+    expect(rendered).toContain('Child task');
+    expect(controller.state.intent).toBeUndefined();
   } finally {
     app.unmount();
     controller.dispose();

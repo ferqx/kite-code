@@ -9,6 +9,7 @@ import type {
   NativeJobOutputRequest,
   NativeSelection,
 } from '../src/native-bridge';
+import { NativeDiagnosticsProvider } from '../src/native-diagnostics';
 import { NativeJobOutputPanel } from '../src/native-job-output-panel';
 
 const selected = (viewSelection = 2) =>
@@ -58,6 +59,7 @@ async function fixture(
       bridge: NativeBridge,
       selection?: NativeSelection,
       historyEpoch?: number,
+      testDiagnostics?: boolean,
     ) => Promise<void>,
   ) => Promise<void>,
 ) {
@@ -78,19 +80,24 @@ async function fixture(
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   try {
-    await run(host, async (bridge, selection = selected(), historyEpoch = 0) => {
-      await act(async () =>
-        root.render(
-          <NativeJobOutputPanel
-            bridge={bridge}
-            generation={1}
-            selection={selection}
-            historyEpoch={historyEpoch}
-            executionId="job"
-          />,
-        ),
-      );
-    });
+    await run(
+      host,
+      async (bridge, selection = selected(), historyEpoch = 0, testDiagnostics = false) => {
+        await act(async () =>
+          root.render(
+            <NativeDiagnosticsProvider enabled={testDiagnostics}>
+              <NativeJobOutputPanel
+                bridge={bridge}
+                generation={1}
+                selection={selection}
+                historyEpoch={historyEpoch}
+                executionId="job"
+              />
+            </NativeDiagnosticsProvider>,
+          ),
+        );
+      },
+    );
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
@@ -127,7 +134,7 @@ test('Job DOM waits for full coverage then keeps every ordinary Unicode chunk in
       next = request;
       return late.promise;
     });
-    await render(bridge);
+    await render(bridge, selected(), 0, true);
     expect(calls).toHaveLength(0);
     await click(host, '读取完整已保存输出');
     expect(host.textContent).toContain('正在读取完整已保存输出');
@@ -165,6 +172,14 @@ test('Job DOM waits for full coverage then keeps every ordinary Unicode chunk in
     expect(host.textContent).toContain('此区间丢失字节数无法确定');
     expect(host.textContent).toContain('丢失 77 字节');
     expect(calls.at(-1)!.method).toBe('jobOutput.close');
+    await render(bridge);
+    expect(host.textContent).not.toContain('输出序号 4');
+    expect(host.textContent).toContain('已完整读取本次固定范围的已保存内容');
+    expect([...host.querySelectorAll('pre')].map((item) => item.textContent)).toEqual([
+      '头部\n🙂',
+      '保留stderr中🙂\n尾',
+    ]);
+    expect(host.textContent).toContain('丢失 77 字节');
     const count = calls.length;
     await render(bridge, { ...selected(), viewGeneration: 9 });
     expect(calls).toHaveLength(count);

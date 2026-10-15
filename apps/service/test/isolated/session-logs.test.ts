@@ -499,9 +499,25 @@ test('default paired main exposes actual Model logs and complete original >64KiB
         (source) => source.digest === createHash('sha256').update(originalSource).digest('hex'),
       ),
     ).toBe(true);
-    expect(snapshot.request.messages.some((message) => message.content === originalSource)).toBe(
-      true,
-    );
+    expect(
+      snapshot.metadata.context?.sources.filter((source) => source.id === 'project:w:AGENTS.md'),
+    ).toEqual([
+      {
+        id: 'project:w:AGENTS.md',
+        digest: createHash('sha256').update(originalSource).digest('hex'),
+      },
+    ]);
+    expect(
+      snapshot.request.messages.filter((message) =>
+        message.sourceIds?.includes('project:w:AGENTS.md'),
+      ),
+    ).toEqual([
+      {
+        role: 'user',
+        content: `<project-instructions role="workspace-context">\nAGENTS.md\n${originalSource}\n</project-instructions>`,
+        sourceIds: ['project:w:AGENTS.md'],
+      },
+    ]);
     expect(await failure(web.browser.getModelInput('other', model.id))).toBeInstanceOf(Error);
     expect(
       (await web.browser.listSessionLogs('other', { afterCursor: '0' })).entries.every(

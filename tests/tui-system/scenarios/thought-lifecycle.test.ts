@@ -640,9 +640,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await submitUserMessage(tui, server, 'Inspect after a standalone command', {
         timeout: 15_000,
       });
-      await waitForText(() => tui.viewport(), '工具授权', 15_000);
-      tui.write('\r');
+      // This presentation journey uses the actual Full policy selected above.
+      // Full does not request approval for this harmless standalone command;
+      // explicit approval/denial is retained in the original approval suites.
       await waitForText(() => tui.outputSinceLastAction(), 'POST_BASH_DONE', 25_000);
+      expect(screenContains(tui.viewport(), '工具授权')).toBe(false);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
@@ -1159,13 +1161,17 @@ describe('TUI PTY System — Thought Lifecycle', () => {
     'thinking-only (no tools) → label is Thinking Xs without tool counts',
     async () => {
       server.setResponses([
-        // Response 1: reasoning only, NO tool_calls
+        // One real Model invocation streams reasoning and its final answer.
+        // A tool-free terminal already completes the new Loop; it must not
+        // dispatch a second Model request merely to consume a fixture queue.
         {
           message: {
-            reasoning_content: 'Let me think about the problem without using any tools.',
+            reasoning_chunks: ['Let me think about the problem without using any tools.'],
+            content_chunks: ['THINK_ONLY_DONE: thought it through.'],
           },
+          stream_frame_sequence: ['reasoning', 'content'],
+          stream_frame_delays: [500, 0],
         },
-        { message: { content: 'THINK_ONLY_DONE: thought it through.' }, delay: 10 },
       ]);
 
       await submitUserMessage(tui, server, 'Think only no tools', { timeout: 15000 });

@@ -1,9 +1,13 @@
 import { AgentError } from '@kite-ai/agent';
 import { createTaskExtension } from '@kite-ai/agent/task';
+
 import type { ChildRole } from './child-configuration';
+
+export { defaultTaskRoles } from '@kite-ai/agent/task';
 
 const taskIds = new Set([
   'task',
+  'task.execute',
   'task_read',
   'task_wait',
   'task_cancel',
@@ -19,14 +23,16 @@ export function createTaskConfiguration(
   declarations: readonly ChildRole[],
   options: { readonly afterTurn?: { enabled: true } } = {},
 ) {
-  const roles = declarations.map(({ id, version }) => ({ id, version }));
+  const roles = declarations.map(({ id, version, description }) => ({ id, version, description }));
   const extension =
     roles.length && roles.length <= 64
       ? createTaskExtension({
-          roles: roles.map(({ id }) => ({
+          roles: roles.map(({ id, description }) => ({
             id,
             configurationId: id,
-            description: `Host-registered child ${id}; capabilities remain bounded by the parent.`,
+            description:
+              description ??
+              `Host-registered child ${id}; capabilities remain bounded by the parent.`,
           })),
           ...(options.afterTurn ? { afterTurn: { enabled: true } } : {}),
         })

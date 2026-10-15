@@ -8,6 +8,7 @@
  * so live output continues to repaint.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { tuiSystemDelay } from '../harness/cancellation';
@@ -27,13 +28,30 @@ import {
   waitForCondition,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace, observePersistedTurnEvents } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedTurnEvents,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 45_000;
 
 function occurrenceCount(text: string, needle: string): number {
   return text.split(needle).length - 1;
 }
+type OldShell = {
+  id: string;
+  state: string;
+  completed_cursor: number | null;
+  cancel_requested_at: number | null;
+  root_cancel_requested_at: number | null;
+  root_active: number;
+  carrier_id: string;
+  carrier_state: string;
+  carrier_started_marker: number;
+  carrier_cancel_requested_at: number | null;
+  carrier_completed_cursor: number | null;
+};
 
 describe('TUI PTY System — cancel shell then render successor', () => {
   let tui: PtyProcess;
@@ -119,8 +137,54 @@ describe('TUI PTY System — cancel shell then render successor', () => {
     'queues one successor prompt and keeps its shell card live without duplicate messages',
     async () => {
       await submitUserMessage(tui, server, 'start old shell', { delayMs: 0, timeout: 15_000 });
-      await waitForText(() => tui.viewport(), 'Bash pwd', 15_000);
-
+      let oldShell: OldShell | undefined;
+      const readOldShell = () => {
+        const observed = observePersistedTurnEvents(workspace, 'start old shell');
+        if (observed.status !== 'ready' || !observed.value) return undefined;
+        using db = new Database(workspace.databasePath, { readonly: true });
+        return (
+          db
+            .query<OldShell, [string, string]>(`
+          SELECT p.id,p.state,p.completed_cursor,p.cancel_requested_at,
+            r.cancel_requested_at AS root_cancel_requested_at,r.is_active AS root_active,
+            c.id AS carrier_id,c.state AS carrier_state,
+            c.cancel_requested_at AS carrier_cancel_requested_at,
+            c.completed_cursor AS carrier_completed_cursor,
+            EXISTS(SELECT 1 FROM execution_output o WHERE o.execution_id=c.id
+              AND instr(CAST(o.content AS TEXT),'OLD_SHELL_RUNNING')>0) AS carrier_started_marker
+          FROM execution p JOIN run r ON r.id=p.run_id AND r.session_id=p.session_id
+          JOIN execution c ON c.parent_execution_id=p.id AND c.kind='job'
+          WHERE p.run_id=? AND p.session_id=? AND p.kind='tool' AND p.call_id='old-shell'
+            AND c.origin_store_id=p.origin_store_id AND p.origin_store_id=r.origin_store_id
+            AND c.session_id=p.session_id AND c.root_session_id=p.root_session_id
+            AND c.root_work_command_id=p.root_work_command_id
+            AND c.root_work_seq=p.root_work_seq
+            AND p.root_work_command_id=r.root_work_command_id AND p.root_work_seq=r.root_work_seq
+        `)
+            .get(observed.value.turnId, observed.value.threadId) ?? undefined
+        );
+      };
+      // A planned Tool card can render before Job.start. Cancel only after the
+      // exact owned carrier has really started and saved its first output, so
+      // this journey exercises cancellation during the fixture's stop window.
+      await waitForCondition(
+        () => {
+          const shell = readOldShell();
+          return (
+            screenContains(tui.viewport(), 'Bash pwd') &&
+            shell?.root_active === 1 &&
+            ['dispatching', 'running'].includes(shell.state) &&
+            shell.carrier_state === 'running' &&
+            shell.carrier_started_marker === 1 &&
+            shell.root_cancel_requested_at === null &&
+            shell.cancel_requested_at === null &&
+            shell.carrier_cancel_requested_at === null
+          );
+        },
+        'the visible original shell and its exact running carrier output',
+        15_000,
+        25,
+      );
       tui.write('\x03');
       // Do not use waitForTuiReady here: its output-quiescence phase can spend
       // the whole synthetic cleanup window waiting on animated frames. We only
@@ -140,13 +204,20 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       );
       await waitForCondition(
         () => {
-          const observation = observePersistedTurnEvents(workspace, 'start old shell');
-          if (observation.status !== 'ready' || !observation.value) return false;
-          return observation.value.events.some(
-            (event) => event.type === 'tool.cancelled' && event.toolCallId === 'old-shell',
+          oldShell = readOldShell();
+          return (
+            !!oldShell &&
+            oldShell.root_active === 1 &&
+            oldShell.root_cancel_requested_at !== null &&
+            oldShell.cancel_requested_at !== null &&
+            oldShell.carrier_cancel_requested_at !== null &&
+            ['planned', 'dispatching', 'running'].includes(oldShell.state) &&
+            ['planned', 'dispatching', 'running'].includes(oldShell.carrier_state) &&
+            oldShell.completed_cursor === null &&
+            oldShell.carrier_completed_cursor === null
           );
         },
-        'durable cancellation of the exact old shell invocation',
+        'durable original cancellation request with its exact Tool and carrier still nonterminal',
         5_000,
         25,
       );
@@ -191,14 +262,36 @@ describe('TUI PTY System — cancel shell then render successor', () => {
 
       await waitForText(() => tui.viewport(), 'Successor completed once.', 15_000);
       await waitForTuiReady(tui);
+      const terminal = readOldShell();
+      expect(terminal?.id).toBe(oldShell!.id);
+      expect(terminal?.carrier_id).toBe(oldShell!.carrier_id);
+      expect(terminal?.state).toBe('cancelled');
+      expect(terminal?.carrier_state).toBe('cancelled');
+      expect(terminal!.completed_cursor).toBeGreaterThan(0);
+      expect(terminal!.carrier_completed_cursor).toBeGreaterThan(0);
+      const successor = requirePersistedRuntimeReady(
+        observePersistedTurnEvents(workspace, 'continue with successor'),
+      );
+      expect(successor).toBeDefined();
+      const successorStarted = successor!.events.find(
+        (event) => event.sourceType === 'run.started',
+      );
+      expect(Number(successorStarted?.sourceCursor)).toBeGreaterThan(terminal!.completed_cursor!);
+      expect(Number(successorStarted?.sourceCursor)).toBeGreaterThan(
+        terminal!.carrier_completed_cursor!,
+      );
 
       // A single correct progress frame is insufficient: retain every parsed
       // successor frame and reject duplicated live tool headers throughout.
       for (const frame of tui.screenFramesSince(progressFrames)) {
-        expect((frame.match(/^.*Bash.*$/gm) ?? []).length).toBeLessThanOrEqual(1);
+        const boundary = frame.indexOf('❯ continue with successor');
+        const successorFrame = boundary < 0 ? frame : frame.slice(boundary);
+        expect((successorFrame.match(/^.*Bash.*$/gm) ?? []).length).toBeLessThanOrEqual(1);
         expect((frame.match(/Successor completed once\./g) ?? []).length).toBeLessThanOrEqual(1);
       }
       const finalScreen = stripAnsi(tui.scrollback());
+      expect(finalScreen).toContain('OLD_SHELL_RUNNING');
+      expect(finalScreen).toContain('cancelled');
       expect(occurrenceCount(finalScreen, 'continue with successor')).toBe(1);
       expect(occurrenceCount(finalScreen, 'Successor completed once.')).toBe(1);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);

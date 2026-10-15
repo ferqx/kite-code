@@ -102,21 +102,43 @@ const frame = async (generation: number, kind: string) => {
     `${JSON.stringify({ phase, generation, kind, frame: normalized(value.text) })}\n`,
   );
 };
+const chooseMenu = async (label: string) => {
+  const end = Date.now() + 10000;
+  for (let index = 0; index < 32; index++) {
+    const observed = await active.projection();
+    const text = normalized(observed.text);
+    if (text.includes(`❯ ${label}`)) return;
+    if (!text.includes('❯')) {
+      if (Date.now() > end) throw Error(`owned_tools_menu_absent:${label}`);
+      await Bun.sleep(50);
+      index--;
+      continue;
+    }
+    await key('\x1b[B');
+    for (;;) {
+      const next = await active.projection();
+      if (next.fresh && normalized(next.text) !== text) break;
+      if (Date.now() > end) throw Error(`owned_tools_menu_deadline:${label}`);
+      await Bun.sleep(50);
+    }
+  }
+  throw Error(`owned_tools_menu_unavailable:${label}`);
+};
 const tools = async (indices: number[], generation: number) => {
   await key('/mcp');
   await wait('New Run > /mcp');
   await key('\r');
   await wait('Server list ready');
-  await key('\x1b[B'.repeat(phase === 'warm' ? 3 : 2));
-  await wait('› Saved tool snapshots');
+  await chooseMenu('Saved tool snapshots');
+  await wait('❯ Saved tool snapshots');
   await key('\r');
   await wait('Generation ');
   if (indices[generation - 1]) await key('\x1b[B'.repeat(indices[generation - 1]!));
-  await wait(`› Generation ${generation}`);
+  await wait(`❯ Generation ${generation}`);
   await key('\r');
   await wait('Tools 1');
   await key('\x1b[B'.repeat(32));
-  await wait('› Next tools');
+  await wait('❯ Next tools');
   await key('\r');
   await wait('Tools 33');
   await key('\r');

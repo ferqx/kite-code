@@ -100,6 +100,18 @@ for (const mode of ['tool', 'model'] as const)
         buildId: 'session-recovery',
       });
       const actual = service;
+      const observedOwner = await store.getSession('crashed');
+      const publicViewResponse = await fetch(`${actual.endpoint}/v1/sessions/crashed/view`, {
+        headers: { authorization: `Bearer ${actual.bootstrap.token}` },
+      });
+      expect(publicViewResponse.status).toBe(200);
+      const publicView = await publicViewResponse.json();
+      expect(publicView.storeId).toBe(ready.storeId);
+      expect(publicView.session.ownerInstanceId).toBe(observedOwner!.ownerInstanceId);
+      expect(publicView.session.ownerGeneration).toBe(ready.owner.generation);
+      expect(publicView.runs.find((run: { id: string }) => run.id === ready.runId).isActive).toBe(
+        true,
+      );
       const input: RecoverSessionRequest = {
         kind: 'session.recover',
         expectedStoreId: ready.storeId,

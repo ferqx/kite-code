@@ -49,7 +49,7 @@ def choose(card):
   direction=1 if position<index else -1;position+=direction;key(b'\\x1b[B' if direction==1 else b'\\x1b[A');target=current[position]
   wait('› '+target['kind']+' ['+target['id']+'] original Session '+target['sessionId']+' · Store '+target['originStoreId']+' · revision '+target['revision'])
  wait('› '+card['kind']+' ['+card['id']+'] original Session '+card['sessionId']+' · Store '+card['originStoreId']+' · revision '+card['revision']);key(b'\\r')
- wait('Question 1/1 · Selection:' if card['kind']=='question' else 'Up/Down explicit approval selection:');wait(card['id'],material=True)
+ wait('Your answer is needed · choiceId' if card['kind']=='question' else '❯ Allow once');wait(card['id'],material=True)
 try:
  wait('New Run');key(b'work');key(b'\\r');waitcards(4);initial=cards();assert len({c['id'] for c in initial})==4;assert len({c['originStoreId'] for c in initial})==1
  root=next(c for c in initial if c['kind']=='question');job=next(c for c in initial if c['definitionId']=='required-verifier');children=[c for c in initial if c['definitionId']=='ask'];assert len(children)==2;assert len({c['sessionId'] for c in children})==2;assert root['sessionId']=='a';assert job['sessionId']=='a';assert all(c['presentationSessionId']=='a' for c in initial)
@@ -59,9 +59,9 @@ try:
  for i,card in enumerate(order):
   choose(card)
   if card['kind']=='question':
-   wait('1. root-choice',material=True);key(b'\\x1b[B');wait('Question 1/1 · Selection: 1',ready=True)
+   wait('1. root-choice',material=True);key(b'\\x1b[B');wait('❯ 1. root-choice',ready=True)
   else:
-   waitreview(card);key(b'\\x1b[B');wait('Up/Down explicit approval selection: only this call')
+   waitreview(card);key(b'\\x1b[B');wait('❯ Deny',ready=True);key(b'\\x1b[A');wait('❯ Allow once',ready=True)
   key(b'\\r')
   if i==0:
    wait('interaction.answer: unknown');before=open(wire).read().count('"method":"POST"');choose(next(c for c in cards() if c['id']!=card['id']));key(b'\\r');assert open(wire).read().count('"method":"POST"')==before

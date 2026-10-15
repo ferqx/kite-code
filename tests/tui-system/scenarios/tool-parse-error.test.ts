@@ -11,6 +11,7 @@
  * that simulate what happens when the model produces unparseable JSON.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -23,7 +24,11 @@ import {
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedTurnEvents,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -39,7 +44,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
     workspace = createTestWorkspace();
 
     // Response #1: malformed tool call args (missing closing brace) — triggers parse error
-    // Response #2: Kernel receives the synthetic tool failure and asks the model to recover.
+    // Response #2: Core returns the actual pre-dispatch parse failure under the original call ID.
     // Response #3: recovery response for the follow-up message.
     server.setResponses([
       {
@@ -51,7 +56,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
       },
       {
         expectedRequest: {
-          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['tool_invalid_args'] }],
+          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['invalid_tool_arguments'] }],
         },
         message: { content: 'Kernel recovered after the invalid tool input.' },
         delay: 50,
@@ -98,6 +103,46 @@ describe('TUI PTY System — Tool Parse Error', () => {
       // TUI must still be alive with prompt
       expect(screenContains(output, '❯')).toBe(true);
       expect(screenContains(output, 'Kernel recovered after the invalid tool input.')).toBe(true);
+      const recovered = server.getRequests()[1]!;
+      expect(
+        recovered.messages.filter(
+          (message) => message.role === 'tool' && message.tool_call_id === 'call_1',
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          role: 'tool',
+          tool_call_id: 'call_1',
+          content: 'invalid_tool_arguments',
+        }),
+      ]);
+      const original = requirePersistedRuntimeReady(
+        observePersistedTurnEvents(workspace, 'Run a broken command'),
+      );
+      expect(original).toBeDefined();
+      using db = new Database(workspace.databasePath, { readonly: true });
+      const calls = db
+        .query<
+          { state: string; dispatched: number; intent_json: string; result_json: string },
+          [string, string]
+        >(
+          "SELECT state,dispatched,intent_json,result_json FROM execution WHERE session_id=? AND run_id=? AND kind='tool' AND call_id='call_1' AND adapter_id='shell.execute'",
+        )
+        .all(original!.threadId, original!.turnId);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.state).toBe('failed');
+      expect(calls[0]!.dispatched).toBe(0);
+      expect(JSON.parse(calls[0]!.intent_json)).toBeNull();
+      expect(JSON.parse(calls[0]!.result_json)).toEqual({
+        outcome: 'failed',
+        content: 'invalid_tool_arguments',
+        details: { code: 'invalid_tool_arguments' },
+      });
+      expect(
+        db
+          .query("SELECT id FROM execution WHERE session_id=? AND run_id=? AND kind='job'")
+          .all(original!.threadId, original!.turnId),
+      ).toHaveLength(0);
+      expect(server.getRequestCount()).toBe(2);
     },
     TIMEOUT,
   );
@@ -119,6 +164,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
 
       const output = tui.viewport();
       expect(screenContains(output, 'Recovery message after parse error!')).toBe(true);
+      expect(server.getRequestCount()).toBe(3);
       expect(screenContains(output, '❯')).toBe(true);
     },
     TIMEOUT,

@@ -157,10 +157,15 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
     const dynamic = new Map<string, CapabilityDescription>();
     const readStepCapabilities: StepCapabilitiesReader = async (input) => {
       const cached = lifecycle
-        ? await lifecycle.readStepCapabilities(input)
+        ? await lifecycle.readStepCapabilities({
+            ...input,
+            selectedServerIds: [...selected.keys()],
+          })
         : { extensions: [], toolIds: [], snapshot: { mcp: [] } };
-      const extensions = cached.extensions.filter((extension) =>
-        selected.has(extension.id.slice('builtin.mcp.remote.'.length)),
+      const extensions = cached.extensions.filter(
+        (extension) =>
+          extension.id === 'builtin.mcp.discovery' ||
+          selected.has(extension.id.slice('builtin.mcp.remote.'.length)),
       );
       dynamic.clear();
       for (const extension of extensions) {
@@ -176,9 +181,20 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
                 definitionId: definition.id,
                 definitionVersion: definition.version,
                 revision: `${extension.id}:${extension.version}:${definition.version}`,
-                effects: Object.freeze(['unknown'] as const),
+                effects: Object.freeze(
+                  extension.id === 'builtin.mcp.discovery' &&
+                    kind === 'tool' &&
+                    definition.id === 'mcp.tools.search' &&
+                    definition.version === '1'
+                    ? (['read'] as const)
+                    : (['unknown'] as const),
+                ),
                 hardAllowed: true,
-                safeRead: false,
+                safeRead:
+                  extension.id === 'builtin.mcp.discovery' &&
+                  kind === 'tool' &&
+                  definition.id === 'mcp.tools.search' &&
+                  definition.version === '1',
               }),
             );
       }

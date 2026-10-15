@@ -238,15 +238,29 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
           output = await client.getModelOutput('s', origin.modelExecutionId);
         expect(input.confirmation).toBe('succeeded');
         expect(input.request.tools).toEqual([]);
-        expect(input.request.messages.at(-1)).toMatchObject({
+        const instructions = input.request.messages.filter(
+          (message) => message.sourceIds?.length === 1 && message.sourceIds[0] === origin.id,
+        );
+        expect(instructions).toHaveLength(1);
+        expect(instructions[0]).toMatchObject({
           role: 'user',
           sourceIds: [origin.id],
         });
-        expect(input.request.messages.at(-1)!.content).toEndWith(`Focus (user data): ${focus}`);
+        expect(instructions[0]!.content).toEndWith(`Focus (user data): ${focus}`);
         expect(output.output.complete).toBe(true);
         expect(output.output.content).toBe(summaries[compressionCalls - 1]!);
-        return { origin, input, instruction: input.request.messages.at(-1)!.content };
+        return { origin, input, instruction: instructions[0]!.content };
       };
+      // Standard reduction requires an older settled real User turn; source
+      // instructions must never manufacture that conversation history.
+      await work('seed-preface', 'Actual earlier settled conversation', 'preface');
+      expect(requests).toHaveLength(1);
+      expect(
+        requests[0]!.messages.some(
+          (message) =>
+            message.role === 'user' && message.content === 'Actual earlier settled conversation',
+        ),
+      ).toBe(true);
       await work('seed', seed, 'seed');
       const first = await compress('compact-first', `FIRST_FOCUS:${'原focus数据\n'.repeat(7000)}`);
       expect(
@@ -486,7 +500,8 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
       });
       expect(compressionCalls).toBe(2);
       expect(writerStep).toBe(3);
-      expect(requests).toHaveLength(8);
+      expect(requests).toHaveLength(9);
+      expect(requests.slice(1)).toHaveLength(8);
       const cursor = (await reader.getMetadata()).lastChangeCursor;
       await reader.close();
       reader = undefined;
@@ -518,7 +533,8 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
       });
       expect((await reader.getMetadata()).lastChangeCursor).toBe(cursor);
       expect(readFileSync(join(workspace, 'original.txt'))).toEqual(original);
-      expect(requests).toHaveLength(8);
+      expect(requests).toHaveLength(9);
+      expect(requests.slice(1)).toHaveLength(8);
     } finally {
       await reader?.close();
       await child?.close();

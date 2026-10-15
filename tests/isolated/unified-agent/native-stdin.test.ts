@@ -212,9 +212,11 @@ test.skipIf(process.platform !== 'darwin')(
       expect(original.storeId).toBe(storeId);
       expect(requests).toHaveLength(1);
       expect(requests[0]!.tools.map((tool) => tool.function.name)).toEqual(['ask_user']);
-      expect(
-        requests[0]!.messages.filter((message) => message.role === 'user').at(-1)!.content,
-      ).toBe(task);
+      const originalUsers = requests[0]!.messages.filter(
+        (message) => message.role === 'user' && message.content === task,
+      );
+      expect(originalUsers).toHaveLength(1);
+      expect(originalUsers[0]!.content).toBe(task);
       const request = {
         expectedStoreId: storeId,
         commandId: original.commandId,

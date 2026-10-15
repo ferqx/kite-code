@@ -227,7 +227,22 @@ try {
       (message) => message.role === 'user' && message.content === original,
     ),
   );
-  assert(snapshot.request.messages.some((message) => message.content === source));
+  assert.deepEqual(
+    snapshot.request.messages.filter((message) =>
+      message.sourceIds?.includes('project:w:AGENTS.md'),
+    ),
+    [
+      {
+        role: 'user',
+        content: `<project-instructions role="workspace-context">\nAGENTS.md\n${source}\n</project-instructions>`,
+        sourceIds: ['project:w:AGENTS.md'],
+      },
+    ],
+  );
+  assert.deepEqual(
+    snapshot.metadata.context?.sources.filter((entry) => entry.id === 'project:w:AGENTS.md'),
+    [{ id: 'project:w:AGENTS.md', digest: hash(Buffer.from(source)) }],
+  );
   const media = await client.readArtifact(
     's',
     { expectedStoreId: storeId, refId: ref.id as string, scope: { kind: 'session', id: 's' } },

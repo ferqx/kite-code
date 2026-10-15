@@ -50,6 +50,7 @@ async function fixture(
     acquireFault?: boolean;
     defaultSource?: boolean;
     waitForCancel?: boolean;
+    loginAllowed?: boolean;
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-oauth-actions-')));
@@ -142,7 +143,7 @@ async function fixture(
       if (removed) throw Error('source_removed');
       return {
         workspaceId: 'w',
-        loginAllowed: true,
+        loginAllowed: options.loginAllowed ?? true,
         async acquire() {
           if (options.acquireFault) {
             const db = new Database(profile.databasePath);
@@ -540,3 +541,67 @@ test('actual default Source OAuth clear uses shared vault and historical result 
     await f.close();
   }
 }, 10000);
+
+test('directory eligibility never reads credentials for an unchallenged target; explicit status retains its original behavior', async () => {
+  const f = await fixture({ loginAllowed: false });
+  try {
+    const input = {
+      serverId: `mcp-${digest}`,
+      expectedReadSet: JSON.parse(JSON.stringify(readSet)),
+    };
+    await expect(
+      f.client.queryExtension('s', 'builtin.mcp.sources', 'mcp.auth.status', {
+        ...input,
+        onlyLoginEligible: 'true',
+      }),
+    ).rejects.toThrow();
+    expect(f.counts()).toEqual({ resolves: 0, statuses: 0, effects: 0, releases: 0 });
+    const directory = await f.client.queryExtension('s', 'builtin.mcp.sources', 'mcp.auth.status', {
+      ...input,
+      onlyLoginEligible: true,
+    });
+    expect(directory[0]!.payload).toEqual({
+      serverId: input.serverId,
+      workspaceId: 'w',
+      eligible: false,
+    });
+    expect(f.counts()).toEqual({ resolves: 1, statuses: 0, effects: 0, releases: 0 });
+    const explicit = await f.client.queryExtension(
+      's',
+      'builtin.mcp.sources',
+      'mcp.auth.status',
+      input,
+    );
+    expect(explicit[0]!.payload).toMatchObject({
+      loginAllowed: false,
+      policy: 'oauth',
+      status: 'available',
+      credentialPresent: true,
+    });
+    expect(f.counts()).toEqual({ resolves: 2, statuses: 1, effects: 0, releases: 0 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('a truly login-eligible directory target retains exact real credential status', async () => {
+  const f = await fixture({ loginAllowed: true });
+  try {
+    const result = await f.client.queryExtension('s', 'builtin.mcp.sources', 'mcp.auth.status', {
+      serverId: `mcp-${digest}`,
+      expectedReadSet: JSON.parse(JSON.stringify(readSet)),
+      onlyLoginEligible: true,
+    });
+    expect(result[0]!.payload).toEqual({
+      serverId: `mcp-${digest}`,
+      workspaceId: 'w',
+      loginAllowed: true,
+      policy: 'oauth',
+      status: 'available',
+      credentialPresent: true,
+    });
+    expect(f.counts()).toEqual({ resolves: 1, statuses: 1, effects: 0, releases: 0 });
+  } finally {
+    await f.close();
+  }
+});

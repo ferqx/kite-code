@@ -2,11 +2,16 @@ import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import type { TuiController } from '../../src/tui/controller';
 import { TuiFileRecoveryPanel } from '../../src/tui/file-recovery-panel';
+import { defaultTuiPreferences } from '../../src/tui/preferences';
+import { TuiPresentationProvider } from '../../src/tui/presentation';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
 test('Files reader windows exact original points, previews real file impact and separately confirms a scope', async () => {
   const items = Array.from({ length: 9 }, (_, i) => ({
-    checkpoint: { id: `point-${i}`, boundary: { triggerMessageId: `m-${i}` } },
+    checkpoint: {
+      id: `point-${i}`,
+      boundary: { triggerMessageId: `m-${i}`, storeId: 'store', sessionId: 'session' },
+    },
     revision: '1',
   }));
   const calls: string[] = [];
@@ -18,7 +23,14 @@ test('Files reader windows exact original points, previews real file impact and 
       intent: undefined as unknown,
       saved: [],
     },
-    snapshot: { messages: items.map((_, i) => ({ id: `m-${i}`, content: `Original task ${i}` })) },
+    snapshot: {
+      storeId: 'store',
+      messages: items.map((_, i) => ({
+        id: `m-${i}`,
+        sessionId: 'session',
+        content: `Original task ${i}`,
+      })),
+    },
   };
   const controller = {
     state,
@@ -89,10 +101,16 @@ test('Files reader windows exact original points, previews real file impact and 
 });
 
 test('original rewind shows verified recorded date, code statistics and read-only bounded text preview without submitting recovery', async () => {
-  const point = { id: 'p', boundary: { triggerMessageId: 'm' } };
+  const point = {
+    id: 'p',
+    boundary: { triggerMessageId: 'm', storeId: 'store', sessionId: 'session' },
+  };
   const calls: string[] = [];
   const state = {
-    snapshot: { messages: [{ id: 'm', content: 'Original task' }] },
+    snapshot: {
+      storeId: 'store',
+      messages: [{ id: 'm', sessionId: 'session', content: 'Original task' }],
+    },
     fileRecovery: {
       phase: 'ready',
       points: { payload: { items: [{ checkpoint: point, revision: '1', recordedAt: 2000 }] } },
@@ -161,6 +179,79 @@ test('original rewind shows verified recorded date, code statistics and read-onl
     await tick();
     expect(ui.lastFrame()).toContain('Code will remain unchanged.');
     expect(calls).not.toContain('begin');
+  } finally {
+    ui.unmount();
+  }
+});
+
+test('Chinese recovery keeps complete navigation and actual impact localized while requiring a separate explicit scope', async () => {
+  const calls: string[] = [];
+  const point = {
+    id: 'point',
+    boundary: { triggerMessageId: 'message', storeId: 'store', sessionId: 'session' },
+  };
+  const controller = {
+    state: {
+      snapshot: {
+        storeId: 'store',
+        messages: [{ id: 'message', sessionId: 'session', content: 'Original boundary' }],
+      },
+      fileRecovery: {
+        phase: 'ready',
+        points: { payload: { items: [{ checkpoint: point, recordedAt: 2000 }] } },
+        saved: [],
+        detail: {
+          boundary: { checkpoint: point },
+          preview: {
+            payload: {
+              files: [
+                {
+                  path: 'notes.md',
+                  status: 'restore',
+                  textChange: { addedLines: 1, removedLines: 1 },
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+    readFileRecoveryPoint: async () => calls.push('read'),
+    chooseFileRecoveryScope: (scope: string) => calls.push(`scope:${scope}`),
+    startFileRecovery: async (scope: string) => calls.push(`submit:${scope}`),
+  } as unknown as TuiController;
+  const ui = render(
+    <TuiPresentationProvider
+      value={{
+        preferences: { ...defaultTuiPreferences, language: 'zh-CN', resolvedLanguage: 'zh-CN' },
+        testDiagnostics: false,
+      }}
+    >
+      <TuiFileRecoveryPanel controller={controller} />
+    </TuiPresentationProvider>,
+  );
+  try {
+    await tick();
+    expect(ui.lastFrame()).toContain('Enter 继续');
+    expect(ui.lastFrame()).toContain('Esc 关闭');
+    expect(ui.lastFrame()).toContain('记录时间：');
+    expect(ui.lastFrame()).not.toContain('Continue');
+    expect(ui.lastFrame()).not.toContain('Close');
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls).toEqual(['read']);
+    expect(ui.lastFrame()).toContain('代码将恢复 +1 −1，涉及 notes.md');
+    expect(ui.lastFrame()).toContain('请明确选择恢复范围');
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls).toEqual(['read']);
+    ui.stdin.write('3');
+    await tick();
+    expect(ui.lastFrame()).toContain('Enter 确认所选范围');
+    expect(calls).toEqual(['read', 'scope:both']);
+    ui.stdin.write('\r');
+    await tick();
+    expect(calls).toEqual(['read', 'scope:both', 'submit:both']);
   } finally {
     ui.unmount();
   }

@@ -1,5 +1,9 @@
 # MCP leaf
 
+[tools-search](tools-search.ts)只搜索本 Run 实际选入的冻结目录，供 Model 取得准确远端定义；不连接或重新发现，也不把 annotations 当权限。实际选中连接的[资源来源](resource-model-source.ts)只投影有限原身份及 generation，标明不是 authority；Model 动态选入原 resources.list/read，实际读取仍核完整目录 Execution、descriptor digest 和目标 URI。TUI 依据同 Scope 的不可变资源收据展示 URI，资源正文留在正式 Model 结果，不进入普通目录卡片。
+
+[provider-action](provider-action.ts)给真实父 Tool 提供普通 nested Action 的有限端口。Store 原子核父执行、Actor、root work、所属 Run 与取消关系，热装配保相同权限；冷记录仅观察、不得重建默认执行。OAuth 执行仍在正式 Action／HTTP port，连接、来源批准和认证各自独立核实。
+
 原目录工具描述查看已完成 connect/refresh、[公共 Client](../../../client/README.md)与[暖/冷 TUI](../../../ui/src/tui/README.md)的有限实际链路，普通 Model Tool refresh 与公共备份恢复 A→B 后的原 metadata 读取均已实际验证；整体 V1.3 继续实施。查看不授予执行能力或完整管理中心资格。
 
 强制暖连接重连已实施：[共享输入类型](reconnection-types.ts)闭合独立Action的准确原carrier/Job/ref与当前Source/static replacement，[实施决定](../../../../.agents/notes/implemented/architecture/2026-10-05-forced-mcp-reconnection-and-original-outcomes.md)保存非原子停止/建立、持久发布和原申请的取舍。此前23个目标主任务、源码外80×24整例及545文件/441主任务完整默认分别通过；最新建立失败的持久收尾修复及13项受影响任务见下文。真实冻结输入、当前完整默认失败、历史红与未覆盖范围见[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。普通connect继续暖复用；当前 OAuth/续期与来源增删边界见下文。持续 Soak、真实系统浏览器、OAuth PTY、三平台和完整 V1.3 继续分别验收。

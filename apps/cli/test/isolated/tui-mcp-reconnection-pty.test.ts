@@ -1175,6 +1175,9 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
     }
   }
   if (cleanupErrors.length)
-    throw new AggregateError(cleanupErrors, 'owned_reconnection_cleanup_failed');
+    throw new AggregateError(
+      failure ? [failure, ...cleanupErrors] : cleanupErrors,
+      'owned_reconnection_cleanup_failed',
+    );
   if (failure) throw failure;
 }, 180000);

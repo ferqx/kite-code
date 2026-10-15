@@ -13,6 +13,7 @@ import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { SkillError, type SkillSummary } from '@kite-ai/agent/skills';
 import {
+  agentContractSource,
   type ContextSource,
   type ContextSources,
   createProjectSources,
@@ -299,7 +300,7 @@ export async function createWorkspaceAssembly(options: {
     });
     project = projectSource;
     const captureSources = async (requests: readonly SourceRequest[]): Promise<ContextSource[]> => {
-      const result = await projectSource.captureBatch!(requests);
+      const result = [agentContractSource(root), ...(await projectSource.captureBatch!(requests))];
       if (!requests.length) return result;
       const current = await catalogue();
       const bodies = new Map<string, Awaited<ReturnType<typeof body>>>();

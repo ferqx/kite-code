@@ -1,3 +1,4 @@
+import { QuestionCancelledError } from '../../execution/interactions';
 import { defineExtension, type Extension, type Json, type ToolDefinition } from '../../extensions';
 import { canonicalJson } from '../../json';
 import { AgentError } from '../../storage/types';
@@ -144,12 +145,21 @@ export function createAskUserExtension(): Extension {
         // This leaf only requests information. Preserve the exact original cancellation,
         // while leaving unrelated errors to Core's ordinary attempted-Tool classification.
         if (
+          error instanceof QuestionCancelledError &&
+          error.interaction.kind === 'question' &&
+          error.interaction.state === 'cancelled' &&
+          error.interaction.sessionId === context.sessionId &&
+          error.interaction.executionId === context.executionId &&
+          error.interaction.runId === context.runId
+        )
+          return { outcome: 'cancelled', content: 'execution_cancel_requested' };
+        if (
           error instanceof AgentError &&
-          error.code === 'cancel_requested' &&
+          ['cancel_requested', 'execution_cancel_requested'].includes(error.code) &&
           context.signal.aborted &&
           error === context.signal.reason
         )
-          return { outcome: 'cancelled', content: 'cancel_requested' };
+          return { outcome: 'cancelled', content: error.code };
         throw error;
       }
       if (accepted === null) {

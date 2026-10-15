@@ -140,19 +140,33 @@ test.skipIf(process.platform !== 'darwin')(
           }
         }
         const body = (await request.json()) as { messages: { role: string; content: unknown }[] };
-        const lastUser = body.messages.filter((row) => row.role === 'user').at(-1)?.content;
-        const marker = typeof lastUser === 'string' ? lastUser : JSON.stringify(lastUser);
-        const tools = body.messages.filter((row) => row.role === 'tool').length;
+        const actualTask = [...body.messages]
+          .reverse()
+          .find(
+            (row) =>
+              row.role === 'user' &&
+              typeof row.content === 'string' &&
+              [
+                'ORIGINAL_PARENT',
+                'NEWER_PARENT',
+                'UNICODE_CHILD',
+                'STOP_CHILD',
+                'DETACHED_CHILD',
+                'NEWER_CHILD',
+              ].includes(row.content),
+          );
+        const marker =
+          typeof actualTask?.content === 'string'
+            ? actualTask.content
+            : JSON.stringify(actualTask?.content);
+        const tools = body.messages
+          .slice(body.messages.lastIndexOf(actualTask!) + 1)
+          .filter((row) => row.role === 'tool').length;
         calls.push({ marker, tools });
         const frame = (delta: unknown, reason: string | null) =>
           `data: ${JSON.stringify({ id: 'fixed', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-        const userContents = body.messages
-          .filter((row) => row.role === 'user')
-          .map((row) =>
-            typeof row.content === 'string' ? row.content : JSON.stringify(row.content),
-          );
-        const isOriginal = userContents.some((content) => content.includes('ORIGINAL_PARENT'));
-        const isNewer = userContents.some((content) => content.includes('NEWER_PARENT'));
+        const isOriginal = marker === 'ORIGINAL_PARENT';
+        const isNewer = marker === 'NEWER_PARENT';
         let delta: unknown,
           reason = 'stop';
         if ((isOriginal || isNewer) && tools === 0) {

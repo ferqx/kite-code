@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -180,12 +181,44 @@ async function fixture(scenario: Scenario) {
   });
   const store = await openSqliteStore(profile),
     expectedStoreId = (await store.getMetadata()).storeId;
+  let driftedAtAuthorization = false;
+  const withDriftAtAuthorization = (base: NonNullable<typeof host.permissions>) => ({
+    ...base,
+    async authorize(request: Parameters<typeof base.authorize>[0]) {
+      const decision = await base.authorize(request);
+      // The owned source changes after the real permission decision, before Core's
+      // final freshness check and adapter dispatch. No record-only human card is invented.
+      if (
+        scenario === 'drift' &&
+        !driftedAtAuthorization &&
+        decision.allowed &&
+        request.kind === 'job' &&
+        request.definitionId === 'agent/worker' &&
+        request.definitionVersion === '1' &&
+        request.sessionId === 'parent'
+      ) {
+        const execution = await store.getExecution(request.executionId!);
+        expect(execution?.status).toBe('planned');
+        expect(execution?.authorization?.dispatched).toBe(false);
+        driftedAtAuthorization = true;
+        writeFileSync(sourcePath, '{ changed owned source');
+      }
+      return decision;
+    },
+  });
+  const resolveRun = host.resolveRunConfiguration!;
   const runtime = createRuntime({
     store,
-    permissions: host.permissions!,
+    permissions: withDriftAtAuthorization(host.permissions!),
     extensions: host.extensions,
     supportsExtensionInputs: host.supportsExtensionInputs,
-    resolveRunConfiguration: host.resolveRunConfiguration,
+    resolveRunConfiguration: async (...args: Parameters<typeof resolveRun>) => {
+      const binding = await resolveRun(...args);
+      return {
+        ...binding,
+        permissions: withDriftAtAuthorization(binding.permissions ?? host.permissions!),
+      };
+    },
     resolveRecoveryRunConfiguration: host.resolveRecoveryRunConfiguration,
     childConfigurations: host.childConfigurations,
     resolveChildRunConfiguration: host.resolveChildRunConfiguration,
@@ -317,8 +350,6 @@ async function fixture(scenario: Scenario) {
             scenario === 'deny' &&
             own.sessionId !== 'parent' &&
             card.definitionId === 'mcp.source.connection';
-          if (scenario === 'drift' && card.definitionId === 'agent/worker')
-            writeFileSync(sourcePath, '{ changed owned source');
           approved.push({ definitionId: card.definitionId, sessionId: own.sessionId });
           await client.answerInteraction(presentation, card.id, {
             expectedStoreId,
@@ -377,6 +408,87 @@ async function fixture(scenario: Scenario) {
       await runtime.waitForCommand('work', { timeoutMs: 3000 });
       return approved;
     },
+    async assertRecordOnlyCreation(sessionId: string) {
+      const executions = await store.listExecutions(sessionId);
+      const task = executions.find((execution) => execution.definitionId === 'task')!;
+      const carrier = executions.find((execution) => execution.definitionId === 'agent/worker')!;
+      expect(task).toBeDefined();
+      expect(carrier).toBeDefined();
+      expect(task.id).not.toBe(carrier.id);
+      expect(task.status).toBe('succeeded');
+      expect(carrier.parentExecutionId).toBe(task.id);
+      expect(task.runId).toBeTruthy();
+      expect(carrier.runId).toBeNull();
+      const work = (await runtime.getCommand('work'))!;
+      for (const execution of [task, carrier]) {
+        expect(execution.originStoreId).toBe(expectedStoreId);
+        expect(execution.sessionId).toBe(sessionId);
+        expect(execution.rootWorkCommandId).toBe('work');
+        expect(execution.rootWorkSeq).toBe(work.seq);
+        expect(execution.definitionVersion).toBe('1');
+        expect(execution.authorization?.dispatched).toBe(true);
+        const database = new Database(profile.databasePath, { readonly: true });
+        let authorization: {
+          revision: string;
+          snapshot: {
+            namespace: string;
+            version: string;
+            data: { policies: { scope: string; allowed: boolean; snapshot: unknown }[] };
+          };
+        };
+        try {
+          const row = database
+            .query('SELECT dispatch_authorization_json FROM execution WHERE id=?')
+            .get(execution.id) as { dispatch_authorization_json: string };
+          authorization = JSON.parse(row.dispatch_authorization_json);
+        } finally {
+          database.close();
+        }
+        expect(authorization).toMatchObject({ allowed: true, definitionVersion: '1' });
+        const snapshots =
+          sessionId === 'parent'
+            ? [authorization.snapshot]
+            : (() => {
+                expect(authorization.snapshot).toMatchObject({
+                  namespace: 'agent.permission-intersection',
+                  version: '1',
+                });
+                const policies = authorization.snapshot.data.policies;
+                expect(policies.map((policy) => policy.scope)).toEqual(['parent', 'child']);
+                expect(policies.every((policy) => policy.allowed === true)).toBe(true);
+                return policies.map((policy) => policy.snapshot);
+              })();
+        for (const snapshot of snapshots)
+          expect(snapshot).toMatchObject({
+            namespace: 'builtin.permissions',
+            version: '1',
+            data: {
+              mode: 'accept_edits',
+              workspaceTrust: true,
+              capability: {
+                kind: execution.kind,
+                definitionId: execution.definitionId,
+                definitionVersion: '1',
+                internalRecordOnly: true,
+                effects: ['record_write'],
+              },
+            },
+          });
+        expect(authorization.revision.length).toBeGreaterThan(0);
+        expect(execution.authorization?.human).toBeUndefined();
+      }
+      const accepted = JSON.parse((task.result as { content: string }).content);
+      expect(accepted.accepted).toBe(true);
+      expect(accepted.ref).toMatchObject({
+        originStoreId: expectedStoreId,
+        sessionId,
+        extensionId: 'builtin.task',
+        executionId: carrier.id,
+        childSessionId: carrier.childSessionId,
+        commandId: carrier.originCommandId,
+      });
+      return { task, carrier };
+    },
     async close() {
       await service.close();
       provider.stop(true);
@@ -394,8 +506,8 @@ test('default worker role uses inherited raw source through real SDK policy and 
     expect(f.effects).toBe(1);
     expect(cards.filter((card) => card.definitionId === 'mcp.connect')).toHaveLength(2);
     expect(cards.filter((card) => card.definitionId === 'mcp.source.connection')).toHaveLength(2);
-    expect(cards.some((card) => card.definitionId === 'task')).toBe(true);
-    expect(cards.some((card) => card.definitionId === 'agent/worker')).toBe(true);
+    expect(cards.some((card) => ['task', 'agent/worker'].includes(card.definitionId))).toBe(false);
+    await f.assertRecordOnlyCreation('parent');
     const carrier = (await f.store.listExecutions('parent')).find(
       (execution) => execution.definitionId === 'agent/worker',
     )!;
@@ -442,7 +554,8 @@ test('default nested worker completes required results with original source scop
     // 15s fixture failures remain evidence, not a product deadline or performance SLA.
     const cards = await f.run();
     expect(f.elapsedMs).toBeLessThan(30000);
-    expect(cards).toHaveLength(11);
+    expect(cards).toHaveLength(7);
+    expect(cards.some((card) => ['task', 'agent/worker'].includes(card.definitionId))).toBe(false);
     expect(f.opens).toBe(3);
     expect(f.effects).toBe(1);
     expect(cards.filter((card) => card.definitionId === 'mcp.connect')).toHaveLength(3);
@@ -460,6 +573,8 @@ test('default nested worker completes required results with original source scop
     const childExecutions = await f.store.listExecutions(carrier.childSessionId!);
     const nested = childExecutions.find((execution) => execution.definitionId === 'agent/worker')!;
     const grandExecutions = await f.store.listExecutions(nested.childSessionId!);
+    await f.assertRecordOnlyCreation('parent');
+    await f.assertRecordOnlyCreation(carrier.childSessionId!);
     const runs = await Promise.all(
       ['parent', carrier.childSessionId!, nested.childSessionId!].map(
         async (id) => (await f.store.getView(id)).runs[0]!,

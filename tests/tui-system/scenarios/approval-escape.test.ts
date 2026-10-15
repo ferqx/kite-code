@@ -12,6 +12,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -109,6 +110,7 @@ describe('TUI PTY System — Approval Escape', () => {
       expect(screenContains(finalOutput, 'Second message received after cancel.')).toBe(true);
       // TUI should still be idle with prompt visible after agent responds
       expect(screenContains(finalOutput, '❯')).toBe(true);
+      expect(existsSync(externalFile)).toBe(false);
     },
     TIMEOUT,
   );
@@ -170,6 +172,7 @@ describe('TUI PTY System — Approval Ctrl+C', () => {
       );
       expect(screenContains(tui.viewport(), 'Still alive after approval Ctrl+C.')).toBe(true);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
+      expect(existsSync(externalFile)).toBe(false);
     },
     TIMEOUT,
   );

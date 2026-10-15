@@ -174,6 +174,7 @@ export interface EnsureAgentFollowUpInput extends EnsureOperationInput {
   contextSelectionId: string;
 }
 export interface PlanActionInput extends OwnedWrite {
+  parentExecutionId?: string;
   commandId: string;
   executionId: string;
   extensionId: string;
@@ -535,6 +536,10 @@ export interface Store {
   getSession(id: string): Promise<SessionRecord | null>;
   listSessions(options?: { limit?: number; afterId?: string }): Promise<SessionRecord[]>;
   acceptCommand(input: AcceptCommandInput): Promise<CommandRecord>;
+  /** Private current-owner admission; a model or HTTP caller cannot supply a parent binding. */
+  acceptNestedAction(
+    input: AcceptCommandInput & { owner: OwnerRef; parentExecutionId: string },
+  ): Promise<CommandRecord>;
   getCommand(id: string): Promise<CommandRecord | null>;
   listAcceptedCommands(sessionId: string, limit?: number): Promise<CommandRecord[]>;
   rejectCommand(
@@ -611,6 +616,7 @@ export interface Store {
       content: string;
       /** Optional small prefix; unfinished Tool arguments are never published here. */
       reasoning?: string;
+      firstOutput?: 'content' | 'reasoning' | 'tool_calls';
       modelOutput?: import('../model-output').ModelOutputReference;
     },
   ): Promise<void>;

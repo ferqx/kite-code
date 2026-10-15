@@ -197,10 +197,29 @@ test('a queued Job keeps its original model decision when the parent refreshes f
     await bounded(runtime.waitForCommand('old-work'));
     expect(model.requests).toHaveLength(2);
     expect(
-      model.requests[1]!.messages.filter((message) => message.role === 'system').map(
-        (message) => message.content,
+      model.requests[1]!.messages.filter((message) =>
+        message.sourceIds?.includes('project:w:AGENTS.md'),
       ),
-    ).toEqual(['new rule']);
+    ).toEqual([
+      {
+        role: 'user',
+        content:
+          '<project-instructions role="workspace-context">\nAGENTS.md\nnew rule\n</project-instructions>',
+        sourceIds: ['project:w:AGENTS.md'],
+      },
+    ]);
+    expect((await store.getExecution(model.requests[1]!.requestId))!.decisionSource).toMatchObject({
+      sources: [
+        {
+          id: 'project:w:AGENTS.md',
+          kind: 'project_instruction',
+          role: 'user',
+          placement: 'after_history',
+          content:
+            '<project-instructions role="workspace-context">\nAGENTS.md\nnew rule\n</project-instructions>',
+        },
+      ],
+    });
     expect(effects).toEqual([{ key: 'first', path: 'output.txt', rule: 'old rule' }]);
     const queuedId = refs.get('queued')!.executionId!;
     const queuedDecision = (await store.getExecution(queuedId))!.decisionSource;

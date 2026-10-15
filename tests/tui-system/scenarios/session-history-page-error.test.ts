@@ -1,190 +1,178 @@
-/** Real Service + PTY regression: a corrupt second directory page must stay visible as an error. */
+/** Real current Service + PTY: invalid page-two metadata must remain an error. */
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trustWorkspace } from '../../../apps/kite-service/src/config/workspace-trust';
-import {
-  BunStdioChildRuntimeClientTransport,
-  kiteAppServerVersion,
-} from '../../../packages/kite-local-runtime/src/client';
-import {
-  createAppServerProtocolConnection,
-  KITE_APP_SERVER_PROTOCOL_METHODS_,
-} from '../../../packages/kite-local-runtime/src/client/protocol-connection';
-import { createKiteHomeDirectoryQuery } from '../../../packages/runtime-storage-sqlite/src/kite-home-directory';
-import { assertKiteSessionStoreSchema } from '../../../packages/runtime-storage-sqlite/src/kite-home-store';
+import { pathToFileURL } from 'node:url';
+import { selectProfile } from '@kite-ai/agent/profile';
+import { launchPairedService } from '@kite-ai/service/paired';
+import { buildOwnedDaemon } from '../../../apps/cli/test/fixtures/daemon-host-build';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForCondition } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, translateOriginalTestConfig } from '../harness/test-workspace';
 
 test('a malformed record reached on page two shows a TUI history error without erasing valid sessions', async () => {
   const workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
   const model = createMockModelServer();
   model.setResponses([{ message: { content: 'A durable first answer' } }]);
   let tui: PtyProcess | undefined;
-  const configRoot = join(workspace.home, '.kite-code');
-  const storePath = join(configRoot, 'kite-session.sqlite');
+  let connection: Awaited<ReturnType<typeof launchPairedService>> | undefined;
+  const profile = selectProfile({ dataRoot: workspace.dataRoot, profile: workspace.profile });
+  const storePath = profile.databasePath;
   try {
     writeFileSync(
       workspace.configPath,
-      JSON.stringify({
-        language: 'zh-CN',
-        provider: {
-          mock: {
-            type: 'openai-compatible',
-            apiKey: 'fixture-only',
-            baseURL: model.baseURL,
-            model: 'mock-model',
-            models: ['mock-model'],
-          },
-        },
-        model: { default: { provider: 'mock', name: 'mock-model' } },
-        interactionMode: 'auto',
-        sandbox: { enabled: false },
-        mcpServers: {},
-      }),
+      JSON.stringify(
+        translateOriginalTestConfig({
+          model: { default: { provider: 'mock', name: 'mock-model' } },
+          provider: { mock: { baseURL: model.baseURL } },
+        }).configuration,
+      ),
     );
-    expect(
-      trustWorkspace({
-        workspace: workspace.workspace,
-        source: 'test',
-        storePath: join(configRoot, 'workspace-trust.jsonc'),
-      }).status,
-    ).toBe('recorded');
-    const label = 'history-page-error';
-    const transport = new BunStdioChildRuntimeClientTransport({
-      argv: [
-        process.execPath,
-        join(import.meta.dir, '../../../scripts/release/entrypoints/service.ts'),
-        'app-server',
-        'run-stdio',
-      ],
-      cwd: workspace.workspace,
-      env: {
-        PATH: process.env.PATH ?? '/usr/bin:/bin',
-        HOME: workspace.home,
-        USERPROFILE: workspace.home,
-        NODE_ENV: 'production',
-        KITE_CODE_HOME: configRoot,
-        KITE_CODE_CONFIG_HOME: configRoot,
-        KITE_APP_SERVER_WORKSPACE: workspace.workspace,
-        KITE_APP_SERVER_BUILD_ID: label,
-      },
+    const artifactRoot = join(workspace.home, 'page-error-service');
+    await buildOwnedDaemon(artifactRoot);
+    const entrypoint = join(artifactRoot, 'node_modules/@kite-ai/service/main.js');
+    connection = await launchPairedService({
+      profile,
+      entrypoint,
+      executable: process.execPath,
+      instanceId: 'page-error-setup',
+      buildId: 'page-error-setup',
+      apiMajor: 1,
+      requiredCapabilities: ['sessions', 'commands', 'history', 'permission_controls'],
     });
-    const connection = createAppServerProtocolConnection(
-      transport,
-      kiteAppServerVersion(label),
-      { name: 'history-page-error', version: '1', instanceId: label },
-      KITE_APP_SERVER_PROTOCOL_METHODS_,
-    );
-    await connection.prepareAppControl();
-    try {
-      const firstId = 'page-session-000';
-      const created = await connection.runtime.command({
-        schema: 'kite.runtime-command.v1',
-        commandId: 'create-000',
-        type: 'create_session',
-        workspace: workspace.workspace,
-        bootstrapSessionId: firstId,
-      });
-      expect(created.status).toBe('applied');
-      const projection = await connection.runtime.query({
-        schema: 'kite.runtime-query.v1',
-        type: 'get_session_projection',
-        sessionId: firstId,
-      });
-      expect(projection.status).toBe('ok');
-      if (projection.status !== 'ok' || !projection.session)
-        throw new Error('Production first Session is unavailable.');
-      const started = await connection.runtime.command({
-        schema: 'kite.runtime-command.v1',
-        commandId: 'first-turn',
-        type: 'start_turn',
-        sessionId: firstId,
-        expectedRevision: projection.session.revision,
-        input: 'Durable first question',
-        phase: 'building',
-      });
-      expect(started.status).toBe('applied');
-      const deadline = Date.now() + 15_000;
-      let completed = false;
-      while (Date.now() < deadline) {
-        const current = await connection.runtime.query({
-          schema: 'kite.runtime-query.v1',
-          type: 'get_session_projection',
-          sessionId: firstId,
-        });
-        if (current.status === 'ok' && current.session?.currentRun?.status === 'completed') {
-          completed = true;
-          break;
-        }
-        await Bun.sleep(50);
+    const client = connection.client,
+      expectedStoreId = connection.bootstrap.storeId!;
+    const root = await client.createWorkspace({
+      expectedStoreId,
+      id: 'page-workspace',
+      name: 'Page workspace',
+      rootUri: pathToFileURL(workspace.workspace).href,
+    });
+    const trust = await client.getWorkspaceTrust(root.id, { storeId: expectedStoreId });
+    await client.setWorkspaceTrust(root.id, {
+      expectedStoreId,
+      commandId: 'trust',
+      trusted: true,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      ifRevision: trust.revision,
+    });
+    const firstId = 'page-session-000';
+    await client.createSession({
+      expectedStoreId,
+      sessionId: firstId,
+      commandId: 'create-000',
+      workspaceId: root.id,
+      title: 'Durable first question',
+    });
+    await client.startRun(firstId, {
+      expectedStoreId,
+      commandId: 'first-turn',
+      kind: 'run.start',
+      content: 'Durable first question',
+    });
+    const deadline = Date.now() + 15_000;
+    let completed = false;
+    while (Date.now() < deadline) {
+      const view = await client.getView(firstId);
+      if (view.runs.some((run) => run.status === 'completed')) {
+        completed = true;
+        break;
       }
-      expect(completed).toBe(true);
-      // Every Session row is created by the real Service command path, never inserted by SQL.
-      for (let index = 1; index <= 101; index++) {
-        const suffix = String(index).padStart(3, '0');
-        const result = await connection.runtime.command({
-          schema: 'kite.runtime-command.v1',
-          commandId: `create-${suffix}`,
-          type: 'create_session',
-          workspace: workspace.workspace,
-          bootstrapSessionId: `page-session-${suffix}`,
-        });
-        expect(result.status).toBe('applied');
-      }
-      const listed = await connection.history.listSessions({ limit: 100 });
-      expect(listed.entries.length).toBe(100);
-      expect(listed.hasMore).toBe(true);
-      expect(listed.nextCursor).toBeDefined();
-    } finally {
-      await connection.close();
+      await Bun.sleep(50);
     }
+    expect(completed).toBe(true);
+    // Every business row is created through the actual public Service contract.
+    for (let index = 1; index <= 101; index++) {
+      const suffix = String(index).padStart(3, '0');
+      const session = await client.createSession({
+        expectedStoreId,
+        sessionId: `page-session-${suffix}`,
+        commandId: `create-${suffix}`,
+        workspaceId: root.id,
+        title: `Valid Session ${suffix}`,
+      });
+      expect(session.id).toBe(`page-session-${suffix}`);
+    }
+    const listed = await client.listSessionDirectory({
+      storeId: expectedStoreId,
+      workspaceId: root.id,
+      limit: 100,
+    });
+    expect(listed.items).toHaveLength(100);
+    expect(listed.nextAfterSeq).not.toBeNull();
+    const originalSecondPage = await client.listSessionDirectory({
+      storeId: expectedStoreId,
+      workspaceId: root.id,
+      limit: 100,
+      afterSeq: listed.nextAfterSeq!,
+      upperSeq: listed.upperSeq,
+    });
+    expect(originalSecondPage.items).toHaveLength(2);
+    const damagedId = originalSecondPage.items.at(-1)!.session.id;
+    expect(listed.items.some((item) => item.session.id === damagedId)).toBe(false);
+    await connection.close();
+    connection = undefined;
 
-    // The one malformed event was written by the real turn above. Move its still-valid
-    // Session metadata to the oldest position, then corrupt only that event's JSON bytes.
     const database = new Database(storePath, { strict: true });
     let originalIds: string[];
     try {
       originalIds = database
-        .query<{ session_id: string }, []>(
-          'SELECT session_id FROM runtime_sessions ORDER BY session_id',
-        )
+        .query<{ id: string }, []>('SELECT id FROM session ORDER BY id')
         .all()
-        .map((row) => row.session_id);
+        .map((row) => row.id);
       expect(originalIds).toHaveLength(102);
-      const originalEvent = database
-        .query<{ event_json: string }, [string]>(
-          "SELECT event_json FROM runtime_events WHERE session_id=? AND json_extract(event_json,'$.type')='user.message_appended' LIMIT 1",
-        )
-        .get('page-session-000');
-      expect(originalEvent).toBeDefined();
-      database
-        .query('UPDATE runtime_sessions SET name=?, updated_at=? WHERE session_id=?')
-        .run('', 0, 'page-session-000');
-      // Simulate existing on-disk damage. The ordinary writer correctly rejects malformed JSON.
+      // Select the actual public page-two record; Core cursors use ascending allocation order.
+      // This is existing storage damage, not a writer accepting an invalid revision.
       database.run('PRAGMA ignore_check_constraints=ON');
-      database
-        .query("UPDATE runtime_events SET event_json='{' WHERE session_id=? AND event_json=?")
-        .run('page-session-000', originalEvent!.event_json);
+      database.query('UPDATE session SET control_revision=-1 WHERE id=?').run(damagedId);
       database.run('PRAGMA ignore_check_constraints=OFF');
-      const directory = createKiteHomeDirectoryQuery(database, {
-        assertStoreSchema: assertKiteSessionStoreSchema,
-      });
-      const firstPage = directory.listSessions({ limit: 100 });
-      expect(firstPage.entries).toHaveLength(100);
-      expect(firstPage.nextCursor).toBeDefined();
-      expect(firstPage.entries.some((entry) => entry.sessionId === 'page-session-000')).toBe(false);
-      expect(() => directory.listSessions({ limit: 100, cursor: firstPage.nextCursor! })).toThrow();
     } finally {
-      database.close(false);
+      database.close();
     }
 
-    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: model, workspace });
+    connection = await launchPairedService({
+      profile,
+      entrypoint,
+      executable: process.execPath,
+      instanceId: 'page-error-read',
+      buildId: 'page-error-setup',
+      apiMajor: 1,
+      requiredCapabilities: ['sessions'],
+    });
+    const firstPage = await connection.client.listSessionDirectory({
+      storeId: expectedStoreId,
+      workspaceId: root.id,
+      limit: 100,
+    });
+    expect(firstPage.items).toHaveLength(100);
+    expect(firstPage.nextAfterSeq).not.toBeNull();
+    expect(firstPage.items.some((item) => item.session.id === damagedId)).toBe(false);
+    await expect(
+      connection.client.listSessionDirectory({
+        storeId: expectedStoreId,
+        workspaceId: root.id,
+        limit: 100,
+        afterSeq: firstPage.nextAfterSeq!,
+        upperSeq: firstPage.upperSeq,
+      }),
+    ).rejects.toThrow();
+    await connection.close();
+    connection = undefined;
+
+    // Reuse the already configured public-Service Profile; its Provider has
+    // already handled the original request, so no new mock contract binding.
+    tui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      mockServer: model,
+      workspace,
+      noPreConfig: true,
+    });
     try {
       await submitCommand(tui, '/resume');
     } catch (error) {
@@ -199,21 +187,23 @@ test('a malformed record reached on page two shows a TUI history error without e
     expect(screenContains(tui.viewport(), '错误：无法加载历史会话，请稍后重试。')).toBe(true);
     using retained = new Database(storePath, { readonly: true });
     const afterIds = retained
-      .query<{ session_id: string }, []>(
-        'SELECT session_id FROM runtime_sessions ORDER BY session_id',
-      )
+      .query<{ id: string }, []>('SELECT id FROM session ORDER BY id')
       .all()
-      .map((row) => row.session_id);
+      .map((row) => row.id);
     for (const id of originalIds) expect(afterIds).toContain(id);
     expect(afterIds.length).toBeGreaterThanOrEqual(originalIds.length);
     expect(
       retained
-        .query<{ event_json: string }, [string]>(
-          "SELECT event_json FROM runtime_events WHERE session_id=? AND event_json='{' LIMIT 1",
+        .query<{ control_revision: number }, [string]>(
+          'SELECT control_revision FROM session WHERE id=?',
         )
-        .get('page-session-000')?.event_json,
-    ).toBe('{');
+        .get(damagedId)?.control_revision,
+    ).toBe(-1);
+  } catch (error) {
+    console.error('Current page-two fixture failure:', error);
+    throw error;
   } finally {
+    await connection?.close();
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [model], workspaces: [workspace] });
   }
 }, 90_000);

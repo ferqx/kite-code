@@ -35,12 +35,16 @@ const provider = Bun.serve({
   async fetch(request) {
     const body = (await request.json()) as { messages: { role: string; content: string }[] };
     requests.push(body);
-    const key = body.messages
-      .filter((m) => m.role === 'user')
-      .at(-1)!
-      .content.includes('SECOND')
-      ? 'second'
-      : 'first';
+    const task = [...body.messages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === 'user' &&
+          (message.content === 'FIRST actual Files read/write/create' ||
+            message.content === 'SECOND actual Files read/write/create'),
+      )?.content;
+    if (!task) throw Error('actual_file_checkpoint_task_unavailable');
+    const key = task === 'SECOND actual Files read/write/create' ? 'second' : 'first';
     const step = steps.get(key) ?? 0;
     steps.set(key, step + 1);
     let call: { name: string; input: unknown } | null = null;

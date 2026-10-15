@@ -148,7 +148,7 @@ export function decodeMcpAuthFact(result: QueryResponse): TuiMcpAuthFact {
     ]);
     if (
       ![e.id, e.originStoreId, e.sessionId, e.originCommandId].every(sourceId) ||
-      e.parentExecutionId !== null ||
+      (e.parentExecutionId !== null && !sourceId(e.parentExecutionId)) ||
       e.kind !== 'job' ||
       typeof e.definitionId !== 'string' ||
       !/^builtin\.mcp\.sources\/mcp\.auth\.(login|refresh|clear|revoke)$/.test(e.definitionId) ||
@@ -236,6 +236,45 @@ export function createTuiMcpAuthPort(input: {
     return actual;
   };
   return {
+    async readDirectory(observed, serverId, signal) {
+      await fresh(observed, serverId, signal);
+      const response = await input.client.queryExtension(
+        observed.sessionId,
+        'builtin.mcp.sources',
+        'mcp.auth.status',
+        {
+          serverId,
+          expectedReadSet: JSON.parse(JSON.stringify(observed.readSet)),
+          onlyLoginEligible: true,
+        },
+        { signal },
+      );
+      signal.throwIfAborted();
+      const payload = envelope(response, 'builtin.mcp.auth.status');
+      if (
+        payload !== null &&
+        typeof payload === 'object' &&
+        !Array.isArray(payload) &&
+        'eligible' in payload
+      ) {
+        const value = closed(payload, ['serverId', 'workspaceId', 'eligible']);
+        if (
+          value.eligible !== false ||
+          value.serverId !== serverId ||
+          value.workspaceId !== observed.workspaceId
+        )
+          throw invalid();
+        return undefined;
+      }
+      const status = decodeMcpAuthStatus(response);
+      if (
+        status.serverId !== serverId ||
+        status.workspaceId !== observed.workspaceId ||
+        !status.loginAllowed
+      )
+        throw invalid();
+      return status;
+    },
     async read(observed, serverId, signal) {
       await fresh(observed, serverId, signal);
       const readSet = JSON.parse(JSON.stringify(observed.readSet));

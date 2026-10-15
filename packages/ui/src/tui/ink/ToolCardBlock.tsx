@@ -540,7 +540,7 @@ const RunningToolHeader = memo(function RunningToolHeader({
           : block.name === 'list_mcp_tools'
             ? 'Listing MCP tools…'
             : block.name === 'write_file'
-              ? writeFileActionName(block.summary, block.args)
+              ? (block.fileAction ?? writeFileActionName(block.summary, block.args))
               : mcpToolDisplayName(block.name);
   return (
     <Box>
@@ -580,7 +580,7 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
           : block.name === 'list_mcp_resources'
             ? 'Listing MCP resources…'
             : block.name === 'write_file'
-              ? writeFileActionName(block.summary, block.args)
+              ? (block.fileAction ?? writeFileActionName(block.summary, block.args))
               : mcpToolDisplayName(block.name);
     return (
       <Box>
@@ -627,7 +627,7 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
   const askQuestionCount = isAskUser ? askQuestions(block.args).length : 0;
   const isMultiQuestionAsk = askQuestionCount > 1;
   const detail = block.detail ?? (isAskUser ? askQuestionText(block.args) : undefined);
-  const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
+  const hasSummary = block.summary !== block.fileNotice && !!block.summary?.trimEnd().length;
   const shellOutput =
     block.status === 'cancelled' && block.summary === 'Cancelled'
       ? block.liveOutput
@@ -635,7 +635,8 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
   const hasShellOutput = shellOutput ? shellOutput.trimEnd().length > 0 : false;
   const isExpanded =
     block.expanded ??
-    (block.status === 'error' ||
+    (hasSummary ||
+      block.status === 'error' ||
       block.status === 'rejected' ||
       block.status === 'cancelled' ||
       block.status === 'timeout' ||
@@ -679,7 +680,7 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
               ? 'Listed MCP tools'
               : 'MCP tool listing failed'
             : block.name === 'write_file'
-              ? writeFileActionName(block.summary, block.args)
+              ? (block.fileAction ?? writeFileActionName(block.summary, block.args))
               : mcpToolDisplayName(block.name);
   return (
     <Box flexDirection="column">
@@ -727,6 +728,20 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
             ))}
           </Box>
         )}
+      {block.resourceReferences?.length ? (
+        <Box paddingLeft={2} flexDirection="column">
+          {block.resourceReferences.map((uri, index) => (
+            <Text key={index} color={dt.muted}>
+              {index === block.resourceReferences!.length - 1 ? '└' : '├'} {uri}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+      {block.fileNotice && (
+        <Box paddingLeft={3}>
+          <Text color={dt.dim}>{block.fileNotice}</Text>
+        </Box>
+      )}
       {/* 方案工具：Markdown 完整渲染，不截断 / Plan: full Markdown, no truncation */}
       {isExpanded && isPlan && hasSummary && (
         <Box paddingLeft={2} marginTop={1} flexDirection="column">
@@ -744,7 +759,12 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
           {block.status === 'exhausted' ? (
             <Text color={dt.warning}>⎿ blocked (too many repeated failures)</Text>
           ) : block.status === 'error' ? (
-            <Text color={dt.error}>⎿ {block.summary || 'Ask failed.'}</Text>
+            <Text color={dt.error}>
+              ⎿{' '}
+              {block.summary === 'invalid_tool_arguments'
+                ? `${translate('tool.askUserInvalidArguments')} (${block.summary})`
+                : block.summary || 'Ask failed.'}
+            </Text>
           ) : (
             renderAskUserSummary(
               block.args,
@@ -823,7 +843,7 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
         </Box>
       )}
       {/* 文件工具 / File tools — 无 summary 时展示文件路径（如工具被取消无 ToolMessage） */}
-      {isExpanded && isFileTool && (
+      {isExpanded && isFileTool && !(block.fileNotice && !hasSummary) && (
         <Box paddingLeft={3} flexDirection="column">
           {block.status === 'exhausted' ? (
             <Text color={dt.warning}>⎿ blocked (too many repeated failures)</Text>

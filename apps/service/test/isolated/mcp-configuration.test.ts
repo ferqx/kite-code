@@ -264,15 +264,49 @@ test('default MCP has no network before dispatched Job; next actual Model sees e
       { function: { name: 'ask_user' } },
       { function: { name: 'mcp.connect' } },
     ]);
-    expect(f.requests[1]!.tools).toMatchObject([
-      { function: { name: 'ask_user' } },
-      { function: { name: 'mcp.connect' } },
-      {
-        function: {
-          parameters: { properties: { value: { type: 'string' } }, required: ['value'] },
-        },
-      },
+    const models = (await f.store.getView('a')).executions.filter(
+      (execution) => execution.kind === 'model',
+    );
+    expect(models).toHaveLength(3);
+    const second = await f.runtime.readModelInput({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'user',
+      sessionId: 'a',
+      executionId: models[1]!.id,
+    });
+    expect(second.metadata.assembly).not.toBeNull();
+    const bindings = second.metadata.assembly!.tools;
+    const remote = bindings.filter((tool) => tool.extensionId === 'builtin.mcp.remote.local');
+    expect(remote).toHaveLength(1);
+    expect(remote[0]!.id).toMatch(/^mcp\.local\.[a-f0-9]{32}$/);
+    expect(remote[0]!.definitionVersion).toMatch(/^[a-f0-9]{64}$/);
+    expect(bindings).toEqual([
+      { id: 'ask_user', definitionVersion: '1', extensionId: 'builtin.ask-user' },
+      { id: 'mcp.connect', definitionVersion: '1', extensionId: 'builtin.mcp' },
+      remote[0]!,
+      { id: 'mcp.resources.list', definitionVersion: '1', extensionId: 'builtin.mcp' },
+      { id: 'mcp.resources.read', definitionVersion: '1', extensionId: 'builtin.mcp' },
+      { id: 'mcp.tools.search', definitionVersion: '1', extensionId: 'builtin.mcp.discovery' },
     ]);
+    const wire = f.requests[1]!.tools as { function: { name: string; parameters: unknown } }[];
+    expect(wire.map((tool) => tool.function.name)).toEqual(bindings.map((tool) => tool.id));
+    expect(wire.find((tool) => tool.function.name === remote[0]!.id)!.function.parameters).toEqual({
+      type: 'object',
+      properties: { value: { type: 'string' } },
+      required: ['value'],
+    });
+    expect(second.request.tools!.map((tool) => tool.id)).toEqual(bindings.map((tool) => tool.id));
+    const remoteExecution = (await f.store.listExecutions('a')).find(
+      (execution) => execution.definitionId === remote[0]!.id,
+    )!;
+    expect(remoteExecution).toMatchObject({
+      status: 'succeeded',
+      definitionVersion: remote[0]!.definitionVersion,
+      authorization: { dispatched: true },
+      originStoreId: f.expectedStoreId,
+      sessionId: 'a',
+      runId: models[1]!.runId,
+    });
     expect(f.calls).toBe(1);
     expect(f.connections).toBe(1);
     const before = (await f.store.getMetadata()).lastChangeCursor;

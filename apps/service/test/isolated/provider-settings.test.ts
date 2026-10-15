@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -9,7 +10,7 @@ import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-provider-settings-');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-provider-settings-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   const file = join(profile.profilePath, 'config.jsonc');
@@ -323,3 +324,168 @@ test('uncertain vault write remains original outcome_unknown and no configuratio
     await f.close();
   }
 });
+
+test('public discovery reads the actual provider once, writes no credential/configuration/mutation, then publishes exact discovered names without another RPC', async () => {
+  const f = await fixture();
+  let requests = 0;
+  const secret = 'hot-discovery-key';
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      requests++;
+      expect(request.headers.get('authorization')).toBe(`Bearer ${secret}`);
+      return Response.json({ data: [{ id: 'alpha' }, { id: 'beta' }] });
+    },
+  });
+  try {
+    const beforeFile = readFileSync(f.file, 'utf8');
+    const beforeCursor = (await f.runtime.getMetadata()).lastChangeCursor;
+    const expectedReadSet = (await f.client.getProviderSettings({ storeId: f.storeId })).readSet!;
+    const operation = {
+      provider: 'compatible' as const,
+      connectionId: null,
+      baseURL: `${provider.url.origin}/v1`,
+      credential: 'replace' as const,
+    };
+    const result = await f.client.discoverProviderSettings({
+      expectedStoreId: f.storeId,
+      expectedReadSet,
+      operation,
+      secret,
+    });
+    expect(result.modelNames).toEqual(['alpha', 'beta']);
+    expect(result.storeId).toBe(f.storeId);
+    expect(result.readSet).toEqual(expectedReadSet);
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(readFileSync(f.file, 'utf8')).toBe(beforeFile);
+    expect((await f.runtime.getMetadata()).lastChangeCursor).toBe(beforeCursor);
+    expect(f.puts).toBe(0);
+    expect(f.keys.size).toBe(0);
+    expect(requests).toBe(1);
+    const saved = await f.client.updateProviderSettings({
+      expectedStoreId: f.storeId,
+      expectedReadSet,
+      commandId: 'publish-discovered',
+      operation: { ...operation, modelNames: result.modelNames },
+      secret,
+    });
+    expect(saved.state).toBe('applied');
+    expect(requests).toBe(1);
+    expect(f.puts).toBe(1);
+    expect(readFileSync(f.file, 'utf8')).toContain('alpha');
+    expect(readFileSync(f.file, 'utf8')).toContain('beta');
+    expect(readFileSync(f.file, 'utf8')).not.toContain(secret);
+    const current = await f.client.getProviderSettings({ storeId: f.storeId });
+    const connection = current.providers.find((entry) => entry.id === 'compatible')!
+      .connections[0]!;
+    const keep = {
+      expectedStoreId: f.storeId,
+      expectedReadSet: current.readSet!,
+      operation: {
+        provider: 'compatible' as const,
+        connectionId: connection.id,
+        baseURL: connection.baseURL,
+        credential: 'keep' as const,
+      },
+    };
+    expect((await f.client.discoverProviderSettings(keep)).modelNames).toEqual(['alpha', 'beta']);
+    expect(requests).toBe(2);
+    expect(f.puts).toBe(1);
+    await expect(
+      f.client.discoverProviderSettings({
+        ...keep,
+        operation: { ...keep.operation, baseURL: `${provider.url.origin}/different-endpoint` },
+      }),
+    ).rejects.toMatchObject({ code: 'provider_discovery_endpoint_mismatch' });
+    expect(requests).toBe(2);
+  } finally {
+    provider.stop(true);
+    await f.close();
+  }
+});
+
+test('public read-only discovery returns accurate HTTP classes, cancels its source, and rejects stale metadata before contacting a provider', async () => {
+  const f = await fixture();
+  let status = 401,
+    requests = 0;
+  let entered!: () => void, released!: () => void;
+  const cancelledSource = new Promise<void>((resolve) => {
+    released = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      requests++;
+      if (status === 200) {
+        entered();
+        await new Promise<void>((resolve) => {
+          if (request.signal.aborted) {
+            released();
+            resolve();
+          } else
+            request.signal.addEventListener(
+              'abort',
+              () => {
+                released();
+                resolve();
+              },
+              { once: true },
+            );
+        });
+        return Response.json({ data: [{ id: 'late' }] });
+      }
+      return new Response('provider body is private', { status });
+    },
+  });
+  try {
+    const input = {
+      expectedStoreId: f.storeId,
+      expectedReadSet: (await f.client.getProviderSettings({ storeId: f.storeId })).readSet!,
+      operation: {
+        provider: 'compatible' as const,
+        connectionId: null,
+        baseURL: `${provider.url.origin}/v1`,
+        credential: 'none' as const,
+      },
+    };
+    await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
+      code: 'provider_discovery_auth_failed',
+    });
+    status = 403;
+    await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
+      code: 'provider_discovery_auth_failed',
+    });
+    status = 500;
+    await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
+      code: 'provider_discovery_failed',
+    });
+    const cancelled = new AbortController();
+    status = 200;
+    const pending = f.client.discoverProviderSettings(input, { signal: cancelled.signal });
+    await started;
+    cancelled.abort();
+    await expect(pending).rejects.toThrow();
+    expect(
+      await Promise.race([
+        cancelledSource.then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1000)),
+      ]),
+    ).toBe(true);
+    expect(f.puts).toBe(0);
+    expect(f.keys.size).toBe(0);
+    const before = requests;
+    writeFileSync(f.file, '// changed original configuration\n{"models":[]}');
+    await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
+      code: 'configuration_read_set_conflict',
+    });
+    expect(requests).toBe(before);
+  } finally {
+    provider.stop(true);
+    await f.close();
+  }
+}, 10_000);

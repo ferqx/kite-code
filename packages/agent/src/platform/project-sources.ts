@@ -186,9 +186,11 @@ export function createProjectSources(
               const value: ContextSource = {
                 id,
                 kind: 'project_instruction',
+                role: 'user',
+                placement: 'after_history',
                 scope: directory,
                 digest: snapshot.digest,
-                content: snapshot.content,
+                content: `<project-instructions role="workspace-context">\n${local}\n${snapshot.content}\n</project-instructions>`,
               };
               const previous = sources.get(id);
               if (previous && previous.digest !== value.digest)

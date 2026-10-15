@@ -139,8 +139,8 @@ test('built Service and actual PTY permission controls create exact Shell grants
       instanceId: crypto.randomUUID(),
       requiredCapabilities: ['sessions', 'permission_controls', 'permission_grants'],
     });
+    const expectedStoreId = seed.bootstrap.storeId!;
     try {
-      const expectedStoreId = seed.bootstrap.storeId!;
       await seed.client.createWorkspace({
         expectedStoreId,
         id: 'w',
@@ -167,7 +167,14 @@ test('built Service and actual PTY permission controls create exact Shell grants
         process.execPath,
         '--no-install',
         join(import.meta.dir, '../fixtures/tui-permissions-driver.ts'),
-        JSON.stringify({ runner, root, databasePath: profile.databasePath, workspace, evidence }),
+        JSON.stringify({
+          runner,
+          root,
+          storeId: expectedStoreId,
+          databasePath: profile.databasePath,
+          workspace,
+          evidence,
+        }),
       ],
       { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
     );

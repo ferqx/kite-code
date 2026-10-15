@@ -532,3 +532,148 @@ test('same Session event refresh preserves authentication loading until the actu
     f.controller.dispose();
   }
 });
+
+function directoryFacts(): import('../../src/tui').TuiMcpSnapshot {
+  return {
+    storeId: 'store',
+    sessionId: 'a',
+    workspaceId: 'w',
+    workspaceIdentity: 'physical',
+    workspacePath: '/owned',
+    registryRevision: 'r',
+    readSet: {
+      userEtag: '1'.repeat(64),
+      workspaceEtag: null,
+      explicitDigest: '2'.repeat(64),
+      registryDigest: '3'.repeat(64),
+      registryRevision: 'r',
+      scopeDigest: '4'.repeat(64),
+    },
+    labels: { [serverId]: 'owned' },
+    items: [
+      {
+        id: serverId,
+        configDigest: '7'.repeat(64),
+        transport: 'http',
+        source: { kind: 'user', id: 'source', revision: '1' },
+        admitted: true,
+        selected: true,
+        available: true,
+        reason: null,
+      },
+    ],
+  };
+}
+test('ordinary MCP directory reads actual authentication before exposing login, and exact server detail opens authentication without work', async () => {
+  const f = fixture();
+  f.port.mcp!.read = async () => directoryFacts();
+  f.port.mcpAuth!.read = async () => ({
+    serverId,
+    workspaceId: 'w',
+    loginAllowed: true,
+    policy: 'auto',
+    status: 'available',
+    credentialPresent: false,
+  });
+  f.port.mcpAuth!.readDirectory = f.port.mcpAuth!.read;
+  await f.controller.select('a');
+  const ui = render(<TuiSession controller={f.controller} />);
+  try {
+    await f.controller.openMcp();
+    await tick();
+    expect(ui.lastFrame()).toContain('● Login required');
+    expect(f.controller.state.mcpDirectoryAuth?.[serverId]?.credentialPresent).toBe(false);
+    ui.stdin.write('\r');
+    await tick();
+    expect(ui.lastFrame()).toContain('Authenticate');
+    ui.stdin.write('\r');
+    await tick();
+    expect(f.controller.state.mcpAuthEntry).toBe('directory');
+    expect(ui.lastFrame()).toContain('Open browser');
+    expect(f.counts()).toEqual({ minted: 0, business: 0 });
+  } finally {
+    ui.unmount();
+    f.controller.dispose();
+  }
+});
+test('directory authentication read failure stays unknown and exposes no private thrown material', async () => {
+  const f = fixture();
+  f.port.mcp!.read = async () => directoryFacts();
+  f.port.mcpAuth!.readDirectory = async () => {
+    throw Error('private-oauth-secret');
+  };
+  await f.controller.select('a');
+  const ui = render(<TuiSession controller={f.controller} />);
+  try {
+    await f.controller.openMcp();
+    await tick();
+    expect(f.controller.state.mcpDirectoryAuth).toEqual({});
+    expect(ui.lastFrame()).not.toContain('Login required');
+    expect(ui.lastFrame()).not.toContain('private-oauth-secret');
+    expect(f.counts()).toEqual({ minted: 0, business: 0 });
+  } finally {
+    ui.unmount();
+    f.controller.dispose();
+  }
+});
+test('late directory authentication cannot cross a session change', async () => {
+  const f = fixture();
+  f.port.mcp!.read = async () => directoryFacts();
+  let release!: (value: Awaited<ReturnType<NonNullable<TuiPort['mcpAuth']>['read']>>) => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  f.port.mcpAuth!.readDirectory = async () => {
+    started();
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  };
+  await f.controller.select('a');
+  const reading = f.controller.openMcp();
+  await gate;
+  await f.controller.select('foreign');
+  release({
+    serverId,
+    workspaceId: 'w',
+    loginAllowed: true,
+    policy: 'auto',
+    status: 'available',
+    credentialPresent: false,
+  });
+  await reading;
+  expect(f.controller.state.sessionId).toBe('foreign');
+  expect(f.controller.state.mcpDirectoryAuth).toBeUndefined();
+  expect(f.counts()).toEqual({ minted: 0, business: 0 });
+  f.controller.dispose();
+});
+
+test('directory ineligibility exposes no fabricated auth fact and never falls back to explicit credential status', async () => {
+  const f = fixture();
+  f.port.mcp!.read = async () => directoryFacts();
+  let directoryReads = 0;
+  let explicitReads = 0;
+  const original = f.port.mcpAuth!.read;
+  f.port.mcpAuth!.read = async (...args) => {
+    explicitReads++;
+    return original(...args);
+  };
+  f.port.mcpAuth!.readDirectory = async () => {
+    directoryReads++;
+    return undefined;
+  };
+  await f.controller.select('a');
+  try {
+    await f.controller.openMcp();
+    expect(directoryReads).toBe(1);
+    expect(explicitReads).toBe(0);
+    expect(f.controller.state.mcpDirectoryAuth).toEqual({});
+    await f.controller.openMcpAuth(serverId);
+    expect(explicitReads).toBe(1);
+    expect(f.controller.state.mcpAuthStatus?.credentialPresent).toBe(true);
+    expect(f.counts()).toEqual({ minted: 0, business: 0 });
+  } finally {
+    f.controller.dispose();
+  }
+});

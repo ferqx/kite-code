@@ -61,8 +61,7 @@ async function main() {
         }
       : {}),
   });
-  const wait = async (text: string) => {
-    const end = Date.now() + 12000;
+  const wait = async (text: string, end = Date.now() + 12000) => {
     while (!buffer.replace(ansi, '').replace(/\s+/g, ' ').includes(text)) {
       if (Date.now() > end) throw Error(`expected ${text} tail=${buffer.slice(-2500)}`);
       if (host.exitCode !== null) throw Error(`host ended tail=${buffer.slice(-2500)}`);
@@ -97,7 +96,26 @@ async function main() {
   let failure: unknown;
   let exitDeadline: number | undefined;
   try {
-    await wait('New Run');
+    const startupDeadline = Date.now() + 12000;
+    let trustConfirmed = false;
+    for (;;) {
+      const rendered = buffer.replace(ansi, '').replace(/\s+/g, ' ');
+      if (rendered.includes('New Run')) break;
+      if (
+        !trustConfirmed &&
+        rendered.includes('Open this workspace?') &&
+        rendered.includes('› Exit Kite Code')
+      ) {
+        key('\x1b[A');
+        await wait('› Trust this workspace and continue', startupDeadline);
+        key('\r');
+        trustConfirmed = true;
+      }
+      if (Date.now() > startupDeadline)
+        throw Error(`expected original draft main input tail=${buffer.slice(-2500)}`);
+      if (host.exitCode !== null) throw Error(`draft host ended tail=${buffer.slice(-2500)}`);
+      await Bun.sleep(50);
+    }
     if (mode === 'first') {
       key('cold original');
       await wait('cold original');

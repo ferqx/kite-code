@@ -6,10 +6,11 @@
  * behavior independently filterable and repeatable.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SLASH_COMMAND_DEFS } from '#kite-cli/tui/hooks/useSlashSuggestions';
+import { fixedTuiCommands } from '../../../packages/ui/src/tui/commands';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitCommand, submitUserMessage, typeText } from '../harness/input-helpers';
@@ -25,7 +26,7 @@ import {
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30_000;
-const BUILTIN_COMMAND_COUNT = SLASH_COMMAND_DEFS.length;
+const BUILTIN_COMMAND_COUNT = fixedTuiCommands.length;
 
 describe('TUI PTY System — Slash Commands', () => {
   let tui: PtyProcess;
@@ -34,7 +35,10 @@ describe('TUI PTY System — Slash Commands', () => {
 
   beforeEach(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({ configOverrides: { thinkingMode: 'max' } });
+    // Keep this journey's original starting theme so Down selects purple.
+    const preferencePath = join(workspace.profilePath, 'ui', 'preferences.jsonc');
+    writeFileSync(preferencePath, JSON.stringify({ language: 'zh-CN', colorPreset: 'blue' }));
     server.setResponses([]);
     tui = await spawnReadyTui({
       cols: 120,
@@ -89,7 +93,7 @@ describe('TUI PTY System — Slash Commands', () => {
       await submitCommand(tui, '/export');
       await waitForText(() => tui.viewport(), 'Session exported', 10_000);
 
-      const exportDirectory = join(workspace.home, '.kite-code');
+      const exportDirectory = workspace.profilePath;
       const exportedFiles = readdirSync(exportDirectory).filter(
         (name) => name.startsWith('session-') && name.endsWith('.md'),
       );
@@ -150,12 +154,17 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await submitCommand(tui, '/effort');
       await waitForText(() => tui.viewport(), '选择推理深度', 10_000);
+      await waitForText(() => tui.viewport(), '❯ 最大', 10_000);
       tui.write('\x1b[A');
       await waitForText(() => tui.viewport(), '❯ 高', 10_000);
+      tui.write('\r');
+      await waitForText(() => tui.viewport(), '确认原项目修改', 10_000);
       tui.write('\r');
       await waitForTextGone(() => tui.viewport(), '选择推理深度', 10_000);
       await waitForText(() => tui.viewport(), 'mock-model high', 10_000);
       await waitForTuiReady(tui);
+      if ((tui.viewport().match(/high/g) ?? []).length !== 2)
+        console.error('Effort Header/Footer actual viewport:', tui.viewport());
       expect(tui.viewport().match(/high/g) ?? []).toHaveLength(2);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
@@ -201,31 +210,58 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
-    '/permissions opens the selector and switches automatic approval to accept edits',
+    '/permissions selects the confirmed three-policy contract and retains the personal default across restart',
     async () => {
+      const initialDb = new Database(workspace.databasePath, { readonly: true });
+      const selectedSessionId = initialDb
+        .query<{ id: string }, []>(
+          'SELECT id FROM session WHERE deleted_at IS NULL AND parent_id IS NULL',
+        )
+        .get()!.id;
+      initialDb.close();
       await submitCommand(tui, '/permissions', 80);
-      await waitForText(() => tui.viewport(), '选择权限模式', 5_000);
+      await waitForText(() => tui.viewport(), '❯ 请求批准', 5_000);
       tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '❯ 自动审批', 5_000);
+      await waitForText(() => tui.viewport(), '❯ 自动审核', 5_000);
       tui.write('\r');
-      await waitForText(() => tui.viewport(), '自动审批', 5_000);
-      expect(screenContains(tui.viewport(), '自动审批')).toBe(true);
-
+      await waitForText(() => tui.viewport(), '确认原操作', 5_000);
+      tui.write('\r');
+      tui.write('\x1b');
+      await waitForTuiReady(tui);
       await submitCommand(tui, '/permissions', 80);
-      await waitForText(() => tui.viewport(), '选择权限模式', 5_000);
+      await waitForText(() => tui.viewport(), '❯ 自动审核', 5_000);
+      // Current defaults come from the actual host control, not the retired JSONC field.
+      tui.write('d');
       tui.write('\x1b[A');
-      await waitForText(() => tui.viewport(), '❯ 接受编辑', 5_000);
+      await waitForText(() => tui.viewport(), '❯ 请求批准', 5_000);
       tui.write('\r');
-      await waitForText(() => tui.viewport(), '接受编辑', 5_000);
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      expect(screenContains(tui.viewport(), '自动审批')).toBe(false);
-      expect(screenContains(tui.viewport(), '接受编辑')).toBe(true);
-
-      const persistedConfig = readFileSync(workspace.configPath, 'utf8');
-      expect(persistedConfig).toContain('"interactionMode": "accept_edits"');
-
-      // A project may suggest Auto as its initial default, but the explicit
-      // personal selection must remain authoritative on the next launch.
+      await waitForText(() => tui.viewport(), '确认原操作', 5_000);
+      tui.write('\r');
+      await waitForCondition(
+        () => {
+          const db = new Database(workspace.databasePath, { readonly: true });
+          try {
+            return (
+              db
+                .query<{ n: number }, [string]>(
+                  "SELECT COUNT(*) AS n FROM host_mutation WHERE kind='permission.mode' AND state='applied' AND scope=? AND json_extract(safe_request_json,'$.mode')='accept_edits' AND json_extract(safe_request_json,'$.makeDefault')=1",
+                )
+                .get(`session:${selectedSessionId}`)?.n === 1
+            );
+          } finally {
+            db.close();
+          }
+        },
+        'actual permission control to persist the chosen personal default',
+        10_000,
+      );
+      expect(screenContains(tui.viewport(), '请求批准')).toBe(true);
+      expect(screenContains(tui.viewport(), '自动审核')).toBe(true);
+      expect(screenContains(tui.viewport(), '完全访问')).toBe(true);
+      tui.write('\x1b');
+      await waitForTuiReady(tui);
+      // An untrusted project declaration cannot override the explicit host-owned choice.
+      mkdirSync(join(workspace.workspace, '.kite-code'), { recursive: true });
       writeFileSync(
         join(workspace.workspace, '.kite-code', 'kite-code.jsonc'),
         JSON.stringify({ interactionMode: 'auto' }, null, 2),
@@ -238,8 +274,12 @@ describe('TUI PTY System — Slash Commands', () => {
         workspace,
         noPreConfig: true,
       });
-      await waitForText(() => tui.viewport(), '接受编辑', 10_000);
-      expect(screenContains(tui.viewport(), '自动审批')).toBe(false);
+      await submitCommand(tui, '/permissions', 80);
+      await waitForText(() => tui.viewport(), '❯ 请求批准', 10_000);
+      expect(screenContains(tui.viewport(), '❯ 自动审核')).toBe(false);
+      expect(screenContains(tui.viewport(), '❯ 请求批准')).toBe(true);
+      tui.write('\x1b');
+      await waitForTuiReady(tui);
     },
     TIMEOUT,
   );

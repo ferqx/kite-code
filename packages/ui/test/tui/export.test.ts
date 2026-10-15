@@ -171,3 +171,54 @@ test('late export, closed view and write failure never publish success into anot
   expect(f.controller.state.error).toBe('Export failed');
   expect(f.controller.state.notice).toBeUndefined();
 });
+
+test('clear exports only the visible conversation and later successful local theme commands without business I/O', async () => {
+  const f = setup();
+  let facts = {
+    revision: 'a'.repeat(64),
+    language: 'en-US' as const,
+    resolvedLanguage: 'en-US' as const,
+    colorPreset: 'teal' as 'teal' | 'purple',
+    theme: 'dark' as const,
+  };
+  let saves = 0;
+  f.port.preferences = {
+    read: async () => facts,
+    save: async (edit) => {
+      expect(edit.expectedRevision).toBe(facts.revision);
+      expect(edit).toMatchObject({ key: 'colorPreset', value: 'purple' });
+      saves++;
+      facts = { ...facts, revision: 'b'.repeat(64), colorPreset: 'purple' };
+      return facts;
+    },
+  };
+  await f.controller.refreshPreferences();
+  await f.controller.select('a');
+  const originalMessages = f.controller.state.snapshot!.messages;
+  f.controller.clearDisplay();
+  await f.controller.savePreference({
+    key: 'colorPreset',
+    value: 'purple',
+    expectedRevision: facts.revision,
+  });
+  await f.controller.exportLoadedText();
+  const text = serializeLoadedText(f.saved[0]!);
+  expect(text).toContain('**You:** /theme purple');
+  expect(text).toContain('Theme set to purple');
+  expect(text).not.toContain('original task');
+  expect(text).not.toContain('preview');
+  expect(f.controller.state.snapshot!.messages).toEqual(originalMessages);
+  expect(f.reads()).toBe(0);
+  await f.controller.savePreference({
+    key: 'colorPreset',
+    value: 'purple',
+    expectedRevision: facts.revision,
+  });
+  expect(saves).toBe(1);
+  expect(f.controller.state.localMessages).toHaveLength(2);
+  await f.controller.select('b');
+  expect(f.controller.state.localMessages).toEqual([]);
+  await f.controller.exportLoadedText();
+  expect(serializeLoadedText(f.saved[1]!)).not.toContain('/theme');
+  f.controller.dispose();
+});

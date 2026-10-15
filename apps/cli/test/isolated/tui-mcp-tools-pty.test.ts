@@ -237,6 +237,16 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
       workspaceId: 'w',
       title: 'Owned MCP Tools',
     });
+    const trust = await seed.client.getWorkspaceTrust('w', { storeId });
+    await seed.client.setWorkspaceTrust('w', {
+      expectedStoreId: storeId,
+      commandId: randomUUID(),
+      trusted: true,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      ifRevision: trust.revision,
+    });
+    expect((await seed.client.getWorkspaceTrust('w', { storeId })).trusted).toBe(true);
     mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,

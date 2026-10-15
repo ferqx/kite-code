@@ -564,6 +564,7 @@ export function createTuiMcpSourceApprovalPort(
     async submit(raw, observed) {
       const intent = parseMcpSourceApprovalIntent(raw);
       let prepared: ReturnType<typeof createMcpSourceApprovalRecord> | undefined;
+      let acceptedCommand: Command | undefined;
       try {
         admission(intent.sessionId);
         if (intent.request.expectedStoreId !== storeId)
@@ -598,6 +599,7 @@ export function createTuiMcpSourceApprovalPort(
           },
         });
         original(intent, command);
+        acceptedCommand = command;
         const result = await outcome(intent);
         journal.record(record, result.phase);
         return result;
@@ -607,7 +609,11 @@ export function createTuiMcpSourceApprovalPort(
             journal.record(prepared, 'outcome_unknown');
           } catch {}
         }
-        return { intent, phase: 'outcome_unknown' };
+        return {
+          intent,
+          phase: 'outcome_unknown',
+          ...(acceptedCommand ? { command: acceptedCommand } : {}),
+        };
       }
     },
     async lookup(raw, signal) {

@@ -18,7 +18,8 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
+import { assertCurrentPlanCompletion, currentPlanWorkResponses } from '../harness/current-plan';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -117,7 +118,9 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
       const order = assertOrder(output, 'Let me ask you something', 'What is your favorite color?');
       expect(order.pass).toBe(true);
 
-      // ── 4. 确认：按 Enter 接受默认选项 / Confirm: Enter to accept default ──
+      // Current question contract keeps recommendations unselected until the user chooses.
+      tui.write('\x1b[B');
+      await tui.settleScreen();
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), 'Got it!', 15000);
 
@@ -169,7 +172,7 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
       },
       {
         expectedRequest: {
-          toolResults: [{ toolCallId: 'call_write', contentIncludes: ['draft_saved'] }],
+          toolResults: [{ toolCallId: 'call_write', contentIncludes: ['"planId"'] }],
         },
         message: { content: 'Draft saved! Ready for review.' },
       },
@@ -181,7 +184,7 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
           const { plan_id, version, structural_digest } = parseDraftSavedPlan(result?.content);
           return {
             expectedRequest: {
-              toolResults: [{ toolCallId: 'call_write', contentIncludes: ['draft_saved'] }],
+              toolResults: [{ toolCallId: 'call_write', contentIncludes: ['"planId"'] }],
             },
             message: {
               tool_calls: [
@@ -195,43 +198,11 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
           };
         },
       },
-      {
-        response(request) {
-          const result = request.messages.find(
-            (message) => message.role === 'tool' && message.tool_call_id === 'call_submit',
-          );
-          const plan = parseDraftSavedPlan(result?.content);
-          return {
-            expectedRequest: {
-              toolResults: [
-                { toolCallId: 'call_submit', contentIncludes: ['"status":"approved"'] },
-              ],
-            },
-            message: {
-              tool_calls: [
-                {
-                  id: 'call_complete',
-                  name: 'update_plan',
-                  args: {
-                    plan_id: plan.plan_id,
-                    version: plan.version,
-                    structural_digest: plan.structural_digest,
-                    updates: [
-                      { step_id: 'step-1', status: 'completed' },
-                      { step_id: 'step-2', status: 'completed' },
-                    ],
-                    complete_plan: true,
-                  },
-                },
-              ],
-            },
-          };
-        },
-      },
+      ...currentPlanWorkResponses('call_submit', ['step-1', 'step-2']),
       {
         expectedRequest: {
           toolResults: [
-            { toolCallId: 'call_complete', contentIncludes: ['"plan_completed":true'] },
+            { toolCallId: 'call_submit-progress-1', contentIncludes: ['"completePlan":true'] },
           ],
         },
         message: { content: 'Lifecycle plan completed.' },
@@ -257,9 +228,13 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
       // Wait for follow-up text
       await waitForText(() => tui.outputSinceLastAction(), 'Draft saved', 15000);
       await waitForText(() => tui.viewport(), '方案审核', 15_000);
+      tui.write('\x1b[B');
+      await tui.settleScreen();
+      tui.write('\x1b[B');
+      await tui.settleScreen();
       tui.write('\r');
       await waitForText(() => tui.viewport(), 'Lifecycle plan completed.', 15_000);
-      await assertCompletedPlanTurn(workspace, 'Draft a lifecycle plan');
+      await assertCurrentPlanCompletion(workspace, 'Draft a lifecycle plan', server);
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
@@ -270,11 +245,11 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
 
       const artifacts = readPersistedPlanArtifacts(workspace);
       expect(artifacts).toHaveLength(1);
-      expect(basename(artifacts[0]!.path)).toBe('v1.md');
-      expect(artifacts[0]!.content).toContain('# Lifecycle Test Plan');
+      expect(artifacts[0]!.version).toBe(1);
+      expect(artifacts[0]!.title).toBe('Lifecycle Test Plan');
       expect(artifacts[0]!.content).toContain('Verify plan lifecycle rendering in the TUI.');
-      expect(artifacts[0]!.content).toContain('"id":"step-1"');
-      expect(artifacts[0]!.content).toContain('"title":"Step 2: Verify"');
+      expect(JSON.stringify(artifacts[0]!.steps)).toContain('"id":"step-1"');
+      expect(JSON.stringify(artifacts[0]!.steps)).toContain('"title":"Step 2: Verify"');
 
       // The review overlay was observed and accepted above; it must close before idle.
       expect(clean.includes('方案审核')).toBe(false);
@@ -285,40 +260,6 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
     TIMEOUT,
   );
 });
-
-async function assertCompletedPlanTurn(
-  workspace: ReturnType<typeof createTestWorkspace>,
-  userMessage: string,
-): Promise<void> {
-  await waitForCondition(
-    () => {
-      const observation = observePersistedTurnEvents(workspace, userMessage);
-      if (observation.status !== 'ready' || !observation.value) return false;
-      return observation.value.events.some((event) => event.type === 'turn.completed');
-    },
-    `durable completion for ${userMessage}`,
-    10_000,
-  );
-  const observed = requirePersistedRuntimeReady(observePersistedTurnEvents(workspace, userMessage));
-  expect(observed).toBeDefined();
-  const events = observed!.events;
-  const blocked = events.filter((event) => event.type === 'completion.blocked');
-  expect(blocked).toHaveLength(1);
-  expect(blocked[0]).toMatchObject({
-    code: 'plan_draft_pending',
-    planning: 'planning_draft',
-    correctionAttempt: 1,
-  });
-  const blockerIndex = events.indexOf(blocked[0]!);
-  const continuationIndex = events.findIndex(
-    (event, index) => index > blockerIndex && event.type === 'model.requested',
-  );
-  const runCompletedIndex = events.findIndex((event) => event.type === 'run.completed');
-  const turnCompletedIndex = events.findIndex((event) => event.type === 'turn.completed');
-  expect(continuationIndex).toBeGreaterThan(blockerIndex);
-  expect(runCompletedIndex).toBeGreaterThan(continuationIndex);
-  expect(turnCompletedIndex).toBeGreaterThan(runCompletedIndex);
-}
 
 // ────────────────────────────────────────────────────────────────
 // approval 全生命周期 / approval full lifecycle
@@ -411,7 +352,11 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         () => {
           const observation = observePersistedTurnEvents(workspace, 'Make a directory');
           if (observation.status !== 'ready' || !observation.value) return false;
-          return observation.value.events.some((event) => event.type === 'turn.aborted');
+          return observation.value.events.some(
+            (event) =>
+              event.type === 'run.finished' &&
+              ['failed', 'cancelled'].includes(String(event.status)),
+          );
         },
         'approval rejection terminal settlement to become durable',
         15_000,
@@ -452,15 +397,29 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         observePersistedTurnEvents(workspace, 'Make a directory'),
       );
       expect(observed).toBeDefined();
-      const rejectionIndex = observed!.events.findIndex(
-        (event) => event.type === 'approval.rejected',
-      );
       const toolRejectedIndex = observed!.events.findIndex(
-        (event) => event.type === 'tool.rejected',
+        (event) =>
+          event.type === 'execution.finished' &&
+          event.kind === 'tool' &&
+          event.callId === 'call_write_external' &&
+          event.status === 'failed' &&
+          (event.result as { content?: unknown } | null)?.content === 'approval_denied',
       );
-      const abortIndex = observed!.events.findIndex((event) => event.type === 'turn.aborted');
+      const rejectedTool = observed!.events[toolRejectedIndex];
+      const rejectionIndex = observed!.events.findIndex(
+        (event) =>
+          event.type === 'interaction.answered' && event.executionId === rejectedTool?.executionId,
+      );
+      const abortIndex = observed!.events.findIndex(
+        (event) =>
+          event.type === 'run.finished' && ['failed', 'cancelled'].includes(String(event.status)),
+      );
       const siblingCancelledIndex = observed!.events.findIndex(
-        (event) => event.type === 'tool.cancelled' && event.toolCallId === 'call_search_sibling',
+        (event) =>
+          event.type === 'execution.finished' &&
+          event.kind === 'tool' &&
+          event.callId === 'call_search_sibling' &&
+          event.status === 'cancelled',
       );
       expect(rejectionIndex).toBeGreaterThanOrEqual(0);
       expect(toolRejectedIndex).toBeGreaterThan(rejectionIndex);
@@ -470,13 +429,14 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         observed!.events.some(
           (event, index) =>
             index > rejectionIndex &&
-            event.type === 'tool.started' &&
-            event.toolCallId === 'call_search_sibling',
+            event.type === 'execution.dispatching' &&
+            event.executionId === observed!.events[siblingCancelledIndex]?.executionId,
         ),
       ).toBe(false);
       expect(
         observed!.events.some(
-          (event, index) => index > rejectionIndex && event.type === 'model.requested',
+          (event, index) =>
+            index > rejectionIndex && event.type === 'execution.planned' && event.kind === 'model',
         ),
       ).toBe(false);
     },

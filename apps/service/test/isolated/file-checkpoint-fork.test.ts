@@ -84,10 +84,21 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       async fetch(request): Promise<Response> {
         const body = (await request.json()) as ProviderBody;
         requests.push(body);
-        const user =
-          body.messages.filter((message) => message.role === 'user').at(-1)?.content ?? '';
-        const key = user.includes('SECOND_ACTUAL_RUN') ? 'second' : 'first',
-          step = steps.get(key) ?? 0;
+        const user = body.messages
+          .slice()
+          .reverse()
+          .find(
+            (message) =>
+              message.role === 'user' && /^(FIRST|SECOND)_ACTUAL_RUN:/.test(message.content),
+          )?.content;
+        const markers: Record<string, string> = {
+          'FIRST_ACTUAL_RUN: read then update original and create first file': 'first',
+          'SECOND_ACTUAL_RUN: read then update original and create second file': 'second',
+        };
+        const key = user === undefined ? undefined : markers[user];
+        if (!key) throw Error('actual_file_user_marker_unavailable');
+        const step = steps.get(key) ?? 0;
+        if (step >= 4) throw Error('actual_file_model_route_exhausted');
         steps.set(key, step + 1);
         let call: { name: string; input: Json } | null = null;
         if (step === 0)
@@ -389,7 +400,14 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       expect(model.confirmation).toBe('succeeded');
       expect(model.bodyHash).toBe(source.modelInputHash);
       expect(Number(model.bodyBytes)).toBeGreaterThan(65536);
-      expect(model.request.messages.some((message) => message.content === agents)).toBe(true);
+      expect(
+        model.request.messages.some(
+          (message) =>
+            message.role === 'user' &&
+            message.content ===
+              `<project-instructions role="workspace-context">\nAGENTS.md\n${agents}\n</project-instructions>`,
+        ),
+      ).toBe(true);
       expect(
         model.request.messages.some(
           (message) => message.role === 'user' && message.content.startsWith('FIRST_ACTUAL_RUN'),

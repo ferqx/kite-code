@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import {
   matchTerminalPredecessorInput,
   TERMINAL_PREDECESSOR_COMMIT,
+  withoutReviewedTuiLockDeclarations,
 } from '../../fixtures/unified-agent/terminal-predecessor';
 
 const repository = resolve(import.meta.dir, '../../..'),
@@ -77,7 +78,7 @@ test('predecessor accepts only the exact Windows Native bootstrap source entry i
   }
 });
 
-test('the root input permits only the exact committed stdio CI script increment', () => {
+test('the root input permits only the exact reviewed stdio and Desktop development scripts', () => {
   const path = 'package.json',
     original = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
       cwd: repository,
@@ -88,7 +89,7 @@ test('the root input permits only the exact committed stdio CI script increment'
     text = current.toString('utf8');
   expect(matchTerminalPredecessorInput(path, previous, previous)).toBe('identical');
   expect(matchTerminalPredecessorInput(path, previous, current)).toBe(
-    'runtime_stdio_validation_script_increment',
+    'runtime_stdio_and_desktop_development_script_increment',
   );
   expect(matchTerminalPredecessorInput('bun.lock', previous, current)).toBeUndefined();
   for (const changed of [
@@ -96,6 +97,10 @@ test('the root input permits only the exact committed stdio CI script increment'
     text.replace(' packages/agent/test/isolated/mcp/linux-owned-program.test.ts', ''),
     text.replace(' packages/agent/test/isolated/mcp/windows-stdio-port.test.ts', ''),
     text.replace(' && bun test --parallel=1 --max-concurrency=1', ''),
+    text.replace(
+      'scripts/development/unified-desktop.ts',
+      'scripts/development/unified-desktop.ts && echo injected',
+    ),
     text.replace('"typecheck": "tsc --noEmit', '"typecheck": "echo tsc --noEmit'),
     text.replace('"version": "0.1.0"', '"version": "0.1.1"'),
     text.replace('"@napi-rs/keyring": "1.3.0"', '"@napi-rs/keyring": "1.3.1"'),
@@ -114,14 +119,18 @@ test('predecessor permits only the exact parser declarations and pinned complete
     });
     expect(prior.exitCode).toBe(0);
     const current = readFileSync(resolve(repository, path));
-    expect(createHash('sha256').update(current).digest('hex')).toBe(
+    expect(
+      createHash('sha256')
+        .update(path === 'bun.lock' ? withoutReviewedTuiLockDeclarations(current)! : current)
+        .digest('hex'),
+    ).toBe(
       path === 'bun.lock'
         ? '748e6ff66e8d3ca2ab4f27b83c9105aae05dc45cdca14edf6560200d5dcb1f91'
         : 'fdb805e391c6772a2b8e8217a31f17ec14949e084e343287634a0976ff783cc2',
     );
     expect(matchTerminalPredecessorInput(path, prior.stdout, current)).toBe(
       path === 'bun.lock'
-        ? 'shell_parser_locked_dependency_increment'
+        ? 'shell_parser_and_tui_workspace_dependency_increment'
         : 'process_observation_and_shell_parser_increment',
     );
     const text = current.toString();
@@ -131,8 +140,20 @@ test('predecessor permits only the exact parser declarations and pinned complete
       text.replace('"@napi-rs/keyring": "1.3.0"', '"@napi-rs/keyring": "1.3.1"'),
       text + '\n',
     ];
-    if (path === 'bun.lock')
+    if (path === 'bun.lock') {
+      const start = text.indexOf('    "packages/ui": {');
       changes.push(
+        text.slice(0, start) +
+          text.slice(start).replace('"ink-text-input": "^6.0.0"', '"ink-text-input": "^6.0.1"'),
+      );
+      changes.push(
+        text.replace('"ink-syntax-highlight": "^2.0.2"', '"ink-syntax-highlight": "^2.0.3"'),
+        text.replace('"ink-text-input": "^6.0.0"', '"ink-text-input": "^6.0.1"'),
+        text.replace('sha512-aiBrZ/', 'sha512-xiBrZ/'),
+        text.replace(
+          '        "react-markdown": "10.1.0",',
+          '        "unexpected": "1.0.0",\n        "react-markdown": "10.1.0",',
+        ),
         text.replace('node-addon-api@8.9.2', 'node-addon-api@8.9.3'),
         text.replace('node-gyp-build@4.8.4', 'node-gyp-build@4.8.5'),
         text.replace('"optionalPeers": ["tree-sitter"]', '"optionalPeers": []'),
@@ -142,9 +163,33 @@ test('predecessor permits only the exact parser declarations and pinned complete
           '    "unrecognized": ["unrecognized@1.0.0", "", {}, "sha512-x"],\n\n    "webidl-conversions": [',
         ),
       );
+    }
     for (const changed of changes) {
       expect(changed).not.toBe(text);
       expect(matchTerminalPredecessorInput(path, prior.stdout, bytes(changed))).toBeUndefined();
     }
+  }
+});
+
+test('UI declarations refine only the exact reviewed workspace manifest; arbitrary dependency or metadata changes fail', () => {
+  const path = 'packages/ui/package.json';
+  const prior = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+    cwd: repository,
+  });
+  expect(prior.exitCode).toBe(0);
+  const current = readFileSync(resolve(repository, path)),
+    text = current.toString();
+  expect(matchTerminalPredecessorInput(path, prior.stdout, current)).toBe(
+    'tui_workspace_dependency_increment',
+  );
+  for (const changed of [
+    text.replace('"ink-text-input": "^6.0.0"', '"ink-text-input": "^6.0.1"'),
+    text.replace('"ink-syntax-highlight": "^2.0.2"', '"ink-syntax-highlight": "^2.0.3"'),
+    text.replace('"dependencies": {', '"dependencies": {\n    "unknown": "1.0.0",'),
+    text.replace('"react-markdown": "10.1.0"', '"react-markdown": "10.1.1"'),
+    text + '\n',
+  ]) {
+    expect(changed).not.toBe(text);
+    expect(matchTerminalPredecessorInput(path, prior.stdout, bytes(changed))).toBeUndefined();
   }
 });
