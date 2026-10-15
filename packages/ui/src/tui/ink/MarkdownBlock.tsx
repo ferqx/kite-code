@@ -1169,7 +1169,7 @@ export default React.memo(function MarkdownBlock({
   let prevGroup: LineGroup | undefined = parsedSlice?.previousGroup;
   let prevBlanks = parsedSlice?.previousBlanks ?? 0;
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" maxWidth={columns}>
       {nonBlank.map(({ group, blanksBefore }) => {
         // blanksBefore on each group is actually blanks AFTER it (accumulated from blank groups).
         // The spacing between prev and current should use prevBlanks (blanks after prev group).

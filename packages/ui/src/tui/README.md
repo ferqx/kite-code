@@ -125,6 +125,8 @@ controller 隔离原 scope/generation/Abort/selected Command。来源目录与 p
 
 后台详情读取同时选中准确原 Execution，目录中的其他 Tool／Job 不会遮住已读取的原输出或子会话。超长纯文本段落在进入 Ink 测量前按同一换行语义拆行，保留完整字符及 Unicode 边界；其他 Markdown 路径、原正文、完整读取与导出不变。完成正文留在终端原生历史，后续折叠和状态更新不要求重新打印原全文。
 
+[MarkdownBlock](ink/MarkdownBlock.tsx) 的根布局以实际 `maxWidth` 限制整个正文列，短段落和行内格式也受约束，避免 Static 的无界测量把超宽行交给终端自行折行而丢失续行缩进。完整消息与流式分组继续使用各自原正文；原宽度变化、表格和代码布局保持。[普通主屏回归](../../test/tui/ink-main-integration.test.tsx)核中文、行内格式和完整字符，实际 80×24 正常入口的缩进与原字节持久化由 [CLI Ink Host](../../../../apps/cli/test/isolated/tui-ink-host.test.ts)核对。
+
 文件恢复的原请求观察更新当前详情和同一 canonical 原请求的已保存目录行，已确认成功不会仍显示旧 pending；其他请求保持原状态。此同步只消费已核回执，不提交恢复、不继续另一段，也不切换仅恢复代码的原会话。
 
 尾部结果折叠在原键到达时更新同 Scope 的显示状态，连续 Enter 不依赖上一帧闭包；仅改变阅读状态，完整正文与原执行事实保持。按用户确认移除 Ctrl+T 入口及其显示状态，帮助和测试诊断不再提示该快捷键；完整 reader 和 serializer 仍核实、保存并导出原 reasoning。

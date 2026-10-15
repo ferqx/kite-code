@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
+import stringWidth from 'string-width';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -9,6 +10,7 @@ const input = JSON.parse(process.argv[2]!) as {
   transcript: string;
   servicePid: string;
   original: string;
+  alignmentParagraph: string;
   responseMarker: string;
   databasePath: string;
 };
@@ -76,6 +78,22 @@ try {
   assert.ok(completed.includes('Original table cell'));
   assert.ok(completed.includes('console.log'));
   assert.ok(!completed.includes('Original outcome pending or unknown'));
+  const replyRows = completed.split('\n');
+  const paragraphStart = replyRows.findIndex((line) => line.includes('ALIGN_BEGIN'));
+  const paragraphEnd = replyRows.findIndex((line) => line.includes('ALIGN_END'));
+  assert.ok(paragraphStart >= 0 && paragraphEnd > paragraphStart);
+  const paragraphRows = replyRows.slice(paragraphStart, paragraphEnd + 1);
+  for (const line of paragraphRows) {
+    assert.ok(line.startsWith('  '), `Reply continuation lost its indent: ${line}`);
+    assert.ok(stringWidth(line) <= 80);
+  }
+  assert.equal(
+    paragraphRows
+      .map((line) => line.slice(2))
+      .join('')
+      .replace(/\s/gu, ''),
+    input.alignmentParagraph.replace(/\s/gu, ''),
+  );
   const completedUntil = Date.now() + 5000;
   for (;;) {
     const db = new Database(input.databasePath, { readonly: true });

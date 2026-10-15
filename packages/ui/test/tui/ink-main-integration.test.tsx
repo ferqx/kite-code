@@ -8,6 +8,7 @@ import type {
   SessionView,
 } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import stringWidth from 'string-width';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
 import type { TuiMcpReadDirectory, TuiMcpSnapshot } from '../../src/tui/mcp';
 
@@ -81,6 +82,68 @@ function output(body: ModelOutputSnapshot['output']): ModelOutputSnapshot {
     output: body,
   };
 }
+
+test('normal recorded and streamed Markdown keep every wrapped reply row inside its indented column', async () => {
+  const plain =
+    '首段开始：如果是明确的实施类任务，我会直接交付实现、必要验证和受影响文档的同步说明，不额外建计划；只有会实质改变产品行为、范围或授权边界且现有证据无法裁决的问题，我才会请你决定。首段结束';
+  const styled =
+    '次段开始：**完整中文说明** 与 `original-code` 保持原文，混排 café é 🧭，以及 [原链接](https://example.test/original) 和足够长的后续中文说明，用来核对所有换行后的文本仍与首行对齐。次段结束';
+  const content = `${plain}\n\n${styled}`;
+  const expected = `${plain}次段开始：完整中文说明 与 original-code 保持原文，混排 café é 🧭，以及 原链接 (https://example.test/original) 和足够长的后续中文说明，用来核对所有换行后的文本仍与首行对齐。次段结束`;
+  for (const streaming of [false, true]) {
+    const body = output({ content, reasoning: '', toolCalls: [], complete: !streaming });
+    const snapshot: TuiSnapshot = {
+      storeId: 'store',
+      view: view([{ ...model, status: streaming ? 'running' : 'succeeded' }]),
+      ...(streaming ? { liveModelOutput: body } : {}),
+      interactions: [],
+      messages: [
+        {
+          id: 'aligned-answer',
+          seq: '1',
+          sessionId: 's',
+          runId: 'run',
+          role: 'assistant',
+          status: streaming ? 'incomplete' : 'complete',
+          sourceIds: ['model'],
+          content,
+        },
+      ],
+    };
+    const original = JSON.stringify(snapshot);
+    const controller = new TuiController(port(() => snapshot));
+    await controller.select('s');
+    const app = render(<TuiSession controller={controller} />);
+    Object.defineProperty(app.stdout, 'columns', { value: 40, configurable: true });
+    app.stdout.emit('resize');
+    try {
+      await tick();
+      const frame = app.lastFrame()!.split('\n');
+      const start = frame.findIndex((line) => line.includes('首段开始'));
+      const end = frame.findIndex((line) => line.includes('次段结束'));
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      const rows = frame.slice(start, end + 1).filter((line) => line.trim());
+      expect(rows.length).toBeGreaterThan(4);
+      for (const line of rows) {
+        expect(line.startsWith('  ')).toBe(true);
+        expect(stringWidth(line)).toBeLessThanOrEqual(40);
+      }
+      expect(
+        rows
+          .map((line) => line.slice(2))
+          .join('')
+          .normalize()
+          .replace(/\s/gu, ''),
+      ).toBe(expected.normalize().replace(/\s/gu, ''));
+      expect(JSON.stringify(snapshot)).toBe(original);
+    } finally {
+      app.unmount();
+      app.cleanup();
+      controller.dispose();
+    }
+  }
+});
 
 test('normal main screen automatically reads one complete original body and retains literal user Markdown', async () => {
   const body = output({
