@@ -505,6 +505,7 @@ test.each(
   );
   const store = await openSqliteStore({ dataRoot: f.profile.dataRoot, profile: f.profile.profile });
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: f.profile.profilePath + '/config.jsonc',
     profile: f.profile,
     allowedToolCapabilities: ['files.read'],
     shell,
@@ -823,6 +824,7 @@ test.each([
     }),
   );
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: f.profile.profilePath + '/config.jsonc',
     profile: f.profile,
     allowedToolCapabilities: ['files.read', 'files.write'],
     child: [{ id: 'code', version: '1', toolIds: ['files.read', 'files.write'] }],

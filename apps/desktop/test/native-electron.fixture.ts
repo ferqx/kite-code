@@ -83,10 +83,13 @@ try {
   await openSessionTools(page);
   await openSettings(page);
   const settings = page.getByRole('region', { name: '模型设置' });
-  await settings.getByRole('button', { name: '读取用户模型配置' }).click();
+  await settings.getByRole('switch', { name: '启用模型 local', exact: true }).waitFor();
+  expect(
+    await settings.getByRole('switch', { name: '启用模型 local', exact: true }).isChecked(),
+  ).toBe(true);
   await settings
-    .getByRole('listitem')
-    .filter({ hasText: 'local · compatible · local · 启用 · 配置可用' })
+    .getByRole('region', { name: '模型提供商 compatible' })
+    .getByText('配置可用', { exact: true })
     .waitFor();
   expect(await count()).toBe(0);
   await closeSettings(page);
@@ -94,18 +97,17 @@ try {
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
   await openSettings(page);
-  await settings.getByRole('button', { name: '读取当前项目模型配置' }).click();
-  await settings.getByText(/项目配置 w/).waitFor();
+  await settings.getByRole('switch', { name: '启用模型 local', exact: true }).waitFor();
   const modelFacts = await page.evaluate(async () =>
     window.kiteNative!.request({
       method: 'settings.models.read',
       generation: 1,
-      scope: 'workspace',
+      scope: 'user',
     }),
   );
   assert.ok(modelFacts && 'models' in modelFacts);
   assert.equal(modelFacts.storeId, storeId);
-  assert.equal(modelFacts.workspaceId, 'w');
+  assert.equal(modelFacts.workspaceId, undefined);
   assert.equal(JSON.stringify(modelFacts).includes(endpoint), false);
   assert.equal(await count(), 0);
   console.log('Native Settings read Node assertions: 6; original scope and zero Model');

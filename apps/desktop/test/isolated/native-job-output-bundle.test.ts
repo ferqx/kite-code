@@ -20,6 +20,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -85,6 +86,7 @@ test.skipIf(process.platform !== 'darwin')(
         manifestSha256: candidate.terminal.manifest.sqlite.manifestSha256,
       });
       const seeded = await seedJob({
+        home,
         root,
         workspace,
         profile,
@@ -350,11 +352,13 @@ async function allOutput(store: Awaited<ReturnType<typeof openSqliteStore>>, exe
   }
 }
 async function seedJob({
+  home,
   root,
   workspace,
   profile,
   providerURL,
 }: {
+  home: string;
   root: string;
   workspace: string;
   profile: ReturnType<typeof selectProfile>;
@@ -414,7 +418,7 @@ async function seedJob({
     ],
     tools: ['shell.launch', 'shell.wait'].map((id) => ({ id, definitionVersion: '1' })),
   };
-  writeFileSync(join(profile.profilePath, 'config.jsonc'), JSON.stringify(config));
+  writeFileSync(userConfigurationPath(home), JSON.stringify(config));
   const supervisor = await Bun.build({
     entrypoints: [
       resolve(
@@ -428,6 +432,7 @@ async function seedJob({
   });
   expect(supervisor.success).toBe(true);
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: userConfigurationPath(home),
     profile,
     shell: {
       platform: 'darwin',
@@ -536,7 +541,7 @@ async function seedJob({
     await runtime.close();
     producer.stop(true);
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfigurationPath(home),
       JSON.stringify({
         modelId: 'cold-fixed',
         models: [

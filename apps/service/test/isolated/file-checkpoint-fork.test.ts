@@ -22,6 +22,7 @@ import type {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { launchPairedService } from '../../src/paired';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
@@ -67,7 +68,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       workspace = join(root, 'workspace');
     mkdirSync(workspace);
     const ownedHome = join(root, 'home');
-    mkdirSync(ownedHome, { mode: 0o700 });
+    const userConfiguration = ownedUserConfiguration(ownedHome);
     const original = Buffer.from(`\uFEFF${'完整原始字节 α\r\n'.repeat(8000)}`),
       originalPath = join(workspace, 'original.txt');
     writeFileSync(originalPath, original);
@@ -150,7 +151,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       },
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [
@@ -170,13 +171,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
     const launch = (id: string) =>
       launchPairedService({
         entrypoint: join(import.meta.dir, '../../src/main.ts'),
-        spawnChild: (command, { env }) =>
-          Bun.spawn([...command], {
-            stdin: 'pipe',
-            stdout: 'pipe',
-            stderr: 'pipe',
-            env: { ...env, HOME: ownedHome },
-          }),
+        spawnChild: userConfiguration.spawnChild,
         profile,
         instanceId: id,
         buildId: 'default-checkpoint-main',

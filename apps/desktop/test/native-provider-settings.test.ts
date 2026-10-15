@@ -206,7 +206,7 @@ test('Native one hot Provider POST persists non-secret original intent first; co
     () => {},
     data,
   );
-  const modelFacts = await models.read('user');
+  const modelFacts = await models.read();
   expect(() => models.submit(modelFacts.observationId, { kind: 'default', modelId: 'b' })).toThrow(
     'configuration_mutation_pending',
   );

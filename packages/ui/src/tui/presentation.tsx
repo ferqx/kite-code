@@ -517,8 +517,6 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command':
     'Ctrl+R 会话 · Ctrl+L 刷新 · Ctrl+O 完整输出 · Ctrl+C 取消准确原 Command',
   '· Workspace': '· 工作区',
-  'Saved project settings apply to later executions; active Run keeps its original model.':
-    '保存的项目设置用于后续执行；活动 Run 保持原模型。',
   'Reading actual configured models': '读取实际配置模型',
   'Desired default:': '期望默认模型：',
   'Current effective effort:': '当前有效推理深度：',
@@ -528,7 +526,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Reasoning effort unavailable for this model': '该模型推理深度不可用',
   'No configured models; unavailable': '没有配置模型；不可用',
   '· R read · K original outcome · Esc close': '· R 读取 · K 核实原结果 · Esc 关闭',
-  'Confirm original project change': '确认原项目修改',
+  'Confirm original user model change': '确认原用户模型修改',
   '; Enter save / Esc abandon': '；Enter 保存 / Esc 放弃',
   'Permissions · original Session': '权限 · 原会话',
   'Reading actual permission controls': '读取实际权限控制',
@@ -623,7 +621,6 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   unspecified: '未指定',
   'stale / read only': '观察失联 / 只读',
   available: '可用',
-  'clear project effort (read resulting value)': '清除项目深度（重读最终值）',
   enabled: '启用',
   disabled: '禁用',
   configured: '已配置',

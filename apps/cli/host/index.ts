@@ -153,7 +153,11 @@ export function verifyArtifact(path: string, digest: string, executable: boolean
     throw new CLIHostError('invalid_cli_artifact');
   try {
     const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || (executable && !(stat.mode & 0o111)))
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      (executable && process.platform !== 'win32' && !(stat.mode & 0o111))
+    )
       throw new CLIHostError('cli_artifact_unavailable');
     if (createHash('sha256').update(readFileSync(path)).digest('hex') !== digest)
       throw new CLIHostError('cli_artifact_identity_mismatch');

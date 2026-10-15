@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { launchPairedService, type PairedServiceChild } from '../../src/paired';
 
 type ProviderBody = {
@@ -67,6 +68,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
   try {
     mkdirSync(workspace);
     mkdirSync(ownedHome);
+    const userConfiguration = ownedUserConfiguration(ownedHome);
     mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
     writeFileSync(join(workspace, 'AGENTS.md'), agents);
     provider = Bun.serve({
@@ -108,7 +110,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
       },
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [
@@ -133,7 +135,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
             stdin: 'pipe',
             stdout: 'pipe',
             stderr: 'pipe',
-            env: { ...env, HOME: ownedHome },
+            env: { ...env, ...userConfiguration.homeEnvironment },
           });
           ownedChildren.push(process);
           return process;

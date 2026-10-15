@@ -375,6 +375,7 @@ export async function reconnectionHostFixture(ask = false, many = false) {
   async function start() {
     const backend = createTemporaryCredentialBackend();
     const configuration = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       observerSubjectId: 'owner',
       mcpSources: { http: { allowLoopbackForTests: true } },

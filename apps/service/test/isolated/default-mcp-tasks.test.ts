@@ -242,6 +242,7 @@ async function fixture() {
     );
   writeConfig();
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: createTemporaryCredentialBackend(),
     mcp: { servers: [{ id: 'local', transport }], transportPort: port },

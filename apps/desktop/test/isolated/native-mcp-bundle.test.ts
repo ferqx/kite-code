@@ -17,6 +17,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 import { buildNativeCandidate } from '../../scripts/build-native';
 import type { NativeMcpSubmission } from '../../src/native-bridge';
 
@@ -231,7 +232,7 @@ else throw Error('owned_credential_operation_invalid');
           return Response.json({ jsonrpc: '2.0', id: row.id, result });
         },
       });
-      writeFileSync(join(profile.profilePath, 'config.jsonc'), JSON.stringify({ models: [] }));
+      writeFileSync(userConfigurationPath(home), JSON.stringify({ models: [] }));
       // Persist the exact owned identity before writing, including failed/partial puts.
       writeFileSync(
         join(root, 'credential-owned.json'),
@@ -302,6 +303,7 @@ else throw Error('owned_credential_operation_invalid');
           home,
           server.url.href.replace(/\/$/, ''),
           storeId!,
+          userConfigurationPath(home),
         ],
         {
           cwd: home,

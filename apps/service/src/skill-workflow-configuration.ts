@@ -280,7 +280,13 @@ export async function createWorkflowConfiguration(options: {
                 ? {}
                 : { maxQueuedBytes: options.shell.maxQueuedBytes }),
             },
-            protectedRoots: [options.profile.dataRoot, options.profile.coordinationPath],
+            protectedRoots: [
+              ...new Set([
+                options.profile.dataRoot,
+                options.profile.coordinationPath,
+                ...(options.shell.host?.protectedRoots ?? []),
+              ]),
+            ],
           })
         : undefined;
     const rejectedStarts = new WeakSet<JobHandle>();

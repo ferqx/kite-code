@@ -1,12 +1,15 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 import { launchPairedService } from '../../src/paired';
@@ -15,12 +18,14 @@ async function setup() {
   const root = mkdtempSync(join(tmpdir(), 'kite-http-management-'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace);
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(workspace);
+  privateDirectory(profile.profilePath);
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const launch = () =>
     launchPairedService({
       entrypoint: join(import.meta.dir, '../fixtures/configured-child.ts'),
       profile,
+      spawnChild: userConfiguration.spawnChild,
       instanceId: crypto.randomUUID(),
       buildId: 'management-test',
       apiMajor: 1,
@@ -30,7 +35,7 @@ async function setup() {
   const storeId = handle.bootstrap.storeId!;
   await handle.client.createWorkspace({
     id: 'workspace',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
     name: 'Management',
     expectedStoreId: storeId,
   });
@@ -64,6 +69,7 @@ async function setup() {
     root,
     profile,
     workspace,
+    userConfiguration,
     handle,
     storeId,
     launch,
@@ -79,7 +85,7 @@ test('paired HTTP config CAS preserves comments/unknowns and same ID is durable 
   const f = await setup();
   let second: Awaited<ReturnType<typeof f.launch>> | undefined;
   try {
-    const file = join(f.profile.profilePath, 'config.jsonc');
+    const file = f.userConfiguration.path;
     writeFileSync(
       file,
       '// keep comment\n{"unknown":{"secret":"must-not-display"},"models":[{"id":"bad","model":{"secret":"malformed-known-field-secret"}}],"modelId":null}\n',
@@ -155,7 +161,7 @@ test('paired HTTP config CAS preserves comments/unknowns and same ID is durable 
 test('bad JSONC is readable as error and explicit exact-etag repair privately backs up original', async () => {
   const f = await setup();
   try {
-    const file = join(f.profile.profilePath, 'config.jsonc');
+    const file = f.userConfiguration.path;
     const original = '{"apiKey":"synthetic-repair-secret", broken';
     writeFileSync(file, original);
     const view = await f.request('/v1/config/user');
@@ -180,7 +186,7 @@ test('bad JSONC is readable as error and explicit exact-etag repair privately ba
     expect(repaired.status).toBe(200);
     expect(repaired.body.state).toBe('applied');
     expect(JSON.stringify(repaired)).not.toContain('synthetic-repair-secret');
-    const backup = join(f.profile.profilePath, '.config-repair-backups');
+    const backup = join(dirname(f.userConfiguration.path), '.config-repair-backups');
     expect(readdirSync(backup)).toHaveLength(1);
     expect(readFileSync(join(backup, readdirSync(backup)[0]!), 'utf8')).toBe(original);
     const projectView = await f.request('/v1/config/workspace?workspaceId=workspace');
@@ -368,8 +374,8 @@ test('HTTP-created credential binds the default Run and revoke only prevents fut
 
 test('in-flight durable credential receipt is not retried, and another HTTP subject cannot claim it', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-management-pending-'));
-  const profile = selectProfile({ dataRoot: root, profile: 'test' });
-  const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
+  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
+  const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: 'test' });
   let release!: () => void;
   let entered!: () => void;
   const enteredPromise = new Promise<void>((resolve) => {
@@ -380,6 +386,7 @@ test('in-flight durable credential receipt is not retried, and another HTTP subj
   });
   let puts = 0;
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',
@@ -527,7 +534,7 @@ test('Native configuration SDK keeps original CAS and cold receipts, with one co
   try {
     await client.connect();
     await proxied.connect();
-    const file = join(f.profile.profilePath, 'config.jsonc');
+    const file = f.userConfiguration.path;
     writeFileSync(
       file,
       '// untouched comment\n{"unknown":{"secret":"PRIVATE_UNKNOWN"},"modelId":null,"models":[{"id":"local","provider":"compatible","model":"fixture","baseURL":"http://127.0.0.1/v1","options":{"reasoningEffort":"low","unknownSecret":"PRIVATE_OPTION"}}]}\n',
@@ -565,7 +572,7 @@ test('Native configuration SDK keeps original CAS and cold receipts, with one co
       commandId: 'sdk-workspace',
       workspaceId: 'workspace',
       ifMatch: workspace.etag,
-      operations: [{ kind: 'set', path: ['modelId'], value: null }],
+      operations: [{ kind: 'set', path: ['tools'], value: [] }],
     });
     expect(project.workspaceId).toBe('workspace');
     const bad = '{"apiKey":"PRIVATE_REPAIR_SECRET",broken';
@@ -693,12 +700,13 @@ test('Native configuration SDK keeps original CAS and cold receipts, with one co
 test('real diagnostic Native configuration preserves broken bytes with no Runtime or credential write', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-diagnostic-config-'));
   const profile = selectProfile({ dataRoot: root, profile: 'test' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const file = join(profile.profilePath, 'config.jsonc');
   const original = '{"apiKey":"DIAGNOSTIC_PRIVATE",broken';
   writeFileSync(file, original);
   let puts = 0;
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',
@@ -771,7 +779,7 @@ test('Settings model mutations enforce effective default and exact full read-set
     expect((result as { code: string }).code).toBe(code);
   };
   try {
-    const path = join(f.profile.profilePath, 'config.jsonc');
+    const path = f.userConfiguration.path;
     writeFileSync(
       path,
       '// preserve model comments\n' +
@@ -849,61 +857,44 @@ test('Settings model mutations enforce effective default and exact full read-set
     );
     view = await client.getModelSettings('user', { storeId: f.storeId });
     expect(view.models.find((m) => m.id === 'a')?.reasoningEffort).toBe('high');
-    await client.updateModelSettings('workspace', {
-      expectedStoreId: f.storeId,
-      workspaceId: 'workspace',
-      commandId: 'workspace-effort',
-      expectedReadSet: (
-        await client.getModelSettings('workspace', { storeId: f.storeId, workspaceId: 'workspace' })
-      ).readSet!,
-      operation: { kind: 'effort', modelId: 'a', reasoningEffort: 'low' },
+    const projectPath = join(f.workspace, 'kite-agent.jsonc');
+    const projectText = JSON.stringify({
+      models: [{ id: 'a', options: { reasoningEffort: 'low', temperature: 0.5 } }],
+      modelId: 'project-only',
     });
-    expect(
-      (
-        await client.getModelSettings('workspace', { storeId: f.storeId, workspaceId: 'workspace' })
-      ).models.find((m) => m.id === 'a')?.reasoningEffort,
-    ).toBe('low');
-    await client.updateModelSettings('workspace', {
-      expectedStoreId: f.storeId,
-      workspaceId: 'workspace',
-      commandId: 'clear-workspace-effort',
-      expectedReadSet: (
-        await client.getModelSettings('workspace', { storeId: f.storeId, workspaceId: 'workspace' })
-      ).readSet!,
-      operation: { kind: 'effort', modelId: 'a', reasoningEffort: null },
-    });
-    expect(
-      (
-        await client.getModelSettings('workspace', { storeId: f.storeId, workspaceId: 'workspace' })
-      ).models.find((m) => m.id === 'a')?.reasoningEffort,
-    ).toBe('high');
-
-    writeFileSync(
-      join(f.workspace, 'kite-agent.jsonc'),
-      JSON.stringify({
-        models: [{ id: 'a', options: { reasoningEffort: 'low', temperature: 0.5 } }],
-      }),
+    writeFileSync(projectPath, projectText);
+    await failure(
+      client.getModelSettings('workspace', { storeId: f.storeId, workspaceId: 'workspace' }),
+      'model_settings_user_scope_required',
     );
-    await client.updateModelSettings('workspace', {
-      expectedStoreId: f.storeId,
+    await failure(
+      client.updateModelSettings('workspace', {
+        expectedStoreId: f.storeId,
+        workspaceId: 'workspace',
+        commandId: 'workspace-effort-rejected',
+        expectedReadSet: { ...view.readSet!, workspaceEtag: 'f'.repeat(64) },
+        operation: { kind: 'effort', modelId: 'a', reasoningEffort: 'low' },
+      }),
+      'model_settings_user_scope_required',
+    );
+    const projectConfig = await client.getConfiguration('workspace', {
+      storeId: f.storeId,
       workspaceId: 'workspace',
-      commandId: 'clear-partial-options',
-      expectedReadSet: (
-        await client.getModelSettings('workspace', { storeId: f.storeId, workspaceId: 'workspace' })
-      ).readSet!,
-      operation: { kind: 'effort', modelId: 'a', reasoningEffort: null },
     });
-    expect(
-      (
-        await client.getModelSettings('workspace', { storeId: f.storeId, workspaceId: 'workspace' })
-      ).models.find((m) => m.id === 'a')?.reasoningEffort,
-    ).toBeNull();
-    expect(
-      JSON.parse(readFileSync(join(f.workspace, 'kite-agent.jsonc'), 'utf8')).models[0].options,
-    ).toEqual({ temperature: 0.5 });
+    await failure(
+      client.patchConfiguration('workspace', {
+        expectedStoreId: f.storeId,
+        workspaceId: 'workspace',
+        commandId: 'workspace-model-patch-rejected',
+        ifMatch: projectConfig.etag,
+        operations: [{ kind: 'set', path: ['modelId'], value: 'a' }],
+      }),
+      'model_settings_user_scope_required',
+    );
+    expect(readFileSync(projectPath, 'utf8')).toBe(projectText);
     expect(
       (await client.getModelSettings('user', { storeId: f.storeId })).models.find(
-        (m) => m.id === 'a',
+        (model) => model.id === 'a',
       )?.reasoningEffort,
     ).toBe('high');
     const base = { expectedStoreId: f.storeId, expectedReadSet: view.readSet! };
@@ -972,55 +963,28 @@ test('Settings model mutations enforce effective default and exact full read-set
     expect(text).toContain('// preserve model comments');
     expect(text).toContain('PRIVATE_A');
     expect(text).toContain('PRIVATE_CONFIG');
-    let project = await client.getModelSettings('workspace', {
-      storeId: f.storeId,
-      workspaceId: 'workspace',
-    });
-    // A non-target user-file edit invalidates the original Workspace read set without changing its own ETag.
+    const observedUser = await client.getModelSettings('user', { storeId: f.storeId });
     writeFileSync(path, text + '// another real editor\n');
     await failure(
-      client.updateModelSettings('workspace', {
+      client.updateModelSettings('user', {
         expectedStoreId: f.storeId,
         commandId: 'stale-user',
-        workspaceId: 'workspace',
-        expectedReadSet: project.readSet!,
+        expectedReadSet: observedUser.readSet!,
         operation: { kind: 'enabled', modelId: 'c', enabled: true },
       }),
       'configuration_read_set_conflict',
     );
-    project = await client.getModelSettings('workspace', {
-      storeId: f.storeId,
-      workspaceId: 'workspace',
-    });
-    const projectResult = await client.updateModelSettings('workspace', {
-      expectedStoreId: f.storeId,
-      commandId: 'project-c',
-      workspaceId: 'workspace',
-      expectedReadSet: project.readSet!,
-      operation: { kind: 'enabled', modelId: 'c', enabled: true },
-    });
-    expect(projectResult.scope).toBe('workspace');
-    expect(projectResult.workspaceId).toBe('workspace');
-    expect(
-      (await client.getModelSettings('user', { storeId: f.storeId })).models.find(
-        (m) => m.id === 'c',
-      )?.enabled,
-    ).toBe(false);
-    const actual = await client.getModelSettings('workspace', {
-      storeId: f.storeId,
-      workspaceId: 'workspace',
-    });
-    expect(actual.models.find((m) => m.id === 'c')?.enabled).toBe(true);
+    const actual = await client.getModelSettings('user', { storeId: f.storeId });
     await failure(
-      client.updateModelSettings('workspace', {
+      client.updateModelSettings('user', {
         expectedStoreId: f.storeId,
         commandId: 'forged-digest',
-        workspaceId: 'workspace',
         expectedReadSet: { ...actual.readSet!, effectiveDigest: '0'.repeat(64) },
         operation: { kind: 'default', modelId: 'c' },
       }),
       'configuration_read_set_conflict',
     );
+    expect(actual.models.find((model) => model.id === 'c')?.enabled).toBe(false);
     await f.handle.close();
     cold = await f.launch();
     const reader = makeClient(cold);
@@ -1118,7 +1082,7 @@ for (const mode of ['default', 'effort'] as const)
     };
     try {
       writeFileSync(
-        join(f.profile.profilePath, 'config.jsonc'),
+        f.userConfiguration.path,
         JSON.stringify({
           modelId: 'a',
           models: [
@@ -1245,8 +1209,8 @@ for (const mode of ['default', 'effort'] as const)
 
 test('effort read/write never resolves credentials or models and explicit options remain immutable', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-effort-no-io-'));
-  const profile = selectProfile({ dataRoot: root, profile: 'test' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
+  privateDirectory(profile.profilePath);
   const file = join(profile.profilePath, 'config.jsonc');
   const value = {
     modelId: 'a',
@@ -1262,10 +1226,11 @@ test('effort read/write never resolves credentials or models and explicit option
     ],
   };
   writeFileSync(file, JSON.stringify(value));
-  const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
+  const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: 'test' });
   let credentialCalls = 0,
     modelCalls = 0;
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     hostConfiguration: {
       configuration: { models: [{ id: 'a', options: { reasoningEffort: 'medium' } }] },

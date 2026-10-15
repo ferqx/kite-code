@@ -26,7 +26,10 @@ async function fixture() {
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   async function open(subjectId = 'owner') {
     const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
-    const host = createDefaultProcessConfiguration({ profile });
+    const host = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
+      profile,
+    });
     const runtime = createRuntime({
       store,
       permissions: host.permissions!,

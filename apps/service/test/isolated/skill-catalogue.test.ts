@@ -1,10 +1,13 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createSkillSource } from '@kite-ai/agent/skills';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -23,11 +26,11 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
     );
   const startedAt = performance.now();
   let catalogueReads = 0;
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-skills-http-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-skills-http-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const skills: Array<{
     id: string;
     path: string;
@@ -62,6 +65,7 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
   let model = 0,
     vault = 0;
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',
@@ -93,7 +97,7 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
     expectedStoreId: storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   timing('workspace_ready');
   const service = await startService({
@@ -315,7 +319,7 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
 });
 
 test('configured aliases keep the first configured identity and reject both bindings even when its digest is invalid', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-skill-ordered-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-skill-ordered-')));
   const workspace = join(root, 'workspace');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   mkdirSync(workspace);
@@ -326,7 +330,11 @@ test('configured aliases keep the first configured identity and reject both bind
       `---\nname: ${name}\ndescription: ${name} metadata\n---\noriginal ${name} body`,
     );
   }
-  symlinkSync('shared', join(workspace, 'alias'));
+  symlinkSync(
+    join(workspace, 'shared'),
+    join(workspace, 'alias'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   try {
     const source = createConfiguredSkillSource({
       workspaceRoot: workspace,
@@ -378,7 +386,7 @@ test('configured aliases keep the first configured identity and reject both bind
 });
 
 test('configured Skill source reports bounded location facts and never reads disabled metadata', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-skill-source-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-skill-source-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -423,7 +431,11 @@ test('configured Skill source reports bounded location facts and never reads dis
       join(outside, 'SKILL.md'),
       '---\nname: outside\ndescription: private outside\n---\nprivate-body',
     );
-    symlinkSync(outside, join(workspace, 'escaped'));
+    symlinkSync(
+      outside,
+      join(workspace, 'escaped'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const source = createConfiguredSkillSource({
       workspaceRoot: workspace,
       profile,

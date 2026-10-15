@@ -178,6 +178,7 @@ async function fixture() {
     }),
   );
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',

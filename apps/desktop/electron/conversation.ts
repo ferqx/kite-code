@@ -14,6 +14,7 @@ import { callerDigest, callerTextDigest, type NativeCallerJournal } from './call
 import { queryBranch, switchBranch } from './git';
 import type { NativeProcessOwner } from './native-processes';
 import type { PrivateData } from './private-data';
+import { canonicalProtectedPath } from './protected-path';
 
 type Send = Extract<NativeRequest, { method: 'conversation.send' }>;
 type Scope = { generation: number; storeId: string };
@@ -76,7 +77,7 @@ export class NativeConversation {
     this.input = input;
     this.hasActiveWork = hasActiveWork;
     this.notify = notify;
-    this.protectedRoots = protectedRoots.map((root) => realpathSync.native(root));
+    this.protectedRoots = protectedRoots.map(canonicalProtectedPath);
     this.controller = createDesktopController({
       admittedClient: client,
       readContextOnSelect: false,
@@ -226,12 +227,15 @@ export class NativeConversation {
           this.check(scope);
         }
       }
-      const models = await this.client.getModelSettings('workspace', {
+      const models = await this.client.getModelSettings('user', {
         storeId: scope.storeId,
-        workspaceId: request.creation.workspaceId,
       });
       this.check(scope);
-      if (models.storeId !== scope.storeId || models.workspaceId !== request.creation.workspaceId)
+      if (
+        models.storeId !== scope.storeId ||
+        models.scope !== 'user' ||
+        models.workspaceId !== undefined
+      )
         throw new ClientError('configuration_scope_mismatch');
       const model = models.models.find(
         (model) => model.id === (request.intent.modelId ?? models.defaultModelId),

@@ -97,6 +97,7 @@ async function fixture(options: {
   );
   const trustedPolicy = structuredClone(options.automaticValidation ?? policy);
   let host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     ...(options.enabled === false ? {} : { planning: { automaticValidation: trustedPolicy } }),
   });
@@ -184,7 +185,10 @@ async function fixture(options: {
       return store.getRun((await f.runId())!);
     },
     unload() {
-      host = createDefaultProcessConfiguration({ profile });
+      host = createDefaultProcessConfiguration({
+        userConfigurationPath: profile.profilePath + '/config.jsonc',
+        profile,
+      });
       management = host.permissionManagement!(runtime);
     },
     async revoke() {

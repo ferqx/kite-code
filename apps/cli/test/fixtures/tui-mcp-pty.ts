@@ -21,6 +21,7 @@ if (!process.stdin.isTTY) {
     configure(startup) {
       appendFileSync(join(settings.root, 'startup-ledger'), 'configure reached\n');
       return createDefaultProcessConfiguration({
+        userConfigurationPath: selectProfile(startup.profile).profilePath + '/config.jsonc',
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
         credentialBackend: {

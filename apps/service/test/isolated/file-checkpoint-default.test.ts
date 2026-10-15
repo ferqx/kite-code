@@ -22,6 +22,7 @@ import type {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { launchPairedService } from '../../src/paired';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
@@ -67,6 +68,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
     'ORIGINAL_CHECKPOINT_AGENT_SOURCE\nUse only the explicitly selected ordinary Files tools.';
   writeFileSync(join(workspace, 'AGENTS.md'), agents);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   const requests: ProviderBody[] = [],
     steps = new Map<string, number>();
@@ -141,7 +143,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -156,6 +158,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
   const launch = (id: string) =>
     launchPairedService({
       entrypoint: join(import.meta.dir, '../../src/main.ts'),
+      spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: id,
       buildId: 'default-checkpoint-main',

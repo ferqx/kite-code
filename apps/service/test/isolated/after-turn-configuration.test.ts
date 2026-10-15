@@ -109,6 +109,7 @@ async function fixture(mode: 'allow' | 'deny' | 'json_only') {
     },
   };
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     child: [{ id: 'worker', version: '7', modelId: 'child', toolIds: [] }],
     permissions: {

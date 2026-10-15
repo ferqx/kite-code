@@ -154,6 +154,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     mcp: {
       servers: ['local', 'other'].map((id) => ({

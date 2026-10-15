@@ -162,7 +162,7 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 [元数据 reader](src/native-file-targets.ts)复用原32项扫描与所属 GET 释放，消息结果有 path 仅用于筛选请求，不授予行为；Main核准确原 Execution后只给成功的 Files read/write/edit 提供原 [ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)文件路径。完整历史不依赖 View 的近200项执行列表，未知格式／未核结果沿原正文保留。面板与工具行重复扫描同一封存结果时保持相同观察 ID，不相互撤销；文件面板仍只计写入／编辑，不把读取算作变更。失去当前scope即清元数据，刷新失败可显式重读，关正文只结束其 reader。
 
-[常规卡](src/native-general-settings.tsx)直接迁入原设置行，所选主会话读取当前项目配置，无会话或新对话准备页读取用户配置，核 Store／Workspace／scope；显示配置 defaultModelId 的 Provider与模型，不把临时下一轮选择或活动轮次的冻结模型当作配置默认。切换／关闭只释放设置 GET；迟到其他作用域不显示。没有默认、读取失败及配置诊断分别表达，改变配置仍走原提供商／模型分类，编辑器选择仍只保当前 renderer。
+[常规卡](src/native-general-settings.tsx)直接迁入原设置行，无论当前主会话、新对话准备页或项目，均读取用户级模型配置并核 Store/scope。显示配置 defaultModelId 的 Provider 与模型，不把临时下一轮选择或活动 Run 的冻结模型当作默认。切换/关闭只释放所属 GET，迟到旧观察不显示；没有默认、读取失败与配置诊断分别表达。编辑继续进入提供商/模型分类。
 
 [原入口 DOM](test/isolated/native-original-entries-dom.test.tsx)、[Main 文件端口](test/native-file-changes.test.ts)和原[源码外窗口](test/isolated/native-bundle.test.ts)核默认与临时选择分离、旧scope、预览／全文／关闭、准确路径／frame和首次／冷读；窗口只核可用路径按钮及真实缺失目标拒绝，不实际启动 OS 编辑器。输入、实际通过与旧错误见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原消息文件路径与常规摘要)，完整PC／installed全路径／其他平台和阶段退出仍按原条件核对。
 
@@ -518,17 +518,21 @@ Native 有独立分页 Context reader，因此仅此宿主以 `readContextOnSele
 
 当前[原后页 driver](test/interaction-pages-electron.fixture.ts)先打开既有“会话工具”，再等待实际“下一页待决请求”；原完整步骤、断言与期限不变。同一完整文件1pass／3Bun断言通过，20卡替换、关闭／切换撤销旧读取、后页原回答丢回执后只查原申请、40次效果与零取消均核实；这项正式导航适配不改变待决窗口或回答权限。
 
-模型设置的安全读取由 [main 配置观察](electron/configuration.ts) 与 [模型面板](src/native-model-settings.tsx) 直接消费公开 NativeClient `getModelSettings`。封闭 IPC 只允许用户或当前项目两种作用域；项目 Workspace 由 main 对当前 Session 的实际 view 推导，renderer 不能提供路径或 Workspace 权威。main 冻结原 Store、选择代次和配置观察，关闭或切换只中止自身 GET，迟到原读取不能进入新选择。renderer 仅收到模型标识、Provider、模型名称、期望启禁、期望默认模型和安全诊断；配置中的 URL、credentialRef、原 snapshot 与 MCP 字段不进入这个面板，配置列表不代表 live 模型发现或 MCP inventory。
+## Native 模型设置与列表
 
-模型启禁与默认选择通过专门 `updateModelSettings` 服务业务端口提交；默认模型不能直接禁用，默认选择必须来自已启用且配置可用的模型。main 保存原 Store、作用域、完整读取集和 commandId，最多保留128项原意图；重复在途共享请求，同作用域存在结果未知则阻止新保存。关闭或切换只取消读取，不取消已保存意图；未知回执仅原 commandId/Store 查询，不自动重发。回执需匹配原 scope/readSet/operation，应用成功才重读原面板，迟到旧结果不覆盖新选择。renderer 显示原提交及其 applied/failed/unknown，冲突后须重新读取。一般 JSONC 仍允许暂时不可路由的期望值，不能代替模型设置服务规则；configured 仅是结构/解析事实，不表示远端发现或凭据可用。推理强度已由AI兼容SDK实际传输并保存metadata，当前面板尚不提供该项。[main/IPC 测试](test/native-configuration.test.ts)覆盖脱敏投影、坏配置诊断、原项目推导、拒绝注入 authority 与迟到关闭；[实际基础窗口](test/isolated/native-electron.test.ts)新增六条 Node 断言，实际读取用户和项目配置，Provider 调用为零，再继续原基础执行与所属 Service 退出检查。
+[模型面板](src/native-model-settings.tsx)与 [Main 配置观察](electron/configuration.ts)通过公共 getModelSettings 固定读取 user scope，不传 Workspace 或路径。唯一生产源为 ~/.kite-code/kite-code.jsonc，现有 provider/model/disabledModels 由 [Service 用户源](../service/src/user-configuration.ts)适配；Profile 和项目不提供模型覆盖。挂载、关闭重开和会话/宿主 generation 改变时自动读取，观察通知或提交状态重绘不制造读取循环。“刷新配置”只 GET 本地配置，不发现远端模型或读取凭据。
 
-当前 Native 模型设置 main/IPC 与实际 DOM 新增回归5项、51断言通过，覆盖原意图重复、坏回执/未知只原查询、选择切换迟到隔离、默认模型禁用门禁、待决作用域写禁用及原读取集。Desktop types/build通过。[真实两模型窗口](test/isolated/native-model-settings-electron.test.ts)通过27条Node断言：held A在保存B后仍使用A，下一显式Run使用B；物理丢回执仅一次POST、零自动GET，跨作用域和Session后原GET一次；读取集冲突保留外部注释和原启用值，冷读Provider总次数仍为2，两次所属Service PID均退出。该结果是macOS开发窗口切片，不代表完整发现、输入区effort、安装与跨平台资格。
+沿用原 settings-models CSS、共享 DropdownMenu 与 checkbox switch。完整列表按 Provider 分组，禁用/配置不完整模型保留；默认菜单只列启用且 configured 的准确 route ID，同名模型附 ID。开关乐观更新，明确失败恢复原值并撤销写资格；成功刷新原观察并通知输入区。默认模型不能直接禁用，外部已禁用的默认模型可以重新启用。读取和编辑均不发送任务或重建 Session，返回应用保留原输入实例和草稿。
 
-正式全屏设置默认打开“常规”；[原模型窗口 driver](test/native-model-settings-electron.fixture.ts)现沿设置分类明确选择“模型”，再继续原配置操作。该 helper 之外的全部 driver 字节与预算保持；当前同一完整窗口1pass／3Bun断言、42Node断言，held A／下一Run B、原未知回执一次查询、CAS冲突、冷读与两次所属退出通过。Desktop types／Biome通过，真实默认红及当前完整回归范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)；本项夹具适配不改变模型设置行为或整体阶段资格。
+Main 将用户配置目录加入文件打开和 Git 分支切换的 protected roots；目录尚未创建时按最近存在祖先固定目标，首次配置前也保留保护。
 
-[原基础窗口 driver](test/native-electron.fixture.ts)也在同一设置分类核 `aria-pressed` 后明确选择“模型”，再读取用户与项目配置。同一原完整文件1pass／2Bun断言通过，配置读取阶段Provider0、原提交后Provider1、私有草稿／刷新／宿主边界与所属Service退出保持；Desktop types／Biome通过，原完整业务断言及预算未改。
+封闭 IPC 拒绝 workspace 模型读取；Main 保存原 Store、选择代次、完整 read-set 与 commandId。用户级未知提交阻止其他会话/项目新保存，关闭只停止所属 GET，不取消原提交。未知仅查询原 ID/Store，不重发；历史 journal 中旧 workspace 原意图仍可核实，不能成为新的项目写入口。Service 以用户文件准确字节 ETag 和完整 read-set CAS 发布；字段/注释保留与 key 隐私由该源负责。renderer 不接收 URL、credentialRef 或原 snapshot。输入区、准备页与常规卡均消费相同用户级列表；Session 临时下一轮选择继续独立。
 
-模型设置接入、profile 生命周期锁修改之前的完整 Native 基线实测为 37 文件、82 项、564 条 Bun 断言，全通过（119.85 秒，2026-10-02）。包含两模型窗口的27条Node断言与两个所属Service PID退出，以及原长历史、完整正文、Context、授权和压缩等既有断言；Desktop types/build通过。这是锁接入之前的证据，不代表下面的生命周期回归已经包含在该计数中。
+[隔离模型 DOM](test/isolated/native-model-settings-dom.test.tsx)覆盖自动加载、分组/同名路由、默认过滤、真实菜单/开关、保存/失败恢复、未知查询、迟到隔离及空/坏配置。[完整 NativeDesktop DOM](test/isolated/native-new-conversation-dom.test.tsx)经普通用户菜单进入模型页并核关闭重开、原草稿和零任务发送。[Main 配置](test/native-configuration.test.ts)、[Provider](test/native-provider-settings.test.ts)与 [Service 实际用户源](../service/test/isolated/user-configuration.test.ts)、[真实模型请求](../service/test/isolated/run-model-selection.test.ts)分别核封闭 scope、原 CAS、单用户文件兼容、跨 Profile 以及真正 wire。当前 Windows 有限回归见此次交付结果；OS vault、macOS 四个窗口 driver 与正式安装资格未因单元/DOM 通过而取得。
+
+2026-10-15 Windows x64／Bun 1.4.2／Electron 44.3.0，通过 `bun run desktop:dev` 启动实际窗口，从“个人工作区 → 设置 → 模型”进入后，无须刷新即可读到用户 `~/.kite-code/kite-code.jsonc` 的两个 Provider、五个模型和原默认项。实际禁用非默认模型、切换跨 Provider 默认项后，逐次核对用户文件；菜单正常退出并重新启动，模型页自动读回关闭状态和新默认项，禁用模型不出现在默认菜单。随后通过界面重新启用并恢复原默认项，最后以原文件 SHA-256 核对准确字节恢复；其他配置字段未变，旧用户 Profile 及开发 Profile 的 `config.jsonc` 均未生成。私有备份和临时验证脚本已清理。此实测仅覆盖当前 Windows 开发客户端的模型读取、保存与冷启动，不包含真实 Provider 执行、OS vault 写入或正式安装资格。
+
+原基础、模型、Provider、MCP 窗口 driver 已适配自动列表、开关和默认菜单，并沿各自自有配置文件/用户 HOME 运行。此前 macOS 两模型窗口的 held A/下一 Run B、一次原未知查询、外部编辑 CAS、冷读与所属退出记录仍见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)；这些历史通过不代表当前 user-only driver 已重新执行。
 
 Desktop 私有 SQLite 使用与 Core/维护相同的 profile 共享锁。[Node profile access](electron/profile-access.ts)只打开 Service 已初始化的原 `profile-use.lock`，不创建新的命名空间或替代锁；[一次性 Bun helper](electron/profile-access-helper.ts)通过公开 `@kite-ai/agent/profile-access` 校验继承 fd、原路径与恢复 journal，再取得 POSIX shared flock。helper关闭自己的描述符并退出后，Node仍持有原打开文件描述的锁；没有常驻 Service 或源码/PATH 回退。[私有构建](scripts/build-native.ts)打包固定相对 helper 与 SHA，main同时验证 helper 与固定 Bun 身份。该继承 fd 实现限定 macOS/Linux POSIX，本轮实测为 macOS；Windows失败关闭，不宣称 Windows 生命周期资格。
 

@@ -185,6 +185,7 @@ async function fixture(ask = false) {
   async function start() {
     const backend = createTemporaryCredentialBackend();
     const host = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       mcpSources: { http: { allowLoopbackForTests: true } },
       credentialBackend: {

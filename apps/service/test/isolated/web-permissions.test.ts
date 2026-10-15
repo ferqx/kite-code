@@ -99,6 +99,7 @@ async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 
     }),
   );
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     permissionPolicy: {
       readPolicy: () => ({

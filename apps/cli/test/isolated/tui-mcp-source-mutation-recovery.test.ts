@@ -69,6 +69,7 @@ async function fixture(many: boolean) {
   const vaultCalls = { availability: 0, presence: 0, put: 0, remove: 0 };
   const backend = createTemporaryCredentialBackend();
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     observerSubjectId: 'owner',
     credentialBackend: {

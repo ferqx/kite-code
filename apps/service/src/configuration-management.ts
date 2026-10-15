@@ -31,6 +31,7 @@ import {
   safeProviderEndpoint,
   supportsReasoningEffort,
 } from './model-providers';
+import { type UserConfiguration, withoutProjectModels } from './user-configuration';
 
 export type ConfigurationScope = 'user' | 'workspace';
 export interface ConfigurationLocation {
@@ -355,12 +356,14 @@ const canonical = (value: unknown): string => {
 /** Journal must be the current Store's durable finite audit API, never an in-memory cache. */
 export function createConfigurationManagement(options: {
   profile: ProfileSelection;
+  userConfiguration: UserConfiguration;
   runtime?: AgentRuntime;
   vault: ReturnType<typeof createCredentialVault>;
   persistence: 'os' | 'temporary';
   explicit: () => JsonObject;
 }): ConfigurationManagementPort {
-  const userPath = join(options.profile.profilePath, 'config.jsonc');
+  const userConfiguration = options.userConfiguration;
+  const userPath = userConfiguration.path;
   async function pathFor(input: ConfigurationLocation): Promise<string> {
     if (input.scope === 'user') {
       if (input.workspaceId !== undefined) throw new AgentError('invalid_configuration_scope');
@@ -401,31 +404,25 @@ export function createConfigurationManagement(options: {
       return [publicError(error).code];
     }
   }
-  function rawModels(input: ConfigurationLocation, path: string) {
-    const user = readConfigurationFile({ path: userPath, windowsPathPolicy: 'private' });
-    const project = input.scope === 'workspace' ? readConfigurationFile({ path }) : undefined;
+  function rawModels() {
+    const user = userConfiguration.read();
     const explicit = structuredClone(options.explicit());
     const effective = resolveConfiguration({
       defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
       user: user.value,
-      ...(project ? { workspace: project.value } : {}),
       explicit,
     });
     const sealed = createConfigurationSnapshot(effective);
     const readSet: ModelSettingsReadSet = {
       userEtag: user.etag,
-      workspaceEtag: project?.etag ?? null,
+      workspaceEtag: null,
       explicitDigest: createHash('sha256').update(canonical(explicit)).digest('hex'),
       effectiveDigest: sealed.digest,
     };
-    return { user, project, explicit, effective, readSet };
+    return { user, explicit, effective, readSet };
   }
-  function assertReadSet(
-    input: ConfigurationLocation,
-    path: string,
-    expected: ModelSettingsReadSet,
-  ) {
-    const observed = rawModels(input, path);
+  function assertReadSet(expected: ModelSettingsReadSet) {
+    const observed = rawModels();
     if (canonical(observed.readSet) !== canonical(expected))
       throw new ConfigurationError('configuration_read_set_conflict');
     return observed;
@@ -436,7 +433,7 @@ export function createConfigurationManagement(options: {
     secret?: string;
   }) {
     const operation = input.operation;
-    const state = assertReadSet({ scope: 'user' }, userPath, input.expectedReadSet);
+    const state = assertReadSet(input.expectedReadSet);
     const provider = modelProviders.find((entry) => entry.id === operation.provider);
     if (!provider || input.expectedReadSet.workspaceEtag !== null)
       throw new AgentError('invalid_request');
@@ -555,14 +552,18 @@ export function createConfigurationManagement(options: {
         const storeId = options.runtime ? (await options.runtime.getMetadata()).storeId : undefined;
         if (storeId !== input.expectedStoreId) throw new AgentError('store_mismatch');
         const path = await pathFor(input);
-        const selected = inspectConfigurationFile({
+        const inspected = inspectConfigurationFile({
           path,
           windowsPathPolicy: input.scope === 'user' ? 'private' : 'scope',
         });
-        const user =
+        const inspectedUser =
           input.scope === 'user'
-            ? selected
+            ? inspected
             : inspectConfigurationFile({ path: userPath, windowsPathPolicy: 'private' });
+        const user = inspectedUser.value
+          ? { ...inspectedUser, value: userConfiguration.normalize(inspectedUser.value) }
+          : inspectedUser;
+        const selected = input.scope === 'user' ? user : inspected;
         const errors = [selected.error, user.error].filter(
           (error): error is string => error !== null,
         );
@@ -573,7 +574,8 @@ export function createConfigurationManagement(options: {
             const resolved = resolveConfiguration({
               defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
               user: user.value ?? {},
-              workspace: input.scope === 'workspace' ? (selected.value ?? {}) : {},
+              workspace:
+                input.scope === 'workspace' ? withoutProjectModels(selected.value ?? {}) : {},
               explicit: options.explicit(),
             });
             const sealed = createConfigurationSnapshot(resolved);
@@ -602,14 +604,15 @@ export function createConfigurationManagement(options: {
       }
     },
     async readModels(input) {
+      if (input.scope !== 'user') throw new AgentError('model_settings_user_scope_required');
       if (
         !options.runtime ||
         (await options.runtime.getMetadata()).storeId !== input.expectedStoreId
       )
         throw new AgentError('store_mismatch');
-      const path = await pathFor(input);
+      await pathFor(input);
       try {
-        const state = rawModels(input, path);
+        const state = rawModels();
         return {
           storeId: input.expectedStoreId,
           scope: input.scope,
@@ -631,7 +634,12 @@ export function createConfigurationManagement(options: {
               id: model.id,
               enabled: model.enabled !== false,
               configured: diagnostics.length === 0,
-              ...(typeof model.provider === 'string' ? { provider: model.provider } : {}),
+              ...(typeof model.provider === 'string'
+                ? {
+                    provider:
+                      typeof model.providerName === 'string' ? model.providerName : model.provider,
+                  }
+                : {}),
               ...(typeof model.model === 'string' ? { model: model.model } : {}),
               ...(typeof model.baseURL === 'string' && isSupportedModelProvider(model.provider)
                 ? { connectionId: providerConnectionId(model) }
@@ -684,7 +692,7 @@ export function createConfigurationManagement(options: {
       )
         throw new AgentError('store_mismatch');
       try {
-        const state = rawModels({ scope: 'user' }, userPath);
+        const state = rawModels();
         return {
           storeId: input.expectedStoreId,
           readSet: state.readSet,
@@ -722,10 +730,10 @@ export function createConfigurationManagement(options: {
               ? await options.vault.resolve(originalRef as string)
               : undefined;
         input.signal?.throwIfAborted();
-        assertReadSet({ scope: 'user' }, userPath, input.expectedReadSet);
+        assertReadSet(input.expectedReadSet);
         const modelNames = await discoverProviderModels(baseURL, secret, input.signal);
         input.signal?.throwIfAborted();
-        const actual = assertReadSet({ scope: 'user' }, userPath, input.expectedReadSet);
+        const actual = assertReadSet(input.expectedReadSet);
         return {
           storeId: input.expectedStoreId,
           readSet: actual.readSet,
@@ -738,7 +746,6 @@ export function createConfigurationManagement(options: {
       }
     },
     async updateProviders(input) {
-      const location = { scope: 'user' as const };
       const ifMatch = input.expectedReadSet.userEtag;
       const operation = structuredClone(input.operation);
       return mutate(
@@ -779,7 +786,7 @@ export function createConfigurationManagement(options: {
               names = await discoverProviderModels(baseURL, secret);
             }
             // Discovery may take time. A stale read never consumes a new credential.
-            assertReadSet(location, userPath, input.expectedReadSet);
+            assertReadSet(input.expectedReadSet);
             let opaqueRef =
               operation.credential === 'keep'
                 ? (originalRef as string)
@@ -795,12 +802,16 @@ export function createConfigurationManagement(options: {
               else delete model.credentialRef;
               changed.push(model);
             }
-            for (const name of names) {
-              if (changed.some((model) => model.model === name)) continue;
+            const existingNames = new Set(changed.map((model) => model.model));
+            const additions = userConfiguration.createModels(
+              provider.id,
+              names.filter((name) => !existingNames.has(name)),
+              changed,
+            );
+            for (const identity of additions) {
               const model: JsonObject = {
-                id: `model-${crypto.randomUUID()}`,
+                ...identity,
                 provider: provider.id,
-                model: name,
                 baseURL,
                 enabled: false,
                 ...(opaqueRef ? { credentialRef: opaqueRef } : {}),
@@ -809,7 +820,7 @@ export function createConfigurationManagement(options: {
               changed.push(model);
             }
             const validate = (candidate: JsonObject) => {
-              const fresh = assertReadSet(location, userPath, input.expectedReadSet);
+              const fresh = assertReadSet(input.expectedReadSet);
               const effective = resolveConfiguration({
                 defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
                 user: candidate,
@@ -849,14 +860,12 @@ export function createConfigurationManagement(options: {
             configurationState = 'outcome_unknown';
             let result: ReturnType<typeof updateConfigurationFile>;
             try {
-              result = updateConfigurationFile({
-                path: userPath,
-                windowsPathPolicy: 'private',
+              result = userConfiguration.update({
                 ifMatch,
                 operations: [{ kind: 'set', path: ['models'], value: models }],
                 validateCandidate: validate,
                 validatePublication() {
-                  assertReadSet(location, userPath, input.expectedReadSet);
+                  assertReadSet(input.expectedReadSet);
                 },
               });
             } catch (error) {
@@ -886,15 +895,13 @@ export function createConfigurationManagement(options: {
       );
     },
     async updateModels(input) {
-      const path = await pathFor(input);
-      const ifMatch =
-        input.scope === 'user'
-          ? input.expectedReadSet.userEtag
-          : input.expectedReadSet.workspaceEtag!;
+      if (input.scope !== 'user') throw new AgentError('model_settings_user_scope_required');
+      await pathFor(input);
+      const ifMatch = input.expectedReadSet.userEtag;
       return mutate(
         input,
         'model_settings.update',
-        input.scope === 'user' ? 'user' : input.workspaceId!,
+        'user',
         {
           scope: input.scope,
           ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
@@ -912,7 +919,7 @@ export function createConfigurationManagement(options: {
           operation: input.operation,
         },
         async () => {
-          const state = assertReadSet(input, path, input.expectedReadSet);
+          const state = assertReadSet(input.expectedReadSet);
           const selected = state.effective.models?.find(
             (model) => model.id === input.operation.modelId,
           );
@@ -931,7 +938,7 @@ export function createConfigurationManagement(options: {
             throw new AgentError('model_settings_model_unconfigured');
           if (input.operation.kind === 'default' && selected.enabled === false)
             throw new AgentError('model_settings_model_disabled');
-          const target = input.scope === 'user' ? state.user.value : state.project!.value;
+          const target = state.user.value;
           const index = Array.isArray(target.models)
             ? target.models.findIndex(
                 (model) =>
@@ -1038,17 +1045,14 @@ export function createConfigurationManagement(options: {
                       };
             }
           }
-          const result = updateConfigurationFile({
-            path,
-            windowsPathPolicy: input.scope === 'user' ? 'private' : 'scope',
+          const result = userConfiguration.update({
             ifMatch,
             operations: [edit],
             validateCandidate(candidate) {
-              const fresh = assertReadSet(input, path, input.expectedReadSet);
+              const fresh = assertReadSet(input.expectedReadSet);
               const effective = resolveConfiguration({
                 defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
-                user: input.scope === 'user' ? candidate : fresh.user.value,
-                ...(input.scope === 'workspace' ? { workspace: candidate } : {}),
+                user: candidate,
                 explicit: fresh.explicit,
               });
               createConfigurationSnapshot(effective);
@@ -1076,7 +1080,7 @@ export function createConfigurationManagement(options: {
                 throw new ConfigurationError('model_settings_default_unconfigured');
             },
             validatePublication() {
-              assertReadSet(input, path, input.expectedReadSet);
+              assertReadSet(input.expectedReadSet);
             },
           });
           return { etag: result.etag };
@@ -1084,6 +1088,13 @@ export function createConfigurationManagement(options: {
       );
     },
     async patch(input) {
+      if (
+        input.scope === 'workspace' &&
+        input.operations.some((operation) =>
+          ['modelId', 'models'].includes(String(operation.path[0])),
+        )
+      )
+        throw new AgentError('model_settings_user_scope_required');
       const path = await pathFor(input);
       if (
         input.operations.some(
@@ -1109,7 +1120,7 @@ export function createConfigurationManagement(options: {
           operations: input.operations as unknown as Json,
         },
         async () => ({
-          etag: updateConfigurationFile({
+          etag: (input.scope === 'user' ? userConfiguration.update : updateConfigurationFile)({
             path,
             windowsPathPolicy: input.scope === 'user' ? 'private' : 'scope',
             ifMatch: input.ifMatch,

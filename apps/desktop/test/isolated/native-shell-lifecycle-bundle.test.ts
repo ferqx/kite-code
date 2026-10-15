@@ -19,6 +19,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 import { buildNativeCandidate } from '../../scripts/build-native';
 import {
   type NativeShellProcessIdentity,
@@ -336,7 +337,7 @@ test.skipIf(process.platform !== 'darwin')(
         await store.close();
       }
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfigurationPath(home),
         JSON.stringify({
           modelId: 'fixed',
           models: [
@@ -447,7 +448,7 @@ test.skipIf(process.platform !== 'darwin')(
       const preservedPaths = [
         profile.databasePath,
         join(profile.profilePath, 'desktop-private/data.sqlite'),
-        join(profile.profilePath, 'config.jsonc'),
+        userConfigurationPath(home),
       ];
       const preserved = () =>
         preservedPaths.map((path) => ({

@@ -22,14 +22,17 @@ import {
   updateConfigurationFile,
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
+import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 
 const create = () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-config-')));
+  const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'kite-config-')));
+  const root = join(temporary, 'private');
+  privateDirectory(root);
   return {
     root,
     path: join(root, 'kite-code.jsonc'),
     close() {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(temporary, { recursive: true, force: true });
     },
   };
 };
@@ -290,11 +293,16 @@ test('broken/duplicate JSONC is preserved, new credential bodies rejected, and s
     expect(() => readConfigurationFile({ path: f.path, maxBytes: 1 })).toThrow(
       'configuration_limit',
     );
-    const target = join(f.root, 'target');
+    const directory = join(f.root, 'target');
+    privateDirectory(directory);
+    const target = join(directory, 'original.jsonc');
     writeFileSync(target, '{}');
     rmSync(f.path);
-    symlinkSync(target, f.path);
-    expect(() => readConfigurationFile({ path: f.path })).toThrow('configuration_path_unsafe');
+    const windows = process.platform === 'win32';
+    symlinkSync(windows ? directory : target, f.path, windows ? 'junction' : 'file');
+    expect(() => readConfigurationFile({ path: f.path })).toThrow(
+      windows ? 'windows_path_security_denied' : 'configuration_path_unsafe',
+    );
     expect(readFileSync(target, 'utf8')).toBe('{}');
   } finally {
     f.close();
@@ -365,48 +373,45 @@ test('two actual processes reject stale field CAS and a fresh edit preserves bot
   }
 });
 
-test.skipIf(process.platform === 'win32')(
-  'real child-held OS lock prevents publication until EOF releases it',
-  async () => {
-    const f = create();
+test('real child-held OS lock prevents publication until EOF releases it', async () => {
+  const f = create();
+  try {
+    writeFileSync(f.path, '{}');
+    const original = readConfigurationFile({ path: f.path });
+    const child = Bun.spawn(
+      [process.execPath, join(import.meta.dir, 'config-child.ts'), 'hold', f.path],
+      { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+    );
     try {
-      writeFileSync(f.path, '{}');
-      const original = readConfigurationFile({ path: f.path });
-      const child = Bun.spawn(
-        [process.execPath, join(import.meta.dir, 'config-child.ts'), 'hold', f.path],
-        { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
-      );
-      try {
-        const reader = child.stdout.getReader();
-        const ready = await reader.read();
-        expect(new TextDecoder().decode(ready.value)).toBe('locked\n');
-        expect(() =>
-          updateConfigurationFile({
-            path: f.path,
-            ifMatch: original.etag,
-            operations: [{ kind: 'set', path: ['value'], value: 1 }],
-          }),
-        ).toThrow('configuration_busy');
-        expect(readFileSync(f.path, 'utf8')).toBe('{}');
-        child.stdin.end();
-        expect(await child.exited).toBe(0);
-        reader.releaseLock();
-        expect(
-          updateConfigurationFile({
-            path: f.path,
-            ifMatch: original.etag,
-            operations: [{ kind: 'set', path: ['value'], value: 1 }],
-          }).value,
-        ).toEqual({ value: 1 });
-      } finally {
-        child.stdin.end();
-        await child.exited;
-      }
+      const reader = child.stdout.getReader();
+      const ready = await reader.read();
+      expect(new TextDecoder().decode(ready.value)).toBe('locked\n');
+      expect(() =>
+        updateConfigurationFile({
+          path: f.path,
+          ifMatch: original.etag,
+          operations: [{ kind: 'set', path: ['value'], value: 1 }],
+        }),
+      ).toThrow('configuration_busy');
+      expect(readFileSync(f.path, 'utf8')).toBe('{}');
+      child.stdin.end();
+      expect(await child.exited).toBe(0);
+      reader.releaseLock();
+      expect(
+        updateConfigurationFile({
+          path: f.path,
+          ifMatch: original.etag,
+          operations: [{ kind: 'set', path: ['value'], value: 1 }],
+        }).value,
+      ).toEqual({ value: 1 });
     } finally {
-      f.close();
+      child.stdin.end();
+      await child.exited;
     }
-  },
-);
+  } finally {
+    f.close();
+  }
+});
 
 test('temporary credential revocation blocks future reads and restart cannot retrieve its body', async () => {
   const backend = createTemporaryCredentialBackend();
@@ -570,7 +575,11 @@ test('explicit invalid JSONC repair checks the exact ETag, preserves private ori
     expect(files).toHaveLength(1);
     const backup = join(directory, files[0]!);
     expect(readFileSync(backup, 'utf8')).toBe(broken);
-    expect(statSync(backup).mode & 0o077).toBe(0);
+    const windows = defaultWindowsPathSecurity();
+    if (windows) {
+      expect(() => windows.verifyDirectory(directory)).not.toThrow();
+      expect(() => windows.verifyFile(backup)).not.toThrow();
+    } else expect(statSync(backup).mode & 0o077).toBe(0);
     expect(() =>
       repairConfigurationFile({ path: f.path, ifMatch: repaired.etag, value: {} }),
     ).toThrow('configuration_repair_not_required');

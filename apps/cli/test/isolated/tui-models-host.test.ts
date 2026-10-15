@@ -5,9 +5,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 
 import { ptyDeadline } from '../fixtures/tui-pty';
 
@@ -22,10 +24,13 @@ for (const mode of ['paired', 'shared'] as const)
       ),
       workspace = join(root, 'workspace'),
       profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+    const home = join(root, 'home');
+    const userConfiguration = ownedUserConfiguration(home);
+    const userEnvironment = { ...process.env, ...userConfiguration.homeEnvironment };
     mkdirSync(workspace, { mode: 0o700 });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     // This fixture asserts English labels independently of the host device locale.
-    mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });
@@ -73,7 +78,7 @@ for (const mode of ['paired', 'shared'] as const)
     let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfiguration.path,
         JSON.stringify({
           modelId: 'one',
           models: ['one', 'two'].map((id) => ({
@@ -103,6 +108,7 @@ for (const mode of ['paired', 'shared'] as const)
         seed = await launchPairedService({
           profile,
           ...artifact,
+          spawnChild: userConfiguration.spawnChild,
           instanceId: randomUUID(),
           requiredCapabilities: ['sessions'],
         });
@@ -143,6 +149,7 @@ for (const mode of ['paired', 'shared'] as const)
           stdin: 'pipe',
           stdout: 'pipe',
           stderr: 'pipe',
+          env: userEnvironment,
         });
         daemon.stdin.write(
           JSON.stringify({
@@ -268,6 +275,7 @@ for (const mode of ['paired', 'shared'] as const)
           stdout: 'pipe',
           stderr: 'pipe',
           stdin: 'ignore',
+          env: userEnvironment,
           ...(process.platform === 'win32' ? { ipc() {} } : {}),
         },
       );
@@ -350,14 +358,13 @@ test('model host review: pending 409 and wrong ifMatch stay original unknown; kn
   const { ClientError } = await import('@kite-ai/client');
   const readSet = {
     userEtag: 'a'.repeat(64),
-    workspaceEtag: 'b'.repeat(64),
+    workspaceEtag: null,
     explicitDigest: 'c'.repeat(64),
     effectiveDigest: 'd'.repeat(64),
   };
   const facts = {
     storeId: 'store',
-    scope: 'workspace' as const,
-    workspaceId: 'w',
+    scope: 'user' as const,
     readSet,
     defaultModelId: 'one',
     models: ['one', 'two'].map((id) => ({ id, enabled: true, configured: true, diagnostics: [] })),
@@ -387,9 +394,8 @@ test('model host review: pending 409 and wrong ifMatch stay original unknown; kn
           commandId: saved!.commandId,
           originStoreId: 'store',
           kind: 'model_settings.update',
-          scope: 'workspace',
-          workspaceId: 'w',
-          ifMatch: wrong ? 'e'.repeat(64) : readSet.workspaceEtag,
+          scope: 'user',
+          ifMatch: wrong ? 'e'.repeat(64) : readSet.userEtag,
           state: 'applied',
           receipt: { status: 'applied', etag: 'f'.repeat(64) },
           modelSettings: {

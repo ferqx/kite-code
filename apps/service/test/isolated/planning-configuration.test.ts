@@ -112,6 +112,7 @@ async function fixture(
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     planning,
     ...(policy

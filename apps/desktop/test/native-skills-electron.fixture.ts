@@ -32,16 +32,20 @@ type Physical = {
   revision?: string;
 };
 type FixtureGlobals = typeof globalThis & { skillsPhysical: Physical[] };
-const [candidate, home, storeId] = process.argv.slice(2) as string[];
+const [candidate, home, storeId, userConfiguration] = process.argv.slice(2) as [
+  string,
+  string,
+  string,
+  string,
+];
 const started = Date.now(),
   pids: number[] = [],
   physical: Physical[] = [];
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: number | undefined;
 const stage = (name: string, facts = {}) =>
   console.log(JSON.stringify({ stage: name, elapsedMs: Date.now() - started, ...facts }));
-const profile = join(home!, '.kite-code/unified-agent/default');
 const workspace = join(home!, 'workspace');
-const originalUser = readFileSync(join(profile, 'config.jsonc'), 'utf8');
+const originalUser = readFileSync(userConfiguration, 'utf8');
 const originalProject = readFileSync(join(workspace, 'kite-agent.jsonc'), 'utf8');
 async function launch() {
   app = await _electron.launch({
@@ -239,7 +243,7 @@ try {
     .waitFor();
   assert.equal(await panel().locator('li').count(), 0);
   writeFileSync(join(workspace, 'kite-agent.jsonc'), JSON.stringify({ models: [], skills: [] }));
-  writeFileSync(join(profile, 'config.jsonc'), JSON.stringify({ models: [], skills: [] }));
+  writeFileSync(userConfiguration, JSON.stringify({ models: [], skills: [] }));
   await refresh(0);
   await panel().getByText('当前工作区没有可发现的 Skill。', { exact: true }).waitFor();
   assert.equal(
@@ -250,7 +254,7 @@ try {
   );
   stage('configuration_unavailable_and_true_empty_distinguished');
   writeFileSync(join(workspace, 'kite-agent.jsonc'), originalProject);
-  writeFileSync(join(profile, 'config.jsonc'), originalUser);
+  writeFileSync(userConfiguration, originalUser);
   await refresh(306);
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
@@ -328,7 +332,7 @@ try {
     runs: 0,
     executions: 0,
   });
-  assert.deepEqual(JSON.parse(readFileSync(join(profile, 'config.jsonc'), 'utf8')).models, []);
+  assert.deepEqual(JSON.parse(readFileSync(userConfiguration, 'utf8')).models, []);
   await page.context().tracing.stop({ path: join(home!, 'cold-trace.zip') });
   await close();
   writeFileSync(

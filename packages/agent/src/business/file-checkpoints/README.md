@@ -14,7 +14,7 @@ leaf 再核原 Tool 的 Session/Run/Store、`files.write|files.edit@2`、attempt
 
 capture 注入时 write/edit 声明 Workspace serial key `files.mutation`，宿主必须装配现有 public Workspace OS-lock backend；缺失明确 workspace_resource_lock_unavailable。锁覆盖捕获→mutation→封存，不锁任意外部 editor。普通未注入 Tools 不新增资源声明。可信 protectedPaths 使用 Files 原语的闭合相对路径组件 prefix，不由 Model/JSONC/HTTP提供。
 
-宿主另可传 `protectReads:true`，使普通 read/list/search/glob 与所有 mutation 共享准确 protected scope。默认 Service 用 canonical profile/协调路径和真实 loader 选择开启它，纯 metadata 注册不读取 Runtime 或打开 Files FD。可信 scope 每次独立解析当前原 Workspace 并在完成或错误时关闭；不以猜测的 runtime 父目录误封任意 custom bundle 旁的整个项目。
+宿主另可传 `protectReads:true`，使普通 read/list/search/glob 与所有 mutation 共享准确 protected scope。默认 Service 用 canonical profile/协调路径、用户配置父目录和真实 loader 选择开启它；全局 `~/.kite-code/kite-code.jsonc` 即使位于当前 Workspace 内，也不能经 Files read 或 mutation 暴露/修改。纯 metadata 注册不读取 Runtime 或打开 Files FD。可信 scope 每次独立解析当前原 Workspace 并在完成或错误时关闭；不以猜测的 runtime 父目录误封任意 custom bundle 旁的整个项目。
 
 ## 原字节和 journal
 

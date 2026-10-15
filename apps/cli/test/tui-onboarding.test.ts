@@ -98,9 +98,8 @@ function fixture() {
         kind: 'model_settings.update',
         state: 'applied',
         originStoreId: 'store',
-        scope: 'workspace',
-        workspaceId: 'workspace',
-        ifMatch: request.expectedReadSet.workspaceEtag,
+        scope: 'user',
+        ifMatch: request.expectedReadSet.userEtag,
         modelSettings: { expectedReadSet: request.expectedReadSet, operation: request.operation },
         receipt: { status: 'applied', etag: 'published' },
       });

@@ -4389,9 +4389,9 @@ export class TuiController {
     const session = this.value.snapshot?.view.session;
     return (
       session?.id === this.value.sessionId &&
-      intent.scope === 'workspace' &&
+      intent.scope === 'user' &&
       intent.request.expectedStoreId === this.port.storeId &&
-      intent.request.workspaceId === session?.workspaceId
+      intent.request.workspaceId === undefined
     );
   }
   private modelOutcome() {
@@ -4444,8 +4444,8 @@ export class TuiController {
         return;
       if (
         facts.storeId !== this.port.storeId ||
-        facts.scope !== 'workspace' ||
-        facts.workspaceId !== session.workspaceId
+        facts.scope !== 'user' ||
+        facts.workspaceId !== undefined
       )
         throw Error('model_settings_scope_mismatch');
       this.publish({
@@ -4473,8 +4473,8 @@ export class TuiController {
       this.value.stale ||
       !['models', 'effort'].includes(this.value.panel ?? '') ||
       observed.storeId !== this.port.storeId ||
-      observed.scope !== 'workspace' ||
-      observed.workspaceId !== session.workspaceId
+      observed.scope !== 'user' ||
+      observed.workspaceId !== undefined
     )
       return;
     if (
@@ -4511,11 +4511,10 @@ export class TuiController {
       panel = this.value.panel === 'effort' ? 'effort' : 'models',
       saved: TuiModelIntent = freezeIntent({
         sessionId: session.id,
-        scope: 'workspace',
+        scope: 'user',
         request: {
           expectedStoreId: this.port.storeId,
           commandId: this.port.nextCommandId(),
-          workspaceId: session.workspaceId,
           expectedReadSet: structuredClone(observed.readSet),
           operation: structuredClone(operation),
         },

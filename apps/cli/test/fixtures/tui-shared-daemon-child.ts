@@ -9,6 +9,7 @@ try {
   await runDaemonProcess({
     configure(startup, context) {
       const management = createDefaultProcessConfiguration({
+        userConfigurationPath: selectProfile(startup.profile).profilePath + '/config.jsonc',
         profile: selectProfile(startup.profile),
         observerSubjectId: context.subjectId,
       });

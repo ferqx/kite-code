@@ -32,6 +32,7 @@ import { createConfigurationManagement } from '../../src/configuration-managemen
 import { startService } from '../../src/index';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 import { createMcpManagement } from '../../src/mcp-management';
+import { createUserConfiguration } from '../../src/user-configuration';
 
 const obj = (value: unknown) => value as Record<string, Json>;
 async function until<T>(read: () => Promise<T | null>) {
@@ -262,6 +263,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
   let runtime!: ReturnType<typeof createRuntime>;
   let receiptFault = false;
   const management = createMcpManagement({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     runtime: () => ({
       getMetadata: () => runtime.getMetadata(),
       getSession: (id) => runtime.getSession(id),
@@ -291,6 +293,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
   });
   const defaults = defaultMode
     ? createDefaultProcessConfiguration({
+        userConfigurationPath: profile.profilePath + '/config.jsonc',
         profile,
         permissions: {
           async authorize() {
@@ -355,6 +358,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
   const service = await startService({
       runtime,
       configurationManagement: createConfigurationManagement({
+        userConfiguration: createUserConfiguration(profile.profilePath + '/config.jsonc'),
         runtime,
         profile,
         vault,
@@ -977,6 +981,7 @@ test('cold SQLite management/catalogue Queries preserve historical facts with ze
       servers: [{ id: 'local', transport: f.configuration }],
     });
     const coldManagement = createMcpManagement({
+      userConfigurationPath: f.profile.profilePath + '/config.jsonc',
       runtime: () => cold!,
       profile: f.profile,
       explicit: () => ({}),

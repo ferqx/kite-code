@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { ptyDeadline } from '../fixtures/tui-pty';
@@ -18,7 +20,8 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   mkdirSync(workspace);
   mkdirSync(home);
-  mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+  const userConfiguration = ownedUserConfiguration(home);
+  privateDirectory(join(profile.profilePath, 'ui'));
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
     mode: 0o600,
   });
@@ -47,7 +50,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
     servicePid = join(root, 'owned-service.pid');
   try {
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [
@@ -101,8 +104,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
         stderr: 'pipe',
         env: {
           ...process.env,
-          HOME: home,
-          ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+          ...userConfiguration.homeEnvironment,
         },
         ...(process.platform === 'win32' ? { ipc() {} } : {}),
       },

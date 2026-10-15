@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 
 async function until<T>(label: string, read: () => Promise<T>, done: (value: T) => boolean) {
   const deadline = Date.now() + 45000;
@@ -140,7 +141,7 @@ test('source-free default Task preserves full child result and emits exactly one
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfigurationPath(home),
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -169,7 +170,11 @@ test('source-free default Task preserves full child result and emits exactly one
       spawnChild: (argv, options) =>
         Bun.spawn([...argv], {
           cwd: workspace,
-          env: { ...options.env, HOME: home },
+          env: {
+            ...options.env,
+            HOME: home,
+            ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+          },
           stdin: 'pipe',
           stdout: 'pipe',
           stderr: 'pipe',

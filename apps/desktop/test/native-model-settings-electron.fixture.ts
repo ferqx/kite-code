@@ -284,16 +284,14 @@ try {
   await openSettings(page);
   let panel = page.getByRole('region', { name: '模型设置', exact: true });
   await openSettings(page);
-  await panel.getByRole('button', { name: '读取用户模型配置' }).click();
-  await openSettings(page);
-  await panel.getByRole('button', { name: '设为默认 B', exact: true }).waitFor();
+  await panel.getByRole('button', { name: '默认模型', exact: true }).click();
+  await panel.getByRole('menuitemradio', { name: '设为默认 B', exact: true }).waitFor();
   // Replace only the owned main-process fetch. Read the physically committed response fully,
   // destroy that socket, and discard its receipt; the Service is not mocked.
   await app.evaluate(
     `(()=>{const original=globalThis.fetch;globalThis.__settingsOriginal=original;globalThis.__settingsPosts=0;globalThis.__settingsGets=0;globalThis.fetch=async(input,init)=>{const request=new Request(input,init);const path=new URL(request.url).pathname;if(request.method==='GET'&&path.includes('/host-mutations/'))globalThis.__settingsGets++;if(request.method!=='POST'||!path.endsWith('/config/user/models'))return original(input,init);globalThis.__settingsPosts++;const body=Buffer.from(await request.arrayBuffer());const http=process.getBuiltinModule('node:http');return await new Promise((resolve,reject)=>{const outgoing=http.request(request.url,{method:'POST',headers:Object.fromEntries(request.headers)},response=>{response.on('data',()=>{});response.on('end',()=>{response.destroy();outgoing.destroy();reject(new TypeError('owned_settings_response_lost'));});});outgoing.on('error',reject);outgoing.end(body);});};})()`,
   );
-  await openSettings(page);
-  await panel.getByRole('button', { name: '设为默认 B', exact: true }).click();
+  await panel.getByRole('menuitemradio', { name: '设为默认 B', exact: true }).click();
   step('default-dispatched');
   const unknown = await waitState(
     page,
@@ -309,7 +307,7 @@ try {
   eq(await count(), 1);
   eq(JSON.parse(await (await controlFetch('configuration')).text()).modelId, 'B');
   await openSettings(page);
-  await panel.getByRole('button', { name: '读取当前项目模型配置' }).click();
+  eq(await panel.getByRole('combobox', { name: '模型配置范围' }).count(), 0);
   await closeSettings(page);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
@@ -342,12 +340,10 @@ try {
   await openSettings(page);
   panel = page.getByRole('region', { name: '模型设置', exact: true });
   await openSettings(page);
-  await panel.getByRole('button', { name: '读取用户模型配置' }).click();
-  await openSettings(page);
-  await panel.getByRole('button', { name: '禁用模型 A', exact: true }).waitFor();
+  await panel.getByRole('switch', { name: '启用模型 A', exact: true }).waitFor();
   await controlFetch('edit');
   await openSettings(page);
-  await panel.getByRole('button', { name: '禁用模型 A', exact: true }).click();
+  await panel.getByRole('switch', { name: '启用模型 A', exact: true }).uncheck();
   step('stale-dispatched');
   const failed = await waitState(
     page,
@@ -456,8 +452,10 @@ try {
   await openSettings(page);
   panel = page.getByRole('region', { name: '模型设置', exact: true });
   await openSettings(page);
-  await panel.getByRole('button', { name: '读取用户模型配置' }).click();
-  await panel.getByText(/当前期望默认模型：B/).waitFor();
+  await panel
+    .getByRole('button', { name: '默认模型', exact: true })
+    .filter({ hasText: 'fixed-B' })
+    .waitFor();
   eq(await count(), 2);
   eq((await state(page)).selection!.runs.length, 2);
   await closeSettings(page);

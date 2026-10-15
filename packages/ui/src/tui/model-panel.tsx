@@ -1,6 +1,6 @@
 import type { ModelSettingsRequest, ModelSettingsView } from '@kite-ai/client';
 import { Box, useInput, useStdout } from 'ink';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
 import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
 import {
@@ -58,30 +58,22 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     );
     setPending(undefined);
   }, [facts, effortPanel]);
-  const submitting = useRef(false);
   const apply = (operation: ModelSettingsRequest['operation'], observed: ModelSettingsView) => {
-    if (submitting.current) return;
-    submitting.current = true;
     const originalSessionId = state.sessionId,
       panel = state.panel,
       previousCommandId = state.modelOutcome?.intent.request.commandId;
-    void controller
-      .chooseModel(operation, observed)
-      .then(() => {
-        const outcome = controller.state.modelOutcome;
-        if (
-          !testDiagnostics &&
-          controller.state.sessionId === originalSessionId &&
-          controller.state.panel === panel &&
-          outcome?.status === 'applied' &&
-          outcome.intent.request.commandId !== previousCommandId &&
-          JSON.stringify(outcome.intent.request.operation) === JSON.stringify(operation)
-        )
-          controller.closePanel();
-      })
-      .finally(() => {
-        submitting.current = false;
-      });
+    void controller.chooseModel(operation, observed).then(() => {
+      const outcome = controller.state.modelOutcome;
+      if (
+        !testDiagnostics &&
+        controller.state.sessionId === originalSessionId &&
+        controller.state.panel === panel &&
+        outcome?.status === 'applied' &&
+        outcome.intent.request.commandId !== previousCommandId &&
+        JSON.stringify(outcome.intent.request.operation) === JSON.stringify(operation)
+      )
+        controller.closePanel();
+    });
   };
   useInput((input, key) => {
     if (key.ctrl) return;
@@ -310,7 +302,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
       )}
       {pending && (
         <OverlayMessage tone="warning" callout>
-          {t('Confirm original project change')}{' '}
+          {t('Confirm original user model change')}{' '}
           {pending.operation.kind === 'default'
             ? displayModel(pending.operation.modelId)
             : pending.operation.kind === 'enabled'

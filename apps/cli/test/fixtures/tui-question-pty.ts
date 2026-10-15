@@ -17,6 +17,7 @@ if (!process.stdin.isTTY) {
   await runServiceProcess({
     configure(startup, context) {
       return createDefaultProcessConfiguration({
+        userConfigurationPath: selectProfile(startup.profile).profilePath + '/config.jsonc',
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
         observerSubjectId: context.subjectId,

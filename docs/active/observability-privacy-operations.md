@@ -14,6 +14,8 @@ Production Model Artifact 或任何未来实验输入，也不能把 Runtime res
 
 ## 数据与启用边界
 
+现有 `~/.kite-code/kite-code.jsonc` 的 provider.apiKey 仅由 Service 用户源在私有宿主解析，列表不访问凭据后端，公开配置与模型/Run snapshot 只使用 opaque reference。替换 key 写入用户级 `user-models` OS namespace 后保存引用，未修改明文不自动迁移。paired launcher 的有限环境只补充宿主 HOME（Windows 同时 USERPROFILE）以保持用户目录一致，仍不继承模型凭据环境变量。用户目录、key、endpoint 与原配置正文不得进入下述 metric、health/status、诊断 stderr 或运营 artifact。
+
 `observabilityMetrics=false`，普通 CLI/TUI 入口没有 artifact telemetry authority 或默认网络 transport。
 project 配置只能关闭观测能力，不能开启远程发送、提供 endpoint secret 或扩大 release ceiling。仓库中
 保留的 exporter/composition contract 在缺少 release authority 或 transport 时固定注入 no-op reporter；

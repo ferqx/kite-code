@@ -162,6 +162,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       { mode: 0o600 },
     );
     const host = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       mcpSources: { stdio: { ...assets, limits: { timeoutMs: 3000 } } },
       permissionPolicy: {

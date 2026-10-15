@@ -115,6 +115,7 @@ test('default Service seals trusted Workflow decision policy and rejects cold po
   };
   const userDecisions = { version: '1' as const, allowWaiver: true, allowReplan: true };
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: backend,
     permissions,
@@ -182,6 +183,7 @@ test('default Service seals trusted Workflow decision policy and rejects cold po
       allowReplan: true,
     });
     const changed = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       credentialBackend: backend,
       permissions,

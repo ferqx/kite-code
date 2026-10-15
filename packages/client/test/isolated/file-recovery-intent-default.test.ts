@@ -19,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { createClient, type ExtensionCommandRequest, type ForkSessionRequest } from '../../src';
 import {
   canonicalFileRecoveryIntent,
@@ -128,8 +129,9 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
       );
     },
   });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -164,6 +166,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
   });
   const launch = (p: ReturnType<typeof selectProfile>, instanceId: string) =>
     launchPairedService({
+      spawnChild: userConfiguration.spawnChild,
       profile: p,
       instanceId,
       entrypoint: built.artifact.entrypoint,

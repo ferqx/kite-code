@@ -137,6 +137,7 @@ async function fixture(
   let roleVersion = '1';
   function host() {
     return createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       child:
         options.roles === false

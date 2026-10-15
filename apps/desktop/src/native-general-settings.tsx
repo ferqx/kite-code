@@ -20,8 +20,6 @@ export function NativeGeneralSettings({
   editor: DesktopEditor;
   onEditorChange: (editor: DesktopEditor) => void;
 }) {
-  const workspaceId = selection?.session.workspaceId;
-  const scope = selection ? 'workspace' : 'user';
   const identity = JSON.stringify([
     generation,
     storeId,
@@ -42,7 +40,7 @@ export function NativeGeneralSettings({
       .request({
         method: 'settings.models.read',
         generation,
-        scope,
+        scope: 'user',
       })
       .then((value) => {
         if (!active) return;
@@ -52,8 +50,8 @@ export function NativeGeneralSettings({
           !('kind' in value) ||
           value.kind !== 'settings.models' ||
           value.storeId !== storeId ||
-          value.scope !== scope ||
-          value.workspaceId !== workspaceId
+          value.scope !== 'user' ||
+          value.workspaceId !== undefined
         )
           throw Error('configuration_scope_mismatch');
         setState({ identity, facts: value });
@@ -65,7 +63,7 @@ export function NativeGeneralSettings({
       active = false;
       void bridge.request({ method: 'settings.models.close', generation }).catch(() => {});
     };
-  }, [bridge, identity, generation, storeId, workspaceId, scope]);
+  }, [bridge, identity, generation, storeId]);
   const facts = state.identity === identity ? state.facts : undefined;
   const model = facts?.models.find((model) => model.id === facts.defaultModelId);
   return (

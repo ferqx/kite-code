@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
@@ -150,7 +151,13 @@ export async function launchPairedService(options: PairedServiceOptions) {
   const command = [executable, ...(artifact?.arguments ?? []), options.entrypoint];
   // Private startup configuration is sent only through stdin, never inherited
   // from model credential environment variables or an endpoint query string.
-  const env = { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' };
+  const home = homedir();
+  const env = {
+    PATH: process.env.PATH ?? '',
+    LANG: 'C.UTF-8',
+    HOME: home,
+    ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+  };
   let child: PairedServiceChild;
   try {
     child = options.spawnChild

@@ -104,6 +104,7 @@ test('manual Workflow HTTP projection is same-source, independently unavailable,
   let vault = 0,
     resolvers = 0;
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',

@@ -12,6 +12,7 @@ import { readSessionLogs } from '@kite-ai/agent/storage';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient, type SessionLogPage } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { startService } from '../../src/index';
 import { launchPairedService } from '../../src/paired';
@@ -363,6 +364,7 @@ test('default paired main exposes actual Model logs and complete original >64KiB
     'PRIVATE_ORIGINAL_SOURCE_SENTINEL\nAnswer the owned fixture without Tools.';
   writeFileSync(join(workspace, 'AGENTS.md'), originalSource);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   const requests: Record<string, unknown>[] = [];
   const provider = Bun.serve({
@@ -379,7 +381,7 @@ test('default paired main exposes actual Model logs and complete original >64KiB
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       tools: [],
@@ -391,6 +393,7 @@ test('default paired main exposes actual Model logs and complete original >64KiB
   const launch = (id: string) =>
     launchPairedService({
       entrypoint: join(import.meta.dir, '../../src/main.ts'),
+      spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: id,
       buildId: 'default-source-main',

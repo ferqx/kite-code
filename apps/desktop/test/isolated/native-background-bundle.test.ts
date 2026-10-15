@@ -26,6 +26,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -283,7 +284,7 @@ test.skipIf(process.platform !== 'darwin')(
       }
       mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfigurationPath(home),
         JSON.stringify({
           modelId: 'fixed',
           models: [
@@ -638,7 +639,7 @@ process.exitCode = await runNativeTerminalCLI(process.argv.slice(3), process.arg
       }
       const restoredCoreBytes = readFileSync(profile.databasePath),
         restoredCoreInode = lstatSync(profile.databasePath).ino,
-        configurationPath = join(profile.profilePath, 'config.jsonc'),
+        configurationPath = userConfigurationPath(home),
         configurationBytes = readFileSync(configurationPath);
       uninstallNativeBundle(nativeInstallation.root);
       uninstallTerminalBundle(terminalInstallation.root);

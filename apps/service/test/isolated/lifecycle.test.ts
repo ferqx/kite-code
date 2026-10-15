@@ -55,6 +55,7 @@ async function fixture(beforeResourceClose?: () => Promise<void>) {
     { mode: 0o600 },
   );
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',

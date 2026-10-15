@@ -123,6 +123,7 @@ async function fixture(source = false) {
     );
   const backend = createTemporaryCredentialBackend();
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       ...backend,

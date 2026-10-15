@@ -5,6 +5,11 @@ import { runServiceProcess } from '../../src/main';
 await runServiceProcess({
   configure(startup) {
     const host = createDefaultProcessConfiguration({
+      userConfigurationPath:
+        selectProfile({
+          dataRoot: startup.profile.dataRoot,
+          profile: startup.profile.profile,
+        }).profilePath + '/config.jsonc',
       profile: selectProfile({
         dataRoot: startup.profile.dataRoot,
         profile: startup.profile.profile,

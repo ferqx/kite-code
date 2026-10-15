@@ -128,6 +128,7 @@ try {
     {
       configure() {
         const host = createDefaultProcessConfiguration({
+          userConfigurationPath: profile.profilePath + '/config.jsonc',
           profile,
           permissionPolicy: {
             readPolicy: () => ({

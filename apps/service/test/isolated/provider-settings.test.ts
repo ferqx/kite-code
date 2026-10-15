@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient, type ProviderSettingsRequest } from '@kite-ai/client';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
@@ -12,7 +13,7 @@ import { startService } from '../../src/index';
 async function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-provider-settings-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const file = join(profile.profilePath, 'config.jsonc');
   writeFileSync(
     file,
@@ -25,6 +26,7 @@ async function fixture() {
   let onPut: (() => void) | undefined;
   let failPut = false;
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',

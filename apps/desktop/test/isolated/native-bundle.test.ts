@@ -15,6 +15,7 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -217,7 +218,7 @@ test.skipIf(process.platform !== 'darwin')(
         },
       });
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfigurationPath(home),
         JSON.stringify({
           modelId: 'fixed',
           models: [

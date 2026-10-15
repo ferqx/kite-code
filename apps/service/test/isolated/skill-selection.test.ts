@@ -87,6 +87,7 @@ async function fixture(runlessTools = false, nested = true) {
   };
   writeFileSync(join(profile.profilePath, 'config.jsonc'), JSON.stringify(config));
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     knownToolIds: ['fixture.delegate'],
     permissions: {
@@ -318,6 +319,7 @@ test('empty and unavailable selectors persist original facts before credentials 
     expect(f.counts()).toEqual(before);
     expect(() =>
       createDefaultProcessConfiguration({
+        userConfigurationPath: f.profile.profilePath + '/config.jsonc',
         profile: f.profile,
         hostConfiguration: { selectedSkills: ['alpha'] },
       }),

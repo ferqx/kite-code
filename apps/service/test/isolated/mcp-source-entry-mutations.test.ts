@@ -56,6 +56,7 @@ async function fixture(options: { mode?: 'full' | 'auto' | 'deny'; observer?: st
   const vaultCalls: string[] = [];
   const backend = createTemporaryCredentialBackend();
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     observerSubjectId: options.observer ?? 'owner',
     credentialBackend: {

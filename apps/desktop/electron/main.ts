@@ -38,6 +38,7 @@ import {
 import { spawnNodePairedChild } from './node-process';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
+import { canonicalProtectedPath } from './protected-path';
 import { inspectNativeQuitWork, settleDesktopQuit } from './quit-settlement';
 import { assertNativeSqliteEngine } from './sqlite-engine';
 import {
@@ -220,6 +221,7 @@ async function openCaller(): Promise<NativeCaller> {
       privateData,
       [
         profile.profilePath,
+        canonicalProtectedPath(join(homedir(), '.kite-code')),
         ...(formalAssets ? [formalAssets.candidateRoot, formalAssets.terminalRoot] : []),
       ],
       {

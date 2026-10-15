@@ -132,3 +132,5 @@ controller 隔离原 scope/generation/Abort/selected Command。来源目录与 p
 文件恢复的原请求观察更新当前详情和同一 canonical 原请求的已保存目录行，已确认成功不会仍显示旧 pending；其他请求保持原状态。此同步只消费已核回执，不提交恢复、不继续另一段，也不切换仅恢复代码的原会话。
 
 尾部结果折叠在原键到达时更新同 Scope 的显示状态，连续 Enter 不依赖上一帧闭包；仅改变阅读状态，完整正文与原执行事实保持。按用户确认移除 Ctrl+T 入口及其显示状态，帮助和测试诊断不再提示该快捷键；完整 reader 和 serializer 仍核实、保存并导出原 reasoning。
+
+模型端口的 `/model`、`/effort` 与首次配置统一使用 user scope；用户配置的来源与落盘由 Service 负责。跨项目会话保留独立读取/草稿，未核实的用户模型 mutation 阻止竞争新写；关闭面板仅释放读取。重复确认由 controller 的用户申请状态统一校验，pending/unknown 的重复按键保留核实原请求的提示，K 仅查询同一 ID；[模型测试](../../test/tui/models.test.tsx)覆盖真实面板按键与仍在等待回执的原请求。

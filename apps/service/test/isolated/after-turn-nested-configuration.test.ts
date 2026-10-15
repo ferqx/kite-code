@@ -143,6 +143,7 @@ async function fixture(mode: 'nested' | 'followup') {
     },
   };
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     afterTurn: policy,
     permissions: {

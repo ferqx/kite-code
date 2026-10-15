@@ -147,7 +147,7 @@ for (const mode of ['paired', 'shared'] as const)
           const source = join(base, `${entry}-workflow.ts`);
           writeFileSync(
             source,
-            `import {selectProfile} from '@kite-ai/agent/profile';import {createDefaultProcessConfiguration} from '@kite-ai/service/configuration';import {${entry === 'paired' ? 'runServiceProcess' : 'runDaemonProcess'}} from '@kite-ai/service/${entry === 'paired' ? 'main' : 'daemon-main'}';await ${entry === 'paired' ? 'runServiceProcess' : 'runDaemonProcess'}({configure(startup){return createDefaultProcessConfiguration({profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,child:[{id:'code',version:'1',toolIds:[]}]});}});`,
+            `import {selectProfile} from '@kite-ai/agent/profile';import {createDefaultProcessConfiguration} from '@kite-ai/service/configuration';import {${entry === 'paired' ? 'runServiceProcess' : 'runDaemonProcess'}} from '@kite-ai/service/${entry === 'paired' ? 'main' : 'daemon-main'}';await ${entry === 'paired' ? 'runServiceProcess' : 'runDaemonProcess'}({configure(startup){return createDefaultProcessConfiguration({userConfigurationPath:selectProfile(startup.profile).profilePath+'/config.jsonc',profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,child:[{id:'code',version:'1',toolIds:[]}]});}});`,
           );
           const result = await Bun.build({
             entrypoints: [source],

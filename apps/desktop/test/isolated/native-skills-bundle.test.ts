@@ -18,6 +18,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -145,7 +146,7 @@ test.skipIf(process.platform !== 'darwin')(
         { id: 'missing', path: 'absent' },
       );
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfigurationPath(home),
         JSON.stringify({
           models: [],
           skills: [{ id: 'profile', path: join(profile.profilePath, 'skills/profile') }],
@@ -201,7 +202,14 @@ test.skipIf(process.platform !== 'darwin')(
         }),
       );
       driver = Bun.spawn(
-        [realpathSync(Bun.which('node')!), join(root, 'driver.js'), moved, home, storeId!],
+        [
+          realpathSync(Bun.which('node')!),
+          join(root, 'driver.js'),
+          moved,
+          home,
+          storeId!,
+          userConfigurationPath(home),
+        ],
         {
           cwd: home,
           env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },

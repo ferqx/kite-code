@@ -336,7 +336,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (method === 'settings.models.enabled' && typeof input.enabled !== 'boolean')
     throw Error('invalid_native_request');
-  if (method === 'settings.models.read' && !['user', 'workspace'].includes(input.scope as string))
+  if (method === 'settings.models.read' && input.scope !== 'user')
     throw Error('invalid_native_request');
   if (method === 'settings.providers.save') {
     const operation = record(input.operation);

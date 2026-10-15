@@ -22,7 +22,13 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
-const [candidate, home, control, storeId] = process.argv.slice(2) as string[];
+const [candidate, home, control, storeId, configPath] = process.argv.slice(2) as [
+  string,
+  string,
+  string,
+  string,
+  string,
+];
 const started = Date.now();
 const stage = (name: string, facts = {}) =>
   console.log(JSON.stringify({ stage: name, elapsedMs: Date.now() - started, ...facts }));
@@ -32,7 +38,6 @@ const pids: number[] = [],
   originals: any[] = [],
   runs: any[] = [],
   steers: any[] = [];
-const configPath = join(home!, '.kite-code/unified-agent/default/config.jsonc');
 const counts: any[] = [];
 async function launch() {
   app = await _electron.launch({
@@ -193,16 +198,28 @@ try {
   const id = (alias: string) => models.find((m) => m.provider === alias).id;
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
-  await page.getByRole('button', { name: '读取用户模型配置', exact: true }).click();
   for (const m of models) {
-    assert.equal(
-      await page.getByRole('button', { name: `设为默认 ${m.id}`, exact: true }).isDisabled(),
-      true,
+    const trigger = page.getByRole('button', { name: '默认模型', exact: true });
+    await page.getByRole('switch', { name: `启用模型 ${m.id}`, exact: true }).waitFor();
+    if (await trigger.isEnabled()) {
+      await trigger.click();
+      assert.equal(
+        await page.getByRole('menuitemradio', { name: `设为默认 ${m.id}`, exact: true }).count(),
+        0,
+      );
+      await page.keyboard.press('Escape');
+    } else assert.equal(await trigger.isDisabled(), true);
+    await page.getByRole('switch', { name: `启用模型 ${m.id}`, exact: true }).check();
+    await until(
+      async () => page.getByRole('switch', { name: `启用模型 ${m.id}`, exact: true }).isDisabled(),
+      (disabled) => !disabled,
+      'enabled model refresh incomplete',
     );
-    await page.getByRole('button', { name: `启用模型 ${m.id}`, exact: true }).click();
-    await page.getByRole('button', { name: `禁用模型 ${m.id}`, exact: true }).waitFor();
   }
-  await page.getByRole('button', { name: `设为默认 ${id('compatible')}`, exact: true }).click();
+  await page.getByRole('button', { name: '默认模型', exact: true }).click();
+  await page
+    .getByRole('menuitemradio', { name: `设为默认 ${id('compatible')}`, exact: true })
+    .click();
   await until(
     async () => JSON.parse(readFileSync(configPath, 'utf8')).modelId,
     (v) => v === id('compatible'),
@@ -210,7 +227,7 @@ try {
   );
   assert.equal(
     await page
-      .getByRole('button', { name: `禁用模型 ${id('compatible')}`, exact: true })
+      .getByRole('switch', { name: `启用模型 ${id('compatible')}`, exact: true })
       .isDisabled(),
     true,
   );
@@ -304,8 +321,8 @@ try {
   await effort('high');
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
-  await page.getByRole('button', { name: '读取用户模型配置', exact: true }).click();
-  await page.getByRole('button', { name: '设为默认 ' + id('openai'), exact: true }).click();
+  await page.getByRole('button', { name: '默认模型', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: `设为默认 ${id('openai')}`, exact: true }).click();
   await until(
     async () => JSON.parse(readFileSync(configPath, 'utf8')).modelId,
     (v) => v === id('openai'),
@@ -337,8 +354,10 @@ try {
   await send('NATIVE_openai_next');
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
-  await page.getByRole('button', { name: '读取用户模型配置', exact: true }).click();
-  await page.getByRole('button', { name: `设为默认 ${id('compatible')}`, exact: true }).click();
+  await page.getByRole('button', { name: '默认模型', exact: true }).click();
+  await page
+    .getByRole('menuitemradio', { name: `设为默认 ${id('compatible')}`, exact: true })
+    .click();
   await until(
     async () => JSON.parse(readFileSync(configPath, 'utf8')).modelId,
     (v) => v === id('compatible'),

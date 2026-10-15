@@ -402,6 +402,7 @@ async function fixture(
   );
   // Preserve actual default roles and after-turn registration; the fixture adds an explicit human ceiling below.
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',

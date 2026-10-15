@@ -26,6 +26,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { startDevelopmentWeb } from '../../src/development-web';
 import {
   FileCheckpointDetailSchema,
@@ -149,8 +150,9 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
       );
     },
   });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -164,6 +166,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
   );
   const launch = (id: string) =>
     launchPairedService({
+      spawnChild: userConfiguration.spawnChild,
       entrypoint: join(import.meta.dir, '../../src/main.ts'),
       profile,
       instanceId: id,
@@ -577,7 +580,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
     writeFileSync(originalPath, 'second actual modified UTF8\r\n');
     const heldPath = join(workspace, 'owned-held-original');
     renameSync(originalPath, heldPath);
-    symlinkSync(join(profile.profilePath, 'config.jsonc'), originalPath);
+    symlinkSync(userConfiguration.path, originalPath);
     try {
       const protectedPreview = await browser.getFileCheckpoint('s', point.id);
       const protectedFile = protectedPreview.payload.files.find(

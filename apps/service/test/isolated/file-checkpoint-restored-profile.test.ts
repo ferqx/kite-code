@@ -27,6 +27,7 @@ import {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { launchPairedService } from '../../src/paired';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
@@ -66,7 +67,7 @@ test('default Files original capture survives public offline restore to a new pr
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const ownedHome = join(root, 'home');
-  mkdirSync(ownedHome, { mode: 0o700 });
+  const userConfiguration = ownedUserConfiguration(ownedHome);
   const original = Buffer.from(`\uFEFF${'完整原始字节 α\r\n'.repeat(8000)}`),
     originalPath = join(workspace, 'original.txt');
   writeFileSync(originalPath, original);
@@ -151,7 +152,7 @@ test('default Files original capture survives public offline restore to a new pr
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -167,13 +168,7 @@ test('default Files original capture survives public offline restore to a new pr
   const launch = (id: string) =>
     launchPairedService({
       entrypoint: join(import.meta.dir, '../../src/main.ts'),
-      spawnChild: (command, { env }) =>
-        Bun.spawn([...command], {
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-          env: { ...env, HOME: ownedHome },
-        }),
+      spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: id,
       buildId: 'default-checkpoint-main',

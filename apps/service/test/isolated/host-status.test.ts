@@ -18,6 +18,7 @@ test('real default HTTP status reads current controls and host facts without cre
   let provider = 0,
     vault = 0;
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: {
       kind: 'temporary',

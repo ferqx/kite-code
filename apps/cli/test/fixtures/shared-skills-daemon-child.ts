@@ -15,6 +15,7 @@ try {
       const backend = createTemporaryCredentialBackend();
       await backend.put('credential:11111111-1111-4111-8111-111111111111', 'owned-local-secret');
       return createDefaultProcessConfiguration({
+        userConfigurationPath: profile.profilePath + '/config.jsonc',
         profile,
         credentialBackend: {
           kind: 'temporary',

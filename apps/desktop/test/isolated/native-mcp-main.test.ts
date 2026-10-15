@@ -84,6 +84,7 @@ async function fixture() {
   const backend = createTemporaryCredentialBackend();
   const authorizations: string[] = [];
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     observerSubjectId: 'owner',
     credentialBackend: {

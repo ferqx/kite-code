@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { ModelSettingsView, SessionView } from '@kite-ai/client';
+import { render } from 'ink-testing-library';
 import {
   TuiController,
   type TuiModelIntent,
@@ -7,14 +8,14 @@ import {
   type TuiPort,
   type TuiSnapshot,
 } from '../../src/tui';
+import { TuiModelPanel } from '../../src/tui/model-panel';
 
-const observed = (workspaceId = 'w'): ModelSettingsView => ({
+const observed = (_workspaceId = 'w'): ModelSettingsView => ({
   storeId: 'store',
-  scope: 'workspace',
-  workspaceId,
+  scope: 'user',
   readSet: {
     userEtag: 'a'.repeat(64),
-    workspaceEtag: 'b'.repeat(64),
+    workspaceEtag: null,
     explicitDigest: 'c'.repeat(64),
     effectiveDigest: 'd'.repeat(64),
   },
@@ -91,6 +92,43 @@ function fixture(workspaces: Record<string, string> = {}) {
   };
   return { port, sent, looked, controller: new TuiController(port) };
 }
+test('pending model save keeps duplicate keyboard feedback under the controller guard with one original request', async () => {
+  const f = fixture();
+  let finish!: (outcome: TuiModelOutcome) => void;
+  f.port.models!.submit = (intent) =>
+    new Promise((resolve) => {
+      f.sent.push(intent);
+      finish = resolve;
+    });
+  await f.controller.select('a');
+  await f.controller.openModels();
+  const ui = render(<TuiModelPanel controller={f.controller} />);
+  const unsubscribe = f.controller.subscribe(() =>
+    ui.rerender(<TuiModelPanel controller={f.controller} />),
+  );
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
+  try {
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(f.sent).toHaveLength(1);
+    ui.stdin.write('\r');
+    await tick();
+    expect(f.sent).toHaveLength(1);
+    expect(f.controller.state.error).toBe('model_settings_original_outcome_required');
+    finish({ intent: f.sent[0]!, status: 'outcome_unknown' });
+    await tick();
+    ui.stdin.write('k');
+    await tick();
+    expect(f.looked).toEqual([f.sent[0]!]);
+    expect(f.sent).toHaveLength(1);
+  } finally {
+    unsubscribe();
+    ui.unmount();
+    f.controller.dispose();
+  }
+});
+
 test('models freeze read set, unknown blocks a second write, lookup only queries the original and preserves failed default', async () => {
   const f = fixture();
   await f.controller.select('a');
@@ -222,8 +260,8 @@ test('model settings remain queryable by original ID from another Session in the
     const original = structuredClone(f.sent[0]!);
     expect(original).toMatchObject({
       sessionId: 'a',
-      scope: 'workspace',
-      request: { commandId: 'c1', expectedStoreId: 'store', workspaceId: 'w' },
+      scope: 'user',
+      request: { commandId: 'c1', expectedStoreId: 'store' },
     });
     await f.controller.select('b');
     await f.controller.routeCommand('/effort');
@@ -246,14 +284,14 @@ test('model settings remain queryable by original ID from another Session in the
     expect(f.sent).toHaveLength(2);
     expect(f.sent[1]).toMatchObject({
       sessionId: 'b',
-      request: { commandId: 'c2', workspaceId: 'w' },
+      request: { commandId: 'c2', expectedStoreId: 'store' },
     });
   } finally {
     f.controller.dispose();
   }
 });
 
-test('model unknowns do not cross Workspaces and returning through another Session restores the matching original', async () => {
+test('one user model intent blocks competing writes across Workspaces until its original is checked', async () => {
   const f = fixture({ c: 'other' });
   try {
     await f.controller.select('a');
@@ -262,22 +300,19 @@ test('model unknowns do not cross Workspaces and returning through another Sessi
     const original = f.sent[0]!;
     await f.controller.select('c');
     await f.controller.openModels('effort');
-    expect(f.controller.state.modelOutcome).toBeUndefined();
-    await f.controller.lookupModel();
-    expect(f.looked).toHaveLength(0);
-    await f.controller.chooseModel({ kind: 'default', modelId: 'two' });
-    expect(f.sent).toHaveLength(2);
-    expect(f.sent[1]).toMatchObject({ sessionId: 'c', request: { workspaceId: 'other' } });
-    await f.controller.select('b');
-    await f.controller.openModels();
     expect(f.controller.state.modelOutcome).toEqual({
       intent: original,
       status: 'outcome_unknown',
     });
+    await f.controller.chooseModel({ kind: 'default', modelId: 'two' });
+    expect(f.sent).toHaveLength(1);
     await f.controller.lookupModel();
     expect(f.looked).toEqual([original]);
+    await f.controller.chooseModel({ kind: 'default', modelId: 'two' });
     expect(f.sent).toHaveLength(2);
-    await f.controller.select('c');
+    expect(f.sent[1]).toMatchObject({ sessionId: 'c', scope: 'user' });
+    expect(f.sent[1]!.request.workspaceId).toBeUndefined();
+    await f.controller.select('b');
     await f.controller.openModels();
     expect(f.controller.state.modelOutcome).toEqual({
       intent: f.sent[1]!,
@@ -285,7 +320,6 @@ test('model unknowns do not cross Workspaces and returning through another Sessi
     });
     await f.controller.lookupModel();
     expect(f.looked).toEqual(f.sent);
-    expect(f.sent).toHaveLength(2);
   } finally {
     f.controller.dispose();
   }

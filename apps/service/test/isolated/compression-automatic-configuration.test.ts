@@ -75,6 +75,7 @@ for (const rejectSummary of [false, true])
       }),
     };
     const host = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       compressor: slot,
       credentialBackend: createTemporaryCredentialBackend(),

@@ -124,8 +124,7 @@ export function createTuiModelPort(
   storeId: string,
 ): import('@kite-ai/ui/tui').TuiModelPort {
   return {
-    read: (workspaceId, signal) =>
-      client.getModelSettings('workspace', { storeId, workspaceId, signal }),
+    read: (_workspaceId, signal) => client.getModelSettings('user', { storeId, signal }),
     async submit(intent) {
       try {
         const mutation = await client.updateModelSettings(intent.scope, intent.request);
@@ -154,7 +153,7 @@ export function createTuiModelPort(
         mutation.kind !== 'model_settings.update' ||
         mutation.scope !== intent.scope ||
         mutation.workspaceId !== expected.workspaceId ||
-        mutation.ifMatch !== expected.expectedReadSet.workspaceEtag ||
+        mutation.ifMatch !== expected.expectedReadSet.userEtag ||
         !marker ||
         ['userEtag', 'workspaceEtag', 'explicitDigest', 'effectiveDigest'].some(
           (key) =>
@@ -668,7 +667,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         );
         const [models, mode, pendingInputs, display, progress, live, tails, childViews, labels] =
           await Promise.allSettled([
-            client.getModelSettings('workspace', { storeId, workspaceId, signal }),
+            client.getModelSettings('user', { storeId, signal }),
             client.getPermissionMode(sessionId, { storeId, signal }),
             readTuiPendingInputs(client, storeId, sessionId, signal),
             readDisplay(view, messages, signal),

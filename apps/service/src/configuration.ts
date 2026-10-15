@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type AfterTurnPolicy,
@@ -104,6 +104,7 @@ import {
   workflowToolIds,
 } from './skill-workflow-configuration';
 import { createTaskConfiguration, defaultTaskRoles } from './task-configuration';
+import { createUserConfiguration, withoutProjectModels } from './user-configuration';
 import {
   createWebFetchConfiguration,
   type WebFetchConfigurationOptions,
@@ -125,6 +126,8 @@ export type {
   PermissionMutation,
   TrustState,
 } from './permission-management';
+export { createUserConfiguration } from './user-configuration';
+export { userConfigurationPath } from './user-configuration-path';
 export type { WebFetchConfigurationOptions } from './web-fetch-configuration';
 
 const assemblyKeys = ['modelId', 'models', 'tools', 'skills', 'mcp'];
@@ -230,6 +233,8 @@ export function createDefaultProcessConfiguration(options: {
   /** Same immutable identity as the actual HTTP Service; absent denies history queries. */
   observerSubjectId?: string;
   profile: ProfileSelection;
+  /** Explicit owned configuration file for embedded hosts and tests; formal clients use the user directory. */
+  userConfigurationPath?: string;
   /** Verified host runtime closure deny paths; never supplied by JSONC, Model or public API. */
   runtimeAssets?: readonly string[];
   hostConfiguration?: Json;
@@ -263,6 +268,7 @@ export function createDefaultProcessConfiguration(options: {
   knownToolIds?: readonly string[];
   allowedToolCapabilities?: readonly string[];
 }): ProcessHostConfiguration {
+  const userConfiguration = createUserConfiguration(options.userConfigurationPath);
   const externalPermissionAuthority =
     options.permissions !== undefined || options.permissionPolicy !== undefined;
   const configurationDefaults = options.ordinaryHostTools
@@ -283,7 +289,17 @@ export function createDefaultProcessConfiguration(options: {
   );
   const childRoles = structuredClone(options.child ?? defaultTaskRoles);
   const describeDefaultTask = createDefaultTaskRequestClassifier(options.child ? [] : childRoles);
-  const shellOptions = options.shell ? structuredClone(options.shell) : undefined;
+  let shellOptions = options.shell ? structuredClone(options.shell) : undefined;
+  if (shellOptions?.host)
+    shellOptions = {
+      ...shellOptions,
+      host: {
+        ...shellOptions.host,
+        protectedRoots: [
+          ...new Set([...shellOptions.host.protectedRoots, dirname(userConfiguration.path)]),
+        ],
+      },
+    };
   const afterTurn = options.afterTurn
     ? Object.freeze({ authorize: options.afterTurn.authorize.bind(options.afterTurn) })
     : createDefaultAfterTurnPolicy({
@@ -357,6 +373,24 @@ export function createDefaultProcessConfiguration(options: {
         accountNamespace: `profile-${options.profile.profileAccessKey}`,
       }),
   });
+  const userModelVault = options.credentialBackend
+    ? vault
+    : createCredentialVault({
+        backend: createOsCredentialBackend({
+          service: 'kite-agent',
+          accountNamespace: 'user-models',
+        }),
+      });
+  const modelVault: typeof vault = {
+    ...userModelVault,
+    async resolve(reference) {
+      return (
+        userConfiguration.resolveCredential(
+          typeof reference === 'string' ? reference : reference.id,
+        ) ?? (await userModelVault.resolve(reference))
+      );
+    },
+  };
   const mcpOptions =
     typeof options.mcp === 'function'
       ? options.mcp({ profile: Object.freeze({ ...options.profile }), credentialVault: vault })
@@ -366,6 +400,7 @@ export function createDefaultProcessConfiguration(options: {
     const storage = sqliteStorageAssets();
     const extractor = webExtractorAssets();
     return [
+      dirname(userConfiguration.path),
       process.execPath,
       fileURLToPath(import.meta.url),
       fileURLToPath(storage.module),
@@ -431,10 +466,7 @@ export function createDefaultProcessConfiguration(options: {
     oauth: { ...sourceOptions?.oauth, serialLocks: () => oauthSerialLocks },
     programmaticServerIds: (mcpOptions?.servers ?? []).map((server) => server.id),
     selection: (_scope, workspaceRoot) => {
-      const user = readConfigurationFile({
-        path: join(options.profile.profilePath, 'config.jsonc'),
-        windowsPathPolicy: 'private',
-      }).value;
+      const user = userConfiguration.read().value;
       const workspace = readConfigurationFile({
         path: join(workspaceRoot, 'kite-agent.jsonc'),
       }).value;
@@ -445,7 +477,7 @@ export function createDefaultProcessConfiguration(options: {
           resolveConfiguration({
             defaults: configurationDefaults,
             user,
-            workspace,
+            workspace: withoutProjectModels(workspace),
             explicit: current,
           }).mcp ?? [],
       };
@@ -490,6 +522,7 @@ export function createDefaultProcessConfiguration(options: {
   );
   const webTools = new Map((web.extension.tools ?? []).map((tool) => [tool.id, tool]));
   const mcpManagement = createMcpManagement({
+    userConfigurationPath: userConfiguration.path,
     runtime: () => {
       if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
       return policyRuntime;
@@ -678,10 +711,7 @@ export function createDefaultProcessConfiguration(options: {
         ? (selection.skillSelection?.requested ?? undefined)
         : commandSkills(command.request);
       const workflowFlags = readSkillWorkflowFlags(options.profile);
-      const user = readConfigurationFile({
-        path: join(options.profile.profilePath, 'config.jsonc'),
-        windowsPathPolicy: 'private',
-      }).value;
+      const user = userConfiguration.read().value;
       let root: string;
       try {
         const uri = new URL(workspace.rootUri);
@@ -699,7 +729,7 @@ export function createDefaultProcessConfiguration(options: {
       const effective = resolveConfiguration({
         defaults: configurationDefaults,
         user,
-        workspace: project,
+        workspace: withoutProjectModels(project),
         explicit: current,
       });
       const selected = effective.models?.find((model) => model.id === effective.modelId);
@@ -1004,7 +1034,7 @@ export function createDefaultProcessConfiguration(options: {
         const apiKey =
           selected.credentialRef === undefined
             ? undefined
-            : await vault.resolve(selected.credentialRef);
+            : await modelVault.resolve(selected.credentialRef);
         const binding = createCompatibleModelBinding({
           name: selected.provider,
           baseURL: selected.baseURL,
@@ -1737,6 +1767,7 @@ export function createDefaultProcessConfiguration(options: {
     ...child,
     skillCatalogue: createDefaultSkillCatalogueSource({
       defaults: configurationDefaults,
+      userConfiguration,
       profile: options.profile,
       explicit: () => explicitConfiguration(explicit),
       allowedCapabilities: options.allowedToolCapabilities,
@@ -1840,9 +1871,10 @@ export function createDefaultProcessConfiguration(options: {
     resolveRecoveryRunConfiguration,
     configurationManagement: (runtime) =>
       createConfigurationManagement({
+        userConfiguration,
         profile: options.profile,
         runtime,
-        vault,
+        vault: modelVault,
         persistence: options.credentialBackend?.kind ?? 'os',
         explicit: () => explicitConfiguration(explicit),
       }),
@@ -1873,16 +1905,13 @@ export function createDefaultProcessConfiguration(options: {
               reason: 'execution_scope_unavailable',
             };
           const root = fileURLToPath(workspace.rootUri);
-          const user = readConfigurationFile({
-            path: join(options.profile.profilePath, 'config.jsonc'),
-            windowsPathPolicy: 'private',
-          }).value;
+          const user = userConfiguration.read().value;
           const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
           const current = explicitConfiguration(explicit);
           const effective = resolveConfiguration({
             defaults: configurationDefaults,
             user,
-            workspace: project,
+            workspace: withoutProjectModels(project),
             explicit: current,
           });
           const execution = await policyRuntime.getExecution(request.executionId);

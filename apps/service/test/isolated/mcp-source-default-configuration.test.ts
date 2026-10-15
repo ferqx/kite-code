@@ -215,6 +215,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
   );
   // No static server registration or programmatic transport substitutes for the default factory.
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend,
     mcpSources: {

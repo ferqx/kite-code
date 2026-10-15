@@ -18,6 +18,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean, limit = 10000) {
@@ -48,7 +49,7 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const ownedHome = join(root, 'home');
-  mkdirSync(ownedHome);
+  const userConfiguration = ownedUserConfiguration(ownedHome);
   const original = Buffer.from(`\uFEFF${'完整原始字节 α\r\n'.repeat(8000)}`),
     originalPath = join(workspace, 'original.txt');
   writeFileSync(originalPath, original);
@@ -128,7 +129,7 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -143,13 +144,7 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
   const launch = (id: string) =>
     launchPairedService({
       entrypoint: resolve(import.meta.dir, '../../../service/src/main.ts'),
-      spawnChild: (command, { env }) =>
-        Bun.spawn([...command], {
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-          env: { ...env, HOME: ownedHome },
-        }),
+      spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: id,
       buildId: 'default-checkpoint-main',
@@ -299,7 +294,11 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
         {
           stdout: 'pipe',
           stderr: 'pipe',
-          env: { HOME: ownedHome, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+          env: {
+            ...userConfiguration.homeEnvironment,
+            PATH: '/usr/bin:/bin',
+            LANG: 'C.UTF-8',
+          },
         },
       );
       const stderr = new Response(native.stderr).text();
@@ -324,7 +323,11 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
           {
             stdout: 'pipe',
             stderr: 'pipe',
-            env: { HOME: ownedHome, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+            env: {
+              ...userConfiguration.homeEnvironment,
+              PATH: '/usr/bin:/bin',
+              LANG: 'C.UTF-8',
+            },
           },
         ),
         out = new Response(cold.stdout).text(),
@@ -346,7 +349,11 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
           {
             stdout: 'pipe',
             stderr: 'pipe',
-            env: { HOME: ownedHome, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+            env: {
+              ...userConfiguration.homeEnvironment,
+              PATH: '/usr/bin:/bin',
+              LANG: 'C.UTF-8',
+            },
           },
         ),
         out = new Response(native.stdout).text(),

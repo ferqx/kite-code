@@ -138,6 +138,7 @@ test.each(
     }),
   );
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     permissions: { authorize: async () => ({ allowed: true, revision: 'trusted-owned-fixture' }) },
     shell: {

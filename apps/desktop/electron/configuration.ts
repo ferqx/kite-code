@@ -72,7 +72,7 @@ export class NativeConfiguration {
     const now = this.current();
     return !!now && (Object.keys(scope) as (keyof Scope)[]).every((key) => scope[key] === now[key]);
   }
-  async read(location: 'user' | 'workspace'): Promise<NativeModelSettingsFacts> {
+  async read(): Promise<NativeModelSettingsFacts> {
     if (this.unavailable) throw new ClientError('configuration_storage_unavailable');
     this.release();
     const current = this.current();
@@ -83,19 +83,8 @@ export class NativeConfiguration {
     const reading = new AbortController();
     this.reading = reading;
     try {
-      let workspaceId: string | undefined;
-      if (location === 'workspace') {
-        if (!scope.sessionId) throw new ClientError('native_selection_changed');
-        const view = await this.client.getView(scope.sessionId, { signal: reading.signal });
-        if (!this.same(scope) || this.reading !== reading)
-          throw new ClientError('native_selection_changed');
-        if (view.storeId !== scope.storeId || view.session.id !== scope.sessionId)
-          throw new ClientError('configuration_scope_mismatch');
-        workspaceId = view.session.workspaceId;
-      }
-      const configuration = await this.client.getModelSettings(location, {
+      const configuration = await this.client.getModelSettings('user', {
         storeId: scope.storeId,
-        ...(workspaceId ? { workspaceId } : {}),
         signal: reading.signal,
       });
       reading.signal.throwIfAborted();
@@ -103,16 +92,15 @@ export class NativeConfiguration {
         throw new ClientError('native_selection_changed');
       if (
         configuration.storeId !== scope.storeId ||
-        configuration.scope !== location ||
-        configuration.workspaceId !== workspaceId
+        configuration.scope !== 'user' ||
+        configuration.workspaceId !== undefined
       )
         throw new ClientError('configuration_scope_mismatch');
       const facts: NativeModelSettingsFacts = {
         kind: 'settings.models',
         observationId: ++this.sequence,
         storeId: scope.storeId,
-        scope: location,
-        ...(workspaceId ? { workspaceId } : {}),
+        scope: 'user',
         canWrite: configuration.readSet !== null && configuration.errors.length === 0,
         errors: [...configuration.errors],
         defaultModelId: configuration.defaultModelId,

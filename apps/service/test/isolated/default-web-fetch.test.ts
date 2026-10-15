@@ -115,6 +115,7 @@ async function fixture(off = false) {
     ? { mode: 'off' as const }
     : { mode: 'allowlist' as const, hosts: ['fixture.test'] };
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     webFetch: {
       network: {

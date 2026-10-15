@@ -11,6 +11,7 @@ const certificate = __NATIVE_MCP_FIXTURE_CERTIFICATE__ || undefined;
 /** Test candidate only: local peers, actual default browser/backend/permissions and packaged stdio. */
 const configure: ConfigureProcessHost = (startup, context) =>
   createDefaultProcessConfiguration({
+    userConfigurationPath: selectProfile(startup.profile).profilePath + '/config.jsonc',
     profile: selectProfile(startup.profile),
     observerSubjectId: context.subjectId,
     hostConfiguration: startup.hostConfiguration,

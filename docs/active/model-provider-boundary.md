@@ -4,14 +4,13 @@
 
 读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文、缓存指标或真实 Provider smoke 时。
 
-验证：当前 `packages/builtin-runtime/test`、`packages/runtime-spi/test`、`packages/runtime-host/test`、`apps/kite-cli/test/runtime/` 与 `tests/integration/`
-Model/compaction/provider suites，以及 `bun run check:core-boundary`、`bun run typecheck`。
+验证：当前默认链以 [Service 用户源测试](../../apps/service/test/isolated/user-configuration.test.ts)、[实际模型路由](../../apps/service/test/isolated/run-model-selection.test.ts)、对应客户端回归、`bun run check:core-boundary` 和 workspace typecheck 核对；下文旧 Runtime 路径的 Provider suites 保留为历史算法证据，不能代替当前默认链验证。
 
 相关：[Agent Note 0022](../../.agents/notes/implemented/simplification/2026-07-23-context-compaction-single-narrative.md)、[Agent Note 0023](../../.agents/notes/implemented/simplification/2026-07-23-model-capabilities-no-builtin-catalog.md)、[Agent Note 0024](../../.agents/notes/implemented/simplification/2026-07-23-context-compaction-manual-auto-only.md)、[Agent Note 0066](../../.agents/notes/implemented/process/2026-08-03-deepseek-owner-accepted-provider-data-policy.md)、[Agent Note 0068](../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)、[Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)、[Agent Note 0093](../../.agents/notes/implemented/process/2026-08-09-opencode-go-release-provider-smoke.md)、[Agent Note 0109](../../.agents/notes/implemented/testing/2026-08-18-model-invocation-evidence-and-replay.md)、[Agent Note 0114](../../.agents/notes/implemented/testing/2026-08-18-stable-subagent-actor-identity-for-strict-replay.md)、[Agent Note 0115](../../.agents/notes/implemented/process/2026-08-18-ps03-deterministic-synthetic-replay-qualification.md)、`private-artifact-storage.md`、`open-source-first-release.md`、`plan-state-reminder.md`。
 
 ## 规则
 
-Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatible` 和 `ollama` 通过 AI SDK 模型边界接入；Runtime Kernel、Tool Controller、Policy 和 Verification 不得依赖某个 provider 的消息类或 SDK。
+Kite Code 是 provider-neutral 系统。当前默认 Service 的模型只来自 ~/.kite-code/kite-code.jsonc，不按 Profile/Workspace 分层，也不读取旧 Profile config.jsonc。Service 私有适配既有 provider/model/disabledModels，模型能力与路由资格仍按实际 SDK/配置验证；客户端无文件路径和凭据 authority。已有 inline key 只用于宿主解析，新增替换 key 存用户级 OS vault，原 key 不进入 DTO/snapshot/日志。决定及代价见[单用户配置 Note](../../.agents/notes/implemented/architecture/2026-10-15-single-user-configuration.md)。下文描述的旧 Runtime Model Surface 约束在其原体系适用，当前源码定位归 Service/AI owner。
 
 ## Model Surface V1 与唯一 Gateway
 

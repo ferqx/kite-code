@@ -1,7 +1,7 @@
 import type { HostMutation, ModelSettingsRequest, ModelSettingsView } from '@kite-ai/client';
 export interface TuiModelIntent {
   sessionId: string;
-  scope: 'workspace';
+  scope: 'user';
   request: ModelSettingsRequest;
 }
 export interface TuiModelOutcome {

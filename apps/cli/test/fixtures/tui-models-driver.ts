@@ -144,8 +144,7 @@ try {
   await wait('❯ two');
   await key('\r');
   await wait('outcome_unknown');
-  await key('\r');
-  await wait('model_settings_original_outcome_required');
+  await Promise.all([key('\r'), wait('model_settings_original_outcome_required')]);
   await key('k');
   await wait('Desired default: two');
   assert.deepEqual(await requests(), [{ model: 'one' }]);

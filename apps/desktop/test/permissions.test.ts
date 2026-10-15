@@ -42,7 +42,10 @@ async function fixture() {
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
-  const host = createDefaultProcessConfiguration({ profile });
+  const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
+    profile,
+  });
   const runtime = createRuntime({
     store,
     permissions: host.permissions!,

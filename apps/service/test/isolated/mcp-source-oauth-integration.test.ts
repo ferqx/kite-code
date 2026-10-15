@@ -262,6 +262,7 @@ async function fixture(
   const holders: { close(): Promise<void> }[] = [];
   async function launch(sessionId = 's') {
     const configuration = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       observerSubjectId: options.observer ?? 'owner',
       credentialBackend: backend,

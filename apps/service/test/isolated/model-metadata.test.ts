@@ -2,8 +2,11 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { launchPairedService } from '../../src/paired';
 
@@ -29,8 +32,9 @@ test('production paired Service freezes actual SDK settings and dispatch control
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
-  const config = join(profile.profilePath, 'config.jsonc');
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
+  privateDirectory(profile.profilePath);
+  const config = userConfiguration.path;
   const entered = barrier(),
     release = barrier();
   const requests: Record<string, unknown>[] = [];
@@ -84,6 +88,7 @@ test('production paired Service freezes actual SDK settings and dispatch control
   try {
     host = await launchPairedService({
       entrypoint: join(import.meta.dir, '../../src/main.ts'),
+      spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: 'metadata-host',
       buildId: 'metadata-http',
@@ -96,7 +101,7 @@ test('production paired Service freezes actual SDK settings and dispatch control
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
       name: 'Metadata',
     });
     await client.createSession({

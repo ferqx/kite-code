@@ -136,6 +136,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   writeFileSync(configurationPath, JSON.stringify(configuration));
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend,
     permissionPolicy: {
@@ -550,6 +551,7 @@ test('closed business envelopes preserve original Workflow input; malformed inte
     const original = (await f.store.getCommand(run.originCommandId))!;
     const before = f.credentialReads;
     const changed = createDefaultProcessConfiguration({
+      userConfigurationPath: f.profile.profilePath + '/config.jsonc',
       profile: f.profile,
       credentialBackend: f.credentialBackend,
       planning: { allowWaiver: true },

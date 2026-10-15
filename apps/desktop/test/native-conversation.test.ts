@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -68,7 +68,7 @@ test('formal Native transcript preserves the explicit final-only copy contract f
   expect(projection.messages.find((entry) => entry.id === 'final')?.finalReply).toBe(true);
   expect(projection.messages.find((entry) => entry.id === 'final')?.copyText).toBe(final);
 });
-function fixture() {
+function fixture(protectMissingUserDirectory = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'native-conversation-')));
   const data = memoryPrivateData(),
     drafts = new Map<string, NativeDraft>();
@@ -255,7 +255,12 @@ function fixture() {
       return command;
     },
   } as unknown as AgentClient;
-  const caller = new NativeCaller(port, () => {}, data);
+  const caller = new NativeCaller(
+    port,
+    () => {},
+    data,
+    protectMissingUserDirectory ? [join(root, '.kite-code')] : [],
+  );
   const request: Extract<NativeRequest, { method: 'conversation.send' }> = {
     method: 'conversation.send',
     generation: 1,
@@ -436,6 +441,20 @@ test('permission failure retains created Session and draft; unknown mode must be
       }),
     ).toMatchObject({ phase: 'accepted' });
     expect(f.counts()).toMatchObject({ creates: 1, starts: 1, modes: 2 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('first configuration remains usable while its protected user directory has not been created', async () => {
+  const f = fixture(true);
+  try {
+    await f.ready();
+    expect(existsSync(join(f.root, '.kite-code'))).toBe(false);
+    expect(
+      await f.caller.invoke({ method: 'conversation.models.read', generation: 1 }),
+    ).toMatchObject({ kind: 'settings.models', scope: 'user' });
+    expect(f.counts()).toMatchObject({ creates: 0, starts: 0, modes: 0, trusts: 0 });
   } finally {
     await f.close();
   }

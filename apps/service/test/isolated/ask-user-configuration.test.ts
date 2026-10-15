@@ -117,6 +117,7 @@ async function fixture(
   };
   writeFileSync(join(profile.profilePath, 'config.jsonc'), JSON.stringify(config));
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: createTemporaryCredentialBackend(),
     planning: { requirePlan: input.planning ?? false },

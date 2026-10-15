@@ -150,6 +150,7 @@ test.each(
     }),
   );
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     child: [{ id: 'code', version: '1', toolIds: [] }],
     permissions: {

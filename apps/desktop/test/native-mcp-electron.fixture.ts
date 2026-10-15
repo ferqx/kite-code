@@ -24,7 +24,13 @@ async function openSessionTools(page: import('playwright').Page) {
 
 type Physical = { path: string; method: string };
 type FixtureGlobals = typeof globalThis & { mcpPhysical: Physical[] };
-const [candidate, home, control, storeId] = process.argv.slice(2) as string[];
+const [candidate, home, control, storeId, userConfiguration] = process.argv.slice(2) as [
+  string,
+  string,
+  string,
+  string,
+  string,
+];
 const started = Date.now(),
   pids: number[] = [],
   submissions: NativeMcpSubmission[] = [];
@@ -123,16 +129,15 @@ try {
     .getByText('已保存提供商配置。', { exact: true })
     .waitFor();
   await page.getByRole('button', { name: '关闭提供商配置', exact: true }).click();
-  const model = JSON.parse(
-    readFileSync(join(home!, '.kite-code/unified-agent/default/config.jsonc'), 'utf8'),
-  ).models.find((value: { model: string }) => value.model === 'owned-mcp-model');
+  const model = JSON.parse(readFileSync(userConfiguration, 'utf8')).models.find(
+    (value: { model: string }) => value.model === 'owned-mcp-model',
+  );
   assert.ok(model);
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
-  await page.getByRole('button', { name: '读取用户模型配置', exact: true }).click();
-  await page.getByRole('button', { name: `启用模型 ${model.id}`, exact: true }).click();
-  await page.getByRole('button', { name: `禁用模型 ${model.id}`, exact: true }).waitFor();
-  await page.getByRole('button', { name: `设为默认 ${model.id}`, exact: true }).click();
+  await page.getByRole('switch', { name: `启用模型 ${model.id}`, exact: true }).check();
+  await page.getByRole('button', { name: '默认模型', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: `设为默认 ${model.id}`, exact: true }).click();
   await openSettings(page);
   await page.getByRole('button', { name: 'MCP', exact: true }).click();
   const panel = () => page.getByRole('region', { name: 'MCP settings', exact: true });

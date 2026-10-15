@@ -138,6 +138,7 @@ async function fixture(
           authorize: async () => ({ allowed: true, revision: 'trusted-fixture' }),
         });
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     child: roles,
     knownToolIds: ['fixture.delegate', ...(options.extra?.tools?.map((tool) => tool.id) ?? [])],

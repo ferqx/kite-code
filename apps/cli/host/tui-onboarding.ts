@@ -93,8 +93,8 @@ export function createTuiOnboardingPort(
   let selectedConnectionId: string | undefined;
   let originalConnectionId: string | undefined;
   let selectedModelId: string | undefined;
-  const models = (workspaceId: string, signal?: AbortSignal) =>
-    client.getModelSettings('workspace', { storeId, workspaceId, signal });
+  const models = (_workspaceId: string, signal?: AbortSignal) =>
+    client.getModelSettings('user', { storeId, signal });
   const ready = async (workspaceId: string, signal?: AbortSignal): Promise<TuiOnboardingResult> => {
     const state = await models(workspaceId, signal);
     if (state.errors.length) return { status: 'failed', code: 'configuration_unavailable' };
@@ -145,8 +145,8 @@ export function createTuiOnboardingPort(
         if (
           !('originStoreId' in state) ||
           state.originStoreId !== storeId ||
-          state.scope !== (pending.kind === 'provider' ? 'user' : 'workspace') ||
-          state.workspaceId !== (pending.kind === 'provider' ? undefined : pending.workspaceId)
+          state.scope !== 'user' ||
+          state.workspaceId !== undefined
         )
           return { status: 'unknown' };
         const expected =
@@ -155,10 +155,7 @@ export function createTuiOnboardingPort(
         if (
           !expected ||
           !marker ||
-          state.ifMatch !==
-            (pending.kind === 'provider'
-              ? expected.expectedReadSet.userEtag
-              : expected.expectedReadSet.workspaceEtag) ||
+          state.ifMatch !== expected.expectedReadSet.userEtag ||
           canonical(marker) !==
             canonical({ expectedReadSet: expected.expectedReadSet, operation: expected.operation })
         )
@@ -274,11 +271,10 @@ export function createTuiOnboardingPort(
         'enable',
         (commandId) =>
           postModel(
-            'workspace',
+            'user',
             {
               expectedStoreId: storeId,
               commandId,
-              workspaceId,
               expectedReadSet: state.readSet!,
               operation: { kind: 'enabled', modelId: chosen.id, enabled: true },
             },
@@ -307,11 +303,10 @@ export function createTuiOnboardingPort(
       'default',
       (commandId) =>
         postModel(
-          'workspace',
+          'user',
           {
             expectedStoreId: storeId,
             commandId,
-            workspaceId,
             expectedReadSet: refreshed.readSet!,
             operation: { kind: 'default', modelId: chosen.id },
           },

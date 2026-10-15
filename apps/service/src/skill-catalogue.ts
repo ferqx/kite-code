@@ -29,6 +29,7 @@ import {
   type createWorkflowConfiguration,
   readSkillWorkflowFlags,
 } from './skill-workflow-configuration';
+import { type UserConfiguration, withoutProjectModels } from './user-configuration';
 
 type Query = z.infer<typeof SkillCatalogueQuerySchema>;
 export type SkillCataloguePage = z.infer<typeof SkillCataloguePageSchema>;
@@ -70,6 +71,7 @@ export function unavailableSkillCatalogue(
 export function createDefaultSkillCatalogueSource(options: {
   defaults?: JsonObject;
   profile: ProfileSelection;
+  userConfiguration: UserConfiguration;
   explicit: () => JsonObject;
   allowedCapabilities?: readonly string[];
   workflowBindings?: (input: {
@@ -119,11 +121,10 @@ export function createDefaultSkillCatalogueSource(options: {
     try {
       effective = resolveConfiguration({
         defaults: options.defaults ?? defaultConfiguration,
-        user: readConfigurationFile({
-          path: join(profile.profilePath, 'config.jsonc'),
-          windowsPathPolicy: 'private',
-        }).value,
-        workspace: readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value,
+        user: options.userConfiguration.read().value,
+        workspace: withoutProjectModels(
+          readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value,
+        ),
         explicit: explicit(),
       });
     } catch {

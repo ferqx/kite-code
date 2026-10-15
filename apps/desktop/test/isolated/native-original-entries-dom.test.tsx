@@ -82,8 +82,6 @@ test('retained General card reads the accurate configuration default and never s
         ? facts
         : {
             ...facts,
-            scope: 'workspace',
-            workspaceId: 'wb',
             defaultModelId: 'b',
             models: [{ ...facts.models[0]!, id: 'b', model: 'workspace-b' }],
           };
@@ -138,7 +136,7 @@ test('retained General card reads the accurate configuration default and never s
       requests
         .filter((request) => request.method === 'settings.models.read')
         .map((request) => request.scope),
-    ).toEqual(['user', 'workspace', 'workspace', 'user']);
+    ).toEqual(['user', 'user', 'user', 'user']);
   } finally {
     await f.close();
   }

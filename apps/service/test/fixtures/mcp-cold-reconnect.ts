@@ -15,6 +15,7 @@ const log = (name: string, value: unknown) =>
 await runServiceProcess({
   configure(startup) {
     return createDefaultProcessConfiguration({
+      userConfigurationPath: selectProfile(startup.profile).profilePath + '/config.jsonc',
       profile: selectProfile(startup.profile),
       hostConfiguration: startup.hostConfiguration,
       permissions: {

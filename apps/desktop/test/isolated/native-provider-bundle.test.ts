@@ -17,6 +17,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -124,7 +125,7 @@ test.skipIf(process.platform !== 'darwin')(
           );
         },
       });
-      writeFileSync(join(profile.profilePath, 'config.jsonc'), JSON.stringify({ models: [] }));
+      writeFileSync(userConfigurationPath(home), JSON.stringify({ models: [] }));
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
@@ -156,6 +157,7 @@ test.skipIf(process.platform !== 'darwin')(
           home,
           server.url.href.replace(/\/$/, ''),
           storeId!,
+          userConfigurationPath(home),
         ],
         {
           cwd: home,

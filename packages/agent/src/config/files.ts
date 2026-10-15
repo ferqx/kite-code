@@ -210,22 +210,11 @@ export function readConfigurationFile(options: ConfigurationFileOptions): Config
   const raw = readRaw(path, limit(options), options.windowsPathPolicy === 'private');
   return { path, exists: raw.exists, etag: raw.etag, value: parseDocument(raw.text) };
 }
-/** Short nonblocking OS lock plus latest byte ETag; never lock while awaiting user/network. */
-export function updateConfigurationFile(
-  options: ConfigurationFileOptions & {
-    ifMatch: string;
-    operations: readonly ConfigurationEdit[];
-    /** Trusted synchronous host checks under this target's short file lock. */
-    validateCandidate?: (candidate: JsonObject) => void;
-    validatePublication?: () => void;
-  },
-): ConfigurationDocument {
-  options = {
-    ...options,
-    windowsPathSecurity: options.windowsPathSecurity ?? defaultWindowsPathSecurity(),
-  };
-  const requested = hostPath(options.path);
-  const maxBytes = limit(options);
+/** Validate before format adaptation as well as file publication; performs no I/O. */
+function validateConfigurationEdits(options: {
+  ifMatch: string;
+  operations: readonly ConfigurationEdit[];
+}): void {
   if (
     !/^[0-9a-f]{64}$/.test(options.ifMatch) ||
     options.operations.length < 1 ||
@@ -258,6 +247,26 @@ export function updateConfigurationFile(
       assertNoCredentialBody(probe);
     }
   }
+}
+/** Short nonblocking OS lock plus latest byte ETag; never lock while awaiting user/network. */
+export function updateConfigurationFile(
+  options: ConfigurationFileOptions & {
+    ifMatch: string;
+    operations: readonly ConfigurationEdit[];
+    /** Trusted synchronous format adaptation under the target lock; output is revalidated. */
+    adaptEdits?: (value: JsonObject) => readonly ConfigurationEdit[];
+    /** Trusted synchronous host checks under this target's short file lock. */
+    validateCandidate?: (candidate: JsonObject) => void;
+    validatePublication?: () => void;
+  },
+): ConfigurationDocument {
+  options = {
+    ...options,
+    windowsPathSecurity: options.windowsPathSecurity ?? defaultWindowsPathSecurity(),
+  };
+  const requested = hostPath(options.path);
+  const maxBytes = limit(options);
+  validateConfigurationEdits(options);
   let lock: ReturnType<typeof acquireFileLock> | undefined;
   let temporary: string | undefined;
   let published = false;
@@ -269,9 +278,12 @@ export function updateConfigurationFile(
     lock = acquireFileLock(`${path}.lock`, 'exclusive', options.windowsPathSecurity);
     const original = readRaw(path, maxBytes, options.windowsPathPolicy === 'private');
     if (original.etag !== options.ifMatch) throw new ConfigurationError('configuration_conflict');
-    parseDocument(original.text); // A broken document is never treated as empty.
+    const current = parseDocument(original.text); // A broken document is never treated as empty.
+    const operations = options.adaptEdits ? options.adaptEdits(current) : options.operations;
+    if (options.adaptEdits && operations.length)
+      validateConfigurationEdits({ ifMatch: options.ifMatch, operations });
     let text = original.text;
-    for (const edit of options.operations)
+    for (const edit of operations)
       text = applyEdits(
         text,
         modify(text, [...edit.path], edit.kind === 'set' ? edit.value : undefined, {

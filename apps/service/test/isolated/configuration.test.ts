@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
   createCredentialVault,
@@ -10,6 +11,8 @@ import {
 } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import {
   defaultConfiguration,
@@ -101,12 +104,14 @@ function fixture() {
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   return {
     root,
     workspace,
     profile,
-    file: join(profile.profilePath, 'config.jsonc'),
+    file: userConfiguration.path,
+    spawnChild: userConfiguration.spawnChild,
     projectFile: join(workspace, 'kite-agent.jsonc'),
     close() {
       rmSync(root, { recursive: true, force: true });
@@ -254,6 +259,7 @@ async function launch(
       injected ? '../fixtures/configured-child.ts' : '../../src/main.ts',
     ),
     profile: f.profile,
+    spawnChild: f.spawnChild,
     instanceId: 'configured',
     buildId: 'configuration-test',
     apiMajor: 1,
@@ -265,7 +271,7 @@ async function launch(
     await handle.client.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: `file://${f.workspace}`,
+      rootUri: pathToFileURL(f.workspace).href,
       name: 'Configured',
     });
     await handle.client.createSession({
@@ -416,7 +422,7 @@ test('actual paired production Service binds per-Run route/options and immutable
   }
 }, 20000);
 
-test('per-Run user/project/explicit precedence is actual Provider input rather than a recorded-only option', async () => {
+test('per-Run trusted explicit options override user models while project models are ignored in actual Provider input', async () => {
   const f = fixture();
   const endpoint = fakeEndpoint();
   let child: Awaited<ReturnType<typeof launch>> | undefined;
@@ -669,6 +675,7 @@ test('explicit recovery resolver preserves the persisted model selection and ref
     expect(run.status).toBe('completed');
     expect(endpoint.requests).toHaveLength(1);
     const host = createDefaultProcessConfiguration({
+      userConfigurationPath: f.file,
       profile: f.profile,
       credentialBackend: {
         kind: 'temporary',

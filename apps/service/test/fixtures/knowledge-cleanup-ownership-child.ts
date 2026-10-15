@@ -266,6 +266,7 @@ try {
       configure(_startup, context) {
         subjectId = context.subjectId;
         const host = createDefaultProcessConfiguration({
+          userConfigurationPath: profile.profilePath + '/config.jsonc',
           profile,
           permissionPolicy:
             mode === 'prep' || mode === 'tool'

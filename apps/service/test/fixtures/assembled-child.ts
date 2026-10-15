@@ -12,6 +12,7 @@ await runServiceProcess({
     });
     let gated = false;
     return createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       hostConfiguration: startup.hostConfiguration,
       allowedToolCapabilities: [

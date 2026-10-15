@@ -78,6 +78,8 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 开发 TUI 宿主见 [host/tui.tsx](host/tui.tsx) 与 [host/tui-main.ts](host/tui-main.ts)。公开 `/tui-host` 的 `runTUIHost` 接收明确 `artifact/dataRoot/profile/workspace/thread` 和独立宿主退出 signal；`/tui-main` 提供纯 `parseTUIArguments` 与 `runTUIProcess`。help/version 和非终端拒绝均先于 profile 创建；没有制品 source fallback、隐式服务发现、argv token 或权限模式猜测；显式 `server` 选择既有共享服务。配对启动校验既有 Service/Bun SHA、profile/instance/build/API/capabilities，私有 bootstrap 不打印到终端。
 
+制品的普通文件、非软链和准确 SHA 校验在各平台保留；POSIX 另要求执行位，Windows 按原生进程启动语义接纳选定的 Bun `.exe`，不以缺失 Unix 执行位拒绝。此检查不替代发行制品的原生保护与 lease。[制品测试](test/artifact.test.ts)核当前真实 Bun、错误摘要、非文件与改写字节；模型 PTY 使用同一宿主校验。
+
 当前正式与开发 TUI 已迁入原 Ink 的纯展示组件、菜单、首次配置和主屏消费，业务仍通过公共 Server port：Header 使用实际 Workspace URI、公开模型配置和当前权限读取，局部不可用不造成功事实。主输入、选择面板、完整结果与帮助沿[UI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)。[onboarding host](host/tui-onboarding.ts)用原 Trust、Provider、enabled/default CAS 与 GET 原 mutation 接首次配置；已有模型没有默认时可在原界面恢复，秘密不进入冷 intent。原刷新同时调用 [live output](host/tui-live-output.ts)、[Shell tails](host/tui-job-tails.ts) 和 [progress](host/tui-progress.ts)，验证原身份并接完整 Model、有限五行／16KiB tail、准确 child views、批准计划和实际压缩阶段；每次 tail 最多两页且沿原 cursor 前进，清理释放所属缓存，没有新轮询器。[MCP tool labels](host/tui-tool-labels.ts)只读既有完整 metadata、核 definition/version／name hash 后显示原工具名称，缓存只保当前目标且结束 clear，零连接／RPC。会话目录使用实际公共 activity 时间／路径／状态，不制造旧 UI 日期。普通启动不常驻开发横幅、原回执和机器 ID；`--test-ui-diagnostics` 或可信 `testDiagnostics:true` 只切展示，严格拒绝重复参数和多余值。原 caller、审批、取消、草稿、观察与生命周期门禁不变，纯参数测试见[test/tui-arguments.test.ts](test/tui-arguments.test.ts)。
 
 [tui-display](host/tui-display.ts)经公共 Client 读取完整 pending-input 目录、准确 Model input 的有限模型/档位事实及已保存 usage；不保留请求正文，不读旧 metadata。目录无冻结上界参数，所以跨页 observation 变化明确 unavailable，不冒充完整队列。实际 active Run 与下一 Workspace 默认分开，optional display 读取失败不阻完整会话或创造配置。usage 按同一成功 Model/Run/message 去重，缺 cache 不补零。
@@ -238,9 +240,11 @@ TUI 观察不可用独立于快照读取失败：SSE 出错而 HTTP 仍健康时
 
 ## 开发 TUI 模型设置
 
-`host/tui.tsx` 将公共 getModelSettings/updateModelSettings/getHostMutation 适配为 UI 的有限模型端口。`/model` 提供准确 ID 的项目默认值与启禁，`/effort` 使用真实 metadata 的有限值或 null；默认模型和 effort 上下选择后单 Enter 保存；E 启用／禁用仍有独立确认。宿主不写 JSONC、不自行推导 Provider 能力。只读 scope 固定原 Workspace，提交固定原 Store/read-set/commandId；已知 4xx 拒绝返回 failed，但 mutation_incomplete 保持未知；丢回执或不可验证响应保留 outcome_unknown。原查询比较 scope、Workspace、准确 ifMatch、完整 read-set 和操作的语义字段，不依赖对象 key 顺序、不重发 POST。
+`host/tui.tsx` 将公共 getModelSettings/updateModelSettings/getHostMutation 适配为 UI 的有限模型端口。`/model` 和 `/effort` 固定 user scope，统一修改 ~/.kite-code/kite-code.jsonc 的默认值、启禁和支持的 effort；切换 Workspace/Profile 不改变来源。默认模型和 effort 上下选择后单 Enter 保存，E 启用／禁用仍有独立确认。Session 仍拥有各自原输入与观察 generation，模型未知提交则按用户范围阻止竞争写入。宿主不自行写 JSONC 或推导远端能力；提交固定原 Store/read-set/commandId，原查询比较 userEtag、scope 和原操作。pending/丢回执保持 unknown，仅显式原 GET，不重发 POST。首次配置也使用同一 user scope。
 
 [模型 controller 测试](../../packages/ui/test/tui/models.test.tsx) 核对 stale、原观察、迟到与原查询；[实际 PTY 测试](test/isolated/tui-models-host.test.ts) 使用自有临时 profile、固定本机 compatible Provider 和标准 80×24 终端验证真实按键。最终资格与失败过程记录于[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。此接入不扩展 Native 的有限设置 IPC，也不代表远端模型发现或正式旧 TUI 切换完成。
+
+2026-10-15 Windows x64／Bun 1.4.2 的同一完整模型文件 3pass／23expects：paired 与 shared 均经首次信任页真实确认，读取自有用户模型文件，原 held Run 使用 one，保存默认 two/effort high 后下一 Run 使用 two/high；POST2、原 GET1、模型 Mutation2 与正常退出保持。shared 退出不停止原 daemon，随后由原生命周期身份正常关闭。夹具的 Profile/UI 目录用同一平台私有目录工具创建，不改宿主 ACL；驱动在原 10秒观察预算内并行观察重复保存的短暂拒绝提示，不以旧累计画面代替当前状态。普通无诊断 [Ink PTY](test/isolated/tui-ink-host.test.ts)另 1pass／7expects，核首次信任、原完整正文、一次实际请求与所属退出；这些是 Windows 本机有限证据，不替代 macOS/Linux 或安装版资格。
 
 该[完整模型文件](test/isolated/tui-models-host.test.ts)的paired／shared两个40秒整链及原有限CAS review现消费[共享驱动](test/fixtures/tui-models-driver.ts)。原held Run仍model one；default改two的首次POST已收到response后抛原owned_lost_reply，明确查询前重复保存阻挡；effort high不影响原Run，原完成one／下一真实Run two/high、POST2／原GET1／HostMutation2保持。这是原回应后异常注入，不冒称物理socket毁损。18个原Bun expect及六项原Python检查等义保留，10秒观察／150ms key／5秒provider／6＋3秒退出不改；真实runTUIHost及默认开发Service／SQLite、开发raw daemon装配保持，Windows使用SID pipe和原Profile／instance的公共Lifecycle。paired实际TUI／同birth Service正常0，shared TUI detach保daemon live后其所属普通退出另核；unknown保错误和根。macOS完整3pass／23expects／10.44秒；新增退出观察误用pid-only onLaunched的真实红已保留并改透明真实spawn观察，准确范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12tui-完整管理模型设置与主机状态的三端测试)。
 
@@ -272,7 +276,7 @@ Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，�
 
 ## 开发 TUI 显示偏好
 
-`/theme` 与 `/language` 使用本机宿主 [tui-preferences.ts](host/tui-preferences.ts)，通过 UI 的有限 preference port 读写当前 profile 的 `ui/preferences.jsonc`。默认 `language: system`、`colorPreset: teal`、`theme: dark`；基础 `theme` 支持手工配置 dark/light。语言可选 system、zh-CN、en-US，配色可选 teal、blue、purple、cyan、mono。macOS 的 system 优先有界读取 AppleLanguages，再使用 Intl locale；其他平台使用 Intl。该新数据基线不读取旧用户目录，也不写 Service `config.jsonc`。
+`/theme` 与 `/language` 使用本机宿主 [tui-preferences.ts](host/tui-preferences.ts)，通过 UI 的有限 preference port 读写当前 profile 的 `ui/preferences.jsonc`。默认 `language: system`、`colorPreset: teal`、`theme: dark`；基础 `theme` 支持手工配置 dark/light。语言可选 system、zh-CN、en-US，配色可选 teal、blue、purple、cyan、mono。macOS 的 system 优先有界读取 AppleLanguages，再使用 Intl locale；其他平台使用 Intl。该新数据基线不读取旧用户目录，也不写模型用户文件 `~/.kite-code/kite-code.jsonc`。
 
 宿主持续持有 profile shared lease，读取和发布时核实原真实使用权、私有路径及文件；实际保存复用 configuration leaf 的稳定短文件锁、完整字节 SHA CAS、JSONC 单字段编辑和持久原子替换，保留无关字段与可保留注释。损坏、非法值、links、宽权限或失效 lease 局部拒绝。旧 revision 冲突不自动重试；另一个终端写入后需重新读取再明确选择。保存失败保留原显示值，发布后无法确认则报告有限 unknown 原因并允许重读。偏好文件纳入维护备份原字节资产，文件锁本身不进入备份。
 

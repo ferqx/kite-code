@@ -141,6 +141,7 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
     ],
   };
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     permissionPolicy: { readPolicy: () => policy },
   });

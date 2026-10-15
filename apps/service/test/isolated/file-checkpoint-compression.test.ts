@@ -13,6 +13,7 @@ import type {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { launchPairedService } from '../../src/paired';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
@@ -110,8 +111,9 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
         );
       },
     });
+    const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [
@@ -130,6 +132,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
     );
     const launch = (instanceId: string) =>
       launchPairedService({
+        spawnChild: userConfiguration.spawnChild,
         entrypoint: join(import.meta.dir, '../../src/main.ts'),
         profile,
         instanceId,

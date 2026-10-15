@@ -45,6 +45,7 @@ type Host = Pick<
 >;
 /** Host composition only. Registry is trusted current source admission, never client policy. */
 export function createMcpManagement(options: {
+  userConfigurationPath: string;
   runtime: Host | (() => Host);
   profile: ProfileSelection;
   explicit: () => JsonObject;
@@ -76,7 +77,7 @@ export function createMcpManagement(options: {
     };
     return {
       scope,
-      userPath: join(options.profile.profilePath, 'config.jsonc'),
+      userPath: options.userConfigurationPath,
       workspacePath: join(root, 'kite-agent.jsonc'),
       sourceIdentity: mcpCanonical(scope),
       validateSource: () => {

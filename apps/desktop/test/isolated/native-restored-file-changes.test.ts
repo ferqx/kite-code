@@ -10,6 +10,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import type { AgentClient, Message } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) {
   const end = Date.now() + 10000;
@@ -52,7 +53,7 @@ test('restored Native Files read original write/edit previews and read/write/edi
     relativePath = 'space name 雪.txt',
     filePath = join(workspace, relativePath);
   mkdirSync(workspace);
-  mkdirSync(ownedHome);
+  const userConfiguration = ownedUserConfiguration(ownedHome);
   const original = '\uFEFFfirst\r\nold 雪🙂\r\nlast\n',
     written = original.replace('old 雪🙂', 'written α🙂'),
     edited = written.replace('written α🙂', 'edited 原🌿');
@@ -120,7 +121,7 @@ test('restored Native Files read original write/edit previews and read/write/edi
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -137,13 +138,7 @@ test('restored Native Files read original write/edit previews and read/write/edi
   const launch = (instanceId: string) =>
     launchPairedService({
       entrypoint: resolve(import.meta.dir, '../../../service/src/main.ts'),
-      spawnChild: (command, { env }) =>
-        Bun.spawn([...command], {
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-          env: { ...env, HOME: ownedHome },
-        }),
+      spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId,
       buildId: 'original-restored-files',
@@ -306,7 +301,11 @@ test('restored Native Files read original write/edit previews and read/write/edi
           {
             stdout: 'pipe',
             stderr: 'pipe',
-            env: { HOME: ownedHome, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+            env: {
+              ...userConfiguration.homeEnvironment,
+              PATH: '/usr/bin:/bin',
+              LANG: 'C.UTF-8',
+            },
           },
         ),
         output = new Response(native.stdout).text(),

@@ -8,6 +8,7 @@
     "./paired": "./src/paired.ts",
     "./bootstrap": "./src/bootstrap.ts",
     "./configuration": "./src/configuration.ts",
+    "./test-fixtures": "./test/fixtures/user-configuration-fixture.ts",
     "./runtime-assets": "./src/runtime-assets.ts",
     "./native-runtime-assets": "./src/native-runtime-assets.ts",
     "./windows-native-bootstrap": "./src/windows-native-bootstrap.ts",

@@ -179,11 +179,15 @@ function fixture(
           branches: input.workspaceId === 'w' ? ['main', 'dev'] : [],
           label: input.workspaceId === 'w' ? 'main' : '本地目录',
         };
-      if (input.method === 'conversation.models.read' || input.method === 'input.models.read')
+      if (
+        input.method === 'conversation.models.read' ||
+        input.method === 'input.models.read' ||
+        input.method === 'settings.models.read'
+      )
         return {
           kind: 'settings.models',
           observationId: 1,
-          scope: 'user',
+          scope: input.method === 'settings.models.read' ? input.scope : 'user',
           storeId: 'store',
           canWrite: false,
           errors: [],
@@ -356,6 +360,19 @@ test('settings replace the painted page without remounting its draft or re-readi
     expect(f.host.querySelector('.fixed.inset-0')).toBeNull();
     expect(f.input('当前会话私有草稿')).toBe(input);
     expect(input.value).toBe('unsent settings draft 雪🙂');
+    const modelReads = f.calls.filter((call) => call.method === 'settings.models.read').length;
+    await f.click('模型');
+    expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(
+      modelReads + 1,
+    );
+    expect(f.host.querySelector('.settings-models .settings-model-provider')).not.toBeNull();
+    expect(
+      f.host.querySelector<HTMLInputElement>('[role="switch"][aria-label="启用模型 model"]')
+        ?.checked,
+    ).toBe(true);
+    expect(f.host.querySelector('[aria-label="默认模型"]')?.textContent).toContain(
+      'compatible · Model',
+    );
     await f.click('返回应用');
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
@@ -369,6 +386,10 @@ test('settings replace the painted page without remounting its draft or re-readi
     expect(f.selected()).toBe('a');
     expect(conversationReads()).toEqual(reads);
     await openSettings();
+    expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(
+      modelReads + 2,
+    );
+    expect(f.host.querySelector('.settings-models .settings-model-provider')).not.toBeNull();
     await act(async () => {
       f.host.dispatchEvent(
         new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),

@@ -1388,12 +1388,12 @@ export class NativeCaller {
         result = this.state();
         break;
       case 'settings.models.read':
-        result = await this.configuration.read(request.scope);
+        result = await this.configuration.read();
         break;
       case 'input.models.read': {
         if (!this.selected) throw new ClientError('native_selection_changed');
         const sessionId = this.selected;
-        const facts = await this.inputConfiguration.read('workspace');
+        const facts = await this.inputConfiguration.read();
         result = {
           ...facts,
           ...(this.privateData?.modelRoute(facts.storeId, sessionId)
@@ -1403,7 +1403,7 @@ export class NativeCaller {
         break;
       }
       case 'conversation.models.read':
-        result = { ...(await this.preparationConfiguration.read('user')), canWrite: false };
+        result = { ...(await this.preparationConfiguration.read()), canWrite: false };
         break;
       case 'conversation.branch':
         result = await this.conversation.branch(request.workspaceId);

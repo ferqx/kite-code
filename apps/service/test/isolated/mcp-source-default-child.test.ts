@@ -176,6 +176,7 @@ async function fixture(scenario: Scenario) {
   );
   // Default role resolver and durable permission manager; only owned HTTP transport opt-in is supplied.
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     mcpSources: { http: { allowLoopbackForTests: true } },
   });

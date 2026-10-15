@@ -91,6 +91,7 @@ for (const { guardedReset, rejectedSummary } of [
       }),
     };
     const host = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       credentialBackend: createTemporaryCredentialBackend(),
       permissions: {

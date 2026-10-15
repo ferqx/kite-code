@@ -57,13 +57,15 @@ const receipt = (
   state: 'applied',
   receipt: { status: 'applied', etag: 'd'.repeat(64) },
 });
-test('Native model settings projects safe facts; main derives original project and closed IPC denies injected authority', async () => {
+test('Native model settings always read user facts and closed IPC denies project scope or injected authority', async () => {
   const calls: unknown[] = [];
   const scope = { generation: 1, selection: 1, storeId: 'store', sessionId: 's' };
   let broken = false;
   const client = {
     serverInfo: { capabilities: ['configuration_management'] },
-    getView: async () => ({ storeId: 'store', session: { id: 's', workspaceId: 'w' } }),
+    getView: async () => {
+      throw Error('models_must_not_read_workspace');
+    },
     getModelSettings: async (
       location: 'user' | 'workspace',
       options: { storeId: string; workspaceId?: string },
@@ -79,25 +81,26 @@ test('Native model settings projects safe facts; main derives original project a
     },
   } as unknown as AgentClient;
   const reader = new NativeConfiguration(client, () => scope);
-  const user = await reader.read('user');
+  const user = await reader.read();
   expect(user.models).toEqual(base.models);
   expect(user.canWrite).toBe(true);
   expect(JSON.stringify(user)).not.toContain('NEVER_IN_RENDERER');
   expect(JSON.stringify(user)).not.toContain('explicitDigest');
   user.models[0]!.enabled = false;
   expect(reader.observation?.models[0]?.enabled).toBe(true);
-  await reader.read('workspace');
+  await reader.read();
   expect(calls).toEqual([
     { location: 'user', storeId: 'store', workspaceId: undefined },
-    { location: 'workspace', storeId: 'store', workspaceId: 'w' },
+    { location: 'user', storeId: 'store', workspaceId: undefined },
   ]);
   broken = true;
-  expect(await reader.read('user')).toMatchObject({
+  expect(await reader.read()).toMatchObject({
     canWrite: false,
     models: [],
     errors: ['invalid_jsonc'],
   });
   for (const input of [
+    { method: 'settings.models.read', generation: 1, scope: 'workspace' },
     { method: 'settings.models.read', generation: 1, scope: 'workspace', workspaceId: 'injected' },
     { method: 'settings.models.read', generation: 1, scope: 'foreign' },
     {
@@ -149,7 +152,7 @@ test('Native model configuration close aborts GET and late selection cannot publ
     } as unknown as AgentClient,
     () => scope,
   );
-  const reading = reader.read('user').then(
+  const reading = reader.read().then(
     () => 'unexpected',
     (error) => (error.name === 'AbortError' ? error.name : error.code),
   );
@@ -164,7 +167,7 @@ test('Native model configuration close aborts GET and late selection cannot publ
     { serverInfo: { capabilities: [] } } as unknown as AgentClient,
     () => scope,
   );
-  await expect(unavailable.read('user')).rejects.toMatchObject({ code: 'capability_unavailable' });
+  await expect(unavailable.read()).rejects.toMatchObject({ code: 'capability_unavailable' });
 });
 
 test('Native settings lost receipt keeps original read set and command across selection changes; duplicate only sends once', async () => {
@@ -192,7 +195,7 @@ test('Native settings lost receipt keeps original read set and command across se
     () => scope,
     () => notifications++,
   );
-  const facts = await reader.read('user');
+  const facts = await reader.read();
   expect(() =>
     reader.submit(facts.observationId, { kind: 'enabled', modelId: 'model-a', enabled: false }),
   ).toThrow('model_settings_default_disable_denied');
@@ -247,12 +250,12 @@ test('Native settings pending blocks same scope; mismatched receipts stay unknow
     } as unknown as AgentClient,
     () => scope,
   );
-  const facts = await reader.read('user');
+  const facts = await reader.read();
   await expect(
     reader.submit(facts.observationId, { kind: 'default', modelId: 'model-b' }),
   ).rejects.toMatchObject({ code: 'network_outcome_unknown' });
   expect(reader.submissions[0]?.phase).toBe('unknown');
-  const refreshed = await reader.read('user');
+  const refreshed = await reader.read();
   expect(() =>
     reader.submit(refreshed.observationId, { kind: 'enabled', modelId: 'model-c', enabled: true }),
   ).toThrow('configuration_mutation_pending');
@@ -275,7 +278,7 @@ test('Native settings pending blocks same scope; mismatched receipts stay unknow
     } as unknown as AgentClient,
     () => scope,
   );
-  const observed = await other.read('user');
+  const observed = await other.read();
   expect(
     await other.submit(observed.observationId, { kind: 'default', modelId: 'model-b' }),
   ).toMatchObject({ phase: 'failed', error: 'configuration_conflict' });

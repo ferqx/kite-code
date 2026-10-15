@@ -104,6 +104,7 @@ async function faultChild(root: string, packetPath: string) {
   });
   const backend = createTemporaryCredentialBackend();
   const host = createDefaultProcessConfiguration({
+    userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     observerSubjectId: 'owner',
     credentialBackend: {

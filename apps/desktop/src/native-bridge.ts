@@ -485,7 +485,7 @@ export type NativeRequest =
   | NativeMcpRequest
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
-  | { method: 'settings.models.read'; generation: number; scope: 'user' | 'workspace' }
+  | { method: 'settings.models.read'; generation: number; scope: 'user' }
   | { method: 'input.models.read' | 'conversation.models.read'; generation: number }
   | { method: 'conversation.branch'; generation: number; workspaceId: string }
   | {
