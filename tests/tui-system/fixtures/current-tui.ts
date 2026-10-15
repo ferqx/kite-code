@@ -26,7 +26,23 @@ const stop = () => exit.abort();
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 async function main() {
-  if (!server) await buildOwnedDaemon(artifactRoot);
+  if (server && process.env.KITE_TUI_SYSTEM_TEMPORARY_CREDENTIALS === '1')
+    throw Error('temporary_credentials_require_owned_service');
+  if (!server) {
+    await buildOwnedDaemon(artifactRoot);
+    // Explicit test composition only: credential tests never touch the host OS vault.
+    if (process.env.KITE_TUI_SYSTEM_TEMPORARY_CREDENTIALS === '1') {
+      const built = await Bun.build({
+        entrypoints: [join(import.meta.dir, 'temporary-credential-service.ts')],
+        target: 'bun',
+        packages: 'external',
+        outdir: join(artifactRoot, 'node_modules/@kite-ai/service'),
+        naming: 'main.js',
+      });
+      if (!built.success)
+        throw new AggregateError(built.logs, 'temporary_credential_fixture_build_failed');
+    }
+  }
   exit.signal.throwIfAborted();
   const entrypoint = join(artifactRoot, 'node_modules/@kite-ai/service/main.js');
   const executable = realpathSync(process.execPath);

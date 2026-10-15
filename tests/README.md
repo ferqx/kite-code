@@ -24,6 +24,8 @@
 
 旧普通调用者收束提交 `f2730258` 后已实际统一执行原754文件／611作业default：Bun退出1，246启动／245通过／1Native问答草稿保存失败／365未启动，原并发／预算及4493文件／11资产／Git输入保持；原red完整保留。确定的enabled Save受History门禁静默返回已补生产单调用，原完整DOM15／127／0及未改原窗口1／32／0通过；不以两文件绿代完整默认，原失败／必要修复归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13统一回归发现的-native-私有草稿保存)。
 
+首次配置的 [PTY 场景](tui-system/scenarios/first-run.test.ts)通过测试专用 `KITE_TUI_SYSTEM_TEMPORARY_CREDENTIALS=1` 选择[临时凭据 Service 组合](tui-system/fixtures/temporary-credential-service.ts)。[当前 TUI 夹具](tui-system/fixtures/current-tui.ts)只为自己构建并持有的 Service 注入该后端，拒绝对共享 Service 使用该选择；普通场景和生产默认仍使用 OS 凭据库。场景验证真实 HTTP 模型发现、凭据引用、配置发布和模型启用／默认选择，配置不含合成 key 明文；临时凭据只随该 Service 进程存活，不构成 OS 凭据库或冷重启资格。
+
 ## 环境基线与 owner
 
 [Windows installed TUI 完整调用者](fixtures/unified-agent/windows-installed-tui.qualification.ts)以 `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>` 消费同 release job 已构建的两种准确候选；actual win32/x64 required，无 backend availability skip。真实 80×24 ConPTY 先用独立 Terminal，再登记 Native 到同一稳定前门，每模式 120 秒、各 PTY 30 秒、写操作最多 10 秒，核提交／全文／思考／导出／精确取消／未提交草稿／普通退出／冷读零重放及最终卸载保数据。原 Job0／完整 EOF／strict Close 与未 Terminate 是成功条件，强制收尾不能改成通过；这条新 caller 不修改原 POSIX 窗口或默认 isolated 调度，也不代 Windows 真正跨代码／Shell／MCP／RSS／完整阶段资格。

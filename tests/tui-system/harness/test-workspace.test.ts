@@ -154,7 +154,7 @@ describe('TUI persisted Runtime observers', () => {
             version: 1,
             title: 'Title',
             body: 'Original plan\nwith all lines',
-            steps: [],
+            steps: [{ id: 'verify', title: 'Verify persisted source' }],
           },
           executable: true,
         },
@@ -237,6 +237,10 @@ describe('TUI persisted Runtime observers', () => {
           {
             path: `${workspace.databasePath}#builtin.planning/thread-a/plan/p/1`,
             content: 'Original plan\nwith all lines',
+            title: 'Title',
+            planId: 'p',
+            version: 1,
+            steps: [{ id: 'verify', title: 'Verify persisted source' }],
           },
         ]);
       } finally {

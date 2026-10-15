@@ -53,6 +53,7 @@ describe('first-run — connection boundaries', () => {
     configuration.models = [];
     writeFileSync(workspace.configPath, JSON.stringify(configuration, null, 2));
     workspace.env.CI = 'true';
+    workspace.env.KITE_TUI_SYSTEM_TEMPORARY_CREDENTIALS = '1';
     workspace.env.DEEPSEEK_API_KEY = '';
     workspace.env.OPENAI_API_KEY = '';
   });
@@ -174,6 +175,8 @@ describe('first-run — connection boundaries', () => {
       expect(savedConfig).toContain('local-model-a');
       expect(savedConfig).toContain('local-model-b');
       expect(savedConfig).toContain(server.baseURL);
+      expect(savedConfig).toContain('credential:');
+      expect(savedConfig).not.toContain('local-key');
       const modelRequests = server.getModelRequests().slice(modelRequestBaseline);
       expect(modelRequests.length).toBeGreaterThanOrEqual(2);
       expect(new Set(modelRequests)).toEqual(new Set([`${server.baseURL}/models`]));
