@@ -127,6 +127,8 @@ controller 隔离原 scope/generation/Abort/selected Command。来源目录与 p
 
 [MarkdownBlock](ink/MarkdownBlock.tsx) 的根布局以实际 `maxWidth` 限制整个正文列，短段落和行内格式也受约束，避免 Static 的无界测量把超宽行交给终端自行折行而丢失续行缩进。完整消息与流式分组继续使用各自原正文；原宽度变化、表格和代码布局保持。[普通主屏回归](../../test/tui/ink-main-integration.test.tsx)核中文、行内格式和完整字符，实际 80×24 正常入口的缩进与原字节持久化由 [CLI Ink Host](../../../../apps/cli/test/isolated/tui-ink-host.test.ts)核对。
 
+`TuiMessage` 只为消息提示、正文及完整读取提示应用回复缩进，Thought 独立使用原 `ToolSummaryBlock` 的指示器留位，避免重复两列。普通 Thinking 的活动／结束标题与正文保持同列，原工具步骤缩进、时长来源和诊断布局保留；上述主屏与真实 CLI 回归同时核对标题列位置。
+
 文件恢复的原请求观察更新当前详情和同一 canonical 原请求的已保存目录行，已确认成功不会仍显示旧 pending；其他请求保持原状态。此同步只消费已核回执，不提交恢复、不继续另一段，也不切换仅恢复代码的原会话。
 
 尾部结果折叠在原键到达时更新同 Scope 的显示状态，连续 Enter 不依赖上一帧闭包；仅改变阅读状态，完整正文与原执行事实保持。按用户确认移除 Ctrl+T 入口及其显示状态，帮助和测试诊断不再提示该快捷键；完整 reader 和 serializer 仍核实、保存并导出原 reasoning。

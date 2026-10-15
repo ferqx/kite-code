@@ -37,7 +37,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
       const frame = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'original', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
       return new Response(
-        `${frame({ content: response }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+        `${frame({ reasoning_content: 'Original private thinking' }, null)}${frame({ content: response }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
         { headers: { 'content-type': 'text/event-stream' } },
       );
     },

@@ -1093,33 +1093,36 @@ function TuiMessage({
   const { stdout } = useStdout();
   const paddingLeft = !testDiagnostics && message.role === 'assistant' ? 2 : 0;
   const maxWidth = Math.max(1, (stdout.columns || 80) - paddingLeft);
+  // Thought owns its indicator spacing; only message content inherits reply padding.
   return (
-    <Box flexDirection="column" marginBottom={1} paddingLeft={paddingLeft}>
-      {!hideHeading &&
-        (testDiagnostics ? (
-          <Text bold>
-            {message.role} {'['}
-            {terminalText(message.id)}
-            {']'} {message.status}
+    <Box flexDirection="column" marginBottom={1}>
+      <Box flexDirection="column" paddingLeft={paddingLeft}>
+        {!hideHeading &&
+          (testDiagnostics ? (
+            <Text bold>
+              {message.role} {'['}
+              {terminalText(message.id)}
+              {']'} {message.status}
+            </Text>
+          ) : (
+            message.role !== 'assistant' &&
+            message.role !== 'user' && (
+              <Text bold>{t(message.role === 'tool' ? 'Tool result' : 'System')}</Text>
+            )
+          ))}
+        {modelRetry && (
+          <Text color="yellow">
+            {t('Retrying')} {modelRetry.attempt}/{modelRetry.maxAttempts}
           </Text>
-        ) : (
-          message.role !== 'assistant' &&
-          message.role !== 'user' && (
-            <Text bold>{t(message.role === 'tool' ? 'Tool result' : 'System')}</Text>
-          )
-        ))}
-      {modelRetry && (
-        <Text color="yellow">
-          {t('Retrying')} {modelRetry.attempt}/{modelRetry.maxAttempts}
-        </Text>
-      )}
-      {modelError && <Text color="red">{terminalText(modelError)}</Text>}
-      {!testDiagnostics &&
-        !modelError &&
-        message.status === 'incomplete' &&
-        !['planned', 'dispatching', 'running'].includes(modelStatus ?? '') && (
-          <Text color="yellow">{t('Incomplete response')}</Text>
         )}
+        {modelError && <Text color="red">{terminalText(modelError)}</Text>}
+        {!testDiagnostics &&
+          !modelError &&
+          message.status === 'incomplete' &&
+          !['planned', 'dispatching', 'running'].includes(modelStatus ?? '') && (
+            <Text color="yellow">{t('Incomplete response')}</Text>
+          )}
+      </Box>
       {message.role === 'assistant' &&
         !suppressThought &&
         (reasoning ||
@@ -1152,57 +1155,59 @@ function TuiMessage({
             )}
           </Box>
         )}
-      {!hideContent &&
-        (!testDiagnostics && message.role === 'user' ? (
-          <UserMessageBlock
-            content={terminalText(fullOutput ?? message.content)}
-            columns={stdout.columns || 80}
-          />
-        ) : (
-          <Box
-            marginTop={
-              !testDiagnostics &&
-              !suppressThought &&
-              message.role === 'assistant' &&
-              (reasoning || (message.outputBody && message.outputBody.reasoningBytes !== '0'))
-                ? 1
-                : 0
-            }
-          >
-            <TerminalMarkdown
-              content={fullOutput ?? message.content}
-              maxWidth={maxWidth}
-              streaming={
-                message.status === 'incomplete' &&
-                ['planned', 'dispatching', 'running'].includes(modelStatus ?? '')
-              }
+      <Box flexDirection="column" paddingLeft={paddingLeft}>
+        {!hideContent &&
+          (!testDiagnostics && message.role === 'user' ? (
+            <UserMessageBlock
+              content={terminalText(fullOutput ?? message.content)}
+              columns={stdout.columns || 80}
             />
-          </Box>
-        ))}
-      {testDiagnostics && <TuiToolCalls item={transcript} />}
+          ) : (
+            <Box
+              marginTop={
+                !testDiagnostics &&
+                !suppressThought &&
+                message.role === 'assistant' &&
+                (reasoning || (message.outputBody && message.outputBody.reasoningBytes !== '0'))
+                  ? 1
+                  : 0
+              }
+            >
+              <TerminalMarkdown
+                content={fullOutput ?? message.content}
+                maxWidth={maxWidth}
+                streaming={
+                  message.status === 'incomplete' &&
+                  ['planned', 'dispatching', 'running'].includes(modelStatus ?? '')
+                }
+              />
+            </Box>
+          ))}
+        {testDiagnostics && <TuiToolCalls item={transcript} />}
 
-      {message.outputBody && message.outputBody.toolCallCount > transcript.toolCalls.length && (
-        <Text dimColor>{t('Tool calls not fully loaded; Ctrl+O reads verified full body')}</Text>
-      )}
-      {message.outputBody && fullOutput === undefined && (
-        <Text>
-          {t('Recorded Model output preview only;')}{' '}
-          {message.outputBody.readAvailability === 'unsupported' ||
-          message.contentFormat === 'unsupported'
-            ? t('full read unsupported')
-            : controller.port.readModelOutput
-              ? t('Ctrl+O reads verified full body')
-              : t('full reader unavailable')}{' '}
-          {testDiagnostics && (
-            <>
-              {'('}
-              {message.outputBody.contentBytes} {t('bytes,')}{' '}
-              {message.outputBody.complete ? t('complete') : t('incomplete prefix')}
-              {').'}
-            </>
-          )}
-        </Text>
-      )}
+        {message.outputBody && message.outputBody.toolCallCount > transcript.toolCalls.length && (
+          <Text dimColor>{t('Tool calls not fully loaded; Ctrl+O reads verified full body')}</Text>
+        )}
+        {message.outputBody && fullOutput === undefined && (
+          <Text>
+            {t('Recorded Model output preview only;')}{' '}
+            {message.outputBody.readAvailability === 'unsupported' ||
+            message.contentFormat === 'unsupported'
+              ? t('full read unsupported')
+              : controller.port.readModelOutput
+                ? t('Ctrl+O reads verified full body')
+                : t('full reader unavailable')}{' '}
+            {testDiagnostics && (
+              <>
+                {'('}
+                {message.outputBody.contentBytes} {t('bytes,')}{' '}
+                {message.outputBody.complete ? t('complete') : t('incomplete prefix')}
+                {').'}
+              </>
+            )}
+          </Text>
+        )}
+      </Box>
     </Box>
   );
 }

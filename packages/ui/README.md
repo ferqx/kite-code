@@ -117,6 +117,8 @@ TUI 的附件快捷键和 Controller reader 都要求当前原卡存在实际附
 
 TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段落在列内换行，续行保持左缩进；原正文、完整读取与导出保持原值。布局与实际终端验证见 [TUI owner](src/tui/README.md)。
 
+普通 TUI 的 Thinking 只使用指示器自身留位，与回复正文同列；消息容器不再重复为 Thought 添加回复缩进，活动、结束及工具步骤的布局归上述 TUI owner。
+
 [真实四卡 PTY](test/isolated/tui/pending-cards.test.ts) 在 owned Core/Service SQLite、80×24 中同时保持两个 sibling Ask Tool、root question 和独立 `required-verifier` ordinary Job，按 root-first/job-first 顺序分别批准。真实 parent/child intersection 70KB policy 的完整 artifact 由公共 SDK reader 核 hash/原 scope，缓存切换不重复读取；首 POST 与首原 GET 回应物理丢失后只查原 answer Command，实际两 child 效果与 Job 各一次。该 configured ordinary Job 不是 `skill.workflow.verify`；Workflow verifier 的真实审批另由 CLI Workflow question/compensation fixtures 验证。revision 清理和迟到选择由 Ink 反例核对，不代表同四卡窗口内实际改变后端 policy 的资格。
 
 

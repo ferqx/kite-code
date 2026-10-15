@@ -79,6 +79,11 @@ try {
   assert.ok(completed.includes('console.log'));
   assert.ok(!completed.includes('Original outcome pending or unknown'));
   const replyRows = completed.split('\n');
+  const thoughtRows = replyRows.filter((line) => line.includes('Thinking'));
+  assert.ok(thoughtRows.length > 0);
+  for (const line of thoughtRows) assert.equal(line.indexOf('Thinking'), 2);
+  const heading = replyRows.find((line) => line.includes('Original assistant heading'));
+  assert.equal(heading?.indexOf('Original assistant heading'), 2);
   const paragraphStart = replyRows.findIndex((line) => line.includes('ALIGN_BEGIN'));
   const paragraphEnd = replyRows.findIndex((line) => line.includes('ALIGN_END'));
   assert.ok(paragraphStart >= 0 && paragraphEnd > paragraphStart);

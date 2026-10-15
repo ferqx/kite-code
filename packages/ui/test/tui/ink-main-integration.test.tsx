@@ -161,6 +161,7 @@ test('normal main screen automatically reads one complete original body and reta
     role: 'assistant',
     status: 'complete',
     content: 'preview',
+    firstOutput: 'reasoning',
     sourceIds: ['model'],
     outputBody: {
       kind: 'model_output',
@@ -174,6 +175,9 @@ test('normal main screen automatically reads one complete original body and reta
   const snapshot: TuiSnapshot = {
     storeId: 'store',
     view: view([model]),
+    executionTimings: {
+      model: { availability: 'recorded_dispatch', startedAt: 1, finishedAt: 2001 },
+    },
     interactions: [],
     messages: [
       {
@@ -207,6 +211,12 @@ test('normal main screen automatically reads one complete original body and reta
     expect(app.lastFrame()).toContain('const actual = 1;');
     expect(app.lastFrame()).toContain('preserved');
     expect(app.lastFrame()).not.toContain('preview only');
+    expect(app.lastFrame()).toContain('Thinking 2s');
+    const lines = app.lastFrame()!.split('\n');
+    const thought = lines.find((line) => line.includes('Thinking 2s'));
+    const reply = lines.find((line) => line.includes('Original complete answer'));
+    expect(thought).toBe('  Thinking 2s');
+    expect(reply?.indexOf('Original complete answer')).toBe(thought!.indexOf('Thinking'));
     controller.setDraft('editing without output replay');
     await tick();
     await controller.select('s');
@@ -250,6 +260,13 @@ test('live small reasoning uses the actual running Model before a terminal resul
   try {
     await tick();
     expect(app.lastFrame()).toContain('actual small thinking line');
+    expect(
+      app
+        .lastFrame()!
+        .split('\n')
+        .find((line) => line.includes('Thinking'))
+        ?.indexOf('Thinking'),
+    ).toBe(2);
     // The reason-first response keeps answer bytes buffered until classified.
     expect(app.lastFrame()).not.toContain('streamed answer');
     expect(app.lastFrame()).not.toContain('Incomplete response');
