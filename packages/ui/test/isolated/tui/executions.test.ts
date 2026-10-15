@@ -16,7 +16,7 @@ def state():
 def waitfor(condition,label):
  deadline=time.monotonic()+8
  while not condition():
-  if time.monotonic()>deadline:raise RuntimeError('expected '+label+' state='+json.dumps({k:state().get(k) for k in ['sessionId','observation','childCalls','effects','outputProduced','starts','stops','jobStops','scopeProof']})+' read='+json.dumps({k:state().get('read',{}).get(k) for k in ['phase','error','target']})+' tail='+buffer[-3000:].decode(errors='replace'))
+  if time.monotonic()>deadline:raise RuntimeError('expected '+label+' state='+json.dumps({k:state().get(k) for k in ['sessionId','observation','childCalls','effects','outputProduced','starts','stops','jobStops','stopReads','scopeProof']})+' read='+json.dumps({k:state().get('read',{}).get(k) for k in ['phase','error','target']})+' tail='+buffer[-3000:].decode(errors='replace'))
   pump()
 def visible(text):return text in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace')))
 def wait_selection(current,target):
@@ -52,7 +52,7 @@ def main_ready():
 def mark(name):open(os.path.join(root,name),'w').write('explicit owned fixture operation')
 def posts():return [json.loads(line) for line in open(wire) if json.loads(line)['method']=='POST']
 def route(text):key(text.encode());key(b'\\r')
-def reopen():route('/background');waitfor(lambda:visible('Original background Jobs'),'background panel')
+def reopen():route('/background');waitfor(lambda:state().get('panel')=='executions' and state().get('sessionId')=='a' and any('Original background Jobs · Session a' in line for line in last_frame_lines()),'complete current original background panel frame')
 def pick(id):
  jobs=state()['panelJobs'];index=next(i for i,j in enumerate(jobs) if j['id']==id)
  def selected():
@@ -74,15 +74,29 @@ try:
  messages=state()['read']['child']['messages'];assistant=next(i for i in range(len(messages)-1,-1,-1) if messages[i]['role']=='assistant');step=next(i for i,m in enumerate(messages) if m['role']=='tool' and m.get('toolCallId')=='step-200');page_size=14
  assert json.loads(messages[step]['content'])=={'step':200}
  assert any(call['id']=='step-200' and call['name']=='child-step' and json.loads(call['arguments'])=={'step':200} for m in messages[:step] if m['role']=='assistant' for call in m.get('toolCalls',[]))
- assert assistant==step+1
+ tools=[(i,m) for i,m in enumerate(messages) if m['role']=='tool']
+ assert len(tools)==200
+ assert {m['toolCallId'] for _,m in tools}=={'step-'+str(i) for i in range(1,201)}
+ for i,m in tools:
+  assert i<assistant
+  assert json.loads(m['content'])=={'step':int(m['toolCallId'][5:])}
+ calls=[call for m in messages[:assistant] if m['role']=='assistant' for call in m.get('toolCalls',[])]
+ assert len(calls)==200
+ assert {(call['id'],call['name'],json.loads(call['arguments'])['step']) for call in calls}=={('step-'+str(i),'child-step',i) for i in range(1,201)}
+ assert assistant==max(i for i,_ in tools)+1
+ print('CHILD_HISTORY_ORDER '+json.dumps({'step200':step,'lastTool':max(i for i,_ in tools),'assistant':assistant,'tools':len(tools)}),flush=True)
  for page in range(step//page_size):
   key(b'n');waitfor(lambda:visible('Read-only child history · '+str(page+2)+'/'),'exact original child page')
  for _ in range(step%page_size):key(b'\\x1b[B')
- waitfor(lambda:any('tool · complete' in line and ('›' in line or '❯' in line) for line in last_frame_lines()),'selected original step-200 Tool body');key(b'\\r');waitfor(lambda:'{"step":200}' in re.sub(r'\\s+','',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))),'complete recorded original step-200 Tool content');key(b'\\x1b');key(b'\\x1b[B')
+ waitfor(lambda:any('tool · complete' in line and ('›' in line or '❯' in line) for line in last_frame_lines()),'selected original step-200 Tool body');key(b'\\r');waitfor(lambda:'{"step":200}' in re.sub(r'\\s+','',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))),'complete recorded original step-200 Tool content');key(b'\\x1b')
+ for page in range(step//page_size,assistant//page_size):
+  key(b'n');waitfor(lambda:visible('Read-only child history · '+str(page+2)+'/'),'exact final assistant history page')
+ assistant_start=step if assistant//page_size==step//page_size else (assistant//page_size)*page_size
+ for _ in range(assistant-assistant_start):key(b'\\x1b[B')
  waitfor(lambda:any('assistant · complete' in line and ('›' in line or '❯' in line) for line in last_frame_lines()),'selected original assistant body');key(b'\\r');key(b'\\x1b[F');waitfor(lambda:'CHILD_MODEL_FULL_TAIL' in re.sub(r'\\s+','',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',full.decode(errors='replace'))),'full recorded original Model tail');assert len(posts())==1;key(b'\\x03');waitfor(lambda:visible('Original background Jobs'),'returned to original parent execution directory')
  mark('break-observer');waitfor(lambda:state().get('observation')=='unknown','real observer closed');pick(one['id']);key(b's');key(b'\\r');assert len(posts())==1;assert state().get('stops',{})=={}
  mark('resume-observer');waitfor(lambda:state().get('observation')=='ready','actual observer re-admitted');key(b's');key(b'\\r');waitfor(lambda:state().get('jobStops') and state()['jobStops'][0]['phase']=='unknown','stop receipt physically lost');waitfor(lambda:next(j for j in state()['jobs'] if j['id']==one['id'])['status']=='cancelled','actual selected Job cleaned');assert next(j for j in state()['jobs'] if j['id']==two['id'])['status']=='running';assert len(posts())==2
- pick(two['id']);key(b's');waitfor(lambda:stop_confirmation(two,True),'second original Job stop confirmation shown');input_phase('second_stop_confirmation_shown');key(b'\\r');waitfor(lambda:stop_confirmation(two,False),'second original Job stop confirmation consumed');input_phase('second_stop_confirmation_consumed');assert len(posts())==2;input_phase('before_stop_reader_close');key(b'\\x03');waitfor(main_ready,'closed stop reader and current main input');input_phase('stop_reader_closed');reopen();input_phase('stop_reader_reopened');key(b'\\x0c');waitfor(lambda:state()['jobStops'][0]['phase']=='unknown','first original GET response lost');key(b'\\x0c');waitfor(lambda:state()['jobStops'][0]['phase']=='applied','original stop receipt recovered');assert len(posts())==2
+ pick(two['id']);key(b's');waitfor(lambda:stop_confirmation(two,True),'second original Job stop confirmation shown');input_phase('second_stop_confirmation_shown');key(b'\\r');waitfor(lambda:stop_confirmation(two,False),'second original Job stop confirmation consumed');input_phase('second_stop_confirmation_consumed');assert len(posts())==2;input_phase('before_stop_reader_close');key(b'\\x03');waitfor(main_ready,'closed stop reader and current main input');input_phase('stop_reader_closed');reopen();input_phase('stop_reader_reopened');key(b'\\x0c');waitfor(lambda:len(state().get('stopReads',[]))==1 and state()['stopReads'][0]['commandId']==state()['jobStops'][0]['request']['commandId'] and state()['stopReads'][0]['settled'] and state()['jobStops'][0]['phase']=='unknown','first exact original GET settled with response lost');key(b'\\x0c');waitfor(lambda:state()['jobStops'][0]['phase']=='applied','original stop receipt recovered');assert len(posts())==2
  mark('release-jobs');waitfor(lambda:next(j for j in state()['jobs'] if j['id']==two['id'])['status']=='succeeded','other Job original success');assert len(posts())==2
  os.kill(p.pid,signal.SIGTERM);deadline=time.monotonic()+5
  while p.poll() is None and time.monotonic()<deadline:pump()
@@ -118,6 +132,10 @@ finally:
   expect(facts.stops).toEqual({ 'long-one': 1 });
   expect(facts.stopPosts).toBe(1);
   expect(facts.stopGets).toBe(2);
+  expect(facts.stopReads).toEqual([
+    { commandId: facts.lostStop, settled: true },
+    { commandId: facts.lostStop, settled: true },
+  ]);
   expect(facts.modelCalls).toBe(2);
   expect(facts.childCalls).toBe(3);
   expect(facts.effects).toBe(200);

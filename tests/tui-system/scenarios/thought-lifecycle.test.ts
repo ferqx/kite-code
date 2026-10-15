@@ -332,6 +332,10 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   test(
     'adjacent file searches retain active pattern detail and settle as one plural summary',
     async () => {
+      let finishSearchPhase!: () => void;
+      const searchPhaseObserved = new Promise<void>((resolve) => {
+        finishSearchPhase = resolve;
+      });
       server.setResponses([
         {
           message: {
@@ -342,27 +346,38 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         {
-          expectedRequest: {
-            toolResults: [
-              { toolCallId: 'search-a', contentIncludes: ['CLAUDE.md'] },
-              { toolCallId: 'search-b', contentIncludes: ['CLAUDE.md'] },
-            ],
+          // Hold the real next Model request until its active exploration is painted.
+          // Fast local glob calls can otherwise finish before the first Session read;
+          // a final answer after 10ms does not establish an observable active phase.
+          response: async () => {
+            await searchPhaseObserved;
+            return {
+              expectedRequest: {
+                toolResults: [
+                  { toolCallId: 'search-a', contentIncludes: ['CLAUDE.md'] },
+                  { toolCallId: 'search-b', contentIncludes: ['CLAUDE.md'] },
+                ],
+              },
+              message: { content: 'SEARCH_PAIR_DONE: both searches completed.' },
+            };
           },
-          message: { content: 'SEARCH_PAIR_DONE: both searches completed.' },
-          delay: 10,
         },
       ]);
 
       const searchFrames = tui.markScreen();
-      await submitUserMessage(tui, server, 'Search two file patterns', { timeout: 15000 });
-      await waitForCondition(
-        () =>
-          tui
-            .screenFramesSince(searchFrames)
-            .some((frame) => screenContains(frame, 'Find CLAUDE.md')),
-        'the active safe search summary to retain its bounded pattern detail',
-        10_000,
-      );
+      try {
+        await submitUserMessage(tui, server, 'Search two file patterns', { timeout: 15000 });
+        await waitForCondition(
+          () =>
+            tui
+              .screenFramesSince(searchFrames)
+              .some((frame) => screenContains(frame, 'Find CLAUDE.md')),
+          'the active safe search summary to retain its bounded pattern detail',
+          10_000,
+        );
+      } finally {
+        finishSearchPhase();
+      }
       await waitForText(() => tui.outputSinceLastAction(), 'SEARCH_PAIR_DONE', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 

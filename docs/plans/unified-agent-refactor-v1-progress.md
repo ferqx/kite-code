@@ -6543,3 +6543,36 @@ Files 三范围、丢回执及两次强杀窗口的四原完整文件随后全�
 必要局部验证包括主屏／滚动／焦点／Footer 四完整文件 23 pass／254 assertions、14 行并发与真实 TTY 显示来源两例 2 pass／11 assertions、真实配置与 Host 显示两完整文件 21 pass／142 assertions。原输入七文件 41 pass、MCP 四 owner 完整文件 47 pass、真实模型／Files 五完整文件 9 pass、错误页及真实 Host 两文件 3 pass，以及其余未变投影证据按适用源码复用，没有盲跑全部 816 个默认文件或新增性能采集。根与八 workspace 类型检查、最终八 workspace 构建、边界／workspace／API／测试归属和文档强制检查在本地提交范围核验；末次类型检查纠正了新增夹具的 Run 完成状态为真实 `completed`，原两例随后完整通过。
 
 最终本地 Terminal 由收束源码构建，candidate=`d2af38cf1e1198d3ff73e312e07a2dc457b8a021f2e1fb3bce3682a5d6aebc6a`，选择时持原制品使用锁，前一候选保留于 `.cache/unified-terminal-before-parity-final-20261015`。本轮仅本地提交，不 push、不触发 Actions。Win/Linux 继续按用户决定留正式发布前平台验证，Actions 接线和备注保留；原 32MiB RSS、完整资源／出生观测仍是未取得的发布资格，不据本轮 UI 迁移声明全 V1.3 或阶段退出。
+
+## 2026-10-15：客户端 UI 迁移缺口与回归收束
+
+本轮按用户要求补齐审计发现的三个 UI 缺口，并修正原完整回归中的过时夹具和剩余失败。基线为持久 checkout 的 `99d591fe3`；Git 交付范围为用户要求的本地提交，不包含 push 或发布。首轮审计的 308 完整文件／195 作业为 179 通过、16 失败，另 Web 11 文件 61 项通过；原红保留于 `/private/tmp/kite-ui-audit.WvkK0y` 和 `/private/tmp/kite-ui-audit-remaining.zKNk64`，不以早前绿结果代替本轮。
+
+- [普通 Native 授权](../../apps/desktop/src/native-trust.tsx)独立于诊断侧栏，展示准确项目与完整读取范围，原观察确认、取消、变化失效、unknown 原 ID 查回及明确继续均沿既有 controller；[普通 DOM](../../apps/desktop/test/isolated/native-new-conversation-dom.test.tsx)原整文件 11 项／261 断言通过。
+- [Web 后台目录](../../apps/web/src/background.tsx)与准确子会话导航消费现有公共 GET；完整输出沿原固定水位 reader，缺清理等事实明确不可用。目录恢复运行／待输入优先提示，复用共享 Badge／Spinner。Web、Browser 与实际 Cookie／SQLite 组合 14 文件 82 项／795 断言通过；跨包边界归 [active](../active/unified-agent-boundary.md)。
+- Native 模型夹具统一自有用户文件；显式工具选择保按 ID 合并的真实语义，恢复调用者从进程启动绑定同一 HOME。Provider／MCP 保真实 OS vault，只在自有 HOME 建立默认钥匙串引用，准确撤销本例凭据。没有为测试扩大生产权限或恢复范围。
+- TUI 菜单尾随文字的旧拒绝断言按现有兼容行为修正；帮助取消、刷新与用户模型作用域同步手册。Thought 场景在实际后继 Model 请求使用显式画面同步点，保原活动细节／复数终态断言与期限；原完整文件 13 项／133 断言通过，不增加生产延迟。
+
+最终完整 UI 首轮按 330 个唯一完整文件／211 作业冻结执行，实际退出 1 并排空，4691 个输入及 HEAD 无漂移；证据为 `/private/tmp/kite-ui-migration-full-20261015-1.log` 与同名 `.json`。新增失败发生在隔离 runner HOME 下的默认钥匙串发现：Bun 的用户目录也受启动 HOME 影响。夹具改按进程 UID 只读查询 Directory Services 的准确目录后读取默认钥匙串，保真实 OS vault、私有配置、原预算及准确撤销证明，没有更改产品凭据后端。
+
+第二轮同一完整计划仍实际退出 1，44 个已启动作业全部结束，4691 个输入及 HEAD 无漂移；证据为 `/private/tmp/kite-ui-migration-full-20261015-2.log` 与同名 `.json`。Native MCP 的真实 vault 与清理、普通 Native bundle、后台／完整 Job 输出等已在该轮通过。CLI 恢复原整文件的两条 shared 旅程失败于首次 bootstrap：短命管理进程启动 daemon 后退出，正式 `--no-orphans` 清理了其后代。独立最小进程探针确认相同 Bun 父进程结构在该规则下后代消失、裸运行保活；修复限定于夹具管理进程的存活与正常停止，不撤运行器清理、不改变恢复产品语义。
+
+恢复夹具的长活管理进程在正式 HOME 隔离／`--no-orphans` 下原完整文件 7 pass／220 assertions／10.44 秒。第三轮优先原恢复、MCP 和 Provider 后仍运行同一 330 文件／211 作业计划，这三份、Thought 原完整场景、Native 普通窗口／后台／Shell／输出及自动审批均通过；该轮实际退出 1，89 个已启动作业全部结束且输入／HEAD 无漂移。唯一正式失败为 Caller Port 大正文 Plan 旅程的自有模型工具身份检查，原红为 `/private/tmp/kite-ui-migration-full-20261015-3.log` 与同名 `.json`。临时探针捕获真实消息：固定恢复模型要求 files.write 被 Plan 只读正确拒绝，固定完成文本之后原规划仍 pending 并继续请求模型，最后 assistant 已非原 Tool call。根因是该消费者误用恢复固定回答；修复使用真实 Provider 的明确等待点保活 journal 测试的活动 Run，原恢复工作仍沿完整身份检查，不更改生产规划规则。
+
+第四轮仍沿相同完整计划、四并发和原预算运行，四个前述问题文件全部通过；该轮因 TUI 原后台执行 reader 在两次 Ctrl+L 的回执读取衔接处失败而退出 1，71 个已启动作业全部结束。源代码、测试、文档共 4691 个输入与 HEAD 保持不变，原始证据为 `/private/tmp/kite-ui-migration-full-20261015-4.log` 与同名 `.json`。
+
+为集中发现剩余问题，随后在完全相同输入下用原 `runTestJob`／HOME 隔离／`--no-orphans`／各自完整预算，把上述计划未启动的 140 个完整文件及作业全部诊断并排空，四并发后再串行两个原独占作业。139 个通过，独占 CLI Caller 的第三条 paired main Work 失败，正式终端导出完整文件通过；输入与 HEAD 继续无漂移。证据为 `/private/tmp/kite-ui-migration-unstarted-20261015-4.log` 与同名 `.json`。运行器自测刻意启动的 `tui-a-failure` 已由其父测试验证为预期负例，不作为额外正式失败，也不从原日志删除。
+
+两段完整覆盖当前 330 个唯一文件／211 作业，明确保留 TUI reader 与 CLI Caller 两项正式失败；这不是单次整轮全绿。TUI 专属夹具现按真实 getCommand 的准确 ID／settled 结果及完整当前面板帧衔接按键；原红未记录 GET started／settled，不能追认具体哪次键或读取失效。原完整文件正式隔离复验 1 pass／38 assertions／11.29 秒，原 applied、1 POST／2 GET、全文／子日志、兄弟 Job 独立状态及清理保持，证据 `/private/tmp/kite-ui-executions-settled-original-final-20261015.log`。CLI 第三例的真实 `model_unavailable` 来自子 CLI 漏传自有 HOME，补准确环境后原完整文件 3 pass／83 assertions／42.21 秒；原审批、一次效果、三次模型与正常 Service 退出均保持，证据 `/private/tmp/kite-cli-caller-official-runner.log`。两项均无生产代码变化。
+
+本机实际编译 Web 的 Service／SQLite／Cookie 浏览器复核已经正常退出：四项完整后台 metadata、原 stdout／stderr／progress 至真实上界 3、准确子会话完整 History、真实运行 Spinner、620px 无横向溢出与主题切换通过；只读浏览期间没有额外模型调用，唯一显式追加使模型数从 3 到 4，最终仍为 4。现场证据 `/private/tmp/kite-ui-browser-final-20261015.json`；初次临时探针的自有等待期错误保留说明，未修改产品或正式测试预算。
+
+第五轮优先四份原集成作业时，Executions 在尚未进入停止／Ctrl+L 阶段的原邻接断言失败，其余三份通过并排空，输入与 HEAD 无漂移；证据 `/private/tmp/kite-ui-migration-full-20261015-5.log` 与同名 `.json`。原失败 state 为 step-200 index201／seq204、step-199 index202／seq205、完整 final assistant index203／seq206；200 条结果均在，是现行物理完成顺序下的合法历史。按 Agent owner／active 和真实 reader 核实后，驱动保全部原内容，新增准确 200 条 Tool／call／内容集合和整批终态顺序证明，按真实 assistant 绝对索引跨页读取，不改生产或串行化夹具。
+
+该最终 Executions 与 CLI 恢复、Native MCP／Provider 组成原四并发组合，一次 4／4 完整通过并排空，Executions 1 pass／38 assertions／12.98 秒，证据 `/private/tmp/kite-ui-executions-order-four-concurrent-20261015.log`。新增集合断言也核过原红 state 的完整合法历史；没有跳过乱序、放宽预算或删除正文／取消／清理检查。
+
+第六轮这五个问题文件均通过，后在 Native read ownership 的 `native_draining` 原用例遇到 JSDOM 跨 realm Event 异常。43 个已启动作业全部结束，输入与 HEAD 无漂移，原红 `/private/tmp/kite-ui-migration-full-20261015-6.log` 与同名 `.json`。根因是该夹具卸载后用 `Bun.sleep(0)`，未等待 Radix 真正的 timer，便恢复全局 CustomEvent。只改为实际 FIFO timer turn 后，真实 Radix 事件证明在全局恢复前沿正确 realm 派发；正式四并发原读取归属／恢复范围／窗口操作／新对话四完整文件 29 pass／430 assertions／actual 0，证据 `/private/tmp/kite-native-read-ownership-fifo-original-20261015.log` 和 `kite-native-read-ownership-focus-realm-proof-20261015.log`。未改生产或共享 DOM helper，未增加任意延迟或预算。
+
+第七轮在 macOS arm64／Bun 1.4.2 上取得单次完整通过：330 个唯一完整文件／211 个正式作业，原四并发及最后两个独占全部结束，actual 0／741.049 秒。当前 TUI 全库存 113 文件及全部原 52 个真实终端场景均在其中；Desktop／共享 UI／Web owner、Browser SDK／Cookie Gateway 与受影响恢复消费者完整覆盖。执行前后 4691 个文件及 HEAD `99d591fe3` 无漂移，输入 SHA-256 `4d1f8abddd90663b1e4a6202f87b45d34d2717a4bfaedae0bb374311835eee77`；原日志 `/private/tmp/kite-ui-migration-full-20261015-7.log`，冻结结果同名 `.json`，独立清单核对 `kite-ui-migration-full-20261015-7-audit.json` 确认 211 个准确作业均启动、通过且无正式失败。负例自测不重复计数，前六轮原红与剩余诊断完整保留。
+
+三个本轮 UI 缺口及上述夹具／剩余失败已闭合。根项目及八个 workspace 类型检查、八 workspace build、架构／API／workspace、测试归属、格式与文档门禁通过；最终结果归档只更新本段文档，再核文档与相关类型门禁。此次结论限本轮客户端 UI 与受影响链路，没有把其他平台、完整默认 823 文件或安装发行资格升级为实测通过，亦未取得整个 V1.3／阶段退出资格。

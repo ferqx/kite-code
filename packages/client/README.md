@@ -217,3 +217,6 @@ Provider Settings 的 `getProviderSettings({storeId})` 与 `updateProviderSettin
 ## 终端展示的只读 metadata
 
 同源生成类型包含 Tool `toolCallId/toolInput`、实际 `compressionProgress`、模型 `connectionId`及 Files `textChange`。Files decoder 核 UTF-8、有界 preview、truncated 与实际行统计，不把展示片段当恢复 bytes；SessionLog 只放行类型／category均匹配的 `builtin.files/checkpoint/<64hex>/point`，其他动态 key 仍不可见。[Files](test/isolated/file-checkpoints.test.ts)与[SessionLog](test/isolated/session-logs.test.ts)保留原身份、分页、拒绝与零效果断言。
+
+
+Cookie Browser 也提供 `listBackgroundExecutions` / `listAllBackgroundExecutions`，沿原 `sessions` capability 读取具名 `/browser/v1/background-executions`。浏览器只发送 Workspace/root Session/Execution 与分页条件，当前 Store 由 Gateway 注入；Store/subject authority 注入在请求前或 Gateway closed query 拒绝。完整 reader 复用有限重扫的 snapshot collector，核原执行、来源、child-start 绑定、Decimal64 上界与跨页重复；恢复来源不重标。它没有任何执行控制方法，原输出继续使用准确 Session/Execution 的 `listExecutionOutput`。对应 [Browser 反例](test/browser-background.test.ts)与[真实 Cookie 消费者](../../apps/service/test/isolated/development-web.test.ts)分别验证完整性和实际只读边界。

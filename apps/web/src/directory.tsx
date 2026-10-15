@@ -3,7 +3,7 @@ import {
   type SessionDirectoryActivity,
   type SessionDirectoryPage,
 } from '@kite-ai/client';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kite-ai/ui/desktop';
+import { Badge, Spinner, Tooltip, TooltipContent, TooltipTrigger } from '@kite-ai/ui/desktop';
 import { type ReactElement, type ReactNode, useEffect, useState } from 'react';
 
 export type DirectorySession = SessionDirectoryPage['items'][number] & {
@@ -116,4 +116,25 @@ export function DirectoryItem({
   );
 }
 
-export const directoryCSS = `.web-directory-tooltip{background:Canvas;color:CanvasText;border:1px solid #8886;border-radius:5px;padding:.65rem;max-width:min(420px,calc(100vw - 16px));overflow-wrap:anywhere;z-index:20}.web-directory-tooltip[data-theme=dark]{color-scheme:dark}.web-directory-tooltip[data-theme=light]{color-scheme:light}.web-directory-tooltip dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.25rem .75rem;margin:.5rem 0 0}.web-directory-tooltip dd{margin:0}.directory-more{border:0;opacity:.7}`;
+export const directoryCSS = `[data-directory-row][href]{display:flex;align-items:center;gap:.5rem}.directory-activity{margin-left:auto;font-size:.8em;white-space:nowrap}.directory-waiting{display:inline-flex;flex-shrink:0;align-items:center;border:1px solid transparent;border-radius:999px;padding:2px 8px;background:var(--attention-background,Mark);color:var(--attention-foreground,MarkText);font-weight:500}.directory-running{display:inline-block;width:12px;height:12px;animation:directory-spin 1s linear infinite}@keyframes directory-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.directory-running{animation:none}}.web-directory-tooltip{background:Canvas;color:CanvasText;border:1px solid #8886;border-radius:5px;padding:.65rem;max-width:min(420px,calc(100vw - 16px));overflow-wrap:anywhere;z-index:20}.web-directory-tooltip[data-theme=dark]{color-scheme:dark}.web-directory-tooltip[data-theme=light]{color-scheme:light}.web-directory-tooltip dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.25rem .75rem;margin:.5rem 0 0}.web-directory-tooltip dd{margin:0}.directory-more{border:0;opacity:.7}`;
+
+/** Waiting takes priority; an old observation never presents itself as live activity. */
+export function DirectoryActivity({
+  activity,
+  stale,
+}: {
+  activity: SessionDirectoryActivity;
+  stale: boolean;
+}) {
+  if (stale)
+    return (
+      <span className="directory-activity" role="status" aria-label="Last read activity">
+        上次读取
+      </span>
+    );
+  if (activity.pendingInteractions > 0)
+    return <Badge className="directory-activity directory-waiting">待用户输入</Badge>;
+  if (activity.run?.isActive)
+    return <Spinner className="directory-activity directory-running" aria-label="正在运行" />;
+  return null;
+}

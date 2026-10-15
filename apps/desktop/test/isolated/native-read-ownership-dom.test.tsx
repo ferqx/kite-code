@@ -191,8 +191,9 @@ function fixture(
     },
     async close() {
       await act(async () => root.unmount());
-      // Radix restores focus in a zero-delay unmount task; keep this DOM's Event realm until it ends.
-      await act(async () => Bun.sleep(0));
+      // FocusScope enqueues its unmount event with setTimeout(0). Wait on that same FIFO timer
+      // queue before releasing this Event realm; Bun.sleep(0) only yields a microtask.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       dom.window.close();
       restoreLayout();
       Object.assign(globalThis, prior);

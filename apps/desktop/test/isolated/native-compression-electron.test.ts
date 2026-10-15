@@ -13,6 +13,7 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -48,6 +49,7 @@ test.skipIf(process.platform !== 'darwin')(
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-compression-')),
       barrier = gate(),
       compressionBarrier = gate();
+    const userConfiguration = ownedUserConfiguration(root);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
       workspace = join(root, 'workspace');
     mkdirSync(workspace);
@@ -177,7 +179,7 @@ test.skipIf(process.platform !== 'darwin')(
       },
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'local',
         models: [

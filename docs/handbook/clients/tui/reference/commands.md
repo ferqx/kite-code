@@ -25,10 +25,10 @@
 | `/export` | 无参数 | 当前已加载对话 Markdown，不代替完整 records export |
 | `/clear` | 无参数 | 清理本地正文展示，保留历史数据、草稿、待决审批和活动工作 |
 | `/status` | 无参数 | 实际 profile/实例/API/候选与执行、发行、遥测事实 |
-| `/help` | `/h`，无参数 | 当前命令帮助；上下滚动、Home/End 跳转、Esc 或 Ctrl+C 关闭，不取消任务 |
+| `/help` | `/h`，无参数 | 当前命令帮助；上下滚动、Home/End 跳转，Esc 关闭；Ctrl+C 请求整轮取消并关闭帮助 |
 | `/exit` | `/quit`、`/q`，无参数 | 明确结束本宿主 |
 
-未知 slash 不作为普通模型任务提交，固定命令优先于同名 Skill。只有当前编译目录中合格的 `/<Skill名称> [任务]` 才能显式激活 Workflow。`/mcp` 是固定无参数命令；当前有限目录与启停不等于完整认证、重连、增删或工具管理，差异见[MCP 指南](../guides/mcp-and-skills.md#通用-tui-的-mcp-目录与选择)。多余参数局部拒绝，不静默扩大操作。当前实现见[命令 owner](../../../../../packages/ui/src/tui/commands.ts)，详细按键见[键盘参考](keyboard.md)。
+未知 slash 不作为普通模型任务提交，固定命令优先于同名 Skill。只有当前编译目录中合格的 `/<Skill名称> [任务]` 才能显式激活 Workflow。`/mcp` 是固定无参数命令；当前目录、连接、认证与来源管理的范围见[MCP 指南](../guides/mcp-and-skills.md#通用-tui-的-mcp-目录与选择)。原菜单命令 `/resume`、`/clear`、`/help`（`/h`）、`/new`、`/rewind`、`/export`、`/context`、`/exit`（`/quit`、`/q`）忽略尾随文字，文字不会选择另一会话、导出路径或操作范围；`/context requests` 仍是明确的原申请入口。其他固定选择器和管理命令按表中参数校验，多余参数局部拒绝。当前实现见[命令 owner](../../../../../packages/ui/src/tui/commands.ts)，详细按键见[键盘参考](keyboard.md)。
 
 ## 测试诊断展示
 
@@ -48,7 +48,7 @@
 
 ## 通用开发 TUI 模型入口
 
-`/model`、`/effort` 均不接受参数。上下选择、Enter 核对再 Enter 保存；模型面板 E 核对启禁，R 读取，K 查询原操作，Esc 放弃确认或关闭。范围为当前 Workspace 项目设置，详情见[模型指南](../guides/models-and-settings.md#开发统一-tui-的模型设置)。
+`/model`、`/effort` 均不接受参数。上下选择，Enter 保存所选默认模型或思考档位；模型面板 E 进入启禁确认，再按 Enter 提交，R 读取，K 查询原操作，Esc 放弃确认或关闭。两者统一使用用户配置，保存后影响使用该配置的项目，详情见[模型指南](../guides/models-and-settings.md#开发统一-tui-的模型设置)。
 
 目录初始定位实际 default model 或当前 effort，超过一屏时显示当前项所在窗口。`/rewind` 用原消息识别恢复点并显示真实文件影响，三范围需独立 Enter 确认；普通模式不显示整个内部申请对象，原未知申请仍按 L/R/C/A 核实。
 

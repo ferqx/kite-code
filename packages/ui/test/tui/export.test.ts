@@ -141,7 +141,8 @@ test('loaded-only export preserves full text and reasoning, marks unread preview
   expect(text).not.toContain('preview only');
   expect(f.saved[1]!.sessionId).toBe('a');
   expect(Object.isFrozen(f.saved[1]!.messages)).toBe(true);
-  expect(() => parseTuiCommand('/export other')).toThrow();
+  // Original menu tails are ignored; they never select a different export target.
+  expect(parseTuiCommand('/export other')).toEqual({ kind: 'export' });
 });
 test('late export, closed view and write failure never publish success into another selected Session', async () => {
   const f = setup();

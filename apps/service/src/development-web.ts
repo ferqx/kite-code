@@ -4,6 +4,8 @@ import { apiDocumentationAssets } from './api-docs';
 import { fileCheckpointResponse, supportsFileCheckpoints } from './file-checkpoint-response';
 import {
   apiSchemas,
+  BackgroundExecutionPageSchema,
+  BackgroundExecutionQuerySchema,
   BrowserContextQuerySchema,
   BrowserInfoSchema,
   BrowserModelInputQuerySchema,
@@ -290,6 +292,7 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
           '/browser/v1/sessions',
           '/browser/v1/workspace-directory',
           '/browser/v1/session-directory',
+          '/browser/v1/background-executions',
         ].includes(url.pathname) &&
         !checkpointMatch &&
         !viewMatch &&
@@ -417,6 +420,26 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
               ),
             }),
           );
+        }
+        if (url.pathname === '/browser/v1/background-executions') {
+          query(url, [
+            'workspaceId',
+            'rootSessionId',
+            'executionId',
+            'afterSeq',
+            'upperSeq',
+            'snapshotCursor',
+            'limit',
+          ]);
+          const parsed = BackgroundExecutionQuerySchema.safeParse({
+            ...Object.fromEntries(url.searchParams),
+            storeId: original.storeId!,
+          });
+          if (!parsed.success) throw new ClientError('invalid_query');
+          const page = await options.admittedClient.listBackgroundExecutions(parsed.data, {
+            signal: controller.signal,
+          });
+          return json(BackgroundExecutionPageSchema.parse(page));
         }
         if (url.pathname === '/browser/v1/workspaces') {
           query(url, []);

@@ -2,6 +2,20 @@
 
 本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
+客户端 UI 迁移回归沿当前 TUI 全库存、Desktop／UI／Web owner 整文件及受影响的 Browser／Cookie Gateway／恢复调用者执行，实际整轮结果归[客户端 UI 收束记录](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-15客户端-ui-迁移缺口与回归收束)。模型夹具只读写自有 HOME 的用户配置，不再依赖退役的 Profile 配置。Thought 的快速搜索通过实际下一次 Model 请求的显式同步点观察活动画面，保原步骤、终态及超时，不靠生产延迟或伪造终端帧。
+
+共享恢复夹具的真实管理进程从启动时绑定自有 HOME，并持续存活到原 daemon 正常停止；正式 `--no-orphans` 规则仍保留。只收到真实 start 成功信号后运行原恢复／查询旅程，完成后通过管理进程调用原 stop 并核退出，不能将短命管理进程被清理后的连接失败归为恢复结果。
+
+Caller Port 的大正文 Plan／steer／follow-up／取消和日志容量旅程为准确自有 Session 启用真实 Provider 流等待点，确认模型请求已经到达后再观察活动 Run；普通恢复工作的原 Files Tool call 身份检查保持。该等待点不修改规划权限、不增加生产延迟，也不以固定恢复回答充当新 Plan 的完成结果。
+
+后台停止丢回执的 PTY 旅程先核实首次原 GET 已实际结束，再发送下一次 Ctrl+L；重开时等待当前会话的完整面板帧。两者只保证输入前提，最终仍须原 applied 回执、准确一次 POST／两次原 ID GET、完整输出与子日志、兄弟 Job 独立状态及正常清理。
+
+同批子 Tool 的物理历史沿[实际完成顺序](../packages/agent/README.md#同一-step-的并行工具批次)保存。该 reader 旅程核全部 200 条原 Tool 的准确身份、正文及调用集合，最终 Model 紧跟整批实际最后一条结果，再按真实消息索引跨页阅读；不能假设编号 200 必须最后完成，也不能为驱动重排历史。
+
+Native DOM 的读取归属夹具在卸载后等待真实 FIFO timer turn，再关闭 JSDOM 和恢复全局 Event 构造器；Radix FocusScope 的卸载事件必须仍属于原 realm。`Bun.sleep(0)` 让出微任务，不能作为该 timer 已完成的证明；此清理不改变生产组件或增加业务等待预算。
+
+Native Provider／MCP 的实际 macOS 凭据场景使用[自有 HOME 的默认钥匙串引用](../apps/desktop/test/owned-default-keychain.ts)：按进程 UID 只读查询 Directory Services 中的 OS 用户目录，再读取该用户的默认钥匙串，在私有测试 HOME 建立引用，让真实 OS 后端可用；不依赖 Bun 启动时缓存的 HOME、不复制钥匙串、不更改系统默认项或搜索列表。测试仍只保存自有随机凭据，并沿原准确引用撤销及用新 Vault 核实不存在，不能将临时内存后端记作这项资格。普通产品启动和其他平台的后端没有变化。
+
 2026-10-14 已按用户要求在 Windows NT 10.0.26300.0／x64／Bun1.4.2 实际执行本机验证：修复Worker构建路径与四个TOKEN_USER缓冲区问题后，八workspace build通过；原默认首批Desktop作业失败并中断，后续未派发。另26份原完整专项各独立Bun进程，12文件通过／14文件失败，合33pass／34fail／4原平台skip／2error。通过范围含daemon原生叶子、stdio MCP、文件候选与TUI私有记录；Files／媒体发布错误87、普通Workspace配置、四份恢复、ConPTY内容、Desktop夹具和缺MSVC仍阻断完整验收。准确命令、原日志与局部修复归[Windows本机证据](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-14windows-本机首次实际验证)。以下旧“Win/Linux未实测”只描述各历史轮次，当前Windows已实测但未通过，Linux／hosted Actions及完整installed资格不由本轮替代。
 
 `bun run test:tui:integration`／`test:tui:system` 使用[当前统一入口](../scripts/run-unified-tui-system-tests.ts)，逐整文件发现原 `tests/tui-system/scenarios` 的 52 个真实终端旅程，并与新 CLI TUI owner、正式入口和跨模块启动等待文件一起执行。`KITE_TUI_SYSTEM_SHARD` 接受 0/4 至 3/4；四份完整覆盖同一库存，每个文件只归一份。原旅程消费当前 Ink UI、公共 Client 和默认 Service；协议映射只转换原参数与实际新收据，不生产旧 Runtime 事件或伪造结果，原超时、清理门禁和行为断言继续保留。
@@ -10,7 +24,7 @@
 
 历史 Store9/11 确属旧数据库格式；其转换按 D08 不适用，对应旅程改验隔离的新 Store／Profile 的会话、重启和维护能力，不能将这些结果记作旧格式兼容；实际旧 State26 文件只作为不读取、不覆盖的隔离反例，遵守 D08。当前新 Store 的版本与维护恢复验证继续由正式测试负责。可选的旧 lifecycle 诊断 fixture 与 `in-process-service-connector` 尚属历史参考，不参与当前 52 个旅程，也不证明全 Runtime 资源或出生后代资格。当前完整执行结果归[进度](../docs/plans/unified-agent-refactor-v1-progress.md)，下面此前默认结果保持其原提交和范围。
 
-当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出；本轮新增上下文估算、实际主屏子任务布局与错误退出测试，合并 Desktop 开发与菜单测试后当前为 819 个默认文件。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
+当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出；本轮新增上下文估算、实际主屏子任务布局与错误退出测试，合并 Desktop 开发与菜单测试并补本轮 Browser／Web 回归后当前为 823 个默认文件。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
 
 本轮原 TUI 迁移前最近完整默认为macOS `a99fdf29` 加当轮最终冻结改动的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1472.848秒，原四并发／604排空后7独占保持；4493输入、11资产、HEAD和Git零漂移。恢复Actions守卫、四份正式恢复、原Terminal／Web／80×24 TUI与Native头部错误／草稿完整文件均在该图内通过，原三轮失败及修复证据保留。准确冻结、原log与result归[集中收尾进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。最终结果归档仅补文档，不重新命名未变执行输入为新一轮测试；原RSS／完整资源与出生后代仍未闭合，wholeV13／phaseExit保持false，Win/Linux只有配置完成与未实测备注。
 

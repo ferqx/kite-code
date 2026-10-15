@@ -18,6 +18,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
@@ -43,6 +44,7 @@ test.skipIf(process.platform !== 'darwin')(
     mkdirSync(workspace);
     const ownedHome = join(root, 'home');
     mkdirSync(ownedHome);
+    const userConfiguration = ownedUserConfiguration(ownedHome);
     const original = Buffer.from(`\uFEFF${'完整原始字节 α\r\n'.repeat(8000)}`),
       originalPath = join(workspace, 'original.txt');
     writeFileSync(originalPath, original);
@@ -119,7 +121,7 @@ test.skipIf(process.platform !== 'darwin')(
       },
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [

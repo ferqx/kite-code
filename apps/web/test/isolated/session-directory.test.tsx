@@ -223,7 +223,7 @@ test('complete directory sorts original activity before 5/+10 presentation and k
     child.session.parentSessionId = 's0';
     f.state.entries.push(child, item('foreign19', 'other', 99999));
     await f.click(f.button('Workspace'));
-    expect(f.rows().map((row) => row.textContent)).toEqual([
+    expect(f.rows().map((row) => row.childNodes[0]?.textContent)).toEqual([
       'Title s15',
       'Title s14',
       'Title s13',
@@ -235,7 +235,8 @@ test('complete directory sorts original activity before 5/+10 presentation and k
         .rows()
         .every(
           (row) =>
-            row.textContent === row.getAttribute('href')?.split('/').at(-1)?.replace(/^/, 'Title '),
+            row.childNodes[0]?.textContent ===
+            row.getAttribute('href')?.split('/').at(-1)?.replace(/^/, 'Title '),
         ),
     ).toBe(true);
     await f.focus(f.button('Workspace'));
@@ -348,7 +349,7 @@ test('directory details use original activity and exact time with bounded hover,
     await f.visibility('hidden');
     expect(f.tooltip()).toBeNull();
     await f.visibility('visible');
-    expect(f.rows().map((row) => row.textContent)).toEqual(['Title s0', 'Title s1']);
+    expect(f.rows().map((row) => row.childNodes[0]?.textContent)).toEqual(['Title s0', 'Title s1']);
   } finally {
     await f.close();
   }
@@ -359,10 +360,10 @@ test('directory failure retains complete facts and late paused or disposed respo
   let release = () => {};
   try {
     await f.click(f.button('Workspace'));
-    const original = f.rows().map((row) => row.textContent);
+    const original = f.rows().map((row) => row.childNodes[0]?.textContent);
     f.state.fail = true;
     await f.click(f.button('Refresh directory'));
-    expect(f.rows().map((row) => row.textContent)).toEqual(original);
+    expect(f.rows().map((row) => row.childNodes[0]?.textContent)).toEqual(original);
     expect(f.section().textContent).toContain('directory_unavailable');
     f.state.fail = false;
     await f.click(f.button('Other'));
@@ -388,8 +389,10 @@ test('directory failure retains complete facts and late paused or disposed respo
     expect(signal.aborted).toBe(true);
     release();
     await f.pause();
-    expect(f.rows().map((row) => row.textContent)).toEqual(original);
-    expect(f.rows('Other').map((row) => row.textContent)).not.toContain('Title late0');
+    expect(f.rows().map((row) => row.childNodes[0]?.textContent)).toEqual(original);
+    expect(f.rows('Other').map((row) => row.childNodes[0]?.textContent)).not.toContain(
+      'Title late0',
+    );
     f.state.held = undefined;
     f.state.late = undefined;
     const resumeStart = f.calls.length;
@@ -410,5 +413,34 @@ test('directory failure retains complete facts and late paused or disposed respo
   } finally {
     release();
     if (f.document.getElementById('root')?.childNodes.length) await f.close();
+  }
+});
+
+test('directory activity uses the original run, prioritizes waiting, and labels stale facts instead of showing a live spinner', async () => {
+  const f = await fixture();
+  try {
+    f.state.entries[0]!.activity = {
+      updatedAt: 50000,
+      queued: false,
+      pendingInteractions: 0,
+      run: { id: 'r', status: 'running', isActive: true, waitingForResults: false },
+    };
+    f.state.entries[1]!.activity = {
+      updatedAt: 49000,
+      queued: false,
+      pendingInteractions: 2,
+      run: { id: 'r2', status: 'running', isActive: true, waitingForResults: false },
+    };
+    await f.click(f.button('Workspace'));
+    expect(f.rows()[0]!.querySelector('[aria-label="正在运行"]')).not.toBeNull();
+    expect(f.rows()[0]!.querySelector('[aria-label="正在运行"]')?.tagName).toBe('svg');
+    expect(f.rows()[1]!.textContent).toContain('待用户输入');
+    expect(f.rows()[1]!.querySelector('[aria-label="正在运行"]')).toBeNull();
+    f.state.fail = true;
+    await f.click(f.button('Refresh directory'));
+    expect(f.rows()[0]!.querySelector('[aria-label="正在运行"]')).toBeNull();
+    expect(f.rows()[0]!.textContent).toContain('上次读取');
+  } finally {
+    await f.close();
   }
 });

@@ -66,7 +66,11 @@ for (const kind of ['run', 'interrupt', 'report'])
             f.workspace,
             resolve(import.meta.dir, '../../package.json'),
           ],
-          { stdout: 'pipe', stderr: 'pipe', env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } },
+          {
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: { HOME: join(f.root, 'home'), PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+          },
         );
         driver = processDriver;
         const error = new Response(processDriver.stderr).text(),

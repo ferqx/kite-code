@@ -16,6 +16,7 @@ import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import {
@@ -35,7 +36,7 @@ export async function untilRecovery(check: () => Promise<boolean>) {
 }
 
 /** Default compatible SDK, actual original Auto ask_user card, real SIGKILL and owned SQLite. */
-export async function recoveryProfile() {
+export async function recoveryProfile(options: { holdModelSessionId?: string } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-client-recovery-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -46,7 +47,8 @@ export async function recoveryProfile() {
     mode: 0o600,
   });
   const ledger = join(root, 'model-ledger');
-  let calls = 0;
+  let calls = 0,
+    heldModelRequests = 0;
   const reviews: { body: Record<string, unknown>; input: Record<string, unknown> }[] = [];
   const provider = (() => {
     try {
@@ -74,11 +76,28 @@ export async function recoveryProfile() {
             try {
               const row = db
                 .query(
-                  'SELECT command.request_json FROM run JOIN command ON command.id=run.origin_command_id WHERE run.is_active=1 ORDER BY command.seq DESC LIMIT 1',
+                  'SELECT command.request_json,run.session_id FROM run JOIN command ON command.id=run.origin_command_id WHERE run.is_active=1 ORDER BY command.seq DESC LIMIT 1',
                 )
-                .get() as { request_json: string } | null;
+                .get() as { request_json: string; session_id: string } | null;
               const human = row && JSON.parse(row.request_json).content;
               if (typeof human !== 'string') throw Error('original_recovery_work_missing');
+              if (row?.session_id === options.holdModelSessionId) {
+                // A caller-journal fixture can hold its own real Model request active.
+                // The original recovery work still follows the strict Files identity below.
+                heldModelRequests++;
+                return new Response(
+                  new ReadableStream<Uint8Array>({
+                    start(controller) {
+                      controller.enqueue(
+                        new TextEncoder().encode(
+                          `data: ${JSON.stringify({ id: 'held-caller', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] })}\n\n`,
+                        ),
+                      );
+                    },
+                  }),
+                  { headers: { 'content-type': 'text/event-stream' } },
+                );
+              }
               complete = originalToolResults(messages, human, [
                 { id: 'original-file', name: 'files.write' },
               ]);
@@ -132,7 +151,12 @@ export async function recoveryProfile() {
       userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
-        tools: [{ id: 'files.write', definitionVersion: '2' }],
+        // This recovery case owns one Files effect; defaults merge by tool ID.
+        tools: ordinaryHostConfigurationDefaults(true).tools.map(({ id }) => ({
+          id,
+          enabled: id === 'ask_user' || id === 'files.write',
+          ...(id === 'files.write' ? { definitionVersion: '2' } : {}),
+        })),
         models: [
           {
             id: 'fixed',
@@ -270,6 +294,7 @@ export async function recoveryProfile() {
       ledger,
       launch,
       calls: () => calls,
+      heldModelRequests: () => heldModelRequests,
       rows,
       reviews,
       reviewProof,

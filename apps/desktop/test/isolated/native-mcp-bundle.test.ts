@@ -20,6 +20,7 @@ import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-asset
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 import type { NativeMcpSubmission } from '../../src/native-bridge';
+import { linkOwnedDefaultKeychain } from '../owned-default-keychain';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
@@ -29,6 +30,7 @@ test.skipIf(process.platform !== 'darwin')(
       home = join(root, 'home'),
       moved = join(root, 'relocated');
     mkdirSync(home, { mode: 0o700 });
+    linkOwnedDefaultKeychain(home);
     mkdirSync(join(home, 'workspace'));
     mkdirSync(join(home, 'workspace', '.kite-code'), { mode: 0o700 });
     const profile = selectProfile({

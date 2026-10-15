@@ -79,6 +79,7 @@ import { NativeStartup } from './native-startup';
 import { useNativeTheme } from './native-theme';
 import { liveToolMessages, useNativeToolMessages } from './native-tool-messages';
 import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-transcript';
+import { NativeTrustConfirmation } from './native-trust';
 import { NativeWindowFrame } from './native-window-frame';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
@@ -2483,55 +2484,130 @@ function NativeDesktopContent({
         </>
       }
       beforeConversation={
-        childDetail ? (
-          <>
-            {childDetail.loading && <p role="status">正在读取完整子会话日志…</p>}
-            {childDetail.error && (
-              <p role="alert">
-                子日志读取失败：{childDetail.error}。
-                {childFacts ? '保留上次完整内容。' : '尚未取得完整内容。'}
-              </p>
+        <>
+          {!diagnostics &&
+            !childDetail &&
+            !preparing &&
+            !scheduledTasksView &&
+            selection?.permissions &&
+            !selection.session.parentSessionId &&
+            !selection.permissions.trust.trusted && (
+              <NativeTrustConfirmation
+                key={JSON.stringify([
+                  state?.generation,
+                  selection.storeId,
+                  selection.session.id,
+                  selection.permissions.trust,
+                ])}
+                facts={selection.permissions}
+                workspace={
+                  directory?.workspaces.find(
+                    (workspace) => workspace.id === selection.session.workspaceId,
+                  )?.rootUri ?? selection.session.workspaceId
+                }
+                busy={
+                  pending ||
+                  !!selection.permissionUnavailable ||
+                  !!state?.permissionSubmissions.some((value) =>
+                    ['saved', 'submitting', 'unknown'].includes(value.phase),
+                  )
+                }
+                onTrust={async () => {
+                  await bridge.request({
+                    method: 'permission.trust',
+                    generation: generation.current,
+                    observationId: selection.permissions!.observationId,
+                    trusted: true,
+                  });
+                  await refresh();
+                }}
+              />
             )}
-            {childFacts && (
-              <p>
-                已完整读取子日志至固定序号 {childFacts.upperSeq}，原子轮次{' '}
-                {childFacts.item.childRun?.id ?? '尚未确认'}。
-              </p>
-            )}
-          </>
-        ) : firstSubmission?.result?.phase === 'unknown' && firstVisible ? (
-          <DesktopButton
-            onClick={() =>
-              void write(async () => {
-                const original = firstSubmission,
-                  current = generation.current,
-                  page = pageIntent.current;
-                const value = await bridge.request({
-                  method: 'conversation.lookup',
-                  generation: current,
-                  commandId: original.commandId,
-                });
-                if (value && 'kind' in value && value.kind === 'conversation' && 'stage' in value)
-                  await acceptFirstResult(value, original, current, page);
-              }, false)
-            }
-            disabled={pending}
-          >
-            查询原首次提交
-          </DesktopButton>
-        ) : preparing &&
-          firstSubmission?.result?.creation?.phase === 'created' &&
-          firstSubmission.creation.expectedStoreId === directory?.storeId ? (
-          <DesktopButton
-            onClick={() => {
-              pageIntent.current++;
-              void report(() => select(firstSubmission.creation.sessionId));
-            }}
-            disabled={pending}
-          >
-            打开本次会话
-          </DesktopButton>
-        ) : undefined
+          {!diagnostics &&
+            !childDetail &&
+            !preparing &&
+            !scheduledTasksView &&
+            selection &&
+            state?.permissionSubmissions
+              .filter(
+                (row) =>
+                  row.sessionId === selection.session.id &&
+                  row.intent.expectedStoreId === selection.storeId &&
+                  ['saved', 'submitting', 'unknown', 'failed'].includes(row.phase),
+              )
+              .map((row) => (
+                <section key={row.intent.commandId} aria-label="项目授权结果">
+                  <PermissionSubmissionStatus
+                    submission={{ commandId: '当前操作', phase: row.phase, error: row.error }}
+                  />
+                  {row.phase === 'unknown' && (
+                    <DesktopButton
+                      onClick={() =>
+                        void report(async () => {
+                          await bridge.request({
+                            method: 'lookupPermission',
+                            generation: generation.current,
+                            commandId: row.intent.commandId,
+                          });
+                          await refresh();
+                        })
+                      }
+                    >
+                      查询原权限选择
+                    </DesktopButton>
+                  )}
+                </section>
+              ))}
+          {childDetail ? (
+            <>
+              {childDetail.loading && <p role="status">正在读取完整子会话日志…</p>}
+              {childDetail.error && (
+                <p role="alert">
+                  子日志读取失败：{childDetail.error}。
+                  {childFacts ? '保留上次完整内容。' : '尚未取得完整内容。'}
+                </p>
+              )}
+              {childFacts && (
+                <p>
+                  已完整读取子日志至固定序号 {childFacts.upperSeq}，原子轮次{' '}
+                  {childFacts.item.childRun?.id ?? '尚未确认'}。
+                </p>
+              )}
+            </>
+          ) : firstSubmission?.result?.phase === 'unknown' && firstVisible ? (
+            <DesktopButton
+              onClick={() =>
+                void write(async () => {
+                  const original = firstSubmission,
+                    current = generation.current,
+                    page = pageIntent.current;
+                  const value = await bridge.request({
+                    method: 'conversation.lookup',
+                    generation: current,
+                    commandId: original.commandId,
+                  });
+                  if (value && 'kind' in value && value.kind === 'conversation' && 'stage' in value)
+                    await acceptFirstResult(value, original, current, page);
+                }, false)
+              }
+              disabled={pending}
+            >
+              查询原首次提交
+            </DesktopButton>
+          ) : preparing &&
+            firstSubmission?.result?.creation?.phase === 'created' &&
+            firstSubmission.creation.expectedStoreId === directory?.storeId ? (
+            <DesktopButton
+              onClick={() => {
+                pageIntent.current++;
+                void report(() => select(firstSubmission.creation.sessionId));
+              }}
+              disabled={pending}
+            >
+              打开本次会话
+            </DesktopButton>
+          ) : undefined}
+        </>
       }
       statusNotice={
         !childDetail &&

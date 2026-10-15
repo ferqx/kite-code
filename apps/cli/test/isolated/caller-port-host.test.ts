@@ -11,7 +11,7 @@ import { openTuiDraftFile } from '../../host/tui-drafts';
 import { recoveryProfile, untilRecovery } from '../fixtures/recovery-profile';
 
 test('actual owned caller port freezes large UTF8 Plan, steer, followup and original cancellation; full/corrupt journal prevents all POST', async () => {
-  const f = await recoveryProfile(),
+  const f = await recoveryProfile({ holdModelSessionId: 'caller' }),
     warm = await f.launch(),
     access = acquireProfileAccess({ dataRoot: f.profile.dataRoot, profile: 'owned' });
   const journal = openCallerJournal({
@@ -79,6 +79,7 @@ test('actual owned caller port freezes large UTF8 Plan, steer, followup and orig
     await untilRecovery(
       async () => (await warm.client.getCommand('large-plan')).status === 'applied',
     );
+    await untilRecovery(async () => f.heldModelRequests() > 0);
     const view = await warm.client.getView('caller'),
       run = view.runs.find((r) => r.isActive)!;
     expect(run).toBeDefined();

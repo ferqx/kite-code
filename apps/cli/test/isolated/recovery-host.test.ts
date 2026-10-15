@@ -143,7 +143,6 @@ for (const mode of ['paired', 'shared'] as const)
     test(`compiled CLI ${mode} cold ${operation} observes original work and looks up saved intent`, async () => {
       const { writeFileSync, mkdirSync, realpathSync } = await import('node:fs');
       const { createHash } = await import('node:crypto');
-      const { runSelectedDaemon } = await import('../../host/daemon');
       const f = await recoveryProfile();
       try {
         const hash = (bytes: string | Uint8Array) =>
@@ -154,8 +153,13 @@ for (const mode of ['paired', 'shared'] as const)
           driverSource,
           `import {appendFileSync} from 'node:fs';import {runCLIProcess} from ${JSON.stringify(new URL('../../host/main.ts', import.meta.url).pathname)};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{preconnect:actual.preconnect});process.exitCode=await runCLIProcess({profile:'owned',argv:process.argv.slice(2),resolveArtifact:()=>(${JSON.stringify(f.artifact)})});`,
         );
+        const daemonSource = join(f.root, 'artifact/daemon-control.ts');
+        writeFileSync(
+          daemonSource,
+          `import {runSelectedDaemon} from ${JSON.stringify(new URL('../../host/daemon.ts', import.meta.url).pathname)};const options=JSON.parse(process.argv[2]!);const started=await runSelectedDaemon({...options,write(){}});if(started!==0)throw Error('owned_daemon_start_failed');console.log('owned_daemon_ready');const stop=await new Response(Bun.stdin).text();if(stop!==${JSON.stringify('stop\n')})throw Error('owned_daemon_stop_required');process.exitCode=await runSelectedDaemon({...options,arguments:{...options.arguments,action:'stop'},write(){}});`,
+        );
         const built = await Bun.build({
-          entrypoints: [driverSource],
+          entrypoints: [driverSource, daemonSource],
           target: 'bun',
           packages: 'external',
           outdir: join(f.root, 'artifact'),
@@ -189,22 +193,88 @@ for (const mode of ['paired', 'shared'] as const)
         expect(protectedEntries).toContain(f.artifact.entrypoint);
         expect(protectedEntries).toContain(daemonEntry);
 
-        const daemon = (action: 'start' | 'stop') =>
-          runSelectedDaemon({
-            arguments: { kind: 'server', action, server: socket, cancel: false, json: false },
-            dataRoot: f.profile.dataRoot,
-            profile: 'owned',
-            cwd: f.workspace,
-            artifact: {
-              ...f.artifact,
-              daemon: {
-                entrypoint: daemonEntry,
-                entrypointSha256: hash(readFileSync(daemonEntry)),
-                web: { directory: web, manifestSha256: hash(raw) },
-              },
+        let daemonManager: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+        let daemonErrors: Promise<string> | undefined;
+        let daemonReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+        const daemon = async (action: 'start' | 'stop') => {
+          if (action === 'stop') {
+            const child = daemonManager!;
+            try {
+              child.stdin.write('stop\n');
+              child.stdin.end();
+              const [out, err, exit] = await Promise.all([
+                (async () => {
+                  let output = '';
+                  for (;;) {
+                    const chunk = await daemonReader!.read();
+                    if (chunk.done) return output;
+                    output += new TextDecoder().decode(chunk.value);
+                  }
+                })(),
+                daemonErrors!,
+                child.exited,
+              ]);
+              if (exit !== 0) console.error({ mode, action, out, err });
+              expect(exit).toBe(0);
+            } finally {
+              if (child.exitCode === null) {
+                child.kill('SIGKILL');
+                await child.exited;
+              }
+              daemonReader!.releaseLock();
+              daemonReader = undefined;
+              daemonManager = undefined;
+            }
+            return;
+          }
+          // Keep the actual manager alive until stop: --no-orphans kills its descendants on exit.
+          // Its startup HOME also owns Bun's cached homedir for configuration discovery.
+          const child = Bun.spawn(
+            [
+              realpathSync(process.execPath),
+              join(f.root, 'artifact/daemon-control.js'),
+              JSON.stringify({
+                arguments: { kind: 'server', action, server: socket, cancel: false, json: false },
+                dataRoot: f.profile.dataRoot,
+                profile: 'owned',
+                cwd: f.workspace,
+                artifact: {
+                  ...f.artifact,
+                  daemon: {
+                    entrypoint: daemonEntry,
+                    entrypointSha256: hash(readFileSync(daemonEntry)),
+                    web: { directory: web, manifestSha256: hash(raw) },
+                  },
+                },
+              }),
+            ],
+            {
+              cwd: f.workspace,
+              env: { ...process.env, ...f.userConfiguration.homeEnvironment },
+              stdin: 'pipe',
+              stdout: 'pipe',
+              stderr: 'pipe',
             },
-            write() {},
-          });
+          );
+          daemonManager = child;
+          daemonErrors = new Response(child.stderr).text();
+          const reader = child.stdout.getReader();
+          daemonReader = reader;
+          try {
+            const ready = await reader.read();
+            expect(ready.done).toBe(false);
+            expect(new TextDecoder().decode(ready.value)).toBe('owned_daemon_ready\n');
+            expect(child.exitCode).toBeNull();
+          } catch (error) {
+            if (child.exitCode === null) child.kill('SIGKILL');
+            await child.exited;
+            console.error({ mode, action, err: await daemonErrors });
+            daemonManager = undefined;
+            reader.releaseLock();
+            daemonReader = undefined;
+            throw error;
+          }
+        };
         let started = false;
         const intent: RecoveryIntent =
           operation === 'run'
@@ -251,6 +321,7 @@ for (const mode of ['paired', 'shared'] as const)
             ],
             {
               cwd: f.workspace,
+              env: { ...process.env, ...f.userConfiguration.homeEnvironment },
               stdin:
                 operation === 'run' && action === 'run'
                   ? new Blob(['approve approve_once\n'])
@@ -265,6 +336,7 @@ for (const mode of ['paired', 'shared'] as const)
               new Response(child.stderr).text(),
               child.exited,
             ]);
+            if (exit !== 0) console.error({ mode, operation, action, out, err });
             expect(exit).toBe(0);
             if (operation === 'run' && action === 'run' && originalCardPresentations === 0) {
               originalCardPresentations++;

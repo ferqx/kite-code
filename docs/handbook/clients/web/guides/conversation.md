@@ -29,7 +29,9 @@ Ctrl+A／Cmd+A 只全选当前会话的可见消息内容，不跨到页面其�
 
 明确备份恢复生成新 Store 后，原会话及封存 Fork 中的大回答仍可沿原 Model 来源读取全文。当前连接负责只读准入，封存消息保持原 Store、Session、Run 与 Execution；来源或完整性无法核实时保留预览并显示错误。读取和复制原历史不会重新调用模型、执行工具或取得旧工作的执行权限。
 
-Web 可读取会话的后台 Shell、service 与子 Agent 摘要，包括执行身份、状态、游标、清理与 stale 标记；列表仍遵循当前页面的读取和刷新边界。Web 不发送运行中引导，也不停止后台执行；共享组件中的停止能力只由 Native/Desktop 宿主提供。
+Background executions 显示所选会话所属根范围的完整后台 Job 与子 Agent 目录，包括原执行、来源会话、原 Store、状态、目录游标、结果版本和已记录的投递事实。首次选择时读取，之后点击 Refresh background executions 显式刷新；刷新失败保留同目标旧目录并标 stale，不随 History 自动轮询。准确子会话提供链接进入其 History，不从标题猜测目标。
+
+固定 Shell 身份可显示 Shell；其他 service/Job 按原 definitionId 显示，不从安全 label 补分类。目录未记录的清理确认和输出游标明确显示 unavailable；执行成功不表示已经确认清理。目录游标是分页序号，不能当作输出游标。点击 Read background output 按原 Session/Execution 读取完整已保存 stdout/stderr/progress，读取完成后显示真实输出上界，已记录缺口仍明确显示。关闭、隐藏、暂停或切会话取消所属 GET 并清除输出正文。Web 不发送运行中引导，也不停止后台执行。
 
 通用Agent V1.3开发Web的文件恢复点面板只读原点目录、详情和原恢复ID状态。目录分页可刷新，没有固定历史快照；点可来自父分支，原Store/Session/Run身份与当前观察分别显示。详情按实际证据展示restore/remove/unchanged/conflict/unavailable，外部改动、受保护路径、未选中的恢复边界或缺来源保持原因。目录存在不等于可恢复。
 

@@ -22,6 +22,7 @@ export {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from './components/ui/alert-dialog';
+export { Badge } from './components/ui/badge';
 export {
   Dialog,
   DialogClose,
@@ -51,6 +52,7 @@ export {
   SheetTitle,
   SheetTrigger,
 } from './components/ui/sheet';
+export { Spinner } from './components/ui/spinner';
 export {
   Tooltip,
   TooltipContent,

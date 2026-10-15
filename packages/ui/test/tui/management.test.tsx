@@ -143,15 +143,10 @@ function fixture(active = false) {
     },
   };
 }
-test('slash vocabulary rejects unsupported/malformed commands rather than sending Model content', async () => {
-  for (const text of [
-    '/resume other',
-    '/context x',
-    '/session delete',
-    '/model foo',
-    '/unknown',
-    '/auto-compact',
-  ])
+test('slash vocabulary preserves original menu tails and rejects unsupported management arguments', async () => {
+  expect(parseTuiCommand('/resume other')).toEqual({ kind: 'resume' });
+  expect(parseTuiCommand('/context x')).toEqual({ kind: 'context' });
+  for (const text of ['/session delete', '/model foo', '/unknown', '/auto-compact'])
     expect(() => parseTuiCommand(text)).toThrow();
   expect(parseTuiCommand('/COMPACT reset')).toEqual({ kind: 'compact_reset' });
   expect(parseTuiCommand('/compact exact focus')).toEqual({

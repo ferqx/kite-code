@@ -23,6 +23,7 @@ let effects = 0,
 const fullBody = 'PARENT_COMPLETED_ORIGINAL';
 const childBody = `CHILD_MODEL_ORIGINAL ${'原完整🙂e\u0301正文'.repeat(18000)} CHILD_MODEL_FULL_TAIL`;
 const outputProduced: Record<string, boolean> = {};
+const stopReads: { commandId: string; settled: boolean }[] = [];
 const starts: Record<string, number> = {},
   stops: Record<string, number> = {},
   finished: Record<string, boolean> = {};
@@ -274,7 +275,13 @@ const port: TuiPort = {
     },
     getCommand: async (id, signal) => {
       stopGets++;
-      return client.getCommand(id, { signal });
+      const read = { commandId: id, settled: false };
+      stopReads.push(read);
+      try {
+        return await client.getCommand(id, { signal });
+      } finally {
+        read.settled = true;
+      }
     },
   },
   storeId,
@@ -379,6 +386,7 @@ const timer = setInterval(() => {
         observation: controller.state.observationState,
         read,
         jobStops: [...controller.state.jobStops.values()],
+        stopReads,
         panelJobs: controller.state.snapshot?.view.executions.filter(
           (e) => e.kind !== 'model' && e.sessionId === controller.state.sessionId,
         ),
@@ -440,6 +448,7 @@ const facts = JSON.stringify({
   finished,
   stopPosts,
   stopGets,
+  stopReads,
   lostStop,
   originalJobs: view.executions
     .filter((item) => item.kind === 'job')

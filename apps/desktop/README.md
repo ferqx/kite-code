@@ -212,6 +212,10 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## 原会话输入区权限与停止
 
+普通 Native 当前根会话未信任项目或新增宿主只读范围时，主区的[项目读取授权](src/native-trust.tsx)提供独立确认入口，不依赖测试诊断侧栏。复用原 Dialog 与 Button，展示当前项目 URI 和完整 `readScopes` 描述，勾选后才沿当前准确 `permission.trust` observation 提交；不改变权限模式、不重新创建会话，也不自动重发保留的首次输入。关闭、暂不授权与会话切换只结束页面确认；已提交申请仍保留原结果，未知时普通主区可准确查询原权限选择。当前 Store／会话／信任范围变化重置确认，迟到结果不移动后来选择或草稿。原诊断 PermissionPanel 继续可用。
+
+[原新对话 DOM 整文件](test/isolated/native-new-conversation-dom.test.tsx)在普通模式覆盖带额外目录的首次创建失败后确认与明确继续、取消零申请、范围变化重置勾选、迟到授权保留另会话草稿，以及 unknown 原 ID 查询／零重放；原诊断模式与权限菜单断言保持。此处只修展示入口，不改变 Main／Service 的信任准入或底层范围证明；DOM 结果不代证安装版系统窗口或跨平台资格。
+
 [NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的请求批准／自动审核／完全访问菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；请求批准直接提交 `accept_edits`，不再映射为旧 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、工作区未信任、事实不可用或原权限申请未核实时等待；提交回调也拒绝未信任的模式写入。会话工具中的模式表单在工作区未信任时同样只读，核对并明确设置信任后才提供模式选择；信任控制保持独立，修改模式不自动设置信任或启动 Model。原计划窗口按真实信任→Auto 顺序运行，由真实审核返回 `ask_user` 后保独立工具审批；完整审核、Files 与冷读断言保持；准确回归范围见[PC 迁移主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)。
 
 停止沿现有 [NativeCaller](electron/native-caller.ts)保存并提交 `command.cancel`，目标是已核实当前 Store／Session 活动 Run 的 `originCommandId`。它不新增停止端口，也不把申请当成终态；原保存／提交中／未知申请禁止重复，准确结果仍由原 Run 和持久申请核实。只读子详情没有这组控制，切换阅读不停止原工作。
@@ -620,6 +624,8 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 正式输入区复用[原模型与思考浮层](../../packages/ui/src/desktop/ModelEffortSelector.tsx)和宝石滑块；Native 仍负责准确目录读取、作用域/迟到隔离、原 route 与就绪门禁。双栏列表按实际 Model ID 选择，同一提供商内同名模型显示 ID；档位只取 Service 声明的集合，配置默认清临时选择，关闭只在实际支持 `none` 时可选。观察事件或临时 effort 不触发重复目录读取。[隔离 DOM](test/isolated/native-model-picker-dom.test.tsx)保留原四项并补准确同名路由、稀疏档位、关闭和默认回归；实际 [Model Settings 窗口](test/isolated/native-model-settings-electron.test.ts)仍核活动绑定、原 CAS/丢回执、下一轮切换及冷读，当前输入和源码外候选结果见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-模型与思考选择器)。其他历史 Provider/Vault 窗口记录保留其原输入范围。
 
 [实际默认 Native 候选](test/isolated/native-provider-bundle.test.ts)与[Electron driver](test/native-provider-electron.fixture.ts)在 macOS、源码外搬迁制品、自有 HOME、OS PATH、固定 SQLite 与默认 OS vault 下通过1项/190条Bun断言：四类表单、一次真实发现、7根Run/8次SDK请求、原 effort、活动冻结与下一次切换、新 Session 首次绑定、物理保存丢回执后冷原GET一次/POST零。两个所属 Service PID 正常结束；实际两枚测试凭据由 Service 准确 revoke，profile exclusive lease 可重新取得。endpoint 是受控 loopback，退出 warning 用明确 dialog 端口回答；不证明付费远端、系统 modal 点击、签名安装或其他平台。有限 Main/DOM/输入15项137断言、真实 HTTP8项93断言支持对应局部边界。
+
+当前 Provider／MCP 窗口夹具通过[自有 HOME 的钥匙串引用](test/owned-default-keychain.ts)保留上述真实 OS 后端：只读查询 OS 用户默认钥匙串，在私有 HOME 建立引用，不复制内容或更改系统默认／搜索列表；只保存并精确撤销本例随机凭据。各窗口和 Service 的模型配置统一读取自有用户文件，不能再以 Profile 旧文件构造可用模型。实际 Run 恢复的丢回执旅程先用原 Command GET 确认应用，再关闭所属进程，配置必须保留准确同一工具与运行环境；不将 accepted 伪称恢复完成。整轮范围归[客户端 UI 收束](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-15客户端-ui-迁移缺口与回归收束)。
 
 本轮当前原完整默认589文件/471原任务全部通过，runner exit0/drain815.977s，4009regular输入与Git前后相同；其中上述实际Provider窗口45573ms及原Model、安装、CLI/TUI、Context/后页/持久答复消费者均通过。原红、嵌套同名fixture、制品摘要和权限环境范围见[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-06native-provider-设置与下一次真实模型选择)；完整默认通过不代表完整V1.3、MCP设置或三平台资格。
 

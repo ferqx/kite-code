@@ -15,6 +15,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -205,7 +206,12 @@ test.skipIf(process.platform !== 'darwin')(
               baseURL: `${provider.url.href}v1`,
             },
           ],
-          tools: [{ id: 'files.write', definitionVersion: '2' }],
+          // Tool configuration merges by ID; explicitly disable the ordinary tools outside this case.
+          tools: ordinaryHostConfigurationDefaults(true).tools.map(({ id }) => ({
+            id,
+            enabled: id === 'ask_user' || id === 'files.write',
+            ...(id === 'files.write' ? { definitionVersion: '2' } : {}),
+          })),
         }),
       );
       const fixture = join(root, 'driver.ts');

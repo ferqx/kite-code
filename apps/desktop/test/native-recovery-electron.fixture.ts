@@ -20,7 +20,7 @@ async function launch() {
     executablePath: electronExecutable,
     args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
     cwd: outdir,
-    env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: { HOME: process.env.HOME!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 15000,
   });
   application = app;
@@ -52,7 +52,7 @@ try {
     globalThis.fetch=async(input,init)=>{
       const path=new URL(String(input)).pathname;
       if(init?.method!=='POST'||!(path==='/v1/sessions/s/commands'&&['run.resume','session.recover'].includes(JSON.parse(init.body).kind)||path.endsWith('/resume')))return original(input,init);
-      globalThis.__recoveryPosts++;
+      globalThis.__recoveryPosts++;globalThis.__originalRecoveryTransport={url:String(input),headers:init.headers};
       if(JSON.parse(init.body).kind==='session.recover'){const actual=await original(input,init);await actual.text();return new Response('{}',{status:actual.status,headers:{'content-type':'application/json'}});}
       return new Promise((resolve,reject)=>{const request=http.request(String(input),{method:'POST',headers:init.headers},response=>{const socket=response.socket;const body=new ReadableStream({start(controller){response.on('data',()=>{socket.destroy();controller.error(Error('owned_physical_response_loss'));});response.on('error',error=>controller.error(error));}});resolve(new Response(body,{status:response.statusCode,headers:{'content-type':'application/json'}}));});request.on('error',reject);request.end(init.body);});
     };})()`,
@@ -92,6 +92,31 @@ try {
     );
   });
   assert.equal(await app.evaluate('globalThis.__recoveryPosts'), 1);
+  if (kind === 'run') {
+    // The lost receipt case crashes after the real original command is applied.
+    // An accepted resume can still be applying; killing it there tests a different boundary.
+    await app.evaluate(async (_, commandId) => {
+      const fixture = globalThis as typeof globalThis & {
+        __originalRecoveryTransport: { url: string; headers: Record<string, string> };
+      };
+      const transport = fixture.__originalRecoveryTransport;
+      const deadline = Date.now() + 10000;
+      for (;;) {
+        const response = await fetch(new URL(`/v1/commands/${commandId}`, transport.url), {
+          headers: transport.headers,
+        });
+        if (!response.ok)
+          throw Error(
+            `owned_original_resume_read_failed_${response.status}_${await response.text()}`,
+          );
+        const command = await response.json();
+        if (command.status === 'applied') return;
+        if (command.status !== 'accepted' || Date.now() > deadline)
+          throw Error('owned_original_resume_not_applied');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }, original);
+  }
   const children = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' })
     .trim()
     .split('\n')

@@ -101,6 +101,92 @@ export class BrowserClient {
       throw new ClientError('capability_unavailable');
   }
 
+  async listBackgroundExecutions(
+    input: Omit<import('./generated/api').BackgroundExecutionQuery, 'storeId'> = {},
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.require('sessions');
+    if ('storeId' in input) throw new ClientError('invalid_request');
+    const generation = this.networkGeneration,
+      frozen = { ...structuredClone(input), storeId: this.info!.storeId! };
+    validateRequest('BackgroundExecutionQuery', frozen);
+    if (this.info?.storeId !== frozen.storeId) throw new ClientError('directory_identity_conflict');
+    const query = new URLSearchParams(
+      Object.entries(frozen)
+        .filter(([key, value]) => key !== 'storeId' && value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    const page = await this.read(
+      `/browser/v1/background-executions?${query}`,
+      'BackgroundExecutionPage',
+      options.signal,
+    );
+    this.require('sessions');
+    if (generation !== this.networkGeneration) throw new ClientError('browser_identity_mismatch');
+    validateDirectoryPage(page, frozen.storeId, frozen);
+    if (frozen.snapshotCursor !== undefined && frozen.snapshotCursor !== page.snapshotCursor)
+      throw new ClientError('directory_identity_conflict');
+    const seen = new Set<string>();
+    for (const item of page.items) {
+      const { execution: e, session: s, rootSession: r, run, childRun, childSession: child } = item;
+      if (
+        seen.has(e.id) ||
+        e.sessionId !== s.id ||
+        e.rootSessionId !== r.id ||
+        s.rootSessionId !== r.id ||
+        r.rootSessionId !== r.id ||
+        r.parentSessionId !== null ||
+        r.deletedAt !== null ||
+        s.deletedAt !== null ||
+        s.workspaceId !== r.workspaceId ||
+        (frozen.workspaceId !== undefined && r.workspaceId !== frozen.workspaceId) ||
+        (frozen.rootSessionId !== undefined && r.id !== frozen.rootSessionId) ||
+        (frozen.executionId !== undefined && e.id !== frozen.executionId) ||
+        (e.runId !== null && run?.id !== e.runId) ||
+        (run &&
+          (run.sessionId !== s.id ||
+            run.originStoreId !== e.originStoreId ||
+            run.rootWorkCommandId !== e.rootWorkCommandId ||
+            run.rootWorkSeq !== e.rootWorkSeq)) ||
+        (e.childSessionId === null
+          ? child !== null || childRun !== null
+          : child?.id !== e.childSessionId) ||
+        (child &&
+          (child.parentSessionId !== s.id ||
+            child.rootSessionId !== r.id ||
+            child.workspaceId !== s.workspaceId)) ||
+        (childRun &&
+          (childRun.sessionId !== child?.id ||
+            childRun.originCommandId !== `child-start-${e.id}` ||
+            childRun.originStoreId !== e.originStoreId ||
+            childRun.rootWorkCommandId !== e.rootWorkCommandId ||
+            childRun.rootWorkSeq !== e.rootWorkSeq))
+      )
+        throw new ClientError('directory_identity_conflict');
+      seen.add(e.id);
+    }
+    return page;
+  }
+  async listAllBackgroundExecutions(
+    options: { workspaceId?: string; rootSessionId?: string; signal?: AbortSignal } = {},
+  ) {
+    this.require('sessions');
+    const generation = this.networkGeneration,
+      storeId = this.info!.storeId!;
+    return collectSnapshotDirectory(
+      async (page) => {
+        if (generation !== this.networkGeneration || this.info?.storeId !== storeId)
+          throw new ClientError('browser_identity_mismatch');
+        return this.listBackgroundExecutions(
+          { workspaceId: options.workspaceId, rootSessionId: options.rootSessionId, ...page },
+          { signal: options.signal },
+        );
+      },
+      options.signal,
+      (item) => item.execution.id,
+    );
+  }
+
   async listWorkspaceDirectory(
     input: import('./generated/api').BrowserWorkspaceDirectoryQuery = {},
     options: { signal?: AbortSignal } = {},

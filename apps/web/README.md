@@ -137,3 +137,12 @@ restore-status 需要用户明确输入原 restore ID，只读该点的原 journ
 [专属 reader/DOM 测试](test/file-checkpoints.test.tsx) 使用生成公共 DTO、有限 fake Browser port 与 React/JSDOM，覆盖 200+1+末空页、跨 fork 来源/当前观察、完整原点绑定、scope/游标冲突、同目标 stale、超预算不裁剪、selection/revision/关闭/隐藏与迟到隔离、准确原 restore ID、legacy blocked 和 journal/carrier 独立事实。当前全 Web 邻接 8 files/51 tests/469 assertions、类型与实际 build 通过；这些证据只证明便携 reader/DOM 与编译，不代替独立实际 Cookie Gateway/SDK、原生浏览器现场、恢复执行或正式旧 launcher 迁移资格。
 
 2026-10-04 独立[实际浏览器夹具](../../tests/fixtures/unified-agent/web-file-checkpoints-preview.ts)使用 fresh public terminal builder、packaged default Service child、owned Profile、固定 loopback Provider 和该 candidate 的完整校验 Web assets，在本机 Codex IAB 复核两 Run/两原点目录、详情及明确原 restore ID 的 v2 journal/carrier。实际独立 Ask 批准后原 250003 字节文件恢复，浏览器只读取 metadata；关闭与切 Session 的两个延迟真实 GET 被 abort，释放旧响应后另一 Session 仍是空目录。读取前后 Provider=8、cursor=124、messages=16、Runs=2、Executions=15、原 write effects=4、原文件 hash/存在性及完整 journal/carrier 全部相同。第六轮在当前 candidate `terminal-740167cc1d7bf19d175e99ae8ce39f30c553315bd5791889b9cfd7a33de8bcad` 核完整现场与 abort；第七轮再次 fresh build 得到同一 digest，复验目录/detail/status、before/after 等值及 stop 自动退出0。夹具保留前期失败日志，串行事实读取并完整关闭 owned HTTP/SQLite/child；没有拓宽原 deadline。这是当前同 Store/S/W 的本机现场证据，不冒称 fork/newStore 浏览器现场、完整恢复执行界面、源码外正式安装、其他浏览器/平台或完整 V1.3 切换。
+
+
+## 完整后台执行与子会话观察
+
+正式 [Background executions](src/background.tsx) 使用 Browser `listAllBackgroundExecutions`，固定当前 Workspace/root Session，沿原上界和 snapshotCursor 读完所有公共 Job metadata。首选会话时读取，之后由 Refresh background executions 明确重读，不复用有限 View 的最近 Execution 列表，也不随 History 轮询。失败保留同目标完整旧目录并标 stale；隐藏、暂停或切换取消所属读取，迟到结果不能覆盖新会话。目录保原 Store/Session/Execution/Run/result revision/delivery，实际 childSession/childRun 保原关系。子会话链接沿准确 childSession.id 进入原 History 路由，不创建会话或授予控制。
+
+只把准确 childSession 关系显示为子 Agent；固定 `shell.command@1` 可显示 Shell，其他 Job/service 保原 definitionId，不按 label 推测分类。公共目录未记录 cleanup confirmation 或输出 highWater，因此显示 unavailable，不由 succeeded 推断已清理。目录 seq 明确是 keyset 游标，不当作输出游标；每个准确原 Session/Job 可显式读取完整已保存 output，沿公共 `ExecutionOutputPages` 核连续覆盖和真实缺口后显示原 highWater。关闭、隐藏、暂停和换会话清除所属正文并取消 GET；没有 stop、steer、cancel、approval 或恢复动作。
+
+会话目录现在按原 activity 在行尾显示活动旋转图形或“待用户输入”，待输入优先；失败或隐藏期间的旧事实显示“上次读取”，不保留实时运行暗示。[后台 DOM 测试](test/isolated/background.test.tsx)核原身份、准确子链接、完整输出、stale 与暂停迟到；[目录 DOM 测试](test/isolated/session-directory.test.tsx)新增徽标优先及旧观察断言。[实际 Cookie 测试](../service/test/isolated/development-web.test.ts)沿真实 Service/SQLite 创建原 Job 和 child，核完整目录、child History、原输出、拒绝 authority 注入及零业务重放。DOM/fake-port 与本机 HTTP 证据不替代原生浏览器、OS 剪贴板或安装平台资格。

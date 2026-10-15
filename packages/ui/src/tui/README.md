@@ -134,3 +134,5 @@ controller 隔离原 scope/generation/Abort/selected Command。来源目录与 p
 尾部结果折叠在原键到达时更新同 Scope 的显示状态，连续 Enter 不依赖上一帧闭包；仅改变阅读状态，完整正文与原执行事实保持。按用户确认移除 Ctrl+T 入口及其显示状态，帮助和测试诊断不再提示该快捷键；完整 reader 和 serializer 仍核实、保存并导出原 reasoning。
 
 模型端口的 `/model`、`/effort` 与首次配置统一使用 user scope；用户配置的来源与落盘由 Service 负责。跨项目会话保留独立读取/草稿，未核实的用户模型 mutation 阻止竞争新写；关闭面板仅释放读取。重复确认由 controller 的用户申请状态统一校验，pending/unknown 的重复按键保留核实原请求的提示，K 仅查询同一 ID；[模型测试](../../test/tui/models.test.tsx)覆盖真实面板按键与仍在等待回执的原请求。
+
+原菜单命令保留忽略尾随文字的兼容行为；它们不从文字选择另一 Session、导出路径或扩大范围，显式管理命令仍校验参数。[命令测试](../../test/tui/management.test.tsx)与[导出测试](../../test/tui/export.test.ts)分别核这一解析边界和原完整正文／零额外读取。[真实 Thought 场景](../../../../tests/tui-system/scenarios/thought-lifecycle.test.ts)在下一次实际 Model 请求等待画面观察后才返回最终回答，核实活动搜索参数和结束后的复数摘要；同步点只属于本机 Provider 夹具，不增加生产展示延迟或放宽原观察预算。

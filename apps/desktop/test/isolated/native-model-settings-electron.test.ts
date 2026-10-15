@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -48,6 +49,7 @@ test.skipIf(process.platform !== 'darwin')(
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-model-settings-')),
       barrier = gate();
+    const userConfiguration = ownedUserConfiguration(root);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
       workspace = join(root, 'workspace');
     mkdirSync(workspace);
@@ -82,12 +84,12 @@ test.skipIf(process.platform !== 'darwin')(
           return new Response('ok');
         }
         if (path === '/edit') {
-          const path = join(profile.profilePath, 'config.jsonc');
+          const path = userConfiguration.path;
           writeFileSync(path, `${readFileSync(path, 'utf8')}\n// external editor retained\n`);
           return new Response('ok');
         }
         if (path === '/configuration')
-          return new Response(readFileSync(join(profile.profilePath, 'config.jsonc'), 'utf8'));
+          return new Response(readFileSync(userConfiguration.path, 'utf8'));
         if (path === '/requests') return Response.json(bodies);
         if (path === '/count') return new Response(String(requests));
         if (path === '/entered') {
@@ -151,7 +153,7 @@ test.skipIf(process.platform !== 'darwin')(
       },
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'A',
         models: [

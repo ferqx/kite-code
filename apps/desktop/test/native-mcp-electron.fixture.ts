@@ -3,7 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
-import type { NativeMcpSubmission, NativeState } from '../src/native-bridge';
+import type {
+  NativeMcpSubmission,
+  NativeModelSettingsFacts,
+  NativeState,
+} from '../src/native-bridge';
 
 async function openSettings(page: import('playwright').Page) {
   if (!(await page.locator('.desktop-settings-dialog').isVisible()))
@@ -24,7 +28,7 @@ async function openSessionTools(page: import('playwright').Page) {
 
 type Physical = { path: string; method: string };
 type FixtureGlobals = typeof globalThis & { mcpPhysical: Physical[] };
-const [candidate, home, control, storeId, userConfiguration] = process.argv.slice(2) as [
+const [candidate, home, control, storeId, _userConfiguration] = process.argv.slice(2) as [
   string,
   string,
   string,
@@ -129,15 +133,36 @@ try {
     .getByText('已保存提供商配置。', { exact: true })
     .waitFor();
   await page.getByRole('button', { name: '关闭提供商配置', exact: true }).click();
-  const model = JSON.parse(readFileSync(userConfiguration, 'utf8')).models.find(
-    (value: { model: string }) => value.model === 'owned-mcp-model',
-  );
+  const modelConfiguration = (await page.evaluate(
+    async () =>
+      await window.kiteNative!.request({
+        method: 'settings.models.read',
+        generation: 1,
+        scope: 'user',
+      }),
+  )) as NativeModelSettingsFacts;
+  const model = modelConfiguration.models.find((value) => value.model === 'owned-mcp-model');
   assert.ok(model);
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   await page.getByRole('switch', { name: `启用模型 ${model.id}`, exact: true }).check();
   await page.getByRole('button', { name: '默认模型', exact: true }).click();
-  await page.getByRole('menuitemradio', { name: `设为默认 ${model.id}`, exact: true }).click();
+  const defaultChoice = page.getByRole('menuitemradio', {
+    name: `设为默认 ${model.id}`,
+    exact: true,
+  });
+  if ((await defaultChoice.getAttribute('aria-checked')) === 'true')
+    await page.keyboard.press('Escape');
+  else await defaultChoice.click();
+  const configured = (await page.evaluate(
+    async () =>
+      await window.kiteNative!.request({
+        method: 'settings.models.read',
+        generation: 1,
+        scope: 'user',
+      }),
+  )) as NativeModelSettingsFacts;
+  assert.equal(configured.defaultModelId, model.id);
   await openSettings(page);
   await page.getByRole('button', { name: 'MCP', exact: true }).click();
   const panel = () => page.getByRole('region', { name: 'MCP settings', exact: true });

@@ -8,9 +8,11 @@ import {
 } from '@kite-ai/ui';
 import { MessageCopyButton, TooltipProvider } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { BackgroundExecutions } from './background';
 import { WebController, type WebUpdate } from './controller';
 import { Diagnostics } from './diagnostics';
 import {
+  DirectoryActivity,
   DirectoryItem,
   type DirectorySession,
   directoryCSS,
@@ -506,6 +508,15 @@ export function WebPage({
                                 }}
                               >
                                 {session.title}
+                                <DirectoryActivity
+                                  activity={item.activity}
+                                  stale={
+                                    !!sessionErrors[workspace.id] ||
+                                    !!directoryError ||
+                                    !pageVisible ||
+                                    suspended
+                                  }
+                                />
                               </a>
                             </DirectoryItem>
                           </li>
@@ -597,6 +608,18 @@ export function WebPage({
                       </p>
                     ))}
                   </section>
+                  <BackgroundExecutions
+                    key={`background:${snapshot.view.storeId}:${snapshot.sessionId}`}
+                    client={client}
+                    view={snapshot.view}
+                    window={browser}
+                    suspended={suspended || !pageVisible}
+                    stale={update.phase !== 'ready'}
+                    onOpen={(sessionId) => {
+                      choose(sessionId);
+                      if (navigation.narrow) navigation.close();
+                    }}
+                  />
                   <ModelInputs
                     key={`${snapshot.view.storeId}:${snapshot.sessionId}:${logModel?.storeId === snapshot.view.storeId && logModel.sessionId === snapshot.sessionId ? logModel.revision : 0}`}
                     client={client}

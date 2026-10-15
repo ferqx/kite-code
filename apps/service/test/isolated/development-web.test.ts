@@ -86,6 +86,24 @@ async function fixture(partialBytes = 32768) {
           return { outcome: 'succeeded', content: 'created' };
         },
       },
+      {
+        id: 'child',
+        version: '1',
+        description: 'Actual read-only child navigation fixture',
+        inputSchema: { type: 'object', additionalProperties: false },
+        async prepare(input) {
+          return input;
+        },
+        async execute(_input, context) {
+          const ref = await context.operations.ensure({
+            key: 'child',
+            request: { kind: 'agent', configurationId: 'child', input: { content: 'child' } },
+            cancellation: 'detached',
+          });
+          await context.operations.wait(ref, { timeoutMs: 4000, signal: context.signal });
+          return { outcome: 'succeeded', content: 'child created' };
+        },
+      },
     ],
   };
   const runtime = createRuntime({
@@ -95,6 +113,7 @@ async function fixture(partialBytes = 32768) {
       store,
     }),
     model,
+    childConfigurations: [{ id: 'child', version: '1', model, modelId: 'child', snapshot: {} }],
     extensions: [outputExtension],
     permissions: {
       async authorize() {
@@ -604,3 +623,65 @@ test('Cookie Browser reads the accurate original Run beyond the recent View with
     await f.close();
   }
 }, 60000);
+
+test('Cookie background directory preserves exact Job metadata and scopes without accepting browser authority or writes', async () => {
+  const f = await fixture();
+  try {
+    const job = await f.launchOutput();
+    f.release();
+    await f.client.invokeExtension('s', {
+      expectedStoreId: f.storeId,
+      commandId: 'launch-child',
+      kind: 'extension.invoke',
+      extensionId: 'fixture.browser-output',
+      actionId: 'child',
+      definitionVersion: '1',
+      input: {},
+    });
+    await f.runtime.waitForCommand('launch-child', { timeoutMs: 4000 });
+    const before = await f.client.getView('s'),
+      models = f.models,
+      jobs = f.jobs;
+    const items = await f.browser.listAllBackgroundExecutions({
+      workspaceId: 'w',
+      rootSessionId: 's',
+    });
+    expect(items.map((item) => item.execution.id)).toContain(job.id);
+    const child = items.find((item) => item.childSession)!;
+    expect(child.childSession!.id).toBe(child.execution.childSessionId!);
+    const childView = await f.browser.getView(child.childSession!.id);
+    expect(childView.session.parentSessionId).toBe('s');
+    expect(childView.session.id).toBe(child.execution.childSessionId!);
+
+    const item = items.find((item) => item.execution.id === job.id)!;
+    expect(item.execution.sessionId).toBe('s');
+    expect(item.rootSession.id).toBe('s');
+    expect(item.execution.originStoreId).toBe(f.storeId);
+    expect(item.execution.status).toBe('succeeded');
+    expect(JSON.stringify(item)).not.toContain('actual-output-handle');
+    expect((item.execution as Record<string, unknown>).result).toBeUndefined();
+    expect(await f.browser.listAllBackgroundExecutions({ rootSessionId: 'other' })).toEqual([]);
+    expect(
+      (await f.browser.listExecutionOutput(item.session.id, job.id)).items.map(
+        (chunk) => chunk.content,
+      ),
+    ).toEqual(['first α\n', 'second β\n']);
+    for (const path of [
+      '/browser/v1/background-executions?storeId=forged',
+      '/browser/v1/background-executions?subjectId=forged',
+      '/browser/v1/background-executions?rootSessionId=s&rootSessionId=other',
+      '/browser/v1/background-executions?limit=201',
+    ])
+      expect((await f.raw(path)).status).toBe(400);
+    expect((await f.raw('/browser/v1/background-executions', 'POST')).status).toBe(405);
+    const after = await f.client.getView('s');
+    expect(after.snapshotCursor).toBe(before.snapshotCursor);
+    expect(f.models).toBe(models);
+    expect(f.jobs).toBe(jobs);
+    expect(
+      f.requests.every((request) => request.method === 'GET' && request.authorization === null),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});

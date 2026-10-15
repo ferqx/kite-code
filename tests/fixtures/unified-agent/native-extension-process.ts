@@ -11,7 +11,6 @@ import { createMiniReview } from '../extensions/mini-review/src';
 /** Explicit immutable test composition with trusted classification for the reference definitions. */
 const configure: ConfigureProcessHost = async (startup, context) => {
   const defaults = await createDefaultProcessConfiguration({
-    userConfigurationPath: selectProfile(startup.profile).profilePath + '/config.jsonc',
     profile: selectProfile(startup.profile),
     observerSubjectId: context.subjectId,
     hostConfiguration: startup.hostConfiguration,

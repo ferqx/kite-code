@@ -618,6 +618,7 @@ test('actual paired main work JSON waits through original Tool approval and comp
       `import{writeFileSync}from'node:fs';import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};import{runCLIProcess}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/main.ts')).href)};const actualSpawn=Bun.spawn.bind(Bun);Bun.spawn=((...args)=>{const original=actualSpawn(...args);const command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(f.artifact.entrypoint)})){const record={pid:original.pid,start:readProcessStartIdentity(original.pid),entrypoint:${JSON.stringify(f.artifact.entrypoint)}};writeFileSync(${JSON.stringify(ownedPath)},JSON.stringify(record));void original.exited.then(code=>writeFileSync(${JSON.stringify(`${ownedPath}.exit`)},JSON.stringify({...record,code})));}return original;});process.exitCode=await runCLIProcess({argv:${JSON.stringify(['work', 's', '--input', JSON.stringify(request)])},artifact:${JSON.stringify(f.artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(f.workspace)}});`,
     );
     child = Bun.spawn([process.execPath, runner], {
+      env: { ...process.env, ...f.userConfiguration.homeEnvironment },
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
