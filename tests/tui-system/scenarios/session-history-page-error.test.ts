@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { buildOwnedDaemon } from '../../../apps/cli/test/fixtures/daemon-host-build';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -37,6 +38,7 @@ test('a malformed record reached on page two shows a TUI history error without e
     const entrypoint = join(artifactRoot, 'node_modules/@kite-ai/service/main.js');
     connection = await launchPairedService({
       profile,
+      spawnChild: ownedUserConfiguration(workspace.home).spawnChild,
       entrypoint,
       executable: process.execPath,
       instanceId: 'page-error-setup',
@@ -137,6 +139,7 @@ test('a malformed record reached on page two shows a TUI history error without e
 
     connection = await launchPairedService({
       profile,
+      spawnChild: ownedUserConfiguration(workspace.home).spawnChild,
       entrypoint,
       executable: process.execPath,
       instanceId: 'page-error-read',

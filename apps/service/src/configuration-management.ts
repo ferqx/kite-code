@@ -1130,6 +1130,13 @@ export function createConfigurationManagement(options: {
       );
     },
     async repair(input) {
+      if (
+        input.scope === 'workspace' &&
+        ['models', 'modelId', 'provider', 'model', 'disabledModels', 'modelOptions'].some((key) =>
+          Object.hasOwn(input.value, key),
+        )
+      )
+        throw new AgentError('model_settings_user_scope_required');
       const path = await pathFor(input);
       return mutate(
         input,

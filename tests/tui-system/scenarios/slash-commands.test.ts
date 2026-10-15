@@ -46,6 +46,11 @@ describe('TUI PTY System — Slash Commands', () => {
       mockServer: server,
       workspace,
     });
+    const project = JSON.parse(readFileSync(join(workspace.workspace, 'kite-agent.jsonc'), 'utf8'));
+    expect(project.models).toBeUndefined();
+    expect(project.modelId).toBeUndefined();
+    expect(screenContains(tui.viewport(), 'mock-model')).toBe(true);
+    expect(screenContains(tui.viewport(), '模型信息不可用')).toBe(false);
   });
 
   afterEach(async () => {

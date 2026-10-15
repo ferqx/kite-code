@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import {
@@ -307,7 +307,13 @@ describe('TUI persisted Runtime observers', () => {
     expect(workspace.databasePath).toBe(
       join(workspace.home, '.kite-code', 'development', 'core.db'),
     );
-    expect(workspace.configPath).toBe(join(workspace.profilePath, 'config.jsonc'));
+    expect(workspace.configPath).toBe(join(workspace.home, '.kite-code', 'kite-code.jsonc'));
+    expect(existsSync(join(workspace.profilePath, 'config.jsonc'))).toBe(false);
+    expect(existsSync(join(workspace.workspace, '.kite-code', 'config.jsonc'))).toBe(false);
+    const project = JSON.parse(readFileSync(join(workspace.workspace, 'kite-agent.jsonc'), 'utf8'));
+    expect(project.models).toBeUndefined();
+    expect(project.modelId).toBeUndefined();
+    expect(project.tools.length).toBeGreaterThan(0);
     expect(JSON.parse(readFileSync(workspace.configPath, 'utf8'))).toMatchObject({
       modelId: 'fixture',
       models: [

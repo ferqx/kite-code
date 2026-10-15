@@ -1,7 +1,7 @@
 // Generated from apps/service/src/http/schema. No runtime code generation.
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 
-// node_modules/.bun/ajv@8.20.0/node_modules/ajv/dist/runtime/ucs2length.js
+// node_modules/.bun/ajv@8.17.1/node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length = __commonJS(function (exports) {
   Object.defineProperty(exports, '__esModule', { value: true });
   function ucs2length(str) {

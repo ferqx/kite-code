@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -201,6 +201,53 @@ test('bad JSONC is readable as error and explicit exact-etag repair privately ba
     expect(project.status).toBe(200);
     expect(readFileSync(join(f.workspace, 'kite-agent.jsonc'), 'utf8')).toContain('registered');
     expect((await f.request('/v1/config/workspace?workspaceId=missing')).status).toBe(404);
+  } finally {
+    await f.close();
+  }
+});
+
+test('workspace repair rejects model fields before filesystem effects and still repairs tools', async () => {
+  const f = await setup();
+  try {
+    const file = join(f.workspace, 'kite-agent.jsonc');
+    for (const original of [undefined, '{ broken']) {
+      if (original !== undefined) writeFileSync(file, original);
+      const view = await f.request('/v1/config/workspace?workspaceId=workspace');
+      for (const key of [
+        'models',
+        'modelId',
+        'provider',
+        'model',
+        'disabledModels',
+        'modelOptions',
+      ]) {
+        const result = await f.request('/v1/config/workspace/repair', 'POST', {
+          commandId: `reject-${original === undefined ? 'missing' : 'broken'}-${key}`,
+          expectedStoreId: f.storeId,
+          workspaceId: 'workspace',
+          ifMatch: view.body.etag,
+          value: { [key]: key === 'models' ? [{ id: 'a', enabled: true }] : null },
+        });
+        expect(result.status).toBeGreaterThanOrEqual(400);
+        expect(result.body.code).toBe('model_settings_user_scope_required');
+        if (original === undefined) expect(existsSync(file)).toBe(false);
+        else expect(readFileSync(file, 'utf8')).toBe(original);
+        expect(existsSync(`${file}.lock`)).toBe(false);
+        expect(existsSync(join(f.workspace, '.config-repair-backups'))).toBe(false);
+      }
+    }
+    const view = await f.request('/v1/config/workspace?workspaceId=workspace');
+    const value = { tools: [{ id: 'registered', enabled: false }] };
+    const repaired = await f.request('/v1/config/workspace/repair', 'POST', {
+      commandId: 'repair-project-tools',
+      expectedStoreId: f.storeId,
+      workspaceId: 'workspace',
+      ifMatch: view.body.etag,
+      value,
+    });
+    expect(repaired.status).toBe(200);
+    expect(repaired.body.state).toBe('applied');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(value);
   } finally {
     await f.close();
   }

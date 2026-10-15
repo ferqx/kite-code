@@ -693,8 +693,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         const modelFacts =
           models.status === 'fulfilled' &&
           models.value.storeId === storeId &&
-          models.value.workspaceId === workspaceId &&
-          models.value.scope === 'workspace'
+          models.value.workspaceId === undefined &&
+          models.value.scope === 'user'
             ? models.value
             : undefined;
         const selectedModel = modelFacts?.models.find(

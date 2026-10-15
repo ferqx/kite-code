@@ -122,7 +122,7 @@ paired 测试使用真实 Bun child、固定 Model、显式外部效果 ledger �
 
 配置管理与 Run 解析共用上述用户源和模型 vault。认证 `GET /v1/config/user?storeId=...` 与 workspace 通用配置读取返回准确文件 ETag、脱敏归一化 raw/effective、支持配置 snapshot 与有限错误；项目 raw 可保留历史模型字段，但它们不进入 effective 模型。未知字段与不支持 options 显示占位符，坏 JSONC 保留原字节和 invalid_jsonc。Workspace 路径只来自持久 file URI，请求不能提供路径。
 
-`PATCH /v1/config/{user|workspace}` 继续使用原 command/Store/ETag 和有限 set/remove 操作。用户支持 modelId/models/tools/skills/mcp，项目仅支持非模型项；项目模型 patch 返回 model_settings_user_scope_required。用户模型编辑由私有适配器转回同一用户文件，保留无关注释和未知字段。旧 ETag/冲突 ID 返回 409，不隐式重试。坏 JSONC 不能 patch；显式 repair 仍在原短锁内备份准确坏字节、重核 ETag 后原子发布，备份路径与内容不经 HTTP 返回。
+`PATCH /v1/config/{user|workspace}` 继续使用原 command/Store/ETag 和有限 set/remove 操作。用户支持 modelId/models/tools/skills/mcp，项目仅支持非模型项；项目模型 patch 返回 model_settings_user_scope_required。项目 repair 同样拒绝 models/modelId/provider/model/disabledModels/modelOptions 字段，并在取得文件锁、创建备份或发布文件前返回该错误；非模型项的显式修复保持可用。用户模型编辑由私有适配器转回同一用户文件，保留无关注释和未知字段。旧 ETag/冲突 ID 返回 409，不隐式重试。坏 JSONC 不能 patch；显式 repair 仍在原短锁内备份准确坏字节、重核 ETag 后原子发布，备份路径与内容不经 HTTP 返回。
 
 `POST /v1/credentials` 接收 `{commandId,expectedStoreId,secret}`，回执只返回 opaque credential reference 与 persistence。`POST /v1/credentials/{opaqueRef}/revoke` 接收 command/Store 身份，阻止 vault 后续解析。原生后端错误局部失败，没有明文配置 fallback；临时引用随显式注入的后端/进程丢失可用性。revoke 不声明能撤回已解析凭据或已派发请求。
 

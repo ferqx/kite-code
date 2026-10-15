@@ -8,10 +8,11 @@
  * sent via `terminal.write()`. Terminal resize via `terminal.resize()`.
  */
 
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import {
   currentTuiSystemStepSignal,
   throwIfTuiSystemStepAborted,
@@ -28,7 +29,7 @@ import {
   waitForOutputQuiescence,
 } from './terminal-screen';
 import type { TestWorkspace } from './test-workspace';
-import { translateOriginalTestConfig } from './test-workspace';
+import { translateOriginalProjectTestConfig, translateOriginalTestConfig } from './test-workspace';
 
 export interface PtyProcessOptions {
   /** Terminal columns (default 120) */
@@ -385,9 +386,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     : undefined;
 
   // If a mock server is provided, write config that points to it.
-  // Config is written to BOTH the home-level (~/.kite-code/) AND the
-  // workspace-level (.kite-code/) paths since the TUI merges both.
-  // We set KITE_CODE_HOME env var so defaultConfigPath() resolves correctly.
+  // Models use the test HOME's user file; projects only provide tools and extensions.
   // Skip when noPreConfig is set — used for first-run/setup tests.
   if (opts.mockServer && opts.workspace && !opts.noPreConfig) {
     const binding = JSON.stringify([opts.workspace.workspace, opts.workspace.home]);
@@ -422,22 +421,16 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       null,
       2,
     );
-    const projectConfigStr = JSON.stringify(
-      translateOriginalTestConfig({
-        ...baseMockConfig,
-        ...(opts.workspace.projectConfigOverrides ?? opts.workspace.configOverrides ?? {}),
-      }).configuration,
-      null,
-      2,
-    );
+    const projectConfiguration = translateOriginalProjectTestConfig({
+      ...baseMockConfig,
+      ...(opts.workspace.projectConfigOverrides ?? opts.workspace.configOverrides ?? {}),
+    });
+    const projectConfigStr = JSON.stringify(projectConfiguration, null, 2);
 
-    // User-level config at KITE_CODE_HOME/.kite-code/
-    const homeDir = profile!.profilePath;
-    mkdirSync(homeDir, { recursive: true });
-    const configFilePath = join(homeDir, 'config.jsonc');
+    // Model routes use the same user source as the production Service.
+    const configFilePath = ownedUserConfiguration(opts.workspace.home).path;
     writeFileSync(configFilePath, userConfigStr);
-    // Also write to workspace dir's .kite-code/ (project-level config,
-    // resolved via projectConfigPath() if cwd is set to workspace)
+    // Supported project tools and extensions.
     writeFileSync(join(opts.workspace.workspace, 'kite-agent.jsonc'), projectConfigStr);
   }
 
@@ -453,8 +446,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
 
   // Build an allowlisted child environment. Test scenarios must never inherit
   // developer credentials, provider configuration, proxies, or feature flags.
-  // Explicit KITE_CODE_HOME is critical — on Windows, homedir() defaults to
-  // USERPROFILE, so KITE_CODE_HOME must be set for defaultConfigPath().
+  // workspace.env supplies the owned HOME/USERPROFILE used by the user configuration source.
   const childEnv: Record<string, string> = {};
   for (const key of [
     'PATH',

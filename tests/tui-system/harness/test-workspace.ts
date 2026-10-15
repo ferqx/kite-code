@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 
 export interface TestWorkspace {
   home: string;
@@ -355,6 +356,13 @@ export function translateOriginalTestConfig(input: Record<string, unknown> = {})
     language: language as 'zh-CN' | 'en-US' | 'system',
   };
 }
+/** Project fixtures retain tools and extensions without user model routes. */
+export function translateOriginalProjectTestConfig(input: Record<string, unknown> = {}) {
+  const configuration = translateOriginalTestConfig(input).configuration;
+  for (const key of ['models', 'modelId', 'provider', 'model', 'disabledModels', 'modelOptions'])
+    delete configuration[key];
+  return configuration;
+}
 export function createTestWorkspace(opts?: {
   files?: Record<string, string>;
   workspaceFiles?: Record<string, string>;
@@ -368,7 +376,7 @@ export function createTestWorkspace(opts?: {
   const profile = selectProfile({ dataRoot: join(home, '.kite-code'), profile: 'development' });
   const translated = translateOriginalTestConfig(opts?.configOverrides);
   mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
-  const configPath = join(profile.profilePath, 'config.jsonc');
+  const configPath = ownedUserConfiguration(home).path;
   writeFileSync(configPath, JSON.stringify(translated.configuration, null, 2), { mode: 0o600 });
   writeFileSync(
     join(profile.profilePath, 'ui', 'preferences.jsonc'),
@@ -385,8 +393,8 @@ export function createTestWorkspace(opts?: {
   if (projectInput) {
     mkdirSync(projectDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(
-      join(projectDirectory, 'config.jsonc'),
-      JSON.stringify(translateOriginalTestConfig(projectInput).configuration, null, 2),
+      join(workspace, 'kite-agent.jsonc'),
+      JSON.stringify(translateOriginalProjectTestConfig(projectInput), null, 2),
       { mode: 0o600 },
     );
   }
