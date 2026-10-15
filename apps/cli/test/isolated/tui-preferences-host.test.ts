@@ -8,6 +8,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
@@ -45,6 +46,7 @@ for (const mode of ['paired', 'shared'] as const)
       ownedPid = join(root, 'owned-pid');
     mkdirSync(workspace, { mode: 0o700 });
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+    const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
     mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
     writeFileSync(
@@ -69,7 +71,7 @@ for (const mode of ['paired', 'shared'] as const)
       },
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [
@@ -106,6 +108,7 @@ for (const mode of ['paired', 'shared'] as const)
       let storeId: string;
       if (mode === 'paired') {
         const seed = await launchPairedService({
+          spawnChild: userConfiguration.spawnChild,
           profile,
           ...artifact,
           instanceId: randomUUID(),
@@ -153,6 +156,7 @@ for (const mode of ['paired', 'shared'] as const)
         writeFileSync(join(web, 'manifest.json'), manifest);
         const instanceId = randomUUID();
         daemon = Bun.spawn([process.execPath, join(repo, 'apps/service/dist/daemon-main.js')], {
+          env: { ...process.env, ...userConfiguration.homeEnvironment },
           stdin: 'pipe',
           stdout: 'pipe',
           stderr: 'pipe',
@@ -263,7 +267,11 @@ for (const mode of ['paired', 'shared'] as const)
             mode,
           }),
         ],
-        { stdout: 'pipe', stderr: 'pipe' },
+        {
+          env: { ...process.env, ...userConfiguration.homeEnvironment },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
       );
       const [out, err, exitCode] = await Promise.all([
         new Response(python.stdout).text(),

@@ -62,3 +62,26 @@ test('request estimate counts exact Unicode content, Tool calls and schemas with
     ).usableInputTokens,
   ).toBe(7976);
 });
+
+test('giant uninterrupted Unicode input counts its complete original body and tail', () => {
+  const repeated = 3 * 1024 * 1024;
+  const tail = 'ORIGINAL_SOURCE_NINE_MIB_TAIL';
+  const result = estimateModelContext({
+    messages: [{ role: 'tool', content: `${'中'.repeat(repeated)}${tail}` }],
+    tools: [],
+  });
+  expect(result.estimate.transcriptTokens).toBe(repeated + countTokens(tail));
+  expect(result.estimate.totalInputTokens).toBe(repeated + countTokens(tail) + 4);
+});
+
+test('long display chunks preserve original Unicode scalar boundaries', () => {
+  const prefix = '中'.repeat(1023);
+  const content = `${prefix}🙂${'中'.repeat(1022)}🙂tail`;
+  const result = estimateModelContext({
+    messages: [{ role: 'user', content }],
+    tools: [],
+  });
+  expect(result.estimate.transcriptTokens).toBe(
+    countTokens(prefix) + countTokens(`🙂${'中'.repeat(1022)}`) + countTokens('🙂tail'),
+  );
+});

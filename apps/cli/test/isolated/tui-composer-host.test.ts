@@ -42,7 +42,7 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
     } finally {
       await preparation.close();
     }
-    const configPath = join(f.profile.profilePath, 'config.jsonc'),
+    const configPath = f.userConfiguration.path,
       config = JSON.parse(readFileSync(configPath, 'utf8')),
       originalURL = config.models[0].baseURL;
     let relayed = 0;
@@ -95,7 +95,12 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
           transcript,
         }),
       ],
-      { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, ...f.userConfiguration.homeEnvironment },
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+      },
     );
     const [out, err, code] = await Promise.all([
       new Response(driver.stdout).text(),
@@ -166,7 +171,13 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
     expect(f.reviews.map((review) => review.body.tools ?? [])).toEqual([[], []]);
     expect(
       f.reviewProof().map(({ state, outcome, decision }) => ({ state, outcome, decision })),
-    ).toEqual(Array(2).fill({ state: 'succeeded', outcome: 'succeeded', decision: 'ask_user' }));
+    ).toEqual(
+      Array(2).fill({
+        state: 'succeeded',
+        outcome: 'succeeded',
+        decision: 'ask_user',
+      }),
+    );
   } finally {
     if (driver && driver.exitCode === null) {
       if (process.platform === 'win32') driver.send('composer-driver-stop');

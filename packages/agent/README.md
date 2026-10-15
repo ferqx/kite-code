@@ -26,7 +26,7 @@
 - [文件入口](src/files.ts)与[普通文件 Tools](src/tools/files/README.md)：显式 Workspace 的目录 FD、完整内容基线与精确修改；行读取、glob、查询分页保留明确范围。大正文使用完整 Artifact，显式分页继续保留选择范围。
 - [Artifact 入口](src/artifacts/README.md)：不可变文件先发布，再事务登记原 Store、主体、Session 与准确授权 scope；相同 hash 不授予其他 scope 读取资格。
 - [完整 Model 正文与实际输入检查](src/model-body/README.md)：原产物正文与大 Model/Auto 请求以准确 scope 的不可变 Artifact 交接，Provider 前完整展开并核实 hash；只读原 Execution 请求及固定上界调用目录不捕获现在来源、不初始化 Provider，Worker 仍使用有限传输。
-- [上下文显示估算](src/context-estimate.ts)：独立 `@kite-ai/agent/context-estimate` 纯函数，沿原 cl100k 计数消息、调用与工具 Schema。容量只接原冻结模型的明确窗口／输出预算；不猜模型容量、不修改请求或取得派发资格，累计 Provider 用量不代替当前估算。
+- [上下文显示估算](src/context-estimate.ts)：独立 `@kite-ai/agent/context-estimate` 纯函数，沿原 cl100k 计数消息、调用与工具 Schema。每次估算按不拆 Unicode scalar 的最多 1024 个 UTF-16 code unit 分块，完整计入全部原字符；短文本保持原计数，长文本块边界允许近似差异。单次最多 128 块的局部缓存避免连续重复大段触发 BPE 病态耗时，调用结束不保留文本。取舍见[估算分块](../../.agents/notes/implemented/bug-fix/2026-10-15-context-estimate-bounded-tokenization.md)。容量只接原冻结模型的明确窗口／输出预算；不猜模型容量、不修改请求或取得派发资格，累计 Provider 用量不代替当前估算。
 - [完整 Model 输出](src/model-output/README.md)：原 Execution linked segments 的完整 EOF、历史展开与 child 正文；私有 reviewer 另封存有限答案凭据，最终 Store 只核原 descriptor 和不可变登记，不以 preview 代替全文。
 - [Task 入口](src/extensions/task/README.md)与[Shell Tools](src/tools/shell.README.md)：可信角色和原 Job 的普通控制工具，使用同一受控 operations；容量、输入与实际执行资格由 owner 记录。
 - [Shell Jobs](src/jobs/README.md)：显式 POSIX、macOS host／confined 和 Linux host／confined 的可信资产、执行范围与原进程结束证明；正式 verifier 已接准确只读 Profile Skill 来源，Linux 原生资格仍缺。

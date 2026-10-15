@@ -19,18 +19,21 @@ for (const mode of ['run', 'interrupt'] as const)
       );
       const built = await compileFileRecoveryTUI(f.root, runner);
       if (!built.success) throw new AggregateError(built.logs, 'recovery_tui_compile_failed');
-      const { out, err, code } = await runRecoveryPTY({
-        root: f.root,
-        runner: join(f.root, 'runner.js'),
-        profilePath: f.profile.profilePath,
-        network,
-        pidPath: join(f.root, 'service-pid'),
-        transcript: join(f.root, 'pty-output'),
-        mode,
-        runId: f.run.id,
-        storeId: f.storeId,
-        cardId: f.card.id,
-      });
+      const { out, err, code } = await runRecoveryPTY(
+        {
+          root: f.root,
+          runner: join(f.root, 'runner.js'),
+          profilePath: f.profile.profilePath,
+          network,
+          pidPath: join(f.root, 'service-pid'),
+          transcript: join(f.root, 'pty-output'),
+          mode,
+          runId: f.run.id,
+          storeId: f.storeId,
+          cardId: f.card.id,
+        },
+        f.userConfiguration.homeEnvironment,
+      );
       if (code !== 0) console.error(err);
       expect(code).toBe(0);
       expect(out).toContain('ORIGINAL_RECOVERY_CONFIRMED');
@@ -95,18 +98,21 @@ for (const kind of ['run', 'interrupt'] as const)
       );
       const built = await compileFileRecoveryTUI(f.root, runner);
       if (!built.success) throw new AggregateError(built.logs, 'recovery_tui_compile_failed');
-      const { out, err, code } = await runRecoveryPTY({
-        root: f.root,
-        runner: join(f.root, 'cold-runner.js'),
-        profilePath: f.profile.profilePath,
-        network,
-        pidPath,
-        transcript,
-        mode: kind,
-        cold: true,
-        runId: f.run.id,
-        storeId: f.storeId,
-      });
+      const { out, err, code } = await runRecoveryPTY(
+        {
+          root: f.root,
+          runner: join(f.root, 'cold-runner.js'),
+          profilePath: f.profile.profilePath,
+          network,
+          pidPath,
+          transcript,
+          mode: kind,
+          cold: true,
+          runId: f.run.id,
+          storeId: f.storeId,
+        },
+        f.userConfiguration.homeEnvironment,
+      );
       console.log('PTY transcript', transcript);
       if (code !== 0) console.error(err);
       expect(code).toBe(0);

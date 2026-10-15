@@ -217,7 +217,7 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
         stdout: 'pipe',
         stderr: 'pipe',
         ...(process.platform === 'win32' ? { ipc() {} } : {}),
-        env: { ...process.env, HOME: f.root, USERPROFILE: f.root },
+        env: { ...process.env, ...f.userConfiguration.homeEnvironment },
       },
     );
     const [out, err, code] = await Promise.all([

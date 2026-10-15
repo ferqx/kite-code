@@ -128,7 +128,8 @@ try {
   assert.equal(host.text().includes('SECRET'), false);
   await key('r');
   await wait('Connection: verified');
-  await key('\x03');
+  // Status uses its documented local Esc action; Ctrl+C requests whole-task cancellation.
+  await key('\x1b');
   await wait('New Run >');
   assert.equal(rows().length, 3);
   await key('/status');

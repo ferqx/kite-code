@@ -8,6 +8,7 @@ import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/mainte
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { openTuiDraftFile } from '../../host/tui-drafts';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 
@@ -17,6 +18,7 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'draft' });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const cleanups: (() => Promise<void>)[] = [];
   let calls = 0;
   const provider = Bun.serve({
@@ -45,7 +47,7 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
       mode: 0o600,
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'local',
         models: [
@@ -60,6 +62,7 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
       { mode: 0o600 },
     );
     const seed = await launchPairedService({
+      spawnChild: userConfiguration.spawnChild,
       profile,
       ...artifact,
       instanceId: crypto.randomUUID(),
@@ -121,7 +124,12 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
           join(import.meta.dir, '../fixtures/tui-drafts-pty.ts'),
           JSON.stringify({ mode, root, hostPath, input, pidPath, storeId }),
         ],
-        { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+        {
+          env: { ...process.env, ...userConfiguration.homeEnvironment },
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
       );
       cleanups.push(async () => {
         try {

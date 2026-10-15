@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createServiceLifecycleClient, type ServiceLifecycle } from '@kite-ai/client';
@@ -145,6 +146,7 @@ async function launch(
     stdout: NonNullable<ReturnType<typeof spawn>['stdout']>;
     stderr: NonNullable<ReturnType<typeof spawn>['stderr']>;
   };
+  const home = homedir();
   try {
     child = spawn(
       artifact.executable,
@@ -152,7 +154,12 @@ async function launch(
       {
         detached: operation === 'start',
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' },
+        env: {
+          PATH: process.env.PATH ?? '',
+          LANG: 'C.UTF-8',
+          HOME: home,
+          ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+        },
       },
     );
   } catch (error) {

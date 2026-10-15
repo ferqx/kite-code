@@ -20,7 +20,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
-import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
+import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);

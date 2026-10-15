@@ -6,9 +6,9 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createBrowserClient } from '@kite-ai/client/browser';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { launchPairedService } from '../../src/paired';
+import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 function barrier() {
   let resolve!: () => void;

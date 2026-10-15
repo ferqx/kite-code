@@ -193,6 +193,11 @@ try {
   await key('\r');
   await wait('owned-server');
   await check('refresh');
+  // Root MCP Ctrl+C cancels the active Run. Exercise the local reader scope.
+  await choose('Saved tool snapshots');
+  await key('\r');
+  await wait('MCP Tools · saved metadata');
+  await wait('Reading does not connect or authorize tools.');
   await key('\x03');
   await wait('Approve this execution only');
   await wait('pending · revision 1');

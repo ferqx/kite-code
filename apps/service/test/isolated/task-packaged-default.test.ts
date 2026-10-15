@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
+import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(label: string, read: () => Promise<T>, done: (value: T) => boolean) {
   const deadline = Date.now() + 45000;

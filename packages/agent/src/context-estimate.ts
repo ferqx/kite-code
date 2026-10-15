@@ -28,20 +28,43 @@ export function estimateModelContext(
   // Preserve the original lazy vocabulary: ordinary startup does not initialize it.
   const { countTokens } =
     require('gpt-tokenizer/encoding/cl100k_base') as typeof import('gpt-tokenizer/encoding/cl100k_base');
+  // BPE on one multi-megabyte word can grow quadratically. Display accounting
+  // includes every character, but bounds each tokenizer input. Counts at long
+  // chunk seams are approximate; short strings retain the original tokenization.
+  const chunkCharacters = 1024;
+  const counts = new Map<string, number>();
+  const countText = (text: string) => {
+    let total = 0;
+    for (let start = 0; start < text.length; ) {
+      let end = Math.min(start + chunkCharacters, text.length);
+      // Never turn one Unicode scalar into two replacement characters.
+      if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!)) end--;
+      const chunk = text.slice(start, end);
+      let count = counts.get(chunk);
+      if (count === undefined) {
+        count = countTokens(chunk);
+        if (counts.size === 128) counts.delete(counts.keys().next().value!);
+        counts.set(chunk, count);
+      }
+      total += count;
+      start = end;
+    }
+    return total;
+  };
   let systemTokens = 0,
     transcriptTokens = 0;
   for (const message of request.messages) {
     const tokens =
-      countTokens(message.content) +
-      (message.toolCalls?.length ? countTokens(JSON.stringify(message.toolCalls)) : 0) +
-      (message.toolCallId ? countTokens(message.toolCallId) : 0);
+      countText(message.content) +
+      (message.toolCalls?.length ? countText(JSON.stringify(message.toolCalls)) : 0) +
+      (message.toolCallId ? countText(message.toolCallId) : 0);
     if (message.role === 'system') systemTokens += tokens;
     else transcriptTokens += tokens;
   }
   const toolSchemaTokens = request.tools.reduce(
     (total, tool) =>
       total +
-      countTokens(
+      countText(
         JSON.stringify({
           name: tool.id,
           description: tool.description,

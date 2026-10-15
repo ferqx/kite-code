@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from './daemon-host-build';
 import { workflowManifest } from './workflow-manifest';
@@ -13,6 +14,7 @@ export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-workflow-decision-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(join(workspace, 'skill'), { recursive: true });
   mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
@@ -130,7 +132,7 @@ export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
   };
   try {
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         tools: [],
@@ -158,7 +160,17 @@ export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
       buildId: 'owned-workflow-question',
       apiMajor: 1,
     };
-    return { root, workspace, profile, artifact, ledger, requests, instructions, close };
+    return {
+      root,
+      workspace,
+      profile,
+      artifact,
+      ledger,
+      requests,
+      instructions,
+      userConfiguration,
+      close,
+    };
   } catch (error) {
     close();
     throw error;

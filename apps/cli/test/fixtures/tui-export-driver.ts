@@ -51,7 +51,8 @@ let synchronizedOutput = false,
   nativeFrameReady = false;
 const composerPainted = () =>
   actionTail.includes('NewRun>') &&
-  actionTail.includes(normalize('fixture · [Request approval]')) &&
+  actionTail.includes(normalize('fixture ·')) &&
+  actionTail.includes(normalize('· [Request approval]')) &&
   actionTail.includes(normalize('Shift+Tab: plan · /help'));
 const markers = [
   'New Run',

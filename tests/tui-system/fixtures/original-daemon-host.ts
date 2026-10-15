@@ -9,9 +9,7 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
-import { runSelectedDaemon } from '../../../apps/cli/host/daemon';
 import { verifyTerminalBundle } from '../../../apps/cli/host/terminal-artifact';
-import { parseCLIArguments } from '../../../apps/cli/src/arguments';
 
 const repository = resolve(import.meta.dir, '../../..');
 type Verified = ReturnType<typeof verifyTerminalBundle>;
@@ -100,18 +98,36 @@ export function createOriginalDaemonHost(input: {
     const argv = ['server', action, '--data-root', dataRoot, '--server', socket];
     if (action === 'start') argv.push('--workspace', input.workspace);
     if (cancel) argv.push('--cancel');
-    const args = parseCLIArguments(argv);
-    if (args.kind !== 'server') throw Error('original_daemon_wrong_arguments');
-    const lines: string[] = [];
-    const code = await runSelectedDaemon({
-      arguments: args,
-      dataRoot,
-      profile: 'development',
-      cwd: input.workspace,
-      artifact: input.candidate.artifact,
-      write: (line) => lines.push(line),
-    });
-    if (code !== 0) throw Error('original_daemon_command_failed');
+    const child = Bun.spawn(
+      [process.execPath, join(import.meta.dir, 'original-daemon-command.ts')],
+      {
+        cwd: repository,
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: input.home,
+          ...(process.platform === 'win32' ? { USERPROFILE: input.home } : {}),
+        },
+      },
+    );
+    child.stdin.write(
+      JSON.stringify({
+        argv,
+        dataRoot,
+        workspace: input.workspace,
+        artifact: input.candidate.artifact,
+      }),
+    );
+    child.stdin.end();
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    if (code !== 0) throw Error(`original_daemon_command_failed:${stderr}`);
+    const lines = stdout.trim().split('\n');
     if (action === 'stop') return;
     const status = JSON.parse(lines.at(-1)!) as {
       state: string;

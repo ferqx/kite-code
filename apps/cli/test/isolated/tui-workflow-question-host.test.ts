@@ -103,6 +103,7 @@ await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataR
         {
           stdout: 'pipe',
           stderr: 'pipe',
+          env: { ...process.env, ...f.userConfiguration.homeEnvironment },
           ...(process.platform === 'win32' ? { ipc() {} } : {}),
         },
       );

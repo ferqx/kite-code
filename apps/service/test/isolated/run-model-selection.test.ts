@@ -14,9 +14,9 @@ import {
   type FollowUpCommandRequest,
   type StartCommandRequest,
 } from '@kite-ai/client';
-import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
+import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 8000;

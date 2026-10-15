@@ -13,6 +13,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from './daemon-host-build';
 
@@ -31,6 +32,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
     home = join(root, 'home');
   mkdirSync(workspace);
   mkdirSync(home, { mode: 0o700 });
+  const userConfiguration = ownedUserConfiguration(home);
   const file = join(workspace, 'original.txt');
   writeFileSync(file, 'original bytes\r\n');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -85,7 +87,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -115,13 +117,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
     buildId: 'file-fork-receipt',
     apiMajor: 1,
     requiredCapabilities: ['extensions_actions', 'extension_queries'],
-    spawnChild: (command, { env }) =>
-      Bun.spawn([...command], {
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: { ...env, HOME: home, ...(process.platform === 'win32' ? { USERPROFILE: home } : {}) },
-      }),
+    spawnChild: userConfiguration.spawnChild,
   });
   try {
     const client = service.client,
@@ -177,6 +173,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
     const checkpointId = (await client.listFileCheckpoints('s')).payload.items[0]!.checkpoint.id;
     await service.close();
     return {
+      userConfiguration,
       checkpointId,
       root,
       workspace,

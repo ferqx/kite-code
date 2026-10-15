@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
@@ -22,6 +23,7 @@ const repo = resolve(import.meta.dir, '../../../..');
 test('actual development PTY slash routes manage Session/Fork/current Context and manual compression without replay', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-management-'))),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
     entrypoint = join(repo, 'apps/service/dist/main.js'),
     entrypointSha256 = sha(readFileSync(entrypoint));
@@ -119,7 +121,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
       mode: 0o600,
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         tools: [],
@@ -136,6 +138,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
       { mode: 0o600 },
     );
     const seed = await launchPairedService({
+      spawnChild: userConfiguration.spawnChild,
       profile,
       ...artifact,
       instanceId: crypto.randomUUID(),
@@ -188,6 +191,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
         }),
       ],
       {
+        env: { ...process.env, ...userConfiguration.homeEnvironment },
         stdout: 'pipe',
         stderr: 'pipe',
         stdin: 'ignore',

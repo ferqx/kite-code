@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { JsonObject } from '@kite-ai/agent/config';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { createUserConfiguration } from '../../src/user-configuration';
+import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'kite-user-configuration-'));

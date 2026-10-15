@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyTerminalBundle } from '../../../apps/cli/host/terminal-artifact';
+import { userConfigurationPath } from '../../../apps/service/src/user-configuration-path';
 import { sourceServerArguments } from '../../../scripts/development/ensure-web';
 import { sourceTerminalRoot } from '../../../scripts/release/source-terminal';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
@@ -382,7 +383,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
       mode: 0o600,
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfigurationPath(home),
       JSON.stringify({
         modelId: 'fixed',
         tools: [],

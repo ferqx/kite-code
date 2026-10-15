@@ -10,7 +10,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import type { AgentClient, Message } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) {
   const end = Date.now() + 10000;

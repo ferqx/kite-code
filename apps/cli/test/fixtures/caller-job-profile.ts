@@ -14,6 +14,7 @@ import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import {
   createStdioPermissionReader,
   promptPermissionMode,
@@ -33,6 +34,7 @@ export async function callerJobProfile() {
     join(root, 'node_modules'),
     process.platform === 'win32' ? 'junction' : 'dir',
   );
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(workspace);
   mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
@@ -76,7 +78,7 @@ export async function callerJobProfile() {
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -100,6 +102,7 @@ export async function callerJobProfile() {
   const service = await launchPairedService({
     profile,
     ...chosen,
+    spawnChild: userConfiguration.spawnChild,
     instanceId: crypto.randomUUID(),
     requiredCapabilities: ['commands', 'inputs', 'permission_controls'],
   });
@@ -152,6 +155,7 @@ export async function callerJobProfile() {
     });
     const jobs = (await client.getView('s')).executions.filter((e) => e.kind === 'job');
     return {
+      userConfiguration,
       root,
       workspace,
       profile,

@@ -7,6 +7,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import { bootstrapSchema } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { type OriginalMessage, originalToolResults } from '../fixtures/original-tool-results';
@@ -27,6 +28,7 @@ for (const mode of ['paired', 'shared'] as const)
         `---\n${JSON.stringify({ ...workflowManifest('alpha-skill'), context: { mode: contextMode, agent: 'code' }, ...(contextMode === 'fork' ? { output_schema: { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false } } : {}) })}\n---\n${body}\n`,
       );
       const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+      const userConfiguration = ownedUserConfiguration(join(root, 'home'));
       mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
       mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
       writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
@@ -123,7 +125,7 @@ for (const mode of ['paired', 'shared'] as const)
         },
       });
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfiguration.path,
         JSON.stringify({
           modelId: 'fixed',
           skills: [{ id: 'alpha', path: 'skill' }],
@@ -147,7 +149,7 @@ for (const mode of ['paired', 'shared'] as const)
           const source = join(base, `${entry}-workflow.ts`);
           writeFileSync(
             source,
-            `import {selectProfile} from '@kite-ai/agent/profile';import {createDefaultProcessConfiguration} from '@kite-ai/service/configuration';import {${entry === 'paired' ? 'runServiceProcess' : 'runDaemonProcess'}} from '@kite-ai/service/${entry === 'paired' ? 'main' : 'daemon-main'}';await ${entry === 'paired' ? 'runServiceProcess' : 'runDaemonProcess'}({configure(startup){return createDefaultProcessConfiguration({userConfigurationPath:selectProfile(startup.profile).profilePath+'/config.jsonc',profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,child:[{id:'code',version:'1',toolIds:[]}]});}});`,
+            `import {selectProfile} from '@kite-ai/agent/profile';import {createDefaultProcessConfiguration} from '@kite-ai/service/configuration';import {${entry === 'paired' ? 'runServiceProcess' : 'runDaemonProcess'}} from '@kite-ai/service/${entry === 'paired' ? 'main' : 'daemon-main'}';await ${entry === 'paired' ? 'runServiceProcess' : 'runDaemonProcess'}({configure(startup){return createDefaultProcessConfiguration({profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,child:[{id:'code',version:'1',toolIds:[]}]});}});`,
           );
           const result = await Bun.build({
             entrypoints: [source],
@@ -209,6 +211,7 @@ for (const mode of ['paired', 'shared'] as const)
       try {
         if (mode === 'paired') {
           const service = await launchPairedService({
+            spawnChild: userConfiguration.spawnChild,
             profile,
             ...artifact,
             instanceId: randomUUID(),
@@ -235,6 +238,7 @@ for (const mode of ['paired', 'shared'] as const)
           writeFileSync(join(web, 'manifest.json'), manifest);
           const instanceId = randomUUID();
           daemon = Bun.spawn([process.execPath, daemonEntry], {
+            env: { ...process.env, ...userConfiguration.homeEnvironment },
             stdin: 'pipe',
             stdout: 'pipe',
             stderr: 'pipe',
@@ -311,7 +315,11 @@ finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(master)
 `;
-        python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+        python = Bun.spawn(['python3', '-c', program], {
+          env: { ...process.env, ...userConfiguration.homeEnvironment },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
         const [out, err, code] = await Promise.all([
           new Response(python.stdout).text(),
           new Response(python.stderr).text(),

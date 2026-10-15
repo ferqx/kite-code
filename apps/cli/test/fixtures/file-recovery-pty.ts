@@ -112,6 +112,10 @@ async function drive(config: Configuration) {
       .filter((row) => row.method === 'POST').length;
   const approveCode = async () => {
     await wait('pending approval panel');
+    // The hint appears while begin/continue is still submitting. Closing the
+    // panel then aborts its reader before the original request has settled.
+    await wait('Reading state: ready');
+    assert.equal(rows()[0]?.code?.phase, config.mode === 'lost' ? 'unknown' : 'pending');
     const beforeAnswer = postCount();
     await key('a');
     await wait('❯ Allow once', { approval: true });

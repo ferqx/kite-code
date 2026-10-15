@@ -12,7 +12,7 @@ import { realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
   currentTuiSystemStepSignal,
   throwIfTuiSystemStepAborted,

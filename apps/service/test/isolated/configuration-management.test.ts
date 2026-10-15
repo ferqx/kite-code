@@ -9,10 +9,10 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 import { launchPairedService } from '../../src/paired';
+import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 async function setup() {
   const root = mkdtempSync(join(tmpdir(), 'kite-http-management-'));

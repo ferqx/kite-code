@@ -25,10 +25,18 @@ type Journal = {
   }[];
 };
 
-export async function runRecoveryPTY(config: Configuration) {
+export async function runRecoveryPTY(
+  config: Configuration,
+  homeEnvironment: Record<string, string> = {},
+) {
   const driver = Bun.spawn(
     [process.execPath, '--no-install', fileURLToPath(import.meta.url), JSON.stringify(config)],
-    { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
+    {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, ...homeEnvironment },
+    },
   );
   const [out, err, code] = await Promise.all([
     new Response(driver.stdout).text(),

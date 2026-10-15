@@ -9,7 +9,7 @@ import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 
 import { ptyDeadline } from '../fixtures/tui-pty';
 

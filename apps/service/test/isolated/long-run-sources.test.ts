@@ -7,8 +7,8 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { launchPairedService, type PairedServiceChild } from '../../src/paired';
+import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 type ProviderBody = {
   messages: { role: string; content: string }[];

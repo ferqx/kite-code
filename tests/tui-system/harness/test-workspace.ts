@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 
 export interface TestWorkspace {
   home: string;

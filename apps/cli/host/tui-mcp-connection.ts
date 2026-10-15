@@ -228,9 +228,14 @@ export function createTuiMcpConnectionPort(
       throw Error('mcp_connection_original_command_mismatch');
   };
   async function scope(intent: TuiMcpConnectionIntent, observed: TuiMcpSnapshot) {
-    // These two Host display fields carry no configuration authority. All
+    // These Host display fields carry no configuration authority. All
     // remaining snapshot bytes must still match the fresh Source exactly.
-    const { labels: _labels, liveServerIds: _liveServerIds, ...canonicalObserved } = observed;
+    const {
+      labels: _labels,
+      liveServerIds: _liveServerIds,
+      details: _details,
+      ...canonicalObserved
+    } = observed;
     admission(intent);
     const view = await client.getView(intent.sessionId);
     admission(intent);

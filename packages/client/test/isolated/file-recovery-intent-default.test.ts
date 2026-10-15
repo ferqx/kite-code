@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
+import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
 import { createClient, type ExtensionCommandRequest, type ForkSessionRequest } from '../../src';
 import {
   canonicalFileRecoveryIntent,

@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
@@ -15,6 +16,7 @@ test('built Service and actual PTY permission controls create exact Shell grants
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-permissions-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+  const userConfiguration = ownedUserConfiguration(root);
   const evidence = join(tmpdir(), `kite-tui-permissions-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
   mkdirSync(workspace, { mode: 0o700 });
@@ -92,7 +94,7 @@ test('built Service and actual PTY permission controls create exact Shell grants
   });
   try {
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         tools: ['shell.launch', 'shell.wait'].map((id) => ({ id, definitionVersion: '1' })),
@@ -134,6 +136,7 @@ test('built Service and actual PTY permission controls create exact Shell grants
         apiMajor: 1,
       };
     const seed = await launchPairedService({
+      spawnChild: userConfiguration.spawnChild,
       profile,
       ...artifact,
       instanceId: crypto.randomUUID(),
@@ -176,7 +179,12 @@ test('built Service and actual PTY permission controls create exact Shell grants
           evidence,
         }),
       ],
-      { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
+      {
+        env: { ...process.env, ...userConfiguration.homeEnvironment },
+        stdout: 'pipe',
+        stderr: 'pipe',
+        ...(process.platform === 'win32' ? { ipc() {} } : {}),
+      },
     );
     const [out, err, exit] = await Promise.all([
       new Response(child.stdout).text(),

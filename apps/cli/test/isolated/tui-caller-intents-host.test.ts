@@ -62,7 +62,12 @@ for (const crash of ['prepared', 'post-lost'] as const)
               servicePidPath,
             }),
           ],
-          { stdout: 'pipe', stderr: 'pipe', ...(process.platform === 'win32' ? { ipc() {} } : {}) },
+          {
+            stdout: 'pipe',
+            stderr: 'pipe',
+            env: { ...process.env, ...f.userConfiguration.homeEnvironment },
+            ...(process.platform === 'win32' ? { ipc() {} } : {}),
+          },
         );
         const [out, err, code] = await Promise.all([
           new Response(child.stdout).text(),

@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { ptyDeadline } from '../fixtures/tui-pty';

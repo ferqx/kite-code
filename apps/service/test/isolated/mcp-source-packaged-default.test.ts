@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
-import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
+import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
   const deadline = Date.now() + 12000;

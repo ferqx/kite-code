@@ -12,10 +12,10 @@ import { readSessionLogs } from '@kite-ai/agent/storage';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient, type SessionLogPage } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { startService } from '../../src/index';
 import { launchPairedService } from '../../src/paired';
+import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 async function failure(read: Promise<unknown> | (() => Promise<unknown>)) {
   try {

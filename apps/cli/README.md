@@ -207,7 +207,7 @@ Profile facade 先核原 authority 和短锁归属并挂资源 guard，再做可
 
 该 PTY 复用[现有 TUI 夹具编译](test/fixtures/file-recovery-profile.ts)的 Ink/React 依赖接线，保留已安装 npm 模块边界，避免 bundle 将可选 DevTools 变成顶层导入；启动时禁止 Bun 自动安装。临时目录按系统选择并 realpath，Windows 依赖目录使用 junction；[草稿驱动](test/fixtures/tui-drafts-pty.ts)以 Bun 原生 PTY／ConPTY 替代 POSIX Python，三端执行同一冷草稿、lease、恢复和冲突断言。macOS／Linux 强制关闭仍发送真实 SIGTERM；Windows 只在[测试 fixture](test/isolated/tui-drafts.fixture.ts)的私有 IPC 触发同一已注册关闭处理器并核确认、最后保存与退出码1，这不证明 Windows OS 信号投递。产品退出码和 PTY EOF 分别核对，保原12／8／5秒及45秒整例预算；下载缓存、强制清理和 workflow 定义均不计正常退出或平台通过证据。
 
-开发 `cli:dev server start|restart` 由 [unified-cli selector](../../scripts/development/unified-cli.ts)提供私有 `resolveArtifact` 回调，只有真正启动或重启预检时才读取目标构建。`server status/stop`、`web` 和已经兼容的 `server start` 复用不依赖目标资产存在；absent 状态查询/停止不创建 profile、启动 Service 或调用 Provider。该回调属于可信宿主，不进入 argv 或公共业务 schema。
+开发 `cli:dev server start|restart` 由 [unified-cli selector](../../scripts/development/unified-cli.ts)提供私有 `resolveArtifact` 回调，只有真正启动或重启预检时才读取目标构建。`server status/stop`、`web` 和已经兼容的 `server start` 复用不依赖目标资产存在；absent 状态查询/停止不创建 profile、启动 Service 或调用 Provider。该回调属于可信宿主，不进入 argv 或公共业务 schema。Daemon 启动与 paired Service 一样显式传递可信宿主的用户 HOME（Windows 同时传 USERPROFILE），使统一用户模型配置不因子进程丢失环境而改读其他目录；该路径不由公共启动请求提供。
 
 daemon 制品选择固定 `apps/service/dist/daemon-main.js` 与 `apps/web/dist/manifest.json`，核真实常规文件和 canonical Web 目录、准确字节 SHA；buildId 同时绑定 paired entry 摘要、daemon entry 摘要和 Web manifest 摘要。manifest 内容的有限资产资格仍由实际 daemon preflight 校验，不把摘要当目录授权。缺失/链接资产在需要 launch 时明确失败，不读取源码 fallback。默认 run/resume 及 session/context 的 paired selector 保持原 entry/executable 准入与 buildId；显式共享 run/resume 不选择配套资产。
 
@@ -433,7 +433,7 @@ accepted Command保持pending；配置已保存须原subject/Store/Command kind/
 
 该MCP选择/清屏PTY在发送slash Enter前，先排空自有PTY已到字节，并在原10秒内核最新完整Ink帧的准确当前草稿及非Loading状态；累计历史中的`/mcp`不是输入就绪证明。原180秒整例、21断言、两次管理面板和原副作用检查保持，当前原完整文件10.88秒通过；默认负载暴露的第二次slash/Enter混入草稿反例和当前全量结果归[总体进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08sqlite-请求内语句释放与仍失败的-rss)。
 
-完整[配置与清屏](test/isolated/tui-mcp-pty.test.ts)和[冷配置恢复](test/isolated/tui-mcp-cold-pty.test.ts)现分别用[选择驱动](test/fixtures/tui-mcp-selection-driver.ts)及[冷驱动](test/fixtures/tui-mcp-cold-driver.ts)，两段内嵌Python退役、两个实际Service helper字节不改。配置例保原waiting_interaction／Command／Card revision、历史与另一Session私有草稿；MCP修改先accepted等待原Run完成，再接受独立Job Ask，只有一个原配置POST及一次实际文件效果。Esc／refresh／Ctrl+C／clear／草稿clear不取消第二原待决Run或删完整历史，原完整终端字节及清屏后的原action字节窗口保持。cold例保两次真实enable／disable、原HostMutation／journal，再在实际空目录选择第二原ID零GET、明确Check只查原Command／Execution／Mutation、冷全部POST0及RPC／credential／admit0。系统tmpdir／Windows junction和USERPROFILE适配三端；POSIX真实getpgid核原PGID=PID，Windows记录持有PTY的实际process-tree ownership，不能伪造PGID或以强杀当normal。原10／12／6＋3／故障5／180秒不改；macOS完整文件分别1pass／23expects／10.50秒、1pass／44expects／10.66秒，正常Ctrl+Q／EOF及所属PID退出保持。共享异步parser替代POSIX select／read-burst，不称运输资源实现逐字节等价；Win/Linux和fault cleanup仍需真实资格。
+完整[配置与清屏](test/isolated/tui-mcp-pty.test.ts)和[冷配置恢复](test/isolated/tui-mcp-cold-pty.test.ts)现分别用[选择驱动](test/fixtures/tui-mcp-selection-driver.ts)及[冷驱动](test/fixtures/tui-mcp-cold-driver.ts)，两段内嵌Python退役、两个实际Service helper字节不改。配置例保原waiting_interaction／Command／Card revision、历史与另一Session私有草稿；MCP修改先accepted等待原Run完成，再接受独立Job Ask，只有一个原配置POST及一次实际文件效果。Esc／refresh／保存工具快照子 reader 的 Ctrl+C／clear／草稿 clear 不取消第二原待决 Run 或删完整历史；MCP 根面板的 Ctrl+C 仍请求取消原整轮，原完整终端字节及清屏后的原action字节窗口保持。cold例保两次真实enable／disable、原HostMutation／journal，再在实际空目录选择第二原ID零GET、明确Check只查原Command／Execution／Mutation、冷全部POST0及RPC／credential／admit0。系统tmpdir／Windows junction和USERPROFILE适配三端；POSIX真实getpgid核原PGID=PID，Windows记录持有PTY的实际process-tree ownership，不能伪造PGID或以强杀当normal。原10／12／6＋3／故障5／180秒不改；macOS完整文件分别1pass／23expects／10.50秒、1pass／44expects／10.66秒，正常Ctrl+Q／EOF及所属PID退出保持。共享异步parser替代POSIX select／read-burst，不称运输资源实现逐字节等价；Win/Linux和fault cleanup仍需真实资格。
 
 ## TUI MCP 项目来源决定与原申请
 
@@ -457,7 +457,7 @@ accepted Command保持pending；配置已保存须原subject/Store/Command kind/
 
 ## TUI MCP 显式连接与原申请
 
-[connection host](host/tui-mcp-connection.ts)只通过公共Client申请普通 `builtin.mcp/mcp.connect@1`、GET原Command与有限 `mcp.connection@1` Query，不建第二Runtime。新提交核真实serverInfo Store/subject、Session、`listAllWorkspaces`完整目录、物理canonical root/dev/ino、当前完整安全目录等于原observed，并要求准确Server admitted/selected/available。原read-set只核新申请来源观察，不伪装为connect input CAS；最终来源捕获和派发仍由Service核实。历史读取不要求当前Source或物理Workspace仍存在。
+[connection host](host/tui-mcp-connection.ts)只通过公共Client申请普通 `builtin.mcp/mcp.connect@1`、GET原Command与有限 `mcp.connection@1` Query，不建第二Runtime。新提交核真实serverInfo Store/subject、Session、`listAllWorkspaces`完整目录、物理canonical root/dev/ino、当前完整安全目录等于原observed，并要求准确Server admitted/selected/available。原read-set只核新申请来源观察，不伪装为connect input CAS；最终来源捕获和派发仍由Service核实。目录附加的名称、当前连接与能力数量仅用于展示，连接提交先剥离这些字段，再对完整来源快照、Store、Session、Workspace 和 read-set 核对；展示信息不阻断合法原申请，也不提供连接资格。历史读取不要求当前Source或物理Workspace仍存在。
 
 [独立codec](host/mcp-connection-intents.ts)与[journal](host/mcp-connection-journal.ts)保存 `ui/mcp-connection-intents.json@1`，不扩大五类caller、答案、Files或旧MCP选择格式。每条闭合完整原request/subject/Store/Session/Workspace/identity、body/request SHA和有限phase；只有本进程成功durable prepare才有原首次POST权，重复/冷记录只查原GET。沿Profile-use lease、短data lock、private/no-follow/单链接/实体、16MiB/128、etag CAS、temp/fsync/rename/目录同步和重读。冲突域Store+Session+Server，unknown不淘汰；ready/failed journal终态不降级，cold list只恢复原意图为unknown，不当当前结果证明。
 

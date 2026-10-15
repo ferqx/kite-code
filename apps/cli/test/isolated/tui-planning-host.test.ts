@@ -141,7 +141,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       },
     });
     try {
-      const configPath = join(f.profile.profilePath, 'config.jsonc');
+      const configPath = f.userConfiguration.path;
       writeFileSync(
         configPath,
         JSON.stringify({
@@ -163,6 +163,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       );
       const seed = await launchPairedService({
         ...f.artifact,
+        spawnChild: f.userConfiguration.spawnChild,
         profile: f.profile,
         instanceId: crypto.randomUUID(),
         requiredCapabilities: ['sessions', 'interactions'],
@@ -240,6 +241,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         {
           stdout: 'pipe',
           stderr: 'pipe',
+          env: { ...process.env, ...f.userConfiguration.homeEnvironment },
           ...(process.platform === 'win32' ? { ipc() {} } : {}),
         },
       );
@@ -359,7 +361,9 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
               .query(
                 "SELECT json FROM extension_record WHERE extension_id='builtin.planning' AND scope_id='s' AND key=?",
               )
-              .get(`progress/original-plan/${current.version}`) as { json: string }
+              .get(`progress/original-plan/${current.version}`) as {
+              json: string;
+            }
           ).json,
         );
         expect(progress.completePlan).toBe(true);
@@ -379,7 +383,11 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         if (entrance === 'active-queued') {
           const parent = db
             .query('SELECT id,status,config_json FROM run WHERE origin_command_id=?')
-            .get(starts[0].body.commandId) as { id: string; status: string; config_json: string };
+            .get(starts[0].body.commandId) as {
+            id: string;
+            status: string;
+            config_json: string;
+          };
           expect(parent.id).toBe(work[0].body.afterRunId);
           expect(parent.status).toBe('completed');
           expect(JSON.parse(parent.config_json).snapshot.planning.intent).toBeNull();

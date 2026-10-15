@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 
 const repository = resolve(import.meta.dir, '../../../..');
@@ -24,6 +25,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
     const workspace = join(root, 'workspace');
     mkdirSync(workspace, { mode: 0o700 });
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+    const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const entrypoint = join(repository, 'apps/service/dist/main.js');
     const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
     const entrypointSha256 = sha(readFileSync(entrypoint));
@@ -106,7 +108,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
         mode: 0o600,
       });
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfiguration.path,
         JSON.stringify({
           modelId: 'local',
           tools: [
@@ -125,6 +127,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
         { mode: 0o600 },
       );
       const seed = await launchPairedService({
+        spawnChild: userConfiguration.spawnChild,
         profile,
         ...artifact,
         instanceId: crypto.randomUUID(),
@@ -204,7 +207,11 @@ finally:
  if p.poll() is None: os.killpg(p.pid,signal.SIGKILL);p.wait()
  if master>=0: os.close(master)
 `;
-      const child = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+      const child = Bun.spawn(['python3', '-c', program], {
+        env: { ...process.env, ...userConfiguration.homeEnvironment },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
       const [out, err, exit] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
@@ -248,6 +255,7 @@ finally:
       }
       // A new genuine paired owner can acquire the same profile immediately after explicit host exit.
       const reopened = await launchPairedService({
+        spawnChild: userConfiguration.spawnChild,
         profile,
         ...artifact,
         instanceId: crypto.randomUUID(),

@@ -19,7 +19,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
-import { userConfigurationPath } from '@kite-ai/service/test-fixtures';
+import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
 test.skipIf(process.platform !== 'darwin')(

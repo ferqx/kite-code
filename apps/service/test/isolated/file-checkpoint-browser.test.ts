@@ -26,13 +26,13 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createBrowserClient } from '@kite-ai/client/browser';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
 import { startDevelopmentWeb } from '../../src/development-web';
 import {
   FileCheckpointDetailSchema,
   FileRestoreStatusSchema,
 } from '../../src/http/schema/file-checkpoints';
 import { launchPairedService } from '../../src/paired';
+import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
 function canonical(value: Json): string {

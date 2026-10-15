@@ -7,6 +7,7 @@ import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import { bootstrapSchema } from '@kite-ai/service/daemon';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 
 const repository = resolve(import.meta.dir, '../../../..');
 const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
@@ -51,12 +52,13 @@ nativeTest(
     const manifest = JSON.stringify(assets);
     writeFileSync(join(web, 'manifest.json'), manifest);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+    const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed-daemon',
         models: [
@@ -81,6 +83,7 @@ nativeTest(
     const daemon = Bun.spawn(
       [process.execPath, join(repository, 'apps/cli/test/fixtures/tui-shared-daemon-child.ts')],
       {
+        env: { ...process.env, ...userConfiguration.homeEnvironment },
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -220,7 +223,11 @@ while not os.path.exists(${JSON.stringify(exitsChecked)}):
 run('loss')
 print('ALL_SHARED_BOUNDARIES')
 `;
-      python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+      python = Bun.spawn(['python3', '-c', program], {
+        env: { ...process.env, ...userConfiguration.homeEnvironment },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
       const output = new Response(python.stdout).text();
       const errors = new Response(python.stderr).text();
       await until(() => existsSync(exitsReady) || python!.exitCode !== null);
@@ -284,7 +291,11 @@ finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(m)
 `;
-      absent = Bun.spawn(['python3', '-c', absentScript], { stdout: 'pipe', stderr: 'pipe' });
+      absent = Bun.spawn(['python3', '-c', absentScript], {
+        env: { ...process.env, ...userConfiguration.homeEnvironment },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
       expect(await deadline(absent.exited)).toBe(0);
       expect(existsSync(missing)).toBe(false);
     } finally {

@@ -36,7 +36,12 @@ describe('TUI PTY System — explicit App Server daemon', () => {
 
   beforeEach(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        provider: { mock: { baseURL: server.baseURL } },
+        model: { default: { provider: 'mock', name: 'mock-model' } },
+      },
+    });
     tui = undefined;
     second = undefined;
     daemon = createOriginalDaemonHost({

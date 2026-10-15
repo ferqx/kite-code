@@ -18,7 +18,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { ownedUserConfiguration } from '@kite-ai/service/test-fixtures';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean, limit = 10000) {

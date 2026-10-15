@@ -16,6 +16,7 @@ import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import {
   createStdioPermissionReader,
@@ -38,6 +39,7 @@ export async function recoveryProfile() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-client-recovery-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(workspace, { mode: 0o700 });
   mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
@@ -127,7 +129,7 @@ export async function recoveryProfile() {
   let warm: Awaited<ReturnType<typeof launchPairedService>> | undefined;
   try {
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         tools: [{ id: 'files.write', definitionVersion: '2' }],
@@ -157,6 +159,7 @@ export async function recoveryProfile() {
       launchPairedService({
         profile,
         ...artifact,
+        spawnChild: userConfiguration.spawnChild,
         instanceId: crypto.randomUUID(),
         requiredCapabilities: [
           'sessions',
@@ -256,6 +259,7 @@ export async function recoveryProfile() {
     warm = undefined;
     let closed = false;
     return {
+      userConfiguration,
       root,
       workspace,
       profile,

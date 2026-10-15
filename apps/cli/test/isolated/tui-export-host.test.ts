@@ -10,6 +10,7 @@ import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { terminalSqliteEngineRoot } from '@kite-ai/service/sqlite-release-assets';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
@@ -24,6 +25,7 @@ for (const mode of ['complete'] as readonly string[]) {
     const workspace = join(root, 'workspace');
     mkdirSync(workspace, { mode: 0o700 });
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'default' });
+    const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const evidence = join(tmpdir(), `kite-export-evidence-${randomUUID()}`);
     mkdirSync(evidence);
     let passed = false;
@@ -103,7 +105,11 @@ for (const mode of ['complete'] as readonly string[]) {
           '--directory',
           join(root, 'candidate'),
         ],
-        { stdout: 'pipe', stderr: 'pipe' },
+        {
+          env: { ...process.env, ...userConfiguration.homeEnvironment },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
       );
       const [buildOut, buildErr, buildExit] = await Promise.all([
         new Response(build.stdout).text(),
@@ -132,7 +138,7 @@ for (const mode of ['complete'] as readonly string[]) {
         mode: 0o600,
       });
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfiguration.path,
         JSON.stringify({
           modelId: 'local',
           tools: [
@@ -151,6 +157,7 @@ for (const mode of ['complete'] as readonly string[]) {
         { mode: 0o600 },
       );
       const seed = await launchPairedService({
+        spawnChild: userConfiguration.spawnChild,
         profile,
         ...artifact,
         instanceId: crypto.randomUUID(),
@@ -213,6 +220,7 @@ for (const mode of ['complete'] as readonly string[]) {
           }),
         ],
         {
+          env: { ...process.env, ...userConfiguration.homeEnvironment },
           stdin: 'ignore',
           stdout: 'pipe',
           stderr: 'pipe',
@@ -265,6 +273,7 @@ for (const mode of ['complete'] as readonly string[]) {
       }
       // A new genuine paired owner can acquire the same profile immediately after explicit host exit.
       const reopened = await launchPairedService({
+        spawnChild: userConfiguration.spawnChild,
         profile,
         ...artifact,
         instanceId: crypto.randomUUID(),

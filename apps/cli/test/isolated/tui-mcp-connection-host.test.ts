@@ -359,7 +359,20 @@ test('directory presentation labels and current connection status do not become 
     const directory = createTuiMcpPort(f.tracked, f.storeId, undefined, f.journal);
     const facts = await directory.read('s', new AbortController().signal);
     expect(facts.liveServerIds).toEqual([]);
-    const shown = { ...facts, labels: { [facts.items[0]!.id]: 'Owned display name' } };
+    expect(facts.details).toBeDefined();
+    const shown = {
+      ...facts,
+      labels: { [facts.items[0]!.id]: 'Owned display name' },
+      details: {
+        [facts.items[0]!.id]: {
+          status: 'unknown' as const,
+          reason: null,
+          toolCount: 123,
+          resourceCount: 456,
+          promptCount: 789,
+        },
+      },
+    };
     const intent = original(facts, 'displayed-source');
     const pending = await directory.connection!.submit(intent, shown);
     expect(pending.phase).toBe('pending');

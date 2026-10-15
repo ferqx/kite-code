@@ -6,6 +6,8 @@
 
 `bun run test:tui:integration`／`test:tui:system` 使用[当前统一入口](../scripts/run-unified-tui-system-tests.ts)，逐整文件发现原 `tests/tui-system/scenarios` 的 52 个真实终端旅程，并与新 CLI TUI owner、正式入口和跨模块启动等待文件一起执行。`KITE_TUI_SYSTEM_SHARD` 接受 0/4 至 3/4；四份完整覆盖同一库存，每个文件只归一份。原旅程消费当前 Ink UI、公共 Client 和默认 Service；协议映射只转换原参数与实际新收据，不生产旧 Runtime 事件或伪造结果，原超时、清理门禁和行为断言继续保留。
 
+2026-10-15 在 `2560b7ca1` 加本轮修复的工作树上，macOS arm64／Bun 1.4.2 实际执行标准 `bun run test:tui:system`：当前 113 个完整文件、默认四并发全部完成，退出 0，301.16 秒；运行前后实现与测试输入一致。根与八个 workspace 的 `bun run typecheck`、`bun run build` 通过，`test:tui:harness` 另 4 项通过。前序候选导出缺失、旧用户配置路径、MCP 展示字段误入来源比较、巨正文显示估算阻塞和测试动作范围／审批就绪失败均保留原失败证据后修复；不把分批诊断结果计作本次标准整轮通过。该结果仅覆盖本机，未执行 Win/Linux 原生或完整安装资格。
+
 历史 Store9/11 确属旧数据库格式；其转换按 D08 不适用，对应旅程改验隔离的新 Store／Profile 的会话、重启和维护能力，不能将这些结果记作旧格式兼容；实际旧 State26 文件只作为不读取、不覆盖的隔离反例，遵守 D08。当前新 Store 的版本与维护恢复验证继续由正式测试负责。可选的旧 lifecycle 诊断 fixture 与 `in-process-service-connector` 尚属历史参考，不参与当前 52 个旅程，也不证明全 Runtime 资源或出生后代资格。当前完整执行结果归[进度](../docs/plans/unified-agent-refactor-v1-progress.md)，下面此前默认结果保持其原提交和范围。
 
 当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出；本轮新增上下文估算、实际主屏子任务布局与错误退出测试，合并 Desktop 开发与菜单测试后当前为 819 个默认文件。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
