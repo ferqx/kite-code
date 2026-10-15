@@ -134,7 +134,9 @@ W09 二进制内容使用 `GET /v1/sessions/{id}/artifacts/{refId}?storeId=&scop
 2 项实际集成测试通过 paired child 中的 Core Tool 发布无害字节，验证准确 binary SDK 下载、原 scope、错误 Store/Session/scope、path/hash 注入拒绝、认证、重复读取零效果以及活动 Run/event cursor 不变。另一个真实进行中 GET 在实际 Artifact store 的受控 reader barrier 被取消，原 Model 仍活动；其他 Service 主体拒绝。测试只用临时文件和 SQLite Worker，不读用户内容。维护 GC 和平台发行资格仍未完成。
 
 
-默认全局登记普通 [ask_user leaf](../../packages/agent/src/tools/ask-user/README.md)，根 Run 缺省选择 `ask_user@1`。Run 和只读 Skill catalogue 使用同一 [configuration-defaults.ts](src/configuration-defaults.ts)；JSONC 按原 merge-by-id 以 enabled:false 或 remove:true 关闭后续选择，`tools:[]` 不删除默认项。实际 Extension 定义进入版本核对和 selected tool snapshot，未知版本、非空 options 明确拒绝。活动 Run 保留原定义、请求与快照，后来禁用不改绑原卡。
+普通 CLI／TUI／Desktop 的进程宿主以可信 `ordinaryHostTools` 装配日常能力：根 Run 默认选中 `ask_user`、六个 Workspace `files.*` 工具及 `web_fetch`；实际宿主提供 Shell 后端资产时再选中 `shell.execute/launch/read/wait/stop`。缺少后端不会冒充 Shell 可用，也不妨碍仅使用其他能力的对话；显式请求不可用 Shell 仍失败关闭。工具选择不授予权限，实际调用继续检查 Workspace trust、三种权限策略和审批。直接嵌入 `createDefaultProcessConfiguration` 的自定义宿主保持原有限默认，只缺省选入 `ask_user`，自行声明其他工具。
+
+默认全局登记普通 [ask_user leaf](../../packages/agent/src/tools/ask-user/README.md)，根 Run 缺省选择 `ask_user@1`。Run 和只读 Skill catalogue 使用同一 [configuration-defaults.ts](src/configuration-defaults.ts) 及实际宿主默认集合；JSONC 按原 merge-by-id 以 enabled:false 或 remove:true 关闭后续选择，`tools:[]` 不删除默认项。实际 Extension 定义进入版本核对和 selected tool snapshot，未知版本、非空 options 明确拒绝。活动 Run 保留原定义、请求与快照，后来禁用不改绑原卡。[普通进程宿主回归](test/isolated/configuration.test.ts)从只有 Model 的新配置启动，核实际 Provider 工具声明、真实 Workspace 文件内容进入后续请求、无额外审批或项目配置写入，以及后续禁用／移除生效。
 
 该能力只提供信息：准确 builtin.ask-user 的可信 host facts 使用零效果数组与 safeRead，仍核原模式、Workspace trust、allowed identity 和 hardAllowed；请求批准/Auto/Full 都不为提问先发工具审批。Planning 未批准前可提问，Workflow 投影三类外部效果均为 none，答案不产生 permission grant。child 无论继承默认工具或显式角色选择，都从实际 ToolSet 排除 ask_user，实际 capability 同时缺失；compatible SDK 强发该调用在 Model 输出解析时 fail closed，不能冒称 Tool 已执行或曾发 question。[默认实际消费者](test/isolated/ask-user-configuration.test.ts)核三模式、后续真实 Provider 文案、零 grant、禁用与原 Run、版本/options 和两种 child；正常源码外 TUI 资格由 [CLI](../cli/README.md#tui-普通问题步骤)维护，临时 vault 不代 OS 资格。
 

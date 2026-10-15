@@ -129,6 +129,61 @@ function question(schema: Record<string, unknown>, id = 'q', revision = '1'): In
     answer: null,
   } as unknown as Interaction;
 }
+test('ordinary questions ignore attachment shortcuts and direct reads without disturbing the original wizard draft', async () => {
+  const f = fixture({
+    type: 'object',
+    additionalProperties: false,
+    required: ['route', 'detail'],
+    properties: {
+      route: {
+        title: 'Choose original route',
+        anyOf: [{ const: 'route-id', title: 'Original route' }, { type: 'string' }],
+      },
+      detail: { type: 'string', title: 'Original detail', minLength: 1 },
+    },
+  });
+  let reads = 0;
+  f.port.readAttachment = async () => {
+    reads++;
+    throw Error('attachment_missing');
+  };
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    app.stdin.write('\t');
+    await tick();
+    app.stdin.write('  自定义路线  ');
+    await tick();
+    app.stdin.write('\u0001');
+    await tick();
+    expect(reads).toBe(0);
+    expect(f.controller.state.error).toBeUndefined();
+    expect(app.lastFrame()).toContain('自定义路线');
+    expect(f.answers).toHaveLength(0);
+    await f.controller.loadAttachment(f.controller.state.snapshot!.interactions[0]!);
+    expect(reads).toBe(0);
+    expect(f.controller.state.attachments.size).toBe(0);
+    expect(f.controller.state.error).toBeUndefined();
+    app.stdin.write('\r');
+    await tick();
+    expect(app.lastFrame()).toContain('Original detail');
+    expect(f.answers).toHaveLength(0);
+    app.stdin.write('原始说明');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(f.answers).toHaveLength(1);
+    expect(f.answers[0]!.answer).toEqual({
+      kind: 'question',
+      answers: { route: '  自定义路线  ', detail: '原始说明' },
+    });
+    expect(f.commandCount()).toBe(1);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
 test('ordinary schema enum answers via actual Ink selection keys, with no initial default', async () => {
   const f = fixture({
     type: 'string',

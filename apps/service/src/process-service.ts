@@ -172,6 +172,7 @@ export async function assembleProcessService(
     configuration = configure
       ? await configure(startup, hostContext)
       : createDefaultProcessConfiguration({
+          ordinaryHostTools: true,
           profile: selected,
           observerSubjectId: subjectId,
           hostConfiguration: startup.hostConfiguration,

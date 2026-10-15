@@ -28,6 +28,8 @@ Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认�
 
 宿主在原 refresh 中读取准确活动 Model 前缀、已验证 child views、有限 Shell tail、已批准计划及真实压缩阶段，没有独立轮询器。正常完成 Model 的全文和必要交互附件自动使用现有完整 reader；保留原 Store／Session／Run／Execution、UTF-8、EOF/hash 与未完整读取不得答复的门禁。失败可以 Ctrl+O／Ctrl+A 明确重读，未来或不支持的格式不猜正文。完整思考保持收起，完整 reader 同时保留正文与 reasoning 供已加载导出使用；读取只读、不派发 Tool。
 
+Ctrl+A 只为当前原卡确实要求的附件发起重读；Controller 也在调用宿主 reader 前要求存在原附件信封。无附件的普通问题不发读取、不产生 `attachment_missing`，步骤与草稿保持；真实附件读取失败仍保留原错误并阻止答复。[问答键盘回归](../../test/tui/questions.test.tsx)同时覆盖普通问卷零读取及原必读附件门禁，[Controller 回归](../../test/tui/controller.test.tsx)继续核读失败后的零答复。
+
 [首次配置](onboarding-panel.tsx)沿原 Trust／Provider／Connection／Manual Model 流程接新的 [onboarding port](onboarding.ts)。没有可用默认时可配置 Provider，也可用原 enabled/default CAS 选已有模型。秘密仅在遮罩输入和一次热 POST 内，unknown 只 GET 原 mutation；输入、配置和身份校验仍由新 Service／Agent 完成。
 
 模型、权限、会话、Files、MCP、Skills、语言、主题、帮助与交互面板使用原纯 frame／行布局，完整目录及描述保留。模型与 effort 使用原单 Enter 选择；权限、MCP 变更及恢复继续保留各自必要确认，CAS、来源绑定与原 ID 查询不变。Question Tab 在选项与自定义编辑间切换；可选的纯输入题仍用 Tab 跳过，混合题用 Alt+S；多步骤 Esc 返回，第一步 Esc 精确取消原 Question Execution。计划意图和权限仍独立，Shift+Tab 只切换下一草稿 planning，不改活动 Run。

@@ -73,7 +73,7 @@ import {
   type SkillSelection,
 } from './child-configuration';
 import { createSummaryCompressor } from './compression-configuration';
-import { defaultConfiguration } from './configuration-defaults';
+import { defaultConfiguration, ordinaryHostConfigurationDefaults } from './configuration-defaults';
 import { createConfigurationManagement } from './configuration-management';
 import { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
 import { createDefaultHostStatusSource } from './host-status';
@@ -233,6 +233,8 @@ export function createDefaultProcessConfiguration(options: {
   /** Verified host runtime closure deny paths; never supplied by JSONC, Model or public API. */
   runtimeAssets?: readonly string[];
   hostConfiguration?: Json;
+  /** Trusted packaged clients select everyday tools; embedded hosts keep explicit selection. */
+  ordinaryHostTools?: true;
   credentialBackend?: CredentialBackend;
   /** Trusted host policy; configuration files cannot supply permissions or capability grants. */
   permissions?: RuntimeOptions['permissions'];
@@ -263,6 +265,9 @@ export function createDefaultProcessConfiguration(options: {
 }): ProcessHostConfiguration {
   const externalPermissionAuthority =
     options.permissions !== undefined || options.permissionPolicy !== undefined;
+  const configurationDefaults = options.ordinaryHostTools
+    ? ordinaryHostConfigurationDefaults(options.shell !== undefined)
+    : defaultConfiguration;
   const explicit = structuredClone(options.hostConfiguration);
   explicitConfiguration(explicit);
   const planningOptions = structuredClone({ completionGuidance: true, ...options.planning });
@@ -438,7 +443,7 @@ export function createDefaultProcessConfiguration(options: {
         present: [user, workspace, current].some((layer) => Object.hasOwn(layer, 'mcp')),
         configurations:
           resolveConfiguration({
-            defaults: defaultConfiguration,
+            defaults: configurationDefaults,
             user,
             workspace,
             explicit: current,
@@ -692,7 +697,7 @@ export function createDefaultProcessConfiguration(options: {
       if (selection) current.modelId = selection.modelId;
       else if (request.modelId !== undefined) current.modelId = request.modelId;
       const effective = resolveConfiguration({
-        defaults: defaultConfiguration,
+        defaults: configurationDefaults,
         user,
         workspace: project,
         explicit: current,
@@ -1731,6 +1736,7 @@ export function createDefaultProcessConfiguration(options: {
   return {
     ...child,
     skillCatalogue: createDefaultSkillCatalogueSource({
+      defaults: configurationDefaults,
       profile: options.profile,
       explicit: () => explicitConfiguration(explicit),
       allowedCapabilities: options.allowedToolCapabilities,
@@ -1874,7 +1880,7 @@ export function createDefaultProcessConfiguration(options: {
           const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
           const current = explicitConfiguration(explicit);
           const effective = resolveConfiguration({
-            defaults: defaultConfiguration,
+            defaults: configurationDefaults,
             user,
             workspace: project,
             explicit: current,

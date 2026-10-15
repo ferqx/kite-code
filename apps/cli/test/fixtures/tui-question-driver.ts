@@ -157,10 +157,17 @@ try {
   const pasted = `[Pasted ${Array.from(detail).length} characters]`;
   await wait(pasted);
   await check('text');
+  // An ordinary question has no review artifact. Ctrl+A must leave this
+  // original pasted answer intact, without issuing an attachment read.
+  await key('\x01', true);
+  await wait(pasted, { ready: true });
+  await check('text-ctrl-a');
   await key('\r');
   await wait('Choose final delivery', { material: true });
   await wait('Question 3/3', { material: true, ready: true });
   await wait('3 / 3', { ready: true });
+  assert.equal(owned.text().includes('attachment_missing'), false);
+  assert.equal(current().includes('Error:'), false);
   await check('text');
   await key('\x1b');
   await wait('Write original detail', { material: true });
@@ -196,6 +203,7 @@ try {
   await check('finish');
   await wait('OWNED_QUESTION_COMPLETE', { material: true });
   await wait('New Run >');
+  assert.equal(owned.text().includes('attachment_missing'), false);
   await key('\x11');
   exitCode = await waitExit();
   assert.equal(exitCode, 0);

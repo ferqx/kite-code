@@ -32,7 +32,7 @@ async function until<T>(label: string, read: () => Promise<T | undefined>): Prom
 }
 type Wire = { method: string; path: string; body?: Record<string, unknown> };
 
-test('actual 80x24 default ask_user wizard preserves labeled original IDs, edited Unicode text and Custom answer; only final Answer completes original Tool and Run', async () => {
+test('actual 80x24 default ask_user wizard preserves labeled original IDs, edited Unicode text across Ctrl+A and Custom answer; only final Answer completes original Tool and Run', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-question-')));
   const evidence = join(tmpdir(), `kite-tui-question-evidence-${randomUUID()}`);
   mkdirSync(evidence, { mode: 0o700 });
@@ -295,6 +295,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
           stage === 'route' ||
           stage === 'back' ||
           stage === 'text' ||
+          stage === 'text-ctrl-a' ||
           stage === 'retained' ||
           stage === 'custom'
         ) {
@@ -347,6 +348,9 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
           expect(offered.description).toContain('one to three');
           expect(offered.parameters.required).toEqual(['questions']);
           expect(answers()).toHaveLength(0);
+          expect(
+            wire().filter((row) => row.method === 'GET' && row.path.includes('/artifacts/')),
+          ).toHaveLength(0);
           const actual = await (await connected()).getInteraction(sessionId, original.id, {
             storeId,
           });
@@ -405,6 +409,9 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
             answers: { q1: 'Second original route', q2: detail, q3: custom },
           });
           expect(wire().filter((row) => row.body?.kind === 'run.start')).toHaveLength(1);
+          expect(
+            wire().filter((row) => row.method === 'GET' && row.path.includes('/artifacts/')),
+          ).toHaveLength(0);
           expect(observerReads.every((row) => row.method === 'GET')).toBe(true);
           const execution = await (await connected()).getExecution(original!.executionId!);
           expect(execution.status).toBe('succeeded');

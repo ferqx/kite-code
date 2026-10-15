@@ -421,8 +421,9 @@ test('Ink text plus Return preserves slash completion and routes the complete ex
     await Bun.sleep(20);
     app.stdin.write('/exp\r');
     await Bun.sleep(20);
-    expect(c.state.draft).toBe('/export');
-    expect(exports).toHaveLength(0);
+    expect(c.state.draft).toBe('');
+    expect(exports).toHaveLength(1);
+    expect(exports[0]).toMatchObject({ storeId: 'store', sessionId: 'a' });
     app.stdin.write('\r');
     await Bun.sleep(20);
     expect(exports).toHaveLength(1);
@@ -463,7 +464,7 @@ test('Ink literal bracketed paste preserves CRLF and Ctrl bytes without submit o
     c.dispose();
   }
 });
-test('Ink text plus Return uses the updated file token and requires ready completion before a separate submit', async () => {
+test('Ink text plus Return uses the updated file token and submits its ready completion exactly once', async () => {
   const f = fixture();
   f.port.readSession = async (id) => snapshot(id, false);
   const reads: {
@@ -512,8 +513,9 @@ test('Ink text plus Return uses the updated file token and requires ready comple
     await Bun.sleep(20);
     app.stdin.write('\r');
     await Bun.sleep(20);
-    expect(c.state.draft).toBe('@"src/文件 空格.txt"');
-    expect(f.writes).toHaveLength(0);
+    expect(c.state.draft).toBe('');
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({ id: 'a', intent: { content: '@"src/文件 空格.txt"' } });
     app.stdin.write('\r');
     await Bun.sleep(20);
     expect(f.writes).toHaveLength(1);
@@ -773,6 +775,24 @@ test('complete 201-message history and verified giant Fork output preserve resto
 test('late output and disposed observer cannot publish or reopen reads, failed attachments keep original card waiting', async () => {
   const f = fixture(),
     c = new TuiController(f.port);
+  const reviewedCard = {
+    ...card,
+    request: {
+      grants: ['approve_once', 'same_command'],
+      policy: {
+        review: {
+          kind: 'artifact',
+          complete: true,
+          reference: {
+            id: 'original-review',
+            mediaType: 'text/plain',
+            size: '1',
+            scope: { kind: 'execution', id: card.executionId! },
+          },
+        },
+      },
+    },
+  };
   const message = {
     ...snapshot().messages[0]!,
     outputBody: {
@@ -787,7 +807,7 @@ test('late output and disposed observer cannot publish or reopen reads, failed a
   f.port.readSession = async (id) => ({
     ...snapshot(id),
     messages: [{ ...message, sessionId: id }],
-    interactions: [{ ...card, presentationSessionId: id }],
+    interactions: [{ ...reviewedCard, presentationSessionId: id }],
   });
   let release!: (value: import('@kite-ai/client').ModelOutputSnapshot) => void,
     signal!: AbortSignal;
@@ -827,6 +847,8 @@ test('late output and disposed observer cannot publish or reopen reads, failed a
   await c.loadAttachment({ ...card, presentationSessionId: 'b' });
   expect(c.state.error).toBe('scope_denied');
   expect(c.state.attachment).toBeUndefined();
+  await c.answer({ ...reviewedCard, presentationSessionId: 'b' }, 'approve');
+  expect(f.writes).toHaveLength(0);
   c.dispose();
   let reads = 0;
   f.port.readSession = async () => {

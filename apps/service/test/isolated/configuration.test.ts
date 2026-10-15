@@ -11,6 +11,10 @@ import {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import {
+  defaultConfiguration,
+  ordinaryHostConfigurationDefaults,
+} from '../../src/configuration-defaults';
 import { launchPairedService } from '../../src/paired';
 
 function gate() {
@@ -109,6 +113,129 @@ function fixture() {
     },
   };
 }
+
+test('ordinary host defaults select Shell only with a supplied backend and preserve minimal embedding defaults', () => {
+  expect(defaultConfiguration.tools).toEqual([{ id: 'ask_user' }]);
+  const unavailable = ordinaryHostConfigurationDefaults(false).tools.map((tool) => tool.id);
+  expect(unavailable).toContain('files.read');
+  expect(unavailable.some((id) => id.startsWith('shell.'))).toBe(false);
+  const available = ordinaryHostConfigurationDefaults(true).tools.map((tool) => tool.id);
+  expect(available.filter((id) => id.startsWith('shell.'))).toEqual([
+    'shell.execute',
+    'shell.launch',
+    'shell.read',
+    'shell.wait',
+    'shell.stop',
+  ]);
+});
+
+test('ordinary paired host exposes everyday tools without tool configuration, reads a real workspace file, and respects explicit disable', async () => {
+  const f = fixture();
+  const marker = 'owned fresh-profile project source';
+  writeFileSync(join(f.workspace, 'source.txt'), marker);
+  const requests: Record<string, unknown>[] = [];
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json()) as Record<string, unknown>;
+      requests.push(body);
+      const call = requests.length === 1;
+      const chunk = (delta: unknown, finish: string | null) =>
+        `data: ${JSON.stringify({ id: 'fresh-host', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+      return new Response(
+        chunk(
+          call
+            ? {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'read-source',
+                    type: 'function',
+                    function: {
+                      name: 'files.read',
+                      arguments: JSON.stringify({ path: 'source.txt' }),
+                    },
+                  },
+                ],
+              }
+            : { content: 'Project read completed' },
+          null,
+        ) +
+          chunk({}, call ? 'tool_calls' : 'stop') +
+          'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    },
+  });
+  let child: Awaited<ReturnType<typeof launch>> | undefined;
+  try {
+    const config = { modelId: 'local', models: [model('local', provider.url.href)] };
+    writeFileSync(f.file, JSON.stringify(config));
+    child = await launch(f);
+    const trust = await child.handle.client.getWorkspaceTrust('workspace', {
+      storeId: child.storeId,
+    });
+    await child.handle.client.setWorkspaceTrust('workspace', {
+      expectedStoreId: child.storeId,
+      commandId: 'trust-fresh-host',
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      trusted: true,
+      ifRevision: trust.revision,
+    });
+    expect(await child.run('read-project')).toMatchObject({ status: 'applied' });
+    const view = await child.finished('read-project');
+    expect(view.runs.find((run) => run.originCommandId === 'read-project')?.status).toBe(
+      'completed',
+    );
+    expect(requests).toHaveLength(2);
+    const names = (requests[0]!.tools as { function: { name: string } }[]).map(
+      (tool) => tool.function.name,
+    );
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'ask_user',
+        'files.read',
+        'files.write',
+        'files.edit',
+        'files.list',
+        'files.glob',
+        'files.search',
+        'web_fetch',
+      ]),
+    );
+    expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
+    expect(
+      (await child.handle.client.listInteractions('session', { storeId: child.storeId }))
+        .interactions,
+    ).toHaveLength(0);
+    expect(existsSync(f.projectFile)).toBe(false);
+
+    writeFileSync(
+      f.file,
+      JSON.stringify({
+        ...config,
+        tools: [
+          { id: 'files.read', enabled: false },
+          { id: 'web_fetch', remove: true },
+        ],
+      }),
+    );
+    expect(await child.run('disabled-tools')).toMatchObject({ status: 'applied' });
+    await child.finished('disabled-tools');
+    const nextNames = (requests.at(-1)!.tools as { function: { name: string } }[]).map(
+      (tool) => tool.function.name,
+    );
+    expect(nextNames).not.toContain('files.read');
+    expect(nextNames).not.toContain('web_fetch');
+    expect(nextNames).toContain('files.search');
+  } finally {
+    await child?.handle.close();
+    provider.stop(true);
+    f.close();
+  }
+}, 15000);
 const model = (id: string, baseURL: string, extras: JsonObject = {}) => ({
   id,
   provider: 'compatible',
@@ -523,7 +650,9 @@ test('explicit recovery resolver preserves the persisted model selection and ref
   };
   try {
     writeFileSync(f.file, JSON.stringify(original));
-    child = await launch(f);
+    // Both sides use the same explicit embedded host; ordinary process hosts
+    // additionally select native tools and require their exact assets on recovery.
+    child = await launch(f, true);
     await child.run('original-recovery-source');
     await child.finished('original-recovery-source');
     await child.handle.close();

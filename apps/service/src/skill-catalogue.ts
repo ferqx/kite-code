@@ -68,6 +68,7 @@ export function unavailableSkillCatalogue(
 }
 /** Reads configured knowledge only; never resolves a Model, credential or executor. */
 export function createDefaultSkillCatalogueSource(options: {
+  defaults?: JsonObject;
   profile: ProfileSelection;
   explicit: () => JsonObject;
   allowedCapabilities?: readonly string[];
@@ -117,7 +118,7 @@ export function createDefaultSkillCatalogueSource(options: {
     let effective: ReturnType<typeof resolveConfiguration>;
     try {
       effective = resolveConfiguration({
-        defaults: defaultConfiguration,
+        defaults: options.defaults ?? defaultConfiguration,
         user: readConfigurationFile({
           path: join(profile.profilePath, 'config.jsonc'),
           windowsPathPolicy: 'private',

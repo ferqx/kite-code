@@ -1862,7 +1862,7 @@ function TuiSessionView({
         if (message) void controller.loadOutput(message);
         return;
       }
-      if (key.ctrl && input === 'a' && card) {
+      if (key.ctrl && input === 'a' && card && requiresInteractionAttachment(card)) {
         void controller.loadAttachment(card);
         return;
       }

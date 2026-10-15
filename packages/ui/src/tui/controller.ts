@@ -5248,9 +5248,11 @@ export class TuiController {
       card.presentationSessionId !== this.value.sessionId
     )
       return;
-    let proof: string | undefined;
+    let proof: string;
     try {
-      proof = interactionAttachment(card)?.key;
+      const attachment = interactionAttachment(card);
+      if (!attachment) return;
+      proof = attachment.key;
     } catch {
       return;
     }
@@ -5275,7 +5277,7 @@ export class TuiController {
         }
         const attachments = new Map(this.value.attachments);
         attachments.set(interactionKey(card), content);
-        if (proof) this.attachmentProofs.set(interactionKey(card), proof);
+        this.attachmentProofs.set(interactionKey(card), proof);
         this.publish({
           attachments,
           attachment: { interactionId: card.id, revision: card.revision, content },
