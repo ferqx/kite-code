@@ -319,14 +319,16 @@ export function Sidebar({
         </ScrollArea>
       </TooltipProvider>
       <div className="sidebar-utilities">
-        <div className="connection">
-          {connectionLabel && <span>{connectionLabel}</span>}
-          {actions.connection && (
-            <Button className="ghost" disabled={props.busy} onClick={actions.connection.run}>
-              {actions.connection.label}
-            </Button>
-          )}
-        </div>
+        {(connectionLabel || actions.connection) && (
+          <div className="connection">
+            {connectionLabel && <span>{connectionLabel}</span>}
+            {actions.connection && (
+              <Button className="ghost" disabled={props.busy} onClick={actions.connection.run}>
+                {actions.connection.label}
+              </Button>
+            )}
+          </div>
+        )}
         {(actions.settings || actions.theme) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

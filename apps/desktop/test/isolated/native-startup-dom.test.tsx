@@ -10,6 +10,7 @@ import type {
   NativeStartupBridge,
   NativeState,
 } from '../../src/native-bridge';
+import type { NativeWindowMenuBridge, NativeWindowMenuRequest } from '../../src/native-menu-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
@@ -39,7 +40,7 @@ const state = (generation: number, directory?: NativeDirectory): NativeState => 
 });
 function fixture(
   read: (request: NativeRequest) => NativeResult | Promise<NativeResult>,
-  hostBridge: Partial<NativeStartupBridge> = {},
+  hostBridge: Partial<NativeStartupBridge & NativeWindowMenuBridge> = {},
 ) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
@@ -59,7 +60,7 @@ function fixture(
   });
   const calls: NativeRequest[] = [],
     listeners = new Set<(event: NativeEvent) => void>();
-  const bridge: NativeBridge & Partial<NativeStartupBridge> = {
+  const bridge: NativeBridge & Partial<NativeStartupBridge & NativeWindowMenuBridge> = {
     ...hostBridge,
     request: async (request) => {
       calls.push(request);
@@ -91,7 +92,12 @@ function fixture(
     host,
     root,
     calls,
-    render: () => act(async () => root.render(<NativeDesktop />)),
+    render: (testDiagnostics = false, nativeWindow = false) =>
+      act(async () =>
+        root.render(
+          <NativeDesktop testDiagnostics={testDiagnostics} nativeWindow={nativeWindow} />,
+        ),
+      ),
     notify: (generation: number) =>
       act(async () => {
         for (const listener of listeners) listener({ kind: 'changed', generation });
@@ -106,6 +112,8 @@ function fixture(
       }),
     async close() {
       await act(async () => root.unmount());
+      // FocusScope dispatches its unmount event on the next timer turn in this browser realm.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       dom.window.close();
       restore();
       Object.assign(globalThis, prior);
@@ -122,25 +130,45 @@ test('retained startup hides the entire product until admitted attach and the co
       directory = resolve;
     });
   let observed = { ...empty, unavailable: true };
-  const f = fixture((request) => {
-    if (request.method === 'attach') return attaching;
-    if (request.method === 'directory') return reading;
-    if (request.method === 'state') return state(1, observed);
-    return null;
-  });
+  const openedMenus: NativeWindowMenuRequest[] = [];
+  const f = fixture(
+    (request) => {
+      if (request.method === 'attach') return attaching;
+      if (request.method === 'directory') return reading;
+      if (request.method === 'state') return state(1, observed);
+      return null;
+    },
+    {
+      showWindowMenu: async (request) => {
+        openedMenus.push(request);
+      },
+    },
+  );
+  f.dom.window.document.documentElement.dataset.platform = 'windows';
   try {
-    await f.render();
+    await f.render(false, true);
     expect(f.host.querySelector('main[aria-label="kite 启动页"]')?.getAttribute('aria-busy')).toBe(
       'true',
     );
     expect(f.host.querySelector('.shell')).toBeNull();
     expect(f.host.querySelector('textarea')).toBeNull();
+    expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
+    expect(f.host.querySelector('[role="menubar"]')).toBeNull();
+    await act(async () => {
+      f.dom.window.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'F10' }));
+      f.dom.window.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'h', altKey: true }),
+      );
+    });
+    expect(openedMenus).toEqual([]);
     expect(f.calls.map((request) => request.method)).toEqual(['attach']);
     await act(async () => attach(state(1)));
     expect(f.host.querySelector('.shell')).toBeNull();
+    expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
     expect(f.calls.map((request) => request.method)).toEqual(['attach', 'directory']);
     await act(async () => directory(observed));
     expect(f.host.querySelector('.shell')).toBeNull();
+    expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
     expect(f.host.querySelector('main[aria-label="kite 启动页"]')?.getAttribute('aria-busy')).toBe(
       'false',
     );
@@ -155,8 +183,40 @@ test('retained startup hides the entire product until admitted attach and the co
     await f.notify(1);
     expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();
     expect(f.host.querySelector('.kite-client.shell')).not.toBeNull();
+    expect(f.host.querySelector('.native-window-titlebar')).not.toBeNull();
+    expect(
+      [...f.host.querySelectorAll('[role="menubar"] [role="menuitem"]')].map(
+        (item) => item.textContent,
+      ),
+    ).toEqual(['文件', '编辑', '视图', '帮助']);
     expect(f.host.querySelector('textarea[aria-label="新对话草稿"]')).not.toBeNull();
+    expect(f.host.querySelector('.connection')).toBeNull();
+    expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
+    expect(f.host.textContent).not.toContain('本地 Agent');
+    expect(f.host.textContent).not.toContain('没有已启用且配置可用的默认模型，请选择模型。');
+    const button = (label: string) =>
+      [...f.host.querySelectorAll('button')].find(
+        (entry) => entry.textContent === label || entry.getAttribute('aria-label') === label,
+      );
+    expect(button('会话工具')).toBeUndefined();
+    expect(button('设置')).toBeUndefined();
+    expect(button('重新读取目录')).toBeUndefined();
+    expect(button('用户菜单')).toBeDefined();
+    expect(button('发送首条消息')?.disabled).toBe(true);
+    const ordinaryCalls = [...f.calls];
+    await f.render(true, true);
+    expect(button('会话工具')).toBeDefined();
+    expect(button('设置')).toBeDefined();
+    expect(button('重新读取目录')).toBeDefined();
+    expect(f.host.querySelector('input[aria-label="先审核计划"]')).not.toBeNull();
     expect(f.host.textContent).toContain('没有已启用且配置可用的默认模型，请选择模型。');
+    expect(button('发送首条消息')?.disabled).toBe(true);
+    expect(f.calls).toEqual(ordinaryCalls);
+    await f.render(false, true);
+    expect(f.host.querySelector('.connection')).toBeNull();
+    expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
+    expect(f.host.textContent).not.toContain('没有已启用且配置可用的默认模型，请选择模型。');
+    expect(f.calls).toEqual(ordinaryCalls);
     expect(
       f.calls.every((request) =>
         ['attach', 'directory', 'state', 'conversation.models.read'].includes(request.method),
@@ -191,11 +251,12 @@ test('startup failures retry explicitly once; a late previous observation and po
     return null;
   });
   try {
-    await f.render();
+    await f.render(false, true);
     expect(f.host.querySelector('[role="alert"]')?.textContent).toContain(
       'native_connection_unavailable',
     );
     expect(f.host.querySelector('.shell')).toBeNull();
+    expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
     mode = 'directory-fails';
     await f.retry();
     expect(f.calls.filter((request) => request.method === 'attach').length).toBe(2);
@@ -203,12 +264,14 @@ test('startup failures retry explicitly once; a late previous observation and po
       'session_directory_unavailable',
     );
     expect(f.host.querySelector('.shell')).toBeNull();
+    expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
     mode = 'late';
     await f.notify(generation);
     mode = 'ready';
     await f.retry();
     expect(f.calls.filter((request) => request.method === 'attach').length).toBe(3);
     expect(f.host.querySelector('.kite-client.shell')).not.toBeNull();
+    expect(f.host.querySelector('.native-window-titlebar')).not.toBeNull();
     await act(async () =>
       release(
         state(1, {
@@ -232,6 +295,7 @@ test('startup failures retry explicitly once; a late previous observation and po
     await f.notify(generation);
     expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();
     expect(f.host.querySelector('.kite-client.shell')).not.toBeNull();
+    expect(f.host.querySelector('.native-window-titlebar')).not.toBeNull();
     expect(draft.value).toBe('保留原草稿\n雪🙂');
     expect(f.calls.filter((request) => request.method === 'attach').length).toBe(3);
     expect(

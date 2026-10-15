@@ -1,5 +1,6 @@
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 /** Package build companion: a standalone Worker bundle and reviewed migration assets. */
 export async function buildStorageAssets(outdir: string): Promise<void> {
   const workerDirectory = join(resolve(outdir), 'storage', 'worker');
@@ -8,8 +9,8 @@ export async function buildStorageAssets(outdir: string): Promise<void> {
   mkdirSync(migrations, { recursive: true });
   const result = await Bun.build({
     entrypoints: [
-      new URL('./main.ts', import.meta.url).pathname,
-      new URL('./observer-preload.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('./main.ts', import.meta.url)),
+      fileURLToPath(new URL('./observer-preload.ts', import.meta.url)),
     ],
     outdir: workerDirectory,
     target: 'bun',
@@ -22,4 +23,6 @@ export async function buildStorageAssets(outdir: string): Promise<void> {
   );
 }
 if (import.meta.main)
-  await buildStorageAssets(process.argv[2] ?? new URL('../../../dist', import.meta.url).pathname);
+  await buildStorageAssets(
+    process.argv[2] ?? fileURLToPath(new URL('../../../dist', import.meta.url)),
+  );

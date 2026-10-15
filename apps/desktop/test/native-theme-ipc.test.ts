@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { registerNativeIpc, registerNativeThemeIpc } from '../electron/native-ipc';
 import {
@@ -10,9 +13,10 @@ import {
 } from '../src/native-bridge';
 
 type Handler = (event: IpcMainInvokeEvent, payload: unknown) => NativeReply | Promise<NativeReply>;
+const rendererUrl = pathToFileURL(join(tmpdir(), 'kite-native-theme/index.html')).href;
 
 function fixture() {
-  const frame = { url: 'file:///private/tmp/native/index.html' },
+  const frame = { url: rendererUrl },
     contents = { mainFrame: frame };
   let destroyed = false,
     callerOpens = 0;
@@ -92,9 +96,9 @@ test('closed theme payload and original frame authority reject unsupported value
       senderFrame: { url: f.frame.url },
     } as IpcMainInvokeEvent),
   ).toEqual({ ok: false, code: 'native_sender_denied' });
-  f.frame.url = 'file:///private/tmp/foreign.html';
+  f.frame.url = pathToFileURL(join(tmpdir(), 'kite-native-theme/foreign.html')).href;
   expect(await f.send({ theme: 'dark' })).toEqual({ ok: false, code: 'native_sender_denied' });
-  f.frame.url = 'file:///private/tmp/native/index.html';
+  f.frame.url = rendererUrl;
   f.destroy();
   expect(await f.send({ theme: 'dark' })).toEqual({ ok: false, code: 'native_sender_denied' });
   expect(f.preferences).toEqual([]);

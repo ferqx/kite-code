@@ -45,6 +45,7 @@ import type {
 } from './interaction-history-bridge';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
+import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
   NativeModelUsagePage,
@@ -76,6 +77,7 @@ export const nativeEventChannel = 'kite:native:changed';
 export const nativeThemeChannel = 'kite:native:theme';
 export const nativeClipboardChannel = 'kite:native:clipboard';
 export const nativeWindowMaximizeChannel = 'kite:native:window-maximize';
+export const nativeWindowAppearanceChannel = 'kite:native:window-appearance';
 export const nativeStartupStatusChannel = 'kite:native:startup-status';
 export const nativeStartupDiagnosticSaveChannel = 'kite:native:startup-diagnostic-save';
 export type NativeStartupStatus = { readonly diagnosticAvailable: boolean };
@@ -94,7 +96,12 @@ export interface NativeThemeBridge {
 export interface NativeWindowBridge {
   writeClipboardText(text: string): Promise<void>;
   toggleWindowMaximize(): Promise<void>;
+  getWindowAppearance(): Promise<NativeWindowAppearance>;
 }
+export type NativeWindowAppearance = { readonly backgroundMaterial: 'mica' | 'none' };
+export type NativeWindowAppearanceReply =
+  | { ok: true; value: NativeWindowAppearance }
+  | { ok: false; code: string };
 export type NativeCallerCommandRequest = CallerCommandRequest | ExtensionCommandRequest;
 export type NativeCallerIntent = {
   scope: { storeId: string; sessionId: string; workspaceId: string };
@@ -798,7 +805,10 @@ export interface NativeBridge {
 declare global {
   interface Window {
     readonly kiteNative?: Readonly<
-      NativeBridge & Partial<NativeThemeBridge & NativeWindowBridge & NativeStartupBridge>
+      NativeBridge &
+        Partial<
+          NativeThemeBridge & NativeWindowBridge & NativeWindowMenuBridge & NativeStartupBridge
+        >
     >;
   }
 }

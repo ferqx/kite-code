@@ -29,7 +29,7 @@ import {
   type SessionPageProps,
   ToolActivity,
 } from '@kite-ai/ui/desktop';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
 import { NativeApproval } from './native-approval';
 import { NativeBackgroundPanel } from './native-background-panel';
@@ -79,14 +79,25 @@ import { NativeStartup } from './native-startup';
 import { useNativeTheme } from './native-theme';
 import { liveToolMessages, useNativeToolMessages } from './native-tool-messages';
 import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-transcript';
+import { NativeWindowFrame } from './native-window-frame';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
-export function NativeDesktop({ testDiagnostics = false }: { testDiagnostics?: boolean } = {}) {
+export function NativeDesktop({
+  testDiagnostics = false,
+  nativeWindow = false,
+}: {
+  testDiagnostics?: boolean;
+  nativeWindow?: boolean;
+} = {}) {
   const bridge = window.kiteNative;
   return bridge ? (
     <NativeDiagnosticsProvider enabled={testDiagnostics}>
-      <NativeDesktopContent bridge={bridge} />
+      <NativeDesktopContent bridge={bridge} nativeWindow={nativeWindow} />
     </NativeDiagnosticsProvider>
+  ) : nativeWindow ? (
+    <NativeWindowFrame showHeader={false}>
+      <NativeStartup phase="failed" error="原生桥不可用，请核对客户端资源。" />
+    </NativeWindowFrame>
   ) : (
     <NativeStartup phase="failed" error="原生桥不可用，请核对客户端资源。" />
   );
@@ -94,8 +105,10 @@ export function NativeDesktop({ testDiagnostics = false }: { testDiagnostics?: b
 
 function NativeDesktopContent({
   bridge,
+  nativeWindow,
 }: {
   bridge: NativeBridge & Partial<import('./native-bridge').NativeStartupBridge>;
+  nativeWindow: boolean;
 }) {
   const diagnostics = useNativeDiagnostics();
   const [interactionHistoryOpen, setInteractionHistoryOpen] = useState(false);
@@ -2146,8 +2159,31 @@ function NativeDesktopContent({
       </>
     );
   };
+  const windowFrame = (content: ReactNode) =>
+    nativeWindow ? (
+      <NativeWindowFrame
+        showHeader={startup === 'ready'}
+        applicationEnabled={
+          startup === 'ready' && !pending && !removingWorkspace && !readLifecycle.current.quitting
+        }
+        onAction={(action) => {
+          if (startupPhase.current !== 'ready' || writing.current || readLifecycle.current.quitting)
+            return;
+          if (action === 'settings') setSettingsOpen(true);
+          else {
+            setSettingsOpen(false);
+            if (action === 'new-conversation') prepareConversation();
+            else if (action === 'add-workspace') void addWorkspace();
+          }
+        }}
+      >
+        {content}
+      </NativeWindowFrame>
+    ) : (
+      content
+    );
   if (startup !== 'ready')
-    return (
+    return windowFrame(
       <NativeStartup
         phase={startup}
         error={startupError}
@@ -2180,11 +2216,12 @@ function NativeDesktopContent({
               }
             : undefined
         }
-      />
+      />,
     );
-  return (
+  return windowFrame(
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
+      covered={settingsOpen}
       writeClipboardText={window.kiteNative?.writeClipboardText}
       onHeaderMouseDown={(clickCount) => {
         if (clickCount === 2)
@@ -2329,11 +2366,13 @@ function NativeDesktopContent({
       }
       connected={generation.current > 0}
       connectionLabel={
-        generation.current > 0
-          ? directory?.unavailable
-            ? '本地 Agent · 目录状态待核实'
-            : '本地 Agent'
-          : '正在连接'
+        diagnostics
+          ? generation.current > 0
+            ? directory?.unavailable
+              ? '本地 Agent · 目录状态待核实'
+              : '本地 Agent'
+            : '正在连接'
+          : ''
       }
       mutationBusy={pending || !!removingWorkspace}
       defaultExpanded
@@ -2351,7 +2390,9 @@ function NativeDesktopContent({
           setScheduledTasksView(true);
         },
         theme,
-        connection: { label: '重新读取目录', run: () => void report(readDirectory) },
+        connection: diagnostics
+          ? { label: '重新读取目录', run: () => void report(readDirectory) }
+          : undefined,
       }}
       onOpen={(sessionId) => {
         const returning =
@@ -2424,17 +2465,21 @@ function NativeDesktopContent({
               </DesktopButton>
             )
           ) : (
-            <DesktopButton
-              variant="ghost"
-              aria-expanded={toolsOpen}
-              onClick={() => setToolsOpen(!toolsOpen)}
-            >
-              会话工具
-            </DesktopButton>
+            <NativeDiagnostic>
+              <DesktopButton
+                variant="ghost"
+                aria-expanded={toolsOpen}
+                onClick={() => setToolsOpen(!toolsOpen)}
+              >
+                会话工具
+              </DesktopButton>
+            </NativeDiagnostic>
           )}
-          <DesktopButton variant="ghost" onClick={() => setSettingsOpen(true)}>
-            设置
-          </DesktopButton>
+          <NativeDiagnostic>
+            <DesktopButton variant="ghost" onClick={() => setSettingsOpen(true)}>
+              设置
+            </DesktopButton>
+          </NativeDiagnostic>
         </>
       }
       beforeConversation={
@@ -2579,16 +2624,18 @@ function NativeDesktopContent({
                         )
                       }
                     />
-                    <label>
-                      <input
-                        type="checkbox"
-                        aria-label="先审核计划"
-                        checked={newPlanMode}
-                        onChange={(event) => setNewPlanMode(event.target.checked)}
-                        disabled={pending}
-                      />
-                      先审核计划
-                    </label>
+                    <NativeDiagnostic>
+                      <label>
+                        <input
+                          type="checkbox"
+                          aria-label="先审核计划"
+                          checked={newPlanMode}
+                          onChange={(event) => setNewPlanMode(event.target.checked)}
+                          disabled={pending}
+                        />
+                        先审核计划
+                      </label>
+                    </NativeDiagnostic>
                   </>
                 ),
               }
@@ -2677,26 +2724,28 @@ function NativeDesktopContent({
                           })
                         }
                       />
-                      <label>
-                        <input
-                          type="checkbox"
-                          aria-label="先审核计划"
-                          checked={planMode}
-                          disabled={pending}
-                          onChange={(event) => {
-                            setPlanMode(event.target.checked);
-                            planModes.current.set(
-                              JSON.stringify([
-                                selection.storeId,
-                                selection.session.workspaceId,
-                                selection.session.id,
-                              ]),
-                              event.target.checked,
-                            );
-                          }}
-                        />
-                        先审核计划
-                      </label>
+                      <NativeDiagnostic>
+                        <label>
+                          <input
+                            type="checkbox"
+                            aria-label="先审核计划"
+                            checked={planMode}
+                            disabled={pending}
+                            onChange={(event) => {
+                              setPlanMode(event.target.checked);
+                              planModes.current.set(
+                                JSON.stringify([
+                                  selection.storeId,
+                                  selection.session.workspaceId,
+                                  selection.session.id,
+                                ]),
+                                event.target.checked,
+                              );
+                            }}
+                          />
+                          先审核计划
+                        </label>
+                      </NativeDiagnostic>
                       <button
                         type="button"
                         disabled={pending}
@@ -2741,7 +2790,7 @@ function NativeDesktopContent({
             : undefined
       }
       detailPanel={
-        !childDetail && toolsOpen
+        diagnostics && !childDetail && toolsOpen
           ? {
               label: '会话与任务',
               content: (
@@ -2796,11 +2845,24 @@ function NativeDesktopContent({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <Dialog
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
+          >
             <DialogContent
               portalled={false}
               className="desktop-settings-dialog translate-x-0 translate-y-0"
               showCloseButton={false}
+              showOverlay={false}
+              onInteractOutside={(event) => {
+                if (
+                  nativeWindow &&
+                  event.target instanceof Element &&
+                  event.target.closest('.native-window-titlebar')
+                )
+                  event.preventDefault();
+              }}
             >
               <DialogHeader className="desktop-settings-header">
                 <DialogTitle>设置</DialogTitle>
@@ -2910,6 +2972,6 @@ function NativeDesktopContent({
           </Dialog>
         </>
       }
-    />
+    />,
   );
 }

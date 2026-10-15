@@ -29,31 +29,37 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     portalled?: boolean;
     showCloseButton?: boolean;
+    showOverlay?: boolean;
   }
->(({ className, children, portalled = true, showCloseButton = true, ...props }, ref) => {
-  const content = (
-    <>
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        ref={ref}
-        className={cn(
-          'fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 shadow-lg',
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        {showCloseButton && (
-          <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-            <HugeiconsIcon icon={Cancel01Icon} />
-            <span className="sr-only">关闭</span>
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Content>
-    </>
-  );
-  return portalled ? <DialogPortal>{content}</DialogPortal> : content;
-});
+>(
+  (
+    { className, children, portalled = true, showCloseButton = true, showOverlay = true, ...props },
+    ref,
+  ) => {
+    const content = (
+      <>
+        {showOverlay && <DialogOverlay />}
+        <DialogPrimitive.Content
+          ref={ref}
+          className={cn(
+            'fixed left-1/2 top-1/2 z-50 grid w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 shadow-lg',
+            className,
+          )}
+          {...props}
+        >
+          {children}
+          {showCloseButton && (
+            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+              <HugeiconsIcon icon={Cancel01Icon} />
+              <span className="sr-only">关闭</span>
+            </DialogPrimitive.Close>
+          )}
+        </DialogPrimitive.Content>
+      </>
+    );
+    return portalled ? <DialogPortal>{content}</DialogPortal> : content;
+  },
+);
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({ className, ...props }: React.ComponentProps<'div'>) => (

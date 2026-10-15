@@ -1,10 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { semanticDigest } from '../../../src/json';
 import { acquireProfileAccess, resolveProfile } from '../../../src/platform/profile';
+import { privateDirectory } from '../../../src/platform/windows-path-security';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
 
@@ -15,9 +17,10 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 function fixture() {
-  const dataRoot = mkdtempSync(join(tmpdir(), 'kite-unified-store-'));
-  chmodSync(dataRoot, 0o700);
-  roots.push(dataRoot);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-unified-store-')));
+  roots.push(root);
+  const dataRoot = join(root, 'data');
+  privateDirectory(dataRoot);
   return { dataRoot, profile: 'test' };
 }
 async function setup() {
@@ -332,7 +335,7 @@ describe('real unified SQLite Store', () => {
   test('future format is untouched by rejected open', async () => {
     const options = fixture();
     const profile = join(options.dataRoot, options.profile);
-    mkdirSync(profile, { mode: 0o700 });
+    privateDirectory(profile);
     const path = join(profile, 'core.db');
     const db = new Database(path);
     db.exec(
@@ -349,7 +352,7 @@ describe('real unified SQLite Store', () => {
     const { store, options } = await setup();
     const owner = (await store.acquireSessionOwner('s', 'parent'))!;
     const spawn = () =>
-      Bun.spawn([process.execPath, new URL('./open-child.ts', import.meta.url).pathname], {
+      Bun.spawn([process.execPath, fileURLToPath(new URL('./open-child.ts', import.meta.url))], {
         env: { ...process.env, TEST_DATA_ROOT: options.dataRoot, TEST_SESSION: 's' },
         stdout: 'pipe',
         stderr: 'pipe',

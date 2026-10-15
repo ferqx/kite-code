@@ -143,7 +143,7 @@ test('actual React DOM keeps the new selected view when an original creation rec
       button.click();
     });
   try {
-    await act(async () => root.render(<NativeDesktop />));
+    await act(async () => root.render(<NativeDesktop testDiagnostics />));
     await click('Original A');
     expect(dom.window.document.querySelector('textarea')!.value).toBe('original text');
     await click('在 Workspace 中新建对话');

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { connect } from 'node:net';
+import { homedir, release } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -11,9 +12,16 @@ import {
   PairedServiceError,
   type ServiceStartupDiagnostic,
 } from '@kite-ai/service/paired';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme } from 'electron';
 import { nativeEventChannel } from '../src/native-bridge';
+import { nativeWindowMenuActionChannel } from '../src/native-menu-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
+import {
+  type DevelopmentServiceReload,
+  desktopContentSecurityPolicy,
+  parseDesktopDevelopment,
+  serveDevelopmentReload,
+} from './development';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { NativeCaller } from './native-caller';
 import {
@@ -22,6 +30,11 @@ import {
   registerNativeThemeIpc,
   registerNativeWindowIpc,
 } from './native-ipc';
+import {
+  nativeWindowMenuShortcut,
+  nativeWindowMenuTemplate,
+  registerNativeWindowMenuIpc,
+} from './native-window-menu';
 import { spawnNodePairedChild } from './node-process';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
@@ -53,6 +66,12 @@ const windowsHandoff =
   candidate && process.platform === 'win32' ? parseWindowsNativeHandoff(process.argv) : undefined;
 const formalAssets = candidate ? resolveNativeCandidate(app.getAppPath()) : undefined;
 const assets = formalAssets ?? parseNativeAssets(inputAssets);
+declare const __KITE_DESKTOP_DEVELOPMENT__: unknown;
+const development = parseDesktopDevelopment(
+  typeof __KITE_DESKTOP_DEVELOPMENT__ === 'undefined' ? null : __KITE_DESKTOP_DEVELOPMENT__,
+  !candidate && assets.kind === 'development',
+);
+let activeAssets = assets;
 const windowsAsset =
   formalAssets?.windowsAsset ??
   (__KITE_DESKTOP_WINDOWS_ACCESS__
@@ -62,6 +81,7 @@ const windowsAsset =
       }
     : undefined);
 app.setName('kite-native');
+const mica = process.platform === 'win32' && Number(release().split('.')[2]) >= 22621;
 let window: BrowserWindow | undefined, caller: NativeCaller | undefined;
 let opening: Promise<NativeCaller> | undefined;
 let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
@@ -99,8 +119,13 @@ let artifactAccess: { close(): void }[] = windowsHandoff ? [acquireFormalWindows
 let startupDiagnostic: ServiceStartupDiagnostic | undefined;
 let quitting = false,
   exitAllowed = false;
+let developmentReload: Promise<void> | undefined;
+let switchingService = false;
 function setQuitting(value: boolean) {
   quitting = value;
+  sendLifecycle(value);
+}
+function sendLifecycle(value: boolean) {
   try {
     if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
       window.webContents.send(nativeEventChannel, {
@@ -112,7 +137,7 @@ function setQuitting(value: boolean) {
   }
 }
 async function openCaller(): Promise<NativeCaller> {
-  if (quitting) throw Error('native_draining');
+  if (quitting || switchingService) throw Error('native_draining');
   if (caller) return caller;
   opening ??= (async () => {
     startupDiagnostic = undefined;
@@ -136,8 +161,8 @@ async function openCaller(): Promise<NativeCaller> {
         throw Error('native_asset_identity_mismatch');
       assertNativeSqliteEngine(fresh.sqlite);
     }
-    verifyNativeAsset(assets.serviceEntrypoint, assets.serviceSha256);
-    verifyNativeAsset(assets.bunExecutable, assets.bunSha256);
+    verifyNativeAsset(activeAssets.serviceEntrypoint, activeAssets.serviceSha256);
+    verifyNativeAsset(activeAssets.bunExecutable, activeAssets.bunSha256);
     const profile = selectProfile(
       assets.profile ?? {
         dataRoot: join(homedir(), '.kite-code', 'unified-agent'),
@@ -160,14 +185,14 @@ async function openCaller(): Promise<NativeCaller> {
     if (process.platform === 'win32') privateAccess = await acquirePrivateAccess();
     paired = await launchPairedService({
       profile,
-      entrypoint: assets.serviceEntrypoint,
-      executable: assets.bunExecutable,
+      entrypoint: activeAssets.serviceEntrypoint,
+      executable: activeAssets.bunExecutable,
       spawnChild(command, options) {
         ownedPairedChild = spawnNodePairedChild(command, options);
         return ownedPairedChild;
       },
       instanceId: crypto.randomUUID(),
-      buildId: assets.buildId,
+      buildId: activeAssets.buildId,
       apiMajor: assets.apiMajor,
       requiredCapabilities: assets.requiredCapabilities,
       ...(formalAssets ? { runtimeProtection: formalAssets.runtimeProtection } : {}),
@@ -219,20 +244,96 @@ async function openCaller(): Promise<NativeCaller> {
   });
   return opening;
 }
+async function closeNativeResources() {
+  await opening?.catch(() => {});
+  await caller?.close();
+  privateData?.close();
+  privateAccess?.close();
+  await paired?.close();
+  if (paired && (await paired.exited) !== 0) throw Error('native_service_cleanup_unverified');
+  for (const lease of artifactAccess.reverse()) lease.close();
+  artifactAccess = [];
+  caller = undefined;
+  opening = undefined;
+  paired = undefined;
+  privateData = undefined;
+  privateAccess = undefined;
+  ownedPairedChild = undefined;
+}
+async function reloadDevelopmentService(request: DevelopmentServiceReload) {
+  if (!development || quitting || developmentReload) throw Error('native_draining');
+  const next = parseNativeAssets({
+    ...activeAssets,
+    serviceEntrypoint: join(app.getAppPath(), 'services', request.id, 'main.js'),
+    serviceSha256: request.sha256,
+    buildId: `development-${request.sha256}`,
+  });
+  verifyNativeAsset(next.serviceEntrypoint, next.serviceSha256);
+  switchingService = true;
+  sendLifecycle(true);
+  developmentReload = (async () => {
+    await closeNativeResources();
+    if (quitting) throw Error('native_draining');
+    activeAssets = next;
+    switchingService = false;
+    await openCaller();
+    if (!window || window.isDestroyed()) throw Error('native_window_unavailable');
+    await window.loadURL(development.rendererUrl);
+  })();
+  await developmentReload;
+  developmentReload = undefined;
+}
+if (development) {
+  const parent = connect({ host: '127.0.0.1', port: development.control.port });
+  parent.once('connect', () =>
+    parent.write(
+      `${JSON.stringify({ kind: 'desktop.ready', token: development.control.token })}\n`,
+    ),
+  );
+  parent.on('error', () => app.exit(1));
+  const stop = serveDevelopmentReload({
+    stream: parent,
+    reply: (line) => {
+      if (!parent.destroyed && parent.writable) parent.write(line);
+    },
+    reload: reloadDevelopmentService,
+  });
+  app.once('will-quit', () => {
+    stop();
+    parent.destroy();
+  });
+  parent.once('end', () => {
+    setQuitting(true);
+    void (async () => {
+      await developmentReload?.catch(() => {});
+      await closeNativeResources();
+      exitAllowed = true;
+      app.exit(0);
+    })().catch(() => forceExit());
+  });
+}
 void app
   .whenReady()
   .then(async () => {
     const rendererPath = join(app.getAppPath(), 'index.html'),
-      rendererUrl = pathToFileURL(rendererPath).href;
+      rendererUrl = development?.rendererUrl ?? pathToFileURL(rendererPath).href;
     window = new BrowserWindow({
       title: 'kite',
       width: 1100,
       height: 780,
       ...(process.platform === 'darwin'
-        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 13, y: 19 } }
-        : {}),
+        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 13, y: 9 } }
+        : {
+            titleBarStyle: 'hidden' as const,
+            titleBarOverlay: {
+              color: '#00000000',
+              symbolColor: nativeTheme.shouldUseDarkColors ? '#eeeeee' : '#222222',
+              height: 32,
+            },
+          }),
       show: false,
-      backgroundColor: nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa',
+      ...(mica ? { backgroundMaterial: 'mica' as const } : {}),
+      backgroundColor: mica ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa',
       webPreferences: {
         preload: join(app.getAppPath(), 'preload.cjs'),
         contextIsolation: true,
@@ -241,9 +342,65 @@ void app
         webSecurity: true,
       },
     });
+    if (process.platform === 'win32') {
+      app.setAboutPanelOptions({ applicationName: 'kite', applicationVersion: app.getVersion() });
+      const menuOptions = {
+        applicationEnabled: true,
+        dispatch(action: import('../src/native-menu-bridge').NativeWindowMenuAction) {
+          if (
+            !quitting &&
+            window &&
+            !window.isDestroyed() &&
+            window.webContents.mainFrame.url.split('#')[0] === rendererUrl
+          )
+            window.webContents.send(nativeWindowMenuActionChannel, action);
+        },
+      };
+      // Retain native accelerators without adding a second row below the immersive titlebar.
+      window.setMenu(Menu.buildFromTemplate(nativeWindowMenuTemplate(menuOptions)));
+      window.setMenuBarVisibility(false);
+      window.webContents.on('before-input-event', (event, input) => {
+        // Let F10 and Alt navigation reach the immersive menu instead of the hidden system row.
+        window!.webContents.setIgnoreMenuShortcuts(input.alt || input.key === 'F10');
+        const action = nativeWindowMenuShortcut(input);
+        if (action) {
+          event.preventDefault();
+          menuOptions.dispatch(action);
+        }
+      });
+      registerNativeWindowMenuIpc({
+        ipcMain,
+        window: () => window,
+        rendererUrl,
+        platform: process.platform,
+        showMenu(host, request) {
+          const menu = Menu.buildFromTemplate(
+            nativeWindowMenuTemplate({
+              ...menuOptions,
+              applicationEnabled: request.applicationEnabled && !quitting,
+            }),
+          ).getMenuItemById(request.menu)!.submenu!;
+          return new Promise<void>((resolve) =>
+            menu.popup({
+              window: host,
+              x: request.x,
+              y: request.y,
+              callback: resolve,
+            }),
+          );
+        },
+      });
+    } else if (process.platform !== 'darwin') window.removeMenu();
     const updateSystemBackground = () => {
-      if (window && !window.isDestroyed())
-        window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa');
+      if (window && !window.isDestroyed()) {
+        window.setBackgroundColor(
+          mica ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa',
+        );
+        if (process.platform !== 'darwin')
+          window.setTitleBarOverlay({
+            symbolColor: nativeTheme.shouldUseDarkColors ? '#eeeeee' : '#222222',
+          });
+      }
     };
     nativeTheme.on('updated', updateSystemBackground);
     window.once('closed', () => nativeTheme.off('updated', updateSystemBackground));
@@ -264,9 +421,7 @@ void app
       complete({
         responseHeaders: {
           ...details.responseHeaders,
-          'Content-Security-Policy': [
-            "default-src 'self'; script-src 'self'; connect-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
-          ],
+          'Content-Security-Policy': [desktopContentSecurityPolicy(development)],
         },
       }),
     );
@@ -283,6 +438,7 @@ void app
       ipcMain,
       window: () => window,
       rendererUrl,
+      getAppearance: () => ({ backgroundMaterial: mica ? 'mica' : 'none' }),
       writeClipboardText: (text) => clipboard.writeText(text),
     });
     registerNativeStartupIpc({
@@ -343,7 +499,8 @@ void app
       }
     });
     window.once('ready-to-show', () => window?.show());
-    await window.loadFile(rendererPath);
+    if (development) await window.loadURL(rendererUrl);
+    else await window.loadFile(rendererPath);
   })
   .catch(() => {
     dialog.showErrorBox('kite 无法启动', '原生调用者初始化失败。请核对发行资源。');
@@ -363,6 +520,7 @@ app.on('before-quit', (event) => {
     window.focus();
   }
   void (async () => {
+    await developmentReload?.catch(() => {});
     const active = caller
       ? await inspectNativeQuitWork((signal) => caller!.hasActiveWork(signal), 2000)
       : !!opening;
@@ -380,16 +538,7 @@ app.on('before-quit', (event) => {
       }
     }
     const outcome = await settleDesktopQuit({
-      async closeService() {
-        await opening?.catch(() => {});
-        await caller?.close();
-        privateData?.close();
-        privateAccess?.close();
-        await paired?.close();
-        if (paired && (await paired.exited) !== 0) throw Error('native_service_cleanup_unverified');
-        for (const lease of artifactAccess.reverse()) lease.close();
-        artifactAccess = [];
-      },
+      closeService: closeNativeResources,
       confirmForceExit: () => showQuitWarning(true),
       warnFailedCleanup: async () => {
         await showQuitWarning(false);

@@ -4,6 +4,9 @@
   place-items: center;
   padding: 32px;
 }
+html[data-native-window][data-window-material="mica"] .kite-client.desktop-startup {
+  background: transparent;
+}
 .desktop-startup-content {
   width: min(100%, 420px);
   text-align: center;

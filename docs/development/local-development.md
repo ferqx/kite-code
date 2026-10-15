@@ -1,6 +1,6 @@
 # 本地开发与验证
 
-仓库使用 Bun；CI 与正式 qualification 固定 Bun 1.4.2。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口使用已构建 Service。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
+仓库使用 Bun；CI 与正式 qualification 固定 Bun 1.4.2。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
 
 | 目标 | 命令 | 说明 |
 | --- | --- | --- |
@@ -10,7 +10,7 @@
 | 正式 daemon/Web | `bun run server` | 先显式启动候选 daemon，再读取 Web 地址；不自动构建缺失资源 |
 | CLI 开发 | `bun run cli:dev run --task "任务"` | 已构建 Service 与独立 development profile |
 | TUI 开发 | `bun run tui:dev --workspace .` | 同一 development profile 与 Ink；`--thread <id>` 选择原 Session |
-| Desktop 开发 | `bun run desktop:dev` | 已构建 Service、已安装 Electron；每次生成独立应用目录，同一 development profile |
+| Desktop 开发 | `bun run desktop:dev` | 已准备 workspace 资产、已安装 Electron；UI 热更新，Service 源码变更自动构建并重启配套服务 |
 | 只读 Web 开发 | `bun run web:dev` | 已构建 Service/Web assets、development profile 与只读 Gateway |
 | 完整 Native 候选 | `bun run release:build --product native` 后 `bun run desktop` | 验证完整 Native、内嵌 Terminal/Bun 与实际 Electron Node；不依赖旧 Vite/配套服务 |
 | Desktop 定向验证 | `bun run test:desktop:native` | 新 Native bundle/process/Files 的隔离实际场景，使用本地固定 Provider |
@@ -32,13 +32,38 @@ npm run tui:dev -- --workspace .
 npm run desktop:dev
 ```
 
-三种开发客户端使用同一 development profile；任务仍需要已配置模型和工作区信任。修改代码后退出对应客户端，重新执行 `npm run build` 并启动。Desktop 每次启动重新编译 Main/preload/renderer，在自己的 `.cache/unified-desktop-*` 目录运行，退出后清理该次应用目录；会话、设置和草稿保留在开发 profile。此入口不提供 Vite 热更新。
+三种开发客户端使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在自己的 `.cache/unified-desktop-*` 目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在开发 profile。
+
+`desktop:dev` 的页面、组件和样式（包括共享 UI）使用 Vite／React Fast Refresh，保存后即时更新，通常保留组件的页面状态；不能进行 Fast Refresh 的模块由 Vite 重新加载。`apps/service/src` 的 TypeScript／JSON 源码保存后合并连续变更，构建到新的私有 Service 版本；构建成功且字节变化后，在同一 Electron 窗口内关闭并核实旧配套服务实际退出，再按新 SHA／build 身份准入新服务并重载页面。运行中的开发任务会正常取消和收尾，不自动重发或接续；Service 重载会重置页面内存中的未保存状态，持久数据保留。
+
+Service 编译失败时旧服务继续运行，修正代码再保存即可重试。启动、收尾或回执无法确认时终端报告失败，停止该实例的后续自动切换；请完全退出并重新运行开发命令后检查结果。Main／preload、原生模块、workspace Worker 资产或依赖清单变更仍需退出后重新启动；需要更新包资产时先执行 `npm run build`，依赖清单变更先安装依赖。UI／Service 热更新只属于显式开发入口，正式 Native 仍加载固定制品。实现与验证归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+
+切换分支或 workspace 清单变更后，先重新执行 `bun install --frozen-lockfile`，确保 `node_modules/@kite-ai/*` 链接当前八个 workspace；缺少这些链接会在启动前报 `Cannot find module '@kite-ai/cli/host'`。
+
+Windows x64 的 Desktop 开发入口还会构建 Node 原生权限模块，需要已安装 [Microsoft C++ Build Tools](https://learn.microsoft.com/en-us/cpp/overview/acquire-msvc) 的 C++ 桌面开发工具和 Windows SDK。普通 PowerShell 可直接启动：
+
+```powershell
+npm run desktop:dev
+```
+
+[开发环境准备](../../scripts/development/windows-desktop-environment.ts)先复用完整的 x64 C++ 构建环境；否则通过 Visual Studio Installer 自带的 [vswhere](https://github.com/microsoft/vswhere/wiki/Examples) 定位最新已安装 C++ 工具，再调用 `VsDevCmd.bat -arch=x64 -host_arch=x64`。仅将编译所需的环境白名单导入本次进程，核编译器与 Windows SDK 文件，设置 canonical absolute `KITE_WINDOWS_MSVC` 并清空 `CL`／`_CL_` 注入参数；调用者的 PowerShell 和系统环境不变。已有显式编译器路径保留，路径无效返回 `windows_desktop_compiler_override_invalid`。
+
+帮助、严格参数拒绝和缺应用资产先于工具探测；准备失败不创建该次应用目录或进入 Profile。缺 C++ 工具或 SDK 返回 `windows_desktop_build_tools_unavailable` 并提示安装，初始化失败返回 `windows_desktop_build_environment_failed`；入口不自动安装系统工具。应用临时目录继续由 Windows 原生权限接口创建，满足 Native 构建器的私有 ACL 校验。此自动准备仅用于 `desktop:dev`，正式 Native 构建仍按其 owner 要求提供明确编译环境。
+
+若 Electron 的 GPU／renderer 在加载页面前以 `-2147483645`（`0x80000003`）退出，先检查实际 Electron `dist` 的 ACL；继承额外受限 SID 的目录可能触发[上游报告的 Windows 沙箱初始化问题](https://github.com/electron/electron/issues/51761)。本机 Electron 44.3.0 已验证：备份原 ACL 后，只向已安装 Electron 的公开 `dist` 目录及其发行文件授予 `ALL RESTRICTED APPLICATION PACKAGES`（`S-1-15-2-2`）读取／执行权限，即可恢复完整沙箱下的硬件渲染和开发窗口。确认同一故障与目录范围后，可在仓库根目录解析当前安装路径并修复：
+
+```powershell
+$electronDist = Split-Path -Path (& node -p "require('./apps/desktop/node_modules/electron')")
+icacls.exe $electronDist /grant '*S-1-15-2-2:(OI)(CI)(RX)' /T
+```
+
+该权限让其他受限应用包也能读取这些公开运行资源，不授予写入权限。范围只包含这份 npm Electron 发行目录；开发应用目录、Profile、数据库和正式候选仍按原私有 ACL 契约校验，不应扩大授权或关闭浏览器沙箱。重新安装或切换 Electron 版本后，按实际新目录重新核对。
 
 `tui:dev` 与 `desktop:dev` 默认使用普通用户界面，开发运行不自动启用测试诊断。TUI 自动化可明确加 `--test-ui-diagnostics`，或调用可信 host 的 `testDiagnostics:true`；Desktop 测试通过明确 builder／组件参数开启，普通命令不启用。测试诊断只影响展示，原权限、scope、未知结果和制品校验不变。
 
 `npm run agent`、`npm run tui`、`npm run desktop` 仍选择正式候选。首次运行这组命令，先执行 `npm run release:build`，再执行 `npm run release:build -- --product native` 生成 Desktop 候选。缺失候选时分别返回 `terminal_bundle_unavailable`／`native_bundle_unavailable` 和准备命令，未通过完整验证时不进入 Profile。源码变化不会自动更新候选；需要重新生成时，先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。构建不覆盖正在使用或已有的目录。
 
-旧 `apps/kite-desktop` 的 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 已退役，直接执行原开发／Electron构建／打包／服务准备脚本也返回 `legacy_desktop_entrypoint_retired` 和退出码2。诊断给出上表的当前 Native 构建、启动和验证命令；拒绝发生在读取旧archive、打开Profile、构建或启动服务之前。旧开发Vite热更新属于[历史实现](../../apps/kite-desktop/README.md)，不将当前候选启动称为等价热更新。旧源码和制品可追溯，当前数据不会交给旧writer；全部旧authority删除与阶段退出仍按原门禁核对。
+旧 `apps/kite-desktop` 的 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 已退役，直接执行原开发／Electron构建／打包／服务准备脚本也返回 `legacy_desktop_entrypoint_retired` 和退出码2。诊断给出上表的当前 Native 构建、启动和验证命令；拒绝发生在读取旧archive、打开Profile、构建或启动服务之前。旧开发Vite热更新属于[历史实现](../../apps/kite-desktop/README.md)，当前正式候选仍固定资源；上面的开发热更新是新宿主的独立实现。旧源码和制品可追溯，当前数据不会交给旧writer；全部旧authority删除与阶段退出仍按原门禁核对。
 
 旧CLI/TUI源码普通启动及旧CLI／Service `build`、旧Service普通App Server启动也已沿同一leaf退役，错误码分别为 `legacy_terminal_entrypoint_retired`、`legacy_service_entrypoint_retired`，退出2。当前替代入口在上表，不自动转发旧参数／数据。历史runCli、同步runTui／MCP判定和runKiteServiceMain仍供明确library用途，Service原私有helper保原路由；它们不恢复旧普通启动。保留范围和实际source／bundle证据归[旧CLI](../../apps/kite-cli/README.md)、[旧Service](../../apps/kite-service/README.md)。用户要求Web端保持现状，旧Web不纳入本轮退役；全部旧producer／源码最终删除仍按原阶段条件核对。
 

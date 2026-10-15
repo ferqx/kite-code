@@ -11,6 +11,17 @@ body {
   margin: 0;
 }
 :root {
+  /* One desktop corner radius, matching the workspace list. */
+  --radius: 10px;
+  --radius-xs: var(--radius);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+  --radius-2xl: var(--radius);
+  --radius-3xl: var(--radius);
+  --radius-4xl: var(--radius);
+  --resize-handle-width: 1px;
   --background: #fafafa;
   --page-background: var(--card);
   --card: #fff;
@@ -19,7 +30,7 @@ body {
   --muted-foreground: #666;
   --directory-tertiary-foreground: #999;
   --accent: #ececec;
-  --sidebar-accent: #e9e9e9;
+  --sidebar-accent: var(--accent);
   --border: #e7e7e7;
   --input: #c7c7c7;
   --primary: #252525;
@@ -101,7 +112,7 @@ body {
     min-height: 32px;
     padding: 5px 10px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius);
     background: var(--card);
     cursor: pointer;
     line-height: 20px;
@@ -132,7 +143,7 @@ body {
   textarea {
     border: 1px solid var(--input);
     background: var(--card);
-    border-radius: 10px;
+    border-radius: var(--radius);
     padding: 7px 10px;
   }
   input::placeholder,
@@ -209,8 +220,8 @@ body {
   [data-slot="resizable-handle"] {
     position: relative;
     z-index: 2;
-    width: 1px;
-    flex: 0 0 1px;
+    width: var(--resize-handle-width);
+    flex: 0 0 var(--resize-handle-width);
     cursor: col-resize;
     background: var(--border);
   }
@@ -394,7 +405,7 @@ body {
     padding: 4px 10px 4px 26px;
     border: 0;
     background: transparent;
-    border-radius: 8px;
+    border-radius: var(--radius);
   }
   .session-row:hover:not(:disabled),
   .session-row.selected {
@@ -618,7 +629,7 @@ body {
     position: relative;
     margin-left: auto;
     background: var(--accent);
-    border-radius: 12px;
+    border-radius: var(--radius);
     padding: 12px 16px;
     max-width: 85%;
     width: fit-content;
@@ -666,7 +677,7 @@ body {
     min-height: 24px;
     margin-top: 2px;
     padding: 0;
-    border-radius: 6px;
+    border-radius: var(--radius);
     border-color: transparent;
     background: transparent;
     color: var(--muted-foreground);
@@ -709,7 +720,7 @@ body {
   }
   .message.tool {
     background: var(--background);
-    border-radius: 10px;
+    border-radius: var(--radius);
     padding: 10px 14px;
     font-size: 13px;
   }
@@ -763,7 +774,7 @@ body {
     min-height: 0;
     padding: 0;
     border: 0;
-    border-radius: 2px;
+    border-radius: var(--radius);
     background: transparent;
     text-align: left;
     font: inherit;
@@ -788,7 +799,7 @@ body {
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border);
-    border-radius: 18px;
+    border-radius: var(--radius);
     background: var(--card);
     min-height: 112px;
     padding: 10px 12px 4px;
@@ -916,7 +927,7 @@ body {
     min-height: 54px;
     gap: 11px;
     padding: 8px 28px 8px 10px;
-    border-radius: 8px;
+    border-radius: var(--radius);
   }
   .permission-menu-item > svg {
     width: 18px;
@@ -993,7 +1004,7 @@ body {
     border: 1px solid var(--input);
     padding: 14px 16px;
     margin: 8px 24px;
-    border-radius: 10px;
+    border-radius: var(--radius);
     line-height: 1.7;
     font-size: 13px;
     overflow-wrap: anywhere;
@@ -1080,7 +1091,7 @@ body {
     min-height: 40px;
     padding: 6px 8px;
     border: 1px solid var(--input);
-    border-radius: 10px;
+    border-radius: var(--radius);
     background: var(--card);
     cursor: pointer;
   }
@@ -1146,7 +1157,7 @@ body {
   }
   .settings fieldset {
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius);
     padding: 14px;
     margin: 12px 0;
     min-width: 0;
@@ -1171,7 +1182,7 @@ body {
   }
   .file-change {
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius);
     margin-top: 14px;
     overflow: hidden;
   }
@@ -1263,7 +1274,7 @@ body {
   max-width: min(320px, var(--radix-tooltip-content-available-width));
   padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--card);
   color: var(--foreground);
   font-size: 12px;
@@ -1287,7 +1298,7 @@ body {
   display: flex;
   align-items: center;
   gap: 2px;
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 .kite-client .space-heading:hover {
   background: var(--sidebar-accent);
@@ -1446,7 +1457,7 @@ body {
   justify-content: center;
   text-align: center;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: var(--card);
 }
 .kite-client .scheduled-empty-icon {
@@ -1455,7 +1466,7 @@ body {
   height: 48px;
   margin-bottom: 18px;
   place-items: center;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--sidebar-accent);
   color: var(--muted-foreground);
   font-size: 27px;
@@ -1509,7 +1520,7 @@ body {
   max-height: 220px;
   padding: 16px;
   border-color: var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   resize: vertical;
   font-size: 14px;
   line-height: 22px;
@@ -1529,7 +1540,7 @@ body {
 .kite-client .scheduled-editor-group {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--card);
 }
 .kite-client .scheduled-editor-row {
@@ -1558,7 +1569,7 @@ body {
 .kite-client .scheduled-editor .scheduled-unavailable {
   margin: -8px 0 0;
   padding: 10px 12px;
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: var(--sidebar);
   color: var(--muted-foreground);
   font-size: 12px;
@@ -1582,7 +1593,7 @@ body {
 .kite-client .scheduled-card {
   padding: 12px 16px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--card);
 }
 .kite-client .scheduled-card-copy {
@@ -1704,14 +1715,14 @@ body {
   align-items: center;
   gap: 4px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--muted);
 }
 .kite-client .right-sidebar-heading [data-slot="tabs-trigger"] {
   min-height: 30px;
   padding: 4px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
@@ -1751,7 +1762,7 @@ body {
 }
 .kite-client .file-change {
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--card);
 }
 .kite-client .file-change > summary {
@@ -1878,7 +1889,7 @@ body {
   gap: 8px;
   justify-content: flex-start;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -2156,7 +2167,7 @@ body {
   margin: 4px 0 8px;
   padding: 16px 16px 48px;
   background: var(--background);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .kite-client .shell-output pre {
   @apply scroll-fade-y;
@@ -2214,7 +2225,7 @@ body {
   max-height: 320px;
   overflow: auto;
   margin: 4px 0 8px;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .kite-client .context-compacted {
   margin: 8px 0;
@@ -2301,7 +2312,7 @@ body {
 .full-permission-risk-notice {
   padding: 12px 14px;
   border-left: 3px solid var(--destructive);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--destructive) 5%, var(--card));
 }
 .full-permission-risk-heading {
@@ -2330,10 +2341,10 @@ body {
   display: inline-flex;
 }
 .kite-client .approval-split > .button:first-child {
-  border-radius: 8px 0 0 8px;
+  border-radius: var(--radius) 0 0 var(--radius);
 }
 .kite-client .approval-split > .button:last-child {
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
   border-left: 1px solid color-mix(in srgb, var(--background) 25%, transparent);
   width: 32px;
   padding: 0;
@@ -2379,7 +2390,7 @@ body {
 .kite-client .extension-card {
   margin-top: 12px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--sidebar);
   overflow-wrap: anywhere;
 }
@@ -2431,7 +2442,7 @@ body {
   padding: 4px 12px 4px 32px;
   border: 0;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .kite-client .workbench-item:hover:not(:disabled) {
   background: var(--accent);
@@ -2524,7 +2535,7 @@ body {
   min-height: 68px;
   height: auto;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   justify-content: flex-start;
   align-items: center;
   gap: 10px;
@@ -2545,7 +2556,7 @@ body {
   gap: 6px;
   margin: 0 0 -6px;
   padding: 5px 6px 11px;
-  border-radius: 12px 12px 0 0;
+  border-radius: var(--radius) var(--radius) 0 0;
   background: transparent;
   color: var(--foreground);
   font-size: 13px;
@@ -2561,7 +2572,7 @@ body {
   padding: 3px 7px;
   max-width: 100%;
   gap: 6px;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .kite-client .context-trigger span {
   min-width: 0;
@@ -2595,7 +2606,7 @@ body {
   width: min(320px, calc(100vw - 32px));
   max-height: min(280px, var(--radix-dropdown-menu-content-available-height));
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--card);
   box-shadow:
     0 12px 32px #00000014,
@@ -2611,7 +2622,7 @@ body {
   padding: 6px 8px;
   justify-content: flex-start;
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius);
   text-align: left;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -2738,7 +2749,7 @@ body {
   margin: 12px 16px 0;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   font-size: 12px;
 }
 .kite-client .background-executions header,
@@ -2774,7 +2785,7 @@ body {
   width: min(300px, calc(100% - 32px));
   max-height: calc(100% - 32px);
   padding: 18px 20px;
-  border-radius: 18px;
+  border-radius: var(--radius);
   background: var(--card);
   font-size: 14px;
   line-height: 20px;
@@ -2918,7 +2929,7 @@ body {
   gap: 4px;
   padding: 2px 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: none;
   color: inherit;
   cursor: pointer;

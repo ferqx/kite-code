@@ -147,7 +147,8 @@ function createNativeWindowsPathSecurity(): Implementation {
     const size = new Uint32Array(1);
     adv.symbols.GetTokenInformation(token[0]!, 1, null, 0, ptr(size));
     if (!size[0] || size[0] > 65536) fail();
-    user = new Uint8Array(size[0]!);
+    // TOKEN_USER contains a pointer into this buffer; materialize its backing before native writes.
+    user = new Uint8Array(new ArrayBuffer(size[0]!));
     if (!adv.symbols.GetTokenInformation(token[0]!, 1, ptr(user), user.length, ptr(size))) fail();
     sid = pointer(new DataView(user.buffer).getBigUint64(0, true));
     const text = out();

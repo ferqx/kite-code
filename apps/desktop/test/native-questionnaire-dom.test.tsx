@@ -173,7 +173,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
     });
   const refresh = async () => act(async () => watcher?.({ generation: 1, kind: 'changed' }));
   try {
-    await act(async () => root.render(<NativeDesktop />));
+    await act(async () => root.render(<NativeDesktop testDiagnostics />));
     await click('Question A');
     await click('会话工具');
     expect(mainInput() === null).toBe(true);

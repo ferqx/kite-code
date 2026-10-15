@@ -14,6 +14,8 @@
 
 根 workspaces 精确为 AI、Agent、Client、UI、Service、CLI、Desktop、Web。正式 CLI/TUI 固定完整 Terminal，Desktop 固定完整 Native；独立 source/development 显式入口不发现旧发布包或旧用户数据。业务通过唯一 HTTP/SSE Client；私有 bootstrap/发现只负责配套进程，不是第二业务 carrier。
 
+显式 `desktop:dev` 可由 builder 固定开发 loopback renderer／nonce 和独立认证父控制连接，用于 UI Fast Refresh 与 Service 新字节重载；只允许明确 development 资产，正式 candidate 拒绝开发配置。重载在原配套服务退出0后使用新 SHA／build 身份准入，保留原 Profile／Store／申请并保持零自动重放，未知关闭或回执不启动后续替代。Vite 不服务 Profile 或私有应用资源，父认证 token 不进入 renderer／argv／日志。当前实现及仅开发模式的 Windows 实际证据归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)，不扩展正式 Runtime protection、installed Main 加载政策或三平台资格。
+
 完整候选只物化生成 exports 真正需要的解析边。当前唯一内联的核心图标依赖归[UI build owner](../../packages/ui/README.md#原桌面展示层)：其他 external／peer、原 exports／CSS与准确许可保持，builder拒绝残留该包的外部引用。复制器不能以内联声明跳过 peer、optional或workspace；新闭包的全部文件仍纳入原manifest和每次独立完整校验。此构建收束不改变三次准入、双使用锁或平台完成约束。
 
 `release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 包含完整 Terminal 和实际 Electron。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。 可信Native MCP测试候选仅由builder固定`native-mcp-loopback`选项在构建前写入专用ProcessHost和可选公开证书，所有字节纳入同一inventory/digest；普通生产main/daemon未选择该选项。其loopback/TLS测试网络必须声明productionDefaultNetwork=false，不能将默认browser/backend/permissions装配或局部窗口通过冒称完整生产/平台资格。
@@ -113,6 +115,8 @@ WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多
 Windows release job另接[完整真实代码调用者](../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)，复用该job准确Terminal／Native和原837a2b8c前驱的两份原builder；11项锁输入中10项逐字相同，根清单只接受已提交 stdio CI 脚本的准确单行增量并保存原/当前 SHA，Core基线相同，实际Agent字节／candidate与clean来源独立核，不以版本标签推导兼容。原同代码、Native维护和TUI caller均保留，新步骤位于其后；整个release job现为60分钟／always formal与完整准入保持，所有原fixture期限保持，统一1140000ms绝对期限包括物化、Terminal三任务／冷读、Native四基础窗口／三任务和installed新Store恢复后第五窗口／单次卸载。前驱已支持DB9，不计DB9拒旧／已发布样本／T029；本机源码和读取证据不授Windows或Linux原生资格。实际入口、预算和来源归[Terminal owner](../../apps/cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，平台验收按用户最新安排后置，Windows 由用户后续独立验证；现有Actions接线保留，当前未dispatch。
 
 ## 平台与完成约束
+
+2026-10-14用户已要求Windows本机实测，前文“由用户后续验证／未实测”为对应旧轮次的范围记录。当前八workspace build通过，原默认中断，26份独立完整专项12文件通过／14失败；Files／媒体错误87、普通Workspace配置、恢复／ConPTY与夹具缺口、原生编译器缺失仍在，候选构建另实际拒绝artifact scope。因此当前Windows是已实测但未通过，完整安装／版本切换／Native窗口／卸载及hosted G1仍未取得；Linux、RSS和完整观测范围不变。具体命令、修复及证据统一归[本机进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-14windows-本机首次实际验证)，不以本机失败改写产品承诺或正式guard。
 
 G0 需要当前产品正确性、安全、安装/取消/恢复的实际证据；G1 仍要求 GitHub-hosted macOS、Ubuntu、Windows 原生 build/install/process/PTY。workflow 定义、artifact 上传或本机单平台结果不能替代三平台通过。当前 POSIX 安装/继承使用锁保原本机 macOS 资格，Linux 当前 Terminal 安装维护链已取得 Ubuntu x64 用户空间在 Apple Silicon Docker VM 仿真的有限实测；准确范围归 [Terminal owner](../../apps/cli/docs/terminal-release.md#linux-当前引擎与安装维护链)，原生 Ubuntu CI 仍未验。Linux arm64 的完整 Native 安装文件也已在 Docker VM 原生 CPU/Xvfb 下实测，保 Chromium sandbox、两层 lease 和原预算；有限范围归[Native owner](../../apps/desktop/docs/native-release.md#linux-arm64-安装生命周期)，不替代原生 Ubuntu x64 CI 或全部 Native/维护资格。Windows Profile/Store/配置原生场景已实现但未本机运行；维护 Bun x64 文件端口已接入原 API 和开发 CLI，实际 DACL/HANDLE、媒体、journal 与恢复原生验收尚未取得，Windows managed Terminal／Native 安装、切换及 Main 加载前实际创建／原文件准入源码现已接入，但原生资格未验；标准 PATH 不由安装器修改，Daemon、Native、PTY、GC 和完整安装版维护仍需各自实际平台证据。准确范围归[maintenance owner](../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
 

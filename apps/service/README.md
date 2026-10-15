@@ -68,6 +68,8 @@ SSE 从单一扫描游标读取持久变更。未来、过期或格式错误的�
 
 可信 Native main 可显式提供中立 `spawnChild` port，用 Node 的进程/stream 能力启动已选定的 Bun 制品；省略时保留 Bun 宿主实现。port 不改变 bootstrap、准入、父存活或所属关闭协议，也不增加默认 PATH/源码回退。Electron main 只持有自己启动的 PID 和 handle；[paired 测试](test/isolated/paired.test.ts)及 Native 实际窗口证据分别证明 launcher 与 Node 调用者的边界。
 
+显式 Desktop 开发宿主监听 Service 源码，构建新的独立开发 bundle，并沿同一 paired 关闭／实际退出与新 SHA／build 准入替换进程。第三方依赖随版本打包，workspace 保外部 source 解析及原运行资产；开发版本不成为正式完整制品证明。UI 整页重新 attach 原 Store，不自动重发工作；编译失败保持旧服务，未知关闭和回执阻止继续替换。此行为归[Desktop 开发 owner](../desktop/README.md#开发热更新与服务重载)，Service 公共 API、Core 生命周期和正式 caller 合同保持。
+
 Windows 且明确传入 `runtimeProtection` 时，[paired parent admission](src/windows-paired-artifact.ts)在实际 spawn 前取得自己对所有 proof roots 的 SH，保留各自 manifest 与完整普通文件的原 HANDLE pin，再执行原 `verifyRuntimeProtection`。Native proof 包含 outer／Terminal inner 两层 roots及 outer 空目录；实际 [Service 装配](src/process-service.ts)独立取得自己的 SH／完整文件 pin 并再次核验，parent 不能代持 child 的使用权。启动命令只加候选固定的 `--no-env-file`、`--no-install`、`--config` 与 `--tsconfig-override` 路径，避免工作目录配置、preload、alias 或自动安装改变闭合制品。正式 Windows Native 已接安装前门和 Main 独立交接的源码，实际平台资格仍归 [Native owner](../desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
 parent pin 与 SH 保持至原 `child.exited` 实际结算；spawn 没有产生 child 时才独立清理。返回的 `exited` 同时反映原退出事实与严格父资源关闭，关闭失败以 `PairedServiceError.code = 'paired_artifact_close_unknown'` 保留错误和未闭 owner，不将 terminate、stdout EOF 或关闭请求当退出／释放证明。文件 pin 先于 lease 关闭，Windows lease 在附件完整关闭后才由原 CloseHandle 释放 region；详细权限与失败重试边界归[平台 owner](../../packages/agent/src/platform/README.md#制品使用权)。POSIX／无 proof 的原配对命令、准入与关闭期限保持。

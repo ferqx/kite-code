@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { win32 } from 'node:path';
 
-const environmentKeys = [
+export const windowsBuildEnvironmentKeys = [
   'PATH',
   'INCLUDE',
   'LIB',
@@ -15,9 +15,9 @@ const environmentKeys = [
   'VSCMD_ARG_HOST_ARCH',
   'VSCMD_ARG_TGT_ARCH',
 ] as const;
-type EnvironmentKey = (typeof environmentKeys)[number];
+type EnvironmentKey = (typeof windowsBuildEnvironmentKeys)[number];
 type BuildEnvironment = Record<EnvironmentKey, string>;
-const keysByUppercase = new Map(environmentKeys.map((key) => [key.toUpperCase(), key]));
+const keysByUppercase = new Map(windowsBuildEnvironmentKeys.map((key) => [key.toUpperCase(), key]));
 
 function hasControl(value: string): boolean {
   return [...value].some((character) => character.charCodeAt(0) < 32);
@@ -44,7 +44,7 @@ export function parseWindowsBuildEnvironment(stdout: string): BuildEnvironment {
       throw Error('windows_native_ci_environment_invalid');
     values.set(key, value);
   }
-  if (environmentKeys.some((key) => !values.has(key)))
+  if (windowsBuildEnvironmentKeys.some((key) => !values.has(key)))
     throw Error('windows_native_ci_environment_incomplete');
   const result = Object.fromEntries(values) as BuildEnvironment;
   if (result.VSCMD_ARG_HOST_ARCH !== 'x64' || result.VSCMD_ARG_TGT_ARCH !== 'x64')
@@ -62,7 +62,7 @@ export function parseWindowsBuildEnvironment(stdout: string): BuildEnvironment {
 export function windowsBuildEnvironmentCommand(devCommand: string): string {
   localPath(devCommand);
   // /s strips the outer pair. The installed batch path stays quoted; no value is echoed.
-  return `"call "${devCommand}" -arch=x64 -host_arch=x64 >nul && ${environmentKeys.map((key) => `set ${key}`).join(' && ')}"`;
+  return `"call "${devCommand}" -arch=x64 -host_arch=x64 >nul && ${windowsBuildEnvironmentKeys.map((key) => `set ${key}`).join(' && ')}"`;
 }
 
 export function decodeWindowsToolOutput(bytes: Uint8Array, encoding: 'utf8' | 'utf16le'): string {
@@ -159,7 +159,7 @@ export function prepareWindowsNativeCI(): void {
   for (const library of ['um/x64/advapi32.lib', 'um/x64/bcrypt.lib', 'ucrt/x64/ucrt.lib'])
     file(win32.join(sdk, 'Lib', sdkVersion, library));
   const output = [
-    ...environmentKeys.map((key) => `${key}=${prepared[key]}`),
+    ...windowsBuildEnvironmentKeys.map((key) => `${key}=${prepared[key]}`),
     `KITE_WINDOWS_MSVC=${compiler}`,
     'CL=',
     '_CL_=',
