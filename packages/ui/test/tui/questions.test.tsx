@@ -520,6 +520,105 @@ test('closed enum never offers custom; explicit anyOf string union allows origin
   app.unmount();
 });
 
+test('arrows leave empty and filled custom answers, preserve the draft and submit only the explicitly selected option', async () => {
+  const f = fixture({
+    anyOf: [
+      { const: 'first-id', title: 'First original option' },
+      { const: 'second-id', title: 'Second original option' },
+      { type: 'string' },
+    ],
+  });
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  const key = async (value: string) => {
+    app.stdin.write(value);
+    await tick();
+  };
+  try {
+    await tick();
+    for (let n = 0; n < 3; n++) await key('\u001b[B');
+    expect(app.lastFrame()).toContain('Answer >');
+    await key('\u001b[A');
+    expect(app.lastFrame()).toContain('❯ 2. Second original option');
+    expect(f.answers).toHaveLength(0);
+    await key('\u001b[B');
+    await key('  自定义原文 é 🧭  ');
+    await key('\u001b[A');
+    expect(app.lastFrame()).toContain('❯ 2. Second original option');
+    await key('\u001b[B');
+    expect(app.lastFrame()).toContain('自定义原文 é 🧭');
+    await key('\u001b[B');
+    expect(app.lastFrame()).toContain('❯ 1. First original option');
+    await key('\t');
+    expect(app.lastFrame()).toContain('自定义原文 é 🧭');
+    await key('\t');
+    expect(app.lastFrame()).toContain('❯ 1. First original option');
+    expect(f.answers).toHaveLength(0);
+    await key('\r');
+    expect(f.answers).toHaveLength(1);
+    expect(f.answers[0]!.answer).toEqual({ kind: 'question', answers: 'first-id' });
+    expect(f.commandCount()).toBe(1);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('mixed questions retain multiline and wrapped Unicode editing while arrows can leave its first and last visual rows', async () => {
+  for (const { first, second } of [
+    { first: '第一行原文', second: '第二行 é 🧭' },
+    { first: '界'.repeat(60), second: undefined },
+  ]) {
+    const f = fixture({
+      anyOf: [
+        { const: 'first-id', title: 'First original option' },
+        { const: 'second-id', title: 'Second original option' },
+        { type: 'string' },
+      ],
+    });
+    await f.controller.select('a');
+    const app = render(<TuiSession controller={f.controller} />);
+    Object.defineProperty(app.stdout, 'columns', { value: 80, configurable: true });
+    const key = async (value: string) => {
+      app.stdin.write(value);
+      await tick();
+    };
+    try {
+      await tick();
+      await key('\t');
+      await key(first);
+      if (second !== undefined) {
+        await key('\u001b\r');
+        await key(second);
+      }
+      await key('\u001b[A');
+      expect(app.lastFrame()).toContain('Answer >');
+      expect(app.lastFrame()).not.toContain('❯ 2. Second original option');
+      await key('\u001b[A');
+      expect(app.lastFrame()).toContain('❯ 2. Second original option');
+      await key('\u001b[B');
+      expect(app.lastFrame()).toContain('Answer >');
+      await key('\u001b[B');
+      expect(app.lastFrame()).toContain('Answer >');
+      await key('\u001b[B');
+      expect(app.lastFrame()).toContain('❯ 1. First original option');
+      expect(f.answers).toHaveLength(0);
+      await key('\t');
+      await key('\r');
+      expect(f.answers).toHaveLength(1);
+      expect(f.answers[0]!.answer).toEqual({
+        kind: 'question',
+        answers: second === undefined ? first : `${first}\n${second}`,
+      });
+      expect(f.commandCount()).toBe(1);
+    } finally {
+      app.unmount();
+      app.cleanup();
+      f.controller.dispose();
+    }
+  }
+});
+
 test('closed text-object custom answers keep option-like text distinct from an original option ID', async () => {
   const f = fixture({
     type: 'object',

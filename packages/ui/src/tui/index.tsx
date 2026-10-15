@@ -1895,6 +1895,15 @@ function TuiSessionView({
             return;
           }
           if (key.ctrl || (key.meta && !key.return)) return;
+          const choiceArrow = field.choices.length > 0 && (key.upArrow || key.downArrow);
+          const inputRow =
+            choiceArrow && editing
+              ? draft.buffer.row(questionInputWidth(stdout.columns, t('Answer')), display)
+              : undefined;
+          const navigateChoice =
+            choiceArrow &&
+            (!inputRow ||
+              (key.upArrow ? inputRow.index === 0 : inputRow.index === inputRow.lines.length - 1));
           if (key.escape) {
             if (question.step > 0) question.step--;
             else void controller.cancelInteraction(card);
@@ -1903,7 +1912,7 @@ function TuiSessionView({
             draft.skipped = false;
           } else if (key.tab && !field.required) {
             draft.skipped = !draft.skipped;
-          } else if (!editing && field.choices.length && (key.upArrow || key.downArrow)) {
+          } else if (navigateChoice) {
             const count = field.choices.length + (field.text ? 1 : 0);
             draft.selected =
               draft.selected === undefined

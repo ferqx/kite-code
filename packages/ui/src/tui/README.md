@@ -34,6 +34,8 @@ Ctrl+A 只为当前原卡确实要求的附件发起重读；Controller 也在�
 
 模型、权限、会话、Files、MCP、Skills、语言、主题、帮助与交互面板使用原纯 frame／行布局，完整目录及描述保留。模型与 effort 使用原单 Enter 选择；权限、MCP 变更及恢复继续保留各自必要确认，CAS、来源绑定与原 ID 查询不变。Question Tab 在选项与自定义编辑间切换；可选的纯输入题仍用 Tab 跳过，混合题用 Alt+S；多步骤 Esc 返回，第一步 Esc 精确取消原 Question Execution。计划意图和权限仍独立，Shift+Tab 只切换下一草稿 planning，不改活动 Run。
 
+混合选项题的自定义输入沿同一 `ComposerBuffer.row` 与实际宽度判断上下键：文本内部保留视觉行移动，首行向上／末行向下继续选项导航，空输入也能离开；切换不清空原草稿，不提交 Answer。纯输入题保持原上下编辑。Question footer 在自定义输入时仍提供方向键导航提示。[问答键盘回归](../../test/tui/questions.test.tsx)核空白／已输入自定义、Unicode 多行及窄行换行、Tab 往返和准确最终答案，实际 Host 问答旅程归 [CLI PTY](../../../../apps/cli/test/isolated/tui-question-pty.test.ts)。
+
 Question 的取消 caller 向 Host 提供当前卡的准确 ID／revision／presentation 范围，Host 重新核原 pending Question 与 Execution 后才准备同一持久 `execution.cancel`。普通 Job 停止仍保 Job 专属核验；错卡、错 Scope、已终结或无法核实不取得 POST 资格。纯 `ask_user` 的实际原执行取消结果允许同 Run 继续，不能将其他 Tool 的 abort 或未知副作用当成问答取消成功。
 
 Question 的可编辑状态取自 Controller 保存的准确原 Answer，匹配 Store／presentation Session／Interaction ID／revision；提交中、unknown 和保存已确认但卡片尚未更新时冻结原选项、正文与步骤，保 Ctrl+L 原查询、会话目录及整轮取消。明确未提交和 rejected 可编辑重试，不把另一卡的回执套到当前卡。新空草稿不立即报长度错误，原不合格提交、Unicode 长度和零 POST 门禁仍适用；问卷使用专用“提交回答”文案。失败 `ask_user` 保实际参数错误及原代码，并说明该调用未创建问卷，后续合法调用保持独立状态。

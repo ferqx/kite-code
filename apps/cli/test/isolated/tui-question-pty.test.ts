@@ -296,6 +296,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
           stage === 'back' ||
           stage === 'text' ||
           stage === 'text-ctrl-a' ||
+          stage === 'custom-navigation' ||
           stage === 'retained' ||
           stage === 'custom'
         ) {

@@ -153,7 +153,7 @@ export function QuestionPanel({
         frozen ? undefined : (
           <OverlayShortcutBar
             shortcuts={[
-              ...(!editing && field.choices.length
+              ...(field.choices.length
                 ? [{ keys: '↑↓', label: translate('common.navigate') }]
                 : []),
               {
