@@ -36,8 +36,10 @@ export function parseTuiCommand(text: string): TuiCommand {
   const rawName = parts[1]!.toLowerCase(),
     name = rawName === 'bg' ? 'background' : rawName === 'c' ? 'clear' : rawName,
     tail = parts[2]?.trim() ?? '';
-  if (name === 'context' && tail.toLowerCase() === 'requests')
+  if (name === 'context' && /^requests(?:\s|$)/i.test(tail)) {
+    if (tail.toLowerCase() !== 'requests') throw new Error('unexpected_command_arguments');
     return { kind: 'management_requests' };
+  }
   const fixed: Record<string, TuiCommand['kind']> = {
     theme: 'theme',
     language: 'language',
@@ -62,7 +64,22 @@ export function parseTuiCommand(text: string): TuiCommand {
     drafts: 'drafts',
   };
   if (name in fixed) {
-    if (tail) throw new Error('unexpected_command_arguments');
+    // Original menu commands accepted ignored trailing text; new management
+    // readers and selectors retain their explicit argument contract.
+    const ignoresTail = [
+      'resume',
+      'clear',
+      'help',
+      'h',
+      'new',
+      'rewind',
+      'export',
+      'context',
+      'exit',
+      'quit',
+      'q',
+    ];
+    if (tail && !ignoresTail.includes(name)) throw new Error('unexpected_command_arguments');
     return { kind: fixed[name]! } as TuiCommand;
   }
   if (name === 'background') {

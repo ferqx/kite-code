@@ -109,7 +109,16 @@ export function createConfigurationSnapshot(
   const configuration: EffectiveConfiguration = {};
   if (effective.modelId !== undefined) configuration.modelId = effective.modelId;
   const fields: Record<(typeof namedKeys)[number], readonly string[]> = {
-    models: ['id', 'enabled', 'provider', 'model', 'baseURL', 'credentialRef', 'options'],
+    models: [
+      'id',
+      'enabled',
+      'provider',
+      'model',
+      'baseURL',
+      'credentialRef',
+      'options',
+      'modelCapabilities',
+    ],
     tools: ['id', 'enabled', 'definitionVersion', 'options'],
     skills: ['id', 'enabled', 'path', 'digest', 'options'],
     mcp: ['id', 'enabled', 'transport', 'url', 'command', 'args', 'credentialRef', 'options'],
@@ -125,6 +134,19 @@ export function createConfigurationSnapshot(
         endpoint(projected.baseURL);
         endpoint(projected.url);
         if (projected.options !== undefined) object(projected.options);
+        if (key === 'models' && projected.modelCapabilities !== undefined) {
+          const capabilities = object(projected.modelCapabilities);
+          if (
+            Object.entries(capabilities).some(
+              ([field, value]) =>
+                !['contextWindowTokens', 'maxOutputTokens'].includes(field) ||
+                typeof value !== 'number' ||
+                !Number.isSafeInteger(value) ||
+                value <= 0,
+            )
+          )
+            throw new ConfigurationError('invalid_model_capabilities');
+        }
         if (
           key === 'models' &&
           (typeof projected.provider !== 'string' || typeof projected.model !== 'string')

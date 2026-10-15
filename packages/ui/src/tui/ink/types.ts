@@ -67,6 +67,7 @@ export type OutputBlock =
       /** Qualified original file-mutation receipt; never inferred from text or arguments alone. */
       fileAction?: 'Create' | 'Write';
       fileNotice?: string;
+      filePreviewTruncated?: boolean;
       resourceReferences?: readonly string[];
       callId: string;
       name: string;

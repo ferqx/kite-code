@@ -16,6 +16,7 @@ import {
   type TuiMcpOutcome,
   type TuiMcpPort,
   type TuiMcpReadDirectory,
+  type TuiMcpSnapshot,
 } from '@kite-ai/ui/tui';
 import type { McpConnectionJournal } from './mcp-connection-journal';
 import type { McpReconnectionJournal } from './mcp-reconnection-journal';
@@ -409,34 +410,73 @@ export function createTuiMcpPort(
       if (facts.storeId !== storeId || facts.sessionId !== sessionId)
         throw Error('mcp_directory_scope_mismatch');
       let liveServerIds: string[] | undefined;
+      const details: Record<string, NonNullable<TuiMcpSnapshot['details']>[string]> = {};
+      const payloadOf = (response: unknown, extension: string, type: string) => {
+        if (!Array.isArray(response) || response.length !== 1) throw Error('mcp_metadata_invalid');
+        const envelope = obj(response[0]);
+        if (
+          envelope?.extensionId !== extension ||
+          envelope.contentType !== type ||
+          envelope.contentVersion !== 1 ||
+          !Array.isArray(envelope.actions) ||
+          envelope.actions.length ||
+          !Array.isArray(envelope.artifactRefs) ||
+          envelope.artifactRefs.length
+        )
+          throw Error('mcp_metadata_invalid');
+        const payload = obj(envelope.payload);
+        if (!payload || !Array.isArray(payload.items)) throw Error('mcp_metadata_invalid');
+        return payload;
+      };
       try {
-        const response = await client.queryExtension(
-          sessionId,
-          'builtin.mcp',
-          'mcp.catalogue',
-          { limit: 100 },
-          { signal },
-        );
-        const views = Array.isArray(response) ? response : [];
-        const matches = views.filter((value) => {
-          const row = obj(value);
-          return (
-            row?.extensionId === 'builtin.mcp' &&
-            row.contentType === 'builtin.mcp.catalogue' &&
-            row.contentVersion === 1
+        const selected = new Set<string>(),
+          keys = new Set<string>();
+        let afterKey: string | undefined;
+        for (let pages = 0; ; pages++) {
+          toolsAdmission(sessionId, signal);
+          if (pages >= 1024) throw Error('mcp_catalogue_incomplete');
+          const payload = payloadOf(
+            await client.queryExtension(
+              sessionId,
+              'builtin.mcp',
+              'mcp.catalogue',
+              { limit: 100, ...(afterKey ? { afterKey } : {}) },
+              { signal },
+            ),
+            'builtin.mcp',
+            'builtin.mcp.catalogue',
           );
-        });
-        const payload = matches.length === 1 ? obj(obj(matches[0])?.payload) : undefined;
-        if (Array.isArray(payload?.items)) {
-          const selected = new Set<string>();
-          for (const item of payload.items) {
+          toolsAdmission(sessionId, signal);
+          const items = payload.items as unknown[];
+          if (
+            items.length > 100 ||
+            !(
+              payload.nextAfterKey === null ||
+              (typeof payload.nextAfterKey === 'string' &&
+                payload.nextAfterKey.length > 0 &&
+                payload.nextAfterKey.length <= 256)
+            )
+          )
+            throw Error('mcp_catalogue_incomplete');
+          let previous = afterKey ?? '';
+          for (const item of items) {
             const row = obj(item),
               record = obj(row?.record),
               current = obj(row?.currentCatalogue),
               ref = obj(record?.operationRef);
             if (
-              row?.originStoreId !== storeId ||
-              row.live !== true ||
+              !row ||
+              typeof row.key !== 'string' ||
+              row.key.length > 256 ||
+              row.key <= previous ||
+              keys.has(row.key)
+            )
+              throw Error('mcp_catalogue_incomplete');
+            previous = row.key;
+            keys.add(row.key);
+            if (row.live !== true) continue;
+            if (
+              row.originStoreId !== storeId ||
               record?.originalStoreId !== storeId ||
               typeof record.serverId !== 'string' ||
               current?.serverId !== record.serverId ||
@@ -446,7 +486,10 @@ export function createTuiMcpPort(
               ref?.originStoreId !== storeId ||
               ref.sessionId !== sessionId ||
               ref.extensionId !== 'builtin.mcp' ||
-              typeof ref.executionId !== 'string' ||
+              typeof ref.executionId !== 'string'
+            )
+              throw Error('mcp_catalogue_scope_mismatch');
+            if (
               !facts.items.some(
                 (server) =>
                   server.id === record.serverId && server.configDigest === current.configDigest,
@@ -455,22 +498,120 @@ export function createTuiMcpPort(
               continue;
             selected.add(record.serverId);
           }
-          liveServerIds = [...selected];
+          if (payload.nextAfterKey === null) break;
+          if (!items.length || payload.nextAfterKey !== previous)
+            throw Error('mcp_catalogue_incomplete');
+          afterKey = payload.nextAfterKey as string;
         }
+        liveServerIds = [...selected];
       } catch {
         signal.throwIfAborted();
       }
+      try {
+        const payload = payloadOf(
+          await client.queryExtension(
+            sessionId,
+            'builtin.mcp.management',
+            'mcp.server.locations',
+            {},
+            { signal },
+          ),
+          'builtin.mcp.management',
+          'builtin.mcp.server.locations',
+        );
+        if (
+          payload.storeId !== storeId ||
+          payload.sessionId !== sessionId ||
+          payload.workspaceId !== facts.workspaceId ||
+          payload.workspaceIdentity !== facts.workspaceIdentity ||
+          payload.workspacePath !== facts.workspacePath ||
+          mcpCanonical(payload.readSet) !== mcpCanonical(facts.readSet)
+        )
+          throw Error('mcp_metadata_scope_mismatch');
+        const seen = new Set<string>();
+        for (const item of payload.items as unknown[]) {
+          const row = obj(item),
+            server = facts.items.find(
+              (server) => server.id === row?.serverId && server.configDigest === row?.configDigest,
+            );
+          if (
+            !server ||
+            seen.has(server.id) ||
+            !(row?.path === null || (typeof row?.path === 'string' && row.path.length <= 32760))
+          )
+            throw Error('mcp_metadata_invalid');
+          seen.add(server.id);
+        }
+        for (const item of payload.items as { serverId: string; path: string | null }[])
+          details[item.serverId] = { configurationPath: item.path };
+      } catch {
+        signal.throwIfAborted();
+      }
+      try {
+        const payload = payloadOf(
+          await client.queryExtension(
+            sessionId,
+            'builtin.mcp',
+            'mcp.server.status',
+            {},
+            { signal },
+          ),
+          'builtin.mcp',
+          'builtin.mcp.server.status',
+        );
+        if (payload.storeId !== storeId || payload.sessionId !== sessionId)
+          throw Error('mcp_metadata_scope_mismatch');
+        const seen = new Set<string>(),
+          additions: typeof details = {};
+        for (const item of payload.items as unknown[]) {
+          const row = obj(item),
+            server = facts.items.find(
+              (server) => server.id === row?.serverId && server.configDigest === row?.configDigest,
+            );
+          if (!server) continue;
+          if (
+            !row ||
+            seen.has(server.id) ||
+            typeof row.executionId !== 'string' ||
+            !['connecting', 'connected', 'failed', 'stopping', 'disconnected', 'unknown'].includes(
+              String(row.status),
+            ) ||
+            !(
+              row.reason === null ||
+              (typeof row.reason === 'string' && /^[a-z][a-z0-9_]{0,127}$/.test(row.reason))
+            ) ||
+            ['toolCount', 'resourceCount', 'promptCount'].some(
+              (key) =>
+                row[key] !== null && (!Number.isSafeInteger(row[key]) || Number(row[key]) < 0),
+            )
+          )
+            throw Error('mcp_metadata_invalid');
+          seen.add(server.id);
+          additions[server.id] = {
+            status: row.status as NonNullable<TuiMcpSnapshot['details']>[string]['status'],
+            reason: row.reason as string | null,
+            toolCount: row.toolCount as number | null,
+            resourceCount: row.resourceCount as number | null,
+            promptCount: row.promptCount as number | null,
+          };
+        }
+        for (const [id, value] of Object.entries(additions))
+          details[id] = { ...details[id], ...value };
+      } catch {
+        signal.throwIfAborted();
+      }
+      toolsAdmission(sessionId, signal);
       if (source) {
         try {
           const labels = decodeTuiMcpLabels(facts, await source.read(sessionId, signal));
           signal.throwIfAborted();
-          return { ...facts, labels, ...(liveServerIds ? { liveServerIds } : {}) };
+          return { ...facts, labels, details, ...(liveServerIds ? { liveServerIds } : {}) };
         } catch {
           // Optional labels cannot invalidate canonical controls or promote a mismatched source.
           signal.throwIfAborted();
         }
       }
-      return { ...facts, ...(liveServerIds ? { liveServerIds } : {}) };
+      return { ...facts, details, ...(liveServerIds ? { liveServerIds } : {}) };
     },
     async list() {
       if (!journal) throw Error('mcp_selection_journal_unavailable');

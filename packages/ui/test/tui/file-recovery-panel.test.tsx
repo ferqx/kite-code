@@ -69,13 +69,15 @@ test('Files reader windows exact original points, previews real file impact and 
     await tick();
     expect(ui.lastFrame()).toContain('src/main.ts');
     expect(ui.lastFrame()).toContain('changed after checkpoint');
-    ui.stdin.write('2');
+    ui.stdin.write('3');
     await tick();
     expect(calls).toEqual(['read:point-8', 'scope:code']);
     ui.stdin.write('\u001b');
     await tick();
     expect(calls).not.toContain('begin:code');
-    ui.stdin.write('3');
+    ui.stdin.write('\r');
+    await tick();
+    ui.stdin.write('1');
     await tick();
     ui.stdin.write('\r');
     await tick();
@@ -158,7 +160,7 @@ test('original rewind shows verified recorded date, code statistics and read-onl
     ui.rerender(<TuiFileRecoveryPanel controller={controller} />);
     await tick();
     expect(ui.lastFrame()).toContain('+2 −1');
-    ui.stdin.write('2');
+    ui.stdin.write('3');
     await tick();
     ui.stdin.write('v');
     await tick();
@@ -175,7 +177,9 @@ test('original rewind shows verified recorded date, code statistics and read-onl
     expect(ui.lastFrame()).not.toContain('original line 14');
     ui.stdin.write('\u001b');
     await tick();
-    ui.stdin.write('1');
+    ui.stdin.write('\r');
+    await tick();
+    ui.stdin.write('2');
     await tick();
     expect(ui.lastFrame()).toContain('Code will remain unchanged.');
     expect(calls).not.toContain('begin');
@@ -184,7 +188,7 @@ test('original rewind shows verified recorded date, code statistics and read-onl
   }
 });
 
-test('Chinese recovery keeps complete navigation and actual impact localized while requiring a separate explicit scope', async () => {
+test('Chinese recovery keeps complete navigation and actual impact localized with original default both and a separate confirmation', async () => {
   const calls: string[] = [];
   const point = {
     id: 'point',
@@ -241,17 +245,11 @@ test('Chinese recovery keeps complete navigation and actual impact localized whi
     await tick();
     expect(calls).toEqual(['read']);
     expect(ui.lastFrame()).toContain('代码将恢复 +1 −1，涉及 notes.md');
-    expect(ui.lastFrame()).toContain('请明确选择恢复范围');
-    ui.stdin.write('\r');
-    await tick();
-    expect(calls).toEqual(['read']);
-    ui.stdin.write('3');
-    await tick();
     expect(ui.lastFrame()).toContain('Enter 确认所选范围');
-    expect(calls).toEqual(['read', 'scope:both']);
+    expect(ui.lastFrame()).toContain('❯ 1. 会话与文件');
     ui.stdin.write('\r');
     await tick();
-    expect(calls).toEqual(['read', 'scope:both', 'submit:both']);
+    expect(calls).toEqual(['read', 'submit:both']);
   } finally {
     ui.unmount();
   }

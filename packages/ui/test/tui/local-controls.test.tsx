@@ -521,7 +521,120 @@ test('pending inputs are actual accepted directory facts; beginning work removes
   }
 });
 
-test('explicit MCP navigation owns pending-card focus and CtrlC closes child then parent without answering or cancelling', async () => {
+test('original main selectors keep whole-task Ctrl+C while preserving the draft and hidden approval', async () => {
+  for (const panel of ['help', 'theme'] as const) {
+    const f = fixture();
+    Object.assign(f.snapshot, {
+      interactions: [
+        {
+          id: 'hidden-approval',
+          kind: 'approval',
+          state: 'pending',
+          revision: '1',
+          originStoreId: 'store',
+          sessionId: 'a',
+          presentationSessionId: 'a',
+          executionId: 'original-tool',
+          runId: 'a-run',
+          request: { description: 'Original decision' },
+        } as unknown as Interaction,
+      ],
+    });
+    await f.controller.select('a');
+    f.controller.setDraft('keep this draft');
+    await f.controller.routeCommand(`/${panel}`);
+    const app = f.app();
+    try {
+      await tick();
+      expect(f.controller.state.panel).toBe(panel);
+      app.stdin.write('\x03');
+      await tick();
+      expect(f.cancels).toEqual(['a-work']);
+      expect(f.controller.state.panel).toBeUndefined();
+      expect(f.controller.state.draft).toBe('keep this draft');
+      expect(f.controller.state.snapshot!.interactions[0]).toMatchObject({
+        id: 'hidden-approval',
+        state: 'pending',
+        revision: '1',
+      });
+      expect(f.posts).toEqual([]);
+      expect(f.quits).toEqual([]);
+    } finally {
+      app.unmount();
+      f.controller.dispose();
+    }
+  }
+});
+
+test('last verified Context is not attributed to a newly selected idle model', async () => {
+  const f = fixture();
+  const unexpectedWrite = async () => {
+    throw Error('no Context write is authorized');
+  };
+  f.port.management = {
+    readContext: async () => {
+      throw Error('selected_projection_unavailable');
+    },
+    manage: unexpectedWrite,
+    lookup: unexpectedWrite,
+    newSession: unexpectedWrite,
+    quit: () => false,
+  };
+  Object.assign(f.snapshot.view.runs[0]!, { isActive: false });
+  const environment: NonNullable<TuiSnapshot['environment']> = {
+    workspacePath: '/workspace',
+    modelId: 'model-a',
+    modelName: 'Model A',
+    runtimeModel: {
+      runId: 'a-run',
+      active: false,
+      modelName: 'Model A',
+      source: 'model_input',
+    },
+    context: {
+      source: 'model_input',
+      storeId: 'store',
+      sessionId: 'a',
+      runId: 'a-run',
+      executionId: 'original-model',
+      modelId: 'model-a',
+      bodyHash: 'a'.repeat(64),
+      estimate: {
+        systemTokens: 10,
+        transcriptTokens: 30,
+        toolSchemaTokens: 10,
+        framingTokens: 10,
+        totalInputTokens: 60,
+      },
+      providerSafetyMarginTokens: 1024,
+      usableInputTokens: 240,
+      utilization: 0.25,
+    },
+  };
+  Object.assign(f.snapshot, { environment });
+  await f.controller.select('a');
+  const app = f.app();
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('25% context');
+    Object.assign(environment, { modelId: 'model-b', modelName: 'Model B' });
+    await f.controller.select('a');
+    await tick();
+    expect(app.lastFrame()).toContain('Model B');
+    expect(app.lastFrame()).not.toContain('25% context');
+    await f.controller.routeCommand('/context');
+    await tick();
+    expect(app.lastFrame()).toContain('Verified Model context estimate: 60');
+    expect(app.lastFrame()).toContain('Based on the last verified Model input');
+    expect(f.posts).toEqual([]);
+    expect(f.cancels).toEqual([]);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('explicit MCP child readers close locally and the root keeps original whole-task cancellation', async () => {
   const f = fixture();
   let managementEffects = 0;
   const forbidden = async () => {
@@ -587,7 +700,7 @@ test('explicit MCP navigation owns pending-card focus and CtrlC closes child the
       revision: '1',
       answer: null,
     });
-    expect(f.cancels).toEqual([]);
+    expect(f.cancels).toEqual(['a-work']);
     expect(f.posts).toEqual([]);
     expect(f.quits).toEqual([]);
     expect(managementEffects).toBe(0);

@@ -857,6 +857,11 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
           ) : null}
         </Box>
       )}
+      {block.filePreviewTruncated && (
+        <Box paddingLeft={3}>
+          <Text color={dt.warning}>{translate('tool.filePreviewTruncated')}</Text>
+        </Box>
+      )}
       {/* 其他工具 / Other tools */}
       {isExpanded && !isPlan && !isAskUser && !isShell && !isFileTool && hasSummary && (
         <Box paddingLeft={3} flexDirection="column">

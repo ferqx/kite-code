@@ -891,18 +891,18 @@ test('file changed display requires a successful scoped builtin receipt and both
       },
     },
   });
-  expect(projectInkTool(source, snapshot([source])).summary).toBe('Workspace file changed.');
+  expect(projectInkTool(source, snapshot([source])).fileNotice).toBe('Workspace file changed.');
   expect(
     projectInkTool(source, {
       ...snapshot([source]),
       environment: { workspacePath: 'file:///original%20workspace' },
-    }).summary,
+    }).fileNotice,
   ).toBe('Workspace file changed.');
   expect(
     projectInkTool(source, {
       ...snapshot([source]),
       environment: { workspacePath: 'file:///C:/original%20workspace' },
-    }).summary,
+    }).fileNotice,
   ).toBe('Workspace file changed.');
   for (const expanded of [false, true]) {
     const app = render(
@@ -919,6 +919,7 @@ test('file changed display requires a successful scoped builtin receipt and both
       app.unmount();
     }
   }
+  expect(projectInkTool(source, snapshot([source])).summary).toBe('original text');
   const unknown = execution('write', { ...source, status: 'outcome_unknown' });
   expect(projectInkTool(unknown, snapshot([unknown])).summary).not.toBe('Workspace file changed.');
   const foreign = execution('write', { ...source, originStoreId: 'foreign' });
@@ -961,7 +962,7 @@ test('file changed display requires a successful scoped builtin receipt and both
     projectInkTool(external, {
       ...snapshot([external]),
       environment: { workspacePath: 'C:\\workspace' },
-    }).summary,
+    }).fileNotice,
   ).toBe('External file changed.');
   const noOp = execution('unchanged', {
     ...source,
@@ -1016,5 +1017,143 @@ test('file changed display requires a successful scoped builtin receipt and both
     },
   ]) {
     expect(projectInkTool(invalid, snapshot([invalid])).fileNotice).toBeUndefined();
+  }
+});
+
+test('qualified file previews reach the original diff renderer, with bounded UTF-8 and explicit truncation', () => {
+  const before = { hash: 'a'.repeat(64), size: 10, device: '1', inode: '2' };
+  const after = { ...before, hash: 'b'.repeat(64), size: 14 };
+  const text = 'Added 1 lines, removed 1 lines\n 1 -old value\n 1 +新的🙂 value\n';
+  const source = execution('edit', {
+    definitionId: 'builtin.files/files.edit',
+    definitionVersion: '2',
+    toolInput: { path: 'original.ts', base: before },
+    result: {
+      outcome: 'succeeded',
+      content: JSON.stringify({ path: 'original.ts', baseline: after }),
+      details: {
+        fileChange: {
+          version: 1,
+          format: 'line_diff',
+          path: 'original.ts',
+          before,
+          after,
+          text,
+          truncated: true,
+        },
+      },
+    },
+  });
+  const facts = snapshot([source]);
+  expect(projectInkTool(source, facts)).toMatchObject({
+    name: 'edit_file',
+    summary: text,
+    fileNotice: 'Workspace file changed.',
+    filePreviewTruncated: true,
+  });
+  const app = render(<InkExecution execution={source} snapshot={facts} columns={80} />);
+  try {
+    expect(app.lastFrame()).toContain('Added 1 lines, removed 1 lines');
+    expect(app.lastFrame()).toContain('-old value');
+    expect(app.lastFrame()).toContain('+新的🙂 value');
+    expect(app.lastFrame()).toContain('File change preview truncated');
+    expect(app.lastFrame()).not.toContain('"baseline"');
+  } finally {
+    app.unmount();
+  }
+  const result = source.result as { details: { fileChange: Record<string, unknown> } };
+  for (const change of [
+    { ...result.details.fileChange, text: '\ud800' },
+    { ...result.details.fileChange, text: '界'.repeat(21846) },
+    { ...result.details.fileChange, path: 'foreign.ts' },
+    { ...result.details.fileChange, before: { ...before, hash: 'c'.repeat(64) } },
+    { ...result.details.fileChange, after: { ...after, inode: '99' } },
+  ]) {
+    const invalid = {
+      ...source,
+      result: { ...(source.result as object), details: { fileChange: change } },
+    };
+    const projected = projectInkTool(invalid, snapshot([invalid]));
+    expect(projected.fileNotice).toBeUndefined();
+    expect(projected.filePreviewTruncated).toBeUndefined();
+  }
+});
+
+test('long child Markdown stays rendered through scrolling and width changes, independently of Tool records', async () => {
+  const carrier = execution('carrier', {
+    kind: 'job',
+    childSessionId: 'child',
+    parentExecutionId: 'task',
+  });
+  const body = [
+    '```ts',
+    ...Array.from({ length: 30 }, (_, i) => `const line${i} = ${i};`),
+    '```',
+    '',
+    '| 名称 | Value |',
+    '| --- | --- |',
+    '| 尾部 | **COMPLETE_CHILD_TAIL** |',
+  ].join('\n');
+  const tool = execution('child-tool', {
+    sessionId: 'child',
+    toolInput: { path: 'original.ts' },
+    result: { content: 'actual child Tool output' },
+  });
+  const child: TuiChildLog = {
+    target: {
+      storeId: 'store',
+      originStoreId: 'store',
+      sessionId: 'parent',
+      executionId: 'carrier',
+      definitionId: carrier.definitionId,
+      definitionVersion: '1',
+    },
+    carrier,
+    view: view('child', { executions: [tool] }),
+    messages: [message('child-message', '1', { sessionId: 'child', content: body })],
+    modelOutputs: new Map(),
+  };
+  let refreshes = 0;
+  const app = render(
+    <TuiChildSessionPanel child={child} onBack={() => {}} onRefresh={() => refreshes++} />,
+  );
+  const tick = () => Bun.sleep(25);
+  try {
+    Object.defineProperty(app.stdout, 'columns', { configurable: true, get: () => 60 });
+    app.stdout.emit('resize');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(app.lastFrame()).toContain('┌─ ts');
+    expect(app.lastFrame()).toContain('const line0 = 0;');
+    expect(app.lastFrame()).not.toContain('```ts');
+    app.stdin.write('\u001b[F');
+    await tick();
+    expect(app.lastFrame()).toContain('COMPLETE_CHILD_TAIL');
+    expect(app.lastFrame()).toContain('┼');
+    expect(app.lastFrame()).not.toContain('**COMPLETE_CHILD_TAIL**');
+    Object.defineProperty(app.stdout, 'columns', { configurable: true, get: () => 46 });
+    app.stdout.emit('resize');
+    await tick();
+    app.stdin.write('\u001b[H');
+    await tick();
+    expect(app.lastFrame()).toContain('┌─ ts');
+    app.stdin.write('\u001b[B');
+    await tick();
+    expect(app.lastFrame()).not.toContain('```');
+    app.stdin.write('\t');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(app.lastFrame()).toContain('Read');
+    expect(app.lastFrame()).toContain('actual child Tool output');
+    app.stdin.write('r');
+    await tick();
+    expect(refreshes).toBe(1);
+    expect(child.messages[0]!.content).toBe(body);
+    expect(child.target.sessionId).toBe('parent');
+    expect(child.view.session.nextSeq).toBe('30');
+  } finally {
+    app.unmount();
   }
 });

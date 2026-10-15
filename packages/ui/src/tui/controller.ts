@@ -169,6 +169,7 @@ export interface TuiSnapshot {
     observer?: 'workspace_missing';
     workspacePath: string;
     homeDirectory?: string;
+    modelId?: string;
     modelName?: string;
     effort?: string;
     permissionMode?: import('@kite-ai/client').PermissionModeState['mode'];
@@ -178,6 +179,28 @@ export interface TuiSnapshot {
       modelName?: string;
       effort?: string;
       source: 'model_input' | 'run_configuration' | 'unavailable';
+    };
+    /** Read-only estimate of the exact saved Model request; separate from cumulative usage. */
+    context?: {
+      source: 'model_input';
+      storeId: string;
+      sessionId: string;
+      runId: string;
+      executionId: string;
+      modelId: string;
+      bodyHash: string;
+      estimate: {
+        systemTokens: number;
+        transcriptTokens: number;
+        toolSchemaTokens: number;
+        framingTokens: number;
+        totalInputTokens: number;
+      };
+      contextWindowTokens?: number;
+      reservedOutputTokens?: number;
+      providerSafetyMarginTokens: number;
+      usableInputTokens?: number;
+      utilization?: number;
     };
     usage?: {
       inputTokens: number;

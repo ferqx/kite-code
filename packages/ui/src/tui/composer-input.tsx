@@ -72,13 +72,13 @@ export function TuiComposer({
     onFileQuery?.(requestKey ? (JSON.parse(requestKey)[0] as FileToken) : undefined);
   }, [requestKey, onFileQuery]);
   const filePaths = token && files?.key === token.key && files.phase === 'ready' ? files.paths : [];
-  const complete = (currentToken = token, currentPaths = filePaths) =>
+  const complete = (currentToken = token, currentPaths = filePaths, selectedOnly = false) =>
     currentPaths.length
       ? buffer.completeFile(
           currentPaths[buffer.candidate % currentPaths.length]!,
           currentToken!.key,
         )
-      : buffer.complete();
+      : buffer.complete(selectedOnly);
   const update = () => {
     if (buffer.text !== value) onChange(buffer.text);
     render();
@@ -113,6 +113,11 @@ export function TuiComposer({
           : [];
       const candidates = currentPaths.length ? currentPaths : buffer.candidates;
       if (key.escape) {
+        if (buffer.parts.some((part) => part.pasted)) {
+          buffer.sync('');
+          update();
+          return;
+        }
         const dismissing = !!currentToken || candidates.length > 0;
         buffer.dismissed = true;
         render();
@@ -129,8 +134,10 @@ export function TuiComposer({
         return;
       }
       if (candidates.length && (key.upArrow || key.downArrow)) {
-        buffer.candidate =
-          (buffer.candidate + (key.downArrow ? 1 : candidates.length - 1)) % candidates.length;
+        buffer.candidate = Math.max(
+          0,
+          Math.min(candidates.length - 1, buffer.candidate + (key.downArrow ? 1 : -1)),
+        );
         render();
         return;
       }
@@ -140,10 +147,9 @@ export function TuiComposer({
           return;
         }
         if (currentToken && !currentPaths.length) return;
-        if (candidates.length && buffer.text !== candidates[buffer.candidate]) {
-          complete(currentToken, currentPaths);
+        if (currentToken || (candidates.length && !buffer.commands.includes(buffer.text))) {
+          complete(currentToken, currentPaths, true);
           update();
-          return;
         }
         buffer.remember();
         onSubmit();

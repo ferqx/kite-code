@@ -158,8 +158,6 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\x1b[A');
       await waitForText(() => tui.viewport(), '❯ 高', 10_000);
       tui.write('\r');
-      await waitForText(() => tui.viewport(), '确认原项目修改', 10_000);
-      tui.write('\r');
       await waitForTextGone(() => tui.viewport(), '选择推理深度', 10_000);
       await waitForText(() => tui.viewport(), 'mock-model high', 10_000);
       await waitForTuiReady(tui);

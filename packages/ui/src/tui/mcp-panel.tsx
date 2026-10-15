@@ -1,12 +1,15 @@
 import { useInput } from 'ink';
 import { useEffect, useRef, useState } from 'react';
+import { isCtrlCBatch } from './composer-input';
 import { type TuiController, terminalText } from './controller';
 import TuiOverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
 import { OverlayListRow, OverlaySection } from './ink/OverlayPrimitives';
 import type { TuiMcpSnapshot } from './mcp';
+import { mcpAuthRequest } from './mcp-auth';
 import { TuiMcpAuthPanel } from './mcp-auth-panel';
 import { TuiMcpDirectoryPanel } from './mcp-directory-panel';
 import { TuiMcpReconnectionPanel } from './mcp-reconnection-panel';
+import { sameReconnectionValue } from './mcp-reconnection-state';
 import { TuiMcpSourceMutationPanel } from './mcp-source-mutation-panel';
 import { TuiMcpSourcePanel } from './mcp-source-panel';
 import { reviewableMcpSource } from './mcp-source-question';
@@ -14,7 +17,13 @@ import { TuiMcpToolsPanel } from './mcp-tools-panel';
 import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** Visible choices use arrows, Enter and Esc; each mutation has a separate scope review. */
-export function TuiMcpPanel({ controller }: { controller: TuiController }) {
+export function TuiMcpPanel({
+  controller,
+  onCancelTask,
+}: {
+  controller: TuiController;
+  onCancelTask?: (batch: boolean) => void;
+}) {
   const { t: originalLabel, language: inkLanguage } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation(),
     state = controller.state,
@@ -37,6 +46,61 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
   const rows = facts?.items ?? [];
   const server = rows.find((row) => row.id === detail);
   const serverName = (id: string) => facts?.labels?.[id] ?? id;
+  const connectionState = (id: string) => {
+    const auth = state.mcpAuthOutcome,
+      request = auth && mcpAuthRequest(auth.intent),
+      fact = auth?.fact;
+    const source = state.mcpSource?.facts;
+    if (
+      facts &&
+      request &&
+      fact &&
+      source &&
+      request.input.serverId === id &&
+      source.storeId === facts.storeId &&
+      source.sessionId === facts.sessionId &&
+      source.workspaceId === facts.workspaceId &&
+      source.items.some(
+        (item) =>
+          item.id === id &&
+          item.configDigest === facts.items.find((item) => item.id === id)?.configDigest,
+      ) &&
+      sameReconnectionValue(request.input.expectedReadSet, source.readSet) &&
+      fact.storeId === facts.storeId &&
+      fact.sessionId === facts.sessionId &&
+      fact.command?.id === request.commandId &&
+      fact.command.originStoreId === facts.storeId &&
+      fact.command.sessionId === facts.sessionId &&
+      fact.command.subjectId === auth.intent.subjectId &&
+      fact.command.requestDigest === auth.intent.requestDigest &&
+      fact.execution?.id === fact.command.executionId &&
+      fact.execution.originStoreId === facts.storeId &&
+      fact.execution.sessionId === facts.sessionId &&
+      fact.execution.kind === 'job' &&
+      fact.execution.definitionId === `builtin.mcp.sources/${request.actionId}` &&
+      fact.execution.definitionVersion === request.definitionVersion
+    ) {
+      if (
+        auth.phase === 'failed' &&
+        fact.binding?.serverId === id &&
+        fact.binding.workspaceId === facts.workspaceId &&
+        fact.binding.originCommandId === request.commandId
+      )
+        return inkLanguage === 'zh-CN' ? '认证失败' : 'Authentication failed';
+      if (auth.phase === 'pending' && ['dispatching', 'running'].includes(fact.execution.status))
+        return inkLanguage === 'zh-CN' ? '认证中' : 'Authenticating';
+    }
+    const status = facts?.details?.[id]?.status;
+    const labels = {
+      connecting: ['连接中', 'Connecting'],
+      connected: ['已连接', 'Connected'],
+      failed: ['连接失败', 'Connection failed'],
+      stopping: ['正在停止', 'Stopping'],
+      disconnected: ['未连接', 'Disconnected'],
+      unknown: ['连接状态未知', 'Connection unknown'],
+    } as const;
+    return status ? labels[status][inkLanguage === 'zh-CN' ? 0 : 1] : undefined;
+  };
   type Choice =
     | { kind: 'server' | 'saved'; id: string }
     | { kind: 'connectionSaved'; id: string }
@@ -184,7 +248,8 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
   }, [state.mcpDetailServerId]);
   useInput(
     (input, key) => {
-      if (key.ctrl && input === 'c') {
+      if ((key.ctrl && input === 'c') || isCtrlCBatch(input)) {
+        onCancelTask?.(isCtrlCBatch(input));
         controller.closePanel();
         return;
       }
@@ -388,11 +453,13 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
             : state.mcpDirectoryAuth?.[row.id]?.loginAllowed &&
                 !state.mcpDirectoryAuth[row.id]!.credentialPresent
               ? (inkLanguage === 'zh-CN' ? '● 需要登录' : '● Login required')
-              : facts?.liveServerIds?.includes(row.id)
-                ? inkLanguage === 'zh-CN'
-                  ? '● 已连接'
-                  : '● Connected'
-                : `${t(row.selected ? 'enabled' : 'disabled')} · ${t(row.available ? 'available' : 'unavailable')}`
+              : connectionState(row.id)
+                ? `● ${connectionState(row.id)}`
+                : facts?.liveServerIds?.includes(row.id)
+                  ? inkLanguage === 'zh-CN'
+                    ? '● 已连接'
+                    : '● Connected'
+                  : `${t(row.selected ? 'enabled' : 'disabled')} · ${t(row.available ? 'available' : 'unavailable')}`
         }`
       : '';
   };
@@ -465,6 +532,30 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
             {t('State:')} {t(server.selected ? 'enabled' : 'disabled')} ·{' '}
             {t(server.available ? 'available' : 'unavailable')}
           </Text>
+          <Text>
+            {inkLanguage === 'zh-CN' ? '连接状态' : 'Connection state'}:{' '}
+            {connectionState(server.id) ??
+              (facts?.liveServerIds?.includes(server.id) ? t('Connected') : t('unknown'))}
+          </Text>
+          <Text>
+            {inkLanguage === 'zh-CN' ? '能力' : 'Capabilities'}:{' '}
+            {inkLanguage === 'zh-CN' ? '工具' : 'Tools'}{' '}
+            {facts?.details?.[server.id]?.toolCount ?? t('unknown')} ·{' '}
+            {inkLanguage === 'zh-CN' ? '资源' : 'Resources'}{' '}
+            {facts?.details?.[server.id]?.resourceCount ?? t('unknown')} ·{' '}
+            {inkLanguage === 'zh-CN' ? '提示词' : 'Prompts'}{' '}
+            {facts?.details?.[server.id]?.promptCount ?? t('unknown')}
+          </Text>
+          <Text>
+            {inkLanguage === 'zh-CN' ? '配置位置' : 'Configuration location'}:{' '}
+            {terminalText(
+              facts?.details?.[server.id]?.configurationPath ??
+                (server.source.kind === 'programmatic' ? t('Static registration') : t('unknown')),
+            )}
+          </Text>
+          {facts?.details?.[server.id]?.reason && (
+            <Text>{terminalText(facts.details[server.id]!.reason!)}</Text>
+          )}
           {server.reason && (
             <Text>
               {t('· Reason:')} {terminalText(server.reason)}

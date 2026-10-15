@@ -133,6 +133,10 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 仅显式指定已保存 Session、核同 Store／Session／Workspace／原 rootUri 且物理根确实 ENOENT、用户配置仍有效时，Host 的[只读恢复](host/tui-workspace-observer.ts)允许历史与原结果查询。独立 observer 状态不补 Trust／Model ready；固定 Client 读方法名单保完整正文、Artifact、Query 与网络观察／清理，所有业务／审批／配置写入及未知方法拒绝。根目录恢复后当前进程仍只读，重新打开才能重新准入；普通启动、非缺失错误与错误 Scope 不借用此入口。
 
+当前 [TUI Host](host/tui.tsx)与正式 Terminal 共用 Kitty 键盘启用及普通错误页；Enter／Esc 确认异常退出返回非零，`waitUntilExit` 防止渲染器结束后宿主悬挂，正常草稿保存和 paired／shared 收尾仍由原 owner 执行。[异常真实 PTY](test/isolated/tui-render-failure-host.test.ts)核原 Service 存活、明确退出、键盘恢复与正常清理。
+
+[显示读取](host/tui-display.ts)复用现有完整 Model 输入查询，准确远端模型名来自同请求 adapter 元数据或唯一同冻结配置；独立纯估算 leaf 只使用该请求与明确原容量事实。Host 另提供准确下一模型 ID，防止空闲切换时误用旧占比。MCP 详情沿现有查询提供真实状态、合格计数与配置位置，live catalogue 穷尽游标并核同源后才交付完整集合；不添加后台 RPC 或权限判断。
+
 ## TUI 原生滚动与清屏
 
 [原生滚动 PTY](test/isolated/tui-scrollback-pty.test.ts)通过当前公共 TUI 源码、有限 UI port 和实际80×24 PTY字节驱动已安装 headless VT。三轮90个完成正文标记、40个活动正文、35行待决问题与60行选项描述各出现一次；各场景明确从底部上滚100行，状态更新、键盘编辑及改选不重发原材料、不清原生历史且保留阅读位置。折叠的179字符 paste、显式12行自由输入及150字符软换行分别核显示与单光标；复杂 question 再核完整30项Unicode JSON paste与显式12行JSON编辑。40→80列重排、同会话正文替换、`/clear`、同会话刷新与跨会话切换核原正文、输入栏和显示基线，原 snapshot 及零业务 mutation 同时核对。
@@ -234,7 +238,7 @@ TUI 观察不可用独立于快照读取失败：SSE 出错而 HTTP 仍健康时
 
 ## 开发 TUI 模型设置
 
-`host/tui.tsx` 将公共 getModelSettings/updateModelSettings/getHostMutation 适配为 UI 的有限模型端口。`/model` 提供准确 ID 的项目默认值与启禁，`/effort` 使用真实 metadata 的有限值或 null；所有修改先核对再提交。宿主不写 JSONC、不自行推导 Provider 能力。只读 scope 固定原 Workspace，提交固定原 Store/read-set/commandId；已知 4xx 拒绝返回 failed，但 mutation_incomplete 保持未知；丢回执或不可验证响应保留 outcome_unknown。原查询比较 scope、Workspace、准确 ifMatch、完整 read-set 和操作的语义字段，不依赖对象 key 顺序、不重发 POST。
+`host/tui.tsx` 将公共 getModelSettings/updateModelSettings/getHostMutation 适配为 UI 的有限模型端口。`/model` 提供准确 ID 的项目默认值与启禁，`/effort` 使用真实 metadata 的有限值或 null；默认模型和 effort 上下选择后单 Enter 保存；E 启用／禁用仍有独立确认。宿主不写 JSONC、不自行推导 Provider 能力。只读 scope 固定原 Workspace，提交固定原 Store/read-set/commandId；已知 4xx 拒绝返回 failed，但 mutation_incomplete 保持未知；丢回执或不可验证响应保留 outcome_unknown。原查询比较 scope、Workspace、准确 ifMatch、完整 read-set 和操作的语义字段，不依赖对象 key 顺序、不重发 POST。
 
 [模型 controller 测试](../../packages/ui/test/tui/models.test.tsx) 核对 stale、原观察、迟到与原查询；[实际 PTY 测试](test/isolated/tui-models-host.test.ts) 使用自有临时 profile、固定本机 compatible Provider 和标准 80×24 终端验证真实按键。最终资格与失败过程记录于[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。此接入不扩展 Native 的有限设置 IPC，也不代表远端模型发现或正式旧 TUI 切换完成。
 
@@ -385,7 +389,7 @@ TUI 的原 Question 取消复用 [caller port](host/caller-port.ts) 和同一 `e
 
 `files.restore` 输出完整冻结 intent 与原 outcome；所有请求成功 exit 0、失败 exit 1、pending/unknown/部分完成 exit 2。EOF/信号只停止本地读取，不发取消 Job/Run。TUI 共用同一 host，renderer 不持 profile/token/文件权限，操作见 [TUI 恢复指南](../../docs/handbook/clients/tui/guides/cancellation-and-recovery.md)。
 
-原 TUI `/rewind` 的[面板](../../packages/ui/src/tui/file-recovery-panel.tsx)保目录选择、只读预览、范围选择与提交的独立步骤：预览空 Enter 不提交或重新读取，1/2/3 只选择范围，下一次 Enter 才申请。目录与预览引用用户原消息；分叉历史只通过准确 Store/Session/messageId 的唯一 `originMessage` 匹配原恢复点，不凭同名正文推定来源。处理中有普通状态提示，A 返回原审批后仍需重新进入目录，以 L/R 查回原申请；both 的 Code 成功仍不自动派发 Fork，C 才明确继续第二步。
+原 TUI `/rewind` 的[面板](../../packages/ui/src/tui/file-recovery-panel.tsx)保目录选择、只读预览、范围选择与提交的独立步骤：目录 Enter 只读预览并进入确认，默认 both，1/2/3 依次选择 both／session／code，确认页 Enter 才申请；独立 diff reader 的 Enter 不提交。目录与预览引用用户原消息；分叉历史只通过准确 Store/Session/messageId 的唯一 `originMessage` 匹配原恢复点，不凭同名正文推定来源。处理中有普通状态提示，A 返回原审批后仍需重新进入目录，以 L/R 查回原申请；both 的 Code 成功仍不自动派发 Fork，C 才明确继续第二步。
 
 Host 的 `readCompletion` 只读重核原成功 Code/Fork 的完整证明，按已验证 restore journal 中实际 restored/removed 的文件计数，排除 unchanged；不使用预览长度、不另写 journal、不生成热许可。保存的 succeeded phase 按合同不降级，因此该读取用私有观察副本重新核原 Command、Execution、checkpoint、每文件 postimage 与 Fork receipt，历史成功不能替代当前证明。[controller](../../packages/ui/src/tui/controller.ts)仅在同原 Store/Session/Workspace、当前原 intent 和 generation 仍匹配时消费结果；both 两腿已确认成功且完成证明有效后，才切换准确新 Session、关闭面板并显示实际恢复数量。缺少、错误、未知或迟到证明不显示完整成功，切换后的会话不被旧完成结果覆盖。
 

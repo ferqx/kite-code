@@ -603,6 +603,125 @@ test('MCP saved phase requires original command, exact action binding and full m
   }
 });
 
+test('current connection observation reads beyond 100 saved records and never publishes a partial or foreign live set', async () => {
+  const f = await fixture();
+  try {
+    const base = await createTuiMcpPort(f.tracked, f.storeId).read(
+      'a',
+      new AbortController().signal,
+    );
+    const server = base.items[0]!;
+    for (const mode of ['complete', 'failed', 'duplicate', 'foreign', 'cancelled'] as const) {
+      const abort = new AbortController(),
+        cursors: unknown[] = [];
+      const live = (key: string) => ({
+        key,
+        originStoreId: f.storeId,
+        live: true,
+        record: {
+          originalStoreId: f.storeId,
+          serverId: server.id,
+          configDigest: server.configDigest,
+          operationRef: {
+            originStoreId: mode === 'foreign' ? 'foreign' : f.storeId,
+            sessionId: 'a',
+            extensionId: 'builtin.mcp',
+            executionId: 'owned',
+          },
+        },
+        currentCatalogue: {
+          serverId: server.id,
+          configDigest: server.configDigest,
+          generation: 1,
+          available: true,
+        },
+      });
+      const port = createTuiMcpPort(
+        {
+          ...f.tracked,
+          async queryExtension(...args) {
+            if (args[2] !== 'mcp.catalogue') return f.tracked.queryExtension(...args);
+            const cursor = (args[3] as { afterKey?: string }).afterKey;
+            cursors.push(cursor);
+            if (cursor && mode === 'failed') throw Error('second_page_unavailable');
+            if (cursor && mode === 'cancelled') {
+              abort.abort(Error('cancelled_page'));
+              abort.signal.throwIfAborted();
+            }
+            const items = cursor
+              ? [live(mode === 'duplicate' ? '099' : '100')]
+              : Array.from({ length: 100 }, (_, index) =>
+                  mode === 'failed' && index === 0
+                    ? live('000')
+                    : {
+                        key: String(index).padStart(3, '0'),
+                        originStoreId: f.storeId,
+                        live: false,
+                        record: {},
+                        currentCatalogue: null,
+                      },
+                );
+            return [
+              {
+                extensionId: 'builtin.mcp',
+                contentType: 'builtin.mcp.catalogue',
+                contentVersion: 1,
+                summary: 'exact original ordered records',
+                payload: { items, nextAfterKey: cursor ? null : '099' },
+                actions: [],
+                artifactRefs: [],
+              },
+            ];
+          },
+        },
+        f.storeId,
+      );
+      if (mode === 'cancelled')
+        await expect(port.read('a', abort.signal)).rejects.toThrow('cancelled_page');
+      else {
+        const result = await port.read('a', abort.signal);
+        expect(result.liveServerIds).toEqual(mode === 'complete' ? [server.id] : undefined);
+      }
+      expect(cursors).toEqual([undefined, '099']);
+    }
+    expect([f.rpc, f.credentialReads, f.posts]).toEqual([0, 0, 0]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('actual source configuration location is bound to current source digest and rejects another scope', async () => {
+  const f = await fixture(true);
+  try {
+    const signal = new AbortController().signal;
+    const facts = await createTuiMcpPort(f.tracked, f.storeId).read('a', signal);
+    const source = facts.items.find((item) => item.source.kind === 'user');
+    expect(source).toBeDefined();
+    expect(facts.details?.[source!.id]?.configurationPath).toBe(f.sourcePath);
+    const foreign = createTuiMcpPort(
+      {
+        ...f.tracked,
+        async queryExtension(...args) {
+          const response = await f.tracked.queryExtension(...args);
+          if (args[2] === 'mcp.server.locations') {
+            const value = structuredClone(response);
+            (value[0]!.payload as Record<string, unknown>).sessionId = 'foreign';
+            return value;
+          }
+          return response;
+        },
+      },
+      f.storeId,
+    );
+    expect(
+      (await foreign.read('a', signal)).details?.[source!.id]?.configurationPath,
+    ).toBeUndefined();
+    expect([f.rpc, f.credentialReads, f.posts]).toEqual([0, 0, 0]);
+  } finally {
+    await f.close();
+  }
+});
+
 test('actual missing private journal authority and corrupted durable file grant zero selection POST', async () => {
   const f = await fixture();
   try {

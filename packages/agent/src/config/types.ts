@@ -18,6 +18,11 @@ export type ModelConfiguration = NamedConfiguration & {
   baseURL?: string;
   credentialRef?: string;
   options?: JsonObject;
+  /** Explicit model metadata, frozen with the selected configuration; never guessed from its name. */
+  modelCapabilities?: {
+    contextWindowTokens?: number;
+    maxOutputTokens?: number;
+  };
 };
 export type EffectiveConfiguration = JsonObject & {
   modelId?: string | null;

@@ -6496,3 +6496,21 @@ Files 三范围、丢回执及两次强杀窗口的四原完整文件随后全�
 
 
 剩余 36 个原未启动完整文件全部通过并排空，actual 0；原 live-scroll 的 12 条真实动态／滚动场景及 162 assertions 也在其中。由此本次全 112 个 TUI 文件均已有当前实现的完整通过证据：首轮 75、原 MCP 审批修正后 1、未启动 36，包含全部原 52 个真实终端文件；不能称原 `test:tui:system` 单次命令全绿。最终完整正式导出在首轮集成中亦以 65.09 秒通过。原失败保留，只复验受影响文件，不重跑已通过库存。补跑证据 `/private/tmp/kite-tui-final-unstarted-36-20261015.log`；首轮及准确原失败见 `/private/tmp/kite-tui-final-complete-no-ctrl-t-112-20261015.log`。当前本地候选与验证源码一致；后续只执行文档／本地提交强制门禁。默认全库存的此前失败已逐受影响完整文件闭合，本次不声称重新取得一条完整 default 全绿命令，亦不宣布全 V1.3／阶段退出。
+
+### 2026-10-15 按原 TUI 源码补齐展示与交互遗漏
+
+本轮基于 `632786a2` 后的源码差异逐项实施，服务继续使用新 Client／Service／Agent，三种权限策略和移除 Ctrl+T 的决定保持。负责实现与产品操作分别归 [TUI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)、[CLI owner](../../apps/cli/README.md)及[手册](../handbook/clients/tui/README.md)，本记录不作为另一份功能定义。
+
+- 输入恢复本范围最近 500 条历史、候选边界停留、Tab／右箭头共同前缀、Enter 准确补全并提交一次及折叠粘贴 Esc；原菜单命令忽略尾随文字，新管理命令继续严格解析。模型／effort 单 Enter 保存，启禁与权限变更仍保必要独立确认。
+- Files 默认 both，目录 Enter 只读预览后由确认 Enter 申请；Code 与 Fork 的独立审批、C 明确继续及未知只查原 ID 保留。实际成功 Files 回执的路径、版本、基线与 UTF-8 校验后，逐行 diff／新文件原文真正进入原 renderer，截断明确提示。
+- MCP live 工具目录穷尽分页并核同 Scope／来源／游标，失败不发布部分集合；详情接真实连接状态、已读取能力数量和固定配置位置，未读取数量保未知。Agent 提供只读状态，Service 提供只读位置，显示事实不进入授权或配置 CAS。
+- 子会话长正文恢复 Markdown、代码与表格滚动；实际单任务和并发组都接终端高度预算。主选择器 Ctrl+C 保原整轮取消，新原申请／执行／MCP 子 reader 保局部关闭。Host 恢复 Kitty 键盘、普通错误页和真实 Ink 结束观察，异常退出返回非零并沿原 owner 收尾。
+- Header 使用原请求的远端模型名或唯一同冻结配置；Context 估算与累计用量分开，空闲切换不把旧比例归到新模型。源码复核发现 `models[].modelCapabilities` 原被快照白名单丢弃，现只严格保留两项显式正安全整数；真实文件读取→合并→冻结→Host 的容量链已验证。未提供者原 snapshot／hash 精确不变，不猜窗口、不改 Provider 请求，当前配置见[设置参考](../handbook/clients/tui/reference/settings.md)。
+
+实际滚动失败另定位出可选模型目录暂缺的确定性源码缺口：原已核 Model 未变，idle 显示名却落为 unknown，触发历史 scope 变化和 `3J` 全文重播。现只保同范围最近已核原模型的显示，下一默认和容量仍未知；真实 Ink TTY 受控快照修前失败、修后无清屏／重播，原完整滚动文件的 viewport、正文、Thinking 次数及顺序断言保持通过。未捕获整库失败当次的唯一触发条件，结论由这项可达源码修复、确定性反例和原场景共同支持，不以偶然单次绿代替定位。所有临时诊断已删除。
+
+原 52 个真实终端完整文件均已取得通过证据：首批 10、随后 12、最后 26 批中的 24，加六个失败原完整文件修正后的复验。三份旧 notice-only 负期望与已确认的 Files 完整展示冲突，现加强为准确原文／增删行只出现一次、原顺序及实际文件字节；旧两次确认按恢复后的默认范围／单 Enter 交互迁移。原审批、效果、Provider 次数、未知、取消、滚动和期限没有删除或提高。原失败保留，不能称某次 `test:tui:system` 命令单次全绿。分批原日志为 `/private/tmp/kite-tui-parity-original52-20261015.log`、`kite-tui-parity-unstarted40-20261015.log`、`kite-tui-parity-unstarted26-20261015.log`；最终滚动为 `kite-tui-thought-scroll-source-fix-full-final-20261015.log`。
+
+必要局部验证包括主屏／滚动／焦点／Footer 四完整文件 23 pass／254 assertions、14 行并发与真实 TTY 显示来源两例 2 pass／11 assertions、真实配置与 Host 显示两完整文件 21 pass／142 assertions。原输入七文件 41 pass、MCP 四 owner 完整文件 47 pass、真实模型／Files 五完整文件 9 pass、错误页及真实 Host 两文件 3 pass，以及其余未变投影证据按适用源码复用，没有盲跑全部 816 个默认文件或新增性能采集。根与八 workspace 类型检查、最终八 workspace 构建、边界／workspace／API／测试归属和文档强制检查在本地提交范围核验；末次类型检查纠正了新增夹具的 Run 完成状态为真实 `completed`，原两例随后完整通过。
+
+最终本地 Terminal 由收束源码构建，candidate=`d2af38cf1e1198d3ff73e312e07a2dc457b8a021f2e1fb3bce3682a5d6aebc6a`，选择时持原制品使用锁，前一候选保留于 `.cache/unified-terminal-before-parity-final-20261015`。本轮仅本地提交，不 push、不触发 Actions。Win/Linux 继续按用户决定留正式发布前平台验证，Actions 接线和备注保留；原 32MiB RSS、完整资源／出生观测仍是未取得的发布资格，不据本轮 UI 迁移声明全 V1.3 或阶段退出。

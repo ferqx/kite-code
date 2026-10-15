@@ -18,7 +18,7 @@ test('adaptive candidate window follows both ends and budgets multiline/narrow v
   expect(candidateViewport(20, 0, 24, 1).start).toBe(0);
 });
 
-test('framed original file candidates navigate, complete whole references and dismiss without submitting', async () => {
+test('framed original file candidates navigate, clamp selection, dismiss without submitting and submit completed whole references', async () => {
   const buffer = new ComposerBuffer();
   buffer.sync('@');
   const key = buffer.fileToken!.key;
@@ -53,8 +53,8 @@ test('framed original file candidates navigate, complete whole references and di
     expect(app.lastFrame()).toContain('file 8🙂.ts');
     app.stdin.write('\u001b[A');
     await tick();
-    expect(app.lastFrame()).toContain('30/30');
-    expect(app.lastFrame()).toMatch(/❯ file 29🙂\.ts\s+目录\/file 29🙂\.ts/);
+    expect(app.lastFrame()).toContain('1/30');
+    expect(app.lastFrame()).toMatch(/❯ file 0🙂\.ts\s+目录\/file 0🙂\.ts/);
     app.stdin.write('\u001b');
     await tick();
     expect(buffer.text).toBe('@');
@@ -68,11 +68,9 @@ test('framed original file candidates navigate, complete whole references and di
     await tick();
     app.stdin.write('\r');
     await tick();
-    expect(submitted).toBe(0);
-    expect(buffer.text).toBe('@"目录/file 29🙂.ts"');
+    expect(submitted).toBe(1);
+    expect(buffer.text).toBe('@"目录/file 0🙂.ts"');
     expect(app.lastFrame()).not.toContain('30/30');
-    app.stdin.write('\r');
-    await tick();
     expect(submitted).toBe(1);
   } finally {
     app.unmount();

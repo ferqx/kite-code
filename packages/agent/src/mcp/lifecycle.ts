@@ -2473,6 +2473,123 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           ];
         },
       },
+      {
+        id: 'mcp.server.status',
+        version: '1',
+        description: 'Read owned connection state and already saved capability counts without RPC',
+        inputSchema: { type: 'object', additionalProperties: false },
+        outputSchema: { type: 'array' },
+        async execute(_input, context) {
+          if (!context.readExecutionGroupSafety)
+            throw new McpAdapterError('mcp_tools_scope_unavailable');
+          const identity = await context.readExecutionGroupSafety();
+          if (identity.sessionId !== context.sessionId)
+            throw new McpAdapterError('mcp_tools_scope_unavailable');
+          const items = [];
+          for (const entry of live.values()) {
+            if (entry.storeId !== identity.originStoreId || entry.sessionId !== context.sessionId)
+              continue;
+            const execution = await context.getExecution(entry.executionId);
+            if (
+              !execution ||
+              execution.originStoreId !== entry.storeId ||
+              execution.sessionId !== entry.sessionId ||
+              execution.id !== entry.executionId ||
+              execution.kind !== 'job' ||
+              execution.definitionId !== entry.definitionId ||
+              execution.definitionVersion !== entry.definitionVersion
+            )
+              continue;
+            const catalogue = entry.adapter?.getCatalogue();
+            const counts: Record<string, number | null> = { resources: null, prompts: null };
+            if (catalogue?.available && !entry.terminal) {
+              for (const family of ['resources', 'prompts'] as const) {
+                let afterKey: string | undefined;
+                const sizes = new Set<number>();
+                for (let pages = 0; ; pages++) {
+                  if (pages >= 1024) throw new McpAdapterError('mcp_catalogue_limit');
+                  const records = await context.records.list({
+                    contentType: readContentTypes[family],
+                    limit: 100,
+                    ...(afterKey ? { afterKey } : {}),
+                  });
+                  for (const record of records) {
+                    const value = object(record.value),
+                      binding = object(value.binding);
+                    if (
+                      record.forkProvenance ||
+                      record.originStoreId !== entry.storeId ||
+                      record.sessionId !== entry.sessionId ||
+                      value.kind !== 'list' ||
+                      binding.originalStoreId !== entry.storeId ||
+                      binding.sessionId !== entry.sessionId ||
+                      binding.serverId !== entry.serverId ||
+                      binding.connectionExecutionId !== entry.executionId ||
+                      binding.configDigest !== catalogue.configDigest ||
+                      binding.generation !== catalogue.generation ||
+                      !Array.isArray(value.descriptors) ||
+                      !Array.isArray(value.descriptorDigests) ||
+                      value.descriptors.length !== value.descriptorDigests.length
+                    )
+                      continue;
+                    sizes.add(value.descriptors.length);
+                  }
+                  if (records.length < 100) break;
+                  const next = records.at(-1)!.key;
+                  if (afterKey && next <= afterKey)
+                    throw new McpAdapterError('mcp_catalogue_limit');
+                  afterKey = next;
+                }
+                counts[family] = sizes.size === 1 ? [...sizes][0]! : null;
+              }
+            }
+            // Do not combine counts from an old generation with a replacement
+            // connection that arrived during the awaited record reads.
+            const current = entry.adapter?.getCatalogue();
+            if (
+              live.get(scopeKey(entry.storeId, entry.sessionId, entry.serverId)) !== entry ||
+              current?.configDigest !== catalogue?.configDigest ||
+              current?.generation !== catalogue?.generation ||
+              current?.available !== catalogue?.available
+            )
+              continue;
+            items.push({
+              serverId: entry.serverId,
+              configDigest: entry.server.configDigest,
+              executionId: entry.executionId,
+              status:
+                entry.terminal === 'unknown'
+                  ? 'unknown'
+                  : execution.status === 'failed'
+                    ? 'failed'
+                    : entry.stopRequested
+                      ? 'stopping'
+                      : catalogue?.available && !entry.terminal
+                        ? 'connected'
+                        : ['planned', 'dispatching', 'running'].includes(execution.status) &&
+                            !entry.terminal
+                          ? 'connecting'
+                          : 'disconnected',
+              reason: entry.failureCode ?? null,
+              toolCount:
+                catalogue?.available && !entry.terminal ? catalogue.definitions.length : null,
+              resourceCount: counts.resources ?? null,
+              promptCount: counts.prompts ?? null,
+            });
+          }
+          return [
+            {
+              extensionId: mcpLifecycleExtensionId,
+              contentType: 'builtin.mcp.server.status',
+              contentVersion: 1,
+              summary: 'Owned current connection facts; unread capabilities remain unknown',
+              payload: { storeId: identity.originStoreId, sessionId: context.sessionId, items },
+              actions: [],
+              artifactRefs: [],
+            },
+          ];
+        },
+      },
     ],
   };
   return {

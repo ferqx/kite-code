@@ -540,6 +540,22 @@ test('actual Client directory is cold; selection CAS preserves JSONC/unknown fie
     expect(f.lookups).toBe(0);
     expect(f.wire).toHaveLength(0);
     expect(f.providerBodies).toHaveLength(0);
+    const location = await f.client.queryExtension(
+      'a',
+      'builtin.mcp.management',
+      'mcp.server.locations',
+      {},
+    );
+    expect(location[0]!.payload).toMatchObject({
+      storeId: f.expectedStoreId,
+      sessionId: 'a',
+      workspaceId: 'w',
+      readSet: await f.readSet(),
+      items: [{ serverId: 'local', path: null }],
+    });
+    expect(f.opens).toBe(0);
+    expect(f.lookups).toBe(0);
+    expect(f.wire).toHaveLength(0);
     const input = {
       serverId: 'local',
       enabled: false,

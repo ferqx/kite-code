@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { additionalTuiCommands, fixedTuiCommands } from '../../src/tui/commands';
+import { additionalTuiCommands, fixedTuiCommands, parseTuiCommand } from '../../src/tui/commands';
 import { ComposerBuffer, composerDisplay } from '../../src/tui/composer';
 import { translateTuiLabel } from '../../src/tui/presentation';
 
@@ -142,4 +142,61 @@ test('localized atomic paste uses its displayed cell width for wrapping, Home/En
   b.horizontal(1);
   expect(b.row(28, display).index).toBe(1);
   expect(b.text).toBe('abcdefghij12\n🙂xy');
+});
+
+test('original 500-entry history retains the oldest allowed task and restores unsubmitted scratch', () => {
+  const buffer = new ComposerBuffer();
+  for (let index = 0; index < 501; index++) {
+    buffer.sync(`task ${index}`);
+    buffer.remember();
+  }
+  buffer.sync('unfinished');
+  for (let index = 0; index < 501; index++) buffer.vertical(-1, 80);
+  expect(buffer.text).toBe('task 1');
+  for (let index = 0; index < 500; index++) buffer.vertical(1, 80);
+  expect(buffer.text).toBe('unfinished');
+});
+
+test('Tab completion first extends the actual shared prefix and then selects the highlighted candidate', () => {
+  const buffer = new ComposerBuffer();
+  buffer.sync('/r');
+  expect(buffer.complete()).toBe(true);
+  expect(buffer.text).toBe('/re');
+  expect(buffer.candidates).toEqual(['/resume', '/rewind']);
+  buffer.candidate = 1;
+  expect(buffer.complete()).toBe(true);
+  expect(buffer.text).toBe('/rewind');
+  expect(buffer.candidates).toEqual([]);
+});
+
+test('original argument-ignoring menus preserve aliases while selectors and new management commands stay strict', () => {
+  for (const command of [
+    'resume',
+    'clear',
+    'help',
+    'new',
+    'rewind',
+    'export',
+    'context',
+    'exit',
+  ] as const)
+    expect(parseTuiCommand(`/${command} unused`)).toEqual({ kind: command });
+  expect(parseTuiCommand('/q ignored')).toEqual({ kind: 'exit' });
+  expect(parseTuiCommand('/c ignored')).toEqual({ kind: 'clear' });
+  for (const command of [
+    'model',
+    'theme',
+    'language',
+    'effort',
+    'mcp',
+    'permissions',
+    'status',
+    'recovery',
+    'skills',
+    'drafts',
+  ])
+    expect(() => parseTuiCommand(`/${command} unused`)).toThrow('unexpected_command_arguments');
+  expect(parseTuiCommand('/context requests')).toEqual({ kind: 'management_requests' });
+  expect(() => parseTuiCommand('/context requests extra')).toThrow('unexpected_command_arguments');
+  expect(() => parseTuiCommand('/session delete ignored')).toThrow();
 });

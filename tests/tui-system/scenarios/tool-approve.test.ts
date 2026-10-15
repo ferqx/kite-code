@@ -7,8 +7,9 @@
  * weakening restricted-mode Shell admission when no sandbox backend exists.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -96,6 +97,8 @@ describe('TUI PTY System — Tool Approve', () => {
       expect(screenContains(beforeOutput, '工具授权')).toBe(true);
       expect(screenContains(beforeOutput, '允许一次')).toBe(true);
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
+      expect(existsSync(approvalMarkerPath)).toBe(false);
+      expect(server.getRequestCount()).toBe(1);
 
       // Approve the tool ("允许一次" is default selected at index 0, press Enter)
       const executionFrames = tui.markScreen();
@@ -110,9 +113,10 @@ describe('TUI PTY System — Tool Approve', () => {
       console.log('  output after approve (last 1500 chars):', clean.slice(-1500));
 
       const executionHistory = tui.screenFramesSince(executionFrames).join('\n');
-      // The filesystem assertion and follow-up model request prove execution.
-      // File contents stay outside the closed Runtime Client presentation surface.
-      expect(screenContains(executionHistory, 'TUI_APPROVAL_EXECUTED')).toBe(false);
+      // The qualified Files receipt presents the original written line. Its
+      // visible text, exact disk bytes and one dispatched Tool agree.
+      expect(screenContains(executionHistory, 'TUI_APPROVAL_EXECUTED')).toBe(true);
+      expect(clean.match(/TUI_APPROVAL_EXECUTED/g) ?? []).toHaveLength(1);
       expect(screenContains(executionHistory, 'exit: error')).toBe(false);
       expect(screenContains(executionHistory, '已取消')).toBe(false);
       expect(screenContains(executionHistory, 'cancelled')).toBe(false);
@@ -120,6 +124,16 @@ describe('TUI PTY System — Tool Approve', () => {
       expect(screenContains(afterOutput, 'APPROVAL_FLOW_COMPLETE')).toBe(true);
       expect(clean.match(/APPROVAL_FLOW_COMPLETE/g) ?? []).toHaveLength(1);
       expect(clean.match(/External file changed\./g) ?? []).toHaveLength(1);
+
+      expect(server.getRequestCount()).toBe(2);
+      using database = new Database(workspace.databasePath, { readonly: true });
+      expect(
+        database
+          .query("SELECT adapter_id,call_id,state,dispatched FROM execution WHERE kind='tool'")
+          .all(),
+      ).toEqual([
+        { adapter_id: 'files.write_path', call_id: 'call_1', state: 'succeeded', dispatched: 1 },
+      ]);
 
       // TUI should recover — prompt visible
       expect(screenContains(afterOutput, '❯')).toBe(true);

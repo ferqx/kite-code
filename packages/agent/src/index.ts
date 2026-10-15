@@ -10,6 +10,11 @@ export type {
   ContextSources,
   SourceRequest,
 } from './context';
+export {
+  type ContextTokenEstimate,
+  estimateModelContext,
+  type ModelContextEstimate,
+} from './context-estimate';
 export type { WorkspaceSerialLocks } from './execution/resource-port';
 export type { ModelBodyReference } from './model-body';
 export type { ModelInputMetadata, ModelRequestMetadata } from './model-snapshot';

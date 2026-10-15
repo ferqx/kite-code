@@ -23,6 +23,20 @@ export type TuiMcpReadSet = {
   scopeDigest: string;
 };
 export interface TuiMcpSnapshot {
+  /** Read-only facts, excluded from selection CAS and authority. Missing means unknown. */
+  details?: Readonly<
+    Record<
+      string,
+      {
+        configurationPath?: string | null;
+        status?: 'connecting' | 'connected' | 'failed' | 'stopping' | 'disconnected' | 'unknown';
+        reason?: string | null;
+        toolCount?: number | null;
+        resourceCount?: number | null;
+        promptCount?: number | null;
+      }
+    >
+  >;
   /** Exact read-only source labels; excluded from canonical settings, targets and intents. */
   labels?: Readonly<Record<string, string>>;
   /** Actual same-Session current catalogue observations; selection is not connection. */

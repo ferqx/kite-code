@@ -1,13 +1,13 @@
 import { Box, Text, useInput } from 'ink';
-import { useMemo, useState } from 'react';
+import { ScrollList, type ScrollListRef } from 'ink-scroll-list';
+import { useRef, useState } from 'react';
 import type { TuiSnapshot } from './controller';
 import { terminalText } from './controller';
-import { InkExecution, inkResultSummary } from './execution-projection';
+import { InkExecution } from './execution-projection';
 import type { TuiChildLog } from './executions';
 import MarkdownBlock from './ink/MarkdownBlock';
 import OverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
 import { OverlayListRow } from './ink/OverlayPrimitives';
-import { wrapDisplayLines } from './ink/soft-wrap';
 import UserMessageBlock from './ink/UserMessageBlock';
 import { useInkWindowSize } from './ink/window-size';
 import { useInkI18n, useInkTheme, useTuiPresentation } from './presentation';
@@ -44,23 +44,16 @@ export function TuiChildSessionPanel({
   const full = message ? child.modelOutputs.get(message.id) : undefined;
   const selectedExecution = kind === 'block' ? executions[current] : undefined;
   const calls = full?.output.toolCalls ?? message?.toolCalls ?? [];
-  const content = message
-    ? [
-        full?.output.content ?? message.content,
-        full?.output.reasoning ? `Recorded reasoning\n${full.output.reasoning}` : '',
-        ...calls.map((call) => `${call.name}\n${call.arguments}`),
-      ]
-        .filter(Boolean)
-        .join('\n\n')
-    : selectedExecution
-      ? inkResultSummary(selectedExecution.result)
-      : '';
-  const fullLines = useMemo(
-    () => wrapDisplayLines(terminalText(content), Math.max(20, columns - 4)),
-    [content, columns],
-  );
-  const contentRows = Math.max(3, rows - 12),
-    offset = Math.max(0, Math.min(scroll, Math.max(0, fullLines.length - contentRows)));
+  const content = full?.output.content ?? message?.content ?? '';
+  const contentRows = Math.max(3, rows - 12);
+  const detailScroll = useRef<ScrollListRef>(null);
+  const scrollContent = (direction: 'top' | 'bottom' | number) => {
+    const reader = detailScroll.current;
+    if (!reader) return;
+    if (direction === 'top') reader.scrollToTop();
+    else if (direction === 'bottom') reader.scrollToBottom();
+    else reader.scrollBy(direction);
+  };
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
       onBack();
@@ -95,10 +88,7 @@ export function TuiChildSessionPanel({
     }
     if (key.upArrow || key.downArrow) {
       const delta = key.downArrow ? 1 : -1;
-      if (detail)
-        setScroll((value) =>
-          Math.max(0, Math.min(Math.max(0, fullLines.length - contentRows), value + delta * 3)),
-        );
+      if (detail) scrollContent(delta * 3);
       else
         setIndex((value) =>
           Math.max(
@@ -115,12 +105,12 @@ export function TuiChildSessionPanel({
       setScroll(0);
       return;
     }
-    if (key.home) {
-      setScroll(0);
+    if (detail && key.home) {
+      scrollContent('top');
       return;
     }
-    if (key.end) {
-      setScroll(Math.max(0, fullLines.length - contentRows));
+    if (detail && key.end) {
+      scrollContent('bottom');
       return;
     }
     if (key.return && !detail && items.length) {
@@ -178,65 +168,69 @@ export function TuiChildSessionPanel({
       )}
       {detail ? (
         <Box flexDirection="column">
-          {message && (
-            <>
-              <Text color={theme.dim}>
-                {message.role} · {message.status}
-              </Text>
-              {offset === 0 && fullLines.length <= contentRows ? (
-                message.role === 'user' ? (
-                  <UserMessageBlock content={content} columns={Math.max(20, columns - 4)} />
-                ) : (
-                  <MarkdownBlock
-                    content={terminalText(content)}
-                    maxWidth={Math.max(20, columns - 4)}
-                  />
-                )
-              ) : (
-                <Box flexDirection="column">
-                  <Text color={theme.dim}>
-                    Lines {offset + 1}–{Math.min(fullLines.length, offset + contentRows)}/
-                    {fullLines.length}
-                  </Text>
-                  {fullLines.slice(offset, offset + contentRows).map((line, n) => (
-                    <Text key={offset + n}>{line || ' '}</Text>
+          <Text color={theme.dim}>
+            {message ? `${message.role} · ${message.status} · ` : ''}Lines {scroll + 1}
+          </Text>
+          <ScrollList
+            key={`${kind}:${items[current]?.id ?? ''}`}
+            ref={detailScroll}
+            height={contentRows}
+            selectedIndex={0}
+            scrollAlignment="auto"
+            onScroll={setScroll}
+          >
+            <Box flexDirection="column">
+              {message && (
+                <>
+                  {message.role === 'user' ? (
+                    <UserMessageBlock content={content} columns={Math.max(20, columns - 4)} />
+                  ) : (
+                    <MarkdownBlock
+                      content={terminalText(content)}
+                      maxWidth={Math.max(20, columns - 4)}
+                    />
+                  )}
+                  {full?.output.reasoning && (
+                    <Box flexDirection="column" marginTop={1}>
+                      <Text color={theme.dim}>Recorded reasoning</Text>
+                      <MarkdownBlock
+                        content={terminalText(full.output.reasoning)}
+                        color={theme.dim}
+                        maxWidth={Math.max(20, columns - 4)}
+                      />
+                    </Box>
+                  )}
+                  {calls.map((call) => (
+                    <Box key={call.id} flexDirection="column" marginTop={1}>
+                      <Text color={theme.dim}>{terminalText(call.name)}</Text>
+                      <Text>{terminalText(call.arguments)}</Text>
+                    </Box>
                   ))}
-                </Box>
+                </>
               )}
-              {full && (
-                <Text color={theme.dim}>
-                  {full.output.complete
-                    ? 'Complete verified Model body'
-                    : 'Incomplete verified Model prefix'}
-                </Text>
+              {selectedExecution && (
+                <InkExecution
+                  execution={selectedExecution}
+                  snapshot={snapshot}
+                  loadedOutputs={loaded}
+                  expanded
+                  columns={Math.max(20, columns - 4)}
+                />
               )}
-              {message.outputBody && !full && (
-                <Text color={theme.warning}>
-                  Full Model reader unavailable; original message projection only
-                </Text>
-              )}
-            </>
+            </Box>
+          </ScrollList>
+          {full && (
+            <Text color={theme.dim}>
+              {full.output.complete
+                ? 'Complete verified Model body'
+                : 'Incomplete verified Model prefix'}
+            </Text>
           )}
-          {selectedExecution &&
-            (offset === 0 ? (
-              <InkExecution
-                execution={selectedExecution}
-                snapshot={snapshot}
-                loadedOutputs={loaded}
-                expanded
-                columns={Math.max(20, columns - 4)}
-              />
-            ) : (
-              <Box flexDirection="column">
-                <Text color={theme.dim}>
-                  Lines {offset + 1}–{Math.min(fullLines.length, offset + contentRows)}/
-                  {fullLines.length}
-                </Text>
-                {fullLines.slice(offset, offset + contentRows).map((line, n) => (
-                  <Text key={offset + n}>{line || ' '}</Text>
-                ))}
-              </Box>
-            ))}
+          {message?.outputBody && !full && (
+            <Text color={theme.warning}>
+              Full Model reader unavailable; original message projection only
+            </Text>
+          )}
         </Box>
       ) : (
         <Box flexDirection="column">

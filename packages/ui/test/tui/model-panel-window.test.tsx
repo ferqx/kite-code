@@ -4,7 +4,7 @@ import type { TuiController } from '../../src/tui/controller';
 import { TuiModelPanel } from '../../src/tui/model-panel';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
-test('model window starts at actual default and effort, exact two-step review preserves chosen model', async () => {
+test('model window starts at actual default and effort, single Enter selection preserves chosen model', async () => {
   const choices: unknown[] = [];
   const models = Array.from({ length: 18 }, (_, i) => ({
     id: `model-${String(i).padStart(2, '0')}`,
@@ -36,16 +36,11 @@ test('model window starts at actual default and effort, exact two-step review pr
     expect(ui.lastFrame()).not.toContain('Name 0');
     ui.stdin.write('\r');
     await tick();
-    expect(choices).toEqual([]);
-    ui.stdin.write('\r');
-    await tick();
     expect(choices).toEqual([{ kind: 'default', modelId: 'model-15' }]);
     state.panel = 'effort';
     ui.rerender(<TuiModelPanel controller={controller} />);
     await tick();
     expect(ui.lastFrame()).toContain('❯ High');
-    ui.stdin.write('\r');
-    await tick();
     ui.stdin.write('\r');
     await tick();
     expect(choices[1]).toEqual({ kind: 'effort', modelId: 'model-15', reasoningEffort: 'high' });

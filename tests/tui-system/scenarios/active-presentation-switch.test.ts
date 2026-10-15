@@ -127,8 +127,6 @@ describe('TUI PTY System — active Run model selection', () => {
       tui.write('\x1b[B');
       await waitForText(() => tui.viewport(), '❯ next-model', 5_000);
       tui.write('\r');
-      await waitForText(() => tui.viewport(), 'Confirm original project change', 5_000);
-      tui.write('\r');
       await waitForCondition(
         () =>
           screenContains(tui.viewport(), 'mock-model') &&

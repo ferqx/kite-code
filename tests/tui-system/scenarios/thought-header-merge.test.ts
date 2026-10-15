@@ -17,6 +17,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -302,7 +304,17 @@ describe('TUI PTY System — Thought Text Header Merge (real-session replay)', (
       expect(clean.match(/read 1 file/g) ?? []).toHaveLength(1);
       expect(screenContains(output, 'Thinking ')).toBe(true);
       expect(screenContains(output, 'notes.md')).toBe(true);
-      expect(screenContains(output, 'entry: apps/kite-cli')).toBe(false);
+      // The original Files card shows the qualified new-file body. It is
+      // local Tool output, not repeated exploration narration.
+      expect(clean.match(/entry: apps\/kite-cli\/src\/tui\/index\.tsx/g) ?? []).toHaveLength(1);
+      expect(
+        /read 1 file[\s\S]*Create[\s\S]*Wrote 1 lines to notes\.md[\s\S]*entry: apps\/kite-cli\/src\/tui\/index\.tsx[\s\S]*read 2 files/.test(
+          clean,
+        ),
+      ).toBe(true);
+      expect(readFileSync(join(workspace.workspace, 'notes.md'))).toEqual(
+        Buffer.from('entry: apps/kite-cli/src/tui/index.tsx\n'),
+      );
       expect(/read 1 file[\s\S]*Create[\s\S]*read 2 files/.test(clean)).toBe(true);
 
       console.log('  [carryover] clean output (last 2000 chars):', clean.slice(-2000));

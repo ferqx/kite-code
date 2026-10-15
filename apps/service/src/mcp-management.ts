@@ -281,6 +281,49 @@ export function createMcpManagement(options: {
     ],
     queries: [
       {
+        id: 'mcp.server.locations',
+        version: '1',
+        description: 'Read fixed current configuration locations without reading transport secrets',
+        inputSchema: { type: 'object', additionalProperties: false },
+        outputSchema: { type: 'array' },
+        async execute(_input, context) {
+          const source = await sources(context),
+            state = readMcpSelection(source);
+          return [
+            {
+              extensionId: mcpManagementExtensionId,
+              contentType: 'builtin.mcp.server.locations',
+              contentVersion: 1,
+              summary: 'Current configuration locations; not configuration contents or authority',
+              payload: {
+                ...source.scope,
+                readSet: state.readSet as unknown as Json,
+                items: state.registry.servers.map((server) => {
+                  const path =
+                    server.source.kind === 'user'
+                      ? join(options.profile.profilePath, 'mcp.json')
+                      : server.source.kind === 'workspace'
+                        ? join(source.scope.workspacePath, '.kite-code', 'mcp.json')
+                        : null;
+                  return {
+                    serverId: server.id,
+                    configDigest: server.configDigest,
+                    path:
+                      path &&
+                      createHash('sha256').update(mcpCanonical(path)).digest('hex') ===
+                        server.source.id
+                        ? path
+                        : null,
+                  };
+                }),
+              },
+              actions: [],
+              artifactRefs: [],
+            },
+          ];
+        },
+      },
+      {
         id: 'mcp.servers',
         version: '1',
         description: 'Read trusted registered server choices; never connect or resolve credentials',

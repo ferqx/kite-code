@@ -1,4 +1,12 @@
 import { expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  createConfigurationSnapshot,
+  readConfigurationFile,
+  resolveConfiguration,
+} from '@kite-ai/agent/config';
 import type {
   AgentClient,
   Message,
@@ -223,4 +231,153 @@ test('usage counts each original successful Model once; absent cache or foreign 
       },
     ]),
   ).toBeUndefined();
+});
+
+test('Context estimates use the exact saved request and frozen explicit capabilities, and never follow another Model source', async () => {
+  const snapshot = view();
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-display-capacity-')));
+  try {
+    const path = join(root, 'config.jsonc');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        modelId: 'actual',
+        models: [
+          {
+            id: 'actual',
+            provider: 'compatible',
+            model: 'actual-remote',
+            modelCapabilities: { contextWindowTokens: 10000, maxOutputTokens: 2000 },
+            options: { maxOutputTokens: 1000 },
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+    const bytes = readFileSync(path);
+    // This is the actual default Service's configuration loader/sealer, not a
+    // hand-written capacity object that could bypass the projection whitelist.
+    const frozen = createConfigurationSnapshot(
+      resolveConfiguration({
+        defaults: {},
+        user: readConfigurationFile({ path }).value,
+      }),
+    );
+    // Public Run DTOs carry the JSON serialization of this exact sealed value.
+    snapshot.runs[0]!.configuration = JSON.parse(JSON.stringify(frozen));
+    expect(readFileSync(path)).toEqual(bytes);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  const calls: string[] = [];
+  let foreign = false;
+  const reader = createTuiDisplayReader(
+    {
+      getModelInput: async (_session, executionId) => {
+        calls.push(executionId);
+        return {
+          storeId: foreign ? 'foreign' : 'store',
+          sessionId: 'session',
+          rootSessionId: 'session',
+          executionId,
+          runId: 'run',
+          originCommandId: 'command',
+          bodyHash: 'a'.repeat(64),
+          request: {
+            modelId: 'actual',
+            requestId: executionId,
+            messages: [
+              { role: 'system', content: '实际系统' },
+              { role: 'user', content: `完整输入🙂${executionId}` },
+            ],
+            tools: [{ id: 'files.read', definitionVersion: '1', inputSchema: { type: 'object' } }],
+          },
+          metadata: { adapter: { availability: 'available', settings: { maxOutputTokens: 1000 } } },
+        } as unknown as ModelInputSnapshot;
+      },
+      listSessionLogs: async () => {
+        throw Error('no timings');
+      },
+    },
+    'store',
+  );
+  const signal = new AbortController().signal;
+  const first = await reader(snapshot, [], signal);
+  expect(first.context).toMatchObject({
+    source: 'model_input',
+    storeId: 'store',
+    sessionId: 'session',
+    runId: 'run',
+    executionId: 'model',
+    modelId: 'actual',
+    bodyHash: 'a'.repeat(64),
+    usableInputTokens: 7976,
+    reservedOutputTokens: 1000,
+  });
+  expect(first.context!.estimate.toolSchemaTokens).toBeGreaterThan(0);
+  expect(first.context!.utilization).toBe(first.context!.estimate.totalInputTokens / 7976);
+  expect((await reader(snapshot, [], signal)).context).toEqual(first.context);
+  expect(calls).toEqual(['model']);
+  snapshot.executions.push({ ...snapshot.executions[0]!, id: 'next-model' });
+  foreign = true;
+  expect((await reader(snapshot, [], signal)).context).toBeUndefined();
+  foreign = false;
+  const next = await reader(snapshot, [], signal);
+  expect(next.context?.executionId).toBe('next-model');
+  const other = { ...snapshot, session: { ...snapshot.session, id: 'other' } };
+  expect((await reader(other, [], signal)).context).toBeUndefined();
+  expect(calls).toEqual(['model', 'next-model', 'next-model']);
+});
+
+test('model display uses verified remote identity or the exact frozen route, preserving logical-ID fallback', async () => {
+  const snapshot = view();
+  snapshot.runs[0]!.configuration = {
+    version: 1,
+    configuration: {
+      modelId: 'config-uuid',
+      models: [{ id: 'config-uuid', model: 'frozen-route-model' }],
+    },
+  };
+  const read = (available: boolean) =>
+    createTuiDisplayReader(
+      {
+        getModelInput: async () =>
+          ({
+            storeId: 'store',
+            sessionId: 'session',
+            rootSessionId: 'session',
+            executionId: 'model',
+            runId: 'run',
+            originCommandId: 'command',
+            request: { modelId: 'config-uuid' },
+            metadata: {
+              adapter: available
+                ? {
+                    availability: 'available',
+                    provider: {
+                      availability: 'available',
+                      family: 'compatible',
+                      modelId: 'actual-remote-model',
+                    },
+                    settings: {},
+                  }
+                : { availability: 'unavailable', reason: 'adapter_opaque' },
+            },
+          }) as unknown as ModelInputSnapshot,
+        listSessionLogs: async () => {
+          throw Error('no timings');
+        },
+      },
+      'store',
+    )(snapshot, [], new AbortController().signal);
+  expect((await read(true)).runtimeModel?.modelName).toBe('actual-remote-model');
+  expect((await read(false)).runtimeModel?.modelName).toBe('frozen-route-model');
+  snapshot.runs[0]!.configuration = {
+    version: 1,
+    configuration: {
+      modelId: 'config-uuid',
+      models: [{ id: 'later-default', model: 'unrelated-model' }],
+    },
+  };
+  expect((await read(false)).runtimeModel?.modelName).toBe('config-uuid');
 });

@@ -33,7 +33,7 @@ test('original composer owns exactly two full-width rules and a named planning h
     view.unmount();
   }
 });
-test('command ghost, original description and aliases never enter submitted source; first Enter completes only', async () => {
+test('command ghost, original description and aliases never enter submitted source; Enter completes and submits exactly the selected command', async () => {
   const buffer = new ComposerBuffer();
   let submitted = '';
   function Harness() {
@@ -61,11 +61,8 @@ test('command ghost, original description and aliases never enter submitted sour
     app.stdin.write('\r');
     await tick();
     expect(buffer.text).toBe('/help');
-    expect(submitted).toBe('');
-    expect(app.lastFrame()).not.toContain('Command matches');
-    app.stdin.write('\r');
-    await tick();
     expect(submitted).toBe('/help');
+    expect(app.lastFrame()).not.toContain('Command matches');
   } finally {
     app.unmount();
   }
@@ -256,5 +253,37 @@ test('ordinary small multiline paste stays visible and editable while the origin
     expect(submitted).toEqual([small, large]);
   } finally {
     largeApp.unmount();
+  }
+});
+
+test('Escape clears the original folded paste draft without invoking task cancellation', async () => {
+  const buffer = new ComposerBuffer();
+  let cancelled = 0;
+  function Harness() {
+    const [value, setValue] = useState('');
+    return (
+      <TuiComposer
+        buffer={buffer}
+        value={value}
+        active
+        label="New Run"
+        onChange={setValue}
+        onSubmit={() => {}}
+        onEscape={() => cancelled++}
+      />
+    );
+  }
+  const ui = render(<Harness />);
+  try {
+    await tick();
+    ui.stdin.write(`\x1b[200~${'完整🙂'.repeat(50)}\x1b[201~`);
+    await tick();
+    expect(buffer.parts.some((part) => part.pasted)).toBe(true);
+    ui.stdin.write('\x1b');
+    await tick();
+    expect(buffer.text).toBe('');
+    expect(cancelled).toBe(0);
+  } finally {
+    ui.unmount();
   }
 });

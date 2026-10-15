@@ -1,7 +1,7 @@
 import { Box, useStdout } from 'ink';
 import { type ReactNode, useEffect, useState } from 'react';
 import stringWidth from 'string-width';
-import { type TuiState, terminalText } from './controller';
+import { type TuiSnapshot, type TuiState, terminalText } from './controller';
 import OverlayFrame from './ink/OverlayFrame';
 import { TuiText as Text, useInkI18n, useInkTheme, useTuiPresentation } from './presentation';
 
@@ -48,6 +48,7 @@ export interface TuiChromeFacts {
     effort?: string;
     source: 'model_input' | 'run_configuration' | 'unavailable';
   };
+  context?: NonNullable<TuiSnapshot['environment']>['context'];
   usage?: {
     inputTokens: number;
     outputTokens?: number;
@@ -243,16 +244,25 @@ export function TuiFooter({
       : facts.permissionMode === 'full'
         ? theme.warning
         : theme.muted;
-  const tokens = facts.usage?.inputTokens;
+  const tokens = facts.context?.estimate.totalInputTokens;
   const tokenText =
     tokens && tokens > 0
       ? tokens >= 1000
         ? `${(tokens / 1000).toFixed(1)}k`
         : formatNumber(tokens)
       : undefined;
+  const contextText =
+    facts.context?.utilization !== undefined
+      ? translate('stats.context', { percent: Math.round(facts.context.utilization * 100) })
+      : tokenText
+        ? `${tokenText} ${language === 'zh-CN' ? '上下文估算' : 'context est.'}`
+        : undefined;
   const cache = facts.usage?.cachedInputTokens;
+  const recordedInput = facts.usage?.inputTokens;
   const cachePct =
-    cache !== undefined && tokens && tokens > 0 ? Math.round((cache / tokens) * 100) : undefined;
+    cache !== undefined && recordedInput && recordedInput > 0
+      ? Math.round((cache / recordedInput) * 100)
+      : undefined;
   const planHint = planning ? translate('stats.exitPlanMode') : undefined;
   const compact =
     stringWidth(
@@ -260,7 +270,7 @@ export function TuiFooter({
         facts.modelName,
         facts.effort,
         cachePct === undefined ? undefined : `${cachePct}% cache`,
-        tokenText,
+        contextText,
         permission && `[${permission}]`,
         planHint,
       ]
@@ -304,10 +314,10 @@ export function TuiFooter({
               </Text>
             </>
           )}
-          {!compact && tokenText && (
+          {!compact && contextText && (
             <>
               <Text color={theme.dim}> · </Text>
-              <Text>{tokenText}</Text>
+              <Text>{contextText}</Text>
             </>
           )}
           {permission && (

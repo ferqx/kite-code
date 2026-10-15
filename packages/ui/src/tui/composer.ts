@@ -157,7 +157,7 @@ export class ComposerBuffer {
   remember() {
     if (!this.text.trim()) return;
     this.history.push(structuredClone(this.parts));
-    if (this.history.length > 100) this.history.shift();
+    if (this.history.length > 500) this.history.shift();
     this.historyIndex = -1;
   }
   private navigateHistory(direction: -1 | 1) {
@@ -211,12 +211,26 @@ export class ComposerBuffer {
     if (this.dismissed || !/^\/[a-z0-9_-]*$/i.test(this.text)) return [];
     return this.commands.filter((command) => command.startsWith(this.text.toLowerCase()));
   }
-  complete() {
-    const choice = this.candidates[this.candidate];
+  complete(selectedOnly = false) {
+    const matches = this.candidates;
+    let choice = matches[this.candidate],
+      prefixExtended = false;
+    if (!selectedOnly && matches.length > 1) {
+      let prefix = matches[0]!;
+      for (const match of matches.slice(1)) {
+        let end = 0;
+        while (end < prefix.length && prefix[end] === match[end]) end++;
+        prefix = prefix.slice(0, end);
+      }
+      if (prefix.length > this.text.length) {
+        choice = prefix;
+        prefixExtended = true;
+      }
+    }
     if (!choice) return false;
     this.parts = units(choice);
     this.cursor = this.parts.length;
-    this.dismissed = true;
+    this.dismissed = !prefixExtended;
     return true;
   }
 }

@@ -266,7 +266,7 @@ describe('TUI PTY System — File Rewind', () => {
       await waitForText(() => tui.viewport(), '回退 · 恢复到此消息之前', 15000);
       await waitForText(() => tui.viewport(), '代码将恢复 +1 −1，涉及 notes.md', 15000);
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(THIRD_NOTES_UPDATE);
-      tui.write('3');
+      expect(screenContains(tui.viewport(), '❯ 1. 会话与文件')).toBe(true);
       await waitForText(() => tui.viewport(), 'Enter 确认所选范围', 5000);
       tui.write('\r');
 
@@ -306,7 +306,7 @@ describe('TUI PTY System — File Rewind', () => {
       await waitForText(() => tui.viewport(), '回退 · 恢复到此消息之前', 15000);
       await waitForText(() => tui.viewport(), '代码将恢复 +1 −1，涉及 notes.md', 15000);
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(SECOND_NOTES_UPDATE);
-      tui.write('3');
+      expect(screenContains(tui.viewport(), '❯ 1. 会话与文件')).toBe(true);
       await waitForText(() => tui.viewport(), 'Enter 确认所选范围', 5000);
       tui.write('\r');
 

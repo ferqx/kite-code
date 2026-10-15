@@ -13,7 +13,7 @@ import {
 import { mcpTextRows, mcpTextWindow } from './mcp-tools';
 import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
-const scopes = ['session', 'code', 'both'] as const;
+const scopes = ['both', 'session', 'code'] as const;
 export function TuiFileRecoveryPanel({ controller }: { controller: TuiController }) {
   const { t: originalLabel, formatDateTime } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation(),
@@ -43,8 +43,10 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
     if (key.ctrl) return;
     if (key.escape) {
       if (readingDiff) setReadingDiff(false);
-      else if (confirm) setConfirm(false);
-      else if (previewing) setPreviewing(false);
+      else if (confirm) {
+        setConfirm(false);
+        setPreviewing(false);
+      } else if (previewing) setPreviewing(false);
       else controller.closePanel();
       return;
     }
@@ -101,7 +103,7 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
     if (previewing && (confirm || key.upArrow || key.downArrow)) {
       setConfirm(true);
       if (key.upArrow || key.downArrow) {
-        const next = scopeIndex === undefined ? 0 : (scopeIndex + (key.downArrow ? 1 : 2)) % 3;
+        const next = Math.max(0, Math.min(2, (scopeIndex ?? 0) + (key.downArrow ? 1 : -1)));
         selectScope(next);
         controller.chooseFileRecoveryScope(scopes[next]!);
       } else if (key.return && scopeIndex !== undefined)
@@ -118,7 +120,8 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
       setReadingDiff(false);
       setDiffLine(0);
       selectFile(0);
-      selectScope(undefined);
+      selectScope(0);
+      setConfirm(true);
       void controller.readFileRecoveryPoint(items[index]!.checkpoint.id);
     }
   });
@@ -242,7 +245,7 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
               {files.filter((file) => file.status === 'conflict').length} · {t('Unavailable')}:{' '}
               {files.filter((file) => file.status === 'unavailable').length}
             </Text>
-            {scopeIndex === 0 ? (
+            {scopeIndex !== undefined && scopes[scopeIndex] === 'session' ? (
               <Text>{originalLabel('rewind.codeUnchanged')}</Text>
             ) : files.some((file) => file.textChange) ? (
               <Text>
@@ -269,7 +272,7 @@ export function TuiFileRecoveryPanel({ controller }: { controller: TuiController
                 <Text key={file.path}>
                   {offset === 0 ? '❯ ' : '  '}
                   {terminalText(file.path)} · {t(file.status)}{' '}
-                  {scopeIndex !== 0 &&
+                  {(scopeIndex === undefined || scopes[scopeIndex] !== 'session') &&
                     file.textChange &&
                     `· +${file.textChange.addedLines} −${file.textChange.removedLines}`}
                   {file.reason ? ` · ${terminalText(file.reason)}` : ''}

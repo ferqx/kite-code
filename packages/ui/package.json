@@ -19,6 +19,7 @@
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
     "ink": "^7.1.1",
+    "ink-scroll-list": "^0.4.1",
     "string-width": "^8.2.0",
     "unified": "11.0.5",
     "remark-parse": "11.0.0",

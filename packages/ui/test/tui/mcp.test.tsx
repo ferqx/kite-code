@@ -835,3 +835,38 @@ test('ordinary MCP add entry is visible immediately and opens the actual source-
     f.controller.dispose();
   }
 });
+
+test('ordinary Server details retain actual connection state, known capability counts and configuration location', async () => {
+  const f = fixture();
+  f.port.mcp!.read = async () => ({
+    ...observed(),
+    items: [observed().items[0]!],
+    details: {
+      refresh: {
+        status: 'connecting',
+        toolCount: 7,
+        resourceCount: null,
+        promptCount: 0,
+        configurationPath: '/owned/profile/mcp.json',
+      },
+    },
+  });
+  await f.controller.select('a');
+  await f.controller.openMcp();
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('Connecting');
+    app.stdin.write('\r');
+    await tick();
+    expect(app.lastFrame()).toContain('Tools 7');
+    expect(app.lastFrame()).toContain('Resources unknown');
+    expect(app.lastFrame()).toContain('Prompts 0');
+    expect(app.lastFrame()).toContain('/owned/profile/mcp.json');
+    expect(app.lastFrame()).not.toContain('configDigest');
+    noWork(f);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});

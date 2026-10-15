@@ -316,11 +316,11 @@ export function inkShellCarrier(tool: Execution, snapshot: TuiSnapshot): Executi
   return carriers.length === 1 ? carriers[0] : undefined;
 }
 /** A display receipt from a scoped, successful builtin mutation with both original baselines. */
-export function inkFileChangeSummary(
+function inkFileChangePresentation(
   execution: Execution,
   snapshot: TuiSnapshot,
   args: Record<string, unknown>,
-): string | undefined {
+): { notice: string; text?: string; truncated: boolean } | undefined {
   if (
     !inkExecutionScope(execution, snapshot) ||
     execution.kind !== 'tool' ||
@@ -364,6 +364,7 @@ export function inkFileChangeSummary(
     typeof change.path !== 'string' ||
     change.path !== args.path ||
     typeof change.text !== 'string' ||
+    Buffer.from(change.text, 'utf8').toString('utf8') !== change.text ||
     Buffer.byteLength(change.text) > 65536 ||
     typeof change.truncated !== 'boolean' ||
     !baseline(change.after) ||
@@ -377,6 +378,7 @@ export function inkFileChangeSummary(
   const published = baseline(resultBody?.baseline);
   if (
     !published ||
+    resultBody?.path !== change.path ||
     ['hash', 'size', 'device', 'inode'].some((key) => published[key] !== after[key]) ||
     (change.before === null
       ? args.base !== null
@@ -387,6 +389,11 @@ export function inkFileChangeSummary(
   )
     return undefined;
   const path = change.path;
+  const presentation = (notice: string) => ({
+    notice,
+    ...(unchanged ? {} : { text: change.text as string }),
+    truncated: change.truncated as boolean,
+  });
   try {
     const observedRoot = snapshot.environment?.workspacePath;
     const uri = observedRoot?.startsWith('file:') ? new URL(observedRoot) : undefined;
@@ -407,9 +414,7 @@ export function inkFileChangeSummary(
       if (absolute(path)) return undefined;
       const base = 'file:///workspace-display/';
       return new URL(encoded(path), base).href.startsWith(base)
-        ? unchanged
-          ? 'File content unchanged.'
-          : 'Workspace file changed.'
+        ? presentation(unchanged ? 'File content unchanged.' : 'Workspace file changed.')
         : undefined;
     }
     if (!absolute(root) || (windows && /^[A-Za-z]:[^\\/]/.test(path))) return undefined;
@@ -427,13 +432,22 @@ export function inkFileChangeSummary(
     const compare = (value: string) => (windows ? value.toLowerCase() : value);
     const prefix = compare(base.href);
     const actual = compare(target.href);
-    if (unchanged) return 'File content unchanged.';
-    return actual === prefix.slice(0, -1) || actual.startsWith(prefix)
-      ? 'Workspace file changed.'
-      : 'External file changed.';
+    if (unchanged) return presentation('File content unchanged.');
+    return presentation(
+      actual === prefix.slice(0, -1) || actual.startsWith(prefix)
+        ? 'Workspace file changed.'
+        : 'External file changed.',
+    );
   } catch {
     return undefined;
   }
+}
+export function inkFileChangeSummary(
+  execution: Execution,
+  snapshot: TuiSnapshot,
+  args: Record<string, unknown>,
+): string | undefined {
+  return inkFileChangePresentation(execution, snapshot, args)?.notice;
 }
 export function projectInkTool(
   execution: Execution,
@@ -548,6 +562,7 @@ export function projectInkTool(
           .filter((value): value is string => typeof value === 'string')
           .map(terminalText)
       : undefined;
+  const fileChange = inkFileChangePresentation(execution, snapshot, args);
   return {
     id: 0,
     kind: 'tool_card',
@@ -556,16 +571,16 @@ export function projectInkTool(
     args,
     status: inkExecutionStatus(execution),
     ...(resourceReferences ? { resourceReferences } : {}),
-    ...(inkFileChangeSummary(execution, snapshot, args)
-      ? { fileNotice: inkFileChangeSummary(execution, snapshot, args) }
+    ...(fileChange
+      ? { fileNotice: fileChange.notice, filePreviewTruncated: fileChange.truncated }
       : {}),
-    ...(name === 'write_file' && inkFileChangeSummary(execution, snapshot, args)
+    ...(name === 'write_file' && fileChange
       ? { fileAction: args.base === null ? ('Create' as const) : ('Write' as const) }
       : {}),
     summary:
       privateMcpSummary ??
       (name === 'read_mcp_resource' || name === 'list_mcp_resources' ? '' : undefined) ??
-      inkFileChangeSummary(execution, snapshot, args) ??
+      (fileChange && terminalText(fileChange.text ?? fileChange.notice)) ??
       terminalText(
         tail && ['succeeded', 'failed', 'cancelled'].includes(execution.status)
           ? tail.content
@@ -761,12 +776,14 @@ export function InkExecution({
   loadedOutputs = new Map(),
   expanded,
   columns = 80,
+  maxVisibleSteps,
 }: {
   execution: Execution;
   snapshot: TuiSnapshot;
   loadedOutputs?: ReadonlyMap<string, ModelOutputSnapshot['output']>;
   expanded?: boolean;
   columns?: number;
+  maxVisibleSteps?: number;
 }) {
   const { t } = useTuiPresentation();
   const child = projectInkChild(execution, snapshot, loadedOutputs, expanded);
@@ -786,7 +803,7 @@ export function InkExecution({
   return (
     <Box flexDirection="column">
       {child ? (
-        <SubAgentBlock block={child} columns={columns} />
+        <SubAgentBlock block={child} columns={columns} maxVisibleSteps={maxVisibleSteps} />
       ) : (
         <ToolCardBlock block={tool} columns={columns} />
       )}

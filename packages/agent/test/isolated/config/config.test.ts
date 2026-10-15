@@ -21,6 +21,7 @@ import {
   resolveConfiguration,
   updateConfigurationFile,
 } from '@kite-ai/agent/config';
+import type { Json } from '@kite-ai/agent/extensions';
 
 const create = () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-config-')));
@@ -152,6 +153,73 @@ test('actual call options and assembly facts are in an immutable digest snapshot
     expect(() =>
       createConfigurationSnapshot(resolveConfiguration({ defaults: { models } })),
     ).toThrow('credential_reference_required');
+});
+
+test('explicit model capacity survives real configuration loading and freezing without changing absent-field hashes', () => {
+  const f = create();
+  try {
+    const baseline = { modelId: 'x', models: [{ id: 'x', provider: 'compatible', model: 'm' }] };
+    const original = createConfigurationSnapshot(resolveConfiguration({ defaults: baseline }));
+    expect(original.digest).toBe(
+      hash('{"modelId":"x","models":[{"id":"x","model":"m","provider":"compatible"}]}'),
+    );
+    expect(original.configuration.models![0]!.modelCapabilities).toBeUndefined();
+    writeFileSync(
+      f.path,
+      JSON.stringify({
+        models: [
+          {
+            id: 'x',
+            modelCapabilities: { contextWindowTokens: 128000, maxOutputTokens: 8000 },
+            unknownModelField: 'not-frozen',
+          },
+        ],
+      }),
+    );
+    const effective = resolveConfiguration({
+      defaults: baseline,
+      user: readConfigurationFile({ path: f.path }).value,
+    });
+    const saved = createConfigurationSnapshot(effective);
+    expect(saved.configuration.models![0]!.modelCapabilities).toEqual({
+      contextWindowTokens: 128000,
+      maxOutputTokens: 8000,
+    });
+    expect(saved.digest).not.toBe(original.digest);
+    expect(Object.isFrozen(saved.configuration.models![0]!.modelCapabilities)).toBe(true);
+    expect(JSON.stringify(saved)).not.toContain('unknownModelField');
+    effective.models![0]!.modelCapabilities!.contextWindowTokens = 64000;
+    expect(saved.configuration.models![0]!.modelCapabilities!.contextWindowTokens).toBe(128000);
+    expect(createConfigurationSnapshot(effective).digest).not.toBe(saved.digest);
+    const malformed: Json[] = [
+      null,
+      [],
+      { contextWindowTokens: 0 },
+      { maxOutputTokens: 1.5 },
+      { contextWindowTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { model: 'guess-window' },
+    ];
+    for (const modelCapabilities of malformed)
+      expect(() =>
+        createConfigurationSnapshot(
+          resolveConfiguration({
+            defaults: { ...baseline, models: [{ ...baseline.models[0]!, modelCapabilities }] },
+          }),
+        ),
+      ).toThrow();
+    expect(() =>
+      createConfigurationSnapshot(
+        resolveConfiguration({
+          defaults: {
+            ...baseline,
+            models: [{ ...baseline.models[0]!, modelCapabilities: { apiKey: 'forbidden' } }],
+          },
+        }),
+      ),
+    ).toThrow('credential_reference_required');
+  } finally {
+    f.close();
+  }
 });
 
 test('real JSONC field set/remove preserves unrelated comments and unknown fields and IfMatch checks exact bytes', () => {

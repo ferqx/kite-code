@@ -110,6 +110,11 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Current task': '当前任务',
   'Next task': '下一次任务',
   'Context capacity estimate unavailable': '当前没有上下文容量估计',
+  'Verified Model context estimate:': '已核实的模型上下文估算：',
+  'Context usage:': '上下文占比：',
+  'Usable input:': '可用输入容量：',
+  'Based on the last verified Model input; future input may differ.':
+    '基于最近一次已核实的模型输入；后续输入可能不同。',
   'Model unavailable': '模型信息不可用',
   'Workspace unavailable': '工作区信息不可用',
   'Automatic review': '自动审核',

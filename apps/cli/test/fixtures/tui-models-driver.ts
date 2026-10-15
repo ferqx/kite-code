@@ -143,11 +143,7 @@ try {
   await wait('compatible');
   await wait('❯ two');
   await key('\r');
-  await wait('Confirm original project change');
-  await key('\r');
   await wait('outcome_unknown');
-  await key('\r');
-  await wait('Confirm original project change');
   await key('\r');
   await wait('model_settings_original_outcome_required');
   await key('k');
@@ -169,8 +165,6 @@ try {
     await key('\x1b[B');
     await wait(`❯ ${value}`);
   }
-  await key('\r');
-  await wait('Confirm original project change');
   await key('\r');
   await wait('high Current');
   assert.deepEqual(await requests(), [{ model: 'one' }]);

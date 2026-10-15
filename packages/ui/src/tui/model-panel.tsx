@@ -1,6 +1,6 @@
 import type { ModelSettingsRequest, ModelSettingsView } from '@kite-ai/client';
 import { Box, useInput, useStdout } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
 import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
 import {
@@ -58,6 +58,31 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     );
     setPending(undefined);
   }, [facts, effortPanel]);
+  const submitting = useRef(false);
+  const apply = (operation: ModelSettingsRequest['operation'], observed: ModelSettingsView) => {
+    if (submitting.current) return;
+    submitting.current = true;
+    const originalSessionId = state.sessionId,
+      panel = state.panel,
+      previousCommandId = state.modelOutcome?.intent.request.commandId;
+    void controller
+      .chooseModel(operation, observed)
+      .then(() => {
+        const outcome = controller.state.modelOutcome;
+        if (
+          !testDiagnostics &&
+          controller.state.sessionId === originalSessionId &&
+          controller.state.panel === panel &&
+          outcome?.status === 'applied' &&
+          outcome.intent.request.commandId !== previousCommandId &&
+          JSON.stringify(outcome.intent.request.operation) === JSON.stringify(operation)
+        )
+          controller.closePanel();
+      })
+      .finally(() => {
+        submitting.current = false;
+      });
+  };
   useInput((input, key) => {
     if (key.ctrl) return;
     if (key.escape) {
@@ -77,22 +102,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     if (!facts) return;
     if (pending) {
       if (key.return) {
-        const original = pending,
-          originalSessionId = state.sessionId,
-          panel = state.panel;
-        const previousCommandId = state.modelOutcome?.intent.request.commandId;
-        void controller.chooseModel(original.operation, original.observed).then(() => {
-          const outcome = controller.state.modelOutcome;
-          if (
-            !testDiagnostics &&
-            controller.state.sessionId === originalSessionId &&
-            controller.state.panel === panel &&
-            outcome?.status === 'applied' &&
-            outcome.intent.request.commandId !== previousCommandId &&
-            JSON.stringify(outcome.intent.request.operation) === JSON.stringify(original.operation)
-          )
-            controller.closePanel();
-        });
+        apply(pending.operation, pending.observed);
         setPending(undefined);
       }
       return;
@@ -113,26 +123,17 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
       if (effortPanel) {
         const selected = facts.models.find((m) => m.id === facts.defaultModelId);
         if (
-          !selected ||
-          selected.reasoningEffortSupport !== 'compatible_wire' ||
+          selected?.reasoningEffortSupport !== 'compatible_wire' ||
           selected.reasoningEffortReadonlyReason
         )
           return;
         const choices = orderedTuiEfforts(selected.reasoningEffortChoices);
         if (key.return && index >= 0 && index < choices.length)
-          setPending({
-            observed: facts,
-            operation: {
-              kind: 'effort',
-              modelId: selected.id,
-              reasoningEffort: choices[index]!,
-            },
-          });
+          apply({ kind: 'effort', modelId: selected.id, reasoningEffort: choices[index]! }, facts);
         return;
       }
       if (!row) return;
-      if (key.return)
-        setPending({ observed: facts, operation: { kind: 'default', modelId: row.id } });
+      if (key.return) apply({ kind: 'default', modelId: row.id }, facts);
       else if (input === 'e')
         setPending({
           observed: facts,

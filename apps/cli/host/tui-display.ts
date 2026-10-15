@@ -1,3 +1,4 @@
+import { estimateModelContext } from '@kite-ai/agent/context-estimate';
 import type { AgentClient, Message, Run, SessionView } from '@kite-ai/client';
 import type { TuiPendingInput, TuiSnapshot } from '@kite-ai/ui/tui';
 import { readTuiTimings, type TuiExecutionTiming } from './tui-timing';
@@ -60,17 +61,25 @@ export async function readTuiPendingInputs(
   }
 }
 
+function frozenModelConfiguration(run: Run, id: string): Record<string, unknown> | undefined {
+  const configuration = object(object(run.configuration)?.configuration);
+  const models = Array.isArray(configuration?.models) ? configuration.models.map(object) : [];
+  const matches = models.filter((entry) => entry?.id === id);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+function frozenModelName(run: Run, id: string): string {
+  const model = frozenModelConfiguration(run, id);
+  return typeof model?.model === 'string' && model.model.length > 0 ? model.model : id;
+}
 function frozenModel(run: Run): Environment['runtimeModel'] {
-  const snapshot = object(run.configuration),
-    configuration = object(snapshot?.configuration);
+  const configuration = object(object(run.configuration)?.configuration);
   const id = typeof configuration?.modelId === 'string' ? configuration.modelId : undefined;
-  const models = Array.isArray(configuration?.models) ? configuration.models : [];
-  const model = models.map(object).find((entry) => entry?.id === id);
+  const model = id ? frozenModelConfiguration(run, id) : undefined;
   const options = object(model?.options);
   return {
     runId: run.id,
     active: run.isActive,
-    ...(id ? { modelName: id } : {}),
+    ...(id ? { modelName: frozenModelName(run, id) } : {}),
     ...(typeof options?.reasoningEffort === 'string' ? { effort: options.reasoningEffort } : {}),
     source: id ? 'run_configuration' : 'unavailable',
   };
@@ -150,11 +159,24 @@ export function createTuiDisplayReader(
   client: Pick<AgentClient, 'getModelInput' | 'listSessionLogs'>,
   storeId: string,
 ) {
-  let lastModel: { key: string; value: NonNullable<Environment['runtimeModel']> } | undefined;
+  let lastModel:
+    | {
+        key: string;
+        value: NonNullable<Environment['runtimeModel']>;
+        context?: Environment['context'];
+      }
+    | undefined;
   let timing: { key: string; value: Readonly<Record<string, TuiExecutionTiming>> } | undefined;
   return async (view: SessionView, messages: readonly Message[], signal: AbortSignal) => {
-    const run = view.runs.find((entry) => entry.isActive) ?? view.runs.at(-1);
+    const runs =
+      view.storeId === storeId
+        ? view.runs.filter(
+            (entry) => entry.originStoreId === storeId && entry.sessionId === view.session.id,
+          )
+        : [];
+    const run = runs.find((entry) => entry.isActive) ?? runs.at(-1);
     let runtimeModel = run ? frozenModel(run) : undefined;
+    let context: Environment['context'];
     const model =
       run &&
       view.executions
@@ -168,10 +190,24 @@ export function createTuiDisplayReader(
         .at(-1);
     const key =
       model &&
-      JSON.stringify([storeId, view.session.id, model.id, model.runId, model.originStoreId]);
+      JSON.stringify([
+        storeId,
+        view.session.id,
+        view.session.rootSessionId,
+        model.id,
+        model.runId,
+        model.originStoreId,
+        model.rootWorkCommandId,
+        model.rootWorkSeq,
+        model.definitionId,
+        model.definitionVersion,
+        run?.originCommandId,
+      ]);
     if (run && model && key) {
-      if (lastModel?.key === key) runtimeModel = { ...lastModel.value, active: run.isActive };
-      else {
+      if (lastModel?.key === key) {
+        runtimeModel = { ...lastModel.value, active: run.isActive };
+        context = lastModel.context;
+      } else {
         try {
           const input = await client.getModelInput(view.session.id, model.id, {
             expectedStoreId: storeId,
@@ -188,17 +224,44 @@ export function createTuiDisplayReader(
           )
             throw Error('tui_model_display_identity_mismatch');
           const adapter = input.metadata.adapter;
+          const provider = adapter.availability === 'available' ? adapter.provider : undefined;
           runtimeModel = {
             runId: run.id,
             active: run.isActive,
-            modelName: input.request.modelId,
+            modelName:
+              provider?.availability === 'available' && provider.modelId.length > 0
+                ? provider.modelId
+                : frozenModelName(run, input.request.modelId),
             source: 'model_input',
             ...(adapter.availability === 'available' &&
             adapter.settings.reasoningEffort !== undefined
               ? { effort: adapter.settings.reasoningEffort }
               : {}),
           };
-          lastModel = { key, value: runtimeModel };
+          if (
+            Array.isArray(input.request.messages) &&
+            Array.isArray(input.request.tools) &&
+            /^[a-f0-9]{64}$/.test(input.bodyHash)
+          ) {
+            const capabilities = object(
+              frozenModelConfiguration(run, input.request.modelId)?.modelCapabilities,
+            );
+            context = {
+              source: 'model_input',
+              storeId,
+              sessionId: view.session.id,
+              runId: run.id,
+              executionId: model.id,
+              modelId: input.request.modelId,
+              bodyHash: input.bodyHash,
+              ...estimateModelContext(
+                input.request,
+                capabilities,
+                adapter.availability === 'available' ? adapter.settings.maxOutputTokens : undefined,
+              ),
+            };
+          }
+          lastModel = { key, value: runtimeModel, context };
         } catch {
           /* Frozen Run selection remains separately labelled; no default substitution. */
         }
@@ -223,6 +286,6 @@ export function createTuiDisplayReader(
       Object.values(executionTimings).some((entry) => entry.availability === 'recorded_dispatch')
     )
       timing = { key: timingKey, value: executionTimings };
-    return { runtimeModel, usage: tuiRecordedUsage(view, messages), executionTimings };
+    return { runtimeModel, context, usage: tuiRecordedUsage(view, messages), executionTimings };
   };
 }

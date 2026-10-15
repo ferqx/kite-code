@@ -270,6 +270,8 @@ runless 后代只沿有限真实 Execution/Command 链继承原 provenance；准
 
 ## MCP 原 metadata 的跨包读取
 
+只读详情由 Agent 的 `mcp.server.status` 提供准确原 connection Job、当前 holder／代次及已读取的能力数量；未知或代次不符保持 null，不发远端 list／connect。Service 的 `mcp.server.locations` 只按当前完整 Source/read-set 交付固定真实配置位置和摘要，不读取秘密或解释权限。CLI 完整分页读取 live catalogue，并核相同 Scope、来源、游标与唯一 key 后才发布；UI 只消费这些有限显示事实，详情不进入配置 CAS 或授权依据。具体字段和证据归 [Agent MCP](../../packages/agent/src/mcp/README.md)与[Service](../../apps/service/README.md)。
+
 MCP adapter 同步 frozen metadata getter与原可执行 catalogue共享同一代次。真实connect/refresh Tool或Action保存准确原SDK Tool到自身publisher scope immutable chunks/manifest/pages/root，Worker只保有限pointer；Query封存原record/generation/indexDigest，不连接、发现、读vault或派发。publisher已保存结果与source value全等，原connection command/parent/inputDigest和新source key分别绑定，Artifact再核原scope/hash/size。不是以sourceRecordKey单独证明writer，也不重构私有bootstrap Job正文。
 
 公共Client闭合32KiB Query并一次manifest后逐块核完整EOF/size/SHA、fatal UTF-8/JSON/schema，完整SDK字段及省略保留；currentStore负责admission，旧originStore负责Artifactmetadata，恢复不重标来源或恢复grant。TUI/CLI只接该公共Query/reader，以原Session/Workspace/read generation+ownAbort隔离迟到，页面/长字段不裁成complete前缀，metadata查看零业务POST/cancel。当前两Query使用现有整组安全观察器作主体准入，其8192记录上限保留；不承诺任意长执行组均可读取。owner与有限实际证据见[MCP](../../packages/agent/src/mcp/README.md)、[Client](../../packages/client/README.md)、[TUI](../../packages/ui/src/tui/README.md)和[CLI](../../apps/cli/README.md#tui-mcp-目录与配置选择)。

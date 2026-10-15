@@ -18,7 +18,22 @@
 
 ## 手工配置位置与模型字段
 
-默认用户配置为 `~/.kite-code/kite-code.jsonc`，项目配置为 `<工作区>/.kite-code/kite-code.jsonc`；显式 profile 可能改变用户根目录。优先使用交互入口完成首次配置，不在项目文件中提交真实凭据。
+当前统一 TUI 的用户模型配置为 `<data-root>/<profile>/config.jsonc`，项目覆盖为 `<工作区>/kite-agent.jsonc`；以实际选定的数据根和 profile 为准。优先使用首次配置、`/model` 和 `/effort`，不要在项目文件中提交真实凭据。模型目录使用 `models[]`，默认模型由 `modelId` 引用准确 `id`，不读取下方旧 `provider.*` 格式。
+
+| 当前字段 | 含义 |
+| --- | --- |
+| `modelId` | 默认模型的准确 `models[].id` |
+| `models[].id / provider / model` | 配置 ID、受支持的 Provider 适配器及实际远端模型名称 |
+| `models[].baseURL / credentialRef` | 实际端点及不透明凭据引用；不写凭据正文 |
+| `models[].options.maxOutputTokens` | 实际请求的输出上限；也优先作为该请求的上下文输出预留 |
+| `models[].modelCapabilities.contextWindowTokens` | 用户显式声明的模型上下文窗口 |
+| `models[].modelCapabilities.maxOutputTokens` | 用户显式声明的模型输出容量；实际请求没有输出上限时用作显示预算的预留 |
+
+`modelCapabilities` 可省略；它只接受上面两个可选正安全整数，未知字段或无效数值拒绝封存。这些元数据随原 Run 冻结，不是 Provider 能力探测或保证，也不会自动把元数据输出容量变成 Provider 请求参数。窗口或输出预留缺失时，`/context` 和底部只显示已核输入的 token 估算及容量未知，不猜模型窗口或显示虚构百分比。模型对象中其他未支持字段即使保留在配置文件，也不会自动进入执行快照。
+
+### 旧配置格式参考
+
+下表仅用于辨认旧 TUI 格式，不是当前统一入口的配置合同，也不构成旧配置迁移支持。旧默认用户配置为 `~/.kite-code/kite-code.jsonc`，项目配置为 `<工作区>/.kite-code/kite-code.jsonc`。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -47,8 +62,8 @@
 这些高级选项没有完整 TUI 设置面板。手工调整前核对对应能力说明；配置被接受也不证明所有条件已具备。
 
 
-## 开发统一入口差异
+## 统一入口设置
 
-`bun run tui:dev` 的 `/model`、`/effort` 使用专门的项目模型设置 API，作用域为当前实际 Workspace，不是按会话保存的模型偏好。`/effort` 的选项来自读取结果；compatible 适配器可提供 none、minimal、low、medium、high、xhigh、max，但这不是远端模型能力承诺。清除项目 effort 的最终值取决于现有配置层覆盖，保存后以重读事实为准。上面的旧配置字段表不能作为新 API 的任意写入入口；操作与快捷键见[模型与界面设置](../guides/models-and-settings.md#开发统一-tui-的模型设置)。
+正式 Terminal 和 `bun run tui:dev` 的 `/model`、`/effort` 使用专门的项目模型设置 API，作用域为当前实际 Workspace，不是按会话保存的模型偏好。`/effort` 的选项来自读取结果；compatible 适配器可提供 none、minimal、low、medium、high、xhigh、max，但这不是远端模型能力承诺。清除项目 effort 的最终值取决于现有配置层覆盖，保存后以重读事实为准。上面的旧配置字段表不能作为新 API 的任意写入入口；操作与快捷键见[模型与界面设置](../guides/models-and-settings.md#统一-tui-的模型设置)。
 
-开发统一 TUI 的 `/theme`、`/language` 保存到当前新 profile 的 `ui/preferences.jsonc`，字段分别为 `colorPreset` 和 `language`；基础 `theme` 可手工配置 dark/light。缺文件默认 teal/system/dark；非法或损坏文件不自动覆盖。每次保存使用读取时文件 revision，冲突需重读后再明确选择。该文件属于客户端显示偏好，随显式维护备份采集；不写服务模型配置，也不承接旧用户目录的数据。
+统一 TUI 的 `/theme`、`/language` 保存到当前 profile 的 `ui/preferences.jsonc`，字段分别为 `colorPreset` 和 `language`；基础 `theme` 可手工配置 dark/light。缺文件默认 teal/system/dark；非法或损坏文件不自动覆盖。每次保存使用读取时文件 revision，冲突需重读后再明确选择。该文件属于客户端显示偏好，随显式维护备份采集；不写服务模型配置，也不承接旧用户目录的数据。

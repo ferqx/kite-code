@@ -315,6 +315,38 @@ test('durable connection Job precedes network; next actual compatible Model sees
       input: {},
     });
     expect(JSON.stringify(views)).toContain(f.expectedStoreId);
+    const status = await f.runtime.queryExtension({
+      sessionId: 'a',
+      subjectId: 'user',
+      extensionId: mcpLifecycleExtensionId,
+      queryId: 'mcp.server.status',
+      input: {},
+    });
+    expect(status[0]!.payload).toMatchObject({
+      storeId: f.expectedStoreId,
+      sessionId: 'a',
+      items: [
+        {
+          serverId: 'local',
+          status: 'connected',
+          toolCount: 1,
+          resourceCount: null,
+          promptCount: null,
+        },
+      ],
+    });
+    const otherStatus = await f.runtime.queryExtension({
+      sessionId: 'b',
+      subjectId: 'user',
+      extensionId: mcpLifecycleExtensionId,
+      queryId: 'mcp.server.status',
+      input: {},
+    });
+    expect(otherStatus[0]!.payload).toMatchObject({
+      storeId: f.expectedStoreId,
+      sessionId: 'b',
+      items: [],
+    });
     expect(await f.run('a', 'connect-a')).toEqual(command);
     expect({
       opens: f.opens,
@@ -652,6 +684,28 @@ test('close during actual dispatched Job open collects the late owned handle wit
         (execution) => execution.kind === 'job',
       )!;
       expect(job.status).toBe('dispatching');
+      expect(f.connections).toBe(0);
+      const openingStatus = await f.runtime.queryExtension({
+        sessionId: 'a',
+        subjectId: 'user',
+        extensionId: mcpLifecycleExtensionId,
+        queryId: 'mcp.server.status',
+        input: {},
+      });
+      expect(openingStatus[0]!.payload).toMatchObject({
+        storeId: f.expectedStoreId,
+        sessionId: 'a',
+        items: [
+          {
+            executionId: job.id,
+            serverId: 'local',
+            status: 'connecting',
+            toolCount: null,
+            resourceCount: null,
+            promptCount: null,
+          },
+        ],
+      });
       expect(f.connections).toBe(0);
       const closing = f.lifecycle.close();
       expect(

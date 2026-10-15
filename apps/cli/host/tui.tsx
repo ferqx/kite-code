@@ -3,7 +3,13 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { type acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { ClientError, type Interaction, type Message } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { TuiController, type TuiPort, TuiSession, translateTuiLabel } from '@kite-ai/ui/tui';
+import {
+  TuiController,
+  TuiErrorBoundary,
+  type TuiPort,
+  TuiSession,
+  translateTuiLabel,
+} from '@kite-ai/ui/tui';
 import { Box, render, Text, useInput } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
 import {
@@ -259,6 +265,9 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
   const stopped = new Promise<void>((resolve) => {
     stop = resolve;
   });
+  let fatalRender = false,
+    quitRequested = false,
+    finalizing = false;
   let ended = false,
     newBusy = false,
     refreshing = false,
@@ -283,6 +292,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       controller?.draftUnavailable('tui_draft_save_failed_exit_blocked');
       return false;
     }
+    quitRequested = true;
     stop();
     return true;
   };
@@ -741,13 +751,18 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
             homeDirectory: homedir(),
             ...(selectedModel
               ? {
+                  modelId: selectedModel.id,
                   modelName: selectedModel.model,
                   effort: selectedModel.reasoningEffort ?? undefined,
                 }
               : {}),
             ...(permission ? { permissionMode: permission } : {}),
             ...(display.status === 'fulfilled'
-              ? { runtimeModel: display.value.runtimeModel, usage: display.value.usage }
+              ? {
+                  runtimeModel: display.value.runtimeModel,
+                  usage: display.value.usage,
+                  context: display.value.context,
+                }
               : {}),
           },
         };
@@ -875,17 +890,45 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
     };
     process.stdin.setRawMode(true);
     terminal = render(
-      <TerminalHost
-        controller={controller}
-        onNew={createNew}
-        onQuit={requestQuit}
-        shared={!!input.server}
+      <TuiErrorBoundary
         testDiagnostics={input.testDiagnostics}
-      />,
+        onError={() => {
+          fatalRender = true;
+        }}
+        onExit={() => {
+          requestQuit();
+        }}
+      >
+        <TerminalHost
+          controller={controller}
+          onNew={createNew}
+          onQuit={requestQuit}
+          shared={!!input.server}
+          testDiagnostics={input.testDiagnostics}
+        />
+      </TuiErrorBoundary>,
       {
         exitOnCtrlC: false,
+        kittyKeyboard: { mode: 'enabled' },
+        incrementalRendering: false,
         // Admission already requires a real terminal, including CI-owned PTYs.
         interactive: true,
+      },
+    );
+    // Ink's own root boundary may terminate outside our fallback. Observe both
+    // outcomes so a dead renderer cannot leave the host waiting for input.
+    void terminal.waitUntilExit().then(
+      () => {
+        if (!ended && !quitRequested && !finalizing) {
+          fatalRender = true;
+          stop();
+        }
+      },
+      () => {
+        if (!ended && !finalizing) {
+          fatalRender = true;
+          stop();
+        }
       },
     );
     const lookup = (chunk: string | Buffer) => {
@@ -984,8 +1027,9 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
     }
     const draftsSaved = draftOwner?.flush() ?? true;
     if (!draftsSaved) process.stderr.write('tui_draft_save_failed_forced_exit\n');
-    return draftsSaved ? 0 : 1;
+    return draftsSaved && !fatalRender ? 0 : 1;
   } finally {
+    finalizing = true;
     try {
       mcpOwner?.close();
       mcpConnectionOwner?.close();

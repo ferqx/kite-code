@@ -48,3 +48,50 @@ test('pure chrome retains observed facts, original interaction content and compl
   expect(truncateDisplayWidth('abc', 1)).toBe('…');
   expect(truncateDisplayWidth('safe\u001b[2J', 30)).toBe('safe\\u001b[2J');
 });
+
+test('footer displays current Context estimate independently from cumulative recorded usage', () => {
+  const context = {
+    source: 'model_input' as const,
+    storeId: 'store',
+    sessionId: 'session',
+    runId: 'run',
+    executionId: 'model',
+    modelId: 'actual',
+    bodyHash: 'a'.repeat(64),
+    estimate: {
+      systemTokens: 10,
+      transcriptTokens: 30,
+      toolSchemaTokens: 10,
+      framingTokens: 10,
+      totalInputTokens: 60,
+    },
+    providerSafetyMarginTokens: 1024,
+    usableInputTokens: 6000,
+    utilization: 0.01,
+  };
+  const footer = render(
+    <TuiFooter
+      modelName="actual"
+      context={context}
+      usage={{ inputTokens: 99999, executionCount: 5 }}
+    />,
+  );
+  try {
+    expect(footer.lastFrame()).toContain('1% context');
+    expect(footer.lastFrame()).not.toContain('100.0k');
+  } finally {
+    footer.unmount();
+  }
+  const unknown = render(
+    <TuiFooter
+      modelName="actual"
+      context={{ ...context, utilization: undefined, usableInputTokens: undefined }}
+    />,
+  );
+  try {
+    expect(unknown.lastFrame()).toContain('60 context est.');
+    expect(unknown.lastFrame()).not.toContain('% context');
+  } finally {
+    unknown.unmount();
+  }
+});

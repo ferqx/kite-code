@@ -104,14 +104,14 @@ async function drive(config: Configuration) {
     }
     throw Error(message);
   };
+  const postCount = () =>
+    readFileSync(wire, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((row) => row.method === 'POST').length;
   const approveCode = async () => {
     await wait('pending approval panel');
-    const postCount = () =>
-      readFileSync(wire, 'utf8')
-        .trimEnd()
-        .split('\n')
-        .map((line) => JSON.parse(line))
-        .filter((row) => row.method === 'POST').length;
     const beforeAnswer = postCount();
     await key('a');
     await wait('❯ Allow once', { approval: true });
@@ -151,6 +151,7 @@ async function drive(config: Configuration) {
     await key('\r');
     await wait('Files recovery');
     await wait(checkpoint);
+    const beforePreview = postCount();
     await key('\r');
     await wait('original.txt');
     await wait('V: read text preview');
@@ -158,13 +159,23 @@ async function drive(config: Configuration) {
     await wait('original bytes');
     await wait('Complete text preview');
     await key('\x1b');
-    await wait('Choose recovery scope explicitly');
+    await wait('❯ 1. Session and code');
+    assert.equal(
+      postCount(),
+      beforePreview,
+      'Opening the original default-scope confirmation has no write',
+    );
     const scope = config.mode === 'session' ? 'session' : config.mode === 'code' ? 'code' : 'both';
-    await key(scope === 'session' ? '1' : scope === 'code' ? '2' : '3');
+    await key(scope === 'session' ? '2' : scope === 'code' ? '3' : '1');
     await wait(
-      `❯ ${scope === 'session' ? '1. Session only' : scope === 'code' ? '2. Code only' : '3. Session and code'}`,
+      `❯ ${scope === 'session' ? '2. Session only' : scope === 'code' ? '3. Code only' : '1. Session and code'}`,
     );
     await wait('Enter confirms selected scope');
+    assert.equal(
+      postCount(),
+      beforePreview,
+      'Selecting the original scope does not submit recovery',
+    );
     await key('\r');
     if (config.mode === 'before_post') {
       await until(

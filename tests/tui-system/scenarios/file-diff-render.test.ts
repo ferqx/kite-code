@@ -23,7 +23,12 @@ import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -141,12 +146,15 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       expect(screenContains(output, 'Write')).toBe(true);
       expect(screenContains(output, 'Create')).toBe(false);
       expect(screenContains(output, 'notes.md')).toBe(true);
-      // Completed cards stay compact by default; the closed client event
-      // retains the result for expansion/replay without forcing the whole diff
-      // into the terminal viewport.
-      expect(screenContains(output, 'Added 1 line, removed 1 line')).toBe(false);
-      expect(screenContains(output, '旧结尾')).toBe(false);
-      expect(screenContains(output, '新结尾')).toBe(false);
+      // Consume the actual qualified Files preview through the original card,
+      // including both changed lines exactly once, rather than notice-only UI.
+      const clean = stripAnsi(output);
+      expect(clean.match(/Added 1 lines, removed 1 lines/g) ?? []).toHaveLength(1);
+      expect(clean.match(/3 -旧结尾/g) ?? []).toHaveLength(1);
+      expect(clean.match(/3 \+新结尾/g) ?? []).toHaveLength(1);
+      expect(/Added 1 lines, removed 1 lines[\s\S]*3 -旧结尾[\s\S]*3 \+新结尾/.test(clean)).toBe(
+        true,
+      );
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(
         '- 嘻嘻嘻\n- 详细信息\n新结尾',
       );
@@ -171,8 +179,13 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
       expect(screenContains(output, 'Create')).toBe(true);
       expect(screenContains(output, 'changelog.md')).toBe(true);
-      expect(screenContains(output, 'Wrote 3 lines')).toBe(false);
-      expect(screenContains(output, '# Changelog')).toBe(false);
+      const clean = stripAnsi(output);
+      expect(clean.match(/Wrote 3 lines to changelog\.md/g) ?? []).toHaveLength(1);
+      expect(clean.match(/1 {2}# Changelog/g) ?? []).toHaveLength(1);
+      expect(clean.match(/3 {2}- 初始版本/g) ?? []).toHaveLength(1);
+      expect(
+        /Wrote 3 lines to changelog\.md[\s\S]*1 {2}# Changelog[\s\S]*3 {2}- 初始版本/.test(clean),
+      ).toBe(true);
       expect(readFileSync(join(workspace.workspace, 'changelog.md'), 'utf8')).toBe(
         CHANGELOG_CONTENT,
       );
@@ -200,6 +213,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       expect(screenContains(output, 'Write')).toBe(true);
       expect(screenContains(output, 'changelog.md')).toBe(true);
       expect(screenContains(output, '(content unchanged)')).toBe(false);
+      expect(stripAnsi(output).match(/File content unchanged\./g) ?? []).toHaveLength(1);
       expect(readFileSync(join(workspace.workspace, 'changelog.md'), 'utf8')).toBe(
         CHANGELOG_CONTENT,
       );

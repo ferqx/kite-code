@@ -29,7 +29,13 @@ import {
 import { additionalTuiCommands, fixedTuiCommands } from './commands';
 import { ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch, TuiComposer } from './composer-input';
-import { activity, currentActivityVerified, type TuiController, terminalText } from './controller';
+import {
+  activity,
+  currentActivityVerified,
+  type TuiController,
+  type TuiSnapshot,
+  terminalText,
+} from './controller';
 import { TuiExecutionPanel } from './execution-panel';
 import {
   frozenBuiltin,
@@ -89,6 +95,7 @@ import { TuiSessionChooser } from './session-chooser';
 import { manualWorkflow } from './skills';
 import { TuiSkillsPanel } from './skills-panel';
 import { TuiStatusPanel } from './status-panel';
+import { type SubagentLayout, subagentLayouts } from './subagent-layout';
 import {
   projectTuiMessages,
   TuiThoughtPhase,
@@ -98,6 +105,7 @@ import {
 } from './transcript';
 
 export * from './controller';
+export { TuiErrorBoundary } from './error-boundary';
 export { TerminalMarkdown } from './markdown';
 export * from './mcp-auth';
 export * from './mcp-connection';
@@ -167,7 +175,14 @@ export function TuiSession({
   );
 }
 type Execution = SessionView['executions'][number];
-type HistoryItem = { key: string; version: string; node: ReactNode; mutable?: boolean };
+type HistoryItem = {
+  key: string;
+  version: string;
+  node: ReactNode;
+  mutable?: boolean;
+  subagentSteps?: readonly number[];
+  renderWithLayout?: (layout: SubagentLayout) => ReactNode;
+};
 const executionLive = (execution: Execution) =>
   ['planned', 'dispatching', 'running'].includes(execution.status);
 /** Inline results and the current verified prefix share the original Model identity. */
@@ -256,6 +271,16 @@ function longQuestionMaterial(
 const executionDisplayKey = (execution: Execution) =>
   JSON.stringify([execution.originStoreId, execution.sessionId, execution.id]);
 
+function verifiedModelContext(snapshot: TuiSnapshot | undefined) {
+  const context = snapshot?.environment?.context;
+  return context &&
+    context.storeId === snapshot?.storeId &&
+    context.sessionId === snapshot?.view.session.id &&
+    context.runId === snapshot?.environment?.runtimeModel?.runId
+    ? context
+    : undefined;
+}
+
 function chromeFacts(
   state: Pick<TuiController['state'], 'snapshot' | 'models' | 'permissions'>,
 ): TuiChromeFacts {
@@ -264,13 +289,18 @@ function chromeFacts(
   const nextModelName = selected?.model ?? selected?.id ?? environment?.modelName;
   const nextEffort = selected ? (selected.reasoningEffort ?? undefined) : environment?.effort;
   const current = environment?.runtimeModel;
+  const context = verifiedModelContext(state.snapshot);
+  const sameModel = current?.active || context?.modelId === (selected?.id ?? environment?.modelId);
   return {
     ...environment,
+    context: sameModel ? context : undefined,
     sessionTitle: state.snapshot?.view.session.title,
     nextModelName,
     nextEffort,
-    modelName: current?.active ? current.modelName : nextModelName,
-    effort: current?.active ? current.effort : nextEffort,
+    // A transient optional catalogue failure does not invalidate the exact
+    // recorded Model or erase native history. The next selection stays unknown.
+    modelName: current?.active ? current.modelName : (nextModelName ?? current?.modelName),
+    effort: current?.active || !nextModelName ? current?.effort : nextEffort,
     ...(state.permissions ? { permissionMode: state.permissions.mode.mode } : {}),
   };
 }
@@ -478,6 +508,21 @@ function TuiHistory({
         snapshot?.jobTails?.find((tail) => tail.executionId === execution.id),
       ]),
       mutable: executionLive(execution),
+      ...(snapshot && projectInkChild(execution, snapshot, loadedOutputs)
+        ? {
+            subagentSteps: [projectInkChild(execution, snapshot, loadedOutputs)!.steps.length],
+            renderWithLayout: (layout: SubagentLayout) => (
+              <TuiExecution
+                execution={execution}
+                snapshot={snapshot}
+                loadedOutputs={loadedOutputs}
+                collapsed={collapsed.has(executionDisplayKey(execution))}
+                elapsedMs={phaseElapsed(snapshot.executionTimings?.[execution.id])}
+                maxVisibleSteps={layout.maxVisibleSteps}
+              />
+            ),
+          }
+        : {}),
       node: (
         <TuiExecution
           execution={execution}
@@ -533,6 +578,14 @@ function TuiHistory({
             mutable: group.executionIds.some((id) =>
               results.some((item) => item.id === id && executionLive(item)),
             ),
+            ...(group.kind === 'concurrent_subagents'
+              ? {
+                  subagentSteps: group.blocks.map((block) => block.steps.length),
+                  renderWithLayout: (layout: SubagentLayout) => (
+                    <InkExecutionGroupView group={group} columns={columns} {...layout} />
+                  ),
+                }
+              : {}),
             node: <InkExecutionGroupView group={group} columns={columns} />,
           },
         ];
@@ -954,6 +1007,11 @@ function TuiHistory({
       setCommitted(history);
     }
   }
+  const liveItems = live.filter(
+    (item) =>
+      !history.items.some((saved) => saved.key === item.key && saved.version === item.version),
+  );
+  const layouts = subagentLayouts(liveItems, rows, history.items.length > 1);
   useInsertionEffect(() => {
     if (history.epoch && stdout.isTTY) write('\u001b[2J\u001b[3J\u001b[H');
   }, [history.epoch, stdout, write]);
@@ -973,29 +1031,22 @@ function TuiHistory({
           )}
         </Static>
       </Box>
-      {live.some(
-        (item) =>
-          !history.items.some((saved) => saved.key === item.key && saved.version === item.version),
-      ) && (
+      {liveItems.length > 0 && (
         <Box
           flexDirection="column"
           flexShrink={1}
           minHeight={0}
           maxHeight={Math.max(1, rows - 8)}
           overflowY="hidden"
+          justifyContent="flex-end"
         >
-          {live
-            .filter(
-              (item) =>
-                !history.items.some(
-                  (saved) => saved.key === item.key && saved.version === item.version,
-                ),
-            )
-            .map((item) => (
-              <Box key={item.key} flexDirection="column">
-                {item.node}
-              </Box>
-            ))}
+          {liveItems.map((item) => (
+            <Box key={item.key} flexDirection="column">
+              {item.renderWithLayout && layouts.has(item.key)
+                ? item.renderWithLayout(layouts.get(item.key)!)
+                : item.node}
+            </Box>
+          ))}
         </Box>
       )}
       {snapshot?.planProgress && <InkTaskProgress plan={snapshot.planProgress} />}
@@ -1171,12 +1222,14 @@ function TuiExecution({
   loadedOutputs,
   collapsed,
   elapsedMs,
+  maxVisibleSteps,
 }: {
   execution: Execution;
   snapshot?: import('./controller').TuiSnapshot;
   loadedOutputs?: ReadonlyMap<string, ModelOutputSnapshot['output']>;
   collapsed: boolean;
   elapsedMs?: number;
+  maxVisibleSteps?: number;
 }) {
   const { t, testDiagnostics } = useTuiPresentation();
   const { stdout } = useStdout();
@@ -1210,6 +1263,7 @@ function TuiExecution({
         snapshot={snapshot}
         loadedOutputs={loadedOutputs}
         expanded={collapsed ? false : undefined}
+        maxVisibleSteps={maxVisibleSteps}
         columns={stdout.columns || 80}
       />
     );
@@ -1268,6 +1322,7 @@ function TuiSessionView({
   const { t, testDiagnostics } = useTuiPresentation();
   const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
+  const verifiedContext = verifiedModelContext(state.snapshot);
   const resultScope = JSON.stringify([controller.port.storeId, state.sessionId]);
   const resultExecutions = controller.visibleExecutions.filter((item) => item.kind !== 'model');
   const resultKeys = new Set(
@@ -1381,6 +1436,17 @@ function TuiSessionView({
   const [, renderQuestion] = useState(0);
   const [panelIndex, setPanelIndex] = useState(0);
   const lastCancelKey = useRef<number | undefined>(undefined);
+  const cancelTask = (batch = false) => {
+    const now = Date.now();
+    if (!batch && lastCancelKey.current !== undefined && now - lastCancelKey.current < 1000) {
+      lastCancelKey.current = undefined;
+      if (onQuit) onQuit();
+      else void controller.routeCommand('/exit');
+      return;
+    }
+    lastCancelKey.current = batch ? undefined : now;
+    void controller.cancel();
+  };
   // A programmatic Session switch must not inherit a previous exit gesture.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on selected Session identity.
   useEffect(() => {
@@ -1677,34 +1743,24 @@ function TuiSessionView({
   );
   useInput(
     (input, key) => {
+      const nativeCancel = (key.ctrl && input === 'c') || isCtrlCBatch(input);
+      // Original-request and child readers close locally. Main selectors keep
+      // the original TUI's whole-task Ctrl+C, even with a hidden approval.
+      const readerOnly = ['recovery', 'management_requests', 'executions'].includes(
+        state.panel ?? '',
+      );
       if (key.tab && key.shift) {
         lastCancelKey.current = undefined;
         controller.togglePlanning();
         return;
       }
-      const majorCancel =
-        !chooser &&
-        !cardChooser &&
-        !blockingPanel &&
-        !sourceQuestion &&
-        ((key.ctrl && input === 'c') || isCtrlCBatch(input));
-      if (majorCancel) {
-        const now = Date.now();
-        // Coalesced native cancellation bytes are one request, never an exit gesture.
-        if (
-          !isCtrlCBatch(input) &&
-          lastCancelKey.current !== undefined &&
-          now - lastCancelKey.current < 1000
-        ) {
-          lastCancelKey.current = undefined;
-          if (onQuit) onQuit();
-          else void controller.routeCommand('/exit');
-          return;
-        }
-        lastCancelKey.current = isCtrlCBatch(input) ? undefined : now;
-      } else lastCancelKey.current = undefined;
+      if (nativeCancel && !readerOnly && !sourceQuestion) {
+        cancelTask(isCtrlCBatch(input));
+        return;
+      }
+      lastCancelKey.current = undefined;
       if (chooser) return;
-      const cancelKey = (key.ctrl && input === 'c') || (!blockingPanel && isCtrlCBatch(input));
+      const cancelKey = nativeCancel;
       if (state.panel === 'recovery') return;
       if (state.panel === 'management_requests') return;
       if (state.panel === 'executions') return;
@@ -2007,7 +2063,9 @@ function TuiSessionView({
   if (state.panel === 'rewind')
     return withHistory(<TuiFileRecoveryPanel controller={controller} />);
   if (blockingPanel === 'mcp')
-    return withHistory(<TuiMcpPanel key={state.sessionId} controller={controller} />);
+    return withHistory(
+      <TuiMcpPanel key={state.sessionId} controller={controller} onCancelTask={cancelTask} />,
+    );
   if (state.panel === 'theme' || state.panel === 'language')
     return withHistory(<TuiPreferencePanel key={state.panel} controller={controller} />);
   if (state.panel === 'status') return withHistory(<TuiStatusPanel controller={controller} />);
@@ -2357,7 +2415,28 @@ function TuiSessionView({
                         : 'Next task',
                     )}
               </Text>
-              <Text dimColor>{t('Context capacity estimate unavailable')}</Text>
+              {verifiedContext ? (
+                <Box flexDirection="column">
+                  <Text>
+                    {t('Verified Model context estimate:')}{' '}
+                    {verifiedContext.estimate.totalInputTokens.toLocaleString()}
+                  </Text>
+                  {verifiedContext.utilization !== undefined && (
+                    <Text>
+                      {t('Context usage:')} {Math.round(verifiedContext.utilization * 100)}%{' · '}
+                      {t('Usable input:')} {verifiedContext.usableInputTokens!.toLocaleString()}
+                    </Text>
+                  )}
+                  <Text dimColor>
+                    {t('Based on the last verified Model input; future input may differ.')}
+                  </Text>
+                  {verifiedContext.utilization === undefined && (
+                    <Text dimColor>{t('Context capacity estimate unavailable')}</Text>
+                  )}
+                </Box>
+              ) : (
+                <Text dimColor>{t('Context capacity estimate unavailable')}</Text>
+              )}
             </>
           )}
         </TuiOverlayFrame>

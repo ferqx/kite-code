@@ -6,7 +6,7 @@
 
 历史 Store9/11 确属旧数据库格式；其转换按 D08 不适用，对应旅程改验隔离的新 Store／Profile 的会话、重启和维护能力，不能将这些结果记作旧格式兼容；实际旧 State26 文件只作为不读取、不覆盖的隔离反例，遵守 D08。当前新 Store 的版本与维护恢复验证继续由正式测试负责。可选的旧 lifecycle 诊断 fixture 与 `in-process-service-connector` 尚属历史参考，不参与当前 52 个旅程，也不证明全 Runtime 资源或出生后代资格。当前完整执行结果归[进度](../docs/plans/unified-agent-refactor-v1-progress.md)，下面此前默认结果保持其原提交和范围。
 
-当前源码发现为 812 个默认测试文件／638 个正式作业（含 7 个 exclusive）；新增的有限换行语义叶与其余运行资格分别记录。完整库存已实际执行，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
+当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出；本轮新增上下文估算、实际主屏子任务布局与错误退出测试，当前为 816 个默认文件。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
 
 本轮原 TUI 迁移前最近完整默认为macOS `a99fdf29` 加当轮最终冻结改动的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1472.848秒，原四并发／604排空后7独占保持；4493输入、11资产、HEAD和Git零漂移。恢复Actions守卫、四份正式恢复、原Terminal／Web／80×24 TUI与Native头部错误／草稿完整文件均在该图内通过，原三轮失败及修复证据保留。准确冻结、原log与result归[集中收尾进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。最终结果归档仅补文档，不重新命名未变执行输入为新一轮测试；原RSS／完整资源与出生后代仍未闭合，wholeV13／phaseExit保持false，Win/Linux只有配置完成与未实测备注。
 
@@ -110,6 +110,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 原 PC 消息路径与常规摘要沿同一 Native 整窗口核首次／冷读、真实缺失文件拒绝、默认配置与 Provider 次数保持；隔离 original-entries DOM 核准确作用域、临时选择分离和原 Markdown 的预览／全文／关闭，文件端口另核已观察 Message、普通目标与派发前 frame。完整证据与未实际启动 OS 编辑器的边界归 [Native owner](../apps/desktop/README.md#原消息文件路径与常规摘要)。
 
 [恢复后 Native 文件消费者](../apps/desktop/test/isolated/native-restored-file-changes.test.ts)沿默认 Service 的真实 read/write/edit、公开 Fork/backup/restore，使用两个冷 Service 与实际 Node Main reader 核原 write/edit preview、五项 read/write/edit 目标和普通消息路径。外部当前文件变化不污染原差异；原 Run/Command/Execution/Message 和 metadata 保持，冷 GET 零重放，opener callback 只证明当前物理目标资格。原 Main 两个完整默认作业和三个原 DOM 文件保全部断言；新增身份换绑负例限同 revision 定义/结果变化，不扩已闭合物理路径或 frame 矩阵。原业务红、夹具权限失败、最终4274项冻结输入与实际结果见[恢复文件进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-文件历史与当前文件入口)。这不代证新恢复整窗口点击、OS 编辑器或阶段完整默认。
+
+原 TUI 补齐的源码对照与验证归 [TUI owner](../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)。新 [14 行主屏](../packages/ui/test/tui/subagent-layout-integration.test.tsx)通过普通 TuiSession 核真实并发子项预算；[错误页与真实 Host](../apps/cli/test/isolated/tui-render-failure-host.test.ts)核明确退出和所属 Service 收尾；[上下文估算](../packages/agent/test/context/context-estimate.test.ts)与 [Host 显示](../apps/cli/test/isolated/tui-display.test.ts)核准确原请求和容量来源。新增测试使用便携 Ink／PTY 端口，不以当前 macOS 执行代替 Win/Linux 系统资格。
 
 ## 默认执行与隔离
 
