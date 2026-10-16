@@ -913,7 +913,7 @@ export const schemas = {
     originStoreId: id,
     status: runStatus,
     isActive: z.boolean(),
-    waitingForResults: z.array(id).max(64).optional(),
+    waitingForResults: z.array(id).optional(),
     configuration: json.optional(),
     createdAt: z.number(),
     finishedAt: z.number().nullable(),
@@ -952,8 +952,8 @@ export const schemas = {
     modelRetry: z
       .object({
         previousExecutionId: id,
-        attempt: z.number().int().min(2).max(5),
-        maxAttempts: z.literal(5),
+        attempt: z.number().int().min(2),
+        maxAttempts: z.number().int().min(2).nullable(),
         reason: z.enum(['provider_unavailable', 'connection_failed', 'stream_incomplete']),
       })
       .optional(),

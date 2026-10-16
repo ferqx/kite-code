@@ -20,7 +20,7 @@ for (const rejectSummary of [false, true])
       workspace = join(root, 'workspace');
     mkdirSync(workspace);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
     const requests: Record<string, unknown>[] = [],
       summary = 'Summary of original answer and automatic next work';
     const provider = Bun.serve({
@@ -75,7 +75,7 @@ for (const rejectSummary of [false, true])
       }),
     };
     const host = createDefaultProcessConfiguration({
-      userConfigurationPath: profile.profilePath + '/config.jsonc',
+      userConfigurationPath: join(profile.profilePath, 'config.jsonc'),
       profile,
       compressor: slot,
       credentialBackend: createTemporaryCredentialBackend(),
@@ -88,8 +88,7 @@ for (const rejectSummary of [false, true])
     slot.shouldCompress = slot.validateSummary = async () => {
       throw Error('later_untrusted_override');
     };
-    const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile }),
-      expectedStoreId = (await store.getMetadata()).storeId;
+    const expectedStoreId = (await store.getMetadata()).storeId;
     const runtime = createRuntime({
         ...host,
         store,

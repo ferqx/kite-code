@@ -93,8 +93,10 @@ export function executionResponse(execution: ExecutionRecord) {
     typeof retry.attempt === 'number' &&
     Number.isInteger(retry.attempt) &&
     retry.attempt >= 2 &&
-    retry.attempt <= 5 &&
-    retry.maxAttempts === 5 &&
+    (retry.maxAttempts === null ||
+      (typeof retry.maxAttempts === 'number' &&
+        Number.isSafeInteger(retry.maxAttempts) &&
+        retry.maxAttempts >= retry.attempt)) &&
     ['provider_unavailable', 'connection_failed', 'stream_incomplete'].includes(
       String(retry.reason),
     )
@@ -103,7 +105,7 @@ export function executionResponse(execution: ExecutionRecord) {
           modelRetry: {
             previousExecutionId: retry.previousExecutionId,
             attempt: retry.attempt,
-            maxAttempts: 5 as const,
+            maxAttempts: retry.maxAttempts as number | null,
             reason: retry.reason,
           },
         }

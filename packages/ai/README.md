@@ -12,7 +12,7 @@
 
 测试使用带测试凭据的本地模拟 HTTP endpoint，证明传输映射与每次流尝试只发一个网络请求；不建立生产 Provider 兼容性、可用性或付费模型行为资格。
 
-[ModelAttemptError](src/model-attempt.ts)仅归一化已知传输中断、Provider unavailable 和流不完整的有限公开原因；不按远端正文猜失败或重试资格。SDK 每次仍是零内部重试；Agent 在真实原 Execution 已失败、关闭及来源资格保持时决定有限下一尝试，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。
+[ModelAttemptError](src/model-attempt.ts)仅归一化已知传输中断、SDK 明确标记可重试的 HTTP 故障（含 408／429／5xx）和流不完整的有限公开原因；不按远端正文猜失败或重试资格。SDK 每次仍是零内部重试；Agent 在真实原 Execution 已失败、关闭及来源资格保持时决定下一尝试，不设本地次数上限，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。Provider 的 `length` 原样交付 Core，由 Core 区分纯文本续接、截断工具批次和不可发布的截断摘要；AI 包不自行续轮。
 
 验证：`bun test packages/ai/test/` 和 `bun run --cwd packages/ai typecheck`。
 

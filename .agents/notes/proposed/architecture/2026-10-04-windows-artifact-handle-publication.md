@@ -10,7 +10,7 @@ Status: proposed
 
 保持公共 Artifact/Store API 与原 Profile/config FA 政策，新增 lazy Windows x64 内部媒体 leaf。当前 token SID、固定系统 DLL、原文件和保留目录 HANDLE 决定身份，调用者不能提供 HANDLE/SID/DACL。新建 temporary 使用 protected currentSID-only FA，逐块最多64KiB计数；只有这个新对象在发布前减权为精确 protected FR，已有对象一律核验而不修 ACL。
 
-以保留的 hash-prefix 目录 HANDLE 和相对 hash 执行 no-overwrite FileRenameInfo。只有明确 FILE_EXISTS/ALREADY_EXISTS 冲突能在完整 EOF/hash 验证后复用。原 writer flush/close 后再次全量核内容，才登记 SQL reference；SQL失败保 orphan。未发布 temporary 通过原 DELETE HANDLE清理，不恢复权限、不删除已发布对象。
+以保留的 hash-prefix 目录 HANDLE 和相对 hash，通过固定 System ntdll 的 NtSetInformationFile(FileRenameInformation=10) 执行 no-overwrite 发布。实际 Win32 wrapper 的 relative RootDirectory 形式返回 error 87；不改用路径移动。只有准确 STATUS_OBJECT_NAME_COLLISION 能在完整 EOF/hash 验证后复用，其余 NTSTATUS（含 pending）失败关闭。原 writer flush/close 后再次全量核内容，才登记 SQL reference；SQL失败保 orphan。未发布 temporary 通过原 DELETE HANDLE清理，不恢复权限、不删除已发布对象。
 
 reader 完成 EOF 时核完整 size/hash、原 HANDLE/路径 volume-file identity、change time、nlink1、regular/non-reparse 与精确 owner/DACL。提前 return、取消和异常也关闭文件及保留目录；close 排空真实在途 I/O。已取得的可信 publisher WRITE HANDLE可以完成 flush；该机制不防御同 owner 主动改ACL，范围与 POSIX owner主动chmod相当。
 
@@ -35,3 +35,7 @@ actual Windows x64必须执行原生完整正文、取消和close drain、真实
 Bun FFI和Windows x64 ABI仍待actual CI。FlushFileBuffers原文件回执与进程强杀不证明断电后的directory durability；本方案不声称SQLite与文件系统原子事务。ARM64尚unsupported，且该媒体政策不能被套用于普通Workspace或安装candidate根目录。原生HANDLE、读共享、碰撞错误码和所有失败关闭路径必须由实际平台证据核对。
 
 Windows维护文件端口现已接入原API与开发CLI，完整角色、原HANDLE/FD/SQL生命周期、发布屏障与未验范围见[维护提案](2026-10-07-windows-maintenance-file-publication.md)。本篇其余角色与安全理由保持，实际原生资格仍未取得。
+
+## 2026-10-15 本机原生补证
+
+[持续执行决定](../../implemented/architecture/2026-10-15-long-running-agent-continuation.md)的默认长上下文封存重现了上述 error87，现已保持原目录与 FR 合同切换到原生入口。完整 Windows Artifact 文件4 pass、1项POSIX-only skip、64断言，含SQL orphan、双进程同hash、完整冷读与两处准确所属进程强杀；硬链接攻击由owner先授权自身创建，再恢复原FR才断言nlink拒绝。默认SDK／Files／SQLite长任务2项26断言核已知／未知窗口和大输入封存。其余 installed、正式paired、完整资源、持续运行和断电证明仍未闭合，保留 proposed；不能由本机切片推导全部原生资格。

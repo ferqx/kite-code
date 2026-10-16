@@ -6,7 +6,7 @@
 
 原完整 TUI 旅程补齐的默认配置包括可信 explore／plan／code／review 子任务角色、前台 Task 的真实结果交付、内建计划完成指导、MCP 发现／资源工具和 Provider 配置向导。业务行为由 Agent 对应模块实现；Service 仅选择当前身份、配置、公共响应和装配。Model 失败／重试响应只公开实际失败前驱的有限字段，不公开完整 decisionSource 或凭据。
 
-已取得准入的 MCP 连接可把准确 Store／Session／Run／connection generation 作为只读 Model 来源；资源列表／读取仍使用原 Tool 和目录收据的严格绑定。Run 内认证通过普通 nested Action 与真实父 Tool 绑定，沿原 Actor、root work、权限及取消收束；没有直接绕过 Core 的 OAuth 执行入口。默认压缩资格统计真实用户任务，不把 user-role 来源附件或 Tool 往返误算成多轮用户对话。
+已取得准入的 MCP 连接可把准确 Store／Session／Run／connection generation 作为只读 Model 来源；资源列表／读取仍使用原 Tool 和目录收据的严格绑定。Run 内认证通过普通 nested Action 与真实父 Tool 绑定，沿原 Actor、root work、权限及取消收束；没有直接绕过 Core 的 OAuth 执行入口。默认压缩可在同一用户任务的已结算 Tool 边界发生，不要求额外用户轮次；user-role 来源附件仍不冒充用户输入。
 
 [默认配置](src/configuration.ts)读取实际 Profile、Workspace、当前身份和注册定义，装配唯一 Agent Runtime；固定内建能力效果和 Workflow 审批投影由[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一提供。正式 Run、恢复绑定与只读 Skill 目录共用工具版本校验和内建注册集合，各自的来源捕获、选中范围与资源释放时刻仍独立。Service 不维护第二份 Task、Shell、Files、Skills 或 Web 效果规则。
 
@@ -30,7 +30,11 @@ Context 提供 `POST /v1/sessions/{id}/context/compress` 和 `/context/compressi
 
 默认装配的 `createSummaryCompressor` 从公开 `/configuration` 导出，纯描述摘要请求；所有实际模型调用与发布仍由同一 Core 执行。宿主可明确选择一个可信 `compressor`，启动时绑定其 `prepare/shouldCompress/validateSummary/validateExpanded`，后来改对象或 JSONC 字段不能替换回调。多个候选冲突明确拒绝。`shouldCompress` 缺省不自动触发；`validateSummary` 可基于宿主准确模型事实拒绝真实输出，`validateExpanded` 必须明确返回 true 才允许清除活动点。默认算法没有准确 tokenizer/window 事实，不把字节量当 token，不宣称目标窗口资格。摘要在后续请求中按带准确 source ID 的低权限用户数据呈现，不获得 Tool 或审批权。
 
-[默认 compatible SDK 压缩](test/isolated/compression-configuration.test.ts)与[自动分支](test/isolated/compression-automatic-configuration.test.ts)共 5 项／125 条断言通过：45KiB 自定义说明完整进入实际请求、真实摘要与覆盖来源、后续 Model 精确采用摘要、可信摘要拒绝后的旧输入继续、两种 reset 预检、压缩/reset 物理丢 202 回复只查原命令且各一次 POST、冷只读零 Provider。该资格使用临时 profile、固定本地模型与临时凭据 backend；不代替真实模型压缩质量、目标窗口计数、正式调用者或平台验证。
+[默认 compatible SDK 压缩](test/isolated/compression-configuration.test.ts)与[自动分支](test/isolated/compression-automatic-configuration.test.ts)两个完整文件在本机 Windows x64/Bun 1.4.2 为 6 项／134 条断言通过，包含五个实际 SDK 场景与一个纯准备资格场景：45KiB 自定义说明完整进入实际请求、真实摘要与覆盖来源、后续 Model 精确采用摘要、可信摘要拒绝后的旧输入继续、两种 reset 预检、压缩/reset 物理丢 202 回复只查原命令且各一次 POST、冷只读零 Provider，以及单任务已结算 Tool 历史可压缩。Profile 由真实 Store 创建私有 ACL，不以 POSIX mkdir mode 代替 Windows 权限。该资格使用临时 profile、固定本地模型与临时凭据 backend，不代替真实模型压缩质量、目标窗口计数、正式调用者或完整平台资格。
+
+默认 Run binding 现按原选中模型元数据启用自动压缩：已知窗口扣除已知输出预留后的约 80% 估算水位触发，未知窗口使用 32768 个估算输入 token 作为维护触发点，均不拒绝普通执行。自定义可信 compressor 的显式手动／自动选择保留。用户模型条目的 `contextWindowTokens/maxOutputTokens` 进入冻结 `modelCapabilities`；工具 schema 同样参与触发估算。单个长任务可反复压缩，已知摘要失败后原工作继续，下一安全边界可重试；半份摘要和无法核实的发布不能生效。[默认长任务整例](test/isolated/long-running-compression.test.ts)以真实本地 SDK、Files 和 SQLite 验证已知／未知窗口、第一次摘要 HTTP 500、后续两次发布、原目标／历史／Run 与完整大输入封存。
+
+公共 `modelRetry` 接受无本地上限的 `maxAttempts:null` 和任意实际正 attempt；旧有限上界仍可读取。Service 不替 Core 决定重试次数，生成 Client/OpenAPI 与 TUI 显示同源更新。主／子 Run 的五次相同工具失败规则由唯一 Loop 负责，来源数量不再由装配层另设 256 门槛。权限、格式、namespace、真实来源 read-set 与未知效果守卫保持。
 
 实际 Model 输入读取入口为 `GET /v1/sessions/{id}/model-inputs?storeId=...` 和 `GET /v1/sessions/{id}/executions/{executionId}/model-input?storeId=...`。主体只由 Service 宿主提供，闭合 query 不接受 path、Artifact ref/hash 或 renderer 主体。目录需要准确 Session，每页最多 200 项的固定上界 keyset 可以取得第 201 次之后的调用；正文使用 Core 的原请求读取，不捕获现在来源、读取现在配置或调用 Model。大正文由 [model-input-response.ts](src/model-input-response.ts) 在原内容核实后分为 64KiB wire chunks，带完整 size/SHA，保留 no-store；Client 成功 EOF 核实后才发布全文，不以便利 JSON 大小静默裁剪。
 

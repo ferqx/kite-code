@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+2026-10-15：[持续执行决定](2026-10-15-long-running-agent-continuation.md)补充同工具／相同参数连续五次失败停止，并将普通 Task 并发调整为持久排队调度，移除配置的 28 上界。子 Run 从实际激活起固定 30 分钟、无限累计用量、准确父子血缘、权限、取消和未知效果的理由继续适用。
+
 新受理的独立首轮子 Run 和 `followup_task` 新轮各自在激活时开始最长 30 分钟执行期限。该期限是子 Run 唯一的累计资源上限；不再为其模型请求、turn、输入／输出 token、工具调用或 Artifact 字节分配有限累计额度。父 Run 发起委派的工具仍须通过并发和授权检查；发起方是有限子 Run 时仍核验其期限，主 Run 期限由[主 Run 期限移除决定](2026-09-30-primary-run-deadline-removed.md)取消；父 Run 的累计额度后来由[主 Run 累计额度移除决定](2026-09-30-run-cumulative-limits-removed.md)取消。`resources.maxConcurrentSubagents` 继续可配置，默认 3，公开范围 1–28；新委派的 `code` 子 Agent 不再另占写者额度，旧委派按持久额度执行。角色、策略、授权、审批、执行权限和未知外部效果的恢复规则继续生效。新子 Run 的受理、激活和结果结算仍需持久身份及可恢复证据。已有 v1 有限预算的子 Run／followup 按持久 grant 回放，不静默扩权或改写历史。
 
 本决定部分替代[累计资源治理决定](2026-07-30-cumulative-runtime-resource-governance.md)中把子 Agent 所有消耗计入父 Run 累计份额的范围。该决定的原子 reservation、并发许可、未知结果与准确终态原则继续适用；新主 Run 的累计数值范围又由上述 2026-09-30 决定替代。

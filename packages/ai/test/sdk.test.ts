@@ -372,9 +372,11 @@ test('compatible effort is frozen and transmitted once; unsupported bindings fai
   ).toThrow('invalid_model_options');
 });
 
-test('HTTP 500 is explicitly classified without hidden retry or leaking Provider details', async () => {
+test.each([
+  408, 429, 500, 502, 503, 504,
+])('HTTP %i is explicitly classified without hidden retry or leaking Provider details', async (status) => {
   const data = endpoint(
-    () => new Response(JSON.stringify({ error: { message: 'fixture-secret' } }), { status: 500 }),
+    () => new Response(JSON.stringify({ error: { message: 'fixture-secret' } }), { status }),
   );
   try {
     const result = await collect(data.adapter);

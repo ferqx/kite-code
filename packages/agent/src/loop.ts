@@ -1,11 +1,39 @@
 import type { ModelMessage, ModelRequest, ModelTool } from '@kite-ai/ai';
 import type { ModelResponse } from './execution';
 import type { ToolResult } from './extensions';
+import { canonicalJson } from './json';
 import { AgentError, type ToolCall } from './storage/types';
+
+/** A Run-local streak, retained across completion checks and reconstructed on resume. */
+export interface ToolFailureStreak {
+  signature: string | null;
+  count: number;
+}
+export function recordToolOutcome(
+  streak: ToolFailureStreak,
+  call: ToolCall,
+  result: ToolResult,
+): void {
+  if (result.outcome !== 'failed') {
+    streak.signature = null;
+    streak.count = 0;
+    return;
+  }
+  let parameters: string;
+  try {
+    parameters = canonicalJson(JSON.parse(call.arguments));
+  } catch {
+    parameters = call.arguments;
+  }
+  const signature = JSON.stringify([call.name, parameters]);
+  streak.count = streak.signature === signature ? streak.count + 1 : 1;
+  streak.signature = signature;
+}
 
 export interface LoopContext {
   readonly modelId: string;
   readonly signal: AbortSignal;
+  toolFailureStreak?: ToolFailureStreak;
   getMessages(): Promise<ModelMessage[]>;
   getTools(): readonly ModelTool[];
   executeModel(request: ModelRequest, stepId: string): Promise<ModelResponse>;
@@ -37,7 +65,11 @@ export interface LoopContext {
 
 /** The single model/tool loop for root and child Sessions. */
 export async function defaultLoop(context: LoopContext): Promise<void> {
+  context.toolFailureStreak ??= { signature: null, count: 0 };
+  const streak = context.toolFailureStreak;
+  if (streak.count >= 5) throw new AgentError('repeated_tool_failure');
   let checkpoint = context.checkpoint;
+  let continuation: string | undefined;
   context.checkpoint = undefined;
   while (true) {
     context.signal.throwIfAborted();
@@ -53,12 +85,31 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
               : {
                   modelId: context.modelId,
                   requestId: crypto.randomUUID(),
-                  messages: await context.getMessages(),
+                  messages: [
+                    ...(await context.getMessages()),
+                    ...(continuation
+                      ? [
+                          {
+                            role: 'user' as const,
+                            content:
+                              'The preceding Model response reached its output length. Continue the original task from the saved response; do not repeat completed work. This continuation grants no additional permission.',
+                            sourceIds: [continuation],
+                          },
+                        ]
+                      : []),
+                  ],
                   tools: context.getTools(),
                 },
             stepId,
           );
-    if (!response.toolCalls.length) return;
+    if (!response.toolCalls.length) {
+      if (response.finishReason === 'length') {
+        continuation = response.executionId;
+        continue;
+      }
+      return;
+    }
+    continuation = undefined;
     await context.prepareToolCalls?.(response.toolCalls);
     const batch = new AbortController();
     const abort = () => batch.abort(context.signal.reason);
@@ -70,6 +121,7 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
     let failed = false,
       failure: unknown;
     let outcomes: PromiseSettledResult<void>[] = [];
+    const results = new Map<string, ToolResult>();
     try {
       // Every started call reaches its durable boundary before the next Model, Run terminal or
       // binding release. A batch error stops siblings without rewriting the Run as user-cancelled.
@@ -84,6 +136,7 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
             const result =
               settled?.result ??
               (await context.executeTool(call, stepId, response.executionId, batch.signal));
+            results.set(call.id, result);
             if (settled) await context.restoreToolCall?.(call);
             if (result.content === 'approval_denied' && result.outcome === 'failed')
               throw new AgentError('approval_denied');
@@ -114,6 +167,12 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
       if (failures.length > 1)
         throw new AggregateError(failures, 'tool_batch_failed', { cause: failure });
       throw failure;
+    }
+    // Physical completion order can differ from the Model's call order. All started
+    // calls have settled before enforcing the limit or releasing the Run binding.
+    for (const call of response.toolCalls) {
+      recordToolOutcome(streak, call, results.get(call.id)!);
+      if (streak.count >= 5) throw new AgentError('repeated_tool_failure');
     }
   }
 }

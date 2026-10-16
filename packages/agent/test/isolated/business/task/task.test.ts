@@ -321,7 +321,7 @@ test('detached Task survives parent completion and exact cancel is requested the
   }
 }, 10000);
 
-test('default three Task slots fail the fourth before any child Session or Provider exists', async () => {
+test('default three Task slots queue the fourth without rejecting accepted work or starting its deadline early', async () => {
   const gate = gateModel();
   const reusable: ModelAdapter = {
     async *stream(request) {
@@ -347,15 +347,13 @@ test('default three Task slots fail the fourth before any child Session or Provi
     const carriers = (await f.store.listExecutions('s')).filter(
       (execution) => execution.childSessionId,
     );
-    expect(carriers).toHaveLength(3);
+    expect(carriers).toHaveLength(4);
     const rejectedTask = (await f.store.listExecutions('s'))
       .filter((execution) => execution.definitionId === 'task')
       .at(-1)!;
-    expect(rejectedTask.status).toBe('failed');
+    expect(rejectedTask.status).toBe('succeeded');
     expect(rejectedTask.result).toMatchObject({
-      outcome: 'failed',
-      content: 'child_capacity_full',
-      details: { childCreated: false },
+      outcome: 'succeeded',
     });
     expect(
       await f.store.getExtensionRecord({
@@ -363,21 +361,24 @@ test('default three Task slots fail the fourth before any child Session or Provi
         extensionId: 'builtin.task',
         key: 'task/child4',
       }),
-    ).toBeNull();
+    ).not.toBeNull();
     const Database = (await import('bun:sqlite')).Database;
     const db = new Database(join(f.directory, 'data', 'test', 'core.db'), { readonly: true });
     try {
       expect(
         (db.query("SELECT count(*) AS n FROM session WHERE parent_id='s'").get() as { n: number })
           .n,
-      ).toBe(3);
+      ).toBe(4);
     } finally {
       db.close();
     }
     const views = await Promise.all(
       carriers.map((carrier) => f.store.getView(carrier.childSessionId!)),
     );
-    expect(views.every((view) => view.runs.length === 1 && view.runs[0]?.isActive)).toBe(true);
+    expect(views.filter((view) => view.runs.length === 1 && view.runs[0]?.isActive)).toHaveLength(
+      3,
+    );
+    expect(views.filter((view) => view.runs.length === 0)).toHaveLength(1);
     expect(
       views.reduce(
         (count, view) =>
@@ -388,6 +389,16 @@ test('default three Task slots fail the fourth before any child Session or Provi
         0,
       ),
     ).toBe(3);
+    gate.release();
+    const until = Date.now() + 5000;
+    for (;;) {
+      const completed = await Promise.all(
+        carriers.map((carrier) => f.store.getView(carrier.childSessionId!)),
+      );
+      if (completed.every((view) => view.runs[0]?.status === 'completed')) break;
+      if (Date.now() > until) throw Error('queued child did not complete');
+      await Bun.sleep(5);
+    }
   } finally {
     gate.release();
     await f.close();

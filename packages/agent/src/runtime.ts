@@ -42,13 +42,8 @@ import { sealForkRule } from './extensions/fork';
 import { type PublicForkInput, prepareNamespaceFork } from './extensions/fork-preparation';
 import { ExtensionHost } from './extensions/host';
 import { canonicalJson, semanticDigest } from './json';
-import { defaultLoop, type LoopContext } from './loop';
-import {
-  MODEL_MAX_ATTEMPTS,
-  type ModelRetrySource,
-  modelRetryReason,
-  waitForModelRetry,
-} from './model-attempt';
+import { defaultLoop, type LoopContext, recordToolOutcome, type ToolFailureStreak } from './loop';
+import { type ModelRetrySource, modelRetryReason, waitForModelRetry } from './model-attempt';
 import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './model-body';
 import { assembleModelContext, modelHistory } from './model-context';
 import { modelOutputReference, readModelOutput } from './model-output';
@@ -306,6 +301,7 @@ type RunBinding = {
 };
 type RunExecutionCheckpoint = {
   loop?: LoopContext['checkpoint'];
+  toolFailureStreak?: ToolFailureStreak;
   plannedModel?: ExecutionRecord;
   plannedTools: ReadonlyMap<string, ExecutionRecord>;
   modelRequest?: ModelRequest;
@@ -868,8 +864,7 @@ export class AgentRuntime {
     return { accepted: true, state: this.getLifecycleState(), completion: this.closeTask };
   }
   private childLimit(value = this.options.maxConcurrentSubagents ?? 3) {
-    if (!Number.isInteger(value) || value < 1 || value > 28)
-      throw new AgentError('invalid_child_capacity');
+    if (!Number.isSafeInteger(value) || value < 1) throw new AgentError('invalid_child_capacity');
     return value;
   }
   private selectedTools(
@@ -2482,6 +2477,7 @@ export class AgentRuntime {
     const request = (await this.readModelInput({ ...scope, executionId: last.id, signal })).request;
     result.modelRequest = request;
     const requests = new Map<string, SourceRequest>();
+    const streak: ToolFailureStreak = { signature: null, count: 0 };
     let afterRowid = '0';
     for (;;) {
       signal.throwIfAborted();
@@ -2496,6 +2492,12 @@ export class AgentRuntime {
         if (BigInt(item.cursor) <= BigInt(afterRowid))
           throw new AgentError('resume_checkpoint_unavailable');
         afterRowid = item.cursor;
+        const priorExecution = await this.options.store.getExecution(item.executionId);
+        if (
+          priorExecution?.status === 'failed' &&
+          (priorExecution.result as Record<string, Json> | null)?.incomplete === true
+        )
+          continue;
         const prior = await this.readModelOutput({
           ...scope,
           executionId: item.executionId,
@@ -2503,13 +2505,59 @@ export class AgentRuntime {
         });
         if (!prior.output.complete || prior.runId !== state.run.id)
           throw new AgentError('resume_checkpoint_unavailable');
+        if (
+          (priorExecution?.result as Record<string, Json> | null)?.finishReason === 'length' &&
+          (prior.output.toolCalls.length || !prior.output.content.trim())
+        )
+          throw new AgentError('resume_checkpoint_unavailable');
+        const priorTools = new Map<string, ExecutionRecord>();
+        if (prior.output.toolCalls.length) {
+          let cursor = '0';
+          for (;;) {
+            const tools = await this.options.store.readRunResumeExecutionPage({
+              ...scope,
+              runId: state.run.id,
+              modelExecutionId: item.executionId,
+              kind: 'model_tools',
+              afterRowid: cursor,
+            });
+            for (const tool of tools.items) {
+              const execution = await this.options.store.getExecution(tool.executionId);
+              if (execution?.kind !== 'tool' || execution.runId !== state.run.id)
+                throw new AgentError('resume_checkpoint_unavailable');
+              priorTools.set(execution.callId, execution);
+              cursor = tool.cursor;
+            }
+            if (tools.nextCursor === null) break;
+            if (!tools.items.length || tools.nextCursor !== cursor)
+              throw new AgentError('resume_checkpoint_unavailable');
+          }
+        }
         for (const call of prior.output.toolCalls) {
+          const tool = priorTools.get(call.id);
+          if (!tool || !['succeeded', 'failed', 'cancelled'].includes(tool.status))
+            throw new AgentError('resume_checkpoint_unavailable');
           let input: Json = null;
           try {
             input = JSON.parse(call.arguments) as Json;
           } catch {
             /* Original invalid call remains a known result. */
           }
+          const decision = tool.decisionSource as Record<string, Json>;
+          if (
+            tool.definitionId !== call.name ||
+            decision.modelExecutionId !== item.executionId ||
+            canonicalJson(tool.input) !== canonicalJson(input) ||
+            !tool.result ||
+            typeof tool.result !== 'object' ||
+            Array.isArray(tool.result)
+          )
+            throw new AgentError('resume_checkpoint_unavailable');
+          recordToolOutcome(
+            streak,
+            call,
+            tool.result as unknown as import('./extensions').ToolResult,
+          );
           requests.set(`${call.name}:${await semanticDigest(input)}`, {
             sessionId: state.run.sessionId,
             workspaceId: state.session.workspaceId,
@@ -2523,6 +2571,7 @@ export class AgentRuntime {
         throw new AgentError('resume_checkpoint_unavailable');
     }
     result.sourceRequests = [...requests.values()];
+    result.toolFailureStreak = streak;
     if (last.status === 'planned') {
       result.plannedModel = last;
       result.loop = { kind: 'model', request, stepId: last.stepId };
@@ -2531,6 +2580,11 @@ export class AgentRuntime {
     if (last.status !== 'succeeded') throw new AgentError('resume_checkpoint_unavailable');
     const output = (await this.readModelOutput({ ...scope, executionId: last.id, signal })).output;
     if (!output.complete) throw new AgentError('resume_checkpoint_unavailable');
+    if (
+      (last.result as Record<string, Json> | null)?.finishReason === 'length' &&
+      (output.toolCalls.length || !output.content.trim())
+    )
+      throw new AgentError('resume_checkpoint_unavailable');
     const candidates = new Map<string, ExecutionRecord[]>();
     afterRowid = '0';
     for (;;) {
@@ -2609,6 +2663,9 @@ export class AgentRuntime {
         toolCalls: output.toolCalls,
         usage: {},
         executionId: last.id,
+        finishReason: (last.result as Record<string, Json> | null)?.finishReason as
+          | string
+          | undefined,
       },
       settledCalls: settled,
     };
@@ -4285,8 +4342,7 @@ export class AgentRuntime {
         const sources = new Map<string, ContextSource>();
         const requestList = [...requests].map((request) => ({ ...request, runId: run.id }));
         const addHostSources = (hostSources: ContextSource[]) => {
-          if (!Array.isArray(hostSources) || hostSources.length > 256)
-            throw new AgentError('context_source_budget_exceeded');
+          if (!Array.isArray(hostSources)) throw new AgentError('context_source_invalid');
           addSources(hostSources);
         };
         const addSources = (values: ContextSource[]) => {
@@ -4296,7 +4352,6 @@ export class AgentRuntime {
             if (previous && previous.digest !== source.digest)
               throw new AgentError('context_refresh_required');
             sources.set(source.id, source);
-            if (sources.size > 256) throw new AgentError('context_source_budget_exceeded');
           }
         };
         if (configuredSources?.captureBatch)
@@ -4315,7 +4370,6 @@ export class AgentRuntime {
           if (sources.has(continuationSource.id))
             throw new AgentError('context_source_namespace_collision');
           sources.set(continuationSource.id, continuationSource);
-          if (sources.size > 256) throw new AgentError('context_source_budget_exceeded');
         }
         const result = [...sources.values()].sort((a, b) => a.id.localeCompare(b.id));
         return result;
@@ -4348,7 +4402,12 @@ export class AgentRuntime {
                 messages: originalMessages as unknown as Json,
               })
             : undefined;
-        if (fingerprint && fingerprint === lastAutomaticFailure) return false;
+        if (fingerprint && fingerprint === lastAutomaticFailure) {
+          // Yield one ordinary decision boundary after a failed attempt. A temporary
+          // interruption must not permanently poison an otherwise unchanged context.
+          lastAutomaticFailure = undefined;
+          return false;
+        }
         let stage: 'pure' | 'model' | 'store' = 'pure';
         let attemptedExecutionId: string | undefined;
         let providerFailure: unknown;
@@ -4576,6 +4635,7 @@ export class AgentRuntime {
       };
       let toolAdmission: ReturnType<typeof createToolDispatchBatch> | undefined;
       const loopContext: LoopContext = {
+        toolFailureStreak: resumed?.toolFailureStreak,
         checkpoint: resumed?.loop,
         modelId,
         signal: controller.signal,
@@ -4621,7 +4681,7 @@ export class AgentRuntime {
               );
             } catch (error) {
               const retryReason = modelRetryReason(error);
-              if (retryReason && providerAttempt < MODEL_MAX_ATTEMPTS) {
+              if (retryReason) {
                 controller.signal.throwIfAborted();
                 const previous = await this.options.store.getExecution(current.requestId);
                 controller.signal.throwIfAborted();
@@ -4645,11 +4705,16 @@ export class AgentRuntime {
                 modelRetry = {
                   previousExecutionId: previous.id,
                   attempt: providerAttempt,
-                  maxAttempts: MODEL_MAX_ATTEMPTS,
+                  maxAttempts: null,
                   reason: retryReason,
                 };
                 await waitForModelRetry(providerAttempt, controller.signal);
-                current = { ...current, requestId: crypto.randomUUID() };
+                current = {
+                  ...current,
+                  requestId: crypto.randomUUID(),
+                  messages: await messages(),
+                  tools: modelTools(),
+                };
                 attempt++;
                 continue;
               }
@@ -4663,11 +4728,7 @@ export class AgentRuntime {
                 ].includes(error.code)
               )
                 throw error;
-              if (
-                ['context_refresh_required', 'capability_refresh_required'].includes(error.code) &&
-                attempt > 0
-              )
-                throw error;
+              await waitForModelRetry(attempt + 2, controller.signal);
               controller.signal.throwIfAborted();
               current = {
                 ...request,
@@ -4865,7 +4926,6 @@ export class AgentRuntime {
         await compress(await messages(), 'manual');
         return;
       }
-      const completionKeys = new Map<string, string>();
       complete: while (true) {
         await this.options.store.setRunResultWait({
           expectedStoreId: run.originStoreId,
@@ -4948,10 +5008,6 @@ export class AgentRuntime {
             if (!directive) continue;
             if (typeof directive.key !== 'string' || !directive.key || directive.key.length > 512)
               throw new AgentError('completion_directive_invalid');
-            const key = `${extension.id}:${directive.key}`;
-            if (completionKeys.get(extension.id) === key)
-              throw new AgentError('necessary_condition_unsatisfied');
-            completionKeys.set(extension.id, key);
             if (directive.kind === 'continue') {
               if (
                 typeof directive.content !== 'string' ||
@@ -5058,11 +5114,7 @@ export class AgentRuntime {
           const ids = [
             ...new Set(blocked.flatMap((evaluation) => evaluation.wait?.executionIds ?? [])),
           ];
-          if (
-            blocked.some((evaluation) => !evaluation.wait?.executionIds.length) ||
-            !ids.length ||
-            ids.length > 64
-          ) {
+          if (blocked.some((evaluation) => !evaluation.wait?.executionIds.length) || !ids.length) {
             if (resultChanged) continue complete;
             throw new AgentError('necessary_condition_unsatisfied');
           }
@@ -5137,6 +5189,19 @@ export class AgentRuntime {
             cause instanceof AgentError &&
             !(error instanceof AggregateError && cause === error.cause),
         ) ?? errors.find((cause) => cause instanceof AgentError);
+      if (failure instanceof AgentError && failure.code === 'repeated_tool_failure') {
+        const root = await this.options.store.getSession(owner.sessionId);
+        if (root?.ownerInstanceId === owner.instanceId && root.ownerGeneration === owner.generation)
+          await this.options.store.cancelWork({
+            expectedStoreId: run.originStoreId,
+            commandId: `tool-failure-${run.id}`,
+            sessionId: run.sessionId,
+            subjectId: command.subjectId,
+            kind: 'run.cancel',
+            runId: run.id,
+          });
+        controller.abort(failure);
+      }
       await this.options.store.finishRun({
         expectedStoreId: command.originStoreId,
         owner,

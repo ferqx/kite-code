@@ -1,5 +1,5 @@
-import { appendFileSync } from 'node:fs';
-import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { type ModelAdapter, ModelAttemptError, type ModelEvent } from '@kite-ai/ai';
 import type { Extension } from '../../../src/extensions';
 import type { RunConfiguration } from '../../../src/runtime';
 
@@ -20,7 +20,36 @@ export function binding(directory: string, mode: string): RunConfiguration {
       )
         throw Error('sealed large source not rehydrated');
       appendFileSync(`${directory}/ledger`, `model:${request.requestId}\n`);
-      if (mode === 'completion' || request.messages.at(-1)?.role === 'tool') {
+      if (mode.startsWith('length_')) {
+        const hasSegment = request.messages.some(
+          (message) => message.content === 'saved length segment',
+        );
+        if (!hasSegment) {
+          yield { type: 'text_delta', text: 'saved length segment' };
+          yield { ...finish, reason: 'length' };
+          return;
+        }
+        if (
+          mode !== 'length_history' ||
+          request.messages.some((message) => message.role === 'tool')
+        ) {
+          yield { type: 'text_delta', text: 'done' };
+          yield finish;
+          return;
+        }
+      }
+      if (
+        mode.startsWith('retry_') &&
+        readFileSync(`${directory}/ledger`, 'utf8')
+          .split('\n')
+          .filter((line) => line.startsWith('model:')).length === 1
+      )
+        throw new ModelAttemptError('provider_unavailable');
+      if (
+        mode === 'completion' ||
+        mode.startsWith('retry_') ||
+        (mode !== 'repeat_failure' && request.messages.at(-1)?.role === 'tool')
+      ) {
         yield { type: 'text_delta', text: 'done' };
         yield finish;
       } else {
@@ -56,7 +85,10 @@ export function binding(directory: string, mode: string): RunConfiguration {
             `${directory}/ledger`,
             `effect:${(input as { value: string }).value.length}\n`,
           );
-          return { outcome: 'succeeded', content: 'effect done' };
+          return {
+            outcome: mode === 'repeat_failure' ? 'failed' : 'succeeded',
+            content: 'effect done',
+          };
         },
       },
     ],

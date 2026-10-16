@@ -25,7 +25,7 @@ function fixture() {
             qwen: {
               baseURL: 'http://127.0.0.1:1234/v1',
               apiKey: 'OWNED_QWEN_KEY',
-              models: [{ name: 'other', maxOutputTokens: 2000 }],
+              models: [{ name: 'other', contextWindowTokens: 128000, maxOutputTokens: 2000 }],
               modelKwargs: { temperature: 0.3 },
             },
           },
@@ -59,6 +59,10 @@ test('one user file projects existing provider aliases and selection without exp
     expect(view.value.modelId).toBe(models[0]!.id);
     expect(models[2]!.provider).toBe('compatible');
     expect(models[2]!.options).toEqual({ maxOutputTokens: 2000, temperature: 0.3 });
+    expect(models[2]!.modelCapabilities).toEqual({
+      contextWindowTokens: 128000,
+      maxOutputTokens: 2000,
+    });
     expect(JSON.stringify(view.value)).not.toContain('OWNED_');
     expect(f.source.resolveCredential(String(models[0]!.credentialRef))).toBe('OWNED_PRIVATE_KEY');
     expect(
@@ -95,7 +99,11 @@ test('switch and default writes preserve the existing schema, comments, metadata
     expect(saved.model).toBe('qwen:other');
     expect(saved.disabledModels).toEqual([{ provider: 'deepseek', name: 'second' }]);
     expect(saved.provider.deepseek.apiKey).toBe('OWNED_PRIVATE_KEY');
-    expect(saved.provider.qwen.models[0]).toEqual({ name: 'other', maxOutputTokens: 2000 });
+    expect(saved.provider.qwen.models[0]).toEqual({
+      name: 'other',
+      contextWindowTokens: 128000,
+      maxOutputTokens: 2000,
+    });
     expect(saved.theme).toBe('dark');
     expect(saved.models).toBeUndefined();
     expect(saved.modelId).toBeUndefined();

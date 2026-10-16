@@ -36,7 +36,6 @@ export class ChildSlots {
       group.used++;
       return this.release(key, group);
     }
-    if (group.waiters.length >= 256) throw new AgentError('child_queue_full');
     const current = group;
     return new Promise((resolve, reject) => {
       const waiter: Waiter = {

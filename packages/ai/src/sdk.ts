@@ -259,10 +259,10 @@ export function createSdkModelAdapter(options: {
       } catch (error) {
         signal.throwIfAborted();
         if (ModelAttemptError.isInstance(error)) throw error;
-        if (APICallError.isInstance(error) && error.statusCode === 500)
-          throw new ModelAttemptError('provider_unavailable');
-        if (APICallError.isInstance(error) && error.statusCode === undefined && error.isRetryable)
-          throw new ModelAttemptError('connection_failed');
+        if (APICallError.isInstance(error) && error.isRetryable)
+          throw new ModelAttemptError(
+            error.statusCode === undefined ? 'connection_failed' : 'provider_unavailable',
+          );
         if (error instanceof TypeError) {
           const code = (error as TypeError & { code?: unknown }).code;
           const cause = error.cause;

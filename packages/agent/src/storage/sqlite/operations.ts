@@ -1770,7 +1770,6 @@ export class SqliteOperations {
           const ids = (args[0] as Parameters<Store['setRunResultWait']>[0]).executionIds;
           if (
             !Array.isArray(ids) ||
-            ids.length > 64 ||
             new Set(ids).size !== ids.length ||
             ids.some((id) => typeof id !== 'string' || !id || id.length > 256)
           )

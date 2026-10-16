@@ -289,7 +289,7 @@ test('scoped business context reaches Model as user data; same-decision record c
   }
 });
 
-test('invalid contribution namespace, collisions and finite source budgets fail before Model or Tool effects', async () => {
+test('complete contributions exceed old count limits while invalid namespace, format and collisions fail before effects', async () => {
   for (const mode of ['prefix', 'collision', 'count', 'aggregate', 'format'] as const) {
     let effects = 0;
     const source = (id: string): ContextSource => ({
@@ -340,7 +340,7 @@ test('invalid contribution namespace, collisions and finite source budgets fail 
         : [ext];
     const f = await fixture(
       aggregate,
-      [calls('fixture.effect')],
+      [calls('fixture.effect'), [finish]],
       mode === 'collision'
         ? {
             sources: {
@@ -354,6 +354,14 @@ test('invalid contribution namespace, collisions and finite source budgets fail 
     try {
       await f.submit('work');
       const run = await f.done('work');
+      if (mode === 'count' || mode === 'aggregate') {
+        expect(run!.status).toBe('completed');
+        expect(effects).toBe(1);
+        expect(
+          f.model.requests[0]!.messages.filter((message) => message.content === 'bounded'),
+        ).toHaveLength(mode === 'count' ? 129 : 257);
+        continue;
+      }
       expect(run!.status).toBe('failed');
       expect(effects).toBe(0);
       expect(f.model.requests).toHaveLength(0);
@@ -365,7 +373,7 @@ test('invalid contribution namespace, collisions and finite source budgets fail 
             ? 'extension_source_namespace_mismatch'
             : mode === 'collision'
               ? 'context_refresh_required'
-              : 'context_source_budget_exceeded',
+              : 'context_refresh_required',
       );
     } finally {
       await f.close();
@@ -593,7 +601,7 @@ test('checkpoint batches preserve distinct Tool inputs and refreshed business fa
   }
 });
 
-test('batch contributions retain namespace, finite sources, conflicting digest and original Session admission', async () => {
+test('batch contributions retain complete sources, namespace, conflicting digest and original Session admission', async () => {
   for (const mode of ['namespace', 'count', 'collision', 'session'] as const) {
     let batches = 0;
     const source = (id: string): ContextSource => ({
@@ -638,6 +646,15 @@ test('batch contributions retain namespace, finite sources, conflicting digest a
     try {
       await f.submit(`batch-${mode}`);
       const run = await f.done(`batch-${mode}`);
+      if (mode === 'count') {
+        expect(run!.status).toBe('completed');
+        expect(
+          f.model.requests[0]!.messages.filter((message) =>
+            message.sourceIds?.some((id) => id.startsWith('fixture:')),
+          ),
+        ).toHaveLength(129);
+        continue;
+      }
       if (mode === 'session') {
         expect(run!.status).toBe('completed');
         expect(
@@ -666,11 +683,7 @@ test('batch contributions retain namespace, finite sources, conflicting digest a
       } else {
         expect(run!.status).toBe('failed');
         expect(run!.reason).toBe(
-          mode === 'namespace'
-            ? 'extension_source_namespace_mismatch'
-            : mode === 'count'
-              ? 'context_source_budget_exceeded'
-              : 'context_refresh_required',
+          mode === 'namespace' ? 'extension_source_namespace_mismatch' : 'context_refresh_required',
         );
         expect(f.model.requests).toHaveLength(0);
         expect(await f.store.listExecutions('s')).toHaveLength(0);

@@ -73,12 +73,7 @@ export function registerRunRequirementsWork(
   input: Parameters<Store['registerRunRequirements']>[0],
 ): RunRecord {
   db.identity(input.expectedStoreId);
-  if (
-    !Array.isArray(input.requirements) ||
-    input.requirements.length > 64 ||
-    Buffer.byteLength(canonicalJson(input.requirements as unknown as Json)) > 32 * 1024
-  )
-    throw new AgentError('requirement_limit');
+  if (!Array.isArray(input.requirements)) throw new AgentError('invalid_requirement');
   const run = db.row('SELECT * FROM run WHERE id=?', input.runId);
   if (!run) throw new AgentError('run_not_found');
   db.active(input.owner, String(run.origin_command_id), input.runId);
@@ -147,8 +142,6 @@ export function registerRunRequirementsWork(
     refs.push(ref);
     changed = true;
   }
-  if (refs.length > 64 || Buffer.byteLength(canonicalJson(refs as unknown as Json)) > 32 * 1024)
-    throw new AgentError('requirement_limit');
   if (changed) {
     db.run(
       'UPDATE run SET requirements_json=? WHERE id=?',

@@ -147,16 +147,32 @@ function scope(
     }
     if (e.run_id === input.runId && e.kind === 'model' && e.state !== 'planned') {
       const result = parse(e.result_json) as Record<string, Json> | null;
-      if (
-        e.state !== 'succeeded' ||
-        !result ||
-        typeof result.content !== 'string' ||
-        !['stop', 'tool_calls'].includes(String(result.finishReason)) ||
-        !Array.isArray(result.toolCalls)
-      )
+      if (!result || typeof result.content !== 'string')
         throw new AgentError('run_resume_checkpoint_unavailable');
-      if (result.modelOutput && !(result.modelOutput as Record<string, Json>).complete)
-        throw new AgentError('run_resume_checkpoint_unavailable');
+      if (e.state === 'failed') {
+        // A closed incomplete attempt is historical data, never a dispatch checkpoint.
+        // No Tool or Job may have been derived from that incomplete Model decision.
+        if (
+          result.incomplete !== true ||
+          e.cancel_requested ||
+          db.row(
+            "SELECT id FROM execution WHERE session_id=? AND kind IN('tool','job') AND (step_id=? OR json_extract(decision_source_json,'$.modelExecutionId')=?) LIMIT 1",
+            input.sessionId,
+            e.step_id!,
+            e.id!,
+          )
+        )
+          throw new AgentError('run_resume_checkpoint_unavailable');
+      } else {
+        if (
+          e.state !== 'succeeded' ||
+          !['stop', 'tool_calls', 'length'].includes(String(result.finishReason)) ||
+          !Array.isArray(result.toolCalls) ||
+          (result.finishReason === 'length' && result.toolCalls.length !== 0) ||
+          (result.modelOutput && !(result.modelOutput as Record<string, Json>).complete)
+        )
+          throw new AgentError('run_resume_checkpoint_unavailable');
+      }
     }
     if (e.state === 'planned') {
       planned.push({ row: e, position: count });
@@ -168,7 +184,11 @@ function scope(
       lastPosition = count;
     }
   }
-  if (plannedModels > 1 || (plannedModels && last?.state !== 'planned'))
+  if (
+    plannedModels > 1 ||
+    (plannedModels && last?.state !== 'planned') ||
+    (last && !['planned', 'succeeded'].includes(String(last.state)))
+  )
     throw new AgentError('run_resume_checkpoint_unavailable');
   if (run.initialization_state === 'started' || (run.initialization_state === 'unstarted' && count))
     throw new AgentError('run_initialization_incomplete');
