@@ -367,6 +367,7 @@ export function Conversation({
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
   const restoredExpanded = useRef(
     new Set(
@@ -443,19 +444,14 @@ export function Conversation({
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element || loading || typeof ResizeObserver === 'undefined') return;
-    let frame: number | undefined;
     const observer = new ResizeObserver(() => {
-      if (!reading.current.follow || frame !== undefined) return;
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        if (reading.current.follow) element.scrollTop = element.scrollHeight;
-      });
+      // Child-local body reads and collapse animations do not commit Conversation.
+      // ResizeObserver runs before paint; delaying this write exposes the old tail for a frame.
+      if (reading.current.follow) element.scrollTop = element.scrollHeight;
     });
     observer.observe(element);
-    return () => {
-      observer.disconnect();
-      if (frame !== undefined) cancelAnimationFrame(frame);
-    };
+    if (content.current) observer.observe(content.current);
+    return () => observer.disconnect();
   }, [loading]);
   // After each content/layout commit, follow only while the reader is at the bottom.
   useLayoutEffect(() => {
@@ -922,7 +918,7 @@ export function Conversation({
             },
           }}
         >
-          <div className="reading-column">
+          <div ref={content} className="reading-column">
             {!loading &&
               (!entries.length ? (
                 <div className="welcome">

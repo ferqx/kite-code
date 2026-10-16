@@ -64,6 +64,7 @@ function fixture(activeParent = false) {
     revision = 1,
     holdNext = false,
     holdParent = false,
+    failParent = false,
     permissionUnavailable = false;
   let releaseHeld: (() => void) | undefined;
   let selectedEnvironmentRevision: number | undefined;
@@ -140,7 +141,14 @@ function fixture(activeParent = false) {
             workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
           };
         case 'messages': {
-          const result = { messages: [parentMessage], nextAfterSeq: null, highWaterSeq: '1' };
+          if (failParent) {
+            throw Error('history_read_failed');
+          }
+          const result = {
+            messages: [{ ...parentMessage }],
+            nextAfterSeq: null,
+            highWaterSeq: '1',
+          };
           if (holdParent) {
             holdParent = false;
             return new Promise<NativeResult>((resolve) => {
@@ -306,6 +314,9 @@ function fixture(activeParent = false) {
     holdParent: () => {
       holdParent = true;
     },
+    failParent: (value = true) => {
+      failParent = value;
+    },
     releaseParent: () => act(async () => releaseParent?.()),
     edit: (text: string) =>
       act(async () => {
@@ -327,6 +338,13 @@ function fixture(activeParent = false) {
       childText = text;
       revision++;
       if (selectedEnvironmentRevision !== undefined) selectedEnvironmentRevision++;
+      await act(async () => {
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+    },
+    updateParent: async (text: string) => {
+      parentMessage.content = text;
+      revision++;
       await act(async () => {
         for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
       });
@@ -367,6 +385,63 @@ test('live child navigation pauses parent history, updates the active child and 
     expect(f.requests.filter((request) => request.method === 'messages').length).toBeGreaterThan(
       parentReads,
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('repeated reply calibrations retain the footer controls and transcript DOM while real history failures remain visible', async () => {
+  const f = fixture(true);
+  try {
+    await f.render();
+    await f.click('Original');
+    const viewport = f.host.querySelector('.conversation-viewport'),
+      message = f.host.querySelector('.message.assistant'),
+      input = f.host.querySelector('textarea'),
+      permission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]');
+    expect(permission).not.toBeNull();
+    expect(permission!.disabled).toBe(false);
+    const footerText = f.host.querySelector('.conversation-footer')!.textContent;
+    for (let index = 0; index < 8; index++) {
+      f.holdParent();
+      const text = `Parent transcript reply update ${index}`;
+      await f.updateParent(text);
+      expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
+      expect(f.host.querySelector('.message.assistant') === message).toBe(true);
+      expect(f.host.querySelector('textarea') === input).toBe(true);
+      expect(f.host.querySelector('[data-permission-trigger]') === permission).toBe(true);
+      expect(permission!.disabled).toBe(true);
+      expect(message!.textContent).not.toContain(text);
+      expect(f.host.querySelector('.conversation-footer')!.textContent).toBe(footerText);
+      await f.releaseParent();
+      expect(f.host.querySelector('[data-permission-trigger]') === permission).toBe(true);
+      expect(permission!.disabled).toBe(false);
+      expect(f.host.querySelector('.message.assistant') === message).toBe(true);
+      expect(message!.textContent).toContain(text);
+      expect(f.host.querySelector('.conversation-footer')!.textContent).toBe(footerText);
+    }
+    f.failParent();
+    await f.update('failed read');
+    expect(f.host.textContent).toContain('历史尚未完整校准');
+    expect(f.host.textContent).toContain('Parent transcript');
+    expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
+      true,
+    );
+    f.failParent(false);
+    await f.click('重新加载会话');
+    expect(f.host.textContent).not.toContain('历史尚未完整校准');
+    expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
+      false,
+    );
+    await f.unavailable(true);
+    expect(f.host.querySelector('[aria-label="当前会话后台状态"]')!.textContent).toContain(
+      '上次确认状态',
+    );
+    expect(
+      f.requests.some((request) =>
+        ['submit', 'caller.prepare', 'caller.submit', 'permission.mode'].includes(request.method),
+      ),
+    ).toBe(false);
   } finally {
     await f.close();
   }

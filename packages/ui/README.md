@@ -101,7 +101,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 桌面 `SessionPage` 的[阅读状态缓存](src/desktop/reading-state.ts)只保存滚动与展开数据，最多32项、256KiB估算载荷、每项512个展开ID；保存时裁剪当前消息中已不存在的展开项。`Conversation`一次建立各轮运行工具和thinking集合，避免每轮重扫全部消息。切换仍卸载原消息DOM和effect，不保活全部会话树；[阅读缓存回归](test/desktop-reading-state.test.ts)核容量、淘汰和裁剪。
 
-`Conversation` 的消息区使用局部原生滚动viewport，保留原outer／viewport／reading-column、region／ARIA、细滚动条和gutter；自动跟随、手动阅读位置与跳到最新保持。真实多会话窗口曾保留13棵旧消息树，heap引用链为Document动画controller→RAF callback→旧viewport；对应原Radix ScrollAreaThumb滚动后立即卸载时遗漏持续RAF清理。因此消息区不再挂载该thumb，不修改其他ScrollArea消费者或全局RAF。[滚动生命周期回归](test/isolated/desktop-conversation-scroll.test.tsx)执行100轮滚动后立即卸载，核自有RAF、ResizeObserver与keydown监听释放，并核跟随／手动位置／跳最新；实际窗口DOM与heap证据归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
+`Conversation` 的消息区使用局部原生滚动viewport，保留原outer／viewport／reading-column、region／ARIA、细滚动条和gutter；自动跟随、手动阅读位置与跳到最新保持。同一个ResizeObserver观察viewport与reading-column，正文内部读取、折叠动画或窗口变化引起高度更新时，在绘制前同步跟随，不要求Conversation重新render，也不延后一帧；手动阅读时不改位置。真实多会话窗口曾保留13棵旧消息树，heap引用链为Document动画controller→RAF callback→旧viewport；对应原Radix ScrollAreaThumb滚动后立即卸载时遗漏持续RAF清理。因此消息区不再挂载该thumb，不修改其他ScrollArea消费者或全局RAF。[滚动生命周期回归](test/isolated/desktop-conversation-scroll.test.tsx)执行100轮滚动后立即卸载，核零自有待执行RAF、ResizeObserver与keydown监听释放，并核内部内容增高／跟随／手动位置／跳最新；实际窗口DOM与heap证据归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 
 Desktop `MessageContent` 的固定 GFM parser 复用[纯语法树缓存](src/desktop/markdown-parse-cache.ts)，最多32项、8MiB估算总量、单项2MiB，原文本 key 与树数据均计入。每次管线取得独立克隆，后续转换不能污染缓存；只保存语法数据，不持有 React、processor、文件回调或操作范围。超预算正文仍完整解析与显示，HTML、图片与链接安全门禁不变。[语法缓存回归](test/desktop-markdown-cache.test.tsx)核淘汰、污染隔离、安全GFM和超预算全文；真实窗口响应测量归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 

@@ -2754,7 +2754,7 @@ function NativeDesktopContent({
           <>
             {(diagnostics ||
               selection.session.historyPurgedAt !== undefined ||
-              historyState.phase !== 'complete') && (
+              historyState.phase === 'unavailable') && (
               <p role="status">
                 {selection.session.historyPurgedAt !== undefined
                   ? '此会话的历史正文已由离线维护清理；原操作回执和执行边界仍保留。'
@@ -2780,13 +2780,13 @@ function NativeDesktopContent({
             {(diagnostics ||
               unfinishedJobs > 0 ||
               unknownJobs > 0 ||
-              selection.viewLoading ||
-              selection.permissionUnavailable ||
+              state?.selection?.viewLoading ||
+              state?.selection?.permissionUnavailable ||
               state?.backgroundUnavailable) && (
               <p role="status" aria-label="当前会话后台状态">
                 后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
-                {selection.viewLoading ||
-                selection.permissionUnavailable ||
+                {state?.selection?.viewLoading ||
+                state?.selection?.permissionUnavailable ||
                 state?.backgroundUnavailable
                   ? ' · 上次确认状态'
                   : ''}
@@ -2876,7 +2876,8 @@ function NativeDesktopContent({
                     ),
                   disabled: pending,
                   sending: pending,
-                  permission: selection.permissions?.mode.mode,
+                  // A routine history scan gates actions without removing the observed label.
+                  permission: state.selection?.permissions?.mode.mode,
                   fullPermissionScope: JSON.stringify([
                     state.generation,
                     selection.storeId,
