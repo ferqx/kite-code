@@ -13,7 +13,7 @@ Status: implemented
 - 活动子页复用现有全局 change 观察。环境目录与子读取分别单飞，变化合并为尾随读取，避免高频 partial 写入反复取消慢 GET。子读取仅在同一 context selection 下复用完整稳定前缀，未完成消息和 Model 正文重读；重进、显式刷新和 context 变化全量校准。原完整后台总览保持原固定快照语义。
 - 增量依据是 Store 的 `persistModelPartial` 只更新尚未完成的原消息，最终执行结算将其完成；完整消息不再由该路径更新。私有游标不改变公共 API，也不成为新的读取权限。每次 Main 仍核当前父子、来源和固定上界，Renderer 仍核完整 wire EOF／SHA／UTF-8。
 - 主子切换只保留一个活动消息树。隐藏父页暂停历史和辅助读取，返回重新校准；关闭、替换、失效与卸载只取消相应 GET／IPC lease，不提交任务取消。scope、nonce和Abort共同阻止迟到结果进入后来的页面。
-- Main的父元数据刷新在途不撤销同selection已验证根的读取范围，避免controller暂时清空snapshot误伤child lease及Job固定H输出；Job新open仍核fresh Execution，原页不因最新输出增长扩大H。真实换根、reset或失败立即abort／撤销，迟到结果不能发布。返回父页在layout阶段撤销旧complete资格并重开校准，正文／草稿可读而动作等待新EOF。
+- Main的父元数据刷新在途不撤销同selection已验证根的读取范围，避免controller暂时清空snapshot误伤child lease及Job固定H输出；Job新open仍核fresh Execution，原页不因最新输出增长扩大H。真实换根、reset或失败立即abort／撤销，迟到结果不能发布。自动元数据或显式权限刷新失败由Main主动释放environment目录、子正文和输出读取及观察，不依赖Renderer关闭；权限失效时不能用controller保留的快照重新准入。恢复须新建目录观察并全量校准当前子页，旧readId、正文缓冲和observation不复活。返回父页在layout阶段撤销旧complete资格并重开校准，正文／草稿可读而动作等待新EOF。
 - 多根change仍共用原全局SSE／ACK；全局目录修订与选中根修订分离，只由本根、已知后代或保守的新Session创建通知校准当前环境。目录索引仅路由失效，不取得读取或操作权。Controller替换选择时取消整条旧GET链，state刷新至多一个在途和一个最新后继；共享目录的child等待可独立取消，避免退役任务继续占用读取与闭包。
 - 显式返回同步撤销child导航意图，再abort当前读取；自动恢复不从旧render的child推导用户仍要查看。真实窗口曾在目录提交与返回交错后重新打开子页，精确layout／passive回归在旧代码稳定复现并于修复后通过；临时权限丢失仍可保留当前未撤销意图。
 - 子消息／正文按 ID 建索引，轮次运行状态一次遍历；共享阅读状态限32项／256KiB估算／512展开ID。宿主已验证的正文通过 `verifiedSnapshot` 直接交组件复核显示，避免已经下载正文却仍要求重复读取。

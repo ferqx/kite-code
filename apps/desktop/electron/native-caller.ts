@@ -671,10 +671,10 @@ export class NativeCaller {
     this.scheduleSelectionRefresh(signal);
   }
   private environmentSnapshot(): DesktopSnapshot | undefined {
+    if (this.permissionUnavailable) return undefined;
     const snapshot =
       this.controller.snapshot ??
       (this.refreshing &&
-      !this.permissionUnavailable &&
       this.lastView?.selection === this.selection &&
       this.lastView.snapshot.sessionId === this.selected
         ? this.lastView.snapshot
@@ -703,6 +703,7 @@ export class NativeCaller {
           } catch {
             if (selected === this.selected && view === this.selection) {
               this.permissionUnavailable = true;
+              this.environment.release();
               this.jobOutput.release();
             }
           }
@@ -1961,6 +1962,7 @@ export class NativeCaller {
         } catch (error) {
           if (selected === this.selected && view === this.selection) {
             this.permissionUnavailable = true;
+            this.environment.release();
             this.jobOutput.release();
           }
           this.changed();

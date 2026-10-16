@@ -7,7 +7,11 @@ import { callerTextDigest } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import { inspectNativeQuitWork } from '../electron/quit-settlement';
-import type { NativeBackgroundChildOpen, NativeBackgroundPage } from '../src/background-bridge';
+import type {
+  NativeBackgroundChildChunk,
+  NativeBackgroundChildOpen,
+  NativeBackgroundPage,
+} from '../src/background-bridge';
 import { type NativeState, nativeChannel } from '../src/native-bridge';
 import { backgroundItem } from './background-item.fixture';
 import { memoryPrivateData } from './private-data.fixture';
@@ -238,6 +242,198 @@ test('environment child and directory reads survive a held same-selection refres
     }
   }
 });
+for (const refresh of ['automatic', 'permission'] as const)
+  test(
+    refresh +
+      ' refresh failure releases environment reads without Renderer close and requires a new observation after recovery',
+    async () => {
+      const deferred = () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((done) => {
+          resolve = done;
+        });
+        return { promise, resolve };
+      };
+      const childStarted = deferred(),
+        childGate = deferred(),
+        directoryStarted = deferred(),
+        directoryGate = deferred();
+      const connection = client(),
+        item = backgroundItem(1, true),
+        cancellations: string[] = [];
+      for (const method of ['cancelCommand', 'cancelRun', 'cancelExecution', 'cancelSession'])
+        Object.assign(connection, {
+          [method]: async () => {
+            cancellations.push(method);
+            throw Error('reading_must_not_cancel_execution');
+          },
+        });
+      connection.serverInfo!.capabilities.push('sessions');
+      connection.verifyConnection = async () => connection.serverInfo!;
+      connection.listBackgroundExecutions = async () =>
+        ({ items: [structuredClone(item)] }) as Awaited<
+          ReturnType<AgentClient['listBackgroundExecutions']>
+        >;
+      connection.getExecution = async (id) =>
+        ({ id, sessionId: 'root', originStoreId: 'store', parentExecutionId: null }) as Awaited<
+          ReturnType<AgentClient['getExecution']>
+        >;
+      let notify!: () => void;
+      connection.observe = async (options) => {
+        notify = () => void options.onChange?.({} as never);
+        await new Promise<void>((resolve) =>
+          options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+        );
+      };
+      const messages = [
+        {
+          id: 'child-message',
+          sessionId: 'child',
+          runId: null,
+          seq: '1',
+          role: 'user',
+          status: 'complete',
+          content: 'retained child reading',
+        } as Message,
+      ];
+      const originalView = connection.getView.bind(connection);
+      let failParent = false,
+        holdChild = false,
+        holdDirectory = false;
+      let childSignal: AbortSignal | undefined, directorySignal: AbortSignal | undefined;
+      connection.getView = async (id) => {
+        if (id === 'root' && failParent) throw Error('parent_refresh_failed');
+        const view = await originalView(id);
+        return id === 'child'
+          ? { ...view, session: { ...item.childSession!, nextSeq: String(messages.length) } }
+          : view;
+      };
+      connection.listMessages = async (_id, options) => {
+        if (holdChild) {
+          childSignal = options?.signal;
+          childStarted.resolve();
+          // Keep the request alive even after abort, including through recovery.
+          await childGate.promise;
+        }
+        return messages.filter((message) => BigInt(message.seq) > BigInt(options?.afterSeq ?? '0'));
+      };
+      connection.listAllBackgroundExecutions = async (options) => {
+        if (holdDirectory) {
+          directorySignal = options?.signal;
+          directoryStarted.resolve();
+          await directoryGate.promise;
+        }
+        return [structuredClone(item)];
+      };
+      const caller = new NativeCaller(connection, () => {}),
+        surface = { generation: 1, surface: 'environment' as const };
+      try {
+        await caller.invoke({ method: 'attach' });
+        await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+        const directory = (await caller.invoke({
+          ...surface,
+          method: 'background.open',
+          readId: 'initial-directory',
+        })) as NativeBackgroundPage;
+        await caller.invoke({ ...surface, method: 'background.close', readId: directory.readId });
+        const childRequest = {
+          ...surface,
+          method: 'background.child.open' as const,
+          observationId: directory.observationId,
+          executionId: item.execution.id,
+        };
+        await caller.invoke({ ...childRequest, readId: 'ready-child' });
+        holdChild = true;
+        const lateChild = caller
+          .invoke({ ...childRequest, readId: 'held-child' })
+          .catch((error) => error);
+        await childStarted.promise;
+        holdDirectory = true;
+        const lateDirectory = caller
+          .invoke({ ...surface, method: 'background.open', readId: 'held-directory' })
+          .catch((error) => error);
+        await directoryStarted.promise;
+        expect(childSignal?.aborted).toBe(false);
+        expect(directorySignal?.aborted).toBe(false);
+        failParent = true;
+        if (refresh === 'automatic') {
+          notify();
+          await caller.invoke({ method: 'state', generation: 1 });
+        } else
+          await expect(
+            caller.invoke({ method: 'permission.refresh', generation: 1 }),
+          ).rejects.toThrow('parent_refresh_failed');
+        expect(caller.state().environmentReadUnavailable).toBe(true);
+        expect(childSignal?.aborted).toBe(true);
+        expect(directorySignal?.aborted).toBe(true);
+        holdDirectory = false;
+        await expect(
+          caller.invoke({ ...surface, method: 'background.open', readId: 'unavailable-directory' }),
+        ).rejects.toThrow('background_unavailable');
+        failParent = holdChild = holdDirectory = false;
+        messages.push({
+          ...messages[0]!,
+          id: 'new-child-message',
+          seq: '2',
+          content: 'fresh child reading',
+        });
+        await caller.invoke({ method: 'permission.refresh', generation: 1 });
+        expect(caller.state().environmentReadUnavailable).toBe(false);
+        // Recovery alone cannot revive a completed wire body or the previous observation.
+        await expect(
+          caller.invoke({
+            ...surface,
+            method: 'background.child.read',
+            readId: 'ready-child',
+            offset: 0,
+            limit: 1,
+          }),
+        ).rejects.toThrow('background_read_missing');
+        await expect(
+          caller.invoke({ ...childRequest, readId: 'unverified-recovery' }),
+        ).rejects.toThrow('background_observation_changed');
+        const recovered = (await caller.invoke({
+          ...surface,
+          method: 'background.open',
+          readId: 'recovered-directory',
+        })) as NativeBackgroundPage;
+        expect(recovered.observationId).toBeGreaterThan(directory.observationId);
+        const opened = (await caller.invoke({
+          ...childRequest,
+          observationId: recovered.observationId,
+          readId: 'recovered-child',
+        })) as NativeBackgroundChildOpen;
+        childGate.resolve();
+        directoryGate.resolve();
+        expect(await lateChild).toBeInstanceOf(Error);
+        expect(await lateDirectory).toBeInstanceOf(Error);
+        await expect(
+          caller.invoke({
+            ...surface,
+            method: 'background.child.read',
+            readId: 'held-child',
+            offset: 0,
+            limit: 1,
+          }),
+        ).rejects.toThrow('background_read_missing');
+        const chunk = (await caller.invoke({
+          ...surface,
+          method: 'background.child.read',
+          readId: opened.readId,
+          offset: 0,
+          limit: 65536,
+        })) as NativeBackgroundChildChunk;
+        expect(chunk.eof).toBe(true);
+        expect(JSON.parse(Buffer.from(chunk.data, 'base64').toString()).messages).toEqual(messages);
+        expect(connection.writes).toBe(0);
+        expect(cancellations).toEqual([]);
+      } finally {
+        childGate.resolve();
+        directoryGate.resolve();
+        await caller.close();
+      }
+    },
+  );
 test('paired first admission is consumed once; standalone cached identity and reconnect still require real admission', async () => {
   const identity: ServerInfo = {
     profile: { dataRoot: '/chosen/data', name: 'native', accessKey: 'native-profile' },
