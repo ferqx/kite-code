@@ -108,13 +108,15 @@ Windows Native 的全屏设置保留已有 `covered` 内容区的隐藏与 `iner
 
 ## Windows 原生 Mica
 
+Windows 导航的 [Native CSS](src/native-tailwind.css) 将宽侧栏和窄窗口侧栏的外层左右 padding 归零，列表内边距设为6px、header设为10px；底部用户区沿共享负 margin 抵消列表内边距，使顶部分隔线铺满侧栏。此布局也适用于 Windows 实色回退，不改变调宽与收展逻辑。
+
 [Main](electron/main.ts)根据实际运行宿主的 Windows build选择材质：Win32且build至少22621时，在窗口构造中设置 `backgroundMaterial: mica`，窗口背景保持 `#00000000`；主题变化只更新原生深浅外观与窗口按钮符号，不改回实色。范围由 [Electron](https://www.electronjs.org/docs/latest/api/base-window#winsetbackgroundmaterialmaterial-windows)及 [DWM](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type)的最低支持版本定义；较早 Windows 与 Linux 保持原实色，macOS 按下文使用 Vibrancy。具体材质绘制与系统降级归 [Windows Mica](https://learn.microsoft.com/en-us/windows/apps/design/style/mica)。
 
 `getWindowAppearance()`沿前述窗口守卫只读 Main 选择，不从构建机、NODE_ENV或浏览器 User Agent猜支持情况。renderer在挂载前读取闭合 `mica/vibrancy/none`，读取失败或旧bridge缺此端口时按 `none`；这项外观读取不依赖 Service成功连接。明确 `mica/vibrancy` 的 Native窗口共用透明 root／body／Frame／shell作为材质承载层，窗口顶栏、`.client-sidebar-panel` 及内部 `.sidebar-header`／`.sidebar` 均透明，侧栏不另铺主题色，与顶栏直接显示同一原生材质；窄侧栏容器使用相同透明规则。主面板、会话header及main保留原实色page背景，输入框与卡片保留原实色card。设置dialog、分类侧栏与返回区透明，右侧设置内容显式填充background，面板圆角和留白按下文平台规则处理；未确认材质时保留原实色设置背景。共享Web不消费Native材质标记，Windows／Linux 独立32px顶栏及原运行权限保持。
 
 设置是同级视图切换：[Native页面](src/native.tsx)将settingsOpen交给SessionPage.covered，主panel树保持挂载和原几何，以opacity0退出绘制，inert／aria-hidden退出交互，避免玻璃侧栏叠出下层正文、边缘或导航文字。保持挂载用于保留未发送草稿、阅读位置和panel状态，不执行会话重选、任务取消或新业务申请。窄侧栏原模态在covered期间关闭，返回后按原开关恢复；原返回自动聚焦在切换期间被抑制，设置自身仍有Radix焦点范围与Escape关闭。设置内容位于panel同级的overlays，明确showOverlay=false，不渲染会压暗材质或透出旧页面的遮罩；设置reader随原内容打开／关闭，Core／Service的authority与运行状态保持。
 
-Windows Mica 的实色 `.client-main-panel` 以四周6px外边距、共享 `var(--radius)` 圆角及6% foreground的1px淡边缘衔接材质；`--native-panel-inset` 统一定义留白，内部背景随圆角裁切。macOS 将这份留白设为0，主内容和设置内容直接铺满各自区域，使用直角并移除面板阴影描边。留白由面板本身承担，不覆盖 resizable Panel 固定的内联padding和尺寸计算。`#navigation-resize` 不常驻竖线，保留原宽度、命中范围、cursor、事件及ARIA；悬浮保原短把手，键盘聚焦将可见环放到把手，移除整条分隔线的outline／shadow。仅已确认的 Native Mica／Vibrancy 消费玻璃布局，共享Web与其他平台的原布局保持。
+Windows Mica 的实色 `.client-main-panel` 默认保留四周6px外边距；仅在 `.shell.sidebar-visible` 且同级 `#navigation-resize` 的实时 `aria-valuenow` 存在且非0时，将左侧外边距设为0、宽度扣除一份 `--native-panel-inset`，与导航之间只保留1px调宽分隔条，右侧仍为6px。拖到0时，CSS立即恢复主面板左右6px，并将分隔条宽度归零、关闭其过渡；同一次按住拖拽仍可反向展开。样式消费原分隔条已有的实时ARIA，不等待鼠标释放后的 `onLayoutChanged`，不新增JS状态或改动宽度保存逻辑。收起侧栏和窄窗口回到默认四周6px；窄窗口即使打开浮层侧栏，也不匹配这条宽窗口规则。面板沿共享 `var(--radius)` 圆角及6% foreground的1px淡边缘衔接材质，内部背景随圆角裁切。设置内容仍为四周6px留白。macOS 将这份留白设为0，主内容和设置内容直接铺满各自区域，使用直角并移除面板阴影描边。留白由面板本身承担，不覆盖 resizable Panel 固定的内联padding和尺寸计算。`#navigation-resize` 不常驻竖线，原事件及ARIA保持；悬浮保原短把手，键盘聚焦将可见环放到把手，移除整条分隔线的outline／shadow。仅已确认的 Native Mica／Vibrancy 消费玻璃布局，共享Web与其他平台的原布局保持。
 
 2026-10-14 设置组件层验证（统一圆角前）：Windows 11 x64 build26300／Electron 44.3.0／Bun 1.4.2，实际当时Main／preload、普通renderer与配套Service隔离窗口核Mica标记。原Main窗口资格已由 `DwmGetWindowAttribute`确认 `DWMSBT_MAINWINDOW=2`；该次未改宿主材质选择。亮／暗设置中，主panel树opacity0但仍保持750px布局高度；向该树注入仅供验证的洋红底色后，返回区、分类栏及其与原主内容重叠区域的实际PNG alpha均为0，右侧设置内容为原主题RGB／alpha255，圆角和顶栏仍透明，无旧页面或黑色遮罩。主textarea和panel对象、未发送草稿及非零scrollTop（120px）在返回与Escape后保持；覆盖期间旧输入不能取得焦点。500×720窗口设置侧栏180px，原侧栏模态暂停，连续Tab均在设置内，返回后恢复侧栏并保草稿。零页面异常、Main退出0通过。[新会话DOM](test/isolated/native-new-conversation-dom.test.tsx)另核原输入实例、未发送草稿、返回／Escape、零重复attach／select／messages／draft.read和零发送；它与启动、草稿、读取归属、模型／提供商／MCP／Skills设置和窗口动作共九个完整文件44项／526断言通过。Desktop／UI typecheck及定向Biome通过。未运行完整默认、旧Windows或新macOS／Linux窗口，透明PNG不代证桌面壁纸最终合成或正式安装视觉资格。
 
@@ -138,7 +140,9 @@ Native 统一消费[共享 UI 的根圆角变量](../../packages/ui/README.md#�
 
 ## 玻璃导航间距
 
-[Native 玻璃样式](src/native-tailwind.css)仅在宽窗口的 `#navigation .client-sidebar-panel` 左侧加入 `--native-panel-inset + --resize-handle-width` 留白，沿右侧内容留白与1px调宽占位计算；Windows 内容留白为6px，macOS 为0。共享分隔宽度的定义归 [UI owner](../../packages/ui/README.md#原桌面展示层)。导航的视觉边界延伸到实色主面板，不能只按内部 ResizablePanel 的宽度判断对称。统一在外层处理，使常用入口、空间列表、header、用户区与其分隔线一起对齐；不单独挤压列表右内边距或覆盖调宽的内联布局。Mica 与 Vibrancy 共用这份补偿，窄侧栏没有这份外侧补偿，未确认材质时保持原布局；原200～420px调宽范围保持。
+[Native 玻璃样式](src/native-tailwind.css)在 macOS 宽窗口的 `#navigation .client-sidebar-panel` 左侧加入 `--native-panel-inset + --resize-handle-width` 留白，补偿1px调宽占位；macOS 的内容留白为0。Windows 宽、窄侧栏均取消这份外层补偿，采用上述6px列表内边距，用户区负 margin 将分隔线展开到容器左右边界；Mica 主面板的展开与实时收起边距按[上述样式规则](#windows-原生-mica)处理。共享分隔宽度的定义归 [UI owner](../../packages/ui/README.md#原桌面展示层)，原200～420px调宽范围保持。共享 Web、macOS 的列表内边距及未确认材质时的主面板布局保持。
+
+2026-10-16 Windows x64 的隔离 Chrome headless 页面加载实际 SessionPage 与 Native／共享 CSS：200px侧栏展开时，分隔线止于x=200，正文从x=201开始，只保留1px分隔条。前轮验证只核鼠标释放后的收起布局；补测发现按住拖到0时，旧 `.sidebar-visible` 仍为true、主面板左边距仍为0。改用实时ARIA后，亮暗主题下实际 `buttons=1` 的收起／反向展开／再次收起均通过：收起时主面板左右6px、分隔条0px，展开时主面板贴齐1px分隔条；拖动中偏好写入0次，松开到展开宽度后才保存1次。按钮／键盘收起、窄窗口浮层开关／Escape、截图和零页面异常通过。此前宽窄切换验证与本轮区分，不把旧鼠标释放后结果当作持续按住证据。此验证只覆盖renderer布局和交互，未启动真实Main／Service或验证原生Mica合成。
 
 2026-10-14 Windows 11 x64 build26300／Electron 44.3.0／Bun 1.4.2，基于 `006b79d3` 的本轮 CSS diff：隔离普通 Native 构建与真实 Service，修前实际常用入口／空间行左右为12px／19px，分隔1px加内容留白6px确为差值；修后两侧均为19px，header两侧23px、用户区15px、底部分隔线7px。亮／暗、200px起始宽度、键盘左右调宽、鼠标拖到420px及收展后均保持等距；500px窄窗口两侧仍12px，取消Mica标记的普通布局不加补偿。设置返回与窄侧栏Escape保未发送草稿；截图核布局、零页面异常、Main退出0通过。两份 CSS Biome与diff检查通过，保原三项 `!important` 提示和构建提示；未改TypeScript，前轮Desktop／UI typecheck范围可复用。未运行完整默认、其他平台或正式安装验证。
 

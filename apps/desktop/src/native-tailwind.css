@@ -855,6 +855,20 @@ html[data-native-window]:is(
   padding-left: calc(var(--native-panel-inset) + var(--resize-handle-width));
 }
 
+/* Keep Windows navigation compact and let the profile divider span the panel. */
+html[data-native-window][data-platform="windows"] .kite-client #navigation .client-sidebar-panel,
+html[data-native-window][data-platform="windows"] .kite-client .client-sidebar-panel.narrow {
+  padding-inline: 0;
+}
+
+html[data-native-window][data-platform="windows"] .kite-client .sidebar {
+  --sidebar-inline-padding: 6px;
+}
+
+html[data-native-window][data-platform="windows"] .kite-client .sidebar-header {
+  padding-inline: 10px;
+}
+
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
   .kite-client
   .client-main-panel {
@@ -864,6 +878,22 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+html[data-native-window][data-platform="windows"][data-window-material="mica"]
+  .kite-client.shell.sidebar-visible
+  #navigation-resize[aria-valuenow]:not([aria-valuenow="0"])
+  ~ #content
+  .client-main-panel {
+  width: calc(100% - var(--native-panel-inset));
+  margin-left: 0;
+}
+
+/* The separator's live value reaches zero before the drag is released. */
+html[data-native-window][data-platform="windows"][data-window-material="mica"] .kite-client
+  #navigation-resize[aria-valuenow="0"] {
+  width: 0;
+  transition: none;
 }
 
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
