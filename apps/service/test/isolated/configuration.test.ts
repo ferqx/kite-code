@@ -145,6 +145,19 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
     async fetch(request) {
       const body = (await request.json()) as Record<string, unknown>;
       requests.push(body);
+      const tools = body.tools as {
+        function: { name: string; parameters: { properties: Record<string, unknown> } };
+      }[];
+      const history = body.messages as { tool_calls?: { function: { name: string } }[] }[];
+      const names = [
+        ...tools.map((tool) => tool.function.name),
+        ...history.flatMap((message) =>
+          (message.tool_calls ?? []).map((tool) => tool.function.name),
+        ),
+      ];
+      if (names.some((name) => !/^[a-zA-Z0-9_-]{1,64}$/.test(name)))
+        return Response.json({ error: { message: 'invalid function name' } }, { status: 400 });
+      const readTool = tools.find((tool) => tool.function.parameters.properties.offset);
       const call = requests.length === 1;
       const chunk = (delta: unknown, finish: string | null) =>
         `data: ${JSON.stringify({ id: 'fresh-host', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
@@ -158,7 +171,7 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
                     id: 'read-source',
                     type: 'function',
                     function: {
-                      name: 'files.read',
+                      name: readTool!.function.name,
                       arguments: JSON.stringify({ path: 'source.txt' }),
                     },
                   },
@@ -198,18 +211,10 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
     const names = (requests[0]!.tools as { function: { name: string } }[]).map(
       (tool) => tool.function.name,
     );
-    expect(names).toEqual(
-      expect.arrayContaining([
-        'ask_user',
-        'files.read',
-        'files.write',
-        'files.edit',
-        'files.list',
-        'files.glob',
-        'files.search',
-        'web_fetch',
-      ]),
-    );
+    expect(names).toHaveLength(8);
+    expect(names).toEqual(expect.arrayContaining(['ask_user', 'web_fetch']));
+    expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
+    expect(new Set(names).size).toBe(8);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(
       (await child.handle.client.listInteractions('session', { storeId: child.storeId }))
@@ -232,9 +237,12 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
     const nextNames = (requests.at(-1)!.tools as { function: { name: string } }[]).map(
       (tool) => tool.function.name,
     );
-    expect(nextNames).not.toContain('files.read');
+    const nextTools = requests.at(-1)!.tools as {
+      function: { parameters: { properties: Record<string, unknown> } };
+    }[];
+    expect(nextTools.some((tool) => tool.function.parameters.properties.offset)).toBe(false);
     expect(nextNames).not.toContain('web_fetch');
-    expect(nextNames).toContain('files.search');
+    expect(nextTools.some((tool) => tool.function.parameters.properties.text)).toBe(true);
   } finally {
     await child?.handle.close();
     provider.stop(true);

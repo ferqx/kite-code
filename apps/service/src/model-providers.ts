@@ -28,10 +28,6 @@ export type ModelProvider = (typeof modelProviders)[number]['id'];
 export function isSupportedModelProvider(value: unknown): value is ModelProvider {
   return modelProviders.some((provider) => provider.id === value);
 }
-export function supportsReasoningEffort(provider: unknown): boolean {
-  return provider === 'openai' || provider === 'compatible';
-}
-
 export type ProviderSettingsOperation = {
   provider: ModelProvider;
   connectionId: string | null;

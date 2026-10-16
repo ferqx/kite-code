@@ -5983,7 +5983,16 @@
                           },
                           "reasoningEffort": {
                             "type": "string",
-                            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                            "enum": [
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "ultar"
+                            ]
                           },
                           "maxRetries": {
                             "type": "integer",
@@ -7704,7 +7713,16 @@
                               },
                               "reasoningEffort": {
                                 "type": "string",
-                                "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                                "enum": [
+                                  "none",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max",
+                                  "ultar"
+                                ]
                               },
                               "maxRetries": {
                                 "type": "integer",
@@ -9053,7 +9071,7 @@
           },
           "reasoningEffort": {
             "type": "string",
-            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultar"]
           },
           "selectedSkills": {
             "maxItems": 256,
@@ -10039,7 +10057,7 @@
                   "anyOf": [
                     {
                       "type": "string",
-                      "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                      "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultar"]
                     },
                     {
                       "type": "null"
@@ -10047,11 +10065,11 @@
                   ]
                 },
                 "reasoningEffortChoices": {
-                  "maxItems": 7,
+                  "maxItems": 8,
                   "type": "array",
                   "items": {
                     "type": "string",
-                    "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                    "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultar"]
                   }
                 },
                 "reasoningEffortSupport": {
@@ -10200,7 +10218,16 @@
                     "anyOf": [
                       {
                         "type": "string",
-                        "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                        "enum": [
+                          "none",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max",
+                          "ultar"
+                        ]
                       },
                       {
                         "type": "null"
@@ -11102,7 +11129,16 @@
                         "anyOf": [
                           {
                             "type": "string",
-                            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                            "enum": [
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "ultar"
+                            ]
                           },
                           {
                             "type": "null"
@@ -13247,7 +13283,7 @@
           },
           "reasoningEffort": {
             "type": "string",
-            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultar"]
           },
           "selectedSkills": {
             "maxItems": 256,
@@ -19706,7 +19742,7 @@
               },
               "reasoningEffort": {
                 "type": "string",
-                "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultar"]
               },
               "selectedSkills": {
                 "maxItems": 256,
@@ -19793,7 +19829,7 @@
               },
               "reasoningEffort": {
                 "type": "string",
-                "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultar"]
               },
               "selectedSkills": {
                 "maxItems": 256,
@@ -21198,7 +21234,16 @@
                         },
                         "reasoningEffort": {
                           "type": "string",
-                          "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                          "enum": [
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultar"
+                          ]
                         },
                         "selectedSkills": {
                           "maxItems": 256,

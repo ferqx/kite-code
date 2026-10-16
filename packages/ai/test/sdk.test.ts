@@ -86,10 +86,11 @@ const sse = (text: string) =>
 async function collect(
   adapter: ReturnType<typeof createSdkModelAdapter>,
   signal = new AbortController().signal,
+  input = request,
 ) {
   const events: ModelEvent[] = [];
   try {
-    for await (const event of adapter.stream(request, { signal })) events.push(event);
+    for await (const event of adapter.stream(input, { signal })) events.push(event);
     return { events, error: null };
   } catch (error) {
     return { events, error };
@@ -108,7 +109,7 @@ test('one actual network attempt maps message history, complete tools, reasoning
               index: 0,
               id: 'new-call',
               type: 'function',
-              function: { name: 'fixture.count', arguments: '{"value":' },
+              function: { name: 'fixture_count', arguments: '{"value":' },
             },
           ],
         }) +
@@ -154,7 +155,7 @@ test('one actual network attempt maps message history, complete tools, reasoning
             {
               id: 'old-call',
               type: 'function',
-              function: { name: 'fixture.count', arguments: '{"value":"old"}' },
+              function: { name: 'fixture_count', arguments: '{"value":"old"}' },
             },
           ],
         },
@@ -164,12 +165,85 @@ test('one actual network attempt maps message history, complete tools, reasoning
       tools: [
         {
           type: 'function',
-          function: { name: 'fixture.count', parameters: request.tools[0]!.inputSchema },
+          function: { name: 'fixture_count', parameters: request.tools[0]!.inputSchema },
         },
       ],
     });
     expect(JSON.stringify(result.events)).not.toContain('fixture-secret');
     expect(JSON.stringify(data.bodies)).not.toContain('fixture-secret');
+  } finally {
+    await data.close();
+  }
+});
+
+test('strict compatible endpoint round-trips namespaced, colliding, Unicode and long tool IDs with original history', async () => {
+  const ids = ['files.read', 'files_read', 'kite_tool_0', '插件.读取', 'a'.repeat(65)];
+  const input: ModelRequest = {
+    ...request,
+    messages: [
+      { role: 'user', content: 'Read the file' },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { id: 'previous', name: 'files.read', arguments: '{}' },
+          { id: 'retired', name: 'history.retired', arguments: '{}' },
+        ],
+      },
+      { role: 'tool', content: 'original result', toolCallId: 'previous' },
+      { role: 'tool', content: 'historical result', toolCallId: 'retired' },
+    ],
+    tools: ids.map((id) => ({
+      id,
+      definitionVersion: '1',
+      inputSchema: { type: 'object', additionalProperties: false },
+    })),
+  };
+  const original = JSON.stringify(input);
+  const data = endpoint(async (incoming) => {
+    const body = (await incoming.json()) as {
+      tools: { function: { name: string } }[];
+      messages: { tool_calls?: { function: { name: string } }[] }[];
+    };
+    const names = [
+      ...body.tools.map((entry) => entry.function.name),
+      ...body.messages.flatMap((message) =>
+        (message.tool_calls ?? []).map((call) => call.function.name),
+      ),
+    ];
+    if (names.some((name) => !/^[a-zA-Z0-9_-]{1,64}$/.test(name)))
+      return Response.json({ error: { message: 'invalid function name' } }, { status: 400 });
+    return sse(
+      chunk({
+        tool_calls: body.tools.map((entry, index) => ({
+          index,
+          id: `call-${index}`,
+          type: 'function',
+          function: { name: entry.function.name, arguments: '{}' },
+        })),
+      }) +
+        chunk({}, 'tool_calls') +
+        'data: [DONE]\n\n',
+    );
+  });
+  try {
+    const result = await collect(data.adapter, new AbortController().signal, input);
+    expect(result.error).toBeNull();
+    expect(data.calls).toBe(1);
+    expect(result.events.filter((event) => event.type === 'tool_call')).toEqual(
+      ids.map((name, index) => ({ type: 'tool_call', id: `call-${index}`, name, arguments: '{}' })),
+    );
+    const body = data.bodies[0] as {
+      tools: { function: { name: string } }[];
+      messages: { tool_calls?: { function: { name: string } }[] }[];
+    };
+    const names = body.tools.map((entry) => entry.function.name);
+    expect(new Set(names).size).toBe(ids.length);
+    expect(names[1]).toBe('files_read');
+    expect(names[2]).toBe('kite_tool_0');
+    expect(body.messages[1]!.tool_calls![0]!.function.name).toBe(names[0]!);
+    expect(names).not.toContain(body.messages[1]!.tool_calls![1]!.function.name);
+    expect(JSON.stringify(input)).toBe(original);
   } finally {
     await data.close();
   }
@@ -234,7 +308,7 @@ test.each([
               index: 0,
               id: 'partial',
               type: 'function',
-              function: { name: 'fixture.count', arguments: '{"value":' },
+              function: { name: 'fixture_count', arguments: '{"value":' },
             },
           ],
         }),
@@ -398,7 +472,7 @@ test('a finished malformed Tool argument reaches Core unchanged for rejection; a
             index: 0,
             id: 'malformed',
             type: 'function',
-            function: { name: 'fixture.count', arguments: raw },
+            function: { name: 'fixture_count', arguments: raw },
           },
         ],
       }) +

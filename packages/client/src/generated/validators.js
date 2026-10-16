@@ -26916,17 +26916,17 @@ var schema41 = {
             anyOf: [
               {
                 type: 'string',
-                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
               },
               { type: 'null' },
             ],
           },
           reasoningEffortChoices: {
-            maxItems: 7,
+            maxItems: 8,
             type: 'array',
             items: {
               type: 'string',
-              enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+              enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
             },
           },
           reasoningEffortSupport: { type: 'string', enum: ['compatible_wire', 'unsupported'] },
@@ -27846,7 +27846,8 @@ function validate30(
                                                   data17 === 'medium' ||
                                                   data17 === 'high' ||
                                                   data17 === 'xhigh' ||
-                                                  data17 === 'max'
+                                                  data17 === 'max' ||
+                                                  data17 === 'ultar'
                                                 )
                                               ) {
                                                 const err21 = {
@@ -27939,7 +27940,7 @@ function validate30(
                                                 const _errs56 = errors;
                                                 if (errors === _errs56) {
                                                   if (Array.isArray(data18)) {
-                                                    if (data18.length > 7) {
+                                                    if (data18.length > 8) {
                                                       validate30.errors = [
                                                         {
                                                           instancePath:
@@ -27950,9 +27951,9 @@ function validate30(
                                                           schemaPath:
                                                             '#/properties/models/items/properties/reasoningEffortChoices/maxItems',
                                                           keyword: 'maxItems',
-                                                          params: { limit: 7 },
+                                                          params: { limit: 8 },
                                                           message:
-                                                            'must NOT have more than 7 items',
+                                                            'must NOT have more than 8 items',
                                                         },
                                                       ];
                                                       return false;
@@ -27988,7 +27989,8 @@ function validate30(
                                                             data19 === 'medium' ||
                                                             data19 === 'high' ||
                                                             data19 === 'xhigh' ||
-                                                            data19 === 'max'
+                                                            data19 === 'max' ||
+                                                            data19 === 'ultar'
                                                           )
                                                         ) {
                                                           validate30.errors = [
@@ -31112,7 +31114,7 @@ var schema46 = {
                   anyOf: [
                     {
                       type: 'string',
-                      enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+                      enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
                     },
                     { type: 'null' },
                   ],
@@ -32448,7 +32450,8 @@ function validate38(
                                                   data20 === 'medium' ||
                                                   data20 === 'high' ||
                                                   data20 === 'xhigh' ||
-                                                  data20 === 'max'
+                                                  data20 === 'max' ||
+                                                  data20 === 'ultar'
                                                 )
                                               ) {
                                                 const err29 = {
@@ -61444,7 +61447,16 @@ var schema61 = {
                         maxOutputTokens: { type: 'number' },
                         reasoningEffort: {
                           type: 'string',
-                          enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+                          enum: [
+                            'none',
+                            'minimal',
+                            'low',
+                            'medium',
+                            'high',
+                            'xhigh',
+                            'max',
+                            'ultar',
+                          ],
                         },
                         maxRetries: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
                         maxSteps: { type: 'integer', minimum: 1, maximum: 9007199254740991 },
@@ -64776,7 +64788,10 @@ function validate54(
                                                                                       'high' ||
                                                                                     data52 ===
                                                                                       'xhigh' ||
-                                                                                    data52 === 'max'
+                                                                                    data52 ===
+                                                                                      'max' ||
+                                                                                    data52 ===
+                                                                                      'ultar'
                                                                                   )
                                                                                 ) {
                                                                                   const err27 = {
@@ -91983,7 +91998,7 @@ var schema80 = {
                   modelId: { type: 'string', minLength: 1, maxLength: 256 },
                   reasoningEffort: {
                     type: 'string',
-                    enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+                    enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
                   },
                   selectedSkills: {
                     maxItems: 256,
@@ -94076,7 +94091,8 @@ function validate84(
                                                                     data25 === 'medium' ||
                                                                     data25 === 'high' ||
                                                                     data25 === 'xhigh' ||
-                                                                    data25 === 'max'
+                                                                    data25 === 'max' ||
+                                                                    data25 === 'ultar'
                                                                   )
                                                                 ) {
                                                                   const err38 = {
@@ -138454,7 +138470,7 @@ var schema131 = {
               anyOf: [
                 {
                   type: 'string',
-                  enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+                  enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
                 },
                 { type: 'null' },
               ],
@@ -139589,7 +139605,8 @@ function validate157(
                                         data16 === 'medium' ||
                                         data16 === 'high' ||
                                         data16 === 'xhigh' ||
-                                        data16 === 'max'
+                                        data16 === 'max' ||
+                                        data16 === 'ultar'
                                       )
                                     ) {
                                       const err32 = {
@@ -158737,7 +158754,7 @@ var schema173 = {
     modelId: { type: 'string', minLength: 1, maxLength: 256 },
     reasoningEffort: {
       type: 'string',
-      enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+      enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
     },
     selectedSkills: {
       maxItems: 256,
@@ -159422,7 +159439,8 @@ function validate201(
                           data5 === 'medium' ||
                           data5 === 'high' ||
                           data5 === 'xhigh' ||
-                          data5 === 'max'
+                          data5 === 'max' ||
+                          data5 === 'ultar'
                         )
                       ) {
                         validate201.errors = [
@@ -162413,7 +162431,7 @@ var schema181 = {
     modelId: { type: 'string', maxLength: 256 },
     reasoningEffort: {
       type: 'string',
-      enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+      enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
     },
     selectedSkills: {
       maxItems: 256,
@@ -163018,7 +163036,8 @@ function validate211(
                           data5 === 'medium' ||
                           data5 === 'high' ||
                           data5 === 'xhigh' ||
-                          data5 === 'max'
+                          data5 === 'max' ||
+                          data5 === 'ultar'
                         )
                       ) {
                         validate211.errors = [

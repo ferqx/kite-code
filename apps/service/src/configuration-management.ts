@@ -17,7 +17,7 @@ import {
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
-import { type ReasoningEffort, reasoningEfforts } from '@kite-ai/ai';
+import { type ReasoningEffort, reasoningEffortLevels, reasoningEfforts } from '@kite-ai/ai';
 import { parseModelPreset } from './configuration';
 import {
   discoverProviderModels,
@@ -29,7 +29,6 @@ import {
   providerModelNames,
   providerSettingsFacts,
   safeProviderEndpoint,
-  supportsReasoningEffort,
 } from './model-providers';
 import { type UserConfiguration, withoutProjectModels } from './user-configuration';
 
@@ -290,7 +289,7 @@ function redacted(value: JsonObject): JsonObject {
                   ? actual
                   : option === 'reasoningEffort' &&
                       typeof actual === 'string' &&
-                      ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(actual)
+                      reasoningEfforts.includes(actual as ReasoningEffort)
                     ? actual
                     : '[unsupported]',
               ]),
@@ -394,11 +393,6 @@ export function createConfigurationManagement(options: {
         throw new ConfigurationError('invalid_model_configuration');
       createConfigurationSnapshot(resolveConfiguration({ defaults: { models: [model] } }));
       parseModelPreset(model.options);
-      if (
-        parseModelPreset(model.options).reasoningEffort !== undefined &&
-        (!supportsReasoningEffort(model.provider) || model.reasoningSupported === false)
-      )
-        throw new ConfigurationError('model_reasoning_effort_unsupported');
       return [];
     } catch (error) {
       return [publicError(error).code];
@@ -648,26 +642,14 @@ export function createConfigurationManagement(options: {
                 diagnostics.length === 0
                   ? (parseModelPreset(model.options).reasoningEffort ?? null)
                   : null,
-              reasoningEffortChoices:
-                supportsReasoningEffort(model.provider) &&
-                model.reasoningSupported !== false &&
-                diagnostics.length === 0
-                  ? [...reasoningEfforts]
-                  : [],
-              reasoningEffortSupport:
-                supportsReasoningEffort(model.provider) &&
-                model.reasoningSupported !== false &&
-                diagnostics.length === 0
-                  ? 'compatible_wire'
-                  : 'unsupported',
-              reasoningEffortReadonlyReason:
-                !supportsReasoningEffort(model.provider) ||
-                model.reasoningSupported === false ||
-                diagnostics.length
-                  ? 'model_reasoning_effort_unsupported'
-                  : explicitModel && Object.hasOwn(explicitModel, 'options')
-                    ? 'model_settings_override'
-                    : null,
+              // Every configured family uses the same wire; remote support is the Provider's decision.
+              reasoningEffortChoices: diagnostics.length === 0 ? [...reasoningEffortLevels] : [],
+              reasoningEffortSupport: diagnostics.length === 0 ? 'compatible_wire' : 'unsupported',
+              reasoningEffortReadonlyReason: diagnostics.length
+                ? 'model_reasoning_effort_unsupported'
+                : explicitModel && Object.hasOwn(explicitModel, 'options')
+                  ? 'model_settings_override'
+                  : null,
               diagnostics,
             };
           }),
@@ -979,11 +961,7 @@ export function createConfigurationManagement(options: {
                       ],
                     };
           if (input.operation.kind === 'effort') {
-            if (
-              !supportsReasoningEffort(selected.provider) ||
-              selected.reasoningSupported === false ||
-              configured(selected).length
-            )
+            if (configured(selected).length)
               throw new AgentError('model_reasoning_effort_unsupported');
             if (
               input.operation.reasoningEffort !== null &&

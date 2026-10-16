@@ -99,7 +99,7 @@ const facts: NativeModelSettingsFacts = {
       enabled: true,
       configured: true,
       reasoningEffort: 'low',
-      reasoningEffortChoices: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+      reasoningEffortChoices: ['low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
       diagnostics: [],
     },
     {
@@ -108,7 +108,7 @@ const facts: NativeModelSettingsFacts = {
       model: 'remote-b',
       enabled: true,
       configured: true,
-      reasoningEffortChoices: [],
+      reasoningEffortChoices: ['low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
       diagnostics: [],
     },
     {
@@ -172,11 +172,11 @@ test('picker filters disabled routes, preserves transient effort through observe
     expect(ready.at(-1)).toBe(true);
     expect(changes).toHaveLength(0);
     expect(resolved.at(-1)).toEqual({ modelId: 'a' });
-    await f.click('模型：remote-a，思考程度：低');
+    await f.click('模型：remote-a，思考程度：轻度');
     const effort = f.element.querySelector<HTMLElement>('[role="slider"]')!;
     expect(effort.getAttribute('aria-valuemin')).toBe('0');
     expect(effort.getAttribute('aria-valuemax')).toBe('5');
-    expect(f.button('配置默认')).toBeDefined();
+    expect(f.button('配置默认')).toBeUndefined();
     expect(f.button('关闭思考')).toBeUndefined();
     await act(async () => {
       effort.dispatchEvent(
@@ -202,7 +202,16 @@ test('picker filters disabled routes, preserves transient effort through observe
     await f.click('选择模型 b');
     expect(observed).toEqual({ modelId: 'b' });
     expect(resolved.at(-1)).toEqual({ modelId: 'b' });
-    expect(f.element.textContent).toContain('当前模型不支持思考程度调节');
+    const deepseekEffort = f.element.querySelector<HTMLElement>('[role="slider"]')!;
+    expect(deepseekEffort).not.toBeNull();
+    expect(f.button('关闭思考')).toBeUndefined();
+    await act(async () => {
+      deepseekEffort.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }),
+      );
+    });
+    expect(observed).toEqual({ modelId: 'b', reasoningEffort: 'ultar' });
+    expect(resolved.at(-1)).toEqual({ modelId: 'b', reasoningEffort: 'ultar' });
     expect(ready.at(-1)).toBe(true);
   } finally {
     await f.close();
@@ -254,7 +263,7 @@ test('explicit missing selection after configuration refresh stays unavailable w
   }
 });
 
-test('picker rejects late scope facts and accepts none only when Service explicitly offers it', async () => {
+test('picker rejects late scope facts and preserves configured none without extra actions', async () => {
   const f = fixture(),
     ready: boolean[] = [],
     changes: NativeModelChoice[] = [];
@@ -270,7 +279,12 @@ test('picker rejects late scope facts and accepts none only when Service explici
       return {
         ...facts,
         models: [
-          { ...facts.models[0]!, model: 'current', reasoningEffortChoices: ['none', 'low'] },
+          {
+            ...facts.models[0]!,
+            model: 'current',
+            reasoningEffort: 'none',
+            reasoningEffortChoices: ['none', 'low'],
+          },
         ],
       };
     },
@@ -296,12 +310,14 @@ test('picker rejects late scope facts and accepts none only when Service explici
     );
     expect(f.element.textContent).toContain('current');
     expect(f.element.textContent).not.toContain('old-route');
-    await f.click('模型：current，思考程度：低');
+    await f.click('模型：current，思考程度：关闭');
     expect(f.element.querySelector('[role="slider"]')).toBeNull();
-    expect(f.button('低')).toBeDefined();
-    expect(f.button('配置默认')).toBeDefined();
-    await f.click('关闭思考');
-    expect(changes).toEqual([{ modelId: 'a', reasoningEffort: 'none' }]);
+    expect(f.button('轻度')).toBeDefined();
+    expect(f.button('配置默认')).toBeUndefined();
+    expect(f.button('关闭思考')).toBeUndefined();
+    expect(changes).toEqual([]);
+    await f.click('轻度');
+    expect(changes).toEqual([{ modelId: 'a', reasoningEffort: 'low' }]);
   } finally {
     await f.close();
   }
@@ -342,7 +358,7 @@ test('picker honors durable Session route before global default and does not rep
   }
 });
 
-test('same-provider duplicate names retain exact route IDs; sparse effort choices, none and reset never manufacture a model or configured change', async () => {
+test('same-provider duplicate names retain exact route IDs; sparse effort changes stay transient and model changes clear them', async () => {
   const f = fixture(),
     calls: NativeRequest[] = [];
   const routes: NativeModelSettingsFacts = {
@@ -353,7 +369,7 @@ test('same-provider duplicate names retain exact route IDs; sparse effort choice
       id,
       model: 'same-name',
       reasoningEffort: 'high',
-      reasoningEffortChoices: ['none', 'minimal', 'high', 'max'],
+      reasoningEffortChoices: ['none', 'low', 'high', 'ultar'],
     })),
   };
   const bridge: NativeBridge = {
@@ -403,16 +419,18 @@ test('same-provider duplicate names retain exact route IDs; sparse effort choice
         slider.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key, bubbles: true }));
       });
     await key('Home');
-    expect(observed).toEqual({ modelId: 'first', reasoningEffort: 'minimal' });
+    expect(observed).toEqual({ modelId: 'first', reasoningEffort: 'low' });
     await key('ArrowRight');
     expect(observed.reasoningEffort).toBe('high');
     await key('ArrowRight');
-    expect(observed.reasoningEffort).toBe('max');
-    await f.click('关闭思考');
-    expect(observed.reasoningEffort).toBe('none');
-    await f.click('配置默认');
-    expect(observed).toEqual({ modelId: 'first', reasoningEffort: undefined });
-    expect(resolved).toEqual({ modelId: 'first' });
+    expect(observed.reasoningEffort).toBe('ultar');
+    expect(f.element.querySelector('.effort-value')?.textContent).toBe('Ultar');
+    expect(f.button('关闭思考')).toBeUndefined();
+    expect(f.button('配置默认')).toBeUndefined();
+    await f.click('选择模型，当前 openai / same-name');
+    await f.click('选择模型 second');
+    expect(observed).toEqual({ modelId: 'second' });
+    expect(resolved).toEqual({ modelId: 'second' });
     expect(f.element.querySelector('.effort-value')?.textContent).toBe('高');
     expect(calls).toEqual([{ method: 'input.models.read', generation: 1 }]);
   } finally {

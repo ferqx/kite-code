@@ -10,7 +10,9 @@
 
 ## 规则
 
-Kite Code 是 provider-neutral 系统。当前默认 Service 的模型只来自 ~/.kite-code/kite-code.jsonc，不按 Profile/Workspace 分层，也不读取旧 Profile config.jsonc。Service 私有适配既有 provider/model/disabledModels，模型能力与路由资格仍按实际 SDK/配置验证；客户端无文件路径和凭据 authority。已有 inline key 只用于宿主解析，新增替换 key 存用户级 OS vault，原 key 不进入 DTO/snapshot/日志。决定及代价见[单用户配置 Note](../../.agents/notes/implemented/architecture/2026-10-15-single-user-configuration.md)。下文描述的旧 Runtime Model Surface 约束在其原体系适用，当前源码定位归 Service/AI owner。
+Kite Code 是 provider-neutral 系统。当前默认 Service 的模型只来自 ~/.kite-code/kite-code.jsonc，不按 Profile/Workspace 分层，也不读取旧 Profile config.jsonc。Service 私有适配既有 provider/model/disabledModels，路由和参数结构仍按实际 SDK/配置验证；客户端无文件路径和凭据 authority。所有配置可用模型都可选择思考程度，当前四类 Provider 统一发送所选 `reasoning_effort`，不以名称或旧能力标记拒绝；是否接受或生效由模型服务决定。非法档位仍本地拒绝，远端拒绝保留真实失败，不切换路由或去参数重发。决定及验证见[思考程度参数 Note](../../.agents/notes/implemented/architecture/2026-10-16-model-effort-pass-through.md)。已有 inline key 只用于宿主解析，新增替换 key 存用户级 OS vault，原 key 不进入 DTO/snapshot/日志。配置源的决定及代价见[单用户配置 Note](../../.agents/notes/implemented/architecture/2026-10-15-single-user-configuration.md)。下文描述的旧 Runtime Model Surface 约束在其原体系适用，当前源码定位归 Service/AI owner。
+
+当前 SDK 适配器在 transport 边界将 namespaced Tool ID 转为符合 compatible 函数名语法的无碰撞名称，并用同一请求映射还原返回调用。Core ID、权限和持久历史不重命名，实际转换版本与严格端点证据归[AI owner](../../packages/ai/README.md)；下文旧 Model Surface 的序列化身份不因当前 SDK 编码变化而改写。
 
 ## Model Surface V1 与唯一 Gateway
 

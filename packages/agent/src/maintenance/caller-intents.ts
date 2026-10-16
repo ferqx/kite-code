@@ -196,7 +196,7 @@ function requestTarget(
     !id(request.commandId) ||
     (Object.hasOwn(request, 'reasoningEffort') &&
       (typeof request.reasoningEffort !== 'string' ||
-        !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(
+        !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'].includes(
           request.reasoningEffort,
         )))
   )

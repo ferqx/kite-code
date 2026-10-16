@@ -12,6 +12,12 @@
 
 测试使用带测试凭据的本地模拟 HTTP endpoint，证明传输映射与每次流尝试只发一个网络请求；不建立生产 Provider 兼容性、可用性或付费模型行为资格。
 
+SDK 的 `kite.sdk.messages` 转换版本为2：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
+
+[SDK 严格端点测试](test/sdk.test.ts)拒绝非法声明及历史函数名，核带点、中文、超长、名称碰撞、原 ID 回传与输入不变；[普通 paired 宿主测试](../../apps/service/test/isolated/configuration.test.ts)使用真实八个默认工具，严格校验请求名称、执行真实文件读取，再带原工具历史完成第二次请求。修复前两项均实际复现失败；原先宽松模拟端点允许带点名称，不能证明真实 Provider 请求合同成立。
+
+2026-10-16 在 Windows x64／Bun 1.4.2 的本次修复工作树，经用户明确授权向 DeepSeek 官方 deepseek-v4-flash 发送两次对照，均仅“你好”及原失败请求中的八个工具定义，不含原系统／项目上下文或 reasoning_effort。两份实际请求只有函数名不同：六个旧名称不合语法时返回400／invalid_request_error，转换后返回200且完整流结束；不执行工具，不改用户配置。该有限实测确认工具名缺陷和修复效果，不证明真实文件工具执行、其他模型或全部 Provider 兼容性；详细计数和证据限制见上述决定。
+
 [ModelAttemptError](src/model-attempt.ts)仅归一化已知传输中断、SDK 明确标记可重试的 HTTP 故障（含 408／429／5xx）和流不完整的有限公开原因；不按远端正文猜失败或重试资格。SDK 每次仍是零内部重试；Agent 在真实原 Execution 已失败、关闭及来源资格保持时决定下一尝试，不设本地次数上限，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。Provider 的 `length` 原样交付 Core，由 Core 区分纯文本续接、截断工具批次和不可发布的截断摘要；AI 包不自行续轮。
 
 验证：`bun test packages/ai/test/` 和 `bun run --cwd packages/ai typecheck`。
@@ -21,7 +27,7 @@
 
 `ModelAdapter.describeRequest` 是可选同步纯描述端口，只返回实际绑定的非秘密 Adapter、Provider family/model、请求 settings 和转换版本；不进行 I/O，也不引入 Agent 类型。SDK Adapter 使用冻结的实际 presets，记录单次请求的 `maxRetries:0`、`maxSteps:1` 和消息转换设置。只有 `createCompatibleModelBinding` 真实构建的模型提供已知 Provider family/model；任意外部 SDK 对象或不透明 Adapter 明确不可用，不猜对象属性或以当前配置补齐历史。不记录 endpoint、凭据、header、credentialRef 或宿主路径。[纯描述与真实 SDK 请求测试](test/request-snapshot.test.ts)用注入的本地传输核对设置一致、零描述请求和 caller 修改不影响绑定。
 
-推理强度使用中立有限值 `none/minimal/low/medium/high/xhigh/max`。只有本厂构建的兼容模型绑定接受这项 preset；不透明 SDK Model 在任何 I/O 前返回 `model_reasoning_effort_unsupported`。SDK 通过 `providerOptions.openaiCompatible.reasoningEffort` 传为实际 `reasoning_effort`，纯描述和原 Execution settings 保存相同冻结值；未配置时不发送该字段。这些值表示适配器的编码范围，不是远端模型发现或支持保证，远端拒绝按实际单次请求失败处理，不切换模型、不重试。
+推理强度的 `reasoningEffortLevels` 为 `low/medium/high/xhigh/max/ultar` 六档；完整 `reasoningEfforts` 另保留 none/minimal，供已有配置、历史与显式 API 请求使用。Ultar/ultar 是用户明确指定的名称和值，不自动改写为 ultra 或 max。只有本厂构建的兼容模型绑定接受这项 preset；不透明 SDK Model 在任何 I/O 前返回 `model_reasoning_effort_unsupported`。SDK 通过 `providerOptions.openaiCompatible.reasoningEffort` 传为实际 `reasoning_effort`，纯描述和原 Execution settings 保存相同冻结值；未配置时不发送该字段。这些值表示适配器的编码范围，不是远端模型发现或支持保证，远端拒绝按实际单次请求失败处理，不切换模型、不去参数重发。
 
 [SDK 请求](test/sdk.test.ts)逐值核对真实本机 HTTP、绑定后 caller 改值不影响请求、未知值/不透明绑定拒绝；[配套 Service](../../apps/service/test/isolated/configuration.test.ts)核对活动旧 Run 与后续新 Run 的实际 low/high 请求和公开历史 ModelInput。2026-10-02 与 Core metadata/Native-Browser inspector 组合29项、239断言通过；不证明生产 Provider 或设置面板资格。
 

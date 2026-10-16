@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { selectProfile } from '../../../src/platform/profile';
 import { retainLegacyDb6Fixture } from './assets-fixture';
 import { nodeCallerAssets } from './desktop-callers-fixture';
 
-const repository = new URL('../../../../../', import.meta.url).pathname;
+const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 /** DB6 qualification retains all DB6 assets; only proven empty DB7 additions are removed after owner close. */
 export async function nodeConfigurationAssets(
   root: string,
@@ -43,7 +44,7 @@ try {data=openPrivateData(input.profilePath,lease);
   data.rememberModelRoute(input.storeId,'original_session','original_model');
   data.rememberModelRoute(input.storeId,'other_session','other_model');
   const scope={storeId:input.storeId,workspaceId:'w',sessionId:'original_session'};
-  for(const [kind,effort] of [['run.start','high'],['input.follow_up','minimal']]){
+  for(const [kind,effort] of [['run.start','ultar'],['input.follow_up','minimal']]){
    const request={kind,expectedStoreId:input.storeId,commandId:'effort-'+kind.replace('.','-'),content:'Original effort é🙂\\r\\n',modelId:'original_model',reasoningEffort:effort,...(kind==='input.follow_up'?{afterRunId:null,contextSelectionId:'original_context'}:{})};
    const intent={scope,request,target:callerTarget(scope,request),subjectId:'original_subject',bodyDigest:callerDigest(request),requestDigest:callerTextDigest(canonicalCallerCommandRequest(request))};
    data.beginCaller({intent,phase:'submitting'});data.finishCaller(request.commandId,'unknown');

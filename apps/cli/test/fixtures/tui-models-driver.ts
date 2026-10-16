@@ -152,11 +152,7 @@ try {
   await wait('Steer original active Run >');
   await send('/effort');
   await wait('❯ Default');
-  for (const value of ['none', 'minimal']) {
-    await key('\x1b[B');
-    await wait(`❯ ${value}`);
-  }
-  for (const value of ['none', 'Default', 'max', 'high', 'medium', 'low']) {
+  for (const value of ['ultar', 'max', 'xhigh', 'high', 'medium', 'low']) {
     await key('\x1b[A');
     await wait(`❯ ${value}`);
   }

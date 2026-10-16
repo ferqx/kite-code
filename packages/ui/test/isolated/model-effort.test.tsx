@@ -84,8 +84,8 @@ async function openSelector() {
 test('same-name models remain distinct by provider and the popup uses two columns without radio choices', async () => {
   const selected: Array<[string, string]> = [];
   const models = [
-    { provider: 'OpenAI', name: 'shared-model', reasoningEffortSupported: true },
-    { provider: 'Gateway', name: 'shared-model', reasoningEffortSupported: true },
+    { provider: 'OpenAI', name: 'shared-model' },
+    { provider: 'Gateway', name: 'shared-model' },
   ];
   await render(
     <ModelEffortSelector
@@ -119,7 +119,7 @@ test('same-name models remain distinct by provider and the popup uses two column
 test('unknown configured effort stays visible as configured and absent effort remains default', async () => {
   const props = {
     model: { provider: 'OpenAI', name: 'model' },
-    models: [{ provider: 'OpenAI', name: 'model', reasoningEffortSupported: true }],
+    models: [{ provider: 'OpenAI', name: 'model' }],
     onModelChange: () => {},
     onReasoningEffortChange: () => {},
   };
@@ -134,23 +134,32 @@ test('unknown configured effort stays visible as configured and absent effort re
   expect(document.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('默认');
 });
 
-test('unsupported or missing model does not offer an ineffective effort slider', async () => {
+test('every selected model offers effort adjustment without capability metadata; missing routes require selection', async () => {
+  let chosenEffort: string | undefined;
   const props = {
     model: { provider: 'DeepSeek', name: 'chat' },
-    models: [{ provider: 'DeepSeek', name: 'chat', reasoningEffortSupported: false }],
+    models: [{ provider: 'DeepSeek', name: 'chat' }],
     onModelChange: () => {},
-    onReasoningEffortChange: () => {},
+    onReasoningEffortChange: (effort: string) => {
+      chosenEffort = effort;
+    },
   };
   await render(<ModelEffortSelector {...props} />);
   await openSelector();
-  expect(document.querySelector('[role="slider"]')).toBeNull();
-  expect(document.querySelector('.model-effort-unavailable')?.textContent).toContain('不支持');
+  const slider = document.querySelector('[role="slider"]')!;
+  expect(slider).not.toBeNull();
+  await act(() => {
+    slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  });
+  expect(chosenEffort).toBe('ultar');
   await click(document.querySelector('.model-effort-switch'));
   expect(document.querySelector('.model-effort-columns [cmdk-item]')).not.toBeNull();
+  await click(document.querySelector('[data-model-trigger]'));
 
   await act(() =>
     root!.render(<ModelEffortSelector {...props} model={{ provider: 'missing', name: 'chat' }} />),
   );
-  await click(document.querySelector('[data-model-trigger]'));
+  await openSelector();
   expect(document.querySelector('[role="slider"]')).toBeNull();
+  expect(document.querySelector('.model-effort-unavailable')?.textContent).toBe('请先选择模型');
 });

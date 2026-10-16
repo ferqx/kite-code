@@ -1,7 +1,7 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { Slider } from './components/ui/slider';
 
-export const effortNames = ['极低', '低', '中', '高', '极高', '最大'];
+export const effortNames = ['轻度', '中', '高', '极高', 'Max', 'Ultar'];
 const allPositions = [0, 1, 2, 3, 4, 5];
 
 export function GemSlider({

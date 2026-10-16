@@ -207,7 +207,7 @@ both 的 Fork 还要求当前 `codeProof` 与实际新读 `currentDetail`：clos
 
 Provider Settings 的 `getProviderSettings({storeId})` 与 `updateProviderSettings({expectedStoreId,commandId,expectedReadSet,operation,secret?})` 属于同一可选管理能力。SDK 保留并核原 provider marker、operation/readSet 和两个介质的 receipt；只发送一次 POST，未知只允许原 `getHostMutation`。公开 receipt 的 `opaqueRef` 仅在凭据已存时出现，可用于准确 revoke；Native renderer 投影不取得它。`canonicalConfigurationRequest(kind,input)` 是非秘密本地原意图 codec，不提供权限或网络操作，Provider journal 禁止 secret。
 
-`startRun/followUp` 的可选 `reasoningEffort` 使用生成的七值闭集；它是本次原命令语义并参与 canonical 摘要。`steer` 仍拒绝模型或 effort 字段，SDK 不代客户端选择路由。远端支持由 Service 投影和实际模型请求确认。
+`startRun/followUp` 的可选 `reasoningEffort` 使用生成的八值闭集：low/medium/high/xhigh/max/ultar，另保留已有 none/minimal；它是本次原命令语义并参与 canonical 摘要。模型目录提供六档可选值，旧值仍可读取和显式提交。`steer` 仍拒绝模型或 effort 字段，SDK 不代客户端选择路由或把 ultar 改写为其他值。远端支持由实际模型请求确认。
 
 ## 完整后台执行目录
 

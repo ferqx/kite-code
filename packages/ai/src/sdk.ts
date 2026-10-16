@@ -20,13 +20,40 @@ import {
   reasoningEfforts,
 } from './request-snapshot';
 
-export { type ReasoningEffort, reasoningEfforts } from './request-snapshot';
+export { type ReasoningEffort, reasoningEffortLevels, reasoningEfforts } from './request-snapshot';
 
 // Only this trusted factory knows the non-secret Provider identity. Arbitrary SDK
 // LanguageModel properties are opaque and must never be interpreted as safe metadata.
 const compatibleSnapshots = new WeakMap<object, { family: string; modelId: string }>();
 
-function messages(request: ModelRequest): SdkMessage[] {
+/** Internal IDs can contain namespaces; the compatible wire only accepts short ASCII names. */
+function toolNames(request: ModelRequest) {
+  const ids = new Set([
+    ...request.tools.map((definition) => definition.id),
+    ...request.messages.flatMap((message) => (message.toolCalls ?? []).map((call) => call.name)),
+  ]);
+  const safe = (name: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(name);
+  const used = new Set([...ids].filter(safe));
+  const encoded = new Map([...used].map((name) => [name, name]));
+  // Reserve every literal name first, including historical tools that are no longer offered.
+  for (const id of [...ids].filter((name) => !safe(name)).sort()) {
+    const base = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'tool';
+    let name = base;
+    for (let next = 1; used.has(name); next++) {
+      const suffix = `_${next}`;
+      name = `${base.slice(0, 64 - suffix.length)}${suffix}`;
+    }
+    used.add(name);
+    encoded.set(id, name);
+  }
+  const decoded = new Map([...encoded].map(([id, name]) => [name, id]));
+  return {
+    encode: (id: string) => encoded.get(id) ?? id,
+    decode: (name: string) => decoded.get(name) ?? name,
+  };
+}
+
+function messages(request: ModelRequest, encodeTool: (name: string) => string): SdkMessage[] {
   const calls = new Map<string, string>();
   return request.messages.map((message): SdkMessage => {
     if (message.role === 'assistant') {
@@ -35,11 +62,12 @@ function messages(request: ModelRequest): SdkMessage[] {
         content: [
           { type: 'text', text: message.content },
           ...(message.toolCalls ?? []).map((call) => {
-            calls.set(call.id, call.name);
+            const toolName = encodeTool(call.name);
+            calls.set(call.id, toolName);
             return {
               type: 'tool-call' as const,
               toolCallId: call.id,
-              toolName: call.name,
+              toolName,
               input: (() => {
                 try {
                   return JSON.parse(call.arguments);
@@ -133,7 +161,7 @@ export function createSdkModelAdapter(options: {
         allowSystemInMessages: true,
         ...(provider ? { includeUsage: true } : {}),
       },
-      transformation: { id: 'kite.sdk.messages', version: '1' },
+      transformation: { id: 'kite.sdk.messages', version: '2' },
     };
   };
   return {
@@ -142,10 +170,12 @@ export function createSdkModelAdapter(options: {
       signal.throwIfAborted();
       const model = models.get(request.modelId);
       if (!model) throw new Error('model_not_bound');
+      const names = toolNames(request);
       const tools: ToolSet = Object.create(null);
       for (const definition of request.tools) {
-        if (Object.hasOwn(tools, definition.id)) throw new Error('duplicate_model_tool');
-        tools[definition.id] = tool({
+        const name = names.encode(definition.id);
+        if (Object.hasOwn(tools, name)) throw new Error('duplicate_model_tool');
+        tools[name] = tool({
           description: definition.description,
           inputSchema: jsonSchema(definition.inputSchema),
         });
@@ -164,7 +194,7 @@ export function createSdkModelAdapter(options: {
             : {
                 providerOptions: { openaiCompatible: { reasoningEffort } },
               }),
-          messages: messages(request),
+          messages: messages(request, names.encode),
           allowSystemInMessages: true,
           tools,
           maxRetries: 0,
@@ -194,7 +224,7 @@ export function createSdkModelAdapter(options: {
               emittedCalls.add(part.toolCallId);
               completedCalls.push({
                 id: part.toolCallId,
-                name: part.toolName,
+                name: names.decode(part.toolName),
                 arguments: argumentsText,
               });
               break;

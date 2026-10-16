@@ -10,15 +10,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { effortNames, GemSlider } from './GemSlider';
 import { cn } from './lib/utils';
 
-const effortValues = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+const effortValues = ['low', 'medium', 'high', 'xhigh', 'max', 'ultar'] as const;
+const defaultEffortIndex = effortValues.indexOf('medium');
 export type ThinkingEffort = (typeof effortValues)[number];
 export interface ModelOption {
   readonly id?: string;
   readonly provider: string;
   readonly name: string;
-  readonly reasoningEffortSupported?: boolean;
   readonly reasoningEffort?: string;
-  readonly reasoningEffortChoices?: readonly (ThinkingEffort | 'none')[];
+  readonly reasoningEffortChoices?: readonly (ThinkingEffort | 'none' | 'minimal')[];
 }
 export interface ModelEffortSelectorProps {
   model?: { readonly id?: string; readonly provider: string; readonly name: string };
@@ -26,8 +26,6 @@ export interface ModelEffortSelectorProps {
   onModelChange: (provider: string, name: string, id?: string) => void;
   reasoningEffort?: string;
   onReasoningEffortChange?: (effort: ThinkingEffort) => void;
-  onReasoningEffortReset?: () => void;
-  onReasoningEffortOff?: () => void;
   disabled?: boolean;
 }
 
@@ -43,7 +41,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       ? model.id === props.model.id
       : model.provider === props.model?.provider && model.name === props.model.name,
   );
-  const supported = selected?.reasoningEffortSupported === true && !!props.onReasoningEffortChange;
+  const canAdjustEffort = !!selected && !!props.onReasoningEffortChange;
   const configuredEffort = props.reasoningEffort ?? selected?.reasoningEffort;
   const effortIndex = (effortValues as readonly string[]).indexOf(configuredEffort ?? '');
   const effortLabel =
@@ -90,12 +88,12 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
           size="sm"
           className="model-trigger model-effort-trigger"
           data-model-trigger
-          aria-label={`模型：${props.model?.name ?? '选择模型'}${supported ? `，思考程度：${effortLabel}` : ''}`}
+          aria-label={`模型：${props.model?.name ?? '选择模型'}${canAdjustEffort ? `，思考程度：${effortLabel}` : ''}`}
           title={props.model ? `${props.model.provider} / ${props.model.name}` : undefined}
           disabled={props.disabled}
         >
           <span className="truncate">{props.model?.name ?? '选择模型'}</span>
-          {supported && <span className="model-effort-summary">{effortLabel}</span>}
+          {canAdjustEffort && <span className="model-effort-summary">{effortLabel}</span>}
           <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
         </Button>
       </PopoverTrigger>
@@ -116,7 +114,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
         {view === 'effort' ? (
           <div className="model-effort-panel">
             <div className="flex min-w-0 flex-col items-center">
-              {supported && (
+              {canAdjustEffort && (
                 <output
                   className="effort-value"
                   data-maximum={effortIndex === 5}
@@ -141,15 +139,15 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                 <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
               </Button>
             </div>
-            {supported ? (
+            {canAdjustEffort && (
               <div className="mt-3">
                 {choices.length > 1 ? (
                   <GemSlider
                     value={
                       allowedPositions.includes(effortIndex)
                         ? effortIndex
-                        : allowedPositions.includes(2)
-                          ? 2
+                        : allowedPositions.includes(defaultEffortIndex)
+                          ? defaultEffortIndex
                           : allowedPositions[0]!
                     }
                     valueText={effortLabel}
@@ -164,27 +162,9 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                     {effortNames[allowedPositions[0]!]}
                   </Button>
                 ) : null}
-                {(props.onReasoningEffortReset ||
-                  (selected?.reasoningEffortChoices?.includes('none') &&
-                    props.onReasoningEffortOff)) && (
-                  <div className="flex justify-center gap-2 mt-2">
-                    {props.onReasoningEffortReset && (
-                      <Button variant="ghost" onClick={props.onReasoningEffortReset}>
-                        配置默认
-                      </Button>
-                    )}
-                    {selected?.reasoningEffortChoices?.includes('none') &&
-                      props.onReasoningEffortOff && (
-                        <Button variant="ghost" onClick={props.onReasoningEffortOff}>
-                          关闭思考
-                        </Button>
-                      )}
-                  </div>
-                )}
               </div>
-            ) : (
-              <p className="model-effort-unavailable">当前模型不支持思考程度调节</p>
             )}
+            {!selected && <p className="model-effort-unavailable">请先选择模型</p>}
           </div>
         ) : (
           <Tabs

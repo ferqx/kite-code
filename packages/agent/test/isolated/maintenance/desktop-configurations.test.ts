@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalJson } from '../../../src/json';
 import {
@@ -15,7 +16,7 @@ import type { Json } from '../../../src/storage';
 import { nodeConfigurationAssets } from './desktop-configurations-fixture';
 
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-db6-maintenance-');
+  const root = mkdtempSync(join(tmpdir(), 'kite-db6-maintenance-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
@@ -62,7 +63,7 @@ test('actual Node DB6 and manifest v14 preserve original configuration GETs, Ses
         .filter((row) => row.intent.request.reasoningEffort)
         .map((row) => row.intent.request.reasoningEffort)
         .sort(),
-    ).toEqual(['high', 'minimal']);
+    ).toEqual(['minimal', 'ultar']);
     expect(JSON.stringify(original.configurations)).not.toContain('secret');
     expect(JSON.stringify(original.configurations)).not.toContain('reasoningEffort');
     const before = readFileSync(f.path);

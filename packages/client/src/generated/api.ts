@@ -582,7 +582,15 @@ export type ModelInputMetadata =
               temperature?: number;
               topP?: number;
               maxOutputTokens?: number;
-              reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+              reasoningEffort?:
+                | 'none'
+                | 'minimal'
+                | 'low'
+                | 'medium'
+                | 'high'
+                | 'xhigh'
+                | 'max'
+                | 'ultar';
               maxRetries: number;
               maxSteps: number;
               allowSystemInMessages: boolean;
@@ -908,7 +916,15 @@ export type ModelInputSnapshot = {
                 temperature?: number;
                 topP?: number;
                 maxOutputTokens?: number;
-                reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+                reasoningEffort?:
+                  | 'none'
+                  | 'minimal'
+                  | 'low'
+                  | 'medium'
+                  | 'high'
+                  | 'xhigh'
+                  | 'max'
+                  | 'ultar';
                 maxRetries: number;
                 maxSteps: number;
                 allowSystemInMessages: boolean;
@@ -1130,7 +1146,7 @@ export type FollowUpCommandRequest = {
   afterRunId: string | null;
   contextSelectionId: string;
   modelId?: string;
-  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar';
   selectedSkills?: Array<string>;
   extensionInputs?: Array<{
     extensionId: string;
@@ -1305,9 +1321,11 @@ export type ModelSettingsView = {
     provider?: string;
     model?: string;
     connectionId?: string;
-    reasoningEffort?: ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max') | null;
+    reasoningEffort?:
+      | ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar')
+      | null;
     reasoningEffortChoices?: Array<
-      'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+      'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar'
     >;
     reasoningEffortSupport?: 'compatible_wire' | 'unsupported';
     reasoningEffortReadonlyReason?:
@@ -1333,7 +1351,9 @@ export type ModelSettingsRequest = {
     | {
         kind: 'effort';
         modelId: string;
-        reasoningEffort: ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max') | null;
+        reasoningEffort:
+          | ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar')
+          | null;
       };
 };
 export type ProviderSettingsView = {
@@ -1488,7 +1508,7 @@ export type HostMutation = {
           kind: 'effort';
           modelId: string;
           reasoningEffort:
-            | ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max')
+            | ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar')
             | null;
         };
   };
@@ -1867,7 +1887,7 @@ export type StartCommandRequest = {
   kind: 'run.start';
   content: string;
   modelId?: string;
-  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar';
   selectedSkills?: Array<string>;
   extensionInputs?: Array<{
     extensionId: string;
@@ -2984,7 +3004,7 @@ export type CommandRequest =
       afterRunId: string | null;
       contextSelectionId: string;
       modelId?: string;
-      reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+      reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar';
       selectedSkills?: Array<string>;
       extensionInputs?: Array<{
         extensionId: string;
@@ -3000,7 +3020,7 @@ export type CommandRequest =
       kind: 'run.start';
       content: string;
       modelId?: string;
-      reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+      reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar';
       selectedSkills?: Array<string>;
       extensionInputs?: Array<{
         extensionId: string;
@@ -3203,7 +3223,15 @@ export type PendingInputPage = {
           afterRunId: string | null;
           contextSelectionId: string;
           modelId?: string;
-          reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+          reasoningEffort?:
+            | 'none'
+            | 'minimal'
+            | 'low'
+            | 'medium'
+            | 'high'
+            | 'xhigh'
+            | 'max'
+            | 'ultar';
           selectedSkills?: Array<string>;
           extensionInputs?: Array<{
             extensionId: string;

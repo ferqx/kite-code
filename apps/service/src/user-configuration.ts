@@ -92,11 +92,7 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
           return selected?.provider === alias && selected.name === name;
         });
         const options: JsonObject = {
-          ...(['openai', 'compatible'].includes(String(family)) &&
-          provider.reasoning !== false &&
-          typeof provider.effort === 'string'
-            ? { reasoningEffort: provider.effort }
-            : {}),
+          ...(typeof provider.effort === 'string' ? { reasoningEffort: provider.effort } : {}),
           ...(typeof metadata.maxOutputTokens === 'number'
             ? { maxOutputTokens: metadata.maxOutputTokens }
             : {}),
@@ -120,7 +116,6 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
             : typeof provider.apiKey === 'string' && provider.apiKey
               ? { credentialRef: secretReference(alias, provider.apiKey) }
               : {}),
-          ...(provider.reasoning === false ? { reasoningSupported: false } : {}),
           ...(typeof metadata.contextWindowTokens === 'number' ||
           typeof metadata.maxOutputTokens === 'number'
             ? {

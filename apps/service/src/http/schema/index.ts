@@ -64,7 +64,9 @@ const followUpInput = z.strictObject({
   afterRunId: id.nullable(),
   contextSelectionId: id,
   modelId: z.string().min(1).max(256).optional(),
-  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
+  reasoningEffort: z
+    .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'])
+    .optional(),
   selectedSkills: selectedSkills.optional(),
   extensionInputs: extensionInputs.optional(),
 });
@@ -219,7 +221,7 @@ const modelAdapterMetadata = z.discriminatedUnion('availability', [
       topP: z.number().optional(),
       maxOutputTokens: z.number().optional(),
       reasoningEffort: z
-        .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+        .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'])
         .optional(),
       maxRetries: z.number().int().min(0),
       maxSteps: z.number().int().min(1),
@@ -362,7 +364,7 @@ const modelSettingsOperation = z.discriminatedUnion('kind', [
     kind: z.literal('effort'),
     modelId: definitionId,
     reasoningEffort: z
-      .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+      .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'])
       .nullable(),
   }),
 ]);
@@ -696,12 +698,12 @@ export const schemas = {
         model: z.string().optional(),
         connectionId: etag.optional(),
         reasoningEffort: z
-          .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+          .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'])
           .nullable()
           .optional(),
         reasoningEffortChoices: z
-          .array(z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']))
-          .max(7)
+          .array(z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar']))
+          .max(8)
           .optional(),
         reasoningEffortSupport: z.enum(['compatible_wire', 'unsupported']).optional(),
         reasoningEffortReadonlyReason: z
@@ -1082,7 +1084,7 @@ export const schemas = {
     content: z.string().max(262144),
     modelId: z.string().max(256).optional(),
     reasoningEffort: z
-      .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+      .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'])
       .optional(),
     selectedSkills: selectedSkills.optional(),
     extensionInputs: extensionInputs.optional(),

@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { selectProfile } from '../../../src/platform/profile';
 import { nodeAssets, retainLegacyDb5Fixture } from './assets-fixture';
 
-const repository = new URL('../../../../../', import.meta.url).pathname;
+const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 export async function nodeCallerAssets(
   root: string,
   profile: { dataRoot: string; profile: string },

@@ -240,7 +240,7 @@ TUI 观察不可用独立于快照读取失败：SSE 出错而 HTTP 仍健康时
 
 ## 开发 TUI 模型设置
 
-`host/tui.tsx` 将公共 getModelSettings/updateModelSettings/getHostMutation 适配为 UI 的有限模型端口。`/model` 和 `/effort` 固定 user scope，统一修改 ~/.kite-code/kite-code.jsonc 的默认值、启禁和支持的 effort；切换 Workspace/Profile 不改变来源。默认模型和 effort 上下选择后单 Enter 保存，E 启用／禁用仍有独立确认。Session 仍拥有各自原输入与观察 generation，模型未知提交则按用户范围阻止竞争写入。宿主不自行写 JSONC 或推导远端能力；提交固定原 Store/read-set/commandId，原查询比较 userEtag、scope 和原操作。pending/丢回执保持 unknown，仅显式原 GET，不重发 POST。首次配置也使用同一 user scope。主界面头部同样只接受当前 Store、user scope 且无 workspaceId 的模型配置观察，显示该用户默认模型；项目配置不提供头部模型。
+`host/tui.tsx` 将公共 getModelSettings/updateModelSettings/getHostMutation 适配为 UI 的有限模型端口。`/model` 和 `/effort` 固定 user scope，统一修改 ~/.kite-code/kite-code.jsonc 的默认值、启禁和六档 effort（low/medium/high/xhigh/max/ultar）；切换 Workspace/Profile 不改变来源。默认模型和 effort 上下选择后单 Enter 保存，E 启用／禁用仍有独立确认。Session 仍拥有各自原输入与观察 generation，模型未知提交则按用户范围阻止竞争写入。宿主不自行写 JSONC 或推导远端能力；提交固定原 Store/read-set/commandId，原查询比较 userEtag、scope 和原操作。pending/丢回执保持 unknown，仅显式原 GET，不重发 POST。首次配置也使用同一 user scope。主界面头部同样只接受当前 Store、user scope 且无 workspaceId 的模型配置观察，显示该用户默认模型；项目配置不提供头部模型。
 
 [模型 controller 测试](../../packages/ui/test/tui/models.test.tsx) 核对 stale、原观察、迟到与原查询；[实际 PTY 测试](test/isolated/tui-models-host.test.ts) 使用自有临时 profile、固定本机 compatible Provider 和标准 80×24 终端验证真实按键。最终资格与失败过程记录于[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。此接入不扩展 Native 的有限设置 IPC，也不代表远端模型发现或正式旧 TUI 切换完成。
 

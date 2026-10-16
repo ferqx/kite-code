@@ -3,7 +3,7 @@
 | 设置 | 入口 | 范围和生效 |
 | --- | --- | --- |
 | Provider / 模型 | 首次配置、`/model` | 保存期望配置；当前执行保留开始时配置，下一次执行采用新值 |
-| 推理深度 | `/effort` | low、medium、high、max；Provider 对这些值的支持不同 |
+| 推理深度 | `/effort` | 轻度、中、高、极高、Max、Ultar；对应 low/medium/high/xhigh/max/ultar，参数效果由模型服务决定 |
 | 权限 | `/permissions` | 控制执行审批方式；不替代工作区信任 |
 | 计划模式 | `/plan`、Shift+Tab | 控制规划阶段，与权限分开 |
 | 语言 | `/language` | `system`、`zh-CN`、`en-US`；终端客户端偏好 |
@@ -47,7 +47,7 @@
 | `provider.<名称>.model` | 默认模型名称 |
 | `provider.<名称>.models` | 模型名称列表，或带元数据的对象列表 |
 | `model` | 当前选择，可写成 `Provider名称:模型名称` |
-| `provider.<名称>.effort` | 推理深度；界面提供 low/medium/high/max |
+| `provider.<名称>.effort` | 请求推理深度；low/medium/high/xhigh/max/ultar，已有 none/minimal 保持有效 |
 | `provider.<名称>.reasoning` | 是否向 Provider 传递推理参数，受模型支持限制 |
 | `provider.<名称>.modelKwargs` | 高级 Provider 参数；不能据此放宽授权或平台限制 |
 | `provider.<名称>.credentialRef` | 系统凭据库引用，由配置入口维护 |
@@ -68,6 +68,6 @@
 
 ## 统一入口设置
 
-`bun run tui:dev` 和正式 TUI 的 `/model`、`/effort`、首次配置统一使用用户级模型 API，不按 Workspace 保存。effort 选项来自实际读取结果；compatible adapter 可提供 none/minimal/low/medium/high/xhigh/max，不承诺远端支持。清除 override 后以重读事实为准。操作见[模型设置](../guides/models-and-settings.md#统一-tui-的模型设置)。
+`bun run tui:dev` 和正式 TUI 的 `/model`、`/effort`、首次配置统一使用用户级模型 API，不按 Workspace 保存。所有配置可用的模型均提供完整 effort 档位，实际请求发送 `reasoning_effort`；模型服务决定如何处理。清除 override 后以重读事实为准。操作见[模型设置](../guides/models-and-settings.md#统一-tui-的模型设置)。
 
 统一 TUI 的 `/theme`、`/language` 保存到当前 profile 的 `ui/preferences.jsonc`，字段分别为 `colorPreset` 和 `language`；基础 `theme` 可手工配置 dark/light。缺文件默认 teal/system/dark；非法或损坏文件不自动覆盖。每次保存使用读取时文件 revision，冲突需重读后再明确选择。该文件属于客户端显示偏好，随显式维护备份采集；不写服务模型配置，也不承接旧用户目录的数据。

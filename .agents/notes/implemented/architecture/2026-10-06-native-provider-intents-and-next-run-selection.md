@@ -14,6 +14,8 @@ vault 保存和 JSONC CAS 分别记录结果。Core 的原 provider marker 绑�
 
 每个 Store/Session 仅保存下一次模型偏好；新 Session 在首次原输入落库前不绑定模型。临时 effort 只在页面会话状态中，切换模型或刷新后清除。start/follow-up 原请求冻结选择，经真实 HTTP 投影进入 root 的配置快照与实际 SDK wire；普通 active steer 保持文本语义，child 按自己的角色 preset。全局默认与活动 Run 不随页面选择修改。
 
+所有配置可用模型均可选择 effort，参数接受与否由模型服务决定，见[思考程度参数决定](2026-10-16-model-effort-pass-through.md)；本文的原意图、临时选择生命周期和活动冻结边界继续适用。
+
 Desktop DB6 保留原六表，新增配置原意图与模型路由。离线 manifest v14 专属真实 DB6；独立 Agent codec 核全部闭合字段、严格字符串 enum、原 UTF8/PK/身份/摘要。旧 v2–v13/DB1–5 grammar 不扩大，冷恢复不将原元数据转为 POST authority。当前负责合同见[Native owner](../../../../apps/desktop/README.md#native-provider-与下一次模型选择)、[Service owner](../../../../apps/service/README.md#native-provider-与下一次模型绑定)与[维护 owner](../../../../packages/agent/src/maintenance/README.md#desktop-db6-与-manifest-v14)。
 
 ## Alternatives considered

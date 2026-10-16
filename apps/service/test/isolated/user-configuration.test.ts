@@ -21,6 +21,7 @@ function fixture() {
               apiKey: 'OWNED_PRIVATE_KEY',
               models: ['first', 'second'],
               reasoning: false,
+              effort: 'high',
             },
             qwen: {
               baseURL: 'http://127.0.0.1:1234/v1',
@@ -57,6 +58,7 @@ test('one user file projects existing provider aliases and selection without exp
       ['qwen', 'other'],
     ]);
     expect(view.value.modelId).toBe(models[0]!.id);
+    expect(models[0]!.options).toEqual({ reasoningEffort: 'high' });
     expect(models[2]!.provider).toBe('compatible');
     expect(models[2]!.options).toEqual({ maxOutputTokens: 2000, temperature: 0.3 });
     expect(models[2]!.modelCapabilities).toEqual({

@@ -106,9 +106,8 @@ export function NativeModelPicker({
   function choose(modelId: string) {
     if (!reading && !error && models.some((model) => model.id === modelId)) onChange({ modelId });
   }
-  function setEffort(reasoningEffort?: NativeReasoningEffort) {
-    if (!selected || (reasoningEffort !== undefined && !supported.includes(reasoningEffort)))
-      return;
+  function setEffort(reasoningEffort: NativeReasoningEffort) {
+    if (!selected || !supported.includes(reasoningEffort)) return;
     onChange({
       ...value,
       ...(value.modelId === undefined ? { modelId: selected.id } : {}),
@@ -132,7 +131,6 @@ export function NativeModelPicker({
           id: model.id,
           provider: model.provider ?? '其他',
           name: model.model ?? model.id,
-          reasoningEffortSupported: !!model.reasoningEffortChoices?.length,
           reasoningEffort: model.reasoningEffort ?? undefined,
           reasoningEffortChoices: model.reasoningEffortChoices ?? [],
         }))}
@@ -142,8 +140,6 @@ export function NativeModelPicker({
           if (id !== undefined) choose(id);
         }}
         onReasoningEffortChange={(effort) => setEffort(effort)}
-        onReasoningEffortReset={() => setEffort(undefined)}
-        onReasoningEffortOff={() => setEffort('none')}
       />
       {reading && <p role="status">正在读取可选模型。</p>}
       {error && <p role="alert">模型目录不可用：{error}</p>}

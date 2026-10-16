@@ -194,9 +194,11 @@ closed document最多128条/16MiB，记录保完整原S/W/physical identity、�
 
 [assets.ts](assets.ts)核 application_id 1263888689 与 DB6 原六表加准确 configuration_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)、model_routes(store_id TEXT NOT NULL,session_id TEXT NOT NULL,model_id TEXT NOT NULL,PRIMARY KEY(store_id,session_id))。[独立 codec](desktop-configurations.ts)只依赖 Agent/Node/Bun：逐行核原 UTF8、PK、128行/16MiB、全部闭合 input/state/readSet/operation、明确字符串 enum、原 command/store/observation 与 pending phase；禁止 secret/opaqueRef/路径 authority/配置 effort。route 只含有效 Store/Session/model ID，不承载执行权。未知或坏行拒绝发布，原字节不清理。
 
-DB6 的[caller reader](desktop-callers.ts)独立重算完整 body/request SHA，允许原 run.start/follow-up 的七值字符串 reasoningEffort；steer 和其他 kind 不接受。此词汇只对真实 DB6 开放，DB1–5 及 CLI/TUI 独立 caller 文件仍用原 grammar。v14 仍精确验证 v13 的其他资产、条件 Auth codec、物理白名单与 absent metadata；不创建缺失 journal，不读 vault、不发送请求。
+DB6 的[caller reader](desktop-callers.ts)独立重算完整 body/request SHA，允许原 run.start/follow-up 的闭合 reasoningEffort 字符串：low/medium/high/xhigh/max/ultar，并保留已有 none/minimal。此值域与当前命令合同同步，Ultar 原请求不在离线读取时改写；steer 和其他 kind 不接受。effort 字段仍只对真实 DB6 及后继格式开放，DB1–5 及 CLI/TUI 独立 caller 文件仍用原 grammar。v14 仍精确验证 v13 的其他资产、条件 Auth codec、物理白名单与 absent metadata；不创建缺失 journal，不读 vault、不发送请求。
 
-备份和恢复随同私有 SQLite 保存原配置查询元数据、Session 模型偏好与完整 caller 请求。新 Core Store 不重标原 Store/Session/command/readSet，不把旧配置行当热 POST 权，临时页面档位不额外写入 route。[历史 Node DB6 验证](../../test/isolated/maintenance/desktop-configurations.test.ts)通过当前 Desktop owner 写入，在 owner 关闭并取得排他 profile 权后，仅移除确认为空的 DB7 MCP 表，得到真实 DB6 物理格式；再沿公共 create/inspect/restore、新 Store 冷读核原字段与完整 high/minimal 请求、HTTP零，以及秘密/错误 enum 类型、重算内部SHA的数组effort、坏UTF8/route、旧manifest伪装拒绝。历史 DB5/6 tests 用[明确空表守卫](../../test/isolated/maintenance/assets-fixture.ts)，不丢弃有内容的新表；完整当前 DB7 维护测试见下一节。资格限本机离线私有资产，不代 Native在线回执、付费模型或其他平台验收。
+备份和恢复随同私有 SQLite 保存原配置查询元数据、Session 模型偏好与完整 caller 请求。新 Core Store 不重标原 Store/Session/command/readSet，不把旧配置行当热 POST 权，临时页面档位不额外写入 route。[历史 Node DB6 验证](../../test/isolated/maintenance/desktop-configurations.test.ts)通过当前 Desktop owner 写入，在 owner 关闭并取得排他 profile 权后，仅移除确认为空的 DB7 MCP 表，得到真实 DB6 物理格式；测试断言公共 create/inspect/restore、新 Store 冷读保原字段与完整 ultar/minimal 请求、HTTP零，以及秘密/错误 enum 类型、重算内部SHA的数组effort、坏UTF8/route、旧manifest伪装拒绝。历史 DB5/6 tests 用[明确空表守卫](../../test/isolated/maintenance/assets-fixture.ts)，不丢弃有内容的新表；完整当前 DB7 维护测试见下一节。资格限本机离线私有资产，不代 Native在线回执、付费模型或其他平台验收。
+
+2026-10-16 在 Windows x64／Bun 1.4.2 对本次六档参数工作树执行 [SQLite caller 测试](../../test/isolated/maintenance/caller-effort.test.ts)，3项／43断言通过：六档及旧 none/minimal 的 start/follow-up 原字节保留、历史 grammar 拒绝 effort，以及重算摘要后的非法值拒绝。上述完整 Node DB6 测试修正临时路径和文件 URL 后，2项均在原夹具缺少 Windows 原生访问组件时以 `windows_access_asset_unavailable` 结束，未进入备份断言；本次不据此宣称完整 Windows 备份恢复已验证。
 
 
 ## Desktop DB7 与 manifest v15

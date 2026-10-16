@@ -405,7 +405,7 @@ Settings 模型业务端口为 `GET /v1/config/user/models?storeId=...` 和 `POS
 
 模型业务请求冻结原 command/Store、user scope、expectedReadSet 和单一 enabled/default/effort 操作。服务核完整用户模型候选：默认模型不能直接禁用，默认只能选择启用且 configured 的 route，其他条目/注释/未知字段保持。没有项目模型层；可信宿主覆盖导致操作不能生效时明确拒绝，普通 JSONC 不可路由期望值仍与模型设置业务约束分开。
 
-模型目录投影实际 reasoningEffort、有限 choices/support 和只读原因；缺失不表示支持。compatible_wire 只证明当前适配器可编码，不能证明远端接受。effort 保存保留其他 options，null 清除该模型的用户级 override；既有 provider effort 可重新成为有效值，结果以重读为准，不涉及项目继承。活动 Run 保持封存值，后续 Run 使用新配置。
+模型目录为所有配置可用的模型投影六档 `low/medium/high/xhigh/max/ultar` choices、当前 reasoningEffort 和只读原因；不按 Provider family、名称或 `reasoningSupported` 标记过滤。完整请求、配置、快照与 mutation 枚举另保留已有 none/minimal。`compatible_wire` 表示当前统一适配器可编码，远端接受情况由实际请求决定；ultar 不改写为 ultra 或 max。配置不完整和可信宿主 options 覆盖仍保原写入门禁。effort 保存保留其他 options，null 清除该模型的用户级 override；既有 provider effort 可重新成为有效值，结果以重读为准，不涉及项目继承。活动 Run 保持封存值，后续 Run 使用新配置。
 
 
 目标配置原 ETag 和完整读取集合在真实目标文件短锁内重核，候选通过结构/default 规则后，发布前再核非目标文件与宿主 explicit/effective digest。读取集合竞争返回 `configuration_read_set_conflict`，不会覆盖竞争编辑。锁约束合作宿主对同一目标文件的写入；不同文件或不合作外部编辑在最终核查之后仍有跨文件竞态，文件/vault/SQLite 不是一个事务。没有向 HTTP 开放验证回调或路径。
@@ -633,9 +633,11 @@ saved 要求 Command applied、准确原 Execution 状态、非准备下一 atte
 
 Service 在任何 vault 效果前核完整原 readSet，发现后和 JSONC 短 CAS 再核。秘密仅供这次热请求并参与私有 HMAC，不进入 Core safeRequest/receipt。vault 与 JSONC 是两个介质：receipt 分别记录 `credentialState` 和 `configurationState`；已存而未发布的凭据向认证 SDK 保留准确 opaque revoke handle，未知不自动回滚或重做。原 Command GET 只核查原 durable HostMutation，不重复发现、vault 写入或配置发布。
 
-`run.start` 与 `input.follow_up` 的可选 `reasoningEffort` 经真实 HTTP 投影进入 Runtime 原请求；普通 steer 不接受它。root resolver 在生成配置快照和 digest 前，将合法临时值投影到本次明确模型的冻结 options；不写 JSONC，冷恢复必须再现同一快照。模型不支持时在凭据/网络前拒绝；child 使用自己的角色 preset。实际 SDK 四 family、wire、原 Command、ModelInput、快照与恢复见[有限 HTTP 测试](test/isolated/run-model-selection.test.ts)；复合保存和520模型发现见[Provider 测试](test/isolated/provider-settings.test.ts)。默认 OS vault 的 macOS Native 窗口证据见[Desktop owner](../desktop/README.md#native-provider-与下一次模型选择)，不外推生产远端模型或其他平台。
+`run.start` 与 `input.follow_up` 的可选 `reasoningEffort` 经真实 HTTP 投影进入 Runtime 原请求；普通 steer 不接受它。root resolver 在生成配置快照和 digest 前，将合法临时值投影到本次明确模型的冻结 options；不写 JSONC，冷恢复必须再现同一快照。四类 Provider 均通过同一 SDK compatible transport 发送 `reasoning_effort`；用户源的 provider effort 同样不受旧 `reasoning:false` 限制。Kite 仅校验合法参数和绑定配置，不预判远端模型是否支持；远端拒绝如实成为模型执行失败，不回退另一模型或删除参数重发。child 使用自己的角色 preset。实际 SDK 四 family、16次配置/Max/Ultar/none wire、旧能力声明、远端400拒绝、原 Command/ModelInput、快照与恢复见[有限 HTTP 测试](test/isolated/run-model-selection.test.ts)；四 family 的 effort 保存、复合保存和520模型发现见[Provider 测试](test/isolated/provider-settings.test.ts)。默认 OS vault 的 macOS Native 窗口证据见[Desktop owner](../desktop/README.md#native-provider-与下一次模型选择)，不外推生产远端模型或其他平台。
 
 复合发布和原命令选择的取舍见[已实施决定](../../.agents/notes/implemented/architecture/2026-10-06-native-provider-intents-and-next-run-selection.md)。
+
+普通工具的内部 namespace ID 保持不变，实际 compatible 请求中的函数名由 [AI adapter](../../packages/ai/README.md)转换并在返回时还原。`files.read` 不再直接作为远端函数名发送；Core 的定义、权限、ModelInput 和历史仍使用原 ID。[普通 paired 宿主回归](test/isolated/configuration.test.ts)对默认八工具及后续历史请求实施严格 ASCII 函数名校验，核完整 Run、真实项目文件读取与显式禁用；不以单条无工具的真实 Provider 成功代替该路径。
 
 
 [Native MCP 测试装配](test/native-mcp-process.fixture.ts)仅由 Terminal builder 的固定 `native-mcp-loopback` 选项在构建前写入，网络选项和可选公开测试证书均进入 inventory/digest；普通 main/daemon 不选择它。该候选保默认权限、默认 OS vault 和系统 opener，但 loopback/证书网络不是生产默认资格。实际窗口及人工浏览器资格的入口和限制归 [Desktop owner](../desktop/README.md#native-mcp-完整设置)。

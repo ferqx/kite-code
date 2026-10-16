@@ -2,13 +2,14 @@ import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   acquireProfileAccess,
   acquireProfileDataLock,
   selectProfile,
 } from '../../../src/platform/profile';
 
-const repository = new URL('../../../../../', import.meta.url).pathname;
+const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 export const configBytes = Buffer.from(
   '// exact config with comments\n{"future":{"unchanged":true},"credentialRef":"credential:01234567-1234-1234-1234-012345678901"}\n',
 );

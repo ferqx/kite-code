@@ -5,6 +5,7 @@ export { ModelAttemptError } from './model-attempt';
 export {
   type ModelAdapterSnapshot,
   type ReasoningEffort,
+  reasoningEffortLevels,
   reasoningEfforts,
 } from './request-snapshot';
 

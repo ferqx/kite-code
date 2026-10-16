@@ -83,7 +83,7 @@ import {
   createMcpSourceConfiguration,
   type McpSourceConfigurationOptions,
 } from './mcp-source-configuration';
-import { isSupportedModelProvider, supportsReasoningEffort } from './model-providers';
+import { isSupportedModelProvider } from './model-providers';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import {
   planningSnapshotDigest,
@@ -745,16 +745,9 @@ export function createDefaultProcessConfiguration(options: {
       // a child selection uses its configured preset, while recovery reproduces
       // the original root request rather than inheriting the current default.
       if ((!selection || recovery) && request.reasoningEffort !== undefined) {
-        if (!supportsReasoningEffort(selected.provider) || selected.reasoningSupported === false)
-          throw new ConfigurationError('model_reasoning_effort_unsupported');
         selected.options = { ...selected.options, reasoningEffort: request.reasoningEffort };
       }
       const actualOptions = parseModelPreset(selected.options);
-      if (
-        actualOptions.reasoningEffort !== undefined &&
-        (!supportsReasoningEffort(selected.provider) || selected.reasoningSupported === false)
-      )
-        throw new ConfigurationError('model_reasoning_effort_unsupported');
       // Preserve the non-Skill credential/shape preflight before constructing any
       // adapters. Skill rows are validated locally by discovery, then the exact
       // selected subset is included in the final immutable snapshot below.

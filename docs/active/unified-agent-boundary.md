@@ -108,7 +108,7 @@ Task carrier成功继续要求原child的attached效果域结算，child Model�
 
 Web 后台目录复用现有 `BackgroundExecutionQuery/Page`，仅增加 Cookie Gateway 的具名 GET `/browser/v1/background-executions`；Store 由已准入 Gateway 注入，浏览器不能提交 Store 或主体 authority。Browser 固定网络代次与完整目录水位，核执行、所属 Session／root／Workspace、原 Run 和实际 child 关系后发布；准确子会话链接只切换阅读。完整输出沿已有 Job reader 和固定上界覆盖校验，隐藏、暂停、关闭及切会话只释放所属读取。目录序号不冒充输出水位，成功终态不冒充清理确认，缺少公开事实时明确不可用；没有新增 Core schema、监督模型或执行操作。负责实现与验证归 [Web](../../apps/web/README.md)、[Client](../../packages/client/README.md)及 [Gateway](../../apps/service/README.md)。
 
-原模型浮层只接受宿主提供的准确 ID、名称与实际支持档位，再回调原选择；稀疏滑块不补造服务能力。Native catalogue、原作用域、Session route、临时 effort 与就绪判定仍归 Desktop，详见 [UI owner](../../packages/ui/README.md#原桌面展示层)及 [Native owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。展示重用不扩大公共管理或运行权限。
+原模型浮层接受宿主提供的准确 ID、名称与合法请求档位，再回调原选择；不根据 Provider 或模型能力标记隐藏思考调节。当前 Service 对所有配置可用模型提供 low/medium/high/xhigh/max/ultar 六档并透传，宿主稀疏列表只表示可编码的选择，远端效果由模型服务决定。Native catalogue、原作用域、Session route、临时 effort 与就绪判定仍归 Desktop，详见 [UI owner](../../packages/ui/README.md#原桌面展示层)及 [Native owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。展示重用不扩大公共管理或运行权限。
 
 原安排任务页只有现行手册定义的字段草稿，Native 不提供不存在的保存、调度或通知回调。页面导航与原 Session 的读取/写入意图分别管理，晚创建回执不能抢占后来页面；返回原会话不以持久草稿覆盖未保存原文。负责实现与当前验收归 [Native owner](../../apps/desktop/README.md#native-安排任务草稿)，不增加 Service 能力或执行权限。
 

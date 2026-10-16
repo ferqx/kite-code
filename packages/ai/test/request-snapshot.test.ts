@@ -49,7 +49,7 @@ test('pure SDK description is sealed from actual binding/preset and never expose
       allowSystemInMessages: true,
       includeUsage: true,
     },
-    transformation: { id: 'kite.sdk.messages', version: '1' },
+    transformation: { id: 'kite.sdk.messages', version: '2' },
   });
   for (const privateValue of [
     'private.invalid',

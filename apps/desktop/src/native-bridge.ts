@@ -224,7 +224,8 @@ export type NativeReasoningEffort =
   | 'medium'
   | 'high'
   | 'xhigh'
-  | 'max';
+  | 'max'
+  | 'ultar';
 export type NativeProvider = 'openai' | 'deepseek' | 'compatible' | 'ollama';
 export type NativeProviderOperation = {
   provider: NativeProvider;

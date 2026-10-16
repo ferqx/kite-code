@@ -36,7 +36,11 @@ async function rejectsCode(work: Promise<unknown>, code: string) {
   }
   expect(caught).toMatchObject({ code });
 }
-async function fixture(delegateChild = false, readUserConfiguration = false) {
+async function fixture(
+  delegateChild = false,
+  readUserConfiguration = false,
+  rejectReasoningEffort = false,
+) {
   const root = mkdtempSync(join(tmpdir(), 'kite-run-model-selection-'));
   const workspace = readUserConfiguration ? root : join(root, 'workspace');
   if (!readUserConfiguration) mkdirSync(workspace);
@@ -54,9 +58,29 @@ async function fixture(delegateChild = false, readUserConfiguration = false) {
         body,
         authorization: request.headers.get('authorization'),
       });
+      if (rejectReasoningEffort && body.reasoning_effort !== undefined)
+        return Response.json(
+          { error: { message: 'fixture rejects reasoning_effort' } },
+          { status: 400 },
+        );
       const chunk = (delta: unknown, finish_reason: string | null = null) =>
         `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
       const delegate = delegateChild && requests.length === 1;
+      const selectedTool = (
+        body.tools as
+          | {
+              function: {
+                name: string;
+                description?: string;
+                parameters: { properties?: Record<string, unknown> };
+              };
+            }[]
+          | undefined
+      )?.find((tool) =>
+        readUserConfiguration
+          ? Object.hasOwn(tool.function.parameters.properties ?? {}, 'offset')
+          : tool.function.description === 'Trusted fixture delegation',
+      );
       const delta =
         readUserConfiguration && requests.length === 1
           ? {
@@ -66,7 +90,7 @@ async function fixture(delegateChild = false, readUserConfiguration = false) {
                   id: 'read-user-config',
                   type: 'function',
                   function: {
-                    name: 'files.read',
+                    name: selectedTool!.function.name,
                     arguments: JSON.stringify({ path: '.kite-code/kite-code.jsonc', limit: 10000 }),
                   },
                 },
@@ -80,7 +104,7 @@ async function fixture(delegateChild = false, readUserConfiguration = false) {
                     index: 0,
                     id: 'delegate',
                     type: 'function',
-                    function: { name: 'fixture.delegate', arguments: '{}' },
+                    function: { name: selectedTool!.function.name, arguments: '{}' },
                   },
                 ],
               }
@@ -470,7 +494,7 @@ test('HTTP temporary effort is original command intent, frozen before digest, re
   }
 }, 20000);
 
-test('invalid intent and unsupported effort reject before credentials and network', async () => {
+test('invalid effort and active steer effort reject before credentials and network', async () => {
   const f = await fixture();
   try {
     await rejectsCode(
@@ -499,73 +523,93 @@ test('invalid intent and unsupported effort reject before credentials and networ
       }),
       'invalid_input_request',
     );
-    f.config.models.find((model) => model.id === 'deepseek')!.options = { reasoningEffort: 'low' };
+    expect(f.credentialReads).toBe(0);
+    expect(f.requests).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('every provider sends configured and temporary effort regardless of model capability declarations', async () => {
+  const f = await fixture();
+  try {
     writeFileSync(
       f.file,
       JSON.stringify({
         ...f.config,
         models: f.config.models.map((model) => ({
           ...model,
+          reasoningSupported: false,
+          options: { reasoningEffort: 'low' },
           credentialRef: 'credential:12345678-1234-1234-1234-123456789abc',
         })),
       }),
     );
-    await f.runtime.submitCommand({
-      ...f.base,
-      commandId: 'unsupported',
-      request: {
-        kind: 'run.start',
-        content: 'hello',
-        modelId: 'deepseek',
-        reasoningEffort: 'high',
-      },
+    const original = readFileSync(f.file, 'utf8');
+    const manager = f.host.configurationManagement!(f.runtime);
+    const facts = await manager.readModels({
+      scope: 'user',
+      expectedStoreId: f.base.expectedStoreId,
     });
-    const command = await until(
-      () => f.store.getCommand('unsupported'),
-      (value) => value?.status === 'rejected',
-    );
-    expect(command!.receipt).toMatchObject({ reason: 'model_reasoning_effort_unsupported' });
-    await f.runtime.submitCommand({
-      ...f.base,
-      commandId: 'configured-unsupported',
-      request: { kind: 'run.start', content: 'hello', modelId: 'deepseek' },
-    });
-    const configured = await until(
-      () => f.store.getCommand('configured-unsupported'),
-      (value) => value?.status === 'rejected',
-    );
-    expect(configured!.receipt).toMatchObject({ reason: 'model_reasoning_effort_unsupported' });
-    writeFileSync(
-      f.file,
-      JSON.stringify({
-        ...f.config,
-        models: f.config.models.map((model) =>
-          model.id === 'openai'
-            ? {
-                ...model,
-                reasoningSupported: false,
-                credentialRef: 'credential:12345678-1234-1234-1234-123456789abc',
-              }
-            : model,
-        ),
-      }),
-    );
-    await f.runtime.submitCommand({
-      ...f.base,
-      commandId: 'model-disabled-effort',
-      request: { kind: 'run.start', content: 'hello', modelId: 'openai', reasoningEffort: 'high' },
-    });
-    const disabled = await until(
-      () => f.store.getCommand('model-disabled-effort'),
-      (value) => value?.status === 'rejected',
-    );
-    expect(disabled!.receipt).toMatchObject({ reason: 'model_reasoning_effort_unsupported' });
-    expect(f.credentialReads).toBe(0);
-    expect(f.requests).toHaveLength(0);
+    expect(facts.errors).toEqual([]);
+    for (const model of facts.models) {
+      expect(model.configured).toBe(true);
+      expect(model.reasoningEffortSupport).toBe('compatible_wire');
+      expect(model.reasoningEffortChoices).toEqual([
+        'low',
+        'medium',
+        'high',
+        'xhigh',
+        'max',
+        'ultar',
+      ]);
+      for (const effort of [undefined, 'max', 'ultar', 'none'] as const) {
+        const commandId = `${model.id}-${effort ?? 'configured'}`;
+        const view = await f.submit(commandId, {
+          kind: 'run.start',
+          content: 'hello',
+          modelId: model.id,
+          ...(effort === undefined ? {} : { reasoningEffort: effort }),
+        });
+        expect(view.runs.find((run) => run.originCommandId === commandId)?.status).toBe(
+          'completed',
+        );
+        expect(f.requests.at(-1)!.body.reasoning_effort).toBe(effort ?? 'low');
+        const execution = view.executions.filter((execution) => execution.kind === 'model').at(-1)!;
+        const input = await f.store.getModelInputSnapshot({ ...f.base, executionId: execution.id });
+        expect(input.metadata).toMatchObject({
+          adapter: { settings: { reasoningEffort: effort ?? 'low' } },
+        });
+      }
+    }
+    expect(f.requests).toHaveLength(16);
+    expect(f.credentialReads).toBe(16);
+    expect(readFileSync(f.file, 'utf8')).toBe(original);
   } finally {
     await f.close();
   }
-}, 15000);
+}, 20000);
+
+test('a remote effort rejection remains a failed model request without fallback or a second request', async () => {
+  const f = await fixture(false, false, true);
+  try {
+    const view = await f.submit('remote-effort-rejection', {
+      kind: 'run.start',
+      content: 'hello',
+      modelId: 'deepseek',
+      reasoningEffort: 'high',
+    });
+    expect(view.runs[0]!.status).toBe('failed');
+    expect(view.executions.find((execution) => execution.kind === 'model')?.status).toBe('failed');
+    expect(f.requests).toHaveLength(1);
+    expect(f.requests[0]).toMatchObject({
+      path: '/deepseek/v1/chat/completions',
+      body: { model: 'actual-deepseek', reasoning_effort: 'high' },
+    });
+  } finally {
+    await f.close();
+  }
+});
 
 test('new child selects its configured preset without inheriting the root temporary effort', async () => {
   const f = await fixture(true);

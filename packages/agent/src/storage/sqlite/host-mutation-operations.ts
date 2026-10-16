@@ -262,7 +262,7 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
             ? Object.keys(operation).sort().join(',') !== 'kind,modelId,reasoningEffort' ||
               (operation.reasoningEffort !== null &&
                 (typeof operation.reasoningEffort !== 'string' ||
-                  !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(
+                  !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'].includes(
                     operation.reasoningEffort,
                   )))
             : operation.kind !== 'default' ||

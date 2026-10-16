@@ -10,11 +10,11 @@ import {
   OverlaySection,
 } from './ink/OverlayPrimitives';
 import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
-/** Preserve original four-choice navigation while retaining every actually offered new effort. */
+/** Match the product's six-level order; retain older values only when explicitly offered. */
 export function orderedTuiEfforts(
   choices: ModelSettingsView['models'][number]['reasoningEffortChoices'],
 ) {
-  const originalOrder = ['low', 'medium', 'high', 'max'];
+  const originalOrder = ['low', 'medium', 'high', 'xhigh', 'max', 'ultar'];
   const offered = choices ?? [];
   return [
     ...offered
@@ -143,6 +143,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     max: 'Maximum reasoning for demanding tasks.',
     minimal: 'Minimal reasoning for simple tasks.',
     xhigh: 'Extended reasoning for difficult tasks.',
+    ultar: 'Send the requested Ultar reasoning effort.',
     none: 'Turn reasoning off.',
   };
   const displayModel = (id: string) => facts?.models.find((model) => model.id === id)?.model ?? id;
@@ -194,13 +195,16 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
                     primary={
                       effort === null
                         ? t('Default')
-                        : !testDiagnostics && ['low', 'medium', 'high', 'max'].includes(effort)
+                        : !testDiagnostics &&
+                            ['low', 'medium', 'high', 'xhigh', 'max', 'ultar'].includes(effort)
                           ? originalLabel(
                               `effort.${effort}` as
                                 | 'effort.low'
                                 | 'effort.medium'
                                 | 'effort.high'
-                                | 'effort.max',
+                                | 'effort.xhigh'
+                                | 'effort.max'
+                                | 'effort.ultar',
                             )
                           : t(effort)
                     }

@@ -150,12 +150,21 @@ test('four explicit provider families save actual names, protect default and ret
     const view = await f.client.getModelSettings('user', { storeId: f.storeId });
     expect(view.models).toHaveLength(4);
     expect(view.models.every((model) => !model.enabled && model.configured)).toBe(true);
-    expect(
-      view.models.find((model) => model.provider === 'deepseek')!.reasoningEffortChoices,
-    ).toEqual([]);
-    expect(
-      view.models.find((model) => model.provider === 'openai')!.reasoningEffortChoices,
-    ).toContain('high');
+    for (const model of view.models) {
+      expect(model.reasoningEffortSupport).toBe('compatible_wire');
+      expect(model.reasoningEffortChoices).toContain('high');
+      expect(model.reasoningEffortChoices).toContain('ultar');
+      expect(model.reasoningEffortChoices).not.toContain('none');
+      const fresh = await f.client.getModelSettings('user', { storeId: f.storeId });
+      await f.client.updateModelSettings('user', {
+        expectedStoreId: f.storeId,
+        commandId: `effort-${model.id}`,
+        expectedReadSet: fresh.readSet!,
+        operation: { kind: 'effort', modelId: model.id, reasoningEffort: 'ultar' },
+      });
+      const saved = await f.client.getModelSettings('user', { storeId: f.storeId });
+      expect(saved.models.find((entry) => entry.id === model.id)!.reasoningEffort).toBe('ultar');
+    }
     const model = view.models[0]!;
     const update = async (kind: 'enabled' | 'default', commandId: string, enabled = true) => {
       const fresh = await f.client.getModelSettings('user', { storeId: f.storeId });
