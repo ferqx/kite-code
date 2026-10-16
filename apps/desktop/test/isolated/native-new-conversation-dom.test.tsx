@@ -82,6 +82,8 @@ function fixture(
   let holdSelection = false,
     holdHistory = false;
   let releaseSelection: (() => void) | undefined, releaseHistory: (() => void) | undefined;
+  let holdModels = false,
+    releaseModels: (() => void) | undefined;
   const permissionSubmissions: NativeState['permissionSubmissions'][number][] = [];
   const state = (): NativeState => ({
     generation: 1,
@@ -258,7 +260,16 @@ function fixture(
         input.method === 'conversation.models.read' ||
         input.method === 'input.models.read' ||
         input.method === 'settings.models.read'
-      )
+      ) {
+        if (holdModels) {
+          holdModels = false;
+          await new Promise<void>((resolve) => {
+            releaseModels = () => {
+              releaseModels = undefined;
+              resolve();
+            };
+          });
+        }
         return {
           kind: 'settings.models',
           observationId: 1,
@@ -279,6 +290,7 @@ function fixture(
             },
           ],
         };
+      }
       if (input.method === 'conversation.send') {
         drafts.set(input.creation.sessionId, input.intent.content);
         if (rejectNext) {
@@ -339,6 +351,11 @@ function fixture(
     click,
     edit,
     input,
+    holdModels: () => {
+      holdModels = true;
+    },
+    modelsHeld: () => !!releaseModels,
+    releaseModels: () => act(async () => releaseModels?.()),
     selected: () => selected,
     holdSelection: () => {
       holdSelection = true;
@@ -421,6 +438,49 @@ function fixture(
     },
   };
 }
+
+test('switching from a Session to global or project preparation retains the input and never inserts a model loading paragraph', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('会话中尚未发送的草稿', '当前会话私有草稿');
+    const input = f.input('当前会话私有草稿')!,
+      composer = input.closest('.composer');
+    for (const entry of ['在 Workspace 中新建对话', '新对话', '在 Workspace 中新建对话']) {
+      f.holdModels();
+      await f.click(entry);
+      expect(f.modelsHeld()).toBe(true);
+      expect(f.input()).toBe(input);
+      expect(input.closest('.composer')).toBe(composer);
+      expect(input.disabled).toBe(false);
+      const picker = f.host.querySelector('[aria-label="下一轮模型选择"]')!;
+      expect(picker.getAttribute('aria-busy')).toBe('true');
+      expect(picker.querySelector('[role="status"]')).toBeNull();
+      expect(f.host.body.textContent).not.toContain('正在读取可选模型');
+      expect(picker.querySelector<HTMLButtonElement>('[data-model-trigger]')!.disabled).toBe(true);
+      await f.edit('准备页独立草稿');
+      expect(
+        f.host.querySelector<HTMLButtonElement>('button[aria-label="发送首条消息"]')!.disabled,
+      ).toBe(true);
+      await f.releaseModels();
+      expect(f.input()).toBe(input);
+      expect(input.value).toBe('准备页独立草稿');
+      expect(picker.hasAttribute('aria-busy')).toBe(false);
+      expect(picker.querySelector<HTMLButtonElement>('[data-model-trigger]')!.disabled).toBe(false);
+      await f.click('Original A');
+      expect(f.input('当前会话私有草稿')).toBe(input);
+      expect(input.value).toBe('会话中尚未发送的草稿');
+    }
+    expect(
+      f.calls.some((call) =>
+        ['conversation.send', 'submit', 'permission.mode'].includes(call.method),
+      ),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
 
 test('settings replace the painted page without remounting its draft or re-reading the selected conversation', async () => {
   const f = fixture();

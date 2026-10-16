@@ -115,7 +115,7 @@ export function NativeModelPicker({
     });
   }
   return (
-    <section aria-label="下一轮模型选择">
+    <section aria-label="下一轮模型选择" aria-busy={reading || undefined}>
       <ModelEffortSelector
         key={`${identity}/${revision}`}
         model={
@@ -141,7 +141,7 @@ export function NativeModelPicker({
         }}
         onReasoningEffortChange={(effort) => setEffort(effort)}
       />
-      {reading && <p role="status">正在读取可选模型。</p>}
+      {reading && diagnostics && <p role="status">正在读取可选模型。</p>}
       {error && <p role="alert">模型目录不可用：{error}</p>}
       {!reading && !error && !selected && (requestedId || diagnostics) && (
         <p role="alert">

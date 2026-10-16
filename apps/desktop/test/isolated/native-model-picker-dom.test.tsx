@@ -218,6 +218,46 @@ test('picker filters disabled routes, preserves transient effort through observe
   }
 });
 
+test('ordinary pending catalogue reads keep a compact busy control and genuine failures remain visible', async () => {
+  const f = fixture(),
+    ready: boolean[] = [];
+  let rejectRead!: (cause: Error) => void;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async () =>
+      new Promise((_resolve, reject) => {
+        rejectRead = reject;
+      }),
+  };
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          preparing={{ storeId: 'store' }}
+          value={{}}
+          onChange={() => {
+            throw Error('unexpected_model_change');
+          }}
+          onReady={(value) => ready.push(value)}
+        />,
+      ),
+    );
+    const picker = f.element.querySelector('[aria-label="下一轮模型选择"]')!;
+    expect(picker.getAttribute('aria-busy')).toBe('true');
+    expect(picker.querySelector('[role="status"]')).toBeNull();
+    expect(picker.querySelector<HTMLButtonElement>('[data-model-trigger]')!.disabled).toBe(true);
+    expect(ready.at(-1)).toBe(false);
+    await act(async () => rejectRead(Error('model_catalogue_unavailable')));
+    expect(picker.hasAttribute('aria-busy')).toBe(false);
+    expect(picker.querySelector('[role="alert"]')?.textContent).toContain('模型目录不可用');
+    expect(ready.at(-1)).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
 test('explicit missing selection after configuration refresh stays unavailable without switching to default', async () => {
   const f = fixture(),
     ready: boolean[] = [],
