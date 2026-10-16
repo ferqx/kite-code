@@ -58,7 +58,7 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 原 Run 的冷恢复将持久意图、可替换 Model 尝试、已确认结果与进程监督分开。纯 Model 无派生效果时可关闭旧 running/failed 尝试并重试；压缩 pending 重建摘要、已发布点保持。所选父子树在同一 root lease 下准备全部绑定并原子交接，只有提前封存的可信 Tool continuation 可接回原操作；普通外部未知效果仍需核实。原 ID、结果、审批、子期限和五次失败 streak 保持。正常 Store 事务以闭合增量迁移维护恢复证明，首次冷读只核前沿/增量和必要来源；旧库一次升级及失效协议完整审计回退。全部迁移资产进入包内构建和 Service 文件保护，公开 HTTP 与 format major 1 保持；协议、真实强杀与成本边界归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
 
-唯一新增主动停止条件是模型顺序中同工具、相同 JSON 参数连续五次失败：Run-local 计数跨完成检查保存，显式安全接续沿原 Model/Tool ledger 重建，最终经准确 `run.cancel` 域停止当前 Run 和 attached 工作。并行批次必须先结算所有已开始调用；物理完成顺序、压缩和新执行 owner 均不能重置计数或重放原工具。完整实现与定向证据归 [Agent owner](../../packages/agent/README.md)和[持续执行决定](../../.agents/notes/implemented/architecture/2026-10-15-long-running-agent-continuation.md)，不把本机定向结果推广为持续数周或完整平台资格。
+唯一新增主动停止条件是模型顺序中同工具、相同 JSON 参数连续五次失败：Run-local 计数跨完成检查保存，显式安全接续沿原 Model/Tool ledger 重建，最终经准确 `run.cancel` 域停止当前 Run 和 attached 工作。Core 确认未派发且因上下文／能力刷新退回的调用只等待重新决策，既不增加也不清空失败序列；扩展自报的详情不能取得此豁免。热执行的内部结果与恢复历史／最后 checkpoint 均携准确 Core dispatch 事实并共用分类，未知派发事实保守计数；公开 ToolResult、HTTP 和持久格式不变。并行批次必须先结算所有已开始调用；物理完成顺序、压缩和新执行 owner 均不能重置计数或重放原工具。完整实现与定向证据归 [Agent owner](../../packages/agent/README.md)和[持续执行决定](../../.agents/notes/implemented/architecture/2026-10-15-long-running-agent-continuation.md)，不把本机定向结果推广为持续数周或完整平台资格。
 
 单次 Skill 选择属于原 `run.start/input.follow_up` Command，不属于 daemon 启动状态。HTTP/Client 只传递有限数组并核 `run_skill_selection`；该能力来自 Runtime 的显式 resolver 支持声明。Core 保持请求摘要与幂等，只由 Service 解析当前可信目录。子配置继承真实父 Run 封存的准确配置 ID，名称不重新匹配，缺失父 marker 或目录项拒绝；Runtime 沿同原 Store/Session/rootWork 的有限实际执行链提供最近父 Run，不猜当前活动 Run。Skill 选择不增加工具、可信 root 或权限，冷历史与原回执只读不重新装配。 无祖先 Run 的 Action 在原派发 scope 捕获实际静态宿主绑定；后代仍按这个集合和原权限限制，不能回退到后来每 Run 配置中的更大工具目录。
 

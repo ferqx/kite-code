@@ -52,6 +52,11 @@ export interface ModelResponse {
   executionId: string;
   finishReason?: string;
 }
+/** Core dispatch facts are separate from the extension-controlled ToolResult payload. */
+export interface ToolExecutionResult {
+  result: ToolResult;
+  dispatched?: boolean;
+}
 export interface ExecutionScope {
   toolAdmission?: ToolDispatchAdmission;
   modelRetry?: import('../model-attempt').ModelRetrySource;
@@ -804,10 +809,31 @@ export class UnifiedExecution {
     decisionSource?: Json,
     planned?: ExecutionRecord,
   ): Promise<ToolResult> {
+    return (
+      await this.toolExecution(
+        scope,
+        definition,
+        call,
+        stepId,
+        sourceExecutionId,
+        decisionSource,
+        planned,
+      )
+    ).result;
+  }
+  async toolExecution(
+    scope: ToolScope,
+    definition: ToolDefinition | undefined,
+    call: ToolCall,
+    stepId: string,
+    sourceExecutionId: string,
+    decisionSource?: Json,
+    planned?: ExecutionRecord,
+  ): Promise<ToolExecutionResult> {
     const executionId = planned?.id ?? crypto.randomUUID();
-    let result: ToolResult | undefined, failure: unknown;
+    let outcome: ToolExecutionResult | undefined, failure: unknown;
     try {
-      result = await this.liveScope(scope, executionId, (bound) =>
+      outcome = await this.liveScope(scope, executionId, (bound) =>
         this.performTool(
           bound,
           definition,
@@ -819,12 +845,12 @@ export class UnifiedExecution {
           planned,
         ),
       );
-      return result;
+      return outcome;
     } catch (error) {
       failure = error;
       throw error;
     } finally {
-      if ('run' in scope) scope.toolAdmission?.settled(result, failure);
+      if ('run' in scope) scope.toolAdmission?.settled(outcome?.result, failure);
     }
   }
   private async performTool(
@@ -836,7 +862,7 @@ export class UnifiedExecution {
     executionId: string,
     decisionSource?: Json,
     planned?: ExecutionRecord,
-  ): Promise<ToolResult> {
+  ): Promise<ToolExecutionResult> {
     const work = identity(scope);
     let source: Json = decisionSource ?? {
       kind: 'model_decision',
@@ -855,37 +881,46 @@ export class UnifiedExecution {
     try {
       input = JSON.parse(call.arguments) as Json;
     } catch {
-      return this.recordRejectedTool(
-        scope,
-        executionId,
-        call,
-        stepId,
-        source,
-        null,
-        'invalid_tool_arguments',
-      );
+      return {
+        result: await this.recordRejectedTool(
+          scope,
+          executionId,
+          call,
+          stepId,
+          source,
+          null,
+          'invalid_tool_arguments',
+        ),
+        dispatched: false,
+      };
     }
     if (!definition)
-      return this.recordRejectedTool(
-        scope,
-        executionId,
-        call,
-        stepId,
-        source,
-        input,
-        'tool_not_available',
-      );
+      return {
+        result: await this.recordRejectedTool(
+          scope,
+          executionId,
+          call,
+          stepId,
+          source,
+          input,
+          'tool_not_available',
+        ),
+        dispatched: false,
+      };
     if (!this.validator.compile(definition.inputSchema)(input))
-      return this.recordRejectedTool(
-        scope,
-        executionId,
-        call,
-        stepId,
-        source,
-        input,
-        'invalid_tool_arguments',
-        definition.version,
-      );
+      return {
+        result: await this.recordRejectedTool(
+          scope,
+          executionId,
+          call,
+          stepId,
+          source,
+          input,
+          'invalid_tool_arguments',
+          definition.version,
+        ),
+        dispatched: false,
+      };
     const resuming = planned && ['dispatching', 'running'].includes(planned.status);
     const continued = resuming ? await this.options.store.getExecution(executionId) : undefined;
     if (
@@ -911,7 +946,7 @@ export class UnifiedExecution {
         });
     if (!('run' in scope)) scope = { ...scope, requirements: execution.requirements };
     let release: (() => void) | undefined;
-    let dispatched = false;
+    let dispatched = Boolean(resuming);
     let attempted = false;
     let result: ToolResult;
     const progress = createProgressWriter((content) =>
@@ -1074,7 +1109,10 @@ export class UnifiedExecution {
           !Array.isArray(stored.result) &&
           stored.result.content === 'superseded_by_user_input'
         )
-          return stored.result as unknown as ToolResult;
+          return {
+            result: stored.result as unknown as ToolResult,
+            dispatched: stored.authorization?.dispatched,
+          };
       }
       await this.options.store.finishExecution({
         expectedStoreId: work.originStoreId,
@@ -1115,7 +1153,7 @@ export class UnifiedExecution {
             }
           : {}),
       });
-      return result;
+      return { result, dispatched };
     } finally {
       release?.();
     }

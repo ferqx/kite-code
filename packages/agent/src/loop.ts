@@ -1,5 +1,5 @@
 import type { ModelMessage, ModelRequest, ModelTool } from '@kite-ai/ai';
-import type { ModelResponse } from './execution';
+import type { ModelResponse, ToolExecutionResult } from './execution';
 import type { ToolResult } from './extensions';
 import { canonicalJson } from './json';
 import { AgentError, type ToolCall } from './storage/types';
@@ -13,7 +13,19 @@ export function recordToolOutcome(
   streak: ToolFailureStreak,
   call: ToolCall,
   result: ToolResult,
+  dispatched?: boolean,
 ): void {
+  const details = result.details;
+  if (
+    result.outcome === 'failed' &&
+    dispatched === false &&
+    details &&
+    typeof details === 'object' &&
+    !Array.isArray(details) &&
+    (details.code === 'context_refresh_required' || details.code === 'capability_refresh_required')
+  )
+    // A retired decision neither consumes nor resets genuine failure attempts.
+    return;
   if (result.outcome !== 'failed') {
     streak.signature = null;
     streak.count = 0;
@@ -50,7 +62,7 @@ export interface LoopContext {
     stepId: string,
     sourceExecutionId: string,
     signal: AbortSignal,
-  ): Promise<ToolResult>;
+  ): Promise<ToolExecutionResult>;
   restoreToolCall?(call: ToolCall): void | Promise<void>;
   /** A verified durable boundary, consumed once before the ordinary loop proceeds. */
   checkpoint?:
@@ -59,7 +71,7 @@ export interface LoopContext {
         kind: 'response';
         stepId: string;
         response: ModelResponse;
-        settledCalls: readonly { callId: string; result: ToolResult; dispatched?: boolean }[];
+        settledCalls: readonly (ToolExecutionResult & { callId: string })[];
       };
 }
 
@@ -121,7 +133,7 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
     let failed = false,
       failure: unknown;
     let outcomes: PromiseSettledResult<void>[] = [];
-    const results = new Map<string, ToolResult>();
+    const results = new Map<string, ToolExecutionResult>();
     try {
       // Every started call reaches its durable boundary before the next Model, Run terminal or
       // binding release. A batch error stops siblings without rewriting the Run as user-cancelled.
@@ -133,10 +145,11 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
               initial?.kind === 'response'
                 ? initial.settledCalls.find((candidate) => candidate.callId === call.id)
                 : undefined;
-            const result =
-              settled?.result ??
+            const outcome =
+              settled ??
               (await context.executeTool(call, stepId, response.executionId, batch.signal));
-            results.set(call.id, result);
+            const { result } = outcome;
+            results.set(call.id, outcome);
             if (settled) await context.restoreToolCall?.(call);
             if (result.content === 'approval_denied' && result.outcome === 'failed')
               throw new AgentError('approval_denied');
@@ -171,7 +184,8 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
     // Physical completion order can differ from the Model's call order. All started
     // calls have settled before enforcing the limit or releasing the Run binding.
     for (const call of response.toolCalls) {
-      recordToolOutcome(streak, call, results.get(call.id)!);
+      const outcome = results.get(call.id)!;
+      recordToolOutcome(streak, call, outcome.result, outcome.dispatched);
       if (streak.count >= 5) throw new AgentError('repeated_tool_failure');
     }
   }

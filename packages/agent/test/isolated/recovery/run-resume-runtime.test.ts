@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -406,5 +407,134 @@ for (const mode of [
       // The deliberate disposer failure must retain its original profile owner.
       // Windows correctly refuses deleting that still-held directory.
       if (mode !== 'cleanup') rmSync(directory, { recursive: true, force: true });
+    }
+  }, 15000);
+
+for (const mode of [
+  'prior_refresh',
+  'last_refresh',
+  'prior_preserve',
+  'last_preserve',
+  'prior_refresh_legacy',
+  'prior_preserve_legacy',
+] as const)
+  test(`genuine SIGKILL reconstructs trusted Tool failure streak at ${mode}`, async () => {
+    const { streakBinding } = await import('./run-resume-streak-fixture');
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-streak-resume-')));
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        fileURLToPath(new URL('./run-resume-streak-crash-child.ts', import.meta.url)),
+        directory,
+        mode,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    const stderr = new Response(child.stderr).text();
+    let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+    let runtime: ReturnType<typeof createRuntime> | undefined;
+    try {
+      await until(async () => {
+        if (child.exitCode !== null) throw Error(`streak_child_exit:${await stderr}`);
+        return existsSync(join(directory, 'ready.json'));
+      });
+      child.kill('SIGKILL');
+      expect(await child.exited).toBe(137);
+      expect(child.signalCode).toBe('SIGKILL');
+      expect(await stderr).toBe('');
+      const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8')) as {
+        expectedStoreId: string;
+        runId: string;
+        expectedOwnerGeneration: string;
+        executionId: string;
+      };
+      if (mode.endsWith('_legacy')) {
+        const db = new Database(join(directory, 'data', 'test', 'core.db'));
+        try {
+          const row = db
+            .query<{ decision_source_json: string }, [string]>(
+              'SELECT decision_source_json FROM execution WHERE id=?',
+            )
+            .get(ready.executionId)!;
+          const source = JSON.parse(row.decision_source_json);
+          expect(source.sourceBody).toBeUndefined();
+          // Controlled old-format fixture: four genuine failures and four
+          // pre-dispatch refreshes were indistinguishable in v1 checkpoints.
+          source.continuation.version = 1;
+          source.continuation.toolFailureStreak = {
+            signature: JSON.stringify(['effect', '{}']),
+            count: 4,
+          };
+          db.run('UPDATE execution SET decision_source_json=? WHERE id=?', [
+            JSON.stringify(source),
+            ready.executionId,
+          ]);
+        } finally {
+          db.close(true);
+        }
+      }
+      store = await openSqliteStore({ dataRoot: join(directory, 'data'), profile: 'test' });
+      runtime = createRuntime({
+        store,
+        permissions: streakBinding(directory, mode).permissions!,
+        resolveRecoveryRunConfiguration: async () => streakBinding(directory, mode),
+      });
+      const original = await store.listExecutions('s');
+      const originalTools = original.filter((execution) => execution.kind === 'tool');
+      const refresh = originalTools.filter(
+        (execution) => execution.authorization?.dispatched === false,
+      );
+      expect(refresh).toHaveLength(
+        mode.includes('preserve') ? (mode.endsWith('_legacy') ? 0 : 1) : 4,
+      );
+      expect(
+        refresh.every(
+          (execution) =>
+            (execution.result as { content?: string }).content === 'context_refresh_required',
+        ),
+      ).toBe(true);
+      const oldEffects = readFileSync(join(directory, 'ledger'), 'utf8')
+        .split('\n')
+        .filter((line) => line.startsWith('effect:'));
+      expect(oldEffects).toHaveLength(mode.includes('preserve') ? 4 : 0);
+      const receipt = await runtime.resumeRun({
+        ...ready,
+        sessionId: 's',
+        commandId: 'resume',
+        subjectId: 'owner',
+      });
+      expect(receipt.receipt).toMatchObject({ outcome: 'run_resumed', runId: ready.runId });
+      await until(async () => !(await store!.getRun(ready.runId))!.isActive);
+      const run = await store.getRun(ready.runId);
+      expect(run).toMatchObject(
+        mode.includes('preserve')
+          ? { status: 'cancelled', reason: 'repeated_tool_failure' }
+          : { status: 'completed' },
+      );
+      const effects = readFileSync(join(directory, 'ledger'), 'utf8')
+        .split('\n')
+        .filter((line) => line.startsWith('effect:'));
+      expect(effects).toHaveLength(mode.includes('preserve') ? 5 : 1);
+      expect(new Set(effects).size).toBe(effects.length);
+      expect(effects.slice(0, oldEffects.length)).toEqual(oldEffects);
+      for (const execution of originalTools)
+        expect(await store.getExecution(execution.id)).toEqual(execution);
+      const completedEffects = (await store.listExecutions('s')).filter(
+        (execution) => execution.kind === 'tool' && execution.authorization?.dispatched === true,
+      );
+      expect(completedEffects).toHaveLength(mode.includes('preserve') ? 5 : 1);
+      expect(
+        completedEffects.every(
+          (execution) =>
+            (execution.result as { details?: { dispatchCommitted?: boolean } }).details
+              ?.dispatchCommitted === false,
+        ),
+      ).toBe(true);
+    } finally {
+      if (child.exitCode === null) child.kill('SIGKILL');
+      await child.exited;
+      await runtime?.close();
+      await store?.close();
+      rmSync(directory, { recursive: true, force: true });
     }
   }, 15000);

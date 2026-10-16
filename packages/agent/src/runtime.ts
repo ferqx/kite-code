@@ -2596,10 +2596,11 @@ export class AgentRuntime {
     const requests = new Map<string, SourceRequest>();
     const streak: ToolFailureStreak = { signature: null, count: 0 };
     const continuation = source.continuation as Record<string, Json> | undefined;
+    const currentContinuation = continuation?.version === 2;
     if (continuation) {
       const saved = continuation.toolFailureStreak as Record<string, Json> | null;
       if (
-        continuation.version !== 1 ||
+        (continuation.version !== 1 && continuation.version !== 2) ||
         continuation.runId !== state.run.id ||
         continuation.contextSelectionId !== state.run.contextSelectionId ||
         !Array.isArray(continuation.sourceRequests) ||
@@ -2610,8 +2611,10 @@ export class AgentRuntime {
         (saved.count === 0 ? saved.signature !== null : typeof saved.signature !== 'string')
       )
         throw new AgentError('run_continuation_invalid');
-      streak.count = Number(saved.count);
-      streak.signature = saved.signature as string | null;
+      if (currentContinuation) {
+        streak.count = Number(saved.count);
+        streak.signature = saved.signature as string | null;
+      }
       for (const value of continuation.sourceRequests) {
         if (
           !value ||
@@ -2628,7 +2631,9 @@ export class AgentRuntime {
       }
     }
     let afterRowid = '0';
-    for (; !continuation; ) {
+    // v1 summaries used the old failure classification. Rebuild from trusted
+    // dispatch facts rather than either importing that count or clearing it.
+    for (; !currentContinuation; ) {
       signal.throwIfAborted();
       const page = await this.options.store.readRunResumeExecutionPage({
         ...scope,
@@ -2707,6 +2712,7 @@ export class AgentRuntime {
             streak,
             call,
             tool.result as unknown as import('./extensions').ToolResult,
+            tool.authorization?.dispatched,
           );
           requests.set(`${call.name}:${await semanticDigest(input)}`, {
             sessionId: state.run.sessionId,
@@ -4728,7 +4734,7 @@ export class AgentRuntime {
         input: { kind: 'model_request' },
       });
       const continuationState = (): Json => ({
-        version: 1,
+        version: 2,
         runId: run.id,
         contextSelectionId: run.contextSelectionId,
         sourceRequests: [...sourceRequests.entries()]
@@ -5171,7 +5177,7 @@ export class AgentRuntime {
             )
               throw new AgentError('context_refresh_required');
           };
-          return this.execution.tool(
+          return this.execution.toolExecution(
             {
               ...scope,
               signal,

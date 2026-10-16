@@ -18,7 +18,7 @@ child queued、已派发但未激活、active 与 terminal-but-unsettled 使用�
 
 普通 Tool 的执行不被泛化为可重试。可信 Tool 可在派发前声明版本化 recovery，并提供独立 resume；原来源、Run manifest 和当前定义须一致。它承诺复用原操作 key 而不重复外部效果。默认 task.execute 的 resume 复用 immutable OperationRef 和幂等登记，再等待同一 carrier。未知外部 Job、未声明 Tool、特殊活动 reviewer 闭包及任意 initializer 不因这个合同取得重放资格。原审批、原结果 revision、当前权限和取消继续核实。
 
-每个新普通/压缩 Model 在原 decision_source_json 封存 version 1 continuation：Run/selection、完整来源请求和失败 streak。大正文使用原 sourceBody Artifact，Runtime 核准确 scope/hash 后恢复；当前 Tool 批次再结算一次，五次失败额度不重置。旧记录没有该字段时继续完整历史重建，未知版本拒绝。没有新增 SQL 表、baseline checksum、Store major 或维护资产格式。
+每个新普通/压缩 Model 在原 decision_source_json 封存 version 2 continuation：Run/selection、完整来源请求和失败 streak。版本2绑定 Core 派发事实的刷新中性分类；版本1的旧失败摘要从原派发历史重建，不直接沿用或清零，来源请求仍核原作用域保留。大正文使用原 sourceBody Artifact，Runtime 核准确 scope/hash 后恢复；当前 Tool 批次再结算一次，五次失败额度不重置。旧记录没有该字段时继续完整历史重建，未知版本拒绝。没有新增 SQL 表、baseline checksum、Store major 或维护资产格式。
 
 首次冷 SQL 审计仍线性验证全部 ledger 并保原 canonical digest。连接内只保一个已验证 frontier，必须同时匹配 SQLite data_version 和 total_changes 才可复用；begin 的已知 root epoch/申请/事件提交可更新快照。最终 commit 先重核当前控制，再匹配快照或完整重审，任何其他本机写入、peer commit、无通知 raw SQL 均使复用失效。该缓存不跨进程持久化、不以 change cursor 作完整性证明，也不授予执行权。组目录只读当前监督闭包与必要祖先，避免累计已结束子任务正文进入恢复目录。
 
