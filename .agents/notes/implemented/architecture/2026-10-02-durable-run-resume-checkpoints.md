@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+2026-10-16：[持久 continuation 与父子恢复](2026-10-16-durable-continuations-and-group-recovery.md)扩展纯 Model、压缩和原 child 监督边界，并以实际 SQLite 写入观察复用未变化校验快照。本文的原身份、未知效果、初始化与权限理由继续适用；旧的全面拒绝范围和每阶段重复扫描由新决定收窄。
+
 显式 run.resume 固定当前 Store、根 Session、原 Run；HTTP 只接收这些公开身份与申请 ID，owner generation 由服务端读取，同 ID 使用原内部 generation 保持幂等，不能由客户端自报。可信 Core/Store 入口保留 generation CAS。只读预检先核原主体和来源，独立 OS 恢复 lease 封存检查点；恢复原配置后，同事务复核配置、当前选择、取消边界和准确检查点，再把可证明未派发的原执行交给新 generation 的普通 owner。独立申请保存 accepted/null 或 applied 的有限回执，不把内部恢复配置复制进原始导出的 Command。
 
 检查点区分原 Model 派发前、完整 Model 的工具调用序列、完成判定。已完成结果只读跳过，planned Model 使用原封存请求和身份，planned Tool 保留原 Execution、决策来源和 Interaction；完成的无工具回复进入既有完成门禁。初始化保存 unstarted/started/completed，completed 不重跑回调，started 的冷恢复明确拒绝，不重放半完成闭包。

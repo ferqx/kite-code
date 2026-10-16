@@ -10,6 +10,7 @@ import {
   type RunResumeState,
 } from '../types';
 import { transferAuthorizationReviewOwnership } from './authorization-review';
+import { assertConfigurationReads } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { identity as modelIdentity, sessionScope } from './model-input-operations';
 import type { SqliteOperations } from './operations';
@@ -25,20 +26,84 @@ const jsonRow = (row: Row): Json =>
       typeof value === 'bigint' ? String(value) : value,
     ]),
   );
+// A validated read snapshot, never a durable authority. SQLite invalidates it for
+// every local write and every peer commit, including raw SQL without change events.
+const validatedScopes = new WeakMap<
+  SqliteOperations,
+  {
+    key: string;
+    token: string;
+    state: RunResumeState;
+    executions: Row[];
+  }
+>();
+function snapshotToken(db: SqliteOperations): string {
+  return `${db.row('PRAGMA data_version')!.data_version}:${db.row('SELECT total_changes() AS changes')!.changes}`;
+}
+const scopeKey = (input: RunResumeInput) =>
+  canonicalJson({
+    expectedStoreId: input.expectedStoreId,
+    commandId: input.commandId,
+    subjectId: input.subjectId,
+    sessionId: input.sessionId,
+    runId: input.runId,
+    expectedOwnerGeneration: input.expectedOwnerGeneration,
+  });
+function assertEffectFreeModel(db: SqliteOperations, execution: Row): void {
+  const source = parse(execution.decision_source_json) as Record<string, Json> | null;
+  const command = db.row('SELECT * FROM command WHERE id=?', execution.origin_command_id!);
+  const carrier = command && db.childCarrier(command, String(execution.run_id));
+  if (
+    execution.kind !== 'model' ||
+    execution.parent_execution_id !== (carrier?.id ?? null) ||
+    execution.cancel_requested ||
+    source?.kind !== 'model_request' ||
+    source.requestId !== execution.id ||
+    db.row(
+      "SELECT id FROM execution WHERE session_id=? AND kind IN('tool','job') AND (step_id=? OR parent_execution_id=? OR json_extract(decision_source_json,'$.modelExecutionId')=?) LIMIT 1",
+      execution.session_id!,
+      execution.step_id!,
+      execution.id!,
+      execution.id!,
+    )
+  )
+    throw new AgentError('run_resume_checkpoint_unavailable');
+}
+function canContinueTool(execution: Row, run: Row): boolean {
+  const source = parse(execution.decision_source_json) as Record<string, Json>;
+  const manifest = parse(run.config_json) as Record<string, Json>;
+  return (
+    execution.kind === 'tool' &&
+    !execution.cancel_requested &&
+    ['dispatching', 'running'].includes(String(execution.state)) &&
+    typeof source.toolRecoveryVersion === 'string' &&
+    !!source.toolRecoveryVersion &&
+    Array.isArray(manifest.tools) &&
+    manifest.tools.some((item) => {
+      const tool = item as Record<string, Json>;
+      return (
+        tool.id === execution.adapter_id &&
+        tool.version === execution.definition_version &&
+        tool.recoveryVersion === source.toolRecoveryVersion
+      );
+    })
+  );
+}
 function scope(
   db: SqliteOperations,
   input: RunResumeInput,
   generation?: string,
   ignorePrior = false,
+  member = false,
 ) {
   db.identity(input.expectedStoreId);
   const session = db.row('SELECT * FROM session WHERE id=?', input.sessionId);
   if (!session || session.delete_requested) throw new AgentError('session_not_found');
-  if (session.parent_id !== null || session.root_id !== session.id)
+  if (!member && (session.parent_id !== null || session.root_id !== session.id))
     throw new AgentError('group_root_required');
   const creator = db.row(
     "SELECT * FROM command WHERE session_id=? AND kind='session.create'",
-    input.sessionId,
+    session.root_id!,
   );
   if (creator?.subject_id !== input.subjectId) throw new AgentError('permission_denied');
   const run = db.row('SELECT * FROM run WHERE id=? AND session_id=?', input.runId, input.sessionId);
@@ -56,7 +121,7 @@ function scope(
     runId: input.runId,
     expectedOwnerGeneration: input.expectedOwnerGeneration,
   };
-  const prior = db.row('SELECT * FROM command WHERE id=?', input.commandId);
+  const prior = member ? null : db.row('SELECT * FROM command WHERE id=?', input.commandId);
   if (
     prior &&
     (prior.kind !== 'run.resume' ||
@@ -77,9 +142,15 @@ function scope(
   };
   if (prior && !ignorePrior)
     return { state: base, run, session, original, executions: [] as Row[], request, prior };
-  if (!['run.start', 'input.follow_up'].includes(String(original.kind)))
+  if (member && !run.is_active)
+    return { state: base, run, session, original, executions: [] as Row[], request, prior };
+  if (
+    !(member ? ['child.start', 'input.follow_up'] : ['run.start', 'input.follow_up']).includes(
+      String(original.kind),
+    )
+  )
     throw new AgentError('run_resume_checkpoint_unavailable');
-  if (String(session.owner_generation) !== (generation ?? input.expectedOwnerGeneration))
+  if (!member && String(session.owner_generation) !== (generation ?? input.expectedOwnerGeneration))
     throw new AgentError('owner_changed');
   if (
     !run.is_active ||
@@ -94,23 +165,14 @@ function scope(
     throw new AgentError('cancelled_before_dispatch');
   if (run.context_selection_id !== session.context_selection_id)
     throw new AgentError('context_selection_changed');
-  if (
-    db.row(
-      'SELECT id FROM run WHERE session_id IN(SELECT id FROM session WHERE root_id=?) AND is_active=1 AND id<>?',
-      input.sessionId,
-      input.runId,
-    )
-  )
-    throw new AgentError('run_resume_checkpoint_unavailable');
-  if (
-    db.row(
-      "SELECT id FROM execution WHERE root_session_id=? AND state IN('planned','dispatching','running','outcome_unknown') AND NOT(COALESCE(run_id=?,0) AND session_id=? AND state='planned' AND dispatched=0 AND kind IN('model','tool') AND parent_execution_id IS NULL) LIMIT 1",
-      input.sessionId,
-      input.runId,
-      input.sessionId,
-    )
-  )
-    throw new AgentError('run_resume_checkpoint_unavailable');
+  const parentExecutionId = member ? db.childCarrier(original, input.runId)?.id : null;
+  const cached = !member && validatedScopes.get(db);
+  if (cached && cached.key === scopeKey(input) && cached.token === snapshotToken(db)) {
+    base.executions = cached.state.executions;
+    base.children = cached.state.children;
+    base.checkpoint = cached.state.checkpoint;
+    return { state: base, run, session, original, executions: cached.executions, request, prior };
+  }
   // Hash exactly the original canonical object, streaming its sorted keys and row arrays.
   // Every historical row is validated; only the latest Model and zero-dispatch frontier leave SQLite.
   const digest = createHash('sha256').update('{"executions":[');
@@ -128,7 +190,12 @@ function scope(
     digest.update(canonicalJson(jsonRow(e)));
     ++count;
     if (e.origin_store_id !== input.expectedStoreId) throw new AgentError('operation_unverifiable');
-    if (['dispatching', 'running', 'outcome_unknown'].includes(String(e.state)))
+    if (
+      e.state === 'outcome_unknown' ||
+      (e.kind !== 'model' &&
+        ['dispatching', 'running'].includes(String(e.state)) &&
+        !canContinueTool(e, run))
+    )
       throw new AgentError('run_resume_checkpoint_unavailable');
     if (
       e.state === 'planned' &&
@@ -136,7 +203,7 @@ function scope(
         e.session_id !== input.sessionId ||
         e.dispatched !== 0n ||
         e.kind === 'job' ||
-        e.parent_execution_id !== null ||
+        e.parent_execution_id !== parentExecutionId ||
         e.cancel_requested)
     )
       throw new AgentError('run_resume_checkpoint_unavailable');
@@ -147,25 +214,20 @@ function scope(
     }
     if (e.run_id === input.runId && e.kind === 'model' && e.state !== 'planned') {
       const result = parse(e.result_json) as Record<string, Json> | null;
-      if (!result || typeof result.content !== 'string')
-        throw new AgentError('run_resume_checkpoint_unavailable');
-      if (e.state === 'failed') {
+      if (['failed', 'dispatching', 'running'].includes(String(e.state))) {
         // A closed incomplete attempt is historical data, never a dispatch checkpoint.
         // No Tool or Job may have been derived from that incomplete Model decision.
         if (
-          result.incomplete !== true ||
-          e.cancel_requested ||
-          db.row(
-            "SELECT id FROM execution WHERE session_id=? AND kind IN('tool','job') AND (step_id=? OR json_extract(decision_source_json,'$.modelExecutionId')=?) LIMIT 1",
-            input.sessionId,
-            e.step_id!,
-            e.id!,
-          )
+          e.state === 'failed' &&
+          (result?.incomplete !== true || typeof result.content !== 'string')
         )
           throw new AgentError('run_resume_checkpoint_unavailable');
+        assertEffectFreeModel(db, e);
       } else {
         if (
           e.state !== 'succeeded' ||
+          !result ||
+          typeof result.content !== 'string' ||
           !['stop', 'tool_calls', 'length'].includes(String(result.finishReason)) ||
           !Array.isArray(result.toolCalls) ||
           (result.finishReason === 'length' && result.toolCalls.length !== 0) ||
@@ -174,7 +236,7 @@ function scope(
           throw new AgentError('run_resume_checkpoint_unavailable');
       }
     }
-    if (e.state === 'planned') {
+    if (e.state === 'planned' || canContinueTool(e, run)) {
       planned.push({ row: e, position: count });
       if (planned.length > 4096) throw new AgentError('run_resume_checkpoint_unavailable');
       if (e.kind === 'model') ++plannedModels;
@@ -184,16 +246,13 @@ function scope(
       lastPosition = count;
     }
   }
-  if (
-    plannedModels > 1 ||
-    (plannedModels && last?.state !== 'planned') ||
-    (last && !['planned', 'succeeded'].includes(String(last.state)))
-  )
+  if (plannedModels > 1 || (plannedModels && last?.state !== 'planned'))
     throw new AgentError('run_resume_checkpoint_unavailable');
   if (run.initialization_state === 'started' || (run.initialization_state === 'unstarted' && count))
     throw new AgentError('run_initialization_incomplete');
   const boundary: RunResumeCheckpoint['boundary'] =
-    !last || last.state === 'planned'
+    last?.state !== 'succeeded' ||
+    (parse(last.decision_source_json) as Record<string, Json>)?.compressionId
       ? 'before_model_dispatch'
       : (parse(last.result_json) as Record<string, Json>).finishReason === 'tool_calls'
         ? 'tool_calls'
@@ -246,7 +305,216 @@ function scope(
     bindingDigest: digest.digest('hex'),
   };
   base.checkpoint = checkpoint;
+  if (!member) attachGroup(db, input, base, run);
   return { state: base, run, session, original, executions, request, prior };
+}
+/** Discover through actual execution edges, never through Session insertion order or UI views. */
+function attachGroup(
+  db: SqliteOperations,
+  input: RunResumeInput,
+  root: RunResumeState,
+  rootRun: Row,
+) {
+  const runs = new Set([input.runId]);
+  const pending = db.rows(
+    `WITH RECURSIVE ancestry(id) AS (
+      SELECT e.id FROM execution e LEFT JOIN run r ON r.origin_command_id='child-start-'||e.id AND r.session_id=e.child_session_id
+      WHERE e.root_session_id=? AND e.root_work_command_id=? AND e.root_work_seq=? AND e.child_session_id IS NOT NULL
+        AND (e.state IN('planned','dispatching','running','outcome_unknown') OR r.is_active=1)
+      UNION SELECT e.parent_execution_id FROM execution e JOIN ancestry a ON e.id=a.id WHERE e.parent_execution_id IS NOT NULL
+    ) SELECT e.* FROM execution e JOIN ancestry a ON e.id=a.id WHERE e.child_session_id IS NOT NULL ORDER BY e.rowid`,
+    input.sessionId,
+    rootRun.root_work_command_id!,
+    rootRun.root_work_seq!,
+  );
+  const children: NonNullable<RunResumeState['children']> = [];
+  const identities = new Map<string, Json>();
+  const paths = new Map<string, Row[]>();
+  const nearestRun = (carrier: Row): string => {
+    let current = carrier;
+    const seen = new Set<string>();
+    const path: Row[] = [];
+    while (current.run_id === null) {
+      if (!current.parent_execution_id || seen.has(String(current.id)))
+        throw new AgentError('operation_unverifiable');
+      seen.add(String(current.id));
+      const parent = db.row('SELECT * FROM execution WHERE id=?', current.parent_execution_id);
+      if (
+        !parent ||
+        parent.session_id !== carrier.session_id ||
+        parent.root_session_id !== input.sessionId
+      )
+        throw new AgentError('operation_unverifiable');
+      if (
+        parent.origin_store_id !== input.expectedStoreId ||
+        parent.root_work_command_id !== rootRun.root_work_command_id ||
+        String(parent.root_work_seq) !== String(rootRun.root_work_seq)
+      )
+        throw new AgentError('operation_unverifiable');
+      path.push(parent);
+      current = parent;
+    }
+    paths.set(String(carrier.id), path);
+    return String(current.run_id);
+  };
+  for (let progress = true; progress; ) {
+    progress = false;
+    for (let index = 0; index < pending.length; ) {
+      const carrier = pending[index]!;
+      const parentRunId = nearestRun(carrier);
+      if (!runs.has(parentRunId)) {
+        index++;
+        continue;
+      }
+      pending.splice(index, 1);
+      progress = true;
+      const session = db.row('SELECT * FROM session WHERE id=?', carrier.child_session_id!);
+      const command = db.row('SELECT * FROM command WHERE id=?', `child-start-${carrier.id}`);
+      const origin = db.row('SELECT * FROM command WHERE id=?', carrier.origin_command_id!);
+      const run = command && db.row('SELECT * FROM run WHERE origin_command_id=?', command.id!);
+      const request = command && (parse(command.request_json) as Record<string, Json> | null);
+      const configuration = parse(carrier.child_configuration_json) as Record<string, Json> | null;
+      const operation = origin && (parse(origin.request_json) as Record<string, Json> | null);
+      const parent =
+        carrier.parent_execution_id &&
+        db.row('SELECT * FROM execution WHERE id=?', carrier.parent_execution_id);
+      if (
+        carrier.kind !== 'job' ||
+        !configuration ||
+        !session ||
+        !command ||
+        !origin ||
+        origin.kind !== 'operation.agent' ||
+        origin.session_id !== carrier.session_id ||
+        carrier.run_id !== null ||
+        operation?.kind !== 'operation.agent' ||
+        operation.parentExecutionId !== carrier.parent_execution_id ||
+        operation.definitionId !== carrier.adapter_id ||
+        operation.definitionVersion !== carrier.definition_version ||
+        operation.configurationId !== configuration.id ||
+        canonicalJson(operation.childConfiguration!) !== carrier.child_configuration_json ||
+        canonicalJson(operation.input!) !== carrier.intent_json ||
+        (operation.cancellation === 'detached') !== !carrier.cancel_with_parent ||
+        carrier.step_id !== `operation-${origin.id}` ||
+        carrier.call_id !== origin.id ||
+        !parent ||
+        parent.decision_source_json !== carrier.decision_source_json ||
+        origin.subject_id !== input.subjectId ||
+        session.parent_id !== carrier.session_id ||
+        session.root_id !== input.sessionId ||
+        session.delete_requested ||
+        command.session_id !== session.id ||
+        command.subject_id !== input.subjectId ||
+        !['child.start', 'input.follow_up'].includes(String(command.kind)) ||
+        (command.kind === 'child.start'
+          ? request?.parentExecutionId !== carrier.id
+          : command.agent_carrier_execution_id !== carrier.id) ||
+        carrier.origin_store_id !== input.expectedStoreId ||
+        origin.origin_store_id !== input.expectedStoreId ||
+        command.origin_store_id !== input.expectedStoreId ||
+        [carrier, command, origin].some(
+          (row) =>
+            row.root_work_command_id !== rootRun.root_work_command_id ||
+            String(row.root_work_seq) !== String(rootRun.root_work_seq),
+        ) ||
+        (run &&
+          (run.session_id !== session.id ||
+            db.childCarrier(command, String(run.id))?.id !== carrier.id ||
+            canonicalJson(configuration.snapshot!) !== run.config_json)) ||
+        carrier.state === 'outcome_unknown' ||
+        (run?.is_active && !['dispatching', 'running'].includes(String(carrier.state))) ||
+        (!run && carrier.state !== 'planned' && carrier.state !== 'dispatching')
+      )
+        throw new AgentError('run_resume_checkpoint_unavailable', 'child_relationship');
+      if (
+        carrier.reference_json !== null &&
+        canonicalJson(parse(carrier.reference_json)) !==
+          canonicalJson({
+            kind: 'child_session',
+            childSessionId: String(session.id),
+            runId: run ? String(run.id) : null,
+            commandId: String(command.id),
+          })
+      )
+        throw new AgentError('run_resume_checkpoint_unavailable', 'child_reference');
+      let child: RunResumeState | null = null;
+      try {
+        child = run
+          ? scope(
+              db,
+              { ...input, sessionId: String(session.id), runId: String(run.id) },
+              undefined,
+              false,
+              true,
+            ).state
+          : null;
+      } catch (error) {
+        throw new AgentError(
+          'run_resume_checkpoint_unavailable',
+          `child_frontier:${error instanceof Error ? error.message : error}`,
+        );
+      }
+      if (run) runs.add(String(run.id));
+      children.push({
+        parentRunId,
+        carrier: db.execution(carrier),
+        session: db.session(session),
+        command: db.command(command),
+        state: child,
+      });
+      identities.set(String(carrier.id), {
+        carrier: jsonRow(carrier),
+        session: jsonRow(session),
+        command: jsonRow(command),
+        origin: jsonRow(origin),
+        path: paths.get(String(carrier.id))!.map(jsonRow),
+      });
+    }
+  }
+  // Only retain live supervision and the ancestors needed to recreate its trusted bindings.
+  const needed = new Set(
+    children
+      .filter(
+        (child) =>
+          child.state?.run.isActive ||
+          ['planned', 'dispatching', 'running'].includes(child.carrier.status),
+      )
+      .map((child) => child.carrier.id),
+  );
+  for (let index = children.length - 1; index >= 0; index--) {
+    const child = children[index]!;
+    if (!needed.has(child.carrier.id)) continue;
+    const parent = children.find((candidate) => candidate.state?.run.id === child.parentRunId);
+    if (parent) needed.add(parent.carrier.id);
+  }
+  root.children = children.filter((child) => needed.has(child.carrier.id));
+  const allowed = new Set(
+    [root, ...root.children.flatMap((child) => (child.state ? [child.state] : []))].flatMap(
+      (state) => state.executions.map((execution) => execution.id),
+    ),
+  );
+  for (const child of root.children) allowed.add(child.carrier.id);
+  for (const execution of db.rows(
+    "SELECT id FROM execution WHERE root_session_id=? AND state IN('planned','dispatching','running','outcome_unknown')",
+    input.sessionId,
+  ))
+    if (!allowed.has(String(execution.id)))
+      throw new AgentError('run_resume_checkpoint_unavailable');
+  for (const active of db.rows(
+    'SELECT id FROM run WHERE session_id IN(SELECT id FROM session WHERE root_id=?) AND is_active=1',
+    input.sessionId,
+  ))
+    if (!runs.has(String(active.id))) throw new AgentError('run_resume_checkpoint_unavailable');
+  if (root.children.length)
+    root.checkpoint!.groupDigest = hash({
+      root: root.checkpoint!.bindingDigest,
+      children: root.children.map((child) => ({
+        parentRunId: child.parentRunId,
+        identity: identities.get(child.carrier.id)!,
+        run: (child.state?.run as unknown as Json) ?? null,
+        checkpoint: (child.state?.checkpoint as unknown as Json) ?? null,
+      })),
+    });
 }
 function readExecutionPage(
   db: SqliteOperations,
@@ -264,8 +532,6 @@ function readExecutionPage(
   db.db.run('BEGIN');
   try {
     const session = sessionScope(db, input);
-    if (session.parent_id !== null || session.root_id !== session.id)
-      throw new AgentError('group_root_required');
     const anchor = db.row(
       'SELECT rowid AS resume_rowid,* FROM execution WHERE id=?',
       input.modelExecutionId,
@@ -308,11 +574,20 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
   if (method === 'readRunResumeExecutionPage')
     return readExecutionPage(db, value as Parameters<Store['readRunResumeExecutionPage']>[0]);
   if (method === 'verifyRunResume') {
+    const before = snapshotToken(db);
     db.db.run('BEGIN');
     try {
-      const result = scope(db, value as RunResumeInput).state;
+      const input = value as RunResumeInput;
+      const result = scope(db, input);
       db.db.run('COMMIT');
-      return result;
+      if (!result.prior && before === snapshotToken(db))
+        validatedScopes.set(db, {
+          key: scopeKey(input),
+          token: before,
+          state: result.state,
+          executions: result.executions,
+        });
+      return result.state;
     } catch (error) {
       db.db.run('ROLLBACK');
       throw error;
@@ -367,6 +642,19 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
         input.commandId,
       );
       db.event(input.sessionId, input.commandId, 'run.resume_prepared');
+      validatedScopes.set(db, {
+        key: scopeKey({
+          expectedStoreId: input.expectedStoreId,
+          commandId: input.commandId,
+          subjectId: input.subjectId,
+          sessionId: input.sessionId,
+          runId: input.runId,
+          expectedOwnerGeneration: input.expectedOwnerGeneration,
+        }),
+        token: snapshotToken(db),
+        state: s.state,
+        executions: s.executions,
+      });
       return {
         command: db.command(db.row('SELECT * FROM command WHERE id=?', input.commandId)!),
         lease,
@@ -420,15 +708,93 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
       canonicalJson(s.state.checkpoint as unknown as Json)
     )
       throw new AgentError('run_resume_checkpoint_changed');
-    for (const e of s.executions)
-      if (e.state === 'planned') {
-        transferAuthorizationReviewOwnership(db, e, String(e.owner_generation), lease.generation);
+    const children = s.state.children ?? [];
+    const configurations = input.childConfigurations ?? [];
+    for (const child of children)
+      assertConfigurationReads(
+        db,
+        child.carrier.childConfiguration!,
+        db.row('SELECT * FROM execution WHERE id=?', child.carrier.parentExecutionId!)!,
+        input.expectedStoreId,
+      );
+    if (
+      configurations.length !== children.length ||
+      children.some((child) => {
+        const matching = configurations.filter((item) => item.executionId === child.carrier.id);
+        return (
+          matching.length !== 1 ||
+          canonicalJson(matching[0]!.configuration) !==
+            canonicalJson(child.carrier.childConfiguration!.snapshot)
+        );
+      })
+    )
+      throw new AgentError('run_configuration_changed');
+    const frontier = [
+      ...s.executions,
+      ...children.flatMap(
+        (child) =>
+          child.state?.executions.map((e) => db.row('SELECT * FROM execution WHERE id=?', e.id)!) ??
+          [],
+      ),
+    ];
+    for (const e of frontier)
+      if (e.kind === 'model' && ['dispatching', 'running'].includes(String(e.state))) {
+        assertEffectFreeModel(db, e);
+        if (BigInt(e.result_revision!) >= 9223372036854775807n)
+          throw new AgentError('sequence_exhausted');
+        const partial = db.row(
+          'SELECT source_json FROM message WHERE id=? AND session_id=?',
+          `partial_${e.id}`,
+          e.session_id!,
+        );
+        const body = (partial ? parse(partial.source_json) : null) as Record<string, Json> | null;
+        db.run(
+          "UPDATE execution SET state='failed',result_json=?,result_revision=result_revision+1 WHERE id=?",
+          canonicalJson({
+            code: 'model_attempt_interrupted',
+            incomplete: true,
+            content: typeof body?.content === 'string' ? body.content : '',
+            reasoning: typeof body?.reasoning === 'string' ? body.reasoning : '',
+            ...(body?.modelOutput ? { modelOutput: body.modelOutput } : {}),
+          }),
+          e.id!,
+        );
+        db.event(String(e.session_id), String(e.id), 'execution.finished');
+        db.run(
+          'UPDATE execution SET completed_cursor=(SELECT last_change_cursor FROM storage_meta WHERE singleton=1) WHERE id=?',
+          e.id!,
+        );
+      } else if (e.state === 'planned' || e.kind === 'tool') {
+        if (e.state === 'planned')
+          transferAuthorizationReviewOwnership(db, e, String(e.owner_generation), lease.generation);
         const changed = db.db.run(
-          "UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state='planned' AND dispatched=0",
-          [BigInt(lease.generation), e.id!, e.owner_generation!],
+          'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=?',
+          [BigInt(lease.generation), e.id!, e.owner_generation!, e.state!],
         );
         if (Number(changed.changes) !== 1) throw new AgentError('run_resume_checkpoint_changed');
       }
+    for (const child of children) {
+      if (!['planned', 'dispatching', 'running'].includes(child.carrier.status)) continue;
+      db.run(
+        'UPDATE execution SET owner_generation=? WHERE id=?',
+        BigInt(lease.generation),
+        child.carrier.id,
+      );
+      // Transfer the existing supervision chain, including settled provenance. State and
+      // result revisions stay unchanged; a terminal ancestor cannot dispatch again.
+      let parentId = child.carrier.parentExecutionId;
+      const seen = new Set<string>();
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId);
+        const parent = db.row('SELECT * FROM execution WHERE id=?', parentId)!;
+        db.run(
+          'UPDATE execution SET owner_generation=? WHERE id=?',
+          BigInt(lease.generation),
+          parentId,
+        );
+        parentId = parent.parent_execution_id === null ? null : String(parent.parent_execution_id);
+      }
+    }
     const receipt: Json = {
       outcome: 'run_resumed',
       runId: lease.runId,

@@ -71,6 +71,10 @@ export interface ToolDefinition {
   readonly description: string;
   readonly inputSchema: JsonSchema;
   readonly resources?: ResourceRequest;
+  /** Trusted durable continuation contract. resume must reuse original operation keys;
+   * it must not repeat external effects. Captured before the original dispatch. */
+  readonly recovery?: { readonly version: string };
+  resume?(input: Json, context: ToolContext): Promise<ToolResult>;
   execute(input: Json, context: ToolContext): Promise<ToolResult>;
 }
 export interface JobHandle {

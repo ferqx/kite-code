@@ -992,6 +992,8 @@ export interface RunResumeCheckpoint {
   bindingDigest: string;
   contextSelectionId: string;
   initializationState: 'unstarted' | 'started' | 'completed';
+  /** Atomic closure of the selected Run and its original child carriers. */
+  groupDigest?: string;
 }
 /** Private bounded identity directory; it never grants recovery or dispatch authority. */
 export interface RunResumeExecutionPageInput {
@@ -1016,6 +1018,15 @@ export interface RunResumeState {
   executions: ExecutionRecord[];
   checkpoint: RunResumeCheckpoint | null;
   requirementsInitialized: boolean;
+  /** Parent before child; terminal ancestors supply bindings but never execute again. */
+  children?: RunResumeChild[];
+}
+export interface RunResumeChild {
+  parentRunId: string;
+  carrier: ExecutionRecord;
+  session: SessionRecord;
+  command: CommandRecord;
+  state: RunResumeState | null;
 }
 export interface RunResumeLease {
   kind: 'run_resume';

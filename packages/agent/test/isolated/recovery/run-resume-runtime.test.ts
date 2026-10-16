@@ -24,6 +24,12 @@ for (const mode of [
   'length_history',
   'retry_planned',
   'retry_failed',
+  'retry_lineage',
+  'running_model',
+  'running_large',
+  'compression_running',
+  'compression_pending',
+  'compression_published',
   'tool_result',
   'repeat_failure',
   'completion',
@@ -65,8 +71,6 @@ for (const mode of [
     let releaseHeld = () => {};
     try {
       await until(async () => existsSync(join(directory, 'ready.json')));
-      child.kill('SIGKILL');
-      await child.exited;
       const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8')) as {
         expectedStoreId: string;
         runId: string;
@@ -74,6 +78,33 @@ for (const mode of [
         executionId: string;
       };
       const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
+      if (mode === 'running_model') {
+        const observer = await openSqliteStore(profile);
+        try {
+          const liveInput = {
+            ...ready,
+            commandId: 'while-owner-live',
+            sessionId: 's',
+            subjectId: 'owner',
+          };
+          const state = await observer.verifyRunResume(liveInput);
+          const execution = await observer.getExecution(ready.executionId);
+          const error = await observer
+            .beginRunResume({
+              ...liveInput,
+              instanceId: 'blocked-observer',
+              checkpoint: state.checkpoint!,
+            })
+            .catch((error) => error);
+          expect(error.code).toBe('owner_busy');
+          expect(await observer.getExecution(ready.executionId)).toEqual(execution);
+          expect(await observer.getCommand('while-owner-live')).toBeNull();
+        } finally {
+          await observer.close();
+        }
+      }
+      child.kill('SIGKILL');
+      await child.exited;
       store = await openSqliteStore(profile);
       let resolves = 0,
         disposals = 0;
@@ -83,47 +114,51 @@ for (const mode of [
         releaseHeld = resolve;
       });
       let entered = false;
-      const wrapped = ['closing', 'steer', 'follow_up'].includes(mode)
-        ? new Proxy(store, {
-            get(target, key) {
-              if (key === 'finishRun' && ['steer', 'follow_up'].includes(mode) && !entered)
-                return async (input: Parameters<Store['finishRun']>[0]) => {
-                  entered = true;
-                  const session = (await target.getSession('s'))!;
-                  await runtime!.submitCommand({
-                    expectedStoreId: ready.expectedStoreId,
-                    subjectId: 'owner',
-                    commandId: mode === 'follow_up' ? 'follow-up' : 'steer',
-                    sessionId: 's',
-                    request:
-                      mode === 'follow_up'
-                        ? {
-                            kind: 'input.follow_up',
-                            afterRunId: ready.runId,
-                            contextSelectionId: session.contextSelectionId,
-                            content: 'next requested work',
-                          }
-                        : {
-                            kind: 'input.steer',
-                            targetRunId: ready.runId,
-                            contextSelectionId: session.contextSelectionId,
-                            content: 'new exact input',
-                          },
-                  });
-                  return target.finishRun(input);
-                };
-              if (key === 'verifyRunResume' && mode === 'closing')
-                return async (input: Parameters<Store['verifyRunResume']>[0]) => {
-                  const state = await target.verifyRunResume(input);
-                  entered = true;
-                  await gate;
-                  return state;
-                };
-              const value = Reflect.get(target, key);
-              return typeof value === 'function' ? value.bind(target) : value;
-            },
-          })
-        : store;
+      let historicalPages = 0;
+      const wrapped = new Proxy(store, {
+        get(target, key) {
+          if (key === 'readRunResumeExecutionPage')
+            return async (input: Parameters<Store['readRunResumeExecutionPage']>[0]) => {
+              if (input.kind === 'prior_models') historicalPages++;
+              return target.readRunResumeExecutionPage(input);
+            };
+          if (key === 'finishRun' && ['steer', 'follow_up'].includes(mode) && !entered)
+            return async (input: Parameters<Store['finishRun']>[0]) => {
+              entered = true;
+              const session = (await target.getSession('s'))!;
+              await runtime!.submitCommand({
+                expectedStoreId: ready.expectedStoreId,
+                subjectId: 'owner',
+                commandId: mode === 'follow_up' ? 'follow-up' : 'steer',
+                sessionId: 's',
+                request:
+                  mode === 'follow_up'
+                    ? {
+                        kind: 'input.follow_up',
+                        afterRunId: ready.runId,
+                        contextSelectionId: session.contextSelectionId,
+                        content: 'next requested work',
+                      }
+                    : {
+                        kind: 'input.steer',
+                        targetRunId: ready.runId,
+                        contextSelectionId: session.contextSelectionId,
+                        content: 'new exact input',
+                      },
+              });
+              return target.finishRun(input);
+            };
+          if (key === 'verifyRunResume' && mode === 'closing')
+            return async (input: Parameters<Store['verifyRunResume']>[0]) => {
+              const state = await target.verifyRunResume(input);
+              entered = true;
+              await gate;
+              return state;
+            };
+          const value = Reflect.get(target, key);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
       runtime = createRuntime({
         store: wrapped,
         ...(mode === 'follow_up'
@@ -162,7 +197,7 @@ for (const mode of [
         sessionId: 's',
       };
       const promise = runtime.resumeRun(input);
-      if (mode === 'initializer' || mode === 'dispatched' || mode === 'retry_failed') {
+      if (mode === 'initializer' || mode === 'dispatched') {
         const error = await promise.catch((e) => e);
         expect(error.code).toBe(
           mode === 'initializer'
@@ -241,6 +276,7 @@ for (const mode of [
       await until(async () => disposals === 1);
       expect(await runtime.resumeRun(input)).toEqual(receipt);
       expect(resolves).toBe(1);
+      expect(historicalPages).toBe(0);
       if (mode === 'follow_up') {
         await until(async () =>
           (await store!.getView('s')).runs.some(
@@ -254,20 +290,35 @@ for (const mode of [
       expect(ledger.filter((v) => v.startsWith('effect:')).length).toBe(
         seedMode === 'repeat_failure'
           ? 5
-          : ['completion', 'length_response', 'length_planned', 'retry_planned'].includes(seedMode)
+          : [
+                'completion',
+                'length_response',
+                'length_planned',
+                'retry_planned',
+                'retry_failed',
+                'retry_lineage',
+                'running_model',
+                'running_large',
+              ].includes(seedMode)
             ? 0
             : 1,
       );
       expect(ledger.filter((v) => v.startsWith('model:')).length).toBe(
-        seedMode === 'length_history'
-          ? 3
-          : seedMode === 'repeat_failure'
-            ? 5
-            : ['steer', 'follow_up'].includes(mode)
-              ? 2
-              : seedMode === 'completion'
-                ? 1
-                : 2,
+        seedMode === 'retry_lineage'
+          ? 5
+          : ['compression_running', 'compression_pending'].includes(seedMode)
+            ? 4
+            : seedMode === 'compression_published'
+              ? 3
+              : seedMode === 'length_history'
+                ? 3
+                : seedMode === 'repeat_failure'
+                  ? 5
+                  : ['steer', 'follow_up'].includes(mode)
+                    ? 2
+                    : seedMode === 'completion'
+                      ? 1
+                      : 2,
       );
       if (mode === 'repeat_failure')
         expect(await store.getRun(ready.runId)).toMatchObject({
@@ -276,6 +327,39 @@ for (const mode of [
         });
       else expect((await store.getRun(ready.runId))!.status).toBe('completed');
       const after = (await store.getView('s')).executions;
+      if (mode === 'retry_lineage') {
+        expect(
+          after.find((execution) => execution.id === ready.executionId)!.decisionSource,
+        ).toMatchObject({ retry: { attempt: 4 } });
+        expect(
+          after.filter((execution) => execution.kind === 'model').at(-1)!.decisionSource,
+        ).toMatchObject({
+          retry: { previousExecutionId: ready.executionId, attempt: 5, maxAttempts: null },
+        });
+      }
+      if (
+        ['running_model', 'running_large', 'retry_failed', 'compression_running'].includes(seedMode)
+      ) {
+        expect(after.find((execution) => execution.id === ready.executionId)).toMatchObject({
+          status: 'failed',
+          result: { incomplete: true },
+        });
+        expect(
+          after
+            .filter((execution) => execution.kind === 'model' && execution.status === 'succeeded')
+            .every((execution) => execution.id !== ready.executionId),
+        ).toBe(true);
+      }
+      if (seedMode.startsWith('compression_')) {
+        const selected = await store.getModelContext({
+          expectedStoreId: ready.expectedStoreId,
+          sessionId: 's',
+        });
+        expect(selected.compression).not.toBeNull();
+        if (seedMode === 'compression_published')
+          expect(selected.compression!.modelExecutionId).toBe(ready.executionId);
+        else expect(selected.compression!.modelExecutionId).not.toBe(ready.executionId);
+      }
       for (const ex of original.filter((e) => e.status === 'succeeded'))
         expect(after.find((e) => e.id === ex.id)).toEqual(ex);
       if (

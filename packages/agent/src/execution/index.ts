@@ -56,6 +56,8 @@ export interface ExecutionScope {
   toolAdmission?: ToolDispatchAdmission;
   modelRetry?: import('../model-attempt').ModelRetrySource;
   compressionId?: string;
+  /** Core-owned state at the boundary before this replaceable Model attempt. */
+  continuation?: Json;
   run: RunRecord;
   owner: OwnerRef;
   workspaceId: string;
@@ -572,6 +574,7 @@ export class UnifiedExecution {
           kind: 'model_request',
           ...(scope.modelRetry ? { retry: { ...scope.modelRetry } } : {}),
           ...(scope.compressionId ? { compressionId: scope.compressionId } : {}),
+          ...(scope.continuation ? { continuation: scope.continuation } : {}),
           requestId: executionId,
           sourceIds: request.messages.flatMap((message) => message.sourceIds ?? []),
           sources: JSON.parse(JSON.stringify(scope.decisionSources ?? [])) as Json,
@@ -842,6 +845,11 @@ export class UnifiedExecution {
         JSON.stringify('run' in scope ? (scope.decisionSources ?? []) : []),
       ) as Json,
     };
+    if (!planned && definition?.recovery && definition.resume)
+      source = {
+        ...(source as Record<string, Json>),
+        toolRecoveryVersion: definition.recovery.version,
+      };
     if (!planned && this.options.sealSource) source = await this.options.sealSource(scope, source);
     let input: Json;
     try {
@@ -878,16 +886,29 @@ export class UnifiedExecution {
         'invalid_tool_arguments',
         definition.version,
       );
-    const execution = await this.prepare(scope, {
-      executionId,
-      stepId,
-      callId: call.id,
-      kind: 'tool',
-      definitionId: definition.id,
-      definitionVersion: definition.version,
-      input,
-      decisionSource: source,
-    });
+    const resuming = planned && ['dispatching', 'running'].includes(planned.status);
+    const continued = resuming ? await this.options.store.getExecution(executionId) : undefined;
+    if (
+      resuming &&
+      (!definition.resume ||
+        !definition.recovery?.version ||
+        (source as Record<string, Json>).toolRecoveryVersion !== definition.recovery.version ||
+        continued?.ownerGeneration !== scope.owner.generation ||
+        continued.status !== planned.status)
+    )
+      throw new AgentError('tool_continuation_unavailable');
+    const execution = resuming
+      ? continued!
+      : await this.prepare(scope, {
+          executionId,
+          stepId,
+          callId: call.id,
+          kind: 'tool',
+          definitionId: definition.id,
+          definitionVersion: definition.version,
+          input,
+          decisionSource: source,
+        });
     if (!('run' in scope)) scope = { ...scope, requirements: execution.requirements };
     let release: (() => void) | undefined;
     let dispatched = false;
@@ -904,7 +925,7 @@ export class UnifiedExecution {
     );
     try {
       if ('run' in scope) await scope.toolAdmission?.wait();
-      {
+      if (!resuming) {
         const references =
           'run' in scope
             ? (await this.options.store.getRun(scope.run.id))?.requirements
@@ -935,33 +956,29 @@ export class UnifiedExecution {
           });
         }
       }
-      await this.authorize(
-        scope,
-        {
-          kind: 'tool',
-          sessionId: work.sessionId,
-          runId: work.runId,
-          executionId,
-          definitionId: definition.id,
-          definitionVersion: definition.version,
-          input,
-          signal: scope.signal,
-        },
-        source,
-      );
+      if (!resuming)
+        await this.authorize(
+          scope,
+          {
+            kind: 'tool',
+            sessionId: work.sessionId,
+            runId: work.runId,
+            executionId,
+            definitionId: definition.id,
+            definitionVersion: definition.version,
+            input,
+            signal: scope.signal,
+          },
+          source,
+        );
       release = await this.options.resources.acquire(
         definition.resources,
         { sessionId: work.sessionId, workspaceId: scope.workspaceId },
         scope.signal,
       );
-      const dispatchAuthorization = await this.dispatch(
-        scope,
-        executionId,
-        definition.id,
-        definition.version,
-        input,
-        source,
-      );
+      const dispatchAuthorization = resuming
+        ? undefined
+        : await this.dispatch(scope, executionId, definition.id, definition.version, input, source);
       dispatched = true;
       if ('run' in scope) scope.toolAdmission?.dispatched();
       scope.signal.throwIfAborted();
@@ -980,7 +997,7 @@ export class UnifiedExecution {
         const { answer } = await requestInteractionWithReceipt(input);
         return answer.kind === 'question' ? answer.answers : (answer as unknown as Json);
       };
-      result = await definition.execute(input, {
+      result = await (resuming ? definition.resume! : definition.execute).call(definition, input, {
         ...context,
         dispatchAuthorization,
         runId: work.runId,
@@ -1139,6 +1156,7 @@ export class UnifiedExecution {
       request: Json;
       source: Json;
       cancelWithParent: boolean;
+      resumedChild?: JobHandle | 'activation';
     },
   ): Promise<void> {
     return this.liveScope(scope, input.executionId, (bound) => this.performJob(bound, input));
@@ -1151,26 +1169,62 @@ export class UnifiedExecution {
       request: Json;
       source: Json;
       cancelWithParent: boolean;
+      resumedChild?: JobHandle | 'activation';
     },
   ): Promise<void> {
     const { executionId, definition } = input;
     const existing = await this.options.store.getExecution(executionId);
     if (!existing) throw new AgentError('execution_not_found');
     scope = { ...scope, requirements: existing.requirements };
-    await this.prepare(scope, {
-      executionId,
-      stepId: `operation-${scope.command.id}`,
-      callId: scope.command.id,
-      kind: 'job',
-      definitionId: definition.id,
-      definitionVersion: definition.version,
-      input: input.request,
-      decisionSource: input.source,
-      cancelWithParent: input.cancelWithParent,
-    });
+    if (input.resumedChild && input.resumedChild !== 'activation') {
+      const reference = input.resumedChild.reference as Record<string, Json>;
+      const run =
+        typeof reference.runId === 'string' && (await this.options.store.getRun(reference.runId));
+      if (
+        existing.kind !== 'job' ||
+        !existing.childSessionId ||
+        !run ||
+        !['dispatching', 'running'].includes(existing.status) ||
+        existing.ownerGeneration !== scope.owner.generation ||
+        existing.definitionId !== definition.id ||
+        existing.definitionVersion !== definition.version ||
+        reference.kind !== 'child_session' ||
+        reference.childSessionId !== existing.childSessionId ||
+        run.originCommandId !== `child-start-${existing.id}` ||
+        reference.commandId !== run.originCommandId ||
+        run.sessionId !== existing.childSessionId ||
+        canonicalJson(existing.input) !== canonicalJson(input.request) ||
+        (existing.reference !== null &&
+          canonicalJson(existing.reference) !== canonicalJson(input.resumedChild.reference))
+      )
+        throw new AgentError('child_recovery_changed');
+    } else if (input.resumedChild === 'activation') {
+      if (
+        existing.kind !== 'job' ||
+        !existing.childSessionId ||
+        existing.status !== 'dispatching' ||
+        existing.ownerGeneration !== scope.owner.generation ||
+        existing.definitionId !== definition.id ||
+        existing.definitionVersion !== definition.version ||
+        existing.reference !== null
+      )
+        throw new AgentError('child_recovery_changed');
+    } else
+      await this.prepare(scope, {
+        executionId,
+        stepId: `operation-${scope.command.id}`,
+        callId: scope.command.id,
+        kind: 'job',
+        definitionId: definition.id,
+        definitionVersion: definition.version,
+        input: input.request,
+        decisionSource: input.source,
+        cancelWithParent: input.cancelWithParent,
+      });
     let release: (() => void | Promise<void>) | undefined;
-    let handle: JobHandle | undefined;
-    let attempted = false;
+    let handle: JobHandle | undefined =
+      input.resumedChild && input.resumedChild !== 'activation' ? input.resumedChild : undefined;
+    let attempted = Boolean(handle);
     let observedTerminal = false;
     let supervisionEnded = false;
     let confirmation: StopConfirmation | undefined;
@@ -1187,95 +1241,8 @@ export class UnifiedExecution {
         },
       );
     };
-    try {
-      await this.authorize(
-        scope,
-        {
-          kind: 'job',
-          sessionId: scope.command.sessionId,
-          runId: null,
-          executionId,
-          definitionId: definition.id,
-          definitionVersion: definition.version,
-          input: input.request,
-          signal: scope.signal,
-        },
-        input.source,
-      );
-      release = await this.options.admitJob?.(definition, scope);
-      const releaseAdmission = release;
-      const releaseResources = await this.options.resources.acquire(
-        definition.resources,
-        { sessionId: scope.command.sessionId, workspaceId: scope.workspaceId },
-        scope.signal,
-      );
-      // The original implementation must remain alive with an unconfirmed handle,
-      // beyond the observer operation's ordinary binding lease.
-      let releaseBinding: (() => Promise<void>) | undefined;
-      try {
-        releaseBinding = scope.bindings?.retain();
-      } catch (error) {
-        releaseResources();
-        await releaseAdmission?.();
-        release = undefined;
-        throw error;
-      }
-      release = async () => {
-        releaseResources();
-        await releaseAdmission?.();
-        await releaseBinding?.();
-      };
-      if (definition.recovery && definition.reconcile) {
-        const extension = scope.bindings?.extensions.find((candidate) =>
-          candidate.jobs?.some(
-            (job) => job.id === definition.id && job.version === definition.version,
-          ),
-        );
-        if (!extension || !definition.recovery.version)
-          throw new AgentError('job_recovery_manifest_unavailable');
-        await this.options.store.sealJobRecoveryManifest({
-          expectedStoreId: scope.command.originStoreId,
-          owner: scope.owner,
-          executionId,
-          manifest: {
-            extensionId: extension.id,
-            extensionVersion: extension.version,
-            adapterId: definition.id,
-            adapterVersion: definition.version,
-            inputSchema: definition.inputSchema,
-            resources: (definition.resources ?? null) as Json,
-            recovery: {
-              version: definition.recovery.version,
-              configuration: structuredClone(definition.recovery.configuration),
-            },
-          },
-        });
-      }
-      const dispatchAuthorization = await this.dispatch(
-        scope,
-        executionId,
-        definition.id,
-        definition.version,
-        input.request,
-        input.source,
-        'job',
-      );
-      scope.signal.throwIfAborted();
-      attempted = true;
-      handle = await definition.start(input.request, {
-        sessionId: scope.command.sessionId,
-        executionId,
-        signal: scope.signal,
-        dispatchAuthorization,
-      });
-      await this.options.store.markRunning({
-        expectedStoreId: scope.command.originStoreId,
-        owner: scope.owner,
-        executionId,
-        reference: handle.reference,
-      });
-      scope.signal.addEventListener('abort', cancel, { once: true });
-      if (scope.signal.aborted) cancel();
+    const observe = async (terminalOnly = false) => {
+      if (!handle) throw new AgentError('child_handle_unavailable');
       for await (const event of definition.observe(handle)) {
         if (observedTerminal) throw new AgentError('job_event_after_terminal');
         if (event.type === 'terminal') {
@@ -1309,7 +1276,7 @@ export class UnifiedExecution {
               content: 'job_stop_unconfirmed',
               details: { actualResult: JSON.parse(JSON.stringify(event.result)) as Json },
             };
-        } else {
+        } else if (!terminalOnly) {
           const stream = event.type === 'progress' ? 'progress' : event.stream;
           const content =
             event.type === 'progress'
@@ -1328,6 +1295,103 @@ export class UnifiedExecution {
         }
       }
       if (!observedTerminal) throw new AgentError('job_terminal_missing');
+    };
+    try {
+      if (!input.resumedChild)
+        await this.authorize(
+          scope,
+          {
+            kind: 'job',
+            sessionId: scope.command.sessionId,
+            runId: null,
+            executionId,
+            definitionId: definition.id,
+            definitionVersion: definition.version,
+            input: input.request,
+            signal: scope.signal,
+          },
+          input.source,
+        );
+      release = await this.options.admitJob?.(definition, scope);
+      const releaseAdmission = release;
+      const releaseResources = await this.options.resources.acquire(
+        definition.resources,
+        { sessionId: scope.command.sessionId, workspaceId: scope.workspaceId },
+        scope.signal,
+      );
+      // The original implementation must remain alive with an unconfirmed handle,
+      // beyond the observer operation's ordinary binding lease.
+      let releaseBinding: (() => Promise<void>) | undefined;
+      try {
+        releaseBinding = scope.bindings?.retain();
+      } catch (error) {
+        releaseResources();
+        await releaseAdmission?.();
+        release = undefined;
+        throw error;
+      }
+      release = async () => {
+        releaseResources();
+        await releaseAdmission?.();
+        await releaseBinding?.();
+      };
+      if (!input.resumedChild && definition.recovery && definition.reconcile) {
+        const extension = scope.bindings?.extensions.find((candidate) =>
+          candidate.jobs?.some(
+            (job) => job.id === definition.id && job.version === definition.version,
+          ),
+        );
+        if (!extension || !definition.recovery.version)
+          throw new AgentError('job_recovery_manifest_unavailable');
+        await this.options.store.sealJobRecoveryManifest({
+          expectedStoreId: scope.command.originStoreId,
+          owner: scope.owner,
+          executionId,
+          manifest: {
+            extensionId: extension.id,
+            extensionVersion: extension.version,
+            adapterId: definition.id,
+            adapterVersion: definition.version,
+            inputSchema: definition.inputSchema,
+            resources: (definition.resources ?? null) as Json,
+            recovery: {
+              version: definition.recovery.version,
+              configuration: structuredClone(definition.recovery.configuration),
+            },
+          },
+        });
+      }
+      const dispatchAuthorization = input.resumedChild
+        ? undefined
+        : await this.dispatch(
+            scope,
+            executionId,
+            definition.id,
+            definition.version,
+            input.request,
+            input.source,
+            'job',
+          );
+      scope.signal.throwIfAborted();
+      attempted = true;
+      handle =
+        (input.resumedChild !== 'activation' ? input.resumedChild : undefined) ??
+        (await definition.start(input.request, {
+          sessionId: scope.command.sessionId,
+          executionId,
+          signal: scope.signal,
+          dispatchAuthorization,
+        }));
+      if (existing.status !== 'running' || !input.resumedChild)
+        await this.options.store.markRunning({
+          expectedStoreId: scope.command.originStoreId,
+          owner: scope.owner,
+          executionId,
+          reference: handle.reference,
+        });
+      scope.signal.addEventListener('abort', cancel, { once: true });
+      if (scope.signal.aborted) cancel();
+      await observe();
       if (!supervisionEnded) {
         cancel();
         await cancellation;
@@ -1337,16 +1401,34 @@ export class UnifiedExecution {
         cancel();
         await cancellation;
       }
-      result = {
-        outcome: attempted ? 'outcome_unknown' : scope.signal.aborted ? 'cancelled' : 'failed',
-        content: error instanceof AgentError ? error.code : 'job_failed',
-        details: {
-          adapterAttempted: attempted,
-          stopConfirmation: confirmation
-            ? (JSON.parse(JSON.stringify(confirmation)) as Json)
-            : null,
-        },
-      };
+      let observedChildCancellation = false;
+      if (
+        input.resumedChild &&
+        handle &&
+        scope.signal.aborted &&
+        !observedTerminal &&
+        (confirmation?.status === 'stopped' || confirmation?.status === 'already_finished')
+      ) {
+        try {
+          // Only trusted child supervision may read its original Run after a known stop.
+          // An external adapter's stop confirmation does not prove its business result.
+          await observe(true);
+          observedChildCancellation = observedTerminal && supervisionEnded;
+        } catch {
+          /* Preserve unknown when the original child result cannot be verified. */
+        }
+      }
+      if (!observedChildCancellation)
+        result = {
+          outcome: attempted ? 'outcome_unknown' : scope.signal.aborted ? 'cancelled' : 'failed',
+          content: error instanceof AgentError ? error.code : 'job_failed',
+          details: {
+            adapterAttempted: attempted,
+            stopConfirmation: confirmation
+              ? (JSON.parse(JSON.stringify(confirmation)) as Json)
+              : null,
+          },
+        };
     } finally {
       scope.signal.removeEventListener('abort', cancel);
       await cancellation;

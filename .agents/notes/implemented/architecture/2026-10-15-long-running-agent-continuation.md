@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+2026-10-16：[持久 continuation 与父子恢复](2026-10-16-durable-continuations-and-group-recovery.md)扩展纯 Model、压缩和原 child 监督边界，并以实际 SQLite 写入观察复用未变化校验快照。本文的原身份、未知效果、初始化与权限理由继续适用；旧的全面拒绝范围和每阶段重复扫描由新决定收窄。
+
 主 Run 不设总期限或累计资源额度，子 Run 保留激活后固定 30 分钟期限，包含等待后代的时间。普通 Task 的并发仅作调度：正整数并发配置默认 3，不再以 28 为配置上界；满额任务持久受理后等待空位，排队不消耗尚未开始的子 Run 期限，也没有固定队列数量上界。显式 fail_if_full 仍是底层调用者明确选择的准入语义。
 
 原父 Run 的 required 结果义务及完整 waitingForResults 集合不设累计数量或 JSON 字节额度。Store 仍逐项核原可执行记录、不可变 ref、carrier、selection 与准确结果证明，缺一项不能完成；有限单次协议校验不作为长 Run 的累计预算。默认客户端 Run Schema 同步取消 64 项等待集合上界。

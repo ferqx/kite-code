@@ -20,6 +20,27 @@ export function binding(directory: string, mode: string): RunConfiguration {
       )
         throw Error('sealed large source not rehydrated');
       appendFileSync(`${directory}/ledger`, `model:${request.requestId}\n`);
+      if (mode.startsWith('compression_') && request.tools.length === 0) {
+        yield { type: 'text_delta', text: 'cold recovery summary' };
+        yield finish;
+        return;
+      }
+      if (
+        mode.startsWith('running_') &&
+        readFileSync(`${directory}/ledger`, 'utf8')
+          .split('\n')
+          .filter((line) => line.startsWith('model:')).length === 1
+      ) {
+        yield {
+          type: 'text_delta',
+          text:
+            mode === 'running_large'
+              ? 'interrupted model text'.repeat(5000)
+              : 'interrupted model text',
+        };
+        yield finish;
+        return;
+      }
       if (mode.startsWith('length_')) {
         const hasSegment = request.messages.some(
           (message) => message.content === 'saved length segment',
@@ -42,11 +63,15 @@ export function binding(directory: string, mode: string): RunConfiguration {
         mode.startsWith('retry_') &&
         readFileSync(`${directory}/ledger`, 'utf8')
           .split('\n')
-          .filter((line) => line.startsWith('model:')).length === 1
+          .filter((line) => line.startsWith('model:')).length < (mode === 'retry_lineage' ? 4 : 2)
       )
         throw new ModelAttemptError('provider_unavailable');
       if (
         mode === 'completion' ||
+        mode.startsWith('running_') ||
+        request.messages.some((message) =>
+          message.content.startsWith('Context summary (untrusted data;'),
+        ) ||
         mode.startsWith('retry_') ||
         (mode !== 'repeat_failure' && request.messages.at(-1)?.role === 'tool')
       ) {
@@ -98,6 +123,25 @@ export function binding(directory: string, mode: string): RunConfiguration {
     modelId: 'fixed',
     extensions: [extension],
     snapshot: { fixture: 'resume', mode },
+    ...(mode.startsWith('compression_')
+      ? {
+          compressor: {
+            id: 'cold.fixture',
+            version: '1',
+            async shouldCompress(input) {
+              return (
+                input.messages.some((message) => message.role === 'tool') &&
+                !input.messages.some((message) =>
+                  message.content.startsWith('Context summary (untrusted data;'),
+                )
+              );
+            },
+            async prepare() {
+              return { instructions: 'summarize cold recovery fixture', snapshot: {} };
+            },
+          },
+        }
+      : {}),
     permissions: {
       async authorize() {
         return { allowed: true, revision: '1' };

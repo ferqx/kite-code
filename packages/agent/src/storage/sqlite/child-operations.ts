@@ -35,7 +35,7 @@ function displayInput(input: Json): { content: string; name?: string } | undefin
 
 const digest = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 /** Rechecked inside the carrier and activation transactions, from trusted captured metadata. */
-function assertConfigurationReads(
+export function assertConfigurationReads(
   db: SqliteOperations,
   configuration: import('../types').ChildConfiguration,
   parent: Record<string, string | number | bigint | null>,

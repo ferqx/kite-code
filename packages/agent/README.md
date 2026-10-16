@@ -105,9 +105,9 @@ Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execu
 
 显式 `resumeRun` 接续仍活动的同 Store 根 Run，支持原 `run.start/input.follow_up` 的三个持久边界：原 Model 派发前、完整 Model 的工具序列、完成判定。只读 `verifyRunResume` 核原身份和安全状态，再通过独立 `RunResumeLease` 封存检查点；准确重建原配置并复核选择、取消与 generation 后，才转成普通 owner，进入同一个 `executeRun/defaultLoop`。HTTP 的 generation 由 Service 内部派生，Core 可信入口仍要求准确 CAS。原 planned Model 使用完整封存请求，原 planned Tool 保留执行身份与审批，已完成调用跳过；完整无工具 stop 回复进入完成门禁，纯文本 length 段保留原响应并继续原任务。原 Model 输入/输出及大正文都从原作用域完整核验，不用预览重建参数；length 段含调用或没有有效正文不能取得恢复资格。
 
-累计已完成历史不再以 4096 条拒绝接续。Store 流式核验全部原 Execution/Interaction 并保持原 canonical checkpoint 摘要；只有当前零派发 planned frontier 保留 4096 条上界。Runtime 经私有 200 条分页穷尽准确原 Model 及其 Tool 链，完整读取旧输出恢复来源请求；包括 planned Model 前发现的祖先指令。begin/commit 仍重核全部历史 CAS，分页不授执行权，也不把有限 View 当历史全集。[公开长 Run 接续](../../apps/service/test/isolated/long-run-resume.test.ts)核 4096 次真实效果、原 Run/Execution/attempt/完整请求和旧结果保持、一次明确接续及零旧效果重放；平台与正式客户端完整资格仍分别判断。
+累计已完成历史不以4096条拒绝接续。首次 SQL 审计仍完整流式核 ledger；未变化的实际 SQLite 快照可跨准备阶段复用，任何写入使其失效。新 Model 在原来源封存版本化 continuation，用于恢复当前来源请求和五次失败 streak；大 checkpoint 沿原 sourceBody Artifact 完整核验。旧记录仍完整分页重建，不把有限 View 当全集；实际成本和未知边界见[冷恢复协议](src/storage/sqlite/run-resume.README.md)。
 
-Run 保存 `initializationState:unstarted/started/completed` 和原 `contextSelectionId`；完成初始化即使没有 requirements 也不重跑，冷 started 阶段不能重放任意回调。可能已经派发的未决工作、child、runless 闭包、部分 Model 与无法精确重建的配置明确拒绝。独立 `run.resume` Command 保存 accepted/null 或 applied 的有限回执，同 ID 不重复解析或派发；普通调度与恢复清扫不把该申请当作新任务。准备期取消和关闭在交接前复核，清理失败保留资源与 Store，不报告假关闭。真实强杀、完整 80KiB 正文、原审批、当前输入和清理反例见 [Runtime 接续测试](test/isolated/recovery/run-resume-runtime.test.ts)与 [Store 事务测试](test/isolated/recovery/run-resume-store.test.ts)；此范围不代表任意旧执行可恢复。
+Run 的初始化三态与原 selection 保持。明确 root 接续可在同一 OS 锁/generation 下原子接管所选 Run 的活动 child 树，沿原配置、权限交集、carrier 与截止时间继续；queued、激活前、已结束子结果、原审批和前台 task.execute 共用普通监督与唯一 Loop。纯 Model 中断结束旧尝试并创建新请求；自动压缩 pending/未发布摘要重新尝试，已发布点保持。普通工具和外部 Job 的未知效果、半完成任意 initializer、无法重建的绑定继续拒绝；受限 continuation 合同不按工具名称放行。资源和证明边界归[协议 owner](src/storage/sqlite/run-resume.README.md)。
 
 显式 `recoverSession(decision='interrupt')` 取得原 Session OS 锁并 fencing，原子中断遗留 Run、保留 partial 和原执行来源。可证明未派发的同 Store 计划取消；可能产生效果的工具/Job 保持 `outcome_unknown`，不会重做启动。该入口不返回普通执行 owner，未知仍限制该 Session；其他 Session 可继续。已有持久根报告的显式冷恢复由 `resumeJobReport` 和专门 `resolveRecoveryRunConfiguration` 负责，详细资格与生命周期见 [Task owner](src/extensions/task/README.md#task-的-after_turn)。外部 adapter 的显式核实见下方“显式 Job 外部核实”；原适配器必须提供可靠查询能力。离线备份恢复由 maintenance owner 单独负责。
 
@@ -133,7 +133,7 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 [唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行；没有新增工具数量或累计预算。拒绝或未知结果停止该批，已启动的调用全部结束后才允许 Run 终结和 binding release。独立的后发持久化失败保留真实错误，不能被首个业务失败覆盖；同一 abort reason 的传播不虚构第二次独立失败。
 
-Message 和 Execution 保留实际保存顺序。`modelMessages` 只在同一 assistant 的工具结果位置按其原 call ID 顺序配对完整结果，不重排其他消息或改变持久 seq。`prepareRunCheckpoint` 核全部原 Model/step/definition/input 后允许 planned A 与 settled B 的组合；B 不重放，A 保留原身份和审批，并重新核当前权限。dispatching/running/outcome_unknown 等边界仍拒绝恢复。
+Message 和 Execution 保留实际保存顺序。modelMessages 排除未完成 Model 消息，只在同一 assistant 的结果位置按原 call ID 配对完整 Tool 结果。恢复保 planned A 与 settled B 的混合边界；B 不重放，A 保原身份与审批。提前封存的可信 continuation 可接回仍在监督的内部操作；普通有副作用 Tool、外部 Job 和 unknown 不能由此自动重试。
 
 原模型声明顺序不建立工具之间的执行依赖。同一串行键保护共享业务登记/证据与派发，按实际取得许可的队列互斥，不承诺按模型声明顺序取得许可；确需因果先后时先等待登记落定，再发依赖调用。后来新增义务只加强未来边界，不能倒溯修改已合法派发的效果。最终派发仍重读当前持久 refs，并由 SQL 复核全部已登记义务。[原义务整文件](test/isolated/execution/requirements.test.ts)为这两个相同准入路径的依赖工具声明同一 Session key，保留原拒绝/waiver/准确来源断言。
 

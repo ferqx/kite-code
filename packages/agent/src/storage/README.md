@@ -103,13 +103,13 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 
 ## 原 active Run 的显式恢复
 
-[Run resume owner](sqlite/run-resume-operations.ts) 提供只读 `verifyRunResume`、受限 `beginRunResume`、最终 `commitRunResume` 和独立 lease release。当前资格限同 Store、真实 root 创建主体所属的 `run.start`／`input.follow_up` 原 active Run；终态不重开，child、runless planned closure、压缩和 Job report 的特殊 Run 局部拒绝。全组存在其他 active Run 或 dispatching/running/outcome_unknown Execution 时不借普通 owner 接管。原 Run 的完整成功 Model、已知 Tool 结果只读复用；成功纯文本 `length` 段可在原边界继续，不重发该段。历史 failed/incomplete Model 仅在没有派生 Tool/Job 且后面已有 planned 或 succeeded Model 时作为旧失败事实保留；它本身不能作为派发 checkpoint。末尾失败、仍未结算或结果不明的 Model 继续拒绝。
+[Run resume 协议](sqlite/run-resume.README.md)将持久意图、Model 尝试、已确认结果与进程监督分开。同 Store 的真实 root 主体可显式恢复原活动 Run 及其 child 闭包；原 Run、carrier、结果和子期限保持。没有派生 Tool/Job 的 running/dispatching 或 failed/incomplete Model 结束旧尝试后使用新 Execution，partial 保留。自动压缩 pending 不进入上下文，发布后的原点继续使用。可信 Tool 只有提前声明并封存版本化 continuation 时才可通过 resume 接回原操作；普通 Tool/外部 Job 的未知效果仍拒绝自动重放。
 
 只读预检和原申请回执查询先于恢复工厂。同 ID 已登记 accepted 或 applied 意图只返回原回执，不重新准备、派发或执行；同 ID 改变原 Run／epoch 等意图冲突。内部 `RunResumeInput.expectedOwnerGeneration` 做持久 epoch CAS，公开 HTTP 不接收客户端 generation，由 Service 查询原回执或当前 Session 推导。`before_model_dispatch`、`tool_calls`、`completion` checkpoint 封存当前 Run 读集摘要、原 selection 与初始化状态；Runtime 另核完整 Model 正文和原调用身份。
 
-检查点逐行验证全部历史 Execution 和 Interaction，并按原列、顺序和 canonical JSON 流式生成同一摘要；累计历史不因超过 4096 条失效。返回 Runtime 的 frontier 仅保最后原 Model 及全部零派发 planned，当前 planned 仍最多 4096 条。私有 `readRunResumeExecutionPage` 用准确原 root/主体/Store/Run、Model anchor 与严格 Decimal64 rowid 游标，每页至多 200 个原执行身份；旧 Model 受 anchor 上界约束，Tool 受原 step 约束。准备分页是短只读事务，commit 重新核完整摘要；原未知效果、错误身份、尚未结算的 Model 和历史漂移仍拒绝。[历史回归](../../test/isolated/recovery/run-resume-history.test.ts)核多页、原 canonical 摘要全等、scope/cursor 拒绝与全历史 CAS，未改变 baseline或公开 HTTP schema。
+首次 SQL 预检流式核完整历史并保原 canonical 摘要，当前 frontier 仍保单次边界。新 Model 在原来源封存 version 1 continuation，Runtime 恢复完整来源请求与失败计数，不重读已覆盖的旧 Model 正文；旧记录仍使用私有200项历史页。SQLite data_version/total_changes 均未变化时才复用已核快照，准备事务只改变 epoch/申请/事件后可保该快照；其他任何写入和无 change_event 的 raw SQL 均使其失效。最终 CAS 不依赖通知 cursor。首次冷审计仍线性，新检查点也仍随独特来源增长；性能与真实故障证据归[协议 owner](sqlite/run-resume.README.md)。
 
-begin 先取得真实 root OS 锁，事务复核后递增 generation、登记 accepted/null 与私有 `RunResumeLease`。这个 lease 只进入 facade 的 recovery map，不能投影为普通 `OwnerRef` 进行 plan、dispatch 或 finish。可信恢复 binding 准备完成后，commit 同事务再核准确 lease、原配置 canonical 等值、checkpoint、selection、主体、取消与原出处，仅重绑准确的零派发 planned Model/Tool generation，随后登记 applied `run_resumed` 回执并转入普通 owner map。原 Run/Execution ID、attempt、成功结果、原 Interaction 和已保存答案保持；后续派发仍检查当前权限、原审批与取消。
+begin 取得真实 root OS 锁并登记受限 RunResumeLease。Runtime 按实际 carrier/父 Run 顺序准备全部可信绑定、权限 ceiling 和 record read-set；最终 commit 核完整组摘要和配置后原子交接 planned/continuation frontier、child carrier 与原监督祖先的 generation。已知终态只改变监督所属 epoch，不改变状态、结果 revision、身份或 attempt；未闭合纯 Model 另保存失败结果。Host 先登记原操作，唯一 Loop 再继续；实际 Job 观察、槽位、取消与 Run binding lease 共用正常路径，子超期先结算。
 
 零派发 Tool 已有结算的私有 Auto 审核时，同一 commit 先完整核原 purpose、封存请求、准确来源与 child 关系，再把原 reviewer carrier 和唯一终态 child Model 的 fencing generation 与目标一并交接。原审核 Command、配置、输入、结果、完整输出凭据、ID 和 attempt 不改，不重新调用模型或签发新 grant。active、unknown、取消或来源无法证明的审核不取得交接资格；child Model 身份/代次失真时整项事务回滚。原 `fact` 的目标/carrier/child Model 代次相等及当前授权校验继续执行；审核失败仍按原 unavailable 决定回退人工。真实 CLI/TUI 冷恢复保留原审批与零重放，Store 验证见[原审核交接回归](../../test/isolated/recovery/run-resume-review-ownership.test.ts)。
 
@@ -119,7 +119,7 @@ begin 先取得真实 root OS 锁，事务复核后递增 generation、登记 ac
 
 [Store 验证](../../test/isolated/recovery/run-resume-store.test.ts) 覆盖真实 SQLite 事务、实际 root 锁、公共 lease 投影拒绝、epoch/config/selection CAS、原 planned attempt／Interaction 保持、初始化三态、取消与事务故障回滚；SQL 修改仅用于明确标注的故障注入。[Runtime 验证](../../test/isolated/recovery/run-resume-runtime.test.ts) 使用所属子进程真实 SIGKILL、固定 Model 和独立效果 ledger，核原边界恢复与拒绝路径。业务 Run 事实可经 [原始导出](sqlite/export/README.md) 读取，私有 purpose lease 不导出。
 
-2026-10-16 Windows x64／Bun 1.4.2 的 Runtime 完整文件20项197断言通过，含 length 刚落盘、后继 planned Model、段后已完成工具零重放、历史失败尝试保留及末尾失败拒绝。Store 接续、完整历史摘要及提交所需 Store/rollback 四个完整文件共28项3267断言通过；length 伪带工具调用的故障记录仍拒绝，不增加 receipt 或事件。
+Windows x64／Bun 1.4.2 的真实强杀、原审批、并行结果与完整历史验证入口见[恢复协议](sqlite/run-resume.README.md)。既有 length 与原 ledger 摘要断言保留；新增纯 Model、三种压缩边界、任务组与连续两次压缩强杀，不代表实际连续数周或全部平台资格。
 
 
 ## Job 核实的受限所有权

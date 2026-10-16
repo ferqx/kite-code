@@ -2115,6 +2115,7 @@ export class ExtensionHost {
     source: Json,
     definition: ToolDefinition | JobDefinition,
     kind: 'tool' | 'job',
+    resumedChild?: import('./index').JobHandle | 'activation',
   ) {
     const command = await this.options.store.getCommand(ref.commandId);
     if (!command) throw new AgentError('command_not_found');
@@ -2145,6 +2146,7 @@ export class ExtensionHost {
           request: input,
           source,
           cancelWithParent: attached,
+          ...(resumedChild ? { resumedChild } : {}),
         });
         await this.options.onJobSettled?.(scope, ref.executionId);
       } else
@@ -2175,8 +2177,60 @@ export class ExtensionHost {
   get operationCount(): number {
     return this.operations.size + Number(this.cleanupFailed);
   }
+  get hasUnconfirmedCleanup(): boolean {
+    return this.cleanupFailed;
+  }
+  /** Trusted recovery coordinator only: register the original operation before Loop re-entry. */
+  resumeChildOperation(
+    ref: OperationRef,
+    parent: StandaloneScope,
+    parentExecutionId: string,
+    source: Json,
+    definition: JobDefinition,
+    resumedChild?: import('./index').JobHandle | 'activation',
+    ready: Promise<void> = Promise.resolve(),
+    disposeUnused?: () => Promise<void>,
+  ): Promise<void> {
+    if (this.operations.has(ref.commandId)) throw new AgentError('operation_already_supervised');
+    const release = parent.bindings?.retain();
+    const task = ready
+      .then(() =>
+        this.performOperation(
+          ref,
+          parent,
+          parentExecutionId,
+          source,
+          definition,
+          'job',
+          resumedChild,
+        ),
+      )
+      .finally(async () => {
+        try {
+          await release?.();
+          await disposeUnused?.();
+        } catch (error) {
+          this.cleanupFailed = true;
+          throw error;
+        }
+      });
+    this.operations.set(ref.commandId, task);
+    this.operationSessions.set(ref.commandId, parent.owner.sessionId);
+    void task
+      .finally(() => {
+        this.operations.delete(ref.commandId);
+        this.operationSessions.delete(ref.commandId);
+        this.options.onActivity?.(parent.owner.sessionId);
+      })
+      .catch(() => {});
+    return task;
+  }
   async drain() {
-    await Promise.allSettled(this.operations.values());
+    for (;;) {
+      const tasks = [...this.operations.values()];
+      if (!tasks.length) break;
+      await Promise.allSettled(tasks);
+    }
     if (this.cleanupFailed) throw new AgentError('shutdown_cleanup_unconfirmed');
   }
 }

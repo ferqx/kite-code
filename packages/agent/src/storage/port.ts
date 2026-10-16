@@ -294,6 +294,7 @@ export interface Store {
     expectedStoreId: string;
     lease: import('./types').RunResumeLease;
     expectedConfiguration: Json;
+    childConfigurations?: { executionId: string; configuration: Json }[];
     checkpoint: import('./types').RunResumeCheckpoint;
   }): Promise<{
     command: CommandRecord;

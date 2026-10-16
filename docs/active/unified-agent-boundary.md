@@ -38,7 +38,7 @@ Native 原大Model正文将当前连接Store与封存出处分别核实。Servic
 
 总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确八个新 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。旧源码与历史测试保留作参考，不进入正式产物或默认调度。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
 
-单一 Loop 的完整 Model 工具批次沿现有资源并行调度，每项原输入、权限和决策来源独立核实；Run 结束与 lease release 等待全部已启动调用，后发持久化失败保留原错误。物理历史保留实际完成顺序，仅下一 Model 的同批结果按原调用顺序投影；显式接续可复用非前缀的已结算结果，live/unknown 边界仍拒绝。当前实现与定向验证归[Agent owner](../../packages/agent/README.md#同一-step-的并行工具批次)，HTTP、公共 Client 和 SQL 格式不变。
+单一 Loop 的完整 Model 工具批次沿现有资源并行调度，每项原输入、权限与决策来源独立核实。Run 结束与 lease release 等待全部已启动调用；后发持久化失败保原错误。显式接续复用非前缀的已结算结果，只有已声明的内部 continuation 可恢复监督，普通未知效果仍拒绝。当前实现与验证归[Agent owner](../../packages/agent/README.md#同一-step-的并行工具批次)。
 
 [`ai`](../../packages/ai/README.md)拥有中立模型协议与独立 SDK 适配 leaf；[`agent`](../../packages/agent/README.md)拥有单一 Loop、具名 Store 操作、执行意图/派发/回执、精确取消与显式本地中断。普通扩展只得到受范围限制的调用身份、自有记录和有限 operations，不能写 SQL、owner 或 Runtime 完成事实。Store 是宿主边界，不能作为便利对象传入扩展。Action 不虚构模型 Run，Query 不触发模型、工具或恢复。
 
@@ -56,7 +56,7 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 长期执行不设主 Run 总期限、累计用量、来源数量、隐式 Shell 总超时或暂时性模型失败的次数额度。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。公共重试上界以 `maxAttempts:null` 表达，Client schema 与 TUI 保实际 attempt 和原失败前驱。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。
 
-原 Run 显式接续的全历史 SQL 校验接纳成功 length 纯文本段，Runtime 核完整正文并继续原任务；已有 Tool 结果不重放。历史 failed/incomplete Model 只有在没有派生 Tool/Job 且后续已有安全 Model 边界时跳过，末尾失败与未知执行仍拒绝。完整 ledger 摘要、generation/selection CAS、原请求和权限校验保持，未增加公开 schema 或持久格式；真实强杀与 Store 反例证据归[恢复 owner](../../packages/agent/src/storage/README.md)。
+原 Run 的冷恢复将持久意图、可替换 Model 尝试、已确认结果与进程监督分开。纯 Model 无派生效果时可关闭旧 running/failed 尝试并重试；压缩 pending 重建摘要、已发布点保持。所选父子树在同一 root lease 下准备全部绑定并原子交接，只有提前封存的可信 Tool continuation 可接回原操作；普通外部未知效果仍需核实。原 ID、结果、审批、子期限和五次失败 streak 保持，协议、真实强杀与成本边界归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
 
 唯一新增主动停止条件是模型顺序中同工具、相同 JSON 参数连续五次失败：Run-local 计数跨完成检查保存，显式安全接续沿原 Model/Tool ledger 重建，最终经准确 `run.cancel` 域停止当前 Run 和 attached 工作。并行批次必须先结算所有已开始调用；物理完成顺序、压缩和新执行 owner 均不能重置计数或重放原工具。完整实现与定向证据归 [Agent owner](../../packages/agent/README.md)和[持续执行决定](../../.agents/notes/implemented/architecture/2026-10-15-long-running-agent-continuation.md)，不把本机定向结果推广为持续数周或完整平台资格。
 
@@ -185,11 +185,11 @@ TUI 模型设置同样通过专门公共 API，固定 user scope 和原读取集
 上述追加证明与历史引用取舍见[Job核实Note](../../.agents/notes/implemented/architecture/2026-10-02-append-only-job-reconciliation.md)；它与原报告冷恢复具有不同目的，不替代原报告绑定要求。
 
 
-同 Store 活动根 Run 的显式 `run.resume` 使用独立目的的准备 lease 和原持久检查点，准确重建原配置后复核 generation、选择、取消与原执行集合，再转普通 owner 进入唯一 Loop。公开 HTTP 只接受原 Store/Session/Run 与申请 ID；owner generation 由服务端读取，同 ID 重用原内部 fence，主体与摘要仍在 Store 校验。已完成初始化不重放，半完成闭包拒绝；原完整 Model 输入/输出、Tool 执行和 Interaction 身份保持，终态 Run 不重开。该受限根恢复不扩大 child/runless 或未知效果的恢复资格，也不改变 Job reconcile 的追加证明边界。实现和证据归 [Runtime](../../packages/agent/README.md)、[Store](../../packages/agent/src/storage/README.md)、[Service](../../apps/service/README.md)与 [Client](../../packages/client/README.md)。
+同 Store 活动根 Run 的显式 run.resume 仍使用独立准备 lease 与公开原身份，准确重建原配置后原子接管其实际 child 闭包，进入唯一 Loop。子权限、记录读取、取消、selection、generation 与组摘要均在交接前核验。外部 Job reconcile 的追加证明、特殊 reviewer 闭包和任意 runless 效果没有获得一般恢复资格；具体[协议与限制](../../packages/agent/src/storage/sqlite/run-resume.README.md)由 owner 维护。
 
-长 Run 不以累计来源请求或已完成 Execution 数量终止。Runtime 保定义/完整输入语义身份，宿主及扩展可选检查点内完整批量捕获；默认项目/Skill/Planning只复用本次读取，所选MCP逐原请求核验，实际来源格式、namespace、数量、digest和新鲜性保持。安全接续由 Store 流式核全部历史生成原摘要，私有有限页重建完整旧 Model/Tool 来源，最终 commit仍全历史CAS；只对当前 planned frontier保有限上界。Worker每次一个事务的宏任务调度、加权控制预留和严格关闭保持。HTTP与持久baseline未新增或放宽，来源取舍见[完整捕获 Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)，实际 257默认Files与4096原效果接续的限定资格归上述owner及[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-10长-run-完整来源与原任务安全接续)；RSS/观测和阶段门禁独立保留。
+长 Run 不以累计来源请求或已完成 Execution 数量终止。新 Model 封存版本化 continuation，恢复来源请求和同工具失败 streak，当前 Tool 批次按原顺序结算；旧记录仍完整历史重建。首次 SQL 流式审计保持原摘要；同一 SQLite 未变化快照可复用，任意写入均使其失效，最终 CAS 和未知效果守卫不放宽。完整历史首次成本仍线性，独特来源和实际资源资格仍需分别测量，见[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
 
-持久检查点与初始化三态的取舍见[原 Run 接续 Note](../../.agents/notes/implemented/architecture/2026-10-02-durable-run-resume-checkpoints.md)；其implemented范围限上述安全根检查点，不扩展到一般闭包或全部恢复。
+原检查点与初始化三态的理由仍见[原决定](../../.agents/notes/implemented/architecture/2026-10-02-durable-run-resume-checkpoints.md)，执行尝试、组监督及验证快照的扩展取舍见[当前决定](../../.agents/notes/implemented/architecture/2026-10-16-durable-continuations-and-group-recovery.md)；两者均不授予任意外部闭包重放资格。
 
 原根执行组的显式 `session.recover(decision:"interrupt")` 也只接受原 Store/Session、申请 ID 与认证主体。Service 读取当前或同 ID 原持久请求的内部 generation，Core 的原 OS 锁及 Store fencing 保持唯一权威；HTTP/SDK 不接收或返回 owner lease/generation。公开 Command 查询投影与写回执一致，只保留准确原 ID 集、partial 和 Decimal64 水位。可能产生效果的调用保持 unknown，不因 applied 回执获得重放或普通 owner 资格；GET 只读。真实 Tool/Model 强杀、原 ledger、同 ID 与物理丢回执证据归[Service](../../apps/service/README.md#显式遗留执行组中断)与[Client](../../packages/client/README.md)。
 

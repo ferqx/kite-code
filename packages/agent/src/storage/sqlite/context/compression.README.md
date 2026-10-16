@@ -21,3 +21,5 @@ Fork 可复制当前活动压缩点的 SQL 来源引用，保持原 `originSessi
 原 `RunRecord.contextSelectionId` 读取具名 Run 创建事务保存的不可变 selection，后续 Session 切换不重标旧 Run。普通 Model/Tool Execution 的 `contextSelectionId` 是结果交付字段，可为 null，不能将它当成原 Model 请求的 selection。实际[typed 来源碰撞测试](../../../../test/isolated/storage/context-compression-history-source.test.ts)先重现 User 被错误排除，再通过原 selected context、完整 sealed Model input、实际 Provider 请求与 Fork 内再次压缩核实修复；它与 compression/fork/lifecycle/restored-media 的五文件 31/429 邻接保持真实 ≥17MiB 原媒体资格。此证据不替代默认 Service 的 checkpoint 摘要递归证明。
 
 排队 Command 与实际输入的最终事务边界由稳定 commit barrier 验证：摘要完整后仅受理 follow-up，Messages 不变时压缩与后继 Run 都完成，后继 Provider 实际收到完整摘要；两个独立 SQL writer 对照分别添加真实 Message/result_ref，均拒绝发布、保原上下文且零下一 Provider。compression/source collision/restored-media 三文件本机 24 tests/298 assertions；实际 TUI 与其他平台仍需对应消费者证据。
+
+自动压缩冷恢复使用统一的[长任务恢复协议](../run-resume.README.md)：未闭合 Model 尝试保留 partial 并保存中断结果，完整但未提交摘要仍属 pending，不成为 selected 上下文；旧已发布点继续有效，普通安全边界允许新摘要尝试。压缩 Model 同样封存来源请求和工具失败 streak 的 continuation。连续两次压缩强杀后仍可由第三进程恢复同一 Run，原工具效果只发生一次，见[真实多次强杀](../../../../test/isolated/recovery/run-resume-repeated-runtime.test.ts)。这不重放任意半完成初始化或外部效果，也不把测试等同于数周运行资格。

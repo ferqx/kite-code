@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { JobDefinition, JobEvent, ToolDefinition } from '../../../src/extensions';
@@ -33,8 +35,8 @@ async function fixture(
     Partial<Pick<RuntimeOptions, 'permissions'>> = {},
   sharedRoot?: string,
 ) {
-  const root = sharedRoot ?? mkdtempSync('/private/tmp/kite-runtime-lifecycle-');
-  const original = await openSqliteStore({ dataRoot: root, profile: 'temporary' });
+  const root = sharedRoot ?? realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-lifecycle-')));
+  const original = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'temporary' });
   const hooks = new Map<keyof Store, () => Promise<void>>();
   const afterHooks = new Map<keyof Store, () => Promise<void>>();
   let storeCloses = 0;
@@ -344,7 +346,7 @@ test('cancellation control first await is busy and remains admitted during host 
 });
 
 test('two Runtime instances on one profile cancel only their own live group', async () => {
-  const root = mkdtempSync('/private/tmp/kite-runtime-lifecycle-peers-');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-lifecycle-peers-')));
   const entered = [gate(), gate()];
   const aborts = [0, 0];
   const fixtures = [];
@@ -398,7 +400,7 @@ test('two Runtime instances on one profile cancel only their own live group', as
 });
 
 test('durable acceptance on closing observer Runtime does not cancel the surviving original owner', async () => {
-  const root = mkdtempSync('/private/tmp/kite-runtime-lifecycle-handover-');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-lifecycle-handover-')));
   const entered = gate(),
     release = gate(),
     accepted = gate(),
@@ -640,8 +642,11 @@ test('confirmed stop with failed original Job disposal still retains its handle 
 });
 
 test('unconfirmed Job retains binding until real stop/dispose and releases its OS permit before permit-dependent disposer', async () => {
-  const root = mkdtempSync('/private/tmp/kite-runtime-lifecycle-permit-');
-  const coordinator = createWorkspaceSerialLocks({ dataRoot: root, profile: 'temporary' });
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-lifecycle-permit-')));
+  const coordinator = createWorkspaceSerialLocks({
+    dataRoot: join(root, 'data'),
+    profile: 'temporary',
+  });
   const started = gate(),
     settled = gate(),
     stopEntered = gate(),

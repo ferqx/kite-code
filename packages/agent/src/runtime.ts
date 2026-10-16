@@ -300,6 +300,7 @@ type RunBinding = {
   dispose?: () => Promise<void>;
 };
 type RunExecutionCheckpoint = {
+  modelRetry?: ModelRetrySource;
   loop?: LoopContext['checkpoint'];
   toolFailureStreak?: ToolFailureStreak;
   plannedModel?: ExecutionRecord;
@@ -431,7 +432,7 @@ export class AgentRuntime {
   private readonly authorizationReviewTasks = new Map<string, Promise<void>>();
   private readonly runBindingLeases = new Map<
     string,
-    { binding: RunBinding; retain: () => () => Promise<void> }
+    { binding: RunBinding; retain: () => () => Promise<void>; release: () => Promise<void> }
   >();
   private readonly reportBindings = new Map<
     string,
@@ -930,6 +931,7 @@ export class AgentRuntime {
         id: tool.id,
         version: tool.version,
         extensionId: extensionIds.get(tool.id)!,
+        ...(tool.recovery && tool.resume ? { recoveryVersion: tool.recovery.version } : {}),
       })),
     };
   }
@@ -1469,6 +1471,12 @@ export class AgentRuntime {
     definition: JobDefinition;
     disposeUnused: () => Promise<void>;
     reserveForCreation?: () => Promise<void>;
+    binding: RunBinding;
+    restore: (
+      child: import('./storage/types').RunResumeChild,
+      checkpoint: RunExecutionCheckpoint | undefined,
+      controller: AbortController,
+    ) => JobHandle;
   } {
     const template =
       reviewConfiguration ?? freshConfiguration ?? this.childConfigurations.get(configurationId);
@@ -1482,6 +1490,7 @@ export class AgentRuntime {
       description: tool.description,
       inputSchema: tool.inputSchema,
       resources: (tool.resources ?? null) as Json,
+      recovery: (tool.recovery ?? null) as Json,
       extensionId:
         extensions.find((extension) =>
           extension.tools?.some((candidate) => candidate.id === tool.id),
@@ -1589,6 +1598,11 @@ export class AgentRuntime {
     let task: Promise<void> | undefined;
     let jobSignal: AbortSignal | undefined;
     let carrierExecutionId: string | undefined;
+    let recoveredCheckpoint: RunExecutionCheckpoint | undefined;
+    const releaseActivatedBinding = () => {
+      const lease = activation && this.runBindingLeases.get(activation.run.id);
+      return lease ? lease.release() : releaseConfigured();
+    };
     const abort = () =>
       controller?.abort(jobSignal?.reason ?? new AgentError('child_cancel_requested'));
     const checkHandle = (candidate: JobHandle) => {
@@ -1777,23 +1791,29 @@ export class AgentRuntime {
       observe: async function* (candidate): AsyncIterable<JobEvent> {
         checkHandle(candidate);
         if (!task)
-          task = thisRuntime.executeRun(
-            activation!.command,
-            parent.owner,
-            activation!.run,
-            configured.binding,
-            controller!,
-          );
+          task = activation!.run.isActive
+            ? thisRuntime.executeRun(
+                activation!.command,
+                parent.owner,
+                activation!.run,
+                configured.binding,
+                controller!,
+                recoveredCheckpoint,
+              )
+            : Promise.resolve().then(releaseActivatedBinding);
         yield {
           type: 'progress',
           value: { childSessionId: activation!.session.id, runId: activation!.run.id },
         };
-        await task.catch(() => {});
+        if (activation!.run.isActive) await task.catch(() => {});
+        else await task;
         yield { type: 'terminal', result: await result(), supervision: 'ended' };
       },
       cancel: async (candidate) => {
         checkHandle(candidate);
         controller!.abort(new AgentError('child_cancel_requested'));
+        if (!task && !activation!.run.isActive)
+          task = Promise.resolve().then(releaseActivatedBinding);
         // No observer means no model call has begun. Settle the activated Run without starting it.
         if (!task)
           task = this.options.store
@@ -1805,7 +1825,7 @@ export class AgentRuntime {
               reason: 'child_cancel_requested',
               requirements: [],
             })
-            .then(() => releaseConfigured());
+            .then(releaseActivatedBinding);
         const ended = await Promise.race([
           task.then(
             () => true,
@@ -1825,7 +1845,7 @@ export class AgentRuntime {
       dispose: async (candidate) => {
         checkHandle(candidate);
         jobSignal?.removeEventListener('abort', abort);
-        if (!task) await releaseConfigured();
+        if (!task) await releaseActivatedBinding();
       },
     };
     const capacity = async () => {
@@ -1845,6 +1865,16 @@ export class AgentRuntime {
       return { key: ancestor.runId ?? parent.command.id, limit };
     };
     this.childAdmissions.set(definition, async (scope) => {
+      if (
+        activation &&
+        (!activation.run.isActive ||
+          (activation.run.deadlineAt !== null && activation.run.deadlineAt <= Date.now()))
+      ) {
+        admitted = true;
+        return () => {
+          admitted = false;
+        };
+      }
       if (reviewConfiguration) {
         admitted = true;
         return () => {
@@ -1897,6 +1927,24 @@ export class AgentRuntime {
     });
     return {
       configuration: structuredClone(configured.configuration),
+      binding: configured.binding,
+      restore: (child, checkpoint, restoredController) => {
+        if (activation || !child.state) throw new AgentError('child_recovery_changed');
+        activation = { command: child.command, session: child.session, run: child.state.run };
+        carrierExecutionId = child.carrier.id;
+        recoveredCheckpoint = checkpoint;
+        controller = restoredController;
+        jobSignal = controller.signal;
+        handle = {
+          reference: {
+            kind: 'child_session',
+            childSessionId: child.session.id,
+            runId: child.state.run.id,
+            commandId: child.command.id,
+          },
+        };
+        return handle;
+      },
       definition,
       reserveForCreation: reviewConfiguration
         ? undefined
@@ -2382,13 +2430,97 @@ export class AgentRuntime {
       })),
     });
   }
+  private async readResumeModelSource(
+    execution: ExecutionRecord,
+    subjectId: string,
+    signal: AbortSignal,
+  ): Promise<Record<string, Json>> {
+    const sourceBody = bodyReference((execution.decisionSource as Record<string, Json>).sourceBody);
+    if (
+      sourceBody &&
+      (sourceBody.reference.storeId !== execution.originStoreId ||
+        sourceBody.reference.sessionId !== execution.sessionId ||
+        sourceBody.reference.subjectId !== subjectId ||
+        sourceBody.reference.scope.kind !== 'session' ||
+        sourceBody.reference.scope.id !== execution.sessionId)
+    )
+      throw new AgentError('model_source_invalid');
+    const source = sourceBody
+      ? jsonBody(await this.readBody(sourceBody.reference, signal, execution.originStoreId))
+      : structuredClone(execution.decisionSource);
+    if (
+      !source ||
+      typeof source !== 'object' ||
+      Array.isArray(source) ||
+      source.kind !== 'model_request' ||
+      source.requestId !== execution.id
+    )
+      throw new AgentError('resume_checkpoint_unavailable');
+    return source;
+  }
+  private async recoveryParentBindings(
+    runId: string,
+    execution: ExecutionRecord,
+    binding: RunBinding,
+    subjectId: string,
+    signal: AbortSignal,
+  ): Promise<ScopedBindings> {
+    const bindings = this.scopedRunBinding(runId, binding);
+    if (!binding.readStepCapabilities) return bindings;
+    const run = await this.options.store.getRun(runId);
+    const session = run && (await this.options.store.getSession(run.sessionId));
+    const command = run && (await this.options.store.getCommand(run.originCommandId));
+    const modelId = (execution.decisionSource as Record<string, Json>).modelExecutionId;
+    const model =
+      typeof modelId === 'string' ? await this.options.store.getExecution(modelId) : null;
+    if (
+      !run ||
+      !session ||
+      !command ||
+      model?.kind !== 'model' ||
+      model.runId !== runId ||
+      model.sessionId !== run.sessionId
+    )
+      throw new AgentError('child_parent_binding_unavailable');
+    const source = await this.readResumeModelSource(model, subjectId, signal);
+    const original = await this.readModelInput({
+      expectedStoreId: run.originStoreId,
+      sessionId: run.sessionId,
+      subjectId,
+      executionId: model.id,
+      signal,
+    });
+    const current = await this.readRunCapabilities(command, run, session, binding, signal);
+    if (!current) throw new AgentError('child_parent_binding_unavailable');
+    const tools = [...current.selected.definitions.values()]
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((tool) => ({
+        id: tool.id,
+        definitionVersion: tool.version,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      }));
+    if (
+      canonicalJson(current.snapshot) !== canonicalJson(source.capabilitySnapshot ?? null) ||
+      canonicalJson(tools as unknown as Json) !==
+        canonicalJson(original.request.tools as unknown as Json)
+    )
+      throw new AgentError('capability_refresh_required');
+    return {
+      ...bindings,
+      extensions: current.selected.extensions,
+      tools: current.selected.definitions,
+      jobs: current.selected.jobs,
+      capabilitySnapshot: current.snapshot,
+    };
+  }
   private async prepareRunCheckpoint(
     state: import('./storage/types').RunResumeState,
     subjectId: string,
     signal: AbortSignal,
   ): Promise<RunExecutionCheckpoint> {
     const checkpoint = state.checkpoint;
-    if (!['run.start', 'input.follow_up'].includes(state.originalCommand.kind))
+    if (!['run.start', 'input.follow_up', 'child.start'].includes(state.originalCommand.kind))
       throw new AgentError('resume_checkpoint_unavailable');
     if (!checkpoint || checkpoint.initializationState === 'started')
       throw new AgentError('run_initialization_incomplete');
@@ -2407,35 +2539,52 @@ export class AgentRuntime {
       sessionId: state.run.sessionId,
       subjectId,
     };
-    const sourceBody = bodyReference((last.decisionSource as Record<string, Json>).sourceBody);
-    if (
-      sourceBody &&
-      (sourceBody.reference.storeId !== state.run.originStoreId ||
-        sourceBody.reference.sessionId !== state.run.sessionId ||
-        sourceBody.reference.subjectId !== subjectId ||
-        sourceBody.reference.scope.kind !== 'session' ||
-        sourceBody.reference.scope.id !== state.run.sessionId)
-    )
-      throw new AgentError('model_source_invalid');
-    const source = sourceBody
-      ? jsonBody(await this.readBody(sourceBody.reference, signal, state.run.originStoreId))
-      : structuredClone(last.decisionSource);
-    if (
-      !source ||
-      typeof source !== 'object' ||
-      Array.isArray(source) ||
-      source.compressionId ||
-      source.kind !== 'model_request' ||
-      source.requestId !== last.id
-    )
-      throw new AgentError('resume_checkpoint_unavailable');
-    result.modelSource = source;
-    const request = (await this.readModelInput({ ...scope, executionId: last.id, signal })).request;
-    result.modelRequest = request;
+    const source = await this.readResumeModelSource(last, subjectId, signal);
+    const freshModel =
+      Boolean(source.compressionId) || ['failed', 'dispatching', 'running'].includes(last.status);
+    const request = freshModel
+      ? undefined
+      : (await this.readModelInput({ ...scope, executionId: last.id, signal })).request;
+    if (!freshModel) {
+      result.modelSource = source;
+      result.modelRequest = request;
+    }
     const requests = new Map<string, SourceRequest>();
     const streak: ToolFailureStreak = { signature: null, count: 0 };
+    const continuation = source.continuation as Record<string, Json> | undefined;
+    if (continuation) {
+      const saved = continuation.toolFailureStreak as Record<string, Json> | null;
+      if (
+        continuation.version !== 1 ||
+        continuation.runId !== state.run.id ||
+        continuation.contextSelectionId !== state.run.contextSelectionId ||
+        !Array.isArray(continuation.sourceRequests) ||
+        !saved ||
+        !Number.isInteger(saved.count) ||
+        Number(saved.count) < 0 ||
+        Number(saved.count) > 5 ||
+        (saved.count === 0 ? saved.signature !== null : typeof saved.signature !== 'string')
+      )
+        throw new AgentError('run_continuation_invalid');
+      streak.count = Number(saved.count);
+      streak.signature = saved.signature as string | null;
+      for (const value of continuation.sourceRequests) {
+        if (
+          !value ||
+          typeof value !== 'object' ||
+          Array.isArray(value) ||
+          value.sessionId !== state.run.sessionId ||
+          value.workspaceId !== state.session.workspaceId ||
+          typeof value.definitionId !== 'string' ||
+          value.input === undefined
+        )
+          throw new AgentError('run_continuation_invalid');
+        const request = value as unknown as SourceRequest;
+        requests.set(`${request.definitionId}:${await semanticDigest(request.input)}`, request);
+      }
+    }
     let afterRowid = '0';
-    for (;;) {
+    for (; !continuation; ) {
       signal.throwIfAborted();
       const page = await this.options.store.readRunResumeExecutionPage({
         ...scope,
@@ -2450,8 +2599,9 @@ export class AgentRuntime {
         afterRowid = item.cursor;
         const priorExecution = await this.options.store.getExecution(item.executionId);
         if (
-          priorExecution?.status === 'failed' &&
-          (priorExecution.result as Record<string, Json> | null)?.incomplete === true
+          (priorExecution?.decisionSource as Record<string, Json> | null)?.compressionId ||
+          (priorExecution?.status === 'failed' &&
+            (priorExecution.result as Record<string, Json> | null)?.incomplete === true)
         )
           continue;
         const prior = await this.readModelOutput({
@@ -2528,9 +2678,33 @@ export class AgentRuntime {
     }
     result.sourceRequests = [...requests.values()];
     result.toolFailureStreak = streak;
+    if (freshModel) {
+      if (!source.compressionId) {
+        const previousRetry = source.retry as unknown as ModelRetrySource | undefined;
+        if (
+          previousRetry &&
+          (typeof previousRetry !== 'object' ||
+            Array.isArray(previousRetry) ||
+            !Number.isSafeInteger(previousRetry.attempt) ||
+            previousRetry.attempt < 2 ||
+            typeof previousRetry.previousExecutionId !== 'string' ||
+            !previousRetry.previousExecutionId ||
+            (previousRetry.maxAttempts !== null &&
+              (!Number.isSafeInteger(previousRetry.maxAttempts) || previousRetry.maxAttempts < 1)))
+        )
+          throw new AgentError('run_continuation_invalid');
+        result.modelRetry = {
+          previousExecutionId: last.id,
+          attempt: (previousRetry?.attempt ?? 1) + 1,
+          maxAttempts: null,
+          reason: 'stream_incomplete',
+        };
+      }
+      return result;
+    }
     if (last.status === 'planned') {
       result.plannedModel = last;
-      result.loop = { kind: 'model', request, stepId: last.stepId };
+      result.loop = { kind: 'model', request: request!, stepId: last.stepId };
       return result;
     }
     if (last.status !== 'succeeded') throw new AgentError('resume_checkpoint_unavailable');
@@ -2599,7 +2773,11 @@ export class AgentRuntime {
         throw new AgentError('resume_checkpoint_unavailable');
       if (canonicalJson(originalInput) !== canonicalJson(existing.input))
         throw new AgentError('resume_checkpoint_unavailable');
-      if (existing.status === 'planned') {
+      if (
+        existing.status === 'planned' ||
+        (['dispatching', 'running'].includes(existing.status) &&
+          (existing.decisionSource as Record<string, Json>).toolRecoveryVersion)
+      ) {
         tools.set(call.id, existing);
       } else if (['succeeded', 'failed', 'cancelled'].includes(existing.status))
         settled.push({
@@ -2650,6 +2828,22 @@ export class AgentRuntime {
       let cleanupFailed = false;
       let preparationError: unknown;
       let preparationResources: RunConfiguration | undefined;
+      const recoveredChildren: {
+        child: import('./storage/types').RunResumeChild;
+        agent: Awaited<ReturnType<AgentRuntime['resolveChildDefinition']>>;
+        parent: StandaloneScope;
+        checkpoint?: RunExecutionCheckpoint;
+      }[] = [];
+      const recoveredBindings = new Map<string, RunBinding>();
+      const recoveredControllers = new Map<string, AbortController>([[state.run.id, controller]]);
+      const operations: Promise<void>[] = [];
+      let startGroup!: () => void;
+      let rejectGroup!: (reason: unknown) => void;
+      const groupReady = new Promise<void>((resolve, reject) => {
+        startGroup = resolve;
+        rejectGroup = reject;
+      });
+      void groupReady.catch(() => {});
       try {
         const prepared = await this.prepareRunCheckpoint(state, input.subjectId, controller.signal);
         const checkpoint = {
@@ -2718,41 +2912,160 @@ export class AgentRuntime {
         );
         if (canonicalJson(configuration) !== canonicalJson(state.run.configuration))
           throw new AgentError('run_configuration_mismatch');
+        const binding: RunBinding = {
+          model,
+          modelId,
+          definitions: catalogue.definitions,
+          jobs: catalogue.jobs,
+          extensions: catalogue.extensions,
+          sources: sealSources(resolved?.sources),
+          permissions: resolved?.permissions,
+          conditions: resolved?.conditions,
+          initializeRequirements:
+            resolved?.initializeRequirements ?? this.options.initializeRunRequirements,
+          authorizationReview: reviewer,
+          readStepCapabilities: resolved?.readStepCapabilities,
+          afterTurn: resolved?.afterTurn ?? this.options.afterTurn,
+          compressor: sealCompressor(resolved?.compressor ?? this.options.compressor),
+          dispose,
+        };
+        recoveredBindings.set(state.run.id, binding);
+        const recoveryOwner: OwnerRef = {
+          sessionId: lease.sessionId,
+          instanceId: lease.instanceId,
+          generation: lease.generation,
+        };
+        for (const child of state.children ?? []) {
+          controller.signal.throwIfAborted();
+          const parentBinding = recoveredBindings.get(child.parentRunId);
+          const parentExecution =
+            child.carrier.parentExecutionId &&
+            (await this.options.store.getExecution(child.carrier.parentExecutionId));
+          const parentCommand =
+            parentExecution &&
+            (await this.options.store.getCommand(parentExecution.originCommandId));
+          if (!parentBinding || !parentExecution || !parentCommand)
+            throw new AgentError('child_parent_binding_unavailable');
+          const parent: StandaloneScope = {
+            command: parentCommand,
+            owner: recoveryOwner,
+            workspaceId: workspace.id,
+            signal: recoveredControllers.get(child.parentRunId)!.signal,
+            bindings: await this.recoveryParentBindings(
+              child.parentRunId,
+              parentExecution,
+              parentBinding,
+              input.subjectId,
+              controller.signal,
+            ),
+          };
+          const afterRunId =
+            child.command.kind === 'input.follow_up'
+              ? ((child.command.request as Record<string, Json>).afterRunId as string)
+              : undefined;
+          const predecessor = afterRunId && (await this.options.store.getRun(afterRunId));
+          const continuation = predecessor
+            ? {
+                executionId: predecessor.originCommandId.slice('child-start-'.length),
+                afterRunId: predecessor.id,
+              }
+            : undefined;
+          const agent = await this.resolveChildDefinition(
+            child.carrier.childConfiguration!.id,
+            parent,
+            parentExecution.id,
+            child.carrier.decisionSource,
+            continuation,
+          );
+          recoveredChildren.push({ child, agent, parent });
+          if (
+            canonicalJson(agent.configuration as unknown as Json) !==
+            canonicalJson(child.carrier.childConfiguration as unknown as Json)
+          )
+            throw new AgentError('run_configuration_mismatch');
+          if (child.state) {
+            recoveredControllers.set(child.state.run.id, new AbortController());
+            recoveredBindings.set(child.state.run.id, agent.binding);
+            this.retainRunBinding(child.state.run.id, agent.binding);
+            if (child.state.run.isActive)
+              recoveredChildren.at(-1)!.checkpoint = await this.prepareRunCheckpoint(
+                child.state,
+                input.subjectId,
+                controller.signal,
+              );
+          }
+        }
         const committed = await this.options.store.commitRunResume({
           expectedStoreId: input.expectedStoreId,
           lease,
           expectedConfiguration: configuration,
           checkpoint,
+          childConfigurations: recoveredChildren.map(({ child, agent }) => ({
+            executionId: child.carrier.id,
+            configuration: agent.configuration.snapshot,
+          })),
         });
         owner = committed.owner;
         lease = null;
-        complete(committed.command);
         transferred = true;
-        await this.executeRun(
+        for (const { child, agent, parent, checkpoint: childCheckpoint } of recoveredChildren) {
+          if (!['planned', 'dispatching', 'running'].includes(child.carrier.status)) continue;
+          const resumedChild = child.state
+            ? agent.restore(child, childCheckpoint, recoveredControllers.get(child.state.run.id)!)
+            : child.carrier.status === 'dispatching'
+              ? ('activation' as const)
+              : undefined;
+          const operation = await this.options.store.getCommand(child.carrier.originCommandId);
+          const request = operation?.request as Record<string, Json> | undefined;
+          if (
+            !operation ||
+            typeof request?.extensionId !== 'string' ||
+            typeof request?.operationKey !== 'string'
+          )
+            throw new AgentError('operation_unverifiable');
+          const operationTask = this.extensionHost.resumeChildOperation(
+            {
+              commandId: operation.id,
+              executionId: child.carrier.id,
+              childSessionId: child.session.id,
+              sessionId: operation.sessionId,
+              originStoreId: operation.originStoreId,
+              extensionId: request.extensionId,
+              key: request.operationKey,
+            },
+            parent,
+            child.carrier.parentExecutionId!,
+            child.carrier.decisionSource,
+            agent.definition,
+            resumedChild,
+            groupReady,
+            agent.disposeUnused,
+          );
+          operations.push(operationTask);
+          void operationTask.catch((error) => this.stopDispatchPolling(input.sessionId, error));
+        }
+        for (const child of state.children ?? [])
+          if (child.state && !child.state.run.isActive)
+            await this.runBindingLeases.get(child.state.run.id)?.release();
+        const execution = this.executeRun(
           committed.originalCommand,
           owner,
           committed.run,
-          {
-            model,
-            modelId,
-            definitions: catalogue.definitions,
-            jobs: catalogue.jobs,
-            extensions: catalogue.extensions,
-            sources: sealSources(resolved?.sources),
-            permissions: resolved?.permissions,
-            conditions: resolved?.conditions,
-            initializeRequirements:
-              resolved?.initializeRequirements ?? this.options.initializeRunRequirements,
-            authorizationReview: reviewer,
-            readStepCapabilities: resolved?.readStepCapabilities,
-            afterTurn: resolved?.afterTurn ?? this.options.afterTurn,
-            compressor: sealCompressor(resolved?.compressor ?? this.options.compressor),
-            dispose,
-          },
+          binding,
           controller,
           prepared,
         );
+        startGroup();
+        complete(committed.command);
+        await execution;
+        // Host owns descendant supervision and its configuration leases. Rejoin ordinary
+        // intake with this same owner; background children must not occupy the Session pump.
+        await this.pumpOwned(input.sessionId, owner);
+        if (this.preparationCleanupFailed) throw new AgentError('shutdown_cleanup_unconfirmed');
       } catch (error) {
+        rejectGroup(error);
+        controller.abort(error);
+        await Promise.allSettled(operations);
         preparationError = error;
         if (!transferred && error instanceof ConfigurationPreparationCleanupError) {
           cleanupFailed = true;
@@ -2763,7 +3076,13 @@ export class AgentRuntime {
         if (transferred) this.stopDispatchPolling(input.sessionId, error);
       } finally {
         try {
-          if (!transferred) await dispose?.();
+          if (!transferred && !cleanupFailed) {
+            const retainedRoot = this.runBindingLeases.has(state.run.id);
+            for (const { agent } of recoveredChildren.reverse()) await agent.disposeUnused();
+            for (const runId of recoveredBindings.keys())
+              await this.runBindingLeases.get(runId)?.release();
+            if (!retainedRoot) await dispose?.();
+          }
         } catch (error) {
           cleanupFailed = true;
           this.runResumeCleanupFailed = true;
@@ -2781,15 +3100,19 @@ export class AgentRuntime {
             this.stopDispatchPolling(input.sessionId, error);
           }
         }
-        if (owner && !this.runResumeCleanupFailed)
-          await this.options.store.releaseSessionOwner(owner).catch((error) => {
+        if (owner && !this.runResumeCleanupFailed && !this.preparationCleanupFailed)
+          await this.releaseOwner(owner).catch((error) => {
             this.runResumeCleanupFailed = true;
             this.stopDispatchPolling(input.sessionId, error);
           });
       }
     })().finally(() => {
       this.tasks.delete(input.sessionId);
-      if (!this.runResumeCleanupFailed && this.wakeups.delete(input.sessionId))
+      if (
+        !this.runResumeCleanupFailed &&
+        !this.preparationCleanupFailed &&
+        this.wakeups.delete(input.sessionId)
+      )
         this.schedule(input.sessionId);
     });
     this.tasks.set(input.sessionId, task);
@@ -3321,8 +3644,7 @@ export class AgentRuntime {
             this.preparationCleanupError(preparationError, error, preparationResources!),
           );
         } finally {
-          if (owner && !cleanupFailed)
-            await this.options.store.releaseSessionOwner(owner).catch(() => false);
+          if (owner && !cleanupFailed) await this.releaseOwner(owner).catch(() => false);
         }
       }
     })().finally(() => {
@@ -3537,6 +3859,11 @@ export class AgentRuntime {
   }
   private schedule(sessionId: string) {
     if (this.closing) return;
+    if (this.hasUnconfirmedCleanup()) {
+      this.wakeups.delete(sessionId);
+      this.stopDispatchPolling(sessionId, new AgentError('shutdown_cleanup_unconfirmed'));
+      return;
+    }
     if (this.tasks.has(sessionId)) {
       this.wakeups.add(sessionId);
       return;
@@ -3567,6 +3894,22 @@ export class AgentRuntime {
         : 'dispatch_failed';
     this.dispatchFailures.set(sessionId, { code, instanceId: this.instanceId });
   }
+  private hasUnconfirmedCleanup(): boolean {
+    return (
+      this.preparationCleanupFailed ||
+      this.runResumeCleanupFailed ||
+      this.jobReconcileCleanupFailed ||
+      this.reportRecoveryCleanupFailed ||
+      this.extensionHost.hasUnconfirmedCleanup
+    );
+  }
+  private async releaseOwner(owner: OwnerRef): Promise<boolean> {
+    // A terminal ledger cannot prove that hot configuration cleanup has ended.
+    // Host retains this owner until its operations and their disposers have settled.
+    if (this.hasUnconfirmedCleanup() || this.extensionHost.hasActiveOperations(owner.sessionId))
+      return false;
+    return this.options.store.releaseSessionOwner(owner);
+  }
   private async pump(sessionId: string): Promise<void> {
     const session = await this.options.store.getSession(sessionId);
     if (!session) throw new AgentError('session_not_found');
@@ -3576,132 +3919,137 @@ export class AgentRuntime {
     );
     if (!owner) return;
     try {
-      while (!this.closing) {
-        // Recovery query receipts never become ordinary model work, including accepted unknowns.
-        const commands = (await this.options.store.listAcceptedCommands(sessionId, 32)).filter(
-          (command) => command.kind !== 'job.reconcile',
-        );
-        for (const command of commands) {
-          if (this.closing) break;
-          if ((await this.options.store.getCommand(command.id))?.status !== 'accepted') continue;
-          const dispatch = await this.options.store.inspectOwnerDispatch({
+      await this.pumpOwned(sessionId, owner);
+    } finally {
+      await this.releaseOwner(owner).catch(() => false);
+    }
+  }
+  private async pumpOwned(sessionId: string, owner: OwnerRef): Promise<void> {
+    while (!this.closing) {
+      if (this.hasUnconfirmedCleanup()) throw new AgentError('shutdown_cleanup_unconfirmed');
+      // Recovery query receipts never become ordinary model work, including accepted unknowns.
+      const commands = (await this.options.store.listAcceptedCommands(sessionId, 32)).filter(
+        (command) => command.kind !== 'job.reconcile',
+      );
+      for (const command of commands) {
+        if (this.closing) break;
+        if ((await this.options.store.getCommand(command.id))?.status !== 'accepted') continue;
+        const dispatch = await this.options.store.inspectOwnerDispatch({
+          expectedStoreId: command.originStoreId,
+          owner,
+          sessionId,
+        });
+        if (this.hasUnconfirmedCleanup()) throw new AgentError('shutdown_cleanup_unconfirmed');
+        if (dispatch.hasUncommittedAction) throw new AgentError('session_recovery_required');
+        if (command.kind === 'input.steer' || command.kind === 'result.include') {
+          await this.options.store.rejectCommand({
             expectedStoreId: command.originStoreId,
             owner,
-            sessionId,
+            commandId: command.id,
+            reason: 'input_target_stopped',
           });
-          if (dispatch.hasUncommittedAction) throw new AgentError('session_recovery_required');
-          if (command.kind === 'input.steer' || command.kind === 'result.include') {
-            await this.options.store.rejectCommand({
-              expectedStoreId: command.originStoreId,
-              owner,
-              commandId: command.id,
-              reason: 'input_target_stopped',
-            });
-            continue;
+          continue;
+        }
+        if (command.kind === 'operation.tool') {
+          await this.options.store.rejectCommand({
+            expectedStoreId: command.originStoreId,
+            owner,
+            commandId: command.id,
+            reason: 'operation_recovery_required',
+            needsReview: true,
+          });
+          continue;
+        }
+        if (command.kind === 'job.report') {
+          const parentRun = await this.options.store.getRun(
+            (command.request as { parentRunId: string }).parentRunId,
+          );
+          if (parentRun?.isActive) {
+            this.pendingSessions.add(sessionId);
+            return;
           }
-          if (command.kind === 'operation.tool') {
-            await this.options.store.rejectCommand({
-              expectedStoreId: command.originStoreId,
-              owner,
-              commandId: command.id,
-              reason: 'operation_recovery_required',
-              needsReview: true,
-            });
-            continue;
-          }
-          if (command.kind === 'job.report') {
-            const parentRun = await this.options.store.getRun(
-              (command.request as { parentRunId: string }).parentRunId,
-            );
-            if (parentRun?.isActive) {
-              this.pendingSessions.add(sessionId);
-              return;
-            }
-            await this.runJobReport(command, owner);
-            continue;
-          }
-          if (command.kind === 'extension.invoke') {
-            const receipt = command.receipt;
-            if (
-              receipt &&
-              typeof receipt === 'object' &&
-              !Array.isArray(receipt) &&
-              receipt.kind === 'nested_action'
-            ) {
-              await this.options.store.rejectCommand({
-                expectedStoreId: command.originStoreId,
-                owner,
-                commandId: command.id,
-                reason: 'nested_action_recovery_required',
-                needsReview: true,
-              });
-              continue;
-            }
-            const controller = new AbortController();
-            const release = this.trackLive(command, owner, controller);
-            try {
-              await this.extensionHost.run(command, owner, controller);
-            } catch (error) {
-              const current = await this.options.store.getCommand(command.id);
-              if (current?.status === 'accepted' && current.cancelRequestedAt === null)
-                await this.options.store.rejectCommand({
-                  expectedStoreId: command.originStoreId,
-                  owner,
-                  commandId: command.id,
-                  reason: error instanceof AgentError ? error.code : 'action_preparation_failed',
-                });
-            } finally {
-              release();
-            }
-            continue;
-          }
+          await this.runJobReport(command, owner);
+          continue;
+        }
+        if (command.kind === 'extension.invoke') {
+          const receipt = command.receipt;
           if (
-            !this.options.model &&
-            !this.options.resolveRunConfiguration &&
-            !Object.hasOwn(command.request as object, 'selectedSkills') &&
-            !Object.hasOwn(command.request as object, 'extensionInputs')
+            receipt &&
+            typeof receipt === 'object' &&
+            !Array.isArray(receipt) &&
+            receipt.kind === 'nested_action'
           ) {
             await this.options.store.rejectCommand({
               expectedStoreId: command.originStoreId,
               owner,
               commandId: command.id,
-              reason: 'model_unavailable',
+              reason: 'nested_action_recovery_required',
+              needsReview: true,
             });
             continue;
           }
-          await this.run(command, owner);
-        }
-        if (await this.options.store.releaseSessionOwner(owner)) return;
-        if (!commands.length) {
-          if (this.extensionHost.hasActiveOperations(owner.sessionId)) return;
-          if (
-            [...this.active.values()].some(
-              (work) =>
-                work.owner.sessionId === owner.sessionId &&
-                work.owner.generation === owner.generation,
-            )
-          )
-            return;
-          // A new exact Session command may have been accepted after the empty list read,
-          // causing the atomic release to retain this same owner. Do not classify that
-          // normal intake window as recovery; persistent live/unknown work still fails closed.
-          const dispatch = await this.options.store.inspectOwnerDispatch({
-            expectedStoreId: (await this.options.store.getMetadata()).storeId,
-            owner,
-            sessionId,
-          });
-          if (!dispatch.hasUnsettledWork) {
-            if (dispatch.hasPendingCommands) continue;
-            // The newly accepted command may already have been precisely cancelled.
-            // A different Session's accepted work keeps its own scheduling/authority.
-            await this.options.store.releaseSessionOwner(owner);
-            return;
+          const controller = new AbortController();
+          const release = this.trackLive(command, owner, controller);
+          try {
+            await this.extensionHost.run(command, owner, controller);
+          } catch (error) {
+            const current = await this.options.store.getCommand(command.id);
+            if (current?.status === 'accepted' && current.cancelRequestedAt === null)
+              await this.options.store.rejectCommand({
+                expectedStoreId: command.originStoreId,
+                owner,
+                commandId: command.id,
+                reason: error instanceof AgentError ? error.code : 'action_preparation_failed',
+              });
+          } finally {
+            release();
           }
-          throw new AgentError('session_recovery_required');
+          continue;
         }
+        if (
+          !this.options.model &&
+          !this.options.resolveRunConfiguration &&
+          !Object.hasOwn(command.request as object, 'selectedSkills') &&
+          !Object.hasOwn(command.request as object, 'extensionInputs')
+        ) {
+          await this.options.store.rejectCommand({
+            expectedStoreId: command.originStoreId,
+            owner,
+            commandId: command.id,
+            reason: 'model_unavailable',
+          });
+          continue;
+        }
+        await this.run(command, owner);
       }
-    } finally {
-      await this.options.store.releaseSessionOwner(owner).catch(() => false);
+      if (await this.releaseOwner(owner)) return;
+      if (!commands.length) {
+        if (this.extensionHost.hasActiveOperations(owner.sessionId)) return;
+        if (
+          [...this.active.values()].some(
+            (work) =>
+              work.owner.sessionId === owner.sessionId &&
+              work.owner.generation === owner.generation,
+          )
+        )
+          return;
+        // A new exact Session command may have been accepted after the empty list read,
+        // causing the atomic release to retain this same owner. Do not classify that
+        // normal intake window as recovery; persistent live/unknown work still fails closed.
+        const dispatch = await this.options.store.inspectOwnerDispatch({
+          expectedStoreId: (await this.options.store.getMetadata()).storeId,
+          owner,
+          sessionId,
+        });
+        if (!dispatch.hasUnsettledWork) {
+          if (dispatch.hasPendingCommands) continue;
+          // The newly accepted command may already have been precisely cancelled.
+          // A different Session's accepted work keeps its own scheduling/authority.
+          await this.releaseOwner(owner);
+          return;
+        }
+        throw new AgentError('session_recovery_required');
+      }
     }
   }
   private async authorizeAfterTurn(
@@ -3975,6 +4323,113 @@ export class AgentRuntime {
       dispose: preparationResources ? preparationResources.dispose : dispose,
     });
   }
+  private async readRunCapabilities(
+    command: CommandRecord,
+    run: RunRecord,
+    session: SessionRecord,
+    binding: RunBinding,
+    signal: AbortSignal,
+  ) {
+    if (!binding.readStepCapabilities) return null;
+    signal.throwIfAborted();
+    const value = await binding.readStepCapabilities({
+      command: freeze(structuredClone(command)),
+      run: freeze(structuredClone(run)),
+      session: freeze(structuredClone(session)),
+      signal: signal,
+    });
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      Object.keys(value).some((key) => !['extensions', 'toolIds', 'snapshot'].includes(key)) ||
+      value.snapshot === undefined
+    )
+      throw new AgentError('invalid_step_capabilities');
+    const snapshot = freeze(structuredClone(value.snapshot));
+    if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > 64 * 1024)
+      throw new AgentError('step_capability_snapshot_too_large');
+    const selected = this.runDefinitions(value.extensions, value.toolIds);
+    const facts: Json = {
+      snapshot,
+      extensions: selected.extensions.map(({ id, version }) => ({ id, version })),
+      tools: [...selected.definitions.values()]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((tool) => ({
+          id: tool.id,
+          version: tool.version,
+          extensionId: selected.extensionIds.get(tool.id)!,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+          resources: (tool.resources ?? null) as Json,
+        })),
+      jobs: [...selected.jobs.values()]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((job) => ({
+          id: job.id,
+          version: job.version,
+          description: job.description,
+          inputSchema: job.inputSchema,
+          resources: (job.resources ?? null) as Json,
+        })),
+    };
+    return { selected, snapshot, fingerprint: await semanticDigest(facts) };
+  }
+  private retainRunBinding(runId: string, binding: RunBinding) {
+    const existing = this.runBindingLeases.get(runId);
+    if (existing) {
+      if (existing.binding !== binding) throw new AgentError('run_configuration_conflict');
+      return existing;
+    }
+    let users = 1;
+    let disposed = false;
+    const release = async () => {
+      if (--users !== 0) return;
+      disposed = true;
+      try {
+        await binding.dispose?.();
+      } catch (error) {
+        this.preparationCleanupFailed = true;
+        throw error;
+      }
+      this.runBindingLeases.delete(runId);
+    };
+    const retain = () => {
+      if (disposed) throw new AgentError('run_configuration_disposed');
+      users++;
+      let released = false;
+      return async () => {
+        if (!released) {
+          released = true;
+          await release();
+        }
+      };
+    };
+    let baseReleased = false;
+    const lease = {
+      binding,
+      retain,
+      release: async () => {
+        if (!baseReleased) {
+          baseReleased = true;
+          await release();
+        }
+      },
+    };
+    this.runBindingLeases.set(runId, lease);
+    return lease;
+  }
+  private scopedRunBinding(runId: string, binding: RunBinding): ScopedBindings {
+    return {
+      extensions: binding.extensions ?? this.extensions,
+      tools: binding.definitions,
+      jobs: binding.jobs ?? this.runDefinitions().jobs,
+      permissions: binding.permissions,
+      authorizationReview: binding.authorizationReview,
+      conditions: binding.conditions,
+      retain: this.retainRunBinding(runId, binding).retain,
+    };
+  }
   private async executeRun(
     command: CommandRecord,
     owner: OwnerRef,
@@ -3983,32 +4438,13 @@ export class AgentRuntime {
     controller = new AbortController(),
     resumed?: RunExecutionCheckpoint,
   ): Promise<void> {
-    const { model, modelId, definitions } = binding;
+    const { model, modelId } = binding;
     const orderedToolAdmission =
       run.configuration !== null &&
       typeof run.configuration === 'object' &&
       !Array.isArray(run.configuration) &&
       run.configuration.toolDispatchOrder === 'model';
-    let users = 1;
-    let disposed = false;
-    const releaseBinding = async () => {
-      if (--users === 0) {
-        disposed = true;
-        await binding.dispose?.();
-        this.runBindingLeases.delete(run.id);
-      }
-    };
-    const retain = () => {
-      if (disposed) throw new AgentError('run_configuration_disposed');
-      users++;
-      let released = false;
-      return async () => {
-        if (released) return;
-        released = true;
-        await releaseBinding();
-      };
-    };
-    this.runBindingLeases.set(run.id, { binding, retain });
+    const { release: releaseBinding } = this.retainRunBinding(run.id, binding);
     const release = this.trackLive(command, owner, controller, run.id);
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let expiry: Promise<void> | undefined;
@@ -4046,6 +4482,10 @@ export class AgentRuntime {
     };
     armDeadline();
     try {
+      if (run.deadlineAt !== null && run.deadlineAt <= Date.now()) await expire();
+      if ((await this.options.store.getRun(run.id))?.status === 'cancelling')
+        controller.abort(new AgentError('cancel_requested'));
+      controller.signal.throwIfAborted();
       const session = await this.options.store.getSession(run.sessionId);
       if (!session) throw new AgentError('session_not_found');
       const compressors = [
@@ -4204,63 +4644,11 @@ export class AgentRuntime {
         workspaceId: session.workspaceId,
         signal: controller.signal,
         checkpoint,
-        bindings: {
-          extensions: binding.extensions ?? this.extensions,
-          tools: definitions,
-          jobs: binding.jobs ?? this.runDefinitions().jobs,
-          permissions: binding.permissions,
-          authorizationReview: binding.authorizationReview,
-          conditions: binding.conditions,
-          retain,
-        } as ScopedBindings,
+        bindings: this.scopedRunBinding(run.id, binding),
       };
       let capabilityFingerprint: string | undefined;
-      const readCapabilities = async () => {
-        if (!binding.readStepCapabilities) return null;
-        controller.signal.throwIfAborted();
-        const value = await binding.readStepCapabilities({
-          command: freeze(structuredClone(command)),
-          run: freeze(structuredClone(run)),
-          session: freeze(structuredClone(session)),
-          signal: controller.signal,
-        });
-        if (
-          !value ||
-          typeof value !== 'object' ||
-          Array.isArray(value) ||
-          Object.keys(value).some((key) => !['extensions', 'toolIds', 'snapshot'].includes(key)) ||
-          value.snapshot === undefined
-        )
-          throw new AgentError('invalid_step_capabilities');
-        const snapshot = freeze(structuredClone(value.snapshot));
-        if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > 64 * 1024)
-          throw new AgentError('step_capability_snapshot_too_large');
-        const selected = this.runDefinitions(value.extensions, value.toolIds);
-        const facts: Json = {
-          snapshot,
-          extensions: selected.extensions.map(({ id, version }) => ({ id, version })),
-          tools: [...selected.definitions.values()]
-            .sort((a, b) => a.id.localeCompare(b.id))
-            .map((tool) => ({
-              id: tool.id,
-              version: tool.version,
-              extensionId: selected.extensionIds.get(tool.id)!,
-              description: tool.description,
-              inputSchema: tool.inputSchema,
-              resources: (tool.resources ?? null) as Json,
-            })),
-          jobs: [...selected.jobs.values()]
-            .sort((a, b) => a.id.localeCompare(b.id))
-            .map((job) => ({
-              id: job.id,
-              version: job.version,
-              description: job.description,
-              inputSchema: job.inputSchema,
-              resources: (job.resources ?? null) as Json,
-            })),
-        };
-        return { selected, snapshot, fingerprint: await semanticDigest(facts) };
-      };
+      const readCapabilities = () =>
+        this.readRunCapabilities(command, run, session, binding, controller.signal);
       const selectCapabilities = async () => {
         const current = await readCapabilities();
         if (!current) return;
@@ -4273,7 +4661,7 @@ export class AgentRuntime {
           authorizationReview: binding.authorizationReview,
           conditions: binding.conditions,
           capabilitySnapshot: current.snapshot,
-          retain,
+          retain: this.retainRunBinding(run.id, binding).retain,
         };
       };
       const checkCapabilities = async (fingerprint: string | undefined) => {
@@ -4283,11 +4671,26 @@ export class AgentRuntime {
       };
       const configuredSources = binding.sources ?? this.options.sources;
       const sourceRequests = new Map<string, SourceRequest>();
+      const failureStreak = resumed?.toolFailureStreak ?? { signature: null, count: 0 };
+      for (const request of resumed?.sourceRequests ?? [])
+        sourceRequests.set(
+          `${request.definitionId}:${await semanticDigest(request.input)}`,
+          request,
+        );
       sourceRequests.set('model', {
         sessionId: session.id,
         workspaceId: session.workspaceId,
         definitionId: modelId,
         input: { kind: 'model_request' },
+      });
+      const continuationState = (): Json => ({
+        version: 1,
+        runId: run.id,
+        contextSelectionId: run.contextSelectionId,
+        sourceRequests: [...sourceRequests.entries()]
+          .filter(([key]) => key !== 'model')
+          .map(([, request]) => request as unknown as Json),
+        toolFailureStreak: { ...failureStreak },
       });
       let captured: ContextSource[] = [];
       let continuationSource: ContextSource | null = null;
@@ -4441,7 +4844,13 @@ export class AgentRuntime {
             executeModel: async (request, stepId) => {
               progress.phase = 'summarizing';
               const response = await this.execution.model(
-                { ...scope, compressionId: pending.id, decisionSources: captured, checkFreshness },
+                {
+                  ...scope,
+                  compressionId: pending.id,
+                  decisionSources: captured,
+                  checkFreshness,
+                  continuation: continuationState(),
+                },
                 compressionModel,
                 { ...request, requestId },
                 stepId,
@@ -4590,8 +4999,9 @@ export class AgentRuntime {
         }
       };
       let toolAdmission: ReturnType<typeof createToolDispatchBatch> | undefined;
+      let recoveredModelRetry = resumed?.modelRetry;
       const loopContext: LoopContext = {
-        toolFailureStreak: resumed?.toolFailureStreak,
+        toolFailureStreak: failureStreak,
         checkpoint: resumed?.loop,
         modelId,
         signal: controller.signal,
@@ -4617,8 +5027,9 @@ export class AgentRuntime {
         executeModel: async (request, stepId) => {
           let current = request;
           let attempt = 0;
-          let providerAttempt = 1;
-          let modelRetry: ModelRetrySource | undefined;
+          let modelRetry = recoveredModelRetry;
+          recoveredModelRetry = undefined;
+          let providerAttempt = modelRetry?.attempt ?? 1;
           while (true) {
             try {
               return await this.execution.model(
@@ -4627,6 +5038,7 @@ export class AgentRuntime {
                   decisionSources: captured,
                   checkFreshness,
                   ...(modelRetry ? { modelRetry } : {}),
+                  continuation: continuationState(),
                 },
                 model!,
                 current,
@@ -4740,11 +5152,6 @@ export class AgentRuntime {
         },
       };
       if (resumed?.modelRequest && resumed.modelSource) {
-        for (const request of resumed.sourceRequests)
-          sourceRequests.set(
-            `${request.definitionId}:${await semanticDigest(request.input)}`,
-            request,
-          );
         await selectCapabilities();
         if (
           canonicalJson(modelTools() as unknown as Json) !==
@@ -5776,8 +6183,9 @@ export class AgentRuntime {
           return { id: value.id!, digest: value.digest! };
         })
       : [];
+    const { continuation: _continuation, ...metadata } = source;
     return {
-      ...source,
+      ...metadata,
       ...(Array.isArray(source.sourceIds) ? { sourceIds: [] } : {}),
       sources,
       sourceBody: body as unknown as Json,
@@ -5958,6 +6366,7 @@ export class AgentRuntime {
         });
       }
       for (const selectedMessage of page.messages) {
+        if (selectedMessage.status !== 'complete') continue;
         const message =
           selectedMessage.runId === null && subjectId
             ? (

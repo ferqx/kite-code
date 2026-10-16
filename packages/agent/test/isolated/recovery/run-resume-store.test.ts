@@ -665,3 +665,45 @@ test('delete during preparation preserves finite independent accepted receipt an
     await f.close();
   }
 });
+
+for (const phase of ['preflight', 'lease'] as const)
+  test(`raw SQL drift without change events invalidates the ${phase} validation snapshot`, async () => {
+    const f = await fixture('tool');
+    try {
+      const state = await f.store.verifyRunResume(f.input);
+      const begun =
+        phase === 'lease'
+          ? await f.store.beginRunResume({
+              ...f.input,
+              checkpoint: state.checkpoint!,
+              instanceId: 'new',
+            })
+          : null;
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      f.db.run(
+        "UPDATE execution SET result_json=json_set(result_json,'$.content','changed outside the owner') WHERE id='model'",
+      );
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      if (begun) {
+        await denied(
+          f.store.commitRunResume({
+            expectedStoreId: f.input.expectedStoreId,
+            lease: begun.lease!,
+            expectedConfiguration: f.configuration,
+            checkpoint: state.checkpoint!,
+          }),
+          'run_resume_checkpoint_changed',
+        );
+        expect((await f.store.getCommand('resume'))!.status).toBe('accepted');
+        await f.store.releaseRunResumeLease(begun.lease!);
+      } else {
+        await denied(
+          f.store.beginRunResume({ ...f.input, checkpoint: state.checkpoint!, instanceId: 'new' }),
+          'run_resume_checkpoint_changed',
+        );
+        expect(await f.store.getCommand('resume')).toBeNull();
+      }
+    } finally {
+      await f.close();
+    }
+  });

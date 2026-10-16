@@ -198,7 +198,14 @@ test('resume scans all original history, pages exact Model and Tool identities a
       expectedOwnerGeneration: owner.generation,
     };
     const metadata = await current.getMetadata();
+    const coldStart = performance.now();
     const state = await current.verifyRunResume(input);
+    const coldMs = performance.now() - coldStart;
+    const warmStart = performance.now();
+    expect(await current.verifyRunResume(input)).toEqual(state);
+    console.info(
+      `resume validation: ${models.length + tools.length + 1} executions, cold=${coldMs.toFixed(2)}ms, unchanged snapshot=${(performance.now() - warmStart).toFixed(2)}ms`,
+    );
     expect(state.executions.map((execution) => execution.id)).toEqual(['planned-next']);
     expect(state.executions[0]!).toEqual(planned);
     expect(state.checkpoint?.boundary).toBe('before_model_dispatch');

@@ -489,6 +489,14 @@ export function createTaskExtension(options: TaskOptions): Extension {
   };
   const create = extension.tools!.find((tool) => tool.id === 'task')!;
   const wait = extension.tools!.find((tool) => tool.id === 'task_wait')!;
+  const foreground = async (input: Json, context: ToolContext): Promise<ToolResult> => {
+    const args = value(input);
+    if (args.cancellation !== undefined && args.cancellation !== 'attached')
+      throw new AgentError('invalid_task_arguments');
+    const created = await create.execute({ ...args, resultDisposition: 'background' }, context);
+    if (created.outcome !== 'succeeded') return created;
+    return completeForegroundTask(await reference(context, text(args, 'key')), context);
+  };
   return {
     ...extension,
     tools: [
@@ -496,6 +504,8 @@ export function createTaskExtension(options: TaskOptions): Extension {
       {
         ...create,
         id: 'task.execute',
+        recovery: { version: '1' },
+        resume: foreground,
         description: `Run an attached child using a trusted role; return its actual complete terminal summary before the next parent Model turn. ${delegationGuidance}`,
         inputSchema: object(
           {
@@ -506,20 +516,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
           },
           ['key', 'role', 'input'],
         ),
-        async execute(input, context) {
-          const args = value(input);
-          if (args.cancellation !== undefined && args.cancellation !== 'attached')
-            throw new AgentError('invalid_task_arguments');
-          // The foreground Tool itself returns the exact terminal child body; a second
-          // completion requirement would redeliver it and force an extra parent Model.
-          const created = await create.execute(
-            { ...args, resultDisposition: 'background' },
-            context,
-          );
-          if (created.outcome !== 'succeeded') return created;
-          const ref = await reference(context, text(args, 'key'));
-          return completeForegroundTask(ref, context);
-        },
+        execute: foreground,
       },
       {
         ...wait,
