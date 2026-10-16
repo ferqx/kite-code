@@ -2,11 +2,13 @@
 
 ## 普通客户端与测试诊断
 
-[统一展示 context](src/native-diagnostics.tsx)默认关闭测试诊断。`NativeDesktop({testDiagnostics:true})` 供明确 DOM fixture；可信 `buildNativeDesktop` 第三参数中的 `testDiagnostics:true`、`buildNativeCandidate` 输入的同名选项 只写入 renderer 构建常量，纳入实际制品字节指纹。正式和 `desktop:dev` 默认关闭，不依据 NODE_ENV、development 身份或 fixture 内容推断，也不改变 Main／IPC／Service 权限和恢复资格。顶部“会话工具／设置”、左栏连接标签与重读目录、两处 Composer 的“先审核计划”及缺默认模型辅助提示均只在此显式测试模式展示；普通界面的设置仍从“个人工作区”用户菜单进入，Windows 另有[顶栏菜单](#windows-顶栏菜单)。[Main](electron/main.ts)移除 Linux 窗口菜单栏，Windows 隐藏独立系统菜单行并保留原生快捷键。
+[统一展示 context](src/native-diagnostics.tsx)只允许显式测试诊断。`NativeDesktop({testDiagnostics:true})` 供直接 DOM fixture；可信 `buildNativeDesktop` 第三参数中的 `testDiagnostics:true`、`buildNativeCandidate` 输入的同名选项供单独测试制品写入 renderer 构建常量，纳入实际制品字节指纹。普通正式制品和 `desktop:dev` 将常量固定为 false，Provider 同时核对该常量与组件参数，传入 true 不能绕过构建关闭值。dev／prod 不得出现测试专用调试功能，不依据 NODE_ENV、development 身份或 fixture 内容推断资格，也不改变 Main／IPC／Service 权限和恢复资格。顶部“会话工具／设置”、左栏连接标签与重读目录、两处 Composer 的“先审核计划”、当前会话的“保留草稿”及缺默认模型辅助提示均只在此显式测试模式展示；普通界面的设置仍从“个人工作区”用户菜单进入，Windows 另有[顶栏菜单](#windows-顶栏菜单)。[Main](electron/main.ts)移除 Linux 窗口菜单栏，Windows 隐藏独立系统菜单行并保留原生快捷键。
 
 普通界面隐藏机器身份、泛化 Model result dump、已确认的创建／答案／交互账本，以及正常完成的历史校准、零后台计数和缓存诊断。所保留的面板在未开启测试诊断时使用“执行记录”标签，未知、当前错误、未完成申请和取消未确认保持原查询合同；“查看提交记录”仍可读原申请全文并清理已核实记录，不清除 unknown。原全文继续核 EOF、完整字节、SHA 和准确命令，关闭／切 scope 只结束所属读取。非 Model [结果组件](src/native-result.tsx)逐字段保留全部业务正文；下文涉及“会话工具”的 Job／子日志、Model input、Context、恢复与管理面板由自动测试显式进入，配置另保普通用户菜单入口。
 
 旧 Electron 身份断言在测试构建显式开启诊断；普通模式验证见[diagnostics DOM](test/isolated/native-diagnostics-dom.test.tsx)、[启动 DOM](test/isolated/native-startup-dom.test.tsx)及[新对话 DOM](test/isolated/native-new-conversation-dom.test.tsx)。启动与当前会话覆盖默认隐藏、显式开启辅助入口及零新增请求，缺模型仍禁发送；需要侧栏或目录重读的原问答／计划／草稿／恢复 DOM 明确开启诊断，其他用例保普通模式。DOM 文件沿测试体系各自隔离运行，避免多个 JSDOM 共享 React DOM 的全局捕获。此展示调整不建立完整 Windows／Linux 实测或新的发布资格。
+
+[构建隔离回归](test/isolated/native-diagnostics-build.test.tsx)另经真实dev Vite服务加载原Provider，以及真实Vite／React构建原Provider和共享context的私有生产IIFE，验证编译关闭后即使组件传true、运行时伪造全局常量、dev／prod／test环境名、诊断环境变量或URL参数，仍保持普通模式；显式测试构建的true正向对照继续生效。实际2项／14断言通过，临时服务和目录均释放。生产部分验证原组件的实际编译行为，完整普通生产窗口另由下述混合压力回归覆盖，不将小入口当作完整发布打包资格。
 
 2026-10-14 Windows x64／Bun 1.4.2，基于 `006b79d3` 的本次界面 diff：分别执行上述启动、新对话、诊断文件，以及目录读取归属、草稿、问答、计划、模型选择、共享页面和 Sidebar 目录，共十个完整文件49项／665断言通过。Desktop／UI typecheck 和定向 Biome 通过；Biome 保一个未改动的 fragment 提示。[恢复压缩原输入](test/isolated/native-restored-compression-input.test.tsx)及 `HEAD` 原文件的临时副本都在页面挂载前的压缩准备断言失败（`compression` 未生成），不计为本轮通过；临时副本已清理。本轮未运行完整默认测试或新的正式制品窗口。
 
@@ -36,7 +38,7 @@ Windows GUI stdin 的实际过早 EOF 已否定其控制通道方案。当前父
 
 ## 原启动页与初始化重试
 
-Windows Mica 窗口的[启动样式](src/native-startup.css)仅在 Main 已确认 `data-window-material=mica` 时将 `.kite-client.desktop-startup` 设为透明，准备中和初始化失败沿用同一容器，直接透出原生材质。文字、图标与共享按钮保留原主题及交互；未确认材质的窗口保留原实色启动背景，服务准备与重试逻辑保持。
+Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)仅在 Main 已确认 `data-window-material=mica/vibrancy` 时将 `.kite-client.desktop-startup` 设为透明，准备中和初始化失败沿用同一容器，直接透出原生材质。文字、图标与共享按钮保留原主题及交互；未确认材质的窗口保留原实色启动背景，服务准备与重试逻辑保持。
 
 2026-10-14 Windows x64／Bun 1.4.2，启动页 DOM 完整文件3项／58断言通过；实际 Chrome headless 按 renderer 的 CSS 顺序载入当前 Tailwind 编译结果、启动样式与共享 CSS，核亮／暗、Native Mica／无材质／非 Native、准备中／失败共12种组合：Mica 启动容器及其承载层透明，其他组合保原实色，文字与重试按钮保主题颜色。定向 Biome、文档结构与影响检查通过；此 CSS 验证不代证 Windows 桌面的最终材质合成，Main 的材质选择未改。
 
@@ -76,11 +78,13 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，窗
 
 ## 原消息复制与标题栏缩放
 
-Native 主界面的沉浸式窗口顶栏单独占32px，[renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。主界面内容区从 y=32px 开始，项目侧栏位于其顶部，Mica 会话面板另按下文圆角留白内缩。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，原生窗口按钮只占窗口顶栏，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:9}`。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
+Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。Windows／Linux 的沉浸式窗口顶栏单独占32px，内容区从 y=32px 开始；Mica 会话面板另按下文圆角留白内缩。macOS 将原生窗口按钮与52px业务 header 整合，内容区从 y=0 开始，不再额外保留32px空行。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:19}`，与业务 header 垂直居中。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
 
-[Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和本地布局类限定窗口展示；共享 Web 页面不因此变为可拖拽。只有独立顶栏声明 drag，导航和右栏恢复原间距，移除此前为同一行叠层保留的横向按钮范围、macOS导航留白和设置页顶部补偿。内容区使用剩余高度，启动页与 SessionPage 不额外占完整 viewport；全屏设置相对内容区定位，窄侧栏浮层从顶栏下方开始。顶栏在 modal 遮罩之上保持独立，返回按钮及业务控件不进入拖拽区域。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
+[Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和平台属性限定窗口展示；共享 Web 页面不因此变为可拖拽。Windows／Linux 只由独立顶栏声明 drag，内容区使用剩余高度，全屏设置相对内容区定位，窄侧栏浮层从顶栏下方开始。macOS 的顶栏元素改为左上角80×52px的绝对定位区域，不占流式高度；侧栏顶部隐藏重复品牌文字，侧栏收起时通过已有 `sidebar-visible` 状态将安全间距转移到主 header。设置返回按钮和窄侧栏顶部同样避开原生窗口按钮，窄浮层从 y=0 开始。macOS 的侧栏、会话、右栏与设置 header 空白声明 drag，内部按钮、链接和表单控件声明 no-drag。顶栏区域在 modal 遮罩之上保留窗口操作。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
 
-[正式 Native 页面](src/native.tsx)接回原 kite-desktop 的 `copyText`／`handleHeaderMouseDown` 行为，仍由原 SessionPage／Conversation 决定可复制正文及 header 交互。[preload](electron/preload.ts)固定提供 `NativeWindowBridge` 的文本复制、窗口缩放及只读材质查询，沿三个固定 IPC 到 [Main](electron/native-ipc.ts)；当前窗口、准确主 frame、renderer URL 与闭合 payload 验证先于宿主动作。文本按原宿主上限接受至 1 MiB UTF-8 字节，超限明确失败，不截断或替换正文；缩放不接受 payload，按实际 isMaximized 切换 maximize／unmaximize；材质查询同样无 payload，只返回 `mica/none`。窗口端口不打开 Service caller，不提交任务或写私有存储。
+2026-10-15 macOS／Electron 44.3.0／Bun 1.4.2 的隔离实际 Main／preload／renderer 与配套 Service 验证了整合布局：1100×780窗口的业务区从 y=0 开始，侧栏 header 高52px，原生按钮位置为 `{x:13,y:19}`；侧栏收起、设置往返、文件变更及760／550／400px窗口的窄侧栏与设置控件均避开按钮区域，草稿往返保留，页面无异常。Windows／Linux 的平台 CSS 切换核实独立32px行保留，不代替这两平台的原生窗口验证。现有窗口交互、启动与共享页面三个完整测试文件共16项／171断言、Desktop typecheck、定向 Biome 和文档检查通过；drag／no-drag 核对为计算样式证据，未进行物理鼠标拖拽验收。
+
+[正式 Native 页面](src/native.tsx)接回原 kite-desktop 的 `copyText`／`handleHeaderMouseDown` 行为，仍由原 SessionPage／Conversation 决定可复制正文及 header 交互。[preload](electron/preload.ts)固定提供 `NativeWindowBridge` 的文本复制、窗口缩放及只读材质查询，沿三个固定 IPC 到 [Main](electron/native-ipc.ts)；当前窗口、准确主 frame、renderer URL 与闭合 payload 验证先于宿主动作。文本按原宿主上限接受至 1 MiB UTF-8 字节，超限明确失败，不截断或替换正文；缩放不接受 payload，按实际 isMaximized 切换 maximize／unmaximize；材质查询同样无 payload，只返回 `mica/vibrancy/none`。窗口端口不打开 Service caller，不提交任务或写私有存储。
 
 原 header 只接左键单击／双击，控件与链接不触发窗口操作；单击不缩放，双击切换。失败沿原 AlertDialog，草稿保留。原完整正文门禁保持：预览、不完整回复和未知最终身份不启用 Agent 复制，完整 reader 当前已显示并核实的原文才可复制，关闭撤销资格；成功／失败提示仍归原 Conversation。
 
@@ -104,27 +108,37 @@ Windows Native 的全屏设置保留已有 `covered` 内容区的隐藏与 `iner
 
 ## Windows 原生 Mica
 
-[Main](electron/main.ts)根据实际运行宿主的 Windows build选择材质：Win32且build至少22621时，在窗口构造中设置 `backgroundMaterial: mica`，窗口背景保持 `#00000000`；主题变化只更新原生深浅外观与窗口按钮符号，不改回实色。范围由 [Electron](https://www.electronjs.org/docs/latest/api/base-window#winsetbackgroundmaterialmaterial-windows)及 [DWM](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type)的最低支持版本定义；其他宿主保持原实色。具体材质绘制与系统降级归 [Windows Mica](https://learn.microsoft.com/en-us/windows/apps/design/style/mica)。
+[Main](electron/main.ts)根据实际运行宿主的 Windows build选择材质：Win32且build至少22621时，在窗口构造中设置 `backgroundMaterial: mica`，窗口背景保持 `#00000000`；主题变化只更新原生深浅外观与窗口按钮符号，不改回实色。范围由 [Electron](https://www.electronjs.org/docs/latest/api/base-window#winsetbackgroundmaterialmaterial-windows)及 [DWM](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type)的最低支持版本定义；较早 Windows 与 Linux 保持原实色，macOS 按下文使用 Vibrancy。具体材质绘制与系统降级归 [Windows Mica](https://learn.microsoft.com/en-us/windows/apps/design/style/mica)。
 
-`getWindowAppearance()`沿前述窗口守卫只读 Main 选择，不从构建机、NODE_ENV或浏览器 User Agent猜支持情况。renderer在挂载前读取闭合 `mica/none`，读取失败或旧bridge缺此端口时按 `none`；这项外观读取不依赖 Service成功连接。只有明确 `mica` 的 Native窗口使用透明 root／body／Frame／shell作为材质承载层，独立窗口顶栏、`.client-sidebar-panel` 及内部 `.sidebar-header`／`.sidebar` 均透明，侧栏不另铺主题色，与顶栏直接显示同一原生材质；窄侧栏容器使用相同透明规则。主面板、会话header及main保留原实色page背景，输入框与卡片保留原实色card。设置dialog、分类侧栏与返回区透明，右侧设置内容显式填充background，并采用6px留白、共享圆角与淡边缘；其他材质保留原实色设置背景。共享Web不消费Native材质标记，独立32px顶栏及原运行权限保持。
+`getWindowAppearance()`沿前述窗口守卫只读 Main 选择，不从构建机、NODE_ENV或浏览器 User Agent猜支持情况。renderer在挂载前读取闭合 `mica/vibrancy/none`，读取失败或旧bridge缺此端口时按 `none`；这项外观读取不依赖 Service成功连接。明确 `mica/vibrancy` 的 Native窗口共用透明 root／body／Frame／shell作为材质承载层，窗口顶栏、`.client-sidebar-panel` 及内部 `.sidebar-header`／`.sidebar` 均透明，侧栏不另铺主题色，与顶栏直接显示同一原生材质；窄侧栏容器使用相同透明规则。主面板、会话header及main保留原实色page背景，输入框与卡片保留原实色card。设置dialog、分类侧栏与返回区透明，右侧设置内容显式填充background，面板圆角和留白按下文平台规则处理；未确认材质时保留原实色设置背景。共享Web不消费Native材质标记，Windows／Linux 独立32px顶栏及原运行权限保持。
 
 设置是同级视图切换：[Native页面](src/native.tsx)将settingsOpen交给SessionPage.covered，主panel树保持挂载和原几何，以opacity0退出绘制，inert／aria-hidden退出交互，避免玻璃侧栏叠出下层正文、边缘或导航文字。保持挂载用于保留未发送草稿、阅读位置和panel状态，不执行会话重选、任务取消或新业务申请。窄侧栏原模态在covered期间关闭，返回后按原开关恢复；原返回自动聚焦在切换期间被抑制，设置自身仍有Radix焦点范围与Escape关闭。设置内容位于panel同级的overlays，明确showOverlay=false，不渲染会压暗材质或透出旧页面的遮罩；设置reader随原内容打开／关闭，Core／Service的authority与运行状态保持。
 
-Mica 的实色 `.client-main-panel` 以四周6px外边距、共享 `var(--radius)` 圆角及6% foreground的1px淡边缘衔接材质；`--native-panel-inset` 统一定义这份留白，宽高扣除其两倍，内部背景随圆角裁切。留白由面板本身承担，不覆盖 resizable Panel 固定的内联padding和尺寸计算。`#navigation-resize` 不常驻竖线，保留原宽度、命中范围、cursor、事件及ARIA；悬浮保原短把手，键盘聚焦将可见环放到把手，移除整条分隔线的outline／shadow。仅 Native Mica 消费这些规则，共享Web、其他材质及全屏设置不因此改变布局。
+Windows Mica 的实色 `.client-main-panel` 以四周6px外边距、共享 `var(--radius)` 圆角及6% foreground的1px淡边缘衔接材质；`--native-panel-inset` 统一定义留白，内部背景随圆角裁切。macOS 将这份留白设为0，主内容和设置内容直接铺满各自区域，使用直角并移除面板阴影描边。留白由面板本身承担，不覆盖 resizable Panel 固定的内联padding和尺寸计算。`#navigation-resize` 不常驻竖线，保留原宽度、命中范围、cursor、事件及ARIA；悬浮保原短把手，键盘聚焦将可见环放到把手，移除整条分隔线的outline／shadow。仅已确认的 Native Mica／Vibrancy 消费玻璃布局，共享Web与其他平台的原布局保持。
 
 2026-10-14 设置组件层验证（统一圆角前）：Windows 11 x64 build26300／Electron 44.3.0／Bun 1.4.2，实际当时Main／preload、普通renderer与配套Service隔离窗口核Mica标记。原Main窗口资格已由 `DwmGetWindowAttribute`确认 `DWMSBT_MAINWINDOW=2`；该次未改宿主材质选择。亮／暗设置中，主panel树opacity0但仍保持750px布局高度；向该树注入仅供验证的洋红底色后，返回区、分类栏及其与原主内容重叠区域的实际PNG alpha均为0，右侧设置内容为原主题RGB／alpha255，圆角和顶栏仍透明，无旧页面或黑色遮罩。主textarea和panel对象、未发送草稿及非零scrollTop（120px）在返回与Escape后保持；覆盖期间旧输入不能取得焦点。500×720窗口设置侧栏180px，原侧栏模态暂停，连续Tab均在设置内，返回后恢复侧栏并保草稿。零页面异常、Main退出0通过。[新会话DOM](test/isolated/native-new-conversation-dom.test.tsx)另核原输入实例、未发送草稿、返回／Escape、零重复attach／select／messages／draft.read和零发送；它与启动、草稿、读取归属、模型／提供商／MCP／Skills设置和窗口动作共九个完整文件44项／526断言通过。Desktop／UI typecheck及定向Biome通过。未运行完整默认、旧Windows或新macOS／Linux窗口，透明PNG不代证桌面壁纸最终合成或正式安装视觉资格。
 
 同环境此前圆角与分界验证（统一圆角前）：亮／暗主题下四周留白均为6px，面板y=38、高738px（viewport782）；实际PNG的圆角切口、留白和未聚焦的调宽分隔均为alpha0，面板内部为255。实际Playwright键盘与鼠标调宽、聚焦把手的可见环、收展动画结束后的6px左留白均通过；500×720窄窗口面板为x=6、y=38、宽488、高676，无整页溢出。后续设置覆盖调整复用该次主面板与调宽证据；当前圆角值和本轮窗口验证见下文。此检查核renderer交互与绘制层，不提升未取得的安装或其他平台资格。
 
+## macOS 原生玻璃
+
+[Main](electron/main.ts)在 macOS 窗口构造中设置 `vibrancy: sidebar` 和 `visualEffectState: active`，窗口及主题更新的底色均保留 `#00000000`。使用 [Electron 原生 Vibrancy](https://www.electronjs.org/docs/latest/api/structures/base-window-options)使材质由 macOS 合成，失焦时保留活动材质，深浅外观沿原 `nativeTheme` 端口同步；不设置 `transparent: true`，保留普通原生窗口的缩放与阴影。Main 只读报告 `vibrancy`，[preload](electron/preload.ts)接受闭合新值，未新增让 renderer 自选窗口效果的端口。
+
+macOS 复用上述玻璃透明层、设置遮盖、导航对齐和调宽样式，并将 `--native-panel-inset` 设为0。`.client-main-panel` 与设置 `.settings-content` 的外边距、圆角和阴影描边均为0，直接铺满可用区域；内容内部排版、卡片和输入框仍沿原样式。侧栏 header、会话 header 与 `{x:13,y:19}` 的原生窗口按钮保持同一顶部行。启动中与失败页同样透明；会话正文和设置右侧继续实色。系统材质的最终合成由 macOS 管理。
+
+同日内容铺满调整后，隔离实际窗口重核13种状态：亮暗主题的主面板与设置内容均为0px圆角、0px外边距、无阴影描边，高度铺满780px可用区；550／400px设置内容同样到达窗口右边界。玻璃透明层、侧栏收展、键盘调宽、草稿往返保持，Mica 平台 CSS 仍为10px圆角和6px外边距；页面无异常，CSS Biome及文档检查通过。本次仅改 CSS，沿用未变 TypeScript 的前轮检查结果。
+
+2026-10-15 macOS 26.7.1／Electron 44.3.0／Bun 1.4.2，内容铺满调整前的隔离实际 Main／preload／普通 renderer 与配套 Service 的13种状态核对通过：原桥返回 `vibrancy`，亮暗主题经原用户菜单切换后透明承载层保持透明，NativeImage 中导航空白 alpha为0、正文为255；向原主面板注入洋红底色后，设置左栏与原主面板重叠区域仍为alpha0，右侧内容为255。侧栏收展、键盘调宽、550／400px窄侧栏和设置往返保留草稿，顶部 header仍从y=0开始，原生按钮位置和窗口可调宽保持，页面无异常。另核 Mica 与 `none` 的 CSS 适用边界；窗口 IPC、窗口动作 DOM、启动 DOM 三个完整文件9项／155断言、Desktop typecheck、定向 Biome 和文档检查通过。此证据覆盖宿主接线和 renderer 透明层，未核系统壁纸最终合成或切换系统辅助功能设置。
+
 ## 统一桌面圆角
 
-Native 统一消费[共享 UI 的根圆角变量](../../packages/ui/README.md#原桌面展示层)，沿空间列表原值10px；[设置／Mica 样式](src/native-tailwind.css)和[正文排版](src/native-typeset.css)均引用 `--radius`，没有另立 Native 数值。Tailwind 尺寸别名、圆形及拼接直角的范围归 UI owner。该调整只改 CSS 圆角，现有 Mica 透明层、6px留白、设置覆盖与业务交互保持。
+Native 统一消费[共享 UI 的根圆角变量](../../packages/ui/README.md#原桌面展示层)，沿空间列表原值10px；[设置／Mica 样式](src/native-tailwind.css)和[正文排版](src/native-typeset.css)均引用 `--radius`，没有另立 Native 圆角值。macOS 主内容与设置内容另按上文采用直角，内部控件仍消费共享圆角。Tailwind 尺寸别名、圆形及拼接直角的范围归 UI owner。现有 Mica 透明层、6px留白、设置覆盖与业务交互保持。
 
 2026-10-14 同环境、基于 `006b79d3` 的当前圆角 diff：隔离普通 Native 构建和真实 Service，由实际空间选择入口登记测试目录（仅控制系统选择框回调）。亮／暗实际 computed style 核空间列表、主面板、Composer、建议按钮、项目选择、用户菜单及菜单项、设置内容、卡片、选择框与导航按钮均为10px；临时将根变量改为14px后全部随之改变，随后恢复10px。顶栏、设置分类栏与返回区保透明；500px窄窗口仍为同一圆角，返回与Escape保原输入实例和未发送草稿，圆形发送按钮与全屏直角保持。截图核布局，零页面异常、Main退出0通过。Desktop／UI typecheck、三份 CSS 的 Biome 和 diff 检查通过（保留原三项 `!important` 提示）；构建保原 keyframes 优化与大chunk提示。仅核本轮桌面外观，未运行完整默认测试或其他平台／安装制品验证，不将先前完整状态矩阵作为本轮重跑结果。
 
 ## 玻璃导航间距
 
-[Native Mica 样式](src/native-tailwind.css)仅在宽窗口的 `#navigation .client-sidebar-panel` 左侧加入 `--native-panel-inset + --resize-handle-width` 留白，沿右侧实际6px内容留白与1px调宽占位计算；共享分隔宽度的定义归 [UI owner](../../packages/ui/README.md#原桌面展示层)。导航的视觉边界延伸到实色主面板，不能只按内部 ResizablePanel 的宽度判断对称。统一在外层处理，使常用入口、空间列表、header、用户区与其分隔线一起对齐；不单独挤压列表右内边距或覆盖调宽的内联布局。窄侧栏没有这份外侧补偿，其他材质保持原布局；主面板与设置的6px留白、共享10px圆角及原200～420px调宽范围保持。
+[Native 玻璃样式](src/native-tailwind.css)仅在宽窗口的 `#navigation .client-sidebar-panel` 左侧加入 `--native-panel-inset + --resize-handle-width` 留白，沿右侧内容留白与1px调宽占位计算；Windows 内容留白为6px，macOS 为0。共享分隔宽度的定义归 [UI owner](../../packages/ui/README.md#原桌面展示层)。导航的视觉边界延伸到实色主面板，不能只按内部 ResizablePanel 的宽度判断对称。统一在外层处理，使常用入口、空间列表、header、用户区与其分隔线一起对齐；不单独挤压列表右内边距或覆盖调宽的内联布局。Mica 与 Vibrancy 共用这份补偿，窄侧栏没有这份外侧补偿，未确认材质时保持原布局；原200～420px调宽范围保持。
 
 2026-10-14 Windows 11 x64 build26300／Electron 44.3.0／Bun 1.4.2，基于 `006b79d3` 的本轮 CSS diff：隔离普通 Native 构建与真实 Service，修前实际常用入口／空间行左右为12px／19px，分隔1px加内容留白6px确为差值；修后两侧均为19px，header两侧23px、用户区15px、底部分隔线7px。亮／暗、200px起始宽度、键盘左右调宽、鼠标拖到420px及收展后均保持等距；500px窄窗口两侧仍12px，取消Mica标记的普通布局不加补偿。设置返回与窄侧栏Escape保未发送草稿；截图核布局、零页面异常、Main退出0通过。两份 CSS Biome与diff检查通过，保原三项 `!important` 提示和构建提示；未改TypeScript，前轮Desktop／UI typecheck范围可复用。未运行完整默认、其他平台或正式安装验证。
 
@@ -292,9 +306,145 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 Main 从实际选中根的 controller snapshot 固定 Store／subject／generation／rootSessionId／viewSelection，复用 [NativeBackground](electron/background.ts)与原完整 reader。封闭 IPC 的 `surface: environment` 仅选择这份 Main 观察，不接收 renderer 根 ID 或路径；它与全局总览有独立读取生命周期，选中根变化只释放环境读取，旧停止资格失效。SSE 或显式刷新触发 GET，完整成功后才发布。页面仅缓存最多八个同代次／Store／根的展示快照，每份最多512KiB；没有 observation、完整输出或提交意图。失败保旧名称和状态，停用停止入口；准确停止继续走原 durable caller，未知／在途原取消不换 ID 重发。
 
-子详情复用原 SessionPage 与现有完整 child reader，固定原消息上界并核全部 ModelOutput 的 EOF／SHA／UTF-8 后显示。打开、刷新或返回不改变 Main 阅读根、不取得 child 写权；详情隐藏父输入、审批和工具动作，返回恢复原草稿与父轮次提示。普通目录刷新不取消已经固定的子日志 GET；真实选中根变化或 reset 才释放所属读取。冷启动 observer reset 正常取消旧目录时，Main 给所有共同等待者同一个 `directory_observation_changed`；页面等待新观察，不将旧 GET 的取消弹成失败，真实读取失败仍保错误。
+子详情复用原 SessionPage 与完整 child reader，每次读取固定消息上界并核 ModelOutput 的 EOF／SHA／UTF-8 后显示。宿主将已验证 snapshot 交给 `ModelOutputMessage.verifiedSnapshot`，组件再次核准确出处和字节数，直接呈现已读正文与活动前缀。全局观察修订驱动目录和子详情更新，各自只有一个在途读取，期间变化合并为一次尾随读取，避免持续输出反复中止 GET。活动子页沿同一 context selection 的完整稳定消息前缀重读尾部；Main 核当前父子绑定，context 变化回退全量。公开已完成消息不可由 partial 写路径更新，未完成消息及正文必须重读；后台总览不使用增量游标，保持原完整固定快照。
+
+子详情只缓存已验证展示数据，最多12项、64MiB估算载荷、单项16MiB；不保存 observation 或操作资格。重新进入先由当前父范围目录核准子成员，再展示命中的正文，同时完整校准；显式刷新也完整重读，不以相同序号跳过。generation、history epoch 或 bridge 替换清理旧缓存。打开、刷新或返回不改变 Main 阅读根、不取得 child 写权；详情隐藏父输入、审批和工具动作，返回恢复原草稿与父轮次提示。子页打开期间暂停父 History、工具／轮次／文件／用量的辅助读取，保留当前展示数据；返回后恢复校准。关闭、切换子页、换根、reset 或卸载会 abort 所属读取，迟到结果不能替换后来视图，读取取消不停止业务任务。消息与正文按 ID 建索引，避免逐行扫描全历史；阅读位置和展开状态由共享 UI 的有界数据缓存保存，不保活隐藏消息 DOM。取舍见[主子会话阅读决定](../../.agents/notes/implemented/architecture/2026-10-15-native-session-reading-lifecycle.md)。
+
+Main 自动刷新父元数据会暂时清空 controller snapshot，但不会因此撤销同一已准入根的 child lease或固定H的Job输出读取。仅在刷新在途、同 selection／Session 且未有真实失败时，环境与Job reader沿 Main 上次已验证根保持范围，每次读取仍核后端绑定；真实换根、reset 或刷新失败立即失效并abort相应读取。自动元数据刷新或显式权限刷新失败时，Main 主动释放 environment 的目录、子正文及输出 lease，清除观察与正文缓冲，不依赖 Renderer close；权限不可用时即使 controller 仍有旧快照也不能重新准入。恢复后旧 readId 与 observation 不复活，必须重新取得完整目录；Renderer 保留上次正文并对当前子页全量校准。[Main 回归](test/native-caller.test.ts)用 held 父 GET 核 child chunk／目录可独立完成，并让失败前的目录和 child GET 忽略 abort、跨过恢复后才返回，核旧结果拒绝、新观察可读及零业务取消；[Job输出回归](test/native-caller-job-output.test.ts)让SDK最新H从2推进至4，确认父刷新未结束仍只读原H2且可同scope重开。两者均核三种真实撤销拒绝迟到结果、零业务取消。返回父页在 layout 阶段重开历史校准，首屏草稿可编辑但发送／停止／权限等待新 EOF，避免旧 complete 状态短暂恢复操作资格。
+
+多个根并发时，单一全局SSE仍消费并确认全部事件，sidebar／全局总览沿全局修订更新。当前父metadata／history仅由本根或全局失效触发；环境另用 `selectedEnvironmentRevision` 跟随本根、已知后代及保守的新Session创建通知。完整根目录得到的Session索引只用于失效路由，不授予读取或停止权，换根／reset清除；不对每个未选中Session发View GET。Main 的 `environmentReadUnavailable` 把同选择metadata在途与真实读取失效分开，普通刷新期间正文可继续，发送／停止仍等原metadata资格。相邻回归核100个无关root／child事件不重读当前父View，也不丢全局目录或游标推进。
+
+[Controller](src/controller.ts)为每次selection读取持有AbortController，替换／网络释放立即取消旧GET链；每个await后与写入缓存前均复核当前选择，退役结果不再进入缓存。Renderer state刷新至多1个在途与1个最新后继，密集通知共享后继且保留显式刷新后的新事实要求；错误、结果按原generation／nonce／epoch隔离。child可取消自己等待共享目录的任务而不取消目录owner，同一份新目录只消费一次；真实后续修订仍排尾随读取。[读取所有权](test/isolated/native-read-ownership-dom.test.tsx)与[导航回归](test/isolated/native-session-navigation-dom.test.tsx)核100次通知／等待、迟到错误和换根，SDK完整后台目录的有限重扫规则归[Client owner](../../packages/client/README.md#完整后台执行目录)。
+
+显式返回主会话同步撤销child导航意图，再取消job／读取；自动恢复只依据当前意图，不能使用旧render捕获的child重新打开详情。目录提交与返回在layout／passive交错时，原代码实际复现返回后重新打开子页；精确交错回归在旧实现失败，修复后通过。临时权限丢失保留尚未撤销的意图，恢复时仍正常校准；换根和明确返回则终止该意图。
+
+环境卡准确停止接纳期间，同scope目录刷新排队，先等待已经在途的完整读取，再按最新完整facts核目标与停止资格；原停止申请只提交一次。目录结果立即更新读取owner的最新facts，避免React尚未commit而使用旧observation。停止返回后恢复目录校准，换根只撤销尚未提交的等待；已提交的原停止继续收束，迟到提示不能进入新scope。Main原有prepare前后两次新鲜度校验、准确身份和unknown不重试保持。[停止竞态DOM回归](test/isolated/native-environment-stop-dom.test.tsx)在旧实现复现轮询替换观察及未等在途目录即提交，修复后3项／24断言通过；真实混合压力复测归下方监督进程对照。
+
+实际多根窗口还发现滚动后立即离开会保留旧消息DOM：GC后脱离document的节点500→2217，heap snapshot定位13棵Conversation经Document动画controller→RAF closure→旧viewport持有。原Radix ScrollAreaThumb卸载遗漏持续RAF清理；消息区现用局部原生滚动viewport，原阅读位置／自动跟随／跳最新／细滚动条保持，资源归属和100轮立即卸载回归归[UI owner](../../packages/ui/README.md#完整模型正文展示)。修复前的GET已排空与单一SSE并不能证明DOM释放，两项证据分别保留。
+
+活动大正文持续改变时，纯全文key缓存仍会miss。多根长正文CPU profile曾在开发React运行时复现99次约60ms长任务，固定parser的micromark tokenizer／调用栈占主要时间；不能用Promise延后同一主线程工作解释为消除阻塞。[Native Markdown准备](src/native-markdown.ts)现将至少32768个UTF-16单位的已验证Model正文交给[静态Worker](src/native-markdown-worker.ts)，只运行UI公开的固定remark／GFM纯解析。一个active计算、最多8个pending、排队源文本估算16MiB，超限明确 `native_markdown_busy`；活动单篇仍完整解析。准确任务ID／原文和AbortSignal隔离迟到结果，取消当前计算终止对应Worker，不取消业务。
+
+child每批完整facts按序准备所有正文，缓存重进也先准备，再发布新formatted内容；旧已验证正文保留到替换完成。每批只注册一个owner abort listener，新批提交后立即释放旧批；重用稳定snapshot时清理核owner身份，inactive LRU不强持超预算AST。当前展示与正在准备的新批可短时各持一份纯树，不能将其算成全局语法缓存8MiB的进程内存上限。手动Model全文的有限HTTP／IPC在CPU准备前已关闭，成功展示的owner直到关闭／卸载才释放，验证失败立即清理。[准备回归](test/native-markdown.test.ts)核队列、超载、100次revision、共享前缀、取消及迟到身份；[正文回归](../../packages/ui/test/model-output.test.tsx)核成功展示与拒绝释放。最终真实窗口数据须同时说明React构建环境，不把旧开发运行时与production差异全部归因Worker。
+
+Worker只导入公开纯子路径 `@kite-ai/ui/desktop/markdown`；[共享构建解析](scripts/markdown-worker-resolution.ts)将准确 `decode-named-character-reference` 依赖固定为锁定包的默认纯实体查表入口，避免browser入口在Worker中访问document。production renderer／Worker与development预打包共用该exact alias，不改变CSP、webSecurity或其他browser条件。[实际构建回归](test/native-markdown-build.test.ts)把真实Vite Worker产物置于无document／window／Node权限的VM执行，与固定parser核中文、emoji、多码点实体、后置reference和GFM的AST一致；普通sandbox的Electron短probe另核静态asset真实响应及所属进程退出。
+
+首次或缓存重进的完整校准失败后，下一个修订仍执行全量读取；旧缓存不能因失败而取得稳定前缀资格。没有已验证前缀时不发送增量游标，[环境回归](test/native-background-panel.test.tsx)覆盖空缓存及已有缓存两种失败恢复，避免空context游标卡死或绕过完整校准。
 
 [Main／IPC](test/native-background.test.ts)、[环境卡 DOM](test/native-background-panel.test.tsx)、[目录 reset](test/native-caller.test.ts)及[原页面](../../packages/ui/test/desktop-page.test.tsx)核准确作用域、全局／当前独立读取、完整分页、只读往返、旧快照与重复停止抑制。实际 [子详情／恢复窗口](test/isolated/native-background-bundle.test.ts)和[宿主 Shell 窗口](test/isolated/native-shell-lifecycle-bundle.test.ts)沿原业务断言验入口；准确结果、原失败和阶段限制见[本片进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-环境信息卡与只读子详情)。
+
+2026-10-15在本轮未提交工作树、macOS arm64、Bun1.4.2／Electron44.3.0执行 `bun test apps/desktop/test/isolated/native-child-stream-electron.test.ts`，使用普通制品、真实Service与受控SSE Provider，两个真实worker各有约172905字节子正文、五次活动更新。[窗口测试](test/isolated/native-child-stream-electron.test.ts)和[driver](test/native-child-stream-electron.fixture.ts)实际完成100轮主／子A/B往返。固定GFM纯语法树缓存前后，热缓存往返P50为142→103ms、P95为181→145ms，切换期间50ms以上长任务100→0；最终活动正文更新P50／P95为135／144ms。语法树仅缓存数据，32项／8MiB总估算／2MiB单项，超预算仍完整解析，不保活隐藏组件。
+
+资源采样在20／60／100轮先等实际HTTP body归零、两帧与微任务后再GC，heap分别15625972／15347028／16380200字节，最终再次settled GC为16302688字节；DOM477、监听器211、documents2均恒定。有限body读取最终active0、峰值1；主模型2次、子A/B各1次，导航没有重放任务。该负载未观察到资源累积异常；采样不直接证明Main私有lease Map为零，其关闭由单元／DOM持有读取回归核对，也不代表数百条子历史、任意超长冷读或其他平台资格。所有测量均由隔离runner／外部CDP完成，普通dev／prod无测试入口。
+
+[多根真实窗口压力](test/isolated/native-multi-session-stream-electron.test.ts)和[driver](test/native-multi-session-stream-electron.fixture.ts)将范围扩大到4根各3子：先核原Task真正派发、16个Model同时流式运行，再完成120次跨根／主子／子子切换，逐次核正文marker和私有草稿归属、活动更新、读取中断、零导航重放及准确根／child停止。可信Host显式16个Model槽仅用于压力，生产默认仍4；Model输出由本机compatible SSE Provider提供，Service／SQLite／Runtime及普通sandbox窗口均真实运行。
+
+2026-10-15 production React制品完整通过：切换P50／P95为146／183ms，50ms以上长任务为0；944次有限正文／目录读取最终active0、峰值2、主动中断8次，全局SSE始终仅一条。settled GC三次heap为11.67／12.88／13.02MB，最后13.02MB；连接DOM随活动正文由357增至425，但脱离document的节点始终59，监听器227／227／228，没有再出现旧消息树累积。显式停止一根后16条模型流剩12，另停一child剩11，其余继续，正常结束后所属Service和Electron实际退出。此前99次长任务来自开发React制品及同步parser，两轮构建环境不同，不能把全部差异归因Worker。
+
+同一测试的私有 `KITE_NATIVE_MULTI_SHELL=1` 仅选择隔离runner负载，不进入普通renderer／Main构建。混合组沿Service的[同一真实Shell脚本与配置](../service/test/isolated/multi-session-shell-load.shared.ts)为每根／子启动一个Shell，生产React窗口在16个Model、16个coalition Shell和16个真实sleep后代重叠30.004秒时完整完成120次切换：P50／P95为176／223ms，长任务0。普通页面核实际中文Shell工具与运行状态；完整stdout／stderr经原私有固定H读取协议核204条／462848字节、H204、UTF-8及gap0，held输出在换根时被abort而16个脚本仍运行。没有开启测试诊断菜单或新增普通完整输出入口。
+
+混合组1516次有限正文／目录／输出读取最终active0、峰值2、主动中断58次，全局observe仍一条；32次实际Model调用不因导航增加。GC后三次heap为12.02／12.73／12.89MB、最终12.77MB，连接节点随正文增长425→503，脱离document节点59和监听器236恒定。根停止准确结束所属4条Model与4棵Shell树，另一个child停止只结束自身Model与Shell，其余11组继续tick／输出；显式finish后全部剩余Run及观察到的OS PID结束，Service与Electron实际退出。
+
+混合窗口总Shell生成10379264字节，稳态双流合计162820字节／秒，脚本采样窗实际CPU约84.75%（单核100%口径）。Service RSS从836736至841056KiB、数值FD89恒定；原外部采样将ledger的32个脚本／后代PID与Service物理树17个进程取并集，共49个进程合计RSS约1.90→1.93GiB。2026-10-16复核发现，这份集合包含16个broker，却遗漏launchd下另16个独立guardian；RSS相加还重复计共享页，因此不能称完整产品或独占物理内存。原数据保留为旧口径参考，不补造遗漏进程的数值；同日已补完整角色并执行下面的同口径前后对照。以上有限本机CPU、进程与正文负载不等于任意Shell、无限历史或长期无泄漏保证；默认Model／process各4的排队、完整输出SHA及Service内存分类另由[Service压力](../service/README.md#多主子会话流与读取压力)维护。
+
+### 内存缓冲区优化与完整进程对照
+
+2026-10-16在macOS26.7.1 arm64／Bun1.4.2／Electron44.3.0当前未提交工作树完成两项内部IO优化：[启动文件校验](../../packages/agent/src/jobs/launch-identity.ts)每次以至多1MiB局部scratch计算完整SHA；[POSIX Artifact](../../packages/agent/src/artifacts-files.ts)按消费者所有权分配小chunk／固定verify scratch／单完整目标，保实际EOF、hash、文件新鲜度和权限。消息协议、默认配额、broker／guardian／coalition结构及业务取消语义保持；代码和局部回归归[Jobs](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)、[Artifact](../../packages/agent/src/artifacts/README.md)及[决定](../../.agents/notes/implemented/architecture/2026-10-16-bounded-verified-file-reads.md)。本轮未实施正文复用或native broker。
+
+[测试私有内存采样器](test/native-memory-census.fixture.ts)只由隔离runner的 `KITE_NATIVE_MULTI_SHELL=1 KITE_NATIVE_MULTI_MEMORY_TAG=before` 或 `after` 选择，未向普通dev／prod增加入口。它只读原Job reference，严格解码Session／Execution／nonce／owner绑定，核broker、launchd guardian及root原kernel birth，再合ledger后代与Electron所属进程；同一ps快照分角色RSS，原身份在采样前后复核。每轮实际为65个业务进程（Service、16 broker、16 guardian、16 Bun脚本、16 sleep）及4个桌面进程（Main、renderer、GPU、utility），排除driver／Provider。联合footprint一次传入69个准确PID；缺字段、集合不符、命令失败或身份漂移明确unknown并阻断完整对比，不填0。每PID当前与历史峰值、联合dirty／clean／reclaimable／swapped及代表vmmap保原始文件，多个历史峰值不相加称并发峰值。
+
+两轮沿同一[隔离测试](test/isolated/native-multi-session-stream-electron.test.ts)和[窗口driver](test/native-multi-session-stream-electron.fixture.ts)串行执行，三份测试文件SHA完全一致，生产差异仅上述两个IO文件；guardian与Service每轮重新构建。before保原 `launch-identity.ts` SHA `1cad32fe…`／`artifacts-files.ts` `d9927d6e…`，after为 `0d592dbf…`／`84ae8b72…`；tag只是保存标签，不能把当前新实现标before来替代原基线。两轮各1项通过，59.87／59.08秒，保原16 Model＋16真实Shell／至少30秒重叠／120次导航、相同脚本、正文及输出／CPU速率。重型footprint／vmmap仅在导航PerformanceObserver断开后执行，3.315／3.141秒；采样前最年轻脚本已运行30.006／30.055秒，生成10356736／10366976字节，采样后33.223／33.068秒、10893312／10874880字节，未通过减少负载取得下降。
+
+| 同一完整集合的测量 | before | after |
+| --- | ---: | ---: |
+| 69进程RSS求和，KiB | 4494976 | 3510992 |
+| 其中65个业务进程RSS求和，KiB | 3595088 | 2617728 |
+| Service RSS，KiB | 841520 | 682208 |
+| 16 broker RSS求和，KiB | 558064 | 555840 |
+| 16 guardian RSS求和，KiB | 1557840 | 755296 |
+| 16业务脚本RSS求和，KiB | 618208 | 604928 |
+| 16 sleep RSS求和，KiB | 19456 | 19456 |
+| 联合去重dirty footprint，字节 | 1476108080 | 1471225432 |
+| Service历史phys_footprint峰值，字节 | 358778056 | 301696128 |
+| guardian单PID历史峰值中位数，字节 | 75154032 | 23413360 |
+| 导航P50／P95，ms | 183／224 | 171／226 |
+| 导航超过50ms长任务 | 0 | 0 |
+
+RSS求和下降21.89%，guardian及Service的分配高水位下降；联合当前dirty footprint仅下降0.33%，不能称持续独占物理内存大幅降低。guardian当前phys_footprint计数的算术合计反而由191293136增至209905288字节，Service当前由144410016至149062952字节；这些分项不是角色去重总量，RSS也不能解释为活heap。联合reclaimable由2122891264降至1128513536字节，仍与当前dirty分开报告。两轮只是一组before／after，没有估计多轮波动；收益限定减少多余分配与高水位，不能据此证明任意时长无泄漏。
+
+两轮消息／草稿归属、活动更新、固定H输出UTF-8及gap、真实GET中断、单global observe和零导航重放均通过。末次Renderer GC heap为13081072／12803876字节，文档外DOM余量最终均59、监听器均236，有限body active均0；root0停止后剩12流，另一个child准确停止后剩11流，其余继续。正常业务结束和所属退出之后，另用原69份kernel birth逐一只读复核，两轮全部absent，包含guardian和桌面进程；这是额外posthoc核验，未冒称原fixture内已有断言。定向资源回归另有6个真实Shell文件47项／445断言，覆盖父EOF／SIGKILL、TERM忽略、setsid／orphan、无关存活、输出失败与准确收尾。
+
+本机原始文件分别保存在ignored `.cache/native-session-stream-evidence/memory-1792083158073-before/`、`memory-1792083544600-after/`，比较文件 `memory-before-after-comparison.json`；每轮含逐PID角色／birth／RSS、原footprint JSON/text、6份vmmap、输出／elapsed、完整窗口报告和原身份退出结果。当前产品行为仍由手册与owner定义，本机loopback Model和macOS真实Shell不授其他平台资格；普通dev／prod继续关闭测试诊断入口。
+
+### broker／guardian 的小堆对照与 GPU 归因
+
+2026-10-16在相同macOS26.7.1 arm64／Bun1.4.2／Electron44.3.0（Chromium152.0.7977.78）工作树完成default／`--smol`各三轮，顺序为default、smol、smol、default、default、smol。每轮仍为4根各3子、16路受控compatible SSE模型流、16个真实Shell、至少30秒同时运行和120次切换；真实Service／SQLite／Runtime、production React与普通sandbox窗口保持，模型token由本机Provider产生。窗口1100×780、显示比例2，GPU compositing／rasterization／Skia Graphite／WebGPU保持启用。
+
+当时的隔离候选构建复制同一267文件Agent源快照，smol仅在broker启动和launchd guardian启动两处argv插入 `--smol`；Service、业务脚本及普通产品入口不改。原源码、package和测试输入SHA逐轮复核不变；每轮私有路径不同，分别保存资产SHA，不声称同组制品逐字节相同。实际ps和16份launchctl print核smol每轮恰16 broker＋16 guardian带flag，其他角色无flag；default全部无flag。对照结束后已移除私有源码改写器和候选选择参数，当前压力回归只使用默认runtime，逐PID ps与16份实际launchd argv继续断言不带 `--smol`。
+
+[采样器](test/native-memory-census.fixture.ts)保原65业务＋4桌面进程联合footprint，另对同一批16 broker＋16 guardian做32 PID联合footprint；两份原始集合、kernel birth和错误字段均严格核验。角色RSS／phys_footprint算术合计不冒称去重值，历史峰值不相加。导航后先采联合footprint与代表vmmap，再采GPU；GPU trace引入的额外tracing utility随后登记，退出证据因此覆盖全程70个原身份。退出核验在正常driver退出之后、owner兜底清理之前执行，六轮均70/70 absent。
+
+| 轮次 | 69 PID联合dirty footprint，MiB | 32监督进程联合dirty footprint，MiB | 导航P95，ms | 根／子Shell树停止，ms |
+| --- | ---: | ---: | ---: | ---: |
+| default-1 | 1432.49 | 387.36 | 232 | 272／109 |
+| smol-1 | 1439.09 | 379.85 | 242 | 262／274 |
+| smol-2 | 1438.96 | 381.63 | 239 | 221／194 |
+| default-2 | 1470.27 | 388.78 | 291 | 281／266 |
+| default-3 | 1433.87 | 386.36 | 231 | 209／183 |
+| smol-3 | 1452.40 | 383.10 | 225 | 228／132 |
+
+69进程联合dirty中位数为1503518704→1508990624字节（1433.87→1439.09MiB，+0.36%）；32监督进程为406179424→400166520字节（387.36→381.63MiB，−1.48%，减少5.73MiB）。guardian单PID历史峰值的组中位数22.65→17.45MiB，但其当前phys算术合计202.96→196.35MiB，broker当前187.78→187.23MiB；启动高水位下降不能当作同量稳态收益。全体RSS算术合计中位数3514.73→3539.27MiB（+0.70%）。本机证据只支持监督进程小幅下降，没有证明整体内存稳定改善，**保留默认参数，不在生产broker／guardian启用 `--smol`**。
+
+导航P50／P95组中位数为177／232→185／239ms；每轮P95范围default231–291ms、smol225–242ms，六轮均无超过50ms导航长任务。根取消至模型流关闭中位数64→46ms、至原Shell树消失272→228ms；准确子停止至流关闭79→78ms、至树消失183→194ms。CPU按checkpoint20至120的累计CPU时间差／实际壁钟计算，100%表示一核：32监督进程合计中位数19.88%→19.24%，Service79.42%→79.27%，renderer76.05%→81.84%；脚本输出约162267→162859字节／秒，脚本窗口CPU76.66%→84.50%。三轮样本不足以判定小幅性能差异的因果或显著性，不宣称smol提速。
+
+六轮均核活动主／子正文持续增长、逐次marker与草稿归属、完整UTF-8／固定H输出、读取中断、原32次Provider调用零导航重放、单一global observe、有限body最终active0／峰值2。根停止仅关闭其4路模型和4棵Shell树，剩12路；另停准确child剩11路，其余继续产出。最终renderer GC heap为12.23–12.52MiB，24个固定checkpoint文档外DOM余量均59，最终监听器均236。该负载未观察到持久资源累积，不外推任意运行时长零泄漏。
+
+预检和先前两个未完成matrix均保留失败记录，不纳入最终六轮统计。首个matrix的default子停止实际报 `background_stop_unavailable`，定位并修复上文同scope目录刷新替换停止观察的竞态；定向DOM旧实现失败、新实现3项／24断言通过。另一次活动更新恰在GC与计数之间启动新校准，计数236→269，随后heap snapshot已回236，不能将瞬时33项确定归为泄漏或AbortSignal。固定快照现仅短暂排队普通changed通知，后端16路模型和Shell、请求回复及lifecycle继续；固定两次GC、原listener／DOM／heap门限不变。六轮窗口108–211ms、队列1–6条，finally恢复并原序转发，队列越界明确失败；释放后等待界面校准和有限读取收束，再采联合footprint或进入下轮导航。导航／取消计时和重型footprint在窗口之外，不以循环采最小值通过门禁。
+
+[GPU采样器](test/native-gpu-memory.fixture.ts)在导航后和业务结束后各触发一次有界详细MemoryInfra dump，保存原trace、准确GPU PID／出生身份、allocator size／effective_size与ownership。Chromium本机导出零ID数据批，采样严格用唯一成功explicit global GUID、配对process scope和批次时间绑定；缺失／冲突／丢数据均报unknown。另存同一GPU进程OS分类footprint与vmmap，不把异时OS和Chromium值相减。12个阶段均capture成功，非total OS类别按dirty／reclaimable／wired／clean／swapped／regions分别求和均与total相等。
+
+导航后GPU OS dirty为266.05–340.95MiB，其中 `IOSurface`、`IOAccelerator (graphics)`、`Owned physical footprint (unmapped) (graphics)` 三类占89.00%–91.76%。六轮Chromium均有明确共享边：`shared_images.size − effective_size`精确等于renderer `cc/tile_memory`，`gpu.size − effective_size`又等于该tile数加20193088字节transfer分摊差。例如default-1的640×800 BGRA_8888 IOSurface带 `GpuRasterTile_Pid:65235`，与renderer resource_41的 `0x1f4000` 字节指向同一global ownership端点，importance分别0和2。不能把GPU根、SharedImage和CC tile再相加；这些分摊来自trace原始effective值，不是自行估计去重。
+
+导航后ANGLE Metal约81.45–91.77MiB、Dawn8.23–8.37MiB、Skia GPU resources4.23–4.37MiB。独立GPUBuffer allocator未导出，分类完整性仍为partial，缺项不填0；OS未映射图形计费也不能逐笔映射到Chromium节点。业务结束后的图形缓存仍有计费，所属GPU进程随正常退出全部消失；这既不证明缓存泄漏，也不构成关闭GPU或改变玻璃效果的依据。
+
+本机最终矩阵在ignored `.cache/native-session-stream-evidence/smol-matrix-1792120884578/`，`index.json`保存顺序、冻结输入和六份证据目录，`comparison.json`保存原始字节／各轮性能／中位数范围。各case含69及32联合footprint、16份launchd证据、8份代表vmmap、两阶段GPU原trace／OS分类、快照边界、窗口与原70出生身份退出结果。较早未完成矩阵为 `smol-matrix-1792118528064` 和 `smol-matrix-1792119706839`；它们的单轮成功未混入最终结果。平台、模型及持续时间资格限于上述本机负载。
+
+### GPU 缓存生命周期与候选对照
+
+2026-10-16继续沿上述macOS／Electron版本、1100×780窗口和DPR2排查图形持有，broker／guardian始终使用default，macOS Vibrancy及GPU特性保持。受控模型token、真实Service／Runtime／SQLite、16路模型流、16个真实Shell、至少30秒并发和120次切换均保持。当时的隔离候选仅向私有构建CSS追加一条规则；default不写字节，每轮保存前后SHA与准确规则。普通dev／prod没有候选或生命周期测试开关，当前没有采纳生产GPU参数或样式修改；未采用的构建改写器及其测试参数已删除。
+
+`contain: paint`候选完成default／candidate各三轮，顺序default、candidate、candidate、default、default、candidate。冻结17份输入和Agent源快照，默认原CSS SHA逐轮相同；完整输入副本与失败的探索记录保留在本机证据中。正式六轮只执行原内存、流、切换、取消和退出测量，没有在这些采样间启用LayerTree或运行静态视觉诊断。69 PID联合footprint均为原65业务＋4桌面进程；另核16 broker＋16 guardian的32 PID联合footprint，集合及出生身份逐轮匹配。
+
+| 指标，中位数（最小–最大） | default | paint containment |
+| --- | ---: | ---: |
+| 69 PID联合dirty footprint，MiB | 1449.71（1428.37–1452.55） | 1443.05（1435.13–1463.98） |
+| GPU当前phys_footprint，MiB | 375.64（367.39–383.25） | 378.56（368.91–379.55） |
+| 32监督进程联合dirty footprint，MiB | 384.02（383.58–387.50） | 388.52（387.83–388.94） |
+| CC tile总量，MiB | 74.03（67.05–77.57） | 72.06（68.14–73.04） |
+| CC tile in-use，MiB | 32.23（32.23–32.23） | 32.23（31.68–32.23） |
+| 导航P95，ms | 217（215–226） | 221（220–226） |
+
+GPU当前计数增加0.78%，联合footprint仅下降0.46%且范围重叠，不能证明持续收益，**不采用paint containment**。稍后单GPU OS dirty中位数341.72→330.39MiB来自另一采样阶段，不能与较早census相减，也不能代替同一checkpoint的当前计数。free tile中位数虽下降53.34%，candidate第二／三轮分别转为22,921,216／18,792,448字节busy；逐轮free＋busy的中位数仅43,827,200→41,762,816字节，in-use中位数不变。不能把池内状态转移解释为同量内存释放。
+
+六轮导航后GPU OS dirty的88.46%–91.80%仍在IOSurface、IOAccelerator graphics与unmapped graphics三类；12个GPU阶段原始分类逐列求和与total相等，独立GPUBuffer类别仍为unknown。SharedImage与CC tile的ownership边继续表明同一分配跨进程分摊，不能将图像、tile和GPU根直接相加。[准确Chromium版本的ResourcePool](https://github.com/chromium/chromium/blob/152.0.7977.78/cc/resources/resource_pool.cc)区分unused、等待显示端归还的busy和in-use；unused默认过期5秒，复用会刷新时间。[SharedImageManager](https://github.com/chromium/chromium/blob/152.0.7977.78/gpu/command_buffer/service/shared_image/shared_image_manager.cc)按引用释放backing，不存在整个SharedImage目录统一5秒到期的规则。删除缓存对象也不保证OS计费同步下降。
+
+六轮逐次marker／草稿归属、活动主子正文增长、完整UTF-8及固定H输出、所属读取中断、零导航任务重放和单global observe均通过；有限body最终active0／峰值2，文档外DOM余量最终均59、监听器236，末次renderer GC heap为12.20–12.47MiB。导航长任务均0；根／子模型流关闭中位数67／76→40／81ms，所属Shell树停止288／244→252／210ms，Shell输出约163296→163287字节／秒。准确根停止后仅其4路及4树结束，另停准确child后剩11路继续；六轮均在owner兜底之前核原70出生身份全部absent。这些断言未见退化，不外推任意时长无泄漏，三轮每组也不能证明小幅计时差异有因果。
+
+当时的有界生命周期采样记录当前DOM／LayerTree及合成原因，但层面积不是实际驻留字节。[Chromium启用LayerTree会为owner debug信息触发重绘](https://github.com/chromium/chromium/blob/152.0.7977.78/third_party/blink/renderer/core/frame/local_frame_view.cc)，因此有效时间线将层检查移到全部内存与取消测量之后；早期逐dump检查层的pilot不能作为无扰动自然回收曲线。opaque滚动背景、浮层静止transform和侧栏stacking隔离的单轮探索也未建立收益，不作为正式对照或生产实现；侧栏isolation pilot的GPU当前计数385.42MiB、联合1434.54MiB、tile79.05MiB，原门禁和70身份退出均通过，没有因此采纳。收尾已移除LayerTree、固定页面额外采样和测试critical pressure分支，没有引入普通客户端诊断入口或全局强制清缓存策略。
+
+移除采样间LayerTree干扰后，以default补做同一负载的固定页面时间线：选中root-3不变，活动阶段16路模型及16个Shell继续运行，导航后／同页6秒／12秒的GPU OS dirty分别264.06／338.19／350.25MiB，tile80.90／71.09／79.49MiB。全部业务结束后的同页观察如下。每行仍保存独立OS与MemoryInfra原始记录，不将两者相减；这是一轮生命周期观察，不是优化收益对照。
+
+| 同页业务结束后的阶段 | GPU OS dirty，MiB | CC tile，MiB | tile free／busy，MiB | SharedImage size／effective，MiB |
+| --- | ---: | ---: | ---: | ---: |
+| 原500ms等待后的采样 | 379.39 | 112.20 | 98.18／0 | 151.62／39.42 |
+| 自然空闲6秒 | 52.11 | 14.02 | 0／0 | 53.43／39.42 |
+| 自然空闲12秒 | 46.33 | 14.02 | 0／0 | 53.43／39.42 |
+| 之后的测试critical pressure | 48.14 | 14.02 | 0／0 | 53.43／39.42 |
+
+ANGLE Metal同期123.22→15.59MiB、Skia资源4.79MiB→4096字节，SharedImage size的下降与tile free消失一致；effective不变再次说明同一tile分配的ownership，不能重复加总。该轮表明空闲图形缓存能自然回收，尚无证据将活动阶段高水位归因为旧会话DOM或图形资源持续泄漏；它没有证明任意时长不存在泄漏，也没有降低活动负载的实际计费。末次LayerTree因空闲后没有取得事件而超时并明确incomplete，不填造层归属；超时发生在所有7次内存采样之后。该轮导航P95为222ms、长任务0，根／子Shell树停止233／215ms，原70出生身份全部absent。本机原始证据为ignored `memory-1792124499546-gpu-lifecycle-clean/`及其中的`lifecycle-comparison.json`。
+
+正式六轮本机证据位于ignored `.cache/native-session-stream-evidence/gpu-paint-matrix-1792123749012/`，`index.json`保存顺序、输入副本SHA和测量边界，`comparison.json`含逐轮字节、角色CPU、性能和退出结果。当前默认基线回归使用 `KITE_NATIVE_MULTI_SHELL=1 KITE_NATIVE_MULTI_MEMORY_TAG=gpu-check bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-multi-session-stream-electron.test.ts`，保留完整角色内存统计、32监督进程联合footprint和导航后／业务结束后两阶段GPU归因，不再选择实验候选。**本轮已按用户要求结束，实际降低活动GPU footprint的优化目标未达到**；保留此前已验证有效的有界文件读取、会话缓存、流读取释放与取消竞态修复，产品行为、玻璃和默认参数保持。删除前的三个实验fixture与runner／driver／census原始输入及SHA保存在ignored `.cache/native-session-stream-evidence/closed-gpu-experiments-1792128424346/`，历史测量没有因清理而被抹除。
+
+清理后的默认复核在ignored `.cache/native-session-stream-evidence/memory-1792128688458-cleanup-default/`。原16模型流／16 Shell／120次切换门禁通过，普通生产React窗口`diagnosticsAbsent=true`；导航P50／P95为176／229ms、长任务0，有限body最终active0／峰值2；根／子模型流关闭42／76ms、Shell树停止196／293ms，原70出生身份全部absent。两阶段GPU归因继续成功，原69及32监督进程集合、16份默认launchd argv完整核对。窗口／玻璃、会话缓存、流读取／取消及有界IO优化涉及的20份生产文件与清理前SHA全部相同，清理没有改动已验证的产品实现。
 
 ## Native 跨会话后台总览
 
@@ -336,11 +486,11 @@ Main 从实际选中根的 controller snapshot 固定 Store／subject／generati
 
 ## Native 普通问题与页面草稿
 
-根 `desktop` 选择的 [Native renderer](src/native.tsx)实际消费共享 Questionnaire；默认 ask_user 的多题选择、自由输入、先浏览后一次提交和显式取消问卷均沿公共原 `interaction.answer`。取消只提交原 schema 的 null，后续 Model 在同一 Run 收到取消信息；所选会话存在 pending question 时，隐藏主输入表单及原命令、原申请或 active Job 的任务停止按钮。主输入草稿仍由页面原状态保留，回答或取消后的交互终态恢复原文；跨会话的主草稿仍沿既有明确保存入口。未知／失败回答保留原意图，只查询原 Command，不再次 POST。
+根 `desktop` 选择的 [Native renderer](src/native.tsx)实际消费共享 Questionnaire；默认 ask_user 的多题选择、自由输入、先浏览后一次提交和显式取消问卷均沿公共原 `interaction.answer`。取消只提交原 schema 的 null，后续 Model 在同一 Run 收到取消信息；所选会话存在 pending question 时，隐藏主输入表单及原命令、原申请或 active Job 的任务停止按钮。主输入草稿仍由页面原状态保留，回答或取消后的交互终态恢复原文；跨会话的未发送文本按原 Store／Session 页面缓存保留，已有私有草稿沿原读取链恢复。普通界面移除“保留草稿”，不新增自动持久保存。未知／失败回答保留原意图，只查询原 Command，不再次 POST。
 
 renderer 的页面 Map 分别保存步骤与 JSON fallback 草稿，身份固定 Store/source/presentation Session/id/revision/inputDigest。切换会话、新建会话及待决后页替换不会搬移或清理原草稿；读取失败和卡片未出现在 bounded pending 页也不证明终态。Main 已核准确 accepted answer_saved 回执时只清原键，观察到同原卡的新 revision/inputDigest 或非 pending 状态时才清理对应旧键。关闭页面进程不保证未提交问卷草稿恢复，持久原 Answer journal 仍负责未知回执。
 
-明确“保留草稿”只保存原Main私有主输入，不要求业务History已经完整读取。原保存按钮可用而 `write` 的默认History门禁静默返回已修：此调用显式不依赖History，原pending防重、generation／Session／revision CAS及迟到scope更新guard保持；发送／回答等原业务操作的门禁不变。[原完整读归属DOM](test/isolated/native-read-ownership-dom.test.tsx)保原断言并新增History GET held时准确原文保存、迟到A回执不改B草稿／修订、零业务提交正例；原macOS问答整窗口保全部流程／断言／10秒读取／45秒driver／120秒整例通过。原完整默认的真实失败及修后证据归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13统一回归发现的-native-私有草稿保存)。
+隔离测试中的“保留草稿”只保存原Main私有主输入，不要求业务History已经完整读取，不向 dev／prod 显示。原保存调用显式不依赖History，原pending防重、generation／Session／revision CAS及迟到scope更新guard保持；发送／回答等原业务操作的门禁不变。[原完整读归属DOM](test/isolated/native-read-ownership-dom.test.tsx)核普通界面无按钮、无保存请求，显式测试模式仍在History GET held时保存准确原文，迟到A回执不改B草稿／修订且零业务提交。此前原macOS问答整窗口的全部流程／断言／10秒读取／45秒driver／120秒整例证据及原完整默认真实失败归[当时进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13统一回归发现的-native-私有草稿保存)。
 
 [页面 DOM](test/native-questionnaire-dom.test.tsx)核会话隔离、遗漏页／读取失败、未知一次答复、准确回执只清原草稿，以及 question 隐藏主输入并在终态恢复原文；[实际完整 Native 候选](test/isolated/native-questionnaire-bundle.test.ts)与 [Electron driver](test/native-questionnaire-electron.fixture.ts)核搬迁、删除构建源后的默认 Service／compatible Provider 窗口流程，末页主动提交前零 HTTP Answer、原 ID／文案和自由原文、问卷取消后原 Run 继续，以及所属 Service 真正退出后的冷 Store。该 fixture 仅暂存各原 Run 的首个 Provider 响应，沿既有“保留草稿”准备并读取准确主草稿后释放；实测答复／取消均隐藏主输入再恢复原文，没有新增 Model 或重答。首次发送等待实际 Renderer 权限与历史就绪，并核一次真实 form submit；[原 Native bundle driver](test/native-bundle-electron.fixture.ts)复用这项界面观察，原制品、独立审批与退出断言保持。实际运行结果与限制归 [进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不由组件或单个窗口测试推导全部 P5、三平台或签名发行资格。
 
@@ -502,7 +652,9 @@ Native 有独立分页 Context reader，因此仅此宿主以 `readContextOnSele
 
 压缩与通知刷新最终完整 Native/共享权限组合实测 28 文件、51 项、348 条 Bun 断言全通过（约 75 秒）；随后新增确定性授权目录 GET/dirty 后继 barrier 的刷新文件复验为 2 项、7 条断言。新压缩窗口另有 33 条实际 Node 断言、四次自有兼容 SDK 调用及两次所属 PID 清理；原管理窗口 18 条 Node 断言和其他已有窗口证据仍保留。Desktop 类型、portable build、15 个本切片归属代码文件 Biome、文档结构和测试归属检查通过；未运行共享 dist 或全 workspace 构建。这是 macOS 私有开发制品资格，不代表正式旧入口切换、完整安装、Linux/Windows 或付费 Provider 验收。
 
-原生历史由 [NativeHistory](src/native-history.ts) 分页读取全部公开记录，固定原 Store、Session、选择代次与 highWaterSeq。每页仍核原身份、严格序号与游标；完整扫描后才发布该高水位的阅读快照，后台校准期间保留上次已发布正文。离开会话缓存及同会话新范围复用也只取已发布快照，不把进行中的前缀提前展示。实际失败仍发布已经合法读到的正文并撤除操作资格。当前选定会话不设累计记录数或字节截断，另外最多保留八个已读会话缓存；首尾原文不会被截断替代。
+原生历史由 [NativeHistory](src/native-history.ts) 分页读取全部公开记录，固定原 Store、Session、选择代次与 highWaterSeq。每页仍核原身份、严格序号与游标；完整扫描后以本次结果精确替换该高水位的阅读快照，后台校准期间保留上次已发布正文，已消失记录不会残留。离开会话缓存及同会话新范围复用也只取已发布快照，不把进行中的前缀提前展示；实际失败才合入已经合法读到的正文并撤除操作资格。完整会话时间线与当前 Model context 分开，rewind 不自动隐藏原消息。当前选定会话不设累计记录数或字节截断，首尾原文不会被截断替代。
+
+[inactive cache](src/native-history-cache.ts)仅保存非当前数据，最多12项、64MiB保守载荷估算、单项16MiB；命中通过 take 转交活动视图，离开时重新入队，空历史可缓存，超预算历史仍可完整阅读但离开后不保留。generation 或 history epoch 改变清空旧数据；确认空间移除时淘汰所属 Store 的缓存与活动正文，卸载清全部引用。`close()`只取消读取并撤销该次校准标记，随后同一阅读选择可完整恢复校准。固定水位相同仍重新核全部历史，不以缓存或序号授予写入资格。[缓存回归](test/native-history-cache.test.ts)核100会话轮转与字节预算，[历史回归](test/native-history.test.ts)核暂停恢复、EOF替换、失败前缀与迟到隔离；[主子导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)核活动子页、父读取暂停、草稿和监听释放。
 
 [Main](electron/native-caller.ts) 每页仍执行 4MiB IPC 预算及公开回应校验，过大时只在原游标和高水位缩小 GET 页；已通过校验的页大小仅在同一 generation／selection／Session／Store／highWater／readId 内单调保留，后页仍重新读取和校验全部正文。范围变化、取消、关闭或新读取重置该限制；单项目无法传输时明确未完成。切换只关闭自己的读取，迟到旧页不能进入新会话，也不取消业务执行。取舍与既有观察刷新共同归[完整正文刷新决定](../../.agents/notes/implemented/bug-fix/2026-10-08-native-observation-output-refresh.md)。
 

@@ -1,5 +1,5 @@
 import type { Message } from '@kite-ai/client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import { modelUsageMessageKey, type NativeModelUsageFact } from './tool-messages-bridge';
 
@@ -21,6 +21,7 @@ export function useNativeCacheMetrics({
   messages,
   historyComplete,
   observationRevision,
+  suspended = false,
 }: {
   bridge?: NativeBridge;
   generation: number;
@@ -29,6 +30,7 @@ export function useNativeCacheMetrics({
   messages: readonly Message[];
   historyComplete: boolean;
   observationRevision: number;
+  suspended?: boolean;
 }) {
   const storeId = selection?.storeId,
     sessionId = selection?.session.id,
@@ -42,31 +44,43 @@ export function useNativeCacheMetrics({
     viewSelection,
     historyEpoch,
   ]);
-  const candidates = messages.filter(
-    (message) =>
-      message.sessionId === sessionId &&
-      message.role === 'assistant' &&
-      message.status === 'complete' &&
-      message.contentFormat !== 'unsupported' &&
-      (message.originMessage?.runId ?? message.runId) &&
-      message.sourceIds?.length === 1,
+  const candidates = useMemo(
+    () =>
+      messages.filter(
+        (message) =>
+          message.sessionId === sessionId &&
+          message.role === 'assistant' &&
+          message.status === 'complete' &&
+          message.contentFormat !== 'unsupported' &&
+          (message.originMessage?.runId ?? message.runId) &&
+          message.sourceIds?.length === 1,
+      ),
+    [messages, sessionId],
   );
   // Stable observation input prevents a failed GET from retrying on an unrelated render.
-  const observation = JSON.stringify({
-    revision: observationRevision,
-    messages: candidates.map((message) => ({
-      id: message.id,
-      key: modelUsageMessageKey(message),
-      content: message.content,
-      executionId: message.sourceIds![0]!,
-      originStoreId: message.originMessage?.storeId,
-    })),
-  });
+  const observation = useMemo(
+    () =>
+      JSON.stringify({
+        revision: observationRevision,
+        messages: candidates.map((message) => ({
+          id: message.id,
+          key: modelUsageMessageKey(message),
+          content: message.content,
+          executionId: message.sourceIds![0]!,
+          originStoreId: message.originMessage?.storeId,
+        })),
+      }),
+    [candidates, observationRevision],
+  );
   const [retryRevision, setRetryRevision] = useState(0);
   const cache = useRef({ scope, retryRevision, read: new Map<string, Receipt>() });
   const [state, setState] = useState({ scope, read: new Map<string, Receipt>(), error: '' });
   const available =
-    historyComplete && !!selection && !selection.viewLoading && !selection.permissionUnavailable;
+    !suspended &&
+    historyComplete &&
+    !!selection &&
+    !selection.viewLoading &&
+    !selection.permissionUnavailable;
   useEffect(() => {
     if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
       cache.current = { scope, retryRevision, read: new Map() };

@@ -56,7 +56,7 @@ export async function runTUIProcess(
       ...(args.server ? { server: args.server } : {}),
       ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(input.onLaunched ? { onLaunched: input.onLaunched } : {}),
-      testDiagnostics: input.testDiagnostics ?? args.testDiagnostics,
+      testDiagnostics: input.testDiagnostics,
       exitSignal: exit.signal,
     });
   } finally {

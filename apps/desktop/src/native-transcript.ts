@@ -1,7 +1,7 @@
 import type { Message } from '@kite-ai/client';
 import { completeRunReplies } from '@kite-ai/ui';
 import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/desktop';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import { desktopMessages } from './native-presentation';
 import { desktopToolMessage } from './native-tool-messages';
@@ -30,6 +30,7 @@ export function useNativeRuns({
   historyEpoch,
   messages,
   observationRevision,
+  suspended = false,
 }: {
   bridge?: NativeBridge;
   generation: number;
@@ -37,6 +38,7 @@ export function useNativeRuns({
   historyEpoch: number;
   messages: readonly Message[];
   observationRevision: number;
+  suspended?: boolean;
 }) {
   const storeId = selection?.storeId,
     sessionId = selection?.session.id,
@@ -50,16 +52,24 @@ export function useNativeRuns({
     workspaceId,
     viewSelection,
   ]);
-  const available = !!selection && !selection.viewLoading && !selection.permissionUnavailable;
-  const representatives = new Map<string, string>();
-  for (const message of messages)
-    if (!message.originMessage && message.sessionId === sessionId && message.runId)
-      representatives.set(message.runId, message.id);
-  const ids = JSON.stringify([...representatives]);
-  const view = JSON.stringify(
-    selection?.runs
-      .filter((run) => storeId && sessionId && presentableRun(run, storeId, sessionId))
-      .map(runFact) ?? [],
+  const available =
+    !suspended && !!selection && !selection.viewLoading && !selection.permissionUnavailable;
+  const representatives = useMemo(() => {
+    const entries = new Map<string, string>();
+    for (const message of messages)
+      if (!message.originMessage && message.sessionId === sessionId && message.runId)
+        entries.set(message.runId, message.id);
+    return entries;
+  }, [messages, sessionId]);
+  const ids = useMemo(() => JSON.stringify([...representatives]), [representatives]);
+  const view = useMemo(
+    () =>
+      JSON.stringify(
+        selection?.runs
+          .filter((run) => storeId && sessionId && presentableRun(run, storeId, sessionId))
+          .map(runFact) ?? [],
+      ),
+    [selection?.runs, storeId, sessionId],
   );
   const [retryRevision, setRetryRevision] = useState(0);
   const cache = useRef({
@@ -205,22 +215,25 @@ export function useNativeRuns({
     observationRevision,
     retryRevision,
   ]);
-  const runs = new Map(
-    (state.presentationIdentity === presentationIdentity && state.bridge === bridge
-      ? state.terminal.filter((run) => representatives.has(run.id))
-      : []
-    ).map((run) => [run.id, run]),
-  );
-  if (
-    state.scope === scope &&
-    state.presentationIdentity === presentationIdentity &&
-    state.bridge === bridge
-  )
-    for (const run of state.runs) runs.set(run.id, run);
-  // The newer verified View wins over an older metadata response, including explicit recovery.
-  for (const run of JSON.parse(view) as NativeRunFact[]) runs.set(run.id, run);
+  const runs = useMemo(() => {
+    const values = new Map(
+      (state.presentationIdentity === presentationIdentity && state.bridge === bridge
+        ? state.terminal.filter((run) => representatives.has(run.id))
+        : []
+      ).map((run) => [run.id, run]),
+    );
+    if (
+      state.scope === scope &&
+      state.presentationIdentity === presentationIdentity &&
+      state.bridge === bridge
+    )
+      for (const run of state.runs) values.set(run.id, run);
+    // The newer verified View wins over an older metadata response, including explicit recovery.
+    for (const run of JSON.parse(view) as NativeRunFact[]) values.set(run.id, run);
+    return [...values.values()];
+  }, [state, scope, presentationIdentity, bridge, representatives, view]);
   return {
-    runs: [...runs.values()],
+    runs,
     error:
       state.scope === scope &&
       state.presentationIdentity === presentationIdentity &&

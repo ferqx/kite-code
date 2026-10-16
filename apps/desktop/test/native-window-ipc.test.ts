@@ -6,6 +6,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { registerNativeIpc, registerNativeWindowIpc } from '../electron/native-ipc';
 import {
   type NativeReply,
+  type NativeWindowAppearance,
   type NativeWindowAppearanceReply,
   nativeChannel,
   nativeClipboardChannel,
@@ -18,7 +19,7 @@ type Handler = (event: IpcMainInvokeEvent, payload: unknown) => WindowReply | Pr
 
 function fixture(
   rendererUrl = pathToFileURL(join(tmpdir(), 'kite-native-ipc/index.html')).href,
-  backgroundMaterial: 'mica' | 'none' = 'mica',
+  backgroundMaterial: NativeWindowAppearance['backgroundMaterial'] = 'mica',
 ) {
   const frame = { url: rendererUrl },
     contents = { mainFrame: frame },
@@ -118,11 +119,14 @@ test('original text and both zoom states use only the current window host, even 
   expect(f.handlers.has(nativeChannel)).toBe(true);
 });
 
-test('development HTTP renderer retains exact main-frame, origin and document scope for window operations', async () => {
-  const f = fixture('http://127.0.0.1:43219/', 'none');
+test.each([
+  'none',
+  'vibrancy',
+] as const)('development HTTP renderer retains exact main-frame, origin and document scope for window operations (%s)', async (backgroundMaterial) => {
+  const f = fixture('http://127.0.0.1:43219/', backgroundMaterial);
   expect(await f.send(nativeWindowAppearanceChannel)).toEqual({
     ok: true,
-    value: { backgroundMaterial: 'none' },
+    value: { backgroundMaterial },
   });
   expect(await f.send(nativeClipboardChannel, { text: 'development' })).toEqual({
     ok: true,

@@ -7,6 +7,7 @@
     ".": "./src/index.tsx",
     "./tui": "./src/tui/index.tsx",
     "./desktop": "./src/desktop/index.ts",
+    "./desktop/markdown": "./src/desktop/markdown-parser.ts",
     "./desktop/style.css": "./src/desktop/style.css"
   },
   "scripts": {

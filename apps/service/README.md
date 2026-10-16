@@ -66,6 +66,51 @@ SSE 从单一扫描游标读取持久变更。未来、过期或格式错误的�
 
 当前接口支持 Workspace/Session 创建与读取、`run.start`、准确 `command.cancel`、通用 `extension.invoke` Action、扩展目录与 Query、Command/Run/Execution 读取、History 和变更 stream。Model Tool 和 Action child operation 使用与直接宿主相同的 Runtime 路径。Action 是 root Job Execution，不创建 Model Run。Query 返回通用 PublicView，使用 Session 范围只读投影，不创建 Execution；可选 JSON `input` 缺省为 `{}`，编码后最多 8192 字符。生产默认装配、完整管理能力和发行资格继续由 V1.3 计划记录。
 
+### 多主子会话流与读取压力
+
+[隔离压力测试](test/isolated/multi-session-stream-load.test.ts)及[进程装配](test/isolated/multi-session-stream-load.fixture.ts)使用真实 Service／SQLite Worker／Runtime、原 Task 扩展和本机 compatible SSE Provider。每个根先真实派发3个 Task，再保持自己的第二次 Model 流；子 Model 同时持续输出超过64KiB的已持久正文。分别核 Provider 增量、实际 Model dispatching 与活动 Run，不能以排队记录或 Provider 控制器个数冒充实际并发。
+
+| 隔离矩阵 | 核对范围 |
+| --- | --- |
+| 默认4个Model槽 | 4个实际父流、12个排队child；准确根取消后对应排队child没有向Provider派发 |
+| 可信Host显式16槽 | 4个实际父流＋12个实际child流，并行正文读取与取消 |
+| 可信Host显式32槽 | 8个实际父流＋24个实际child流，追加30秒持续读取压力 |
+
+16／32槽只由可信测试装配提供，生产默认Model并发仍为4，没有新增JSONC、环境变量或HTTP调额入口。HTTP正文／SSE中断只释放读取，测试确认真实Model继续；显式 `command.cancel` 沿原attached子树收束，detached保持独立；准确child停止不停止兄弟或其他根。最终核原Run不再活动、所有carrier成功或预期取消、Provider活动流为零及所属Service正常退出。
+
+原32槽压力曾使正文GET返回503 `artifact_busy`，并使Model发布失败；Native 4主／12子也实际重现子Model失败。[Artifact owner](../../packages/agent/src/artifacts/README.md)现在用原8个活动槽、有界可取消队列和发布保留进展处理竞争，不通过重执行Model隐藏失败。SSE仍沿原有界订阅实现，未建立额外执行流。
+
+2026-10-15在macOS arm64／Bun1.4.2对当时工作树执行上述测试，最终3项／165断言通过。32槽持续阶段30.312秒完成234次完整正文GET，最大正文221724字节，吞吐7.72次／秒；整个32槽阶段共306次完整GET、51次主动取消、7次SSE准入及90665次change回调，意外读取失败为零。GET P50／P95为227.82／1261.68ms，健康GET P95为12.58ms，服务事件循环最大延迟70.88ms；这些是端到端测量，没有拆分Worker排队或SQL时间。16槽阶段正文GET P95为47.15ms；生产默认4槽仍单独核饱和排队。此前同负载一轮GET P95为1118.15ms、事件循环最大21.46ms，保留波动而不以较快一轮代替最终测量。
+
+最终轮次在同一Service进程采集以下分类，MB按1000000字节换算；quiescent之前另用公共View枚举32个Session／32个Run／46个Model，准确终态和全部读取／SSE排空后再静置一秒，无强制GC。
+
+| 阶段 | RSS MB | heapUsed MB | external MB | ArrayBuffer字节 | 数值FD |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| warmup | 424.97 | 50.30 | 44.58 | 20456016 | 80 |
+| 中段 | 598.33 | 212.27 | 170.86 | 112940702 | 62 |
+| 尾段 | 600.60 | 64.17 | 38.96 | 5126022 | 62 |
+| 排空后 | 660.47 | 40.00 | 15.97 | 194 | 72 |
+
+heap／external／ArrayBuffer明显回落，但RSS仍较高，不能仅据此判定allocator归因或长期无泄漏。最后32个并发公共View验证会建立连接，一秒静置不证明连接池已过idle期限；FD不作为私有Artifact队列的直接计数。完整正文重建与最终结果结算仍有整块分配，wire分块不是请求总内存上限。窗口切换、DOM与renderer heap资格归[Native owner](../desktop/README.md#native-当前会话环境信息与子详情)，本机loopback负载不证明远端模型吞吐或其他平台。
+
+[Shell混合压力](test/isolated/multi-session-shell-load.test.ts)沿[共享脚本与宿主配置](test/isolated/multi-session-shell-load.shared.ts)补充真实外部执行：4根各派发3子，每个根／子经默认 `shell.launch` 创建一个attached Shell，再保持实际Model SSE。每个有限脚本包含256KiB双流突发、每200ms持续stdout／stderr、每tick约10ms有界CPU工作和一个真实 `/bin/sleep` 后代；90秒硬截止及显式finish防止测试无限运行。测试使用实际macOS host coalition监督与guardian资产，分别核公共Execution、原输出覆盖证明、脚本ledger和实际PID；不以Tool文字、受控Job adapter或逻辑终态代替OS退出。
+
+默认Model／process各4时，实际4个Shell与4个Model运行、12个Shell请求排队，准确根停止撤销所属运行／排队效果且不派发已取消工作。可信测试Host各16时，实际16个Model和16个Shell重叠至少30秒，同时反复完整读取Model正文、固定H输出、取消GET和SSE，再准确停止一根子树和另一个child，其余根／兄弟继续。测试专属配额不进入普通配置或启动协议。
+
+该默认4档发现子Model已结束而attached Shell尚未收束时，Task过早提交成功触发原 `child_execution_unsettled`，随后carrier遗留running。修复归[Task owner](../../packages/agent/src/extensions/task/README.md)：原owner／Store／carrier范围内的短只读快照与同事务cursor驱动等待，不等待detached；最终Store完成门禁和持久取消事实保持。旧实现定向超时、新实现自然收束／取消／旧cursor唤醒／close回归及真实默认档均通过，不靠扩大timeout掩盖未结算。
+
+2026-10-15在相同macOS arm64／Bun1.4.2工作树执行真实Shell两档，最终2项／539断言通过。可信16档重叠30.345秒，Shell实际生成9408512字节、累计实际CPU28.563秒；完整UTF-8／字节／SHA核对一致，无丢失区间。性能包含实际输出持久化和进程竞争：
+
+| 可信16档读取 | 次数 | P50 ms | P95 ms |
+| --- | ---: | ---: | ---: |
+| Model完整正文GET | 176 | 83.06 | 169.57 |
+| Job完整固定H输出GET | 368 | 7.25 | 17.80 |
+| 健康GET | 88 | — | 7.09 |
+
+另有88次主动GET中断、4次SSE准入和33984次change回调，意外读取失败为零；最终16个Session／16个Run／35个Model均为准确终态、Provider活动流为零，全部Job具监督结束证明，观察到的脚本／后代PID全部消失，所属Service退出码0。停止、自然收束、完整输出核验及一秒quiet合计2.964秒，不单独称为drain耗时。
+
+同一Shell压力Service进程的RSS由warmup 990.17MB至quiet 1057.18MB，heapUsed由中尾段约175–179MB回落至113.18MB，external至86.89MB、ArrayBuffer至34.91MB；数值FD由98经稳态90降至41，事件循环最大延迟71.75ms。此处warmup在实际并发负载已启动后采样，不是空载Service基线；主线程heap／external／ArrayBuffer不是完整进程内存的互斥分项。无强制GC，以上有限窗口不能证明长期无泄漏或把剩余RSS归因于allocator；真实Shell资格限定本机macOS，纯Model的32档证据不能替代32个Shell的实际执行。这是当时独立Service负载的历史实测，不改写为后续优化结果；2026-10-16启动文件分块校验与POSIX Artifact缓冲区优化后的完整角色／同负载前后测量由[Native owner](../desktop/README.md#内存缓冲区优化与完整进程对照)维护，RSS、高水位和联合当前footprint分别报告。
+
 当前认证 Native server identity 返回宿主实际 `subjectId`，Command POST/GET 投影返回实际持久 `subjectId/requestDigest`；不公开请求正文、owner 或内部 lease。摘要仍由 Store 对原闭合请求的 canonical JSON 生成，完整正文和 extensionInputs 保留，不把 command ID/expected Store 加入请求摘要。生成 DTO 的凭证字段为可选，调用者缺字段时必须明确 unknown，不能借旧无凭证 DTO 判断本地记录已受理。[真实完整请求凭证测试](test/isolated/caller-command-proof.test.ts)1 项/51 断言核五种普通申请、实际主体、SDK canonical 摘要和重复原 GET 零新 Run/Provider；实际停止仍独立观察 Execution 终态。
 
 `@kite-ai/service/paired` 提供 `launchPairedService`。调用者启动前通过只读 `@kite-ai/agent/profile` API 选定 profile，并传入选定 entrypoint、instance/build 身份、API major 和必要 capabilities。launcher 发送一行私有 startup JSON（最多 64 KiB），保持 stdin 作为独立父进程存活通道，并读取一行 bootstrap JSON（最多 16 KiB）。凭据和 token 不进入 argv、URL 或继承的模型凭据环境变量。Client 准入将 bootstrap 与认证 HTTP 身份和启动前选择逐项比较，不从响应推导预期 profile；启动失败只清理本次建立的 child。

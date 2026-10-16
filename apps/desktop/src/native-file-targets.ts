@@ -1,5 +1,5 @@
 import type { Message } from '@kite-ai/client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeFileChange } from './file-changes-bridge';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 
@@ -11,6 +11,7 @@ export function useNativeFileTargets({
   historyEpoch,
   messages,
   includeRead = false,
+  suspended = false,
 }: {
   bridge?: NativeBridge;
   generation: number;
@@ -18,11 +19,13 @@ export function useNativeFileTargets({
   historyEpoch: number;
   messages: readonly Message[];
   includeRead?: boolean;
+  suspended?: boolean;
 }) {
   const storeId = selection?.storeId,
     sessionId = selection?.session.id,
     workspaceId = selection?.session.workspaceId;
   const viewSelection = selection?.viewSelection ?? selection?.viewGeneration;
+  const hasSelection = !!selection;
   const scope = JSON.stringify([
     generation,
     selection?.storeId,
@@ -31,26 +34,30 @@ export function useNativeFileTargets({
     historyEpoch,
     includeRead,
   ]);
-  const ids = selection
-    ? messages
-        .filter((message) => {
-          if (
-            message.role !== 'tool' ||
-            message.status !== 'complete' ||
-            message.sourceIds?.length !== 1
-          )
-            return false;
-          if (!includeRead) return true;
-          // This is only a request filter. Main verifies the original Files definition and result.
-          try {
-            return typeof JSON.parse(message.content)?.path === 'string';
-          } catch {
-            return false;
-          }
-        })
-        .map((message) => message.id)
-        .join(',')
-    : '';
+  const ids = useMemo(
+    () =>
+      hasSelection
+        ? messages
+            .filter((message) => {
+              if (
+                message.role !== 'tool' ||
+                message.status !== 'complete' ||
+                message.sourceIds?.length !== 1
+              )
+                return false;
+              if (!includeRead) return true;
+              // This is only a request filter. Main verifies the original Files definition and result.
+              try {
+                return typeof JSON.parse(message.content)?.path === 'string';
+              } catch {
+                return false;
+              }
+            })
+            .map((message) => message.id)
+            .join(',')
+        : '',
+    [hasSelection, messages, includeRead],
+  );
   const [revision, setRevision] = useState(0);
   const cache = useRef({
     scope,
@@ -76,6 +83,7 @@ export function useNativeFileTargets({
       publish(false);
       return;
     }
+    if (suspended) return;
     publish(true);
     void (async () => {
       const pending = ids ? ids.split(',').filter((id) => !current.read.has(id)) : [];
@@ -131,6 +139,7 @@ export function useNativeFileTargets({
     workspaceId,
     viewSelection,
     includeRead,
+    suspended,
   ]);
   return {
     entries: state.scope === scope ? state.entries : [],

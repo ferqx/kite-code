@@ -6,7 +6,15 @@
 
 `readStream` 先核准确 Store、Session、subject 和 scope，再 no-follow 打开只读不可变 Blob，逐块完整核 hash、size 和 FD 前后 identity。**只有成功 EOF 才证明完整内容**；提前停止、取消或末尾校验错误不能把已接收前缀称为全文。消费者必须完成迭代或调用 iterator.return，close 会排空真实在途操作后释放 profile 使用权。`read` 便利入口收集完整 bytes 并在成功完整校验后返回。
 
+POSIX [文件读取](../artifacts-files.ts)为三类消费者保持同一完整验证：公开chunks按剩余大小分配独占chunk，每块最多64KiB，已yield字节不复用；内部verify只持一个最多64KiB的scratch；完整read在opened真实大小／身份通过后直接填充一个目标buffer，不保chunk列表后再concat。三者到达声明大小后仍做1字节真实EOF探测，再核完整hash／size／ctime；增长、截断或元数据变化拒绝，异常及iterator.return／throw均关闭FD。完整read仅受运行时连续Buffer能力限制，无法分配时明确 `artifact_content_unavailable`，流式读取没有新增累计内容额度。Windows原生读取与完整read的原路径保持，本轮POSIX优化不构成Windows新资格。
+
+[缓冲区回归](../../test/isolated/artifacts/artifact-files.test.ts)在独立子进程内核实际分配、短读UTF-8、公开chunk所有权、三种消费者的EOF／hash／size／immutable／symlink／inode／ctime门禁与关闭。18字节tiny完整读的Buffer.alloc累计由131072降至19字节；200000字节verify由327680降至65537字节，完整read为200001字节且concat为零。这是局部分配证据，不等于RSS或整机footprint降幅；原接纳队列、scope与引用授权保持。取舍见[完整验证与有界工作内存](../../../../.agents/notes/implemented/architecture/2026-10-16-bounded-verified-file-reads.md)。
+
 `readReference({expectedStoreId, reference})` 在同一个在途读取中实时查询准确 scope 的登记引用，逐项保持完整原 metadata（含出处、MIME、hash 和 size）的 canonical 相等，再沿同一完整文件验证返回 bytes；不缓存引用或授权。`expectedStoreId` 是当前连接准入，`reference.storeId` 是原引用出处，恢复后不能互换。中立 `ArtifactContentStore` 将这个入口设为可选：Runtime 使用它避免先查询、再由默认 `read` 重复查询同一引用；未提供该入口的自定义端口保留原 Runtime metadata 校验与 `read` 路径。包装读取的端口需要明确包装所提供的两个入口，不能把一个入口的阻塞或取消钩子当作另一个入口也已执行。Runtime 在读取前后仍核取消并复核完整 bytes 的 size/hash，发布、owner 守卫和每段持久检查点保持。
+
+每个 Artifact Store 最多接纳8个活动操作，其中读取最多6个，为真实输出发布保留进展空间。其余操作进入可取消的有界队列：最多64项、读取最多32项，排队 metadata 与已知字节数组合计预算16MiB。这是排队保留量，不是单个或累计 Artifact 的大小限制；空闲时的大文件仍可完整发布。预算不足返回可重试的 `artifact_busy`。每批最多连续交接4个发布后给等待读取机会，避免读取洪峰误伤模型发布，也避免发布持续饿死读取。惰性 source 闭包的任意外部保留量不能据此计量，只受票据数约束。
+
+`read`、`readReference` 和 `readStream` 均接受 `AbortSignal`；Runtime 的正文取消沿中立端口传递。排队期间取消立即移除票据，不再查询 Store；已接纳的读取仍遵守原完整文件校验与取消边界。scope 和 metadata 在调用时封存，signal 不传入 Worker；`publish(Uint8Array)` 先取得接纳资格再复制调用时 bytes，拒绝时不先复制大载荷。close 拒绝新操作，等待此前接受的活动及排队操作全部结算后才释放 Profile 使用权。取舍及真实并发故障见[有界接纳决定](../../../../.agents/notes/implemented/architecture/2026-10-15-artifact-admission-backpressure.md)。
 
 Store 登记使用 `verifyPublishedArtifact` 固定工作内存复核全文，不把整 Blob 分配到 Worker 事务中。Windows x64 使用下面的固定原生实现；其他 Windows architecture 仍明确 unsupported。本机 macOS 证据不代表 Windows/Linux、独立安装或跨平台发行资格。
 
@@ -22,6 +30,6 @@ temporary 在 rename 前后通过原 writer HANDLE FlushFileBuffers，关闭 wri
 
 [Windows 专项](../../test/isolated/artifacts/windows.test.ts)在 actual win32 必须执行原生正文/取消/close drain、SQL失败 orphan、错误 hash、hardlink/宽 ACL/junction和进程强杀；没有 backend availability skip。源码树外编译公共 Store/Artifact 两进程同 hash与冷只读在本机也运行，Node/POSIX import 验证不加载 DLL。Windows 原生场景未在本机运行，不能把本机非 Windows skip 当资格；实际 Windows CI结果仍须独立提供。强杀第二窗口准确是内部 native publication 后、SQL reference 提交前，不冒充已成功的公共发布。
 
-验证位于 [scope/发布回归](../../test/isolated/artifacts/artifacts.test.ts)、[大流式正文](../../test/isolated/artifacts/stream.test.ts)及[真实 Core Files 大正文](../../test/isolated/files/large.test.ts)。发布回归保原八路接纳／busy／关闭排空和真实双进程，新增一例只延迟真实 Worker 已提交的登记回执：公开读流取首块后让原发布完成，再完整读取 EOF，核完整正文／hash与目标 inode／ctime保持。这证明本宿主登记后的延迟清理竞争修复，不把 POSIX link→unlink 的跨进程两 syscall短可见窗口称为已消除；原完整 hash／size／mode／inode／ctime守卫不放宽。准确原红、完整回归与资格范围归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。流式 Artifact、完整文件产物与模型实际正文输入是不同事实；[Runtime 正文交接](../model-body/README.md)用准确原 scope 验证和实际 Model 回执分别证明后者，引用自身不代替全文。
+验证位于 [scope/发布回归](../../test/isolated/artifacts/artifacts.test.ts)、[大流式正文](../../test/isolated/artifacts/stream.test.ts)及[真实 Core Files 大正文](../../test/isolated/files/large.test.ts)。发布回归核八个活动槽、有界队列／超载、排队取消、发布进展、读写公平、关闭排空和真实双进程；大流式正文仍完整读取，不把排队预算当内容截断线。原回归另有一例只延迟真实 Worker 已提交的登记回执：公开读流取首块后让原发布完成，再完整读取 EOF，核完整正文／hash与目标 inode／ctime保持。这证明本宿主登记后的延迟清理竞争修复，不把 POSIX link→unlink 的跨进程两 syscall短可见窗口称为已消除；原完整 hash／size／mode／inode／ctime守卫不放宽。准确原红、完整回归与资格范围归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)。多主子流的实际压力证据归[Service owner](../../../../apps/service/README.md#多主子会话流与读取压力)。流式 Artifact、完整文件产物与模型实际正文输入是不同事实；[Runtime 正文交接](../model-body/README.md)用准确原 scope 验证和实际 Model 回执分别证明后者，引用自身不代替全文。
 
 恢复后的 `expectedStoreId` 只校验当前连接准入；返回引用的 `storeId` 保留真实 `blob_ref.origin_store_id`。执行 scope 另核引用出处与原 Execution/Command 一致，Session、subject、准确 scope 校验不变。旧引用不能在新 Store 重新登记或重绑定；发布、执行和 owner 资格仍要求当前 Store。实际恢复读、新 Run 展开与跨出处拒绝见[恢复正文回归](../../test/isolated/restored-media/read.test.ts)。

@@ -44,6 +44,51 @@ export function outputFixture(content = 'Full answer tail', complete = true) {
   };
   return { message, snapshot };
 }
+test('host verified snapshots render immediately, suspend safely, and reject mismatched bodies', async () => {
+  const f = await domFixture(),
+    data = outputFixture('Verified child tail🙂');
+  const content: (string | undefined)[] = [];
+  const props = {
+    message: data.message,
+    storeId: 'store',
+    verifiedSnapshot: data.snapshot,
+    onContent: (text: string | undefined) => content.push(text),
+  };
+  try {
+    await f.render(props);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('Verified child tail🙂');
+    expect(f.host.textContent).not.toContain('Read complete recorded Model output');
+    expect(content.at(-1)).toBe('Verified child tail🙂');
+    await f.render({ ...props, suspended: true });
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+    expect(content.at(-1)).toBeUndefined();
+    await f.render(props);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('Verified child tail🙂');
+    await f.click('Close full Model output');
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+    await f.click('Read complete recorded Model output');
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('Verified child tail🙂');
+    for (const snapshot of [
+      { ...data.snapshot, sessionId: 'other' },
+      { ...data.snapshot, runId: 'other' },
+      { ...data.snapshot, executionId: 'other' },
+      { ...data.snapshot, output: { ...data.snapshot.output, content: 'wrong bytes' } },
+    ]) {
+      await f.render({
+        ...props,
+        message: {
+          ...data.message,
+          id: `other-${snapshot.executionId}-${snapshot.runId}-${snapshot.sessionId}-${snapshot.output.content}`,
+        },
+        verifiedSnapshot: snapshot,
+      });
+      expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+      expect(content.at(-1)).toBeUndefined();
+    }
+  } finally {
+    await f.close();
+  }
+});
 test('Fork full reader uses the proved original Session/Run; foreign origin and unsupported content cannot fetch or publish a body', async () => {
   const f = await domFixture(),
     data = outputFixture();

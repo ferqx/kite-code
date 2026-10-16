@@ -1,0 +1,96 @@
+import { renameSync, writeFileSync } from 'node:fs';
+import { selectProfile } from '@kite-ai/agent/profile';
+import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { runServiceProcess } from '../../src/main';
+import { mixedShellConfiguration } from './multi-session-shell-load.shared';
+import type { LoadTelemetry } from './multi-session-stream-load.types';
+
+let slots = 4;
+let timer: ReturnType<typeof setInterval> | undefined;
+await runServiceProcess({
+  configure(startup, host) {
+    const input = startup.hostConfiguration as {
+      slots: number;
+      supervisorPath: string;
+      metricsPath: string;
+    };
+    slots = input.slots;
+    const profile = selectProfile({
+      dataRoot: startup.profile.dataRoot,
+      profile: startup.profile.profile,
+    });
+    const started = performance.now();
+    let previous = started,
+      lagMaxMs = 0,
+      samples = 0;
+    const sample = () => {
+      const now = performance.now();
+      lagMaxMs = Math.max(lagMaxMs, now - previous - 100);
+      previous = now;
+      samples++;
+      const memory = process.memoryUsage();
+      const value: LoadTelemetry = {
+        pid: process.pid,
+        rss: memory.rss,
+        heapUsed: memory.heapUsed,
+        external: memory.external,
+        arrayBuffers: memory.arrayBuffers,
+        cpu: process.cpuUsage(),
+        elapsedMs: now - started,
+        lagMaxMs,
+        samples,
+      };
+      writeFileSync(`${input.metricsPath}.pending`, JSON.stringify(value));
+      renameSync(`${input.metricsPath}.pending`, input.metricsPath);
+    };
+    timer = setInterval(sample, 100);
+    sample();
+    const tools = ['task', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'];
+    return createDefaultProcessConfiguration({
+      profile,
+      observerSubjectId: host.subjectId,
+      userConfigurationPath: `${profile.profilePath}/config.jsonc`,
+      shell: mixedShellConfiguration(profile, input.supervisorPath),
+      child: [
+        {
+          id: 'worker',
+          version: '1',
+          modelId: 'mixed-child',
+          toolIds: ['shell.launch', 'shell.read', 'shell.wait', 'shell.stop'],
+        },
+      ],
+      permissionPolicy: {
+        readPolicy: () => ({
+          mode: 'full',
+          workspaceTrust: true,
+          revision: 'isolated-mixed-shell-authorized',
+          allowed: [
+            ...['mixed-parent', 'mixed-child'].map((definitionId) => ({
+              kind: 'model' as const,
+              definitionId,
+              definitionVersion: '1',
+            })),
+            ...tools.map((definitionId) => ({
+              kind: 'tool' as const,
+              definitionId,
+              definitionVersion: '1',
+            })),
+            ...['shell.command', 'agent/worker'].map((definitionId) => ({
+              kind: 'job' as const,
+              definitionId,
+              definitionVersion: '1',
+            })),
+          ],
+        }),
+      },
+    });
+  },
+  decorateConfiguration(configuration) {
+    return slots === 4
+      ? configuration
+      : { ...configuration, modelConcurrency: slots, processConcurrency: slots };
+  },
+  async beforeResourceClose() {
+    clearInterval(timer);
+  },
+});

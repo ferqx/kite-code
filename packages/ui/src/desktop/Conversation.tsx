@@ -15,9 +15,9 @@ import {
   CollapsibleTrigger,
 } from './components/ui/collapsible';
 import { Marker, MarkerContent } from './components/ui/marker';
-import { ScrollArea } from './components/ui/scroll-area';
 import { MessageContent } from './MessageContent';
 import { MessageCopyButton } from './MessageCopyButton';
+import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
 import { ToolActivity } from './ToolActivity';
 import { TurnFailure } from './TurnFailure';
@@ -427,7 +427,19 @@ export function Conversation({
   const save = useRef(saveReading);
   save.current = saveReading;
   reading.current.expanded = expanded;
-  useLayoutEffect(() => () => save.current(reading.current), []);
+  const currentMessages = useRef<readonly Message[] | undefined>(loading ? undefined : messages);
+  if (!loading) currentMessages.current = messages;
+  const currentTurn = useRef(turnActivity?.turnId);
+  currentTurn.current = turnActivity?.turnId;
+  useLayoutEffect(
+    () => () =>
+      save.current(
+        currentMessages.current
+          ? pruneReadingState(reading.current, currentMessages.current, currentTurn.current)
+          : reading.current,
+      ),
+    [],
+  );
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element || loading || typeof ResizeObserver === 'undefined') return;
@@ -528,6 +540,13 @@ export function Conversation({
       return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
     return !message.settled || !!message.text;
   });
+  const runningToolTurns = new Set<string>();
+  const thinkingTurns = new Set<string>();
+  for (const message of messages) {
+    if (!message.turnId || message.settled) continue;
+    if (message.role === 'tool') runningToolTurns.add(message.turnId);
+    if (message.role === 'thinking') thinkingTurns.add(message.turnId);
+  }
   const finalReplyByTurn = new Map<string, Message>();
   const timingByTurn = new Map(
     messages
@@ -742,13 +761,8 @@ export function Conversation({
         group.some((message) => message.role === 'assistant' && message.status === 'cancelled'),
       );
     const aborted = terminalStatus === 'aborted';
-    const runningTool = messages.some(
-      (message) => message.turnId === entry.turnId && message.role === 'tool' && !message.settled,
-    );
-    const thinking = messages.some(
-      (message) =>
-        message.turnId === entry.turnId && message.role === 'thinking' && !message.settled,
-    );
+    const runningTool = runningToolTurns.has(entry.turnId);
+    const thinking = thinkingTurns.has(entry.turnId);
     const completed =
       !failed &&
       !cancelled &&
@@ -874,64 +888,65 @@ export function Conversation({
   };
   return (
     <div className="conversation-container">
-      <ScrollArea
-        className="conversation"
-        viewportRef={viewport}
-        viewportClassName="conversation-viewport"
-        viewportProps={{
-          role: 'region',
-          'aria-label': '会话消息',
-          'aria-busy':
-            loading ||
-            ['queued', 'running', 'waiting'].includes(turnActivity?.status ?? '') ||
-            messages.some(
-              (message) =>
-                message.systemKind !== 'turn_timing' &&
-                (message.delivery === 'sending' ||
-                  ((message.role === 'assistant' ||
-                    message.role === 'tool' ||
-                    message.role === 'subagent' ||
-                    message.role === 'thinking' ||
-                    message.role === 'system') &&
-                    !message.settled)),
-            ),
-          onScroll: () => {
-            const element = viewport.current;
-            if (!element || loading || restore.current) return;
-            const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
-            reading.current = {
-              top: element.scrollTop,
-              follow,
-              expanded: reading.current.expanded,
-            };
-            setFollowing(follow);
-          },
-        }}
-      >
-        <div className="reading-column">
-          {!loading &&
-            (!entries.length ? (
-              <div className="welcome">
-                <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
-                <p>
-                  {emptyState?.detail ??
-                    (selected
-                      ? '描述你的目标，或写下需要一起解决的问题。'
-                      : connected
-                        ? '选择已有会话，或为新的工作创建一个会话。'
-                        : '选择本地项目，连接你的模型与工具。')}
-                </p>
-              </div>
-            ) : (
-              entries.map(renderEntry)
-            ))}
-          {!loading && selected && requiredSubagentWait && (
-            <Marker className="mt-4" role="status">
-              <MarkerContent>正在等待子 Agent 结果</MarkerContent>
-            </Marker>
-          )}
+      <div className="conversation">
+        <div
+          ref={viewport}
+          className="conversation-viewport"
+          {...{
+            role: 'region',
+            'aria-label': '会话消息',
+            'aria-busy':
+              loading ||
+              ['queued', 'running', 'waiting'].includes(turnActivity?.status ?? '') ||
+              messages.some(
+                (message) =>
+                  message.systemKind !== 'turn_timing' &&
+                  (message.delivery === 'sending' ||
+                    ((message.role === 'assistant' ||
+                      message.role === 'tool' ||
+                      message.role === 'subagent' ||
+                      message.role === 'thinking' ||
+                      message.role === 'system') &&
+                      !message.settled)),
+              ),
+            onScroll: () => {
+              const element = viewport.current;
+              if (!element || loading || restore.current) return;
+              const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
+              reading.current = {
+                top: element.scrollTop,
+                follow,
+                expanded: reading.current.expanded,
+              };
+              setFollowing(follow);
+            },
+          }}
+        >
+          <div className="reading-column">
+            {!loading &&
+              (!entries.length ? (
+                <div className="welcome">
+                  <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
+                  <p>
+                    {emptyState?.detail ??
+                      (selected
+                        ? '描述你的目标，或写下需要一起解决的问题。'
+                        : connected
+                          ? '选择已有会话，或为新的工作创建一个会话。'
+                          : '选择本地项目，连接你的模型与工具。')}
+                  </p>
+                </div>
+              ) : (
+                entries.map(renderEntry)
+              ))}
+            {!loading && selected && requiredSubagentWait && (
+              <Marker className="mt-4" role="status">
+                <MarkerContent>正在等待子 Agent 结果</MarkerContent>
+              </Marker>
+            )}
+          </div>
         </div>
-      </ScrollArea>
+      </div>
       {loading && (
         <div className="conversation-loading" role="status" aria-label="正在加载聊天">
           <HugeiconsIcon aria-hidden="true" data-icon="kite-loading" icon={KiteIcon} />

@@ -10,6 +10,8 @@
 
 当前 leaf 的角色、同调用去重、共享单模型槽等待、父权限拒绝零 child Model、detached 后台继续及准确取消已由[真实 Core/SQLite 测试](../../../test/isolated/business/task/task.test.ts)验证。默认结果义务与事件驱动等待由 [required.test.ts](../../../test/isolated/business/task/required.test.ts) 的真实 Core/SQLite 场景验证；QueueOnly 邮件的当前边界见下文。
 
+child Model／Run结束后，原carrier仍须等待该child范围内未结算的Model／Tool与attached Job，包含尚未取得process槽的Job；detached保持独立。Runtime沿准确Store／root owner／carrier调用 `inspectChildSettlement`，同一短读事务取得pending与change cursor，再经原ChangeWaits等待，不持有SQLite事务或额外Model槽。最终 `finishExecution` 原成功门禁仍重新核实；unknown继续交原附着域归并，不伪装已停止。准确持久取消使carrier为cancelled，同时保留已经completed的原child Run；只有本地中断且缺持久取消证据时为unknown。[收敛回归](../../../test/isolated/business/task/attached-job-settlement.test.ts)以一个process槽和两个受控Job核queued／running、detached独立、等待中精确取消、旧cursor先变化及close drain。实际Shell曾暴露Store正确拒绝后carrier永久running的缺口，取舍见[修复决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-15-task-attached-job-settlement.md)，真实压力证据归[Service owner](../../../../../apps/service/README.md#多主子会话流与读取压力)。
+
 ## 前台完整结果与后台处置
 
 正式前台 `task.execute` 复用原 role、key、immutable OperationRef 和真实 child carrier，由 [foreground.ts](foreground.ts) 等待该准确 carrier 的实际终态；创建 accepted 不作为完成。原父 Tool call ID 收到完整 child 总结后，父 Model 才继续。同一批多个前台 Task 可以并发创建独立 child，仍服从实际 ChildSlots 和父工具集合／权限交集。大正文核原 carrier 的准确 Artifact scope、完整 UTF-8 和大小，再发布到当前 Tool scope；不截断或复制整个 child 历史。

@@ -59,7 +59,7 @@ icacls.exe $electronDist /grant '*S-1-15-2-2:(OI)(CI)(RX)' /T
 
 该权限让其他受限应用包也能读取这些公开运行资源，不授予写入权限。范围只包含这份 npm Electron 发行目录；开发应用目录、Profile、数据库和正式候选仍按原私有 ACL 契约校验，不应扩大授权或关闭浏览器沙箱。重新安装或切换 Electron 版本后，按实际新目录重新核对。
 
-`tui:dev` 与 `desktop:dev` 默认使用普通用户界面，开发运行不自动启用测试诊断。TUI 自动化可明确加 `--test-ui-diagnostics`，或调用可信 host 的 `testDiagnostics:true`；Desktop 测试通过明确 builder／组件参数开启，普通命令不启用。测试诊断只影响展示，原权限、scope、未知结果和制品校验不变。
+`tui:dev`、`desktop:dev` 与正式客户端强制使用普通用户界面，测试专用调试功能不得在 dev／prod 出现。TUI 公开参数拒绝 `--test-ui-diagnostics`；自动化只能从测试目录的入口向可信 host 显式传 `testDiagnostics:true`。Desktop 开发和普通正式 renderer 的构建常量固定为 false，传入组件参数也不能开启；DOM fixture 或单独测试制品可以显式启用。共享 UI 不以 `NODE_ENV` 等环境名自动开启诊断。测试诊断只影响展示，原权限、scope、未知结果和制品校验不变。
 
 `npm run agent`、`npm run tui`、`npm run desktop` 仍选择正式候选。首次运行这组命令，先执行 `npm run release:build`，再执行 `npm run release:build -- --product native` 生成 Desktop 候选。缺失候选时分别返回 `terminal_bundle_unavailable`／`native_bundle_unavailable` 和准备命令，未通过完整验证时不进入 Profile。源码变化不会自动更新候选；需要重新生成时，先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。构建不覆盖正在使用或已有的目录。
 

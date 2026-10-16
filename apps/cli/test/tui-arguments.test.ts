@@ -1,19 +1,24 @@
 import { expect, test } from 'bun:test';
 import { parseTUIArguments } from '../host/tui-arguments';
 
-test('test diagnostics is an explicit presentation flag, with strict duplicate and argument checks', () => {
-  expect(parseTUIArguments(['--test-ui-diagnostics', '--thread', 's'])).toEqual({
-    kind: 'tui',
-    testDiagnostics: true,
-    thread: 's',
-  });
-  expect(parseTUIArguments([])).toEqual({ kind: 'tui' });
-  expect(() => parseTUIArguments(['--test-ui-diagnostics', '--test-ui-diagnostics'])).toThrow(
-    'invalid_tui_arguments',
-  );
-  expect(() => parseTUIArguments(['--test-ui-diagnostics', 'true'])).toThrow(
-    'invalid_tui_arguments',
-  );
+test('ordinary TUI arguments reject test diagnostics in every environment', () => {
+  for (const environment of ['development', 'production', 'test']) {
+    const previous = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = environment;
+      expect(parseTUIArguments([])).toEqual({ kind: 'tui' });
+      for (const argv of [
+        ['--test-ui-diagnostics'],
+        ['--test-ui-diagnostics', '--thread', 's'],
+        ['--test-ui-diagnostics', '--test-ui-diagnostics'],
+        ['--test-ui-diagnostics', 'true'],
+      ])
+        expect(() => parseTUIArguments(argv)).toThrow('invalid_tui_arguments');
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous;
+    }
+  }
 });
 
 test('development TUI arguments are pure, closed and do not invent authority or endpoints', () => {

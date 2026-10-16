@@ -69,7 +69,7 @@ for (const name of desktopBundledDependencies) {
 }
 await mkdir(outdir, { recursive: true });
 const result = await Bun.build({
-  entrypoints: [join(source, 'index.ts')],
+  entrypoints: [join(source, 'index.ts'), join(source, 'markdown-parser.ts')],
   target: 'browser',
   packages: 'bundle',
   external: [

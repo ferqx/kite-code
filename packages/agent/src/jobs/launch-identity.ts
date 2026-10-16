@@ -8,7 +8,7 @@ import {
   lstatSync,
   openSync,
   readdirSync,
-  readFileSync,
+  readSync,
   realpathSync,
   rmSync,
 } from 'node:fs';
@@ -35,20 +35,34 @@ export function launchIdentity(path: string, file = false): LaunchIdentity {
     );
     try {
       const opened = fstatSync(fd, { bigint: true });
-      if (opened.dev !== stat.dev || opened.ino !== stat.ino || !opened.isFile())
-        throw Error('confined_launch_changed');
-      const bytes = readFileSync(fd);
+      const unchanged = (current: BigIntStats) =>
+        current.isFile() &&
+        current.dev === opened.dev &&
+        current.ino === opened.ino &&
+        current.mode === opened.mode &&
+        current.size === opened.size &&
+        current.mtimeNs === opened.mtimeNs &&
+        current.ctimeNs === opened.ctimeNs;
+      if (!opened.isFile() || !unchanged(stat)) throw Error('confined_launch_changed');
+      // One call-local buffer bounds native allocation even for large runtime
+      // binaries. Empty files still need a one-byte read to observe actual EOF.
+      const capacity = opened.size > 1048576n ? 1048576 : Math.max(1, Number(opened.size));
+      const scratch = Buffer.allocUnsafe(capacity);
+      const hash = createHash('sha256');
+      let bytes = 0n;
+      for (;;) {
+        const count = readSync(fd, scratch, 0, scratch.length, null);
+        if (count === 0) break;
+        bytes += BigInt(count);
+        // Never chase a growing file indefinitely or accept its changed prefix.
+        if (bytes > opened.size) throw Error('confined_launch_changed');
+        hash.update(scratch.subarray(0, count));
+      }
       const after = fstatSync(fd, { bigint: true });
       const current = lstatSync(canonical, { bigint: true });
-      if (
-        after.size !== BigInt(bytes.length) ||
-        after.mtimeNs !== opened.mtimeNs ||
-        after.ctimeNs !== opened.ctimeNs ||
-        current.dev !== after.dev ||
-        current.ino !== after.ino
-      )
+      if (bytes !== opened.size || !unchanged(after) || !unchanged(current))
         throw Error('confined_launch_changed');
-      digest = createHash('sha256').update(bytes).digest('hex');
+      digest = hash.digest('hex');
     } finally {
       closeSync(fd);
     }

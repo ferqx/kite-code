@@ -2281,7 +2281,7 @@ export class AgentClient {
     const workspaceId = options.workspaceId,
       rootSessionId = options.rootSessionId,
       signal = options.signal;
-    for (;;) {
+    for (let attempt = 0; ; attempt++) {
       const items: import('./generated/api').BackgroundExecutionItem[] = [],
         seen = new Set<string>();
       let afterSeq: string | undefined,
@@ -2309,7 +2309,25 @@ export class AgentClient {
         }
       } catch (error) {
         signal?.throwIfAborted();
-        if (!(error instanceof ClientError) || error.code !== 'directory_changed') throw error;
+        if (!(error instanceof ClientError) || error.code !== 'directory_changed' || attempt >= 2)
+          throw error;
+        // A hot Store must not keep one finite directory read retrying forever.
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
+            reject(signal?.reason);
+          };
+          const timer = setTimeout(
+            () => {
+              signal?.removeEventListener('abort', abort);
+              resolve();
+            },
+            25 * (attempt + 1),
+          );
+          signal?.addEventListener('abort', abort, { once: true });
+          if (signal?.aborted) abort();
+        });
       }
     }
   }

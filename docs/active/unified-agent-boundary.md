@@ -2,7 +2,7 @@
 
 状态：active
 
-客户端测试诊断只控制展示。正式与开发 TUI 的 `--test-ui-diagnostics`、可信组件／host 的 `testDiagnostics`，以及 Native builder 的显式 renderer 常量都默认关闭；不从环境名、业务正文或 fixture 名称取得资格。它们不改变公共请求、身份、原申请持久化、审批与取消权，也不跳过制品完整验证。普通界面仍保未知／失败／未确认清理、完整业务结果和用户明确的原内容检查；移植原 Ink 的纯 Header／Footer／面板不能恢复旧 provider 或执行 authority。负责实现归 [TUI](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)与 [Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
+客户端测试专用的调试入口、诊断展示和辅助控件只允许由隔离测试夹具或明确测试制品开启，dev 与 prod 客户端必须关闭。公开启动参数、环境变量、URL 或环境名不提供开启资格；TUI 普通入口拒绝 `--test-ui-diagnostics`，Native 的开发与正式 renderer 将测试常量固定为 false，组件传入 true 也不能覆盖该值。测试目录的入口可向可信 host 显式传 `testDiagnostics:true`，测试 Native 可单独构建诊断制品；共享 Desktop context 默认关闭，不再按 `NODE_ENV=development` 增加技术详情。测试诊断只控制展示，不改变公共请求、身份、原申请持久化、审批与取消权，也不跳过制品完整验证。普通界面仍保未知／失败／未确认清理、完整业务结果和用户明确的原内容检查；移植原 Ink 的纯 Header／Footer／面板不能恢复旧 provider 或执行 authority。负责实现归 [TUI](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)与 [Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
 
 [Agent 权限模块](../../packages/agent/src/permissions/README.md)统一默认三策略、执行与 Workflow 共用的 builtin effect 分类、计划/Workflow/恢复审批约束、默认 Task 后续汇报许可，以及 Shell 命令分析、摘要和最终批准范围。Service 只装配可信事实与执行工厂、处理公开接口和身份；原 Loop/Execution 接口与审批生命周期保持。默认 after-turn 判定由 Agent 核原 role/source/root work、取消／删除和当前信任，Service 只提供可信读取；Planning 装配直接调用 Agent 工厂和原状态 reader，旧单次转发层退役。静态边界检查沿真实 export/barrel 拒绝权限模块反向依赖 Service，并拒绝 Service 自有解析依赖及原策略／范围／after-turn／Planning 工厂实现；Core／SQL 的激活、报告应用及最终 CAS 保独立 owner，正式制品仍须验证实际 Agent entry 与资产闭包。
 
@@ -91,6 +91,16 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 正式 Native 已复用 [UI 的原桌面展示层](../../packages/ui/README.md#原桌面展示层)，SessionPage、侧栏、消息区、输入框、右侧栏与样式由纯展示 owner 维护；[Desktop adapter](../../apps/desktop/src/native-presentation.ts)只映射实际公共事实。有限宿主 slot 接原完整正文与写入回调，打开右侧工具不卸载消息区。旧 Host/Runtime/私有存储没有迁入此层。声明的 CSS export 必须解析到实际仓库资产，缺失、越界与旧目标仍拒绝；CSS 不作为 TypeScript 执行模块，实际编译资产闭包另由候选 manifest 和窗口验收证明。显式 UI 构建脚本属于 I/O 宿主，UI source 经 export/import 到达该脚本时仍按便携依赖检查；不存在整个 UI workspace 的 I/O 豁免。
 
 原 PC 环境信息卡与只读 child 详情复用已有后台 reader／durable caller。全局总览与当前根环境各持独立 Main 观察；环境范围来自实际 controller snapshot，renderer 的有限 surface 不提供根／Session／路径。选中根变化释放环境 GET 和旧停止资格，全局观察保持；目录刷新不扩大已固定 child 日志读取范围。展示缓存不持 observation 或原提交意图，子详情不改变 Main 阅读根、不恢复写权，准确 stop 与完整正文核验仍沿[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。observer reset 取消旧全局目录 GET 时，所有共同等待者得到明确观察失效，页面等待新状态；真实 GET 失败不被吞掉。
+
+活动 Native child 阅读复用全局 change 失效信号，不建立第二条执行流。有限私有游标只描述同 context selection 中已验证的完整消息前缀；Main 重核当前父范围和子绑定，变化时全量回退，每次尾部仍有固定上界和完整 EOF／hash 核验。重进与显式刷新完整校准，缓存不能替代当前父目录对子成员的确认。主子切换只取消所属 GET／IPC lease并拒迟到发布，暂停隐藏父阅读，不提交取消任务；有界缓存只持展示数据，不保留活跃订阅、隐藏DOM或操作资格。公开 Service／Core API 与持久格式保持。
+
+多个根并发时，全局SSE和ACK保持完整，当前根失效路由与全局目录修订分开。Main已验证目录的后代Session索引仅选择需要重读的事实，不授读取或停止权；新Session创建保守重核当前环境，换根／reset清除。Controller替换选择时取消旧GET链，Renderer state仅有一个在途和一个最新后继，共享目录的child等待可独立取消。同选择metadata刷新不撤销既有只读范围，原metadata／EOF写门禁仍独立；完整后台目录持续变更最多3次扫描后明确失败，不无限保留读取。
+
+Native在已验证Model正文发布前，可由静态Worker运行UI公开固定Markdown纯计算；不读取业务数据或获得网络、文件、执行权限。准确原文／任务身份、有限队列及当前display owner隔离计算，HTTP／IPC EOF资源在计算前释放；新formatted批完成前保留旧已验证正文。主线程继续原HTML／图片／链接安全处理，prepared树不能授正文读取或写入资格。超全局语法缓存预算的树只归活动展示批，inactive snapshot缓存不成为其长期owner；参数及实际窗口资格归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
+
+正文取消信号从Runtime的中立Artifact端口传递到原Artifact reader，排队取消不查询Store；它不成为业务取消。Artifact保留8个活动操作并限制读取占用，额外接纳受票据数和已知排队载荷预算约束；close排空此前接受的工作，超载只返回可重试错误，不取得Model重放权。引用授权、EOF／hash／size和不可变文件核实保持，参数、惰性source计量限制与真实压力证据分别归[Artifact](../../packages/agent/src/artifacts/README.md)及[Service](../../apps/service/README.md#多主子会话流与读取压力)。
+
+Task carrier成功继续要求原child的attached效果域结算，child Model／Run已结束不代表排队或运行中的Shell已结束。Runtime在该边界用可信Store的准确owner／carrier快照与同事务cursor等待原变更，detached保持独立，最终成功／unknown仍由原SQLite事务复核。准确持久取消与本地读取／计算中断分别处理，不以信号本身伪造已停止，不重新执行Model或Shell；负责合同及修复验证归[Task](../../packages/agent/src/extensions/task/README.md)与[child Store](../../packages/agent/src/storage/sqlite/child/README.md)。
 
 全局 PC 目录复用原 Sidebar 展示，公共 `session_directory_activity` 从同 Store／主体的只读事务提供准确 Run／pending 和已封存事件时间。SDK 只有穷尽同 upper／snapshotCursor 后才发布，变化丢弃前缀、持续变化明确失败；没有新增 Store schema 或第二个运行索引。Native 全局读取与选中会话正文／草稿分别管理，SSE 只触发 GET，迟到读取按原 attach／Store／epoch 拒绝，失败保上次目录并标明。没有目录事实时不从当前选择推造其他会话状态，目录成功不 ACK 或授予执行／审批权；owner 见[Store](../../packages/agent/src/storage/README.md#目录分页)、[Client](../../packages/client/README.md#完整目录读取)与[Native](../../apps/desktop/README.md#native-项目会话目录)。
 

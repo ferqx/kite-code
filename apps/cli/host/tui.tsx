@@ -185,7 +185,7 @@ export interface TUIHostOptions {
   exitSignal?: AbortSignal;
   /** Private host test hook, never stdout bootstrap or public token. */
   onLaunched?: (value: { pid: number }) => void;
-  /** Explicit renderer option, also selected by the dedicated test UI argument. */
+  /** Trusted fixture renderer option; ordinary development and installed argv cannot enable it. */
   testDiagnostics?: boolean;
 }
 /** Native composition only; no Loop or Provider implementation. */

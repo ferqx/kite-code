@@ -515,3 +515,176 @@ test('an authenticated observed descendant Job uses the original actual Session 
   expect(posts).toBe(1);
   expect(lookups).toBe(1);
 });
+
+test('live child tail reuses only stable verified rows and resets on context replacement', async () => {
+  const item = backgroundItem(1, true),
+    f = fixture([item]);
+  const rows = [
+    {
+      id: 'stable',
+      sessionId: 'child',
+      runId: 'original-child-run',
+      seq: '1',
+      status: 'complete' as const,
+      role: 'user' as const,
+      content: 'stable',
+    },
+    {
+      id: 'active',
+      sessionId: 'child',
+      runId: 'original-child-run',
+      seq: '2',
+      status: 'incomplete' as const,
+      role: 'assistant' as const,
+      content: 'first',
+    },
+  ];
+  let context = 'context';
+  const after: string[] = [];
+  f.port.getView = async () =>
+    ({
+      storeId: 'store',
+      session: { ...item.childSession!, contextSelectionId: context, nextSeq: '2' },
+    }) as never;
+  f.port.listMessages = async (_id, options) => {
+    after.push(options!.afterSeq!);
+    return structuredClone(rows.filter((row) => BigInt(row.seq) > BigInt(options!.afterSeq!)));
+  };
+  const read = async (previous?: Awaited<ReturnType<typeof readNativeBackgroundChild>>) => {
+    const page = await f.environment.open(crypto.randomUUID());
+    f.environment.close(page.readId);
+    return readNativeBackgroundChild({
+      bridge: f.bridge,
+      generation: 1,
+      storeId: 'store',
+      observationId: page.observationId,
+      item,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+      environment: { rootSessionId: 'root', viewSelection: 1 },
+      incremental: !!previous,
+      previous,
+    });
+  };
+  try {
+    const initial = await read();
+    rows[1]!.content = 'second prefix';
+    const updated = await read(initial);
+    expect(after).toEqual(['0', '1']);
+    expect(updated.messages.map((row) => row.content)).toEqual(['stable', 'second prefix']);
+    context = 'new-context';
+    rows[0]!.content = 'replaced stable';
+    const replaced = await read(updated);
+    expect(after).toEqual(['0', '1', '0']);
+    expect(replaced.messages[0]!.content).toBe('replaced stable');
+  } finally {
+    f.environment.release();
+  }
+});
+
+test('selected live child accepts a newer verified active Model prefix without declaring the message complete', async () => {
+  const item = backgroundItem(1, true),
+    f = fixture([item]);
+  const content = 'updated 中文🙂 prefix';
+  const output = { complete: false, content, reasoning: '', toolCalls: [] };
+  const snapshot: ModelOutputSnapshot = {
+    storeId: 'store',
+    sessionId: 'child',
+    rootSessionId: 'root',
+    runId: 'original-child-run',
+    executionId: 'child-model',
+    originCommandId: 'child-start-job-1',
+    rootWorkCommandId: 'start',
+    rootWorkSeq: '1',
+    attempt: 1,
+    status: 'running',
+    snapshotCursor: '1',
+    bodyHash: createHash('sha256').update(JSON.stringify(output)).digest('hex'),
+    bodyBytes: String(Buffer.byteLength(JSON.stringify(output))),
+    contentBytes: String(Buffer.byteLength(content)),
+    reasoningBytes: '0',
+    output,
+  };
+  f.port.getView = async () =>
+    ({ storeId: 'store', session: { ...item.childSession!, nextSeq: '1' } }) as never;
+  f.port.listMessages = async () => [
+    {
+      id: 'active',
+      sessionId: 'child',
+      runId: 'original-child-run',
+      seq: '1',
+      status: 'incomplete',
+      role: 'assistant',
+      content: 'old',
+      outputBody: {
+        kind: 'model_output',
+        executionId: 'child-model',
+        complete: false,
+        contentBytes: '3',
+        reasoningBytes: '0',
+        toolCallCount: 0,
+      },
+    },
+  ];
+  f.port.getModelOutput = async () => snapshot;
+  try {
+    const directory = await f.environment.open('live-directory');
+    f.environment.close(directory.readId);
+    const body = await readNativeBackgroundChild({
+      bridge: f.bridge,
+      generation: 1,
+      storeId: 'store',
+      observationId: directory.observationId,
+      item,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+      environment: { rootSessionId: 'root', viewSelection: 1 },
+    });
+    expect(body.messages[0]!.content).toBe(content);
+    expect(body.messages[0]!.status).toBe('incomplete');
+    expect(body.messages[0]!.outputBody!.contentBytes).toBe(snapshot.contentBytes);
+    expect(body.modelOutputs[0]!.snapshot.output.complete).toBe(false);
+    const fixed = await f.main.open('fixed-directory');
+    f.main.close(fixed.readId);
+    await expect(
+      readNativeBackgroundChild({
+        bridge: f.bridge,
+        generation: 1,
+        storeId: 'store',
+        observationId: fixed.observationId,
+        item,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+      }),
+    ).rejects.toMatchObject({ code: 'background_child_history_mismatch' });
+  } finally {
+    f.environment.release();
+    f.main.release();
+  }
+});
+
+test('incremental child IPC cursor is environment-only, exact and bounded', () => {
+  const request = {
+    method: 'background.child.open' as const,
+    generation: 1,
+    observationId: 1,
+    executionId: 'job-1',
+    readId: 'read',
+    surface: 'environment' as const,
+    cursor: { afterSeq: '1', contextSelectionId: 'context' },
+  };
+  expect(decodeNativeRequest(request)).toEqual(request);
+  expect(() => decodeNativeRequest({ ...request, surface: undefined })).toThrow(
+    'invalid_native_request',
+  );
+  for (const cursor of [
+    { afterSeq: '-1', contextSelectionId: 'context' },
+    { afterSeq: '9223372036854775808', contextSelectionId: 'context' },
+    { afterSeq: '1', contextSelectionId: '' },
+    { afterSeq: '1', contextSelectionId: 'context', extra: true },
+  ])
+    expect(() => decodeNativeRequest({ ...request, cursor })).toThrow('invalid_native_request');
+  expect(() => decodeNativeRequest({ ...request, method: 'background.output.open' })).toThrow(
+    'invalid_native_request',
+  );
+});

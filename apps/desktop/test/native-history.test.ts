@@ -198,3 +198,214 @@ test('Native switching away from an unfinished recalibration restores only the l
   await new Promise((resolve) => setTimeout(resolve, 5));
   expect(value.messages).toEqual([original]);
 });
+
+test('Native attach generation and history epoch changes discard same-session and inactive snapshots', async () => {
+  for (const change of ['generation', 'epoch'] as const) {
+    let blocked = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const bridge = {
+      async request(request) {
+        if (request.method === 'messages.close') return null;
+        if (request.method !== 'messages') throw Error('unexpected');
+        if (blocked) await gate;
+        return {
+          messages: [{ id: request.sessionId, sessionId: request.sessionId, seq: '1' }],
+          highWaterSeq: '1',
+          nextAfterSeq: null,
+        };
+      },
+    } as NativeBridge;
+    const reader = new NativeHistory(bridge, () => {});
+    reader.select(1, selection('inactive', '1'));
+    await until(() => reader.state.phase === 'complete');
+    reader.preview('active');
+    reader.select(1, selection('active', '1'));
+    await until(() => reader.state.phase === 'complete');
+    blocked = true;
+    reader.select(
+      change === 'generation' ? 2 : 1,
+      selection('active', '1'),
+      change === 'epoch' ? 1 : 0,
+    );
+    expect(reader.state.messages).toEqual([]);
+    reader.preview('inactive');
+    expect(reader.state.messages).toEqual([]);
+    reader.dispose();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reader.state.messages).toEqual([]);
+  }
+});
+
+test('Native confirmed Store removal clears published and inactive history and rejects a pending old page', async () => {
+  let blocked = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const closed: string[] = [];
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') {
+        closed.push(request.readId);
+        return null;
+      }
+      if (request.method !== 'messages') throw Error('unexpected');
+      if (blocked) await gate;
+      return {
+        messages: [{ id: request.sessionId, sessionId: request.sessionId, seq: '1' }],
+        highWaterSeq: '1',
+        nextAfterSeq: null,
+      };
+    },
+  } as NativeBridge;
+  let publications = 0;
+  const reader = new NativeHistory(bridge, () => publications++);
+  reader.select(1, selection('inactive', '1'));
+  await until(() => reader.state.phase === 'complete');
+  reader.preview('active');
+  reader.select(1, selection('active', '1'));
+  await until(() => reader.state.phase === 'complete');
+  reader.evictStore('foreign');
+  expect(reader.state.messages[0]?.id).toBe('active');
+  blocked = true;
+  reader.select(1, { ...selection('active', '1'), viewGeneration: 2 });
+  reader.evictStore('store');
+  expect(reader.state.messages).toEqual([]);
+  reader.preview('inactive');
+  expect(reader.state.messages).toEqual([]);
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(reader.state.messages).toEqual([]);
+  expect(closed.length).toBeGreaterThan(0);
+  reader.clear();
+  reader.dispose();
+  const afterDispose = publications;
+  reader.select(1, selection('active', '1'));
+  reader.preview('inactive');
+  expect(reader.state.messages).toEqual([]);
+  expect(publications).toBe(afterDispose);
+});
+
+test('Native close pauses only history and same-revision selection resumes full calibration', async () => {
+  let reads = 0;
+  let block = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      const read = ++reads;
+      if (block) await gate;
+      return {
+        messages: [{ id: 'm', sessionId: 's', seq: '1', content: `read-${read}` }],
+        highWaterSeq: '1',
+        nextAfterSeq: null,
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  const current = selection('s', '1');
+  reader.select(1, current);
+  await until(() => reader.state.phase === 'complete');
+  reader.select(1, current);
+  expect(reads).toBe(1);
+  reader.close();
+  expect(reader.state.messages[0]?.content).toBe('read-1');
+  block = true;
+  reader.select(1, current);
+  expect(reads).toBe(2);
+  expect(reader.state.messages[0]?.content).toBe('read-1');
+  reader.close();
+  block = false;
+  reader.select(1, current);
+  await until(() => reader.state.phase === 'complete');
+  expect(reads).toBe(3);
+  expect(reader.state.messages[0]?.content).toBe('read-3');
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(reader.state.messages[0]?.content).toBe('read-3');
+  reader.dispose();
+});
+
+test('Native same-high-water full calibration replaces vanished records only at EOF, while failure preserves prior reading beyond its prefix', async () => {
+  for (const failed of [false, true]) {
+    const original = { id: 'first', sessionId: 's', seq: '1', content: 'old body' } as Message;
+    const removed = {
+      id: 'removed',
+      sessionId: 's',
+      seq: '2',
+      content: 'previous tail',
+    } as Message;
+    const updated = { ...original, content: 'rewritten body at the same seq' };
+    let recalibrating = false;
+    let entered = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const bridge = {
+      async request(request) {
+        if (request.method === 'messages.close') return null;
+        if (request.method !== 'messages') throw Error('unexpected');
+        if (!recalibrating)
+          return { messages: [original, removed], highWaterSeq: '2', nextAfterSeq: null };
+        if (request.afterSeq === '0')
+          return { messages: [updated], highWaterSeq: '2', nextAfterSeq: '1' };
+        entered = true;
+        await gate;
+        if (failed) throw Error('last_page_failed');
+        return { messages: [], highWaterSeq: '2', nextAfterSeq: null };
+      },
+    } as NativeBridge;
+    const reader = new NativeHistory(bridge, () => {});
+    reader.select(1, selection('s', '2'));
+    await until(() => reader.state.phase === 'complete');
+    recalibrating = true;
+    reader.select(1, { ...selection('s', '2'), viewGeneration: 2 });
+    await until(() => entered);
+    expect(reader.state.messages).toEqual([original, removed]);
+    release();
+    await until(() => reader.state.phase === (failed ? 'unavailable' : 'complete'));
+    expect(reader.state.messages).toEqual(failed ? [updated, removed] : [updated]);
+    reader.dispose();
+  }
+});
+
+test('Native context selection changes recalibrate the complete session timeline rather than filtering it to the new Model context', async () => {
+  const original = {
+    id: 'first',
+    sessionId: 's',
+    seq: '1',
+    content: 'old context turn',
+  } as Message;
+  let reads = 0;
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      reads++;
+      return { messages: [original], highWaterSeq: '1', nextAfterSeq: null };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  const initial = selection('s', '1');
+  reader.select(1, { ...initial, session: { ...initial.session, contextSelectionId: 'before' } });
+  await until(() => reader.state.phase === 'complete');
+  reader.select(1, {
+    ...initial,
+    viewGeneration: 2,
+    session: { ...initial.session, contextSelectionId: 'after-rewind' },
+  });
+  expect(reader.state.messages).toEqual([original]);
+  await until(() => reader.state.phase === 'complete');
+  expect(reader.state.messages).toEqual([original]);
+  expect(reads).toBe(2);
+  reader.dispose();
+});

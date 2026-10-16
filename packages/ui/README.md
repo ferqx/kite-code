@@ -1,6 +1,6 @@
 # UI
 
-当前 TUI 复用原 Ink 展示，输入、消息／工具阅读、审核和管理面板经公共 Server port 接入；功能迁移、普通模式与显式测试诊断由[终端 owner](src/tui/README.md#原-ink-展示与明确测试诊断)维护。Desktop 的[诊断展示 context](src/desktop/diagnostics.tsx)允许 Native 明确传入 false／true，回复失败详情与客户端面板共用该值；未指定的现有 Web 消费者保原环境行为，不扩大控制权限。
+当前 TUI 复用原 Ink 展示，输入、消息／工具阅读、审核和管理面板经公共 Server port 接入；功能迁移、普通模式与显式测试诊断由[终端 owner](src/tui/README.md#原-ink-展示与明确测试诊断)维护。Desktop 的[诊断展示 context](src/desktop/diagnostics.tsx)默认 false，回复失败技术详情与客户端面板只按显式测试值显示，不从 `NODE_ENV=development` 等环境名推断。dev／prod 客户端不得开启测试专用调试功能，测试 fixture 可显式提供 true；Native 另外执行构建常量的关闭门禁，见[Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)。这份展示开关不扩大控制权限。
 
 ## 原桌面展示层
 
@@ -94,6 +94,16 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 `ModelOutputMessage` 消费公开 `Message.outputBody`，默认明确显示有限预览，不把预览声称为完整输出。宿主可提供 `onRead({sessionId,executionId,signal})`；该 reader 必须先通过公共 Client 的完整 EOF、SHA、UTF-8 与正文验证，再返回 `ModelOutputSnapshot`。组件复核原 Store、Session、Run、Execution、完整性与正文长度；只在当前视图保存已读全文。显式关闭、隐藏、身份/预览更新或卸载会 abort 所属读取并清除全文，迟到结果不能显示。缺 reader 时预览仍可读，全文按钮禁用；失败不展示半正文。原完整 Tool calls 需用户展开，不完整前缀不显示完整调用。原 reasoning 缺省不展示；只有明确诊断宿主设置 `showReasoning` 才提供展开入口，普通会话阅读不启用。
 
 `onContent` 只通知当前已显示的完整正文，回到预览时通知 `undefined`，供宿主准确复制；组件不拥有网络关闭或 Runtime 取消。[Model output DOM 测试](test/model-output.test.tsx) 验证超过 17 MiB 的完整尾部、显式读取、single flight、关闭/身份变化/隐藏的 abort 与 late 隔离、缺 reader、身份冲突和不完整前缀。它建立 React/JSDOM 证据，不代表真实浏览器、Electron 或 TUI 资格。
+
+宿主已经完成公共 Client 的 EOF／SHA／UTF-8 验证时，可直接提供 `verifiedSnapshot`，组件仍核同一 Store／Session／Run／Execution、complete、正文／reasoning字节数和toolCalls，再呈现原正文或已保存的未完成前缀。关闭后可本地重开，不重复下载；宿主替换 snapshot、暂停、身份替换和卸载均撤销旧读取。该 prop 不接受未验证 transport 数据，也不赋予组件网络或执行权。
+
+桌面 `SessionPage` 的[阅读状态缓存](src/desktop/reading-state.ts)只保存滚动与展开数据，最多32项、256KiB估算载荷、每项512个展开ID；保存时裁剪当前消息中已不存在的展开项。`Conversation`一次建立各轮运行工具和thinking集合，避免每轮重扫全部消息。切换仍卸载原消息DOM和effect，不保活全部会话树；[阅读缓存回归](test/desktop-reading-state.test.ts)核容量、淘汰和裁剪。
+
+`Conversation` 的消息区使用局部原生滚动viewport，保留原outer／viewport／reading-column、region／ARIA、细滚动条和gutter；自动跟随、手动阅读位置与跳到最新保持。真实多会话窗口曾保留13棵旧消息树，heap引用链为Document动画controller→RAF callback→旧viewport；对应原Radix ScrollAreaThumb滚动后立即卸载时遗漏持续RAF清理。因此消息区不再挂载该thumb，不修改其他ScrollArea消费者或全局RAF。[滚动生命周期回归](test/isolated/desktop-conversation-scroll.test.tsx)执行100轮滚动后立即卸载，核自有RAF、ResizeObserver与keydown监听释放，并核跟随／手动位置／跳最新；实际窗口DOM与heap证据归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
+
+Desktop `MessageContent` 的固定 GFM parser 复用[纯语法树缓存](src/desktop/markdown-parse-cache.ts)，最多32项、8MiB估算总量、单项2MiB，原文本 key 与树数据均计入。每次管线取得独立克隆，后续转换不能污染缓存；只保存语法数据，不持有 React、processor、文件回调或操作范围。超预算正文仍完整解析与显示，HTML、图片与链接安全门禁不变。[语法缓存回归](test/desktop-markdown-cache.test.tsx)核淘汰、污染隔离、安全GFM和超预算全文；真实窗口响应测量归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
+
+纯子路径 `@kite-ai/ui/desktop/markdown` 公开 `parseDesktopMarkdown` 固定语法计算，compiled desktop build同时生成 `markdown-parser.js`，Worker不经UI组件barrel。`PreparedDesktopMarkdown` 是展示数据；`MessageContent.preparedMarkdown` 只在其原文与当前text准确相等时克隆该树，后续仍经过原react-markdown的HTML／图片／链接安全处理，错配回原parser；不接受树数据作为任何业务权限。`ModelOutputMessage.renderText` 的第二个可选参数只交当前复核通过的snapshot，既有单参数回调保持兼容。Native拥有Worker静态资产、纯实体decoder解析、调度、取消与活动树生命周期，UI compiled入口不内置Vite专用Worker路径；[prepared回归](test/desktop-markdown-cache.test.tsx)核准确原文、管线隔离、安全结构和超全局预算全文。
 
 正文身份的序列化按原八项输入 memo：Store、restored-origin 资格、Session、Run、Message、originMessage、outputBody 与 content。相同身份的普通 render 不重复序列化完整正文，任一原字段变化仍触发原 identity 清理；callbacks 更新、suspension、abort、完整 snapshot 门禁和复制撤销不变。原完整 Model output DOM 文件6pass／40断言通过，源码 token 核对仅新增 memo wrapper 与 import；当前完整 Native 历史窗口资格仍归 Desktop owner 和[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
 

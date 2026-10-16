@@ -62,7 +62,7 @@ const item = (id: string, seq: string) => ({
 });
 let restore: () => void = () => {};
 afterEach(() => restore());
-function fixture(mode: string) {
+function fixture(mode: string, onConflict?: () => void) {
   let scans = 0;
   const queries: string[] = [];
   const transport = Object.assign(
@@ -72,7 +72,13 @@ function fixture(mode: string) {
       queries.push(url.search);
       const after = url.searchParams.get('afterSeq');
       if (!after) scans++;
-      if (after && mode === 'retry' && scans === 1)
+      if (
+        after &&
+        ((mode === 'retry' && scans === 1) ||
+          mode === 'always-retry' ||
+          (mode === 'third' && scans < 3))
+      ) {
+        onConflict?.();
         return Response.json(
           {
             code: 'directory_changed',
@@ -83,6 +89,7 @@ function fixture(mode: string) {
           },
           { status: 409 },
         );
+      }
 
       const value = {
         storeId: 'store',
@@ -92,7 +99,7 @@ function fixture(mode: string) {
         nextAfterSeq: after ? null : '9007199254740993',
         items: [
           item(
-            after && mode !== 'duplicate' ? 'two' : 'one',
+            after && mode !== 'duplicate' ? 'two' : `one-${scans}`,
             after ? '9007199254740994' : '9007199254740993',
           ),
         ],
@@ -129,7 +136,7 @@ test('whole background scan retries from zero at a changed snapshot and retains 
   const f = fixture('retry');
   await f.client.connect();
   const result = await f.client.listAllBackgroundExecutions();
-  expect(result.map((i) => i.execution.id)).toEqual(['one', 'two']);
+  expect(result.map((i) => i.execution.id)).toEqual(['one-2', 'two']);
   expect(f.scans).toBe(2);
   expect(f.queries[1]).toContain('snapshotCursor=1');
   expect(f.queries[3]).toContain('snapshotCursor=2');
@@ -163,4 +170,34 @@ test('background scan accepts restored Job provenance under the current snapshot
   const result = await f.client.listAllBackgroundExecutions();
   expect(result).toHaveLength(2);
   expect(result.every((i) => i.execution.originStoreId === 'other')).toBe(true);
+});
+
+test('a continuously changing background directory fails after exactly three complete attempts', async () => {
+  const f = fixture('always-retry');
+  await f.client.connect();
+  await expect(f.client.listAllBackgroundExecutions()).rejects.toMatchObject({
+    code: 'directory_changed',
+  });
+  expect(f.scans).toBe(3);
+  expect(f.queries).toHaveLength(6);
+});
+
+test('the third background attempt can succeed without mixing abandoned prefixes', async () => {
+  const f = fixture('third');
+  await f.client.connect();
+  const result = await f.client.listAllBackgroundExecutions();
+  expect(f.scans).toBe(3);
+  expect(result.map((entry) => entry.execution.id)).toEqual(['one-3', 'two']);
+});
+
+test('cancellation during background retry backoff performs no successor scan', async () => {
+  const abort = new AbortController();
+  const reason = Error('retired_background_view');
+  const f = fixture('always-retry', () => {
+    setTimeout(() => abort.abort(reason), 0);
+  });
+  await f.client.connect();
+  await expect(f.client.listAllBackgroundExecutions({ signal: abort.signal })).rejects.toBe(reason);
+  expect(f.scans).toBe(1);
+  expect(f.queries).toHaveLength(2);
 });

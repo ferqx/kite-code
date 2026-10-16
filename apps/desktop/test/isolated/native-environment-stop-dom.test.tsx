@@ -1,0 +1,236 @@
+import { expect, test } from 'bun:test';
+import type { BackgroundExecutionSummary } from '@kite-ai/ui/desktop';
+import { JSDOM } from 'jsdom';
+import { act } from 'react';
+import type { NativeBridge, NativeSelection } from '../../src/native-bridge';
+import { useNativeEnvironment } from '../../src/native-environment';
+import { backgroundItem } from '../background-item.fixture';
+
+const bootstrap = new JSDOM('<div/>');
+const prior = {
+  window: globalThis.window,
+  document: globalThis.document,
+  navigator: globalThis.navigator,
+};
+Object.assign(globalThis, {
+  window: bootstrap.window,
+  document: bootstrap.window.document,
+  navigator: bootstrap.window.navigator,
+});
+const { createRoot } = await import('react-dom/client');
+Object.assign(globalThis, prior);
+bootstrap.window.close();
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+function fixture() {
+  const dom = new JSDOM('<div id="root"/>');
+  const before = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  const item = backgroundItem(1, true);
+  let observation = 0,
+    opens = 0,
+    stops = 0,
+    revision = 0,
+    sessionId = 'root';
+  let heldDirectory: ReturnType<typeof deferred> | undefined,
+    heldStop: ReturnType<typeof deferred> | undefined;
+  let stopObservation: number | undefined;
+  let stopUnknown = false;
+  let click!: () => void;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    async request(request) {
+      if (request.method === 'background.open') {
+        opens++;
+        const id = ++observation,
+          wait = heldDirectory;
+        heldDirectory = undefined;
+        if (wait) await wait.promise;
+        return {
+          kind: 'background.page',
+          viewGeneration: 1,
+          viewSelection: sessionId === 'root' ? 1 : 2,
+          rootSessionId: sessionId,
+          storeId: 'store',
+          readId: request.readId,
+          observationId: id,
+          startIndex: 0,
+          nextIndex: 1,
+          total: 1,
+          complete: true,
+          entries: [{ ...item, rootSession: { ...item.rootSession, id: sessionId } }],
+        };
+      }
+      if (request.method === 'background.stop') {
+        stops++;
+        stopObservation = request.observationId;
+        if (heldStop) await heldStop.promise;
+        if (observation !== request.observationId) throw Error('background_stop_unavailable');
+        return { id: request.commandId, status: stopUnknown ? 'unknown' : 'accepted' } as never;
+      }
+      return null;
+    },
+  };
+  function Harness() {
+    const environment = useNativeEnvironment({
+      bridge,
+      generation: 1,
+      selection: {
+        viewGeneration: 1,
+        viewSelection: sessionId === 'root' ? 1 : 2,
+        storeId: 'store',
+        session: { ...item.rootSession, id: sessionId },
+        runs: [],
+        executions: [],
+        interactions: [],
+        interactionsAfterId: null,
+        canReadModelOutput: false,
+      } as NativeSelection,
+      revision,
+      unavailable: false,
+      onChanged: async () => {},
+    });
+    // Retain the previously actionable event handler, exercising an event accepted
+    // before React commits the pending-directory disabled state.
+    const card = environment.card as React.ReactElement<{
+      children: React.ReactElement<{ onStop?: (row: BackgroundExecutionSummary) => void }>[];
+    }>;
+    const handler = card?.props.children[0]?.props.onStop;
+    if (handler)
+      click = () =>
+        handler({ executionId: item.execution.id, canStop: true } as BackgroundExecutionSummary);
+    return environment.card;
+  }
+  return {
+    get opens() {
+      return opens;
+    },
+    get stops() {
+      return stops;
+    },
+    get stopObservation() {
+      return stopObservation;
+    },
+    get observation() {
+      return observation;
+    },
+    get text() {
+      return dom.window.document.body.textContent;
+    },
+    click: () => click(),
+    unknownStop() {
+      stopUnknown = true;
+    },
+    holdDirectory() {
+      heldDirectory = deferred();
+      return heldDirectory;
+    },
+    holdStop() {
+      heldStop = deferred();
+      return heldStop;
+    },
+    async render(nextRoot = sessionId) {
+      sessionId = nextRoot;
+      revision++;
+      await act(async () => root.render(<Harness />));
+    },
+    async close() {
+      await act(async () => root.unmount());
+      dom.window.close();
+      Object.assign(globalThis, before);
+    },
+  };
+}
+test('same-scope directory revisions wait for exactly one accepted stop and resume afterwards', async () => {
+  const f = fixture();
+  let hold: ReturnType<typeof deferred> | undefined;
+  try {
+    await f.render();
+    hold = f.holdStop();
+    await act(async () => f.click());
+    const opened = f.opens;
+    await f.render();
+    await f.render();
+    expect(f.opens).toBe(opened);
+    expect(f.stops).toBe(1);
+    await act(async () => hold!.resolve());
+    expect(f.text).toContain('停止请求已受理');
+    expect(f.opens).toBe(opened + 1);
+    expect(f.stops).toBe(1);
+  } finally {
+    hold?.resolve();
+    await f.close();
+  }
+});
+test('accepted stop waits for existing directory EOF and uses latest facts; navigation drops only an unsubmitted stop', async () => {
+  for (const switchScope of [false, true]) {
+    const f = fixture();
+    let hold: ReturnType<typeof deferred> | undefined;
+    try {
+      await f.render();
+      hold = f.holdDirectory();
+      await f.render();
+      await act(async () => f.click());
+      expect(f.stops).toBe(0);
+      if (switchScope) await f.render('other-root');
+      else {
+        await f.render();
+        expect(f.opens).toBe(2);
+      }
+      await act(async () => hold!.resolve());
+      expect(f.stops).toBe(switchScope ? 0 : 1);
+      if (!switchScope) expect(f.stopObservation).toBe(2);
+      else expect(f.opens).toBeGreaterThanOrEqual(3);
+    } finally {
+      hold?.resolve();
+      await f.close();
+    }
+  }
+});
+
+test('unknown or already submitted stops are never replayed and scope switching resumes its own directory', async () => {
+  for (const switchScope of [false, true]) {
+    const f = fixture();
+    let held: ReturnType<typeof deferred> | undefined;
+    try {
+      await f.render();
+      f.unknownStop();
+      held = f.holdStop();
+      await act(async () => f.click());
+      expect(f.stops).toBe(1);
+      const opened = f.opens;
+      if (switchScope) {
+        await f.render('other-root');
+        expect(f.opens).toBe(opened + 1);
+      } else {
+        await f.render();
+        expect(f.opens).toBe(opened);
+      }
+      await act(async () => held!.resolve());
+      expect(f.stops).toBe(1);
+      if (!switchScope) expect(f.text).toContain('停止结果待核实');
+      else expect(f.text).not.toContain('原停止申请');
+      await f.render();
+      expect(f.stops).toBe(1);
+      expect(f.opens).toBeGreaterThan(opened);
+    } finally {
+      held?.resolve();
+      await f.close();
+    }
+  }
+});

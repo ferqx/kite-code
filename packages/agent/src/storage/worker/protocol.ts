@@ -60,6 +60,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'getRun',
   'planExecution',
   'activateChildRun',
+  'inspectChildSettlement',
   'acceptAgentInput',
   'queueAgentMessage',
   'readAgentMessageTarget',

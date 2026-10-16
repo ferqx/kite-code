@@ -10,6 +10,8 @@ export interface ModelOutputMessageProps {
   readonly showReasoning?: boolean;
   /** The host reader independently proves the original Model Store after profile restore. */
   readonly canReadRestoredOrigin?: boolean;
+  /** Host-proved wire EOF/hash snapshot. Exact message ownership is checked again here. */
+  readonly verifiedSnapshot?: ModelOutputSnapshot;
   readonly onRead?: (input: {
     sessionId: string;
     executionId: string;
@@ -18,8 +20,37 @@ export interface ModelOutputMessageProps {
   /** Current rendered full content only; undefined means the original explicitly labeled preview. */
   readonly onContent?: (content: string | undefined) => void;
   /** Host presentation of the same preview or verified body; reading semantics stay here. */
-  readonly renderText?: (content: string) => ReactNode;
+  readonly renderText?: (content: string, verifiedSnapshot?: ModelOutputSnapshot) => ReactNode;
 }
+function validateSnapshot(
+  snapshot: ModelOutputSnapshot,
+  message: Message,
+  storeId: string,
+  canReadRestoredOrigin: boolean,
+) {
+  const body = message.outputBody;
+  const origin = message.originMessage;
+  if (
+    !body ||
+    (origin && (origin.runId === null || (origin.storeId !== storeId && !canReadRestoredOrigin))) ||
+    snapshot.storeId !== storeId ||
+    snapshot.sessionId !== (origin?.sessionId ?? message.sessionId) ||
+    snapshot.executionId !== body.executionId ||
+    snapshot.runId !== (origin?.runId ?? message.runId) ||
+    (body.complete && snapshot.status !== 'succeeded') ||
+    snapshot.output.complete !== body.complete ||
+    snapshot.contentBytes !== body.contentBytes ||
+    snapshot.reasoningBytes !== body.reasoningBytes ||
+    String(new TextEncoder().encode(snapshot.output.content).byteLength) !== body.contentBytes ||
+    String(new TextEncoder().encode(snapshot.output.reasoning).byteLength) !==
+      body.reasoningBytes ||
+    (body.complete
+      ? snapshot.output.toolCalls.length !== body.toolCallCount
+      : snapshot.output.toolCalls.length !== 0)
+  )
+    throw new ClientError('model_output_identity_conflict');
+}
+
 /** Only current-view full-body state. The host reader verifies complete wire EOF/hash before resolving. */
 export function ModelOutputMessage({
   message,
@@ -27,6 +58,7 @@ export function ModelOutputMessage({
   suspended = false,
   showReasoning = false,
   canReadRestoredOrigin = false,
+  verifiedSnapshot,
   onRead,
   onContent,
   renderText,
@@ -64,7 +96,27 @@ export function ModelOutputMessage({
   const [loaded, setLoaded] = useState<{ identity: string; snapshot: ModelOutputSnapshot }>();
   const [loading, setLoading] = useState(false),
     [error, setError] = useState<string>();
-  const full = loaded?.identity === identity && !suspended ? loaded.snapshot : undefined;
+  const admittedSnapshot = useMemo(() => {
+    if (!verifiedSnapshot || !body || body.readAvailability === 'unsupported') return undefined;
+    try {
+      validateSnapshot(verifiedSnapshot, message, storeId, canReadRestoredOrigin);
+      return verifiedSnapshot;
+    } catch {
+      return undefined;
+    }
+  }, [verifiedSnapshot, message, storeId, canReadRestoredOrigin, body]);
+  const [dismissed, setDismissed] = useState<{ identity: string; snapshot: ModelOutputSnapshot }>();
+  const full = !suspended
+    ? admittedSnapshot
+      ? dismissed?.identity === identity && dismissed.snapshot === admittedSnapshot
+        ? undefined
+        : admittedSnapshot
+      : loaded?.identity === identity
+        ? loaded.snapshot
+        : undefined
+    : undefined;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Replacing the host snapshot releases the previous body and any pending reader even when message metadata is unchanged.
   useEffect(() => {
     current.current = identity;
     if (suspended) callbacks.current.onContent?.(undefined);
@@ -72,6 +124,7 @@ export function ModelOutputMessage({
     request.current?.abort();
     request.current = undefined;
     setLoaded(undefined);
+    setDismissed(undefined);
     setLoading(false);
     setError(undefined);
     return () => {
@@ -79,11 +132,13 @@ export function ModelOutputMessage({
       request.current?.abort();
       callbacks.current.onContent?.(undefined);
     };
-  }, [identity, suspended]);
+  }, [identity, suspended, verifiedSnapshot]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new message scope must publish its content even if the host reuses the same verified snapshot object.
   useEffect(() => {
     callbacks.current.onContent?.(full?.output.content);
-  }, [full]);
+  }, [full, identity]);
   function close() {
+    if (admittedSnapshot) setDismissed({ identity, snapshot: admittedSnapshot });
     callbacks.current.onContent?.(undefined);
     generation.current++;
     request.current?.abort();
@@ -96,11 +151,16 @@ export function ModelOutputMessage({
     if (
       !body ||
       body.readAvailability === 'unsupported' ||
-      !callbacks.current.onRead ||
+      (!callbacks.current.onRead && !admittedSnapshot) ||
       suspended ||
       request.current
     )
       return;
+    if (admittedSnapshot) {
+      setDismissed(undefined);
+      setLoaded({ identity, snapshot: admittedSnapshot });
+      return;
+    }
     const origin = message.originMessage;
     if (
       origin &&
@@ -115,33 +175,18 @@ export function ModelOutputMessage({
     request.current = controller;
     setLoading(true);
     setError(undefined);
+    let accepted = false;
     try {
-      const snapshot = await callbacks.current.onRead({
+      const snapshot = await callbacks.current.onRead!({
         sessionId: origin?.sessionId ?? message.sessionId,
         executionId: body.executionId,
         signal: controller.signal,
       });
       controller.signal.throwIfAborted();
       if (version !== generation.current || current.current !== started) return;
-      if (
-        snapshot.storeId !== storeId ||
-        snapshot.sessionId !== (origin?.sessionId ?? message.sessionId) ||
-        snapshot.executionId !== body.executionId ||
-        snapshot.runId !== (origin?.runId ?? message.runId) ||
-        (body.complete && snapshot.status !== 'succeeded') ||
-        snapshot.output.complete !== body.complete ||
-        snapshot.contentBytes !== body.contentBytes ||
-        snapshot.reasoningBytes !== body.reasoningBytes ||
-        String(new TextEncoder().encode(snapshot.output.content).byteLength) !==
-          body.contentBytes ||
-        String(new TextEncoder().encode(snapshot.output.reasoning).byteLength) !==
-          body.reasoningBytes ||
-        (body.complete
-          ? snapshot.output.toolCalls.length !== body.toolCallCount
-          : snapshot.output.toolCalls.length !== 0)
-      )
-        throw new ClientError('model_output_identity_conflict');
+      validateSnapshot(snapshot, message, storeId, canReadRestoredOrigin);
       setLoaded({ identity: started, snapshot });
+      accepted = true;
     } catch (cause) {
       if (
         version === generation.current &&
@@ -151,14 +196,17 @@ export function ModelOutputMessage({
         setError(cause instanceof ClientError ? cause.code : 'model_output_unavailable');
     } finally {
       if (version === generation.current && current.current === started) {
-        request.current = undefined;
+        if (!accepted) {
+          controller.abort();
+          request.current = undefined;
+        }
         setLoading(false);
       }
     }
   }
   const render = (content: string) =>
     renderText ? (
-      <div className="message-markdown">{renderText(content)}</div>
+      <div className="message-markdown">{renderText(content, full)}</div>
     ) : (
       <SafeMessageMarkdown content={content} />
     );
@@ -186,7 +234,12 @@ export function ModelOutputMessage({
       {!full && (
         <button
           type="button"
-          disabled={!onRead || suspended || loading || body.readAvailability === 'unsupported'}
+          disabled={
+            (!onRead && !admittedSnapshot) ||
+            suspended ||
+            loading ||
+            body.readAvailability === 'unsupported'
+          }
           onClick={() => void read()}
         >
           Read complete recorded Model output
@@ -197,7 +250,7 @@ export function ModelOutputMessage({
           Close full Model output
         </button>
       )}
-      {!onRead && <p>Full Model output reader unavailable</p>}
+      {!onRead && !full && <p>Full Model output reader unavailable</p>}
       {body.readAvailability === 'unsupported' && (
         <p>Full body unavailable · unsupported original content format</p>
       )}

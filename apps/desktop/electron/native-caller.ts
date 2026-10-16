@@ -107,6 +107,7 @@ export class NativeCaller {
   private readonly background: NativeBackground;
   private readonly environment: NativeBackground;
   private environmentRevision = 0;
+  private selectedEnvironmentRevision = 0;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
   private observationUnavailable = false;
@@ -219,8 +220,11 @@ export class NativeCaller {
     this.environment = new NativeBackground(
       client,
       () => {
-        const info = this.client.serverInfo,
-          snapshot = this.controller.snapshot;
+        const info = this.client.serverInfo;
+        // A metadata refresh temporarily clears controller.snapshot. It does not
+        // revoke an admitted root's read leases while the same selection remains
+        // current; every child read still verifies its live backend binding.
+        const snapshot = this.environmentSnapshot();
         return !this.closed &&
           !this.observationUnavailable &&
           this.generation > 0 &&
@@ -367,11 +371,12 @@ export class NativeCaller {
     );
     this.jobOutput = new NativeJobOutputReads(client, (executionId) => {
       const scope = current(),
-        snapshot = this.controller.snapshot,
+        snapshot = this.environmentSnapshot(),
         execution = snapshot?.view.executions.find((item) => item.id === executionId);
       if (
         !scope ||
         this.observationUnavailable ||
+        this.permissionUnavailable ||
         !snapshot ||
         snapshot.sessionId !== scope.sessionId ||
         snapshot.view.storeId !== scope.storeId ||
@@ -665,6 +670,23 @@ export class NativeCaller {
     this.scheduleDirectoryRefresh();
     this.scheduleSelectionRefresh(signal);
   }
+  private environmentSnapshot(): DesktopSnapshot | undefined {
+    if (this.permissionUnavailable) return undefined;
+    const snapshot =
+      this.controller.snapshot ??
+      (this.refreshing &&
+      this.lastView?.selection === this.selection &&
+      this.lastView.snapshot.sessionId === this.selected
+        ? this.lastView.snapshot
+        : undefined);
+    return snapshot &&
+      snapshot.sessionId === this.selected &&
+      snapshot.view.storeId === this.client.serverInfo?.storeId &&
+      snapshot.view.session.parentSessionId === null &&
+      snapshot.view.session.deletedAt === null
+      ? snapshot
+      : undefined;
+  }
   private scheduleSelectionRefresh(signal: AbortSignal) {
     this.refreshRequested = true;
     if (this.refreshing || this.refreshTimer || signal.aborted || this.closed) return;
@@ -679,8 +701,11 @@ export class NativeCaller {
             if (selected === this.selected && view === this.selection)
               this.permissionUnavailable = false;
           } catch {
-            if (selected === this.selected && view === this.selection)
+            if (selected === this.selected && view === this.selection) {
               this.permissionUnavailable = true;
+              this.environment.release();
+              this.jobOutput.release();
+            }
           }
         }
       }
@@ -775,6 +800,7 @@ export class NativeCaller {
             ...(startAfter ? { startAfter } : acknowledged ? { cursor: acknowledged } : {}),
             onReady: (ready) => {
               this.environmentRevision++;
+              this.selectedEnvironmentRevision++;
               this.observationUnavailable = false;
               this.permissionUnavailable = false;
               this.changed();
@@ -782,9 +808,22 @@ export class NativeCaller {
               if (!startAfter || ready.highWaterCursor !== startAfter.sequence)
                 this.scheduleRefresh(signal.signal);
             },
-            onChange: () => {
+            onChange: (change) => {
               this.environmentRevision++;
-              this.scheduleRefresh(signal.signal);
+              this.scheduleDirectoryRefresh();
+              // The global cursor is still acknowledged for every change. Only
+              // facts owned by the selected Session invalidate its metadata/history.
+              if (!change.sessionId || change.sessionId === this.selected)
+                this.scheduleSelectionRefresh(signal.signal);
+              // Creation is conservative: the next exact root directory establishes
+              // a new descendant's membership. Known descendants need no foreign View GET.
+              if (
+                !change.sessionId ||
+                change.sessionId === this.selected ||
+                change.type === 'session.created' ||
+                this.environment.includesSession(change.sessionId)
+              )
+                this.selectedEnvironmentRevision++;
             },
             onReset: () => {
               reset = true;
@@ -879,6 +918,9 @@ export class NativeCaller {
     return {
       generation: this.generation,
       environmentRevision: this.environmentRevision,
+      selectedEnvironmentRevision: this.selectedEnvironmentRevision,
+      environmentReadUnavailable:
+        this.observationUnavailable || this.permissionUnavailable || !this.environmentSnapshot(),
       directory: this.directoryState(),
       backgroundUnavailable: this.observationUnavailable,
       selection,
@@ -1918,8 +1960,11 @@ export class NativeCaller {
           if (selected === this.selected && view === this.selection)
             this.permissionUnavailable = false;
         } catch (error) {
-          if (selected === this.selected && view === this.selection)
+          if (selected === this.selected && view === this.selection) {
             this.permissionUnavailable = true;
+            this.environment.release();
+            this.jobOutput.release();
+          }
           this.changed();
           throw error;
         }

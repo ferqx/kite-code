@@ -40,7 +40,7 @@ export function TurnFailure({
 }) {
   const summary =
     message.failure?.summary || message.text.trim().split('\n')[0] || '本轮回复未完成';
-  const development = useDesktopDiagnostics() ?? process.env.NODE_ENV === 'development';
+  const diagnostics = useDesktopDiagnostics();
   const detail = message.text || '当前记录未提供具体失败原因。';
   const outcome = message.failure?.outcome;
   return (
@@ -76,8 +76,8 @@ export function TurnFailure({
         </CollapsibleTrigger>
         <AnimatedCollapsibleContent className="tool-activity-content">
           <section className="turn-failure-details" aria-label="回复失败详情">
-            <p>{development ? detail : detail.replace(/\s*\n+\s*/g, ' ')}</p>
-            {development && (message.failure?.reasonCode || outcome) && (
+            <p>{diagnostics ? detail : detail.replace(/\s*\n+\s*/g, ' ')}</p>
+            {diagnostics && (message.failure?.reasonCode || outcome) && (
               <dl>
                 {message.failure?.reasonCode && (
                   <>

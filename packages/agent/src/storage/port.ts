@@ -569,6 +569,10 @@ export interface Store {
   ): Promise<ExtensionRecord>;
   getRun(id: string): Promise<RunRecord | null>;
   planExecution(input: PlanExecutionInput): Promise<ExecutionRecord>;
+  /** Original-owner observation only; detached Jobs do not hold Task settlement. */
+  inspectChildSettlement(
+    input: OwnedWrite & { executionId: string },
+  ): Promise<{ pending: boolean; cursor: string }>;
   activateChildRun(
     input: OwnedWrite & {
       executionId: string;
