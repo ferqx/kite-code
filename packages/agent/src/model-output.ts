@@ -23,6 +23,7 @@ const semanticDigestBytes = async (bytes: Uint8Array) =>
 type Delta =
   | { kind: 'text'; text: string }
   | { kind: 'reasoning'; text: string }
+  | { kind: 'continuation'; part: number; text: string; last: boolean }
   | { kind: 'tool_call'; index: number; part: number; text: string; last: boolean };
 interface Segment {
   kind: 'model_output_segment';
@@ -150,12 +151,24 @@ export class ModelOutputWriter {
     this.seq = sequence;
     if (delta.kind === 'text') this.content.add(delta.text);
     else if (delta.kind === 'reasoning') this.reasoning.add(delta.text);
-    else if (delta.last) this.calls++;
+    else if (delta.kind === 'tool_call' && delta.last) this.calls++;
     await this.checkpoint(this.descriptor()!);
   }
   async text(kind: 'text' | 'reasoning', text: string) {
     for (let offset = 0; offset < text.length; offset += 32768)
       await this.append({ kind, text: text.slice(offset, offset + 32768) });
+  }
+  /** Opaque adapter state, never displayed as reasoning or used as authority. */
+  async continuation(value: Json) {
+    const json = canonicalJson(value);
+    let part = 0;
+    for (let offset = 0; offset < json.length; offset += 32768)
+      await this.append({
+        kind: 'continuation',
+        part: part++,
+        text: json.slice(offset, offset + 32768),
+        last: offset + 32768 >= json.length,
+      });
   }
   async call(call: ToolCall) {
     const json = canonicalJson(call as unknown as Json);
@@ -178,7 +191,13 @@ export async function readModelOutput(
   scope: ModelOutputScope,
   read: (reference: ArtifactReference) => Promise<Uint8Array>,
   signal?: AbortSignal,
-): Promise<{ content: string; reasoning: string; toolCalls: ToolCall[]; complete: boolean }> {
+): Promise<{
+  content: string;
+  reasoning: string;
+  toolCalls: ToolCall[];
+  complete: boolean;
+  continuation?: Json;
+}> {
   modelOutputReference(output);
   let ref: ArtifactReference | null = output.head;
   let seq = BigInt(output.seq);
@@ -214,13 +233,18 @@ export async function readModelOutput(
       typeof delta.text !== 'string' ||
       (delta.kind === 'text' || delta.kind === 'reasoning'
         ? !keys(delta, ['kind', 'text'])
-        : delta.kind !== 'tool_call' ||
-          !keys(delta, ['kind', 'index', 'part', 'text', 'last']) ||
-          !Number.isSafeInteger(delta.index) ||
-          Number(delta.index) < 0 ||
-          !Number.isSafeInteger(delta.part) ||
-          Number(delta.part) < 0 ||
-          typeof delta.last !== 'boolean')
+        : delta.kind === 'continuation'
+          ? !keys(delta, ['kind', 'part', 'text', 'last']) ||
+            !Number.isSafeInteger(delta.part) ||
+            Number(delta.part) < 0 ||
+            typeof delta.last !== 'boolean'
+          : delta.kind !== 'tool_call' ||
+            !keys(delta, ['kind', 'index', 'part', 'text', 'last']) ||
+            !Number.isSafeInteger(delta.index) ||
+            Number(delta.index) < 0 ||
+            !Number.isSafeInteger(delta.part) ||
+            Number(delta.part) < 0 ||
+            typeof delta.last !== 'boolean')
     )
       throw new AgentError('model_output_invalid');
     const previous = node.previous === null ? null : artifact(node.previous);
@@ -234,11 +258,27 @@ export async function readModelOutput(
     callText = '',
     part = 0;
   const calls: ToolCall[] = [];
+  let continuation: Json | undefined;
+  let continuationText = '';
+  let continuationPart = 0;
+  let continuationComplete = false;
   for (const { delta } of nodes.reverse()) {
     signal?.throwIfAborted();
     if (delta.kind === 'text') content += delta.text;
     else if (delta.kind === 'reasoning') reasoning += delta.text;
-    else {
+    else if (delta.kind === 'continuation') {
+      if (continuationComplete || delta.part !== continuationPart++)
+        throw new AgentError('model_output_invalid');
+      continuationText += delta.text;
+      if (delta.last) {
+        try {
+          continuation = JSON.parse(continuationText) as Json;
+        } catch {
+          throw new AgentError('model_output_invalid');
+        }
+        continuationComplete = true;
+      }
+    } else {
       if (delta.index !== calls.length || delta.part !== part++)
         throw new AgentError('model_output_invalid');
       callText += delta.text;
@@ -267,8 +307,14 @@ export async function readModelOutput(
     String(Buffer.byteLength(content)) !== output.contentBytes ||
     String(Buffer.byteLength(reasoning)) !== output.reasoningBytes ||
     calls.length !== output.toolCallCount ||
-    (output.complete && part !== 0)
+    (output.complete && (part !== 0 || (continuationPart > 0 && !continuationComplete)))
   )
     throw new AgentError('model_output_invalid');
-  return { content, reasoning, toolCalls: output.complete ? calls : [], complete: output.complete };
+  return {
+    content,
+    reasoning,
+    toolCalls: output.complete ? calls : [],
+    complete: output.complete,
+    ...(output.complete && continuationComplete ? { continuation } : {}),
+  };
 }

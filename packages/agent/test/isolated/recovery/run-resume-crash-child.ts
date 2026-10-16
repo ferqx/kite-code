@@ -124,6 +124,7 @@ const wrapped = new Proxy(store, {
         }
         if (
           mode.startsWith('running_') ||
+          (mode === 'continuation_running' && dispatchedModels === 2) ||
           mode === 'retry_lineage' ||
           (mode === 'compression_running' &&
             (ex?.decisionSource as Record<string, unknown>)?.compressionId)
@@ -144,7 +145,8 @@ const wrapped = new Proxy(store, {
           dispatchedModels++;
           if (
             mode.startsWith('planned_') ||
-            (['length_planned', 'retry_planned'].includes(mode) && dispatchedModels === 2) ||
+            (['length_planned', 'retry_planned', 'continuation_planned'].includes(mode) &&
+              dispatchedModels === 2) ||
             (mode === 'length_history' && dispatchedModels === 3)
           )
             await stop(ex.id);
@@ -178,6 +180,7 @@ const wrapped = new Proxy(store, {
           (mode === 'completion' && ex?.kind === 'model') ||
           (mode === 'length_response' && ex?.kind === 'model') ||
           (mode === 'retry_failed' && ex?.kind === 'model') ||
+          (mode === 'continuation_failed' && ex?.kind === 'model' && ex.status === 'failed') ||
           (mode === 'compression_pending' &&
             ex?.kind === 'model' &&
             (ex.decisionSource as Record<string, unknown>)?.compressionId) ||

@@ -27,3 +27,5 @@ get/listInteractions 纯查询、同快照、有界 ID keyset，真实 child 和
 可信 private verifier 在实际接纳和最终授权路径核原 Artifact 登记、scope、完整 hash/size、严格 UTF-8/JSON 和当前准确 input/定义/人工 policy；同 revision 更换人工 policy 也不能复用旧正文。读取或完整性失败零 adapter 效果；原卡预算和有限 SQL/Worker 传输保持，未配置 Artifact 的宿主明确不可提供这条大正文路径。批准后仍由原 Interaction/权限/来源/必要条件的最终事务判定派发，附件全文与普通人类信息回答都不扩大执行权限。
 
 [完整人工卡测试](../../../../test/isolated/execution/approval-body.test.ts)使用真实 SQLite、原 scope Artifact 与固定 Model，核超过 240 KiB 的原 input、70 KiB policy 的完整末尾、独立重复调用附件、准确原卡回答、同 revision policy 漂移及正文损坏零效果。实际客户端复用完整附件读取协议，其各自展示/回答资格由客户端 owner 记录；这些 Core 断言不代表三平台或完整 V1.3 资格。
+
+Auto 审核回退的旧 `model-body-` 公共附件使用独立只读验证：Artifact 的准确登记与 scope 和已绑定 Interaction/request digest、原 target/attempt/input/source/policy、authorization.review 的准确 requestBody 在同一个 SQLite 快照核实。它只兼容真实原卡的公开请求，不放行 Model 输入/来源/元数据或输出；新 producer 为 review.request 使用独立 ID。pending、已答与取消历史读取均不执行接纳或恢复。具体正文与真实冷 HTTP/改绑拒绝证据见[Model 正文 owner](../../../model-body/README.md)。

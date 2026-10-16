@@ -12,7 +12,7 @@
 
 测试使用带测试凭据的本地模拟 HTTP endpoint，证明传输映射与每次流尝试只发一个网络请求；不建立生产 Provider 兼容性、可用性或付费模型行为资格。
 
-SDK 的 `kite.sdk.messages` 转换版本为2：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
+SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为2、Responses 为3：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
 
 [SDK 严格端点测试](test/sdk.test.ts)拒绝非法声明及历史函数名，核带点、中文、超长、名称碰撞、原 ID 回传与输入不变；[普通 paired 宿主测试](../../apps/service/test/isolated/configuration.test.ts)使用真实八个默认工具，严格校验请求名称、执行真实文件读取，再带原工具历史完成第二次请求。修复前两项均实际复现失败；原先宽松模拟端点允许带点名称，不能证明真实 Provider 请求合同成立。
 
@@ -27,9 +27,22 @@ SDK 的 `kite.sdk.messages` 转换版本为2：内部 `files.read` 等 Tool ID �
 
 `ModelAdapter.describeRequest` 是可选同步纯描述端口，只返回实际绑定的非秘密 Adapter、Provider family/model、请求 settings 和转换版本；不进行 I/O，也不引入 Agent 类型。SDK Adapter 使用冻结的实际 presets，记录单次请求的 `maxRetries:0`、`maxSteps:1` 和消息转换设置。只有 `createCompatibleModelBinding` 真实构建的模型提供已知 Provider family/model；任意外部 SDK 对象或不透明 Adapter 明确不可用，不猜对象属性或以当前配置补齐历史。不记录 endpoint、凭据、header、credentialRef 或宿主路径。[纯描述与真实 SDK 请求测试](test/request-snapshot.test.ts)用注入的本地传输核对设置一致、零描述请求和 caller 修改不影响绑定。
 
-推理强度的 `reasoningEffortLevels` 为 `low/medium/high/xhigh/max/ultar` 六档；完整 `reasoningEfforts` 另保留 none/minimal，供已有配置、历史与显式 API 请求使用。Ultar/ultar 是用户明确指定的名称和值，不自动改写为 ultra 或 max。只有本厂构建的兼容模型绑定接受这项 preset；不透明 SDK Model 在任何 I/O 前返回 `model_reasoning_effort_unsupported`。SDK 通过 `providerOptions.openaiCompatible.reasoningEffort` 传为实际 `reasoning_effort`，纯描述和原 Execution settings 保存相同冻结值；未配置时不发送该字段。这些值表示适配器的编码范围，不是远端模型发现或支持保证，远端拒绝按实际单次请求失败处理，不切换模型、不去参数重发。
+推理强度的 `reasoningEffortLevels` 为 `low/medium/high/xhigh/max/ultar` 六档；完整 `reasoningEfforts` 另保留 none/minimal，供已有配置、历史与显式 API 请求使用。Ultar/ultar 是用户明确指定的名称和值，不自动改写为 ultra 或 max。只有本厂构建的兼容模型绑定接受这项 preset；不透明 SDK Model 在任何 I/O 前返回 `model_reasoning_effort_unsupported`。Chat Completions 通过 `providerOptions.openaiCompatible.reasoningEffort` 传为实际 `reasoning_effort`；Responses 通过 `providerOptions.openai.reasoningEffort` 与 `forceReasoning` 传为 `reasoning.effort`，纯描述和原 Execution settings 保存相同冻结值；未配置时不发送该字段。这些值表示适配器的编码范围，不是远端模型发现或支持保证，远端拒绝按实际单次请求失败处理，不切换模型、不去参数重发。
 
 [SDK 请求](test/sdk.test.ts)逐值核对真实本机 HTTP、绑定后 caller 改值不影响请求、未知值/不透明绑定拒绝；[配套 Service](../../apps/service/test/isolated/configuration.test.ts)核对活动旧 Run 与后续新 Run 的实际 low/high 请求和公开历史 ModelInput。2026-10-02 与 Core metadata/Native-Browser inspector 组合29项、239断言通过；不证明生产 Provider 或设置面板资格。
 
 
-默认宿主显式传入 `provider` 时，绑定的公开 family 为 `openai`、`deepseek`、`ollama` 或兼容默认 `openai-compatible`，与实际 endpoint/model 同时冻结；不会从模型名称猜 family。四类仍走同一明确单次 SDK compatible transport，凭据和 endpoint 不进入公开 metadata。Service 的[真实 HTTP 四路请求](../../apps/service/test/isolated/run-model-selection.test.ts)与 [Native 原 ModelInput/wire 验收](../../apps/desktop/test/isolated/native-provider-bundle.test.ts)核对绑定、临时 effort 和 child preset；不据此宣称生产 Provider 全部语义兼容。
+默认宿主显式传入 `provider` 时，绑定的公开 family 为 `openai`、`deepseek`、`ollama` 或兼容默认 `openai-compatible`，与实际 endpoint/model 同时冻结；不会从模型名称猜 family。四类默认仍走明确单次 SDK compatible Chat Completions transport；OpenAI 与 compatible 可显式选择 Responses，凭据和 endpoint 不进入公开 metadata。Service 的[真实 HTTP 四路请求](../../apps/service/test/isolated/run-model-selection.test.ts)与 [Native 原 ModelInput/wire 验收](../../apps/desktop/test/isolated/native-provider-bundle.test.ts)核对绑定、临时 effort 和 child preset；不据此宣称生产 Provider 全部语义兼容。
+
+
+## Responses 协议
+
+`createCompatibleModelBinding({ protocol: 'responses', ... })` 显式使用官方 `@ai-sdk/openai` 的 `.responses(modelId)`；省略协议继续走既有 Chat Completions。SDK 固定 `4.0.19`，匹配现有 `ai@7.0.19` 的 Provider v4 契约，避免无关 SDK 升级。它复用原 Adapter 和 Agent Loop，不手写 SSE、不引入第二执行循环，也不回退其他协议。OpenAI/compatible 可选择 Responses；DeepSeek/Ollama 的该选项在配置和绑定边界拒绝。
+
+每次请求保持 `maxRetries:0`、一个 SDK step 和真实 AbortSignal；Responses 设 `store:false` 并请求 `reasoning.encrypted_content`。显式 effort 同时启用 SDK `forceReasoning`，使第三方模型别名不被 SDK 名称推断静默忽略。公开 settings 保存实际协议，Responses 消息转换版本为 3。缺失 API key 不读取环境中的 OpenAI key。Provider 错误保留有限公开错误码；可能包含历史内容的 Responses SDK warning details 只保留通用诊断。
+
+完整 finish 的 SDK assistant content（包括 encrypted reasoning、summary 和 function call 的原 call ID）成为 `ModelEvent.finish.continuation`；[Agent 私有输出](../agent/src/model-output/README.md)以现有分段 Artifact 链保存并在多轮及冷恢复后回传。该 JSON 带协议、版本、路由 ID 和 endpoint/provider/model/凭据/header 绑定 SHA-256，不包含原始连接数据。绑定变化不回放旧 opaque state，仍映射普通 assistant/tool 历史。私有 envelope 保持 version 1；回放其中 tool-call 时按准确 call ID 从原 Core toolCalls 取内部名称，再用当前请求映射编码，避免工具集合变化后旧 wire 名碰撞。encrypted reasoning、summary 和 Provider metadata 保持原值，不重写既有 Artifact；缺少匹配原调用在网络前拒绝。取消、错误、截断工具批次和未完成工具输入不发布可执行调用或私有 continuation；非空纯文本 `length` 由 Core 沿原 Run 续接，并保留该次封存的 reasoning。SDK 不执行工具。自定义 Runtime 必须提供 Artifact port 才能保存 continuation。公开 Inspector 和消息正文不展示此状态。
+
+[Responses HTTP 测试](test/responses.test.ts)覆盖流式文本/推理、usage、工具结果配对、三轮历史、无可见 summary 的 encrypted reasoning、绑定隔离、取消、错误与未完成调用，以及旧 v1 continuation/新碰撞集合、原 Artifact 不变和八档 effort（含 ultar）的别名 wire；[Service 完整 wire](../../apps/service/test/isolated/responses-loop.test.ts)以真实 SQLite/Client/HTTP 核三轮工具、并行分片、冷 continuation 与新增合法工具名碰撞、六次物理断流后的第七次成功、永久断流明确取消、纯文本 length 续接与零重复工具效果；[默认配置](../../apps/service/test/isolated/configuration.test.ts)验证 JSONC 路由；[定时任务集成](../../apps/desktop/test/scheduled-task-runner.test.ts)验证固定模型与 Responses mock 都复用普通 Service 运行链。所有 Provider 请求均为本地模拟服务，未验证真实付费调用。
+
+官方语义参考：[OpenAI Responses](https://developers.openai.com/api/reference/resources/responses/methods/create)、[stateless reasoning](https://developers.openai.com/api/docs/guides/reasoning)、[AI SDK OpenAI provider](https://ai-sdk.dev/providers/ai-sdk-providers/openai)。

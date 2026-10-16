@@ -211,8 +211,39 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
           !operation ||
           typeof operation !== 'object' ||
           Array.isArray(operation) ||
-          Object.keys(operation).sort().join(',') !==
-            'baseURL,connectionId,credential,modelNames,provider' ||
+          ['baseURL', 'connectionId', 'credential', 'modelNames', 'provider'].some(
+            (key) => !Object.hasOwn(operation, key),
+          ) ||
+          Object.keys(operation).some(
+            (key) =>
+              ![
+                'baseURL',
+                'connectionId',
+                'credential',
+                'modelNames',
+                'provider',
+                'protocol',
+                'kind',
+                'name',
+              ].includes(key),
+          ) ||
+          (operation.kind !== undefined &&
+            !['upsert', 'remove'].includes(String(operation.kind))) ||
+          (operation.name !== undefined &&
+            (typeof operation.name !== 'string' ||
+              !operation.name.trim() ||
+              operation.name.length > 120 ||
+              [...operation.name].some(
+                (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+              ))) ||
+          (operation.kind === 'remove' &&
+            (operation.connectionId === null ||
+              operation.credential !== 'none' ||
+              !Array.isArray(operation.modelNames) ||
+              operation.modelNames.length !== 0)) ||
+          (operation.protocol !== undefined &&
+            operation.protocol !== 'chat-completions' &&
+            operation.protocol !== 'responses') ||
           typeof operation.provider !== 'string' ||
           !['openai', 'deepseek', 'compatible', 'ollama'].includes(operation.provider) ||
           !(

@@ -579,6 +579,7 @@ export type ModelInputMetadata =
               | { availability: 'available'; family: string; modelId: string }
               | { availability: 'unavailable'; reason: string };
             settings: {
+              protocol?: 'chat-completions' | 'responses';
               temperature?: number;
               topP?: number;
               maxOutputTokens?: number;
@@ -913,6 +914,7 @@ export type ModelInputSnapshot = {
                 | { availability: 'available'; family: string; modelId: string }
                 | { availability: 'unavailable'; reason: string };
               settings: {
+                protocol?: 'chat-completions' | 'responses';
                 temperature?: number;
                 topP?: number;
                 maxOutputTokens?: number;
@@ -1319,6 +1321,7 @@ export type ModelSettingsView = {
     enabled: boolean;
     configured: boolean;
     provider?: string;
+    protocol?: 'chat-completions' | 'responses';
     model?: string;
     connectionId?: string;
     reasoningEffort?:
@@ -1371,8 +1374,12 @@ export type ProviderSettingsView = {
     requiresCredential: boolean;
     connections: Array<{
       id: string;
+      name?: string;
+      modelIds?: Array<string>;
+      defaultModelIds?: Array<string>;
       baseURL: string;
       hasCredential: boolean;
+      protocol: 'chat-completions' | 'responses';
       modelNames: Array<string>;
       canWrite: boolean;
     }>;
@@ -1388,7 +1395,9 @@ export type ProviderDiscoveryRequest = {
     effectiveDigest: string;
   };
   operation: {
+    name?: string;
     provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    protocol?: 'chat-completions' | 'responses';
     connectionId: string | null;
     baseURL: string;
     credential: 'keep' | 'replace' | 'none';
@@ -1404,7 +1413,9 @@ export type ProviderDiscoveryView = {
     effectiveDigest: string;
   };
   operation: {
+    name?: string;
     provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    protocol?: 'chat-completions' | 'responses';
     connectionId: string | null;
     baseURL: string;
     credential: 'keep' | 'replace' | 'none';
@@ -1421,7 +1432,10 @@ export type ProviderSettingsRequest = {
     effectiveDigest: string;
   };
   operation: {
+    kind?: 'upsert' | 'remove';
+    name?: string;
     provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    protocol?: 'chat-completions' | 'responses';
     connectionId: string | null;
     baseURL: string;
     modelNames: Array<string>;
@@ -1520,7 +1534,10 @@ export type HostMutation = {
       effectiveDigest: string;
     };
     operation: {
+      kind?: 'upsert' | 'remove';
+      name?: string;
       provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+      protocol?: 'chat-completions' | 'responses';
       connectionId: string | null;
       baseURL: string;
       modelNames: Array<string>;

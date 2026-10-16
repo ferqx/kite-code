@@ -1,3 +1,5 @@
+import { Database } from 'bun:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import {
   canonicalFileRecoveryIntent,
   type FileRecoveryIntent,
@@ -24,6 +26,7 @@ import {
   parseNativeMcpRecord,
 } from '../electron/mcp-journal';
 import type { DraftScope, PrivateData } from '../electron/private-data';
+import { createScheduledTaskData } from '../electron/scheduled-tasks';
 import {
   parseWorkspaceRemovalIntent,
   type WorkspaceRemovalIntent,
@@ -36,6 +39,8 @@ import type {
 } from '../src/native-bridge';
 /** Explicit unit port. Production main always opens the Node private file. */
 export function memoryPrivateData(): PrivateData {
+  const schedules = new Database(':memory:');
+  schedules.exec('PRAGMA user_version=7');
   const files = new Map<string, FileRecoveryIntent>();
   const removals = new Map<string, WorkspaceRemovalIntent>();
   const mcps = new Map<string, NativeMcpRecord>();
@@ -54,6 +59,7 @@ export function memoryPrivateData(): PrivateData {
       revision: 0,
     };
   return {
+    ...createScheduledTaskData(() => schedules as unknown as DatabaseSync),
     workspaceRemovals: () => [...removals.values()].map((r) => structuredClone(r)),
     saveWorkspaceRemoval(raw) {
       const r = parseWorkspaceRemovalIntent(raw);
@@ -232,6 +238,8 @@ export function memoryPrivateData(): PrivateData {
       files.set(id, value);
       return value;
     },
-    close() {},
+    close() {
+      schedules.close();
+    },
   };
 }

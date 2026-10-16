@@ -82,7 +82,7 @@ import {
   type McpSourceConfigurationOptions,
 } from './mcp-source-configuration';
 import { parseModelPreset } from './model-options';
-import { isSupportedModelProvider } from './model-providers';
+import { isSupportedModelProvider, modelProtocol } from './model-providers';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import {
   planningSnapshotDigest,
@@ -993,6 +993,7 @@ export function createDefaultProcessConfiguration(options: {
             : await modelVault.resolve(selected.credentialRef);
         const binding = createCompatibleModelBinding({
           name: selected.provider,
+          protocol: modelProtocol(selected.provider, selected.protocol),
           baseURL: selected.baseURL,
           modelId: selected.model,
           apiKey,

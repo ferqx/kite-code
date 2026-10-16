@@ -9,6 +9,7 @@ import {
   updateConfigurationFile,
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
+import { providerConnectionId } from './model-providers';
 import { userConfigurationPath } from './user-configuration-path';
 
 const object = (value: Json | undefined): JsonObject => {
@@ -50,31 +51,61 @@ function route(value: Json | undefined): { provider: string; name: string } | un
 /** One user document. Raw keys stay private; callers receive the neutral assembly shape. */
 export function createUserConfiguration(path = userConfigurationPath(homedir())) {
   const readRaw = () => readConfigurationFile({ path, windowsPathPolicy: 'private' });
+  function connection(alias: string, provider: JsonObject): JsonObject {
+    const family =
+      provider.type === 'openai-compatible' ||
+      (provider.type === undefined && !['openai', 'deepseek', 'ollama'].includes(alias))
+        ? 'compatible'
+        : (provider.type ?? alias);
+    const endpoint =
+      provider.baseURL ??
+      (
+        {
+          openai: 'https://api.openai.com/v1',
+          deepseek: 'https://api.deepseek.com/v1',
+          ollama: 'http://localhost:11434/v1',
+        } as Record<string, string>
+      )[String(family)];
+    return {
+      provider: family,
+      providerName: alias,
+      ...(typeof provider.name === 'string' ? { providerLabel: provider.name } : {}),
+      ...(provider.protocol === undefined ? {} : { protocol: provider.protocol }),
+      ...(endpoint === undefined ? {} : { baseURL: endpoint }),
+      ...(typeof provider.credentialRef === 'string'
+        ? { credentialRef: provider.credentialRef }
+        : typeof provider.apiKey === 'string' && provider.apiKey
+          ? { credentialRef: secretReference(alias, provider.apiKey) }
+          : {}),
+    };
+  }
+  function readProviderConnections(): JsonObject[] {
+    const raw = readRaw().value;
+    if (assemblyForm(raw)) return [];
+    const providers = raw.provider === undefined ? {} : object(raw.provider);
+    return Object.entries(providers).map(([alias, value]) =>
+      connection(
+        alias,
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? value
+          : { type: 'unsupported' },
+      ),
+    );
+  }
   function normalize(raw: JsonObject): JsonObject {
     // The assembly form remains valid in this same file for explicitly configured hosts.
-    if (assemblyForm(raw)) return structuredClone(raw);
+    if (assemblyForm(raw)) return { ...structuredClone(raw), _providerConnections: [] };
     const providers = raw.provider === undefined ? {} : object(raw.provider);
     const disabled = raw.disabledModels ?? [];
     if (!Array.isArray(disabled)) throw new ConfigurationError('invalid_user_configuration');
     const overrides = raw.modelOptions === undefined ? {} : object(raw.modelOptions);
     const models: JsonObject[] = [];
+    const connections: JsonObject[] = [];
     let preferred: string | undefined;
     for (const [alias, value] of Object.entries(providers)) {
       const provider = object(value);
-      const family =
-        provider.type === 'openai-compatible' ||
-        (provider.type === undefined && !['openai', 'deepseek', 'ollama'].includes(alias))
-          ? 'compatible'
-          : (provider.type ?? alias);
-      const endpoint =
-        provider.baseURL ??
-        (
-          {
-            openai: 'https://api.openai.com/v1',
-            deepseek: 'https://api.deepseek.com/v1',
-            ollama: 'http://localhost:11434/v1',
-          } as Record<string, string>
-        )[String(family)];
+      const metadataConnection = connection(alias, provider);
+      connections.push(metadataConnection);
       const entries =
         provider.models ?? (typeof provider.model === 'string' ? [provider.model] : []);
       if (!Array.isArray(entries)) throw new ConfigurationError('invalid_user_configuration');
@@ -106,16 +137,9 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
         };
         models.push({
           id,
-          provider: family,
-          providerName: alias,
+          ...metadataConnection,
           model: name,
           enabled,
-          ...(endpoint === undefined ? {} : { baseURL: endpoint }),
-          ...(typeof provider.credentialRef === 'string'
-            ? { credentialRef: provider.credentialRef }
-            : typeof provider.apiKey === 'string' && provider.apiKey
-              ? { credentialRef: secretReference(alias, provider.apiKey) }
-              : {}),
           ...(typeof metadata.contextWindowTokens === 'number' ||
           typeof metadata.maxOutputTokens === 'number'
             ? {
@@ -140,6 +164,7 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
     return {
       ...result,
       models,
+      _providerConnections: connections,
       modelId: selection
         ? routeId(selection.provider, selection.name)
         : (preferred ?? models.find((model) => model.enabled)?.id ?? null),
@@ -163,12 +188,18 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
       | string
       | undefined;
     if (!alias) {
-      alias = provider;
-      for (let index = 2; Object.hasOwn(providers, alias); index++) alias = `${provider}-${index}`;
+      // Never recycle a deleted route namespace: saved sessions must not rebind to a new account.
+      do {
+        alias = `${provider}-${crypto.randomUUID()}`;
+      } while (Object.hasOwn(providers, alias));
     }
     return names.map((model) => ({ id: routeId(alias, model), providerName: alias, model }));
   }
-  function adaptEdits(raw: JsonObject, operations: readonly ConfigurationEdit[]) {
+  function adaptEdits(
+    raw: JsonObject,
+    operations: readonly ConfigurationEdit[],
+    removeProviderConnection?: string,
+  ) {
     const createsAssemblyModels =
       raw.provider === undefined &&
       operations.some(
@@ -181,6 +212,14 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
       );
     if (assemblyForm(raw) || createsAssemblyModels) return operations;
     const original = normalize(raw);
+    const removedAlias =
+      removeProviderConnection === undefined
+        ? undefined
+        : (original._providerConnections as JsonObject[]).find(
+            (entry) => providerConnectionId(entry) === removeProviderConnection,
+          )?.providerName;
+    if (removeProviderConnection !== undefined && typeof removedAlias !== 'string')
+      throw new ConfigurationError('provider_settings_override');
     const desired = structuredClone(original);
     for (const edit of operations) {
       let parent: JsonObject | Json[] = desired;
@@ -204,6 +243,7 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
       const providers = raw.provider === undefined ? {} : object(raw.provider);
       const disabled = ((raw.disabledModels ?? []) as Json[]).filter((item) => {
         const selected = route(item);
+        if (selected?.provider === removedAlias) return false;
         const model = models.find(
           (entry) => entry.providerName === selected?.provider && entry.model === selected?.name,
         );
@@ -211,6 +251,10 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
       });
       const modelOptions: JsonObject =
         raw.modelOptions === undefined ? {} : structuredClone(object(raw.modelOptions));
+      for (const removed of (original.models as JsonObject[]).filter(
+        (model) => model.providerName === removedAlias,
+      ))
+        delete modelOptions[String(removed.id)];
       const grouped = new Map<string, JsonObject[]>();
       for (const model of models) {
         if (typeof model.providerName !== 'string')
@@ -233,18 +277,30 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
         }
       }
       for (const [alias, entries] of grouped) {
+        const originalModels = (original.models as JsonObject[]).filter(
+          (item) => item.providerName === alias,
+        );
+        if (JSON.stringify(entries) === JSON.stringify(originalModels)) continue;
         const model = entries[0]!;
         if (
           entries.some((item) =>
-            ['provider', 'baseURL', 'credentialRef'].some((key) => item[key] !== model[key]),
+            ['provider', 'protocol', 'baseURL', 'credentialRef', 'providerLabel'].some(
+              (key) => item[key] !== model[key],
+            ),
           )
         )
           throw new ConfigurationError('user_model_connection_conflict');
         const rawProvider = providers[alias] === undefined ? {} : object(providers[alias]);
-        const originalModel = (original.models as JsonObject[]).find(
-          (item) => item.providerName === alias,
-        );
-        const originalEntries = Array.isArray(rawProvider.models) ? rawProvider.models : [];
+        const originalModel =
+          (original.models as JsonObject[]).find((item) => item.providerName === alias) ??
+          (original._providerConnections as JsonObject[]).find(
+            (item) => item.providerName === alias,
+          );
+        const originalEntries = Array.isArray(rawProvider.models)
+          ? rawProvider.models
+          : typeof rawProvider.model === 'string'
+            ? [rawProvider.model]
+            : [];
         const names = entries.map(
           (item) => originalEntries.find((entry) => nameOf(entry) === item.model) ?? item.model!,
         );
@@ -256,6 +312,18 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
             path: ['provider', alias, 'type'],
             value: model.provider === 'compatible' ? 'openai-compatible' : model.provider!,
           });
+        if (originalModel?.providerLabel !== model.providerLabel)
+          edits.push(
+            model.providerLabel === undefined
+              ? { kind: 'remove', path: ['provider', alias, 'name'] }
+              : { kind: 'set', path: ['provider', alias, 'name'], value: model.providerLabel },
+          );
+        if (originalModel?.protocol !== model.protocol)
+          edits.push(
+            model.protocol === undefined
+              ? { kind: 'remove', path: ['provider', alias, 'protocol'] }
+              : { kind: 'set', path: ['provider', alias, 'protocol'], value: model.protocol },
+          );
         if (!originalModel || originalModel.baseURL !== model.baseURL)
           edits.push({ kind: 'set', path: ['provider', alias, 'baseURL'], value: model.baseURL! });
         if (!originalModel || originalModel.credentialRef !== model.credentialRef) {
@@ -273,6 +341,10 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
         }
       }
       for (const alias of Object.keys(providers)) {
+        if (alias === removedAlias) {
+          edits.push({ kind: 'remove', path: ['provider', alias] });
+          continue;
+        }
         if (
           !grouped.has(alias) &&
           (original.models as JsonObject[]).some((model) => model.providerName === alias)
@@ -309,13 +381,14 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
   function update(
     options: Omit<Parameters<typeof updateConfigurationFile>[0], 'path' | 'adaptEdits'> & {
       path?: string;
+      removeProviderConnection?: string;
     },
   ) {
     const result = updateConfigurationFile({
       ...options,
       path,
       windowsPathPolicy: 'private',
-      adaptEdits: (raw) => adaptEdits(raw, options.operations),
+      adaptEdits: (raw) => adaptEdits(raw, options.operations, options.removeProviderConnection),
       validateCandidate: (candidate) => options.validateCandidate?.(normalize(candidate)),
     });
     return { ...result, value: normalize(result.value) };
@@ -334,7 +407,15 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
     }
     return undefined;
   }
-  return { path, read, normalize, update, createModels, resolveCredential };
+  return {
+    path,
+    read,
+    normalize,
+    update,
+    createModels,
+    resolveCredential,
+    readProviderConnections,
+  };
 }
 export type UserConfiguration = ReturnType<typeof createUserConfiguration>;
 

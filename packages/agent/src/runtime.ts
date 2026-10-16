@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ModelAdapter, ModelMessage, ModelRequest } from '@kite-ai/ai';
 import type { ArtifactContentStore, ArtifactReadInput } from './artifact-port';
+import { semanticReviewContent, semanticReviewContext } from './authorization-review-context';
 import {
   type AuthorizationReviewOutput,
   authorizationReviewAnswer,
@@ -947,7 +948,7 @@ export class AgentRuntime {
     const identity = { id: reviewer.id, version: reviewer.version, modelId: reviewer.modelId };
     const requestBody =
       Buffer.byteLength(canonicalJson(decision.review.request)) > 64 * 1024
-        ? await this.publishBody(scope, decision.review.request)
+        ? await this.publishBody(scope, decision.review.request, 'authorization-review-request')
         : undefined;
     const reviewRequest = requestBody ? null : decision.review.request;
     const origin =
@@ -1004,6 +1005,11 @@ export class AgentRuntime {
       const command = await this.options.store.getCommand(fact.operation.commandId);
       if (command?.kind !== 'authorization.review')
         throw new AgentError('authorization_review_unverifiable');
+      const childStart = await this.options.store.getCommand(
+        `child-start-${reference.reviewExecutionId}`,
+      );
+      if (childStart?.kind !== 'child.start')
+        throw new AgentError('authorization_review_unverifiable');
       const carrierId = `agent/${fact.configuration.id}`;
       const permissions: Permissions = {
         async authorize(candidate) {
@@ -1025,7 +1031,10 @@ export class AgentRuntime {
         async *stream(input, options) {
           if (calls++ || input.tools?.length)
             throw new AgentError('authorization_review_call_limit');
-          const expanded = await thisRuntime.expandReviewRequest(input, scope);
+          const expanded = await thisRuntime.expandReviewRequest(input, scope, [
+            childStart.id,
+            reference.reviewExecutionId,
+          ]);
           for await (const event of reviewer.model.stream(expanded, options)) {
             if (event.type === 'tool_call' || (event.type === 'finish' && event.reason !== 'stop'))
               throw new AgentError('authorization_review_output_invalid');
@@ -2070,6 +2079,38 @@ export class AgentRuntime {
   async readModelInput(
     input: Parameters<Store['getModelInputSnapshot']>[0] & { signal?: AbortSignal },
   ): Promise<ModelInputSnapshot> {
+    const { authorizationReview: review, ...snapshot } = await this.readOriginalModelInput(input);
+    let changed = false;
+    const request = {
+      ...snapshot.request,
+      messages: snapshot.request.messages.map(({ continuation, ...message }) => {
+        changed ||= continuation !== undefined;
+        // Older reviewer snapshots may contain private history serialized as user text.
+        // Only the exact persisted review child can identify this envelope, never its text alone.
+        if (
+          review &&
+          message.role === 'user' &&
+          canonicalJson(message.sourceIds as unknown as Json) === canonicalJson(review.sourceIds)
+        ) {
+          const content = semanticReviewContent(message.content);
+          changed ||= content !== message.content;
+          message.content = content;
+        }
+        return message;
+      }),
+    };
+    input.signal?.throwIfAborted();
+    if (!changed) return snapshot;
+    // Public digest describes the public body; original receipt verification stays private above.
+    const bytes = Buffer.from(canonicalJson(request as unknown as Json));
+    const bodyHash = await semanticDigestBytes(bytes);
+    input.signal?.throwIfAborted();
+    return { ...snapshot, request, bodyHash, bodyBytes: String(bytes.byteLength) };
+  }
+  /** Internal replay retains opaque transport state; the public Inspector omits it. */
+  private async readOriginalModelInput(
+    input: Parameters<Store['getModelInputSnapshot']>[0] & { signal?: AbortSignal },
+  ): Promise<ModelInputSnapshot & { authorizationReview: { sourceIds: [string, string] } | null }> {
     const { signal, ...scope } = input;
     signal?.throwIfAborted();
     const snapshot = await this.options.store.getModelInputSnapshot(scope);
@@ -2142,6 +2183,7 @@ export class AgentRuntime {
     const { modelId: _modelId, ...identity } = snapshot.identity;
     return {
       ...identity,
+      authorizationReview: snapshot.authorizationReview,
       storeId: snapshot.storeId,
       bodyHash: hash,
       bodyBytes: size,
@@ -2156,7 +2198,7 @@ export class AgentRuntime {
     const { signal, ...scope } = input;
     signal?.throwIfAborted();
     const snapshot = await this.options.store.getModelOutputSnapshot(scope);
-    const output = snapshot.output
+    const fullOutput = snapshot.output
       ? await readModelOutput(
           snapshot.output,
           {
@@ -2175,6 +2217,9 @@ export class AgentRuntime {
           complete: snapshot.complete,
         };
     signal?.throwIfAborted();
+    const { continuation: _private, ...output } = fullOutput as typeof fullOutput & {
+      continuation?: Json;
+    };
     const bytes = Buffer.from(canonicalJson(output as unknown as Json));
     const { modelId: _modelId, confirmation: _confirmation, ...identity } = snapshot.identity;
     return {
@@ -2189,9 +2234,18 @@ export class AgentRuntime {
     };
   }
   async readArtifact(input: ArtifactReadInput) {
+    if (input.refId.startsWith('model-output-')) throw new AgentError('artifact_scope_denied');
     if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
-    const reference = await this.options.store.getArtifactReference(input);
-    if (!reference) throw new AgentError('artifact_reference_not_found');
+    const legacyBody = input.refId.startsWith('model-body-');
+    const reference = legacyBody
+      ? await this.options.store.getLegacyReviewArtifactReference(input)
+      : await this.options.store.getArtifactReference(input);
+    if (!reference)
+      throw new AgentError(legacyBody ? 'artifact_scope_denied' : 'artifact_reference_not_found');
+    // Model transport bodies are private even when their immutable IDs can be inferred.
+    // Internal replay uses readBody, never this public download entry point.
+    if (reference.mediaType === 'application/vnd.kite.model-output+json')
+      throw new AgentError('artifact_scope_denied');
     return { reference, content: await this.options.artifacts.read(input) };
   }
   beginHostMutation(input: Parameters<Store['beginHostMutation']>[0]) {
@@ -2363,8 +2417,39 @@ export class AgentRuntime {
       command?.status === 'accepted' ? this.dispatchFailures.get(command.sessionId) : undefined;
     return command && dispatchFailure ? { ...command, dispatchFailure } : command;
   }
-  getRun(id: string) {
-    return this.options.store.getRun(id);
+  async getRun(id: string) {
+    const run = await this.options.store.getRun(id);
+    return run ? this.publicRun(run) : null;
+  }
+  private async publicRun(run: RunRecord): Promise<RunRecord> {
+    const configuration = run.configuration as Record<string, Json> | null;
+    const review = configuration?.authorizationReview as Record<string, Json> | null;
+    if (review?.purpose !== 'authorization_review') return run;
+    const command = await this.options.store.getCommand(run.originCommandId);
+    if (command?.kind !== 'child.start' || command.sessionId !== run.sessionId) return run;
+    const parentExecutionId = (command.request as Record<string, Json>).parentExecutionId;
+    if (typeof parentExecutionId !== 'string' || command.id !== `child-start-${parentExecutionId}`)
+      return run;
+    const carrier = await this.options.store.getExecution(parentExecutionId);
+    const origin = carrier ? await this.options.store.getCommand(carrier.originCommandId) : null;
+    if (
+      carrier?.childSessionId !== run.sessionId ||
+      carrier.originStoreId !== run.originStoreId ||
+      command.originStoreId !== run.originStoreId ||
+      origin?.kind !== 'authorization.review'
+    )
+      return run;
+    // Run configuration is public history; the Store retains the original binding proof.
+    return {
+      ...run,
+      configuration: {
+        ...configuration,
+        authorizationReview: {
+          ...review,
+          decisionContext: semanticReviewContext(review.decisionContext!),
+        },
+      },
+    };
   }
   /** Trusted host observation of one actual Run namespace; does not confer execution permission. */
   async readRunExtensionRecord(input: {
@@ -2411,7 +2496,11 @@ export class AgentRuntime {
       };
     }
   > {
-    const view = await this.options.store.getView(id);
+    const original = await this.options.store.getView(id);
+    const view = {
+      ...original,
+      runs: await Promise.all(original.runs.map((run) => this.publicRun(run))),
+    };
     const progress = this.compressionProgress.get(id);
     return progress &&
       view.runs.some(
@@ -2588,7 +2677,7 @@ export class AgentRuntime {
       Boolean(source.compressionId) || ['failed', 'dispatching', 'running'].includes(last.status);
     const request = freshModel
       ? undefined
-      : (await this.readModelInput({ ...scope, executionId: last.id, signal })).request;
+      : (await this.readOriginalModelInput({ ...scope, executionId: last.id, signal })).request;
     if (!freshModel) {
       result.modelSource = source;
       result.modelRequest = request;
@@ -6092,6 +6181,7 @@ export class AgentRuntime {
   private async publishBody(
     scope: ToolScope,
     value: Json,
+    purpose: 'model-body' | 'authorization-review-request' = 'model-body',
   ): Promise<import('./model-body').ModelBodyReference> {
     if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
     const command =
@@ -6107,7 +6197,9 @@ export class AgentRuntime {
       sessionId: command.sessionId,
       subjectId: command.subjectId,
       scope: { kind: 'session', id: command.sessionId },
-      refId: `model-body-${hash}`,
+      // Only the policy's human-readable request is a public attachment.
+      // Model inputs, decision sources and transport state retain the private prefix.
+      refId: `${purpose}-${hash}`,
       mediaType: 'application/json',
       content,
     });
@@ -6160,6 +6252,7 @@ export class AgentRuntime {
   ): Promise<Json> {
     const command = await this.options.store.getCommand(scope.run.originCommandId);
     let authorizationReviewBindingDigest: string | undefined;
+    let reviewHasModelInputBody = false;
     if (command?.kind === 'child.start') {
       const carrier = await this.options.store.getExecution(
         String((command.request as Record<string, Json>).parentExecutionId),
@@ -6167,11 +6260,17 @@ export class AgentRuntime {
       const parent = carrier ? await this.options.store.getCommand(carrier.originCommandId) : null;
       if (parent?.kind === 'authorization.review') {
         authorizationReviewBindingDigest = await semanticDigest(carrier!.input);
-        request = await this.expandReviewRequest(request, scope);
+        const payload = carrier!.input as Record<string, Json>;
+        const context = payload.decisionContext as Record<string, Json> | null;
+        reviewHasModelInputBody = !!context?.modelInput;
+        request = await this.expandReviewRequest(request, scope, [command.id, carrier!.id]);
       }
     }
     const input = JSON.parse(JSON.stringify(request)) as Json;
-    if (Buffer.byteLength(canonicalJson(input)) <= 64 * 1024) return input;
+    // Projection may shrink an artifact-backed history below the transport threshold.
+    // Keep its existing body proof: SQL cannot expand the original private modelInput.
+    if (!reviewHasModelInputBody && Buffer.byteLength(canonicalJson(input)) <= 64 * 1024)
+      return input;
     const body = await this.publishBody(scope, input);
     // Identity and actual tool manifest remain visible to durable authorization; body is immutable.
     return {
@@ -6245,10 +6344,14 @@ export class AgentRuntime {
   private async expandReviewRequest(
     request: ModelRequest,
     scope: ToolScope,
+    sourceIds: [string, string],
   ): Promise<ModelRequest> {
     const messages = [];
     for (const message of request.messages) {
-      if (message.role !== 'user') {
+      if (
+        message.role !== 'user' ||
+        canonicalJson(message.sourceIds as unknown as Json) !== canonicalJson(sourceIds)
+      ) {
         messages.push(message);
         continue;
       }
@@ -6279,6 +6382,7 @@ export class AgentRuntime {
           messages: actual.messages!,
         };
       }
+      payload.decisionContext = semanticReviewContext(payload.decisionContext!);
       const requestBody = bodyReference(payload.requestBody);
       if (requestBody) {
         payload.request = jsonBody(await this.readBody(requestBody.reference, scope.signal));
@@ -6480,6 +6584,7 @@ export class AgentRuntime {
           content = `Agent message (untrusted data; no additional authorization):\n${canonicalJson({ messageId: mail.id, sourceSessionId: mail.sourceSessionId, sourceExecutionId: mail.sourceExecutionId, content: new TextDecoder('utf-8', { fatal: true }).decode(bytes) })}`;
         }
         let toolCalls = message.toolCalls;
+        let continuation: Json | undefined;
         if (message.modelOutput) {
           const output = modelOutputReference(message.modelOutput);
           const executionId = message.sourceIds?.[0];
@@ -6525,6 +6630,7 @@ export class AgentRuntime {
           );
           content = full.content;
           toolCalls = full.toolCalls;
+          continuation = full.continuation;
         }
         if (message.role === 'tool') {
           for (const id of message.sourceIds ?? []) {
@@ -6543,6 +6649,7 @@ export class AgentRuntime {
             role: message.role,
             content,
             ...(toolCalls ? { toolCalls } : {}),
+            ...(continuation === undefined ? {} : { continuation }),
             ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
             sourceIds: message.sourceIds ?? [message.id],
           },

@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -16,7 +17,7 @@ async function rejected(work: Promise<unknown>, code: string) {
   expect((error as { code?: string })?.code).toBe(code);
 }
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-host-controls-');
+  const root = mkdtempSync(join(tmpdir(), 'kite-host-controls-'));
   chmodSync(root, 0o700);
   const profile = { dataRoot: root, profile: 'new' };
   const store = await openSqliteStore(profile);

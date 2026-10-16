@@ -44,7 +44,7 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 
 [Desktop 构建](scripts/build-desktop.ts)在普通 workspace 与源码外候选中均输出实际 desktop/index.js 和原样 desktop/style.css，补齐新增 exports；Native renderer 编译 CSS/字体并纳入原递归 manifest。[原页面测试](test/desktop-page.test.tsx)迁回原 12 项展示断言。正式 macOS 窗口、原身份读写和剩余旧页面迁移范围由 Desktop owner 维护。
 
-原 [ScheduledTasks/ScheduledTaskEditor](src/desktop/ScheduledTasks.tsx)已由正式 Native 消费，沿原页面与右侧栏布局维护字段草稿。任务事实与保存/启禁/删除均只来自宿主显式参数；缺少保存回调时，页面和编辑器说明不可保存及后台运行，保存禁用，表单 submit 不推造持久任务。实际项目、页面导航、Session 草稿与窗口证据归 [Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)。
+[ScheduledTasks/ScheduledTaskEditor](src/desktop/ScheduledTasks.tsx)由正式 Native 消费，支持本地任务创建／编辑、项目与模型选择、日／工作日／周频率、时间和时区，以及启禁、立即运行、删除确认、运行记录与原会话入口。事实和行为均来自宿主参数，UI不调度或调用模型；异步失败保留字段，pending阻止重复点击，缺宿主保存回调仍禁用。SessionPage 每次打开编辑器绑定独立代次，关闭后再打开同一或其他任务时，旧保存结果不能关闭后来面板。工作树只显示禁用选项。验证见[DOM测试](test/isolated/scheduled-tasks.test.tsx)，真实持久化与权限归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)。
 
 原 SessionPage 欢迎区、建议、项目／分支菜单与 Composer 已接正式 Native 新对话准备。纯 UI 只追加／聚焦草稿和回调宿主选择，项目字段承载宿主 ID，不据此读取目录或执行 Git。创建、权限、实际模型及首次消息接管归 [Desktop owner](../../apps/desktop/README.md#native-新对话准备与首次发送)；不将准备页状态转为 Session 或执行 authority。
 

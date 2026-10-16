@@ -629,3 +629,40 @@ test('trusted candidate/publication checks run under the target lock and reject 
     f.close();
   }
 });
+
+test('model protocol is explicit snapshot identity with backward-compatible omission and strict family validation', () => {
+  const original = {
+    models: [
+      { id: 'local', provider: 'compatible', model: 'same', baseURL: 'http://localhost:1234/v1' },
+    ],
+  };
+  const legacy = createConfigurationSnapshot(resolveConfiguration({ defaults: original }));
+  expect(legacy.configuration.models![0]!.protocol).toBeUndefined();
+  const responses = createConfigurationSnapshot(
+    resolveConfiguration({
+      defaults: original,
+      explicit: { models: [{ id: 'local', protocol: 'responses' }] },
+    }),
+  );
+  expect(responses.configuration.models![0]!.protocol).toBe('responses');
+  expect(responses.digest).not.toBe(legacy.digest);
+  expect(Object.isFrozen(responses.configuration.models![0])).toBe(true);
+  for (const protocol of ['auto', '', null, 1, ['responses']])
+    expect(() =>
+      createConfigurationSnapshot(
+        resolveConfiguration({
+          defaults: original,
+          explicit: { models: [{ id: 'local', protocol }] },
+        }),
+      ),
+    ).toThrow('invalid_model_protocol');
+  for (const provider of ['deepseek', 'ollama'])
+    expect(() =>
+      createConfigurationSnapshot(
+        resolveConfiguration({
+          defaults: original,
+          explicit: { models: [{ id: 'local', provider, protocol: 'responses' }] },
+        }),
+      ),
+    ).toThrow('model_protocol_unsupported');
+});

@@ -217,6 +217,7 @@ const modelAdapterMetadata = z.discriminatedUnion('availability', [
       z.object({ availability: z.literal('unavailable'), reason: z.string() }),
     ]),
     settings: z.object({
+      protocol: z.enum(['chat-completions', 'responses']).optional(),
       temperature: z.number().optional(),
       topP: z.number().optional(),
       maxOutputTokens: z.number().optional(),
@@ -373,7 +374,16 @@ const modelSettingsMarker = z.strictObject({
   operation: modelSettingsOperation,
 });
 const providerSettingsOperation = z.strictObject({
+  kind: z.enum(['upsert', 'remove']).optional(),
+  name: z
+    .string()
+    .min(1)
+    .max(120)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: Provider labels deliberately exclude ASCII controls.
+    .regex(/^[^\x00-\x1f\x7f]+$/)
+    .optional(),
   provider: z.enum(['openai', 'deepseek', 'compatible', 'ollama']),
+  protocol: z.enum(['chat-completions', 'responses']).optional(),
   connectionId: etag.nullable(),
   baseURL: z.string().min(1).max(4096),
   modelNames: z.array(z.string().min(1).max(256)),
@@ -695,6 +705,7 @@ export const schemas = {
         enabled: z.boolean(),
         configured: z.boolean(),
         provider: z.string().optional(),
+        protocol: z.enum(['chat-completions', 'responses']).optional(),
         model: z.string().optional(),
         connectionId: etag.optional(),
         reasoningEffort: z
@@ -735,8 +746,12 @@ export const schemas = {
           connections: z.array(
             z.object({
               id: etag,
+              name: z.string().optional(),
+              modelIds: z.array(definitionId).optional(),
+              defaultModelIds: z.array(definitionId).optional(),
               baseURL: z.string(),
               hasCredential: z.boolean(),
+              protocol: z.enum(['chat-completions', 'responses']),
               modelNames: z.array(z.string()),
               canWrite: z.boolean(),
             }),
@@ -749,13 +764,13 @@ export const schemas = {
   ProviderDiscoveryRequest: z.strictObject({
     expectedStoreId: id,
     expectedReadSet: modelSettingsReadSet,
-    operation: providerSettingsOperation.omit({ modelNames: true }),
+    operation: providerSettingsOperation.omit({ modelNames: true, kind: true }),
     secret: z.string().min(1).max(65536).optional(),
   }),
   ProviderDiscoveryView: z.object({
     storeId: id,
     readSet: modelSettingsReadSet,
-    operation: providerSettingsOperation.omit({ modelNames: true }),
+    operation: providerSettingsOperation.omit({ modelNames: true, kind: true }),
     modelNames: z.array(z.string().min(1).max(256)).min(1),
   }),
   ProviderSettingsRequest: z.strictObject({

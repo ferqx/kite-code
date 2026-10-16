@@ -12,6 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalJson } from '../../../src/json';
 import {
@@ -43,7 +44,7 @@ function mutateUntrustedFixture(value: unknown, [path, ...replacement]: FixtureM
 }
 
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-file-recovery-maintenance-');
+  const root = mkdtempSync(join(tmpdir(), 'kite-file-recovery-maintenance-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;

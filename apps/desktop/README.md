@@ -298,11 +298,13 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 安排任务草稿
 
-正式 Native 左侧「安排任务」直接消费原 [ScheduledTasks/ScheduledTaskEditor](../../packages/ui/src/desktop/ScheduledTasks.tsx)与右侧栏。创建只打开名称、任务说明、真实项目、频率和本地／独立工作树环境表单；未观察项目不成为可选项。当前 Service 没有任务保存、调度、运行记录或通知协议，host 不传写入回调；页面及编辑器明确显示限制，保存保持禁用，表单提交也不产生任务、Session 或 Run。
+安排任务现已接入本地持久化与调度，不再只是草稿占位。操作与运行边界见[Desktop 手册](../../docs/handbook/clients/desktop/README.md)。[共享 UI](../../packages/ui/src/desktop/ScheduledTasks.tsx)负责异步表单、编辑、启禁、运行、删除确认和历史入口；[页面桥](src/native-scheduled-tasks.ts)沿封闭 IPC 读取事实，不改变当前会话，明确打开结果才导航。失败保留输入，打开不存在的结果会话失败仍保留任务页。
 
-页面导航保留当前准确 Session 及主输入／交互草稿，隐藏会话工具。返回会话或点击同一原会话只恢复页面，不重读持久草稿覆盖未保存原文；点击其他会话仍走原 select/历史/草稿路径。独立页面意图只阻止迟到创建回执抢占后来页面，不替换正在读取的 Session 代次。回到输入区重新挂载模型控件可读取目录，不产生新工作。
+[存储](electron/scheduled-tasks.ts)在原 desktop-private/data.sqlite 首次保存时惰性迁移 DB10，使用两张小表保存任务与冻结运行快照，不改变 Agent baseline/schema。任务最多128个、聚合1MiB；运行最多10000条、32MiB，新 claim 为仍活动记录的现有可变字段保留增长预算，update 在同一事务校验完整候选，容量不足明确报错并保持原字节，不自动淘汰历史。旧合法或略超总容量的运行仍可按严格逐行格式只读展示，容量不伪装成结构损坏；用户明确删除带可信结算标识的任务时只验证目标历史，不被其他任务的总容量挡住。旧满库若同一任务仍有无法写入新事实的活动记录或无空间补写验证标识的旧终态，仍需明确清理或迁移，不能自动判作终态或删除未知效果。IANA 本地时间按每天／工作日／每周解析，DST gap 跳过、overlap只取第一刻；原子 claim 消费已错过的最近一次，同任务、同 Store 绑定不重叠；新 claim 身份包含 Store，旧 Store 的运行保留只读，不阻止明确重新绑定后的新运行。用户明确确认删除时沿原语义移除任务定义及本地运行摘要（含旧 Store 摘要），原 Service 运行会话仍保留；这不取消或重放外部效果。稳定 occurrence、Session、创建和启动 Command 身份均在效果前保存。最近 IPC 仅传轻量运行摘要（全局128、单任务20），不重复传 prompt 快照；按实际序列化UTF8字节保留完整记录至3MiB，满足4MiB响应边界。
 
-[实际 DOM](test/isolated/native-scheduled-tasks-dom.test.tsx)核真实项目、disabled/submit 零调用、原未保存草稿与晚创建；[问卷 DOM](test/native-questionnaire-dom.test.tsx)核页面往返保原答案。源码外默认 [Native 候选](test/isolated/native-bundle.test.ts)及 [driver](test/native-bundle-electron.fixture.ts)沿实际窗口核同一入口、完整字段、禁用保存、原草稿和零工作；准确输入及结果见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-安排任务草稿页)。这项迁移完成原手册已有的页面能力，不声明新增定时运行能力。
+[Main](electron/main.ts)持有单个[运行器](electron/scheduled-task-runner.ts)，可注入时钟；关闭窗口不停止，退出／开发重载在关闭 Service 前停止新调度并等待已有提交回执。执行沿普通 AgentClient createSession 和 run.start，使用用户全局模型配置及真实项目。每次独立 Session，不选择或引导当前会话，不建另一套模型执行器。运行状态来自原 Command／Run；前台 Run 终态前后还核实准确原 Session／root work 的全部未结算 Tool、后台目录和子会话，未知效果保 unknown、未结束工作保 waiting，读取不完整保守阻止后继。after-turn 原报告待处理时继续等待；背景目录先读，再核原根／已关联 child Session 内所有活动 Run，覆盖报告已受理而尚无 Model 的窗口。这会保守等待同 Session 的其他活动轮次，其他根工作中的 unknown 仍按准确 root work 隔离。等待审批在原会话处理。退出／重载先等待 opening 确认结束，再停止并排空调度器；opening 的两处异步准入同时核退出和重载门禁。Main caller 关闭须等设置队列结算，手动立即运行的历史核对也计入调度器 stop，随后才关闭私有库和 Service。结算证明以有限 `settlementVersion` 保存；旧版未带证明的同任务、同 Store 终态也阻止新派发，不能由较新正常终态掩盖。到点或立即运行前只读核实所属原记录，全局每轮最多核实4条，核实未完不消费下一计划时间；未知、缺原事实或容量不足仍保守阻挡，不自动重放或伪造证明。未知、冷恢复仅 GET 原请求，不能恢复热 POST 权利。原申请缺失时保持 unknown并阻止下一次发生。恢复为新 Store 不 retag 原任务，自动／手动运行均拒绝旧身份；明确编辑保存后仅新绑定获得运行资格，旧运行字节不重写。保存、启禁和删除进入同一 Main 设置队列，IPC 明确区分 create 与 update：新增保留 renderer 按 Store 绑定的重试 ID，同 Store 重连或设置刷新继续复用，切 Store 不沿用；同 ID 相同输入幂等，冲突输入拒绝；编辑在异步目录校验前后核原任务仍存在，本连接已删除 ID 不能被迟到创建或编辑复活。设置保存确认后，安排任务模型目录沿同一设置修订重新读取，旧目录在重读期间不可选择。
+
+[Main 生命周期隔离测试](test/isolated/native-main-scheduling-lifecycle.test.ts)运行真实 Main 模块与调度器、有限宿主端口和 SQLite，核 opening／重载交叠及创建回执排空次序；它不代证真实 Electron 或原生进程退出。[存储与时区测试](test/isolated/scheduled-tasks.test.ts)、[实际固定模型 Service 与审批测试](test/scheduled-task-runner.test.ts)、[IPC](test/native-scheduled-ipc.test.ts)、[页面导航](test/isolated/native-scheduled-tasks-dom.test.tsx)、[hook](test/isolated/native-scheduled-hook-dom.test.tsx)和[共享 DOM](../../packages/ui/test/isolated/scheduled-tasks.test.tsx)覆盖对应断言；[DB10实际备份恢复](../../packages/agent/test/isolated/maintenance/desktop-schedules-profile.test.ts)核旧字节、恢复 Store 与零重放。实现决策见[Note](../../.agents/notes/implemented/architecture/2026-10-15-desktop-local-scheduled-tasks.md)。这些证据不授予 macOS／Windows 发布或安装资格。
 
 ## Native 当前会话环境信息与子详情
 
@@ -484,7 +486,7 @@ ANGLE Metal同期123.22→15.59MiB、Skia资源4.79MiB→4096字节，SharedImag
 
 正式 Native 全屏设置左侧的 Skills 分类展示所选 Session 工作区当前可信配置目录的名称、摘要、来源与可用／禁用／不可用状态。[Main reader](electron/skill-catalogue-reads.ts) 从实际选择封存 attach generation、viewSelection、historyEpoch、Store、Session 与 Workspace；open 在任何 GET 前同步核对原选择并登记 read ID，open/next/close 不排队在 controller refresh 后。Main 保存原 revision/cursor，每页限 128 KiB，关闭和作用域变化只中止所属读取。[IPC](electron/native-ipc.ts) 不接收 renderer 提供的 Workspace、路径或执行 authority。
 
-[完整读取](src/native-skills.ts)复用公共 Client 的闭合页 verifier，穷尽同 revision 后才发布，无总目录截断。[页面](src/native-skills-settings.tsx)区分可用空目录与不可用，刷新失败保留同作用域上次完整事实并说明未更新；实际选择、attach 或观察 epoch 改变时清理旧读取，普通 controller viewGeneration 更新不反复重开目录。来源只说明已准入的配置位置，缺字段说明未记录；页面不读正文、安装或激活 Workflow，发现与执行仍由默认 Service 负责，不恢复旧 home 隐式扫描。
+[完整读取](src/native-skills.ts)复用公共 Client 的闭合页 verifier，穷尽同 revision 后才发布，无总目录截断。目录列表与 MCP、提供商复用标题、列表行、状态标签和控件样式；条目详情通过 `panelHost` portal 到应用最右侧的共享 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx)，`editorControl` 接入设置壳的分层 Escape。关闭恢复入口焦点，移除条目后回到刷新；身份或目录资格改变立即隐藏旧详情。Skills 仅展示已有状态，没有手动新增、编辑、安装、上传或启停写接口。[页面](src/native-skills-settings.tsx)区分可用空目录与不可用，刷新失败保留同作用域上次完整事实并说明未更新；实际选择、attach 或观察 epoch 改变时清理旧读取，普通 controller viewGeneration 更新不反复重开目录。来源只说明已准入的配置位置，缺字段说明未记录；页面不读正文、安装或激活 Workflow，发现与执行仍由默认 Service 负责，不恢复旧 home 隐式扫描。
 
 [Main/IPC 测试](test/native-skills-reads.test.ts)与[实际 DOM](test/native-skills-settings.test.tsx)验证完整分页、关闭、迟到响应、刷新失败和作用域隔离。[默认 Native 候选](test/isolated/native-skills-bundle.test.ts)与[Electron driver](test/native-skills-electron.fixture.ts)已在本机 macOS 核搬迁、删除构建源后的默认 Service／网络装配：306 项经 16 个真实同 revision 页完整展示，文件与配置刷新、两个 Workspace、分类关闭重开、冷启动与普通所属 Service 退出均完成；退出后独立公共冷 Store 无 Run/Execution 增长。切换会话先沿原“返回应用”回到侧栏，再打开所选工作区的Skills设置；关闭设置不停止执行。原目录资格归[早期进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)，当前原窗口复验、真实失败和完整默认范围归[PC主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)，取舍见[目录决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。这项资格只覆盖当前 Native 公开目录消费者，完整 Skills/Workflow 与其他平台仍按 [P5](../../docs/plans/unified-agent-refactor-v1.md#3021-当前-native-skills-消费者迁移)核对。
 
@@ -771,7 +773,19 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 ## Native Provider 与下一次模型选择
 
+提供商目录现在平铺真实连接，四个协议族仅作新增模板；名称与稳定连接 ID 分离，同模板/同地址可多实例。新增、编辑、删除确认均沿 settings shell 最右 `RightSidebar`，保存失败留表单，成功且刷新完成后关闭，删除后的焦点回新增入口；迟到回执不覆盖新表单。Main 从 Service安全快照复制模型/默认引用，并只从本机私有库读取关联定时任务与未结束运行名称。删除在提交前重读这些引用，拒绝默认或定时依赖，不撤销 Vault 秘密。Native caller 将提供商写入与定时任务保存/启用串行，未知删除期间禁止新增任务引用，冷行仍只查原 GET。该保护不宣称能阻止非参与式外部编辑器或其他客户端修改用户 JSONC。
+
+[Provider DOM](test/native-provider-settings-dom.test.tsx)、[Main/IPC](test/native-provider-settings.test.ts)和[真实HTTP](../service/test/isolated/provider-settings.test.ts)覆盖列表/CRUD、旧配置、删除保护、重复点击和未知原回执；隔离 Linux Electron 预览使用无凭据本机测试配置，不代表付费服务、系统 Vault、正式完整构建或三平台发行资格。
+
 [Provider 面板](src/native-provider-settings.tsx)和[模型选择器](src/native-model-picker.tsx)是正式 Native renderer 消费者；Main 的[Provider manager](electron/provider-settings.ts)沿公共 Client/Service 管理接口固定原 Store/generation、用户观察 readSet 和五字段操作。renderer 只持安全连接/模型事实，不取得路径、credentialRef 或 opaque revoke authority。四类明确 family，手动名称直接保存、留空才显式发现；切换/关闭清未保存密钥与字段，局部必填/URL 错误聚焦，提交后密钥清空，等待/未知跨关闭保留。凭据与配置结果分别显示；已发布后的刷新失败保原结果，原 GET 的 applied 刷新输入选择器，不重绑定迟到面板。新模型 disabled，默认禁用门禁和开关失败恢复保留。
+
+提供商页的展示样式由 [专属 CSS](src/native-provider-settings.css)维护：连接列表显示名称、类型和配置状态，选中行保留高亮。按照[配置编辑交互约定](../../docs/handbook/clients/desktop/README.md#配置编辑交互)，[Native 设置壳层](src/native.tsx)在 `settings-content` 同级的应用最右端提供 `settings-editor-panel` 宿主；[Provider 面板](src/native-provider-settings.tsx)以 portal 复用定时任务使用的 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx)，而非主区内分栏或新弹窗。面板头与底部取消/保存固定，连接、凭据与模型字段独立滚动；窄窗贴右覆盖而不把表单排入列表，沿用亮暗主题变量。
+
+新增直接打开表单并聚焦服务商预设下拉框，编辑聚焦名称；关闭、取消、Escape 恢复原列表按钮焦点，Escape 在编辑器打开时不关闭设置。直接提交或原提交查询确认 applied 后共用刷新并收起原面板的流程；仅当前身份、编辑代次和原目标仍匹配时关闭，验证/保存/刷新错误保留表单；提交仍立即清密钥，未知提交跨面板关闭保留且只能查询原提交。新增表单内通过服务商预设下拉框选择模板；不另显示预设列表。列表和编辑栏均不展示历史提交结果、技术详情或内部 ID，仅保留简短成功/失败反馈。结果未知时显示精简提示与原提交查询入口，跨提供商或数据源的未决更改仍可查询；原内部账本和写入锁不变。关闭时清理读等待状态；读取开始即废止旧写观察，取消读取后需重新刷新才可保存；编辑版本隔离迟到保存/刷新，不关闭或重绑定后来选择的编辑器。切换分类或 Store 卸载原面板并保留原提交语义。该轮不新增 Service、发现请求、凭据读取或协议降级；模型及常规设置的其余编辑布局仍待单独迁移。
+
+[Provider DOM](test/native-provider-settings-dom.test.tsx)核 portal 归属、表单语义、成功关闭、失败保留及迟到结果；[完整 NativeDesktop DOM](test/isolated/native-new-conversation-dom.test.tsx)核实际设置壳层的最右侧宿主、Escape 分层、分类退出、焦点及原会话草稿不变。测试断言与实际运行结果仍分别记录，不能据 DOM 测试宣称系统凭证库或真实付费模型已验。
+
+2026-10-16 Linux 云端开发窗口（Bun 1.4.2／Electron 44.3.0）已从普通用户菜单检查列表、OpenAI Responses 表单、模型区域、空凭据错误聚焦，以及亮暗主题与窄窗口。提供商 DOM 5 项／80 断言与 Main 3 项／40 断言通过，Desktop typecheck 通过。默认 workspace build 在既有 `linux-shell-init.c` 的未使用 write 返回值警告被 `-Werror` 拒绝；仅本地预览构建使用保留警告的 `-Wno-error=unused-result` 编译包装，未修改该源码或仓库编译规则。没有真实 key 输入、凭据库写入、远端模型发现或付费请求；此证据不代表正式制品、完整回归或跨平台资格。
 
 [配置原意图](electron/configuration-journal.ts)在首次热 POST 前 FULL 保存非秘密原 input 与 safe state。[PrivateData](electron/private-data.ts) 的 DB6 从 DB0–5 保留原六表，新增准确 configuration_intents(command_id,state) 与 model_routes(store_id,session_id,model_id)；当前 DB7 保留这八表并增加下文独立 MCP 记录；前者最多128行/16MiB、原 input 不可替换、终结才删除，坏行保字节并拒绝写。Provider 与模型设置共用原 Store 未决门禁。冷行只允许显式原 ID GET，不持有 secret、不自动 GET/POST。已存未发布的 opaque reference 只留 Service/认证 SDK，Main 不投影它到 renderer。
 
@@ -807,9 +821,11 @@ Native局部 `NativeCallerCommandRequest` 增加公共 `ExtensionCommandRequest`
 
 [设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已交付全部有限入口。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；本机 Chrome/default OS vault 四项 Auth、准确取消与重启恢复已有独立资格。新的非参与式审查所发现的普通失败建立消费者已修复；真实 stdio 完整失败恢复、原局部回归及714文件／575正式作业的新冻结原完整默认均通过。本机局部设置方案已归位并删除，设计理由归[当前决定](../../.agents/notes/implemented/architecture/2026-10-07-native-mcp-settings-and-original-records.md)，准确结果归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-失败建立与完整连接恢复)。本机组合不代表外部账号、其他平台或整个重构已完成。
 
-用户从当前 Session 的设置页读取完整安全目录、来源／选择／认证／连接事实，再明确执行 user/project 选择、有限 Add/Remove、独立 Source Review、已有 opaque Ref 的 bind/revoke、四 Auth、连接／刷新／强制重连和原工具阅读。没有当前 Session 时要求选择，不隐式创建；离线、未登录、未批准、坏源只阻相应操作，无关普通对话继续。Add只收无凭据HTTP URL或绝对stdio command，高级raw声明仍由配置owner管理，设置没有secret editor。业务取消需准确原Execution的独立普通申请；Auth成功不自动连接，401不自动Login或重放Tool。
+用户从当前 Session 的设置页读取完整安全目录、来源／选择／认证／连接事实，再明确执行 user/project 选择、有限 Add/Remove、独立 Source Review、已有 opaque Ref 的 bind/revoke、四 Auth、连接／刷新／强制重连和原工具阅读。主区改为连接、配置来源和工具快照列表；新增来源、现有连接／来源管理及准确操作复核在与提供商、定时任务共用的最右侧 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx) 中进行。面板头与取消／复核／确认操作固定，内容独立滚动。来源管理仅呈现原有批准、绑定和删除能力，不新增来源原文更新 API 或秘密编辑器。关闭面板、切分类及刷新清理未提交表单与复核，释放工具 reader，不取消业务 Execution；原提交与未知结果继续保留，可明确查询准确原 ID。没有当前 Session 时要求选择，不隐式创建；离线、未登录、未批准、坏源只阻相应操作，无关普通对话继续。Add只收无凭据HTTP URL或绝对stdio command，高级raw声明仍由配置owner管理，设置没有secret editor。业务取消需准确原Execution的独立普通申请；Auth成功不自动连接，401不自动Login或重放Tool。
 
 Main 冻结真实 Store/subject/Session/Workspace identity、read-set 和观察代次；renderer 仅提交来源 ID、有限操作与显式范围。换 scope/关闭释放自己的 Reader，不取消业务 Execution。工具页固定原 snapshot，Main 最多两份在途 descriptor、每次至多64KiB chunk；完整 EOF/size/hash 和严格 UTF-8 核验后才显示全文，读取零额外连接或远端 RPC。来源批准/既有 Ref binding 由独立 Source Review 答复，普通父 Action、连接 Job 和远端 Tool 的 Ask 各自保留。 原全屏设置页保留“返回应用”；来源决定与普通审批在准确会话卡中分别操作，再回MCP设置核同一个原申请，返回页面不取消业务或新建申请。现有源码外窗口已按这些真实导航保原Source Review、独立Ask、一次效果和冷查回，准确范围归上述PC主线。
+
+[MCP DOM](test/native-mcp-settings.test.tsx)、[Skills DOM](test/native-skills-settings.test.tsx)及 [设置壳 DOM](test/isolated/native-new-conversation-dom.test.tsx)覆盖右栏归属、关闭／焦点、输入验证、复核失效、迟到读取与原提交保持。局部 UI 验证不代表外部 MCP、真实凭据或跨平台安装资格。
 
 [私有 MCP codec](electron/mcp-journal.ts)在 DB7 的 `mcp_intents(command_id,state)` FULL 保存完整非秘密原申请，独立128行/16MiB原字节上界，坏行保字节并拒绝写，未知不淘汰。首次提交前保存，冷/foreign 行不获得热 POST 许可；明确 Check 只查询原 ID，取消需准确原 Execution 的普通持久 caller 申请。已确认终态不被后来 pending/unknown GET 降级。来源发表成功但独立凭据清理失败/未知时保声明已保存与总体未确认，不能清除为成功。[DB7/manifest15 维护](../../packages/agent/src/maintenance/README.md#desktop-db7-与-manifest-v15)保独立 codec、历史 DB/manifest 白名单及原 Store 身份，恢复不自动 GET/POST。
 

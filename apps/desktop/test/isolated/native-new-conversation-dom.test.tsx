@@ -262,6 +262,23 @@ function fixture(
             },
           ],
         };
+      if (input.method === 'settings.providers.read')
+        return {
+          kind: 'settings.providers',
+          observationId: 1,
+          storeId: 'store',
+          canWrite: true,
+          errors: [],
+          providers: [
+            {
+              id: 'openai',
+              label: 'OpenAI',
+              defaultBaseURL: 'https://api.openai.com/v1',
+              requiresCredential: true,
+              connections: [],
+            },
+          ],
+        };
       if (input.method === 'conversation.send') {
         drafts.set(input.creation.sessionId, input.intent.content);
         if (rejectNext) {
@@ -474,6 +491,84 @@ test('settings replace the painted page without remounting its draft or re-readi
     expect(input.value).toBe('unsent settings draft 雪🙂');
     expect(conversationReads()).toEqual(reads);
     expect(f.calls.some((call) => call.method === 'conversation.send')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('provider configuration uses the rightmost settings rail and Escape dismisses editor before settings', async () => {
+  const f = fixture();
+  const pressEscape = async () => {
+    await act(async () => {
+      f.host.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('provider settings draft', '当前会话私有草稿');
+    const input = f.input('当前会话私有草稿');
+    await act(async () => {
+      const trigger = f.host.querySelector<HTMLButtonElement>('button[aria-label="用户菜单"]')!;
+      trigger.focus();
+      trigger.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+        .find((item) => item.textContent === '设置')!
+        .click(),
+    );
+    await f.click('提供商');
+    await f.click('新增提供商');
+    const shell = f.host.querySelector('.desktop-settings')!;
+    const main = shell.querySelector('.settings-content')!;
+    const rail = shell.querySelector('.settings-editor-panel')!;
+    expect(rail.parentElement).toBe(main.parentElement);
+    expect(rail).toBe(shell.lastElementChild!);
+    expect(rail.querySelector('.right-sidebar form')).not.toBeNull();
+    expect(main.querySelector('form')).toBeNull();
+    expect(main.querySelectorAll('.provider-instance')).toHaveLength(0);
+    expect(f.host.activeElement?.getAttribute('aria-label')).toBe('服务商预设');
+    const preset = rail.querySelector<HTMLSelectElement>('[aria-label="服务商预设"]')!;
+    expect(preset.tagName).toBe('SELECT');
+    expect(preset.value).toBe('openai');
+    expect(rail.querySelectorAll('.provider-preset')).toHaveLength(0);
+    expect(rail.textContent).not.toContain('更换预设');
+    expect(rail.textContent).not.toContain('提供商提交结果');
+    const origin = [...main.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === '新增提供商',
+    )!;
+    await pressEscape();
+    expect(rail.querySelector('form')).toBeNull();
+    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    expect(f.host.activeElement).toBe(origin);
+    await f.click('新增提供商');
+    await f.click('模型');
+    expect(rail.querySelector('form')).toBeNull();
+    await f.click('提供商');
+    expect(rail.querySelector('form')).toBeNull();
+    await f.click('新增提供商');
+    await f.click('返回应用');
+    expect(f.host.querySelector('.settings-editor-panel')).toBeNull();
+    expect(f.input('当前会话私有草稿')).toBe(input);
+    expect(input?.value).toBe('provider settings draft');
+    expect(
+      f.calls.some(
+        (call) => call.method === 'settings.providers.save' || call.method === 'conversation.send',
+      ),
+    ).toBe(false);
+    expect(
+      f.calls.filter((call) => call.method === 'settings.providers.close').length,
+    ).toBeGreaterThanOrEqual(3);
   } finally {
     await f.close();
   }
@@ -945,6 +1040,176 @@ test('ordinary unknown trust preserves the original permission lookup and never 
     ).toHaveLength(0);
     expect(f.input('当前会话私有草稿')?.value).toBe('unsent exact draft');
     expect(f.host.body.textContent).not.toContain('original-trust');
+  } finally {
+    await f.close();
+  }
+});
+
+test('MCP and Skills share the far-right settings rail, Escape closes details first, and tab changes preserve the conversation draft', async () => {
+  const f = fixture();
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const originalRequest = bridge.request;
+  bridge.request = async (input) => {
+    const result = await originalRequest(input);
+    if (input.method === 'attach' || input.method === 'state' || input.method === 'select') {
+      const state = result as NativeState;
+      return { ...state, selection: { ...state.selection!, canReadSkills: true } };
+    }
+    if (input.method === 'settings.mcp.read')
+      return {
+        kind: 'settings.mcp',
+        observationId: 1,
+        storeId: 'store',
+        sessionId: f.selected(),
+        workspaceId: 'w',
+        canWrite: true,
+        errors: [],
+        servers: [
+          {
+            id: 'server',
+            configDigest: 'a'.repeat(64),
+            transport: 'http',
+            source: { kind: 'programmatic', id: 'fixture', revision: '1' },
+            admitted: true,
+            selected: true,
+            available: true,
+            reason: null,
+          },
+        ],
+        sources: [],
+        nextAfterId: null,
+        snapshots: [],
+        nextAfterKey: null,
+      };
+    if (input.method === 'settings.skills.open')
+      return {
+        kind: 'settings.skills.page',
+        readId: input.readId,
+        scope: {
+          generation: input.generation,
+          viewSelection: input.viewSelection,
+          historyEpoch: input.historyEpoch,
+          storeId: 'store',
+          sessionId: f.selected(),
+          workspaceId: 'w',
+        },
+        page: {
+          version: 1,
+          storeId: 'store',
+          workspaceId: 'w',
+          revision: 'b'.repeat(64),
+          availability: 'available',
+          reason: null,
+          entries: [
+            {
+              id: 'shell-skill',
+              name: 'Shell Skill',
+              description: 'Complete skill summary',
+              version: 'c'.repeat(64),
+              source: { scope: 'project', origin: '.agents' },
+              enabled: true,
+              state: 'available',
+              reason: null,
+              requiredCapabilities: [],
+              missingCapabilities: [],
+            },
+          ],
+          nextAfterId: null,
+          complete: true,
+        },
+      };
+    return result;
+  };
+  const pressEscape = async () => {
+    await act(async () =>
+      f.host.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  };
+  const openSettings = async () => {
+    await act(async () => {
+      const trigger = f.host.querySelector<HTMLButtonElement>('button[aria-label="用户菜单"]')!;
+      trigger.focus();
+      trigger.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+        .find((item) => item.textContent === '设置')!
+        .click(),
+    );
+  };
+  const conversationReads = () =>
+    f.calls.filter((input) =>
+      ['attach', 'select', 'messages', 'draft.read'].includes(input.method),
+    );
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('unchanged extension-settings draft 雪🙂', '当前会话私有草稿');
+    const draft = f.input('当前会话私有草稿');
+    const reads = [...conversationReads()];
+    await openSettings();
+    await f.click('MCP');
+    const shell = () => f.host.querySelector('.desktop-settings')!;
+    const main = () => shell().querySelector('.settings-content')!;
+    const rail = () => shell().querySelector('.settings-editor-panel')!;
+    expect(rail() === shell().lastElementChild).toBe(true);
+    expect(rail().parentElement === main().parentElement).toBe(true);
+    expect(main().querySelector('form, .right-sidebar')).toBeNull();
+    expect(rail().childElementCount).toBe(0);
+    await f.click('新增 MCP');
+    expect(rail().querySelector('.right-sidebar form[aria-label="Add MCP source"]')).not.toBeNull();
+    expect(main().querySelector('form')).toBeNull();
+    expect(f.host.activeElement?.getAttribute('aria-label')).toBe('Name');
+    await pressEscape();
+    expect(rail().childElementCount).toBe(0);
+    expect(f.host.activeElement?.textContent).toBe('新增 MCP');
+    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    await pressEscape();
+    expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
+    await openSettings();
+    await f.click('MCP');
+    await f.click('新增 MCP');
+    await f.click('Skills');
+    expect(rail().childElementCount).toBe(0);
+    expect(main().querySelector('[aria-label="Skills 目录"]')).not.toBeNull();
+    await f.click('查看 Shell Skill 详情');
+    expect(rail().querySelector('.right-sidebar h3')?.textContent).toBe('Shell Skill');
+    expect(rail().textContent).toContain('Complete skill summary');
+    expect(main().querySelector('.right-sidebar')).toBeNull();
+    expect(rail().querySelector('form, input, textarea')).toBeNull();
+    expect(f.host.activeElement?.tagName).toBe('H3');
+    await pressEscape();
+    expect(rail().childElementCount).toBe(0);
+    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    expect(f.host.activeElement?.getAttribute('aria-label')).toBe('查看 Shell Skill 详情');
+    await f.click('查看 Shell Skill 详情');
+    await f.click('MCP');
+    expect(rail().childElementCount).toBe(0);
+    await f.click('管理连接 server');
+    expect(rail().querySelector('.right-sidebar[aria-label="MCP 连接详情"]')).not.toBeNull();
+    await f.click('返回应用');
+    expect(f.host.querySelector('.settings-editor-panel')).toBeNull();
+    expect(f.input('当前会话私有草稿') === draft).toBe(true);
+    expect(draft?.value).toBe('unchanged extension-settings draft 雪🙂');
+    expect(conversationReads()).toEqual(reads);
+    expect(f.selected()).toBe('a');
+    expect(
+      f.calls.some((input) =>
+        ['settings.mcp.submit', 'settings.mcp.cancel', 'conversation.send'].includes(input.method),
+      ),
+    ).toBe(false);
+    expect(f.calls.some((input) => input.method === 'settings.mcp.close')).toBe(true);
+    expect(f.calls.filter((input) => input.method === 'settings.skills.open')).toHaveLength(1);
+    expect(f.calls.filter((input) => input.method === 'settings.skills.close')).toHaveLength(1);
   } finally {
     await f.close();
   }

@@ -37,7 +37,7 @@ const lease=await acquireDesktopProfileAccess(input.access);let data;
 try {data=openPrivateData(input.profilePath,lease);
  if(input.action==='seed'){
   const readSet={userEtag:'a'.repeat(64),workspaceEtag:null,explicitDigest:'b'.repeat(64),effectiveDigest:'c'.repeat(64)};
-  const operation={provider:'compatible',connectionId:null,baseURL:'https://original.invalid/v1',modelNames:['Original-é-模型'],credential:'replace'};
+  const operation={provider:'compatible',protocol:'responses',connectionId:null,baseURL:'https://original.invalid/v1',modelNames:['Original-é-模型'],credential:'replace'};
   data.saveConfiguration({kind:'provider',input:{expectedStoreId:input.storeId,commandId:'provider-original',expectedReadSet:readSet,operation},state:{kind:'settings.providers.submission',commandId:'provider-original',storeId:input.storeId,observationId:1,operation,phase:'unknown',credentialState:'outcome_unknown',configurationState:'not_attempted'}});
   const modelOperation={kind:'default',modelId:'original_model'};
   data.saveConfiguration({kind:'model',input:{expectedStoreId:'historical_store',commandId:'model-original',expectedReadSet:readSet,operation:modelOperation},state:{kind:'settings.models.submission',commandId:'model-original',storeId:'historical_store',observationId:2,operation:modelOperation,scope:'user',phase:'unknown'}});

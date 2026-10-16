@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { semanticReviewContent } from '../../authorization-review-context';
 import { canonicalJson } from '../../json';
 import type { EnsureAgentFollowUpInput, EnsureOperationInput, Store } from '../port';
 import {
@@ -613,14 +614,18 @@ export function activateChildRun(
       command.id,
     );
     const start = JSON.parse(String(command.request_json)) as { input: Json };
+    const originalContent =
+      typeof start.input === 'string'
+        ? start.input
+        : (displayInput(start.input)?.content ?? canonicalJson(start.input));
+    const review =
+      db.row('SELECT kind FROM command WHERE id=?', job.origin_command_id!)?.kind ===
+      'authorization.review';
     db.appendMessage(
       String(job.child_session_id),
       runId,
       {
-        content:
-          typeof start.input === 'string'
-            ? start.input
-            : (displayInput(start.input)?.content ?? canonicalJson(start.input)),
+        content: review ? semanticReviewContent(originalContent) : originalContent,
         sourceIds: [String(command.id), input.executionId],
       },
       'user',

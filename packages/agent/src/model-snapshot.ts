@@ -50,6 +50,7 @@ function adapterSnapshot(value: ModelAdapterSnapshot): ModelAdapterSnapshot {
     typeof value.transformation.version !== 'string' ||
     !closed(value.settings, [
       'reasoningEffort',
+      'protocol',
       'temperature',
       'topP',
       'maxOutputTokens',
@@ -65,6 +66,8 @@ function adapterSnapshot(value: ModelAdapterSnapshot): ModelAdapterSnapshot {
     typeof value.settings.allowSystemInMessages !== 'boolean' ||
     (value.settings.includeUsage !== undefined &&
       typeof value.settings.includeUsage !== 'boolean') ||
+    (value.settings.protocol !== undefined &&
+      !['chat-completions', 'responses'].includes(value.settings.protocol)) ||
     (value.settings.reasoningEffort !== undefined &&
       !reasoningEfforts.includes(value.settings.reasoningEffort)) ||
     ['temperature', 'topP', 'maxOutputTokens'].some(

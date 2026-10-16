@@ -14,6 +14,7 @@ export class ConfigurationError extends Error {
 export type NamedConfiguration = JsonObject & { id: string; enabled?: boolean };
 export type ModelConfiguration = NamedConfiguration & {
   provider: string;
+  protocol?: 'chat-completions' | 'responses';
   model: string;
   baseURL?: string;
   credentialRef?: string;

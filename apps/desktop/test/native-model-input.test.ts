@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -205,7 +206,7 @@ test('input identity, bad chunk offsets/hash, abort and late selection are local
   ).toThrow('invalid_native_request');
 });
 test('actual Core fixed Adapter records 205 original requests; Native public SDK directory exhausts fixed upper through two pages with zero remote Provider', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-native-input-pages-')),
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-input-pages-'))),
     profile = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(profile),
     storeId = (await store.getMetadata()).storeId;

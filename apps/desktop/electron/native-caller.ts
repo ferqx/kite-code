@@ -49,6 +49,7 @@ import { NativePermissionGrants } from './permission-grants';
 import type { PrivateData } from './private-data';
 import { NativeProviderSettings } from './provider-settings';
 import { NativeRecovery } from './recovery';
+import type { ScheduledTaskRunner } from './scheduled-task-runner';
 import { NativeSessionManagement } from './session-management';
 import { NativeSkillCatalogueReads } from './skill-catalogue-reads';
 import { NativeToolMessages } from './tool-messages';
@@ -136,6 +137,16 @@ export class NativeCaller {
     string,
     { commandId: string; body: string; hash: string; nextOffset: number }
   >();
+  private scheduledTasks: ScheduledTaskRunner | undefined;
+  private settingsMutationTail: Promise<unknown> = Promise.resolve();
+  private serializeSettingsMutation<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.settingsMutationTail.then(work);
+    this.settingsMutationTail = result.catch(() => {});
+    return result;
+  }
+  setScheduledTasks(runner: ScheduledTaskRunner) {
+    this.scheduledTasks = runner;
+  }
   private readonly client: AgentClient;
   private readonly emit: (event: NativeEvent) => void;
   private readonly privateData: PrivateData | undefined;
@@ -1119,6 +1130,34 @@ export class NativeCaller {
         : this.background;
     let result: NativeResult;
     switch (request.method) {
+      case 'scheduled.list':
+      case 'scheduled.save':
+      case 'scheduled.toggle':
+      case 'scheduled.delete':
+      case 'scheduled.runNow': {
+        const tasks = this.scheduledTasks;
+        if (!tasks) throw new ClientError('scheduled_tasks_unavailable');
+        if (request.method === 'scheduled.save')
+          await this.serializeSettingsMutation(async () => {
+            this.check(generation);
+            this.providers.assertSchedulingAllowed();
+            return tasks.save(request.input, request.operation);
+          });
+        else if (request.method === 'scheduled.toggle')
+          await this.serializeSettingsMutation(async () => {
+            this.check(generation);
+            if (request.enabled) this.providers.assertSchedulingAllowed();
+            return tasks.toggle(request.id, request.enabled);
+          });
+        else if (request.method === 'scheduled.delete')
+          await this.serializeSettingsMutation(async () => {
+            this.check(generation);
+            return tasks.delete(request.id);
+          });
+        else if (request.method === 'scheduled.runNow') await tasks.runNow(request.id);
+        result = tasks.list();
+        break;
+      }
       case 'extensions.open':
         result = await this.extensions.open(request);
         break;
@@ -1460,11 +1499,10 @@ export class NativeCaller {
         result = await this.providers.read();
         break;
       case 'settings.providers.save':
-        result = await this.providers.submit(
-          request.observationId,
-          request.operation,
-          request.secret,
-        );
+        result = await this.serializeSettingsMutation(async () => {
+          this.check(generation);
+          return this.providers.submit(request.observationId, request.operation, request.secret);
+        });
         break;
       case 'settings.providers.lookup':
         result = await this.providers.lookup(request.commandId);
@@ -2083,6 +2121,7 @@ export class NativeCaller {
     const stopped = this.processes.close();
     try {
       await this.disposeNetwork();
+      await this.settingsMutationTail;
       await Promise.allSettled(this.creating.values());
       await this.conversation.close();
       this.input.disposeObserver();

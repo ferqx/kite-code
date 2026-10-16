@@ -113,6 +113,7 @@ export function createConfigurationSnapshot(
       'id',
       'enabled',
       'provider',
+      'protocol',
       'model',
       'baseURL',
       'credentialRef',
@@ -134,6 +135,15 @@ export function createConfigurationSnapshot(
         endpoint(projected.baseURL);
         endpoint(projected.url);
         if (projected.options !== undefined) object(projected.options);
+        if (key === 'models' && projected.protocol !== undefined) {
+          if (projected.protocol !== 'chat-completions' && projected.protocol !== 'responses')
+            throw new ConfigurationError('invalid_model_protocol');
+          if (
+            projected.protocol === 'responses' &&
+            !['openai', 'compatible'].includes(String(projected.provider))
+          )
+            throw new ConfigurationError('model_protocol_unsupported');
+        }
         if (key === 'models' && projected.modelCapabilities !== undefined) {
           const capabilities = object(projected.modelCapabilities);
           if (

@@ -14,6 +14,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { artifactPath } from '../../../src/artifacts-files';
@@ -38,7 +39,7 @@ async function failure(work: Promise<unknown>, code?: string) {
   if (code) expect((error as { code?: string }).code ?? (error as Error).message).toBe(code);
 }
 async function fixture(large = false) {
-  const directory = mkdtempSync('/private/tmp/kite-backup-');
+  const directory = mkdtempSync(join(tmpdir(), 'kite-backup-'));
   const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;

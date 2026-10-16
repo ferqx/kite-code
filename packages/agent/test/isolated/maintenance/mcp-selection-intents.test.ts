@@ -12,6 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalJson } from '../../../src/json';
 import {
@@ -39,7 +40,7 @@ function proofs(row: SelectionRecord) {
   return row;
 }
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-mcp-maintenance-');
+  const root = mkdtempSync(join(tmpdir(), 'kite-mcp-maintenance-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;

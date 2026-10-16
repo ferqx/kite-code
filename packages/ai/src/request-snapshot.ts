@@ -30,6 +30,7 @@ export interface ModelAdapterSnapshot {
     readonly maxSteps: number;
     readonly allowSystemInMessages: boolean;
     readonly includeUsage?: boolean;
+    readonly protocol?: 'chat-completions' | 'responses';
   };
   readonly transformation: { readonly id: string; readonly version: string };
 }

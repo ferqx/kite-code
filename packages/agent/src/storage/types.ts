@@ -406,6 +406,8 @@ export interface StoredModelOutput {
   complete: boolean;
 }
 export interface StoredModelInput {
+  /** Internal purpose sealed from the exact child carrier in the same read transaction. */
+  authorizationReview: { sourceIds: [string, string] } | null;
   storeId: string;
   originStoreId: string;
   identity: ModelInputIdentity;

@@ -663,7 +663,7 @@ export class UnifiedExecution {
       await output.text('reasoning', reasoning);
       for (const call of calls) await output.call(call);
     };
-    let finish: { reason: string; usage: Json } | undefined;
+    let finish: { reason: string; usage: Json; continuation?: Json } | undefined;
     try {
       const actualRequest = this.options.openModelInput
         ? await this.options.openModelInput(scope, input)
@@ -698,7 +698,14 @@ export class UnifiedExecution {
           const call = { id: event.id, name: event.name, arguments: event.arguments };
           calls.push(call);
           if (output) await output.call(call);
-        } else finish = { reason: event.reason, usage: { ...event.usage } };
+        } else
+          finish = {
+            reason: event.reason,
+            usage: { ...event.usage },
+            ...(event.continuation === undefined
+              ? {}
+              : { continuation: structuredClone(event.continuation) }),
+          };
         if (
           !output &&
           Buffer.byteLength(content) +
@@ -735,6 +742,10 @@ export class UnifiedExecution {
         throw new ModelAttemptError('stream_incomplete');
       if (new Set(calls.map((call) => call.id)).size !== calls.length)
         throw new AgentError('duplicate_tool_call_id');
+      if (finish.continuation !== undefined) {
+        if (!output) await activateOutput();
+        await output!.continuation(finish.continuation);
+      }
       await this.options.store.finishExecution({
         expectedStoreId: scope.run.originStoreId,
         owner: scope.owner,

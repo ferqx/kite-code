@@ -2,6 +2,8 @@
 
 [中立输出链](../model-output.ts)保存实际 Model 的 text、reasoning 和原 ToolCall JSON。普通小响应继续使用 inline 字段；超过 64 KiB 时转为原 Model Execution scope 的不可变 Artifact linked segments。这个阈值只决定存储形态，不拒绝、截断或累计限制响应。每段文本最多 32 KiB JavaScript code units，JSON 精确保留跨段／跨事件的 surrogate；完整 UTF-8 字节计数按拼接后的实际文本计算，不把跨事件 emoji 算成两个替换字符。内容不作为新的权限来源。
 
+Adapter 可在成功 `finish` 携带中立 `continuation: Json`。Core 不解释其中的 Provider 项、加密 reasoning 或调用 ID，不把它变成显示 reasoning、Tool 参数或授权来源；完整成功流才写入同一私有链的分块 continuation，保持 JSON 值。即使可见文本很短，也启用 Artifact 链，因此返回 continuation 的自定义 Runtime 必须提供 Artifact 端口；缺少能力会明确失败，不能静默丢弃状态。取消、流异常、重复调用 ID、截断工具批次及未完成压缩不建立可重放的 continuation。非空纯文本 length 按正常长任务续接保留成功的文本段与其 opaque continuation，下一次请求由新 Model Execution 发起。完整历史按原 Model scope 验证后恢复该字段，跨工具轮次和冷重开继续交给 Adapter；匹配 Provider/模型及 wire 协议由 AI owner 校验。公开输入/输出 Inspector 与 Message 不返回 opaque 内容；公共 Artifact 下载入口拒绝私有 model-body/model-output 引用，即使调用者从回执 hash 推导其 ID，内部完整读取不受影响；输入 bodyHash/bodyBytes 标识去除该私有字段后的公开 request 投影；公开客户端可独立核实该投影，原完整请求及其回执 hash 在私有展开路径验证。显式恢复使用私有完整请求，不从公开 Inspector 投影重放。
+
 只有一个 producer；每次段发布和有限 Store 检查点都被 await，没有无限正文队列。Artifact 使用固定 MIME、完整 hash/size 和准确 Store/Session/subject/Execution scope。新节点封存上一准确 reference 与连续 seq；Worker 收到有限 head、计数和明确不完整的 preview，不反复收到增长全文，也不改变原 Worker 控制／正文容量。完整便利读取受真实内存与平台表示能力限制，不另造 token 或总输出预算。
 
 `ModelOutputReference` 是私有 Store／Core descriptor，不是公共 ArtifactRef。`Store.getModelOutputSnapshot` 在一致读里核原 Model、Run、Command、root work、subject 和 child ancestry，再封存当时准确 head。成功的原 partial Message 保留原 id/seq，原位结算为 complete；没有 partial 时才新建消息，避免已成功后仍留下另一张 incomplete 卡。result 与 Message 指向同一 head，不在 SQL 多列复制全文。最终 SQL 核实际登记 metadata 和已确认的当前检查点；正文文件读取／JSON 解析不进入派发或终态事务。
@@ -17,3 +19,5 @@
 [实际输出回归](../../test/isolated/model-output/output.test.ts)使用临时 SQLite Worker／Artifacts、固定 Model 和本地无害 Tool，验证至少 17 MiB、544 个分块进入下一次实际请求、原 source ID、唯一完整 Message、cold readonly、Unicode 与 ToolCall 参数、取消／失败 prefix、错误 scope／损坏零后续 Provider；测量真实 Store 请求参数，检查单帧有限、部分输出提交总字节不随全文平方增长。本机证据为 macOS，不建立外部付费 Provider 能力、其他平台或发行安装资格；大 child 输出 carrier 由 Runtime owner 另作实际回归。
 
 恢复后，当前连接 Store 与原输出链出处独立校验：公开 snapshot 仍标当前 Store，私有 Store snapshot 从真实 Model/Run/Command 链封存原 `originStoreId`，每段 Artifact 仍核原出处与完整内容。读取旧历史和随后显式新 Run 的展开都通过相同完整链验证；不改写 origin，也不消费旧 planned/unknown 工作。[真实恢复回归](../../test/isolated/restored-media/read.test.ts)覆盖原大输出、大输入、Tool 正文和新 Run；[同 Loop child 回归](../../test/isolated/model-output/child.test.ts)同时核恢复后原 child/body/carrier 来源与新父 Run。
+
+[同一输出回归](../../test/isolated/model-output/output.test.ts)另核超过单段的 opaque continuation、工具调用 ID、关闭重开后的下一用户轮、输入/输出 Inspector 不泄漏，以及不完整 finish 零工具派发和无 continuation。测试使用固定 Adapter 与本地 SQLite/Artifact，不调用付费 Provider。

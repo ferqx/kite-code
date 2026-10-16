@@ -156,6 +156,8 @@ Service持原wrapper、SCM credentials、init／root pidfd和namespace FD，以�
 
 只有原root WNOWAIT／waitpid／raw status一致、namespace ECHILD、init／root原pidfd死亡、wrapper实际exit0／close／双EOF、stdin及配置真实关闭、pending write收束和全部原FD确认关闭才`ended`。启动清理unknown交回原facade，首unknown强持owner与证据、迟到terminal不升级。closed v4／`mcp-owned-pid-namespace`核原六字段scope和这些有限事实；[纯decoder](linux-stdio-process-evidence.ts)不加载FFI／读`/proc`／重开FD／连接，旧v1／v2／v3语义保持。
 
+unknown-owner的固定stderr诊断与Shell init共用相同的准确长度／EINTR／短写错误边界；原无限等待、零完成receipt与FORTIFY／Werror保持，见[诊断与构建验证](../jobs/README.md#linux-宿主与严格补偿源码)。
+
 Linux构建脚本生成并核x64／arm64 ELF `dist/mcp/linux-stdio-init`；显式`mcpStdioLinuxAssets()`定位本包原资产及canonical Bubblewrap，没有源码或安装机编译fallback。正式[Service assembler](../../../../apps/service/src/process-service.ts)沿原Source选择它；[来源工厂](../../../../apps/service/src/mcp-source-configuration.ts)在明确资产装配、resolve／admit／最后wire边界核原完整字节／EOF／devino／mode／mtime／ctime。原资产FD关闭unknown保首错与原对象、不重试，内部Profile门禁接现有装配cleanup及beforeResourceClose，阻正常Store／Profile／candidate释放，cleanup不依赖freshness。
 
 [owner整文件](../../test/isolated/mcp/linux-owned-program.test.ts)、[SDK／cold整文件](../../test/isolated/mcp/linux-stdio-port.test.ts)和[Service新FD整文件](../../../../apps/service/test/isolated/mcp-linux-source-assets.test.ts)仅证明本机private ABI mock、完整原RPC、wire漂移零入队、取消写错误及关闭／unknown控制流。[正式封装整例](../../../../apps/service/test/isolated/mcp-source-packaged-default.test.ts)保原180s／12s、Mac／Windows断言，Linux分支要求真正构建资产、原namespace host身份、完整终态和cold原C／E／output／cursor、零Provider／RPC。Linux native owner和正式整链缺compiler／Bubblewrap或真实失败必须失败；只有非Linux条件skip。实际Linux、installed版本／维护及全部客户端资格仍待重构后验收，本机macOS邻接不代其资格；持久边界归[Linux MCP提案](../../../../.agents/notes/proposed/architecture/2026-10-10-linux-mcp-owned-pid-namespace.md)。

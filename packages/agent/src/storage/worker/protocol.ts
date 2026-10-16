@@ -114,6 +114,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'getSessionLogs',
   'registerArtifact',
   'getArtifactReference',
+  'getLegacyReviewArtifactReference',
   'beginHostMutation',
   'finishHostMutation',
   'getHostMutation',

@@ -12,6 +12,10 @@ import type {
   NativeProviderSubmission,
 } from '../src/native-bridge';
 import type { NativeConfigurationData } from './configuration-journal';
+import type { NativeScheduledTaskData } from './scheduled-tasks';
+
+type ProviderData = NativeConfigurationData &
+  Partial<Pick<NativeScheduledTaskData, 'scheduledTasks' | 'scheduledTaskRuns'>>;
 
 type Scope = { generation: number; selection: number; storeId: string; sessionId?: string };
 type Entry = {
@@ -28,7 +32,7 @@ export class NativeProviderSettings {
   private readonly client: AgentClient;
   private readonly current: () => Scope | undefined;
   private readonly notify: () => void;
-  private readonly data?: NativeConfigurationData;
+  private readonly data?: ProviderData;
   private readonly entries = new Map<string, Entry>();
   private reading?: AbortController;
   private sequence = 0;
@@ -42,7 +46,7 @@ export class NativeProviderSettings {
     client: AgentClient,
     current: () => Scope | undefined,
     notify: () => void,
-    data?: NativeConfigurationData,
+    data?: ProviderData,
   ) {
     this.client = client;
     this.current = current;
@@ -62,6 +66,32 @@ export class NativeProviderSettings {
   }
   get submissions() {
     return [...this.entries.values()].map((entry) => structuredClone(entry.state));
+  }
+  /** Unknown deletions cannot admit a new local reference until their original outcome is known. */
+  assertSchedulingAllowed() {
+    const storeId = this.current()?.storeId;
+    if (
+      [...this.entries.values()].some(
+        (entry) =>
+          entry.state.storeId === storeId &&
+          entry.input.operation.kind === 'remove' &&
+          ['submitting', 'unknown'].includes(entry.state.phase),
+      )
+    )
+      throw new ClientError('configuration_mutation_pending');
+  }
+  private scheduledReferences(storeId: string, modelIds: readonly string[]) {
+    const names = new Set<string>();
+    for (const task of this.data?.scheduledTasks?.() ?? [])
+      if (task.storeId === storeId && modelIds.includes(task.modelId)) names.add(task.name);
+    for (const run of this.data?.scheduledTaskRuns?.() ?? [])
+      if (
+        run.task.storeId === storeId &&
+        modelIds.includes(run.task.modelId) &&
+        !['completed', 'failed', 'cancelled'].includes(run.status)
+      )
+        names.add(run.task.name);
+    return [...names];
   }
   release() {
     this.reading?.abort();
@@ -105,7 +135,12 @@ export class NativeProviderSettings {
           requiresCredential: provider.requiresCredential,
           connections: provider.connections.map((connection) => ({
             id: connection.id,
+            ...(connection.name === undefined ? {} : { name: connection.name }),
+            modelIds: [...(connection.modelIds ?? [])],
+            defaultModelIds: [...(connection.defaultModelIds ?? [])],
+            scheduledTaskNames: this.scheduledReferences(view.storeId, connection.modelIds ?? []),
             baseURL: connection.baseURL,
+            protocol: connection.protocol,
             hasCredential: connection.hasCredential,
             modelNames: [...connection.modelNames],
             canWrite: connection.canWrite,
@@ -129,6 +164,17 @@ export class NativeProviderSettings {
       throw new ClientError('configuration_observation_changed');
     if (!observed.view.readSet || !observed.facts.canWrite)
       throw new ClientError('configuration_unavailable');
+    if (operation.kind !== undefined && operation.kind !== 'upsert' && operation.kind !== 'remove')
+      throw new ClientError('invalid_request');
+    if (
+      operation.name !== undefined &&
+      (!operation.name.trim() ||
+        operation.name.length > 120 ||
+        [...operation.name].some(
+          (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+        ))
+    )
+      throw new ClientError('invalid_provider_name');
     try {
       const url = new URL(operation.baseURL);
       if (
@@ -142,11 +188,37 @@ export class NativeProviderSettings {
     } catch {
       throw new ClientError('invalid_provider_endpoint');
     }
+    if (
+      operation.protocol !== undefined &&
+      operation.protocol !== 'chat-completions' &&
+      operation.protocol !== 'responses'
+    )
+      throw new ClientError('invalid_model_protocol');
+    if (
+      operation.protocol === 'responses' &&
+      operation.provider !== 'openai' &&
+      operation.provider !== 'compatible'
+    )
+      throw new ClientError('model_protocol_unsupported');
     const provider = observed.facts.providers.find((entry) => entry.id === operation.provider);
     const connection = provider?.connections.find((entry) => entry.id === operation.connectionId);
     if (!provider || (operation.connectionId !== null && !connection?.canWrite))
       throw new ClientError('provider_settings_override');
-    if (
+    if (operation.kind === 'remove') {
+      if (
+        !connection ||
+        operation.credential !== 'none' ||
+        secret !== undefined ||
+        operation.modelNames.length
+      )
+        throw new ClientError('invalid_request');
+      if (connection.defaultModelIds?.length)
+        throw new ClientError('provider_default_model_in_use');
+      if (!this.data?.scheduledTasks || !this.data?.scheduledTaskRuns)
+        throw new ClientError('configuration_storage_unavailable');
+      if (this.scheduledReferences(observed.scope.storeId, connection.modelIds ?? []).length)
+        throw new ClientError('provider_scheduled_model_in_use');
+    } else if (
       (operation.credential === 'replace') !== (secret !== undefined) ||
       (operation.credential === 'replace' && !secret?.trim()) ||
       (operation.credential === 'keep' && !connection?.hasCredential) ||

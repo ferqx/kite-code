@@ -51,11 +51,30 @@ function validate(raw: unknown, commandId: string): void {
   )
     throw Error();
   const operation = provider
-    ? object(input.operation, ['provider', 'connectionId', 'baseURL', 'modelNames', 'credential'])
+    ? object(
+        input.operation,
+        ['provider', 'connectionId', 'baseURL', 'modelNames', 'credential'],
+        ['protocol', 'kind', 'name'],
+      )
     : object(input.operation, ['kind', 'modelId'], ['enabled']);
   if (provider) {
     if (
+      (operation.kind !== undefined && !oneOf(operation.kind, ['upsert', 'remove'])) ||
+      (operation.name !== undefined &&
+        (typeof operation.name !== 'string' ||
+          !operation.name.trim() ||
+          operation.name.length > 120 ||
+          [...operation.name].some(
+            (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+          ))) ||
+      (operation.kind === 'remove' &&
+        (operation.connectionId === null ||
+          operation.credential !== 'none' ||
+          !Array.isArray(operation.modelNames) ||
+          operation.modelNames.length !== 0)) ||
       !oneOf(operation.provider, ['openai', 'deepseek', 'compatible', 'ollama']) ||
+      (operation.protocol !== undefined &&
+        !oneOf(operation.protocol, ['chat-completions', 'responses'])) ||
       (operation.connectionId !== null && !hash(operation.connectionId)) ||
       typeof operation.baseURL !== 'string' ||
       operation.baseURL.length > 4096 ||

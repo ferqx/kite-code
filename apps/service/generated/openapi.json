@@ -5972,6 +5972,10 @@
                       "settings": {
                         "type": "object",
                         "properties": {
+                          "protocol": {
+                            "type": "string",
+                            "enum": ["chat-completions", "responses"]
+                          },
                           "temperature": {
                             "type": "number"
                           },
@@ -7702,6 +7706,10 @@
                           "settings": {
                             "type": "object",
                             "properties": {
+                              "protocol": {
+                                "type": "string",
+                                "enum": ["chat-completions", "responses"]
+                              },
                               "temperature": {
                                 "type": "number"
                               },
@@ -10046,6 +10054,10 @@
                 "provider": {
                   "type": "string"
                 },
+                "protocol": {
+                  "type": "string",
+                  "enum": ["chat-completions", "responses"]
+                },
                 "model": {
                   "type": "string"
                 },
@@ -10320,11 +10332,36 @@
                         "type": "string",
                         "pattern": "^[a-f0-9]{64}$"
                       },
+                      "name": {
+                        "type": "string"
+                      },
+                      "modelIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_.-]+$"
+                        }
+                      },
+                      "defaultModelIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_.-]+$"
+                        }
+                      },
                       "baseURL": {
                         "type": "string"
                       },
                       "hasCredential": {
                         "type": "boolean"
+                      },
+                      "protocol": {
+                        "type": "string",
+                        "enum": ["chat-completions", "responses"]
                       },
                       "modelNames": {
                         "type": "array",
@@ -10336,7 +10373,14 @@
                         "type": "boolean"
                       }
                     },
-                    "required": ["id", "baseURL", "hasCredential", "modelNames", "canWrite"],
+                    "required": [
+                      "id",
+                      "baseURL",
+                      "hasCredential",
+                      "protocol",
+                      "modelNames",
+                      "canWrite"
+                    ],
                     "additionalProperties": false
                   }
                 }
@@ -10399,9 +10443,19 @@
           "operation": {
             "type": "object",
             "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
               "provider": {
                 "type": "string",
                 "enum": ["openai", "deepseek", "compatible", "ollama"]
+              },
+              "protocol": {
+                "type": "string",
+                "enum": ["chat-completions", "responses"]
               },
               "connectionId": {
                 "anyOf": [
@@ -10479,9 +10533,19 @@
           "operation": {
             "type": "object",
             "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
               "provider": {
                 "type": "string",
                 "enum": ["openai", "deepseek", "compatible", "ollama"]
+              },
+              "protocol": {
+                "type": "string",
+                "enum": ["chat-completions", "responses"]
               },
               "connectionId": {
                 "anyOf": [
@@ -10569,9 +10633,23 @@
           "operation": {
             "type": "object",
             "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["upsert", "remove"]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
               "provider": {
                 "type": "string",
                 "enum": ["openai", "deepseek", "compatible", "ollama"]
+              },
+              "protocol": {
+                "type": "string",
+                "enum": ["chat-completions", "responses"]
               },
               "connectionId": {
                 "anyOf": [
@@ -11191,9 +11269,23 @@
               "operation": {
                 "type": "object",
                 "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["upsert", "remove"]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                  },
                   "provider": {
                     "type": "string",
                     "enum": ["openai", "deepseek", "compatible", "ollama"]
+                  },
+                  "protocol": {
+                    "type": "string",
+                    "enum": ["chat-completions", "responses"]
                   },
                   "connectionId": {
                     "anyOf": [

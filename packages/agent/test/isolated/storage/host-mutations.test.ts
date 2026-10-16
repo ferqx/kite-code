@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHmac, randomBytes } from 'node:crypto';
 import { appendFileSync, chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalJson } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -16,7 +17,7 @@ async function rejected(work: Promise<unknown>, code: string) {
   expect((actual as { code?: string })?.code).toBe(code);
 }
 async function fixture() {
-  const dataRoot = mkdtempSync('/private/tmp/kite-host-journal-');
+  const dataRoot = mkdtempSync(join(tmpdir(), 'kite-host-journal-'));
   chmodSync(dataRoot, 0o700);
   const profile = { dataRoot, profile: 'new' };
   const store = await openSqliteStore(profile);
@@ -715,6 +716,96 @@ test('Provider terminal journal distinguishes stored-unpublished, uncertain vaul
         })
       )?.state,
     ).toBe('pending');
+  } finally {
+    await f.close();
+  }
+});
+
+test('named Responses and remove markers keep exact durable identity and reject nonempty deletion models', async () => {
+  const f = await fixture();
+  const marker = {
+    expectedReadSet: {
+      userEtag: 'a'.repeat(64),
+      workspaceEtag: null,
+      explicitDigest: 'b'.repeat(64),
+      effectiveDigest: 'c'.repeat(64),
+    },
+    operation: {
+      kind: 'upsert',
+      name: 'Original named connection',
+      protocol: 'responses',
+      provider: 'openai',
+      connectionId: 'd'.repeat(64),
+      baseURL: 'https://provider.invalid/v1',
+      modelNames: ['actual'],
+      credential: 'none',
+    },
+  };
+  const request = (commandId: string, operation = marker.operation) => ({
+    expectedStoreId: f.expectedStoreId,
+    subjectId: 'owner',
+    commandId,
+    kind: 'config.user.write' as const,
+    scope: 'user',
+    requestDigest: f.digest({ commandId }),
+    safeRequest: {
+      scope: 'user',
+      ifMatch: marker.expectedReadSet.userEtag,
+      operationCount: 1,
+      providerSettings: { ...marker, operation },
+    },
+  });
+  try {
+    for (const kind of ['upsert', 'remove']) {
+      const original = request(kind, {
+        ...marker.operation,
+        kind,
+        modelNames: kind === 'remove' ? [] : ['actual'],
+      });
+      const created = await f.store.beginHostMutation(original);
+      expect(created.created).toBe(true);
+      expect(created.record.safeRequest).toEqual(original.safeRequest);
+      expect((await f.store.beginHostMutation(original)).created).toBe(false);
+      for (const changed of [{ name: 'Other name' }, { protocol: 'chat-completions' }])
+        await rejected(
+          f.store.beginHostMutation({
+            ...original,
+            safeRequest: {
+              ...original.safeRequest,
+              providerSettings: {
+                ...original.safeRequest.providerSettings,
+                operation: { ...original.safeRequest.providerSettings.operation, ...changed },
+              },
+            },
+          }),
+          'host_mutation_conflict',
+        );
+    }
+    const remove = { ...marker.operation, kind: 'remove', modelNames: [] };
+    for (const [index, operation] of [
+      { ...remove, modelNames: ['must-not-be-replayed'] },
+      { ...remove, credential: 'replace' },
+      { ...remove, connectionId: null },
+      { ...remove, name: 'invalid\nname' },
+      { ...remove, protocol: 'unrecognized' },
+    ].entries()) {
+      const original = request(`invalid-remove-${index}`);
+      await rejected(
+        f.store.beginHostMutation({
+          ...original,
+          safeRequest: { ...original.safeRequest, providerSettings: { ...marker, operation } },
+        }),
+        'invalid_host_mutation',
+      );
+      expect(
+        await f.store.getHostMutation({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'owner',
+          commandId: original.commandId,
+        }),
+      ).toBeNull();
+    }
+    expect(f.db.query('SELECT count(*) AS n FROM host_mutation').get()).toEqual({ n: 2 });
   } finally {
     await f.close();
   }

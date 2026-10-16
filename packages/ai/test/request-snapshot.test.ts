@@ -48,6 +48,7 @@ test('pure SDK description is sealed from actual binding/preset and never expose
       maxSteps: 1,
       allowSystemInMessages: true,
       includeUsage: true,
+      protocol: 'chat-completions',
     },
     transformation: { id: 'kite.sdk.messages', version: '2' },
   });

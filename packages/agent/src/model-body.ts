@@ -63,9 +63,10 @@ export function persistedModelRequest(value: Json): ModelRequest {
   for (const message of value.messages) {
     if (
       !object(message) ||
-      !keys(message, ['role', 'content', 'toolCalls', 'toolCallId', 'sourceIds']) ||
+      !keys(message, ['role', 'content', 'toolCalls', 'toolCallId', 'sourceIds', 'continuation']) ||
       !['system', 'user', 'assistant', 'tool'].includes(String(message.role)) ||
       !text(message.content) ||
+      (message.continuation !== undefined && message.role !== 'assistant') ||
       (message.toolCallId !== undefined && !text(message.toolCallId)) ||
       (message.sourceIds !== undefined &&
         (!Array.isArray(message.sourceIds) || !message.sourceIds.every(text))) ||

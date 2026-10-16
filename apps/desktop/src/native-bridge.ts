@@ -46,6 +46,7 @@ import type {
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
+import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
   NativeModelUsagePage,
@@ -228,7 +229,10 @@ export type NativeReasoningEffort =
   | 'ultar';
 export type NativeProvider = 'openai' | 'deepseek' | 'compatible' | 'ollama';
 export type NativeProviderOperation = {
+  kind?: 'upsert' | 'remove';
+  name?: string;
   provider: NativeProvider;
+  protocol?: 'chat-completions' | 'responses';
   connectionId: string | null;
   baseURL: string;
   modelNames: string[];
@@ -247,6 +251,11 @@ export type NativeProviderSettingsFacts = {
     requiresCredential: boolean;
     connections: {
       id: string;
+      name?: string;
+      modelIds?: string[];
+      defaultModelIds?: string[];
+      scheduledTaskNames?: string[];
+      protocol?: 'chat-completions' | 'responses';
       baseURL: string;
       hasCredential: boolean;
       modelNames: string[];
@@ -480,6 +489,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeScheduledRequest
   | NativeExtensionsRequest
   | NativeInteractionHistoryRequest
   | NativeToolMessageRequest
@@ -748,6 +758,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeScheduledResult
   | NativeExtensionsResult
   | NativeInteractionHistoryPage
   | NativeToolMessagePage
