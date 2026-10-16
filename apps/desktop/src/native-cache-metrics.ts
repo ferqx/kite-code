@@ -1,6 +1,7 @@
 import type { Message } from '@kite-ai/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
+import { NativeDisplayCache } from './native-display-cache';
 import { modelUsageMessageKey, type NativeModelUsageFact } from './tool-messages-bridge';
 
 type Receipt = { key: string; content: string; sample?: NativeModelUsageFact };
@@ -44,6 +45,24 @@ export function useNativeCacheMetrics({
     viewSelection,
     historyEpoch,
   ]);
+  const boundary = JSON.stringify([generation, historyEpoch]);
+  const snapshots = useRef({
+    boundary,
+    storeId,
+    version: 0,
+    cache: new NativeDisplayCache<readonly (readonly [string, Receipt])[]>(),
+  });
+  if (
+    snapshots.current.boundary !== boundary ||
+    (storeId && snapshots.current.storeId !== storeId)
+  ) {
+    snapshots.current.cache.clear();
+    snapshots.current.boundary = boundary;
+    snapshots.current.version++;
+  }
+  if (storeId) snapshots.current.storeId = storeId;
+  const version = snapshots.current.version;
+  const displayKey = JSON.stringify([storeId, sessionId, workspaceId]);
   const candidates = useMemo(
     () =>
       messages.filter(
@@ -73,8 +92,13 @@ export function useNativeCacheMetrics({
     [candidates, observationRevision],
   );
   const [retryRevision, setRetryRevision] = useState(0);
-  const cache = useRef({ scope, retryRevision, read: new Map<string, Receipt>() });
-  const [state, setState] = useState({ scope, read: new Map<string, Receipt>(), error: '' });
+  const cache = useRef({ scope, version, retryRevision, read: new Map<string, Receipt>() });
+  const [state, setState] = useState({
+    scope,
+    version,
+    read: new Map<string, Receipt>(),
+    error: '',
+  });
   const available =
     !suspended &&
     historyComplete &&
@@ -82,8 +106,12 @@ export function useNativeCacheMetrics({
     !selection.viewLoading &&
     !selection.permissionUnavailable;
   useEffect(() => {
-    if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
-      cache.current = { scope, retryRevision, read: new Map() };
+    if (
+      cache.current.scope !== scope ||
+      cache.current.version !== version ||
+      cache.current.retryRevision !== retryRevision
+    )
+      cache.current = { scope, version, retryRevision, read: new Map() };
     if (
       !bridge ||
       !storeId ||
@@ -154,12 +182,19 @@ export function useNativeCacheMetrics({
             sample: page.entries.find((entry) => entry.messageId === message.id),
           });
       }
-      if (active && pending.length) setState({ scope, read: new Map(current.read), error: '' });
+      if (active && pending.length) {
+        snapshots.current.cache.set(displayKey, [...current.read]);
+        setState({ scope, version, read: new Map(current.read), error: '' });
+      }
     })().catch(() => {
       if (active)
         setState((previous) => ({
           scope,
-          read: previous.scope === scope ? previous.read : new Map(),
+          version,
+          read:
+            previous.scope === scope && previous.version === version
+              ? previous.read
+              : new Map(snapshots.current.cache.get(displayKey)),
           error: '缓存指标未更新；只保留已核实的原样本。',
         }));
     });
@@ -180,14 +215,21 @@ export function useNativeCacheMetrics({
     historyEpoch,
     available,
     retryRevision,
+    displayKey,
+    version,
   ]);
+  const retained = snapshots.current.cache.get(displayKey);
+  const displayed = useMemo(
+    () => (state.scope === scope && state.version === version ? state.read : new Map(retained)),
+    [state, scope, version, retained],
+  );
   let metrics: { cacheHitTokens: number; cacheMissTokens: number } | undefined;
   const executions = new Set<string>();
   // A history/View refresh only gates new reads. Previously verified, unchanged
   // receipts remain displayable while the next round's usage is being checked.
-  if (!suspended && state.scope === scope)
+  if (!suspended)
     for (const message of candidates) {
-      const receipt = state.read.get(message.id);
+      const receipt = displayed.get(message.id);
       if (receipt?.key !== modelUsageMessageKey(message) || receipt.content !== message.content)
         continue;
       const sample = receipt.sample;
@@ -202,7 +244,10 @@ export function useNativeCacheMetrics({
     metrics && !Number.isSafeInteger(metrics.cacheHitTokens + metrics.cacheMissTokens);
   return {
     metrics: overflow ? undefined : metrics,
-    error: state.scope === scope ? state.error || (overflow ? '缓存指标超出可核实范围。' : '') : '',
+    error:
+      state.scope === scope && state.version === version
+        ? state.error || (overflow ? '缓存指标超出可核实范围。' : '')
+        : '',
     retry: () => setRetryRevision((value) => value + 1),
   };
 }

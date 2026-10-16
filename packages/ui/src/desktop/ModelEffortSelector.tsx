@@ -49,7 +49,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       ? effortNames[effortIndex]
       : configuredEffort === 'none'
         ? '关闭'
-        : configuredEffort || '默认';
+        : configuredEffort || undefined;
   const choices = effortValues.filter(
     (value) =>
       selected?.reasoningEffortChoices === undefined ||
@@ -88,12 +88,14 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
           size="sm"
           className="model-trigger model-effort-trigger"
           data-model-trigger
-          aria-label={`模型：${props.model?.name ?? '选择模型'}${canAdjustEffort ? `，思考程度：${effortLabel}` : ''}`}
+          aria-label={`模型：${props.model?.name ?? '选择模型'}${canAdjustEffort && effortLabel ? `，思考程度：${effortLabel}` : ''}`}
           title={props.model ? `${props.model.provider} / ${props.model.name}` : undefined}
           disabled={props.disabled}
         >
           <span className="truncate">{props.model?.name ?? '选择模型'}</span>
-          {canAdjustEffort && <span className="model-effort-summary">{effortLabel}</span>}
+          {canAdjustEffort && effortLabel && (
+            <span className="model-effort-summary">{effortLabel}</span>
+          )}
           <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
         </Button>
       </PopoverTrigger>
@@ -114,7 +116,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
         {view === 'effort' ? (
           <div className="model-effort-panel">
             <div className="flex min-w-0 flex-col items-center">
-              {canAdjustEffort && (
+              {canAdjustEffort && effortLabel && (
                 <output
                   className="effort-value"
                   data-maximum={effortIndex === 5}

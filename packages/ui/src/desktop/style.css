@@ -875,6 +875,9 @@ body {
   .composer[data-permission-pending="true"] .model-trigger:disabled {
     opacity: 1;
   }
+  .composer [data-model-picker][aria-busy="true"] .model-trigger:disabled {
+    opacity: 1;
+  }
   .permission-menu {
     border-color: var(--border);
     background: var(--card);

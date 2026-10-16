@@ -82,6 +82,7 @@ function fixture(
   let holdSelection = false,
     holdHistory = false;
   let releaseSelection: (() => void) | undefined, releaseHistory: (() => void) | undefined;
+  let heldSelectionSession: string | undefined;
   let holdModels = false,
     releaseModels: (() => void) | undefined;
   const permissionSubmissions: NativeState['permissionSubmissions'][number][] = [];
@@ -142,7 +143,10 @@ function fixture(
     },
     async request(input) {
       calls.push(input);
-      if (input.method === 'attach' || input.method === 'state') return state();
+      if (input.method === 'attach' || input.method === 'state')
+        return input.method === 'state' && releaseSelection && heldSelectionSession === selected
+          ? { ...state(), selection: undefined }
+          : state();
       if (input.method === 'directory')
         return {
           storeId: 'store',
@@ -157,8 +161,13 @@ function fixture(
         const result = state();
         if (holdSelection) {
           holdSelection = false;
+          heldSelectionSession = input.sessionId;
           await new Promise<void>((resolve) => {
-            releaseSelection = resolve;
+            releaseSelection = () => {
+              releaseSelection = undefined;
+              heldSelectionSession = undefined;
+              resolve();
+            };
           });
         }
         return result;
@@ -355,6 +364,7 @@ function fixture(
       holdModels = true;
     },
     modelsHeld: () => !!releaseModels,
+    refreshWhileSelecting: () => act(async () => watcher?.({ kind: 'changed', generation: 1 })),
     releaseModels: () => act(async () => releaseModels?.()),
     selected: () => selected,
     holdSelection: () => {
@@ -475,6 +485,43 @@ test('switching from a Session to global or project preparation retains the inpu
     expect(
       f.calls.some((call) =>
         ['conversation.send', 'submit', 'permission.mode'].includes(call.method),
+      ),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a held Session switch retains one input and model control through Main publication without selection, gates writes and restores the target draft directly', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('A own draft', '当前会话私有草稿');
+    await f.click('Other B');
+    await f.edit('B own draft', '当前会话私有草稿');
+    await f.click('Original A');
+    const input = f.input('当前会话私有草稿'),
+      model = f.host.querySelector('[data-model-trigger]');
+    f.holdSelection();
+    await f.click('Other B');
+    expect(f.input('当前会话私有草稿')).toBe(input);
+    expect(input?.value).toBe('B own draft');
+    expect(f.host.querySelector('[data-model-trigger]')).toBe(model);
+    expect((model as HTMLButtonElement).disabled).toBe(true);
+    await f.refreshWhileSelecting();
+    expect(f.input('当前会话私有草稿')).toBe(input);
+    expect(f.host.querySelector('[data-model-trigger]')).toBe(model);
+    const send = f.host.querySelector<HTMLButtonElement>('button[aria-label="发送明确的新轮次"]')!;
+    expect(send.disabled).toBe(true);
+    await act(async () => send.click());
+    await f.releaseSelection();
+    expect(f.input('当前会话私有草稿')).toBe(input);
+    expect(input?.value).toBe('B own draft');
+    expect(f.host.querySelector('[data-model-trigger]')).toBe(model);
+    expect(
+      f.calls.some((call) =>
+        ['submit', 'conversation.send', 'permission.mode'].includes(call.method),
       ),
     ).toBe(false);
   } finally {

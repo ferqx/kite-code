@@ -311,7 +311,26 @@ function NativeDesktopContent({
             ]),
           ) ?? false,
         );
-      setState(value);
+      const selecting = !!selectionRead.current;
+      setState((previous) => {
+        if (
+          !value.selection &&
+          selecting &&
+          previous?.selection &&
+          previous.generation === value.generation &&
+          (!value.directory || value.directory.storeId === previous.selection.storeId)
+        )
+          return {
+            ...value,
+            selection: {
+              ...previous.selection,
+              permissions: undefined,
+              permissionUnavailable: true,
+              viewLoading: true,
+            },
+          };
+        return value;
+      });
     }
   }
   async function report(action: () => Promise<unknown>, clearError = true) {
@@ -456,10 +475,11 @@ function NativeDesktopContent({
       current = generation.current,
       epoch = readLifecycle.current.epoch;
     selected.current = sessionId;
-    history.current?.preview(sessionId);
+    history.current?.close();
+    setHistoryState((previous) => ({ ...previous, phase: 'loading', error: undefined }));
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
-    setDraft('');
+    setDraft(draftCache.current.get(JSON.stringify([directory?.storeId, sessionId])) ?? '');
     await readSelection(sessionId, current, nonce, epoch);
     if (firstHandoff && page === pageIntent.current && isCurrentRead(current, epoch, nonce))
       setPreparing(false);
@@ -471,6 +491,8 @@ function NativeDesktopContent({
     try {
       const value = await bridge.request({ method: 'select', generation: current, sessionId });
       if (!isCurrentRead(current, epoch, nonce)) return;
+      if (value && 'generation' in value && value.selection?.session.id === sessionId)
+        history.current?.preview(sessionId);
       apply(value);
       if (value && 'generation' in value && value.selection && parentHistoryVisible.current)
         history.current?.select(current, value.selection, value.historyEpoch);
@@ -593,8 +615,13 @@ function NativeDesktopContent({
         ? {
             ...state.selection,
             permissionUnavailable:
-              state.selection.permissionUnavailable || historyState.phase !== 'complete',
-            viewLoading: state.selection.viewLoading || historyState.phase === 'loading',
+              state.selection.permissionUnavailable ||
+              historyState.phase !== 'complete' ||
+              selected.current !== state.selection.session.id,
+            viewLoading:
+              state.selection.viewLoading ||
+              historyState.phase === 'loading' ||
+              selected.current !== state.selection.session.id,
             permissions:
               historyState.phase === 'complete' ? state.selection.permissions : undefined,
           }
@@ -2962,6 +2989,7 @@ function NativeDesktopContent({
                         bridge={bridge}
                         generation={state.generation}
                         selection={selection}
+                        disabled={selected.current !== selection.session.id}
                         revision={String(settingsRevision)}
                         value={modelChoices.current.get(choiceKey) ?? {}}
                         onChange={(choice) => {

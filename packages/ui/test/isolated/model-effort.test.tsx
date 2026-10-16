@@ -116,12 +116,13 @@ test('same-name models remain distinct by provider and the popup uses two column
   expect(document.querySelector('.model-effort-panel')).not.toBeNull();
 });
 
-test('unknown configured effort stays visible as configured and absent effort remains default', async () => {
+test('configured effort stays visible and absent effort does not invent a default label or selection', async () => {
+  const changes: string[] = [];
   const props = {
     model: { provider: 'OpenAI', name: 'model' },
     models: [{ provider: 'OpenAI', name: 'model' }],
     onModelChange: () => {},
-    onReasoningEffortChange: () => {},
+    onReasoningEffortChange: (value: string) => changes.push(value),
   };
   await render(<ModelEffortSelector {...props} reasoningEffort="legacy-extra" />);
   await openSelector();
@@ -130,8 +131,28 @@ test('unknown configured effort stays visible as configured and absent effort re
     'legacy-extra',
   );
   await act(() => root!.render(<ModelEffortSelector {...props} reasoningEffort={undefined} />));
-  expect(document.querySelector('.effort-value')?.textContent).toBe('默认');
-  expect(document.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('默认');
+  expect(document.querySelector('.effort-value')).toBeNull();
+  expect(document.querySelector('.model-effort-summary')).toBeNull();
+  expect(document.querySelector('[data-model-trigger]')?.getAttribute('aria-label')).toBe(
+    '模型：model',
+  );
+  expect(document.body.textContent).not.toContain('默认');
+  expect(document.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('中');
+  expect(changes).toEqual([]);
+  await act(() =>
+    root!.render(
+      <ModelEffortSelector
+        {...props}
+        models={[{ ...props.models[0]!, reasoningEffort: 'high' }]}
+      />,
+    ),
+  );
+  expect(document.querySelector('.model-effort-summary')?.textContent).toBe('高');
+  expect(document.querySelector('.effort-value')?.textContent).toBe('高');
+  await act(() => root!.render(<ModelEffortSelector {...props} reasoningEffort="low" />));
+  expect(document.querySelector('.model-effort-summary')?.textContent).toBe('轻度');
+  expect(document.querySelector('.effort-value')?.textContent).toBe('轻度');
+  expect(changes).toEqual([]);
 });
 
 test('every selected model offers effort adjustment without capability metadata; missing routes require selection', async () => {

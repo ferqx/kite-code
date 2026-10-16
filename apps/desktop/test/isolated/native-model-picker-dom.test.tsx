@@ -258,6 +258,70 @@ test('ordinary pending catalogue reads keep a compact busy control and genuine f
   }
 });
 
+test('returning to a cached Session retains its model button while rereading, and late catalogues cannot replace the next Session', async () => {
+  const f = fixture(),
+    ready: boolean[] = [],
+    changes: NativeModelChoice[] = [];
+  let id = 'a',
+    hold = false,
+    release: (() => void) | undefined;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async () => {
+      const original = id;
+      if (hold) {
+        hold = false;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return { ...facts, selectedModelId: original };
+    },
+  };
+  const render = (target: string, view: number, generation = 1) => {
+    id = target;
+    return act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={generation}
+          selection={selected(target, view)}
+          value={{}}
+          onChange={(value) => changes.push(value)}
+          onReady={(value) => ready.push(value)}
+        />,
+      ),
+    );
+  };
+  try {
+    await render('a', 1);
+    const button = f.element.querySelector('[data-model-trigger]');
+    await render('b', 2);
+    expect(f.element.querySelector('[data-model-trigger]')).toBe(button);
+    expect(button?.textContent).toContain('remote-b');
+    hold = true;
+    await render('a', 3);
+    expect(f.element.querySelector('[data-model-trigger]')).toBe(button);
+    expect(button?.textContent).toContain('remote-a');
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(ready.at(-1)).toBe(false);
+    await render('b', 4);
+    expect(button?.textContent).toContain('remote-b');
+    await act(async () => release!());
+    expect(button?.textContent).toContain('remote-b');
+    expect(ready.at(-1)).toBe(true);
+    hold = true;
+    await render('a', 5, 2);
+    expect(button?.textContent).toBe('选择模型');
+    expect(ready.at(-1)).toBe(false);
+    await act(async () => release!());
+    expect(button?.textContent).toContain('remote-a');
+    expect(changes).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
 test('explicit missing selection after configuration refresh stays unavailable without switching to default', async () => {
   const f = fixture(),
     ready: boolean[] = [],

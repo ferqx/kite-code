@@ -7,6 +7,7 @@ import type {
   NativeSelection,
 } from './native-bridge';
 import { useNativeDiagnostics } from './native-diagnostics';
+import { NativeDisplayCache } from './native-display-cache';
 
 export type NativeModelChoice = { modelId?: string; reasoningEffort?: NativeReasoningEffort };
 function errorCode(cause: unknown) {
@@ -22,6 +23,7 @@ export function NativeModelPicker({
   value,
   onChange,
   onReady,
+  disabled = false,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -31,16 +33,36 @@ export function NativeModelPicker({
   value: NativeModelChoice;
   onChange: (value: NativeModelChoice) => void;
   onReady: (ready: boolean, choice?: NativeModelChoice) => void;
+  disabled?: boolean;
 }) {
   const diagnostics = useNativeDiagnostics();
-  const [facts, setFacts] = useState<NativeModelSettingsFacts>();
-  const [error, setError] = useState(''),
-    [reading, setReading] = useState(false);
+  const storeId = preparing?.storeId ?? selection?.storeId;
+  const boundary = JSON.stringify([generation, storeId, revision]);
+  const snapshots = useRef({ boundary, cache: new NativeDisplayCache<NativeModelSettingsFacts>() });
+  if (snapshots.current.boundary !== boundary) {
+    snapshots.current.cache.clear();
+    snapshots.current.boundary = boundary;
+  }
+  const displayKey = JSON.stringify([
+    preparing ? 'preparing' : 'session',
+    selection?.session.id,
+    selection?.session.workspaceId,
+  ]);
   const identity = preparing
     ? `${generation}/${preparing.storeId}/new-conversation`
     : `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
-  const current = useRef(identity);
-  current.current = identity;
+  const readKey = JSON.stringify([identity, revision]);
+  const [state, setState] = useState<{
+    key: string;
+    facts?: NativeModelSettingsFacts;
+    reading: boolean;
+    error: string;
+  }>();
+  const facts = state?.key === readKey ? state.facts : snapshots.current.cache.get(displayKey);
+  const reading = state?.key !== readKey || state.reading;
+  const error = state?.key === readKey ? state.error : '';
+  const current = useRef(readKey);
+  current.current = readKey;
   const sequence = useRef(0),
     readyCallback = useRef(onReady);
   readyCallback.current = onReady;
@@ -52,7 +74,7 @@ export function NativeModelPicker({
   const effort = value.reasoningEffort ?? selected?.reasoningEffort;
   const allowedEffort =
     value.reasoningEffort === undefined || supported.includes(value.reasoningEffort);
-  const ready = !!selected && allowedEffort && !reading && !error;
+  const ready = !!selected && allowedEffort && !reading && !error && !disabled;
   const readyId = ready ? selected?.id : undefined;
   useEffect(() => {
     readyCallback.current(
@@ -69,11 +91,10 @@ export function NativeModelPicker({
   }, [ready, readyId, value.reasoningEffort]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Catalogue reads use only scope and settings revision, never observer event objects or temporary effort.
   useEffect(() => {
-    const original = identity,
+    const original = readKey,
       request = ++sequence.current;
-    setFacts(undefined);
-    setError('');
-    setReading(true);
+    const retained = snapshots.current.cache.get(displayKey);
+    setState({ key: readKey, facts: retained, error: '', reading: true });
     readyCallback.current(false);
     void bridge
       .request({ method: preparing ? 'conversation.models.read' : 'input.models.read', generation })
@@ -90,24 +111,23 @@ export function NativeModelPicker({
           throw Error('store_identity_mismatch');
         if (preparing && response.storeId !== preparing.storeId)
           throw Error('store_identity_mismatch');
-        setFacts(response);
+        snapshots.current.cache.set(displayKey, response);
+        setState({ key: readKey, facts: response, error: '', reading: false });
       })
       .catch((cause) => {
         if (current.current === original && sequence.current === request)
-          setError(errorCode(cause));
-      })
-      .finally(() => {
-        if (current.current === original && sequence.current === request) setReading(false);
+          setState({ key: readKey, facts: retained, error: errorCode(cause), reading: false });
       });
     return () => {
       sequence.current++;
     };
   }, [identity, revision, bridge]);
   function choose(modelId: string) {
-    if (!reading && !error && models.some((model) => model.id === modelId)) onChange({ modelId });
+    if (!reading && !error && !disabled && models.some((model) => model.id === modelId))
+      onChange({ modelId });
   }
   function setEffort(reasoningEffort: NativeReasoningEffort) {
-    if (!selected || !supported.includes(reasoningEffort)) return;
+    if (!ready || !selected || !supported.includes(reasoningEffort)) return;
     onChange({
       ...value,
       ...(value.modelId === undefined ? { modelId: selected.id } : {}),
@@ -115,9 +135,12 @@ export function NativeModelPicker({
     });
   }
   return (
-    <section aria-label="下一轮模型选择" aria-busy={reading || undefined}>
+    <section
+      data-model-picker
+      aria-label="下一轮模型选择"
+      aria-busy={reading || disabled || undefined}
+    >
       <ModelEffortSelector
-        key={`${identity}/${revision}`}
         model={
           selected
             ? {
@@ -134,7 +157,7 @@ export function NativeModelPicker({
           reasoningEffort: model.reasoningEffort ?? undefined,
           reasoningEffortChoices: model.reasoningEffortChoices ?? [],
         }))}
-        disabled={reading}
+        disabled={reading || disabled}
         reasoningEffort={effort ?? undefined}
         onModelChange={(_provider, _name, id) => {
           if (id !== undefined) choose(id);

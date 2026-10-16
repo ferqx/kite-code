@@ -6,6 +6,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { useNativeCacheMetrics } from '../../src/native-cache-metrics';
+import { NativeDisplayCache } from '../../src/native-display-cache';
 import type { NativeModelUsagePage } from '../../src/tool-messages-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
@@ -346,6 +347,88 @@ test('retained samples still require the original body and source, and never cro
   } finally {
     await f.close();
   }
+});
+
+test('returning to cached Sessions displays their own verified rate while fresh usage is held; late reads and epoch resets cannot revive old facts', async () => {
+  const f = fixture();
+  let hold = false,
+    release: (() => void) | undefined;
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      if (request.method !== 'toolMessages.usage') return null;
+      if (hold) {
+        hold = false;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      const id = request.messageIds[0]!;
+      return pageFor(request, id, [
+        {
+          messageId: id,
+          executionId: `model-${id}`,
+          originStoreId: 'store',
+          cacheHitTokens: id === 'a' ? 40 : 90,
+          cacheMissTokens: id === 'a' ? 60 : 10,
+        },
+      ]);
+    },
+  } as NativeBridge;
+  const render = (id: string, view: number, complete = true, epoch = 0) =>
+    act(async () =>
+      f.root.render(
+        <Harness
+          bridge={bridge}
+          selected={selection(id, view)}
+          messages={[message(id, id)]}
+          complete={complete}
+          historyEpoch={epoch}
+        />,
+      ),
+    );
+  try {
+    await render('a', 2);
+    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 40%');
+    await render('b', 3);
+    const rate = f.host.querySelector('.composer-cache-rate');
+    expect(rate?.textContent).toBe('缓存 90%');
+    await render('a', 4, false);
+    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+    expect(rate?.textContent).toBe('缓存 40%');
+    hold = true;
+    await render('a', 4);
+    expect(release).toBeDefined();
+    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+    expect(rate?.textContent).toBe('缓存 40%');
+    await render('b', 5, false);
+    expect(rate?.textContent).toBe('缓存 90%');
+    await act(async () => release!());
+    expect(rate?.textContent).toBe('缓存 90%');
+    await render('b', 3, false, 1);
+    expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    await render('b', 3, false, 0);
+    expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('display snapshots bound both entry count and retained bytes, including replacement and LRU use', () => {
+  const snapshots = new NativeDisplayCache<string>();
+  for (let i = 0; i < 12; i++) snapshots.set(String(i), `value ${i}`);
+  expect(snapshots.get('0')).toBe('value 0');
+  snapshots.set('12', 'new');
+  expect(snapshots.get('1')).toBeUndefined();
+  expect(snapshots.get('0')).toBe('value 0');
+  snapshots.clear();
+  const large = 'x'.repeat(1_600_000);
+  for (let i = 0; i < 6; i++) snapshots.set(String(i), large);
+  expect(snapshots.get('0')).toBeUndefined();
+  expect(snapshots.get('5')).toBe(large);
+  snapshots.set('5', 'replacement');
+  expect(snapshots.get('5')).toBe('replacement');
+  snapshots.set('huge', 'x'.repeat(2_100_000));
+  expect(snapshots.get('huge')).toBeUndefined();
 });
 
 test('late cache reads cannot enter another Session; changed Message samples do not reuse old usage and failed reads require an explicit retry', async () => {
