@@ -85,7 +85,7 @@ function frozenModel(run: Run): Environment['runtimeModel'] {
   };
 }
 
-/** Finite facts from the exact saved Model/Run/message, counted once per execution. */
+/** Observed usage snapshots, counted once per original Model, including failed/cancelled attempts. */
 export function tuiRecordedUsage(
   view: SessionView,
   messages: readonly Message[],
@@ -96,6 +96,41 @@ export function tuiRecordedUsage(
     cachedInputTokens = 0,
     hasOutput = true,
     hasCache = true;
+  const add = (id: string, result: unknown) => {
+    if (seen.has(id)) return;
+    const usage = object(object(result)?.usage);
+    if (!count(usage?.inputTokens)) return;
+    if (
+      usage.cachedInputTokens !== undefined &&
+      (!count(usage.cachedInputTokens) || usage.cachedInputTokens > usage.inputTokens)
+    )
+      return;
+    const nextInput = inputTokens + usage.inputTokens;
+    if (!Number.isSafeInteger(nextInput)) return;
+    seen.add(id);
+    inputTokens = nextInput;
+    if (count(usage.outputTokens) && Number.isSafeInteger(outputTokens + usage.outputTokens))
+      outputTokens += usage.outputTokens;
+    else hasOutput = false;
+    if (
+      count(usage.cachedInputTokens) &&
+      Number.isSafeInteger(cachedInputTokens + usage.cachedInputTokens)
+    )
+      cachedInputTokens += usage.cachedInputTokens;
+    else hasCache = false;
+  };
+  for (const execution of view.executions) {
+    const run = view.runs.find((entry) => entry.id === execution.runId);
+    if (
+      execution.kind === 'model' &&
+      ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status) &&
+      execution.sessionId === view.session.id &&
+      execution.originStoreId === view.storeId &&
+      run?.sessionId === execution.sessionId &&
+      run.originStoreId === execution.originStoreId
+    )
+      add(execution.id, execution.result);
+  }
   for (const message of messages) {
     const id =
       message.outputBody?.executionId ??
@@ -119,30 +154,11 @@ export function tuiRecordedUsage(
       execution.originStoreId !== (message.originMessage?.storeId ?? view.storeId)
     )
       continue;
-    const result = object(execution.result),
-      usage = object(result?.usage);
+    const result = object(execution.result);
     // A preview is not the saved complete content. outputBody identifies that
     // saved Model; without it, the exact content must also agree.
     if (!message.outputBody && result?.content !== message.content) continue;
-    if (!count(usage?.inputTokens)) continue;
-    if (
-      usage.cachedInputTokens !== undefined &&
-      (!count(usage.cachedInputTokens) || usage.cachedInputTokens > usage.inputTokens)
-    )
-      continue;
-    const nextInput = inputTokens + usage.inputTokens;
-    if (!Number.isSafeInteger(nextInput)) continue;
-    seen.add(id);
-    inputTokens = nextInput;
-    if (count(usage.outputTokens) && Number.isSafeInteger(outputTokens + usage.outputTokens))
-      outputTokens += usage.outputTokens;
-    else hasOutput = false;
-    if (
-      count(usage.cachedInputTokens) &&
-      Number.isSafeInteger(cachedInputTokens + usage.cachedInputTokens)
-    )
-      cachedInputTokens += usage.cachedInputTokens;
-    else hasCache = false;
+    add(id, result);
   }
   return seen.size
     ? {
@@ -156,7 +172,8 @@ export function tuiRecordedUsage(
 
 /** The display cache retains only facts for the current finite view, never request bodies. */
 export function createTuiDisplayReader(
-  client: Pick<AgentClient, 'getModelInput' | 'listSessionLogs'>,
+  client: Pick<AgentClient, 'getModelInput' | 'listSessionLogs'> &
+    Partial<Pick<AgentClient, 'getContextEstimate'>>,
   storeId: string,
 ) {
   let lastModel:
@@ -167,6 +184,9 @@ export function createTuiDisplayReader(
       }
     | undefined;
   let timing: { key: string; value: Readonly<Record<string, TuiExecutionTiming>> } | undefined;
+  let forecast:
+    | { key: string; value: Awaited<ReturnType<AgentClient['getContextEstimate']>> }
+    | undefined;
   return async (view: SessionView, messages: readonly Message[], signal: AbortSignal) => {
     const runs =
       view.storeId === storeId
@@ -267,6 +287,19 @@ export function createTuiDisplayReader(
         }
       }
     }
+    // The saved input is immutable, but a running attempt can acquire usage later.
+    // Overlay the current exact result on every observation instead of caching it
+    // with the input body, or a first read during streaming would stay estimated.
+    const reportedInputTokens = object(object(model?.result)?.usage)?.inputTokens;
+    if (context && count(reportedInputTokens)) {
+      context = {
+        ...context,
+        reportedInputTokens,
+        ...(context.usableInputTokens && context.usableInputTokens > 0
+          ? { utilization: reportedInputTokens / context.usableInputTokens }
+          : {}),
+      };
+    }
     const timingKey = JSON.stringify([
       storeId,
       view.session.id,
@@ -286,6 +319,48 @@ export function createTuiDisplayReader(
       Object.values(executionTimings).some((entry) => entry.availability === 'recorded_dispatch')
     )
       timing = { key: timingKey, value: executionTimings };
-    return { runtimeModel, context, usage: tuiRecordedUsage(view, messages), executionTimings };
+    let nextContext: Environment['nextContext'];
+    const observedUsage = tuiRecordedUsage(view, messages);
+    let usage: Environment['usage'] = observedUsage
+      ? { ...observedUsage, scope: 'observed' }
+      : undefined;
+    if (context && client.getContextEstimate) {
+      try {
+        const forecastKey = JSON.stringify([
+          storeId,
+          view.session.id,
+          view.snapshotCursor,
+          context.executionId,
+          model?.status,
+          model?.resultRevision,
+        ]);
+        const projection =
+          forecast?.key === forecastKey
+            ? forecast.value
+            : await client.getContextEstimate(
+                view.session.id,
+                { storeId, executionId: context.executionId },
+                { signal },
+              );
+        signal.throwIfAborted();
+        if (
+          projection.storeId === storeId &&
+          projection.sessionId === view.session.id &&
+          projection.runId === context.runId &&
+          projection.modelId === context.modelId &&
+          projection.modelInputExecutionId === context.executionId &&
+          BigInt(projection.snapshotCursor) >= BigInt(view.snapshotCursor)
+        ) {
+          nextContext = projection;
+          usage = { ...projection.cumulativeUsage, scope: 'session' };
+          // Cache only numeric facts at the exact observed cursor; streaming/new history invalidates them.
+          if (projection.snapshotCursor === view.snapshotCursor)
+            forecast = { key: forecastKey, value: projection };
+        }
+      } catch {
+        /* A projection is unavailable rather than substituted with old measurements. */
+      }
+    }
+    return { runtimeModel, context, nextContext, usage, executionTimings };
   };
 }

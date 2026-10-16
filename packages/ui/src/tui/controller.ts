@@ -180,7 +180,7 @@ export interface TuiSnapshot {
       effort?: string;
       source: 'model_input' | 'run_configuration' | 'unavailable';
     };
-    /** Read-only estimate of the exact saved Model request; separate from cumulative usage. */
+    /** Exact request usage when reported, with a separate local fallback estimate. */
     context?: {
       source: 'model_input';
       storeId: string;
@@ -189,6 +189,7 @@ export interface TuiSnapshot {
       executionId: string;
       modelId: string;
       bodyHash: string;
+      reportedInputTokens?: number;
       estimate: {
         systemTokens: number;
         transcriptTokens: number;
@@ -202,11 +203,31 @@ export interface TuiSnapshot {
       usableInputTokens?: number;
       utilization?: number;
     };
+    /** Forecast of the next recorded-context request, distinct from the last request's input. */
+    nextContext?: {
+      storeId: string;
+      sessionId: string;
+      runId: string;
+      modelId: string;
+      modelInputExecutionId: string;
+      contextSelectionId: string;
+      highWaterSeq: string;
+      source: 'reported_baseline' | 'local_estimate';
+      measuredInputTokens: number;
+      estimatedInputTokens: number;
+      totalInputTokens: number;
+      baselineExecutionId?: string;
+      usableInputTokens?: number;
+      utilization?: number;
+    };
     usage?: {
-      inputTokens: number;
+      scope?: 'session' | 'observed';
+      inputTokens?: number;
       outputTokens?: number;
       cachedInputTokens?: number;
       executionCount: number;
+      missingInputCount?: number;
+      missingOutputCount?: number;
     };
   };
 }

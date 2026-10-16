@@ -11,9 +11,12 @@ export type {
   SourceRequest,
 } from './context';
 export {
+  type ContextTokenBaseline,
   type ContextTokenEstimate,
+  type ContextTokenProjection,
   estimateModelContext,
   type ModelContextEstimate,
+  projectModelContext,
 } from './context-estimate';
 export type { WorkspaceSerialLocks } from './execution/resource-port';
 export type { ModelBodyReference } from './model-body';

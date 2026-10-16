@@ -294,6 +294,13 @@ function chromeFacts(
   return {
     ...environment,
     context: sameModel ? context : undefined,
+    nextContext:
+      sameModel &&
+      (!selected ||
+        selected.reasoningEffort === undefined ||
+        selected.reasoningEffort === current?.effort)
+        ? verifiedNextContext(state.snapshot)
+        : undefined,
     sessionTitle: state.snapshot?.view.session.title,
     nextModelName,
     nextEffort,
@@ -303,6 +310,20 @@ function chromeFacts(
     effort: current?.active || !nextModelName ? current?.effort : nextEffort,
     ...(state.permissions ? { permissionMode: state.permissions.mode.mode } : {}),
   };
+}
+
+function verifiedNextContext(snapshot: TuiSnapshot | undefined) {
+  const context = verifiedModelContext(snapshot),
+    next = snapshot?.environment?.nextContext;
+  return context &&
+    next &&
+    next.storeId === context.storeId &&
+    next.sessionId === context.sessionId &&
+    next.runId === context.runId &&
+    next.modelId === context.modelId &&
+    next.modelInputExecutionId === context.executionId
+    ? next
+    : undefined;
 }
 
 /** Ink owns the emitted bytes; these are only the current immutable render items. */
@@ -1330,6 +1351,7 @@ function TuiSessionView({
   const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const verifiedContext = verifiedModelContext(state.snapshot);
+  const nextContext = chromeFacts(state).nextContext;
   const resultScope = JSON.stringify([controller.port.storeId, state.sessionId]);
   const resultExecutions = controller.visibleExecutions.filter((item) => item.kind !== 'model');
   const resultKeys = new Set(
@@ -2431,11 +2453,76 @@ function TuiSessionView({
                         : 'Next task',
                     )}
               </Text>
-              {verifiedContext ? (
+              {state.snapshot?.environment?.usage && (
+                <Text>
+                  {t(
+                    state.snapshot.environment.usage.scope === 'observed'
+                      ? 'Observed actual usage:'
+                      : 'Cumulative actual usage:',
+                  )}{' '}
+                  {state.snapshot.environment.usage.inputTokens?.toLocaleString() ??
+                    t('unavailable')}{' '}
+                  {t('input tokens')}
+                  {state.snapshot.environment.usage.outputTokens !== undefined &&
+                    ` · ${state.snapshot.environment.usage.outputTokens.toLocaleString()} ${t('output tokens')}`}
+                </Text>
+              )}
+              {state.snapshot?.environment?.usage?.missingInputCount !== undefined && (
+                <Text dimColor>
+                  {t('Usage coverage:')}{' '}
+                  {state.snapshot.environment.usage.executionCount -
+                    state.snapshot.environment.usage.missingInputCount}
+                  /{state.snapshot.environment.usage.executionCount} {t('input tokens')}
+                  {' · '}
+                  {state.snapshot.environment.usage.executionCount -
+                    (state.snapshot.environment.usage.missingOutputCount ?? 0)}
+                  /{state.snapshot.environment.usage.executionCount} {t('output tokens')}
+                </Text>
+              )}
+              {nextContext && (
                 <Box flexDirection="column">
                   <Text>
-                    {t('Verified Model context estimate:')}{' '}
-                    {verifiedContext.estimate.totalInputTokens.toLocaleString()}
+                    {t('Next request context estimate:')}{' '}
+                    {nextContext.totalInputTokens.toLocaleString()}
+                  </Text>
+                  <Text dimColor>
+                    {t('Measured baseline:')}{' '}
+                    {nextContext.source === 'reported_baseline'
+                      ? nextContext.measuredInputTokens.toLocaleString()
+                      : t('unavailable')}
+                    {' · '}
+                    {t(
+                      nextContext.source === 'reported_baseline'
+                        ? 'Estimated additions:'
+                        : 'Full local estimate:',
+                    )}{' '}
+                    {nextContext.estimatedInputTokens.toLocaleString()}
+                  </Text>
+                  <Text dimColor>
+                    {t('Based on recorded sources and selected history; future input may differ.')}
+                  </Text>
+                </Box>
+              )}
+              {!nextContext && (
+                <Text dimColor>{t('Next request context estimate unavailable')}</Text>
+              )}
+              {verifiedContext ? (
+                <Box flexDirection="column">
+                  {verifiedContext.reportedInputTokens === undefined && (
+                    <Text>
+                      {t('Last request actual input:')} {t('unavailable')}
+                    </Text>
+                  )}
+                  <Text>
+                    {t(
+                      verifiedContext.reportedInputTokens !== undefined
+                        ? 'Reported Model input tokens:'
+                        : 'Verified Model context estimate:',
+                    )}{' '}
+                    {(
+                      verifiedContext.reportedInputTokens ??
+                      verifiedContext.estimate.totalInputTokens
+                    ).toLocaleString()}
                   </Text>
                   {verifiedContext.utilization !== undefined && (
                     <Text>
@@ -2444,7 +2531,11 @@ function TuiSessionView({
                     </Text>
                   )}
                   <Text dimColor>
-                    {t('Based on the last verified Model input; future input may differ.')}
+                    {t(
+                      verifiedContext.reportedInputTokens !== undefined
+                        ? 'Reported by the Provider for this request; future input may differ.'
+                        : 'Based on the last verified Model input; future input may differ.',
+                    )}
                   </Text>
                   {verifiedContext.utilization === undefined && (
                     <Text dimColor>{t('Context capacity estimate unavailable')}</Text>

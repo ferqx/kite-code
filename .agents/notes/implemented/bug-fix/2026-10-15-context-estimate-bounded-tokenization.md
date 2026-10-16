@@ -2,6 +2,8 @@
 
 Status: implemented
 
+适用范围：本 Note 继续规定缺失服务端输入统计时的本地回退计数。2026-10-16 已按[用量记录决定](2026-10-16-provider-token-accounting.md)优先显示同原请求的实际输入数；该变化不替代下述有限分块、完整字符和资源取舍。
+
 ## Problem
 
 TUI 在读取准确原 Model 请求后同步计算上下文显示估算。现有真实 Host 和导出 PTY 会读取含 9 MiB 连续中文的完整 Files 结果；`gpt-tokenizer` 的 cl100k BPE 对没有切分点的长段表现出病态增长，阻塞 TUI 主线程。Model 与 Run 已在 Service 持久完成，终端却保留 Working，无法绘制原完成结果或响应后续按键。本机独立诊断中，连续 3,000 个“中”计数约 38 ms，30,000 个约 3.4 s；这不是模型执行未完成或等待文案变化。

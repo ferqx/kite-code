@@ -1,4 +1,5 @@
 // Generated from apps/service/src/http/schema.
+export declare function response_ContextEstimate(value: unknown): boolean;
 export declare function response_WorkspaceRemoval(value: unknown): boolean;
 export declare function response_FileCheckpointPage(value: unknown): boolean;
 export declare function response_FileCheckpointDetail(value: unknown): boolean;
@@ -110,6 +111,7 @@ export declare function request_ModelInputQuery(value: unknown): boolean;
 export declare function request_ModelOutputQuery(value: unknown): boolean;
 export declare function request_BrowserModelInputQuery(value: unknown): boolean;
 export declare function request_ContextQuery(value: unknown): boolean;
+export declare function request_ContextEstimateQuery(value: unknown): boolean;
 export declare function request_BrowserContextQuery(value: unknown): boolean;
 export declare function request_SelectContextRequest(value: unknown): boolean;
 export declare function request_ForkSessionRequest(value: unknown): boolean;
@@ -133,6 +135,7 @@ export declare function request_CancelSessionRequest(value: unknown): boolean;
 export declare function request_ExtensionCommandRequest(value: unknown): boolean;
 export declare function queryInput(value: unknown): boolean;
 export declare const responseValidators: {
+  ContextEstimate: (value: unknown) => boolean;
   WorkspaceRemoval: (value: unknown) => boolean;
   FileCheckpointPage: (value: unknown) => boolean;
   FileCheckpointDetail: (value: unknown) => boolean;
@@ -246,6 +249,7 @@ export declare const requestValidators: {
   ModelOutputQuery: (value: unknown) => boolean;
   BrowserModelInputQuery: (value: unknown) => boolean;
   ContextQuery: (value: unknown) => boolean;
+  ContextEstimateQuery: (value: unknown) => boolean;
   BrowserContextQuery: (value: unknown) => boolean;
   SelectContextRequest: (value: unknown) => boolean;
   ForkSessionRequest: (value: unknown) => boolean;

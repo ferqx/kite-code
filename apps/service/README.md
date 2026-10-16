@@ -671,3 +671,7 @@ Session closed query 新增可选 `snapshotCursor`；续页元数据变化返回
 
 
 SQLite 增量恢复证明由 Agent Store 的正常事务维护，公开 HTTP 保持。`sqliteStorageAssets().migrations` 给出完整的包内迁移 URL，默认 Files 的 protectedRoots 逐项保护原 baseline 和增量 SQL；构建与只读格式预检使用同一闭合迁移链，不用源码 fallback。准确升级、来源/身份/unknown 校验及冷读成本归[恢复协议](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
+
+## 上下文统计观察
+
+`GET /v1/sessions/{id}/context/estimate?storeId=...&executionId=...` 复用原 Model 输入的主体／Store／Session 权限，以完整当前所选历史和已保存来源布局返回下一请求预测及本会话累计实际用量。查询不初始化 Provider、不捕获现在来源、不写 Store；Client 验证目标、基线与加总关系。默认压缩沿 Core 当次实际工具与已核实输入基线加新增估算，沿用约 80%／未知窗口 32768 的维护阈值；摘要快照保存数字投影出处。口径与失效规则见 [Core owner](../../packages/agent/src/context-estimate.README.md)，验证见[完整会话与冷读取](test/isolated/context-token-estimate.test.ts)。

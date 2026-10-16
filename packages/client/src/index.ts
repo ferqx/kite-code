@@ -1681,6 +1681,39 @@ export class AgentClient {
       { signal },
     );
   }
+  async getContextEstimate(
+    sessionId: string,
+    input: { storeId: string; executionId: string },
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('context');
+    const query = structuredClone(input);
+    validateRequest('ContextEstimateQuery', query);
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/context/estimate?${new URLSearchParams(query)}`,
+      'ContextEstimate',
+      options,
+    );
+    if (
+      result.storeId !== query.storeId ||
+      result.sessionId !== sessionId ||
+      result.modelInputExecutionId !== query.executionId ||
+      result.totalInputTokens !== result.measuredInputTokens + result.estimatedInputTokens ||
+      result.cumulativeUsage.missingInputCount > result.cumulativeUsage.executionCount ||
+      result.cumulativeUsage.missingOutputCount > result.cumulativeUsage.executionCount ||
+      (result.cumulativeUsage.cachedInputTokens !== undefined &&
+        (result.cumulativeUsage.inputTokens === undefined ||
+          result.cumulativeUsage.cachedInputTokens > result.cumulativeUsage.inputTokens)) ||
+      (result.utilization !== undefined &&
+        (!result.usableInputTokens ||
+          result.utilization !== result.totalInputTokens / result.usableInputTokens)) ||
+      (result.source === 'reported_baseline'
+        ? result.baselineExecutionId !== query.executionId
+        : result.baselineExecutionId !== undefined || result.measuredInputTokens !== 0)
+    )
+      throw new ClientError('invalid_response');
+    return result;
+  }
   getContext(sessionId: string, input: ContextQuery, options: { signal?: AbortSignal } = {}) {
     this.requireCapability('context');
     const query = structuredClone(input);

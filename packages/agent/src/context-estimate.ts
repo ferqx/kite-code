@@ -1,4 +1,76 @@
-import type { ModelRequest } from '@kite-ai/ai';
+import type { Json, ModelMessage, ModelRequest } from '@kite-ai/ai';
+import { canonicalJson } from './json';
+
+/** A measured original input, supplied only after its route and scope have been verified. */
+export interface ContextTokenBaseline {
+  readonly executionId: string;
+  readonly request: Pick<ModelRequest, 'modelId' | 'messages' | 'tools'>;
+  readonly inputTokens: number;
+}
+
+export interface ContextTokenProjection {
+  source: 'reported_baseline' | 'local_estimate';
+  measuredInputTokens: number;
+  estimatedInputTokens: number;
+  totalInputTokens: number;
+  baselineExecutionId?: string;
+}
+
+/** An unchanged measured request may acquire new messages, including insertions before trailing sources. */
+export function projectModelContext(
+  request: Pick<ModelRequest, 'modelId' | 'messages' | 'tools'>,
+  baseline?: ContextTokenBaseline,
+): ContextTokenProjection {
+  const fallback = (): ContextTokenProjection => {
+    const tokens = estimateModelContext(request).estimate.totalInputTokens;
+    return {
+      source: 'local_estimate',
+      measuredInputTokens: 0,
+      estimatedInputTokens: tokens,
+      totalInputTokens: tokens,
+    };
+  };
+  if (
+    !baseline ||
+    !Number.isSafeInteger(baseline.inputTokens) ||
+    baseline.inputTokens < 0 ||
+    baseline.request.modelId !== request.modelId ||
+    canonicalJson(JSON.parse(JSON.stringify(baseline.request.tools)) as Json) !==
+      canonicalJson(JSON.parse(JSON.stringify(request.tools)) as Json)
+  )
+    return fallback();
+  const same = (a: ModelMessage, b: ModelMessage) =>
+    a.role === b.role &&
+    a.content === b.content &&
+    a.toolCallId === b.toolCallId &&
+    (a.toolCalls?.length ?? 0) === (b.toolCalls?.length ?? 0) &&
+    (a.toolCalls ?? []).every((call, index) => {
+      const other = b.toolCalls?.[index];
+      return (
+        other?.id === call.id && other.name === call.name && other.arguments === call.arguments
+      );
+    }) &&
+    JSON.stringify(a.sourceIds ?? []) === JSON.stringify(b.sourceIds ?? []);
+  const added: ModelMessage[] = [];
+  let matched = 0;
+  for (const message of request.messages) {
+    const previous = baseline.request.messages[matched];
+    if (previous && same(previous, message)) matched++;
+    else added.push(message);
+  }
+  // Deletions, edits, rewinds and compaction cannot inherit the old measured count.
+  if (matched !== baseline.request.messages.length) return fallback();
+  const estimated = estimateModelContext({ messages: added, tools: [] }).estimate.totalInputTokens;
+  const total = baseline.inputTokens + estimated;
+  if (!Number.isSafeInteger(total)) return fallback();
+  return {
+    source: 'reported_baseline',
+    measuredInputTokens: baseline.inputTokens,
+    estimatedInputTokens: estimated,
+    totalInputTokens: total,
+    baselineExecutionId: baseline.executionId,
+  };
+}
 
 /** Approximate cl100k accounting of the saved request, never Provider billing or admission. */
 export interface ContextTokenEstimate {
@@ -19,7 +91,7 @@ export interface ModelContextEstimate {
 const positive = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 
-/** Pure display estimate. Capabilities must be explicit facts from the original frozen Model. */
+/** Pure local estimate. Capabilities must be explicit facts from the original frozen Model. */
 export function estimateModelContext(
   request: Pick<ModelRequest, 'messages' | 'tools'>,
   capabilities: { contextWindowTokens?: unknown; maxOutputTokens?: unknown } = {},

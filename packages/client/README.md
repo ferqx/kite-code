@@ -222,3 +222,5 @@ Provider Settings 的 `getProviderSettings({storeId})` 与 `updateProviderSettin
 
 
 Cookie Browser 也提供 `listBackgroundExecutions` / `listAllBackgroundExecutions`，沿原 `sessions` capability 读取具名 `/browser/v1/background-executions`。浏览器只发送 Workspace/root Session/Execution 与分页条件，当前 Store 由 Gateway 注入；Store/subject authority 注入在请求前或 Gateway closed query 拒绝。完整 reader 复用有限重扫的 snapshot collector，核原执行、来源、child-start 绑定、Decimal64 上界与跨页重复；恢复来源不重标。它没有任何执行控制方法，原输出继续使用准确 Session/Execution 的 `listExecutionOutput`。对应 [Browser 反例](test/browser-background.test.ts)与[真实 Cookie 消费者](../../apps/service/test/isolated/development-web.test.ts)分别验证完整性和实际只读边界。
+
+`getContextEstimate` 只读新上下文估算接口，闭合查询与生成 schema 核 Store／Session／原请求身份、合法计数和测量加估算的关系。它不修改实际用量或发起模型请求；错误不转成零或旧请求实测值。完整字段由[Service schema](../../apps/service/src/http/schema/index.ts)生成，口径见 [Core owner](../agent/src/context-estimate.README.md)。

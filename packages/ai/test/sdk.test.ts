@@ -249,6 +249,104 @@ test('strict compatible endpoint round-trips namespaced, colliding, Unicode and 
   }
 });
 
+test('separate usage-only chunk preserves reported totals, original nested details and legacy cache aliases', async () => {
+  const usage = {
+    prompt_tokens: 123,
+    completion_tokens: 45,
+    total_tokens: 170,
+    prompt_cache_hit_tokens: 50,
+    prompt_cache_miss_tokens: 73,
+    prompt_tokens_details: { cache_write_tokens: 12, image_tokens: 8 },
+    completion_tokens_details: { reasoning_tokens: 9, text_tokens: 36 },
+  };
+  const data = endpoint(() =>
+    sse(
+      chunk({ content: 'Done' }) +
+        chunk({}, 'stop') +
+        `data: ${JSON.stringify({ choices: [], usage, private_response_field: 'not usage' })}\n\n` +
+        'data: [DONE]\n\n',
+    ),
+  );
+  try {
+    const result = await collect(data.adapter);
+    expect(result.error).toBeNull();
+    expect(result.events.at(-1)).toEqual({
+      type: 'finish',
+      reason: 'stop',
+      usage: {
+        inputTokens: 123,
+        outputTokens: 45,
+        totalTokens: 170,
+        cachedInputTokens: 50,
+        reasoningTokens: 9,
+        raw: usage,
+      },
+    });
+    expect(result.events.filter((event) => event.type === 'usage')).toHaveLength(1);
+    expect(data.bodies[0]).toMatchObject({ stream_options: { include_usage: true } });
+    expect(JSON.stringify(result.events)).not.toContain('private_response_field');
+    expect(JSON.stringify(result.events)).not.toContain('fixture-secret');
+    expect(data.calls).toBe(1);
+  } finally {
+    await data.close();
+  }
+});
+
+test('repeated Provider usage is replaced by the final snapshot rather than added', async () => {
+  const first = { prompt_tokens: 31, completion_tokens: 2, total_tokens: 33 };
+  const last = { prompt_tokens: 31, completion_tokens: 7, total_tokens: 38 };
+  const data = endpoint(() =>
+    sse(`${chunk({ content: 'Partial' }, null, first)}${chunk({}, 'stop', last)}data: [DONE]\n\n`),
+  );
+  try {
+    const result = await collect(data.adapter);
+    expect(result.error).toBeNull();
+    expect(result.events.filter((event) => event.type === 'usage')).toHaveLength(2);
+    expect(result.events.at(-1)).toMatchObject({
+      type: 'finish',
+      usage: { inputTokens: 31, outputTokens: 7, totalTokens: 38, raw: last },
+    });
+    expect(data.calls).toBe(1);
+  } finally {
+    await data.close();
+  }
+});
+
+test('received usage survives a failed or cancelled stream without successful finish or tool dispatch', async () => {
+  for (const cancelled of [false, true]) {
+    const usage = { prompt_tokens: 31, completion_tokens: 7, total_tokens: 38 };
+    const data = endpoint(() =>
+      sse(
+        chunk({ content: 'Partial' }, null, usage) +
+          'data: {"error":{"message":"fixture-secret"}}\n\n',
+      ),
+    );
+    const abort = new AbortController();
+    const events: ModelEvent[] = [];
+    let failure: unknown;
+    try {
+      for await (const event of data.adapter.stream(request, { signal: abort.signal })) {
+        events.push(event);
+        if (cancelled && event.type === 'usage') abort.abort();
+      }
+    } catch (error) {
+      failure = error;
+    } finally {
+      await data.close();
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect(events).toContainEqual({
+      type: 'usage',
+      usage: { inputTokens: 31, outputTokens: 7, totalTokens: 38, raw: usage },
+    });
+    expect(events.some((event) => event.type === 'finish' || event.type === 'tool_call')).toBe(
+      false,
+    );
+    expect(JSON.stringify(failure)).not.toContain('fixture-secret');
+    expect(data.calls).toBe(1);
+  }
+});
+
 test('missing Provider token usage remains null rather than zero', async () => {
   const data = endpoint(() =>
     sse(`${chunk({ content: 'Done' })}${chunk({}, 'stop')}data: [DONE]\n\n`),
@@ -277,7 +375,7 @@ test('partial usage does not turn absent input/cache/reasoning measurements into
     expect(result.events.at(-1)).toEqual({
       type: 'finish',
       reason: 'stop',
-      usage: { inputTokens: null, outputTokens: 7 },
+      usage: { inputTokens: null, outputTokens: 7, raw: { completion_tokens: 7 } },
     });
     expect(data.calls).toBe(1);
   } finally {

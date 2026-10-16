@@ -664,6 +664,7 @@ export class UnifiedExecution {
       for (const call of calls) await output.call(call);
     };
     let finish: { reason: string; usage: Json } | undefined;
+    let recordedUsage: Json | undefined;
     try {
       const actualRequest = this.options.openModelInput
         ? await this.options.openModelInput(scope, input)
@@ -684,8 +685,11 @@ export class UnifiedExecution {
       let savedAt = Date.now();
       for await (const event of model.stream(actualRequest, { signal: scope.signal })) {
         if (finish) throw new AgentError('model_event_after_finish');
+        if (event.type === 'usage') recordedUsage = structuredClone({ ...event.usage });
         scope.signal.throwIfAborted();
-        if (event.type === 'text_delta') {
+        if (event.type === 'usage') {
+          continue;
+        } else if (event.type === 'text_delta') {
           if (event.text.length) firstOutput ??= 'content';
           content += event.text;
           if (output) await output.text('text', event.text);
@@ -698,7 +702,10 @@ export class UnifiedExecution {
           const call = { id: event.id, name: event.name, arguments: event.arguments };
           calls.push(call);
           if (output) await output.call(call);
-        } else finish = { reason: event.reason, usage: { ...event.usage } };
+        } else {
+          recordedUsage = structuredClone({ ...event.usage });
+          finish = { reason: event.reason, usage: recordedUsage };
+        }
         if (
           !output &&
           Buffer.byteLength(content) +
@@ -798,6 +805,7 @@ export class UnifiedExecution {
                   ? error.message
                   : 'model_failed',
             incomplete: true,
+            ...(recordedUsage === undefined ? {} : { usage: recordedUsage }),
             content: output ? preview() : content.slice(0, 64 * 1024),
             reasoning: output ? '' : reasoning.slice(0, 64 * 1024),
             ...(firstOutput ? { firstOutput } : {}),

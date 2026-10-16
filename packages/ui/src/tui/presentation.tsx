@@ -98,6 +98,17 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Current model unavailable': '当前运行模型无法核实',
   'Next model:': '下一轮模型：',
   'Recorded usage:': '已保存用量：',
+  'Cumulative actual usage:': '累计实际用量：',
+  'Observed actual usage:': '当前已核实的实际用量：',
+  'Next request context estimate unavailable': '下一请求上下文估算暂不可用',
+  'Last request actual input:': '最近请求实际输入：',
+  'Usage coverage:': '收到统计的请求数：',
+  'Next request context estimate:': '下一请求上下文估算：',
+  'Measured baseline:': '实测基线：',
+  'Estimated additions:': '新增内容估算：',
+  'Full local estimate:': '完整本地估算：',
+  'Based on recorded sources and selected history; future input may differ.':
+    '基于已保存来源与所选历史；后续实际输入可能变化。',
   'input tokens': '输入 token',
   'output tokens': '输出 token',
   cache: '缓存',
@@ -111,6 +122,9 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Next task': '下一次任务',
   'Context capacity estimate unavailable': '当前没有上下文容量估计',
   'Verified Model context estimate:': '已核实的模型上下文估算：',
+  'Reported Model input tokens:': '模型服务返回的输入 token：',
+  'Reported by the Provider for this request; future input may differ.':
+    '来自模型服务对本次请求的统计；后续输入可能不同。',
   'Context usage:': '上下文占比：',
   'Usable input:': '可用输入容量：',
   'Based on the last verified Model input; future input may differ.':

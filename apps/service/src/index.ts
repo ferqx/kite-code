@@ -1464,6 +1464,20 @@ export async function startService(options: ServiceOptions) {
       }),
     );
   });
+  app.get('/v1/sessions/:id/context/estimate', async (context) => {
+    if (Object.values(context.req.queries()).some((values) => values.length !== 1))
+      throw new HttpFailure('invalid_request', 400);
+    const query = schemas.ContextEstimateQuery.safeParse(context.req.query());
+    if (!query.success) throw new HttpFailure('invalid_request', 400);
+    const estimate = await runtime.readContextEstimate({
+      expectedStoreId: query.data.storeId,
+      executionId: query.data.executionId,
+      sessionId: context.req.param('id'),
+      subjectId,
+      signal: context.req.raw.signal,
+    });
+    return context.json(apiSchemas.ContextEstimate.parse(estimate));
+  });
   app.post('/v1/sessions/:id/context/select', async (context) => {
     if (closing) throw new HttpFailure('service_draining', 503);
     const request = await readBusinessBody(

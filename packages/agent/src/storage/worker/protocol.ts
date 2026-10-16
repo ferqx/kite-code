@@ -90,6 +90,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'getModelInputSnapshot',
   'listModelInputs',
   'listExecutions',
+  'getSessionTokenUsage',
   'persistModelPartial',
   'listMessages',
   'getView',

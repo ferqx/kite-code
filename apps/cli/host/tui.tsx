@@ -759,6 +759,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
             ...(display.status === 'fulfilled'
               ? {
                   runtimeModel: display.value.runtimeModel,
+                  nextContext: display.value.nextContext,
                   usage: display.value.usage,
                   context: display.value.context,
                 }

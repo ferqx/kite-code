@@ -50,7 +50,7 @@ Files 目录 Enter 只读预览并进入范围确认，默认 both，次序为 b
 
 [subagent-layout](subagent-layout.ts)按当前动态尾部、真实 child 步数和终端行数分配原步骤／子项预算；实际单 child 与 concurrent group 都接入预算，先折叠并显示最新摘要再进行有限裁切。`child-session-panel` 的详情用原 Markdown renderer 和 ScrollList 保持长代码、表格与 resize 阅读；Files 卡片接核实后的真实逐行变更，原路径、版本、基线和 UTF-8 门禁保留。
 
-Footer Context 独立消费同 Store／Session／Run 的完整 Model 请求估算，当前活动模型或准确下一模型 ID 匹配才显示占比；Context 面板明确保留最近已核估算。累计用量只用于原 usage／cache，不代替容量；无明确冻结窗口时不猜百分比。可选下一模型目录暂缺时，Header 只保留同范围最近已核原模型显示，nextModelName／nextEffort 仍未知；不把显示来源的暂失当作历史 scope 变化清空原生滚动，也不借原模型取得下一模型容量。[Error boundary](error-boundary.tsx)把渲染失败转为普通错误页和 Enter／Esc 退出，诊断调用栈只在显式测试模式显示；Host 观察实际 Ink 结束并拥有清理。
+Footer Context 独立消费同 Store／Session／Run 的准确 Model 输入统计，`reportedInputTokens` 存在时优先使用（包括 0），缺失时回退完整原请求估算。当前活动模型或准确下一模型 ID 匹配才显示占比；Context 面板分别标明服务端返回和本地估算，并保留最近已核原请求。累计用量只用于原 usage／cache，不代替容量；无明确冻结窗口时不猜百分比。[Chrome](../../test/tui/chrome.test.tsx)和[实际面板按键](../../test/tui/local-controls.test.tsx)核实测／回退、0及空闲换模型不串占比。可选下一模型目录暂缺时，Header 只保留同范围最近已核原模型显示，nextModelName／nextEffort 仍未知；不把显示来源的暂失当作历史 scope 变化清空原生滚动，也不借原模型取得下一模型容量。[Error boundary](error-boundary.tsx)把渲染失败转为普通错误页和 Enter／Esc 退出，诊断调用栈只在显式测试模式显示；Host 观察实际 Ink 结束并拥有清理。
 
 ## MCP 安全目录与原选择意图
 
@@ -136,3 +136,5 @@ controller 隔离原 scope/generation/Abort/selected Command。来源目录与 p
 模型端口的 `/model`、`/effort` 与首次配置统一使用 user scope；用户配置的来源与落盘由 Service 负责。跨项目会话保留独立读取/草稿，未核实的用户模型 mutation 阻止竞争新写；关闭面板仅释放读取。重复确认由 controller 的用户申请状态统一校验，pending/unknown 的重复按键保留核实原请求的提示，K 仅查询同一 ID；[模型测试](../../test/tui/models.test.tsx)覆盖真实面板按键与仍在等待回执的原请求。
 
 原菜单命令保留忽略尾随文字的兼容行为；它们不从文字选择另一 Session、导出路径或扩大范围，显式管理命令仍校验参数。[命令测试](../../test/tui/management.test.tsx)与[导出测试](../../test/tui/export.test.ts)分别核这一解析边界和原完整正文／零额外读取。[真实 Thought 场景](../../../../tests/tui-system/scenarios/thought-lifecycle.test.ts)在下一次实际 Model 请求等待画面观察后才返回最终回答，核实活动搜索参数和结束后的复数摘要；同步点只属于本机 Provider 夹具，不增加生产展示延迟或放宽原观察预算。
+
+`environment.context` 只表示最近已核实的原请求输入及其独立本地估算，`nextContext` 表示当前已保存上下文的下一请求预测，`usage` 为实际消费与统计覆盖。底部优先显示明确标为估算的下一请求数量；`/context` 同时区分三者，实际输入缺失明确不可用。错误 scope、空闲换模型或推理档位改变不把旧预测归给新选择；没有新增客户端测试入口。口径归 [Core](../../../agent/src/context-estimate.README.md)。

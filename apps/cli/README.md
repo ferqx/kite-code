@@ -137,7 +137,7 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 当前 [TUI Host](host/tui.tsx)与正式 Terminal 共用 Kitty 键盘启用及普通错误页；Enter／Esc 确认异常退出返回非零，`waitUntilExit` 防止渲染器结束后宿主悬挂，正常草稿保存和 paired／shared 收尾仍由原 owner 执行。[异常真实 PTY](test/isolated/tui-render-failure-host.test.ts)核原 Service 存活、明确退出、键盘恢复与正常清理。
 
-[显示读取](host/tui-display.ts)复用现有完整 Model 输入查询，准确远端模型名来自同请求 adapter 元数据或唯一同冻结配置；独立纯估算 leaf 只使用该请求与明确原容量事实。Host 另提供准确下一模型 ID，防止空闲切换时误用旧占比。MCP 详情沿现有查询提供真实状态、合格计数与配置位置，live catalogue 穷尽游标并核同源后才交付完整集合；不添加后台 RPC 或权限判断。
+[显示读取](host/tui-display.ts)复用现有完整 Model 输入查询，准确远端模型名来自同请求 adapter 元数据或唯一同冻结配置。上下文分子优先用准确原 Execution 的已返回 `inputTokens`，缺失时用独立纯估算 leaf；窗口／输出预算保持原冻结事实。不可变输入可缓存，实测用量每次观察重新叠加，因此运行中首次估算不会遮住后来返回的统计，合法 0 也覆盖估算；新调用没有用量时不借旧调用的实测值。当前 View 中准确终态 Model 的已收用量含失败／取消尝试并按原 ID 去重；Fork 消息仍核原出处，有限 View 不承诺完整会话账单。[Host 回归](test/isolated/tui-display.test.ts)核状态变化、缺失／无效回退、0、新调用、跨来源及累计去重。Host 另提供准确下一模型 ID，防止空闲切换时误用旧占比。MCP 详情沿现有查询提供真实状态、合格计数与配置位置，live catalogue 穷尽游标并核同源后才交付完整集合；不添加后台 RPC 或权限判断。
 
 ## TUI 原生滚动与清屏
 
@@ -528,3 +528,5 @@ Tools、Source修改／批准、强制重连、Auth、配置与冷配置七个�
 [原普通 Ink 真实入口](test/isolated/tui-ink-host.test.ts)使用共享 POSIX／ConPTY 驱动、正式 `runTUIProcess`、默认 Service／Client、临时 Profile 与本机 compatible SSE；不开启测试诊断。从未信任工作区明确确认，核原 Header／Help、literal 用户 Markdown 与完整助手表格／代码／尾部，真实一次请求、SQLite 完整两份正文、唯一 Run completed 及 Ctrl+Q／所属 Service 退出。该新增场景本机 macOS 1pass／7外层业务断言，测试可交后续 Win/Linux Actions；配置可运行不等于实际三平台通过。
 
 MCP 目录自动认证观察使用独立 `readDirectory`，只在真实 target.loginAllowed 资格成立时读取安全状态。不具资格的未 challenge auto HTTP 返回有限 unavailable 分支，不探 Vault、不推断凭据存在性；显式 Auth／Remove 和冷原 ID 查回仍走原端口。协议装配及来源校验归 [Service](../service/README.md)；目录与原 credential 零读取门禁由真实终端用例保留。
+
+TUI display 分别保留原请求输入、动态 `nextContext` 与累计实际 `usage`。Host 优先读取完整会话累计与基于已保存上下文的下一请求预测，核原请求／模型／Run／Store／Session；查询失败时只保留标为 observed 的有限实际用量，动态预测不可用。不可变原输入缓存不会遮住后来收到的 usage 或新增工具结果。具体口径见 [Core](../../packages/agent/src/context-estimate.README.md)，展示见[上下文指南](../../docs/handbook/clients/tui/guides/context-and-compaction.md)。

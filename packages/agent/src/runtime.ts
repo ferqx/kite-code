@@ -16,6 +16,11 @@ import {
   sealCompressor,
 } from './context';
 import {
+  type ContextTokenBaseline,
+  estimateModelContext,
+  projectModelContext,
+} from './context-estimate';
+import {
   type ScopedBindings,
   type StandaloneScope,
   type ToolScope,
@@ -729,6 +734,7 @@ export class AgentRuntime {
     this.listPendingInputs = this.accountEntry(this.listPendingInputs, 'observation');
     this.readOriginalRunSelection = this.accountEntry(this.readOriginalRunSelection, 'observation');
     this.getSelectedContext = this.accountEntry(this.getSelectedContext, 'observation');
+    this.readContextEstimate = this.accountEntry(this.readContextEstimate, 'observation');
     this.getCompressionOrigin = this.accountEntry(this.getCompressionOrigin, 'observation');
     this.getMessageOrigin = this.accountEntry(this.getMessageOrigin, 'observation');
     this.getWorkspace = this.accountEntry(this.getWorkspace, 'observation');
@@ -2232,6 +2238,161 @@ export class AgentRuntime {
   }
   getSelectedContext(input: Parameters<Store['getSelectedContext']>[0]) {
     return this.options.store.getSelectedContext(input);
+  }
+  /** Read-only forecast from complete selected history and the last recorded source layout. No fresh sources or Provider work. */
+  async readContextEstimate(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    subjectId: string;
+    executionId: string;
+    signal?: AbortSignal;
+  }) {
+    const saved = await this.readModelInput(input);
+    if (!saved.metadata.context) throw new AgentError('context_estimate_unavailable');
+    const execution = await this.options.store.getExecution(input.executionId);
+    const run = execution?.runId && (await this.options.store.getRun(execution.runId));
+    if (
+      !execution ||
+      !run ||
+      execution.originStoreId !== input.expectedStoreId ||
+      execution.sessionId !== input.sessionId ||
+      run.sessionId !== input.sessionId ||
+      run.originStoreId !== input.expectedStoreId
+    )
+      throw new AgentError('context_estimate_unavailable');
+    const query = {
+      expectedStoreId: input.expectedStoreId,
+      sessionId: input.sessionId,
+      messageLimit: 1,
+      sourceLimit: 1,
+    };
+    const before = await this.options.store.getModelContext(query);
+    const history = await this.modelMessages(
+      input.sessionId,
+      input.expectedStoreId,
+      input.signal,
+      input.subjectId,
+      false,
+      before.highWaterSeq,
+    );
+    const after = await this.options.store.getModelContext(query);
+    if (
+      before.selection.id !== after.selection.id ||
+      before.compression?.id !== after.compression?.id
+    )
+      throw new AgentError('context_estimate_changed');
+    const sourceIds = new Set(saved.metadata.context?.sources.map((source) => source.id) ?? []);
+    const isSource = (message: ModelMessage) =>
+      !!message.sourceIds?.length && message.sourceIds.every((id) => sourceIds.has(id));
+    const firstHistory = saved.request.messages.findIndex((message) => !isSource(message));
+    const split = firstHistory < 0 ? saved.request.messages.length : firstHistory;
+    const request = {
+      ...saved.request,
+      messages: [
+        ...saved.request.messages.slice(0, split).filter(isSource),
+        ...history,
+        ...saved.request.messages.slice(split).filter(isSource),
+      ],
+    };
+    const config = this.frozenTokenModel(run, saved.request.modelId);
+    const capabilities = config?.modelCapabilities;
+    const capacity = estimateModelContext(
+      { messages: [], tools: [] },
+      capabilities && typeof capabilities === 'object' && !Array.isArray(capabilities)
+        ? capabilities
+        : {},
+      saved.metadata.adapter.availability === 'available'
+        ? saved.metadata.adapter.settings.maxOutputTokens
+        : undefined,
+    );
+    const projection = projectModelContext(
+      request,
+      this.inputTokenBaseline(execution, saved.request),
+    );
+    return {
+      storeId: input.expectedStoreId,
+      sessionId: input.sessionId,
+      runId: run.id,
+      modelId: request.modelId,
+      modelInputExecutionId: execution.id,
+      contextSelectionId: before.selection.id,
+      highWaterSeq: before.highWaterSeq,
+      snapshotCursor: before.snapshotCursor,
+      ...projection,
+      cumulativeUsage: await this.options.store.getSessionTokenUsage({
+        expectedStoreId: input.expectedStoreId,
+        sessionId: input.sessionId,
+      }),
+      ...(capacity.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: capacity.contextWindowTokens }),
+      ...(capacity.usableInputTokens === undefined
+        ? {}
+        : { usableInputTokens: capacity.usableInputTokens }),
+      ...(capacity.usableInputTokens
+        ? { utilization: projection.totalInputTokens / capacity.usableInputTokens }
+        : {}),
+    };
+  }
+  private frozenTokenModel(run: RunRecord, modelId: string): Record<string, Json> | undefined {
+    const config = (run.configuration as { configuration?: { models?: Record<string, Json>[] } })
+      ?.configuration;
+    const matches = config?.models?.filter((model) => model.id === modelId);
+    return matches?.length === 1 ? matches[0] : undefined;
+  }
+  private inputTokenBaseline(
+    execution: ExecutionRecord,
+    request: ModelRequest,
+  ): ContextTokenBaseline | undefined {
+    const result = execution.result as { usage?: { inputTokens?: unknown } } | null;
+    const tokens = result?.usage?.inputTokens;
+    return ['succeeded', 'failed', 'cancelled'].includes(execution.status) &&
+      typeof tokens === 'number' &&
+      Number.isSafeInteger(tokens) &&
+      tokens >= 0
+      ? { executionId: execution.id, request, inputTokens: tokens }
+      : undefined;
+  }
+  private async readTokenBaseline(
+    run: RunRecord,
+    modelId: string,
+    messages: readonly ModelMessage[],
+    subjectId: string,
+    signal: AbortSignal,
+  ) {
+    const id = [...messages]
+      .reverse()
+      .find((message) => message.role === 'assistant' && message.sourceIds?.length === 1)
+      ?.sourceIds?.[0];
+    if (!id) return undefined;
+    const execution = await this.options.store.getExecution(id);
+    if (
+      execution?.kind !== 'model' ||
+      execution.status !== 'succeeded' ||
+      execution.sessionId !== run.sessionId ||
+      execution.originStoreId !== run.originStoreId ||
+      execution.definitionId !== modelId
+    )
+      return undefined;
+    const tokens = (execution.result as { usage?: { inputTokens?: unknown } } | null)?.usage
+      ?.inputTokens;
+    if (typeof tokens !== 'number' || !Number.isSafeInteger(tokens) || tokens < 0) return undefined;
+    const previousRun = execution.runId && (await this.options.store.getRun(execution.runId));
+    if (!previousRun || previousRun.originStoreId !== run.originStoreId) return undefined;
+    if (previousRun.id !== run.id) {
+      const current = this.frozenTokenModel(run, modelId),
+        previous = this.frozenTokenModel(previousRun, modelId);
+      if (!current || !previous || canonicalJson(current) !== canonicalJson(previous))
+        return undefined;
+    }
+    const saved = await this.readModelInput({
+      expectedStoreId: run.originStoreId,
+      sessionId: run.sessionId,
+      subjectId,
+      executionId: execution.id,
+      signal,
+    });
+    return this.inputTokenBaseline(execution, saved.request);
   }
   /** Trusted complete original compression proof; no activation or Model work. */
   getCompressionOrigin(input: Parameters<Store['getCompressionOrigin']>[0]) {
@@ -4788,7 +4949,8 @@ export class AgentRuntime {
         originalMessages: ModelMessage[],
         trigger: 'manual' | 'automatic',
       ) => {
-        if (!selectedCompressor) return false;
+        if (!selectedCompressor || (trigger === 'automatic' && !selectedCompressor.shouldCompress))
+          return false;
         const focus =
           command.kind === 'context.compress'
             ? ((command.request as { focus?: string }).focus ?? null)
@@ -4798,6 +4960,17 @@ export class AgentRuntime {
           run: freeze(structuredClone(run)),
           session: freeze(structuredClone(session)),
           messages: freeze(structuredClone(originalMessages)),
+          modelId,
+          tools: freeze(structuredClone(modelTools())),
+          tokenBaseline: freeze(
+            await this.readTokenBaseline(
+              run,
+              modelId,
+              originalMessages,
+              command.subjectId,
+              controller.signal,
+            ),
+          ),
           sources: freeze(structuredClone(captured)),
           trigger,
           focus,

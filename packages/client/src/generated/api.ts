@@ -1049,6 +1049,7 @@ export type ResultContextSource = {
   inclusion: 'automatic' | 'explicit';
   result: ResultContextSource___schema0;
 };
+export type ContextEstimateQuery = { storeId: string; executionId: string };
 export type ContextQuery = {
   storeId: string;
   contextSelectionId?: string;
@@ -2554,6 +2555,32 @@ export type SelectedContextPage = {
     compressor: { id: string; version: string; snapshot: SelectedContextPage___schema0 };
     trigger: 'manual' | 'automatic';
   };
+};
+export type ContextEstimate = {
+  cumulativeUsage: {
+    executionCount: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedInputTokens?: number;
+    missingInputCount: number;
+    missingOutputCount: number;
+  };
+  storeId: string;
+  sessionId: string;
+  runId: string;
+  modelId: string;
+  modelInputExecutionId: string;
+  contextSelectionId: string;
+  highWaterSeq: string;
+  snapshotCursor: string;
+  source: 'reported_baseline' | 'local_estimate';
+  measuredInputTokens: number;
+  estimatedInputTokens: number;
+  totalInputTokens: number;
+  baselineExecutionId?: string;
+  contextWindowTokens?: number;
+  usableInputTokens?: number;
+  utilization?: number;
 };
 type SelectContextResponse___schema0 =
   | string

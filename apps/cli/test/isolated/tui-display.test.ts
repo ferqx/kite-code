@@ -223,6 +223,7 @@ test('usage counts each original successful Model once; absent cache or foreign 
   });
   snapshot.executions[0]!.result = { content: 'complete', usage: { inputTokens: 100 } };
   expect(tuiRecordedUsage(snapshot, [message])).toEqual({ inputTokens: 100, executionCount: 1 });
+  snapshot.executions[0]!.originStoreId = 'foreign';
   expect(
     tuiRecordedUsage(snapshot, [
       {
@@ -235,6 +236,7 @@ test('usage counts each original successful Model once; absent cache or foreign 
 
 test('Context estimates use the exact saved request and frozen explicit capabilities, and never follow another Model source', async () => {
   const snapshot = view();
+  snapshot.executions[0]!.result = { content: 'complete' };
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-display-capacity-')));
   try {
     const path = join(root, 'config.jsonc');
@@ -327,6 +329,203 @@ test('Context estimates use the exact saved request and frozen explicit capabili
   const other = { ...snapshot, session: { ...snapshot.session, id: 'other' } };
   expect((await reader(other, [], signal)).context).toBeUndefined();
   expect(calls).toEqual(['model', 'next-model', 'next-model']);
+});
+
+test('dynamic forecast and complete cumulative statistics update independently of cached last input', async () => {
+  const snapshot = view();
+  let bodies = 0,
+    projections = 0,
+    foreign = false,
+    stable = false;
+  const reader = createTuiDisplayReader(
+    {
+      async getModelInput() {
+        bodies++;
+        return {
+          storeId: 'store',
+          sessionId: 'session',
+          rootSessionId: 'session',
+          executionId: 'model',
+          runId: 'run',
+          originCommandId: 'command',
+          bodyHash: 'a'.repeat(64),
+          request: {
+            modelId: 'custom',
+            requestId: 'model',
+            messages: [{ role: 'user', content: 'Original' }],
+            tools: [],
+          },
+          metadata: { adapter: { availability: 'unavailable' } },
+        } as unknown as ModelInputSnapshot;
+      },
+      async listSessionLogs() {
+        throw Error('no logs');
+      },
+      async getContextEstimate() {
+        projections++;
+        return {
+          storeId: 'store',
+          sessionId: foreign ? 'foreign' : 'session',
+          runId: 'run',
+          modelId: 'custom',
+          modelInputExecutionId: 'model',
+          contextSelectionId: 'selection',
+          highWaterSeq: String(10 + projections),
+          snapshotCursor: stable ? snapshot.snapshotCursor : String(10 + projections),
+          source: 'reported_baseline',
+          measuredInputTokens: 100,
+          estimatedInputTokens: projections * 10,
+          totalInputTokens: 100 + projections * 10,
+          baselineExecutionId: 'model',
+          cumulativeUsage: {
+            inputTokens: 99999,
+            outputTokens: 100,
+            executionCount: 300,
+            missingInputCount: 2,
+            missingOutputCount: 0,
+          },
+        };
+      },
+    },
+    'store',
+  );
+  const first = await reader(snapshot, [], new AbortController().signal);
+  const second = await reader(snapshot, [], new AbortController().signal);
+  expect(first.context?.reportedInputTokens).toBe(100);
+  expect(first.nextContext?.totalInputTokens).toBe(110);
+  expect(second.nextContext?.totalInputTokens).toBe(120);
+  expect(second.usage).toMatchObject({ scope: 'session', inputTokens: 99999, executionCount: 300 });
+  expect(bodies).toBe(1);
+  foreign = true;
+  const unavailable = await reader(snapshot, [], new AbortController().signal);
+  expect(unavailable.nextContext).toBeUndefined();
+  expect(unavailable.usage).toMatchObject({ scope: 'observed', inputTokens: 100 });
+  foreign = false;
+  stable = true;
+  await reader(snapshot, [], new AbortController().signal);
+  const before = projections;
+  await reader(snapshot, [], new AbortController().signal);
+  expect(projections).toBe(before);
+  snapshot.snapshotCursor = '20';
+  await reader(snapshot, [], new AbortController().signal);
+  expect(projections).toBe(before + 1);
+});
+
+test('Context follows actual input usage after a cached streaming read, retaining per-request fallback and zero', async () => {
+  const snapshot = view();
+  snapshot.runs[0]!.configuration = {
+    version: 1,
+    configuration: {
+      modelId: 'actual',
+      models: [
+        { id: 'actual', modelCapabilities: { contextWindowTokens: 10000, maxOutputTokens: 1000 } },
+      ],
+    },
+  };
+  const model = snapshot.executions[0]!;
+  model.status = 'running';
+  model.result = null;
+  const calls: string[] = [];
+  const reader = createTuiDisplayReader(
+    {
+      async getModelInput(_session, executionId) {
+        calls.push(executionId);
+        return {
+          storeId: 'store',
+          sessionId: 'session',
+          rootSessionId: 'session',
+          executionId,
+          runId: 'run',
+          originCommandId: 'command',
+          bodyHash: 'a'.repeat(64),
+          request: {
+            modelId: 'actual',
+            requestId: executionId,
+            messages: [{ role: 'user', content: 'Original full input.' }],
+            tools: [],
+          },
+          metadata: { adapter: { availability: 'unavailable' } },
+        } as unknown as ModelInputSnapshot;
+      },
+      async listSessionLogs() {
+        throw Error('no timings');
+      },
+    },
+    'store',
+  );
+  const signal = new AbortController().signal;
+  const initial = (await reader(snapshot, [], signal)).context!;
+  expect(initial.reportedInputTokens).toBeUndefined();
+  expect(initial.utilization).toBe(initial.estimate.totalInputTokens / 7976);
+  for (const status of ['succeeded', 'failed', 'cancelled'] as const) {
+    model.status = status;
+    model.result = { usage: { inputTokens: 2345, outputTokens: 17 } };
+    const current = (await reader(snapshot, [], signal)).context!;
+    expect(current.reportedInputTokens).toBe(2345);
+    expect(current.utilization).toBe(2345 / 7976);
+    expect(current.estimate).toEqual(initial.estimate);
+  }
+  model.result = { usage: { inputTokens: 0 } };
+  expect((await reader(snapshot, [], signal)).context).toMatchObject({
+    reportedInputTokens: 0,
+    utilization: 0,
+  });
+  for (const missing of [null, -1, 1.5]) {
+    model.result = { usage: { inputTokens: missing } };
+    const fallback = (await reader(snapshot, [], signal)).context!;
+    expect(fallback.reportedInputTokens).toBeUndefined();
+    expect(fallback.utilization).toBe(initial.utilization);
+  }
+  expect(calls).toEqual(['model']);
+  model.result = { usage: { inputTokens: 2345 } };
+  snapshot.executions.push({ ...model, id: 'next-model', status: 'running', result: null });
+  const next = (await reader(snapshot, [], signal)).context!;
+  expect(next.executionId).toBe('next-model');
+  expect(next.reportedInputTokens).toBeUndefined();
+  expect(calls).toEqual(['model', 'next-model']);
+});
+
+test('recorded usage includes exact failed and cancelled attempts once without requiring a completed message', () => {
+  const snapshot = view();
+  snapshot.executions.push(
+    {
+      ...snapshot.executions[0]!,
+      id: 'failed',
+      status: 'failed',
+      result: { usage: { inputTokens: 30, outputTokens: 7, cachedInputTokens: 10 } },
+    },
+    {
+      ...snapshot.executions[0]!,
+      id: 'cancelled',
+      status: 'cancelled',
+      result: { usage: { inputTokens: 20, outputTokens: 3, cachedInputTokens: 0 } },
+    },
+    {
+      ...snapshot.executions[0]!,
+      id: 'unknown-usage',
+      status: 'failed',
+      result: { usage: { inputTokens: null, outputTokens: null } },
+    },
+    { ...snapshot.executions[0]!, id: 'foreign', originStoreId: 'foreign' },
+  );
+  expect(tuiRecordedUsage(snapshot, [])).toEqual({
+    inputTokens: 150,
+    outputTokens: 30,
+    cachedInputTokens: 50,
+    executionCount: 3,
+  });
+  const message = {
+    id: 'answer',
+    sessionId: 'session',
+    runId: 'run',
+    role: 'assistant',
+    status: 'complete',
+    content: 'complete',
+    sourceIds: ['model'],
+  } as Message;
+  expect(tuiRecordedUsage(snapshot, [message, { ...message, id: 'duplicate' }])).toEqual(
+    tuiRecordedUsage(snapshot, []),
+  );
 });
 
 test('model display uses verified remote identity or the exact frozen route, preserving logical-ID fallback', async () => {

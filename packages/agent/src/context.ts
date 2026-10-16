@@ -61,6 +61,9 @@ export interface CompressionInput {
   readonly run: Readonly<import('./storage/types').RunRecord>;
   readonly session: Readonly<import('./storage/types').SessionRecord>;
   readonly messages: readonly import('@kite-ai/ai').ModelMessage[];
+  readonly modelId?: string;
+  readonly tools?: readonly import('@kite-ai/ai').ModelTool[];
+  readonly tokenBaseline?: import('./context-estimate').ContextTokenBaseline;
   readonly sources: readonly ContextSource[];
   readonly trigger: 'manual' | 'automatic';
   readonly focus: string | null;

@@ -566,7 +566,10 @@ test('original main selectors keep whole-task Ctrl+C while preserving the draft 
   }
 });
 
-test('last verified Context is not attributed to a newly selected idle model', async () => {
+test.each([
+  undefined,
+  120,
+])('last verified Context (%s reported tokens) is not attributed to a newly selected idle model', async (reportedInputTokens) => {
   const f = fixture();
   const unexpectedWrite = async () => {
     throw Error('no Context write is authorized');
@@ -599,6 +602,7 @@ test('last verified Context is not attributed to a newly selected idle model', a
       executionId: 'original-model',
       modelId: 'model-a',
       bodyHash: 'a'.repeat(64),
+      ...(reportedInputTokens === undefined ? {} : { reportedInputTokens }),
       estimate: {
         systemTokens: 10,
         transcriptTokens: 30,
@@ -608,7 +612,29 @@ test('last verified Context is not attributed to a newly selected idle model', a
       },
       providerSafetyMarginTokens: 1024,
       usableInputTokens: 240,
-      utilization: 0.25,
+      utilization: reportedInputTokens === undefined ? 0.25 : 0.5,
+    },
+    nextContext: {
+      storeId: 'store',
+      sessionId: 'a',
+      runId: 'a-run',
+      modelId: 'model-a',
+      modelInputExecutionId: 'original-model',
+      contextSelectionId: 'selection',
+      highWaterSeq: '10',
+      source: 'reported_baseline',
+      measuredInputTokens: 120,
+      estimatedInputTokens: 25,
+      totalInputTokens: 145,
+      baselineExecutionId: 'original-model',
+    },
+    usage: {
+      scope: 'session',
+      inputTokens: 999,
+      outputTokens: 77,
+      executionCount: 3,
+      missingInputCount: 1,
+      missingOutputCount: 0,
     },
   };
   Object.assign(f.snapshot, { environment });
@@ -616,16 +642,36 @@ test('last verified Context is not attributed to a newly selected idle model', a
   const app = f.app();
   try {
     await tick();
-    expect(app.lastFrame()).toContain('25% context');
+    const percent = reportedInputTokens === undefined ? 25 : 50;
+    expect(app.lastFrame()).toContain('145 next context est.');
     Object.assign(environment, { modelId: 'model-b', modelName: 'Model B' });
     await f.controller.select('a');
     await tick();
     expect(app.lastFrame()).toContain('Model B');
-    expect(app.lastFrame()).not.toContain('25% context');
+    expect(app.lastFrame()).not.toContain(`${percent}% context`);
+    expect(app.lastFrame()).not.toContain('145 next context est.');
     await f.controller.routeCommand('/context');
     await tick();
-    expect(app.lastFrame()).toContain('Verified Model context estimate: 60');
-    expect(app.lastFrame()).toContain('Based on the last verified Model input');
+    expect(app.lastFrame()).toContain(
+      reportedInputTokens === undefined
+        ? 'Verified Model context estimate: 60'
+        : 'Reported Model input tokens: 120',
+    );
+    expect(app.lastFrame()).toContain(
+      reportedInputTokens === undefined
+        ? 'Based on the last verified Model input'
+        : 'Reported by the Provider for this request',
+    );
+    expect(app.lastFrame()).toContain('Cumulative actual usage: 999');
+    expect(app.lastFrame()).toContain('Next request context estimate unavailable');
+    Object.assign(environment, { modelId: 'model-a', modelName: 'Model A' });
+    await f.controller.select('a');
+    await f.controller.routeCommand('/context');
+    await tick();
+    expect(app.lastFrame()).toContain('Next request context estimate: 145');
+    expect(app.lastFrame()).toContain('Measured baseline: 120');
+    expect(app.lastFrame()).toContain('Estimated additions: 25');
+    expect(app.lastFrame()).toContain('Usage coverage: 2/3');
     expect(f.posts).toEqual([]);
     expect(f.cancels).toEqual([]);
   } finally {

@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
+import { recordedTokenUsage } from '../../token-usage';
 import type {
   AcceptCommandInput,
   CancelCommandInput,
@@ -1630,6 +1631,17 @@ export class SqliteOperations {
       case 'getExecution': {
         const row = this.row('SELECT * FROM execution WHERE id=?', String(args[0]));
         return row ? this.execution(row) : null;
+      }
+      case 'getSessionTokenUsage': {
+        this.identity(input.expectedStoreId);
+        const rows = this.rows(
+          "SELECT json_extract(result_json,'$.usage') AS usage_json FROM execution WHERE session_id=? AND origin_store_id=? AND kind='model' AND state IN ('succeeded','failed','cancelled','outcome_unknown') ORDER BY rowid",
+          input.sessionId,
+          input.expectedStoreId,
+        );
+        return recordedTokenUsage(
+          rows.map((row) => (row.usage_json ? parse(row.usage_json) : undefined)),
+        );
       }
       case 'listExecutions':
         return this.rows(

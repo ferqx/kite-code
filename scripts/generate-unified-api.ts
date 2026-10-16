@@ -57,6 +57,7 @@ const schemas = Object.fromEntries(
 ) as Record<string, Schema>;
 // Schema selection only; all actual validation rules still come from the Service schema.
 const responseNames = [
+  'ContextEstimate',
   'WorkspaceRemoval',
   'FileCheckpointPage',
   'FileCheckpointDetail',
@@ -170,6 +171,7 @@ const requestNames = [
   'ModelOutputQuery',
   'BrowserModelInputQuery',
   'ContextQuery',
+  'ContextEstimateQuery',
   'BrowserContextQuery',
   'SelectContextRequest',
   'ForkSessionRequest',

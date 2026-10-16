@@ -615,6 +615,10 @@ export interface Store {
   finishExecution(input: FinishExecutionInput): Promise<ExecutionRecord>;
   getExecution(id: string): Promise<ExecutionRecord | null>;
   listExecutions(sessionId: string, limit?: number): Promise<ExecutionRecord[]>;
+  getSessionTokenUsage(input: {
+    expectedStoreId: string;
+    sessionId: string;
+  }): Promise<import('../token-usage').RecordedTokenUsage>;
   persistModelPartial(
     input: OwnedWrite & {
       executionId: string;

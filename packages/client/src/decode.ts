@@ -38,6 +38,7 @@ export interface Responses {
   BrowserView: API.BrowserView;
   BrowserRunFacts: API.BrowserRunFacts;
   SelectedContextPage: API.SelectedContextPage;
+  ContextEstimate: API.ContextEstimate;
   SelectContextResponse: API.SelectContextResponse;
   ForkSessionResponse: API.ForkSessionResponse;
   SessionMutationResponse: API.SessionMutationResponse;
@@ -127,6 +128,7 @@ export function validateRequest(
     | 'ModelOutputQuery'
     | 'BrowserModelInputQuery'
     | 'ContextQuery'
+    | 'ContextEstimateQuery'
     | 'BrowserContextQuery'
     | 'SelectContextRequest'
     | 'ForkSessionRequest'

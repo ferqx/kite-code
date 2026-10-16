@@ -12,13 +12,14 @@ import {
   type ToolSet,
   tool,
 } from 'ai';
-import type { ModelAdapter, ModelRequest } from './index';
+import type { ModelAdapter, ModelRequest, ModelUsage } from './index';
 import { ModelAttemptError } from './model-attempt';
 import {
   type ModelAdapterSnapshot,
   type ReasoningEffort,
   reasoningEfforts,
 } from './request-snapshot';
+import { compatibleModelUsage, sdkModelUsage } from './usage';
 
 export { type ReasoningEffort, reasoningEffortLevels, reasoningEfforts } from './request-snapshot';
 
@@ -181,6 +182,7 @@ export function createSdkModelAdapter(options: {
         });
       }
       let finished = false;
+      let recordedUsage: ModelUsage | undefined;
       const argumentsById = new Map<string, string>();
       const emittedCalls = new Set<string>();
       const completedCalls: import('./index').ModelToolCall[] = [];
@@ -200,12 +202,35 @@ export function createSdkModelAdapter(options: {
           maxRetries: 0,
           stopWhen: stepCountIs(1),
           abortSignal: signal,
+          // Read only the usage leaf before Provider schemas discard extra token details.
+          include: { rawChunks: compatibleSnapshots.has(model as object) },
           // SDK errors are consumed below and never logged with host credentials.
           onError() {},
         });
         for await (const part of response.stream) {
           signal.throwIfAborted();
           switch (part.type) {
+            case 'raw': {
+              const value = part.rawValue;
+              if (
+                value !== null &&
+                typeof value === 'object' &&
+                'usage' in value &&
+                value.usage !== null &&
+                typeof value.usage === 'object' &&
+                !Array.isArray(value.usage)
+              ) {
+                recordedUsage = compatibleModelUsage(value.usage);
+                yield { type: 'usage', usage: recordedUsage };
+              }
+              break;
+            }
+            case 'finish-step':
+              if (!recordedUsage) {
+                recordedUsage = sdkModelUsage(part.usage);
+                yield { type: 'usage', usage: recordedUsage };
+              }
+              break;
             case 'text-delta':
               yield { type: 'text_delta', text: part.text };
               break;
@@ -244,21 +269,12 @@ export function createSdkModelAdapter(options: {
               }
               if (finished) throw new Error('model_finish_unavailable');
               finished = true;
-              const usage = part.totalUsage;
+              const usage = recordedUsage ?? sdkModelUsage(part.totalUsage);
               for (const call of completedCalls) yield { type: 'tool_call', ...call };
               yield {
                 type: 'finish',
                 reason,
-                usage: {
-                  inputTokens: usage.inputTokens ?? null,
-                  outputTokens: usage.outputTokens ?? null,
-                  ...(usage.inputTokenDetails.cacheReadTokens !== undefined
-                    ? { cachedInputTokens: usage.inputTokenDetails.cacheReadTokens }
-                    : {}),
-                  ...(usage.outputTokenDetails.reasoningTokens !== undefined
-                    ? { reasoningTokens: usage.outputTokenDetails.reasoningTokens }
-                    : {}),
-                },
+                usage,
               };
               break;
             }
@@ -273,7 +289,6 @@ export function createSdkModelAdapter(options: {
               break;
             case 'start':
             case 'start-step':
-            case 'finish-step':
             case 'text-start':
             case 'text-end':
             case 'reasoning-start':
@@ -353,10 +368,11 @@ export function createCompatibleModelBinding(options: {
     // The SDK compatible default fills missing fields in a partial usage object
     // with zero. Preserve absent Provider measurements as unknown instead.
     convertUsage(usage) {
-      const input = usage?.prompt_tokens ?? undefined;
-      const output = usage?.completion_tokens ?? undefined;
-      const cached = usage?.prompt_tokens_details?.cached_tokens ?? undefined;
-      const reasoning = usage?.completion_tokens_details?.reasoning_tokens ?? undefined;
+      const measured = compatibleModelUsage(usage);
+      const input = measured.inputTokens ?? undefined;
+      const output = measured.outputTokens ?? undefined;
+      const cached = measured.cachedInputTokens;
+      const reasoning = measured.reasoningTokens;
       return {
         inputTokens: {
           total: input,
@@ -369,7 +385,7 @@ export function createCompatibleModelBinding(options: {
           text: output !== undefined && reasoning !== undefined ? output - reasoning : undefined,
           reasoning,
         },
-        raw: undefined,
+        raw: measured.raw,
       };
     },
   }).chatModel(options.modelId);

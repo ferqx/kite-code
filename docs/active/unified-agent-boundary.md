@@ -2,6 +2,8 @@
 
 状态：active
 
+Model 用量通过 [AI 中立事件](../../packages/ai/src/index.ts)的独立 `usage` 快照交接，完整 finish 与工具派发仍分别核实。[Agent Execution](../../packages/agent/src/execution/index.ts)在成功、失败、取消结果中保留已收输入／输出、缓存、推理、原服务端总数及 `usage.raw`；只保存响应中的用量叶子，不复制 headers、凭据或其他原响应。未收到、无效或旧记录未保存的测量保持未知，原始明细不生成授权或执行成功。TUI 同原请求优先显示实测输入，缺失才用本地估算；完整 Model 输入身份与冻结容量仍独立核实，累计统计不代替当前上下文。既有 JSON result 承载新增可选字段，SQL baseline 与公开 HTTP schema 保持。当前接口、限制和实测范围归 [AI](../../packages/ai/README.md)、[Agent](../../packages/agent/README.md)和 [CLI Host](../../apps/cli/README.md)。
+
 客户端测试专用的调试入口、诊断展示和辅助控件只允许由隔离测试夹具或明确测试制品开启，dev 与 prod 客户端必须关闭。公开启动参数、环境变量、URL 或环境名不提供开启资格；TUI 普通入口拒绝 `--test-ui-diagnostics`，Native 的开发与正式 renderer 将测试常量固定为 false，组件传入 true 也不能覆盖该值。测试目录的入口可向可信 host 显式传 `testDiagnostics:true`，测试 Native 可单独构建诊断制品；共享 Desktop context 默认关闭，不再按 `NODE_ENV=development` 增加技术详情。测试诊断只控制展示，不改变公共请求、身份、原申请持久化、审批与取消权，也不跳过制品完整验证。普通界面仍保未知／失败／未确认清理、完整业务结果和用户明确的原内容检查；移植原 Ink 的纯 Header／Footer／面板不能恢复旧 provider 或执行 authority。负责实现归 [TUI](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)与 [Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
 
 [Agent 权限模块](../../packages/agent/src/permissions/README.md)统一默认三策略、执行与 Workflow 共用的 builtin effect 分类、计划/Workflow/恢复审批约束、默认 Task 后续汇报许可，以及 Shell 命令分析、摘要和最终批准范围。Service 只装配可信事实与执行工厂、处理公开接口和身份；原 Loop/Execution 接口与审批生命周期保持。默认 after-turn 判定由 Agent 核原 role/source/root work、取消／删除和当前信任，Service 只提供可信读取；Planning 装配直接调用 Agent 工厂和原状态 reader，旧单次转发层退役。静态边界检查沿真实 export/barrel 拒绝权限模块反向依赖 Service，并拒绝 Service 自有解析依赖及原策略／范围／after-turn／Planning 工厂实现；Core／SQL 的激活、报告应用及最终 CAS 保独立 owner，正式制品仍须验证实际 Agent entry 与资产闭包。
@@ -326,3 +328,7 @@ Native MCP 的 renderer通过固定IPC提交有限参数，Main固定真实观�
 终端原 Ink UI 在 `packages/ui/src/tui/ink` 保留纯展示算法，正式／开发宿主均只消费新 Client 事实。只读 planning progress、compression phase、Tool call/input、Files 文本预览与 point 日志时间补齐原界面所需来源；不引入 UI 权限规则、旧 Runtime、第二 Store 或派发 fallback。Source 与完整性仍由 Agent／Service／Client 核实，UI 聚合不授予执行或恢复资格。实现与验证范围归 [TUI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)。
 
 `SessionView.session` 的可选 owner 实例／generation 来自同一原 Store 视图，普通 Session DTO 不扩。Host 绑定当前已认证 Service 实例供 UI 限定活动显示；不同 owner 只表示当前连接无法核实，原任务仍可能在另一执行者运行，不证明死亡或终态，不产生恢复、取消或派发权。缺字段旧消费者保原观察合同，当前正式消费者沿同源 Client decoder 使用事实；同 Scope 的历史／完整正文与原未知状态保持，见 [Service](../../apps/service/README.md#终端展示的新增只读字段)、[Client](../../packages/client/README.md#模型尝试与原工作身份)和上述 TUI owner。
+
+## 三项 token 口径
+
+Core 分离累计实际用量、最近请求实际输入与下一请求上下文预测。新增只读 Store usage 聚合只取本 Store／Session 原 Model 终态，覆盖缺失保留未知，读取不写入；不受有限 View 截断。跨包 `CompressionInput` 传实际工具及经 scope／路由核验的测量基线；纯投影在原输入被改写、移除或换工具时全量回退。已测输入与新增估算不会伪装成新的 Provider 统计或派发资格。Service、Client 与 TUI 的只读预测保准确原请求和 selection/upper，不捕获新来源、不初始化模型。完整接口与验证归[Core owner](../../packages/agent/src/context-estimate.README.md)。

@@ -1,5 +1,5 @@
 import type { CompressionInput, ContextCompressor } from '@kite-ai/agent';
-import { estimateModelContext } from '@kite-ai/agent/context-estimate';
+import { estimateModelContext, projectModelContext } from '@kite-ai/agent/context-estimate';
 import type { ModelTool } from '@kite-ai/ai';
 
 /** Host token/window policy; callbacks describe facts and perform no Provider or effect calls. */
@@ -25,8 +25,13 @@ export function createSummaryCompressor(
       options.shouldCompress?.bind(options) ??
       (options.automatic
         ? async (input: CompressionInput) => {
+            const request = {
+              modelId: input.modelId ?? '',
+              messages: input.messages,
+              tools: input.tools ?? options.automatic!.tools ?? [],
+            };
             const estimate = estimateModelContext(
-              { messages: [...input.messages], tools: options.automatic!.tools ?? [] },
+              { messages: [], tools: [] },
               options.automatic,
               options.automatic!.requestMaxOutputTokens,
             );
@@ -34,7 +39,7 @@ export function createSummaryCompressor(
             const threshold = window
               ? Math.max(1, (window - (estimate.reservedOutputTokens ?? 0)) * 0.8)
               : 32768;
-            return estimate.estimate.totalInputTokens >= threshold;
+            return projectModelContext(request, input.tokenBaseline).totalInputTokens >= threshold;
           }
         : undefined),
     summary = options.validateSummary?.bind(options),
@@ -63,6 +68,19 @@ export function createSummaryCompressor(
           automatic: !!automatic,
           summaryWindowPreflight: !!summary,
           expandedWindowPreflight: !!expanded,
+          tokenAccounting: 'measured-input-plus-additions-v1',
+          tokenProjection: JSON.parse(
+            JSON.stringify(
+              projectModelContext(
+                {
+                  modelId: input.modelId ?? '',
+                  messages: input.messages,
+                  tools: input.tools ?? options.automatic?.tools ?? [],
+                },
+                input.tokenBaseline,
+              ),
+            ),
+          ),
         },
       };
     },

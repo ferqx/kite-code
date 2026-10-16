@@ -94,4 +94,54 @@ test('footer displays current Context estimate independently from cumulative rec
   } finally {
     unknown.unmount();
   }
+  for (const reportedInputTokens of [0, 2345]) {
+    const measured = render(
+      <TuiFooter
+        modelName="actual"
+        context={{
+          ...context,
+          reportedInputTokens,
+          utilization: undefined,
+          usableInputTokens: undefined,
+        }}
+      />,
+    );
+    try {
+      expect(measured.lastFrame()).toContain(
+        `${reportedInputTokens === 0 ? '0' : '2.3k'} context measured`,
+      );
+      expect(measured.lastFrame()).not.toContain('context est.');
+      expect(measured.lastFrame()).not.toContain('60 context');
+    } finally {
+      measured.unmount();
+    }
+  }
+});
+
+test('footer identifies next-request forecast separately from actual last input and cumulative usage', () => {
+  const rendered = render(
+    <TuiFooter
+      modelName="custom"
+      usage={{ inputTokens: 999999, executionCount: 300 }}
+      nextContext={{
+        storeId: 's',
+        sessionId: 's',
+        runId: 'r',
+        modelId: 'custom',
+        modelInputExecutionId: 'm',
+        contextSelectionId: 'selection',
+        highWaterSeq: '20',
+        source: 'reported_baseline',
+        measuredInputTokens: 100,
+        estimatedInputTokens: 35,
+        totalInputTokens: 135,
+      }}
+    />,
+  );
+  try {
+    expect(rendered.lastFrame()).toContain('135 next context est.');
+    expect(rendered.lastFrame()).not.toContain('999');
+  } finally {
+    rendered.unmount();
+  }
 });

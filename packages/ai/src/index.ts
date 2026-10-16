@@ -43,13 +43,19 @@ export interface ModelRequest {
 export interface ModelUsage {
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
+  /** Reported total; never reconstructed from partial input/output measurements. */
+  readonly totalTokens?: number;
   readonly cachedInputTokens?: number;
   readonly reasoningTokens?: number;
+  /** The Provider usage object only, excluding response text, headers and credentials. */
+  readonly raw?: Readonly<Record<string, Json>>;
 }
 
 export type ModelEvent =
   | { readonly type: 'text_delta'; readonly text: string }
   | { readonly type: 'reasoning_delta'; readonly text: string }
+  /** A request usage snapshot, independent of successful response completion. */
+  | { readonly type: 'usage'; readonly usage: ModelUsage }
   | ({ readonly type: 'tool_call' } & ModelToolCall)
   | {
       readonly type: 'finish';

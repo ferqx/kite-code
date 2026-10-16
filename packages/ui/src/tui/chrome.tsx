@@ -49,12 +49,8 @@ export interface TuiChromeFacts {
     source: 'model_input' | 'run_configuration' | 'unavailable';
   };
   context?: NonNullable<TuiSnapshot['environment']>['context'];
-  usage?: {
-    inputTokens: number;
-    outputTokens?: number;
-    cachedInputTokens?: number;
-    executionCount: number;
-  };
+  nextContext?: NonNullable<TuiSnapshot['environment']>['nextContext'];
+  usage?: NonNullable<TuiSnapshot['environment']>['usage'];
 }
 
 /** Static header: the host supplies observed display facts, never runtime authority. */
@@ -244,18 +240,30 @@ export function TuiFooter({
       : facts.permissionMode === 'full'
         ? theme.warning
         : theme.muted;
-  const tokens = facts.context?.estimate.totalInputTokens;
+  const tokens =
+    facts.nextContext?.totalInputTokens ??
+    facts.context?.reportedInputTokens ??
+    facts.context?.estimate.totalInputTokens;
   const tokenText =
-    tokens && tokens > 0
+    tokens !== undefined && tokens >= 0
       ? tokens >= 1000
         ? `${(tokens / 1000).toFixed(1)}k`
         : formatNumber(tokens)
       : undefined;
-  const contextText =
-    facts.context?.utilization !== undefined
+  const contextText = facts.nextContext
+    ? `${tokenText} ${language === 'zh-CN' ? '下次上下文估算' : 'next context est.'}${facts.nextContext.utilization === undefined ? '' : ` (${Math.round(facts.nextContext.utilization * 100)}%)`}`
+    : facts.context?.utilization !== undefined
       ? translate('stats.context', { percent: Math.round(facts.context.utilization * 100) })
       : tokenText
-        ? `${tokenText} ${language === 'zh-CN' ? '上下文估算' : 'context est.'}`
+        ? `${tokenText} ${
+            facts.context?.reportedInputTokens !== undefined
+              ? language === 'zh-CN'
+                ? '上下文实测'
+                : 'context measured'
+              : language === 'zh-CN'
+                ? '上下文估算'
+                : 'context est.'
+          }`
         : undefined;
   const cache = facts.usage?.cachedInputTokens;
   const recordedInput = facts.usage?.inputTokens;
@@ -289,7 +297,8 @@ export function TuiFooter({
       )}
       {testDiagnostics && facts.usage && (
         <Text dimColor>
-          {t('Recorded usage:')} {facts.usage.inputTokens.toLocaleString()} {t('input tokens')}
+          {t('Recorded usage:')} {facts.usage.inputTokens?.toLocaleString() ?? t('unavailable')}{' '}
+          {t('input tokens')}
           {facts.usage.outputTokens !== undefined &&
             ` · ${facts.usage.outputTokens.toLocaleString()} ${t('output tokens')}`}
         </Text>

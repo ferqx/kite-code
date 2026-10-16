@@ -50,6 +50,8 @@ Worker 的首次和积压 pump 使用 `setImmediate`，每个宏任务至多执�
 
 ## 当前会话视图
 
+累计实际用量不通过有限 `getView` 求和。`getSessionTokenUsage` 只读准确当前 Store／Session 原 Model 终态的 usage 叶子，每个原 Execution 计一次，包含已经收到统计的失败、取消与摘要；继承和其他会话的消费不纳入。未知字段由统计覆盖数表达，不补零或混入本地估算。聚合与完整 205 次调用的验证见[上下文统计 owner](../context-estimate.README.md)。
+
 `getView` 在同一短只读事务读取原 Session、Store、通知水位与显示投影。Run 选取该 Session 最近200个分配身份，加全部 `is_active=1`；Execution 选取最近200个身份，加全部 `planned/dispatching/running/outcome_unknown` 原事实。两组身份分别去重后按原 rowid 顺序返回，历史数量不能隐藏当前 Run、较早的运行中 Job 或未知结果。未知结果即使另有核实证明，也不在此查询中改写原状态；显示不授予恢复或取消权限。
 
 活动 Run 的真实 `cancel_requested` 已保存时，[共用 Run 投影](sqlite/operations.ts)返回 `cancelling`；`getRun`、`getView`、[Session directory](sqlite/directory.ts)与[background directory](sqlite/background-directory.ts)读取同一事实。SQL 原调度状态、派发条件与结束事务保持；终态显示真实最终状态，单个 Tool/Job 的取消不扩大为整个 Run。由[真实 TUI 后继链](../../../../apps/cli/test/isolated/tui-finishing-input-host.test.ts)核取消后尚未停止时的四种公开读取和停止后完整后继执行，[精确取消原回归](../../test/isolated/storage/cancellation.test.ts)保独立执行与旧 Run 范围。
