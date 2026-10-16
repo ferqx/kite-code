@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+2026-10-15：[持续执行决定](2026-10-15-long-running-agent-continuation.md)部分替代本记录的 128／256 来源数量及项目目标／目录／深度／字节额度。完整原请求、检查点内批量复用、namespace、原文件身份与新鲜性理由继续适用；下文中的旧额度不再是当前准入规则。
+
 Runtime保留定义ID与完整输入语义摘要对应的原请求，移除请求累计256门禁。宿主`ContextSources`和扩展`Extension.context`可选`captureBatch`，接收当前检查点的全部原请求；没有选择批量回调时保持原逐项捕获。批量不是按工具名挑代表输入。Core仍核来源格式、同ID摘要一致及最多256个当前唯一来源；扩展仍核全部原Session、自有namespace及每次最多128项，并强制低权限user。
 
 默认项目来源只在一次批量捕获内复用可信Workspace root、已核目标链/目录和实际指令字节。每个原请求保路径/NUL/越界/depth/target/directory/byte限制；目录并集不冒充单请求，实际字节仍核nofollow、原文件实体和UTF8。下一检查点重新捕获，新增指令和同mtime/大小的重写不会借跨检查点缓存获得资格。Service同次复用Skill catalogue及已加载正文，Planning同次读取真实计划；所选MCP仍逐原请求走原scope/read-set，Workflow fence保持。

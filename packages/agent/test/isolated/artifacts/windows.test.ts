@@ -258,13 +258,30 @@ test.skipIf(process.platform !== 'win32')(
         unlinkSync(junction);
       }
       const other = join(f.root, 'other-link');
+      const identity = spawnSync('whoami', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' });
+      expect(identity.status).toBe(0);
+      const sid = identity.stdout.match(/S-1-(?:\d+-)*\d+/)?.[0];
+      expect(sid).toBeDefined();
+      const access = (rights: 'F' | 'R') => {
+        // The owner deliberately creates this attack fixture, then restores the
+        // exact FR DACL before testing the independent nlink invariant.
+        expect(
+          spawnSync('icacls', [path, '/grant:r', `*${sid}:(${rights})`], { encoding: 'utf8' })
+            .status,
+        ).toBe(0);
+      };
+      access('F');
       linkSync(path, other);
+      access('R');
       try {
         await rejects(f.artifacts.read(f.input));
         await rejects(f.artifacts.publish({ ...f.input, refId: 'hardlink', content: body }));
       } finally {
+        access('F');
         unlinkSync(other);
+        access('R');
       }
+      expect(await f.artifacts.read(f.input)).toEqual(body);
       const acl = spawnSync('icacls', [path, '/grant', '*S-1-1-0:(F)'], { encoding: 'utf8' });
       expect(acl.status).toBe(0);
       const bytesBefore = readFileSync(path);

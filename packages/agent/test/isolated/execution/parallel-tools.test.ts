@@ -29,7 +29,7 @@ test('parallel Tools retain actual reverse completion and original Model call-re
     ],
     [{ type: 'text_delta', text: 'Both original results complete' }, finish],
   ]);
-  const store = await openSqliteStore({ dataRoot: root, profile: 'parallel' });
+  const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'parallel' });
   const runtime = createRuntime({
     store,
     model,
@@ -120,7 +120,11 @@ test('parallel Tools retain actual reverse completion and original Model call-re
     const cursor = (await store.getMetadata()).lastChangeCursor;
     await runtime.close();
     closed = true;
-    reader = await openSqliteStore({ dataRoot: root, profile: 'parallel', mode: 'readonly' });
+    reader = await openSqliteStore({
+      dataRoot: join(root, 'data'),
+      profile: 'parallel',
+      mode: 'readonly',
+    });
     expect((await reader.getMetadata()).storeId).toBe(storeId);
     expect(await reader.listMessages('s')).toEqual(messages);
     expect(await reader.listExecutions('s')).toEqual(executions);
@@ -196,8 +200,8 @@ test('a later parallel Tool terminal SQLite rejection survives the earlier unkno
       },
     ],
   });
-  const store = await openSqliteStore({ dataRoot: root, profile: 'storage' });
-  const db = new Database(join(root, 'storage/core.db'));
+  const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'storage' });
+  const db = new Database(join(root, 'data', 'storage/core.db'));
   // Match the Store Worker's bounded native writer wait: the accepted terminal
   // snapshot does not stop its independent control/owner-release transactions.
   db.exec('PRAGMA busy_timeout=1000');
@@ -281,7 +285,11 @@ test('a later parallel Tool terminal SQLite rejection survives the earlier unkno
     closed = true;
     expect(disposed).toBe(1);
     db.close();
-    reader = await openSqliteStore({ dataRoot: root, profile: 'storage', mode: 'readonly' });
+    reader = await openSqliteStore({
+      dataRoot: join(root, 'data'),
+      profile: 'storage',
+      mode: 'readonly',
+    });
     expect(await reader.listExecutions('s')).toEqual(executions);
     expect(await reader.listMessages('s')).toEqual(messages);
     expect(await reader.getCommand('work')).toEqual(command);
@@ -360,7 +368,7 @@ test('denying a parallel sibling waits for attempted Tool cleanup before releasi
       },
     ],
   });
-  const store = await openSqliteStore({ dataRoot: root, profile: 'denial' });
+  const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'denial' });
   const runtime = createRuntime({
     store,
     model,
@@ -464,7 +472,11 @@ test('denying a parallel sibling waits for attempted Tool cleanup before releasi
     const cursor = (await store.getMetadata()).lastChangeCursor;
     await runtime.close();
     closed = true;
-    reader = await openSqliteStore({ dataRoot: root, profile: 'denial', mode: 'readonly' });
+    reader = await openSqliteStore({
+      dataRoot: join(root, 'data'),
+      profile: 'denial',
+      mode: 'readonly',
+    });
     expect(await reader.listExecutions('s')).toEqual(executions);
     expect(await reader.listMessages('s')).toEqual(messages);
     expect(await reader.getRun(interaction.runId!)).toEqual(run);

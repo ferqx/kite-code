@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -16,7 +17,8 @@ async function rejects(work: Promise<unknown>, code: string) {
   expect((error as { code?: string })?.code).toBe(code);
 }
 async function fixture() {
-  const dataRoot = mkdtempSync('/private/tmp/kite-result-requirements-');
+  const directory = mkdtempSync(join(tmpdir(), 'kite-result-requirements-'));
+  const dataRoot = join(directory, 'data');
   const store = await openSqliteStore({ dataRoot, profile: 'test' });
   const expectedStoreId = (await store.getMetadata()).storeId;
   await store.createWorkspace({
@@ -124,7 +126,7 @@ async function fixture() {
     async close() {
       database.close();
       await store.close();
-      rmSync(dataRoot, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true });
     },
   };
 }

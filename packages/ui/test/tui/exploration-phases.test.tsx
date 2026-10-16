@@ -455,6 +455,21 @@ test('retry presentation requires the real failed predecessor in the exact origi
     observedModelRetry(next, [{ ...previous, status: 'outcome_unknown' }, next]),
   ).toBeUndefined();
   expect(observedModelRetry(next, [next])).toBeUndefined();
+  const fifth = {
+    ...previous,
+    id: 'fifth',
+    modelRetry: { ...next.modelRetry!, attempt: 5, maxAttempts: null },
+  };
+  const sixth = {
+    ...next,
+    modelRetry: {
+      ...next.modelRetry!,
+      previousExecutionId: 'fifth',
+      attempt: 6,
+      maxAttempts: null,
+    },
+  };
+  expect(observedModelRetry(sixth, [fifth, sixth])).toEqual(sixth.modelRetry);
 });
 
 test('queued or cancelled exploration retains its actual row without claiming performed file searches', () => {

@@ -686,8 +686,7 @@ export class ExtensionHost {
       } finally {
         this.forkReaderClosers.get(context)?.();
       }
-      if (!Array.isArray(sources) || sources.length > 128)
-        throw new AgentError('context_source_budget_exceeded');
+      if (!Array.isArray(sources)) throw new AgentError('context_source_invalid');
       for (const source of sources) {
         assertContextSource(source);
         if (!source.id.startsWith(`${extension.id}:`))
@@ -733,8 +732,7 @@ export class ExtensionHost {
       } finally {
         this.forkReaderClosers.get(context)?.();
       }
-      if (!Array.isArray(sources) || sources.length > 128)
-        throw new AgentError('context_source_budget_exceeded');
+      if (!Array.isArray(sources)) throw new AgentError('context_source_invalid');
       for (const source of sources) {
         assertContextSource(source);
         if (!source.id.startsWith(`${extension.id}:`))
@@ -1366,8 +1364,7 @@ export class ExtensionHost {
           scope.signal.throwIfAborted();
           const current = await this.options.store.getExecution(executionId);
           if (!current?.runId) throw new AgentError('requirement_run_required');
-          if (!Array.isArray(references) || references.length > 64)
-            throw new AgentError('requirement_limit');
+          if (!Array.isArray(references)) throw new AgentError('invalid_requirement');
           const run = await this.options.store.registerRunRequirements({
             expectedStoreId: scope.command.originStoreId,
             owner: scope.owner,

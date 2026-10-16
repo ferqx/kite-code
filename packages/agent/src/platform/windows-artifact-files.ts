@@ -79,6 +79,10 @@ function native() {
   const system = new Uint16Array(32768);
   const length = kernel.symbols.GetSystemDirectoryW(ptr(system), system.length);
   if (!length || length >= system.length) fail();
+  const ntdll = dlopen(
+    `${Buffer.from(system.buffer, 0, length * 2).toString('utf16le')}\\ntdll.dll`,
+    { NtSetInformationFile: { args: ['u64', 'ptr', 'ptr', 'u32', 'u32'], returns: 'i32' } },
+  );
   const adv = dlopen(
     `${Buffer.from(system.buffer, 0, length * 2).toString('utf16le')}\\advapi32.dll`,
     {
@@ -416,14 +420,22 @@ function native() {
           const name = Buffer.from(hash, 'utf16le'),
             rename = new Uint8Array(20 + name.length + 2);
           const view = new DataView(rename.buffer);
-          // FILE_RENAME_INFO x64: FALSE at 0, retained directory HANDLE at 8, UTF16 byte count at 16.
+          // FILE_RENAME_INFORMATION x64. NtSetInformationFile accepts the retained
+          // RootDirectory; the Win32 wrapper rejects this relative form with error 87.
           view.setBigUint64(8, BigInt(targetDirs.handles[2]!), true);
           view.setUint32(16, name.length, true);
           rename.set(name, 20);
-          if (!kernel.symbols.SetFileInformationByHandle(handle, 3, ptr(rename), rename.length)) {
-            const error = kernel.symbols.GetLastError();
-            if (error !== 80 && error !== 183) fail();
-            // Only the official FILE_EXISTS/ALREADY_EXISTS collision adopts an existing object.
+          const io = new Uint8Array(16);
+          const status = ntdll.symbols.NtSetInformationFile(
+            handle,
+            ptr(io),
+            ptr(rename),
+            rename.length,
+            10,
+          );
+          if (status !== 0) {
+            if (status >>> 0 !== 0xc0000035) fail();
+            // Only STATUS_OBJECT_NAME_COLLISION adopts an existing immutable object.
             for (const _part of read(profile, hash, size)) {
               /* Complete EOF before reuse. */
             }

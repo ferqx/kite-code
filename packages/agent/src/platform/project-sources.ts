@@ -16,14 +16,6 @@ export interface ProjectSourcesOptions {
   /** Host-trusted target selection. Raw caller input is not a filesystem capability. */
   targetPaths?(request: SourceRequest): readonly string[];
 }
-const limits = {
-  targets: 64,
-  depth: 32,
-  directories: 256,
-  path: 4096,
-  fileBytes: 1024 * 1024,
-  totalBytes: 8 * 1024 * 1024,
-};
 const names = ['CLAUDE.md', 'AGENTS.md'] as const;
 const unavailable = () => new AgentError('context_source_unavailable');
 const missing = (error: unknown) => (error as { code?: string })?.code === 'ENOENT';
@@ -59,23 +51,19 @@ export function createProjectSources(
           let root = roots.get(request.workspaceId);
           if (!root) {
             const selectedRoot = await options.workspaceRoot(request.workspaceId);
-            if (!selectedRoot || selectedRoot.length > limits.path) throw unavailable();
+            if (!selectedRoot) throw unavailable();
             const original = await lstat(resolve(selectedRoot));
             if (!original.isDirectory() || original.isSymbolicLink()) throw unavailable();
             root = await realpath(resolve(selectedRoot));
-            if (root.length > limits.path) throw unavailable();
             roots.set(request.workspaceId, root);
           }
           const targets = options.targetPaths?.(request) ?? [];
-          if (targets.length > limits.targets) throw unavailable();
           const directories = new Set<string>([root]);
           for (const target of targets) {
-            if (!target || target.length > limits.path || target.includes('\0'))
-              throw unavailable();
+            if (!target || target.includes('\0')) throw unavailable();
             const absolute = resolve(root, target);
-            if (absolute.length > limits.path || !inside(root, absolute)) throw unavailable();
+            if (!inside(root, absolute)) throw unavailable();
             const parts = relative(root, absolute).split(sep).filter(Boolean);
-            if (parts.length > limits.depth) throw unavailable();
             // Validate the full target chain before inspecting its final entry. An
             // intermediate symlink is never followed, even when it points inside.
             const targetKey = `${root}\0${absolute}`;
@@ -102,7 +90,6 @@ export function createProjectSources(
               scope = resolve(scope, segment);
               directories.add(scope);
             }
-            if (directories.size > limits.directories) throw unavailable();
           }
           const ordered = [...directories].sort(
             (a, b) =>
@@ -112,15 +99,11 @@ export function createProjectSources(
           plans.push({ request, root, directories: ordered });
         }
         // This byte snapshot belongs only to this checkpoint. Each original request
-        // still validates its complete trusted target chain and its own budgets.
-        const snapshots = new Map<
-          string,
-          { length: number; digest: string; content: string } | null
-        >();
+        // still validates its complete trusted target chain and original file identity.
+        const snapshots = new Map<string, { digest: string; content: string } | null>();
         const sources = new Map<string, ContextSource>();
         const checkedDirectories = new Set<string>();
         for (const { request, root, directories } of plans) {
-          let totalBytes = 0;
           for (const directory of directories) {
             // Recheck ancestor paths at each read; a newly added directory/symlink
             // cannot widen the host-selected scope silently.
@@ -136,14 +119,12 @@ export function createProjectSources(
             }
             for (const name of names) {
               const path = resolve(directory, name);
-              if (path.length > limits.path) throw unavailable();
               if (!snapshots.has(path)) {
                 const before = await stat(path);
                 if (!before) {
                   snapshots.set(path, null);
                 } else {
-                  if (!before.isFile() || before.isSymbolicLink() || before.size > limits.fileBytes)
-                    throw unavailable();
+                  if (!before.isFile() || before.isSymbolicLink()) throw unavailable();
                   if (!inside(root, await realpath(path))) throw unavailable();
                   await files.read(
                     path,
@@ -153,23 +134,9 @@ export function createProjectSources(
                       // A replacement inode cannot supply bytes for the original path.
                       if (!held.isFile() || held.dev !== before.dev || held.ino !== before.ino)
                         throw unavailable();
-                      const buffer = Buffer.alloc(limits.fileBytes + 1);
-                      let length = 0;
-                      while (length < buffer.length) {
-                        const chunk = await handle.read(
-                          buffer,
-                          length,
-                          buffer.length - length,
-                          length,
-                        );
-                        if (!chunk.bytesRead) break;
-                        length += chunk.bytesRead;
-                      }
-                      if (length > limits.fileBytes) throw unavailable();
-                      const bytes = buffer.subarray(0, length);
+                      const bytes = await handle.readFile();
                       if (bytes.includes(0)) throw unavailable();
                       snapshots.set(path, {
-                        length,
                         digest: createHash('sha256').update(bytes).digest('hex'),
                         content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
                       });
@@ -179,8 +146,6 @@ export function createProjectSources(
               }
               const snapshot = snapshots.get(path);
               if (!snapshot) continue;
-              totalBytes += snapshot.length;
-              if (totalBytes > limits.totalBytes) throw unavailable();
               const local = relative(root, path).split(sep).join('/');
               const id = `project:${request.workspaceId}:${local}`;
               const value: ContextSource = {

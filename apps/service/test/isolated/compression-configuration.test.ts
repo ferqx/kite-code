@@ -26,7 +26,7 @@ for (const { guardedReset, rejectedSummary } of [
       workspace = join(root, 'workspace');
     mkdirSync(workspace);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
     const requests: Record<string, unknown>[] = [];
     const provider = Bun.serve({
       hostname: '127.0.0.1',
@@ -91,7 +91,7 @@ for (const { guardedReset, rejectedSummary } of [
       }),
     };
     const host = createDefaultProcessConfiguration({
-      userConfigurationPath: profile.profilePath + '/config.jsonc',
+      userConfigurationPath: join(profile.profilePath, 'config.jsonc'),
       profile,
       credentialBackend: createTemporaryCredentialBackend(),
       permissions: {
@@ -109,8 +109,7 @@ for (const { guardedReset, rejectedSummary } of [
       slot.validateSummary = async () => {
         throw Error('later_untrusted_override');
       };
-    const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile }),
-      expectedStoreId = (await store.getMetadata()).storeId;
+    const expectedStoreId = (await store.getMetadata()).storeId;
     const runtime = createRuntime({
       ...host,
       store,
@@ -317,7 +316,11 @@ for (const { guardedReset, rejectedSummary } of [
         originStoreId: expectedStoreId,
         trigger: 'manual',
         contextSelectionId: original.selection.id,
-        compressor: { id: 'standard-summary', version: '1', snapshot: { automatic: false } },
+        compressor: {
+          id: 'standard-summary',
+          version: '1',
+          snapshot: { automatic: !guardedReset && !rejectedSummary },
+        },
       });
       const compression = compact.compression!;
       const saved = await client.getModelInput('s', compression.modelExecutionId);
@@ -426,7 +429,7 @@ for (const { guardedReset, rejectedSummary } of [
     }
   }, 30000);
 
-test('default reduction preflight refuses one recent user turn even with Tool steps or user-role source material', async () => {
+test('default reduction preflight admits settled Tool steps within one long user task and ignores source material as extra user input', async () => {
   const compressor = createSummaryCompressor();
   const input = {
     messages: [
@@ -439,5 +442,11 @@ test('default reduction preflight refuses one recent user turn even with Tool st
     sources: [{ id: 'remote-source' }],
     signal: new AbortController().signal,
   } as unknown as Parameters<ContextCompressor['prepare']>[0];
-  expect(await compressor.prepare(input)).toBeNull();
+  expect(await compressor.prepare(input)).not.toBeNull();
+  expect(
+    await compressor.prepare({
+      ...input,
+      messages: input.messages.filter((message) => message.role === 'user'),
+    }),
+  ).toBeNull();
 });

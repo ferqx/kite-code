@@ -63,25 +63,26 @@ function context(controller: AbortController, get: () => Promise<PublicExecution
   return { value, waits: () => waits, dispatches: () => dispatches };
 }
 
-test('foreground Shell abort waits for the exact already-owned terminal stop without another dispatch', async () => {
-  const controller = new AbortController();
-  let reads = 0;
-  const c = context(controller, async () => (++reads === 1 ? execution('running') : execution()));
-  const result = await completeForegroundShell(ref, c.value, 600000, 'standalone');
-  expect(reads).toBe(2);
-  expect(c.waits()).toBe(1);
-  expect(c.dispatches()).toBe(0);
-  expect(result.outcome).toBe('cancelled');
-  expect(result.details).toMatchObject({
-    ref,
-    cancellationObserved: true,
-    execution: {
-      id: 'job',
-      status: 'cancelled',
-      result: { details: { groupStopped: true, processTreeStopped: true } },
-    },
+for (const timeoutMs of [600000, undefined])
+  test(`foreground Shell abort with timeout=${timeoutMs ?? 'none'} waits for the exact owned stop`, async () => {
+    const controller = new AbortController();
+    let reads = 0;
+    const c = context(controller, async () => (++reads === 1 ? execution('running') : execution()));
+    const result = await completeForegroundShell(ref, c.value, timeoutMs, 'standalone');
+    expect(reads).toBe(2);
+    expect(c.waits()).toBe(1);
+    expect(c.dispatches()).toBe(0);
+    expect(result.outcome).toBe('cancelled');
+    expect(result.details).toMatchObject({
+      ref,
+      cancellationObserved: true,
+      execution: {
+        id: 'job',
+        status: 'cancelled',
+        result: { details: { groupStopped: true, processTreeStopped: true } },
+      },
+    });
   });
-});
 
 test('foreground Shell abort retains an unknown stop and refuses foreign or missing terminal evidence', async () => {
   for (const observed of [

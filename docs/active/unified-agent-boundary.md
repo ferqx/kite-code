@@ -14,7 +14,7 @@ Native累计缓存用量沿已观察Message的原Model Execution只读取得：�
 
 [自动 mutation 验证](../../packages/agent/src/business/planning/README.md)由可信装配明确选择真实版本及 effects，Core 只保留通用 mutation/completion governance 边界。派发前保存潜在验证事实，真实 Execution 结算与事实 revision 在同一短事务落定，文件路径/hash 列表分页读取，不转成每个文件一条不可撤回 RequirementRef。Model 完成候选通过同 Loop 的普通 `validation.auto_check` 与独立获准的真实 Files checker 验证；失败诊断作为低权限结果交给下一 Model 修复，未知或取消不自动继续。后序同 Store/Run、同路径的实际成功 mutation 可以将旧 hash 验证标为 superseded，仍保留旧事实，最后 mutation 必须实查；failed/unknown/cancelled 不因此解除义务。JSONC 不能授予这些 hooks 或隐式补选 checker。
 
-Extension 的业务 Context 贡献只接收 scoped read projections，Core 检查 namespace、有限格式和预算，并强制以 user 数据呈现。公开执行证明仅提供准确 identity、attempt、定义、参数摘要、结果 revision 和原来源 id/digest；信息 receipt 另行核实原 Interaction 的 accepted revision，不替代工具授权。配置文件、正文、展示卡和调用者自报证明不能生成这些权威事实。
+Extension 的业务 Context 贡献只接收 scoped read projections，Core 检查 namespace 和有限格式，并强制以 user 数据呈现；来源没有累计数量额度。公开执行证明仅提供准确 identity、attempt、定义、参数摘要、结果 revision 和原来源 id/digest；信息 receipt 另行核实原 Interaction 的 accepted revision，不替代工具授权。配置文件、正文、展示卡和调用者自报证明不能生成这些权威事实。
 
 文件变更阅读继续沿原 Message 的唯一 source Execution 和准确原 Run/Store/结果 revision，不以 tool call 名称或模型参数关联。普通 Files 可保存有版本的中立 `details.fileChange`，由实际已验证 preimage 与确认 postimage 生成；只限展示预算，不改完整文件或 Model 内容合同。Main 只给当前已读 scope 的成功 File receipt 建立有限观察，缺预览明确不可读；恢复检查点和当前磁盘不是历史 diff 的替代来源。编辑器跳转另核当前登记项目的物理根、目标普通文件和原 frame，不从历史来源继承另一 Workspace 的文件范围。当前实现与证据见 [Files owner](../../packages/agent/src/tools/files/README.md#逐操作文件变更预览)和 [Native owner](../../apps/desktop/README.md#原文件变更面板与编辑器)。Core、生成 HTTP schema 与私有 UI 数据格式均保持。
 
@@ -53,6 +53,12 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 正常空闲交接使用原 owner 的有限 dispatch 观察，核 Store、instance/generation、准确 Session 并与 acquire/release 共用组阻塞条件。旧空列表与释放之间新接受的本 Session 工作，没有未结算执行时沿同一 generation 继续；已取消工作有限释放后退出，其他 Session 保持原调度。真实 unknown/cold active 不借 accepted 新命令解除，观察不取得 owner 或恢复权。[Store owner](../../packages/agent/src/storage/README.md)与[确定性交接测试](../../packages/agent/test/isolated/execution/owner-handoff.test.ts)负责准确范围。
 
 根与 child 使用同一个 Loop 与执行器，根执行组拥有一个 OS owner/generation；child 配置只能选择固定宿主绑定及父允许的工具。每 Run 的定义与来源封存，后台 operation 保留该绑定 lease 直到真实监督终止。Skills/MCP 内容不授予权限；默认 MCP 连接须在普通持久派发之后，不能在配置解析时提前启动。
+
+长期执行不设主 Run 总期限、累计用量、来源数量、隐式 Shell 总超时或暂时性模型失败的次数额度。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。公共重试上界以 `maxAttempts:null` 表达，Client schema 与 TUI 保实际 attempt 和原失败前驱。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。
+
+原 Run 显式接续的全历史 SQL 校验接纳成功 length 纯文本段，Runtime 核完整正文并继续原任务；已有 Tool 结果不重放。历史 failed/incomplete Model 只有在没有派生 Tool/Job 且后续已有安全 Model 边界时跳过，末尾失败与未知执行仍拒绝。完整 ledger 摘要、generation/selection CAS、原请求和权限校验保持，未增加公开 schema 或持久格式；真实强杀与 Store 反例证据归[恢复 owner](../../packages/agent/src/storage/README.md)。
+
+唯一新增主动停止条件是模型顺序中同工具、相同 JSON 参数连续五次失败：Run-local 计数跨完成检查保存，显式安全接续沿原 Model/Tool ledger 重建，最终经准确 `run.cancel` 域停止当前 Run 和 attached 工作。并行批次必须先结算所有已开始调用；物理完成顺序、压缩和新执行 owner 均不能重置计数或重放原工具。完整实现与定向证据归 [Agent owner](../../packages/agent/README.md)和[持续执行决定](../../.agents/notes/implemented/architecture/2026-10-15-long-running-agent-continuation.md)，不把本机定向结果推广为持续数周或完整平台资格。
 
 单次 Skill 选择属于原 `run.start/input.follow_up` Command，不属于 daemon 启动状态。HTTP/Client 只传递有限数组并核 `run_skill_selection`；该能力来自 Runtime 的显式 resolver 支持声明。Core 保持请求摘要与幂等，只由 Service 解析当前可信目录。子配置继承真实父 Run 封存的准确配置 ID，名称不重新匹配，缺失父 marker 或目录项拒绝；Runtime 沿同原 Store/Session/rootWork 的有限实际执行链提供最近父 Run，不猜当前活动 Run。Skill 选择不增加工具、可信 root 或权限，冷历史与原回执只读不重新装配。 无祖先 Run 的 Action 在原派发 scope 捕获实际静态宿主绑定；后代仍按这个集合和原权限限制，不能回退到后来每 Run 配置中的更大工具目录。
 

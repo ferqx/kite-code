@@ -67,7 +67,7 @@ Job.start 的可选只读 `dispatchAuthorization` 来自资源等待后的最终
 
 可信宿主的 `readRunExtensionRecord({sessionId,runId,extensionId,key})` 只观测准确当前 Store、实际 Run manifest 所含 namespace 的原记录，拒绝外部 origin/fork provenance；返回 clone/freeze。它属于 Runtime 的普通只读资源生命周期，不取得执行 owner、不初始化 Provider，也不增加 HTTP 或 Model 能力。Service 可由原 immutable activation anchor 读取最低审批，不能用模型输入或有限当前视图猜权限。
 
-Task 使用创建前的真实容量预留，满容量不新增 child Session。`task` 和 `followup_task` 默认在 carrier 的 ensure 事务登记原父 Run 的 required 结果义务；明确 background 才只保留后台事实。已知失败或取消可以被原父 Run 如实接纳，unknown 只给一次状态诊断，不能满足完成义务。等待复用中央变化水位与 `waiting_execution`，不反复调用 Model；普通单目标 `operations.wait` 保留终态等待，新输入在该 Tool 返回后的安全边界应用。受控 `send_message` 与 follow-up 只作用于原直接 child、Run 和 selection；公开 HTTP 不能借此向任意 child 写输入。详细交付及邮箱/after_turn 边界由 Task owner 维护。
+普通 Task 在真实 carrier 受理后按 ChildSlots 排队，激活时才开始子 Run。`task` 和 `followup_task` 默认在 carrier 的 ensure 事务登记原父 Run 的 required 结果义务，不设累计数量或字节额度；明确 background 才只保留后台事实。已知失败或取消可以被原父 Run 如实接纳，unknown 只给一次状态诊断，不能满足完成义务。等待复用中央变化水位与 `waiting_execution`，完整等待集合不设累计数量额度，不反复调用 Model；普通单目标 `operations.wait` 保留终态等待，新输入在该 Tool 返回后的安全边界应用。受控 `send_message` 与 follow-up 只作用于原直接 child、Run 和 selection；公开 HTTP 不能借此向任意 child 写输入。详细交付及邮箱/after_turn 边界由 Task owner 维护。
 
 child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 的 `deadlineAt=null`。Runtime 计时器与 SQL 最后派发使用同一固定期限，到期按真实 Run 提交取消并停止 attached 域；已激活独立 child 与 detached Job 保持自己的适用域。迟到 partial、终态或 unknown 可以保存，不能启动新工作。没有公开短期限或累计 token/Tool/attempt 额度。期限 owner 与真实持续等待证据见[child README](test/isolated/child/README.md)。
 
@@ -87,7 +87,11 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 模型来源变化时旧工具不派发，唯一 Loop 的下一次请求看到刷新后的实际指令。无模型 Action 的旧未派发 freshness attempt 先结算，最多重新准备一次并重新授权新的执行 ID，原 Command 输入与旧来源保持不变；`preparingNextAttempt` 回执随事务提交，等待者不能把旧 attempt 的失败当作原命令最终完成。再变化或重新准备失败保留明确失败/需核实。文件系统复查与 SQLite、外部 I/O 不是原子事务。
 
-主 Run 的来源请求按定义及完整输入语义摘要保留，不以累计 256 次请求结束长任务。`ContextSources.captureBatch` 可在一个检查点接收全部原请求；未提供时仍逐项调用 `capture`。Core 继续核每个实际 source 的格式、同 ID 摘要一致性及当前最多 256 个唯一来源，不丢弃旧路径或不同输入。默认项目捕获只在该次调用内复用实际目录核验与指令字节，下一检查点重新读取；请求各自的路径、目标、目录及字节门禁保持。取舍见[完整来源捕获 Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)。
+主 Run 的来源请求按定义及完整输入语义摘要保留，`ContextSources.captureBatch` 在检查点接收全部原请求；未提供时仍逐项调用 `capture`。Core 与 Extension 不设来源数量额度，仍核格式、namespace、同 ID 摘要一致与准确 Session。默认项目来源完整读取全部适用指令，不设目标／目录／字节额度；nofollow、原文件实体、范围和 UTF-8 校验保持。批量理由见[完整来源捕获 Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)，当前长期执行取舍见[持续执行决定](../../.agents/notes/implemented/architecture/2026-10-15-long-running-agent-continuation.md)。
+
+唯一 Loop 的主 Run 无总期限或累计额度，子 Run 激活后固定 30 分钟，包含等待后代的时间。暂时性 Model 失败不设尝试次数上限，按原失败 Execution 血缘退避且响应取消；公开重试 `maxAttempts=null`。长度截断的纯文本作为真实响应段保留并继续，截断工具批次零派发，摘要长度截断不发布。来源／能力变化可反复重新准备。完成治理不以重复诊断 key 代替当前必要条件核验。Shell 只有明确 `timeoutMs` 才有单次总期限。
+
+模型顺序中的同 Tool／相同 JSON 参数连续五次 `failed` 触发 `repeated_tool_failure`，经原 `run.cancel` 域停止当前 Run 与 attached 后代；其他工具、参数或非失败结果重置。并行批次先保存所有已启动结果，再按原调用顺序计算。计数跨完成检查保存，显式原 Run 接续从原 Model/Tool ledger 重建，不能通过压缩或重启重置。[长任务回归](test/isolated/execution/long-running.test.ts)、[重试](test/isolated/execution/model-attempt.test.ts)和[真实强杀接续](test/isolated/recovery/run-resume-runtime.test.ts)分别核这些边界；定向通过不代表实际连续数周或完整平台资格。
 
 [模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主显式装配纯 `agentContractSource`，静态规则及可缓存工作区事实不混入动态计划状态。[项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，放在真实历史之后。`ContextSource.placement` 仅允许 user 的 `after_history` 或 `runtime`；最多一个 runtime 来源组成唯一尾部观察块，非法或冲突明确拒绝。无 placement 的既有来源保原前缀行为；原 source IDs、完整工具配对、摘要及派发前 freshness 不变。
 
@@ -99,7 +103,7 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execution 与稳定 key 发布，Query/prepare 只能读取原 subject/scope。终态声明的 Artifact refs 必须再次核实实际 Store、scope 和元数据；效果发生后伪造引用保留未知结果。真实内容下载由 Service/Client 的二进制协议负责，不通过 renderer 路径或 hash 自授权。
 
-显式 `resumeRun` 接续仍活动的同 Store 根 Run，支持原 `run.start/input.follow_up` 的三个持久边界：原 Model 派发前、完整 Model 的工具序列、完成判定。只读 `verifyRunResume` 核原身份和安全状态，再通过独立 `RunResumeLease` 封存检查点；准确重建原配置并复核选择、取消与 generation 后，才转成普通 owner，进入同一个 `executeRun/defaultLoop`。HTTP 的 generation 由 Service 内部派生，Core 可信入口仍要求准确 CAS。原 planned Model 使用完整封存请求，原 planned Tool 保留执行身份与审批，已完成调用跳过；完整无工具回复进入完成门禁，不重复询问 Model。原 Model 输入/输出及大正文都从原作用域完整核验，不用预览重建参数。
+显式 `resumeRun` 接续仍活动的同 Store 根 Run，支持原 `run.start/input.follow_up` 的三个持久边界：原 Model 派发前、完整 Model 的工具序列、完成判定。只读 `verifyRunResume` 核原身份和安全状态，再通过独立 `RunResumeLease` 封存检查点；准确重建原配置并复核选择、取消与 generation 后，才转成普通 owner，进入同一个 `executeRun/defaultLoop`。HTTP 的 generation 由 Service 内部派生，Core 可信入口仍要求准确 CAS。原 planned Model 使用完整封存请求，原 planned Tool 保留执行身份与审批，已完成调用跳过；完整无工具 stop 回复进入完成门禁，纯文本 length 段保留原响应并继续原任务。原 Model 输入/输出及大正文都从原作用域完整核验，不用预览重建参数；length 段含调用或没有有效正文不能取得恢复资格。
 
 累计已完成历史不再以 4096 条拒绝接续。Store 流式核验全部原 Execution/Interaction 并保持原 canonical checkpoint 摘要；只有当前零派发 planned frontier 保留 4096 条上界。Runtime 经私有 200 条分页穷尽准确原 Model 及其 Tool 链，完整读取旧输出恢复来源请求；包括 planned Model 前发现的祖先指令。begin/commit 仍重核全部历史 CAS，分页不授执行权，也不把有限 View 当历史全集。[公开长 Run 接续](../../apps/service/test/isolated/long-run-resume.test.ts)核 4096 次真实效果、原 Run/Execution/attempt/完整请求和旧结果保持、一次明确接续及零旧效果重放；平台与正式客户端完整资格仍分别判断。
 

@@ -12069,7 +12069,6 @@
             "type": "boolean"
           },
           "waitingForResults": {
-            "maxItems": 64,
             "type": "array",
             "items": {
               "type": "string",
@@ -12292,11 +12291,19 @@
               "attempt": {
                 "type": "integer",
                 "minimum": 2,
-                "maximum": 5
+                "maximum": 9007199254740991
               },
               "maxAttempts": {
-                "type": "number",
-                "const": 5
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "reason": {
                 "type": "string",
@@ -16098,7 +16105,6 @@
                   "type": "boolean"
                 },
                 "waitingForResults": {
-                  "maxItems": 64,
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -16293,11 +16299,19 @@
                     "attempt": {
                       "type": "integer",
                       "minimum": 2,
-                      "maximum": 5
+                      "maximum": 9007199254740991
                     },
                     "maxAttempts": {
-                      "type": "number",
-                      "const": 5
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 2,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "reason": {
                       "type": "string",
@@ -16536,7 +16550,6 @@
                 "type": "boolean"
               },
               "waitingForResults": {
-                "maxItems": 64,
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -18997,7 +19010,6 @@
                   "type": "boolean"
                 },
                 "waitingForResults": {
-                  "maxItems": 64,
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -19195,11 +19207,19 @@
                     "attempt": {
                       "type": "integer",
                       "minimum": 2,
-                      "maximum": 5
+                      "maximum": 9007199254740991
                     },
                     "maxAttempts": {
-                      "type": "number",
-                      "const": 5
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 2,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "reason": {
                       "type": "string",

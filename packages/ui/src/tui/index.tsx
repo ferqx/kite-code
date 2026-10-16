@@ -1112,7 +1112,8 @@ function TuiMessage({
           ))}
         {modelRetry && (
           <Text color="yellow">
-            {t('Retrying')} {modelRetry.attempt}/{modelRetry.maxAttempts}
+            {t('Retrying')} {modelRetry.attempt}
+            {modelRetry.maxAttempts === null ? '' : `/${modelRetry.maxAttempts}`}
           </Text>
         )}
         {modelError && <Text color="red">{terminalText(modelError)}</Text>}
@@ -1245,7 +1246,8 @@ function TuiExecution({
       <Box flexDirection="column" marginBottom={1}>
         {retry && (
           <Text color="yellow">
-            {t('Retrying')} {retry.attempt}/{retry.maxAttempts}
+            {t('Retrying')} {retry.attempt}
+            {retry.maxAttempts === null ? '' : `/${retry.maxAttempts}`}
           </Text>
         )}
         <Text color="red">

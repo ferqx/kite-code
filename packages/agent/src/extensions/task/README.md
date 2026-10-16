@@ -24,13 +24,13 @@
 
 ## 通用接口接入状态
 
-[port.ts](port.ts) 给出有限公共合同。Task 使用 `admission=fail_if_full`，Runtime 在 durable ensure 前以原 ChildSlots 预留许可；第四个默认并发 Task 立即失败，零第四 child Session/Provider。成功预留交给同一 Job admission，失败或真实终态幂等释放，没有 query 软检查或第二 manager。
+[port.ts](port.ts) 给出有限公共合同。普通 Task 使用原 durable ensure 受理，默认三个 ChildSlots 仅调度同时运行数量；第四个任务保留实际 child Session/carrier 并等待空位，不因固定排队长度或时长失败，激活时才开始自身 30 分钟期限。可信宿主接受正整数并发配置。底层显式 `admission=fail_if_full` 的调用仍表达调用方明确选择的立即拒绝语义，普通 Task 不再隐式选择它。许可由原 Job admission 在真实终态幂等释放，没有第二 manager。
 
 `operations.readAgent` 按原 ref 和准确 carrier 启动命令投影 child Run.deadlineAt/contextSelectionId，重复查询不激活历史。用户 steer 与 Agent 的 QueueOnly 邮件各有准确来源和受理事实；公共 HTTP/Store child 用户输入仍被拒。
 
 `followup_task` 必须指定旧 task、准确 predecessor Run、当前 selection 和新 key。它创建新的 carrier 与 accepted follow-up 命令，保留原 Session 创建血缘与 history；旧 carrier/Run 真正终态后才以当前可信配置、父 catalogue/permission 交集和原容量进入同一 Loop。新 Run 重新取得 activation+30 分钟期限，不续签或重启旧执行。unknown、旧 Store、错关系或 context 不明不能自动接续。根 stop/delete 最后核实仍覆盖迟到 activation；两个 carrier 的最终事务维护唯一前台。只读历史没有 Model 或自动恢复。
 
-`task` 和 `followup_task` 默认 `resultDisposition=required`，只有显式 `background` 才不登记本 Run 的结果义务。Store 在原 ensure 同一事务封存 carrier、不可变结果 metadata 与原父 Run completion ref；原 key 重试不能补加、移除或改变处置。准确已知终态结果由原父 Run/current selection 一次接纳为具名低信任来源，并进入下一 Model 输入后才解除完成等待。child failed/cancelled 保留实际状态，父可如实报告；unknown 只接纳一次状态诊断来源，不能满足义务或伪成功。取消后 suppressed/execution_cancel 的 required Task 仅接纳状态，不导入完整外部结果、不改回 pending；普通 suppressed Job 不消费。
+`task` 和 `followup_task` 默认 `resultDisposition=required`，只有显式 `background` 才不登记本 Run 的结果义务。Store 在原 ensure 同一事务封存 carrier、不可变结果 metadata 与原父 Run completion ref；原 key 重试不能补加、移除或改变处置。Run 义务及完整等待集合不设累计数量或字节额度，真实65个 required child 的同父 Run 等待与结算由上述 required 回归验证。准确已知终态结果由原父 Run/current selection 一次接纳为具名低信任来源，并进入下一 Model 输入后才解除完成等待。child failed/cancelled 保留实际状态，父可如实报告；unknown 只接纳一次状态诊断来源，不能满足义务或伪成功。取消后 suppressed/execution_cancel 的 required Task 仅接纳状态，不导入完整外部结果、不改回 pending；普通 suppressed Job 不消费。
 
 Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 waiting_execution 与 waitingForResults 范围，通过既有 controls/持久变化水位等待；progress 和第一份 staggered 结果不轮询调用 Model。全部结果准确接纳后才重新请求一次 Model；完成评估期间刚结算的 carrier 也会在该边界重新核实并接纳，未知仍只产生一次状态诊断；新引导、取消和真实 interaction 使安全边界重新处理。`task_wait` 接受 1–64 个去重目标，等待任一真实终态/interaction/新输入，默认最多 30 秒且不超过调用 child Run 的原固定期限。超时或新引导不取消目标。QueueOnly 邮件与 idle follow-up 接纳见下节；根父、嵌套 Task 及 followup_task 的 after_turn 见下节。完整 retry/delivery 尚未实施；默认 Service metadata 与 assembly 由 Service owner 接入。
 

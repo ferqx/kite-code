@@ -58,7 +58,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         key: idSchema,
         command: { type: 'string', minLength: 1, maxLength: 262144 },
         cancellation: { enum: ['attached', 'detached'] },
-        ...(foreground ? { timeoutMs: { type: 'integer', minimum: 1, maximum: 3600000 } } : {}),
+        ...(foreground ? { timeoutMs: { type: 'integer', minimum: 1 } } : {}),
         ...(options.permissionsSchema ? { permissions: options.permissionsSchema } : {}),
       },
       ['key', 'command'],
@@ -118,7 +118,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           return completeForegroundShell(
             launched.ref as unknown as OperationRef,
             context,
-            typeof args(input).timeoutMs === 'number' ? Number(args(input).timeoutMs) : 600000,
+            typeof args(input).timeoutMs === 'number' ? Number(args(input).timeoutMs) : undefined,
             launched.presentation,
           );
         },

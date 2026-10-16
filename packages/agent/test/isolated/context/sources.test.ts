@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   mkdirSync,
@@ -120,37 +121,60 @@ test('discovers new target ancestry without recursively scanning other directori
   ]);
 });
 
-test('rejects out-of-scope paths and symlink directories/files before reading escaped instructions', async () => {
+test('rejects out-of-scope paths and redirected directories before reading escaped instructions', async () => {
   const outside = fixture();
   writeFileSync(join(outside.root, 'AGENTS.md'), 'private outside marker');
-  for (const target of [
-    outside.root,
-    '../escape/new.ts',
-    `${'a/'.repeat(33)}new.ts`,
-    'x'.repeat(4097),
-  ]) {
+  for (const target of [outside.root, '../escape/new.ts']) {
     const data = fixture([target]);
     await unavailable(data.capture());
   }
   const directory = fixture(['linked/new.ts']);
-  symlinkSync(outside.root, join(directory.root, 'linked'), 'dir');
+  symlinkSync(
+    outside.root,
+    join(directory.root, 'linked'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   await unavailable(directory.capture());
+  expect(readFileSync(join(outside.root, 'AGENTS.md'), 'utf8')).toBe('private outside marker');
+});
+
+test('rejects a file symlink before reading escaped instructions', async () => {
+  const outside = fixture();
+  writeFileSync(join(outside.root, 'AGENTS.md'), 'private outside marker');
   const file = fixture();
   symlinkSync(join(outside.root, 'AGENTS.md'), join(file.root, 'AGENTS.md'), 'file');
   await unavailable(file.capture());
   expect(readFileSync(join(outside.root, 'AGENTS.md'), 'utf8')).toBe('private outside marker');
 });
 
-test('required sources fail locally for unreadable, invalid text or non-regular instruction entries', async () => {
+test('required unreadable instructions fail locally under actual host permissions', async () => {
   const data = fixture();
   const path = join(data.root, 'AGENTS.md');
   writeFileSync(path, 'required rule');
-  chmodSync(path, 0);
+  let sid: string | undefined;
+  if (process.platform === 'win32') {
+    const identity = spawnSync('whoami', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' });
+    expect(identity.status).toBe(0);
+    sid = identity.stdout.match(/S-1-(?:\d+-)*\d+/)?.[0];
+    expect(sid).toBeDefined();
+    expect(spawnSync('icacls', [path, '/deny', `*${sid}:(R)`], { encoding: 'utf8' }).status).toBe(
+      0,
+    );
+  } else chmodSync(path, 0);
   try {
     await unavailable(data.capture());
   } finally {
-    chmodSync(path, 0o600);
+    if (sid)
+      expect(spawnSync('icacls', [path, '/remove:d', `*${sid}`], { encoding: 'utf8' }).status).toBe(
+        0,
+      );
+    else chmodSync(path, 0o600);
   }
+});
+
+test('required instruction snapshots reject invalid UTF-8, NUL and non-regular entries', async () => {
+  const data = fixture();
+  const path = join(data.root, 'AGENTS.md');
   for (const bytes of [Buffer.from([0xff]), Buffer.from([0])]) {
     writeFileSync(path, bytes);
     await unavailable(data.capture());
@@ -160,25 +184,34 @@ test('required sources fail locally for unreadable, invalid text or non-regular 
   await unavailable(data.capture());
 });
 
-test('file bytes, total bytes, target count and directory discovery have explicit bounds without truncation', async () => {
+test('complete instruction bytes, targets and directory ancestry have no arbitrary execution quota', async () => {
   const data = fixture();
   writeFileSync(join(data.root, 'AGENTS.md'), 'x'.repeat(1024 * 1024 + 1));
-  await unavailable(data.capture());
+  expect((await data.capture())[0]!.content).toBe(
+    projectText('AGENTS.md', 'x'.repeat(1024 * 1024 + 1)),
+  );
   const count = fixture(Array.from({ length: 65 }, (_unused, index) => `target-${index}/new.ts`));
-  await unavailable(count.capture());
+  expect(await count.capture()).toEqual([]);
+  expect(await fixture([`${'a/'.repeat(33)}new.ts`]).capture()).toEqual([]);
   const directories = fixture(
     Array.from({ length: 64 }, (_unused, index) => `${index}/a/b/c/d/new.ts`),
   );
-  await unavailable(directories.capture());
+  expect(await directories.capture()).toEqual([]);
   const total = fixture(Array.from({ length: 9 }, (_unused, index) => `${index}/new.ts`));
   for (let index = 0; index < 9; index++) {
     mkdirSync(join(total.root, String(index)));
     writeFileSync(join(total.root, String(index), 'AGENTS.md'), 'x'.repeat(1024 * 1024));
   }
-  await unavailable(total.capture());
+  const actual = await total.capture();
+  expect(actual).toHaveLength(9);
+  expect(
+    actual.every((source) =>
+      source.content.endsWith(`${'x'.repeat(1024 * 1024)}\n</project-instructions>`),
+    ),
+  ).toBe(true);
 });
 
-test('batch preserves per-request limits, all target ancestry and fresh bytes without cumulative target or directory caps', async () => {
+test('batch preserves all target ancestry and fresh bytes without target or directory caps', async () => {
   const data = fixture();
   const targets = Array.from({ length: 80 }, (_unused, index) => `target-${index}/a/b/c/value.ts`);
   for (const target of targets) mkdirSync(join(data.root, target, '..'), { recursive: true });
@@ -224,11 +257,15 @@ test('batch preserves per-request limits, all target ancestry and fresh bytes wi
   expect(rewritten[1]!.digest).not.toBe(added[1]!.digest);
   const outside = fixture();
   writeFileSync(join(outside.root, 'AGENTS.md'), 'outside must never be admitted');
-  symlinkSync(outside.root, join(data.root, 'linked'), 'dir');
+  symlinkSync(
+    outside.root,
+    join(data.root, 'linked'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   // The last request shares the Tool definition; batching must not discard its distinct input.
   await unavailable(batch([...requests, { ...request, input: { targets: ['linked/value.ts'] } }]));
-  await unavailable(
-    batch([
+  expect(
+    await batch([
       {
         ...request,
         input: {
@@ -236,5 +273,5 @@ test('batch preserves per-request limits, all target ancestry and fresh bytes wi
         },
       },
     ]),
-  );
+  ).toHaveLength(1);
 });

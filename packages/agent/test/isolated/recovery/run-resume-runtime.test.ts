@@ -19,7 +19,13 @@ async function until(check: () => Promise<boolean>) {
 for (const mode of [
   'planned_model',
   'planned_large',
+  'length_response',
+  'length_planned',
+  'length_history',
+  'retry_planned',
+  'retry_failed',
   'tool_result',
+  'repeat_failure',
   'completion',
   'large',
   'version',
@@ -156,7 +162,7 @@ for (const mode of [
         sessionId: 's',
       };
       const promise = runtime.resumeRun(input);
-      if (mode === 'initializer' || mode === 'dispatched') {
+      if (mode === 'initializer' || mode === 'dispatched' || mode === 'retry_failed') {
         const error = await promise.catch((e) => e);
         expect(error.code).toBe(
           mode === 'initializer'
@@ -246,18 +252,52 @@ for (const mode of [
       }
       const ledger = readFileSync(join(directory, 'ledger'), 'utf8').trim().split('\n');
       expect(ledger.filter((v) => v.startsWith('effect:')).length).toBe(
-        seedMode === 'completion' ? 0 : 1,
+        seedMode === 'repeat_failure'
+          ? 5
+          : ['completion', 'length_response', 'length_planned', 'retry_planned'].includes(seedMode)
+            ? 0
+            : 1,
       );
       expect(ledger.filter((v) => v.startsWith('model:')).length).toBe(
-        ['steer', 'follow_up'].includes(mode) ? 2 : seedMode === 'completion' ? 1 : 2,
+        seedMode === 'length_history'
+          ? 3
+          : seedMode === 'repeat_failure'
+            ? 5
+            : ['steer', 'follow_up'].includes(mode)
+              ? 2
+              : seedMode === 'completion'
+                ? 1
+                : 2,
       );
+      if (mode === 'repeat_failure')
+        expect(await store.getRun(ready.runId)).toMatchObject({
+          status: 'cancelled',
+          reason: 'repeated_tool_failure',
+        });
+      else expect((await store.getRun(ready.runId))!.status).toBe('completed');
       const after = (await store.getView('s')).executions;
       for (const ex of original.filter((e) => e.status === 'succeeded'))
         expect(after.find((e) => e.id === ex.id)).toEqual(ex);
-      if (seedMode.startsWith('planned_')) {
+      if (
+        seedMode.startsWith('planned_') ||
+        ['length_planned', 'length_history', 'retry_planned'].includes(seedMode)
+      ) {
         const resumed = after.find((e) => e.id === ready.executionId)!;
         expect(resumed.status).toBe('succeeded');
         expect(resumed.input).toEqual(original.find((e) => e.id === ready.executionId)!.input);
+      }
+      if (seedMode.startsWith('length_')) {
+        const segment = original.find(
+          (execution) =>
+            execution.kind === 'model' &&
+            (execution.result as { finishReason?: string } | null)?.finishReason === 'length',
+        )!;
+        expect(segment.result).toMatchObject({
+          content: 'saved length segment',
+          finishReason: 'length',
+          toolCalls: [],
+        });
+        expect(after.find((execution) => execution.id === segment.id)).toEqual(segment);
       }
       if (seedMode === 'large') {
         const model = original.find((e) => e.kind === 'model')!;
@@ -279,6 +319,8 @@ for (const mode of [
       await child.exited;
       await runtime?.close().catch(() => {});
       await store?.close();
-      rmSync(directory, { recursive: true, force: true });
+      // The deliberate disposer failure must retain its original profile owner.
+      // Windows correctly refuses deleting that still-held directory.
+      if (mode !== 'cleanup') rmSync(directory, { recursive: true, force: true });
     }
   }, 15000);

@@ -108,7 +108,7 @@ test('each safe transport attempt is a separate failed/successful execution with
       retry: {
         previousExecutionId: models[0]!.id,
         attempt: 2,
-        maxAttempts: 5,
+        maxAttempts: null,
         reason: 'stream_incomplete',
       },
     });
@@ -118,7 +118,7 @@ test('each safe transport attempt is a separate failed/successful execution with
   }
 });
 
-test('five attempts exhaust, then a new user command works without retrying the failed Run', async () => {
+test('safe transient failures continue beyond five attempts in the same Run', async () => {
   let attempts = 0;
   const f = await fixture({
     async *stream() {
@@ -136,18 +136,22 @@ test('five attempts exhaust, then a new user command works without retrying the 
     });
     await f.runtime.waitForCommand('work');
     const first = await f.runtime.getView('session');
-    expect(attempts).toBe(5);
+    expect(attempts).toBe(6);
     expect(
       first.executions.filter((e) => e.kind === 'model' && e.status === 'failed'),
     ).toHaveLength(5);
-    expect(first.runs[0]!.status).toBe('failed');
+    expect(first.runs[0]!.status).toBe('completed');
+    expect(first.runs).toHaveLength(1);
+    expect(first.executions.at(-1)!.decisionSource).toMatchObject({
+      retry: { attempt: 6, maxAttempts: null },
+    });
     await f.runtime.submitCommand({
       ...f.input,
       commandId: 'followup',
       request: { kind: 'run.start', content: 'new work' },
     });
     await f.runtime.waitForCommand('followup');
-    expect(attempts).toBe(6);
+    expect(attempts).toBe(7);
     expect(
       (await f.runtime.getView('session')).runs.find((r) => r.originCommandId === 'followup')
         ?.status,

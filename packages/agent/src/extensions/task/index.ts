@@ -242,7 +242,6 @@ export function createTaskExtension(options: TaskOptions): Extension {
                 ? { continuation: { kind: 'after_turn' as const } }
                 : {}),
               key,
-              admission: 'fail_if_full',
               request: { kind: 'agent', configurationId: role.configurationId, input: args.input! },
               cancellation: args.cancellation === 'detached' ? 'detached' : 'attached',
               ...(args.resultDisposition === 'background' || args.resultDisposition === 'after_turn'

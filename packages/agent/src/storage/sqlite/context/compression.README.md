@@ -8,7 +8,7 @@
 
 最终提交重新核对 owner/generation、原命令取消、group stop/delete、准确 selection、实际成功 Model/完整无 Tool 调用输出、原压缩点和实际 Message/result_ref 读集。共享 Session 序号也用于 Command 受理，准确排队且尚未应用的 follow-up 不改变原压缩输入，不能仅因其分配序号拒绝发布。覆盖上界之后除准确同 Session/Run、assistant、原 Model 来源的完整摘要外，任何新增 Message 或已纳入 result_ref 仍导致冲突；pending input 不冒充已纳入来源。手动摘要发布与 Run completion（包括必要义务/read-set 最终复核）同事务；任一触发器失败完整回滚。自动成功压缩后的普通工作仍可独立失败，不能把后一业务失败改写为压缩未发生。压缩不增加 `contextSelectionId`。
 
-自动压缩的已知 Provider 或纯算法失败，在原 Model 的 Store/Session/Run/generation、压缩身份与成功或失败终态可核实时保留旧上下文并继续原工作。SQL 写入失败、无法核实的 dispatch/unknown、取消和未知 Part 不走这个降级。仅保存最近一次失败的完整输入指纹，避免未变化上下文立即重复收费；新增输入或显式手动操作仍可重试，这不是累计预算或冷却配额。`getModelContext` 和 `getExpandedContext` 在只读快照内核支持的 Part 格式；普通历史查询仍保留未知原事实。压缩 Model 的历史消息不能成为普通配对边界或 Fork 的可执行来源。
+自动压缩的已知 Provider 或纯算法失败，在原 Model 的 Store/Session/Run/generation、压缩身份与成功或失败终态可核实时保留旧上下文并继续原工作。SQL 写入失败、无法核实的 dispatch/unknown、Run 取消和未知 Part 不走这个降级。最近失败的完整输入指纹只让出一次普通决策边界，随后清除；相同上下文以后仍可再次压缩，新增输入或显式手动操作可直接重试，不能形成永久禁用或尝试额度。长度截断的摘要仍视为失败，不将部分摘要发布。`getModelContext` 和 `getExpandedContext` 在只读快照内核支持的 Part 格式；普通历史查询仍保留未知原事实。压缩 Model 的历史消息不能成为普通配对边界或 Fork 的可执行来源。
 
 `Runtime.resetCompressionContext` 封原 selection 与 `expectedCompressionId`（无活动点为 null）。存在活动点时，可信 slot 必须对完整展开历史与 Context 贡献执行 `validateExpanded` 窗口预检；没有实现、拒绝、取消或并发输入均保原点。清点与管理 Run 完成在同事务核准确高水位/CAS，保全部历史与 selection，零 Provider；无活动点是明确 noop。新工作在随后正常安全边界读取恢复的所选历史，不读取压缩 Model 的历史消息。
 

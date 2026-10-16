@@ -121,6 +121,19 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
               ? { credentialRef: secretReference(alias, provider.apiKey) }
               : {}),
           ...(provider.reasoning === false ? { reasoningSupported: false } : {}),
+          ...(typeof metadata.contextWindowTokens === 'number' ||
+          typeof metadata.maxOutputTokens === 'number'
+            ? {
+                modelCapabilities: {
+                  ...(typeof metadata.contextWindowTokens === 'number'
+                    ? { contextWindowTokens: metadata.contextWindowTokens }
+                    : {}),
+                  ...(typeof metadata.maxOutputTokens === 'number'
+                    ? { maxOutputTokens: metadata.maxOutputTokens }
+                    : {}),
+                },
+              }
+            : {}),
           ...(Object.keys(options).length ? { options } : {}),
         });
         if (enabled && (provider.model === name || metadata.default === true)) preferred ??= id;

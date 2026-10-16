@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -20,9 +21,11 @@ async function fixture(
     | 'approval'
     | 'tool'
     | 'completion'
+    | 'length'
     | 'follow_up' = 'planned',
 ) {
-  const dataRoot = mkdtempSync('/private/tmp/kite-run-resume-store-'),
+  const directory = mkdtempSync(join(tmpdir(), 'kite-run-resume-store-')),
+    dataRoot = join(directory, 'data'),
     profile = { dataRoot, profile: 'test' };
   let store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -104,7 +107,7 @@ async function fixture(
       decisionSource: { kind: 'fixed' },
     });
   }
-  if (mode === 'dispatching' || mode === 'tool' || mode === 'completion')
+  if (mode === 'dispatching' || mode === 'tool' || mode === 'completion' || mode === 'length')
     await store.markDispatching({
       expectedStoreId,
       owner: originalOwner,
@@ -118,7 +121,7 @@ async function fixture(
       requirements: [],
       freshness: { checked: true, source: { kind: 'fixed' } },
     });
-  if (mode === 'tool' || mode === 'completion') {
+  if (mode === 'tool' || mode === 'completion' || mode === 'length') {
     await store.finishExecution({
       expectedStoreId,
       owner: originalOwner,
@@ -127,7 +130,7 @@ async function fixture(
       result: {
         content: 'complete fixed result',
         reasoning: '',
-        finishReason: mode === 'tool' ? 'tool_calls' : 'stop',
+        finishReason: mode === 'tool' ? 'tool_calls' : mode === 'length' ? 'length' : 'stop',
         toolCalls: mode === 'tool' ? [{ id: 'call', name: 'fixture.tool', arguments: '{}' }] : [],
       },
     });
@@ -191,7 +194,7 @@ async function fixture(
     async close() {
       db.close();
       await store.close();
-      rmSync(dataRoot, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true });
     },
   };
 }
@@ -501,7 +504,7 @@ test('planned approval resumes its exact pending authority without changing Inte
   }
 });
 
-for (const mode of ['tool', 'completion'] as const)
+for (const mode of ['tool', 'completion', 'length'] as const)
   test(`complete original Model ${mode} checkpoint preserves successful result and only adopts pending attempt`, async () => {
     const f = await fixture(mode);
     try {
@@ -531,6 +534,22 @@ for (const mode of ['tool', 'completion'] as const)
       await f.close();
     }
   });
+
+test('a length result with tool calls cannot qualify a resume checkpoint', async () => {
+  const f = await fixture('tool');
+  try {
+    // Explicit corruption injection: production Execution never publishes length with calls.
+    f.db.run(
+      "UPDATE execution SET result_json=json_set(result_json,'$.finishReason','length') WHERE id='model'",
+    );
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    await denied(f.store.verifyRunResume(f.input), 'run_resume_checkpoint_unavailable');
+    expect(await f.store.getCommand('resume')).toBeNull();
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+  } finally {
+    await f.close();
+  }
+});
 
 test('ordinary follow-up Run captures its selection and resumes the same Run and Command', async () => {
   const f = await fixture('follow_up');

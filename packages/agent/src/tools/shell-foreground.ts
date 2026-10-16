@@ -7,10 +7,11 @@ import { AgentError } from '../storage/types';
 async function readForegroundShell(
   ref: OperationRef,
   context: ToolContext,
-  timeoutMs: number,
+  timeoutMs: number | undefined,
   presentation: 'exploration' | 'standalone',
 ): Promise<ToolResult> {
-  const deadline = performance.now() + timeoutMs;
+  const deadline =
+    timeoutMs === undefined ? Number.POSITIVE_INFINITY : performance.now() + timeoutMs;
   let timedOut = false;
   let execution: PublicExecution;
   for (;;) {
@@ -102,7 +103,7 @@ async function readForegroundShell(
 export async function completeForegroundShell(
   ref: OperationRef,
   context: ToolContext,
-  timeoutMs: number,
+  timeoutMs: number | undefined,
   presentation: 'exploration' | 'standalone',
 ): Promise<ToolResult> {
   try {

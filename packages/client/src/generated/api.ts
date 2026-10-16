@@ -1706,7 +1706,7 @@ export type Execution = {
   modelRetry?: {
     previousExecutionId: string;
     attempt: number;
-    maxAttempts: 5;
+    maxAttempts: number | null;
     reason: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
   };
   childSessionId?: string | null;
@@ -2408,7 +2408,7 @@ export type BrowserView = {
     modelRetry?: {
       previousExecutionId: string;
       attempt: number;
-      maxAttempts: 5;
+      maxAttempts: number | null;
       reason: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
     };
     childSessionId?: string | null;
@@ -2900,7 +2900,7 @@ export type SessionView = {
     modelRetry?: {
       previousExecutionId: string;
       attempt: number;
-      maxAttempts: 5;
+      maxAttempts: number | null;
       reason: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
     };
     childSessionId?: string | null;

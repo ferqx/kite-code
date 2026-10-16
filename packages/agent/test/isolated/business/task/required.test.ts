@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
+import { createArtifactStore } from '../../../../src/artifacts';
 import type { Extension, Json } from '../../../../src/extensions';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { openSqliteStore } from '../../../../src/sqlite';
@@ -170,8 +171,12 @@ test('followup_task creates a new required carrier in the same child Session and
     rmSync(directory, { recursive: true, force: true });
   }
 }, 15000);
-async function until<T>(read: () => Promise<T>, check: (value: T) => boolean): Promise<T> {
-  const end = Date.now() + 5000;
+async function until<T>(
+  read: () => Promise<T>,
+  check: (value: T) => boolean,
+  timeoutMs = 5000,
+): Promise<T> {
+  const end = Date.now() + timeoutMs;
   for (;;) {
     const value = await read();
     if (check(value)) return value;
@@ -179,6 +184,146 @@ async function until<T>(read: () => Promise<T>, check: (value: T) => boolean): P
     await Bun.sleep(5);
   }
 }
+test('65 required children queue, hold one parent Run and all settle without a cumulative obligation limit', async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-task-many-required-')));
+  const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
+  const store = await openSqliteStore(profile);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let parentModels = 0;
+  const hold: Extension = {
+    id: 'hold',
+    version: '1',
+    apiMajor: 1,
+    tools: [
+      {
+        id: 'hold',
+        version: '1',
+        description: 'wait for the actual parent result-wait boundary',
+        inputSchema: { type: 'object', additionalProperties: false },
+        async execute() {
+          await gate;
+          return { outcome: 'succeeded', content: 'settled' };
+        },
+      },
+    ],
+  };
+  const child: ModelAdapter = {
+    async *stream(request) {
+      for (const event of request.messages.some((message) => message.role === 'tool')
+        ? [finish]
+        : call('hold', {}))
+        yield event;
+    },
+  };
+  const parent: ModelAdapter = {
+    async *stream() {
+      if (++parentModels === 1) {
+        for (let index = 0; index < 65; index++)
+          yield {
+            type: 'tool_call',
+            id: `child-${index}`,
+            name: 'task',
+            arguments: JSON.stringify({
+              key: `child-${index}`,
+              role: 'reader',
+              input: { content: `work ${index}` },
+            }),
+          };
+        yield { ...finish, reason: 'tool_calls' };
+      } else yield finish;
+    },
+  };
+  const runtime = createRuntime({
+    store,
+    artifacts: createArtifactStore({ profile, store }),
+    model: parent,
+    modelId: 'parent',
+    modelConcurrency: 4,
+    extensions: [
+      createTaskExtension({
+        roles: [{ id: 'reader', configurationId: 'child', description: 'trusted' }],
+      }),
+      hold,
+    ],
+    childConfigurations: [
+      {
+        id: 'child',
+        version: '1',
+        model: child,
+        modelId: 'child',
+        toolIds: ['hold'],
+        snapshot: {},
+      },
+    ],
+    permissions: {
+      async authorize() {
+        return { allowed: true, revision: '1' };
+      },
+    },
+  });
+  try {
+    const expectedStoreId = (await store.getMetadata()).storeId;
+    await runtime.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      name: 'private',
+      rootUri: `file://${directory}`,
+    });
+    await runtime.createSession({
+      expectedStoreId,
+      sessionId: 'root',
+      workspaceId: 'w',
+      subjectId: 'owner',
+      commandId: 'create',
+      title: 'many required children',
+    });
+    await runtime.submitCommand({
+      expectedStoreId,
+      sessionId: 'root',
+      subjectId: 'owner',
+      commandId: 'work',
+      request: { kind: 'run.start', content: 'complete all 65 children' },
+    });
+    const waiting = await until(
+      () => store.getView('root'),
+      (view) => view.runs[0]?.waitingForResults.length === 65,
+      15000,
+    ).catch(async (cause) => {
+      const view = await store.getView('root');
+      throw new Error(
+        JSON.stringify({
+          run: {
+            status: view.runs[0]?.status,
+            reason: view.runs[0]?.reason,
+            requirements: view.runs[0]?.requirements.length,
+            waiting: view.runs[0]?.waitingForResults.length,
+          },
+          parentModels,
+        }),
+        { cause },
+      );
+    });
+    const runId = waiting.runs[0]!.id;
+    expect(waiting.runs[0]!.requirements).toHaveLength(65);
+    expect(waiting.runs[0]!.status).toBe('waiting_execution');
+    release();
+    await runtime.waitForCommand('work', { timeoutMs: 25000 });
+    const final = await store.getView('root');
+    expect(final.runs).toHaveLength(1);
+    expect(final.runs[0]!.id).toBe(runId);
+    expect(final.runs[0]!.reason).toBeNull();
+    expect(final.runs[0]!.status).toBe('completed');
+    expect(final.runs[0]!.requirements).toHaveLength(65);
+    expect(final.runs[0]!.waitingForResults).toHaveLength(0);
+  } finally {
+    release();
+    await runtime.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 40000);
 test('default required children hold the same completion candidate, staggered results cause no polling Model, and exact low-trust results are accepted once', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-task-required-')));
   const store = await openSqliteStore({ dataRoot: join(directory, 'data'), profile: 'test' });

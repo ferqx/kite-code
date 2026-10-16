@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -16,8 +17,8 @@ async function rejected(promise: Promise<unknown>, code: string) {
   expect((error as { code?: string })?.code).toBe(code);
 }
 async function fixture() {
-  const dataRoot = mkdtempSync('/private/tmp/kite-requirements-');
-  chmodSync(dataRoot, 0o700);
+  const directory = mkdtempSync(join(tmpdir(), 'kite-requirements-'));
+  const dataRoot = join(directory, 'data');
   const profile = { dataRoot, profile: 'new' };
   const store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -140,7 +141,7 @@ async function fixture() {
     async close() {
       db.close();
       await store.close();
-      rmSync(dataRoot, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true });
     },
   };
 }
@@ -208,13 +209,6 @@ test('concurrent exact registration is zero duplicate events; immutable key bind
     expect(BigInt((await f.store.getMetadata()).lastChangeCursor) - BigInt(before)).toBe(1n);
     const cursor = (await f.store.getMetadata()).lastChangeCursor;
     expect((await f.register([])).requirements).toEqual(results[0]!.requirements);
-    await rejected(
-      f.register(
-        Array.from({ length: 64 }, (_, index) => f.ref('one', { requirementId: `extra-${index}` })),
-      ),
-      'requirement_limit',
-    );
-    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
     expect((await f.register(results[0]!.requirements)).requirements).toEqual(
       results[0]!.requirements,
     );
@@ -246,7 +240,7 @@ test('concurrent exact registration is zero duplicate events; immutable key bind
   }
 });
 
-test('scope, original executable origin, owner/cancel and bounded input reject without adding requirements', async () => {
+test('scope, original executable origin, owner/cancel and malformed refs reject without adding requirements', async () => {
   const f = await fixture();
   try {
     await f.record('record');
@@ -288,15 +282,9 @@ test('scope, original executable origin, owner/cancel and bounded input reject w
       'owner_changed',
     );
     await rejected(
-      f.register(Array.from({ length: 65 }, () => f.ref('record'))),
-      'requirement_limit',
+      f.register([f.ref('record', { requirementId: 'a'.repeat(257) })]),
+      'invalid_requirement',
     );
-    const long = f.ref('record', {
-      requirementId: 'a'.repeat(256),
-      recordKey: 'b'.repeat(256),
-      definitionVersion: 'c'.repeat(256),
-    });
-    await rejected(f.register(Array.from({ length: 64 }, () => long)), 'requirement_limit');
     expect((await f.store.getRun(f.run.id))!.requirements).toEqual([]);
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
     const scoped = await f.register([f.ref('record', { executionId: 'parent', attempt: 1 })]);
@@ -313,6 +301,45 @@ test('scope, original executable origin, owner/cancel and bounded input reject w
       'cancelled_before_dispatch',
     );
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cancelledCursor);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Run obligations exceed 64 refs and 32 KiB while every original record proof still gates completion', async () => {
+  const f = await fixture();
+  try {
+    await f.record('record');
+    const refs = Array.from({ length: 130 }, (_, index) =>
+      f.ref('record', { requirementId: `${index}-${'a'.repeat(240)}` }),
+    );
+    expect((await f.register(refs.slice(0, 65))).requirements).toHaveLength(65);
+    const run = await f.register(refs.slice(65));
+    expect(run.requirements).toHaveLength(130);
+    expect(Buffer.byteLength(JSON.stringify(run.requirements))).toBeGreaterThan(32 * 1024);
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect((await f.register(refs)).requirements).toEqual(run.requirements);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    await f.finish('parent');
+    await rejected(
+      f.store.finishRun({
+        ...f.write,
+        runId: run.id,
+        status: 'completed',
+        requirements: run.requirements.slice(1).map(f.evaluation),
+      }),
+      'requirement_not_satisfied',
+    );
+    expect(
+      (
+        await f.store.finishRun({
+          ...f.write,
+          runId: run.id,
+          status: 'completed',
+          requirements: run.requirements.map(f.evaluation),
+        })
+      ).status,
+    ).toBe('completed');
   } finally {
     await f.close();
   }

@@ -343,21 +343,23 @@ export function createDefaultProcessConfiguration(options: {
           };
         },
       });
-  const selectedCompressor = options.compressor ?? createSummaryCompressor();
-  const compressor: ContextCompressor = Object.freeze({
-    id: selectedCompressor.id,
-    version: selectedCompressor.version,
-    prepare: selectedCompressor.prepare.bind(selectedCompressor),
-    ...(selectedCompressor.shouldCompress
-      ? { shouldCompress: selectedCompressor.shouldCompress.bind(selectedCompressor) }
-      : {}),
-    ...(selectedCompressor.validateSummary
-      ? { validateSummary: selectedCompressor.validateSummary.bind(selectedCompressor) }
-      : {}),
-    ...(selectedCompressor.validateExpanded
-      ? { validateExpanded: selectedCompressor.validateExpanded.bind(selectedCompressor) }
-      : {}),
-  });
+  const selectedCompressor = options.compressor;
+  const compressor: ContextCompressor | undefined =
+    selectedCompressor &&
+    Object.freeze({
+      id: selectedCompressor.id,
+      version: selectedCompressor.version,
+      prepare: selectedCompressor.prepare.bind(selectedCompressor),
+      ...(selectedCompressor.shouldCompress
+        ? { shouldCompress: selectedCompressor.shouldCompress.bind(selectedCompressor) }
+        : {}),
+      ...(selectedCompressor.validateSummary
+        ? { validateSummary: selectedCompressor.validateSummary.bind(selectedCompressor) }
+        : {}),
+      ...(selectedCompressor.validateExpanded
+        ? { validateExpanded: selectedCompressor.validateExpanded.bind(selectedCompressor) }
+        : {}),
+    });
   const task = createTaskConfiguration(
     childRoles,
     afterTurn ? { afterTurn: { enabled: true } } : {},
@@ -1395,7 +1397,24 @@ export function createDefaultProcessConfiguration(options: {
         return {
           permissions,
           ...(afterTurn ? { afterTurn } : {}),
-          compressor,
+          compressor:
+            compressor ??
+            createSummaryCompressor({
+              automatic: {
+                ...selected.modelCapabilities,
+                requestMaxOutputTokens: actualOptions.maxOutputTokens,
+                tools: assembly.extensions.flatMap((extension) =>
+                  (extension.tools ?? [])
+                    .filter((tool) => assembly.toolIds.includes(tool.id))
+                    .map((tool) => ({
+                      id: tool.id,
+                      definitionVersion: tool.version,
+                      description: tool.description,
+                      inputSchema: tool.inputSchema,
+                    })),
+                ),
+              },
+            }),
           authorizationReview,
           conditions: planning.conditions,
           initializeRequirements: !hasBusinessInitializer
@@ -1485,14 +1504,12 @@ export function createDefaultProcessConfiguration(options: {
                 assertWorkflowForkCurrent(selection.workflowFence, assembly.knowledgeScope);
               const sources = new Map<string, ContextSource>();
               const append = (values: ContextSource[]) => {
-                if (!Array.isArray(values) || values.length > 256)
-                  throw new AgentError('context_source_budget_exceeded');
+                if (!Array.isArray(values)) throw new AgentError('context_source_invalid');
                 for (const source of values) {
                   const previous = sources.get(source.id);
                   if (previous && previous.digest !== source.digest)
                     throw new AgentError('context_refresh_required');
                   sources.set(source.id, source);
-                  if (sources.size > 256) throw new AgentError('context_source_budget_exceeded');
                 }
               };
               if (assembly.sources.captureBatch)

@@ -50,6 +50,7 @@ export interface ModelResponse {
   toolCalls: ToolCall[];
   usage: Json;
   executionId: string;
+  finishReason?: string;
 }
 export interface ExecutionScope {
   toolAdmission?: ToolDispatchAdmission;
@@ -704,8 +705,14 @@ export class UnifiedExecution {
           savedAt = Date.now();
         }
       }
-      if (!finish || finish.reason === 'length' || finish.reason === 'cancelled')
+      if (!finish || finish.reason === 'cancelled')
         throw new AgentError('model_response_incomplete');
+      if (finish.reason === 'length' && scope.compressionId)
+        throw new AgentError('model_response_incomplete');
+      // A truncated tool batch cannot prove that all call arguments were received.
+      // Retrying the Model is safe because none of these calls has been dispatched.
+      if (finish.reason === 'length' && (calls.length || !content.trim()))
+        throw new ModelAttemptError('stream_incomplete');
       if (new Set(calls.map((call) => call.id)).size !== calls.length)
         throw new AgentError('duplicate_tool_call_id');
       await this.options.store.finishExecution({
@@ -737,7 +744,14 @@ export class UnifiedExecution {
           ...(output ? { modelOutput: output.descriptor(true)! } : {}),
         },
       });
-      return { content, reasoning, toolCalls: calls, usage: finish.usage, executionId };
+      return {
+        content,
+        reasoning,
+        toolCalls: calls,
+        usage: finish.usage,
+        executionId,
+        finishReason: finish.reason,
+      };
     } catch (error) {
       if (dispatched && (content || reasoning) && !output)
         await this.options.store

@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalJson, semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -24,7 +25,8 @@ async function denied(operation: Promise<unknown>, code: string) {
 
 // Store transaction contract only: these are actual owned API records, not Runtime/Tool effects.
 test('resume scans all original history, pages exact Model and Tool identities and binds omitted terminal rows in the unchanged canonical digest', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-resume-history-');
+  const directory = mkdtempSync(join(tmpdir(), 'kite-resume-history-'));
+  const dataRoot = join(directory, 'data');
   const profile = { dataRoot, profile: 'test' };
   let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let db: Database | undefined;
@@ -352,7 +354,7 @@ test('resume scans all original history, pages exact Model and Tool identities a
     }
     if (!cleanupErrors.length && !db && !store) {
       try {
-        rmSync(dataRoot, { recursive: true, force: true });
+        rmSync(directory, { recursive: true, force: true });
       } catch (error) {
         cleanupErrors.push(error);
       }

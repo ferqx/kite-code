@@ -26,12 +26,22 @@ async function stop(executionId: string) {
   renameSync(join(directory, 'ready.tmp'), join(directory, 'ready.json'));
   await new Promise<void>(() => {});
 }
+let settledTools = 0;
+let dispatchedModels = 0;
 const wrapped = new Proxy(store, {
   get(target, key) {
-    if (key === 'markDispatching' && mode.startsWith('planned_'))
+    if (key === 'markDispatching')
       return async (input: Parameters<Store['markDispatching']>[0]) => {
         const ex = await store.getExecution(input.executionId);
-        if (ex?.kind === 'model') await stop(ex.id);
+        if (ex?.kind === 'model') {
+          dispatchedModels++;
+          if (
+            mode.startsWith('planned_') ||
+            (['length_planned', 'retry_planned'].includes(mode) && dispatchedModels === 2) ||
+            (mode === 'length_history' && dispatchedModels === 3)
+          )
+            await stop(ex.id);
+        }
         return store.markDispatching(input);
       };
     if (key === 'finishExecution')
@@ -42,7 +52,10 @@ const wrapped = new Proxy(store, {
         const ex = await store.getExecution(input.executionId);
         if (
           (mode === 'completion' && ex?.kind === 'model') ||
-          (['tool_result', 'large'].includes(mode) && ex?.kind === 'tool')
+          (mode === 'length_response' && ex?.kind === 'model') ||
+          (mode === 'retry_failed' && ex?.kind === 'model') ||
+          (['tool_result', 'large'].includes(mode) && ex?.kind === 'tool') ||
+          (mode === 'repeat_failure' && ex?.kind === 'tool' && ++settledTools === 4)
         )
           await stop(input.executionId);
         return result;

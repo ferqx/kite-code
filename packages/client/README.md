@@ -2,7 +2,7 @@
 
 ## 模型尝试与原工作身份
 
-公共 Execution 可保留原 `rootWorkCommandId`／`rootWorkSeq`，以及 Model 的有限 `modelRetry`：准确失败前驱、2 至 5 的当前尝试、固定上限 5 和三类已定义原因。字段沿同一 Service schema 生成并验证；缺字段不补重试事实，不公开私有 `decisionSource`、请求正文或凭据。TUI 必须在同 Store／Session／Run／原工作内关联前驱；SDK 不执行模型重试，也不因观察到失败而重发 Command。实际尝试与资格归 [Agent](../agent/README.md)和[模型适配器](../ai/README.md)。
+公共 Execution 可保留原 `rootWorkCommandId`／`rootWorkSeq`，以及 Model 的 `modelRetry`：准确失败前驱、从 2 开始的实际 attempt、三类已定义原因和可空 `maxAttempts`。新执行的 null 表示没有本地次数上限，历史有限数字仍可读。字段沿同一 Service schema 生成并验证；缺字段不补重试事实，不公开私有 `decisionSource`、请求正文或凭据。TUI 在同 Store／Session／Run／原工作内关联前驱，null 时不显示虚构分母；Client 不执行模型重试，也不因观察到失败重发 Command。[真实 HTTP／生成 validator 回归](../../apps/service/test/isolated/long-running-compression.test.ts)核同一 Run 的第六次尝试与 null。实际尝试与资格归 [Agent](../agent/README.md)和[模型适配器](../ai/README.md)。
 
 `SessionView.session` 的可选 `ownerInstanceId`／`ownerGeneration` 是同一公开视图的只读事实，普通 Session DTO 不扩。客户端与已认证 ServerInfo 比较时仍绑定原 Store／Session／Workspace；不匹配只能说明当前连接无法核实活动，不能推断死亡或完成，也不是恢复／派发许可。缺字段保旧消费者的观察合同，不能补造 owner。
 
