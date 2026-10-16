@@ -133,7 +133,14 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
     JSON.stringify({
       modelId: 'fixed',
       models: [
-        { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
+        {
+          id: 'fixed',
+          provider: 'compatible',
+          model: 'fixed',
+          baseURL: `${provider.url.href}v1`,
+          // This finite Files Provider does not implement the summary algorithm.
+          modelCapabilities: { contextWindowTokens: 1_000_000 },
+        },
       ],
       tools: [
         { id: 'files.read', definitionVersion: '3' },

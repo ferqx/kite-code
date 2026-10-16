@@ -1,57 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createBrowserClient } from '../src/browser';
+import {
+  backgroundItem as item,
+  backgroundSession as session,
+} from './fixtures/background-directory';
 
 const response = (body: unknown, status = 200) =>
   Response.json(body, { status, headers: { 'x-kite-web-identity': 'a'.repeat(64) } });
-const session = {
-  id: 's',
-  workspaceId: 'w',
-  parentSessionId: null,
-  rootSessionId: 's',
-  title: 's',
-  controlRevision: '1',
-  contextSelectionId: 'selection',
-  ownerInstanceId: null,
-  ownerGeneration: '0',
-  nextSeq: '0',
-  deletedAt: null,
-};
-const item = (id: string, seq: string) => ({
-  seq,
-  session,
-  rootSession: session,
-  run: null,
-  childRun: null,
-  childSession: null,
-  execution: {
-    id,
-    sessionId: 's',
-    rootSessionId: 's',
-    runId: null,
-    originCommandId: 'work',
-    originStoreId: 'store',
-    rootWorkCommandId: 'work',
-    rootWorkSeq: '1',
-    parentExecutionId: null,
-    childSessionId: null,
-    cancelWithParent: false,
-    stepId: 'step',
-    callId: 'call',
-    attempt: 1,
-    kind: 'job',
-    definitionId: 'fixture.job',
-    definitionVersion: '1',
-    status: 'succeeded',
-    ownerGeneration: '1',
-    cancelRequested: false,
-    cancelRequestedAt: null,
-    resultRevision: '1',
-    delivery: 'pending',
-    deliveryReason: null,
-    deliveryTargetSessionId: 's',
-    contextSelectionId: 'selection',
-  },
-});
 function fixture(mode: string) {
   let scans = 0;
   const queries: string[] = [];

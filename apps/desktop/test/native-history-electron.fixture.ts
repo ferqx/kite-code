@@ -105,7 +105,7 @@ try {
   eq(Number(await (await fetch(`${control}/count`)).text()), 0);
   phase('failed_refresh_begin');
   await app.evaluate(
-    `(()=>{const original=globalThis.fetch;globalThis.__historyOriginal=original;globalThis.__historyFail=true;globalThis.fetch=(input,init)=>{const request=new Request(input,init);if(globalThis.__historyFail&&request.method==='GET'&&new URL(request.url).pathname.endsWith('/sessions/s/messages')){globalThis.__historyFail=false;return Promise.reject(new TypeError('owned_history_page_failed'));}return original(input,init);};})()`,
+    `(()=>{const original=globalThis.fetch;globalThis.__historyOriginal=original;globalThis.__historyFail=true;globalThis.fetch=(input,init)=>{const request=new Request(input,init);if(globalThis.__historyFail&&request.method==='GET'&&new URL(request.url).pathname.endsWith('/sessions/s/messages')){return Promise.reject(new TypeError('owned_history_page_failed'));}return original(input,init);};})()`,
   );
   await page.evaluate(async () => {
     const facts = await window.kiteNative!.request({
@@ -131,6 +131,7 @@ try {
   eq(await page.getByRole('button', { name: '发送明确的新轮次' }).isEnabled(), false);
   phase('failure_original_body_retained');
   phase('reload_begin');
+  await app.evaluate('globalThis.__historyFail=false');
   await page.getByRole('button', { name: '重新加载会话', exact: true }).click();
   await page
     .locator('[role="status"]')

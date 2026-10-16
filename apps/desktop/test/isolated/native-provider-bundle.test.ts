@@ -11,15 +11,25 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import type { ModelBodyReference } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
+import type { ProviderReport } from '../native-provider-electron.fixture';
 import { linkOwnedDefaultKeychain } from '../owned-default-keychain';
+
+type ProviderWireRequest = { model: string; messages: unknown[]; reasoning_effort?: string };
+function object(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw Error('expected fixture object');
+  return value as Record<string, unknown>;
+}
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
@@ -35,7 +45,7 @@ test.skipIf(process.platform !== 'darwin')(
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
     });
-    const bodies: { alias: string; body: any }[] = [],
+    const bodies: { alias: string; body: ProviderWireRequest }[] = [],
       discovery: string[] = [];
     let releaseHeld: (() => void) | undefined;
     let server: ReturnType<typeof Bun.serve> | undefined,
@@ -108,7 +118,7 @@ test.skipIf(process.platform !== 'darwin')(
             expect(request.headers.get('authorization')).toBe(
               `Bearer owned-fixture-${alias}-nonpaid`,
             );
-          const body = await request.json();
+          const body = (await request.json()) as ProviderWireRequest;
           bodies.push({ alias, body });
           if (
             JSON.stringify(body.messages).includes('NATIVE_compatible_held') &&
@@ -117,7 +127,7 @@ test.skipIf(process.platform !== 'darwin')(
             await new Promise<void>((resolve) => {
               releaseHeld = resolve;
             });
-          const frame = (delta: any, finish_reason: string | null) =>
+          const frame = (delta: { content?: string }, finish_reason: string | null) =>
             `data: ${JSON.stringify({ id: `provider-${bodies.length}`, object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
           return new Response(
             frame({ content: `Controlled ${alias} result` }, null) +
@@ -182,7 +192,9 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         clearTimeout(timer);
       }
-      const report = JSON.parse(readFileSync(join(home, 'provider-report.json'), 'utf8'));
+      const report: ProviderReport = JSON.parse(
+        readFileSync(join(home, 'provider-report.json'), 'utf8'),
+      );
       writeFileSync(join(root, 'physical-wire.json'), JSON.stringify(bodies));
       expect(discovery).toEqual(['ollama']);
       expect(bodies.slice(0, 4).map((x) => x.alias)).toEqual([
@@ -220,9 +232,10 @@ test.skipIf(process.platform !== 'darwin')(
       try {
         const cursor = (await cold.getMetadata()).lastChangeCursor;
         let wireCursor = 0;
-        async function expand(value: any) {
-          if (!value?.body) return value;
-          const ref = value.body.reference;
+        async function expand(value: Json): Promise<unknown> {
+          if (!value || typeof value !== 'object' || Array.isArray(value) || !value.body)
+            return value;
+          const ref = object(value.body).reference as ModelBodyReference['reference'];
           const bytes = await artifacts.read({
             expectedStoreId: storeId!,
             refId: ref.id,
@@ -231,7 +244,7 @@ test.skipIf(process.platform !== 'darwin')(
             scope: ref.scope,
           });
           expect(createHash('sha256').update(bytes).digest('hex')).toBe(ref.hash);
-          expect(bytes.byteLength).toBe(ref.size);
+          expect<unknown>(bytes.byteLength).toBe(ref.size);
           return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
         }
         for (const run of report.runs) {
@@ -240,15 +253,16 @@ test.skipIf(process.platform !== 'darwin')(
           const command = await cold.getCommand(original!.originCommandId);
           expect(command!.originStoreId).toBe(storeId!);
           expect(command!.sessionId).toBe(run.sessionId);
-          expect((command!.request as any).content).toBe(run.marker);
-          expect((command!.request as any).modelId).toBe(run.modelId);
+          expect(object(command!.request).content).toBe(run.marker);
+          expect(object(command!.request).modelId).toBe(run.modelId);
           const executions = (await cold.listExecutions(run.sessionId)).filter(
             (x) => x.runId === run.id && x.kind === 'model',
           );
           expect(executions.length).toBe(run.marker.endsWith('_held') ? 2 : 1);
-          const config = original!.configuration as any;
+          const config = object(original!.configuration);
+          const configuration = object(object(config.snapshot).configuration);
           expect(config.modelId).toBe(run.modelId);
-          expect(config.snapshot.configuration.modelId).toBe(run.modelId);
+          expect(configuration.modelId).toBe(run.modelId);
           for (const execution of executions) {
             const sealed = await cold.getModelInputSnapshot({
               expectedStoreId: storeId!,
@@ -256,24 +270,27 @@ test.skipIf(process.platform !== 'darwin')(
               executionId: execution.id,
               subjectId: 'local-user',
             });
-            const request = await expand(sealed.input),
-              metadata = await expand(sealed.metadata),
+            const request = object(await expand(sealed.input)),
+              metadata = object(await expand(sealed.metadata)),
               wire = bodies[wireCursor++]!;
-            expect((command!.request as any).reasoningEffort).toBe(wire.body.reasoning_effort);
+            expect(object(command!.request).reasoningEffort).toBe(wire.body.reasoning_effort);
             expect(sealed.identity.modelId).toBe(run.modelId);
             expect(request.modelId).toBe(run.modelId);
             expect(JSON.stringify(request)).toContain(run.marker);
-            expect(metadata.adapter.provider.family).toBe(
+            expect(object(object(metadata.adapter).provider).family).toBe(
               wire.alias === 'compatible' ? 'openai-compatible' : wire.alias,
             );
-            expect(metadata.adapter.provider.modelId).toBe(wire.body.model);
-            expect(metadata.adapter.settings.reasoningEffort).toBe(wire.body.reasoning_effort);
-            const selected = config.snapshot.configuration.models.find(
-              (m: any) => m.id === run.modelId,
+            expect(object(object(metadata.adapter).provider).modelId).toBe(wire.body.model);
+            expect(object(object(metadata.adapter).settings).reasoningEffort).toBe(
+              wire.body.reasoning_effort,
             );
+            if (!Array.isArray(configuration.models)) throw Error('expected fixture models');
+            const selected = configuration.models.map(object).find((m) => m.id === run.modelId)!;
             expect(selected.provider).toBe(wire.alias);
             expect(selected.model).toBe(wire.body.model);
-            expect(selected.options?.reasoningEffort).toBe(wire.body.reasoning_effort);
+            expect(selected.options ? object(selected.options).reasoningEffort : undefined).toBe(
+              wire.body.reasoning_effort,
+            );
             expect(selected.baseURL).toBe(
               `${server!.url.href.replace(/\/$/, '')}/${wire.alias}/v1`,
             );
@@ -285,14 +302,14 @@ test.skipIf(process.platform !== 'darwin')(
           }
         }
         expect(report.steers).toHaveLength(1);
-        const steer = await cold.getCommand(report.steers[0].request.commandId);
+        const steer = await cold.getCommand(report.steers[0]!.request.commandId);
         expect(steer!.request).toMatchObject({
           kind: 'input.steer',
           content: 'NATIVE_plain_steer',
-          targetRunId: report.runs.find((r: any) => r.marker.endsWith('_held')).id,
+          targetRunId: report.runs.find((r) => r.marker.endsWith('_held'))!.id,
         });
-        expect('modelId' in (steer!.request as any)).toBe(false);
-        expect('reasoningEffort' in (steer!.request as any)).toBe(false);
+        expect('modelId' in object(steer!.request)).toBe(false);
+        expect('reasoningEffort' in object(steer!.request)).toBe(false);
         expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
         expect(bodies).toHaveLength(8);
       } finally {

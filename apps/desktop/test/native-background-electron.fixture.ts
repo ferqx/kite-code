@@ -265,6 +265,9 @@ try {
     await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
     0,
   );
+  // The complete child snapshot is already displayed; close and reopen its verified body.
+  await page.getByText('Complete Model output', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
   await page
     .getByRole('button', { name: 'Read complete recorded Model output', exact: true })
     .click();

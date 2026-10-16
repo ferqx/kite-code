@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { CLIServiceArtifact } from '@kite-ai/cli/host';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
 import type {
   CaseEvidence,
   ResourceObservation,
@@ -34,6 +35,7 @@ export async function runTuiCase(
     return e;
   }
   mkdirSync(root, { recursive: true, mode: 0o700 });
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
   let calls = 0;
@@ -64,7 +66,7 @@ export async function runTuiCase(
     mode: 0o600,
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       tools: [],
@@ -77,6 +79,7 @@ export async function runTuiCase(
   let child: Bun.Subprocess | undefined;
   try {
     const seed = await launchPairedService({
+      spawnChild: userConfiguration.spawnChild,
       profile,
       ...artifact,
       instanceId: randomUUID(),
@@ -181,7 +184,7 @@ finally:
       cwd: root,
       stdout: 'pipe',
       stderr: 'pipe',
-      env: { PATH: process.env.PATH ?? '', HOME: join(root, 'home'), TMPDIR: root },
+      env: { PATH: process.env.PATH ?? '', ...userConfiguration.homeEnvironment, TMPDIR: root },
     });
     const stdout = new Response(child.stdout as ReadableStream<Uint8Array>).text(),
       stderr = new Response(child.stderr as ReadableStream<Uint8Array>).text();

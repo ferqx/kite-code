@@ -55,6 +55,8 @@ Runtime 的公共 admission 方法由同一个 `accountEntry` 同步封门并计
 
 `cancelCommand` 与 `cancelWork` 在短事务中核对原主体、Session 和准确目标；取消从指定 Command/Run/Execution 的实际执行 seed 沿 attached 边传播，父终态不隐藏活跃后代，detached sibling 不被局部取消扩大。普通 Tool 的 execution cancel 不标记其共享 Run Command。Session 全量停止写持久根工作边界阻止迟到因果派发，后来明确新顶层工作仍可开始；foreground-only 停止只覆盖当前 Run 与 attached 后代。受理回执为 `cancel_requested`，不冒充停止确认，也不覆盖真实终态。
 
+Model 的实际 Store 派发事务以 `cancelled_before_dispatch` 拒绝时，原未派发尝试收束为 `cancelled`，不等待本地 abort 通知到达。输入、授权、条件等派发前钩子或已派发 Provider 的同名错误仍是原失败；原错误、执行身份、资源释放和零适配器派发事实保持。[确定性控制回归](test/isolated/execution/control.test.ts)覆盖持久取消与通知交错及这些拒绝边界，真实多会话流式负载继续核取消隔离与全部终态。
+
 接收实例最多保留 256 个待派发 Session，以 250ms 起测间隔等待正常 owner 交接；本 owner 从持久 Command/Execution 观察精确取消，再停止自己的对应句柄。取得安全派发边界失败后停止该 Session 的自动轮询，Command 查询显示带本实例身份的局部 `dispatchFailure`，不改写持久完成事实，也不隐式恢复或重放；其他 Session 可继续，准确取消仍可用。冻结 owner 不被抢占，网络订阅释放不参与这条路径。Worker 按控制/正文/查询加权调度，预留控制容量；可选 `onTiming` 观察实际排队、SQL 和 COMMIT，观察异常不能影响提交。
 
 已登记的根 Session 仍有本实例 hot operation 时，空 accepted 列表不删除其轮询登记；peer Service 后接纳的准确根 Session Command 继续交给原 owner 的 pump。后台 Job 等待 process/Workspace permit 不阻止主 Action 返回，但不允许第二 Job提前启动。原 generation、未提交 Action、cold/unknown和关闭守卫仍在现有派发路径核实；不扫描全 profile，也未取得跨 child Session 的新 intake 资格。[确定性交接测试](test/isolated/execution/owner-handoff.test.ts)在首个命令前安装真实空控制轮询屏障，核两个 Store/Runtime、原 owner 排他锁、同 generation、planned Job和各启动一次；当前 5 tests / 36 assertions，原[真实 Shell Service](../../tests/isolated/unified-agent/shell-service.test.ts)四场景 / 51 assertions通过。取舍与原 idle 交接边界见[同一 Note](../../.agents/notes/implemented/bug-fix/2026-10-03-idle-owner-intake-keeps-original-generation.md)。

@@ -503,6 +503,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
             <ResizablePanel
               id="navigation"
               className="collapsible-sidebar-viewport"
+              style={{ overflow: 'hidden' }}
               data-animate-width={navigationAnimating ? 'true' : undefined}
               panelRef={navigationPanel}
               collapsible
@@ -737,6 +738,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         <ResizablePanel
           id="details"
           className="collapsible-sidebar-viewport"
+          style={{ overflow: 'hidden' }}
           panelRef={detailsPanel}
           collapsible
           collapsedSize="0px"

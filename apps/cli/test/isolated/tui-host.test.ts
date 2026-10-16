@@ -121,6 +121,8 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
               provider: 'compatible',
               model: 'fixture',
               baseURL: `${provider.url.href}v1`,
+              // This transport fixture consumes the complete nine-MiB source without a summary round.
+              modelCapabilities: { contextWindowTokens: 16000000 },
             },
           ],
         }),

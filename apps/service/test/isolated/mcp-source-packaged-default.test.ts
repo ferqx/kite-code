@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
-import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
+import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
   const deadline = Date.now() + 12000;
@@ -148,7 +148,7 @@ test('sealed default process discovers and executes owned stdio sources using pe
     },
   });
   writeFileSync(
-    userConfigurationPath(home),
+    ownedUserConfiguration(home).path,
     JSON.stringify({
       modelId: 'fixed',
       models: [

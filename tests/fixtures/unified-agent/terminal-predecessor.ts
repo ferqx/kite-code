@@ -6,12 +6,20 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import {
+  assertCompatiblePredecessorInputPaths,
+  assertCompatiblePredecessorLockedInput,
+  COMPATIBLE_PREDECESSOR_COMMIT,
+  COMPATIBLE_PREDECESSOR_MIGRATIONS,
+} from './compatible-predecessor-input';
 import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
+import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-declarations';
 
 // Original committed PC UI with current locked inputs and DB7. Earlier comparisons
 // used 3140 (macOS) / 1b796 (Linux); their locks predate the PC presentation migration.
 // Keep all original-source, dependency, engine and actual-code-change guards below.
+export const COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT = COMPATIBLE_PREDECESSOR_COMMIT;
 export const TERMINAL_PREDECESSOR_COMMIT = 'a2b6441fde28d9c0f895a26e6a9d2471d2b1b242';
 const baseline = 'packages/agent/src/storage/migrations/0001-baseline.sql';
 const baselineSha256 = '92773869c4d4e68947e9721d5bb6d28e10567c6dc3a82b56726b1a0fb7adee42';
@@ -27,9 +35,11 @@ const workspaces = [
 ] as const;
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-/** Remove only the reviewed UI workspace declarations; resolved packages stay byte-exact. */
+/** Project only reviewed workspace declarations; resolved packages stay byte-exact. */
 export function withoutReviewedTuiLockDeclarations(current: Uint8Array): Uint8Array | undefined {
-  const text = Buffer.from(current).toString('utf8');
+  const text = Buffer.from(
+    refinePredecessorWorkspaceDeclarations('bun.lock', current)?.bytes ?? current,
+  ).toString('utf8');
   const startAnchor = '    "packages/ui": {\n';
   if (text.split(startAnchor).length !== 2) return undefined;
   const start = text.indexOf(startAnchor),
@@ -76,12 +86,15 @@ export function matchTerminalPredecessorInput(
   | 'runtime_stdio_and_desktop_development_script_increment'
   | undefined {
   const oldBytes = Buffer.from(previous),
-    currentBytes = Buffer.from(current);
-  if (oldBytes.equals(currentBytes)) return 'identical';
+    actualBytes = Buffer.from(current);
+  if (oldBytes.equals(actualBytes)) return 'identical';
+  const currentBytes = Buffer.from(
+    refinePredecessorWorkspaceDeclarations(path, current)?.bytes ?? current,
+  );
   if (path === 'bun.lock') {
-    const originalMatch = matchPredecessorShellParserInput(path, previous, current);
+    const originalMatch = matchPredecessorShellParserInput(path, previous, currentBytes);
     if (originalMatch) return originalMatch;
-    const reviewed = withoutReviewedTuiLockDeclarations(current);
+    const reviewed = withoutReviewedTuiLockDeclarations(currentBytes);
     return reviewed && matchPredecessorShellParserInput(path, previous, reviewed)
       ? 'shell_parser_and_tui_workspace_dependency_increment'
       : undefined;
@@ -150,7 +163,7 @@ export function matchTerminalPredecessorInput(
     )
     .replace(buildAnchor, ' ./src/resources.ts ./src/process-observation.ts ./src/jobs/shell.ts ');
   if (Buffer.from(expected).equals(currentBytes)) return 'process_observation_source_entry';
-  return matchPredecessorShellParserInput(path, Buffer.from(expected), current)
+  return matchPredecessorShellParserInput(path, Buffer.from(expected), currentBytes)
     ? 'process_observation_and_shell_parser_increment'
     : undefined;
 }
@@ -217,7 +230,7 @@ async function command(argv: string[], cwd: string, timeoutMs: number): Promise<
  * Failure retains the clone and command scripts for diagnosis; success removes all old source.
  * No install, checkout, build, or source mutation occurs in repositoryRoot.
  */
-export async function materializeTerminalPredecessor(input: {
+type TerminalPredecessorInput = {
   root: string;
   repositoryRoot: string;
   bunExecutable?: string;
@@ -225,7 +238,20 @@ export async function materializeTerminalPredecessor(input: {
   buildTimeoutMs?: number;
   /** Also build the old Native app from this same original checkout, before deleting it. */
   nativeElectronDist?: string;
-}) {
+};
+export function materializeTerminalPredecessor(input: TerminalPredecessorInput) {
+  return materializeTerminalPredecessorVersion(input, false);
+}
+export function materializeCompatibleTerminalPredecessor(input: TerminalPredecessorInput) {
+  return materializeTerminalPredecessorVersion(input, true);
+}
+async function materializeTerminalPredecessorVersion(
+  input: TerminalPredecessorInput,
+  compatible: boolean,
+) {
+  const predecessorCommit = compatible
+    ? COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT
+    : TERMINAL_PREDECESSOR_COMMIT;
   const root = realpathSync(input.root),
     repository = realpathSync(input.repositoryRoot);
   if (inside(repository, root) || inside(root, repository) || !lstatSync(root).isDirectory())
@@ -249,41 +275,60 @@ export async function materializeTerminalPredecessor(input: {
     ...workspaces.map((path) => `${path}/package.json`),
     ...Object.values(manifest.patchedDependencies ?? {}),
   ];
+  if (compatible) assertCompatiblePredecessorInputPaths(inputs);
   const lockedInputs: {
     path: string;
     sha256: string;
     currentSha256: string;
     match: NonNullable<ReturnType<typeof matchTerminalPredecessorInput>>;
   }[] = [];
+  const reviewedDeclarations: {
+    path: string;
+    kind: string;
+    commits: string[];
+    projectedSha256: string;
+  }[] = [];
   for (const path of inputs) {
     if (!inside(repository, resolve(repository, path)))
       throw Error('terminal_predecessor_input_escape');
-    const old = await command(
-      ['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`],
+    const old = await command(['git', 'show', `${predecessorCommit}:${path}`], repository, 10_000);
+    const current = readFileSync(join(repository, path)),
+      match = compatible
+        ? assertCompatiblePredecessorLockedInput(path, old, current).match
+        : matchTerminalPredecessorInput(path, old, current);
+    if (!match) throw Error(`terminal_predecessor_dependency_input_changed:${path}`);
+    lockedInputs.push({ path, sha256: sha256(old), currentSha256: sha256(current), match });
+    const refinement = compatible
+      ? undefined
+      : refinePredecessorWorkspaceDeclarations(path, current);
+    if (refinement)
+      reviewedDeclarations.push({
+        path,
+        kind: refinement.kind,
+        commits: refinement.commits,
+        projectedSha256: sha256(refinement.bytes),
+      });
+  }
+  const migrations = compatible
+    ? COMPATIBLE_PREDECESSOR_MIGRATIONS
+    : [{ path: baseline, sha256: baselineSha256 }];
+  for (const migration of migrations) {
+    const previous = await command(
+      ['git', 'show', `${predecessorCommit}:${migration.path}`],
       repository,
       10_000,
     );
-    const current = readFileSync(join(repository, path)),
-      match = matchTerminalPredecessorInput(path, old, current);
-    if (!match) throw Error(`terminal_predecessor_dependency_input_changed:${path}`);
-    lockedInputs.push({ path, sha256: sha256(old), currentSha256: sha256(current), match });
+    const current = readFileSync(join(repository, migration.path));
+    if (compatible) assertCompatiblePredecessorLockedInput(migration.path, previous, current);
+    else if (sha256(previous) !== migration.sha256 || sha256(current) !== migration.sha256)
+      throw Error('terminal_predecessor_baseline_changed');
   }
-  const oldBaseline = await command(
-    ['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${baseline}`],
-    repository,
-    10_000,
-  );
-  if (
-    sha256(oldBaseline) !== baselineSha256 ||
-    sha256(readFileSync(join(repository, baseline))) !== baselineSha256
-  )
-    throw Error('terminal_predecessor_baseline_changed');
   await command(
     ['git', 'clone', '--shared', '--no-checkout', '--', repository, source],
     root,
     30_000,
   );
-  await command(['git', 'checkout', '--detach', TERMINAL_PREDECESSOR_COMMIT], source, 30_000);
+  await command(['git', 'checkout', '--detach', predecessorCommit], source, 30_000);
   // The old builder rejects npm realpaths outside its own node_modules. Mirror exact installed
   // bytes and internal links, remap package-local npm links, and omit current workspace links
   // before adding the eight old owners. The old builder still verifies the resulting closure.
@@ -337,6 +382,8 @@ function mirrorLocal(installedFolder, oldFolder) {
   for (const name of readdirSync(installedFolder)) {
     const path = join(installedFolder, name), oldPath = join(oldFolder, name);
     const stat = lstatSync(path);
+    // The renderer's owned Vite cache is generated output, not an installed dependency.
+    if (path === join(repository, 'apps/desktop/node_modules/.vite-desktop-dev') && stat.isDirectory()) continue;
     if (stat.isSymbolicLink()) {
       const declared = resolve(dirname(path), readlinkSync(path));
       const resolved = existsSync(path) ? realpathSync(path) : declared;
@@ -386,13 +433,13 @@ for (const path of JSON.parse(workspaceJSON)) {
     dirty: (await command(['git', 'status', '--porcelain'], source, 10_000)).length !== 0,
   });
   const before = await sourceIdentity();
-  if (before.commit !== TERMINAL_PREDECESSOR_COMMIT || before.dirty)
+  if (before.commit !== predecessorCommit || before.dirty)
     throw Error('terminal_predecessor_source_identity_invalid');
   writeFileSync(
     buildScript,
     `import {buildTerminalBundle} from ${JSON.stringify(pathToFileURL(join(source, 'scripts/release/terminal-bundle.ts')).href)};\nawait buildTerminalBundle(${JSON.stringify({ destination: candidate, repositoryRoot: source, bunExecutable: bun, ...(input.sqliteLibrary ? { sqliteLibrary: input.sqliteLibrary } : {}) })});\n` +
       (input.nativeElectronDist
-        ? `import {buildNativeCandidate} from ${JSON.stringify(pathToFileURL(join(source, 'apps/desktop/scripts/build-native.ts')).href)};\nawait buildNativeCandidate(${JSON.stringify({ terminalRoot: candidate, electronDist: realpathSync(input.nativeElectronDist), outdir: join(root, 'predecessor-native') })});\n`
+        ? `import {buildNativeCandidate} from ${JSON.stringify(pathToFileURL(join(source, 'apps/desktop/scripts/build-native.ts')).href)};\nawait buildNativeCandidate(${JSON.stringify({ terminalRoot: candidate, electronDist: realpathSync(input.nativeElectronDist), outdir: join(root, 'predecessor-native'), ...(compatible ? { testDiagnostics: true } : {}) })});\n`
         : ''),
   );
   await command([bun, buildScript], source, timeoutMs);
@@ -400,7 +447,7 @@ for (const path of JSON.parse(workspaceJSON)) {
     after = await sourceIdentity();
   const oldProductVersion = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')).version;
   if (
-    built.manifest.source.commit !== TERMINAL_PREDECESSOR_COMMIT ||
+    built.manifest.source.commit !== predecessorCommit ||
     built.manifest.source.dirty ||
     after.dirty ||
     after.commit !== before.commit ||
@@ -424,12 +471,15 @@ for (const path of JSON.parse(workspaceJSON)) {
     provenance: {
       kind: 'local-real-code-comparison' as const,
       platform: process.platform,
-      commit: TERMINAL_PREDECESSOR_COMMIT,
+      commit: predecessorCommit,
       dirty: false as const,
       builder: 'scripts/release/terminal-bundle.ts',
       productVersion: oldProductVersion as string,
       lockedInputs,
+      reviewedDeclarations,
       baseline: { path: baseline, sha256: baselineSha256, format: 1 as const },
+      schemaCapability: compatible ? ('recovery-audit-v1' as const) : ('baseline-v1' as const),
+      migrations,
       sourceRoot: source,
       sourceRemoved: true as const,
     },

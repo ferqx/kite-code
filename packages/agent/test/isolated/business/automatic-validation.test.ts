@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createPlanningValidation } from '../../../src/business/planning';
 import type { ToolContext, ToolResult } from '../../../src/extensions';
@@ -30,6 +30,7 @@ async function fixture(
     checkerAllowed?: boolean;
     askWrites?: boolean;
     ambiguousWrite?: boolean;
+    pauseAtModelStep?: number;
     onRead?: (context: ToolContext, result: ToolResult) => Promise<void>;
   } = {},
 ) {
@@ -53,10 +54,18 @@ async function fixture(
   });
   let modelCalls = 0,
     reads = 0;
+  const modelRelease = gate();
+  let pausedRequest: ModelRequest | null = null;
   const model: ModelAdapter = {
-    async *stream(_request, { signal }) {
+    async *stream(request, { signal }) {
       signal.throwIfAborted();
-      for (const event of await script(modelCalls++, f)) yield event;
+      const step = modelCalls++;
+      if (options.pauseAtModelStep === step) {
+        pausedRequest = structuredClone(request);
+        await modelRelease.promise;
+        signal.throwIfAborted();
+      }
+      for (const event of await script(step, f)) yield event;
     },
   };
   const runtime = createRuntime({
@@ -151,23 +160,35 @@ async function fixture(
         request: { kind: 'run.start', content: 'write and verify' },
       });
     },
+    async run() {
+      const command = await store.getCommand('work');
+      return command?.receipt &&
+        typeof command.receipt === 'object' &&
+        !Array.isArray(command.receipt) &&
+        typeof command.receipt.runId === 'string'
+        ? store.getRun(command.receipt.runId)
+        : null;
+    },
+    async pausedModel() {
+      const deadline = Date.now() + 5000;
+      while (!pausedRequest) {
+        if (Date.now() > deadline) throw new Error('automatic_validation_model_gate_timeout');
+        await Bun.sleep(5);
+      }
+      return pausedRequest;
+    },
+    resumeModel: modelRelease.release,
     async done(timeoutMs = 5000) {
       const until = Date.now() + timeoutMs;
       for (;;) {
-        const command = await store.getCommand('work');
-        const run =
-          command?.receipt &&
-          typeof command.receipt === 'object' &&
-          !Array.isArray(command.receipt) &&
-          typeof command.receipt.runId === 'string'
-            ? await store.getRun(command.receipt.runId)
-            : null;
+        const run = await f.run();
         if (run && !run.isActive) return run;
         if (Date.now() > until) throw new Error('automatic_validation_timeout');
         await Bun.sleep(5);
       }
     },
     async close() {
+      modelRelease.release();
       await runtime.close();
       await files.close();
       await store.close();
@@ -241,24 +262,49 @@ test('a changed file causes a new same-Loop repair turn and a fresh exact check;
     await f.close();
   }
 }, 10000);
-test('missing checker permission cannot become completion and an unchanged failure does not endlessly call Model', async () => {
+test('missing checker permission keeps the original requirement unsatisfied until explicit cancellation', async () => {
   const f = await fixture(
     async (step) =>
       step === 0
         ? call('files.write', { path: 'out.txt', content: 'actual', base: null })
         : [finish],
-    { checkerAllowed: false },
+    { checkerAllowed: false, pauseAtModelStep: 2 },
   );
   try {
     await f.submit();
-    const run = await f.done();
-    expect(run.status).toBe('failed');
+    const request = await f.pausedModel();
+    const run = (await f.run())!;
+    expect(run.isActive).toBe(true);
+    expect(run.status).toBe('running');
+    expect(
+      request.messages.some((message) => message.content.includes('completion_diagnostic')),
+    ).toBe(true);
     expect(f.modelCalls).toBe(3);
     const page = await f.store.listMutationFacts({
       expectedStoreId: f.metadata.storeId,
       requirement: mutationRef(run),
     });
     expect(page.facts[0]!.check?.outcome).toBe('inconclusive');
+    expect(page.facts[0]!.status).toBe('succeeded');
+    expect((await f.files.read('out.txt')).content).toBe('actual');
+    const checker = (await f.store.listExecutions('s')).find(
+      (execution) => execution.definitionId === 'files.read',
+    )!;
+    expect(checker.status).toBe('failed');
+    expect(checker.authorization?.dispatched).toBe(false);
+    await f.runtime.cancelRun({
+      expectedStoreId: f.metadata.storeId,
+      commandId: 'cancel-original-validation',
+      sessionId: 's',
+      subjectId: 'u',
+      runId: run.id,
+    });
+    f.resumeModel();
+    const cancelled = await f.done();
+    expect(cancelled.id).toBe(run.id);
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.requirements).toEqual(run.requirements);
+    expect(f.modelCalls).toBe(3);
   } finally {
     await f.close();
   }
@@ -742,27 +788,48 @@ test('two actual same-path mutations preserve history and verify the latest comm
 }, 10000);
 
 test('same-path supersession does not hide a mismatching latest hash or invent an old passed check', async () => {
-  const f = await fixture(async (step, f) => {
-    if (step === 0) return call('files.write', { path: 'out.txt', content: 'v1', base: null });
-    if (step === 1)
-      return call('files.write', {
-        path: 'out.txt',
-        content: 'v2',
-        base: (await f.files.read('out.txt')).baseline as unknown as Json,
-      });
-    if (step === 2) writeFileSync(join(f.root, 'out.txt'), 'external');
-    return [finish];
-  });
+  const f = await fixture(
+    async (step, f) => {
+      if (step === 0) return call('files.write', { path: 'out.txt', content: 'v1', base: null });
+      if (step === 1)
+        return call('files.write', {
+          path: 'out.txt',
+          content: 'v2',
+          base: (await f.files.read('out.txt')).baseline as unknown as Json,
+        });
+      if (step === 2) writeFileSync(join(f.root, 'out.txt'), 'external');
+      return [finish];
+    },
+    { pauseAtModelStep: 3 },
+  );
   try {
     await f.submit();
-    const run = await f.done();
-    expect(run.status).toBe('failed');
+    const request = await f.pausedModel();
+    const run = (await f.run())!;
+    expect(run.isActive).toBe(true);
+    expect(run.status).toBe('running');
+    expect(
+      request.messages.some((message) => message.content.includes('completion_diagnostic')),
+    ).toBe(true);
     const page = await f.store.listMutationFacts({
       expectedStoreId: f.metadata.storeId,
       requirement: mutationRef(run),
     });
     expect(page.facts.map((fact) => fact.check?.outcome)).toEqual(['superseded', 'failed']);
     expect((await f.files.read('out.txt')).content).toBe('external');
+    expect(f.modelCalls).toBe(4);
+    await f.runtime.cancelRun({
+      expectedStoreId: f.metadata.storeId,
+      commandId: 'cancel-original-mismatch',
+      sessionId: 's',
+      subjectId: 'u',
+      runId: run.id,
+    });
+    f.resumeModel();
+    const cancelled = await f.done();
+    expect(cancelled.id).toBe(run.id);
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.requirements).toEqual(run.requirements);
     expect(f.modelCalls).toBe(4);
   } finally {
     await f.close();

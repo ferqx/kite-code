@@ -205,7 +205,7 @@ body {
     overflow: hidden;
   }
   .collapsible-sidebar-viewport {
-    overflow: hidden !important;
+    overflow: hidden;
   }
   .client-sidebar-panel,
   .client-main-panel {
@@ -579,9 +579,9 @@ body {
     scrollbar-gutter: stable;
   }
   .conversation-viewport > div {
-    display: block !important;
+    display: block;
     width: 100%;
-    min-width: 0 !important;
+    min-width: 0;
   }
   .message,
   input,

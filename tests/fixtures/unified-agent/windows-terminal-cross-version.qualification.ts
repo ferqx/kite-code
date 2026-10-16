@@ -7,6 +7,7 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
   startWindowsOwnedChild,
   type WindowsOwnedChild,
@@ -386,6 +387,7 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
             id: 'fixed',
             provider: 'compatible',
             model: 'fixed',
+            modelCapabilities: { contextWindowTokens: 1_000_000 },
             baseURL: `${provider.url.href}v1`,
           },
         ],
@@ -393,6 +395,8 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
     ),
   );
   const configBytes = readFileSync(configPath);
+  const userConfiguration = ownedUserConfiguration(home);
+  security.writePrivateFile(userConfiguration.path, configBytes);
   let firstError: unknown,
     completed = false;
   try {
@@ -670,10 +674,12 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
     leases([installedA.releaseRoot, installedB.releaseRoot], false);
     const database = readFileSync(profile.databasePath);
     assert.deepEqual(readFileSync(configPath), configBytes);
+    assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
     uninstallTerminalBundle(prefix);
     assert(!existsSync(prefix));
     assert.deepEqual(readFileSync(profile.databasePath), database);
     assert.deepEqual(readFileSync(configPath), configBytes);
+    assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
     assert.equal(verifyTerminalRuntimeBundle(currentInput).digest, current.digest);
     assert.equal(verifyTerminalRuntimeBundle(previousInput).digest, previous.digest);
     const evidence = {

@@ -5661,8 +5661,7 @@ export class TuiController {
     );
     const port = this.port.executions;
     if (
-      !current ||
-      current.state !== 'pending' ||
+      current?.state !== 'pending' ||
       card.kind !== 'question' ||
       !port ||
       card.originStoreId !== this.port.storeId ||

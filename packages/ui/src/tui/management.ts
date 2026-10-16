@@ -44,7 +44,7 @@ export interface TuiManagementPort {
   lookup(intent: TuiManagementIntent, signal?: AbortSignal): Promise<TuiManagementOutcome>;
   newSession(): Promise<string>;
   /** False means the Host blocked exit; retain the original unsent command. */
-  quit(): void | boolean;
+  quit: (() => void) | (() => boolean);
 }
 
 export interface TuiSessionDeletion {

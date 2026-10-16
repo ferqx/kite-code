@@ -260,6 +260,16 @@ async function readOriginalTheme(page: import('playwright').Page, cold: boolean)
   });
   // Playwright defaults media to light. Remove that override to observe the real Native engine.
   await page.emulateMedia({ colorScheme: null });
+  assert.equal(
+    await page.evaluate(
+      async () => (await window.kiteNative!.getWindowAppearance!()).backgroundMaterial,
+    ),
+    'vibrancy',
+  );
+  assert.equal(
+    await page.evaluate(() => document.documentElement.dataset.windowMaterial),
+    'vibrancy',
+  );
   const before = await (await fetch(`${control}/count`)).text();
   async function matches(preference: 'dark' | 'light' | 'system') {
     const deadline = Date.now() + 10000;
@@ -276,7 +286,8 @@ async function readOriginalTheme(page: import('playwright').Page, cold: boolean)
       }));
       if (
         appearance.preference === preference &&
-        appearance.background.toLowerCase() === (appearance.dark ? '#191919' : '#fafafa')
+        // Electron reports transparent black as RGB on macOS; material and CSS are checked too.
+        appearance.background.toLowerCase() === '#000000'
       )
         break;
       assert.ok(Date.now() < deadline, `original window theme did not settle: ${preference}`);
@@ -292,7 +303,13 @@ async function readOriginalTheme(page: import('playwright').Page, cold: boolean)
       await page.evaluate(
         () => getComputedStyle(document.querySelector('.kite-client.shell')!).backgroundColor,
       ),
-      appearance.dark ? 'rgb(25, 25, 25)' : 'rgb(250, 250, 250)',
+      'rgba(0, 0, 0, 0)',
+    );
+    assert.equal(
+      await page.evaluate(
+        () => getComputedStyle(document.querySelector('.client-main-panel')!).backgroundColor,
+      ),
+      appearance.dark ? 'rgb(25, 25, 25)' : 'rgb(255, 255, 255)',
     );
   }
   async function choose(preference: 'dark' | 'light' | 'system', label: string) {

@@ -3,6 +3,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
 import type { AuthorizationRequest, ToolContext } from '../extensions';
 import { AgentError, type Json } from '../storage/types';
+import { dispatchScopeLeaves } from './dispatch-scope';
 import type { CapabilityDescription } from './index';
 
 export const pathFileToolIds = ['files.read_path', 'files.write_path', 'files.edit_path'] as const;
@@ -159,46 +160,13 @@ export function verifyPathFileDispatch(
 ) {
   const authorization = context.dispatchAuthorization;
   if (!authorization?.revision) throw new AgentError('file_dispatch_scope_unavailable');
-  const pending = [authorization.snapshot];
-  let count = 0;
-  while (pending.length) {
-    const snapshot = pending.pop();
-    if (
-      snapshot?.version !== '1' ||
-      ++count > 8192 ||
-      !snapshot.data ||
-      typeof snapshot.data !== 'object' ||
-      Array.isArray(snapshot.data)
-    )
-      throw new AgentError('file_dispatch_scope_unavailable');
-    const data = snapshot.data;
-    if (snapshot.namespace === 'agent.permission-intersection') {
-      if (!Array.isArray(data.policies) || !data.policies.length || data.policies.length > 2)
-        throw new AgentError('file_dispatch_scope_unavailable');
-      for (const [index, policy] of data.policies.entries()) {
-        if (
-          !policy ||
-          typeof policy !== 'object' ||
-          Array.isArray(policy) ||
-          policy.scope !== (index === 0 ? 'parent' : 'child') ||
-          typeof policy.revision !== 'string' ||
-          !policy.revision ||
-          typeof policy.allowed !== 'boolean' ||
-          !policy.snapshot ||
-          typeof policy.snapshot !== 'object' ||
-          Array.isArray(policy.snapshot) ||
-          typeof policy.snapshot.namespace !== 'string' ||
-          typeof policy.snapshot.version !== 'string' ||
-          !Object.hasOwn(policy.snapshot, 'data')
-        )
-          throw new AgentError('file_dispatch_scope_unavailable');
-        pending.push(policy.snapshot as NonNullable<typeof authorization.snapshot>);
-      }
-      continue;
-    }
+  for (const { namespace, data } of dispatchScopeLeaves(
+    authorization.snapshot,
+    'file_dispatch_scope_unavailable',
+  )) {
     const capability = data.capability;
     if (
-      snapshot.namespace !== 'builtin.permissions' ||
+      namespace !== 'builtin.permissions' ||
       data.workspaceTrust !== true ||
       !['accept_edits', 'auto', 'full'].includes(String(data.mode)) ||
       !capability ||

@@ -37,6 +37,8 @@ Interaction SDK 使用生成的 `Interaction`、`InteractionPage`、`Interaction
 
 `@kite-ai/client` 是可在浏览器与 Bun 使用的 HTTP/SSE SDK。业务类型与验证规则来自 Service 的唯一 schema 生成产物：[api.ts](src/generated/api.ts)、[schema.json](src/generated/schema.json) 与[静态校验函数](src/generated/validators.js)。生成器在构建时编译并封装校验函数，Client 运行时不加载 AJV 编译器、不使用 `eval` 或 `Function`，可在禁止动态代码生成的 CSP 中运行。响应仍递归保留新增字段，请求仍按 closed schema 验证；[真实 V8 回归](test/isolated/csp.test.ts)使用公共浏览器 bundle 和禁用字符串代码生成的 Node VM 核对该边界。Client 不导入 Service、Agent、AI 或本机存储实现。
 
+静态 AJV 校验器超过普通 Biome 扫描的 1MiB 上限，常规扫描仅精确排除 `src/generated/validators.js`，不扩大到其他生成物或手写源码。[生成器](../../scripts/generate-unified-api.ts)仍用相同 JavaScript 规则和实际源大小格式化该文件；stdin 使用独立文件名以避开扫描排除。`check:unified-api` 对完整生成字节继续核漂移，schema、closed 请求、响应兼容边界和 CSP 断言均保持。
+
 调用 `createClient({ endpoint, token, expected, bootstrap? })` 时，`expected` 必须来自启动前已经选择的 profile、API 版本、必需 capabilities 与可选 instance/build 身份。`await client.connect()` 只请求 `/v1/server`，核对身份和 bootstrap。准入成功前，业务读写和观察均被拒绝。`dataAvailability=available` 必须带有有效 Store 身份，缺失时 bootstrap/HTTP 均拒绝准入，业务读写与 SSE 不会启动。数据不可用时仍可读取已验证的服务器身份；缺少可选 capability 只限制相应调用。
 
 `verifyConnection({signal?})` 对已经准入的原目标执行一次只读身份复核。它保留现有并发请求、观察流和已应用游标，不重新绑定身份；profile、instance、build、API 或 Store 改变均拒绝该读取。共享 Gateway 使用这个入口逐请求复核，避免重新 `connect` 中断另一个浏览器读取。显式重新 `connect` 仍释放原连接的网络请求并重新准入。

@@ -22,6 +22,7 @@ import {
   reserveDaemonEndpoint,
   selectDaemonEndpoint,
 } from '../../../apps/service/src/daemon/endpoint';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { runDevelopmentCLI, selectDevelopmentCLI } from '../../../scripts/development/unified-cli';
 
 const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
@@ -220,6 +221,7 @@ test('new finite local vocabulary resolves lazily; shared and invalid argv never
 
 test('actual CLI development argv runs one paired built Service with the selected isolated profile and complete answer', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-dev-argv-')));
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   let requests = 0;
@@ -255,7 +257,7 @@ test('actual CLI development argv runs one paired built Service with the selecte
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'local',
         tools: [],
@@ -310,7 +312,11 @@ test('actual CLI development argv runs one paired built Service with the selecte
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' },
+        env: {
+          PATH: process.env.PATH ?? '',
+          LANG: 'C.UTF-8',
+          ...userConfiguration.homeEnvironment,
+        },
       },
     );
     child = processChild;
@@ -319,6 +325,7 @@ test('actual CLI development argv runs one paired built Service with the selecte
       new Response(processChild.stdout).text(),
       new Response(processChild.stderr).text(),
     ]);
+    if (code !== 0) throw Error(`development argv run exit ${code}: ${stderr}\n${stdout}`);
     expect(code).toBe(0);
     expect(stderr).toBe('');
     expect(requests).toBe(1);
@@ -442,6 +449,7 @@ test('daemon asset resolution is lazy and exact; read-only and compatible reuse 
 
 test('actual development wrapper new argv binds original Work, cold caller, Files point and recovery GET through exact local built Service', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-dev-callers-')));
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   writeFileSync(join(workspace, 'original.txt'), '原始完整字节😀\r\n');
@@ -508,7 +516,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [
@@ -545,6 +553,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
     const selected = selectDevelopmentCLI(['files', 'checkpoints', 's'], root).resolveArtifact!();
     seed = await launchPairedService({
       ...selected,
+      spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: 'development-seed',
       requiredCapabilities: ['commands', 'sessions', 'file_recovery', 'session_recovery'],
@@ -589,16 +598,25 @@ test('actual development wrapper new argv binds original Work, cold caller, File
       content: 'seed actual checkpoint',
     });
     const deadline = Date.now() + 10000;
+    let lastRun: { id: string; status: string; reason: string | null } | undefined;
     for (;;) {
       const command = await client.getCommand('seed');
       if (command.status === 'applied') {
         const run = await client.getRun((command.receipt as { runId: string }).runId);
+        lastRun = { id: run.id, status: run.status, reason: run.reason };
         if (!run.isActive) {
           expect(run.status).toBe('completed');
           break;
         }
       }
-      if (Date.now() > deadline) throw Error('development_seed_deadline');
+      if (Date.now() > deadline)
+        throw Error(
+          `development_seed_deadline:${JSON.stringify({
+            commandId: command.id,
+            commandStatus: command.status,
+            run: lastRun ?? null,
+          })}`,
+        );
       await Bun.sleep(10);
     }
     expect(requests).toBe(3);
@@ -638,7 +656,11 @@ test('actual development wrapper new argv binds original Work, cold caller, File
           stdin: 'ignore',
           stdout: 'pipe',
           stderr: 'pipe',
-          env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' },
+          env: {
+            PATH: process.env.PATH ?? '',
+            LANG: 'C.UTF-8',
+            ...userConfiguration.homeEnvironment,
+          },
         },
       );
       running = processChild;
@@ -724,6 +746,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
     expect(finalArtifact.entrypointSha256).toBe(selected.entrypointSha256);
     seed = await launchPairedService({
       ...finalArtifact,
+      spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: 'development-shared',
       requiredCapabilities: ['commands', 'sessions', 'file_recovery'],

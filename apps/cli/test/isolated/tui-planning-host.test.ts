@@ -152,6 +152,8 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
               provider: 'compatible',
               model: 'fixed',
               baseURL: `${provider.url.href}v1`,
+              // The scripted Planning transport retains the original full plan instead of summarizing it.
+              modelCapabilities: { contextWindowTokens: 1000000 },
             },
           ],
           tools: [

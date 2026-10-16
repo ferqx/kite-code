@@ -494,6 +494,7 @@ export class UnifiedExecution {
     input: Json,
     source: Json,
     kind: AuthorizationRequest['kind'] = 'tool',
+    onStoreCancellation?: () => void,
   ) {
     const work = identity(scope);
     scope.signal.throwIfAborted();
@@ -521,7 +522,7 @@ export class UnifiedExecution {
         ? await scope.captureDispatchReadSet?.(executionId)
         : undefined;
     scope.signal.throwIfAborted();
-    await this.options.store.markDispatching({
+    const dispatchInput = {
       expectedStoreId: work.originStoreId,
       owner: scope.owner,
       executionId,
@@ -543,7 +544,14 @@ export class UnifiedExecution {
       },
       requirements,
       freshness: { checked: true, source },
-    });
+    } satisfies Parameters<Store['markDispatching']>[0];
+    try {
+      await this.options.store.markDispatching(dispatchInput);
+    } catch (error) {
+      if (error instanceof AgentError && error.code === 'cancelled_before_dispatch')
+        onStoreCancellation?.();
+      throw error;
+    }
     return {
       revision: decision.revision,
       ...(decision.snapshot === undefined ? {} : { snapshot: structuredClone(decision.snapshot) }),
@@ -620,6 +628,7 @@ export class UnifiedExecution {
     }
     let release: (() => void) | undefined;
     let dispatched = false;
+    let cancelledByStoreAdmission = false;
     let content = '';
     let reasoning = '';
     let firstOutput: 'content' | 'reasoning' | 'tool_calls' | undefined;
@@ -665,7 +674,10 @@ export class UnifiedExecution {
         { sessionId: scope.run.sessionId, workspaceId: scope.workspaceId },
         scope.signal,
       );
-      await this.dispatch(scope, executionId, request.modelId, '1', input, source, 'model');
+      await this.dispatch(scope, executionId, request.modelId, '1', input, source, 'model', () => {
+        // Durable cancellation may be visible before its local abort notification arrives.
+        cancelledByStoreAdmission = true;
+      });
       dispatched = true;
       scope.signal.throwIfAborted();
       let savedLength = 0;
@@ -777,7 +789,7 @@ export class UnifiedExecution {
           expectedStoreId: scope.run.originStoreId,
           owner: scope.owner,
           executionId,
-          status: scope.signal.aborted ? 'cancelled' : 'failed',
+          status: scope.signal.aborted || cancelledByStoreAdmission ? 'cancelled' : 'failed',
           result: {
             code:
               error instanceof AgentError

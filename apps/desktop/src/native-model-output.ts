@@ -1,4 +1,5 @@
 import { ClientError, type ModelOutputSnapshot, verifyModelOutputSnapshot } from '@kite-ai/client';
+import { readNativeBodyChunks } from './native-body-chunks';
 import type { NativeBridge, NativeModelBodyOpen } from './native-bridge';
 import { NativeMarkdownOwner } from './native-markdown';
 
@@ -85,47 +86,21 @@ export async function readNativeModelBody<
       !/^[a-f0-9]{64}$/.test(opened.bodyHash)
     )
       throw new ClientError(code('model_output_metadata_invalid'));
-    const bytes = new Uint8Array(Number(opened.wireBytes));
-    let offset = 0;
-    for (;;) {
-      check();
-      const chunk = await input.bridge.request({
-        method: `${kind}.read`,
-        generation: input.generation,
-        readId,
-        offset,
-        limit: 65536,
-      });
-      check();
-      if (
-        !chunk ||
-        !('readId' in chunk) ||
-        !('offset' in chunk) ||
-        chunk.kind !== `${kind}.chunk` ||
-        chunk.readId !== readId ||
-        chunk.offset !== offset ||
-        !Number.isSafeInteger(chunk.nextOffset) ||
-        typeof chunk.eof !== 'boolean' ||
-        typeof chunk.data !== 'string' ||
-        chunk.data.length > 87384 ||
-        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(chunk.data)
-      )
-        throw new ClientError(code('model_output_chunk_invalid'));
-      const binary = atob(chunk.data),
-        next = offset + binary.length;
-      if (
-        binary.length > 65536 ||
-        next !== chunk.nextOffset ||
-        next > bytes.length ||
-        (!chunk.eof && binary.length === 0) ||
-        chunk.eof !== (next === bytes.length)
-      )
-        throw new ClientError(code('model_output_chunk_invalid'));
-      for (let index = 0; index < binary.length; index++)
-        bytes[offset + index] = binary.charCodeAt(index);
-      offset = next;
-      if (chunk.eof) break;
-    }
+    const bytes = await readNativeBodyChunks({
+      byteLength: Number(opened.wireBytes),
+      readId,
+      kind: `${kind}.chunk`,
+      read: (offset, limit) =>
+        input.bridge.request({
+          method: `${kind}.read`,
+          generation: input.generation,
+          readId,
+          offset,
+          limit,
+        }),
+      check,
+      invalid: () => new ClientError(code('model_output_chunk_invalid')),
+    });
     check();
     let parsed: unknown;
     try {

@@ -333,9 +333,12 @@ test('one Model slot uses fresh SDK child binding and Workspace sources; a detac
     expect(first.definitionVersion).toBe('7');
     expect(f.disposals).toBe(0);
     writeFileSync(
-      f.projectPath,
+      f.userPath,
       JSON.stringify({
-        models: [{ id: 'child', provider: 'compatible', model: 'child-new', baseURL: f.b.baseURL }],
+        ...f.configuration,
+        models: f.configuration.models.map((model) =>
+          model.id === 'child' ? { ...model, model: 'child-new', baseURL: f.b.baseURL } : model,
+        ),
       }),
     );
     writeFileSync(join(f.workspace, 'AGENTS.md'), 'actual new Workspace instruction');
@@ -666,10 +669,14 @@ test('an omitted role modelId inherits the actual parent identity rather than th
     await f.submit();
     await until(async () => (waiting ? true : undefined));
     writeFileSync(
-      f.projectPath,
+      f.userPath,
       JSON.stringify({
+        ...f.configuration,
         modelId: 'unrelated',
-        models: [{ id: 'unrelated', provider: 'compatible', model: 'wrong', baseURL: f.b.baseURL }],
+        models: [
+          ...f.configuration.models,
+          { id: 'unrelated', provider: 'compatible', model: 'wrong', baseURL: f.b.baseURL },
+        ],
       }),
     );
     release.resolve();

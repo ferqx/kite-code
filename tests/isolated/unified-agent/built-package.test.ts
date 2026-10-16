@@ -158,6 +158,7 @@ nativeTest(
         './profile': './profile.js',
         './profile-access': './profile-access.js',
         './resources': './resources.js',
+        './context-estimate': './context-estimate.js',
         './process-observation': './process-observation.js',
         './jobs/shell': './jobs/shell.js',
         './config': './config/index.js',

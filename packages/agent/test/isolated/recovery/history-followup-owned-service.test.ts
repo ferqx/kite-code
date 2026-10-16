@@ -54,7 +54,11 @@ finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(master)
 `;
-    python = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    python = Bun.spawn(['python3', '-c', program], {
+      env: { ...process.env, ...f.userConfiguration.homeEnvironment },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const [out, err, code] = await Promise.all([
       new Response(python.stdout).text(),
       new Response(python.stderr).text(),

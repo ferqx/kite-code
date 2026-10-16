@@ -9,6 +9,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
 
 const [root] = process.argv.slice(2);
 assert(root);
@@ -24,7 +25,8 @@ for (const specifier of [
   assert(!existsSync(join(import.meta.dir, 'node_modules/@kite-ai/agent/src')));
 }
 const profile = selectProfile({ dataRoot: join(root, 'private'), profile: 'owned' });
-// Actual default native creation precedes writing the private configuration (no broad-ACL repair).
+const userConfiguration = ownedUserConfiguration(join(root, 'home'));
+// Actual default native Profile creation is independent of the owned user model source.
 const initialStore = await openSqliteStore(profile);
 await initialStore.close();
 const workspace = join(root, 'workspace');
@@ -50,7 +52,7 @@ const provider = Bun.serve({
   },
 });
 writeFileSync(
-  join(profile.profilePath, 'config.jsonc'),
+  userConfiguration.path,
   JSON.stringify({
     modelId: 'fixed',
     tools: [],
@@ -77,6 +79,7 @@ const launch = (instanceId: string) =>
     profile,
     entrypoint: resolver.resolve('@kite-ai/service/main'),
     executable: process.execPath,
+    spawnChild: userConfiguration.spawnChild,
     instanceId,
     buildId: 'owned-sourcefree-default-media',
     apiMajor: 1,
@@ -174,7 +177,31 @@ try {
   assert.equal(model.status, 'succeeded');
   assert.equal(model.runId, run.id);
   assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0]!.tools?.map((tool) => tool.function.name) ?? [], ['ask_user']);
+  const shellAvailable =
+    process.platform === 'darwin' || (process.platform === 'linux' && Bun.which('bwrap') !== null);
+  const toolNames: [string, string][] = [
+    ['ask_user', 'ask_user'],
+    ['files.edit', 'files_edit'],
+    ['files.glob', 'files_glob'],
+    ['files.list', 'files_list'],
+    ['files.read', 'files_read'],
+    ['files.search', 'files_search'],
+    ['files.write', 'files_write'],
+    ...(shellAvailable
+      ? ([
+          ['shell.execute', 'shell_execute'],
+          ['shell.launch', 'shell_launch'],
+          ['shell.read', 'shell_read'],
+          ['shell.stop', 'shell_stop'],
+          ['shell.wait', 'shell_wait'],
+        ] satisfies [string, string][])
+      : []),
+    ['web_fetch', 'web_fetch'],
+  ];
+  assert.deepEqual(
+    requests[0]!.tools?.map((tool) => tool.function.name) ?? [],
+    toolNames.map(([, wireName]) => wireName),
+  );
   assert(
     requests[0]!.messages.some(
       (message) => message.role === 'user' && message.content === original,
@@ -219,6 +246,10 @@ try {
   assert.equal(snapshot.confirmation, 'succeeded');
   assert.equal(snapshot.bodyHash, ref.hash);
   assert.equal(snapshot.bodyBytes, ref.size);
+  assert.deepEqual(
+    snapshot.request.tools.map((tool) => tool.id),
+    toolNames.map(([originalId]) => originalId),
+  );
   const complete = Buffer.from(canonical(snapshot.request));
   assert.equal(hash(complete), snapshot.bodyHash);
   assert.equal(String(complete.length), snapshot.bodyBytes);

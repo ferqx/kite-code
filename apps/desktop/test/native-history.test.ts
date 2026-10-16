@@ -199,7 +199,7 @@ test('Native switching away from an unfinished recalibration restores only the l
   expect(value.messages).toEqual([original]);
 });
 
-test('Native attach generation and history epoch changes discard same-session and inactive snapshots', async () => {
+test('Native attach changes clear all snapshots while history epoch changes retain only the active reading', async () => {
   for (const change of ['generation', 'epoch'] as const) {
     let blocked = false;
     let release!: () => void;
@@ -230,7 +230,10 @@ test('Native attach generation and history epoch changes discard same-session an
       selection('active', '1'),
       change === 'epoch' ? 1 : 0,
     );
-    expect(reader.state.messages).toEqual([]);
+    expect(reader.state.phase).toBe('loading');
+    expect(reader.state.messages.map((message) => message.id)).toEqual(
+      change === 'generation' ? [] : ['active'],
+    );
     reader.preview('inactive');
     expect(reader.state.messages).toEqual([]);
     reader.dispose();
@@ -238,6 +241,126 @@ test('Native attach generation and history epoch changes discard same-session an
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(reader.state.messages).toEqual([]);
   }
+});
+
+test('Native Store or Session changes never retain the previous identity reading', async () => {
+  for (const change of ['store', 'session'] as const) {
+    let block = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const bridge = {
+      async request(request) {
+        if (request.method === 'messages.close') return null;
+        if (request.method !== 'messages') throw Error('unexpected');
+        if (block) await gate;
+        return {
+          messages: [{ id: request.expectedStoreId, sessionId: request.sessionId, seq: '1' }],
+          highWaterSeq: '1',
+          nextAfterSeq: null,
+        };
+      },
+    } as NativeBridge;
+    const reader = new NativeHistory(bridge, () => {});
+    reader.select(1, selection('s', '1'));
+    await until(() => reader.state.phase === 'complete');
+    block = true;
+    reader.select(1, {
+      ...selection(change === 'session' ? 'other' : 's', '1'),
+      storeId: change === 'store' ? 'other-store' : 'store',
+    });
+    expect(reader.state.phase).toBe('loading');
+    expect(reader.state.messages).toEqual([]);
+    reader.dispose();
+    release();
+  }
+});
+
+test('Native a new epoch discards an inactive snapshot just restored by preview', async () => {
+  let block = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      if (block) await gate;
+      return {
+        messages: [{ id: request.sessionId, sessionId: request.sessionId, seq: '1' }],
+        highWaterSeq: '1',
+        nextAfterSeq: null,
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  reader.select(1, selection('inactive', '1'));
+  await until(() => reader.state.phase === 'complete');
+  reader.preview('active');
+  reader.select(1, selection('active', '1'));
+  await until(() => reader.state.phase === 'complete');
+  reader.preview('inactive');
+  expect(reader.state.messages.map((message) => message.id)).toEqual(['inactive']);
+  block = true;
+  reader.select(1, selection('inactive', '1'), 1);
+  expect(reader.state.phase).toBe('loading');
+  expect(reader.state.messages).toEqual([]);
+  reader.dispose();
+  release();
+});
+
+test('Native late old-epoch pages and their lease closes cannot replace the new epoch reading', async () => {
+  let reads = 0;
+  let oldReadId = '';
+  let oldPageReturned = false;
+  let lateLeaseClosed = false;
+  const closed: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') {
+        closed.push(request.readId);
+        if (request.readId === oldReadId && oldPageReturned) lateLeaseClosed = true;
+        return null;
+      }
+      if (request.method !== 'messages') throw Error('unexpected');
+      const read = ++reads;
+      if (read === 2) {
+        if (!request.readId) throw Error('history_fixture_read_id_missing');
+        oldReadId = request.readId;
+        await gate;
+        oldPageReturned = true;
+      }
+      return {
+        messages: [{ id: 'm', sessionId: 's', seq: '1', content: `read-${read}` }],
+        highWaterSeq: '1',
+        nextAfterSeq: null,
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  reader.select(1, selection('s', '1'));
+  await until(() => reader.state.phase === 'complete');
+  reader.select(1, selection('s', '1'), 1);
+  await until(() => !!oldReadId);
+  expect(reader.state.phase).toBe('loading');
+  expect(reader.state.messages[0]?.content).toBe('read-1');
+  reader.select(1, selection('s', '1'), 2);
+  await until(() => reader.state.phase === 'complete');
+  expect(reader.state.messages[0]?.content).toBe('read-3');
+  expect(closed).toContain(oldReadId);
+  release();
+  await until(() => lateLeaseClosed);
+  expect(reader.state.phase).toBe('complete');
+  expect(reader.state.messages[0]?.content).toBe('read-3');
+  reader.select(1, selection('s', '1'), 2);
+  expect(reads).toBe(3);
+  reader.dispose();
 });
 
 test('Native confirmed Store removal clears published and inactive history and rejects a pending old page', async () => {
@@ -335,46 +458,59 @@ test('Native close pauses only history and same-revision selection resumes full 
 });
 
 test('Native same-high-water full calibration replaces vanished records only at EOF, while failure preserves prior reading beyond its prefix', async () => {
-  for (const failed of [false, true]) {
-    const original = { id: 'first', sessionId: 's', seq: '1', content: 'old body' } as Message;
-    const removed = {
-      id: 'removed',
-      sessionId: 's',
-      seq: '2',
-      content: 'previous tail',
-    } as Message;
-    const updated = { ...original, content: 'rewritten body at the same seq' };
-    let recalibrating = false;
-    let entered = false;
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const bridge = {
-      async request(request) {
-        if (request.method === 'messages.close') return null;
-        if (request.method !== 'messages') throw Error('unexpected');
-        if (!recalibrating)
-          return { messages: [original, removed], highWaterSeq: '2', nextAfterSeq: null };
-        if (request.afterSeq === '0')
-          return { messages: [updated], highWaterSeq: '2', nextAfterSeq: '1' };
-        entered = true;
-        await gate;
-        if (failed) throw Error('last_page_failed');
-        return { messages: [], highWaterSeq: '2', nextAfterSeq: null };
-      },
-    } as NativeBridge;
-    const reader = new NativeHistory(bridge, () => {});
-    reader.select(1, selection('s', '2'));
-    await until(() => reader.state.phase === 'complete');
-    recalibrating = true;
-    reader.select(1, { ...selection('s', '2'), viewGeneration: 2 });
-    await until(() => entered);
-    expect(reader.state.messages).toEqual([original, removed]);
-    release();
-    await until(() => reader.state.phase === (failed ? 'unavailable' : 'complete'));
-    expect(reader.state.messages).toEqual(failed ? [updated, removed] : [updated]);
-    reader.dispose();
+  for (const change of ['revision', 'epoch'] as const) {
+    for (const failed of [false, true]) {
+      let failScan = failed;
+      const original = { id: 'first', sessionId: 's', seq: '1', content: 'old body' } as Message;
+      const removed = {
+        id: 'removed',
+        sessionId: 's',
+        seq: '2',
+        content: 'previous tail',
+      } as Message;
+      const updated = { ...original, content: 'rewritten body at the same seq' };
+      let recalibrating = false;
+      let entered = false;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const bridge = {
+        async request(request) {
+          if (request.method === 'messages.close') return null;
+          if (request.method !== 'messages') throw Error('unexpected');
+          if (!recalibrating)
+            return { messages: [original, removed], highWaterSeq: '2', nextAfterSeq: null };
+          if (request.afterSeq === '0')
+            return { messages: [updated], highWaterSeq: '2', nextAfterSeq: '1' };
+          entered = true;
+          await gate;
+          if (failScan) throw Error('last_page_failed');
+          return { messages: [], highWaterSeq: '2', nextAfterSeq: null };
+        },
+      } as NativeBridge;
+      const reader = new NativeHistory(bridge, () => {});
+      reader.select(1, selection('s', '2'));
+      await until(() => reader.state.phase === 'complete');
+      recalibrating = true;
+      const changed = { ...selection('s', '2'), viewGeneration: 2 };
+      const epoch = change === 'epoch' ? 1 : 0;
+      reader.select(1, changed, epoch);
+      await until(() => entered);
+      expect(reader.state.phase).toBe('loading');
+      expect(reader.state.messages).toEqual([original, removed]);
+      release();
+      await until(() => reader.state.phase === (failed ? 'unavailable' : 'complete'));
+      expect(reader.state.messages).toEqual(failed ? [updated, removed] : [updated]);
+      if (failed) {
+        failScan = false;
+        reader.select(1, changed, epoch);
+        await until(() => reader.state.phase === 'complete');
+        expect(reader.state.messages).toEqual([updated]);
+        expect(reader.state.error).toBeUndefined();
+      }
+      reader.dispose();
+    }
   }
 });
 

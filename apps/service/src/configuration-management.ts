@@ -18,7 +18,7 @@ import {
 import type { Json } from '@kite-ai/agent/extensions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { type ReasoningEffort, reasoningEffortLevels, reasoningEfforts } from '@kite-ai/ai';
-import { parseModelPreset } from './configuration';
+import { parseModelPreset } from './model-options';
 import {
   discoverProviderModels,
   isSupportedModelProvider,

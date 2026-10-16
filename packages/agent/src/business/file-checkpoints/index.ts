@@ -696,7 +696,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
     const event = snapshot.events.find(
       (event) => event.kind === 'capture' && point(event.point).id === pointId,
     );
-    if (!event || event.kind !== 'capture') fail('checkpoint_not_found');
+    if (event?.kind !== 'capture') fail('checkpoint_not_found');
     return snapshotPoint(event);
   }
   async function timeline(context: FileCheckpointReadContext) {
@@ -917,8 +917,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
         (source) => source.executionId === original.executionId,
       );
       if (
-        !binding ||
-        binding.kind !== 'tool' ||
+        binding?.kind !== 'tool' ||
         binding.sessionId !== checkpoint.boundary.sessionId ||
         binding.originStoreId !== checkpoint.boundary.storeId ||
         binding.runId !== original.runId ||

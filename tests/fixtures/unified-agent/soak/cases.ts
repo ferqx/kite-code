@@ -414,8 +414,10 @@ async function childCancel(root: string, e: CaseEvidence) {
 async function modelFault(root: string, e: CaseEvidence) {
   let calls = 0,
     transportAborted = false;
-  type Attempt = { id: string; http: number[]; text: string; failure?: string };
+  type Attempt = { id: string; http: number[]; text: string; toolCalls: number; failure?: string };
   const attempts: Attempt[] = [];
+  const faultRequests = new Map<string, number>();
+  const partialFailures = 5;
   let activeAttempt: Attempt | undefined;
   const chunk = (delta: unknown, reason: string | null) =>
     `data: ${JSON.stringify({ id: 'owned', object: 'chat.completion.chunk', created: 1, model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
@@ -427,14 +429,32 @@ async function modelFault(root: string, e: CaseEvidence) {
       if (!activeAttempt) throw new Error('provider_request_without_model_attempt');
       activeAttempt.http.push(calls);
       const input = JSON.stringify(await request.json());
-      if (input.includes('actual-429'))
-        return Response.json({ error: { message: 'owned rate limit' } }, { status: 429 });
-      if (input.includes('actual-503'))
-        return Response.json({ error: { message: 'owned unavailable' } }, { status: 503 });
-      if (input.includes('partial-drop'))
-        return new Response(chunk({ content: `actual partial provider-${calls}` }, null), {
-          headers: { 'content-type': 'text/event-stream' },
-        });
+      const fault = ['partial-drop', 'actual-429', 'actual-503'].find((marker) =>
+        input.includes(marker),
+      );
+      if (fault) {
+        const attempt = (faultRequests.get(fault) ?? 0) + 1;
+        faultRequests.set(fault, attempt);
+        if (fault === 'partial-drop' && attempt <= partialFailures)
+          return new Response(chunk({ content: `actual partial provider-${calls}` }, null), {
+            headers: { 'content-type': 'text/event-stream' },
+          });
+        if (fault !== 'partial-drop' && attempt === 1)
+          return Response.json(
+            {
+              error: { message: fault === 'actual-429' ? 'owned rate limit' : 'owned unavailable' },
+            },
+            { status: fault === 'actual-429' ? 429 : 503 },
+          );
+        return new Response(
+          chunk({ content: `actual recovered provider-${calls}` }, null) +
+            chunk({}, 'stop') +
+            'data: [DONE]\n\n',
+          {
+            headers: { 'content-type': 'text/event-stream' },
+          },
+        );
+      }
       return new Response(
         new ReadableStream({
           start(controller) {
@@ -465,12 +485,13 @@ async function modelFault(root: string, e: CaseEvidence) {
       describeRequest: sdk.describeRequest?.bind(sdk),
       async *stream(request, options) {
         if (activeAttempt) throw new Error('overlapping_fault_provider_attempts');
-        const observed: Attempt = { id: request.requestId, http: [], text: '' };
+        const observed: Attempt = { id: request.requestId, http: [], text: '', toolCalls: 0 };
         attempts.push(observed);
         activeAttempt = observed;
         try {
           for await (const event of sdk.stream(request, options)) {
             if (event.type === 'text_delta') observed.text += event.text;
+            if (event.type === 'tool_call') observed.toolCalls++;
             yield event;
           }
         } catch (error) {
@@ -491,19 +512,21 @@ async function modelFault(root: string, e: CaseEvidence) {
   const verifyAttempts = async (
     sessionId: string,
     runId: string,
-    count: number,
-    partial: boolean,
+    failedCount: number,
+    reason: ModelAttemptError['reason'],
   ) => {
-    const executions = (await f.store.getView(sessionId)).executions.filter(
+    const view = await f.store.getView(sessionId);
+    const executions = view.executions.filter(
       (execution) => execution.kind === 'model' && execution.runId === runId,
     );
     const observed = attempts.filter((attempt) =>
       executions.some((execution) => execution.id === attempt.id),
     );
     let proved =
-      executions.length === count &&
-      observed.length === count &&
-      new Set(observed.map((attempt) => attempt.id)).size === count;
+      executions.length === failedCount + 1 &&
+      observed.length === failedCount + 1 &&
+      new Set(observed.map((attempt) => attempt.id)).size === failedCount + 1 &&
+      !view.executions.some((execution) => execution.runId === runId && execution.kind !== 'model');
     for (const [index, attempt] of observed.entries()) {
       const execution = executions.find((value) => value.id === attempt.id)!;
       const result = execution.result as Record<string, unknown> | null;
@@ -512,31 +535,38 @@ async function modelFault(root: string, e: CaseEvidence) {
       proved &&=
         execution.originStoreId === f.storeId &&
         execution.sessionId === sessionId &&
-        execution.status === 'failed' &&
         source?.kind === 'model_request' &&
         source.requestId === attempt.id &&
-        result?.incomplete === true &&
-        result.code ===
-          (attempt.failure?.startsWith('MODEL_ATTEMPT_RETRYABLE_FAILURE:')
-            ? attempt.failure
-            : 'model_failed') &&
-        (partial || attempt.failure === 'model_transport_failed') &&
         attempt.http.length === 1 &&
+        attempt.toolCalls === 0 &&
         (index === 0
           ? retry === undefined
           : retry?.previousExecutionId === observed[index - 1]!.id &&
             retry.attempt === index + 1 &&
-            retry.maxAttempts === 5 &&
-            retry.reason === 'stream_incomplete');
-      if (partial)
+            retry.maxAttempts === null &&
+            retry.reason === reason);
+      if (index < failedCount) {
         proved &&=
-          attempt.failure === 'MODEL_ATTEMPT_RETRYABLE_FAILURE:stream_incomplete' &&
-          attempt.text === `actual partial provider-${attempt.http[0]}` &&
+          execution.status === 'failed' &&
+          attempt.failure === `MODEL_ATTEMPT_RETRYABLE_FAILURE:${reason}` &&
+          result?.incomplete === true &&
+          result.code === attempt.failure;
+        if (reason === 'stream_incomplete')
+          proved &&=
+            attempt.text === `actual partial provider-${attempt.http[0]}` &&
+            result?.content === attempt.text;
+      } else
+        proved &&=
+          execution.status === 'succeeded' &&
+          attempt.failure === undefined &&
+          result?.incomplete !== true &&
+          result?.finishReason === 'stop' &&
+          attempt.text === `actual recovered provider-${attempt.http[0]}` &&
           result?.content === attempt.text;
     }
     check(
       e.assertions,
-      `${partial ? 'partial' : sessionId}_provider_execution_proof`,
+      `${reason === 'stream_incomplete' ? 'partial' : sessionId}_provider_execution_proof`,
       proved,
       true,
     );
@@ -556,15 +586,15 @@ async function modelFault(root: string, e: CaseEvidence) {
     check(
       e.assertions,
       'partial_not_complete',
-      terminal?.status === 'failed' &&
+      terminal?.status === 'completed' &&
         (await f.client.getView(s)).messages.some((m) => m.status === 'incomplete'),
       true,
     );
-    check(e.assertions, 'partial_visible_retry_http_count', calls, 5);
+    check(e.assertions, 'partial_visible_retry_http_count', calls, partialFailures + 1);
     check(
       e.assertions,
       'single_attempt_no_hidden_retry',
-      await verifyAttempts(s, run.runId, 5, true),
+      await verifyAttempts(s, run.runId, partialFailures, 'stream_incomplete'),
       1,
     );
     const beforeHold = calls;
@@ -590,13 +620,13 @@ async function modelFault(root: string, e: CaseEvidence) {
       const sessionId = await f.session(`status-${status}`);
       const before = calls;
       const attempt = await f.start(sessionId, `actual-${status}`);
-      const failed = await f.finish(attempt.runId);
-      check(e.assertions, `http_${status}_terminal`, failed?.status ?? 'missing', 'failed');
-      check(e.assertions, `http_${status}_provider_http_count`, calls - before, 1);
+      const recovered = await f.finish(attempt.runId);
+      check(e.assertions, `http_${status}_terminal`, recovered?.status ?? 'missing', 'completed');
+      check(e.assertions, `http_${status}_provider_http_count`, calls - before, 2);
       check(
         e.assertions,
         `http_${status}_single_attempt`,
-        await verifyAttempts(sessionId, attempt.runId, 1, false),
+        await verifyAttempts(sessionId, attempt.runId, 1, 'provider_unavailable'),
         1,
       );
     }

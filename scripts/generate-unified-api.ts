@@ -362,12 +362,15 @@ const outputs = {
   'apps/service/generated/openapi.json': `${JSON.stringify({ openapi: '3.1.0', info: { title: 'Kite Agent API', version: '1.0.0' }, paths, components: { schemas: Object.fromEntries(Object.entries(schemas).map(([name, schema]) => [name, openApiReferences(schema, name)])) } }, null, 2)}\n`,
 };
 for (const [path, source] of Object.entries(outputs)) {
+  // The generated validator exceeds normal scan limits; format its stdin under the same JS rules.
+  const formatPath =
+    path === 'packages/client/src/generated/validators.js' ? 'http-schema-validators.js' : path;
   const formatted = Bun.spawnSync(
     [
       './node_modules/.bin/biome',
       'format',
       `--files-max-size=${Math.max(1048576, Buffer.byteLength(source) + 1)}`,
-      `--stdin-file-path=${path}`,
+      `--stdin-file-path=${formatPath}`,
     ],
     { stdin: new TextEncoder().encode(source), stdout: 'pipe', stderr: 'pipe' },
   );

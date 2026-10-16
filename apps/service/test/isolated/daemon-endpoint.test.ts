@@ -3,6 +3,8 @@ import {
   chmodSync,
   existsSync,
   linkSync,
+  lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -10,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createConnection } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import {
@@ -20,6 +22,7 @@ import {
   reserveDaemonEndpoint,
   selectDaemonEndpoint,
 } from '../../src/daemon/endpoint';
+import { withPosixRecordLock } from '../../src/daemon/posix-record';
 import { readProcessStartIdentity } from '../../src/daemon/process-identity';
 
 const input = {
@@ -116,6 +119,169 @@ test('reservation precedes Store and exact finite bootstrap; malformed/large fra
     expect(existsSync(f.endpoint.record)).toBe(false);
   } finally {
     await owner.close();
+    f.clean();
+  }
+});
+test('reservation reader waits for the original held-FD publication instead of parsing its incomplete prefix', async () => {
+  const f = fixture(),
+    owner = await reserveDaemonEndpoint(f.endpoint, f.identity);
+  const original = owner.reservation;
+  const bytes = readFileSync(f.endpoint.record);
+  const writer = Bun.spawn(
+    [
+      process.execPath,
+      join(import.meta.dir, '../fixtures/daemon-endpoint-child.ts'),
+      f.root,
+      f.endpoint.socket,
+      'held-record-publication',
+    ],
+    { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+  );
+  const stderr = new Response(writer.stderr).text();
+  let released = false;
+  try {
+    const reader = writer.stdout.getReader();
+    const first = await reader.read();
+    reader.releaseLock();
+    expect(first.done).toBe(false);
+    const locked = JSON.parse(new TextDecoder().decode(first.value));
+    expect(locked.stage).toBe('incomplete-record-locked');
+    expect(readFileSync(f.endpoint.record, 'utf8')).toBe('{"reservationVersion":');
+    writer.stdin.write('finish\n');
+    writer.stdin.end();
+    released = true;
+    expect(readDaemonReservation(f.endpoint)).toEqual(original);
+    expect(await writer.exited).toBe(0);
+    expect(await stderr).toBe('');
+    expect(readFileSync(f.endpoint.record)).toEqual(bytes);
+    const stat = lstatSync(f.endpoint.record, { bigint: true });
+    expect({ dev: String(stat.dev), ino: String(stat.ino) }).toEqual({
+      dev: locked.dev,
+      ino: locked.ino,
+    });
+    expect(existsSync(f.profile.dataRoot)).toBe(false);
+  } finally {
+    if (!released) {
+      writer.stdin.write('finish\n');
+      writer.stdin.end();
+    }
+    await writer.exited;
+    await stderr;
+    await owner.close();
+    f.clean();
+  }
+}, 10000);
+test('lock wait and native bootstrap response share the original absolute five-second budget', async () => {
+  const f = fixture();
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const sockets = new Set<import('node:net').Socket>();
+  let requests = 0;
+  const server = createServer({ allowHalfOpen: true }, (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    let text = '';
+    socket.on('data', (bytes) => {
+      text += bytes.toString();
+      if (!text.endsWith('\n')) return;
+      requests++;
+      const request = JSON.parse(text);
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        socket.end(
+          `${JSON.stringify({ ...input, profile: record.profile, instanceId: record.instanceId, buildId: record.buildId, workspace: record.workspace, pid: record.pid, processStartIdentity: record.processStartIdentity, requestVersion: 1, operation: 'bootstrap', requestId: request.requestId })}\n`,
+        );
+      }, 4500);
+      timers.add(timer);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(f.endpoint.socket, resolve));
+  chmodSync(f.endpoint.socket, 0o600);
+  const stat = lstatSync(f.endpoint.socket, { bigint: true });
+  const record = {
+    reservationVersion: 1,
+    ...f.identity,
+    pid: process.pid,
+    processStartIdentity: readProcessStartIdentity(process.pid)!,
+    socket: { dev: String(stat.dev), ino: String(stat.ino) },
+  };
+  writeFileSync(f.endpoint.record, `${JSON.stringify(record)}\n`, { mode: 0o600, flag: 'wx' });
+  const writer = Bun.spawn(
+    [
+      process.execPath,
+      join(import.meta.dir, '../fixtures/daemon-endpoint-child.ts'),
+      f.root,
+      f.endpoint.socket,
+      'held-record-publication-slow',
+    ],
+    { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+  );
+  const stderr = new Response(writer.stderr).text();
+  try {
+    const reader = writer.stdout.getReader();
+    const first = await reader.read();
+    reader.releaseLock();
+    expect(first.done).toBe(false);
+    expect(JSON.parse(new TextDecoder().decode(first.value)).stage).toBe(
+      'incomplete-record-locked',
+    );
+    writer.stdin.write('finish\n');
+    if (writer.exitCode === null) writer.stdin.end();
+    const error = await requestDaemonBootstrap(f.endpoint, f.profile).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toMatchObject({ code: 'daemon_bootstrap_timeout' });
+    expect(requests).toBe(1);
+    expect(await writer.exited).toBe(0);
+    expect(await stderr).toBe('');
+    expect(existsSync(f.profile.dataRoot)).toBe(false);
+  } finally {
+    writer.stdin.end();
+    await writer.exited;
+    await stderr;
+    for (const timer of timers) clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    f.clean();
+  }
+}, 10000);
+
+test('POSIX record lock rejects unknown descriptor errors without entering the operation', () => {
+  let calls = 0;
+  expect(() => withPosixRecordLock(-1, 'shared', () => calls++)).toThrow(
+    'daemon_reservation_unsafe',
+  );
+  expect(calls).toBe(0);
+});
+
+test('POSIX record leaf imports under pure Node without loading native FFI', async () => {
+  const f = fixture();
+  try {
+    const node = Bun.which('node');
+    expect(node).not.toBeNull();
+    if (!node) throw Error('fixture_node_unavailable');
+    const outdir = join(f.root, 'node-leaf');
+    mkdirSync(outdir);
+    const built = await Bun.build({
+      entrypoints: [join(import.meta.dir, '../../src/daemon/posix-record.ts')],
+      target: 'node',
+      packages: 'external',
+      naming: '[name].mjs',
+      outdir,
+    });
+    expect(built.success).toBe(true);
+    const child = Bun.spawn([node, join(outdir, 'posix-record.mjs')], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(code).toBe(0);
+    expect(stdout).toBe('');
+    expect(stderr).toBe('');
+  } finally {
     f.clean();
   }
 });
@@ -224,6 +390,14 @@ test('private record link/mode and replacement identity fail closed; cold reads 
   const f = fixture(),
     owner = await reserveDaemonEndpoint(f.endpoint, f.identity);
   try {
+    const original = readFileSync(f.endpoint.record);
+    for (const invalid of ['{', '{}']) {
+      writeFileSync(f.endpoint.record, invalid);
+      expect(() => readDaemonReservation(f.endpoint)).toThrow('daemon_reservation_invalid');
+    }
+    writeFileSync(f.endpoint.record, 'x'.repeat(16385));
+    expect(() => readDaemonReservation(f.endpoint)).toThrow('daemon_reservation_unsafe');
+    writeFileSync(f.endpoint.record, original);
     chmodSync(f.endpoint.record, 0o644);
     expect(() => readDaemonReservation(f.endpoint)).toThrow('unsafe');
     chmodSync(f.endpoint.record, 0o600);

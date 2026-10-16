@@ -461,12 +461,23 @@ test('default paired main exposes actual Model logs and complete original >64KiB
     const model = view.executions.find((execution) => execution.kind === 'model')!;
     expect(model.status).toBe('succeeded');
     expect(requests).toHaveLength(1);
-    expect(requests[0]!.tools).toEqual([
-      expect.objectContaining({
-        type: 'function',
-        function: expect.objectContaining({ name: 'ask_user' }),
-      }),
-    ]);
+    const tools = requests[0]!.tools as { function: { name: string } }[];
+    const expectedTools = [
+      { id: 'ask_user', definitionVersion: '1' },
+      { id: 'files.edit', definitionVersion: '2' },
+      { id: 'files.glob', definitionVersion: '2' },
+      { id: 'files.list', definitionVersion: '1' },
+      { id: 'files.read', definitionVersion: '3' },
+      { id: 'files.search', definitionVersion: '2' },
+      { id: 'files.write', definitionVersion: '2' },
+      { id: 'web_fetch', definitionVersion: '1' },
+    ];
+    expect(tools.map((tool) => tool.function.name).sort()).toEqual(
+      expectedTools.map((tool) => tool.id),
+    );
+    expect(tools.find((tool) => tool.function.name === 'ask_user')).toMatchObject({
+      type: 'function',
+    });
     expect(view.executions.filter((execution) => execution.kind === 'tool')).toHaveLength(0);
     web = await browserFor(client);
     db = new Database(profile.databasePath, { readonly: true });
@@ -492,7 +503,7 @@ test('default paired main exposes actual Model logs and complete original >64KiB
         id: tool.id,
         definitionVersion: tool.definitionVersion,
       })),
-    ).toEqual([{ id: 'ask_user', definitionVersion: '1' }]);
+    ).toEqual(expectedTools);
     expect(BigInt(snapshot.bodyBytes)).toBeGreaterThan(65536n);
     expect(snapshot.request.messages.some((message) => message.content === original)).toBe(true);
     expect(snapshot.metadata.context?.transformationId).toBe('kite.model-request');

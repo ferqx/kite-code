@@ -1,7 +1,6 @@
 import { dlopen, ptr } from 'bun:ffi';
 import {
   chmodSync,
-  closeSync,
   constants,
   fstatSync,
   fsyncSync,
@@ -16,6 +15,7 @@ import { createServer } from 'node:net';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { bootstrapSchema, type DaemonBootstrap, handleBootstrapConnection } from './bootstrap';
+import { assertPosixRecordUnlocked, closePosixRecord, withPosixRecordLock } from './posix-record';
 import { readProcessStartIdentity } from './process-identity';
 import {
   assertPrivateDirectory,
@@ -210,19 +210,21 @@ async function reserveEndpoint(
   function publish() {
     const bytes = Buffer.from(`${JSON.stringify(record)}\n`);
     if (bytes.length > 16384) throw daemonError('daemon_reservation_oversized');
-    let offset = 0;
-    while (offset < bytes.length) {
-      const n = writeSync(recordFd, bytes, offset, bytes.length - offset, offset);
-      if (!n) throw daemonError('daemon_reservation_write_failed');
-      offset += n;
-    }
-    ftruncateSync(recordFd, bytes.length);
-    fsyncSync(recordFd);
+    withPosixRecordLock(recordFd, 'exclusive', () => {
+      let offset = 0;
+      while (offset < bytes.length) {
+        const n = writeSync(recordFd, bytes, offset, bytes.length - offset, offset);
+        if (!n) throw daemonError('daemon_reservation_write_failed');
+        offset += n;
+      }
+      ftruncateSync(recordFd, bytes.length);
+      fsyncSync(recordFd);
+    });
   }
   try {
     publish();
   } catch (error) {
-    closeSync(recordFd);
+    closePosixRecord(recordFd);
     throw error;
   }
   const close = () =>
@@ -239,9 +241,10 @@ async function reserveEndpoint(
           posix!.symbols.close(rawFd);
           rawFd = undefined;
         }
+        assertPosixRecordUnlocked(recordFd);
         removeExactEndpoint(endpoint, record, recordIdentity);
       } finally {
-        closeSync(recordFd);
+        closePosixRecord(recordFd);
       }
     })());
   return Object.freeze({

@@ -497,6 +497,8 @@ test.each(
           model: 'fixed',
           baseURL: `http://127.0.0.1:${provider.port}/v1`,
           credentialRef: 'credential:11111111-1111-1111-1111-111111111111',
+          // This fixed Provider verifies full activation inputs; summary calls have their own fixture.
+          modelCapabilities: { contextWindowTokens: 1_000_000 },
         },
       ],
       tools: [{ id: 'files.read' }],

@@ -16,6 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import type { ProfileBackup, ProfileRestoreResult } from '@kite-ai/agent/maintenance';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 function verifyLocalLinks(root: string) {
@@ -64,8 +65,9 @@ test('sealed terminal bundle remains independent after archive relocation and te
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-bundle-')));
   const home = join(root, 'home');
   mkdirSync(home, { mode: 0o700 });
-  mkdirSync(join(home, '.kite-code'), { mode: 0o700 });
-  const legacy = join(home, '.kite-code', 'kite-code.jsonc');
+  const userConfiguration = ownedUserConfiguration(home);
+  const legacy = join(home, '.kite-code', 'unified-agent', 'default', 'config.jsonc');
+  mkdirSync(join(home, '.kite-code', 'unified-agent', 'default'), { recursive: true, mode: 0o700 });
   writeFileSync(legacy, 'LEGACY_PROFILE_MUST_NOT_BE_READ', { mode: 0o600 });
   try {
     // Build/install are production APIs; runtime children below receive neither source imports nor NODE_PATH.
@@ -165,7 +167,7 @@ test('sealed terminal bundle remains independent after archive relocation and te
     let daemonStarted = false;
     try {
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfiguration.path,
         JSON.stringify({
           modelId: 'fixed',
           models: [

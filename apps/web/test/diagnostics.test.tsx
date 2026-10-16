@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { type DiagnosticPort, Diagnostics, readContext, readOutput } from '../src/diagnostics';
+import { installGlobals } from './globals.fixture';
 
 function view(sessionId = 'session', selectionId = 'selection'): BrowserView {
   return {
@@ -313,15 +314,11 @@ test('output missing intervals, overlapping pages and premature EOF reject inste
 
 async function domFixture(client: DiagnosticPort) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
-  const originals = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const root = createRoot(dom.window.document.getElementById('root')!);
   async function render(v = view()) {
     await act(async () =>
@@ -349,10 +346,7 @@ async function domFixture(client: DiagnosticPort) {
     async close() {
       await act(async () => root.unmount());
       dom.window.close();
-      for (const [key, old] of originals) {
-        if (old) Object.defineProperty(globalThis, key, old);
-        else Reflect.deleteProperty(globalThis, key);
-      }
+      restoreGlobals();
     },
   };
 }

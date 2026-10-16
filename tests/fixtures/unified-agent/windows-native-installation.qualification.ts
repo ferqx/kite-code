@@ -4,6 +4,7 @@ import { cpSync, existsSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import type { ProfileBackup } from '../../../packages/agent/src/maintenance';
 import { readModelOutput } from '../../../packages/agent/src/model-output';
 import {
@@ -12,6 +13,7 @@ import {
   WindowsOwnedChildStartError,
   type WindowsOwnedJobMember,
 } from '../../../packages/agent/src/platform/process/windows-owned-child';
+import { COMPATIBLE_PREDECESSOR_COMMIT } from './compatible-predecessor-input';
 import { createWindowsNativeUIA, type WindowsNativeUIAElement } from './windows-native-uia';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -63,10 +65,7 @@ export async function qualifyWindowsNativeInstallation(
   const originalCandidate = crossCode ? verifyNativeRuntimeBundle(predecessor) : currentCandidate;
   const agentEntry = 'node_modules/@kite-ai/agent/index.js';
   if (crossCode) {
-    assert.equal(
-      originalCandidate.terminal.manifest.source.commit,
-      '837a2b8cde946d70d00920941a1a3e5e7c684f5d',
-    );
+    assert.equal(originalCandidate.terminal.manifest.source.commit, COMPATIBLE_PREDECESSOR_COMMIT);
     assert.equal(originalCandidate.terminal.manifest.source.dirty, false);
     assert.equal(currentCandidate.terminal.manifest.source.dirty, false);
     assert(
@@ -449,12 +448,16 @@ export async function qualifyWindowsNativeInstallation(
               id: 'fixed',
               provider: 'compatible',
               model: 'fixed',
+              ...(crossCode ? { modelCapabilities: { contextWindowTokens: 1_000_000 } } : {}),
               baseURL: `${provider.url.href}v1`,
             },
           ],
         }),
       ),
     );
+    const configBytes = readFileSync(configPath);
+    const userConfiguration = ownedUserConfiguration(home);
+    security.writePrivateFile(userConfiguration.path, configBytes);
     const readHistory = async () =>
       await usingStore(
         await sqlite.openSqliteStore({
@@ -919,6 +922,7 @@ export async function qualifyWindowsNativeInstallation(
       else assert.equal(providerCalls, 1);
       return value;
     };
+    assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
     const beforeBackup = {
       core: sha(readFileSync(profile.databasePath)),
       native: sha(readFileSync(join(profile.profilePath, 'desktop-private', 'data.sqlite'))),
@@ -957,6 +961,7 @@ export async function qualifyWindowsNativeInstallation(
     assert.equal(restored.previousDirectoryPreserved, true);
     assert.equal((await maintenance('status', scope)).restore, null);
     assert.equal(sha(readFileSync(configPath)), beforeBackup.config);
+    assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
     sameHistory(await readHistory(), originalHistory, restored.storeId as string);
     const restoreDriverDeadline = Math.min(deadline, Date.now() + 45000);
     currentDriverDeadline = restoreDriverDeadline;
@@ -990,6 +995,7 @@ export async function qualifyWindowsNativeInstallation(
       preserved.native,
     );
     assert.equal(sha(readFileSync(configPath)), preserved.config);
+    assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
     // The exact Core bytes retain the independently checked new Store and original
     // full history. The installed worker itself has now been genuinely removed.
     assert.equal(sha(readFileSync(packed.archivePath)), packed.sha256);

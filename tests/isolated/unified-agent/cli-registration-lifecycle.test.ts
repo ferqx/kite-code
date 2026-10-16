@@ -20,6 +20,7 @@ import {
   readCLIRegistration,
 } from '../../../apps/cli/host/cli-registration';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
   installNativeBundle,
   uninstallNativeBundle,
@@ -49,6 +50,7 @@ test.skipIf(process.platform !== 'darwin')(
     const home = join(root, 'home'),
       workspace = join(home, 'workspace');
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
@@ -131,7 +133,12 @@ test.skipIf(process.platform !== 'darwin')(
       phase('execute_begin', { executable: argv[0] });
       const child = Bun.spawn(argv, {
         cwd: workspace,
-        env: { HOME: home, PATH: path, LANG: 'C.UTF-8', BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
+        env: {
+          ...userConfiguration.homeEnvironment,
+          PATH: path,
+          LANG: 'C.UTF-8',
+          BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
+        },
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -185,6 +192,12 @@ test.skipIf(process.platform !== 'darwin')(
             },
           ],
         }),
+        { mode: 0o600 },
+      );
+      // Retain the original Profile bytes; the default model source is the owned user file.
+      writeFileSync(
+        userConfiguration.path,
+        readFileSync(join(profile.profilePath, 'config.jsonc')),
         { mode: 0o600 },
       );
       const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-source') });

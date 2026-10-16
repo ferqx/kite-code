@@ -82,6 +82,7 @@ export async function collectSnapshotDirectory<T extends { seq: string }>(
   }) => Promise<Page & { items: T[] }>,
   signal?: AbortSignal,
   identity?: (item: T) => string,
+  retryDelayMs = 0,
 ): Promise<T[]> {
   for (let attempt = 0; ; attempt++) {
     let snapshotCursor: string | undefined;
@@ -101,6 +102,23 @@ export async function collectSnapshotDirectory<T extends { seq: string }>(
       signal?.throwIfAborted();
       if (!(error instanceof ClientError) || error.code !== 'directory_changed' || attempt >= 2)
         throw error;
+      if (retryDelayMs > 0)
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
+            reject(signal?.reason);
+          };
+          const timer = setTimeout(
+            () => {
+              signal?.removeEventListener('abort', abort);
+              resolve();
+            },
+            retryDelayMs * (attempt + 1),
+          );
+          signal?.addEventListener('abort', abort, { once: true });
+          if (signal?.aborted) abort();
+        });
     }
   }
 }

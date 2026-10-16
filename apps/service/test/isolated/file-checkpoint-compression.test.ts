@@ -122,6 +122,8 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
             provider: 'compatible',
             model: 'fixed',
             baseURL: `${provider.url.href}v1`,
+            // Keep these two manual summary requests separate from automatic-window coverage.
+            modelCapabilities: { contextWindowTokens: 1_000_000 },
           },
         ],
         tools: [
@@ -235,7 +237,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
           originSessionId: 's',
           trigger: 'manual',
           contextSelectionId: before.selection.id,
-          compressor: { id: 'standard-summary', version: '1', snapshot: { automatic: false } },
+          compressor: { id: 'standard-summary', version: '1', snapshot: { automatic: true } },
         });
         const input = await client.getModelInput('s', origin.modelExecutionId),
           output = await client.getModelOutput('s', origin.modelExecutionId);

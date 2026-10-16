@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { AgentClient } from '@kite-ai/client';
 import { NativeCaller } from '../electron/native-caller';
+import { sessionChange } from './native-change.fixture';
 
 test('Native reset reloads original facts before a ready-only stream restores write qualification without acknowledging the snapshot', async () => {
   let reset!: () => void, endFirst!: () => void;
@@ -129,10 +130,10 @@ test('Native notification backlog coalesces fast directory and view reads, retai
   const client = {
     serverInfo: { storeId: 'store', capabilities: [] },
     connect: async () => {},
-    observe: async ({ signal, onChange }: { signal: AbortSignal; onChange: () => void }) => {
-      notify = onChange;
+    observe: async ({ signal, onChange }: Parameters<AgentClient['observe']>[0]) => {
+      notify = () => void onChange(sessionChange('s'));
       await new Promise<void>((resolve) =>
-        signal.addEventListener('abort', () => resolve(), { once: true }),
+        signal!.addEventListener('abort', () => resolve(), { once: true }),
       );
     },
     disposeNetwork() {},
@@ -231,10 +232,10 @@ test('Native read-only grants keep original Workspace while a dirty successor te
   const client = {
     serverInfo: { storeId: 'store', capabilities: ['permission_grants'] },
     connect: async () => {},
-    observe: async ({ signal, onChange }: { signal: AbortSignal; onChange: () => void }) => {
-      notify = onChange;
+    observe: async ({ signal, onChange }: Parameters<AgentClient['observe']>[0]) => {
+      notify = () => void onChange(sessionChange('s'));
       await new Promise<void>((resolve) =>
-        signal.addEventListener('abort', () => resolve(), { once: true }),
+        signal!.addEventListener('abort', () => resolve(), { once: true }),
       );
     },
     disposeNetwork() {},

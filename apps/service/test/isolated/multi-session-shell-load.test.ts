@@ -222,6 +222,8 @@ for (const slots of [4, 16])
             provider: 'compatible',
             model: id,
             baseURL: source.baseURL,
+            // This finite load provider routes by original task markers; compression has its own fixtures.
+            modelCapabilities: { contextWindowTokens: 1_000_000 },
           })),
           tools: ['task', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].map((id) => ({
             id,

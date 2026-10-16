@@ -17,6 +17,23 @@ import {
 } from '../../src/file-recovery-intent';
 
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+
+type FixtureMutation =
+  | readonly [path: readonly (string | number)[], replacement: unknown]
+  | readonly [path: readonly (string | number)[]];
+function mutateUntrustedFixture(value: unknown, [path, ...replacement]: FixtureMutation) {
+  const record = (input: unknown) => {
+    if (!input || typeof input !== 'object') throw Error('test_fixture_path_unavailable');
+    return input as Record<string | number, unknown>;
+  };
+  let target = value;
+  for (const key of path.slice(0, -1)) target = record(target)[key];
+  const key = path.at(-1);
+  if (key === undefined) throw Error('test_fixture_path_unavailable');
+  if (replacement.length) record(target)[key] = replacement[0];
+  else delete record(target)[key];
+}
+
 const identity: FileRecoveryIdentity & { contextSelectionId: string } = {
   storeId: 'store-A',
   sessionId: 's',
@@ -207,40 +224,21 @@ test('closed keys reject delimiter collisions, missing fields and synthesized re
 
 test('closed parser rejects authority/body/selector/digest/Decimal64 drift and keeps null boundaries distinct', async () => {
   const i = await plan();
-  for (const change of [
-    (x: any) => {
-      x.token = 'secret';
-    },
-    (x: any) => {
-      x.code.request.input.extra = true;
-    },
-    (x: any) => {
-      x.code.request.actionId = 'other';
-    },
-    (x: any) => {
-      x.code.requestDigest = '0'.repeat(64);
-    },
-    (x: any) => {
-      x.storeId = 'store-B';
-    },
-    (x: any) => {
-      x.fork.request.expectedContextSelectionId = 'different';
-    },
-    (x: any) => {
-      x.boundary.seq = '9223372036854775808';
-    },
-    (x: any) => {
-      x.code.phase = 'completed';
-    },
-    (x: any) => {
-      x.checkpoint.boundary.messageId = 'bad';
-    },
-    (x: any) => {
-      x.fork.request.commandId = x.code.request.commandId;
-    },
-  ]) {
+  const changes: FixtureMutation[] = [
+    [['token'], 'secret'],
+    [['code', 'request', 'input', 'extra'], true],
+    [['code', 'request', 'actionId'], 'other'],
+    [['code', 'requestDigest'], '0'.repeat(64)],
+    [['storeId'], 'store-B'],
+    [['fork', 'request', 'expectedContextSelectionId'], 'different'],
+    [['boundary', 'seq'], '9223372036854775808'],
+    [['code', 'phase'], 'completed'],
+    [['checkpoint', 'boundary', 'messageId'], 'bad'],
+    [['fork', 'request', 'commandId'], i.code!.request.commandId],
+  ];
+  for (const change of changes) {
     const raw = structuredClone(i);
-    change(raw);
+    mutateUntrustedFixture(raw, change);
     await expect(parseFileRecoveryIntent(raw)).rejects.toBeInstanceOf(Error);
   }
   const raw = structuredClone(i);
@@ -351,40 +349,24 @@ test('failed persistence or injected POST uncertainty never grants replay; cold 
 
 test('both allows explicit Fork only after exact original Code v2 all-confirmed succeeded proof; pending/unknown/legacy/receipt drift fail closed', async () => {
   const i = await plan();
-  for (const mutate of [
-    (p: any) => {
-      p.command.subjectId = 'other';
-    },
-    (p: any) => {
-      p.command.requestDigest = '0'.repeat(64);
-    },
-    (p: any) => {
-      p.command.receipt.executionId = 'another-job';
-    },
-    (p: any) => {
-      p.restoreStatus.workspaceId = 'other';
-    },
-    (p: any) => {
-      p.restoreStatus.payload.execution.status = 'outcome_unknown';
-    },
-    (p: any) => {
-      p.restoreStatus.payload.journal.phase = 'restoring';
-    },
-    (p: any) => {
-      delete p.restoreStatus.payload.journal.rootWorkSeq;
-    },
-    (p: any) => {
-      p.restoreStatus.payload.journal.files[0].confirmedPost = null;
-    },
-    (p: any) => {
-      p.restoreStatus.payload.journal.files[0].confirmedPost.baseline.hash = 'e'.repeat(64);
-    },
-    (p: any) => {
-      p.restoreStatus.payload.journal.files[0].state = 'pending';
-    },
-  ]) {
+  const changes: FixtureMutation[] = [
+    [['command', 'subjectId'], 'other'],
+    [['command', 'requestDigest'], '0'.repeat(64)],
+    [['command', 'receipt', 'executionId'], 'another-job'],
+    [['restoreStatus', 'workspaceId'], 'other'],
+    [['restoreStatus', 'payload', 'execution', 'status'], 'outcome_unknown'],
+    [['restoreStatus', 'payload', 'journal', 'phase'], 'restoring'],
+    [['restoreStatus', 'payload', 'journal', 'rootWorkSeq']],
+    [['restoreStatus', 'payload', 'journal', 'files', 0, 'confirmedPost'], null],
+    [
+      ['restoreStatus', 'payload', 'journal', 'files', 0, 'confirmedPost', 'baseline', 'hash'],
+      'e'.repeat(64),
+    ],
+    [['restoreStatus', 'payload', 'journal', 'files', 0, 'state'], 'pending'],
+  ];
+  for (const change of changes) {
     const p = structuredClone(proof(i));
-    mutate(p);
+    mutateUntrustedFixture(p, change);
     expect(() =>
       prepareFileRecoveryLeg(i, 'fork', identity, {
         explicitContinue: true,
@@ -580,25 +562,16 @@ test('foreign Store/subject/Workspace intent is readonly; malformed fork provena
     );
   }
   expect(reads).toBe(0);
-  for (const change of [
-    (c: any) => {
-      c.receipt.sourceSessionId = 'other';
-    },
-    (c: any) => {
-      c.sessionId = 's';
-    },
-    (c: any) => {
-      c.receipt.sourceUpperSeq = '0';
-    },
-    (c: any) => {
-      c.receipt.namespaceReport = [{ mode: 'copy' }];
-    },
-    (c: any) => {
-      delete c.subjectId;
-    },
-  ]) {
+  const changes: FixtureMutation[] = [
+    [['receipt', 'sourceSessionId'], 'other'],
+    [['sessionId'], 's'],
+    [['receipt', 'sourceUpperSeq'], '0'],
+    [['receipt', 'namespaceReport'], [{ mode: 'copy' }]],
+    [['subjectId']],
+  ];
+  for (const change of changes) {
     const c = structuredClone(command(i, 'fork'));
-    change(c);
+    mutateUntrustedFixture(c, change);
     expect(observeFileRecoveryLeg(i, 'fork', identity, c).fork!.phase).toBe('unknown');
   }
   expect(canTransitionFileRecoveryPhase('succeeded', 'unknown')).toBe(false);

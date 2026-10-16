@@ -124,7 +124,14 @@ test.each(
     JSON.stringify({
       modelId: 'fixed',
       models: [
-        { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
+        {
+          id: 'fixed',
+          provider: 'compatible',
+          model: 'fixed',
+          baseURL: `${provider.url.href}v1`,
+          // This finite scripted provider verifies compensation; compression has separate fixtures.
+          modelCapabilities: { contextWindowTokens: 1_000_000 },
+        },
       ],
       tools: [],
       skills: [{ id: 'configured', path: 'skill' }],

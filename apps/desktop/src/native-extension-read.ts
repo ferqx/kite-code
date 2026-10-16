@@ -3,6 +3,7 @@ import type {
   NativeExtensionScope,
   NativeExtensionsRequest,
 } from './extensions-bridge';
+import { readNativeBodyChunks } from './native-body-chunks';
 import type { NativeBridge } from './native-bridge';
 
 /** One complete immutable body; closing its read retains the panel's observation. */
@@ -37,45 +38,22 @@ export async function readNativeExtensionBody<T>(
       )
     )
       throw new Error('扩展完整内容身份不符');
-    const bytes = new Uint8Array(head.bodyBytes);
-    let offset = 0;
-    for (;;) {
-      check();
-      const chunk = await bridge.request({
-        method: 'extensions.read',
-        generation: scope.generation,
-        readId: request.readId,
-        offset,
-        limit: 65536,
-      });
-      check();
-      if (
-        !chunk ||
-        !('offset' in chunk) ||
-        chunk.kind !== 'extensions.chunk' ||
-        chunk.readId !== request.readId ||
-        chunk.offset !== offset ||
-        typeof chunk.eof !== 'boolean' ||
-        typeof chunk.data !== 'string' ||
-        chunk.data.length > 87384 ||
-        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(chunk.data)
-      )
-        throw new Error('扩展内容分片无效');
-      const binary = atob(chunk.data),
-        next = offset + binary.length;
-      if (
-        binary.length > 65536 ||
-        chunk.nextOffset !== next ||
-        next > bytes.length ||
-        (!chunk.eof && !binary.length) ||
-        chunk.eof !== (next === bytes.length)
-      )
-        throw new Error('扩展内容不完整');
-      for (let index = 0; index < binary.length; index++)
-        bytes[offset + index] = binary.charCodeAt(index);
-      offset = next;
-      if (chunk.eof) break;
-    }
+    const bytes = await readNativeBodyChunks({
+      byteLength: head.bodyBytes,
+      readId: request.readId,
+      kind: 'extensions.chunk',
+      read: (offset, limit) =>
+        bridge.request({
+          method: 'extensions.read',
+          generation: scope.generation,
+          readId: request.readId,
+          offset,
+          limit,
+        }),
+      check,
+      invalid: () => new Error('扩展内容分片无效'),
+      incomplete: () => new Error('扩展内容不完整'),
+    });
     const digest = Array.from(
       new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
       (value) => value.toString(16).padStart(2, '0'),

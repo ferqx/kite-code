@@ -14,6 +14,7 @@ import type {
 } from '../src/background-bridge';
 import { type NativeState, nativeChannel } from '../src/native-bridge';
 import { backgroundItem } from './background-item.fixture';
+import { sessionChange } from './native-change.fixture';
 import { memoryPrivateData } from './private-data.fixture';
 
 function client() {
@@ -94,7 +95,7 @@ test('environment child and directory reads survive a held same-selection refres
     let notify!: () => void;
     let reset!: () => void;
     connection.observe = async (options) => {
-      notify = () => void options.onChange?.({} as never);
+      notify = () => void options.onChange?.(sessionChange('root'));
       reset = () => void options.onReset?.({} as never);
       await new Promise<void>((resolve) =>
         options.signal!.addEventListener('abort', () => resolve(), { once: true }),
@@ -280,7 +281,7 @@ for (const refresh of ['automatic', 'permission'] as const)
         >;
       let notify!: () => void;
       connection.observe = async (options) => {
-        notify = () => void options.onChange?.({} as never);
+        notify = () => void options.onChange?.(sessionChange('root'));
         await new Promise<void>((resolve) =>
           options.signal!.addEventListener('abort', () => resolve(), { once: true }),
         );
@@ -1391,7 +1392,7 @@ test('global activity refresh follows non-selected changes, retains failed obser
   Object.assign(port, {
     async observe(options: Parameters<AgentClient['observe']>[0]) {
       change = () => {
-        void options.onChange?.({} as never);
+        void options.onChange?.(sessionChange('other-session'));
       };
       await options.onReady?.({} as never);
       await new Promise<void>((resolve) =>

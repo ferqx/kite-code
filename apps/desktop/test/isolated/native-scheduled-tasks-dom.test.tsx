@@ -165,7 +165,7 @@ function fixture() {
       }),
     releaseCreation() {
       const input = calls.find((input) => input.method === 'conversation.send');
-      if (!input || input.method !== 'conversation.send') return;
+      if (input?.method !== 'conversation.send') return;
       release({
         kind: 'conversation',
         commandId: input.intent.commandId,
@@ -193,6 +193,29 @@ test('Native reuses the scheduled page and editor with real projects, disabled p
     await f.click('Original A');
     await f.edit(input()!, 'unsaved original\n雪🙂');
     const baseline = f.calls.length;
+    const expectResumedReads = (count: number) => {
+      const calls = f.calls.slice(baseline);
+      expect(calls).toHaveLength(count * 3);
+      for (let index = 0; index < count; index++) {
+        const page = calls[index * 3];
+        expect(page).toEqual({
+          method: 'messages',
+          generation: 1,
+          sessionId: 'a',
+          expectedStoreId: 'store',
+          readId: expect.any(String),
+          afterSeq: '0',
+          upperSeq: '0',
+          limit: 200,
+        });
+        if (page?.method !== 'messages' || !page.readId)
+          throw Error('expected_history_calibration');
+        expect(calls.slice(index * 3 + 1, index * 3 + 3)).toEqual([
+          { method: 'input.models.read', generation: 1 },
+          { method: 'messages.close', generation: 1, readId: page.readId },
+        ]);
+      }
+    };
     await f.click('安排任务');
     expect(f.host.querySelector('.primary-navigation [aria-current="page"]')?.textContent).toBe(
       '安排任务',
@@ -228,14 +251,11 @@ test('Native reuses the scheduled page and editor with real projects, disabled p
     expect(f.calls.slice(baseline)).toEqual([]);
     await f.click('返回会话');
     expect(input()?.value).toBe('unsaved original\n雪🙂');
-    expect(f.calls.slice(baseline)).toEqual([{ method: 'input.models.read', generation: 1 }]);
+    expectResumedReads(1);
     await f.click('安排任务');
     await f.click('Original A');
     expect(input()?.value).toBe('unsaved original\n雪🙂');
-    expect(f.calls.slice(baseline)).toEqual([
-      { method: 'input.models.read', generation: 1 },
-      { method: 'input.models.read', generation: 1 },
-    ]);
+    expectResumedReads(2);
     await f.click('安排任务');
     await f.click('Other B');
     expect(input()?.value).toBe('saved other');

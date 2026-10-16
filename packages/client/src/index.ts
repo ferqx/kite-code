@@ -2281,55 +2281,19 @@ export class AgentClient {
     const workspaceId = options.workspaceId,
       rootSessionId = options.rootSessionId,
       signal = options.signal;
-    for (let attempt = 0; ; attempt++) {
-      const items: import('./generated/api').BackgroundExecutionItem[] = [],
-        seen = new Set<string>();
-      let afterSeq: string | undefined,
-        upperSeq: string | undefined,
-        snapshotCursor: string | undefined;
-      try {
-        for (;;) {
-          signal?.throwIfAborted();
-          if (generation !== this.connectionGeneration || this.serverInfo?.storeId !== storeId)
-            throw new ClientError('connection_superseded');
-          const page = await this.listBackgroundExecutions(
-            { storeId, workspaceId, rootSessionId, afterSeq, upperSeq, snapshotCursor, limit: 200 },
-            { signal },
-          );
-          signal?.throwIfAborted();
-          upperSeq ??= page.upperSeq;
-          snapshotCursor ??= page.snapshotCursor;
-          for (const item of page.items) {
-            if (seen.has(item.execution.id)) throw new ClientError('directory_identity_conflict');
-            seen.add(item.execution.id);
-            items.push(item);
-          }
-          if (page.nextAfterSeq === null) return items;
-          afterSeq = page.nextAfterSeq;
-        }
-      } catch (error) {
-        signal?.throwIfAborted();
-        if (!(error instanceof ClientError) || error.code !== 'directory_changed' || attempt >= 2)
-          throw error;
-        // A hot Store must not keep one finite directory read retrying forever.
-        await new Promise<void>((resolve, reject) => {
-          const abort = () => {
-            clearTimeout(timer);
-            signal?.removeEventListener('abort', abort);
-            reject(signal?.reason);
-          };
-          const timer = setTimeout(
-            () => {
-              signal?.removeEventListener('abort', abort);
-              resolve();
-            },
-            25 * (attempt + 1),
-          );
-          signal?.addEventListener('abort', abort, { once: true });
-          if (signal?.aborted) abort();
-        });
-      }
-    }
+    return collectSnapshotDirectory(
+      (page) => {
+        if (generation !== this.connectionGeneration || this.serverInfo?.storeId !== storeId)
+          throw new ClientError('connection_superseded');
+        return this.listBackgroundExecutions(
+          { storeId, workspaceId, rootSessionId, ...page },
+          { signal },
+        );
+      },
+      signal,
+      (item) => item.execution.id,
+      25,
+    );
   }
   async listWorkspaceDirectory(
     input: import('./generated/api').WorkspaceDirectoryQuery,

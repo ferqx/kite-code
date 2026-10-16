@@ -22,6 +22,19 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
+function nativeServiceProcesses(candidateRoot: string, parentPid?: number) {
+  const processColumn = process.platform === 'linux' ? 'args=' : 'comm=';
+  return String(execFileSync('/bin/ps', ['-axo', `pid=,ppid=,${processColumn}`]))
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter(
+      (parts) =>
+        (parentPid === undefined || Number(parts[1]) === parentPid) &&
+        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')) ===
+          join(candidateRoot, 'terminal/runtime/bun'),
+    );
+}
+
 const [launcher, home, control, desktopPackage, mode] = process.argv.slice(2) as string[];
 const { _electron } = createRequire(desktopPackage!)('playwright') as typeof import('playwright');
 const expected = JSON.parse(readFileSync(join(home!, 'expected.json'), 'utf8')) as {
@@ -172,16 +185,9 @@ async function launch(index: number) {
     sandboxDisabled: false,
     windows: [{ sandbox: true, contextIsolation: true, nodeIntegration: false }],
   });
-  const processColumn = process.platform === 'linux' ? 'args=' : 'comm=';
-  const children = String(execFileSync('/bin/ps', ['-axo', `pid=,ppid=,${processColumn}`]))
-    .split('\n')
-    .map((line) => line.trim().split(/\s+/))
-    .filter(
-      (parts) =>
-        Number(parts[1]) === app!.process().pid &&
-        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')) ===
-          join(candidate.root, 'terminal/runtime/bun'),
-    );
+  const parentPid = app.process().pid;
+  assert.ok(parentPid);
+  const children = nativeServiceProcesses(candidate.root, parentPid);
   assert.equal(children.length, 1);
   childPid = Number(children[0]![0]);
   const identity = await query<{ pid: number; startIdentity: string }>(`process?pid=${childPid}`);
@@ -223,7 +229,7 @@ async function launch(index: number) {
     }) as typeof fetch;
   });
   await page.getByRole('button', { name: 'Native real versions', exact: true }).click();
-  if (mode === 'db8-cold' && index === 0) {
+  if (mode === 'legacy-private') {
     const failure = page.getByRole('alertdialog', { name: '操作未完成', exact: true });
     await failure.getByText('draft_storage_unavailable', { exact: true }).waitFor();
     await failure.getByRole('button', { name: '确定', exact: true }).click();
@@ -412,7 +418,116 @@ async function close(sequence: number) {
   stage('ordinary_exit', { sequence, pid, exit, exclusive: true });
 }
 try {
-  if (mode === 'db8-cold') {
+  if (mode === 'legacy-schema') {
+    const candidate = expected.candidates[0]!;
+    app = await _electron.launch({
+      executablePath: launcher!,
+      args: [`--user-data-dir=${join(home!, 'electron-data')}`],
+      cwd: home,
+      env: {
+        HOME: home!,
+        PATH: '/usr/bin:/bin',
+        LANG: 'C.UTF-8',
+        ...(process.platform === 'linux'
+          ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
+          : {}),
+      },
+      timeout: 15000,
+      chromiumSandbox: true,
+    });
+    const current = app;
+    const page = await app.firstWindow();
+    page.setDefaultTimeout(15000);
+    assert.equal(
+      await app.evaluate(() => process.execPath),
+      join(candidate.root, candidate.electron),
+    );
+    assert.deepEqual(
+      await app.evaluate(({ app, BrowserWindow }) => ({
+        sandboxDisabled: app.commandLine.hasSwitch('no-sandbox'),
+        windows: BrowserWindow.getAllWindows().map((window) => {
+          const preferences = (
+            window.webContents as typeof window.webContents & {
+              getLastWebPreferences(): WebPreferences;
+            }
+          ).getLastWebPreferences();
+          return {
+            sandbox: preferences.sandbox,
+            contextIsolation: preferences.contextIsolation,
+            nodeIntegration: preferences.nodeIntegration,
+          };
+        }),
+      })),
+      {
+        sandboxDisabled: false,
+        windows: [{ sandbox: true, contextIsolation: true, nodeIntegration: false }],
+      },
+    );
+    const serviceProcesses = () => nativeServiceProcesses(candidate.root);
+    const observed = new Set<number>();
+    const observe = () => {
+      for (const row of serviceProcesses()) observed.add(Number(row[0]));
+    };
+    observe();
+    const monitor = setInterval(observe, 25);
+    try {
+      const failure = page.getByRole('alertdialog', { name: '操作未完成', exact: true });
+      await failure.getByText('required_capability_missing', { exact: true }).waitFor();
+      assert.equal(
+        await page.getByRole('button', { name: 'Native real versions', exact: true }).count(),
+        0,
+      );
+    } finally {
+      clearInterval(monitor);
+    }
+    const electronPid = app.process().pid;
+    assert.ok(electronPid);
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+      current.process().once('exit', (code, signal) => resolve({ code, signal })),
+    );
+    await current.evaluate(({ app }) => app.quit());
+    const exit = await exited;
+    assert.deepEqual(exit, { code: 0, signal: null });
+    app = undefined;
+    assert.throws(() => process.kill(electronPid, 0));
+    for (const pid of observed) assert.throws(() => process.kill(pid, 0));
+    assert.equal(serviceProcesses().length, 0);
+    assert.ok(
+      (await query<{ outer: boolean; inner: boolean }[]>('locks')).every(
+        (row) => !row.outer && !row.inner,
+      ),
+    );
+    writeFileSync(
+      join(home!, 'native-legacy-report.json'),
+      JSON.stringify({
+        error: 'required_capability_missing',
+        electronPid,
+        servicePids: [...observed],
+        exit,
+      }),
+    );
+  } else if (mode === 'legacy-private') {
+    const cold = await launch(0);
+    const rejected = await cold.page.evaluate(async (sessionId) => {
+      try {
+        await window.kiteNative!.request({ method: 'draft.read', generation: 1, sessionId });
+        return 'unexpected_success';
+      } catch (error) {
+        const failure = error as { code?: string; message?: string };
+        return failure.code ?? failure.message;
+      }
+    }, expected.sessionId);
+    assert.equal(rejected, 'draft_storage_unavailable');
+    assert.equal((await state(cold.page)).callerUnavailable, true);
+    await read(cold.page, 0);
+    const physical = await app!.evaluate(() => (globalThis as Globals).versionPhysical);
+    assert.ok(physical.every((row) => row.method === 'GET'));
+    await close(0);
+    writeFileSync(
+      join(home!, 'native-legacy-report.json'),
+      JSON.stringify({ error: rejected, owned, physical, normalExits: 1 }),
+    );
+  } else if (mode === 'compatible-cold') {
     const saved = JSON.parse(
       readFileSync(join(home!, 'native-db8-intent.json'), 'utf8'),
     ) as NativeWorkspaceRemoval;
@@ -428,17 +543,15 @@ try {
       expected.candidates[0]!.id,
     );
     let cold = await launch(0);
-    const rejected = await cold.page.evaluate(async (sessionId) => {
-      try {
-        await window.kiteNative!.request({ method: 'draft.read', generation: 1, sessionId });
-        return 'unexpected_success';
-      } catch (error) {
-        const failure = error as { code?: string; message?: string };
-        return failure.code ?? failure.message;
-      }
-    }, expected.sessionId);
-    assert.equal(rejected, 'draft_storage_unavailable');
-    assert.equal((await state(cold.page)).callerUnavailable, true);
+    const draft = (await cold.page.evaluate(
+      async (sessionId) =>
+        await window.kiteNative!.request({ method: 'draft.read', generation: 1, sessionId }),
+      expected.sessionId,
+    )) as import('../src/native-bridge').NativeDraft;
+    assert.equal(draft.storeId, expected.storeId);
+    assert.equal(draft.rootSessionId, expected.sessionId);
+    assert.equal(typeof draft.content, 'string');
+    assert.notEqual((await state(cold.page)).callerUnavailable, true);
     await read(cold.page, 3);
     const oldPhysical = await app!.evaluate(() => (globalThis as Globals).versionPhysical);
     assert.ok(oldPhysical.every((row) => row.method === 'GET'));
@@ -583,7 +696,7 @@ try {
       JSON.stringify({
         owned,
         saved,
-        rejected,
+        draft,
         applied,
         oldPhysical,
         physical,
@@ -600,7 +713,7 @@ try {
       extensionCommandId: db9.intent.request.commandId,
       originalBodyHash: db9.intent.bodyDigest,
       normalExits: 2,
-      oldPrivateError: rejected,
+      compatiblePrivateRead: draft,
       originalCommandId: saved.commandId,
       storeId: saved.storeId,
       newModelCalls: 0,
@@ -991,7 +1104,7 @@ try {
       });
     }
     await close(3);
-    // macOS keeps these same installed candidates for the separate bounded DB8 cold
+    // macOS keeps these same installed candidates for the separate bounded DB9 cold
     // driver. That driver performs the original uninstall after both ordinary exits.
     if (process.platform !== 'darwin')
       assert.equal((await query<{ removed: boolean }>('uninstall')).removed, true);

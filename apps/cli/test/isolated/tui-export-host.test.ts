@@ -151,6 +151,8 @@ for (const mode of ['complete'] as readonly string[]) {
               provider: 'compatible',
               model: 'fixture',
               baseURL: `${provider.url.href}v1`,
+              // This fixture preserves 9MiB input and giant output, not the summary protocol.
+              modelCapabilities: { contextWindowTokens: 32_000_000 },
             },
           ],
         }),

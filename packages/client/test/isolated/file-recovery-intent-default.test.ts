@@ -135,7 +135,14 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
     JSON.stringify({
       modelId: 'fixed',
       models: [
-        { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
+        {
+          id: 'fixed',
+          provider: 'compatible',
+          model: 'fixed',
+          baseURL: `${provider.url.href}v1`,
+          // This finite recovery fixture retains its full file history without requesting summaries.
+          modelCapabilities: { contextWindowTokens: 1000000 },
+        },
       ],
       tools: [
         { id: 'files.read', definitionVersion: '3' },

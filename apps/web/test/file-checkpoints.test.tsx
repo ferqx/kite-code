@@ -9,6 +9,7 @@ import {
   type FileCheckpointScope,
   FileCheckpoints,
 } from '../src/file-checkpoints';
+import { installGlobals } from './globals.fixture';
 
 const scope: FileCheckpointScope = {
   storeId: 'current-B',
@@ -91,16 +92,12 @@ async function domFixture(client: FileCheckpointPort) {
     url: 'http://localhost',
     pretendToBeVisual: true,
   });
-  const old = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     HTMLElement: dom.window.HTMLElement,
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    old.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const element = dom.window.document.getElementById('root')!,
     root = createRoot(element);
   const render = async (nextScope = scope, suspended = false) => {
@@ -128,10 +125,7 @@ async function domFixture(client: FileCheckpointPort) {
     async close() {
       await act(async () => root.unmount());
       dom.window.close();
-      for (const [key, value] of old) {
-        if (value) Object.defineProperty(globalThis, key, value);
-        else Reflect.deleteProperty(globalThis, key);
-      }
+      restoreGlobals();
     },
   };
 }

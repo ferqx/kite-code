@@ -1,10 +1,8 @@
 import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
-import { fstatSync, readSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { canonicalJson } from '../json';
 import type { Json } from '../storage/types';
-import { closePrivate as closeSync, openPrivate, privateDirectory } from './files';
+import { verifyIntentDocument } from './intent-document';
 import { MaintenanceError } from './types';
 
 const invalid = () => new MaintenanceError('backup_file_recovery_intents_invalid');
@@ -231,41 +229,5 @@ export function verifyDesktopFileRecoveryRows(db: Database): void {
   }
 }
 export function verifyFileRecoveryIntentsDocument(path: string): void {
-  privateDirectory(dirname(path));
-  const fd = openPrivate(path);
-  try {
-    const before = fstatSync(fd, { bigint: true });
-    if (
-      (process.platform !== 'win32' && (Number(before.mode) & 0o777) !== 0o600) ||
-      before.nlink !== 1n ||
-      (process.getuid && before.uid !== BigInt(process.getuid())) ||
-      before.size > 16n * 1024n * 1024n
-    )
-      throw invalid();
-    const bytes = Buffer.alloc(Number(before.size));
-    let offset = 0;
-    while (offset < bytes.length) {
-      const size = readSync(fd, bytes, offset, bytes.length - offset, null);
-      if (!size) throw invalid();
-      offset += size;
-    }
-    const after = fstatSync(fd, { bigint: true });
-    if (
-      ['dev', 'ino', 'size', 'ctimeNs', 'mtimeNs', 'mode', 'uid', 'nlink'].some(
-        (key) => before[key as keyof typeof before] !== after[key as keyof typeof after],
-      )
-    )
-      throw invalid();
-    const value = object(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), [
-      'version',
-      'records',
-    ]);
-    if (value.version !== 1) throw invalid();
-    verifyFileRecoveryIntentRecords(value.records);
-  } catch (error) {
-    if (error instanceof MaintenanceError) throw error;
-    throw invalid();
-  } finally {
-    closeSync(fd);
-  }
+  verifyIntentDocument(path, invalid, verifyFileRecoveryIntentRecords);
 }

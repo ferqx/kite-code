@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 async function execute(argv: string[], cwd: string, home: string) {
@@ -45,6 +46,7 @@ test('actual single-file default Service protects loader companions without prot
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-protection-')));
   const home = join(root, 'home');
   mkdirSync(home, { mode: 0o700 });
+  const userConfiguration = ownedUserConfiguration(home);
   let provider: ReturnType<typeof Bun.serve> | undefined;
   let runtime = '';
   let completed = false;
@@ -96,6 +98,7 @@ test('actual single-file default Service protects loader companions without prot
       'storage/worker/main.js',
       'storage/worker/observer-preload.js',
       'storage/migrations/0001-baseline.sql',
+      'storage/migrations/0002-recovery-audit.sql',
     ]) {
       mkdirSync(join(root, path.substring(0, path.lastIndexOf('/'))), {
         recursive: true,
@@ -185,6 +188,8 @@ test('actual single-file default Service protects loader companions without prot
       ],
     });
     writeFileSync(configPath, configBytes, { mode: 0o600 });
+    // Retain the original Profile file as a protected target; models use the user source.
+    writeFileSync(userConfiguration.path, configBytes, { mode: 0o600 });
     const input = join(root, 'input.json');
     writeFileSync(
       input,
@@ -209,7 +214,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {launchPairedService} from ${JSON.stringify(join(built.root, 'node_modules/@kite-ai/service/paired.js'))};
 const p=JSON.parse(readFileSync(process.argv[2],'utf8'));
-const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000,spawnChild(argv,{env}){const child=Bun.spawn(argv,{env,stdin:'pipe',stdout:'pipe',stderr:'pipe'});const [copy,stderr]=child.stderr.tee();void new Response(copy).text().then(text=>{writeFileSync(${JSON.stringify(join(root, 'child-stderr-'))}+instanceId+'.log',text);if(text)console.error(text)});return {stdin:child.stdin,stdout:child.stdout,stderr,pid:child.pid,exited:child.exited,kill:signal=>child.kill(signal)};}});
+const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000,spawnChild(argv,{env}){const child=Bun.spawn(argv,{env:{...env,...${JSON.stringify(userConfiguration.homeEnvironment)}},stdin:'pipe',stdout:'pipe',stderr:'pipe'});const [copy,stderr]=child.stderr.tee();void new Response(copy).text().then(text=>{writeFileSync(${JSON.stringify(join(root, 'child-stderr-'))}+instanceId+'.log',text);if(text)console.error(text)});return {stdin:child.stdin,stdout:child.stdout,stderr,pid:child.pid,exited:child.exited,kill:signal=>child.kill(signal)};}});
 let h;const ownedPids=[];
 try {
  h=await launch('runtime-paired');ownedPids.push(h.pid);

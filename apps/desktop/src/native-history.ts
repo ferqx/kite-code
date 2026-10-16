@@ -114,16 +114,22 @@ export class NativeHistory {
       const previous = this.scope;
       this.close();
       const sameObservation = previous?.generation === generation && previous.epoch === epoch;
-      const same =
-        sameObservation &&
+      const sameReading =
+        previous?.generation === generation &&
         previous.storeId === scope.storeId &&
-        previous.sessionId === scope.sessionId;
+        previous.sessionId === scope.sessionId &&
+        // A preview may have just taken an inactive snapshot from the old epoch.
+        (sameObservation || previous.selection !== -1);
+      // Reset invalidates cached observations, while the active reading remains read-only.
+      // The new loading state still requires a full scan before actions resume.
       if (!sameObservation) this.cached.clear();
-      else if (!same) this.cached.save(previous.storeId, previous.sessionId, this.state.messages);
+      else if (!sameReading)
+        this.cached.save(previous.storeId, previous.sessionId, this.state.messages);
       this.entries = new Map(
-        (same ? this.state.messages : (this.cached.take(scope.storeId, scope.sessionId) ?? [])).map(
-          (message) => [message.id, message],
-        ),
+        (sameReading
+          ? this.state.messages
+          : (this.cached.take(scope.storeId, scope.sessionId) ?? [])
+        ).map((message) => [message.id, message]),
       );
       this.scope = scope;
       this.publish('loading');

@@ -13,11 +13,15 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { SqliteEngineObservation } from '@kite-ai/agent/sqlite-engine';
+import { createFixedModel } from '@kite-ai/ai';
 import type { Command, ModelOutputSnapshot, ServerInfo, SessionView } from '@kite-ai/client';
 import { inspectProcess } from '@kite-ai/service/daemon';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
   packTerminalBundle,
   unpackTerminalBundle,
@@ -29,6 +33,8 @@ import {
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
 import {
+  COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
+  materializeCompatibleTerminalPredecessor,
   materializeTerminalPredecessor,
   TERMINAL_PREDECESSOR_COMMIT,
 } from '../../fixtures/unified-agent/terminal-predecessor';
@@ -103,8 +109,8 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
     succeeded = false;
   let provider: ReturnType<typeof Bun.serve> | undefined;
   try {
-    const predecessor = await materializeTerminalPredecessor({ root, repositoryRoot });
-    expect(predecessor.provenance.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
+    const predecessor = await materializeCompatibleTerminalPredecessor({ root, repositoryRoot });
+    expect(predecessor.provenance.commit).toBe(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT);
     expect(predecessor.provenance.platform).toBe(process.platform);
     expect(predecessor.provenance.sourceRemoved).toBe(true);
     expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
@@ -115,7 +121,7 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
       bunExecutable: process.execPath,
     });
     expect(current.manifest.source.commit).toBe(currentHead);
-    expect(currentHead).not.toBe(TERMINAL_PREDECESSOR_COMMIT);
+    expect(currentHead).not.toBe(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT);
     expect(current.manifest.productVersion).toBe(predecessor.candidate.manifest.productVersion);
     expect(current.candidateId).not.toBe(predecessor.candidate.digest);
     const oldFiles = new Map(
@@ -206,12 +212,17 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
             provider: 'compatible',
             model: 'fixed',
             baseURL: `${provider.url.href}v1`,
+            // This finite Provider accepts the full original history, with no summary protocol.
+            modelCapabilities: { contextWindowTokens: 1_000_000 },
           },
         ],
       }),
       { mode: 0o600 },
     );
     const configBytes = readFileSync(configurationPath);
+    // The original predecessor reads Profile configuration; current code reads the user source.
+    const userConfiguration = ownedUserConfiguration(home);
+    writeFileSync(userConfiguration.path, configBytes, { mode: 0o600 });
     const installedRoots: string[] = [];
     const start = async (candidate: typeof old) => {
       const status = JSON.parse(
@@ -406,6 +417,7 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
     expect(existsSync(prefix)).toBe(false);
     expect(readFileSync(profile.databasePath)).toEqual(finalDatabase);
     expect(readFileSync(configurationPath)).toEqual(configBytes);
+    expect(readFileSync(userConfiguration.path)).toEqual(configBytes);
     console.log(
       `TERMINAL_REAL_CODE_COMPATIBILITY ${JSON.stringify({ prior: predecessor.provenance, current: current.manifest.source, candidates: [old.candidateId, newer.candidateId], readerHash, storeId: final.store.storeId, commandIds, runIds: final.view.runs.map((value) => value.id), modelExecutionIds: final.outputs.map((value) => value.executionId), fullBodyBytes: Buffer.byteLength(bodies[1]!), fullBodyHash: hash(bodies[1]!), requests: requestFacts, instances, stopped, exclusiveAfterStops: true, databaseInodeRetained: true, dataRestored: false, cleanup: 'confirmed' })}`,
     );
@@ -417,3 +429,165 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
     else console.log(`OWNED_TERMINAL_VERSION_FAILURE_ROOT ${root}`);
   }
 }, 360000);
+
+test('the original Terminal predecessor rejects recovery-audit schema without changing the current Store', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-reject-'))),
+    home = join(root, 'home'),
+    workspace = join(root, 'workspace'),
+    prefix = join(root, 'installed'),
+    socket = join(root, 'owned.sock'),
+    cli = join(prefix, 'bin/kite');
+  for (const path of [home, workspace]) mkdirSync(path, { mode: 0o700 });
+  const profile = selectProfile({
+    dataRoot: join(home, '.kite-code/unified-agent'),
+    profile: 'default',
+  });
+  const model = createFixedModel([
+    [
+      { type: 'text_delta', text: 'Original current-schema history 雪🙂' },
+      { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } },
+    ],
+  ]);
+  const store = await openSqliteStore(profile),
+    runtime = createRuntime({
+      store,
+      model,
+      modelId: 'fixed',
+      permissions: {
+        async authorize() {
+          return { allowed: true, revision: 'owned' };
+        },
+      },
+    });
+  let daemonLive = false,
+    succeeded = false;
+  try {
+    const expectedStoreId = (await store.getMetadata()).storeId;
+    await runtime.createWorkspace({
+      expectedStoreId,
+      id: 'workspace',
+      rootUri: `file://${workspace}`,
+      name: 'Schema rejection',
+    });
+    await runtime.createSession({
+      expectedStoreId,
+      commandId: 'create',
+      sessionId,
+      workspaceId: 'workspace',
+      subjectId: 'owner',
+      title: 'Original schema history',
+    });
+    await runtime.submitCommand({
+      expectedStoreId,
+      commandId: 'original',
+      sessionId,
+      subjectId: 'owner',
+      request: { kind: 'run.start', content: 'Retain this original history' },
+    });
+    await runtime.waitForCommand('original');
+    const before = await store.getView(sessionId),
+      metadata = await store.getMetadata();
+    expect(before.runs[0]!.status).toBe('completed');
+    expect(model.requests).toHaveLength(1);
+    await runtime.close();
+    const configuration = ownedUserConfiguration(home);
+    writeFileSync(configuration.path, '{"modelId":"fixed","models":[]}', { mode: 0o600 });
+    const configurationPath = join(profile.profilePath, 'config.jsonc');
+    writeFileSync(configurationPath, readFileSync(configuration.path), { mode: 0o600 });
+    const protectedFiles = [
+      profile.databasePath,
+      join(profile.profilePath, 'profile.json'),
+      configurationPath,
+      configuration.path,
+    ].map((path) => ({ path, bytes: readFileSync(path), inode: lstatSync(path).ino }));
+    const predecessor = await materializeTerminalPredecessor({ root, repositoryRoot });
+    expect(predecessor.provenance.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
+    expect(predecessor.provenance.sourceRemoved).toBe(true);
+    expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
+    const installed = await installTerminalBundle({
+      bundleRoot: predecessor.candidate.root,
+      prefix,
+    });
+    rmSync(predecessor.candidate.root, { recursive: true });
+    expect(existsSync(predecessor.candidate.root)).toBe(false);
+    const compiled = await Bun.build({
+      entrypoints: [
+        resolve(repositoryRoot, 'tests/fixtures/unified-agent/terminal-incompatible-store-read.ts'),
+      ],
+      target: 'bun',
+      packages: 'external',
+      outdir: join(root, 'reader'),
+      naming: 'read.js',
+    });
+    expect(compiled.success).toBe(true);
+    symlinkSync(
+      join(installed.releaseRoot, 'node_modules'),
+      join(root, 'reader/node_modules'),
+      'dir',
+    );
+    const started = JSON.parse(
+      await execute(
+        [cli, 'server', 'start', '--server', socket, '--workspace', workspace],
+        workspace,
+        home,
+      ),
+    );
+    daemonLive = true;
+    expect(started.state).toBe('accepting');
+    expect(started.runningBuildId).toBe(`terminal-${predecessor.candidate.digest}`);
+    const rejected = JSON.parse(
+      await execute(
+        [
+          join(installed.releaseRoot, predecessor.candidate.manifest.entries.runtime),
+          join(root, 'reader/read.js'),
+          profile.dataRoot,
+          socket,
+          sessionId,
+          `terminal-${predecessor.candidate.digest}`,
+        ],
+        workspace,
+        home,
+      ),
+    );
+    expect(rejected).toMatchObject({
+      code: 'store_incompatible',
+      historyCode: 'data_unavailable',
+      dataAvailability: 'unavailable',
+      buildId: `terminal-${predecessor.candidate.digest}`,
+      instanceId: started.instanceId,
+    });
+    await execute([cli, 'server', 'stop', '--server', socket], workspace, home);
+    daemonLive = false;
+    expect(inspectProcess(rejected.pid, rejected.startIdentity)).toBe('dead');
+    expect(
+      JSON.parse(await execute([cli, 'server', 'status', '--server', socket], workspace, home))
+        .state,
+    ).toBe('absent');
+    const lease = acquireArtifactAccess({ root: installed.releaseRoot, mode: 'exclusive' });
+    lease.release();
+    const current = await openSqliteStore({ ...profile, mode: 'readonly' });
+    try {
+      expect(await current.getMetadata()).toEqual(metadata);
+      expect(await current.getView(sessionId)).toEqual(before);
+    } finally {
+      await current.close();
+    }
+    for (const file of protectedFiles) {
+      expect(readFileSync(file.path)).toEqual(file.bytes);
+      expect(lstatSync(file.path).ino).toBe(file.inode);
+    }
+    expect(model.requests).toHaveLength(1);
+    await uninstallTerminalBundle(prefix);
+    for (const file of protectedFiles) expect(readFileSync(file.path)).toEqual(file.bytes);
+    succeeded = true;
+    console.log(
+      `TERMINAL_INCOMPATIBLE_PREDECESSOR_REJECTED ${JSON.stringify({ prior: predecessor.provenance, rejection: rejected, storeId: expectedStoreId, originalCommand: 'original', providerCalls: model.requests.length, dataUnchanged: true, originalProcessExited: true })}`,
+    );
+  } finally {
+    await runtime.close();
+    if (daemonLive)
+      await execute([cli, 'server', 'stop', '--server', socket], workspace, home).catch(() => {});
+    if (succeeded) rmSync(root, { recursive: true, force: true });
+    else console.error(`OWNED_TERMINAL_SCHEMA_REJECTION_FAILURE_ROOT ${root}`);
+  }
+}, 240_000);

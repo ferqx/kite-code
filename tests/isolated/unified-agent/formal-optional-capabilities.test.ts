@@ -15,6 +15,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { candidate, probe } from '../../fixtures/formal-optional-capabilities/candidate';
 
 function runId(receipt: unknown) {
@@ -32,6 +33,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
     const root = realpathSync(mkdtempSync('/private/tmp/kite-formal-optional-')),
       home = join(root, 'home');
     mkdirSync(home, { mode: 0o700 });
+    const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
@@ -133,12 +135,13 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           ],
           tools,
         });
-      const configPath = join(profile.profilePath, 'config.jsonc');
+      const configPath = userConfiguration.path;
       writeFileSync(configPath, config([{ id: 'shell.launch', definitionVersion: '1' }]), {
         mode: 0o600,
       });
       const b = built.bundle;
       service = await launchPairedService({
+        spawnChild: userConfiguration.spawnChild,
         profile,
         entrypoint: join(b.root, b.manifest.entries.service),
         executable: join(b.root, b.manifest.entries.runtime),

@@ -3,6 +3,14 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  assertCompatiblePredecessorInputPaths,
+  assertCompatiblePredecessorLockedInput,
+  COMPATIBLE_PREDECESSOR_INPUT_PATHS,
+  COMPATIBLE_PREDECESSOR_MIGRATIONS,
+} from '../../fixtures/unified-agent/compatible-predecessor-input';
+import { refinePredecessorWorkspaceDeclarations } from '../../fixtures/unified-agent/predecessor-workspace-declarations';
+import {
+  COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
   matchTerminalPredecessorInput,
   TERMINAL_PREDECESSOR_COMMIT,
   withoutReviewedTuiLockDeclarations,
@@ -121,7 +129,11 @@ test('predecessor permits only the exact parser declarations and pinned complete
     const current = readFileSync(resolve(repository, path));
     expect(
       createHash('sha256')
-        .update(path === 'bun.lock' ? withoutReviewedTuiLockDeclarations(current)! : current)
+        .update(
+          path === 'bun.lock'
+            ? withoutReviewedTuiLockDeclarations(current)!
+            : refinePredecessorWorkspaceDeclarations(path, current)!.bytes,
+        )
         .digest('hex'),
     ).toBe(
       path === 'bun.lock'
@@ -191,5 +203,161 @@ test('UI declarations refine only the exact reviewed workspace manifest; arbitra
   ]) {
     expect(changed).not.toBe(text);
     expect(matchTerminalPredecessorInput(path, prior.stdout, bytes(changed))).toBeUndefined();
+  }
+});
+
+test('current workspace refinements preserve pinned bytes and reject incomplete or misplaced declarations', () => {
+  const hashes: Record<string, string> = {
+    'bun.lock': 'cc1b2b43f874bca59043e4c2090675c2b0c4c4033d9d1cd19da95b5ffc67d6d1',
+    'packages/agent/package.json':
+      'eeb75457d1fa24a49a6d806710c0de6eef76f8af4743e8086b20e2dfeea7a8be',
+    'packages/ui/package.json': 'f2ef2bdb1eca663e29c5f05b1fd595bab911287136a2a698956e3d2aa90b2411',
+  };
+  for (const [path, sha256] of Object.entries(hashes)) {
+    const current = readFileSync(resolve(repository, path)),
+      text = current.toString('utf8'),
+      original = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+        cwd: repository,
+      });
+    expect(original.exitCode).toBe(0);
+    expect(createHash('sha256').update(current).digest('hex')).toBe(sha256);
+    const refinement = refinePredecessorWorkspaceDeclarations(path, current)!;
+    expect(refinement).toBeDefined();
+    expect(refinement.commits).toContain('cf6b4946e');
+    expect(matchTerminalPredecessorInput(path, original.stdout, current)).toBeDefined();
+    const changes = [text.replace('"name":', '"unexpected": true,\n  "name":'), `${text}\n`];
+    if (path === 'packages/agent/package.json')
+      changes.push(
+        text.replace('    "./context-estimate": "./src/context-estimate.ts"\n', ''),
+        text.replace(' ./src/context-estimate.ts ', ' '),
+        text.replace('"gpt-tokenizer": "^3.4.0"', '"gpt-tokenizer": "^3.4.1"'),
+        text.replace('./src/context-estimate.ts"', './src/other.ts"'),
+        text.replace(
+          '    "./context-estimate": "./src/context-estimate.ts"',
+          '    "./context-estimate": "./src/context-estimate.ts",\n    "./context-estimate": "./src/context-estimate.ts"',
+        ),
+      );
+    else if (path === 'packages/ui/package.json')
+      changes.push(
+        text.replace('    "./desktop/markdown": "./src/desktop/markdown-parser.ts",\n', ''),
+        text.replace('    "ink-scroll-list": "^0.4.1",\n', ''),
+        text.replace('"ink-scroll-list": "^0.4.1"', '"ink-scroll-list": "^0.4.2"'),
+        text.replace('./src/desktop/markdown-parser.ts"', './src/desktop/other.ts"'),
+        text
+          .replace('    "./desktop/markdown": "./src/desktop/markdown-parser.ts",\n', '')
+          .replace(
+            '  "dependencies": {\n',
+            '  "dependencies": {\n    "./desktop/markdown": "./src/desktop/markdown-parser.ts",\n',
+          ),
+        text
+          .replace('    "ink-scroll-list": "^0.4.1",\n', '')
+          .replace('  "exports": {\n', '  "exports": {\n    "ink-scroll-list": "^0.4.1",\n'),
+        text.replace(
+          '    "ink-scroll-list": "^0.4.1",\n',
+          '    "ink-scroll-list": "^0.4.1",\n    "ink-scroll-list": "^0.4.1",\n',
+        ),
+      );
+    else {
+      // Change only the selected workspace, leaving the root declarations untouched.
+      for (const [workspace, declaration] of [
+        ['packages/agent', '        "gpt-tokenizer": "^3.4.0",\n'],
+        ['packages/ui', '        "ink-scroll-list": "^0.4.1",\n'],
+      ] as const) {
+        const start = text.indexOf(`    "${workspace}": {`);
+        expect(start).toBeGreaterThan(0);
+        for (const replacement of ['', declaration + declaration, declaration.replace('^', '~')])
+          changes.push(text.slice(0, start) + text.slice(start).replace(declaration, replacement));
+      }
+      changes.splice(0, 1, text.replace('"gpt-tokenizer": "^3.4.0"', '"gpt-tokenizer": "^3.4.1"'));
+      changes.push(text.replace('gpt-tokenizer@3.4.0', 'gpt-tokenizer@3.4.1'));
+      const start = text.indexOf('    "packages/agent": {'),
+        end = text.indexOf('\n    },\n', start),
+        declaration = '        "gpt-tokenizer": "^3.4.0",\n';
+      const moved = text
+        .slice(start, end)
+        .replace(declaration, '')
+        .replace('      "devDependencies": {\n', `      "devDependencies": {\n${declaration}`);
+      changes.push(text.slice(0, start) + moved + text.slice(end));
+    }
+    for (const changed of changes) {
+      expect(changed).not.toBe(text);
+      expect(matchTerminalPredecessorInput(path, original.stdout, bytes(changed))).toBeUndefined();
+    }
+  }
+});
+
+test('compatible real predecessor pins all eleven raw inputs and both exact migration assets without refinements', () => {
+  expect(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT).toBe('4a4c0e440b2098e5b4ec58c5831452773b39228f');
+  expect(COMPATIBLE_PREDECESSOR_INPUT_PATHS).toHaveLength(11);
+  expect(() =>
+    assertCompatiblePredecessorInputPaths(COMPATIBLE_PREDECESSOR_INPUT_PATHS),
+  ).not.toThrow();
+  expect(() =>
+    assertCompatiblePredecessorInputPaths(COMPATIBLE_PREDECESSOR_INPUT_PATHS.slice(1)),
+  ).toThrow('compatible_predecessor_input_inventory_changed');
+  expect(() =>
+    assertCompatiblePredecessorInputPaths([...COMPATIBLE_PREDECESSOR_INPUT_PATHS, 'unreviewed']),
+  ).toThrow('compatible_predecessor_input_inventory_changed');
+  expect(() =>
+    assertCompatiblePredecessorInputPaths([...COMPATIBLE_PREDECESSOR_INPUT_PATHS].reverse()),
+  ).toThrow('compatible_predecessor_input_inventory_changed');
+  for (const path of [
+    ...COMPATIBLE_PREDECESSOR_INPUT_PATHS,
+    ...COMPATIBLE_PREDECESSOR_MIGRATIONS.map((item) => item.path),
+  ]) {
+    const original = Bun.spawnSync(
+      ['git', 'show', `${COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
+      { cwd: repository },
+    );
+    expect(original.exitCode).toBe(0);
+    const current = readFileSync(resolve(repository, path));
+    const sha256 = createHash('sha256').update(current).digest('hex');
+    expect(assertCompatiblePredecessorLockedInput(path, original.stdout, current)).toEqual({
+      path,
+      sha256,
+      currentSha256: sha256,
+      match: 'identical',
+    });
+    const migration = COMPATIBLE_PREDECESSOR_MIGRATIONS.find((item) => item.path === path);
+    if (migration) expect(sha256).toBe(migration.sha256);
+    for (const changed of [Buffer.concat([current, Buffer.from('\n')]), current.subarray(1)])
+      expect(() => assertCompatiblePredecessorLockedInput(path, original.stdout, changed)).toThrow(
+        `compatible_predecessor_input_changed:${path}`,
+      );
+  }
+  expect(() => assertCompatiblePredecessorLockedInput('unreviewed', previous, previous)).toThrow(
+    'compatible_predecessor_input_changed:unreviewed',
+  );
+});
+
+test('unmerged recovery and UI commits cannot replace the complete compatible predecessor', () => {
+  const path = 'packages/ui/package.json';
+  const recoveryOnly = Bun.spawnSync(
+    ['git', 'show', `30e7ec16a63de354f61677093566b77ff7fe4796:${path}`],
+    { cwd: repository },
+  );
+  expect(recoveryOnly.exitCode).toBe(0);
+  expect(() =>
+    assertCompatiblePredecessorLockedInput(
+      path,
+      recoveryOnly.stdout,
+      readFileSync(resolve(repository, path)),
+    ),
+  ).toThrow(`compatible_predecessor_input_changed:${path}`);
+  const migration = COMPATIBLE_PREDECESSOR_MIGRATIONS[1];
+  const uiOnly = Bun.spawnSync(['git', 'show', `21fd426d7:${migration.path}`], { cwd: repository });
+  expect(uiOnly.exitCode).not.toBe(0);
+  expect(() =>
+    assertCompatiblePredecessorLockedInput(
+      migration.path,
+      uiOnly.stdout,
+      readFileSync(resolve(repository, migration.path)),
+    ),
+  ).toThrow(`compatible_predecessor_input_changed:${migration.path}`);
+  for (const migration of COMPATIBLE_PREDECESSOR_MIGRATIONS) {
+    const malformed = Buffer.from('identical but not a supported migration');
+    expect(() =>
+      assertCompatiblePredecessorLockedInput(migration.path, malformed, malformed),
+    ).toThrow(`compatible_predecessor_input_changed:${migration.path}`);
   }
 });
