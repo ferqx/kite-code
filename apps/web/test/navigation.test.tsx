@@ -3,6 +3,7 @@ import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { installGlobals } from './globals.fixture';
 
 async function fixture(preference?: string, width = 1024, unavailableStorage = false) {
   const dom = new JSDOM('<div id="root"></div>', {
@@ -22,8 +23,7 @@ async function fixture(preference?: string, width = 1024, unavailableStorage = f
         throw Error('denied');
       },
     });
-  const previous = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     HTMLElement: dom.window.HTMLElement,
@@ -40,10 +40,7 @@ async function fixture(preference?: string, width = 1024, unavailableStorage = f
       disconnect() {}
     },
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const { WebPage } = await import('../src/page');
   const reads: string[] = [];
   const client = {
@@ -162,10 +159,7 @@ async function fixture(preference?: string, width = 1024, unavailableStorage = f
     async close() {
       await act(async () => root.unmount());
       dom.window.close();
-      for (const [key, descriptor] of previous) {
-        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-        else Reflect.deleteProperty(globalThis, key);
-      }
+      restoreGlobals();
     },
   };
 }

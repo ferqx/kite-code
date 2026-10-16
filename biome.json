@@ -5,6 +5,9 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
+  "files": {
+    "includes": ["**", "!packages/client/src/generated/validators.js"]
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",

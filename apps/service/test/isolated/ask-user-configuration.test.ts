@@ -46,6 +46,8 @@ async function fixture(
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   const requests: Record<string, unknown>[] = [];
+  let completionWaiting = false;
+  let releaseCompletion: (() => void) | undefined;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -53,6 +55,23 @@ async function fixture(
       const body = (await request.json()) as Record<string, unknown>;
       requests.push(body);
       const messages = body.messages as { role: string; content?: string }[];
+      if (input.planning) {
+        for (const message of messages) {
+          let diagnostic: { kind?: string };
+          try {
+            diagnostic = JSON.parse(String(message.content));
+          } catch {
+            continue;
+          }
+          if (diagnostic?.kind !== 'completion_diagnostic') continue;
+          // The answered question cannot satisfy planning; inspect its original repair turn.
+          await new Promise<void>((resolve) => {
+            releaseCompletion = resolve;
+            completionWaiting = true;
+          });
+          break;
+        }
+      }
       const results = messages.filter((message) => message.role === 'tool');
       let call: { name: string; input: unknown } | undefined;
       if (!results.length)
@@ -209,7 +228,18 @@ async function fixture(
         JSON.stringify({ ...config, tools: [{ id: 'ask_user', enabled: false }] }),
       );
     },
+    async waitForCompletionModel() {
+      const deadline = Date.now() + 5000;
+      while (!completionWaiting) {
+        if (Date.now() > deadline) throw Error('ask_user_completion_model_deadline');
+        await Bun.sleep(10);
+      }
+    },
+    resumeCompletionModel() {
+      releaseCompletion?.();
+    },
     async close() {
+      releaseCompletion?.();
       client.disposeNetwork();
       await service.close();
       provider.stop(true);
@@ -327,7 +357,8 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         expectedRevision: card.revision,
         answer: { kind: 'question', answers: { q1: 'q1-o1', q2: { text: 'q1-o1' } } },
       });
-      await f.runtime.waitForCommand('run', { timeoutMs: 5000 });
+      if (mode === 'accept_edits') await f.waitForCompletionModel();
+      else await f.runtime.waitForCommand('run', { timeoutMs: 5000 });
       expect(f.requests).toHaveLength(mode === 'accept_edits' ? 3 : 2);
       const messages = f.requests[1]!.messages as { role: string; content: string }[];
       expect(JSON.parse(messages.find((item) => item.role === 'tool')!.content)).toMatchObject({
@@ -343,7 +374,9 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         const models = view.executions.filter((execution) => execution.kind === 'model');
         expect(models).toHaveLength(3);
         expect(
-          models.every((execution) => execution.status === 'succeeded' && execution.attempt === 1),
+          models
+            .slice(0, 2)
+            .every((execution) => execution.status === 'succeeded' && execution.attempt === 1),
         ).toBe(true);
         const sources = (execution: (typeof models)[number]) =>
           (
@@ -356,6 +389,8 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         );
         expect(completionModels).toHaveLength(1);
         const completion = completionModels[0]!;
+        expect(completion.status).toBe('dispatching');
+        expect(completion.attempt).toBe(1);
         expect(completion.runId).toBe(run.id);
         expect(completion.sessionId).toBe('s');
         expect(completion.originStoreId).toBe(f.expectedStoreId);
@@ -380,9 +415,33 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
           .interactions;
         expect(interactions).toHaveLength(1);
         expect(interactions[0]).toMatchObject({ id: card.id, state: 'answered' });
+        const pending = (await f.store.getRun(run.id))!;
+        expect(pending.isActive).toBe(true);
+        expect(pending.status).toBe('running');
+        expect(
+          pending.requirements.some(
+            (ref) => ref.requirementId === 'plan.required' && ref.runId === run.id,
+          ),
+        ).toBe(true);
+        await f.client.cancelRun('s', {
+          expectedStoreId: f.expectedStoreId,
+          commandId: 'cancel-original-plan',
+          kind: 'run.cancel',
+          runId: run.id,
+        });
+        f.resumeCompletionModel();
+        await f.runtime.waitForCommand('run', { timeoutMs: 5000 });
+        const cancelled = (await f.store.getRun(run.id))!;
+        expect(cancelled.id).toBe(pending.id);
+        expect(cancelled.status).toBe('cancelled');
+        expect(cancelled.requirements).toEqual(pending.requirements);
+        expect((await f.client.getExecution(completion.id)).status).toBe('cancelled');
+        expect(f.requests).toHaveLength(3);
       }
-      // Required planning can still reject completion; it did not block the question.
-      expect(run.status).toBe(mode === 'accept_edits' ? 'failed' : 'completed');
+      // The exact answer succeeded independently of the still-required plan.
+      expect((await f.client.getRun(run.id)).status).toBe(
+        mode === 'accept_edits' ? 'cancelled' : 'completed',
+      );
       expect(
         (await f.client.listPermissionGrants('s', { storeId: f.expectedStoreId })).items,
       ).toHaveLength(0);

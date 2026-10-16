@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BackgroundExecutions } from '../../src/background';
+import { installGlobals } from '../globals.fixture';
 
 function item(): BackgroundExecutionItem {
   const session = {
@@ -63,15 +64,11 @@ test('background UI uses exact metadata, opens original child, reads full saved 
     url: 'http://localhost',
     pretendToBeVisual: true,
   });
-  const previous = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const root = createRoot(dom.window.document.getElementById('root')!);
   const opened: string[] = [],
     calls: string[] = [],
@@ -228,9 +225,6 @@ test('background UI uses exact metadata, opens original child, reads full saved 
     releaseOutput();
     await act(async () => root.unmount());
     dom.window.close();
-    for (const [key, descriptor] of previous) {
-      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-      else delete (globalThis as Record<string, unknown>)[key];
-    }
+    restoreGlobals();
   }
 });

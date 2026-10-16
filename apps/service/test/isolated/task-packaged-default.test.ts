@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
+import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(label: string, read: () => Promise<T>, done: (value: T) => boolean) {
   const deadline = Date.now() + 45000;
@@ -141,11 +141,17 @@ test('source-free default Task preserves full child result and emits exactly one
     },
   });
   writeFileSync(
-    userConfigurationPath(home),
+    ownedUserConfiguration(home).path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
-        { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
+        {
+          id: 'fixed',
+          provider: 'compatible',
+          model: 'fixed',
+          baseURL: `${provider.url.href}v1`,
+          modelCapabilities: { contextWindowTokens: 1000000 },
+        },
       ],
       tools: [{ id: 'task', definitionVersion: '1' }],
     }),

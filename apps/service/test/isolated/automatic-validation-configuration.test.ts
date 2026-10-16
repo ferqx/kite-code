@@ -23,6 +23,7 @@ async function fixture(options: {
   enabled?: boolean;
   automaticValidation?: NonNullable<PlanningOptions['automaticValidation']>;
   tools?: string[];
+  pauseAtModelStep?: number;
   script?: (step: number, f: Fixture) => Promise<Call>;
 }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-automatic-')));
@@ -31,6 +32,8 @@ async function fixture(options: {
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   const requests: Record<string, unknown>[] = [];
+  let pausedRequest: Record<string, unknown> | null = null;
+  let releaseModel: (() => void) | undefined;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -41,6 +44,12 @@ async function fixture(options: {
         : requests.length === 1
           ? { name: 'files.write', input: { path: 'result.txt', content: 'first', base: null } }
           : null;
+      if (options.pauseAtModelStep === requests.length - 1) {
+        pausedRequest = requests.at(-1)!;
+        await new Promise<void>((resolve) => {
+          releaseModel = resolve;
+        });
+      }
       const chunk = {
         id: 'local',
         object: 'chat.completion.chunk',
@@ -180,6 +189,17 @@ async function fixture(options: {
         request: { kind: 'run.start', content: 'real governed file work' },
       });
     },
+    async pausedModel() {
+      const deadline = Date.now() + 5000;
+      while (!pausedRequest) {
+        if (Date.now() > deadline) throw new Error('automatic_configuration_model_gate_timeout');
+        await Bun.sleep(5);
+      }
+      return pausedRequest;
+    },
+    resumeModel() {
+      releaseModel?.();
+    },
     async done() {
       await runtime.waitForCommand('work', { timeoutMs: 5000 });
       return store.getRun((await f.runId())!);
@@ -204,6 +224,7 @@ async function fixture(options: {
       });
     },
     async close() {
+      releaseModel?.();
       await runtime.close();
       await workspaceSerialLocks.close();
       provider.stop(true);
@@ -322,6 +343,7 @@ test('default off ignores JSONC governance and ordinary chat has no mutation obl
 test('missing selected checker stays inconclusive and unloading the factory cannot erase the original required policy', async () => {
   const f = await fixture({
     tools: ['files.write', 'validation.auto_check'],
+    pauseAtModelStep: 2,
     script: async (step, current): Promise<Call> => {
       if (step === 0)
         return { name: 'files.write', input: { path: 'result.txt', content: 'first', base: null } };
@@ -331,8 +353,11 @@ test('missing selected checker stays inconclusive and unloading the factory cann
   });
   try {
     await f.submit();
-    const run = await f.done();
-    expect(run?.status).not.toBe('completed');
+    const request = await f.pausedModel();
+    const run = await f.store.getRun((await f.runId())!);
+    expect(run?.status).toBe('running');
+    expect(run?.isActive).toBe(true);
+    expect(JSON.stringify(request.messages)).toContain('completion_diagnostic');
     expect(run?.requirements.some((x) => x.requirementId === 'mutation.required')).toBe(true);
     expect((await f.head())!.value).toMatchObject({ lastOutcome: 'inconclusive' });
     expect(
@@ -341,6 +366,17 @@ test('missing selected checker stays inconclusive and unloading the factory cann
       ),
     ).toHaveLength(0);
     expect(readFileSync(join(f.workspace, 'result.txt'), 'utf8')).toBe('first');
+    await f.runtime.cancelRun({
+      ...f.base,
+      commandId: 'cancel-original-missing-checker',
+      runId: run!.id,
+    });
+    f.resumeModel();
+    const cancelled = await f.done();
+    expect(cancelled?.id).toBe(run!.id);
+    expect(cancelled?.status).toBe('cancelled');
+    expect(cancelled?.requirements).toEqual(run!.requirements);
+    expect(f.requests).toHaveLength(3);
   } finally {
     await f.close();
   }

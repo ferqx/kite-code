@@ -15,6 +15,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
   buildTerminalBundle,
   verifyTerminalBundle,
@@ -72,6 +73,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
   };
   try {
     mkdirSync(root, { recursive: true, mode: 0o700 });
+    const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const workspace = join(root, 'workspace');
     mkdirSync(join(workspace, 'effects'), { recursive: true, mode: 0o700 });
     const candidate = candidateRoot
@@ -170,7 +172,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
     });
     cleanup.push(async () => provider.stop(true));
     writeFileSync(
-      join(profile.profilePath, 'config.jsonc'),
+      userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [
@@ -199,12 +201,12 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         executable: join(candidate.root, candidate.manifest.entries.runtime),
         instanceId: `continuous-default-${index}`,
         spawnChild(command, options) {
-          // Exact original default spawn; observation supplies no runtime/Tool/permission adapter.
+          // Default spawn with owned user configuration; observation supplies no runtime/Tool/permission adapter.
           const child = Bun.spawn([...command], {
             stdin: 'pipe',
             stdout: 'pipe',
             stderr: 'pipe',
-            env: options.env,
+            env: { ...options.env, ...userConfiguration.homeEnvironment },
           });
           spawnObservation = observeNativeProcess(child.pid);
           return child;

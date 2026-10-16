@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { createFileRecoveryPort } from '../../host/file-recovery';
 import { openFileRecoveryJournal } from '../../host/file-recovery-intents';
 
@@ -19,10 +20,9 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) 
 }
 test('actual default file recovery engine seals both legs before POST and cold lookup cannot start Fork', async () => {
   const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-file-fork-'));
-  const workspace = join(root, 'workspace'),
-    home = join(root, 'home');
+  const workspace = join(root, 'workspace');
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(workspace);
-  mkdirSync(home, { mode: 0o700 });
   const file = join(workspace, 'original.txt');
   writeFileSync(file, 'original bytes\r\n');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -73,7 +73,7 @@ test('actual default file recovery engine seals both legs before POST and cold l
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -92,13 +92,7 @@ test('actual default file recovery engine seals both legs before POST and cold l
     buildId: 'file-fork-receipt',
     apiMajor: 1,
     requiredCapabilities: ['extensions_actions', 'extension_queries'],
-    spawnChild: (command, { env }) =>
-      Bun.spawn([...command], {
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: { ...env, HOME: home },
-      }),
+    spawnChild: userConfiguration.spawnChild,
   });
   try {
     const client = service.client,

@@ -316,7 +316,19 @@ for (const decision of ['replan', 'waive'] as const)
       originalGets = 0;
     const lines: string[] = [];
     let ownedPid: number | undefined;
+    const originalSpawn = Bun.spawn;
     try {
+      // Bun caches homedir(), so changing this process's HOME cannot select the child config.
+      Bun.spawn = ((...args: unknown[]) => {
+        if (Array.isArray(args[0]) && args[0].includes(f.artifact.entrypoint)) {
+          const options = (args[1] ?? {}) as { env?: Record<string, string> };
+          return Reflect.apply(originalSpawn, Bun, [
+            args[0],
+            { ...options, env: { ...options.env, ...f.userConfiguration.homeEnvironment } },
+          ]);
+        }
+        return Reflect.apply(originalSpawn, Bun, args);
+      }) as typeof Bun.spawn;
       const code = await runSelectedCLI({
         arguments: parseCLIArguments([
           'run',
@@ -351,7 +363,22 @@ for (const decision of ['replan', 'waive'] as const)
           ownedPid = connection.pid;
           const client = connection.client;
           const post = client.answerInteraction.bind(client),
-            get = client.getCommand.bind(client);
+            get = client.getCommand.bind(client),
+            listSkills = client.listAllSkills.bind(client);
+          client.listAllSkills = async (...args) => {
+            const page = await listSkills(...args);
+            expect(page.entries).toContainEqual(
+              expect.objectContaining({
+                workflow: expect.objectContaining({
+                  name: 'alpha-skill',
+                  state: 'available',
+                  manualAllowed: true,
+                  emptyInputValid: true,
+                }),
+              }),
+            );
+            return page;
+          };
           client.answerInteraction = async (session, id, request, options) => {
             const response = await post(session, id, request, options);
             if (request.answer.kind === 'question') {
@@ -544,6 +571,7 @@ for (const decision of ['replan', 'waive'] as const)
       }
       expect(() => process.kill(ownedPid!, 0)).toThrow();
     } finally {
+      Bun.spawn = originalSpawn;
       stdin.destroy();
       f.close();
     }

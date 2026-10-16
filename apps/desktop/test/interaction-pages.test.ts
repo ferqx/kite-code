@@ -4,6 +4,7 @@ import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { createDesktopController } from '../src/controller';
 import type { NativeState } from '../src/native-bridge';
+import { sessionChange } from './native-change.fixture';
 
 const card = (id: string): Interaction => ({
   id,
@@ -139,7 +140,7 @@ test('Native Main automatic change refresh re-reads the visible later page rathe
   f.client.connect = async () => f.client.serverInfo!;
   f.client.observe = async (options) => {
     trigger = () => {
-      void options.onChange({} as Parameters<typeof options.onChange>[0]);
+      void options.onChange(sessionChange('s'));
     };
     await new Promise<void>((resolve) =>
       options.signal!.addEventListener('abort', () => resolve(), { once: true }),

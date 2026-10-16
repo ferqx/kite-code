@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 async function execute(argv: string[], cwd: string, home: string) {
@@ -41,6 +42,7 @@ test('actual candidate default paired and daemon children protect closure and re
   const root = realpathSync(mkdtempSync('/private/tmp/kite-runtime-protection-'));
   const home = join(root, 'home');
   mkdirSync(home, { mode: 0o700 });
+  const userConfiguration = ownedUserConfiguration(home);
   let provider: ReturnType<typeof Bun.serve> | undefined;
   let daemonStarted = false;
   let runtime = '',
@@ -144,6 +146,8 @@ test('actual candidate default paired and daemon children protect closure and re
       ],
     });
     writeFileSync(configPath, configBytes, { mode: 0o600 });
+    // Retain the original Profile file as a protected target; models use the user source.
+    writeFileSync(userConfiguration.path, configBytes, { mode: 0o600 });
     const input = join(root, 'input.json');
     writeFileSync(
       input,
@@ -165,7 +169,7 @@ import {acquireArtifactAccess} from ${JSON.stringify(join(built.root, 'node_modu
 const p=JSON.parse(readFileSync(process.argv[2],'utf8'));
 const blocked=()=>assert.throws(()=>acquireArtifactAccess({root:p.root,mode:'exclusive'}),e=>e.code==='owner_busy');
 const free=()=>acquireArtifactAccess({root:p.root,mode:'exclusive'}).release();
-const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000});
+const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000,spawnChild(argv,{env}){return Bun.spawn(argv,{env:{...env,...${JSON.stringify(userConfiguration.homeEnvironment)}},stdin:'pipe',stdout:'pipe',stderr:'pipe'});}});
 let h;
 try {
  free();h=await launch('runtime-paired');blocked();

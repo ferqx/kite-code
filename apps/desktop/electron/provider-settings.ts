@@ -144,7 +144,7 @@ export class NativeProviderSettings {
     }
     const provider = observed.facts.providers.find((entry) => entry.id === operation.provider);
     const connection = provider?.connections.find((entry) => entry.id === operation.connectionId);
-    if (!provider || (operation.connectionId !== null && (!connection || !connection.canWrite)))
+    if (!provider || (operation.connectionId !== null && !connection?.canWrite))
       throw new ClientError('provider_settings_override');
     if (
       (operation.credential === 'replace') !== (secret !== undefined) ||

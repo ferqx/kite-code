@@ -658,7 +658,7 @@ Native 有独立分页 Context reader，因此仅此宿主以 `readContextOnSele
 
 原生历史由 [NativeHistory](src/native-history.ts) 分页读取全部公开记录，固定原 Store、Session、选择代次与 highWaterSeq。每页仍核原身份、严格序号与游标；完整扫描后以本次结果精确替换该高水位的阅读快照，后台校准期间保留上次已发布正文，已消失记录不会残留。离开会话缓存及同会话新范围复用也只取已发布快照，不把进行中的前缀提前展示；实际失败才合入已经合法读到的正文并撤除操作资格。完整会话时间线与当前 Model context 分开，rewind 不自动隐藏原消息。当前选定会话不设累计记录数或字节截断，首尾原文不会被截断替代。
 
-[inactive cache](src/native-history-cache.ts)仅保存非当前数据，最多12项、64MiB保守载荷估算、单项16MiB；命中通过 take 转交活动视图，离开时重新入队，空历史可缓存，超预算历史仍可完整阅读但离开后不保留。generation 或 history epoch 改变清空旧数据；确认空间移除时淘汰所属 Store 的缓存与活动正文，卸载清全部引用。`close()`只取消读取并撤销该次校准标记，随后同一阅读选择可完整恢复校准。固定水位相同仍重新核全部历史，不以缓存或序号授予写入资格。[缓存回归](test/native-history-cache.test.ts)核100会话轮转与字节预算，[历史回归](test/native-history.test.ts)核暂停恢复、EOF替换、失败前缀与迟到隔离；[主子导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)核活动子页、父读取暂停、草稿和监听释放。
+[inactive cache](src/native-history-cache.ts)仅保存非当前数据，最多12项、64MiB保守载荷估算、单项16MiB；命中通过 take 转交活动视图，离开时重新入队，空历史可缓存，超预算历史仍可完整阅读但离开后不保留。generation 改变清空旧正文与缓存；history epoch 改变仍清非当前缓存，同一 generation／Store／Session 已发布的活动正文保留为只读阅读，刚由 preview 取出的旧非当前快照不能跨 epoch 冒充活动正文。新 scope 仍从零完整校准，只有新 EOF 才恢复完整读取资格；取舍归[历史 reset 阅读决定](../../.agents/notes/implemented/bug-fix/2026-10-16-native-history-reset-reading.md)。确认空间移除时淘汰所属 Store 的缓存与活动正文，卸载清全部引用。`close()`只取消读取并撤销该次校准标记，随后同一阅读选择可完整恢复校准。固定水位相同仍重新核全部历史，不以缓存或序号授予写入资格。[缓存回归](test/native-history-cache.test.ts)核100会话轮转与字节预算，[历史回归](test/native-history.test.ts)核暂停恢复、EOF替换、失败前缀与迟到隔离；[主子导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)核活动子页、父读取暂停、草稿和监听释放。
 
 [Main](electron/native-caller.ts) 每页仍执行 4MiB IPC 预算及公开回应校验，过大时只在原游标和高水位缩小 GET 页；已通过校验的页大小仅在同一 generation／selection／Session／Store／highWater／readId 内单调保留，后页仍重新读取和校验全部正文。范围变化、取消、关闭或新读取重置该限制；单项目无法传输时明确未完成。切换只关闭自己的读取，迟到旧页不能进入新会话，也不取消业务执行。取舍与既有观察刷新共同归[完整正文刷新决定](../../.agents/notes/implemented/bug-fix/2026-10-08-native-observation-output-refresh.md)。
 
@@ -790,6 +790,8 @@ Profile 无三项 raw MCP 文件时，DB6 离线备份使用专属 manifest v14�
 原意图、两个介质结果和临时选择的长期取舍见[已实施决定](../../.agents/notes/implemented/architecture/2026-10-06-native-provider-intents-and-next-run-selection.md)。
 
 ## Native 公共扩展完整能力
+
+Model 输入／输出、人工卡附件、后台子会话与扩展正文的 renderer 分片传输共用私有 [有限字节 reader](src/native-body-chunks.ts)。它只核原 readId／kind、base64、64KiB 分片、offset 前进与准确 EOF；打开／关闭读取、原 scope／generation／selection、SHA 与 UTF-8／业务身份核验仍归各 reader。扩展保留格式无效与内容不完整两类原错误，不由字节复用授予额外读取或执行权限。[扩展 reader 回归](test/isolated/native-extensions-dom.test.tsx)覆盖坏 base64、异读身份、零进展、提前／缺失 EOF 和原关闭归属。
 
 [NativeDesktop](src/native.tsx) 的自动测试侧栏“会话工具→扩展能力”现消费已注册目录、公共 `ActionInputForm` 和 `PublicViewCard`，通过固定 [协议](src/extensions-bridge.ts)、[IPC](electron/native-ipc.ts) 与 [Main 叶子](electron/extensions.ts) 完成动作表单、原 Command／Execution 状态、注册 Query、完整通用结果和原结果动作。没有按参考扩展业务增加 Client／Service／内核方法；参考样本不进入默认装配。
 

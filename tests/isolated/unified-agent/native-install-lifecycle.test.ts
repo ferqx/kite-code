@@ -21,6 +21,7 @@ import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-asset
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 import { readCLIRegistration } from '../../../apps/cli/host/cli-registration';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { packNativeBundle, unpackNativeBundle } from '../../../scripts/release/native-archive';
 import {
   installNativeBundle,
@@ -42,6 +43,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       home = join(root, 'home'),
       workspace = join(home, 'workspace');
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
         dataRoot: join(home, '.kite-code/unified-agent'),
         profile: 'default',
@@ -228,6 +230,12 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         }),
         { mode: 0o600 },
       );
+      // Retain the original Profile bytes; the default model source is the owned user file.
+      writeFileSync(
+        userConfiguration.path,
+        readFileSync(join(profile.profilePath, 'config.jsonc')),
+        { mode: 0o600 },
+      );
       const terminal = await prep('terminal_build', () =>
           buildTerminalBundle({ destination: join(root, 'terminal-build') }),
         ),
@@ -348,7 +356,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         {
           cwd: home,
           env: {
-            HOME: home,
+            ...userConfiguration.homeEnvironment,
             PATH: '/usr/bin:/bin',
             LANG: 'C.UTF-8',
             ...(process.platform === 'linux'

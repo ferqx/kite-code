@@ -3,6 +3,7 @@ import type { BrowserView, Message } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { installGlobals } from '../globals.fixture';
 
 async function settle(check: () => boolean) {
   const deadline = Date.now() + 2000;
@@ -19,8 +20,7 @@ test('formal Web mount copies each original user message with recoverable clipbo
     url: 'http://localhost/sessions/a',
     pretendToBeVisual: true,
   });
-  const previous = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     navigator: dom.window.navigator,
@@ -38,10 +38,7 @@ test('formal Web mount copies each original user message with recoverable clipbo
       disconnect() {}
     },
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const raw = [
     '第一条🌿e\u0301\r\n完整原文 <script>window.originalExecuted=true</script>\r\nUSER_ONE_END',
     'Second original 文本\r\n\r\n**literal Markdown**\r\nUSER_TWO_END',
@@ -250,9 +247,6 @@ test('formal Web mount copies each original user message with recoverable clipbo
   } finally {
     await act(async () => mounted?.dispose());
     dom.window.close();
-    for (const [key, descriptor] of previous) {
-      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-      else Reflect.deleteProperty(globalThis, key);
-    }
+    restoreGlobals();
   }
 }, 15000);

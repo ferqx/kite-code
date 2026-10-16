@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { workflowManifest } from '../fixtures/workflow-manifest';
 
@@ -23,6 +24,7 @@ async function fixture(
   workflow?: 'enabled' | 'disabled' | 'structured' | 'unsupported',
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-host-skills-')));
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace'),
     elsewhere = join(root, 'elsewhere');
   mkdirSync(workspace, { mode: 0o700 });
@@ -79,7 +81,7 @@ async function fixture(
   });
   mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'configured',
       tools: [{ id: 'skills.load' }],
@@ -169,7 +171,11 @@ async function fixture(
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' },
+      env: {
+        PATH: process.env.PATH ?? '',
+        LANG: 'C.UTF-8',
+        ...userConfiguration.homeEnvironment,
+      },
     });
     children.push(child);
     child.stdin.end();

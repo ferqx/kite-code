@@ -14,6 +14,8 @@
 
 HTTP 身份和 schema 准入、当前持久权限与来源读取、真实 transport 可用性属于宿主。业务执行、权限决定、Workflow 能力投影和 Runtime 准入属于 Agent。Source 编译前后复核、完整文件消费证明和不同持久摘要格式有独立合同，保留原检查；本轮精简理由见[实施决定](../../.agents/notes/implemented/simplification/2026-10-11-service-agent-default-composition.md)。
 
+Run 绑定与配置管理共用纯[模型参数校验](src/model-options.ts)，后者不再反向依赖默认装配；公开 `/configuration` 仍导出原 `parseModelPreset`。Files 默认捕获、Fork、Browser、Native 和离线恢复测试共用同一[本地 Provider](test/fixtures/file-checkpoint-provider.ts)，保持实际 SDK／HTTP、四步工具执行和各场景独立断言；该有限夹具声明自己的模型窗口，自动压缩仍由压缩测试单独验证。同 owner 算法复用与独立证明的取舍见[新架构精简决定](../../.agents/notes/implemented/simplification/2026-10-16-owner-local-algorithm-reuse.md)。
+
 项目来源的专用答案 schema、可信 observer 和有限原决定 Query 已实施；当前证明与历史读取边界见[Source owner](#项目来源决定的有限历史事实)，本片取舍与已完成的有限验收见[Source 决定](../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。
 
 Session 管理提供 `POST /v1/sessions/{id}/fork`、`/rename`、`/delete`，输入为有限 closed schema，主体由可信宿主填入。Fork 核原 Store/selection/稳定配对边界，只复制历史与出处；未登记 namespace 规则默认 omit，可信注册可选择 copy/rebuild。有限 `namespaceReport` 与原命令 receipt 一致，`omittedExtensionState` 如实表示省略，HTTP 不接受内部准备计划。重命名和删除按 `ifRevision` 控制 CAS，原 command ID 查回原 Session 快照。删除原子保存整组 tombstone 和停止边界，关闭迟到创建/派发，异步通知真实 owner 收尾；回执不声称资源已停止，准确旧 ID 历史继续可读。历史物理清理和完整恢复资格尚未闭合。
@@ -439,6 +441,8 @@ Settings 模型业务端口为 `GET /v1/config/user/models?storeId=...` 和 `POS
 ## 显式 daemon
 
 [daemon-main](src/daemon-main.ts) 与 paired [main](src/main.ts) 共用 [process-service](src/process-service.ts) 的一次 Store/Runtime/HTTP 装配。daemon 的启动 stdin 是有限单帧，EOF 不代表退出；原 profile、canonical Workspace、build 和 native owner 在首次启动固定。[私有 daemon 叶子](src/daemon/README.md)只作发现与准确资源所有权，业务仍走公共 Client。默认 endpoint 与显式 socket 保留各自原 record 路径，不把默认地址重新解释成显式地址。
+
+POSIX reservation 的[原 FD 发布与读取序列化](src/daemon/README.md)保留准确 inode、坏记录拒绝和原 5 秒 bootstrap 总期限，不扩展公共协议或读取权限。
 
 启动前以 [web-assets](src/daemon/web-assets.ts) 校验所选三个 Web 文件及闭合 manifest，不执行宿主提供的 assets 模块；restart 的[预检](../../packages/agent/src/sqlite.ts)在目标子进程只读检查已有 Store，零 Runtime/Model。普通 start 直接进入正常装配，Store 打开失败仍保留安全身份与 HTTP 诊断，不把格式预检变为全局 ready 门槛。有限 preflight 回复经闭合 schema 核对原 profile/instance/build；预检不免除随后正常启动准入。Web Gateway 固定封装本构建的 [API Docs](src/api-docs.ts)与完整 OpenAPI，纳入页面内容身份，不接受外部文档覆盖，也不携带认证信息。
 

@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { connectSharedService } from '../../../apps/cli/host/shared-service';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
   installNativeBundle,
   uninstallNativeBundle,
@@ -30,6 +31,7 @@ test.skipIf(process.platform !== 'darwin')(
       prefix = join(root, 'installed'),
       socket = join(root, 'daemon.sock');
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
@@ -104,7 +106,7 @@ test.skipIf(process.platform !== 'darwin')(
       const child = Bun.spawn([join(prefix, 'bin/kite'), ...argv], {
         cwd: workspace,
         env: {
-          HOME: home,
+          ...userConfiguration.homeEnvironment,
           PATH: '/usr/bin:/bin',
           LANG: 'C.UTF-8',
           BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
@@ -139,7 +141,7 @@ test.skipIf(process.platform !== 'darwin')(
     };
     try {
       writeFileSync(
-        join(profile.profilePath, 'config.jsonc'),
+        userConfiguration.path,
         JSON.stringify({
           modelId: 'fixed',
           tools: [],
@@ -211,7 +213,21 @@ test.skipIf(process.platform !== 'darwin')(
       };
       expect(original.storeId).toBe(storeId);
       expect(requests).toHaveLength(1);
-      expect(requests[0]!.tools.map((tool) => tool.function.name)).toEqual(['ask_user']);
+      expect(requests[0]!.tools.map((tool) => tool.function.name)).toEqual([
+        'ask_user',
+        'files.edit',
+        'files.glob',
+        'files.list',
+        'files.read',
+        'files.search',
+        'files.write',
+        'shell.execute',
+        'shell.launch',
+        'shell.read',
+        'shell.stop',
+        'shell.wait',
+        'web_fetch',
+      ]);
       const originalUsers = requests[0]!.messages.filter(
         (message) => message.role === 'user' && message.content === task,
       );

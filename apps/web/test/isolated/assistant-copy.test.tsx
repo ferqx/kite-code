@@ -4,6 +4,7 @@ import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createTrustedAssets } from '../../src/assets';
+import { installGlobals } from '../globals.fixture';
 
 const first = 'First raw paragraph 🌿e\u0301\r\nEXACT first';
 const last = 'Final raw paragraph 東京\r\nEXACT last';
@@ -56,8 +57,7 @@ async function fixture(bodyMode = false) {
   const style = dom.window.document.createElement('style');
   style.textContent = productionAssets.assets.get('/app.css')!.content;
   dom.window.document.head.append(style);
-  const previous = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     HTMLElement: dom.window.HTMLElement,
@@ -74,10 +74,7 @@ async function fixture(bodyMode = false) {
       disconnect() {}
     },
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const { mountWebPage } = await import('../../src/mount');
   const state = {
     compact: false,
@@ -264,10 +261,7 @@ async function fixture(bodyMode = false) {
     async close() {
       await act(async () => handle.dispose());
       dom.window.close();
-      for (const [key, descriptor] of previous) {
-        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-        else Reflect.deleteProperty(globalThis, key);
-      }
+      restoreGlobals();
     },
   };
 }

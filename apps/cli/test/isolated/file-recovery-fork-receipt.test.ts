@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { lookupManagementOutcome, submitManagement } from '../../src/session-management';
 
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) {
@@ -21,6 +22,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
     home = join(root, 'home');
   mkdirSync(workspace);
   mkdirSync(home, { mode: 0o700 });
+  const userConfiguration = ownedUserConfiguration(home);
   const file = join(workspace, 'original.txt');
   writeFileSync(file, 'original bytes\r\n');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -71,7 +73,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
     },
   });
   writeFileSync(
-    join(profile.profilePath, 'config.jsonc'),
+    userConfiguration.path,
     JSON.stringify({
       modelId: 'fixed',
       models: [
@@ -90,13 +92,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
     buildId: 'file-fork-receipt',
     apiMajor: 1,
     requiredCapabilities: ['extensions_actions', 'extension_queries'],
-    spawnChild: (command, { env }) =>
-      Bun.spawn([...command], {
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: { ...env, HOME: home },
-      }),
+    spawnChild: userConfiguration.spawnChild,
   });
   try {
     const client = service.client,

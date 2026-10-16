@@ -4,6 +4,7 @@ import {
   verifyModelOutputSnapshot,
 } from '@kite-ai/client';
 import { type NativeBackgroundChild, nativeBackgroundPageBytes } from './background-bridge';
+import { readNativeBodyChunks } from './native-body-chunks';
 import type { NativeBridge } from './native-bridge';
 
 const decimal = (value: string) => {
@@ -204,46 +205,22 @@ export async function readNativeBackgroundChild(
       !/^[a-f0-9]{64}$/.test(opened.wireHash)
     )
       throw new ClientError('background_child_invalid');
-    const bytes = new Uint8Array(Number(opened.wireBytes));
-    let offset = 0;
-    for (;;) {
-      check();
-      const chunk = await input.bridge.request({
-        method: 'background.child.read',
-        generation: input.generation,
-        readId,
-        offset,
-        limit: 65536,
-        ...surface,
-      });
-      check();
-      if (
-        !chunk ||
-        !('readId' in chunk) ||
-        chunk.kind !== 'background.child.chunk' ||
-        chunk.readId !== readId ||
-        chunk.offset !== offset ||
-        !Number.isSafeInteger(chunk.nextOffset) ||
-        typeof chunk.eof !== 'boolean' ||
-        typeof chunk.data !== 'string' ||
-        chunk.data.length > 87384 ||
-        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(chunk.data)
-      )
-        throw new ClientError('background_child_chunk_invalid');
-      const binary = atob(chunk.data),
-        next = offset + binary.length;
-      if (
-        binary.length > 65536 ||
-        next !== chunk.nextOffset ||
-        next > bytes.length ||
-        (!chunk.eof && binary.length === 0) ||
-        chunk.eof !== (next === bytes.length)
-      )
-        throw new ClientError('background_child_chunk_invalid');
-      for (let i = 0; i < binary.length; i++) bytes[offset + i] = binary.charCodeAt(i);
-      offset = next;
-      if (chunk.eof) break;
-    }
+    const bytes = await readNativeBodyChunks({
+      byteLength: Number(opened.wireBytes),
+      readId,
+      kind: 'background.child.chunk',
+      read: (offset, limit) =>
+        input.bridge.request({
+          method: 'background.child.read',
+          generation: input.generation,
+          readId,
+          offset,
+          limit,
+          ...surface,
+        }),
+      check,
+      invalid: () => new ClientError('background_child_chunk_invalid'),
+    });
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
       .map((x) => x.toString(16).padStart(2, '0'))
       .join('');

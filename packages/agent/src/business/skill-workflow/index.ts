@@ -1029,8 +1029,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       return false;
     const saved = decode(await read.records.get(string(opening.decisionKey)), stateType);
     if (
-      !saved ||
-      saved.kind !== 'user_decision' ||
+      saved?.kind !== 'user_decision' ||
       saved.outcome !== 'replan' ||
       saved.detail !== opening.detail
     )
@@ -1201,8 +1200,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
     const decisionKey = string(opening.decisionKey),
       decision = decode(await read.records.get(decisionKey), stateType);
     if (
-      !decision ||
-      decision.kind !== 'user_decision' ||
+      decision?.kind !== 'user_decision' ||
       decision.outcome !== 'compensation_requested' ||
       decisionKey !== `${path}/decision/${parent.id}` ||
       opening.decisionDigest !== hash(canonicalJson(decision))

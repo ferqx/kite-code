@@ -3,8 +3,62 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Interaction, InteractionAttachment, Json } from '@kite-ai/client';
 import { _electron } from 'playwright';
 import type { NativeDraft, NativeState } from '../src/native-bridge';
+
+type ReviewPolicy = {
+  review: {
+    reference: InteractionAttachment['reference'];
+    hash: string;
+    planRecordRevision: string;
+    originStoreId: string;
+    executionId: string;
+  };
+};
+export type PlanRequest = { version: string; digest: string; policy?: ReviewPolicy };
+export type ApprovalRequest = {
+  definitionId: string;
+  definitionVersion: string;
+  approvalRequestDigest: string;
+  policy?: ReviewPolicy;
+};
+type RecordedInteraction<Request> = Pick<Interaction, 'id' | 'executionId'> & {
+  runId: string;
+  sessionId: string;
+  request: Request;
+  commandId: string;
+};
+export type PlanReviewReport = {
+  cards: (Omit<RecordedInteraction<PlanRequest>, 'commandId'> & {
+    commandId?: string;
+    decision?: string;
+    mode?: string;
+    version: string;
+  })[];
+  runs: {
+    sessionId: string;
+    id: string;
+    status: 'completed' | 'failed' | 'cancelled';
+    commandId: string;
+  }[];
+  management: (RecordedInteraction<ApprovalRequest> & {
+    definitionId: string;
+    completeHash?: string;
+  })[];
+  planningExecutions: NonNullable<NativeState['selection']>['executions'][number][];
+  filesApprovals: RecordedInteraction<Interaction['request']>[];
+};
+function jsonObject(value: Json): Record<string, Json> {
+  assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value));
+  return value as Record<string, Json>;
+}
+function planRequest(card: Interaction): PlanRequest {
+  const request = jsonObject(card.request);
+  assert.equal(typeof request.version, 'string');
+  assert.equal(typeof request.digest, 'string');
+  return request as PlanRequest;
+}
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -48,11 +102,11 @@ const stage = (name: string, facts: Record<string, unknown> = {}) =>
   );
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
 let childPid: number | undefined;
-const cards: any[] = [],
-  runs: any[] = [],
-  management: any[] = [],
+const cards: PlanReviewReport['cards'] = [],
+  runs: PlanReviewReport['runs'] = [],
+  management: PlanReviewReport['management'] = [],
   planningExecutions: import('@kite-ai/client').Execution[] = [],
-  filesApprovals: any[] = [];
+  filesApprovals: PlanReviewReport['filesApprovals'] = [];
 try {
   app = await _electron.launch({
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
@@ -178,7 +232,11 @@ try {
       (card) => card.kind === 'approval' && card.state === 'pending',
     );
     if (!card) return;
-    const request = card.request as Record<string, any>;
+    const requestObject = jsonObject(card.request);
+    assert.equal(typeof requestObject.definitionId, 'string');
+    assert.equal(typeof requestObject.definitionVersion, 'string');
+    const request = requestObject as ApprovalRequest;
+    assert.ok(card.runId);
     assert.ok(
       ['planning.write', 'planning.review', 'planning.update'].includes(request.definitionId),
       'only exact Planning management approvals may be handled here',
@@ -425,7 +483,9 @@ try {
     });
     return card;
   }
-  async function capture(card: any, decision?: string, mode?: string) {
+  async function capture(card: Interaction, decision?: string, mode?: string) {
+    assert.ok(card.runId);
+    const request = planRequest(card);
     stage('capture_enter', {
       sessionId: card.presentationSessionId,
       runId: card.runId,
@@ -448,8 +508,8 @@ try {
       runId: card.runId,
       executionId: card.executionId,
       sessionId: card.presentationSessionId,
-      version: card.request.version,
-      request: card.request,
+      version: request.version,
+      request,
       decision,
       mode,
       commandId: submission?.intent.commandId,
@@ -463,7 +523,12 @@ try {
       commandId: submission?.intent.commandId,
     });
   }
-  async function done(id: string, runId: string, status: string, mainDraft: string) {
+  async function done(
+    id: string,
+    runId: string,
+    status: PlanReviewReport['runs'][number]['status'],
+    mainDraft: string,
+  ) {
     stage('done_enter', { sessionId: id, runId, status });
     const current = await until(
       async () => {
@@ -521,6 +586,7 @@ try {
       (card) => card.kind === 'approval' && card.state === 'pending',
     )!;
     assert.ok(approval);
+    assert.ok(approval.runId);
     assert.equal(approval.runId, runId);
     assert.equal((approval.request as Record<string, unknown>).definitionId, 'files.write');
     assert.equal(existsSync(join(home, 'workspace', `effect-${id}.txt`)), false);
@@ -554,11 +620,14 @@ try {
     });
   }
   const mainDraft = '  原 Main 草稿🙂\n空格必须恢复  ';
-  const first: any = await start('a', mainDraft);
+  const first = await start('a', mainDraft);
+  assert.ok(first.runId);
+  const firstRequest = planRequest(first);
+  assert.ok(firstRequest.policy);
   const approve = page.getByRole('button', { name: 'Approve this exact plan', exact: true });
-  assert.ok(first.request.policy.review.reference.size > 32768);
-  assert.equal(first.request.policy.review.originStoreId, storeId);
-  assert.equal(first.request.policy.review.executionId, first.executionId);
+  assert.ok(Number(firstRequest.policy.review.reference.size) > 32768);
+  assert.equal(firstRequest.policy.review.originStoreId, storeId);
+  assert.equal(firstRequest.policy.review.executionId, first.executionId);
   assert.ok((await approve.count()) === 0 || (await approve.isDisabled()));
   const reviseBeforeRead = page.getByRole('button', { name: 'Request revision', exact: true });
   assert.ok((await reviseBeforeRead.count()) === 0 || (await reviseBeforeRead.isDisabled()));
@@ -571,7 +640,7 @@ try {
   assert.equal(completePlan.body, metadata.bodyText);
   assert.equal(completePlan.planId, 'p-a');
   assert.equal(completePlan.version, 1);
-  assert.equal(completePlan.digest, first.request.digest);
+  assert.equal(completePlan.digest, firstRequest.digest);
   assert.deepEqual(completePlan.steps, [
     { id: 'write', title: 'Write the approved file and verify its receipt' },
   ]);
@@ -611,7 +680,7 @@ try {
     (card) => card.kind === 'plan_review' && card.state === 'pending',
   )!;
   assert.notEqual(second.id, first.id);
-  assert.equal((second.request as any).version, '2');
+  assert.equal(planRequest(second).version, '2');
   assert.equal(
     await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).inputValue(),
     '',
@@ -651,7 +720,7 @@ try {
   assert.equal(JSON.parse(completeRecord!).body, metadata.bodyText);
   assert.equal(
     Buffer.byteLength(completeRecord!),
-    Number(first.request.policy.review.reference.size),
+    Number(firstRequest.policy.review.reference.size),
   );
   assert.equal(
     await originalReview
@@ -679,7 +748,35 @@ try {
     .fill('原拒绝理由 雪🙂');
   await page.getByRole('button', { name: 'Deny plan', exact: true }).click();
   await capture(d, 'deny');
-  await done('d', d.runId!, 'failed', dDraft);
+  const diagnostics = await until(
+    async () =>
+      (await (
+        await fetch(`${control}/denied-completion?runId=${encodeURIComponent(d.runId!)}`)
+      ).json()) as { kind: string; key: string; content: string }[],
+    (values) => values.length > 0,
+    'original denied Run completion diagnostic missing',
+  );
+  assert.equal(diagnostics[0]!.kind, 'completion_diagnostic');
+  assert.ok(diagnostics[0]!.key.startsWith('plan-review:'));
+  assert.equal(JSON.parse(diagnostics[0]!.content).code, 'plan_draft_pending');
+  const deniedState = await state();
+  assert.equal(deniedState.selection!.session.id, 'd');
+  assert.equal(deniedState.selection!.runs.find((run) => run.id === d.runId)!.isActive, true);
+  assert.equal(
+    deniedState.selection!.executions.some(
+      (execution) =>
+        execution.runId === d.runId &&
+        execution.definitionId === 'files.write' &&
+        execution.status === 'succeeded',
+    ),
+    false,
+  );
+  assert.equal(existsSync(join(home, 'workspace', 'denied-effect.txt')), false);
+  const dCommand = deniedState.callerSubmissions!.find(
+    (row) => row.scope.sessionId === 'd' && row.request.kind === 'run.start',
+  )!.request.commandId;
+  await page.getByRole('button', { name: `取消原申请 · ${dCommand}`, exact: true }).click();
+  await done('d', d.runId!, 'cancelled', dDraft);
   assert.equal(existsSync(join(home, 'workspace', 'denied-effect.txt')), false);
   const cDraft = '取消原 Main 草稿';
   const c = await start('c', cDraft);
@@ -824,8 +921,8 @@ try {
       managementApprovals: management.length,
       answerPosts: expectedPosts,
       completed: 2,
-      deniedFailed: 1,
-      explicitlyCancelled: 1,
+      deniedDiagnostic: 1,
+      explicitlyCancelled: 2,
     }),
   );
 } catch (error) {

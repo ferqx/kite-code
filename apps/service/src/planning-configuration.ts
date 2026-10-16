@@ -128,8 +128,7 @@ export async function readBoundJobReportParent(
   const carrier = await runtime.getExecution(command.request.executionId);
   const binding = carrier?.afterTurn ?? undefined;
   if (
-    !carrier ||
-    carrier.kind !== 'job' ||
+    carrier?.kind !== 'job' ||
     !['succeeded', 'failed'].includes(carrier.status) ||
     carrier.cancelRequestedAt !== null ||
     carrier.originStoreId !== originStoreId ||

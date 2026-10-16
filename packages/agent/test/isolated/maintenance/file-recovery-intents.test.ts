@@ -25,6 +25,23 @@ import type { Json } from '../../../src/storage/types';
 import { nodeFileRecoveryAssets } from './file-recovery-assets-fixture';
 
 const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+
+type FixtureMutation =
+  | readonly [path: readonly (string | number)[], replacement: unknown]
+  | readonly [path: readonly (string | number)[]];
+function mutateUntrustedFixture(value: unknown, [path, ...replacement]: FixtureMutation) {
+  const record = (input: unknown) => {
+    if (!input || typeof input !== 'object') throw Error('test_fixture_path_unavailable');
+    return input as Record<string | number, unknown>;
+  };
+  let target = value;
+  for (const key of path.slice(0, -1)) target = record(target)[key];
+  const key = path.at(-1);
+  if (key === undefined) throw Error('test_fixture_path_unavailable');
+  if (replacement.length) record(target)[key] = replacement[0];
+  else delete record(target)[key];
+}
+
 async function fixture() {
   const root = mkdtempSync('/private/tmp/kite-file-recovery-maintenance-');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
@@ -207,50 +224,24 @@ test('closed file intent digests, branch metadata, phases and foreign authority 
   const f = await fixture();
   try {
     const base = row(f.storeId);
-    const changes: ((value: any) => void)[] = [
-      (v) => {
-        v.code.request.input.restoreId = 'changed';
-      },
-      (v) => {
-        v.code.request.actionId = 'other.action';
-      },
-      (v) => {
-        v.fork.requestDigest = hash(canonicalJson(v.fork.request as Json));
-      },
-      (v) => {
-        v.fork.request.title += ' changed';
-      },
-      (v) => {
-        v.fork.phase = 'dispatching';
-      },
-      (v) => {
-        v.code.phase = 'unknown';
-      },
-      (v) => {
-        v.boundary.seq = '9223372036854775808';
-      },
-      (v) => {
-        v.checkpoint.boundary.messageId = null;
-      },
-      (v) => {
-        v.code.request.expectedStoreId = 'retargeted';
-      },
-      (v) => {
-        v.hotPermit = { kind: 'file_recovery_hot_permit' };
-      },
-      (v) => {
-        v.checkpoint.workspace = { 'device|inode': '1' };
-      },
-      (v) => {
-        v.checkpoint.workspace = {};
-      },
-      (v) => {
-        v.checkpoint.workspace = { device: '1', 'inode|extra': '2' };
-      },
+    const changes: FixtureMutation[] = [
+      [['code', 'request', 'input', 'restoreId'], 'changed'],
+      [['code', 'request', 'actionId'], 'other.action'],
+      [['fork', 'requestDigest'], hash(canonicalJson(base.fork!.request as Json))],
+      [['fork', 'request', 'title'], `${base.fork!.request.title} changed`],
+      [['fork', 'phase'], 'dispatching'],
+      [['code', 'phase'], 'unknown'],
+      [['boundary', 'seq'], '9223372036854775808'],
+      [['checkpoint', 'boundary', 'messageId'], null],
+      [['code', 'request', 'expectedStoreId'], 'retargeted'],
+      [['hotPermit'], { kind: 'file_recovery_hot_permit' }],
+      [['checkpoint', 'workspace'], { 'device|inode': '1' }],
+      [['checkpoint', 'workspace'], {}],
+      [['checkpoint', 'workspace'], { device: '1', 'inode|extra': '2' }],
     ];
     for (const change of changes) {
       const value = structuredClone(base);
-      change(value);
+      mutateUntrustedFixture(value, change);
       write(f.path, [value]);
       await reject(createProfileBackup(f), 'backup_file_recovery_intents_invalid');
     }

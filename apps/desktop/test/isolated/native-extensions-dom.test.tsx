@@ -265,6 +265,44 @@ test('complete reader rejects late scope and integrity failure, closes only the 
   ).rejects.toThrow('扩展内容校验失败');
 });
 
+test.each([
+  ['malformed base64', { data: '!' }, '扩展内容分片无效'],
+  ['foreign read', { readId: 'another-read' }, '扩展内容分片无效'],
+  ['zero progress', { data: '', nextOffset: 0, eof: false }, '扩展内容不完整'],
+  ['early EOF', { data: '', nextOffset: 0, eof: true }, '扩展内容不完整'],
+  ['missing EOF', { eof: false }, '扩展内容不完整'],
+  ['wrong offset', { nextOffset: 1 }, '扩展内容不完整'],
+] as const)('complete extension reader refuses %s with its original failure category and closes only the read', async (_name, mutation, error) => {
+  const { bridge, calls } = fixture();
+  const original = bridge.request.bind(bridge);
+  bridge.request = async (request) => {
+    const value = await original(request);
+    return value && 'kind' in value && value.kind === 'extensions.chunk'
+      ? { ...value, ...mutation }
+      : value;
+  };
+  await expect(
+    readNativeExtensionBody(
+      bridge,
+      {
+        method: 'extensions.open',
+        generation: 1,
+        readId: 'failed-read',
+        viewSelection: 1,
+        historyEpoch: 0,
+      },
+      scope,
+      'catalogue',
+      () => true,
+    ),
+  ).rejects.toThrow(error);
+  expect(calls.map((request) => request.method)).toEqual([
+    'extensions.open',
+    'extensions.read',
+    'extensions.close',
+  ]);
+});
+
 test('real panel drops a late catalogue after session selection and releases its observation', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const previous = {

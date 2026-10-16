@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto';
-import { fstatSync, readSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { canonicalJson } from '../json';
 import type { Json } from '../storage/types';
-import { closePrivate as closeSync, openPrivate, privateDirectory } from './files';
+import { verifyIntentDocument } from './intent-document';
 import { MaintenanceError } from './types';
 
 const invalid = () => new MaintenanceError('backup_mcp_reconnection_intents_invalid');
@@ -193,41 +191,5 @@ export function verifyMcpReconnectionRecords(value: unknown): void {
 }
 
 export function verifyMcpReconnectionIntentsDocument(path: string): void {
-  privateDirectory(dirname(path));
-  const fd = openPrivate(path);
-  try {
-    const before = fstatSync(fd, { bigint: true });
-    if (
-      (process.platform !== 'win32' && (Number(before.mode) & 0o777) !== 0o600) ||
-      before.nlink !== 1n ||
-      (process.getuid && before.uid !== BigInt(process.getuid())) ||
-      before.size > 16n * 1024n * 1024n
-    )
-      throw invalid();
-    const bytes = Buffer.alloc(Number(before.size));
-    let offset = 0;
-    while (offset < bytes.length) {
-      const read = readSync(fd, bytes, offset, bytes.length - offset, null);
-      if (!read) throw invalid();
-      offset += read;
-    }
-    const after = fstatSync(fd, { bigint: true });
-    if (
-      ['dev', 'ino', 'size', 'ctimeNs', 'mtimeNs', 'mode', 'uid', 'nlink'].some(
-        (key) => before[key as keyof typeof before] !== after[key as keyof typeof after],
-      )
-    )
-      throw invalid();
-    const doc = closed(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), [
-      'version',
-      'records',
-    ]);
-    if (doc.version !== 1) throw invalid();
-    verifyMcpReconnectionRecords(doc.records);
-  } catch (error) {
-    if (error instanceof MaintenanceError) throw error;
-    throw invalid();
-  } finally {
-    closeSync(fd);
-  }
+  verifyIntentDocument(path, invalid, verifyMcpReconnectionRecords);
 }

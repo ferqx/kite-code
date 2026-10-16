@@ -1,3 +1,4 @@
+import { constants, Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
@@ -17,11 +18,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Command, Execution, ModelOutputSnapshot } from '@kite-ai/client';
 import { inspectProcess } from '@kite-ai/service/daemon';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { readProcessStartIdentity } from '../../../apps/service/src/daemon/process-identity';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { packNativeBundle, unpackNativeBundle } from '../../../scripts/release/native-archive';
 import {
   installNativeBundle,
@@ -30,6 +33,8 @@ import {
 } from '../../../scripts/release/native-install';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import {
+  COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
+  materializeCompatibleTerminalPredecessor,
   materializeTerminalPredecessor,
   TERMINAL_PREDECESSOR_COMMIT,
 } from '../../fixtures/unified-agent/terminal-predecessor';
@@ -64,7 +69,14 @@ type StoredFacts = {
 async function execute(argv: string[], cwd: string, home: string, timeoutMs = 30000) {
   const child = Bun.spawn(argv, {
     cwd,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...(process.platform === 'linux'
+        ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
+        : {}),
+    },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -108,6 +120,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
     });
     const privatePath = join(profile.profilePath, 'desktop-private/data.sqlite'),
       configurationPath = join(profile.profilePath, 'config.jsonc');
+    const userConfiguration = ownedUserConfiguration(home);
     const requests: { task: string; contextHasB: boolean }[] = [],
       facts: StoredFacts[] = [];
     let activeIndex = 0,
@@ -135,17 +148,19 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           process.platform === 'darwin'
             ? resolve(dirname(dirname(electronPath)), '../..')
             : dirname(electronPath);
-      const predecessor = await materializeTerminalPredecessor({
+      const predecessor = await materializeCompatibleTerminalPredecessor({
         root,
         repositoryRoot,
         nativeElectronDist: electronDist,
       });
       const oldNative = predecessor.nativeCandidate!;
-      expect(predecessor.provenance.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
+      expect(predecessor.provenance.commit).toBe(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT);
       expect(predecessor.provenance.platform).toBe(process.platform);
       expect(predecessor.provenance.sourceRemoved).toBe(true);
       expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
-      expect(oldNative.terminal.manifest.source.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
+      expect(oldNative.terminal.manifest.source.commit).toBe(
+        COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
+      );
       expect(oldNative.terminal.manifest.source.dirty).toBe(false);
       const currentHead = (
         await execute(['git', 'rev-parse', 'HEAD'], repositoryRoot, home)
@@ -165,7 +180,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         outdir: join(root, 'current-native'),
       });
       expect(current.terminal.manifest.source.commit).toBe(currentHead);
-      expect(currentHead).not.toBe(TERMINAL_PREDECESSOR_COMMIT);
+      expect(currentHead).not.toBe(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT);
       expect(current.terminal.manifest.productVersion).toBe(
         oldNative.terminal.manifest.productVersion,
       );
@@ -261,6 +276,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         expect(readFileSync(profile.databasePath)).toEqual(before.core);
         expect(readFileSync(privatePath)).toEqual(before.native);
         expect(readFileSync(configurationPath)).toEqual(before.config);
+        expect(readFileSync(userConfiguration.path)).toEqual(before.config);
         expect(lstatSync(profile.databasePath).ino).toBe(before.coreInode);
         expect(lstatSync(privatePath).ino).toBe(before.nativeInode);
       };
@@ -454,12 +470,15 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
               id: 'fixed',
               provider: 'compatible',
               model: 'fixed',
+              modelCapabilities: { contextWindowTokens: 1_000_000 },
               baseURL: `${provider.url.href}v1`,
             },
           ],
         }),
         { mode: 0o600 },
       );
+      // Keep both original Profile input and current user input for their respective real code.
+      writeFileSync(userConfiguration.path, readFileSync(configurationPath), { mode: 0o600 });
       writeFileSync(
         join(home, 'expected.json'),
         JSON.stringify({
@@ -605,7 +624,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
             home,
             provider.url.href.replace(/\/$/, ''),
             join(repositoryRoot, 'apps/desktop/package.json'),
-            'db8-cold',
+            'compatible-cold',
           ],
           home,
           home,
@@ -614,7 +633,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         const report = JSON.parse(readFileSync(join(home, 'native-db8-report.json'), 'utf8')) as {
           owned: { pid: number; startIdentity: string; root: string }[];
           saved: { commandId: string; storeId: string; workspaceId: string };
-          rejected: string;
+          draft: { storeId: string; rootSessionId: string; content: string };
           applied: {
             receipt: {
               commandId: string;
@@ -629,7 +648,9 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         expect(report.owned).toHaveLength(2);
         for (const owned of report.owned)
           expect(inspectProcess(owned.pid, owned.startIdentity)).toBe('dead');
-        expect(report.rejected).toBe('draft_storage_unavailable');
+        expect(report.draft.storeId).toBe(originalStoreId);
+        expect(report.draft.rootSessionId).toBe(sessionId);
+        expect(typeof report.draft.content).toBe('string');
         expect(report.saved.storeId).toBe(originalStoreId);
         expect(report.applied.receipt).toMatchObject({
           commandId: report.saved.commandId,
@@ -644,10 +665,10 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           'original DB8 project bytes',
         );
         db8Rollback = {
-          actualPrivateFormatRejected: 9,
+          compatiblePrivateFormatRead: 9,
           observedPriorPrivateFormatBeforeExtension: 8,
           maintenanceManifestVersion: 18,
-          oldPrivateError: report.rejected,
+          compatiblePrivateRead: report.draft,
           originalCommandId: report.saved.commandId,
           owned: report.owned,
           normalExits: 2,
@@ -678,4 +699,348 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
     }
   },
   420000,
+);
+
+test.skipIf(!['darwin', 'linux'].includes(process.platform))(
+  'legacy installed Native rejects current Core schema and DB9 private originals without changing either owned Profile',
+  async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-legacy-rejection-')));
+    let success = false;
+    let provider: ReturnType<typeof Bun.serve> | undefined;
+    try {
+      const electronPath = createRequire(join(repositoryRoot, 'apps/desktop/package.json'))(
+        'electron',
+      ) as string;
+      const predecessor = await materializeTerminalPredecessor({
+        root,
+        repositoryRoot,
+        nativeElectronDist:
+          process.platform === 'darwin'
+            ? resolve(dirname(dirname(electronPath)), '../..')
+            : dirname(electronPath),
+      });
+      const legacy = predecessor.nativeCandidate!;
+      expect(predecessor.provenance.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
+      expect(predecessor.provenance.sourceRemoved).toBe(true);
+      expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
+      expect(legacy.terminal.manifest.source.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
+      expect(legacy.terminal.manifest.source.dirty).toBe(false);
+      const legacyMigration = join(
+        legacy.terminal.root,
+        'node_modules/@kite-ai/agent/storage/migrations',
+      );
+      expect(existsSync(join(legacyMigration, '0002-recovery-audit.sql'))).toBe(false);
+      for (const [entry, target, naming, packages, external] of [
+        [
+          'tests/fixtures/unified-agent/native-cross-version-store.ts',
+          'bun',
+          'store.js',
+          'external',
+          [],
+        ],
+        [
+          'apps/desktop/test/native-cross-version-electron.fixture.ts',
+          'node',
+          'electron-driver.mjs',
+          'bundle',
+          ['playwright'],
+        ],
+        [
+          'apps/desktop/test/native-legacy-private.fixture.ts',
+          'node',
+          'private-driver.mjs',
+          'bundle',
+          [],
+        ],
+        [
+          'apps/desktop/electron/profile-access-helper.ts',
+          'bun',
+          'profile-access.js',
+          'bundle',
+          [],
+        ],
+      ] as const) {
+        expect(
+          (
+            await Bun.build({
+              entrypoints: [join(repositoryRoot, entry)],
+              target,
+              packages,
+              external: [...external],
+              format: 'esm',
+              outdir: root,
+              naming,
+            })
+          ).success,
+        ).toBe(true);
+      }
+      symlinkSync(join(legacy.terminal.root, 'node_modules'), join(root, 'node_modules'), 'dir');
+      let providerCalls = 0;
+      let currentLocks: () => { outer: boolean; inner: boolean }[] = () => [];
+      let currentSnapshot: () => Promise<StoredFacts>;
+      provider = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 0,
+        async fetch(request) {
+          const url = new URL(request.url);
+          if (url.pathname === '/process') {
+            const pid = Number(url.searchParams.get('pid'));
+            const startIdentity = readProcessStartIdentity(pid);
+            if (!startIdentity) return new Response('owned process missing', { status: 409 });
+            return Response.json({ pid, startIdentity });
+          }
+          if (url.pathname === '/locks') return Response.json(currentLocks());
+          if (url.pathname === '/snapshot')
+            return Response.json({ ...(await currentSnapshot()), providerCalls });
+          providerCalls++;
+          return new Response('legacy rejection must not call a Model', { status: 500 });
+        },
+      });
+      const reports: unknown[] = [];
+      for (const boundary of ['schema', 'private'] as const) {
+        const caseRoot = join(root, boundary),
+          home = join(caseRoot, 'home'),
+          workspace = join(caseRoot, 'workspace');
+        for (const path of [caseRoot, home, workspace, `${workspace}-db8`])
+          mkdirSync(path, { mode: 0o700 });
+        const profile = selectProfile({
+          dataRoot: join(home, '.kite-code/unified-agent'),
+          profile: 'default',
+        });
+        const userConfiguration = ownedUserConfiguration(home);
+        let storeId: string;
+        if (boundary === 'schema') {
+          const store = await openSqliteStore({
+            dataRoot: profile.dataRoot,
+            profile: profile.profile,
+          });
+          try {
+            storeId = (await store.getMetadata()).storeId;
+            await store.createWorkspace({
+              expectedStoreId: storeId,
+              id: 'native-version-workspace',
+              name: 'Native versions',
+              rootUri: new URL(`file://${workspace}`).href,
+            });
+            await store.createSession({
+              expectedStoreId: storeId,
+              subjectId: 'local-user',
+              commandId: 'native-version-create',
+              sessionId,
+              workspaceId: 'native-version-workspace',
+              title: 'Native real versions',
+            });
+          } finally {
+            await store.close();
+          }
+        } else {
+          const seeded = JSON.parse(
+            await execute(
+              [
+                join(legacy.terminal.root, 'runtime/bun'),
+                join(root, 'store.js'),
+                'seed',
+                profile.dataRoot,
+                workspace,
+                sessionId,
+              ],
+              workspace,
+              home,
+            ),
+          ) as { storeId: string };
+          storeId = seeded.storeId;
+        }
+        // The owned seed process has exited and checkpointed its WAL. Immutable URI
+        // inspection cannot create sidecars for an otherwise read-only schema assertion.
+        const wal = `${profile.databasePath}-wal`;
+        expect(!existsSync(wal) || lstatSync(wal).size === 0).toBe(true);
+        const databaseUri = new URL(`file://${profile.databasePath}`);
+        databaseUri.searchParams.set('immutable', '1');
+        const database = new Database(
+          databaseUri.href,
+          constants.SQLITE_OPEN_READONLY |
+            constants.SQLITE_OPEN_URI |
+            constants.SQLITE_OPEN_NOFOLLOW,
+        );
+        try {
+          database.run('PRAGMA query_only=ON');
+          expect(
+            database
+              .query<{ id: string }, []>('SELECT id FROM schema_migration ORDER BY id')
+              .all()
+              .map((row) => row.id),
+          ).toEqual(
+            boundary === 'schema' ? ['0001-baseline', '0002-recovery-audit'] : ['0001-baseline'],
+          );
+        } finally {
+          database.close(true);
+        }
+        const prefix = join(caseRoot, 'installed');
+        const installed = installNativeBundle({ bundleRoot: legacy.root, prefix });
+        const configurationPath = join(profile.profilePath, 'config.jsonc');
+        const configuration = JSON.stringify({
+          modelId: 'fixed',
+          tools: [],
+          models: [
+            {
+              id: 'fixed',
+              provider: 'compatible',
+              model: 'fixed',
+              baseURL: `${provider.url.href}v1`,
+            },
+          ],
+        });
+        writeFileSync(configurationPath, configuration, { mode: 0o600 });
+        writeFileSync(userConfiguration.path, configuration, { mode: 0o600 });
+        const helperPath = join(root, 'profile-access.js');
+        const produced = JSON.parse(
+          await execute(
+            [
+              realpathSync(Bun.which('node')!),
+              join(root, 'private-driver.mjs'),
+              profile.profilePath,
+              realpathSync(process.execPath),
+              hash(readFileSync(process.execPath)),
+              helperPath,
+              hash(readFileSync(helperPath)),
+              storeId,
+              sessionId,
+            ],
+            home,
+            home,
+          ),
+        ) as { privateVersion: number; dispatched: boolean };
+        expect(produced).toEqual({ privateVersion: 9, dispatched: false });
+        const privatePath = join(profile.profilePath, 'desktop-private/data.sqlite');
+        expect(readFileSync(privatePath).readUInt32BE(60)).toBe(9);
+        const protectedPaths = [
+          profile.databasePath,
+          privatePath,
+          configurationPath,
+          userConfiguration.path,
+        ];
+        const before = protectedPaths.map((path) => ({
+          path,
+          bytes: readFileSync(path),
+          inode: lstatSync(path).ino,
+        }));
+        currentLocks = () => {
+          const held = { outer: false, inner: false };
+          for (const [key, path] of [
+            ['outer', installed.releaseRoot],
+            ['inner', join(installed.releaseRoot, 'terminal')],
+          ] as const) {
+            try {
+              const lease = acquireArtifactAccess({ root: path, mode: 'exclusive' });
+              lease.release();
+            } catch {
+              held[key] = true;
+            }
+          }
+          return [held];
+        };
+        currentSnapshot = async () =>
+          JSON.parse(
+            await execute(
+              [
+                join(legacy.terminal.root, 'runtime/bun'),
+                join(root, 'store.js'),
+                'snapshot',
+                profile.dataRoot,
+                workspace,
+                sessionId,
+              ],
+              workspace,
+              home,
+            ),
+          ) as StoredFacts;
+        writeFileSync(
+          join(home, 'expected.json'),
+          JSON.stringify({
+            storeId,
+            sessionId,
+            candidates: [
+              {
+                id: legacy.digest,
+                root: installed.releaseRoot,
+                electron: legacy.manifest.entries.electron,
+              },
+            ],
+            tasks: [],
+            bodies: [],
+          }),
+          { mode: 0o600 },
+        );
+        await execute(
+          [
+            realpathSync(Bun.which('node')!),
+            join(root, 'electron-driver.mjs'),
+            join(prefix, 'bin/kite-desktop'),
+            home,
+            provider.url.href.replace(/\/$/, ''),
+            join(repositoryRoot, 'apps/desktop/package.json'),
+            `legacy-${boundary}`,
+          ],
+          home,
+          home,
+          45000,
+        );
+        const report = JSON.parse(
+          readFileSync(join(home, 'native-legacy-report.json'), 'utf8'),
+        ) as {
+          error: string;
+          owned?: { pid: number; startIdentity: string }[];
+          electronPid?: number;
+          servicePids?: number[];
+          exit?: { code: number; signal: null };
+          normalExits?: number;
+        };
+        expect(report.error).toBe(
+          boundary === 'schema' ? 'required_capability_missing' : 'draft_storage_unavailable',
+        );
+        if (boundary === 'schema') {
+          expect(typeof report.electronPid).toBe('number');
+          expect(report.exit).toEqual({ code: 0, signal: null });
+        } else {
+          expect(report.owned).toHaveLength(1);
+          expect(report.normalExits).toBe(1);
+        }
+        for (const process of report.owned ?? [])
+          expect(inspectProcess(process.pid, process.startIdentity)).toBe('dead');
+        for (const pid of [
+          ...(report.servicePids ?? []),
+          ...(report.electronPid ? [report.electronPid] : []),
+        ])
+          expect(() => process.kill(pid, 0)).toThrow();
+        expect(providerCalls).toBe(0);
+        expect(currentLocks()).toEqual([{ outer: false, inner: false }]);
+        for (const value of before) {
+          expect(readFileSync(value.path)).toEqual(value.bytes);
+          expect(lstatSync(value.path).ino).toBe(value.inode);
+        }
+        uninstallNativeBundle(prefix);
+        expect(existsSync(prefix)).toBe(false);
+        for (const value of before) {
+          expect(readFileSync(value.path)).toEqual(value.bytes);
+          expect(lstatSync(value.path).ino).toBe(value.inode);
+        }
+        reports.push({
+          boundary,
+          sourcePrivateVersion: 9,
+          report,
+          originalBytesAndInodesRetained: true,
+          dataRestored: false,
+        });
+      }
+      console.log(
+        `NATIVE_LEGACY_SAFE_REJECTION ${JSON.stringify({ prior: predecessor.provenance, producer: 'current public Store and Native PrivateData source owners', providerCalls, reports })}`,
+      );
+      success = true;
+    } finally {
+      provider?.stop(true);
+      if (success) rmSync(root, { recursive: true });
+      else console.log(`OWNED_NATIVE_LEGACY_FAILURE_ROOT ${root}`);
+    }
+  },
+  300000,
 );

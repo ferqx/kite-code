@@ -10,6 +10,7 @@ import {
   ModelInputs,
   readModelDirectory,
 } from '../src/model-input';
+import { installGlobals } from './globals.fixture';
 
 function snapshot(id = 'm1', content = 'exact original'): ModelInputSnapshot {
   return {
@@ -97,15 +98,11 @@ function port(extra: Partial<ModelInputPort> = {}): ModelInputPort {
 }
 async function fixture(client: ModelInputPort) {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
-  const old = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    old.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const root = createRoot(dom.window.document.getElementById('root')!);
   async function render(sessionId = 'session', suspended = false, initialExecutionId?: string) {
     await act(async () =>
@@ -138,10 +135,7 @@ async function fixture(client: ModelInputPort) {
     async close() {
       await act(async () => root.unmount());
       dom.window.close();
-      for (const [key, descriptor] of old) {
-        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-        else Reflect.deleteProperty(globalThis, key);
-      }
+      restoreGlobals();
     },
   };
 }

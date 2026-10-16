@@ -1,5 +1,7 @@
 # 显式离线备份
 
+MCP 五类申请与文件恢复申请的 document reader 共用内部 [intent-document](intent-document.ts)：沿原 `openPrivate/closePrivate` 保有同一 FD／Windows pin，执行 16MiB 完整读取、实体前后复核、fatal UTF-8 和闭合 version/records envelope；各资产继续独立核原 records grammar、摘要、数量及错误码。普通 caller reader 保留自己的 `backup_content_changed`、实体字段、平台前置检查及布尔返回合同，不以共享 reader 改写其兼容语义。
+
 实际 Desktop DB9 优先使用专属 closed manifest v18；公共扩展申请与旧格式隔离见[DB9 合同](#desktop-db9-与-manifest-v18)。其余 Desktop DB8 使用 closed manifest v17，原 Workspace 移除申请见[DB8 合同](#desktop-db8-与-manifest-v17)。未升级 DB8／DB9 的 Profile 才按下面 v5–v16 条件选择。空间历史与无引用附件的显式清理见[GC 合同](#显式无引用附件-gc)。
 
 Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 任一实际存在时，当前创建 closed manifest v16；准确 raw 资产与恢复后消费者合同见[Profile MCP 配置资产](#profile-mcp-配置资产与-manifest-v16)。三者均不存在时才使用下述 v5–v15 条件，旧 v2–v15 白名单不扩大。

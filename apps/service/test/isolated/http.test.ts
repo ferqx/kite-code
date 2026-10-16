@@ -170,7 +170,7 @@ test('real HTTP exposes projected facts, distinguishes initialization writes and
     const db = new Database(data.paths.databasePath, { readonly: true });
     try {
       expect(db.query('SELECT COUNT(*) AS count FROM schema_migration').get()).toEqual({
-        count: 1,
+        count: 2,
       });
       expect(db.query('SELECT COUNT(*) AS count FROM command').get()).toEqual({ count: 0 });
     } finally {

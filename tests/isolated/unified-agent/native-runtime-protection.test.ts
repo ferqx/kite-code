@@ -12,6 +12,7 @@ import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-asset
 import { launchPairedService } from '@kite-ai/service/paired';
 import { terminalSqliteEngineRoot } from '@kite-ai/service/sqlite-release-assets';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -31,6 +32,7 @@ test.skipIf(process.platform !== 'darwin')(
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-runtime-protection-')),
       home = join(root, 'home');
     mkdirSync(home, { mode: 0o700 });
+    const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
@@ -123,6 +125,7 @@ test.skipIf(process.platform !== 'darwin')(
         ],
       });
       writeFileSync(join(profile.profilePath, 'config.jsonc'), config, { mode: 0o600 });
+      writeFileSync(userConfiguration.path, config, { mode: 0o600 });
       const free = () => {
         for (const path of [built.root, built.terminal.root])
           acquireArtifactAccess({ root: path, mode: 'exclusive' }).release();
@@ -135,6 +138,7 @@ test.skipIf(process.platform !== 'darwin')(
       };
       free();
       service = await launchPairedService({
+        spawnChild: userConfiguration.spawnChild,
         profile,
         entrypoint: join(built.terminal.root, built.terminal.manifest.entries.service),
         executable: join(built.terminal.root, built.terminal.manifest.entries.runtime),

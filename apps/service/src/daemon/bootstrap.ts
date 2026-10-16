@@ -10,6 +10,7 @@ import {
   endpointCleanupUnknown,
   profileSchema,
   readDaemonReservation,
+  readReservationDetails,
   sameRecord,
 } from './reservation';
 import { requestWindowsDaemonPipe } from './windows-pipe';
@@ -116,10 +117,11 @@ export async function requestDaemonBootstrap(
   endpoint: DaemonEndpoint,
   expectedProfile: DaemonProfile,
 ): Promise<DaemonBootstrap> {
+  const deadline = performance.now() + 5000;
   const parsed = profileSchema.safeParse(structuredClone(expectedProfile));
   if (!parsed.success) throw daemonError('daemon_invalid_selection');
   const expected = parsed.data,
-    record = readDaemonReservation(endpoint);
+    record = readReservationDetails(endpoint, deadline)?.record;
   if (!record) throw daemonError('daemon_absent');
   if (!sameProfile(record.profile, expected)) throw daemonError('daemon_identity_mismatch');
   if (endpoint.transport === 'windows-pipe') {
@@ -166,17 +168,24 @@ export async function requestDaemonBootstrap(
     throw daemonError('daemon_endpoint_drift');
   const id = randomUUID();
   return await new Promise((resolve, reject) => {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) {
+      reject(daemonError('daemon_bootstrap_timeout'));
+      return;
+    }
     const socket = createConnection(endpoint.socket);
     let bytes = Buffer.alloc(0),
       done = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error, value?: DaemonBootstrap) => {
       if (done) return;
       done = true;
+      clearTimeout(timeout);
       socket.destroy();
       if (error) reject(error);
       else resolve(value!);
     };
-    socket.setTimeout(5000, () => finish(daemonError('daemon_bootstrap_timeout')));
+    timeout = setTimeout(() => finish(daemonError('daemon_bootstrap_timeout')), remaining);
     socket.once('error', () => finish(daemonError('daemon_unavailable')));
     socket.once('end', () => {
       if (!done) finish(daemonError('daemon_invalid_bootstrap'));
@@ -197,7 +206,7 @@ export async function requestDaemonBootstrap(
       try {
         if (end !== bytes.length - 1) throw daemonError('daemon_invalid_bootstrap');
         const value = bootstrapSchema.parse(decodeFrame(bytes.subarray(0, end)));
-        const after = readDaemonReservation(endpoint);
+        const after = readReservationDetails(endpoint, deadline)?.record;
         if (
           value.requestId !== id ||
           !sameProfile(value.profile, expected) ||
@@ -207,8 +216,14 @@ export async function requestDaemonBootstrap(
         )
           throw daemonError('daemon_identity_mismatch');
         finish(undefined, value);
-      } catch {
-        finish(daemonError('daemon_identity_mismatch'));
+      } catch (error) {
+        finish(
+          error instanceof Error &&
+            (endpointCleanupUnknown(error) ||
+              ('code' in error && error.code === 'daemon_bootstrap_timeout'))
+            ? error
+            : daemonError('daemon_identity_mismatch'),
+        );
       }
     });
   });

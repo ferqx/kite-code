@@ -10,6 +10,10 @@
 
 POSIX 先通过固定 libc socket/bind 取得 fd，核原 socket 权限并同步调用 libc listen，再公布 socket identity，随后交给 net.listen({fd})；公布身份之前内核已可接入，避免读者把仅 bind、尚未 listen 的窗口误判为 unavailable。net 取得 fd 关闭所有权，但不取得 pathname 自动 unlink 权。Node 与 Bun 的按 pathname listen/close 实测会删除原路径替换文件，因此禁止迁移该方式。原 owner.close 缓存同一 Promise，终止自己的 bootstrap 连接、关闭 fd，再仅移除同原 inode 与完整原记录的路径；drift 保留未知文件和记录。fd 交接过程与并发 close 等待同一 opening，避免双 close。
 
+POSIX [record 锁](posix-record.ts)在原 held FD 上用 `flock` 序列化完整发布和读取：EX 包含全部 write、truncate 与 fsync，SH 包含原文件 uid/nlink/private/size、完整 JSON/schema 与路径 dev/ino 复核。初次发布和增加 socket identity 都保留同一 inode，不通过 rename 换对象，也不把坏 JSON 重试成 ready。只有真实 `EAGAIN/EWOULDBLOCK` 等待锁，其他错误立即拒绝；等待与 native bootstrap 网络读取共用原绝对 5 秒期限。unlock 或 close 未确认时，可信 cleanup marker 强持原 FD，拒绝继续删除原记录或丢弃 owner。FFI 仅在实际 POSIX 锁调用时加载，纯 Node 导入此 leaf 不加载 `bun:ffi`。wx 创建到首次取得锁之间的未完成初写仍按原 size/格式规则拒绝。
+
+[endpoint 测试](../../test/isolated/daemon-endpoint.test.ts)用独立 writer 持 EX 写入不完整前缀，再完成原字节，核读者等待完整发布且 inode 不变；同时保坏 JSON、超大记录、权限/链接/替换身份负例，并核锁等待与 bootstrap 回复没有获得第二份网络期限、纯 Node 导入不加载 FFI。[编译进程测试](../../test/isolated/daemon-process.test.ts)保原立即关闭父输出管道、准确 endpoint 发现与 idle 公共 shutdown。
+
 `clearDeadDaemonEndpoint` 只用于明确离线清理：原 PID/start 必须真实 dead，完整 reservation 与 socket dev/ino 重核未漂移才删除。alive/uncertain/drift 保留，不从端口、旧 PID 数字或同名进程猜测。关闭、清理均不操作 Runtime/Store/其他 profile。
 
 macOS 固定 libproc PROC_PIDTBSDINFO=3，核 136-byte proc_bsdinfo 返回长度/PID，采用 offset120/128 的 uint64 sec/usec；来自本机 SDK 并有 clang 静态断言，禁止 ps 秒精度/timeOrigin fallback。Linux采用 boot ID 与 /proc PID start ticks；读不到身份时仅 ESRCH 能证 dead。

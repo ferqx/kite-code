@@ -1,5 +1,9 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { createClient } from '../src';
+import {
+  backgroundItem as item,
+  backgroundSession as session,
+} from './fixtures/background-directory';
 
 const profile = { dataRoot: '/fixture', name: 'test', accessKey: 'background' };
 const server = {
@@ -11,55 +15,6 @@ const server = {
   capabilities: ['sessions'],
   dataAvailability: 'available',
 };
-const session = {
-  id: 's',
-  workspaceId: 'w',
-  parentSessionId: null,
-  rootSessionId: 's',
-  title: 's',
-  controlRevision: '1',
-  contextSelectionId: 'selection',
-  ownerInstanceId: null,
-  ownerGeneration: '0',
-  nextSeq: '0',
-  deletedAt: null,
-};
-const item = (id: string, seq: string) => ({
-  seq,
-  session,
-  rootSession: session,
-  run: null,
-  childRun: null,
-  childSession: null,
-  execution: {
-    id,
-    sessionId: 's',
-    rootSessionId: 's',
-    runId: null,
-    originCommandId: 'work',
-    originStoreId: 'store',
-    rootWorkCommandId: 'work',
-    rootWorkSeq: '1',
-    parentExecutionId: null,
-    childSessionId: null,
-    cancelWithParent: false,
-    stepId: 'step',
-    callId: 'call',
-    attempt: 1,
-    kind: 'job',
-    definitionId: 'fixture.job',
-    definitionVersion: '1',
-    status: 'succeeded',
-    ownerGeneration: '1',
-    cancelRequested: false,
-    cancelRequestedAt: null,
-    resultRevision: '1',
-    delivery: 'pending',
-    deliveryReason: null,
-    deliveryTargetSessionId: 's',
-    contextSelectionId: 'selection',
-  },
-});
 let restore: () => void = () => {};
 afterEach(() => restore());
 function fixture(mode: string, onConflict?: () => void) {

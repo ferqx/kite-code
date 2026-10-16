@@ -61,8 +61,6 @@ import {
   createCompatibleModelBinding,
   createSdkModelAdapter,
   type ReasoningEffort,
-  reasoningEfforts,
-  type SdkModelPreset,
 } from '@kite-ai/ai/sdk';
 import { createWorkspaceAssembly } from './assembly';
 import type { ProcessHostConfiguration } from './bootstrap';
@@ -83,6 +81,7 @@ import {
   createMcpSourceConfiguration,
   type McpSourceConfigurationOptions,
 } from './mcp-source-configuration';
+import { parseModelPreset } from './model-options';
 import { isSupportedModelProvider, supportsReasoningEffort } from './model-providers';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import {
@@ -120,6 +119,7 @@ export type {
   ManagementMutation,
 } from './configuration-management';
 export { createMcpManagement } from './mcp-management';
+export { parseModelPreset } from './model-options';
 export type {
   ModeState,
   PermissionManagementPort,
@@ -184,45 +184,6 @@ function commandSkills(value: Json): readonly string[] | undefined {
   )
     throw new AgentError('invalid_skill_selection');
   return Object.freeze([...(selection as string[])]);
-}
-/** Pure validation shared by Run binding and finite model-settings candidate checks. */
-export function parseModelPreset(value: Json | undefined): SdkModelPreset {
-  if (value === undefined) return {};
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new ConfigurationError('invalid_model_options');
-  if (
-    Object.keys(value).some(
-      (key) => !['temperature', 'topP', 'maxOutputTokens', 'reasoningEffort'].includes(key),
-    )
-  )
-    throw new ConfigurationError('unsupported_model_options');
-  const { temperature, topP, maxOutputTokens, reasoningEffort } = value;
-  if (
-    (reasoningEffort !== undefined &&
-      (typeof reasoningEffort !== 'string' ||
-        !reasoningEfforts.includes(reasoningEffort as ReasoningEffort))) ||
-    (temperature !== undefined &&
-      (typeof temperature !== 'number' ||
-        !Number.isFinite(temperature) ||
-        temperature < 0 ||
-        temperature > 2)) ||
-    (topP !== undefined &&
-      (typeof topP !== 'number' || !Number.isFinite(topP) || topP < 0 || topP > 1)) ||
-    (maxOutputTokens !== undefined &&
-      (typeof maxOutputTokens !== 'number' ||
-        !Number.isSafeInteger(maxOutputTokens) ||
-        maxOutputTokens < 1 ||
-        maxOutputTokens > 1000000))
-  )
-    throw new ConfigurationError('invalid_model_options');
-  return Object.freeze({
-    ...(reasoningEffort === undefined
-      ? {}
-      : { reasoningEffort: reasoningEffort as ReasoningEffort }),
-    ...(temperature === undefined ? {} : { temperature }),
-    ...(topP === undefined ? {} : { topP }),
-    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
-  });
 }
 export type McpHostFactory = (host: {
   readonly profile: ProfileSelection;

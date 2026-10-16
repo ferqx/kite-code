@@ -6,12 +6,11 @@ export function observedModelRetry(
   executions: readonly Execution[],
 ): Execution['modelRetry'] {
   const retry = execution?.modelRetry;
-  if (!execution || execution.kind !== 'model' || !retry) return undefined;
+  if (execution?.kind !== 'model' || !retry) return undefined;
   const predecessors = executions.filter((item) => item.id === retry.previousExecutionId);
   const previous = predecessors.length === 1 ? predecessors[0] : undefined;
   if (
-    !previous ||
-    previous.kind !== 'model' ||
+    previous?.kind !== 'model' ||
     previous.status !== 'failed' ||
     previous.id === execution.id ||
     !execution.originStoreId ||

@@ -2,8 +2,32 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { EffectiveConfiguration, ModelConfiguration } from '@kite-ai/agent/config';
 import { _electron } from 'playwright';
-import type { NativeState } from '../src/native-bridge';
+import type {
+  NativeCallerMetadata,
+  NativeProviderSubmission,
+  NativeState,
+} from '../src/native-bridge';
+
+type PhysicalRequest = { path: string; method: string };
+type OwnedTransport = { base: string; headers: RequestInit['headers'] };
+type ProviderFixtureGlobal = typeof globalThis & {
+  providerPhysical: PhysicalRequest[];
+  dropProviderSave: boolean;
+  ownedTransport?: OwnedTransport;
+  cleanupTransport: () => OwnedTransport | undefined;
+};
+type ProviderRun = { id: string; sessionId: string; marker: string; modelId: string };
+export type ProviderReport = {
+  pids: number[];
+  originals: NativeProviderSubmission[];
+  runs: ProviderRun[];
+  steers: NativeCallerMetadata[];
+  counts: PhysicalRequest[][];
+  models: ModelConfiguration[];
+  refsRevoked: number;
+};
 
 async function openSettings(page: import('playwright').Page) {
   if (!(await page.locator('.desktop-settings-dialog').isVisible()))
@@ -29,16 +53,18 @@ const [candidate, home, control, storeId, configPath] = process.argv.slice(2) as
   string,
   string,
 ];
+const readConfiguration = (): EffectiveConfiguration =>
+  JSON.parse(readFileSync(configPath, 'utf8'));
 const started = Date.now();
 const stage = (name: string, facts = {}) =>
   console.log(JSON.stringify({ stage: name, elapsedMs: Date.now() - started, ...facts }));
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
 let childPid: number | undefined;
 const pids: number[] = [],
-  originals: any[] = [],
-  runs: any[] = [],
-  steers: any[] = [];
-const counts: any[] = [];
+  originals: NativeProviderSubmission[] = [],
+  runs: ProviderRun[] = [],
+  steers: NativeCallerMetadata[] = [];
+const counts: PhysicalRequest[][] = [];
 async function launch() {
   app = await _electron.launch({
     executablePath: join(candidate!, 'electron/Electron.app/Contents/MacOS/Electron'),
@@ -66,7 +92,7 @@ async function launch() {
   pids.push(childPid!);
   stage('owned_service', { electronPid: app.process().pid, childPid });
   await app.evaluate(() => {
-    const t = globalThis as any;
+    const t = globalThis as ProviderFixtureGlobal;
     t.providerPhysical = [];
     t.dropProviderSave = false;
     t.ownedTransport = undefined;
@@ -191,11 +217,11 @@ try {
     );
     await page.getByRole('button', { name: '关闭提供商配置', exact: true }).click();
   }
-  const config = JSON.parse(readFileSync(configPath, 'utf8'));
-  const models = config.models as any[];
+  const config = readConfiguration();
+  const models = config.models!;
   assert.equal(models.length, 4);
   assert.ok(models.every((m) => m.enabled === false));
-  const id = (alias: string) => models.find((m) => m.provider === alias).id;
+  const id = (alias: string) => models.find((m) => m.provider === alias)!.id;
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   for (const m of models) {
@@ -221,7 +247,7 @@ try {
     .getByRole('menuitemradio', { name: `设为默认 ${id('compatible')}`, exact: true })
     .click();
   await until(
-    async () => JSON.parse(readFileSync(configPath, 'utf8')).modelId,
+    async () => readConfiguration().modelId,
     (v) => v === id('compatible'),
     'default A absent',
   );
@@ -289,7 +315,7 @@ try {
   }
   await choose('openai');
   await effort('high');
-  assert.equal(JSON.parse(readFileSync(configPath, 'utf8')).modelId, id('compatible'));
+  assert.equal(readConfiguration().modelId, id('compatible'));
   await select('b');
   assert.match(await page.getByRole('region', { name: '下一轮模型选择' }).innerText(), /model-a/);
   await select('a');
@@ -324,7 +350,7 @@ try {
   await page.getByRole('button', { name: '默认模型', exact: true }).click();
   await page.getByRole('menuitemradio', { name: `设为默认 ${id('openai')}`, exact: true }).click();
   await until(
-    async () => JSON.parse(readFileSync(configPath, 'utf8')).modelId,
+    async () => readConfiguration().modelId,
     (v) => v === id('openai'),
     'changed default B absent',
   );
@@ -338,7 +364,7 @@ try {
     (v) => v.callerSubmissions!.some((row) => row.request.kind === 'input.steer'),
     'original steer missing',
   );
-  steers.push(steered.callerSubmissions!.find((row) => row.request.kind === 'input.steer'));
+  steers.push(steered.callerSubmissions!.find((row) => row.request.kind === 'input.steer')!);
   await fetch(`${control}/release`);
   await until(
     state,
@@ -359,7 +385,7 @@ try {
     .getByRole('menuitemradio', { name: `设为默认 ${id('compatible')}`, exact: true })
     .click();
   await until(
-    async () => JSON.parse(readFileSync(configPath, 'utf8')).modelId,
+    async () => readConfiguration().modelId,
     (v) => v === id('compatible'),
     'new session default A missing',
   );
@@ -390,7 +416,7 @@ try {
   await page.getByRole('button', { name: '编辑 OpenAI-compatible', exact: true }).click();
   await page.getByRole('textbox', { name: '模型名称', exact: true }).fill('model-a');
   await app!.evaluate(() => {
-    (globalThis as any).dropProviderSave = true;
+    (globalThis as ProviderFixtureGlobal).dropProviderSave = true;
   });
   await page.getByRole('button', { name: '保存提供商配置', exact: true }).click();
   const unknown = await until(
@@ -400,9 +426,9 @@ try {
   );
   const original = unknown.providerSettingsSubmissions!.find((s) => s.phase === 'unknown')!;
   originals.push(original);
-  counts.push(await app!.evaluate(() => (globalThis as any).providerPhysical));
-  assert.equal(counts[0].filter((x: any) => x.method === 'POST').length, 5);
-  assert.equal(counts[0].filter((x: any) => x.path.includes('/host-mutations/')).length, 0);
+  counts.push(await app!.evaluate(() => (globalThis as ProviderFixtureGlobal).providerPhysical));
+  assert.equal(counts[0]!.filter((x) => x.method === 'POST').length, 5);
+  assert.equal(counts[0]!.filter((x) => x.path.includes('/host-mutations/')).length, 0);
   const persisted = await app!.evaluate(
     (_, { home, commandId }) => {
       const { DatabaseSync } = process.getBuiltinModule(
@@ -442,7 +468,7 @@ try {
     async () => await window.kiteNative!.request({ method: 'input.models.read', generation: 1 }),
   );
   assert.equal((coldRoute as { selectedModelId?: string }).selectedModelId, id('openai'));
-  assert.equal(JSON.parse(readFileSync(configPath, 'utf8')).modelId, id('compatible'));
+  assert.equal(readConfiguration().modelId, id('compatible'));
   const before = Number(await (await fetch(`${control}/count`)).text());
   await openSettings(page);
   await page.getByRole('button', { name: '提供商', exact: true }).click();
@@ -454,10 +480,10 @@ try {
       'applied',
     'cold original explicit lookup missing',
   );
-  counts.push(await app!.evaluate(() => (globalThis as any).providerPhysical));
-  assert.equal(counts[1].filter((x: any) => x.method === 'POST').length, 0);
+  counts.push(await app!.evaluate(() => (globalThis as ProviderFixtureGlobal).providerPhysical));
+  assert.equal(counts[1]!.filter((x) => x.method === 'POST').length, 0);
   assert.equal(
-    counts[1].filter((x: any) => x.path === `/v1/host-mutations/${original.commandId}`).length,
+    counts[1]!.filter((x) => x.path === `/v1/host-mutations/${original.commandId}`).length,
     1,
   );
   assert.equal(Number(await (await fetch(`${control}/count`)).text()), before);
@@ -477,9 +503,9 @@ try {
   const refs = models.flatMap((m) => (m.credentialRef ? [m.credentialRef] : []));
   // Capture authenticated transport with an explicit provider metadata GET during cold read.
   await app!.evaluate(async () => {
-    const t = globalThis as any;
+    const t = globalThis as ProviderFixtureGlobal;
     const existing = t.fetch;
-    let transport: any;
+    let transport: OwnedTransport | undefined;
     t.fetch = Object.assign(
       async (...args: Parameters<typeof fetch>) => {
         const u = new URL(String(args[0]));
@@ -497,7 +523,7 @@ try {
   await page.waitForTimeout(100);
   await app!.evaluate(
     async (_, { refs, storeId }) => {
-      const t = (globalThis as any).cleanupTransport();
+      const t = (globalThis as ProviderFixtureGlobal).cleanupTransport();
       if (!t) throw Error('missing owned transport');
       for (const ref of refs) {
         const r = await fetch(`${t.base}/v1/credentials/${encodeURIComponent(ref)}/revoke`, {
@@ -515,7 +541,15 @@ try {
   await close();
   writeFileSync(
     join(home!, 'provider-report.json'),
-    JSON.stringify({ pids, originals, runs, steers, counts, models, refsRevoked: refs.length }),
+    JSON.stringify({
+      pids,
+      originals,
+      runs,
+      steers,
+      counts,
+      models,
+      refsRevoked: refs.length,
+    } satisfies ProviderReport),
   );
   stage('complete', {
     runs: runs.length,
@@ -526,9 +560,8 @@ try {
 } catch (error) {
   if (app)
     try {
-      const refs = JSON.parse(readFileSync(configPath, 'utf8')).models.flatMap((m: any) =>
-        m.credentialRef ? [m.credentialRef] : [],
-      );
+      const configuration = readConfiguration();
+      const refs = configuration.models!.flatMap((m) => (m.credentialRef ? [m.credentialRef] : []));
       await app
         .windows()[0]!
         .evaluate(
@@ -537,14 +570,14 @@ try {
         );
       await app.evaluate(
         async (_, { refs, storeId }) => {
-          const t = (globalThis as any).ownedTransport;
+          const t = (globalThis as ProviderFixtureGlobal).ownedTransport;
           if (!t && refs.length) throw Error('missing owned cleanup transport');
           for (const ref of refs) {
             const response = await fetch(
-              `${t.base}/v1/credentials/${encodeURIComponent(ref)}/revoke`,
+              `${t!.base}/v1/credentials/${encodeURIComponent(ref)}/revoke`,
               {
                 method: 'POST',
-                headers: { ...t.headers, 'content-type': 'application/json' },
+                headers: { ...t!.headers, 'content-type': 'application/json' },
                 body: JSON.stringify({ commandId: crypto.randomUUID(), expectedStoreId: storeId }),
               },
             );

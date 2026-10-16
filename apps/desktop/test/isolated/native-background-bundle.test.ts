@@ -292,6 +292,7 @@ test.skipIf(process.platform !== 'darwin')(
               id: 'fixed',
               provider: 'compatible',
               model: 'fixed',
+              modelCapabilities: { contextWindowTokens: 1_000_000 },
               baseURL: `${provider.url.href}v1`,
             },
           ],

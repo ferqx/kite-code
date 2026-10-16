@@ -119,6 +119,8 @@ test('one ordinary Run retains complete project sources across 257 distinct File
             provider: 'compatible',
             model: 'fixed',
             baseURL: `${provider.url.href}v1`,
+            // This finite source-capture Provider has no summary protocol.
+            modelCapabilities: { contextWindowTokens: 1_000_000 },
           },
         ],
         tools: [
@@ -285,7 +287,15 @@ test('one ordinary Run retains complete project sources across 257 distinct File
           content: `<project-instructions role="workspace-context">\nAGENTS.md\n${agents}\n</project-instructions>`,
         },
       ]);
-      expect(request.tools.map((tool) => tool.function.name)).toEqual(['files.read']);
+      expect(request.tools.map((tool) => tool.function.name)).toEqual([
+        'files.edit',
+        'files.glob',
+        'files.list',
+        'files.read',
+        'files.search',
+        'files.write',
+        'web_fetch',
+      ]);
     }
     for (const execution of models) {
       expect(execution.status).toBe('succeeded');

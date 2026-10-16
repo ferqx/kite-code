@@ -7,7 +7,10 @@ import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 import { qualifyWindowsNativeInstallation } from './windows-native-installation.qualification';
-import { materializeWindowsPredecessor, WINDOWS_PREDECESSOR_COMMIT } from './windows-predecessor';
+import {
+  COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT,
+  materializeCompatibleWindowsPredecessor,
+} from './windows-predecessor';
 import { qualifyWindowsTerminalCrossVersion } from './windows-terminal-cross-version.qualification';
 
 /** One old-source build feeds both installed families; no candidate is relabelled. */
@@ -30,20 +33,20 @@ export async function qualifyWindowsCrossVersion(input: { terminal: string; nati
   assert.equal(native.terminal.digest, terminal.digest);
   assert.equal(terminal.manifest.source.dirty, false);
   assert(/^[a-f0-9]{40}$/.test(terminal.manifest.source.commit));
-  assert.notEqual(terminal.manifest.source.commit, WINDOWS_PREDECESSOR_COMMIT);
+  assert.notEqual(terminal.manifest.source.commit, COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT);
   if (process.env.KITE_EXPECTED_CANDIDATE_COMMIT !== undefined)
     assert.equal(terminal.manifest.source.commit, process.env.KITE_EXPECTED_CANDIDATE_COMMIT);
   const root = join(realpathSync(tmpdir()), `kite-windows-cross-code-${randomUUID()}`);
   assert(!existsSync(root));
   privateDirectory(root);
   try {
-    const old = await materializeWindowsPredecessor({
+    const old = await materializeCompatibleWindowsPredecessor({
       root,
       repositoryRoot: resolve(import.meta.dir, '../../..'),
       nativeElectronDist: join(native.root, 'electron'),
       deadline: Date.now() + Math.min(180000, remaining()),
     });
-    assert.equal(old.sourceCommit, WINDOWS_PREDECESSOR_COMMIT);
+    assert.equal(old.sourceCommit, COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT);
     assert(!existsSync(join(root, 'predecessor-source')));
     const terminalResult = await qualifyWindowsTerminalCrossVersion({
       candidate: terminal.root,
@@ -66,6 +69,9 @@ export async function qualifyWindowsCrossVersion(input: { terminal: string; nati
       predecessorCommit: old.sourceCommit,
       sourceRemoved: true,
       lockedInputs: old.lockedInputs,
+      reviewedDeclarations: old.reviewedDeclarations,
+      schemaCapability: old.schemaCapability,
+      migrations: old.migrations,
       terminal: terminalResult,
       native: nativeResult,
       wholeBudgetMs,

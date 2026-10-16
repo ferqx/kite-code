@@ -524,6 +524,39 @@ for (const stage of [
           (run) => !run.isActive && ['completed', 'cancelled'].includes(run.status),
         ),
       ).toBe(true);
+      if (
+        !terminalModels.every((execution) => ['succeeded', 'cancelled'].includes(execution.status))
+      )
+        console.error(
+          JSON.stringify({
+            terminalModelFailures: terminalModels
+              .filter((execution) => !['succeeded', 'cancelled'].includes(execution.status))
+              .map((execution) => {
+                const carrier = terminal.find(
+                  (item) => item.execution.childSessionId === execution.sessionId,
+                );
+                const result = execution.result as {
+                  code?: unknown;
+                  incomplete?: unknown;
+                  finishReason?: unknown;
+                } | null;
+                return {
+                  id: execution.id,
+                  sessionId: execution.sessionId,
+                  runId: execution.runId,
+                  status: execution.status,
+                  parentSessionId: carrier?.session.id,
+                  carrierStatus: carrier?.execution.status,
+                  rootWorkCommandId: execution.rootWorkCommandId,
+                  cancelRequestedAt: execution.cancelRequestedAt,
+                  modelRetry: execution.modelRetry,
+                  code: result?.code,
+                  incomplete: result?.incomplete,
+                  finishReason: result?.finishReason,
+                };
+              }),
+          }),
+        );
       expect(
         terminalModels.every((execution) => ['succeeded', 'cancelled'].includes(execution.status)),
       ).toBe(true);

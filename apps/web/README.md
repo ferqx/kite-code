@@ -20,6 +20,8 @@
 
 ## 目录布局
 
+DOM 测试共用私有 [global descriptor 夹具](test/globals.fixture.ts)安装所需全局并恢复原属性描述符；每个测试继续自行配置 JSDOM、浏览器 API stub、React 生命周期和业务 port。夹具不进入生产构建，也不把 DOM 测试提升为真实浏览器资格。
+
 私有 [navigation](src/navigation.tsx) 只管理浏览器本地布局，不接收 Client 或执行身份。宽屏目录默认 200 px，可用 pointer 拖动分隔线调整至 420 px；窗口仍为宽屏时保留像素宽度，由内容区适应剩余空间。拖至 100 px 以下折叠，顶栏按钮重开并恢复最后合法宽度。导航 DOM 保持挂载，目录展开项、选中会话及 History/Model/context/Job 所属读取不因折叠或 resize 重建。
 
 分隔线是可聚焦的垂直 separator，发布 200–420 的 ARIA 值；左右键每次调整 10 px，Home/End 到边界，Enter/Escape 折叠并将焦点返回顶栏按钮。640 px 及以下初始关闭目录，按钮打开覆盖侧栏；选择真实会话或按 Escape 关闭，焦点在顶栏关闭按钮时也有效并回到打开按钮。已有目录 handler 消费的 Escape 不重复执行。选择仍使用原 controller，宽窄屏切换不改变 Session 或执行权限。

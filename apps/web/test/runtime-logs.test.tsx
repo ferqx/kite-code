@@ -6,6 +6,7 @@ import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ModelInputPort } from '../src/model-input';
 import type { RuntimeLogPort } from '../src/runtime-logs';
+import { installGlobals } from './globals.fixture';
 
 function entry(cursor: string, model = false): SessionLogEntry {
   return {
@@ -43,8 +44,7 @@ async function fixture(
     url: fullPage ? 'http://localhost/sessions/s' : 'http://localhost',
     pretendToBeVisual: true,
   });
-  const previous = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     HTMLElement: dom.window.HTMLElement,
@@ -61,10 +61,7 @@ async function fixture(
       disconnect() {}
     },
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const [{ WebPage }, { ModelInputs }, { RuntimeLogs }] = await Promise.all([
     import('../src/page'),
     import('../src/model-input'),
@@ -213,10 +210,7 @@ async function fixture(
     async close() {
       await act(async () => root.unmount());
       dom.window.close();
-      for (const [key, descriptor] of previous) {
-        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-        else Reflect.deleteProperty(globalThis, key);
-      }
+      restoreGlobals();
     },
   };
 }

@@ -65,6 +65,11 @@ async function fixture(
   let trusted = true;
   let revision = 0;
   let credentialReads = 0;
+  let completionGate: {
+    workId: string;
+    diagnostic: Record<string, unknown>;
+    release(): void;
+  } | null = null;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -88,6 +93,26 @@ async function fixture(
       }
       if (review) reviews.push(body);
       else normal.push(body);
+      if (
+        !review &&
+        (['pending_task', 'pending_job', 'head_drift', 'proof_drift'].includes(scenario) ||
+          workId === 'next')
+      ) {
+        for (const message of messages) {
+          let diagnostic: Record<string, unknown>;
+          try {
+            diagnostic = JSON.parse(String(message.content));
+          } catch {
+            continue;
+          }
+          if (diagnostic?.kind !== 'completion_diagnostic') continue;
+          // Hold the exact repair turn so assertions observe the real incomplete Run, without polling Models.
+          await new Promise<void>((resolve) => {
+            completionGate = { workId, diagnostic, release: resolve };
+          });
+          break;
+        }
+      }
       const chunk = {
         id: `response-${normal.length}-${reviews.length}`,
         object: 'chat.completion.chunk',
@@ -372,6 +397,7 @@ async function fixture(
       workId = id;
       step = 0;
       modelSteps.clear();
+      completionGate = null;
       return client.startRun('s', {
         expectedStoreId,
         commandId: id,
@@ -420,6 +446,26 @@ async function fixture(
       });
       return card;
     },
+    async incomplete() {
+      const held = await until(async () =>
+        completionGate?.workId === workId ? completionGate : null,
+      );
+      return { run: await f.run(), diagnostic: held.diagnostic };
+    },
+    async cancelIncomplete(runId: string) {
+      await client.cancelRun('s', {
+        expectedStoreId,
+        commandId: `cancel-${workId}`,
+        kind: 'run.cancel',
+        runId,
+      });
+      completionGate?.release();
+      const cancelled = await f.done();
+      expect(cancelled.id).toBe(runId);
+      expect(cancelled.status).toBe('cancelled');
+      expect(cancelled.isActive).toBe(false);
+      return cancelled;
+    },
     async done() {
       try {
         const command = await runtime.waitForCommand(workId, { timeoutMs: 8000 });
@@ -458,6 +504,7 @@ async function fixture(
       }
     },
     async close() {
+      completionGate?.release();
       await service.close();
       await workspaceSerialLocks.close();
       provider.stop(true);
@@ -573,7 +620,17 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
     const f = await fixture(scenario);
     try {
       await f.submit();
-      expect((await f.done()).status).toBe('failed');
+      const { run, diagnostic } = await f.incomplete();
+      expect(run.isActive).toBe(true);
+      expect(run.status).toBe('running');
+      expect(run.requirements.some((ref) => ref.requirementId === 'plan.required')).toBe(true);
+      expect(String(diagnostic.content)).toContain('plan_draft_pending');
+      const denied = (await f.store.listExecutions('s')).find(
+        (execution) =>
+          execution.definitionId === (scenario === 'pending_task' ? 'task' : 'shell.command'),
+      )!;
+      expect(denied.status).toBe('failed');
+      expect(denied.authorization?.dispatched).toBe(false);
       expect(f.normal.filter((row) => row.model === 'child')).toHaveLength(0);
       expect(
         (await f.store.listExecutions('s')).filter((e) => e.childSessionId !== null),
@@ -585,6 +642,8 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
             (e) => e.kind === 'job' && e.definitionId === 'shell.command',
           )!.status,
         ).toBe('failed');
+      const cancelled = await f.cancelIncomplete(run.id);
+      expect(cancelled.requirements).toEqual(run.requirements);
     } finally {
       await f.close();
     }
@@ -690,8 +749,28 @@ test('original parent head/proof drift during child approval refuses dispatch an
         db.close();
       }
       await f.approve('files.write');
-      await f.done();
+      const { run, diagnostic } = await f.incomplete();
+      expect(run.isActive).toBe(true);
+      expect(run.status).toBe('running');
+      expect(String(diagnostic.content)).toContain('plan_draft_pending');
+      const carrier = (await f.store.listExecutions('s')).find(
+        (execution) => execution.childSessionId !== null,
+      )!;
+      // The parent's repair request can arrive before the approved child attempt settles.
+      // Observe the original card's execution through its real terminal boundary.
+      const write = await until(async () => {
+        const execution = await f.store.getExecution(card.executionId);
+        return execution &&
+          ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status)
+          ? execution
+          : null;
+      });
+      expect(write.sessionId).toBe(carrier.childSessionId!);
+      expect(write.status).toBe('failed');
+      expect(write.authorization?.dispatched).toBe(false);
       expect(existsSync(join(f.workspace, 'child.txt'))).toBe(false);
+      const cancelled = await f.cancelIncomplete(run.id);
+      expect(cancelled.requirements).toEqual(run.requirements);
     } finally {
       await f.close();
     }
@@ -705,10 +784,15 @@ test('original parent head/proof drift during child approval refuses dispatch an
       (e) => e.childSessionId !== null,
     ).length;
     await f.submit('next');
-    expect((await f.done()).status).toBe('failed');
+    const { run, diagnostic } = await f.incomplete();
+    expect(run.isActive).toBe(true);
+    expect(run.status).toBe('running');
+    expect(String(diagnostic.content)).toContain('plan_draft_pending');
     expect(
       (await f.store.listExecutions('s')).filter((e) => e.childSessionId !== null),
     ).toHaveLength(prior);
+    const cancelled = await f.cancelIncomplete(run.id);
+    expect(cancelled.requirements).toEqual(run.requirements);
   } finally {
     await f.close();
   }

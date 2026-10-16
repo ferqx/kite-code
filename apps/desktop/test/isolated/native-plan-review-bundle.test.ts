@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -16,9 +17,11 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
+import type { Json } from '@kite-ai/client';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
+import type { PlanReviewReport } from '../native-plan-review-electron.fixture';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
@@ -94,8 +97,7 @@ test.skipIf(process.platform !== 'darwin')(
         await seed.close();
       }
       const feedback = '  修改原计划 🪁\n保持组合字符 e\u0301 与空格  ';
-      const bodyText =
-        '# Original Unicode plan\n' + '完整正文 雪🙂 e\u0301\n'.repeat(3000) + '\n原完整正文尾部';
+      const bodyText = `# Original Unicode plan\n${'完整正文 雪🙂 e\u0301\n'.repeat(3000)}\n原完整正文尾部`;
       const stages = new Map<string, number>();
       const pointers = new Map<string, { planId: string; version: number; digest: string }>();
       const callNames = new Map<string, string>();
@@ -107,6 +109,41 @@ test.skipIf(process.platform !== 'darwin')(
           const url = new URL(request.url);
           if (url.pathname === '/count') return new Response(String(businessBodies.length));
           if (url.pathname === '/metadata') return Response.json({ feedback, bodyText });
+          if (url.pathname === '/denied-completion') {
+            const runId = url.searchParams.get('runId');
+            const body = businessBodies.find(
+              (body) =>
+                runId &&
+                JSON.stringify(body.messages).includes('NATIVE_PLAN_D') &&
+                body.messages.some(
+                  (message) =>
+                    typeof message.content === 'string' &&
+                    message.content.includes(`run: ${runId}\n`),
+                ) &&
+                body.messages.some((message) => {
+                  try {
+                    return (
+                      message.role === 'user' &&
+                      typeof message.content === 'string' &&
+                      JSON.parse(message.content).kind === 'completion_diagnostic'
+                    );
+                  } catch {
+                    return false;
+                  }
+                }),
+            );
+            return Response.json(
+              body?.messages.flatMap((message) => {
+                try {
+                  const value =
+                    typeof message.content === 'string' ? JSON.parse(message.content) : null;
+                  return value?.kind === 'completion_diagnostic' ? [value] : [];
+                } catch {
+                  return [];
+                }
+              }) ?? [],
+            );
+          }
           if (url.pathname === '/quit-facts') {
             const reader = await openSqliteStore({
               dataRoot: profile.dataRoot,
@@ -227,10 +264,12 @@ test.skipIf(process.platform !== 'darwin')(
             .find((message) => message.role === 'tool') as
             | { content: string; tool_call_id?: string }
             | undefined;
-          let value: any;
+          let value: Record<string, unknown> | undefined;
           if (toolMessage) {
             try {
-              value = JSON.parse(toolMessage.content);
+              const parsed: unknown = JSON.parse(toolMessage.content);
+              if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed))
+                value = parsed as Record<string, unknown>;
             } catch {}
           }
           const previous = toolMessage?.tool_call_id
@@ -320,6 +359,10 @@ test.skipIf(process.platform !== 'darwin')(
             );
           }
           if (previous === 'planning.write') {
+            assert.ok(value);
+            assert.ok(typeof value.planId === 'string');
+            assert.ok(typeof value.digest === 'string');
+            assert.ok(typeof value.version === 'number');
             // Assert scalar values without applying asymmetric matchers to a reused request object.
             expect(value.planId).toBe(`p-${sessionId}`);
             expect(typeof value.digest).toBe('string');
@@ -342,6 +385,9 @@ test.skipIf(process.platform !== 'darwin')(
             );
           }
           if (previous === 'planning.review') {
+            assert.ok(value);
+            assert.ok(typeof value.decision === 'string');
+            assert.ok(value.feedback === undefined || typeof value.feedback === 'string');
             expect(value.decision).toBe(
               sessionId === 'd'
                 ? 'deny'
@@ -386,12 +432,12 @@ test.skipIf(process.platform !== 'darwin')(
           ) {
             name = 'planning.review';
             input = pointer;
-          } else if (previous === 'planning.review' && value.decision === 'revise') {
+          } else if (previous === 'planning.review' && value?.decision === 'revise') {
             // The exact accepted review result, rather than a request counter, drives v2.
             expect(value).toEqual({ status: 'not_approved', decision: 'revise', feedback });
             name = 'planning.write';
             input = planWrite(1, `# Revised original plan\n${value.feedback}\n新版正文尾部`);
-          } else if (previous === 'planning.review' && value.decision === 'approve') {
+          } else if (previous === 'planning.review' && value?.decision === 'approve') {
             expect(value.mode).toBe(sessionId === 'a' ? 'auto' : 'accept_edits');
             name = 'files.write';
             input = {
@@ -423,11 +469,11 @@ test.skipIf(process.platform !== 'darwin')(
             } finally {
               await reader.close();
             }
-          } else if (previous === 'planning.review' && value.decision === 'deny') {
+          } else if (previous === 'planning.review' && value?.decision === 'deny') {
             name = 'files.write';
             input = { path: 'denied-effect.txt', base: null, content: 'must remain absent' };
           }
-          // Denial's refused effect must reach a real unsuccessful completion, not cancel.
+          // An unapproved necessary plan keeps the same Run active until explicit cancellation.
           if (sessionId === 'd' && stage >= 5) name = undefined;
           const id = `native-plan-call-${serial}`;
           if (name) callNames.set(id, name);
@@ -483,6 +529,8 @@ test.skipIf(process.platform !== 'darwin')(
               provider: 'compatible',
               model: 'fixed',
               baseURL: `${provider.url.href}v1`,
+              // This fixed Provider implements Plan/Files and authorization review, not summaries.
+              modelCapabilities: { contextWindowTokens: 1_000_000 },
             },
           ],
           tools: [{ id: 'files.write', definitionVersion: '2' }],
@@ -610,43 +658,9 @@ test.skipIf(process.platform !== 'darwin')(
       }
       expect(reviewRequests).toHaveLength(authorizationReviewCalls);
       expect(bodies).toHaveLength(businessBodies.length + authorizationReviewCalls);
-      const report = JSON.parse(readFileSync(join(home, 'plan-review-report.json'), 'utf8')) as {
-        cards: {
-          id: string;
-          runId: string;
-          executionId: string;
-          commandId?: string;
-          sessionId: string;
-          decision?: string;
-          mode?: string;
-          version: string;
-          request: any;
-        }[];
-        runs: {
-          sessionId: string;
-          id: string;
-          status: 'completed' | 'failed' | 'cancelled';
-          commandId: string;
-        }[];
-        management: {
-          id: string;
-          runId: string;
-          sessionId: string;
-          executionId: string;
-          definitionId: string;
-          request: any;
-          completeHash?: string;
-          commandId: string;
-        }[];
-        planningExecutions: import('@kite-ai/client').Execution[];
-        filesApprovals: {
-          id: string;
-          runId: string;
-          sessionId: string;
-          executionId: string;
-          request: any;
-          commandId: string;
-        }[];
+      const report = JSON.parse(
+        readFileSync(join(home, 'plan-review-report.json'), 'utf8'),
+      ) as PlanReviewReport & {
         expectedPosts: number;
         childPid: number;
         providerRequestsBeforeCancel: number;
@@ -795,11 +809,11 @@ test.skipIf(process.platform !== 'darwin')(
           });
           if (original.completeHash) {
             expect(original.completeHash).toBe(original.request.approvalRequestDigest);
-            expect(original.request.policy.review.reference.scope).toEqual({
+            expect(original.request.policy!.review.reference.scope).toEqual({
               kind: 'execution',
               id: original.executionId,
             });
-            expect(Number(original.request.policy.review.reference.size)).toBeGreaterThan(32768);
+            expect(Number(original.request.policy!.review.reference.size)).toBeGreaterThan(32768);
           }
         }
         for (const original of report.filesApprovals) {
@@ -905,20 +919,21 @@ test.skipIf(process.platform !== 'darwin')(
               originStoreId: storeId,
               planRecordRevision: metadata.planRecordRevision,
             });
-            const plan = (await cold.getExtensionRecord({
+            const plan: Json = (await cold.getExtensionRecord({
               sessionId: original.sessionId,
               extensionId: 'builtin.planning',
               key: 'plan/p-a/1',
-            }))!.value as any;
+            }))!.value;
+            assert.ok(plan !== null && typeof plan === 'object' && !Array.isArray(plan));
             expect(plan.body).toBe(bodyText);
-            const canonical = (v: any): string =>
+            const canonical = (v: Json): string =>
               v === null || typeof v !== 'object'
                 ? JSON.stringify(v)
                 : Array.isArray(v)
                   ? `[${v.map(canonical).join(',')}]`
                   : `{${Object.keys(v)
                       .sort()
-                      .map((key) => `${JSON.stringify(key)}:${canonical(v[key])}`)
+                      .map((key) => `${JSON.stringify(key)}:${canonical(v[key]!)}`)
                       .join(',')}}`;
             const bytes = Buffer.from(canonical(plan));
             expect(bytes.length).toBeGreaterThan(32768);

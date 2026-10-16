@@ -3,6 +3,7 @@ import { type BrowserView, ClientError, type Message } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { installGlobals } from './globals.fixture';
 
 function view(id: string, active = false): BrowserView {
   return {
@@ -81,8 +82,7 @@ async function fixture(
     '<!doctype html><html><head><meta name="kite-web-identity" content="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"></head><body><div id="root"></div></body></html>',
     { url: 'http://127.0.0.1:31000/', pretendToBeVisual: true },
   );
-  const previous = new Map<string, PropertyDescriptor | undefined>();
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     HTMLElement: dom.window.HTMLElement,
@@ -99,10 +99,7 @@ async function fixture(
       disconnect() {}
     },
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const { mountWebPage } = await import('../src/mount');
   const state = {
     fail: false,
@@ -259,10 +256,7 @@ async function fixture(
     async close() {
       await act(async () => handle.dispose());
       dom.window.close();
-      for (const [key, descriptor] of previous) {
-        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-        else Reflect.deleteProperty(globalThis, key);
-      }
+      restoreGlobals();
     },
   };
 }

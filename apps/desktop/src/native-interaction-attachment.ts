@@ -1,4 +1,5 @@
 import { ClientError, type InteractionAttachment } from '@kite-ai/client';
+import { readNativeBodyChunks } from './native-body-chunks';
 import type { NativeAttachmentOpen, NativeBridge } from './native-bridge';
 
 /** A view-only reader; the original controller and public SDK own the card proof. */
@@ -65,50 +66,24 @@ export async function readNativeInteractionAttachment(input: {
       !/^[a-f0-9]{64}$/.test(ref.hash)
     )
       throw new ClientError('attachment_metadata_invalid');
-    const content = new Uint8Array(Number(ref.size));
-    let offset = 0;
-    for (;;) {
-      check();
-      const chunk = await input.bridge.request({
-        method:
-          input.surface === 'history'
-            ? 'interactionHistory.attachment.read'
-            : 'interactionAttachment.read',
-        generation: input.generation,
-        readId,
-        offset,
-        limit: 65536,
-      });
-      check();
-      if (
-        !chunk ||
-        !('readId' in chunk) ||
-        !('offset' in chunk) ||
-        chunk.kind !== 'interactionAttachment.chunk' ||
-        chunk.readId !== readId ||
-        chunk.offset !== offset ||
-        !Number.isSafeInteger(chunk.nextOffset) ||
-        typeof chunk.eof !== 'boolean' ||
-        typeof chunk.data !== 'string' ||
-        chunk.data.length > 87384 ||
-        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(chunk.data)
-      )
-        throw new ClientError('attachment_chunk_invalid');
-      const bytes = atob(chunk.data),
-        next = offset + bytes.length;
-      if (
-        bytes.length > 65536 ||
-        next !== chunk.nextOffset ||
-        next > content.length ||
-        (!chunk.eof && bytes.length === 0) ||
-        chunk.eof !== (next === content.length)
-      )
-        throw new ClientError('attachment_chunk_invalid');
-      for (let index = 0; index < bytes.length; index++)
-        content[offset + index] = bytes.charCodeAt(index);
-      offset = next;
-      if (chunk.eof) break;
-    }
+    const content = await readNativeBodyChunks({
+      byteLength: Number(ref.size),
+      readId,
+      kind: 'interactionAttachment.chunk',
+      read: (offset, limit) =>
+        input.bridge.request({
+          method:
+            input.surface === 'history'
+              ? 'interactionHistory.attachment.read'
+              : 'interactionAttachment.read',
+          generation: input.generation,
+          readId,
+          offset,
+          limit,
+        }),
+      check,
+      invalid: () => new ClientError('attachment_chunk_invalid'),
+    });
     const hash = Array.from(
       new Uint8Array(await crypto.subtle.digest('SHA-256', content)),
       (byte) => byte.toString(16).padStart(2, '0'),

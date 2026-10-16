@@ -1,3 +1,5 @@
+import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-declarations';
+
 const shellParserDeclarations =
   '    "tree-sitter-bash": "0.25.1",\n    "web-tree-sitter": "0.25.10",\n';
 /** Exact new parser closure only; these are retained as bytes, never normalized JSON. */
@@ -43,6 +45,7 @@ export function matchPredecessorShellParserInput(
   previous: Uint8Array,
   current: Uint8Array,
 ): 'shell_parser_locked_dependency_increment' | undefined {
+  current = refinePredecessorWorkspaceDeclarations(path, current)?.bytes ?? current;
   const original = Buffer.from(previous).toString('utf8');
   let expected: string | undefined;
   if (path === 'bun.lock') expected = shellParserLockIncrement(original);

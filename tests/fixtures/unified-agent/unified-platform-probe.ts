@@ -8,6 +8,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { getLoadedSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 
 const [workspace, candidateRoot, barrier] = process.argv.slice(2);
 if (!workspace || !candidateRoot || !barrier) throw Error('platform_probe_helper_arguments');
@@ -16,6 +17,7 @@ const candidate = verifyTerminalRuntimeBundle(candidateRoot);
 const home = join(workspace, 'home');
 mkdirSync(home, { recursive: true, mode: 0o700 });
 process.env.HOME = home;
+const userConfiguration = ownedUserConfiguration(home);
 const profile = selectProfile({
   dataRoot: join(home, '.kite-code/unified-agent'),
   profile: 'default',
@@ -129,7 +131,7 @@ try {
       ],
       tools,
     });
-  const configPath = join(profile.profilePath, 'config.jsonc');
+  const configPath = userConfiguration.path;
   writeFileSync(configPath, configuration([{ id: 'shell.launch', definitionVersion: '1' }]), {
     mode: 0o600,
   });
@@ -137,6 +139,7 @@ try {
     profile,
     entrypoint: join(candidateRoot, candidate.manifest.entries.service),
     executable: join(candidateRoot, candidate.manifest.entries.runtime),
+    spawnChild: userConfiguration.spawnChild,
     instanceId: 'unified-platform-owned',
     buildId: `terminal-${candidate.digest}`,
     apiMajor: 1,

@@ -14,8 +14,7 @@ export async function requestMcpProviderAction(
 ): Promise<ToolResult> {
   const own = await context.getExecution(context.executionId);
   if (
-    !own ||
-    own.kind !== 'tool' ||
+    own?.kind !== 'tool' ||
     own.sessionId !== context.sessionId ||
     !own.originStoreId ||
     typeof own.definitionId !== 'string' ||

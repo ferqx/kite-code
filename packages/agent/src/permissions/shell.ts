@@ -11,6 +11,7 @@ import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AuthorizationRequest, Extension, JobContext } from '../extensions';
 import { AgentError } from '../storage/types';
 import { shellToolCapability as describe } from './capabilities';
+import { dispatchScopeLeaves } from './dispatch-scope';
 import type { CapabilityDescription } from './index';
 import { createShellCommandPolicy } from './shell-command-policy';
 import { shellExplorationPresentation } from './shell-presentation';
@@ -45,48 +46,15 @@ export const shellToolIds = [
 /** Interpret only the original accepted default-policy tree, including delegated AND policies. */
 function acceptedScopeLeaves(context: JobContext, definitionId: string) {
   const authorization = context.dispatchAuthorization;
-  const pending = [authorization?.snapshot];
   const leaves: { mode: string; executionScope: unknown }[] = [];
-  let count = 0;
   if (!authorization?.revision) throw new AgentError('shell_dispatch_scope_unavailable');
-  while (pending.length) {
-    const snapshot = pending.pop();
-    if (snapshot?.version !== '1' || ++count > 8192)
-      throw new AgentError('shell_dispatch_scope_unavailable');
-    const data = snapshot.data;
-    if (!data || typeof data !== 'object' || Array.isArray(data))
-      throw new AgentError('shell_dispatch_scope_unavailable');
-    if (snapshot.namespace === 'agent.permission-intersection') {
-      const policies = data.policies;
-      if (!Array.isArray(policies) || policies.length < 1 || policies.length > 2)
-        throw new AgentError('shell_dispatch_scope_unavailable');
-      for (const [index, policy] of policies.entries()) {
-        if (
-          !policy ||
-          typeof policy !== 'object' ||
-          Array.isArray(policy) ||
-          policy.scope !== (index === 0 ? 'parent' : 'child') ||
-          typeof policy.revision !== 'string' ||
-          !policy.revision ||
-          typeof policy.allowed !== 'boolean' ||
-          !policy.snapshot ||
-          typeof policy.snapshot !== 'object' ||
-          Array.isArray(policy.snapshot) ||
-          typeof policy.snapshot.namespace !== 'string' ||
-          typeof policy.snapshot.version !== 'string' ||
-          !Object.hasOwn(policy.snapshot, 'data')
-        )
-          throw new AgentError('shell_dispatch_scope_unavailable');
-        // allowed=false can be the original policy's approval challenge. The
-        // final owned dispatch accepted that challenge; hardAllowed still must
-        // be true in every leaf. Never synthesize a grant from this metadata.
-        pending.push(policy.snapshot as NonNullable<typeof authorization.snapshot>);
-      }
-      continue;
-    }
+  for (const { namespace, data } of dispatchScopeLeaves(
+    authorization.snapshot,
+    'shell_dispatch_scope_unavailable',
+  )) {
     const capability = data.capability;
     if (
-      snapshot.namespace !== 'builtin.permissions' ||
+      namespace !== 'builtin.permissions' ||
       data.workspaceTrust !== true ||
       typeof data.mode !== 'string' ||
       !['accept_edits', 'auto', 'full'].includes(data.mode) ||

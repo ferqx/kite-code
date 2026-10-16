@@ -4,6 +4,7 @@ import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { installGlobals } from '../globals.fixture';
 
 function item(id: string, workspaceId = 'w', updatedAt: number | null = null) {
   return {
@@ -32,13 +33,12 @@ async function fixture() {
     url: 'http://localhost/',
     pretendToBeVisual: true,
   });
-  const previous = new Map<string, PropertyDescriptor | undefined>();
   class ResizeObserver {
     observe() {}
     unobserve() {}
     disconnect() {}
   }
-  for (const [key, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom.window,
     document: dom.window.document,
     HTMLElement: dom.window.HTMLElement,
@@ -51,10 +51,7 @@ async function fixture() {
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
     ResizeObserver,
     IS_REACT_ACT_ENVIRONMENT: true,
-  })) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  }
+  });
   const { WebPage } = await import('../../src/page');
   const calls: string[] = [],
     signals: AbortSignal[] = [];
@@ -207,10 +204,7 @@ async function fixture() {
         await act(async () => root.unmount());
       } finally {
         dom.window.close();
-        for (const [key, descriptor] of previous) {
-          if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-          else Reflect.deleteProperty(globalThis, key);
-        }
+        restoreGlobals();
       }
     },
   };

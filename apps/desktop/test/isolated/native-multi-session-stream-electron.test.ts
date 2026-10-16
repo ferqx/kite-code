@@ -335,6 +335,8 @@ test.skipIf(process.platform !== 'darwin')(
               provider: 'compatible',
               model: 'fixture',
               baseURL: `${provider.url.href}v1`,
+              // This streaming Provider does not implement the summary algorithm.
+              modelCapabilities: { contextWindowTokens: 1_000_000 },
             },
           ],
           tools: ['task', ...(shell ? ['shell.launch', 'shell.read', 'shell.stop'] : [])].map(

@@ -1,5 +1,4 @@
 import {
-  closeSync,
   constants,
   fstatSync,
   lstatSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
+import { closePosixRecord, withPosixRecordLock } from './posix-record';
 import { inspectProcess } from './process-identity';
 import { windowsPipeExists } from './windows-pipe';
 import { readWindowsDaemonRecord, removeWindowsDaemonRecord } from './windows-record';
@@ -119,7 +119,10 @@ export function fileIdentity(path: string) {
 export function sameIdentity(a: { dev: string; ino: string }, b: { dev: string; ino: string }) {
   return a.dev === b.dev && a.ino === b.ino;
 }
-export function readReservationDetails(endpoint: DaemonEndpoint) {
+export function readReservationDetails(
+  endpoint: DaemonEndpoint,
+  deadline = performance.now() + 5000,
+) {
   if (endpoint.transport === 'windows-pipe') {
     try {
       const native = readWindowsDaemonRecord(endpoint.record);
@@ -159,24 +162,32 @@ export function readReservationDetails(endpoint: DaemonEndpoint) {
   let fd: number | undefined;
   try {
     fd = openSync(endpoint.record, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const stat = fstatSync(fd, { bigint: true });
-    if (
-      !stat.isFile() ||
-      stat.nlink !== 1n ||
-      stat.size < 1n ||
-      stat.size > 16384n ||
-      stat.uid !== BigInt(process.getuid!()) ||
-      (stat.mode & 0o077n) !== 0n
-    )
-      throw daemonError('daemon_reservation_unsafe');
-    const record = reservationSchema.parse(JSON.parse(readFileSync(fd, 'utf8')));
-    if (record.pipe !== undefined) throw daemonError('daemon_reservation_invalid');
-    if (record.profile.accessKey !== endpoint.profileAccessKey)
-      throw daemonError('daemon_identity_mismatch');
-    const identity = { dev: String(stat.dev), ino: String(stat.ino) };
-    if (!sameIdentity(identity, fileIdentity(endpoint.record)))
-      throw daemonError('daemon_endpoint_drift');
-    return { record, identity };
+    const recordFd = fd;
+    return withPosixRecordLock(
+      fd,
+      'shared',
+      () => {
+        const stat = fstatSync(recordFd, { bigint: true });
+        if (
+          !stat.isFile() ||
+          stat.nlink !== 1n ||
+          stat.size < 1n ||
+          stat.size > 16384n ||
+          stat.uid !== BigInt(process.getuid!()) ||
+          (stat.mode & 0o077n) !== 0n
+        )
+          throw daemonError('daemon_reservation_unsafe');
+        const record = reservationSchema.parse(JSON.parse(readFileSync(recordFd, 'utf8')));
+        if (record.pipe !== undefined) throw daemonError('daemon_reservation_invalid');
+        if (record.profile.accessKey !== endpoint.profileAccessKey)
+          throw daemonError('daemon_identity_mismatch');
+        const identity = { dev: String(stat.dev), ino: String(stat.ino) };
+        if (!sameIdentity(identity, fileIdentity(endpoint.record)))
+          throw daemonError('daemon_endpoint_drift');
+        return { record, identity };
+      },
+      deadline,
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       try {
@@ -195,7 +206,7 @@ export function readReservationDetails(endpoint: DaemonEndpoint) {
       throw error;
     throw daemonError('daemon_reservation_unsafe');
   } finally {
-    if (fd !== undefined) closeSync(fd);
+    if (fd !== undefined) closePosixRecord(fd);
   }
 }
 export function readDaemonReservation(endpoint: DaemonEndpoint) {

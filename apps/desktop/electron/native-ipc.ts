@@ -870,7 +870,7 @@ export function registerNativeIpc(options: {
   pickWorkspace?: (
     generation: number,
     caller: NativeCaller,
-  ) => Promise<void | { workspaceId: string }>;
+  ) => Promise<undefined | { workspaceId: string }>;
 }) {
   options.ipcMain.handle(nativeChannel, async (event, payload: unknown): Promise<NativeReply> => {
     try {

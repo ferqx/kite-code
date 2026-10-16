@@ -18,7 +18,7 @@ import {
 import type { Json } from '@kite-ai/agent/extensions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { type ReasoningEffort, reasoningEfforts } from '@kite-ai/ai';
-import { parseModelPreset } from './configuration';
+import { parseModelPreset } from './model-options';
 import {
   discoverProviderModels,
   isSupportedModelProvider,
@@ -393,9 +393,9 @@ export function createConfigurationManagement(options: {
       )
         throw new ConfigurationError('invalid_model_configuration');
       createConfigurationSnapshot(resolveConfiguration({ defaults: { models: [model] } }));
-      parseModelPreset(model.options);
+      const preset = parseModelPreset(model.options);
       if (
-        parseModelPreset(model.options).reasoningEffort !== undefined &&
+        preset.reasoningEffort !== undefined &&
         (!supportsReasoningEffort(model.provider) || model.reasoningSupported === false)
       )
         throw new ConfigurationError('model_reasoning_effort_unsupported');

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { AgentClient } from '@kite-ai/client';
 import { NativeCaller } from '../electron/native-caller';
 import type { NativeJobOutputPage } from '../src/job-output-bridge';
+import { sessionChange } from './native-change.fixture';
 
 const deferred = () => {
   let resolve!: () => void;
@@ -41,7 +42,7 @@ test('fixed Job output survives same-selection metadata refresh while selection,
       connect: async () => ({}),
       verifyConnection: async () => ({ storeId: 'store' }),
       async observe(options: Parameters<AgentClient['observe']>[0]) {
-        notify = () => void options.onChange?.({} as never);
+        notify = () => void options.onChange?.(sessionChange('root'));
         reset = () => void options.onReset?.({} as never);
         await new Promise<void>((done) =>
           options.signal!.addEventListener('abort', () => done(), { once: true }),

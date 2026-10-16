@@ -161,10 +161,11 @@ async function built(root: string) {
   });
   const migration = join(root, 'node_modules', '@kite-ai', 'agent', 'storage', 'migrations');
   mkdirSync(migration, { recursive: true });
-  copyFileSync(
-    join(repository, 'packages/agent/src/storage/migrations/0001-baseline.sql'),
-    join(migration, '0001-baseline.sql'),
-  );
+  for (const name of ['0001-baseline.sql', '0002-recovery-audit.sql'])
+    copyFileSync(
+      join(repository, 'packages/agent/src/storage/migrations', name),
+      join(migration, name),
+    );
   return join(root, 'node_modules', '@kite-ai', 'cli', 'host', 'main.js');
 }
 async function argv(entry: string, args: string[]) {

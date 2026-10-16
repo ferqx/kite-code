@@ -6,6 +6,9 @@ import { createRuntime } from '@kite-ai/agent';
 import { defineExtension, type Permissions, type ToolDefinition } from '@kite-ai/agent/extensions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { UnifiedExecution } from '../../../src/execution';
+import { ExecutionResources } from '../../../src/execution/resources';
+import { AgentError } from '../../../src/storage/types';
 
 function barrier() {
   let release!: () => void;
@@ -131,6 +134,136 @@ test('a tool that performs an effect then throws preserves outcome_unknown and c
     rmSync(effects, { recursive: true, force: true });
   }
 }, 10_000);
+
+for (const failure of [
+  'store-cancellation',
+  'store-identity',
+  'authorization-same-code',
+  'provider-same-code',
+] as const)
+  test(`Model ${failure} preserves the exact dispatch boundary without relying on abort notification`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-model-dispatch-control-'));
+    const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'disposable' });
+    const controller = new AbortController();
+    let providerCalls = 0,
+      dispatchCalls = 0,
+      dispatchCommits = 0;
+    try {
+      const expectedStoreId = (await store.getMetadata()).storeId;
+      const identity = { expectedStoreId, sessionId: 'session', subjectId: 'owner' };
+      await store.createWorkspace({
+        expectedStoreId,
+        id: 'workspace',
+        rootUri: `file://${root}`,
+        name: 'Model dispatch control',
+      });
+      await store.createSession({
+        ...identity,
+        commandId: 'create',
+        workspaceId: 'workspace',
+        title: 'Model dispatch control',
+      });
+      await store.acceptCommand({
+        ...identity,
+        commandId: 'original',
+        request: { kind: 'run.start', content: 'original model request' },
+      });
+      const owner = (await store.acquireSessionOwner('session', 'model-control'))!;
+      const run = await store.startRun({
+        expectedStoreId,
+        owner,
+        commandId: 'original',
+        configuration: {},
+      });
+      const cancel = { ...identity, commandId: 'cancel-original', targetCommandId: 'original' };
+      const markDispatching = store.markDispatching.bind(store);
+      store.markDispatching = async (input) => {
+        dispatchCalls++;
+        expect(input.executionId).toBe('original-model');
+        if (failure === 'store-cancellation') {
+          const receipt = await store.cancelCommand(cancel);
+          expect(receipt).toMatchObject({
+            id: cancel.commandId,
+            status: 'applied',
+            originStoreId: expectedStoreId,
+            subjectId: identity.subjectId,
+            receipt: { targetCommandId: 'original', outcome: 'cancel_requested' },
+          });
+          expect(controller.signal.aborted).toBe(false);
+        }
+        const dispatched = await markDispatching(
+          failure === 'store-identity' ? { ...input, expectedStoreId: 'foreign-store' } : input,
+        );
+        dispatchCommits++;
+        return dispatched;
+      };
+      const execution = new UnifiedExecution({
+        store,
+        permissions: {
+          async authorize() {
+            if (failure === 'authorization-same-code')
+              throw new AgentError('cancelled_before_dispatch');
+            return { allowed: true, revision: 'original-policy' };
+          },
+        },
+        resources: new ExecutionResources(),
+      });
+      const result = execution.model(
+        { run, owner, workspaceId: 'workspace', signal: controller.signal },
+        {
+          async *stream() {
+            providerCalls++;
+            yield { type: 'text_delta', text: 'Original provider partial' };
+            throw new AgentError('cancelled_before_dispatch');
+          },
+        },
+        { requestId: 'original-model', modelId: 'fixed', messages: [], tools: [] },
+        'original-step',
+      );
+      const error = await result.catch((caught: unknown) => caught);
+      expect(error).toMatchObject({
+        code:
+          failure === 'store-identity' ? 'store_identity_mismatch' : 'cancelled_before_dispatch',
+      });
+      expect(controller.signal.aborted).toBe(false);
+      expect(providerCalls).toBe(failure === 'provider-same-code' ? 1 : 0);
+      expect(dispatchCalls).toBe(failure === 'authorization-same-code' ? 0 : 1);
+      const saved = (await store.getExecution('original-model'))!;
+      expect(saved).toMatchObject({
+        id: 'original-model',
+        sessionId: identity.sessionId,
+        runId: run.id,
+        originStoreId: expectedStoreId,
+        originCommandId: 'original',
+        status: failure === 'store-cancellation' ? 'cancelled' : 'failed',
+        result: {
+          code:
+            failure === 'store-identity' ? 'store_identity_mismatch' : 'cancelled_before_dispatch',
+          incomplete: true,
+          content: failure === 'provider-same-code' ? 'Original provider partial' : '',
+        },
+      });
+      expect(dispatchCommits).toBe(failure === 'provider-same-code' ? 1 : 0);
+      expect((await store.listExecutions(identity.sessionId)).map((value) => value.id)).toEqual([
+        'original-model',
+      ]);
+      if (failure === 'store-cancellation') {
+        expect((await store.getCommand('original'))!.cancelRequestedAt).not.toBeNull();
+        const receipt = (await store.getCommand(cancel.commandId))!;
+        const before = await store.getView(identity.sessionId);
+        controller.abort(new AgentError('cancel_requested'));
+        expect(await store.cancelCommand(cancel)).toEqual(receipt);
+        expect(await store.getView(identity.sessionId)).toEqual(before);
+        expect(await store.getExecution(saved.id)).toEqual(saved);
+        expect(providerCalls).toBe(0);
+        expect(dispatchCalls).toBe(1);
+      }
+    } finally {
+      controller.abort();
+      await store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10_000);
 
 test('intruder or wrong Store cancellation writes no receipt and cannot abort the original live tool', async () => {
   const entered = barrier();

@@ -3,11 +3,19 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  assertCompatiblePredecessorLockedInput,
+  COMPATIBLE_PREDECESSOR_INPUT_PATHS,
+  COMPATIBLE_PREDECESSOR_MIGRATIONS,
+} from '../../fixtures/unified-agent/compatible-predecessor-input';
+import { refinePredecessorWorkspaceDeclarations } from '../../fixtures/unified-agent/predecessor-workspace-declarations';
+import {
   withoutReviewedDesktopDevelopmentScript,
   withoutReviewedTuiLockDeclarations,
 } from '../../fixtures/unified-agent/terminal-predecessor';
 import {
   assertWindowsPredecessorLockedInput,
+  COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT,
+  materializeCompatibleWindowsPredecessor,
   materializeWindowsPredecessor,
   WINDOWS_PREDECESSOR_COMMIT,
   windowsPredecessorLockedInputPaths,
@@ -60,6 +68,8 @@ test('current Windows inputs retain all original bytes except the exact reviewed
     });
     expect(original.exitCode).toBe(0);
     const current = readFileSync(resolve(root, path));
+    const workspaceProjection =
+      refinePredecessorWorkspaceDeclarations(path, current)?.bytes ?? current;
     const refined =
       path === 'package.json'
         ? withoutReviewedDesktopDevelopmentScript(current)!
@@ -67,14 +77,14 @@ test('current Windows inputs retain all original bytes except the exact reviewed
           ? withoutReviewedTuiLockDeclarations(current)!
           : path === 'packages/ui/package.json'
             ? Buffer.from(
-                current
+                workspaceProjection
                   .toString()
                   .replace(
                     '    "tailwind-merge": "3.6.0",\n    "ink-syntax-highlight": "^2.0.2",\n    "ink-text-input": "^6.0.0"\n',
                     '    "tailwind-merge": "3.6.0"\n',
                   ),
               )
-            : current;
+            : workspaceProjection;
     // Preserve every pre-refinement SHA; the new declarations do not replace the original lock proof.
     expect(createHash('sha256').update(refined).digest('hex')).toBe(
       path === 'package.json'
@@ -129,7 +139,11 @@ test('current Windows inputs retain all original bytes except the exact reviewed
         );
       }
       if (path === 'packages/ui/package.json')
-        mutations.push(text.replace('"react-markdown": "10.1.0"', '"react-markdown": "10.1.1"'));
+        mutations.push(
+          text.replace('"react-markdown": "10.1.0"', '"react-markdown": "10.1.1"'),
+          text.replace('"ink-scroll-list": "^0.4.1"', '"ink-scroll-list": "^0.4.2"'),
+          text.replace('    "./desktop/markdown": "./src/desktop/markdown-parser.ts",\n', ''),
+        );
       for (const changed of mutations) {
         expect(changed).not.toBe(text);
         expect(() =>
@@ -149,6 +163,11 @@ test('current Windows inputs retain all original bytes except the exact reviewed
         text.replace(' ./src/permissions/shell.ts ', ' '),
         text.replace('"exports": {', '"exports": {\n    "./unknown": "./src/unknown.ts",'),
         text.replace('--target=bun', '--target=node'),
+        text.replace('    "./context-estimate": "./src/context-estimate.ts"\n', ''),
+        text.replace(' ./src/context-estimate.ts ', ' '),
+        text.replace('"gpt-tokenizer": "^3.4.0"', '"gpt-tokenizer": "^3.4.1"'),
+        text.replace('    "./process-observation": "./src/process-observation.ts",\n', ''),
+        text.replace(' ./src/process-observation.ts ', ' '),
       ]) {
         expect(changed).not.toBe(text);
         expect(() =>
@@ -190,6 +209,63 @@ test.skipIf(process.platform === 'win32' && process.arch === 'x64')(
   async () => {
     await expect(
       materializeWindowsPredecessor({
+        root: '/definitely-not-owned',
+        repositoryRoot: '/missing',
+        nativeElectronDist: '/missing',
+        deadline: Date.now() + 1000,
+      }),
+    ).rejects.toThrow('windows_predecessor_platform_required');
+  },
+);
+
+test('Windows compatible predecessor permits only identical raw inputs and pinned schema bytes', () => {
+  expect(COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT).toBe('4a4c0e440b2098e5b4ec58c5831452773b39228f');
+  const paths = windowsPredecessorLockedInputPaths(
+    JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')),
+  );
+  expect(paths).toEqual([...COMPATIBLE_PREDECESSOR_INPUT_PATHS]);
+  for (const path of [...paths, ...COMPATIBLE_PREDECESSOR_MIGRATIONS.map((item) => item.path)]) {
+    const original = Bun.spawnSync(
+      ['git', 'show', `${COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT}:${path}`],
+      { cwd: root },
+    );
+    expect(original.exitCode).toBe(0);
+    const current = readFileSync(resolve(root, path));
+    expect(assertCompatiblePredecessorLockedInput(path, original.stdout, current)).toEqual({
+      path,
+      sha256: createHash('sha256').update(original.stdout).digest('hex'),
+      currentSha256: createHash('sha256').update(current).digest('hex'),
+      match: 'identical',
+    });
+    expect(() =>
+      assertCompatiblePredecessorLockedInput(
+        path,
+        original.stdout,
+        Buffer.concat([current, Buffer.from('x')]),
+      ),
+    ).toThrow(`compatible_predecessor_input_changed:${path}`);
+  }
+  const path = 'packages/agent/package.json',
+    current = readFileSync(resolve(root, path));
+  for (const changed of [
+    current
+      .toString()
+      .replace('    "./process-observation": "./src/process-observation.ts",\n', ''),
+    current.toString().replace(' ./src/process-observation.ts ', ' '),
+    current.toString().replace(' ./src/context-estimate.ts ', ' '),
+  ]) {
+    expect(changed).not.toBe(current.toString());
+    expect(() =>
+      assertCompatiblePredecessorLockedInput(path, current, Buffer.from(changed)),
+    ).toThrow(`compatible_predecessor_input_changed:${path}`);
+  }
+});
+
+test.skipIf(process.platform === 'win32' && process.arch === 'x64')(
+  'compatible Windows materialization still refuses other platforms before I/O',
+  async () => {
+    await expect(
+      materializeCompatibleWindowsPredecessor({
         root: '/definitely-not-owned',
         repositoryRoot: '/missing',
         nativeElectronDist: '/missing',

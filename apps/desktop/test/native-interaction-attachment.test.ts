@@ -9,6 +9,7 @@ import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import type { NativeBridge } from '../src/native-bridge';
 import { readNativeInteractionAttachment } from '../src/native-interaction-attachment';
+import { sessionChange } from './native-change.fixture';
 import { memoryPrivateData } from './private-data.fixture';
 
 const text = `${'完整原计划🙂e\u0301\n'.repeat(15000)}ORIGINAL_FULL_TAIL`;
@@ -215,16 +216,16 @@ test.each([
   let failNextView = false;
   let failedViewReads = 0;
   let successfulViewReads = 0;
-  let observer: { onChange: () => void; onReset: () => void } | undefined;
+  let observer: Pick<Parameters<AgentClient['observe']>[0], 'onChange' | 'onReset'> | undefined;
   const privateData = memoryPrivateData();
   const client = {
     serverInfo: { storeId: 'store', subjectId: 'local-user', capabilities: ['interactions'] },
     connect: async () => ({}),
-    async observe(options: { signal: AbortSignal; onChange: () => void; onReset: () => void }) {
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
       observer = options;
       const { signal } = options;
       await new Promise<void>((resolve) =>
-        signal.addEventListener('abort', () => resolve(), { once: true }),
+        signal!.addEventListener('abort', () => resolve(), { once: true }),
       );
     },
     async getView(id: string) {
@@ -324,7 +325,7 @@ test.each([
         readId: 'reset-read',
         key: attachment.key,
       });
-      observer!.onReset();
+      observer!.onReset!('server_reset');
       expect(
         await code(
           main.invoke({
@@ -340,10 +341,10 @@ test.each([
       expect(writes).toBe(0);
       return;
     }
-    observer!.onChange();
+    observer!.onChange(sessionChange('root'));
     await main.invoke({ method: 'state', generation: 1 });
     failNextView = true;
-    observer!.onChange();
+    observer!.onChange(sessionChange('root'));
     const deadline = Date.now() + 1000;
     while (failedViewReads === 0) {
       if (Date.now() >= deadline) throw Error('original view failure was not observed');
@@ -354,7 +355,7 @@ test.each([
     expect(writes).toBe(0);
     failNextView = false;
     const beforeRestore = successfulViewReads;
-    observer!.onChange();
+    observer!.onChange(sessionChange('root'));
     const restoreDeadline = Date.now() + 1000;
     while (successfulViewReads === beforeRestore) {
       if (Date.now() >= restoreDeadline) throw Error('original view restoration was not observed');

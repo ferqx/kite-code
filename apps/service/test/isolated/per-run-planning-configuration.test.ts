@@ -53,6 +53,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
   let revision = 0;
   let reviewDecision: 'approve_once' | 'ask_user' = 'approve_once';
   let credentialReads = 0;
+  let completionGate: { diagnostic: Record<string, unknown>; release(): void } | null = null;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -70,6 +71,21 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
       const call: Call = review ? null : await script(step++, f);
       if (review) reviews.push(body);
       else normal.push(body);
+      if (!review && workId === 'next-plan') {
+        for (const message of messages) {
+          let diagnostic: Record<string, unknown>;
+          try {
+            diagnostic = JSON.parse(String(message.content));
+          } catch {
+            continue;
+          }
+          if (diagnostic?.kind !== 'completion_diagnostic') continue;
+          await new Promise<void>((resolve) => {
+            completionGate = { diagnostic, release: resolve };
+          });
+          break;
+        }
+      }
       const chunk = {
         id: `response-${normal.length}-${reviews.length}`,
         object: 'chat.completion.chunk',
@@ -271,6 +287,13 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
       });
       return card;
     },
+    async incomplete() {
+      const held = await until(async () => completionGate);
+      return { run: await f.run(), diagnostic: held.diagnostic };
+    },
+    resumeModel() {
+      completionGate?.release();
+    },
     async done() {
       await runtime.waitForCommand(workId, { timeoutMs: 8000 });
       return f.run();
@@ -432,10 +455,33 @@ test('actual Service per-Run planning blocks Full writes before approval, permit
     const approval = await f.record(`run/${run.id}/approval/plan/1`);
     expect(approval?.originStoreId).toBe(f.expectedStoreId);
     await f.submit('next-plan');
-    const next = await f.done();
-    expect(next.status).toBe('failed');
-    expect(next.reason).toBe('necessary_condition_unsatisfied');
+    const { run: next, diagnostic } = await f.incomplete();
+    expect(next.id).not.toBe(run.id);
+    expect(next.status).toBe('running');
+    expect(next.isActive).toBe(true);
+    expect(
+      next.requirements.some(
+        (ref) => ref.requirementId === 'plan.required' && ref.runId === next.id,
+      ),
+    ).toBe(true);
+    expect(String(diagnostic.content)).toContain('plan_draft_pending');
+    const refused = (await f.store.listExecutions('s')).find(
+      (execution) => execution.runId === next.id && execution.definitionId === 'files.write',
+    )!;
+    expect(refused.status).toBe('failed');
+    expect(refused.authorization?.dispatched).toBe(false);
     expect(existsSync(join(f.workspace, 'next-plan.txt'))).toBe(false);
+    await f.client.cancelRun('s', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'cancel-next-plan',
+      kind: 'run.cancel',
+      runId: next.id,
+    });
+    f.resumeModel();
+    const cancelled = await f.done();
+    expect(cancelled.id).toBe(next.id);
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.requirements).toEqual(next.requirements);
     await f.submit('ordinary', false);
     const ordinary = await f.done();
     expect(ordinary.status).toBe('completed');
