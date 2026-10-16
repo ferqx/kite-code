@@ -199,6 +199,7 @@ function NativeDesktopContent({
     historyEpoch = useRef<number | undefined>(undefined),
     viewIntent = useRef(0),
     pageIntent = useRef(0),
+    firstOpenPage = useRef<number | undefined>(undefined),
     draftRevision = useRef(0),
     writing = useRef(false);
   const readLifecycle = useRef({ epoch: 0, quitting: false });
@@ -445,16 +446,23 @@ function NativeDesktopContent({
   async function select(sessionId: string, keepCurrentDraft = true) {
     if (!bridge || readLifecycle.current.quitting) return;
     if (keepCurrentDraft) rememberDraft();
-    setPreparing(false);
+    const firstHandoff =
+      preparing && !keepCurrentDraft && firstRef.current?.creation.sessionId === sessionId;
+    const page = pageIntent.current;
+    // Keep the submitted preparation visible until its own selected facts arrive.
+    if (!firstHandoff) setPreparing(false);
     setScheduledTasksView(false);
     const nonce = ++viewIntent.current,
-      current = generation.current;
+      current = generation.current,
+      epoch = readLifecycle.current.epoch;
     selected.current = sessionId;
     history.current?.preview(sessionId);
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
     setDraft('');
-    await readSelection(sessionId, current, nonce, readLifecycle.current.epoch);
+    await readSelection(sessionId, current, nonce, epoch);
+    if (firstHandoff && page === pageIntent.current && isCurrentRead(current, epoch, nonce))
+      setPreparing(false);
   }
   async function readSelection(sessionId: string, current: number, nonce: number, epoch: number) {
     if (!isCurrentRead(current, epoch, nonce)) return;
@@ -1038,7 +1046,7 @@ function NativeDesktopContent({
           JSON.stringify([value.creation.input.expectedStoreId, sessionId]),
           '',
         );
-      if (page === pageIntent.current) {
+      if (page === pageIntent.current || firstOpenPage.current === pageIntent.current) {
         await select(sessionId, false);
         if (value.code === 'workspace_trust_required') setToolsOpen(true);
       }
@@ -1059,6 +1067,7 @@ function NativeDesktopContent({
       return;
     const current = generation.current,
       page = pageIntent.current;
+    firstOpenPage.current = page;
     const original = {
       creation: {
         expectedStoreId: directory.storeId,
@@ -2124,18 +2133,13 @@ function NativeDesktopContent({
       return (
         <>
           <p>{model.text}</p>
-          <p
-            className="delivery-status"
-            role={!model.delivery || model.delivery === 'sending' ? 'status' : 'alert'}
-          >
-            {!model.delivery
-              ? '已提交，请打开本次会话查看实际消息。'
-              : model.delivery === 'sending'
-                ? '正在发送'
-                : model.delivery === 'unknown'
-                  ? '发送结果未知，请查询原提交。'
-                  : '发送失败，原文已恢复供重试。'}
-          </p>
+          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
+            <p className="delivery-status" role="alert">
+              {model.delivery === 'unknown'
+                ? '发送结果未知，请查询原提交。'
+                : '发送失败，原文已恢复供重试。'}
+            </p>
+          )}
         </>
       );
     const message = messagesById.get(model.id);
@@ -2384,9 +2388,14 @@ function NativeDesktopContent({
             : (selection?.session.title ?? 'kite')
       }
       readingKey={
-        preparing
-          ? 'new-conversation'
-          : JSON.stringify([selection?.storeId, childDetail?.sessionId ?? selection?.session.id])
+        firstVisible && !firstSaved && !childDetail
+          ? JSON.stringify([
+              firstSubmission.creation.expectedStoreId,
+              firstSubmission.creation.sessionId,
+            ])
+          : preparing
+            ? 'new-conversation'
+            : JSON.stringify([selection?.storeId, childDetail?.sessionId ?? selection?.session.id])
       }
       messages={childDetail ? childMessages : messageModels}
       renderMessageContent={renderNativeMessage}
@@ -2396,7 +2405,10 @@ function NativeDesktopContent({
           ? undefined
           : {
               ...transcript.turnActivity,
-              unavailable: !!(selection?.viewLoading || selection?.permissionUnavailable),
+              // Read admission is revoked during scans; the last observed Run still owns its label.
+              unavailable:
+                historyState.phase === 'unavailable' ||
+                !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
             }
       }
       notices={
@@ -2464,6 +2476,7 @@ function NativeDesktopContent({
         childDetail
           ? childDetail.loading && !childFacts
           : !preparing &&
+            !(firstVisible && !firstSaved) &&
             !!selection &&
             historyState.phase === 'loading' &&
             (!messages.length || selected.current !== selection.session.id)
@@ -2597,6 +2610,15 @@ function NativeDesktopContent({
                 variant="ghost"
                 onClick={() => {
                   pageIntent.current++;
+                  if (preparing && firstRef.current) {
+                    firstOpenPage.current = pageIntent.current;
+                    const creation = firstRef.current.result?.creation;
+                    if (
+                      creation?.phase === 'created' &&
+                      creation.input.expectedStoreId === directory?.storeId
+                    )
+                      void report(() => select(creation.input.sessionId, false));
+                  }
                   setScheduledTasksView(false);
                 }}
               >
@@ -2731,18 +2753,6 @@ function NativeDesktopContent({
               disabled={pending}
             >
               查询原首次提交
-            </DesktopButton>
-          ) : preparing &&
-            firstSubmission?.result?.creation?.phase === 'created' &&
-            firstSubmission.creation.expectedStoreId === directory?.storeId ? (
-            <DesktopButton
-              onClick={() => {
-                pageIntent.current++;
-                void report(() => select(firstSubmission.creation.sessionId));
-              }}
-              disabled={pending}
-            >
-              打开本次会话
             </DesktopButton>
           ) : undefined}
         </>

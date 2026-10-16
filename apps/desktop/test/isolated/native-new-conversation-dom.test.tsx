@@ -79,6 +79,9 @@ function fixture(
   let trustRelease: (() => void) | undefined;
   let holdTrust = false;
   let unknownTrust = false;
+  let holdSelection = false,
+    holdHistory = false;
+  let releaseSelection: (() => void) | undefined, releaseHistory: (() => void) | undefined;
   const permissionSubmissions: NativeState['permissionSubmissions'][number][] = [];
   const state = (): NativeState => ({
     generation: 1,
@@ -149,7 +152,14 @@ function fixture(
         };
       if (input.method === 'select') {
         selected = input.sessionId;
-        return state();
+        const result = state();
+        if (holdSelection) {
+          holdSelection = false;
+          await new Promise<void>((resolve) => {
+            releaseSelection = resolve;
+          });
+        }
+        return result;
       }
       if (input.method === 'permission.trust') {
         expect(input.trusted).toBe(true);
@@ -212,12 +222,19 @@ function fixture(
           },
         };
       }
-      if (input.method === 'messages')
+      if (input.method === 'messages') {
+        if (holdHistory) {
+          holdHistory = false;
+          await new Promise<void>((resolve) => {
+            releaseHistory = resolve;
+          });
+        }
         return {
           messages: messages.filter((message) => message.sessionId === input.sessionId),
           nextAfterSeq: null,
           highWaterSeq: sessions.find((session) => session.id === input.sessionId)?.nextSeq ?? '0',
         };
+      }
       if (input.method === 'draft.read')
         return {
           id: input.sessionId,
@@ -323,6 +340,14 @@ function fixture(
     edit,
     input,
     selected: () => selected,
+    holdSelection: () => {
+      holdSelection = true;
+    },
+    releaseSelection: () => act(async () => releaseSelection?.()),
+    holdHistory: () => {
+      holdHistory = true;
+    },
+    releaseHistory: () => act(async () => releaseHistory?.()),
     trustWorkspace: () => {
       trusted = true;
     },
@@ -648,7 +673,7 @@ test('first send clears and renders original text; late failure cannot steal ano
       send.click();
     });
     expect(f.input()?.value).toBe('');
-    expect(f.host.body.textContent).toContain('正在发送');
+    expect(f.host.querySelector('.delivery-status')).toBeNull();
     expect(f.host.body.textContent).toContain('first raw');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     await f.click('Other B');
@@ -689,7 +714,7 @@ test('first send clears and renders original text; late failure cannot steal ano
   }
 });
 
-test('a completed first send preserves the scheduled page and opens its original Session only on request', async () => {
+test('a completed first send preserves the scheduled page and returning enters its original Session directly', async () => {
   const f = fixture();
   try {
     await act(async () => f.root.render(<NativeDesktop />));
@@ -702,16 +727,109 @@ test('a completed first send preserves the scheduled page and opens its original
     expect(f.host.querySelector('.scheduled-page')).not.toBeNull();
     await f.click('返回新对话');
     expect(f.host.body.textContent).not.toContain('正在发送');
-    expect(f.host.body.textContent).toContain('已提交');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
-    await f.click('打开本次会话');
     expect(f.selected()).toBe(send.creation.sessionId);
+    expect(f.host.body.textContent).not.toContain('已提交');
+    expect(f.host.body.textContent).not.toContain('打开本次会话');
     expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
     expect(f.input('当前会话私有草稿')?.value).toBe('');
     expect(f.host.querySelectorAll('.delivery-status')).toHaveLength(0);
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
   } finally {
     await f.close();
+  }
+});
+
+test('first submission keeps one readable pending message through delayed selection and history, then hands off without a loading or welcome flash', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.click('在 Workspace 中新建对话');
+    expect(f.host.querySelector('.new-conversation-welcome')).not.toBeNull();
+    await f.edit('original first message 雪🙂');
+    await f.click('发送首条消息');
+    const viewport = f.host.querySelector('.conversation-viewport'),
+      pending = f.host.querySelector('.message.user');
+    expect(pending?.textContent).toContain('original first message 雪🙂');
+    expect(f.host.querySelector('.delivery-status')).toBeNull();
+    f.holdSelection();
+    f.holdHistory();
+    await f.resolve('accepted');
+    const expectPending = () => {
+      expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
+      expect(f.host.querySelector('.message.user') === pending).toBe(true);
+      expect(pending!.isConnected).toBe(true);
+      expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+      expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
+      expect(f.host.querySelector('.conversation-loading')).toBeNull();
+      expect(f.host.querySelector('.welcome')).toBeNull();
+      expect(f.host.querySelector('.delivery-status')).toBeNull();
+      expect(f.host.body.textContent).not.toContain('打开本次会话');
+    };
+    expectPending();
+    await f.releaseSelection();
+    expectPending();
+    await f.releaseHistory();
+    expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')!.textContent).toContain(
+      'original first message 雪🙂',
+    );
+    expect(f.host.querySelector('.delivery-status')).toBeNull();
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('returning to a still-pending first submission enters the created Session when its original receipt arrives', async () => {
+  const f = fixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('original pending return');
+    await f.click('发送首条消息');
+    await f.click('安排任务');
+    await f.click('返回新对话');
+    expect(f.host.querySelector('.message.user')!.textContent).toContain('original pending return');
+    const send = await f.resolve('accepted');
+    expect(f.selected()).toBe(send.creation.sessionId);
+    expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
+    expect(f.input('当前会话私有草稿')?.value).toBe('');
+    expect(f.host.querySelector('.delivery-status')).toBeNull();
+    expect(f.host.body.textContent).not.toContain('打开本次会话');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('leaving a delayed first selection or history read preserves the newer Session and draft without replaying input', async () => {
+  for (const delay of ['selection', 'history'] as const) {
+    const f = fixture(true);
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('在 Workspace 中新建对话');
+      await f.edit('original delayed first input');
+      await f.click('发送首条消息');
+      if (delay === 'selection') f.holdSelection();
+      else f.holdHistory();
+      await f.resolve('accepted');
+      await f.click('Other B');
+      expect(f.input('当前会话私有草稿')?.value).toBe('saved B');
+      if (delay === 'selection') await f.releaseSelection();
+      else await f.releaseHistory();
+      expect(f.selected()).toBe('b');
+      expect(f.input('当前会话私有草稿')?.value).toBe('saved B');
+      expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
+      expect(f.host.querySelector('.message.user')?.textContent ?? '').not.toContain(
+        'original delayed first input',
+      );
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
   }
 });
 

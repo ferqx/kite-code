@@ -65,6 +65,7 @@ function fixture(activeParent = false) {
     holdNext = false,
     holdParent = false,
     failParent = false,
+    viewLoading = false,
     permissionUnavailable = false;
   let releaseHeld: (() => void) | undefined;
   let selectedEnvironmentRevision: number | undefined;
@@ -89,6 +90,7 @@ function fixture(activeParent = false) {
       viewSelection: 1,
       canReadModelOutput: false,
       session: item.rootSession,
+      viewLoading,
       permissionUnavailable,
       ...(activeParent
         ? {
@@ -300,6 +302,11 @@ function fixture(activeParent = false) {
     requests,
     listeners,
     click,
+    runningParent: () => {
+      item.run!.status = 'running';
+      item.run!.createdAt = Date.now() - 10000;
+      parentMessage.runId = item.run!.id;
+    },
     render: () => act(async () => root.render(<NativeDesktop />)),
     unmount: () => act(async () => root.render(null)),
     open: () => click('查看子 Agent 详情：Live child'),
@@ -328,8 +335,16 @@ function fixture(activeParent = false) {
         input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
       }),
     unavailable: async (value: boolean) => {
+      viewLoading = false;
       permissionUnavailable = value;
       revision++;
+      await act(async () => {
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+    },
+    refreshing: async (value: boolean) => {
+      viewLoading = value;
+      permissionUnavailable = value;
       await act(async () => {
         for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
       });
@@ -442,6 +457,45 @@ test('repeated reply calibrations retain the footer controls and transcript DOM 
         ['submit', 'caller.prepare', 'caller.submit', 'permission.mode'].includes(request.method),
       ),
     ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('ordinary history and View refreshes retain the processed status and timer; actual observation and history failures revoke them', async () => {
+  const f = fixture(true);
+  f.runningParent();
+  try {
+    await f.render();
+    await f.click('Original');
+    const status = f.host.querySelector('.agent-turn-status-label')!,
+      timer = status.querySelector('span');
+    expect(status.textContent).toMatch(/^已处理 .*秒/);
+    expect(timer).not.toBeNull();
+    for (let index = 0; index < 8; index++) {
+      f.holdParent();
+      await f.updateParent(`running reply ${index}`);
+      expect(f.host.querySelector('.agent-turn-status-label') === status).toBe(true);
+      expect(status.textContent).toMatch(/^已处理 .*秒/);
+      expect(status.querySelector('span') === timer).toBe(true);
+      await f.releaseParent();
+      await f.refreshing(true);
+      expect(status.textContent).toMatch(/^已处理 .*秒/);
+      expect(status.querySelector('span') === timer).toBe(true);
+      await f.refreshing(false);
+      expect(status.textContent).toMatch(/^已处理 .*秒/);
+    }
+    await f.unavailable(true);
+    expect(status.textContent).toBe('上次确认状态');
+    await f.unavailable(false);
+    expect(status.textContent).toMatch(/^已处理 .*秒/);
+    f.failParent();
+    await f.updateParent('held after failure');
+    expect(status.textContent).toBe('上次确认状态');
+    expect(f.host.textContent).toContain('历史尚未完整校准');
+    f.failParent(false);
+    await f.click('重新加载会话');
+    expect(status.textContent).toMatch(/^已处理 .*秒/);
   } finally {
     await f.close();
   }
