@@ -16,9 +16,11 @@ export function runSourceTerminalCLI(
 export async function runSourceTerminalTUI(
   argv: readonly string[] = process.argv.slice(2),
   root = repositoryRoot,
+  /** Trusted fixture option; ordinary argv cannot enable test diagnostics. */
+  options: { readonly testDiagnostics?: boolean } = {},
 ): Promise<number> {
   const { runInstalledTerminalTUI } = await import('./entrypoints/terminal-tui');
-  return runInstalledTerminalTUI(argv, sourceTerminalRoot(root));
+  return runInstalledTerminalTUI(argv, sourceTerminalRoot(root), options);
 }
 export async function terminalEntrypoint(run: () => Promise<number>): Promise<void> {
   try {

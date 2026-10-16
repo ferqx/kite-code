@@ -43,7 +43,7 @@ import {
 } from './authorization-review';
 import { readBackgroundExecutions } from './background-directory';
 import { cancel } from './cancel-operations';
-import { activateChildRun, ensureAgent } from './child-operations';
+import { activateChildRun, ensureAgent, inspectChildSettlement } from './child-operations';
 import { getAgentSummary, listAgentSummaries } from './child-query-operations';
 import {
   beginCompression,
@@ -777,6 +777,11 @@ export class SqliteOperations {
         return getAuthorizationReview(
           this,
           args[0] as Parameters<Store['getAuthorizationReview']>[0],
+        );
+      case 'inspectChildSettlement':
+        return inspectChildSettlement(
+          this,
+          args[0] as Parameters<Store['inspectChildSettlement']>[0],
         );
       case 'activateChildRun':
         return activateChildRun(this, args[0] as Parameters<Store['activateChildRun']>[0]);

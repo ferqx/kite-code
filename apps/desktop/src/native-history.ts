@@ -1,5 +1,6 @@
 import type { Message } from '@kite-ai/client';
 import type { NativeBridge, NativeSelection } from './native-bridge';
+import { NativeHistoryCache } from './native-history-cache';
 
 export type HistoryState = {
   messages: Message[];
@@ -20,7 +21,8 @@ export class NativeHistory {
   private wanted?: string;
   private revision?: number;
   private entries = new Map<string, Message>();
-  private cached = new Map<string, Message[]>();
+  private cached = new NativeHistoryCache();
+  private disposed = false;
   state: HistoryState = { messages: [], phase: 'loading' };
   private bridge: NativeBridge;
   private changed: (value: HistoryState) => void;
@@ -38,6 +40,8 @@ export class NativeHistory {
     this.changed(this.state);
   }
   close() {
+    // Returning to an unchanged selection still requires a fresh reading after a pause.
+    this.revision = undefined;
     if (this.run && this.scope) {
       this.run.canceled = true;
       void this.bridge
@@ -51,15 +55,37 @@ export class NativeHistory {
     this.run = undefined;
     this.wanted = undefined;
   }
+  /** Confirmed scope removal: release its cached data as well as its current read. */
+  evictStore(storeId: string) {
+    this.cached.evictStore(storeId);
+    if (this.scope?.storeId === storeId) this.reset();
+  }
+  private reset() {
+    this.close();
+    this.scope = undefined;
+    this.revision = undefined;
+    this.entries.clear();
+    this.publish('loading');
+  }
+  clear() {
+    this.cached.clear();
+    this.reset();
+  }
+  /** Permanent owner teardown must not publish into an unmounted renderer. */
+  dispose() {
+    this.disposed = true;
+    this.changed = () => {};
+    this.clear();
+  }
   preview(sessionId: string) {
+    if (this.disposed) return;
     this.revision = undefined;
     const previous = this.scope;
     this.close();
     if (previous) {
-      this.cached.set(`${previous.storeId}/${previous.sessionId}`, this.state.messages);
-      while (this.cached.size > 8) this.cached.delete(this.cached.keys().next().value!);
+      this.cached.save(previous.storeId, previous.sessionId, this.state.messages);
       this.entries = new Map(
-        (this.cached.get(`${previous.storeId}/${sessionId}`) ?? []).map((message) => [
+        (this.cached.take(previous.storeId, sessionId) ?? []).map((message) => [
           message.id,
           message,
         ]),
@@ -69,6 +95,7 @@ export class NativeHistory {
     this.publish('loading');
   }
   select(generation: number, selection: NativeSelection, epoch = 0) {
+    if (this.disposed) return;
     const scope = {
       generation,
       storeId: selection.storeId,
@@ -83,24 +110,25 @@ export class NativeHistory {
       this.state.phase !== 'unavailable'
     )
       return;
-    this.revision = selection.viewGeneration;
     if (JSON.stringify(scope) !== JSON.stringify(this.scope)) {
       const previous = this.scope;
       this.close();
-      if (previous && previous.generation === generation && previous.epoch === epoch) {
-        this.cached.set(`${previous.storeId}/${previous.sessionId}`, this.state.messages);
-        while (this.cached.size > 8) this.cached.delete(this.cached.keys().next().value!);
-      } else this.cached.clear();
-      const same = previous?.storeId === scope.storeId && previous.sessionId === scope.sessionId;
+      const sameObservation = previous?.generation === generation && previous.epoch === epoch;
+      const same =
+        sameObservation &&
+        previous.storeId === scope.storeId &&
+        previous.sessionId === scope.sessionId;
+      if (!sameObservation) this.cached.clear();
+      else if (!same) this.cached.save(previous.storeId, previous.sessionId, this.state.messages);
       this.entries = new Map(
-        (same
-          ? this.state.messages
-          : (this.cached.get(`${scope.storeId}/${scope.sessionId}`) ?? [])
-        ).map((message) => [message.id, message]),
+        (same ? this.state.messages : (this.cached.take(scope.storeId, scope.sessionId) ?? [])).map(
+          (message) => [message.id, message],
+        ),
       );
       this.scope = scope;
       this.publish('loading');
     }
+    this.revision = selection.viewGeneration;
     this.wanted = selection.session.nextSeq;
     void this.drain();
   }
@@ -112,6 +140,7 @@ export class NativeHistory {
     this.wanted = undefined;
     this.run = run;
     this.publish('loading');
+    const scanned = new Map<string, Message>();
     let afterSeq = '0';
     try {
       for (;;) {
@@ -138,16 +167,21 @@ export class NativeHistory {
             throw Error('history_page_sequence_mismatch');
           last = BigInt(message.seq);
         }
-        for (const message of page.messages) this.entries.set(message.id, message);
+        for (const message of page.messages) scanned.set(message.id, message);
         if (page.nextAfterSeq === null) break;
         if (!page.messages.length || page.nextAfterSeq !== page.messages.at(-1)!.seq)
           throw Error('history_page_cursor_mismatch');
         afterSeq = page.nextAfterSeq;
       }
+      // EOF proves the complete reading, including removal or replacement of older records.
+      this.entries = scanned;
       this.publish(this.wanted ? 'loading' : 'complete', upperSeq);
     } catch (error) {
-      if (!run.canceled && this.scope === scope)
+      if (!run.canceled && this.scope === scope) {
+        // A failed scan proves only its legal prefix; retain the last reading beyond it.
+        for (const [id, message] of scanned) this.entries.set(id, message);
         this.publish('unavailable', this.state.highWaterSeq, (error as Error).message);
+      }
     } finally {
       if (this.run === run) this.run = undefined;
       await this.bridge

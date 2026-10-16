@@ -158,8 +158,8 @@ const scan = (bytes: Uint8Array) => {
 const pty = spawnTuiPTY({
   cmd: [
     input.executable,
+    join(import.meta.dir, 'tui-diagnostics-entry.ts'),
     input.entrypoint,
-    '--test-ui-diagnostics',
     '--workspace',
     input.workspace,
     '--thread',

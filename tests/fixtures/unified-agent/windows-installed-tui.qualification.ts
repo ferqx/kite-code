@@ -421,7 +421,7 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       const pty = await startWindowsInstalledTuiPty({
         runtimeExecutable: driverRuntime,
         launcher,
-        argv: ['--test-ui-diagnostics', '--workspace', workspace, '--thread', scenario.sessionId],
+        argv: ['--workspace', workspace, '--thread', scenario.sessionId],
         cwd: workspace,
         env,
         productEnv,
@@ -449,13 +449,16 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
           (value) => value.revision > after && test(value.frame),
         );
       const idle = (value: string) =>
-        compact(value).includes(compact(`Session ${scenario.sessionId} · Idle`)) &&
-        !value.includes(' · Loading') &&
-        !value.includes(' · Stale') &&
+        value.includes('❯') &&
+        value.includes('fixed') &&
+        !value.includes('Loading') &&
+        !value.includes('Observation unknown') &&
+        !value.includes('Working') &&
+        !value.includes('Cancelling') &&
         !value.includes('Error:');
       await waitFrame(
         'current_session_idle',
-        (value) => idle(value) && value.includes('New Run >'),
+        (value) => idle(value) && !value.includes(`Session ${scenario.sessionId} ·`),
       );
       const members = await poll(
         'original_tui_and_service',
@@ -527,25 +530,37 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       return { pty, screen, frame, waitFrame, idle, revision: () => revision, selected };
     };
     type Window = Awaited<ReturnType<typeof start>>;
-    // Read the latest rendering of the exact original Message from the parsed
-    // terminal buffer. The completed Thought summary remains visible; complete
-    // reasoning is qualified through the saved output and Markdown export.
-    const originalOutputFrame = (window: Window, message: { id: string; status: string }) => {
+    // Ordinary presentation automatically reads complete Model output and hides
+    // diagnostic Message IDs. Bind the original output by its unique full body;
+    // history/fullOutput independently verify its exact Message/Execution identity.
+    const originalOutputFrame = (
+      window: Window,
+      scenario: (typeof cases)[number],
+      message: { id: string; status: string },
+    ) => {
       assert.equal(message.status, 'complete');
-      const expectedHeader = compact(`assistant [${message.id}] ${message.status}`);
       const buffer = window.screen.buffer.active;
-      let header = -1;
-      for (let line = buffer.length - 1; line >= 0; line--) {
-        const text = compact(buffer.getLine(line)?.translateToString(true) ?? '');
-        if (text.includes(expectedHeader)) {
-          header = line;
-          break;
-        }
-      }
-      assert(header >= 0, 'latest_original_output_header_required');
-      window.screen.scrollToLine(header);
+      const lines = Array.from(
+        { length: buffer.length },
+        (_, index) => buffer.getLine(index)?.translateToString(true) ?? '',
+      );
+      let tail = lines.length - 1;
+      while (tail >= 0 && !lines[tail]!.includes(`FULL_INSTALLED_TUI_${scenario.phase}_TAIL`))
+        tail--;
+      assert(tail >= 0, 'latest_original_full_output_required');
+      let thought = tail;
+      while (thought >= 0 && !lines[thought]!.includes('Thinking')) thought--;
+      assert(thought >= 0, 'latest_original_thought_summary_required');
+      const rendered = lines.slice(thought, tail + 1).join('\n');
+      assert(
+        compact(rendered).includes(compact(scenario.body)),
+        'complete_original_body_must_reach_real_terminal',
+      );
+      assert(!rendered.includes(scenario.reasoning));
+      window.screen.scrollToLine(thought);
       const frame = window.frame();
-      assert(compact(frame).includes(expectedHeader));
+      assert(frame.includes('Thinking'));
+      assert(!frame.includes(`assistant [${message.id}]`));
       window.screen.scrollToBottom();
       assert(window.idle(window.frame()), 'latest_main_area_must_remain_current');
       return frame;
@@ -578,13 +593,13 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       await warm.pty.write(scenario.work);
       await warm.waitFrame(
         'exact_editor_work',
-        (value) => compact(value).includes(compact(`New Run > ${scenario.work}`)),
+        (value) => compact(value).includes(compact(`❯ ${scenario.work}`)),
         before,
       );
       await warm.pty.write('\r');
       await warm.waitFrame(
-        'original_work_completed_preview',
-        (value) => warm.idle(value) && value.includes('Recorded Model output preview only;'),
+        'original_work_completed_full_body',
+        (value) => warm.idle(value) && value.includes(`FULL_INSTALLED_TUI_${scenario.phase}_TAIL`),
       );
       const completed = await history(selectedSqlite, scenario.sessionId);
       assert.equal(completed.runs.length, 1);
@@ -607,26 +622,16 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
         !originalMessage.content.includes(`FULL_INSTALLED_TUI_${scenario.phase}_TAIL`),
         'full_tail_must_exceed_preview',
       );
-      const previewRevision = warm.revision();
-      await warm.pty.write('\x0f');
-      await warm.waitFrame(
-        'explicit_complete_body',
-        (value) =>
-          warm.idle(value) &&
-          value.includes(`FULL_INSTALLED_TUI_${scenario.phase}_TAIL`) &&
-          !value.includes('Recorded Model output preview only;'),
-        previewRevision,
-      );
-      const completedFrame = originalOutputFrame(warm, originalMessage);
+      const completedFrame = originalOutputFrame(warm, scenario, originalMessage);
       assert(!completedFrame.includes(scenario.reasoning));
-      assert(completedFrame.includes('Thought · Recorded phase:'));
+      assert(completedFrame.includes('Thinking'));
       const exportsBefore = new Set(
         readdirSync(profile.profilePath).filter(
           (name) => name.startsWith('session-') && name.endsWith('.md'),
         ),
       );
       await warm.pty.write('/export');
-      await warm.waitFrame('export_editor', (value) => value.includes('New Run > /export'));
+      await warm.waitFrame('export_editor', (value) => value.includes('❯ /export'));
       await warm.pty.write('\r');
       const filename = await poll(
         'complete_export_created',
@@ -641,8 +646,7 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       await warm.waitFrame(
         'export_actual_receipt',
         (value) =>
-          value.includes('Exported loaded conversation:') &&
-          compact(value).includes(compact(filename[0]!)),
+          value.includes('Session exported:') && compact(value).includes(compact(filename[0]!)),
       );
       security.verifyFile(exportedPath);
       const exported = readFileSync(exportedPath, 'utf8');
@@ -667,14 +671,12 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       });
       await warm.pty.write(scenario.cancel);
       await warm.waitFrame('exact_cancel_editor', (value) =>
-        compact(value).includes(compact(`New Run > ${scenario.cancel}`)),
+        compact(value).includes(compact(`❯ ${scenario.cancel}`)),
       );
       await warm.pty.write('\r');
       await warm.waitFrame(
         'original_second_work_active',
-        (value) =>
-          compact(value).includes(compact(`Session ${scenario.sessionId} · Working`)) &&
-          value.includes(scenario.partial),
+        (value) => value.includes('Working') && value.includes(scenario.partial),
       );
       const active = await poll(
         'original_active_model',
@@ -764,17 +766,12 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
         (value) =>
           cold.idle(value) &&
           compact(value).includes(compact(scenario.draft)) &&
-          value.includes('Recorded Model output preview only;'),
+          value.includes(`FULL_INSTALLED_TUI_${scenario.phase}_TAIL`),
       );
-      await cold.pty.write('\x0f');
-      await cold.waitFrame(
-        'cold_explicit_original_full_body',
-        (value) => cold.idle(value) && value.includes(`FULL_INSTALLED_TUI_${scenario.phase}_TAIL`),
-      );
-      const coldCompletedFrame = originalOutputFrame(cold, originalMessage);
+      const coldCompletedFrame = originalOutputFrame(cold, scenario, originalMessage);
       assert(!coldCompletedFrame.includes('Recorded Model output preview only;'));
       assert(!coldCompletedFrame.includes(scenario.reasoning));
-      assert(coldCompletedFrame.includes('Thought · Recorded phase:'));
+      assert(coldCompletedFrame.includes('Thinking'));
       await quit(cold, 'cold_normal_quit_full_original_job');
       const afterCold = await history(selectedSqlite, scenario.sessionId);
       for (const field of ['runs', 'messages', 'executions', 'commands'] as const)

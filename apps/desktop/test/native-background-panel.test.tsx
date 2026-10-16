@@ -642,3 +642,240 @@ test('reopening a complete child waits for the in-flight directory token and gua
     globalThis.setTimeout = originalTimeout;
   }
 });
+
+test('live environment child coalesces revisions, closes held reads and immediately reuses verified cache', async () => {
+  const item = backgroundItem(1, true);
+  const selection = {
+    viewGeneration: 1,
+    viewSelection: 1,
+    storeId: 'store',
+    session: item.rootSession,
+    runs: [],
+    executions: [],
+    interactions: [],
+    interactionsAfterId: null,
+    canReadModelOutput: false,
+  } as NativeSelection;
+  const calls: NativeRequest[] = [],
+    bodies = new Map<string, Buffer>();
+  let prefix = 'first prefix',
+    hold = false,
+    failNextChildOpen = true,
+    release: (() => void) | undefined;
+  const port: NativeBridge = {
+    watch: () => () => undefined,
+    request: async (request) => {
+      calls.push(request);
+      if (request.method === 'background.open')
+        return {
+          kind: 'background.page',
+          viewGeneration: 1,
+          viewSelection: 1,
+          rootSessionId: 'root',
+          storeId: 'store',
+          readId: request.readId,
+          observationId: 1,
+          startIndex: 0,
+          nextIndex: 1,
+          total: 1,
+          complete: true,
+          entries: [item],
+        };
+      if (request.method === 'background.child.open') {
+        if (request.cursor && !request.cursor.contextSelectionId)
+          throw Error('invalid_native_request');
+        if (failNextChildOpen) {
+          failNextChildOpen = false;
+          throw Error('background_child_unavailable');
+        }
+        const bytes = Buffer.from(
+          JSON.stringify({
+            item,
+            session: item.childSession,
+            upperSeq: '1',
+            ...(request.cursor ? { afterSeq: '0' } : {}),
+            messages: [
+              {
+                id: 'active',
+                sessionId: item.childSession!.id,
+                seq: '1',
+                role: 'assistant',
+                status: 'incomplete',
+                content: prefix,
+                runId: item.childRun!.id,
+              },
+            ],
+            modelOutputs: [],
+          }),
+        );
+        bodies.set(request.readId, bytes);
+        return {
+          kind: 'background.child.opened',
+          viewGeneration: 1,
+          viewSelection: 1,
+          rootSessionId: 'root',
+          storeId: 'store',
+          readId: request.readId,
+          observationId: 1,
+          executionId: item.execution.id,
+          childSessionId: item.childSession!.id,
+          childRunId: item.childRun!.id,
+          wireBytes: String(bytes.length),
+          wireHash: createHash('sha256').update(bytes).digest('hex'),
+        };
+      }
+      if (request.method === 'background.child.read') {
+        const bytes = bodies.get(request.readId)!;
+        if (hold)
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        return {
+          kind: 'background.child.chunk',
+          readId: request.readId,
+          offset: 0,
+          nextOffset: bytes.length,
+          eof: true,
+          data: bytes.toString('base64'),
+        };
+      }
+      if (request.method === 'background.child.close') {
+        bodies.delete(request.readId);
+        return null;
+      }
+      if (request.method === 'background.close') return null;
+      throw Error('unexpected_operation');
+    },
+  };
+  function Surface() {
+    const [revision, setRevision] = useState(0);
+    const [unavailable, setUnavailable] = useState(false);
+    const environment = useNativeEnvironment({
+      bridge: port,
+      generation: 1,
+      selection,
+      revision,
+      unavailable,
+      onChanged: async () => undefined,
+    });
+    return (
+      <>
+        <button type="button" onClick={() => setUnavailable((value) => !value)}>
+          availability
+        </button>
+        <button type="button" onClick={() => setRevision((value) => value + 1)}>
+          revision
+        </button>
+        <button type="button" onClick={() => environment.openChild(item.childSession!.id)}>
+          open child
+        </button>
+        <button type="button" onClick={environment.closeChild}>
+          close child
+        </button>
+        <div data-child>
+          {environment.child?.facts?.messages.map((message) => message.content).join('|')}
+        </div>
+        <div data-loading>{String(environment.child?.loading)}</div>
+        <div data-error>{environment.child?.error}</div>
+      </>
+    );
+  }
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  await fixture(
+    async (host, render) => {
+      await render(port);
+      await click(host, 'open child');
+      await settle();
+      expect(host.querySelector('[data-child]')!.textContent).toBe('');
+      expect(host.querySelector('[data-error]')!.textContent).toBe('background_child_unavailable');
+      await click(host, 'revision');
+      await settle();
+      expect(calls.filter((call) => call.method === 'background.child.open')).toHaveLength(2);
+      expect(
+        calls
+          .filter((call) => call.method === 'background.child.open')
+          .every((call) => !('cursor' in call)),
+      ).toBe(true);
+      expect(host.querySelector('[data-error]')!.textContent).toBe('');
+      expect(host.querySelector('[data-child]')!.textContent).toBe('first prefix');
+      prefix = 'next prefix';
+      hold = true;
+      await click(host, 'revision');
+      const count = () => calls.filter((call) => call.method === 'background.child.open').length;
+      expect(count()).toBe(3);
+      await click(host, 'revision');
+      await click(host, 'revision');
+      expect(count()).toBe(3);
+      prefix = 'latest prefix';
+      hold = false;
+      await act(async () => {
+        release!();
+      });
+      await settle();
+      expect(count()).toBe(4);
+      expect(host.querySelector('[data-child]')!.textContent).toBe('latest prefix');
+      expect(
+        calls
+          .filter((call) => call.method === 'background.child.open')
+          .slice(2)
+          .every((call) => 'cursor' in call),
+      ).toBe(true);
+      await click(host, 'close child');
+      hold = true;
+      prefix = 'late prefix';
+      await click(host, 'open child');
+      await settle();
+      expect(host.querySelector('[data-child]')!.textContent).toBe('latest prefix');
+      expect(host.querySelector('[data-loading]')!.textContent).toBe('true');
+      const lastOpen = calls.filter((call) => call.method === 'background.child.open').at(-1)!;
+      expect('cursor' in lastOpen).toBe(false);
+      await click(host, 'close child');
+      expect(bodies.size).toBe(0);
+      await act(async () => {
+        hold = false;
+        release!();
+      });
+      expect(host.querySelector('[data-child]')!.textContent).toBe('');
+      expect(bodies.size).toBe(0);
+      hold = true;
+      await click(host, 'open child');
+      await click(host, 'availability');
+      expect(bodies.size).toBe(0);
+      await act(async () => {
+        hold = false;
+        release!();
+      });
+      await settle();
+      expect(host.querySelector('[data-child]')!.textContent).toBe('latest prefix');
+      prefix = 'recovered prefix';
+      await click(host, 'availability');
+      await settle();
+      expect(host.querySelector('[data-child]')!.textContent).toBe('recovered prefix');
+      await click(host, 'close child');
+      const beforeCachedRetry = calls.filter(
+        (call) => call.method === 'background.child.open',
+      ).length;
+      failNextChildOpen = true;
+      await click(host, 'open child');
+      await settle();
+      expect(host.querySelector('[data-child]')!.textContent).toBe('recovered prefix');
+      expect(host.querySelector('[data-error]')!.textContent).toBe('background_child_unavailable');
+      prefix = 'cache full calibration recovered';
+      await click(host, 'revision');
+      await settle();
+      const cachedRetries = calls
+        .filter((call) => call.method === 'background.child.open')
+        .slice(beforeCachedRetry);
+      expect(cachedRetries).toHaveLength(2);
+      expect(cachedRetries.every((call) => !('cursor' in call))).toBe(true);
+      expect(host.querySelector('[data-child]')!.textContent).toBe(
+        'cache full calibration recovered',
+      );
+      expect(host.querySelector('[data-error]')!.textContent).toBe('');
+    },
+    () => <Surface />,
+  );
+});

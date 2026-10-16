@@ -21,7 +21,7 @@ function view(id: string): SessionView {
     executions: [],
   };
 }
-test('late old view is cached within bounds but cannot overwrite new selection; disposal never stops service', async () => {
+test('retired old view cannot enter cache or overwrite new selection; disposal never stops service', async () => {
   let release!: (value: SessionView) => void;
   let stopped = 0;
   let disposed = 0;
@@ -41,7 +41,7 @@ test('late old view is cached within bounds but cannot overwrite new selection; 
   const visible: string[] = [];
   const controller = createDesktopController({
     admittedClient: client,
-    maxCachedObjects: 1,
+    maxCachedObjects: 4,
     maxCacheBytes: 2048,
     onSnapshot(snapshot) {
       visible.push(snapshot.sessionId);
@@ -115,6 +115,146 @@ test('unknown action receipt retains its original intent for lookup and never re
     intent: { expectedStoreId: 'store', input: action.input },
   });
   expect(saved?.intent.commandId.length).toBeGreaterThan(0);
+});
+
+test('100 rapid selections cancel retired pure GET chains and disposal aborts the last pending refresh', async () => {
+  const active = new Set<AbortSignal>(),
+    signals: AbortSignal[] = [],
+    followup: string[] = [],
+    visible: string[] = [],
+    errors: unknown[] = [];
+  const held = new Map<string, (value: SessionView) => void>();
+  const check = (id: string, signal: AbortSignal) => {
+    expect(signal.aborted).toBe(false);
+    followup.push(id);
+  };
+  let disposed = 0;
+  const client = {
+    serverInfo: {
+      storeId: 'store',
+      capabilities: ['interactions', 'context', 'permission_controls'],
+    },
+    getView(id: string, { signal }: { signal: AbortSignal }) {
+      active.add(signal);
+      signals.push(signal);
+      return new Promise<SessionView>((resolve, reject) => {
+        const abort = () => {
+          active.delete(signal);
+          reject(signal.reason);
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        held.set(id, (value) => {
+          signal.removeEventListener('abort', abort);
+          active.delete(signal);
+          resolve(value);
+        });
+      });
+    },
+    async queryExtension(
+      id: string,
+      _extension: string,
+      _query: string,
+      _input: unknown,
+      { signal }: { signal: AbortSignal },
+    ) {
+      check(id, signal);
+      return [];
+    },
+    async listInteractions(id: string, _input: unknown, { signal }: { signal: AbortSignal }) {
+      check(id, signal);
+      return { interactions: [], nextAfterId: null };
+    },
+    async getContext(id: string, _input: unknown, { signal }: { signal: AbortSignal }) {
+      check(id, signal);
+      return { messages: [], resultSources: [] };
+    },
+    async getPermissionMode(id: string, { signal }: { signal: AbortSignal }) {
+      check(id, signal);
+      return { mode: 'auto' };
+    },
+    async getWorkspaceTrust(_id: string, { signal }: { signal: AbortSignal }) {
+      check('s-99', signal);
+      return { readScopes: [] };
+    },
+    async getCommand(_id: string, { signal }: { signal: AbortSignal }) {
+      check('s-99', signal);
+      return { id: 'command', sessionId: 's-99', originStoreId: 'store' };
+    },
+    disposeNetwork() {
+      disposed++;
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    readActiveCommandOnSelect: true,
+    onSnapshot: (snapshot) => visible.push(snapshot.sessionId),
+    onError: (error) => errors.push(error),
+  });
+  const reads = Array.from({ length: 100 }, (_, index) =>
+    controller.selectSession(`s-${index}`, [
+      { extensionId: 'fixture', queryId: 'read', input: {} },
+    ]),
+  );
+  expect(active.size).toBe(1);
+  expect(signals.filter((signal) => signal.aborted)).toHaveLength(99);
+  const last = view('s-99');
+  last.runs = [{ id: 'run', isActive: true, originCommandId: 'command' }] as SessionView['runs'];
+  held.get('s-99')!(last);
+  await Promise.all(reads);
+  expect(followup).toEqual(Array(6).fill('s-99'));
+  expect(visible).toEqual(['s-99']);
+  expect(controller.cachedObjectCount).toBe(1);
+  expect(errors).toEqual([]);
+  const refresh = controller.refreshSession('s-99');
+  expect(active.size).toBe(1);
+  controller.disposeNetwork();
+  await refresh;
+  expect(active.size).toBe(0);
+  expect(signals.at(-1)!.aborted).toBe(true);
+  expect(disposed).toBe(1);
+  expect(errors).toEqual([]);
+  await expect(controller.refreshSession('s-99')).rejects.toThrow('controller_disposed');
+  expect(signals).toHaveLength(101);
+});
+
+test('a retired held permission GET cannot continue to trust reads or replace the newer permission proof', async () => {
+  let release!: (value: unknown) => void;
+  const trustReads: string[] = [],
+    errors: unknown[] = [];
+  const signals: AbortSignal[] = [];
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
+    async getView(id: string) {
+      return { ...view(id), session: { ...view(id).session, workspaceId: `w-${id}` } };
+    },
+    getPermissionMode(id: string, { signal }: { signal: AbortSignal }) {
+      signals.push(signal);
+      return id === 'old'
+        ? new Promise((resolve) => {
+            release = resolve;
+          })
+        : Promise.resolve({ mode: 'auto', revision: 'new' });
+    },
+    async getWorkspaceTrust(id: string) {
+      trustReads.push(id);
+      return { readScopes: [] };
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    onSnapshot() {},
+    onError: (error) => errors.push(error),
+  });
+  const old = controller.selectSession('old');
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await controller.selectSession('new');
+  expect(signals[0]!.aborted).toBe(true);
+  release({ mode: 'full', revision: 'old' });
+  await old;
+  expect(trustReads).toEqual(['w-new']);
+  expect(controller.snapshot?.permissions?.mode.revision).toBe('new');
+  expect(controller.cachedObjectCount).toBe(1);
+  expect(errors).toEqual([]);
 });
 
 test('lost answer response retains exact pending child source and reconciles original command without replay', async () => {

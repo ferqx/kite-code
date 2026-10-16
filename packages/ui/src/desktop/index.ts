@@ -69,6 +69,13 @@ export {
   type ModelOption,
   type ThinkingEffort,
 } from './ModelEffortSelector';
+export {
+  type DesktopMarkdownTree,
+  getDesktopMarkdownParse,
+  type PreparedDesktopMarkdown,
+  parseDesktopMarkdown,
+  rememberDesktopMarkdownParse,
+} from './markdown-parse-cache';
 export { RightSidebar, type RightSidebarProps, type RightSidebarTab } from './RightSidebar';
 export {
   type ScheduledTaskSummary,

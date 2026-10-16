@@ -241,6 +241,40 @@ test('an old event state rejection in the same generation cannot open a dialog i
   }
 });
 
+test('100 changed notifications retain one in-flight state read and one latest successor', async () => {
+  const held: ReturnType<typeof deferred<NativeResult>>[] = [];
+  let active = 0,
+    peak = 0,
+    hold = false;
+  const f = fixture((request) => {
+    if (request.method !== 'state' || !hold) return undefined;
+    const next = deferred<NativeResult>();
+    held.push(next);
+    active++;
+    peak = Math.max(peak, active);
+    return next.promise.finally(() => {
+      active--;
+    });
+  });
+  try {
+    await f.render();
+    await f.click('Original A');
+    hold = true;
+    for (let index = 0; index < 100; index++) await f.notify();
+    expect(held).toHaveLength(1);
+    expect(active).toBe(1);
+    await act(async () => held[0]!.resolve(null));
+    expect(held).toHaveLength(2);
+    expect(active).toBe(1);
+    await act(async () => held[1]!.resolve(null));
+    expect(active).toBe(0);
+    expect(peak).toBe(1);
+    expect(f.calls.filter((request) => request.method === 'state')).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a current event state failure still opens the original failure dialog', async () => {
   let fail = false;
   const f = fixture((request) => {
@@ -493,7 +527,7 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
   }
 });
 
-test('explicit private draft save keeps its original scope and CAS while history is still reading', async () => {
+test('private draft save is test-only and retains its original scope and CAS while history is still reading', async () => {
   const history = deferred<NativeResult>();
   const savedReply = deferred<NativeResult>();
   const raw = '  原私有草稿🙂\r\n保留 空格  ';
@@ -535,6 +569,13 @@ test('explicit private draft save keeps its original scope and CAS while history
     expect(f.dom.window.document.querySelector('textarea')!.value).toBe(
       raw.replaceAll('\r\n', '\n'),
     );
+    expect(
+      [...f.dom.window.document.querySelectorAll('button')].some(
+        (candidate) => candidate.textContent === '保留草稿',
+      ),
+    ).toBe(false);
+    expect(saves).toEqual([]);
+    await f.render(true);
     const button = [...f.dom.window.document.querySelectorAll('button')].find(
       (candidate) => candidate.textContent === '保留草稿',
     )!;

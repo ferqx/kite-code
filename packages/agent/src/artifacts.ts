@@ -33,6 +33,7 @@ export interface ArtifactReadInput {
   sessionId: string;
   subjectId: string;
   scope: ArtifactScope;
+  signal?: AbortSignal;
 }
 export interface ArtifactPublishInput extends ArtifactReadInput {
   mediaType: string;
@@ -59,18 +60,108 @@ export function createArtifactStore(options: {
   const access = acquireProfileAccess(options.profile);
   let closing = false;
   let active = 0;
+  let activeReads = 0;
+  let queuedBytes = 0;
+  let queuedReads = 0;
+  let publisherBurst = 0;
+  type Kind = 'read' | 'publish';
+  type Waiting = {
+    kind: Kind;
+    bytes: number;
+    signal?: AbortSignal;
+    abort: () => void;
+    resolve: (release: () => void) => void;
+    reject: (error: unknown) => void;
+  };
+  const waiting: Waiting[] = [];
   let done: (() => void) | undefined;
   let closePromise: Promise<void> | undefined;
-  function enter(): () => void {
-    if (closing) throw new AgentError('artifact_closed');
-    if (active >= 8) throw new AgentError('artifact_busy');
+  function permit(kind: Kind): () => void {
     active++;
+    if (kind === 'read') activeReads++;
+    let released = false;
     return () => {
-      if (--active === 0) done?.();
+      if (released) return;
+      released = true;
+      active--;
+      if (kind === 'read') activeReads--;
+      pump();
     };
   }
-  async function use<T>(work: () => Promise<T>): Promise<T> {
-    const release = enter();
+  function remove(entry: Waiting) {
+    const index = waiting.indexOf(entry);
+    if (index < 0) return false;
+    waiting.splice(index, 1);
+    queuedBytes -= entry.bytes;
+    if (entry.kind === 'read') queuedReads--;
+    entry.signal?.removeEventListener('abort', entry.abort);
+    return true;
+  }
+  function pump() {
+    while (active < 8) {
+      const publisher = waiting.findIndex((entry) => entry.kind === 'publish');
+      // Two active positions remain available for publication even with held read streams.
+      const reader = activeReads < 6 ? waiting.findIndex((entry) => entry.kind === 'read') : -1;
+      const index = publisher >= 0 && (publisherBurst < 4 || reader < 0) ? publisher : reader;
+      if (index < 0) break;
+      const entry = waiting[index]!;
+      remove(entry);
+      publisherBurst = entry.kind === 'publish' ? publisherBurst + 1 : 0;
+      entry.resolve(permit(entry.kind));
+    }
+    if (!active && !waiting.length) done?.();
+  }
+  function metadataBytes(input: ArtifactReadInput) {
+    return (
+      512 +
+      [
+        input.expectedStoreId,
+        input.refId,
+        input.sessionId,
+        input.subjectId,
+        input.scope.kind,
+        input.scope.id,
+        'mediaType' in input && typeof input.mediaType === 'string' ? input.mediaType : '',
+      ].reduce((sum, value) => sum + value.length * 2, 0)
+    );
+  }
+  /** Queue bounds cover retained ticket metadata and known byte-array publications, not lazy source closures. */
+  function enter(kind: Kind, bytes: number, signal?: AbortSignal): Promise<() => void> {
+    if (closing) throw new AgentError('artifact_closed');
+    signal?.throwIfAborted();
+    if (!waiting.length && active < 8 && (kind === 'publish' || activeReads < 6))
+      return Promise.resolve(permit(kind));
+    // Reader floods cannot consume all pending admission positions needed by producers.
+    if (
+      waiting.length >= 64 ||
+      (kind === 'read' && queuedReads >= 32) ||
+      queuedBytes + bytes > 16 * 1024 * 1024
+    )
+      throw new AgentError('artifact_busy', 'artifact_busy', true);
+    const promise = new Promise<() => void>((resolve, reject) => {
+      const entry: Waiting = {
+        kind,
+        bytes,
+        signal,
+        resolve,
+        reject,
+        abort() {
+          if (!remove(entry)) return;
+          reject(signal!.reason);
+          pump();
+        },
+      };
+      waiting.push(entry);
+      queuedBytes += bytes;
+      if (kind === 'read') queuedReads++;
+      signal?.addEventListener('abort', entry.abort, { once: true });
+      if (signal?.aborted) entry.abort();
+    });
+    pump();
+    return promise;
+  }
+  async function use<T>(admission: Promise<() => void>, work: () => Promise<T>): Promise<T> {
+    const release = await admission;
     try {
       return await work();
     } finally {
@@ -93,10 +184,23 @@ export function createArtifactStore(options: {
       content: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
       signal?: AbortSignal;
     },
+    admission?: Promise<() => void>,
   ): Promise<ArtifactReference> {
     const { content, signal, ...metadata } = input;
     const sealed = { ...metadata, scope: { ...metadata.scope } };
-    return use(async () => {
+    let accepted: Promise<() => void>;
+    try {
+      const knownBytes = Array.isArray(content)
+        ? content.reduce(
+            (sum, chunk) => sum + (chunk instanceof Uint8Array ? chunk.byteLength : 0),
+            0,
+          )
+        : 0;
+      accepted = admission ?? enter('publish', metadataBytes(input) + knownBytes, signal);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return use(accepted, async () => {
       signal?.throwIfAborted();
       if ((await options.store.getMetadata()).storeId !== sealed.expectedStoreId)
         throw new AgentError('store_identity_mismatch');
@@ -197,42 +301,86 @@ export function createArtifactStore(options: {
     publish(input) {
       if (!(input.content instanceof Uint8Array))
         return Promise.reject(new AgentError('artifact_content_invalid'));
-      const bytes = Uint8Array.from(input.content);
-      return publishStream({ ...input, content: [bytes] });
+      try {
+        // Reserve the retained payload budget before copying, but seal bytes at the call boundary.
+        const admission = enter(
+          'publish',
+          metadataBytes(input) + input.content.byteLength,
+          input.signal,
+        );
+        let bytes: Uint8Array;
+        try {
+          bytes = Uint8Array.from(input.content);
+        } catch (error) {
+          void admission.then(
+            (release) => release(),
+            () => {},
+          );
+          return Promise.reject(error);
+        }
+        return publishStream({ ...input, content: [bytes] }, admission);
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
-    publishStream,
-    read(input) {
-      return use(async () => {
-        const ref = await options.store.getArtifactReference(input);
+    publishStream(input) {
+      return publishStream(input);
+    },
+    async read(input) {
+      const { signal, ...request } = input;
+      const sealed = { ...request, scope: { ...request.scope } };
+      return use(enter('read', metadataBytes(sealed), signal), async () => {
+        signal?.throwIfAborted();
+        const ref = await options.store.getArtifactReference(sealed);
+        signal?.throwIfAborted();
         if (!ref) throw new AgentError('artifact_reference_not_found');
         return readPublishedArtifact(access.profilePath, ref.hash, ref.size);
       });
     },
-    readReference(input) {
+    async readReference(input) {
       const expectedStoreId = input.expectedStoreId;
       const reference = { ...input.reference, scope: { ...input.reference.scope } };
-      return use(async () => {
-        const original = await options.store.getArtifactReference({
-          expectedStoreId,
-          sessionId: reference.sessionId,
-          subjectId: reference.subjectId,
-          refId: reference.id,
-          scope: reference.scope,
-        });
-        if (
-          !original ||
-          canonicalJson(original as unknown as Json) !== canonicalJson(reference as unknown as Json)
-        )
-          throw new AgentError('artifact_reference_mismatch');
-        return readPublishedArtifact(access.profilePath, original.hash, original.size);
-      });
+      const signal = input.signal;
+      return use(
+        enter(
+          'read',
+          metadataBytes({
+            expectedStoreId,
+            refId: reference.id,
+            sessionId: reference.sessionId,
+            subjectId: reference.subjectId,
+            scope: reference.scope,
+          }),
+          signal,
+        ),
+        async () => {
+          signal?.throwIfAborted();
+          const original = await options.store.getArtifactReference({
+            expectedStoreId,
+            sessionId: reference.sessionId,
+            subjectId: reference.subjectId,
+            refId: reference.id,
+            scope: reference.scope,
+          });
+          signal?.throwIfAborted();
+          if (
+            !original ||
+            canonicalJson(original as unknown as Json) !==
+              canonicalJson(reference as unknown as Json)
+          )
+            throw new AgentError('artifact_reference_mismatch');
+          return readPublishedArtifact(access.profilePath, original.hash, original.size);
+        },
+      );
     },
     async *readStream(input) {
-      const release = enter();
       const { signal, ...request } = input;
+      const sealed = { ...request, scope: { ...request.scope } };
+      const release = await enter('read', metadataBytes(sealed), signal);
       try {
         signal?.throwIfAborted();
-        const ref = await options.store.getArtifactReference(request);
+        const ref = await options.store.getArtifactReference(sealed);
+        signal?.throwIfAborted();
         if (!ref) throw new AgentError('artifact_reference_not_found');
         for (const chunk of readPublishedArtifactChunks(access.profilePath, ref.hash, ref.size)) {
           signal?.throwIfAborted();
@@ -246,7 +394,7 @@ export function createArtifactStore(options: {
       if (!closePromise) {
         closing = true;
         closePromise = (async () => {
-          if (active)
+          if (active || waiting.length)
             await new Promise<void>((resolve) => {
               done = resolve;
             });

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { createServer } from 'vite';
+import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 
 export async function startDesktopRenderer(root: string) {
   const cspNonce = randomUUID().replaceAll('-', '');
@@ -13,6 +14,7 @@ export async function startDesktopRenderer(root: string) {
     mode: 'development',
     define: { __KITE_DESKTOP_TEST_DIAGNOSTICS__: 'false' },
     plugins: [react(), tailwindcss()],
+    resolve: { alias: [desktopMarkdownDecoderAlias()] },
     clearScreen: false,
     logLevel: 'warn',
     html: { cspNonce },

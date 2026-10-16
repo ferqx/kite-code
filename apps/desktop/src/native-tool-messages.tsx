@@ -1,6 +1,6 @@
 import type { Execution, Message } from '@kite-ai/client';
 import { type Message as DesktopMessage, ToolActivity, ToolRow } from '@kite-ai/ui/desktop';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import type { NativeToolMessageFact } from './tool-messages-bridge';
 
@@ -193,6 +193,7 @@ export function useNativeToolMessages({
   historyEpoch,
   messages,
   observationRevision,
+  suspended = false,
 }: {
   bridge?: NativeBridge;
   generation: number;
@@ -200,13 +201,15 @@ export function useNativeToolMessages({
   historyEpoch: number;
   messages: readonly Message[];
   observationRevision: number;
+  suspended?: boolean;
 }) {
   const storeId = selection?.storeId,
     sessionId = selection?.session.id,
     workspaceId = selection?.session.workspaceId;
   const viewSelection = selection?.viewSelection ?? selection?.viewGeneration;
   const scope = JSON.stringify([generation, storeId, sessionId, viewSelection, historyEpoch]);
-  const unavailable = !selection || selection.viewLoading || selection.permissionUnavailable;
+  const unavailable =
+    suspended || !selection || selection.viewLoading || selection.permissionUnavailable;
   const [retryRevision, setRetryRevision] = useState(0);
   const cache = useRef({
     scope,
@@ -324,14 +327,15 @@ export function useNativeToolMessages({
     observationRevision,
   ]);
   return {
-    entries:
-      state.scope === scope
-        ? state.entries.filter((fact) => {
-            const original = cache.current.read.get(fact.messageId)?.message;
-            const current = messages.find((message) => message.id === fact.messageId);
-            return original && current && sameReceipt(original, current);
-          })
-        : [],
+    entries: useMemo(() => {
+      if (state.scope !== scope) return [];
+      const messagesById = new Map(messages.map((message) => [message.id, message]));
+      return state.entries.filter((fact) => {
+        const original = cache.current.read.get(fact.messageId)?.message;
+        const current = messagesById.get(fact.messageId);
+        return original && current && sameReceipt(original, current);
+      });
+    }, [state, scope, messages]),
     error: state.scope === scope ? state.error : undefined,
     retry: () => setRetryRevision((value) => value + 1),
   };

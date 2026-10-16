@@ -124,9 +124,32 @@ export async function readNativeBackground(input: BackgroundRead) {
 }
 
 export async function readNativeBackgroundChild(
-  input: BackgroundRead & { observationId: number; item: BackgroundExecutionItem },
+  input: BackgroundRead & {
+    observationId: number;
+    item: BackgroundExecutionItem;
+    previous?: NativeBackgroundChild;
+    incremental?: boolean;
+  },
 ): Promise<NativeBackgroundChild> {
   const surface = input.environment ? { surface: 'environment' as const } : {};
+  const previous = input.previous;
+  const incremental = !!(input.incremental && previous && input.environment);
+  if (
+    previous &&
+    (previous.session.id !== input.item.execution.childSessionId ||
+      previous.item.execution.id !== input.item.execution.id ||
+      previous.item.rootSession.id !== input.item.rootSession.id ||
+      previous.item.session.id !== input.item.session.id)
+  )
+    throw new ClientError('background_child_history_mismatch');
+  let afterSeq = '0';
+  if (incremental && previous) {
+    for (const message of previous.messages) {
+      if (message.status !== 'complete' || (message.outputBody && !message.outputBody.complete))
+        break;
+      afterSeq = message.seq;
+    }
+  }
   const readId = crypto.randomUUID(),
     executionId = input.item.execution.id,
     childId = input.item.execution.childSessionId;
@@ -153,6 +176,9 @@ export async function readNativeBackgroundChild(
       method: 'background.child.open',
       generation: input.generation,
       observationId: input.observationId,
+      ...(incremental
+        ? { cursor: { afterSeq, contextSelectionId: previous!.session.contextSelectionId } }
+        : {}),
       executionId,
       readId,
       ...surface,
@@ -241,7 +267,13 @@ export async function readNativeBackgroundChild(
       !Array.isArray(body.modelOutputs)
     )
       throw new ClientError('background_child_invalid');
-    let lastSeq = 0n;
+    if (!incremental && body.afterSeq !== undefined)
+      throw new ClientError('background_child_history_mismatch');
+    if (incremental && body.afterSeq !== '0' && body.afterSeq !== afterSeq)
+      throw new ClientError('background_child_history_mismatch');
+    if (body.afterSeq !== undefined && decimal(body.afterSeq) > decimal(body.upperSeq))
+      throw new ClientError('background_child_history_mismatch');
+    let lastSeq = decimal(body.afterSeq ?? '0');
     const messages = new Map<string, NativeBackgroundChild['messages'][number]>();
     for (const message of body.messages) {
       if (
@@ -284,6 +316,24 @@ export async function readNativeBackgroundChild(
         !outputs.has(message.id)
       )
         throw new ClientError('background_child_history_mismatch');
+    if (incremental && previous && body.afterSeq !== '0') {
+      if (
+        body.afterSeq === undefined ||
+        body.session.contextSelectionId !== previous.session.contextSelectionId
+      )
+        throw new ClientError('background_child_history_mismatch');
+      const prefix = previous.messages.filter(
+        (message) => decimal(message.seq) <= decimal(body.afterSeq!),
+      );
+      const ids = new Set(prefix.map((message) => message.id));
+      if (body.messages.some((message) => ids.has(message.id)))
+        throw new ClientError('background_child_history_mismatch');
+      body.messages = [...prefix, ...body.messages];
+      body.modelOutputs = [
+        ...previous.modelOutputs.filter((entry) => ids.has(entry.messageId)),
+        ...body.modelOutputs,
+      ];
+    }
     return body;
   } finally {
     input.signal.removeEventListener('abort', abort);

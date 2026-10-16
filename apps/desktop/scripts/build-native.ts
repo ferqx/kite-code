@@ -33,6 +33,7 @@ import { build as buildRenderer } from 'vite';
 import { type DesktopDevelopment, parseDesktopDevelopment } from '../electron/development';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
 import { buildWindowsAccess } from './build-windows-access';
+import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 import { probeNativeSqliteEngine } from './sqlite-engine';
 export async function buildNativeDesktop(
   input: NativeAssets,
@@ -106,6 +107,7 @@ async function buildNativeApp(
       root,
       configFile: false,
       plugins: [react(), tailwindcss()],
+      resolve: { alias: [desktopMarkdownDecoderAlias()] },
       base: './',
       clearScreen: false,
       logLevel: 'warn',

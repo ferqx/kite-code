@@ -7,7 +7,9 @@ import { callerTextDigest } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import { inspectNativeQuitWork } from '../electron/quit-settlement';
+import type { NativeBackgroundChildOpen, NativeBackgroundPage } from '../src/background-bridge';
 import { type NativeState, nativeChannel } from '../src/native-bridge';
+import { backgroundItem } from './background-item.fixture';
 import { memoryPrivateData } from './private-data.fixture';
 
 function client() {
@@ -62,6 +64,180 @@ function authority() {
     frame,
   };
 }
+test('environment child and directory reads survive a held same-selection refresh, but selection, reset, and refresh failure revoke them', async () => {
+  for (const invalidation of ['select', 'reset', 'failure'] as const) {
+    const connection = client();
+    const cancellations: string[] = [];
+    for (const method of ['cancelCommand', 'cancelRun', 'cancelExecution', 'cancelSession'])
+      Object.assign(connection, {
+        [method]: async () => {
+          cancellations.push(method);
+          throw Error('reading_must_not_cancel_execution');
+        },
+      });
+    const item = backgroundItem(1, true);
+    connection.serverInfo!.capabilities.push('sessions');
+    connection.verifyConnection = async () => connection.serverInfo!;
+    connection.listAllBackgroundExecutions = async () => [structuredClone(item)];
+    connection.listBackgroundExecutions = async () =>
+      ({ items: [structuredClone(item)] }) as Awaited<
+        ReturnType<AgentClient['listBackgroundExecutions']>
+      >;
+    connection.getExecution = async (id) =>
+      ({ id, sessionId: 'root', originStoreId: 'store', parentExecutionId: null }) as Awaited<
+        ReturnType<AgentClient['getExecution']>
+      >;
+    let notify!: () => void;
+    let reset!: () => void;
+    connection.observe = async (options) => {
+      notify = () => void options.onChange?.({} as never);
+      reset = () => void options.onReset?.({} as never);
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    };
+    const originalView = connection.getView.bind(connection);
+    let holdParent = false;
+    let parentEntered!: () => void;
+    let releaseParent!: () => void;
+    const parentStarted = new Promise<void>((resolve) => {
+      parentEntered = resolve;
+    });
+    const parentGate = new Promise<void>((resolve) => {
+      releaseParent = resolve;
+    });
+    connection.getView = async (id) => {
+      if (id === 'root' && holdParent) {
+        parentEntered();
+        await parentGate;
+        if (invalidation === 'failure') throw Error('parent_refresh_failed');
+      }
+      const view = await originalView(id);
+      return id === 'child' ? { ...view, session: { ...item.childSession!, nextSeq: '1' } } : view;
+    };
+    const message = {
+      id: 'child-message',
+      sessionId: 'child',
+      runId: null,
+      seq: '1',
+      role: 'user',
+      status: 'complete',
+      content: 'retained child reading',
+    } as Message;
+    let holdChild = false;
+    let childEntered!: () => void;
+    let releaseChild!: () => void;
+    const childStarted = new Promise<void>((resolve) => {
+      childEntered = resolve;
+    });
+    const childGate = new Promise<void>((resolve) => {
+      releaseChild = resolve;
+    });
+    connection.listMessages = async (_id, options) => {
+      if (holdChild) {
+        childEntered();
+        // Deliberately ignore cancellation until released, to exercise late-result rejection.
+        await childGate;
+      }
+      return options?.afterSeq === '0' ? [message] : [];
+    };
+    const caller = new NativeCaller(connection, () => {});
+    const surface = { generation: 1, surface: 'environment' as const };
+    const beforeParent = async <T>(promise: Promise<T>) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(Error('environment_waited_for_parent_refresh')), 1000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    try {
+      await caller.invoke({ method: 'attach' });
+      await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+      const directory = (await caller.invoke({
+        ...surface,
+        method: 'background.open',
+        readId: 'initial-environment',
+      })) as NativeBackgroundPage;
+      await caller.invoke({ ...surface, method: 'background.close', readId: directory.readId });
+      const opened = (await caller.invoke({
+        ...surface,
+        method: 'background.child.open',
+        observationId: directory.observationId,
+        executionId: item.execution.id,
+        readId: 'fixed-child',
+      })) as NativeBackgroundChildOpen;
+      expect(opened.childSessionId).toBe('child');
+      holdParent = true;
+      notify();
+      await beforeParent(parentStarted);
+      const firstChunk = await beforeParent(
+        caller.invoke({
+          ...surface,
+          method: 'background.child.read',
+          readId: opened.readId,
+          offset: 0,
+          limit: 1,
+        }),
+      );
+      expect(firstChunk).toMatchObject({ kind: 'background.child.chunk', nextOffset: 1 });
+      const duringRefresh = (await beforeParent(
+        caller.invoke({ ...surface, method: 'background.open', readId: 'during-refresh' }),
+      )) as NativeBackgroundPage;
+      expect(duringRefresh).toMatchObject({
+        rootSessionId: 'root',
+        entries: [{ execution: { id: 'job-1' } }],
+      });
+      await caller.invoke({ ...surface, method: 'background.close', readId: duringRefresh.readId });
+      holdChild = true;
+      const late = caller.invoke({
+        ...surface,
+        method: 'background.child.open',
+        observationId: duringRefresh.observationId,
+        executionId: item.execution.id,
+        readId: 'late-child',
+      });
+      const lateResult = late.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await beforeParent(childStarted);
+      if (invalidation === 'select')
+        await caller.invoke({ method: 'select', generation: 1, sessionId: 'other-root' });
+      else if (invalidation === 'reset') reset();
+      else {
+        releaseParent();
+        await caller.invoke({ method: 'state', generation: 1 });
+        expect(caller.state().selection?.permissionUnavailable).toBe(true);
+      }
+      await expect(
+        caller.invoke({
+          ...surface,
+          method: 'background.child.read',
+          readId: opened.readId,
+          offset: 1,
+          limit: 1,
+        }),
+      ).rejects.toThrow();
+      releaseChild();
+      expect(await lateResult).toBeInstanceOf(Error);
+      expect(caller.state().selection?.session.id).toBe(
+        invalidation === 'select' ? 'other-root' : 'root',
+      );
+      expect(connection.writes).toBe(0);
+      expect(cancellations).toEqual([]);
+    } finally {
+      releaseParent();
+      releaseChild();
+      await caller.close();
+    }
+  }
+});
 test('paired first admission is consumed once; standalone cached identity and reconnect still require real admission', async () => {
   const identity: ServerInfo = {
     profile: { dataRoot: '/chosen/data', name: 'native', accessKey: 'native-profile' },
@@ -1240,5 +1416,122 @@ test('same creation command shares one in-flight POST across view switches; cold
     expect(posts).toBe(1);
   } finally {
     await cold.close();
+  }
+});
+
+test('global observation routes foreign metadata away from the selected View while retaining directory, descendant environment and read admission', async () => {
+  const connection = client();
+  connection.serverInfo!.capabilities.push('sessions');
+  connection.verifyConnection = async () => connection.serverInfo!;
+  const item = backgroundItem(1, true);
+  item.rootSession = { ...item.rootSession, id: 's1', rootSessionId: 's1' };
+  item.session = item.rootSession;
+  item.execution = { ...item.execution, sessionId: 's1', rootSessionId: 's1' };
+  item.childSession = { ...item.childSession!, parentSessionId: 's1', rootSessionId: 's1' };
+  connection.listAllBackgroundExecutions = async () => [structuredClone(item)];
+  let emit!: (sessionId: string) => Promise<void>, reset!: () => void;
+  let acknowledged = 0,
+    directories = 0,
+    selectedReads = 0,
+    hold = false;
+  let entered!: () => void, release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // This SDK fixture acknowledges after the Main callback returns, matching the
+  // actual Client contract without asserting HTTP/SSE decoder behavior here.
+  Object.defineProperty(connection, 'lastAppliedCursor', {
+    get: () => (acknowledged ? { storeId: 'store', sequence: String(acknowledged) } : undefined),
+  });
+  connection.observe = async (options) => {
+    emit = async (sessionId) => {
+      await options.onChange({
+        cursor: String(acknowledged + 1),
+        sessionId,
+        objectId: 'message',
+        type: 'message.updated',
+        revision: '1',
+        payload: null,
+      } as never);
+      acknowledged++;
+    };
+    reset = () => {
+      void options.onReset?.({} as never);
+    };
+    await new Promise<void>((resolve) =>
+      options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+    );
+  };
+  connection.listAllWorkspaces = async () => {
+    directories++;
+    return [];
+  };
+  const getView = connection.getView.bind(connection);
+  connection.getView = async (id) => {
+    if (id === 's1') {
+      selectedReads++;
+      if (hold) {
+        entered();
+        await gate;
+        throw Error('selected_metadata_unavailable');
+      }
+    }
+    return getView(id);
+  };
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's1' });
+    await caller.invoke({ method: 'directory', generation: 1 });
+    const observed = (await caller.invoke({
+      method: 'background.open',
+      generation: 1,
+      surface: 'environment',
+      readId: 'known-descendant',
+    })) as NativeBackgroundPage;
+    await caller.invoke({
+      method: 'background.close',
+      generation: 1,
+      surface: 'environment',
+      readId: observed.readId,
+    });
+    const readsBefore = selectedReads,
+      directoryBefore = directories;
+    const before = caller.state();
+    for (let index = 0; index < 100; index++) await emit(index % 2 ? 'other-root' : 'other-child');
+    await Bun.sleep(150);
+    expect(selectedReads).toBe(readsBefore);
+    expect(caller.state().selection!.viewGeneration).toBe(before.selection!.viewGeneration);
+    expect(caller.state().environmentRevision).toBe(before.environmentRevision! + 100);
+    expect(caller.state().selectedEnvironmentRevision).toBe(before.selectedEnvironmentRevision);
+    expect(directories).toBeGreaterThan(directoryBefore);
+    expect(connection.lastAppliedCursor).toEqual({ storeId: 'store', sequence: '100' });
+    await emit('child');
+    expect(caller.state().selectedEnvironmentRevision).toBe(
+      before.selectedEnvironmentRevision! + 1,
+    );
+    expect(selectedReads).toBe(readsBefore);
+    hold = true;
+    await emit('s1');
+    await held;
+    const during = caller.state();
+    expect(during.selectedEnvironmentRevision).toBe(before.selectedEnvironmentRevision! + 2);
+    expect(during.selection!.permissionUnavailable).toBe(true);
+    expect(during.environmentReadUnavailable).toBe(false);
+    release();
+    await caller.invoke({ method: 'state', generation: 1 });
+    expect(caller.state().environmentReadUnavailable).toBe(true);
+    expect(caller.state().selection!.permissionUnavailable).toBe(true);
+    reset();
+    expect(caller.state().environmentReadUnavailable).toBe(true);
+    expect(caller.state().historyEpoch).toBe(before.historyEpoch! + 1);
+    expect(connection.lastAppliedCursor).toEqual({ storeId: 'store', sequence: '102' });
+    expect(connection.writes).toBe(0);
+  } finally {
+    release();
+    await caller.close();
   }
 });

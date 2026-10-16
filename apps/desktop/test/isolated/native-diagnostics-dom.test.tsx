@@ -96,6 +96,27 @@ test('ordinary caller UI hides machine identities and ended diagnostics while un
     expect(text()).toContain('原完整请求');
     expect(text()).toContain('清除已核实申请');
     expect(requests).toHaveLength(2);
+    const buildConstant = Object.getOwnPropertyDescriptor(
+      globalThis,
+      '__KITE_DESKTOP_TEST_DIAGNOSTICS__',
+    );
+    try {
+      // Both the dev renderer and ordinary release build compile this value to false.
+      Object.defineProperty(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__', {
+        configurable: true,
+        value: false,
+      });
+      await draw(true);
+      expect(text()).not.toContain('original-unknown-command');
+      expect(text()).not.toContain('private-session-id');
+      expect(text()).not.toContain('ended-command');
+      expect(text()).not.toContain('原完整请求');
+      expect(requests).toHaveLength(2);
+    } finally {
+      if (buildConstant)
+        Object.defineProperty(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__', buildConstant);
+      else Reflect.deleteProperty(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__');
+    }
   } finally {
     await act(async () => rendered.unmount());
     Object.assign(globalThis, before);

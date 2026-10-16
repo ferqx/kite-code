@@ -68,7 +68,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'background.output.open': ['observationId', 'executionId', 'readId'],
   'background.output.next': ['readId'],
   'background.output.close': ['readId'],
-  'background.child.open': ['observationId', 'executionId', 'readId'],
+  'background.child.open': ['observationId', 'executionId', 'readId', 'cursor'],
   'background.child.read': ['readId', 'offset', 'limit'],
   'background.child.close': ['readId'],
   'settings.skills.open': ['readId', 'viewSelection', 'historyEpoch'],
@@ -497,6 +497,16 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     typeof value === 'string' &&
     /^(0|[1-9][0-9]{0,18})$/.test(value) &&
     BigInt(value) <= 9223372036854775807n;
+  if (method === 'background.child.open' && input.cursor !== undefined) {
+    const cursor = record(input.cursor);
+    exact(cursor, ['afterSeq', 'contextSelectionId']);
+    if (
+      input.surface !== 'environment' ||
+      !sequence(cursor.afterSeq) ||
+      !resourceId(cursor.contextSelectionId)
+    )
+      throw Error('invalid_native_request');
+  }
   if (
     method === 'context.compress' &&
     input.focus !== undefined &&

@@ -6,10 +6,12 @@ export interface ArtifactReadInput {
   sessionId: string;
   subjectId: string;
   scope: ArtifactScope;
+  signal?: AbortSignal;
 }
 export interface ArtifactReferenceReadInput {
   expectedStoreId: string;
   reference: ArtifactReference;
+  signal?: AbortSignal;
 }
 /** Host I/O port; the core imports no filesystem implementation. */
 export interface ArtifactContentStore {

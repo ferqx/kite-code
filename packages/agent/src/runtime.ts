@@ -1594,6 +1594,7 @@ export class AgentRuntime {
     let task: Promise<void> | undefined;
     let jobSignal: AbortSignal | undefined;
     let carrierExecutionId: string | undefined;
+    let settlementInterrupted = false;
     const abort = () =>
       controller?.abort(jobSignal?.reason ?? new AgentError('child_cancel_requested'));
     const checkHandle = (candidate: JobHandle) => {
@@ -1603,11 +1604,18 @@ export class AgentRuntime {
     const result = async (): Promise<import('./extensions').ToolResult> => {
       if (!activation) throw new AgentError('child_handle_unavailable');
       const current = await this.options.store.getRun(activation.run.id);
+      const carrier = carrierExecutionId
+        ? await this.options.store.getExecution(carrierExecutionId)
+        : null;
       const outcome =
         !current || current.isActive || current.status === 'interrupted'
           ? ('outcome_unknown' as const)
           : current.status === 'completed'
-            ? ('succeeded' as const)
+            ? carrier?.cancelRequestedAt !== null && carrier?.cancelRequestedAt !== undefined
+              ? ('cancelled' as const)
+              : settlementInterrupted
+                ? ('outcome_unknown' as const)
+                : ('succeeded' as const)
             : current.status === 'cancelled'
               ? ('cancelled' as const)
               : ('failed' as const);
@@ -1624,7 +1632,16 @@ export class AgentRuntime {
         .slice()
         .reverse()
         .find((message) => message.role === 'assistant');
-      const content = assistant?.content ?? current?.reason ?? 'child_result_unavailable';
+      const content =
+        assistant?.content ??
+        current?.reason ??
+        (outcome === 'cancelled' &&
+        carrier?.cancelRequestedAt !== null &&
+        carrier?.cancelRequestedAt !== undefined
+          ? 'cancel_requested'
+          : settlementInterrupted
+            ? 'child_settlement_unconfirmed'
+            : 'child_result_unavailable');
       let reviewOutput: AuthorizationReviewOutput | undefined;
       if (reviewConfiguration && outcome === 'succeeded') {
         const modelExecutionId = assistant?.sourceIds?.[0];
@@ -1794,6 +1811,33 @@ export class AgentRuntime {
           value: { childSessionId: activation!.session.id, runId: activation!.run.id },
         };
         await task.catch(() => {});
+        // The Model/Run can finish while its attached Jobs still wait for process admission.
+        // Keep the original carrier and ownership alive until the same durable success gate
+        // used by finishExecution is ready. Detached Jobs retain their independent domain.
+        const signal = AbortSignal.any([jobSignal!, controller!.signal]);
+        for (;;) {
+          const run = await thisRuntime.options.store.getRun(activation!.run.id);
+          if (run?.status !== 'completed' || run.isActive) break;
+          const snapshot = await thisRuntime.options.store.inspectChildSettlement({
+            expectedStoreId: parent.command.originStoreId,
+            owner: parent.owner,
+            executionId: carrierExecutionId!,
+          });
+          if (!snapshot.pending) break;
+          if (signal.aborted) {
+            settlementInterrupted = true;
+            break;
+          }
+          try {
+            const waiting = thisRuntime.changeWaits.wait(snapshot.cursor, signal, 30000);
+            thisRuntime.watchControls();
+            await waiting;
+          } catch (error) {
+            if (!signal.aborted) throw error;
+            settlementInterrupted = true;
+            break;
+          }
+        }
         yield { type: 'terminal', result: await result(), supervision: 'ended' };
       },
       cancel: async (candidate) => {
@@ -5413,6 +5457,7 @@ export class AgentRuntime {
         content = await this.options.artifacts.readReference({
           expectedStoreId: storeId,
           reference,
+          signal,
         });
       } catch (error) {
         if (error instanceof AgentError && error.code === 'artifact_reference_mismatch')
@@ -5426,7 +5471,7 @@ export class AgentRuntime {
         canonicalJson(original as unknown as Json) !== canonicalJson(reference as unknown as Json)
       )
         throw new AgentError('model_body_invalid');
-      content = await this.options.artifacts.read(input);
+      content = await this.options.artifacts.read({ ...input, signal });
     }
     signal?.throwIfAborted();
     if (

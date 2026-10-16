@@ -399,16 +399,240 @@ test('Artifact host admission is bounded and close drains accepted publications 
     content: Buffer.from('bounded publication'),
     mediaType: 'text/plain',
   };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let entered = 0;
   const inFlight = Array.from({ length: 8 }, (_, i) =>
-    f.artifact.publish({ ...common, refId: `bound-${i}` }),
+    f.artifact.publishStream({
+      ...common,
+      refId: `bound-${i}`,
+      content: (async function* () {
+        entered++;
+        await gate;
+        yield common.content;
+      })(),
+    }),
+  );
+  const admissionDeadline = Date.now() + 5000;
+  while (entered < 8 && Date.now() < admissionDeadline) await Bun.sleep(1);
+  expect(entered).toBe(8);
+  const queued = Array.from({ length: 64 }, (_, i) =>
+    f.artifact.publish({ ...common, refId: `queued-${i}` }),
   );
   await code(f.artifact.publish({ ...common, refId: 'refused' }), 'artifact_busy');
+  expect(entered).toBe(8);
   const closing = f.artifact.close();
   await code(f.artifact.publish({ ...common, refId: 'after-close' }), 'artifact_closed');
-  await Promise.all(inFlight);
+  release();
+  await Promise.all([...inFlight, ...queued]);
   await closing;
   expect(await f.store.getArtifactReference({ ...common, refId: 'refused' })).toBeNull();
   expect(await f.store.getArtifactReference({ ...common, refId: 'bound-7' })).not.toBeNull();
+  expect(await f.store.getArtifactReference({ ...common, refId: 'queued-63' })).not.toBeNull();
+});
+
+test('Artifact queued byte budget rejects before another copy, and queued reads abort without a Store lookup', async () => {
+  const f = await fixture();
+  const common = {
+    expectedStoreId: f.expectedStoreId,
+    sessionId: 's',
+    subjectId: 'owner',
+    scope: f.scope,
+    mediaType: 'text/plain',
+  };
+  const ref = await f.artifact.publish({
+    ...common,
+    refId: 'original',
+    content: Buffer.from('original'),
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const active = Array.from({ length: 8 }, (_, i) =>
+    f.artifact.publishStream({
+      ...common,
+      refId: `held-${i}`,
+      content: (async function* () {
+        await gate;
+        yield Buffer.from('held');
+      })(),
+    }),
+  );
+  const bytes = new Uint8Array(10 * 1024 * 1024).fill(65);
+  const accepted = f.artifact.publish({ ...common, refId: 'queued-large', content: bytes });
+  bytes.fill(66);
+  let error: unknown;
+  try {
+    await f.artifact.publish({
+      ...common,
+      refId: 'over-budget',
+      content: new Uint8Array(7 * 1024 * 1024),
+    });
+  } catch (cause) {
+    error = cause;
+  }
+  expect(error).toMatchObject({ code: 'artifact_busy', retryable: true });
+  let lookups = 0;
+  const original = f.store.getArtifactReference.bind(f.store);
+  f.store.getArtifactReference = async (input) => {
+    lookups++;
+    return original(input);
+  };
+  const abort = new AbortController();
+  const read = f.artifact
+    .readReference({ expectedStoreId: f.expectedStoreId, reference: ref, signal: abort.signal })
+    .then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+  const streamAbort = new AbortController();
+  const stream = f.artifact
+    .readStream({ ...common, refId: ref.id, signal: streamAbort.signal })
+    [Symbol.asyncIterator]();
+  const next = stream.next().then(
+    () => undefined,
+    (cause: unknown) => cause,
+  );
+  const reason = Error('only_cancel_read');
+  abort.abort(reason);
+  streamAbort.abort(reason);
+  expect(await read).toBe(reason);
+  expect(await next).toBe(reason);
+  expect(lookups).toBe(0);
+  release();
+  await Promise.all([...active, accepted]);
+  const content = await f.artifact.read({ ...common, refId: 'queued-large' });
+  expect(content.length).toBe(bytes.length);
+  expect(content[0]).toBe(65);
+  expect(content.at(-1)).toBe(65);
+});
+
+test('Artifact read streams reserve publication capacity and queued-reader saturation preserves producer admission', async () => {
+  const f = await fixture();
+  const common = {
+    expectedStoreId: f.expectedStoreId,
+    sessionId: 's',
+    subjectId: 'owner',
+    scope: f.scope,
+    mediaType: 'text/plain',
+  };
+  await f.artifact.publish({ ...common, refId: 'original', content: Buffer.alloc(128 * 1024, 65) });
+  const readers = Array.from({ length: 6 }, () =>
+    f.artifact.readStream({ ...common, refId: 'original' })[Symbol.asyncIterator](),
+  );
+  await Promise.all(readers.map((reader) => reader.next()));
+  const controller = new AbortController();
+  const queued = Array.from({ length: 32 }, () =>
+    f.artifact.read({ ...common, refId: 'original', signal: controller.signal }).then(
+      () => undefined,
+      (error: unknown) => error,
+    ),
+  );
+  await code(f.artifact.read({ ...common, refId: 'original' }), 'artifact_busy');
+  await f.artifact.publish({
+    ...common,
+    refId: 'not-starved',
+    content: Buffer.from('producer continues'),
+  });
+  const abortReason = Error('release_queued_reads');
+  controller.abort(abortReason);
+  expect((await Promise.all(queued)).every((error) => error === abortReason)).toBe(true);
+  await Promise.all(readers.map((reader) => reader.return!()));
+  expect(Buffer.from(await f.artifact.read({ ...common, refId: 'not-starved' })).toString()).toBe(
+    'producer continues',
+  );
+});
+
+test('Artifact waiting scope read makes progress before a continuous queued publisher backlog is exhausted', async () => {
+  const f = await fixture();
+  const common = {
+    expectedStoreId: f.expectedStoreId,
+    sessionId: 's',
+    subjectId: 'owner',
+    scope: f.scope,
+    mediaType: 'text/plain',
+  };
+  await f.artifact.publish({
+    ...common,
+    refId: 'fair-original',
+    content: Buffer.from('accurate scoped reading'),
+  });
+  const gate = () => {
+    let release!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { promise, release };
+  };
+  const admitted = gate();
+  let initialStarted = 0;
+  const initialGates = Array.from({ length: 8 }, gate);
+  const active = initialGates.map((entry, index) =>
+    f.artifact.publishStream({
+      ...common,
+      refId: `fair-active-${index}`,
+      content: (async function* () {
+        if (++initialStarted === initialGates.length) admitted.release();
+        await entry.promise;
+        yield Buffer.from('initial publication');
+      })(),
+    }),
+  );
+  await admitted.promise;
+  type Progress = { kind: 'publisher'; index: number } | { kind: 'reader' };
+  const events: Progress[] = [];
+  let wake: (() => void) | undefined;
+  const notify = (event: Progress) => {
+    events.push(event);
+    wake?.();
+  };
+  const next = async () => {
+    if (!events.length)
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    wake = undefined;
+    return events.shift()!;
+  };
+  const queuedGates = Array.from({ length: 16 }, gate);
+  let queuedStarted = 0;
+  const queued = queuedGates.map((entry, index) =>
+    f.artifact.publishStream({
+      ...common,
+      refId: `fair-queued-${index}`,
+      content: (async function* () {
+        queuedStarted++;
+        notify({ kind: 'publisher', index });
+        await entry.promise;
+        yield Buffer.from('queued publication');
+      })(),
+    }),
+  );
+  const original = f.store.getArtifactReference.bind(f.store);
+  f.store.getArtifactReference = (input) => {
+    if (input.refId === 'fair-original') notify({ kind: 'reader' });
+    return original(input);
+  };
+  const abort = new AbortController();
+  const reading = f.artifact.read({ ...common, refId: 'fair-original', signal: abort.signal });
+  try {
+    for (const entry of initialGates) entry.release();
+    for (;;) {
+      const event = await next();
+      if (event.kind === 'reader') break;
+      // Keep publishers arriving at the admission boundary without relying on wall-clock timing.
+      queuedGates[event.index]!.release();
+    }
+    expect(queuedStarted).toBeLessThan(queuedGates.length);
+    expect(Buffer.from(await reading).toString()).toBe('accurate scoped reading');
+  } finally {
+    abort.abort();
+    for (const entry of [...initialGates, ...queuedGates]) entry.release();
+    await Promise.allSettled([reading, ...active, ...queued]);
+  }
 });
 
 test('a committed reference keeps its full stream identity when a delayed publication reply completes', async () => {

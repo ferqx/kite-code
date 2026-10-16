@@ -633,3 +633,37 @@ export function activateChildRun(
     };
   });
 }
+
+/** A private original-owner snapshot matching the successful carrier's final Store gate. */
+export function inspectChildSettlement(
+  db: SqliteOperations,
+  input: Parameters<Store['inspectChildSettlement']>[0],
+) {
+  db.db.run('BEGIN');
+  try {
+    db.identity(input.expectedStoreId);
+    db.owner(input.owner);
+    const carrier = db.row('SELECT * FROM execution WHERE id=?', input.executionId);
+    if (
+      carrier?.kind !== 'job' ||
+      carrier.child_session_id === null ||
+      carrier.origin_store_id !== input.expectedStoreId ||
+      String(carrier.owner_generation) !== input.owner.generation
+    )
+      throw new AgentError('operation_unverifiable');
+    db.owner(input.owner, String(carrier.session_id));
+    const pending = !!(
+      db.row('SELECT id FROM run WHERE session_id=? AND is_active=1', carrier.child_session_id!) ||
+      db.row(
+        "SELECT id FROM execution WHERE session_id=? AND state IN ('planned','dispatching','running') AND NOT (kind='job' AND cancel_with_parent=0) LIMIT 1",
+        carrier.child_session_id!,
+      )
+    );
+    const cursor = db.metadata().lastChangeCursor;
+    db.db.run('COMMIT');
+    return { pending, cursor };
+  } catch (error) {
+    db.db.run('ROLLBACK');
+    throw error;
+  }
+}

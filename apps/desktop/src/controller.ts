@@ -138,6 +138,7 @@ export class DesktopController {
   private readonly attachmentReads = new Set<AbortController>();
   private readonly verifiedAttachments = new Set<string>();
   private interactionRead: AbortController | undefined;
+  private selectionRead: AbortController | undefined;
   private interactionReadGeneration: number | undefined;
   private interactionPageStartId: string | undefined;
   private readonly answers = new Map<
@@ -210,6 +211,7 @@ export class DesktopController {
 
   /** Event refresh re-reads the visible bounded window using fresh observation facts. */
   async refreshSession(sessionId: string): Promise<DesktopSnapshot | undefined> {
+    if (this.disposed) throw new Error('controller_disposed');
     const original = this.current;
     if (
       !this.selected ||
@@ -234,8 +236,22 @@ export class DesktopController {
     previous?: { afterId: string; scope: SessionView },
   ): Promise<DesktopSnapshot | undefined> {
     this.cancelInteractionRead();
+    this.selectionRead?.abort();
+    const reading = new AbortController();
+    this.selectionRead = reading;
+    const signal = reading.signal;
+    const check = () => {
+      signal.throwIfAborted();
+      if (
+        this.disposed ||
+        generation !== this.generation ||
+        this.selected?.sessionId !== selection.sessionId
+      )
+        throw new ClientError('native_selection_changed');
+    };
     try {
-      const view = await this.client.getView(selection.sessionId);
+      const view = await this.client.getView(selection.sessionId, { signal });
+      check();
       const afterId =
         previous &&
         previous.scope.storeId === view.storeId &&
@@ -252,41 +268,61 @@ export class DesktopController {
               query.extensionId,
               query.queryId,
               query.input,
+              { signal },
             ),
           ),
         )
       ).flat();
+      check();
       const page = this.client.serverInfo?.capabilities?.includes('interactions')
-        ? await this.client.listInteractions(selection.sessionId, {
-            storeId: view.storeId,
-            state: 'pending',
-            limit: 20,
-            ...(afterId ? { afterId } : {}),
-          })
+        ? await this.client.listInteractions(
+            selection.sessionId,
+            {
+              storeId: view.storeId,
+              state: 'pending',
+              limit: 20,
+              ...(afterId ? { afterId } : {}),
+            },
+            { signal },
+          )
         : { interactions: [], nextAfterId: null };
+      check();
       this.validateInteractionPage(page, view, afterId);
       if (afterId && 'snapshotCursor' in page && page.snapshotCursor !== view.snapshotCursor)
         throw new ClientError('interaction_page_observation_changed');
       const context =
         this.options.readContextOnSelect !== false &&
         this.client.serverInfo?.capabilities?.includes('context')
-          ? await this.client.getContext(selection.sessionId, {
-              storeId: view.storeId,
-              messageLimit: 200,
-              sourceLimit: 100,
-            })
+          ? await this.client.getContext(
+              selection.sessionId,
+              {
+                storeId: view.storeId,
+                messageLimit: 200,
+                sourceLimit: 100,
+              },
+              { signal },
+            )
           : undefined;
+      check();
       const permissions = this.client.serverInfo?.capabilities?.includes('permission_controls')
         ? {
             observationId: ++this.permissionObservation,
-            mode: await this.client.getPermissionMode(selection.sessionId, {
-              storeId: view.storeId,
-            }),
+            mode: await this.client
+              .getPermissionMode(selection.sessionId, {
+                storeId: view.storeId,
+                signal,
+              })
+              .then((mode) => {
+                check();
+                return mode;
+              }),
             trust: await this.client.getWorkspaceTrust(view.session.workspaceId, {
               storeId: view.storeId,
+              signal,
             }),
           }
         : undefined;
+      check();
       if (permissions) {
         Object.freeze(permissions.mode);
         for (const scope of permissions.trust.readScopes) Object.freeze(scope);
@@ -297,8 +333,9 @@ export class DesktopController {
       const activeRun = view.runs.find((run) => run.isActive);
       const activeCommand =
         this.options.readActiveCommandOnSelect && activeRun
-          ? await this.client.getCommand(activeRun.originCommandId)
+          ? await this.client.getCommand(activeRun.originCommandId, { signal })
           : undefined;
+      check();
       if (
         activeCommand &&
         (activeCommand.id !== activeRun!.originCommandId ||
@@ -317,14 +354,9 @@ export class DesktopController {
         activeCommand,
         permissions,
       };
-      // A late response may enter the bounded cache; its generation cannot select the visible page.
+      // Only the current read may contribute display data or a cached snapshot.
+      check();
       this.remember(snapshot);
-      if (
-        this.disposed ||
-        generation !== this.generation ||
-        this.selected?.sessionId !== selection.sessionId
-      )
-        return undefined;
       this.current = snapshot;
       this.interactionPageStartId = afterId;
       const visibleAttachmentKeys = new Set<string>();
@@ -353,9 +385,12 @@ export class DesktopController {
       this.options.onSnapshot(snapshot);
       return snapshot;
     } catch (error) {
+      reading.abort();
       if (!this.disposed && generation === this.generation) this.options.onError?.(error);
       if (generation === this.generation && !this.disposed) throw error;
       return undefined;
+    } finally {
+      if (this.selectionRead === reading) this.selectionRead = undefined;
     }
   }
 
@@ -1130,6 +1165,8 @@ export class DesktopController {
   }
 
   disposeNetwork(): void {
+    this.selectionRead?.abort();
+    this.selectionRead = undefined;
     this.cancelInteractionRead();
     this.clearAttachmentReads();
     this.disposed = true;

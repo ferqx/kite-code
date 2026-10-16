@@ -130,7 +130,7 @@ let seen='';
 const timer=setInterval(()=>{let request;try{request=JSON.parse(readFileSync(${JSON.stringify(requestPath)},'utf8'));}catch{return;}
 if(typeof request.key!=='string'||request.key===seen)return;seen=request.key;Bun.gc(true);
 writeFileSync(${JSON.stringify(responsePath)},JSON.stringify({key:seen,sample:sampleSoakResources()}),{mode:0o600});},5);
-try { process.exitCode=await runTUIProcess(${JSON.stringify({ argv: ['--test-ui-diagnostics', '--thread', 's'], artifact, dataRoot: profile.dataRoot, profile: profile.profile, cwd: workspace })}); }
+try { process.exitCode=await runTUIProcess(${JSON.stringify({ argv: ['--thread', 's'], testDiagnostics: true, artifact, dataRoot: profile.dataRoot, profile: profile.profile, cwd: workspace })}); }
 finally { clearInterval(timer); }`;
     writeFileSync(entry, instrumentation, { mode: 0o600 });
     const built = await Bun.build({

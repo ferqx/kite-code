@@ -98,7 +98,7 @@ export interface NativeWindowBridge {
   toggleWindowMaximize(): Promise<void>;
   getWindowAppearance(): Promise<NativeWindowAppearance>;
 }
-export type NativeWindowAppearance = { readonly backgroundMaterial: 'mica' | 'none' };
+export type NativeWindowAppearance = { readonly backgroundMaterial: 'mica' | 'vibrancy' | 'none' };
 export type NativeWindowAppearanceReply =
   | { ok: true; value: NativeWindowAppearance }
   | { ok: false; code: string };
@@ -384,6 +384,10 @@ export type NativeState = {
   readonly workspaceRemovalSubmissions?: readonly NativeWorkspaceRemoval[];
   readonly workspaceRemovalUnavailable?: boolean;
   readonly environmentRevision?: number;
+  /** Invalidations within the selected root, independent of unrelated background sessions. */
+  readonly selectedEnvironmentRevision?: number;
+  /** Read admission remains available while same-selection metadata is merely refreshing. */
+  readonly environmentReadUnavailable?: boolean;
   readonly directory?: NativeDirectory;
   readonly backgroundUnavailable?: boolean;
   readonly generation: number;

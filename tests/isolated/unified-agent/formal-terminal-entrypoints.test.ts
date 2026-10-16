@@ -140,7 +140,12 @@ async function execute(
     }
   }
 }
-function driver(root: string, kind: 'CLI' | 'TUI' | 'Server', terminal = false) {
+function driver(
+  root: string,
+  kind: 'CLI' | 'TUI' | 'Server',
+  terminal = false,
+  testDiagnostics = false,
+) {
   const path = join(root, `${kind}.ts`);
   const source =
     kind === 'Server' ? 'scripts/development/ensure-web.ts' : 'scripts/release/source-terminal.ts';
@@ -151,7 +156,7 @@ function driver(root: string, kind: 'CLI' | 'TUI' | 'Server', terminal = false) 
   const entry =
     kind === 'Server'
       ? `try{process.exitCode=await ${fn}(process.argv.slice(2),${JSON.stringify(root)});}catch(error){process.stderr.write(String(error?.code??'terminal_host_failed')+'\\n');process.exitCode=1;}\n`
-      : `import{terminalEntrypoint}from ${JSON.stringify(pathToFileURL(join(repositoryRoot, 'scripts/release/source-terminal.ts')).href)};\n${tty}await terminalEntrypoint(()=>${fn}(process.argv.slice(2),${JSON.stringify(root)}));\n`;
+      : `import{terminalEntrypoint}from ${JSON.stringify(pathToFileURL(join(repositoryRoot, 'scripts/release/source-terminal.ts')).href)};\n${tty}await terminalEntrypoint(()=>${fn}(process.argv.slice(2),${JSON.stringify(root)}${kind === 'TUI' && testDiagnostics ? ',{testDiagnostics:true}' : ''}));\n`;
   writeFileSync(
     path,
     `import {${fn}} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, source)).href)};\n${entry}`,
@@ -216,6 +221,16 @@ test('formal source wrappers pure argv and server finite projection never inspec
     const cli = driver(root, 'CLI'),
       tui = driver(root, 'TUI'),
       server = driver(root, 'Server');
+    for (const entry of [tui, join(repositoryRoot, 'scripts/development/unified-tui.ts')]) {
+      const rejected = await execute(
+        [process.execPath, entry, '--test-ui-diagnostics'],
+        root,
+        home,
+      );
+      expect(rejected.code).toBe(1);
+      expect(rejected.stderr).toBe('invalid_tui_arguments\n');
+      expect(rejected.stdout).toBe('');
+    }
     const trace = join(root, 'trace.jsonl');
     writeFileSync(trace, '');
     expect((await execute([process.execPath, cli, 'trace', trace], root, home)).code).toBe(0);
@@ -257,7 +272,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
   mkdirSync(home, { mode: 0o700 });
   mkdirSync(workspace);
   const cli = driver(root, 'CLI'),
-    tui = driver(root, 'TUI'),
+    tui = driver(root, 'TUI', false, true),
     server = driver(root, 'Server'),
     socket = ownedSocket(root, 'owned.sock');
   let calls = 0,
@@ -485,7 +500,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
       `import assert from 'node:assert/strict';
 import {existsSync,writeFileSync} from 'node:fs';
 import {ptyDeadline,spawnTuiPTY,terminateTuiTree} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, 'apps/cli/test/fixtures/tui-pty.ts')).href)};
-const owned=spawnTuiPTY({cmd:[${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--test-ui-diagnostics','--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],cwd:${JSON.stringify(workspace)}});
+const owned=spawnTuiPTY({cmd:[${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],cwd:${JSON.stringify(workspace)}});
 const cancelled=new AbortController();
 process.once('SIGTERM',()=>cancelled.abort(Error('owned PTY cancelled')));
 const cancellation=new Promise((_,reject)=>cancelled.signal.addEventListener('abort',()=>reject(cancelled.signal.reason),{once:true}));

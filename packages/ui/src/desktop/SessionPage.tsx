@@ -9,7 +9,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { PanelImperativeHandle } from 'react-resizable-panels';
 import { Composer, type ComposerProps } from './Composer';
 import type { ToolActivityState } from './Conversation';
-import { Conversation, type ReadingState } from './Conversation';
+import { Conversation } from './Conversation';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from './components/ui/sheet';
 import { FileChanges } from './FileChanges';
@@ -19,6 +19,7 @@ import {
   NewConversationWelcome,
 } from './NewConversation';
 import { RightSidebar } from './RightSidebar';
+import { ReadingStateCache } from './reading-state';
 import { ScheduledTaskEditor, ScheduledTasks, type ScheduledTasksProps } from './ScheduledTasks';
 import { type PageActions, Sidebar } from './Sidebar';
 import type { Message, TurnActivity, WorkspaceSummary } from './types';
@@ -295,7 +296,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     if (!previouslyFit || environmentFits || previousMode !== 'docked') return;
     setEnvironmentPreference('closed');
   }, [environmentFits, environmentMode]);
-  const readings = useRef<Record<string, ReadingState>>({});
+  const readings = useRef(new ReadingStateCache());
   const toggle = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
@@ -678,9 +679,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                                 : undefined
                             }
                             connected={props.connected}
-                            initialReading={readings.current[props.readingKey]}
+                            initialReading={readings.current.get(props.readingKey)}
                             saveReading={(state) => {
-                              readings.current[props.readingKey] = state;
+                              readings.current.save(props.readingKey, state);
                             }}
                             openFile={props.actions.openFile}
                             writeClipboardText={props.writeClipboardText}

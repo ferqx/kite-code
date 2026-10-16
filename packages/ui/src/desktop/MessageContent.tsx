@@ -9,6 +9,7 @@ import {
 } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
 type MarkdownNode = {
   type: string;
@@ -83,9 +84,11 @@ function MarkdownLink({ href, children }: { href?: string; children?: ReactNode 
 export const MessageContent = memo(function MessageContent({
   text,
   openFile,
+  prepared,
 }: {
   text: string;
   openFile?: (path: string) => void;
+  prepared?: PreparedDesktopMarkdown;
 }) {
   const currentOpenFile = useRef(openFile);
   useLayoutEffect(() => {
@@ -97,16 +100,22 @@ export const MessageContent = memo(function MessageContent({
   const dispatchOpenFile = useCallback((path: string) => currentOpenFile.current?.(path), []);
   return (
     <FileLinkContext.Provider value={openFile ? dispatchOpenFile : undefined}>
-      <MarkdownContent text={text} />
+      <MarkdownContent text={text} prepared={prepared} />
     </FileLinkContext.Provider>
   );
 });
 
-const MarkdownContent = memo(function MarkdownContent({ text }: { text: string }) {
+const MarkdownContent = memo(function MarkdownContent({
+  text,
+  prepared,
+}: {
+  text: string;
+  prepared?: PreparedDesktopMarkdown;
+}) {
   return (
     <div className="typeset typeset-chat">
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, [reuseDesktopMarkdownParse, prepared]]}
         rehypePlugins={[segmentLongTextNodes]}
         skipHtml
         components={{

@@ -168,7 +168,7 @@ nativeTest(
 def interrupted(*args):raise SystemExit(130)
 signal.signal(signal.SIGTERM,interrupted)
 bun=${JSON.stringify(process.execPath)};entry=${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))}
-base=[bun,entry,'--test-ui-diagnostics','--server',${JSON.stringify(socket)},'--data-root',${JSON.stringify(profile.dataRoot)},'--thread','visible']
+base=[bun,${JSON.stringify(join(repository, 'apps/cli/test/fixtures/tui-diagnostics-entry.ts'))},entry,'--server',${JSON.stringify(socket)},'--data-root',${JSON.stringify(profile.dataRoot)},'--thread','visible']
 def run(mode,extra=[]):
  master,slave=pty.openpty()
  fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))

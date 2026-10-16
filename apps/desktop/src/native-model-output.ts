@@ -1,5 +1,6 @@
 import { ClientError, type ModelOutputSnapshot, verifyModelOutputSnapshot } from '@kite-ai/client';
 import type { NativeBridge, NativeModelBodyOpen } from './native-bridge';
+import { NativeMarkdownOwner } from './native-markdown';
 
 /** Complete public snapshot over finite IPC; cancellation releases only the view read. */
 export type NativeModelBodyRead = {
@@ -16,7 +17,17 @@ export type NativeModelBodyRead = {
 export async function readNativeModelOutput(
   input: NativeModelBodyRead,
 ): Promise<ModelOutputSnapshot> {
-  return readNativeModelBody(input, 'modelOutput', verifyModelOutputSnapshot);
+  const snapshot = await readNativeModelBody(input, 'modelOutput', verifyModelOutputSnapshot);
+  const owner = new NativeMarkdownOwner(input.signal);
+  try {
+    await owner.prepare(snapshot);
+    input.signal.throwIfAborted();
+    if (!input.isCurrent()) throw new ClientError('model_output_view_changed');
+    return snapshot;
+  } catch (cause) {
+    owner.dispose();
+    throw cause;
+  }
 }
 export async function readNativeModelBody<
   S extends {

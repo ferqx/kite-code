@@ -12,6 +12,8 @@
 
 Session 持久 root_id/parent_id 与 Execution.root_session_id 表示归属，不另建 Run Registry 或子状态机。OwnerRef 始终指根 Session；根 OS 锁与 generation 管理整组。child acquire/recover 明确 group_root_required，不能借 child 锁绕过根。主进程 request 检查真实持有的 root owner；Worker 复核 root/child 归属及 generation。child 的模型/工具/部分正文/终态仍保存真实 child Session/Run 关系和来源，model/tool 自动关联原 carrier Job。正常父完成不等于局部取消，已经可靠创建的后台 child 可继续；carrier Job 成功前 child 活 Run、未结算 Model/Tool 与 attached Job 必须收束；已建立的独立 detached Job 保留自己的监督与 owner，不阻已完成 child Run 的 carrier 成功。
 
+`inspectChildSettlement` 是Runtime可信owner使用的有限只读快照：核当前Store、root owner／generation及准确carrier，再查询该原child Session的活动Run／未结束Model、Tool和attached Job，并在同一短读事务返回change cursor。排队Job也属于未结束效果，detached Job不阻塞；unknown交最终原附着域转换处理。事务在返回前结束，Runtime等事件后重新核实，不扫描消息／正文，也不授予扩展、Model或HTTP新能力。该快照只避免过早尝试成功提交，`finishExecution` 最终门禁、准确未知归并和取消事务均保持。[Task收敛回归](../../../../test/isolated/business/task/attached-job-settlement.test.ts)覆盖先变化后等待的游标竞态、queued与取消，实际SQL与Runtime资格分别核对。
+
 最终创建、child 激活与每次派发均检查原 Store、命令撤销、根及每个 Session 祖先的 stop/delete 边界、carrier Job 活性、适用 attached 祖先取消、owner generation、封存来源/定义/输入和必要条件。detached 只切局部父执行取消边，根全停止仍覆盖旧因果后代；child 全停止只覆盖其 Session 子树，父和兄弟保持独立。取消事务跨 Session 沿真实 attached 边传播，标记 child Run 与启动命令；root stop 保存工作边界，不能靠迟到 detached 创建逃过。
 
 根 owner 的 acquire/release 检查整组 active Run、未结算/unknown Execution 与 accepted 命令。显式根 recover fencing 整组：模型失败、partial incomplete 保留；同 Store 未派发工作取消，可能有效果的 Job/tool unknown。原执行 generation/source/origin 不改，不自动再次派发，unknown 继续限制根组执行资格。正常重开仅查询历史。

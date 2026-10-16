@@ -18,7 +18,15 @@ export type NativeBackgroundRequest = (
       commandId: string;
     }
   | {
-      method: 'background.output.open' | 'background.child.open';
+      method: 'background.output.open';
+      generation: number;
+      observationId: number;
+      executionId: string;
+      readId: string;
+    }
+  | {
+      method: 'background.child.open';
+      cursor?: { afterSeq: string; contextSelectionId: string };
       generation: number;
       observationId: number;
       executionId: string;
@@ -55,6 +63,8 @@ export type NativeBackgroundChild = {
   item: BackgroundExecutionItem;
   session: Session;
   upperSeq: string;
+  /** Present only for the incremental environment consumer; earlier rows remain verified. */
+  afterSeq?: string;
   messages: Message[];
   modelOutputs: { messageId: string; snapshot: ModelOutputSnapshot }[];
 };

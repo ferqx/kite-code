@@ -81,6 +81,7 @@ export function backgroundIdentity(item: BackgroundExecutionItem) {
 /** Each Main-owned scope has its own complete authenticated observation and detail readers. */
 export class NativeBackground {
   private directory: Directory | undefined;
+  private knownSessions: { scope: Scope; ids: Set<string> } | undefined;
   private observed:
     | { id: number; scope: Scope; items: Map<string, BackgroundExecutionItem> }
     | undefined;
@@ -160,6 +161,16 @@ export class NativeBackground {
         scope: { ...lease.scope },
         items: new Map(items.map((item) => [item.execution.id, structuredClone(item)])),
       };
+      this.knownSessions = {
+        scope: { ...lease.scope },
+        ids: new Set(
+          items.flatMap((item) => [
+            item.rootSession.id,
+            item.session.id,
+            ...(item.childSession ? [item.childSession.id] : []),
+          ]),
+        ),
+      };
       return this.page(lease);
     } catch (error) {
       this.close(readId);
@@ -207,6 +218,19 @@ export class NativeBackground {
     this.directory.abort.abort();
     this.directory = undefined;
     // A completed directory's observation remains usable until refresh/reset.
+  }
+  /** Invalidation routing only. This retained index never grants read or stop admission. */
+  includesSession(sessionId: string): boolean {
+    const known = this.knownSessions;
+    const scope = this.current();
+    return !!(
+      known &&
+      scope &&
+      Object.keys(known.scope).every(
+        (key) => known.scope[key as keyof Scope] === scope[key as keyof Scope],
+      ) &&
+      known.ids.has(sessionId)
+    );
   }
   private target(observationId: number, executionId: string): Detail {
     const observed = this.observed,
@@ -325,6 +349,7 @@ export class NativeBackground {
     observationId: number;
     executionId: string;
     readId: string;
+    cursor?: { afterSeq: string; contextSelectionId: string };
   }): Promise<NativeBackgroundChildOpen> {
     if (this.children.has(input.readId)) throw new ClientError('background_read_busy');
     const lease = this.target(input.observationId, input.executionId);
@@ -365,7 +390,14 @@ export class NativeBackground {
         messages: NativeBackgroundChild['messages'] = [],
         modelOutputs: NativeBackgroundChild['modelOutputs'] = [],
         ids = new Set<string>();
-      let afterSeq = '0';
+      const baseSeq =
+        input.cursor &&
+        lease.scope.rootSessionId &&
+        input.cursor.contextSelectionId === view.session.contextSelectionId &&
+        decimal(input.cursor.afterSeq) <= decimal(upperSeq)
+          ? input.cursor.afterSeq
+          : '0';
+      let afterSeq = baseSeq;
       for (;;) {
         this.check(lease);
         const page = await this.client.listMessages(childId, {
@@ -413,6 +445,29 @@ export class NativeBackground {
               { expectedStoreId: lease.scope.storeId, signal },
             );
             this.check(lease);
+            // A live prefix can advance between the journal row and authenticated body read.
+            // Keep fixed-log consumers strict; the selected environment may publish that newer
+            // verified prefix under the same original Model identity.
+            if (
+              lease.scope.rootSessionId &&
+              !message.outputBody.complete &&
+              snapshot.storeId === lease.scope.storeId &&
+              snapshot.sessionId === sourceSession &&
+              snapshot.executionId === message.outputBody.executionId &&
+              snapshot.runId === runId &&
+              snapshot.rootSessionId === item.rootSession.id &&
+              decimal(snapshot.contentBytes) >= decimal(message.outputBody.contentBytes) &&
+              decimal(snapshot.reasoningBytes) >= decimal(message.outputBody.reasoningBytes)
+            ) {
+              message.outputBody = {
+                ...message.outputBody,
+                complete: snapshot.output.complete,
+                contentBytes: snapshot.contentBytes,
+                reasoningBytes: snapshot.reasoningBytes,
+                toolCallCount: snapshot.output.toolCalls.length,
+              };
+              message.content = snapshot.output.content.slice(0, 4096);
+            }
             if (
               snapshot.storeId !== lease.scope.storeId ||
               snapshot.sessionId !== sourceSession ||
@@ -455,6 +510,7 @@ export class NativeBackground {
         item,
         session: view.session,
         upperSeq,
+        ...(input.cursor ? { afterSeq: baseSeq } : {}),
         messages,
         modelOutputs,
       };
@@ -513,6 +569,7 @@ export class NativeBackground {
   }
   release() {
     this.observed = undefined;
+    this.knownSessions = undefined;
     if (this.directory) this.close(this.directory.readId);
     for (const id of this.outputs.keys()) this.outputClose(id);
     for (const id of this.children.keys()) this.childClose(id);
