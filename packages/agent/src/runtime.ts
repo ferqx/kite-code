@@ -2557,6 +2557,7 @@ export class AgentRuntime {
             streak,
             call,
             tool.result as unknown as import('./extensions').ToolResult,
+            tool.authorization?.dispatched,
           );
           requests.set(`${call.name}:${await semanticDigest(input)}`, {
             sessionId: state.run.sessionId,
@@ -4759,7 +4760,7 @@ export class AgentRuntime {
             )
               throw new AgentError('context_refresh_required');
           };
-          return this.execution.tool(
+          return this.execution.toolExecution(
             {
               ...scope,
               signal,

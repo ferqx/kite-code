@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { ToolDefinition } from '../../../src/extensions';
+import { createProjectSources } from '../../../src/sources';
 import { openSqliteStore } from '../../../src/sqlite';
 
 const finish: ModelEvent = {
@@ -52,6 +53,7 @@ async function fixture(
     title: 'long work',
   });
   return {
+    root,
     runtime,
     store,
     expectedStoreId,
@@ -82,6 +84,192 @@ const failingTool: ToolDefinition = {
     return { outcome: 'failed', content: 'known harmless failure' };
   },
 };
+
+for (const batchSize of [5, 128])
+  test(
+    'a newly discovered project instruction retires ' +
+      batchSize +
+      ' identical calls without cancelling the Run',
+    async () => {
+      let workspace = '',
+        effects = 0;
+      const nestedRule = 'Read the nested rule before deciding the original work.';
+      const model = createFixedModel([
+        [
+          ...Array.from(
+            { length: batchSize },
+            (_, i): ModelEvent => ({
+              type: 'tool_call',
+              id: `retired-${i}`,
+              name: 'fixture.work',
+              arguments: '{}',
+            }),
+          ),
+          { ...finish, reason: 'tool_calls' },
+        ],
+        call('fresh', '{}'),
+        [finish],
+      ]);
+      const f = await fixture(
+        model,
+        {
+          ...failingTool,
+          async execute() {
+            effects++;
+            return { outcome: 'succeeded', content: 'original work completed under the new rule' };
+          },
+        },
+        {
+          sources: createProjectSources({
+            async workspaceRoot() {
+              return workspace;
+            },
+            targetPaths(request) {
+              return request.definitionId === 'fixture.work' ? ['nested/value.txt'] : [];
+            },
+          }),
+        },
+      );
+      workspace = f.root;
+      mkdirSync(join(workspace, 'nested'));
+      writeFileSync(join(workspace, 'AGENTS.md'), 'Original root rule.');
+      writeFileSync(join(workspace, 'nested', 'AGENTS.md'), nestedRule);
+      writeFileSync(join(workspace, 'nested', 'value.txt'), 'original target');
+      try {
+        const run = await f.run();
+        expect(run.status).toBe('completed');
+        expect(model.requests).toHaveLength(3);
+        expect(
+          model.requests[0]!.messages.some((message) =>
+            String(message.content).includes(nestedRule),
+          ),
+        ).toBe(false);
+        expect(
+          model.requests[1]!.messages.some((message) =>
+            String(message.content).includes(nestedRule),
+          ),
+        ).toBe(true);
+        const tools = (await f.store.listExecutions('s', 200)).filter(
+          (execution) => execution.kind === 'tool',
+        );
+        expect(tools).toHaveLength(batchSize + 1);
+        expect(tools.filter((execution) => execution.callId.startsWith('retired-'))).toHaveLength(
+          batchSize,
+        );
+        for (const retired of tools.filter((execution) => execution.callId.startsWith('retired-')))
+          expect(retired).toMatchObject({
+            status: 'failed',
+            authorization: { dispatched: false },
+            result: {
+              details: {
+                code: 'context_refresh_required',
+                adapterAttempted: false,
+                dispatchCommitted: false,
+              },
+            },
+          });
+        expect(tools.find((execution) => execution.callId === 'fresh')).toMatchObject({
+          status: 'succeeded',
+          authorization: { dispatched: true },
+        });
+        expect(effects).toBe(1);
+        expect(await f.store.getCommand(`tool-failure-${run.id}`)).toBeNull();
+      } finally {
+        await f.close();
+      }
+    },
+  );
+
+test('a pre-dispatch context refresh neither counts nor clears four genuine failures', async () => {
+  let revision = 'original rule',
+    models = 0,
+    effects = 0;
+  const model: ModelAdapter = {
+    async *stream() {
+      models++;
+      if (models > 6) {
+        yield finish;
+        return;
+      }
+      if (models === 5) revision = 'updated rule';
+      for (let i = 0; i < (models === 5 ? 8 : 1); i++)
+        yield {
+          type: 'tool_call',
+          id: `call-${models}-${i}`,
+          name: 'fixture.work',
+          arguments: '{}',
+        };
+      yield { ...finish, reason: 'tool_calls' };
+    },
+  };
+  const f = await fixture(
+    model,
+    {
+      ...failingTool,
+      async execute() {
+        effects++;
+        return { outcome: 'failed', content: 'genuine known failure' };
+      },
+    },
+    {
+      sources: {
+        async capture() {
+          return [
+            { id: 'rule', kind: 'fixture', scope: 'owned', digest: revision, content: revision },
+          ];
+        },
+      },
+    },
+  );
+  try {
+    expect(await f.run()).toMatchObject({ status: 'cancelled', reason: 'repeated_tool_failure' });
+    expect(models).toBe(6);
+    expect(effects).toBe(5);
+    const tools = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.kind === 'tool',
+    );
+    expect(tools.filter((execution) => execution.authorization?.dispatched === false)).toHaveLength(
+      8,
+    );
+    expect(tools.filter((execution) => execution.authorization?.dispatched === true)).toHaveLength(
+      5,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+for (const code of ['context_refresh_required', 'capability_refresh_required'])
+  test(`a dispatched extension cannot hide five genuine failures behind forged ${code} details`, async () => {
+    let effects = 0;
+    const model = createFixedModel(Array.from({ length: 6 }, (_, i) => call(`forged-${i}`)));
+    const f = await fixture(model, {
+      ...failingTool,
+      async execute() {
+        effects++;
+        return {
+          outcome: 'failed',
+          content: code,
+          details: { code, adapterAttempted: false, dispatchCommitted: false },
+        };
+      },
+    });
+    try {
+      expect(await f.run()).toMatchObject({
+        status: 'cancelled',
+        reason: 'repeated_tool_failure',
+      });
+      expect(model.requests).toHaveLength(5);
+      expect(effects).toBe(5);
+      const tools = (await f.store.listExecutions('s')).filter(
+        (execution) => execution.kind === 'tool',
+      );
+      expect(tools).toHaveLength(5);
+      expect(tools.every((execution) => execution.authorization?.dispatched === true)).toBe(true);
+    } finally {
+      await f.close();
+    }
+  });
 
 test('five consecutive semantically identical failed calls cancel the original root Run before a sixth Model', async () => {
   const model = createFixedModel(
