@@ -18,8 +18,11 @@
 | 默认测试 | `bun run test` | 与 `test:unified-agent` 共用新八 workspace 和有限 root safety 计划，最多四槽；独占场景串行 |
 | TUI 系统测试 | `bun run test:tui:system` | 当前 112 个完整文件（原 52 个旅程及 60 个当前宿主文件）；支持 `--list` 和 `KITE_TUI_SYSTEM_SHARD=0/4` 至 `3/4`，详见测试 owner |
 | 类型检查 | `bun run typecheck` | 根与精确八 workspace |
+| 工作区与依赖边界 | `bun run check:runtime-packages`、`bun run check:core-boundary` | 工作区清单、正式消费闭包与源代码依赖边界 |
 | 文档 | `bun run check:docs`、`bun run check:docs-impact` | 结构检查与实际影响语义核对 |
 | 首发证据 | `bun run check:plan-evidence` | 独立历史证据消费者，不代替当前 §35 资格 |
+
+`check:runtime-packages` 检查八个工作区的清单、公开 exports、正式脚本和 CI 消费闭包，并调用与 `check:core-boundary` 相同的[依赖边界守卫](../../scripts/check-unified-agent-boundary.ts)。守卫在每次调用内复用已解析的模块依赖图，各入口仍按自己的策略遍历；仅在导入或违规处计算行号。下一次调用重新读取源码和清单。回归覆盖[共享与循环依赖及入口策略](../../tests/isolated/scripts/unified-agent-boundary.test.ts)、[工作区合同](../../tests/integration/scripts/unified-workspaces.test.ts)和[CI 消费闭包](../../tests/integration/scripts/unified-ci.test.ts)。
 
 正式 Terminal 默认使用 `~/.kite-code/unified-agent/default`，开发入口默认使用 checkout 的 `.kite-code/unified-development/development`。可用 `--data-root <绝对路径>` 明确隔离；当前入口不读取旧 Kite Home 配置或数据库，也不自动迁移旧用户数据。测试必须使用所属临时 home/workspace/profile/endpoint，按 harness 清理。
 

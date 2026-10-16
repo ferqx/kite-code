@@ -17,6 +17,13 @@ export interface UnifiedBoundaryReport {
   readonly legacyRetirement: 'pending';
 }
 
+interface ModuleReference {
+  readonly specifier: string;
+  readonly line: number;
+  readonly targets: readonly string[];
+  readonly targetPath: string;
+}
+
 const legacy =
   /(?:@kite-ai\/|packages\/|#)(?:agent-api-(?:contract|client)|agent-kernel|builtin-runtime|runtime-(?:host|spi|contract|protocol|server|client|storage-sqlite)|kite-(?:app-contract|local-runtime|client-ui|cli|service|web|desktop))(?:\/|$)|(?:^|\/)apps\/kite-(?:cli|service|web|desktop)(?:\/|$)/;
 const workspacePaths: Readonly<Record<string, string>> = {
@@ -123,7 +130,7 @@ export function checkUnifiedAgentBoundary(
   const violations: UnifiedBoundaryViolation[] = [];
   const pending: string[] = [];
   const checked: string[] = [];
-  const imports = new Map<string, { specifier: string; line: number }[]>();
+  const imports = new Map<string, ModuleReference[]>();
   const normalizedRoot = existsSync(root) ? realpathSync(resolve(root)) : resolve(root);
   const targets = [
     ...['ai', 'agent', 'client', 'ui'].map((owner) => ({
@@ -187,13 +194,14 @@ export function checkUnifiedAgentBoundary(
       ts.ScriptTarget.Latest,
       true,
     );
-    const refs: { specifier: string; line: number }[] = [];
+    const refs: ModuleReference[] = [];
     const path = relative(normalizedRoot, file).replaceAll('\\', '/');
     const core = /^packages\/agent\/src\/(?:loop(?:\/|\.)|runtime\.|session\/|execution\/)/.test(
       path,
     );
+    const lineOf = (node: ts.Node) =>
+      source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
     const visit = (node: ts.Node): void => {
-      const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
       if (
         path.startsWith('apps/service/') &&
         (ts.isFunctionDeclaration(node) ||
@@ -203,7 +211,7 @@ export function checkUnifiedAgentBoundary(
         ts.isIdentifier(node.name) &&
         servicePermissionImplementations.has(node.name.text)
       )
-        add(file, line, 'service-no-permission-implementation', node.name.text);
+        add(file, lineOf(node), 'service-no-permission-implementation', node.name.text);
       let specifier: ts.Node | undefined;
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
         specifier = node.moduleSpecifier;
@@ -216,14 +224,21 @@ export function checkUnifiedAgentBoundary(
       )
         specifier = node.arguments[0];
       if (specifier && !ts.isStringLiteralLike(specifier))
-        refs.push({ specifier: '<computed module>', line });
+        refs.push({
+          specifier: '<computed module>',
+          line: lineOf(node),
+          targets: [],
+          targetPath: '<computed module>',
+        });
       if (specifier && ts.isStringLiteralLike(specifier)) {
-        refs.push({ specifier: specifier.text, line });
+        const line = lineOf(node);
         const targets = localModules(normalizedRoot, file, specifier.text);
         const target = targets[0];
         const targetPath = target
           ? relative(normalizedRoot, target).replaceAll('\\', '/')
           : specifier.text;
+        // Every entry uses the same source graph during this check; resolve each edge once.
+        refs.push({ specifier: specifier.text, line, targets, targetPath });
         if (/^@kite-ai\//.test(specifier.text) && !legacy.test(specifier.text) && !target)
           add(file, line, 'target-unresolved-workspace-export', specifier.text);
         if (
@@ -248,7 +263,7 @@ export function checkUnifiedAgentBoundary(
           )) ||
           (ts.isStringLiteralLike(node) && ['shell_execute', 'code_review'].includes(node.text)))
       ) {
-        add(file, line, 'core-no-business-branch-or-whole-state', node.getText(source));
+        add(file, lineOf(node), 'core-no-business-branch-or-whole-state', node.getText(source));
       }
       ts.forEachChild(node, visit);
     };
@@ -275,11 +290,7 @@ export function checkUnifiedAgentBoundary(
       visited.add(file);
       scan(file);
       for (const ref of imports.get(file) ?? []) {
-        const targets = localModules(normalizedRoot, file, ref.specifier);
-        const target = targets[0];
-        const targetPath = target
-          ? relative(normalizedRoot, target).replaceAll('\\', '/')
-          : ref.specifier;
+        const { targets, targetPath } = ref;
         if (ref.specifier === '<computed module>') {
           if (policy === 'test-consumer') {
             pending.push(

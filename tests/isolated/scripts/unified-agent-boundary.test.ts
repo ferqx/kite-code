@@ -178,6 +178,38 @@ test('portable contracts and loop storage port are permitted', () => {
   expect(checkUnifiedAgentBoundary(root).violations).toEqual([]);
 });
 
+test('shared cyclic dependencies retain entry-specific policies and are reread by the next check', () => {
+  const root = fixture({
+    'packages/client/src/a.ts': 'export * from "./shared";',
+    'packages/client/src/b.ts': 'export * from "./shared";',
+    'packages/client/src/shared.ts': 'export * from "./cycle";',
+    'packages/client/src/cycle.ts':
+      'export * from "./shared";\nimport "node:fs";\nimport "node:process";',
+    'apps/cli/src/index.ts': 'import "@kite-ai/client/a";',
+  });
+  const report = checkUnifiedAgentBoundary(root);
+  expect(report.violations.map(({ file, line, rule }) => ({ file, line, rule }))).toEqual([
+    {
+      file: 'packages/client/src/cycle.ts',
+      line: 2,
+      rule: 'portable-dependency',
+    },
+    {
+      file: 'packages/client/src/cycle.ts',
+      line: 3,
+      rule: 'portable-dependency',
+    },
+  ]);
+  expect(report.violations[0]!.detail.replaceAll('\\', '/')).toBe(
+    'node:fs (from apps/cli/src/index.ts)',
+  );
+  expect(report.violations[1]!.detail.replaceAll('\\', '/')).toMatch(
+    /^node:process \(from packages\/client\/src\/(?:a|b|shared|cycle)\.ts\)$/,
+  );
+  writeFileSync(resolve(root, 'packages/client/src/cycle.ts'), 'export * from "./shared";');
+  expect(checkUnifiedAgentBoundary(root).violations).toEqual([]);
+});
+
 test('loop cannot reach concrete SQL, HTTP or tool implementation through barrels', () => {
   for (const forbidden of ['bun:sqlite', 'hono', '../tools/shell']) {
     const root = fixture({
