@@ -601,6 +601,35 @@ function NativeDesktopContent({
         : undefined,
     [state?.selection, historyState.phase],
   );
+  const permissionLabelScope = JSON.stringify([
+    state?.generation,
+    state?.selection?.storeId,
+    state?.selection?.session.id,
+    state?.selection?.session.workspaceId,
+    state?.selection?.viewSelection,
+    state?.historyEpoch,
+  ]);
+  const permissionLabel = useRef<
+    | {
+        scope: string;
+        mode: NonNullable<SessionPageProps['composer']>['permission'];
+      }
+    | undefined
+  >(undefined);
+  const observedPermission = state?.selection?.permissions?.mode.mode;
+  if (
+    permissionLabel.current?.scope !== permissionLabelScope ||
+    (state?.selection?.permissionUnavailable && !state.selection.viewLoading) ||
+    state?.backgroundUnavailable
+  )
+    permissionLabel.current = undefined;
+  if (observedPermission && !state?.selection?.permissionUnavailable)
+    permissionLabel.current = { scope: permissionLabelScope, mode: observedPermission };
+  const composerPermission =
+    observedPermission ??
+    (state?.selection?.viewLoading && permissionLabel.current?.scope === permissionLabelScope
+      ? permissionLabel.current.mode
+      : undefined);
   const choiceKey = JSON.stringify([
     selection?.storeId,
     selection?.session.workspaceId,
@@ -2790,8 +2819,7 @@ function NativeDesktopContent({
             {(diagnostics ||
               unfinishedJobs > 0 ||
               unknownJobs > 0 ||
-              state?.selection?.viewLoading ||
-              state?.selection?.permissionUnavailable ||
+              (state?.selection?.permissionUnavailable && !state.selection.viewLoading) ||
               state?.backgroundUnavailable) && (
               <p role="status" aria-label="当前会话后台状态">
                 后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
@@ -2887,7 +2915,7 @@ function NativeDesktopContent({
                   disabled: pending,
                   sending: pending,
                   // A routine history scan gates actions without removing the observed label.
-                  permission: state.selection?.permissions?.mode.mode,
+                  permission: composerPermission,
                   fullPermissionScope: JSON.stringify([
                     state.generation,
                     selection.storeId,

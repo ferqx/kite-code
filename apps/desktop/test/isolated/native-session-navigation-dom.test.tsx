@@ -92,7 +92,7 @@ function fixture(activeParent = false) {
       session: item.rootSession,
       viewLoading,
       permissionUnavailable,
-      ...(activeParent
+      ...(activeParent && !viewLoading && !permissionUnavailable
         ? {
             permissions: {
               observationId: 1,
@@ -469,7 +469,9 @@ test('ordinary history and View refreshes retain the processed status and timer;
     await f.render();
     await f.click('Original');
     const status = f.host.querySelector('.agent-turn-status-label')!,
-      timer = status.querySelector('span');
+      timer = status.querySelector('span'),
+      permission = f.host.querySelector('[data-permission-trigger]')!,
+      input = f.host.querySelector('.composer textarea');
     expect(status.textContent).toMatch(/^已处理 .*秒/);
     expect(timer).not.toBeNull();
     for (let index = 0; index < 8; index++) {
@@ -482,11 +484,20 @@ test('ordinary history and View refreshes retain the processed status and timer;
       await f.refreshing(true);
       expect(status.textContent).toMatch(/^已处理 .*秒/);
       expect(status.querySelector('span') === timer).toBe(true);
+      expect(f.host.querySelector('[aria-label="当前会话后台状态"]')).toBeNull();
+      expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
+      expect((permission as HTMLButtonElement).disabled).toBe(true);
+      expect(f.host.querySelector('.composer textarea')).toBe(input);
       await f.refreshing(false);
       expect(status.textContent).toMatch(/^已处理 .*秒/);
+      expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
     }
     await f.unavailable(true);
     expect(status.textContent).toBe('上次确认状态');
+    expect(f.host.querySelector('[aria-label="当前会话后台状态"]')?.textContent).toContain(
+      '上次确认状态',
+    );
+    expect(f.host.querySelector('[data-permission-trigger]')).toBeNull();
     await f.unavailable(false);
     expect(status.textContent).toMatch(/^已处理 .*秒/);
     f.failParent();

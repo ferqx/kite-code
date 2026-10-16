@@ -77,21 +77,28 @@ function Harness({
   messages,
   complete = true,
   revision = 0,
+  generation = 1,
+  historyEpoch = 0,
+  suspended = false,
 }: {
   bridge: NativeBridge;
   selected: NativeSelection;
   messages: Message[];
   complete?: boolean;
   revision?: number;
+  generation?: number;
+  historyEpoch?: number;
+  suspended?: boolean;
 }) {
   const facts = useNativeCacheMetrics({
     bridge,
-    generation: 1,
+    generation,
     selection: selected,
-    historyEpoch: 0,
+    historyEpoch,
     messages,
     historyComplete: complete,
     observationRevision: revision,
+    suspended,
   });
   return (
     <>
@@ -121,7 +128,7 @@ function Harness({
   );
 }
 
-test('the original Composer displays cumulative observed usage once per Model, gates complete history and distinguishes no sample from a real zero hit rate', async () => {
+test('the original Composer displays cumulative observed usage once per Model, retains confirmed samples during calibration and distinguishes no sample from a real zero hit rate', async () => {
   const f = fixture(),
     requests: NativeRequest[] = [];
   const values = Array.from({ length: 35 }, (_, index) => message(`usage-${index}`));
@@ -184,7 +191,7 @@ test('the original Composer displays cumulative observed usage once per Model, g
         .map((request) => request.messageIds.length),
     ).toEqual([32, 4]);
     await render([...values], selection(), false);
-    expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 50%');
     await render([...values]);
     expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 50%');
     expect(requests.filter((request) => request.method === 'toolMessages.usage').length).toBe(2);
@@ -200,6 +207,142 @@ test('the original Composer displays cumulative observed usage once per Model, g
         ['toolMessages.usage', 'toolMessages.close'].includes(request.method),
       ),
     ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('confirmed cache text and input nodes survive repeated calibration and the next round pending or failed usage', async () => {
+  const f = fixture();
+  const requests: NativeRequest[] = [];
+  let release: (() => void) | undefined;
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      requests.push(request);
+      if (request.method !== 'toolMessages.usage') return null;
+      if (request.messageIds.includes('next'))
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      if (request.messageIds.includes('failed')) throw Error('model_usage_unavailable');
+      return pageFor(
+        request,
+        's',
+        request.messageIds.map((id) => ({
+          messageId: id,
+          executionId: `model-${id}`,
+          originStoreId: 'store',
+          cacheHitTokens: id === 'next' ? 160 : 40,
+          cacheMissTokens: id === 'next' ? 40 : 60,
+        })),
+      );
+    },
+  } as NativeBridge;
+  const original = message('original');
+  const render = (messages = [original], complete = true, revision = 0) =>
+    act(async () =>
+      f.root.render(
+        <Harness
+          bridge={bridge}
+          selected={{ ...selection(), viewLoading: !complete, permissionUnavailable: !complete }}
+          messages={messages}
+          complete={complete}
+          revision={revision}
+        />,
+      ),
+    );
+  try {
+    await render();
+    const rate = f.host.querySelector('.composer-cache-rate')!,
+      input = f.host.querySelector('.composer textarea');
+    expect(rate.textContent).toBe('缓存 40%');
+    for (let revision = 1; revision <= 8; revision++) {
+      await render([{ ...original }], false, revision);
+      expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+      expect(rate.getAttribute('title')).toBe('缓存命中 40 / 100 tokens');
+      expect(f.host.querySelector('.composer textarea')).toBe(input);
+      await render([{ ...original }], true, revision);
+      expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+    }
+    expect(requests.filter((request) => request.method === 'toolMessages.usage').length).toBe(1);
+    const next = message('next');
+    await render([original, { ...next, status: 'incomplete' }], true, 9);
+    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+    await render([original, next], true, 10);
+    expect(release).toBeDefined();
+    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+    expect(rate.getAttribute('title')).toBe('缓存命中 40 / 100 tokens');
+    await act(async () => release!());
+    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+    expect(rate.textContent).toBe('缓存 67%');
+    expect(rate.getAttribute('title')).toBe('缓存命中 200 / 300 tokens');
+    await render([original, next, message('failed')], true, 11);
+    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+    expect(rate.getAttribute('title')).toBe('缓存命中 200 / 300 tokens');
+    expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('缓存指标未更新');
+    expect(f.host.querySelector('.composer textarea')).toBe(input);
+  } finally {
+    await f.close();
+  }
+});
+
+test('retained samples still require the original body and source, and never cross reading scopes', async () => {
+  const f = fixture();
+  let reads = 0;
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      if (request.method !== 'toolMessages.usage') return null;
+      reads++;
+      return pageFor(request, 's', [
+        {
+          messageId: 'original',
+          executionId: 'model-original',
+          originStoreId: 'store',
+          cacheHitTokens: 40,
+          cacheMissTokens: 60,
+        },
+      ]);
+    },
+  } as NativeBridge;
+  const original = message('original');
+  const render = (options: Partial<Parameters<typeof Harness>[0]> = {}) =>
+    act(async () =>
+      f.root.render(
+        <Harness bridge={bridge} selected={selection()} messages={[original]} {...options} />,
+      ),
+    );
+  try {
+    await render();
+    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 40%');
+    for (const messages of [
+      [],
+      [{ ...original, content: 'replaced body' }],
+      [{ ...original, sourceIds: ['another-model'] }],
+      [{ ...original, status: 'incomplete' as const }],
+    ]) {
+      await render({ messages, complete: false });
+      expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    }
+    await render({ complete: false });
+    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 40%');
+    for (const scope of [
+      { generation: 2 },
+      { historyEpoch: 1 },
+      { selected: { ...selection(), storeId: 'another-store' } },
+      {
+        selected: {
+          ...selection(),
+          session: { ...selection().session, workspaceId: 'another-workspace' },
+        },
+      },
+      { selected: selection('another-session', 2) },
+      { selected: selection('s', 3) },
+      { suspended: true },
+    ]) {
+      await render({ ...scope, complete: false });
+      expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    }
+    expect(reads).toBe(1);
   } finally {
     await f.close();
   }

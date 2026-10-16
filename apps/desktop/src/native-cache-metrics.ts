@@ -183,16 +183,14 @@ export function useNativeCacheMetrics({
   ]);
   let metrics: { cacheHitTokens: number; cacheMissTokens: number } | undefined;
   const executions = new Set<string>();
-  const complete =
-    available &&
-    state.scope === scope &&
-    candidates.every((message) => {
-      const receipt = state.read.get(message.id);
-      return receipt?.key === modelUsageMessageKey(message) && receipt.content === message.content;
-    });
-  if (complete)
+  // A history/View refresh only gates new reads. Previously verified, unchanged
+  // receipts remain displayable while the next round's usage is being checked.
+  if (!suspended && state.scope === scope)
     for (const message of candidates) {
-      const sample = state.read.get(message.id)?.sample;
+      const receipt = state.read.get(message.id);
+      if (receipt?.key !== modelUsageMessageKey(message) || receipt.content !== message.content)
+        continue;
+      const sample = receipt.sample;
       const origin = sample && JSON.stringify([sample.originStoreId, sample.executionId]);
       if (!sample || !origin || executions.has(origin)) continue;
       executions.add(origin);
