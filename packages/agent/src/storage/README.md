@@ -92,13 +92,13 @@ Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Ru
 
 Session 完整原始记录的只读导出与分块文本范围见 [export owner](sqlite/export/README.md)。SQL 冻结读集完成验证、完整下载 footer 和原 scope 媒体 EOF 是独立证明；导出不恢复或消费旧工作。
 
-`@kite-ai/agent/sqlite` 的 `preflightSqliteStore(ProfileOptions)` 是启动准备阶段的只读格式预检：持有选定 profile 的外置 shared profile-use lease，返回 `absent`、`uninitialized` 或 `{ status: 'compatible', storeId, formatMajor: 1 }`。它复用正式打开的 baseline schema/migration checksum 校验，读取所选 Bun SQLite 引擎可见的当前 WAL 状态；不启动 Worker/Runtime/Model，不创建 profile、core.db、profile.json，不初始化或迁移业务表。启动准备允许建立 dataRoot/协调锁目录；status 发现入口仍不使用此函数。
+`@kite-ai/agent/sqlite` 的 `preflightSqliteStore(ProfileOptions)` 是启动准备阶段的只读格式预检：持有选定 profile 的外置 shared profile-use lease，返回 `absent`、`uninitialized` 或 `{ status: 'compatible', storeId, formatMajor: 1 }`。它复用正式打开的闭合 baseline／增量迁移 schema 与 checksum 校验，读取所选 Bun SQLite 引擎可见的当前 WAL 状态；不启动 Worker/Runtime/Model，不创建 profile、core.db、profile.json，不初始化或迁移业务表；已支持原 0001 和加 0002 的闭合版本，写入打开才升级旧库。启动准备允许建立 dataRoot/协调锁目录；status 发现入口仍不使用此函数。
 
 未完成 restore journal、exclusive 维护占用、rollback journal、链接/非私有文件和未知/损坏格式明确拒绝。只读连接使用 strict close 后才释放 lease；若数据库关闭未获确认，返回 `store_preflight_cleanup_failed` 并保留该进程的 profile-use 锁，不能冒充已释放。`compatible` 仅证明该次观察的格式与身份，未来 launch 仍须重新执行正式格式和身份准入，也不是完整业务历史的健康证明。源码与发布 SQLite leaf 分别使用各自真实包内 migration SQL，不回退到源码树。
 
 [启动预检测试](../../test/isolated/storage/preflight.test.ts) 验证真实空库/缺库、合法 Store 和 live WAL 的原字节与 Core 事实、未来/未知/破坏 schema/checksum、链接/权限/journal、第二进程锁，以及源码树外公开 leaf 的实际包内资产读取。当前本机证据不能代表其他平台或发布引擎资格。
 
-`sqliteStorageAssets()` 是同一公开 leaf 的纯 metadata getter，返回实际 `module`、`worker`、`baseline` URL。`openSqliteStore` 的 Worker 与 preflight 共用这些实际选择，source/built 分别选择 main.ts/main.js，不由 Service 猜私有路径，也不把 module 的任意父目录当专用 runtime root。它不打开库、读取文件或证明候选目录身份；完整安装 candidate 的 host-only closure 证明归[Service 资产 owner](../../../../apps/service/src/runtime-assets.ts)。
+`sqliteStorageAssets()` 是同一公开 leaf 的纯 metadata getter，返回实际 `module`、`worker`、`baseline` 及完整 `migrations` URL 清单。`openSqliteStore` 的 Worker 与 preflight 共用这些实际选择，source/built 分别选择 main.ts/main.js，不由 Service 猜私有路径，也不把 module 的任意父目录当专用 runtime root。它不打开库、读取文件或证明候选目录身份；完整安装 candidate 的 host-only closure 证明归[Service 资产 owner](../../../../apps/service/src/runtime-assets.ts)。
 
 
 ## 原 active Run 的显式恢复
@@ -107,7 +107,7 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 
 只读预检和原申请回执查询先于恢复工厂。同 ID 已登记 accepted 或 applied 意图只返回原回执，不重新准备、派发或执行；同 ID 改变原 Run／epoch 等意图冲突。内部 `RunResumeInput.expectedOwnerGeneration` 做持久 epoch CAS，公开 HTTP 不接收客户端 generation，由 Service 查询原回执或当前 Session 推导。`before_model_dispatch`、`tool_calls`、`completion` checkpoint 封存当前 Run 读集摘要、原 selection 与初始化状态；Runtime 另核完整 Model 正文和原调用身份。
 
-首次 SQL 预检流式核完整历史并保原 canonical 摘要，当前 frontier 仍保单次边界。新 Model 在原来源封存 version 1 continuation，Runtime 恢复完整来源请求与失败计数，不重读已覆盖的旧 Model 正文；旧记录仍使用私有200项历史页。SQLite data_version/total_changes 均未变化时才复用已核快照，准备事务只改变 epoch/申请/事件后可保该快照；其他任何写入和无 change_event 的 raw SQL 均使其失效。最终 CAS 不依赖通知 cursor。首次冷审计仍线性，新检查点也仍随独特来源增长；性能与真实故障证据归[协议 owner](sqlite/run-resume.README.md)。
+正常写事务通过闭合 0002-recovery-audit 迁移维护增量恢复证明：trigger 保 OLD/NEW 身份及资格依赖，原子认证变更并推进单调序号。健康证明的首次冷读只审当前前沿与未认证增量，不扫描累计已认证历史；无事件 SQL、历史删除/移动和未知效果仍失效或阻挡，最终 CAS 不依赖通知 cursor。新 Model 的 version 1 continuation 保原来源请求和失败计数，大正文沿原 Artifact 完整核验；旧记录仍用私有200项历史页。0001 旧历史首次升级及失效证明回退仍完整审计，B-tree、实际 live 树和必要来源成本各自保留，准确边界归[协议 owner](sqlite/run-resume.README.md)。
 
 begin 取得真实 root OS 锁并登记受限 RunResumeLease。Runtime 按实际 carrier/父 Run 顺序准备全部可信绑定、权限 ceiling 和 record read-set；最终 commit 核完整组摘要和配置后原子交接 planned/continuation frontier、child carrier 与原监督祖先的 generation。已知终态只改变监督所属 epoch，不改变状态、结果 revision、身份或 attempt；未闭合纯 Model 另保存失败结果。Host 先登记原操作，唯一 Loop 再继续；实际 Job 观察、槽位、取消与 Run binding lease 共用正常路径，子超期先结算。
 
@@ -119,7 +119,7 @@ begin 取得真实 root OS 锁并登记受限 RunResumeLease。Runtime 按实际
 
 [Store 验证](../../test/isolated/recovery/run-resume-store.test.ts) 覆盖真实 SQLite 事务、实际 root 锁、公共 lease 投影拒绝、epoch/config/selection CAS、原 planned attempt／Interaction 保持、初始化三态、取消与事务故障回滚；SQL 修改仅用于明确标注的故障注入。[Runtime 验证](../../test/isolated/recovery/run-resume-runtime.test.ts) 使用所属子进程真实 SIGKILL、固定 Model 和独立效果 ledger，核原边界恢复与拒绝路径。业务 Run 事实可经 [原始导出](sqlite/export/README.md) 读取，私有 purpose lease 不导出。
 
-Windows x64／Bun 1.4.2 的真实强杀、原审批、并行结果与完整历史验证入口见[恢复协议](sqlite/run-resume.README.md)。既有 length 与原 ledger 摘要断言保留；新增纯 Model、三种压缩边界、任务组与连续两次压缩强杀，不代表实际连续数周或全部平台资格。
+Windows x64／Bun 1.4.2 的真实强杀、原审批、并行结果与完整历史验证入口见[恢复协议](sqlite/run-resume.README.md)。既有 length、版本化增量摘要与原完整审计回退保留；新增纯 Model、三种压缩边界、任务组与连续两次压缩强杀，不代表实际连续数周或全部平台资格。
 
 
 ## Job 核实的受限所有权

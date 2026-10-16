@@ -356,6 +356,10 @@ test('pure default Files metadata does not resolve Runtime or filesystem assets 
   const actual = sqliteStorageAssets();
   expect(actual.worker.pathname.endsWith('/storage/worker/main.ts')).toBe(true);
   expect(actual.baseline.pathname.endsWith('/storage/migrations/0001-baseline.sql')).toBe(true);
+  expect(actual.migrations.map((migration) => migration.pathname.split('/').at(-1))).toEqual([
+    '0001-baseline.sql',
+    '0002-recovery-audit.sql',
+  ]);
 });
 
 test('actual file, directory and missing loader companion protection rejects read/write/edit while a neighboring file stays usable', async () => {

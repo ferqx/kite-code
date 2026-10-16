@@ -56,7 +56,7 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 长期执行不设主 Run 总期限、累计用量、来源数量、隐式 Shell 总超时或暂时性模型失败的次数额度。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。公共重试上界以 `maxAttempts:null` 表达，Client schema 与 TUI 保实际 attempt 和原失败前驱。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。
 
-原 Run 的冷恢复将持久意图、可替换 Model 尝试、已确认结果与进程监督分开。纯 Model 无派生效果时可关闭旧 running/failed 尝试并重试；压缩 pending 重建摘要、已发布点保持。所选父子树在同一 root lease 下准备全部绑定并原子交接，只有提前封存的可信 Tool continuation 可接回原操作；普通外部未知效果仍需核实。原 ID、结果、审批、子期限和五次失败 streak 保持，协议、真实强杀与成本边界归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
+原 Run 的冷恢复将持久意图、可替换 Model 尝试、已确认结果与进程监督分开。纯 Model 无派生效果时可关闭旧 running/failed 尝试并重试；压缩 pending 重建摘要、已发布点保持。所选父子树在同一 root lease 下准备全部绑定并原子交接，只有提前封存的可信 Tool continuation 可接回原操作；普通外部未知效果仍需核实。原 ID、结果、审批、子期限和五次失败 streak 保持。正常 Store 事务以闭合增量迁移维护恢复证明，首次冷读只核前沿/增量和必要来源；旧库一次升级及失效协议完整审计回退。全部迁移资产进入包内构建和 Service 文件保护，公开 HTTP 与 format major 1 保持；协议、真实强杀与成本边界归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
 
 唯一新增主动停止条件是模型顺序中同工具、相同 JSON 参数连续五次失败：Run-local 计数跨完成检查保存，显式安全接续沿原 Model/Tool ledger 重建，最终经准确 `run.cancel` 域停止当前 Run 和 attached 工作。并行批次必须先结算所有已开始调用；物理完成顺序、压缩和新执行 owner 均不能重置计数或重放原工具。完整实现与定向证据归 [Agent owner](../../packages/agent/README.md)和[持续执行决定](../../.agents/notes/implemented/architecture/2026-10-15-long-running-agent-continuation.md)，不把本机定向结果推广为持续数周或完整平台资格。
 

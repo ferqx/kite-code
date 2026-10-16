@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,6 +17,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireProfileAccess } from '../../../src/platform/profile';
+import {
+  defaultWindowsPathSecurity,
+  privateDirectory,
+} from '../../../src/platform/windows-path-security';
 import { openSqliteStore, preflightSqliteStore } from '../../../src/sqlite';
 
 const roots: string[] = [];
@@ -23,9 +28,9 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 function fixture() {
-  const dataRoot = mkdtempSync(join(tmpdir(), 'kite-preflight-'));
-  chmodSync(dataRoot, 0o700);
-  roots.push(dataRoot);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-preflight-')));
+  roots.push(root);
+  const dataRoot = join(root, 'data');
   const options = { dataRoot, profile: 'selected' };
   const access = acquireProfileAccess(options);
   access.lock.release();
@@ -57,8 +62,10 @@ test('absent and empty are explicit and never initialize profile or Core', async
   const value = fixture();
   expect(await preflightSqliteStore(value.options)).toEqual({ status: 'absent' });
   expect(existsSync(value.profilePath)).toBe(false);
-  mkdirSync(value.profilePath, { mode: 0o700 });
-  writeFileSync(value.databasePath, '', { mode: 0o600 });
+  privateDirectory(value.profilePath);
+  if (process.platform === 'win32')
+    defaultWindowsPathSecurity()!.writePrivateFile(value.databasePath, Buffer.alloc(0));
+  else writeFileSync(value.databasePath, '', { mode: 0o600 });
   expect(await preflightSqliteStore(value.options)).toEqual({ status: 'uninitialized' });
   expect(bytes(value.databasePath)).toBe('');
   expect(existsSync(join(value.profilePath, 'profile.json'))).toBe(false);
@@ -220,6 +227,12 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
   copyFileSync(
     fileURLToPath(new URL('../../../src/storage/migrations/0001-baseline.sql', import.meta.url)),
     migration,
+  );
+  copyFileSync(
+    fileURLToPath(
+      new URL('../../../src/storage/migrations/0002-recovery-audit.sql', import.meta.url),
+    ),
+    join(dirname(migration), '0002-recovery-audit.sql'),
   );
   writeFileSync(
     join(packageRoot, 'package.json'),

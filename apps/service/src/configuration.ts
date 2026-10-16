@@ -407,7 +407,7 @@ export function createDefaultProcessConfiguration(options: {
       fileURLToPath(import.meta.url),
       fileURLToPath(storage.module),
       fileURLToPath(storage.worker),
-      fileURLToPath(storage.baseline),
+      ...storage.migrations.map((migration) => fileURLToPath(migration)),
       fileURLToPath(storage.preload),
       ...storage.observerModules.map((module) => fileURLToPath(module)),
       ...(options.shell

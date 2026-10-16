@@ -458,10 +458,11 @@ test('built maintenance leaf creates and inspects a backup from a consumer outsi
     });
     if (!build.success) throw new AggregateError(build.logs, 'maintenance build failed');
     mkdirSync(join(packaged, 'storage', 'migrations'), { recursive: true });
-    copyFileSync(
-      new URL('../../../src/storage/migrations/0001-baseline.sql', import.meta.url),
-      join(packaged, 'storage', 'migrations', '0001-baseline.sql'),
-    );
+    for (const name of ['0001-baseline.sql', '0002-recovery-audit.sql'])
+      copyFileSync(
+        new URL(`../../../src/storage/migrations/${name}`, import.meta.url),
+        join(packaged, 'storage', 'migrations', name),
+      );
     writeFileSync(
       join(packaged, 'package.json'),
       JSON.stringify({

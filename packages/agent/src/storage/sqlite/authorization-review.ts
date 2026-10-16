@@ -282,19 +282,26 @@ export function transferAuthorizationReviewOwnership(
           String(model.owner_generation) !== originalGeneration
         )
           throw new AgentError('authorization_review_unverifiable');
-        const changed = db.db.run(
-          'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=? AND parent_execution_id=?',
-          [BigInt(generation), model.id!, BigInt(originalGeneration), model.state!, carrier.id!],
+        const changed = db.row(
+          'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=? AND parent_execution_id=? RETURNING id',
+          BigInt(generation),
+          model.id!,
+          BigInt(originalGeneration),
+          model.state!,
+          carrier.id!,
         );
-        if (Number(changed.changes) !== 1)
-          throw new AgentError('authorization_review_unverifiable');
+        if (!changed) throw new AgentError('authorization_review_unverifiable');
       }
     }
-    const changed = db.db.run(
-      'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=? AND parent_execution_id=?',
-      [BigInt(generation), carrier.id!, BigInt(originalGeneration), carrier.state!, target.id!],
+    const changed = db.row(
+      'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=? AND parent_execution_id=? RETURNING id',
+      BigInt(generation),
+      carrier.id!,
+      BigInt(originalGeneration),
+      carrier.state!,
+      target.id!,
     );
-    if (Number(changed.changes) !== 1) throw new AgentError('authorization_review_unverifiable');
+    if (!changed) throw new AgentError('authorization_review_unverifiable');
   }
 }
 export function ensureAuthorizationReview(

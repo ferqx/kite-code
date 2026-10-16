@@ -24,7 +24,7 @@ async function denied(operation: Promise<unknown>, code: string) {
 }
 
 // Store transaction contract only: these are actual owned API records, not Runtime/Tool effects.
-test('resume scans all original history, pages exact Model and Tool identities and binds omitted terminal rows in the unchanged canonical digest', async () => {
+test('certified cold resume keeps complete original history, pages exact identities and binds historical drift', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'kite-resume-history-'));
   const dataRoot = join(directory, 'data');
   const profile = { dataRoot, profile: 'test' };
@@ -293,9 +293,11 @@ test('resume scans all original history, pages exact Model and Tool identities a
     const rawSession = all('SELECT * FROM session WHERE id=?', 's')[0]!;
     expect(executions).toHaveLength(412);
     expect(interactions).toHaveLength(1);
+    const certificate = all('SELECT * FROM recovery_audit WHERE run_id=?', run.id)[0]!;
+    expect(certificate.version).toBe(1n);
     const originalCanonical = canonicalJson({
-      executions: executions.map(jsonRow),
-      interactions: interactions.map(jsonRow),
+      kind: 'transactional-recovery-audit-v1',
+      certificate: { version: 1, revision: String(certificate.covered_seq) },
       run: jsonRow(rawRun),
       selection: String(rawSession.context_selection_id),
     });
@@ -309,9 +311,13 @@ test('resume scans all original history, pages exact Model and Tool identities a
     db.run('UPDATE execution SET result_json=? WHERE id=?', ['{}', 'model-0']);
     await denied(current.verifyRunResume(input), 'run_resume_checkpoint_unavailable');
     db.run('UPDATE execution SET result_json=? WHERE id=?', [oldResult, 'model-0']);
+    const repaired = await current.verifyRunResume(input);
+    // A repaired body keeps its original identity, but cannot rewind the audit revision.
+    expect(repaired.executions).toEqual(state.executions);
+    expect(repaired.checkpoint!.bindingDigest).not.toBe(state.checkpoint!.bindingDigest);
     const begun = await current.beginRunResume({
       ...input,
-      checkpoint: state.checkpoint!,
+      checkpoint: repaired.checkpoint!,
       instanceId: 'new',
     });
     expect(begun.lease).not.toBeNull();
@@ -335,7 +341,7 @@ test('resume scans all original history, pages exact Model and Tool identities a
         expectedStoreId,
         lease: begun.lease!,
         expectedConfiguration: configuration,
-        checkpoint: state.checkpoint!,
+        checkpoint: repaired.checkpoint!,
       }),
       'run_resume_checkpoint_changed',
     );

@@ -98,6 +98,7 @@ import {
   settleMutation,
 } from './mutation-operations';
 import { callPermissionGrant, verifyPermissionGrantDispatch } from './permission-grants';
+import { RecoveryAudit } from './recovery-audit';
 import { recoverSession } from './recovery-operations';
 import { initializeRunRecord } from './requirement-initialization';
 import { registerRunRequirements } from './requirement-operations';
@@ -148,9 +149,12 @@ export class SqliteOperations {
   readonly db: Database;
   readonly readonly: boolean;
   private readonly statements = new Set<Statement>();
+  readonly recoveryAudit: RecoveryAudit;
   constructor(db: Database, readOnly: boolean) {
     this.db = this.timedDatabase(db);
     this.readonly = readOnly;
+    this.recoveryAudit = new RecoveryAudit(this);
+    if (!readOnly && this.recoveryAudit.available) this.tx(() => {});
   }
   private sqlDurationMs = 0;
   private commitMs: number | undefined;
@@ -250,6 +254,7 @@ export class SqliteOperations {
     this.db.run('BEGIN IMMEDIATE');
     try {
       const value = work();
+      this.recoveryAudit.flush();
       this.db.run('COMMIT');
       return value;
     } catch (error) {

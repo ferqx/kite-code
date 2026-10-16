@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { assertNoSymlinkPath, type ProfileAccess } from '../../platform/profile';
 import { defaultWindowsPathSecurity, privateDirectory } from '../../platform/windows-path-security';
 import { initializeDefaultSqliteEngine, type SqliteEngineSelection } from '../../sqlite-engine';
+import { matchingSchema, supportedSchemas } from './migrations';
 export const FORMAT_MAJOR = 1;
 export class StoreOpenError extends Error {
   readonly code: string;
@@ -204,6 +205,18 @@ function initialize(database: Database): void {
       if (Number(meta?.format_major) !== FORMAT_MAJOR)
         throw new StoreOpenError('store_incompatible', 'Unsupported Store format.');
     }
+    const current = matchingSchema(database);
+    if (!current)
+      throw new StoreOpenError('store_incompatible', 'Store migration identity is invalid.');
+    const target = supportedSchemas().at(-1)!;
+    for (const migration of target.migrations.slice(current.migrations.length)) {
+      database.exec(migration.sql);
+      database.run('INSERT INTO schema_migration VALUES(?,?,?)', [
+        migration.id,
+        migration.checksum,
+        new Date().toISOString(),
+      ]);
+    }
     database.run('COMMIT');
   } catch (error) {
     try {
@@ -214,27 +227,9 @@ function initialize(database: Database): void {
 }
 
 function validateBaseline(database: Database, baseline: URL): void {
-  const sql = readFileSync(baseline, 'utf8');
-  const expected = new Database(':memory:');
-  try {
-    expected.exec(sql);
-    const query =
-      "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name";
-    const reference = JSON.stringify(expected.query(query).all());
-    const actual = JSON.stringify(database.query(query).all());
-    if (actual !== reference)
-      throw new StoreOpenError(
-        'store_incompatible',
-        'Store schema does not match its supported baseline.',
-      );
-    const migration = database
-      .query<{ checksum: string }, []>(
-        "SELECT checksum FROM schema_migration WHERE id='0001-baseline'",
-      )
-      .get();
-    if (migration?.checksum !== createHash('sha256').update(sql).digest('hex'))
-      throw new StoreOpenError('store_incompatible', 'Store migration identity is invalid.');
-  } finally {
-    expected.close(true);
-  }
+  if (!matchingSchema(database, baseline))
+    throw new StoreOpenError(
+      'store_incompatible',
+      'Store schema or migration identity is invalid.',
+    );
 }

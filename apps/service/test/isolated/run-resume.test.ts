@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -38,13 +40,13 @@ async function firstLine(stream: ReadableStream<Uint8Array>) {
 }
 
 test('SIGKILL with complete original Model and pending approval resumes original Run through HTTP; physical lost receipt only queries original command', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-http-run-resume-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-http-run-resume-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const ledger = join(root, 'effects');
   const child = Bun.spawn(
     [
       process.execPath,
-      new URL('../fixtures/run-resume-child.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('../fixtures/run-resume-child.ts', import.meta.url)),
       profile.dataRoot,
       ledger,
     ],

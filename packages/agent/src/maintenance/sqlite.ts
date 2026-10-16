@@ -1,11 +1,10 @@
 import { constants, Database } from 'bun:sqlite';
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import {
   defaultWindowsPathSecurity,
   type WindowsPrivateRead,
 } from '../platform/windows-path-security';
 import { initializeDefaultSqliteEngine } from '../sqlite-engine';
+import { matchingSchema } from '../storage/sqlite/migrations';
 import {
   closePrivate as closeSync,
   decimal,
@@ -14,6 +13,8 @@ import {
   retainMaintenanceResource,
 } from './files';
 import { MaintenanceError } from './types';
+
+const maintenanceBaseline = new URL('../storage/migrations/0001-baseline.sql', import.meta.url);
 
 /** Only this maintenance connection's successful strict close releases its ownership. */
 export function createMaintenanceDatabase(
@@ -29,31 +30,6 @@ export function createMaintenanceDatabase(
   return db;
 }
 
-const schemaQuery =
-  "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name";
-let expected: { schema: string; checksum: string } | undefined;
-function baseline() {
-  if (expected) return expected;
-  const sql = readFileSync(
-    new URL('../storage/migrations/0001-baseline.sql', import.meta.url),
-    'utf8',
-  );
-  initializeDefaultSqliteEngine();
-  const db = createMaintenanceDatabase(':memory:');
-  try {
-    db.exec(sql);
-    expected = {
-      schema: JSON.stringify(db.query(schemaQuery).all()),
-      checksum: createHash('sha256').update(sql).digest('hex'),
-    };
-    return expected;
-  } catch (error) {
-    preserveMaintenanceFailure(error);
-    throw error;
-  } finally {
-    db.close(true);
-  }
-}
 /** Windows keeps the original private file/ancestry alive through the SQL connection. */
 export function openPrivateDatabase(path: string): Database {
   if (process.platform !== 'win32') {
@@ -108,15 +84,7 @@ function validateDatabase(db: Database): Database {
   try {
     db.run('PRAGMA busy_timeout=100');
     db.run('PRAGMA synchronous=FULL');
-    const supported = baseline();
-    if (JSON.stringify(db.query(schemaQuery).all()) !== supported.schema)
-      throw new MaintenanceError('backup_store_incompatible');
-    const migration = db
-      .query<{ checksum: string }, []>(
-        "SELECT checksum FROM schema_migration WHERE id='0001-baseline'",
-      )
-      .get();
-    if (migration?.checksum !== supported.checksum)
+    if (!matchingSchema(db, maintenanceBaseline))
       throw new MaintenanceError('backup_store_incompatible');
     if (
       db.query<{ integrity_check: string }, []>('PRAGMA integrity_check(1)').get()
@@ -166,7 +134,7 @@ export function capture(db: Database) {
   return {
     ...row,
     snapshotCursor: decimal(row.snapshotCursor),
-    migrationChecksum: baseline().checksum,
+    migrationChecksum: matchingSchema(db, maintenanceBaseline)!.checksum,
   };
 }
 export interface MediaRow {

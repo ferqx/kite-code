@@ -176,8 +176,9 @@ export function assertNoExecutionGroupFence(
   const { root } = actualRoot(db, sessionId);
   const rows = finite(
     db.rows(
-      `SELECT e.* FROM execution e JOIN session s ON s.id=e.session_id
-    WHERE s.root_id=? AND e.state IN ('dispatching','running','outcome_unknown') AND json_type(e.decision_source_json,'$.guard') IS NOT NULL ORDER BY e.id LIMIT 8193`,
+      `SELECT e.* FROM execution e LEFT JOIN session s ON s.id=e.session_id
+    WHERE (s.root_id=? OR e.root_session_id=?) AND e.state IN ('planned','dispatching','running','outcome_unknown') AND e.state!='planned' AND json_type(e.decision_source_json,'$.guard') IS NOT NULL ORDER BY e.id LIMIT 8193`,
+      root.id!,
       root.id!,
     ),
   );

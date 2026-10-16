@@ -1,10 +1,10 @@
 # 长任务的执行尝试与冷恢复
 
-[Runtime](../../runtime.ts) 与 [Store](run-resume-operations.ts) 将持久任务意图、可替换的 Model 尝试、已确认效果及进程监督分开。显式 `run.resume` 仍由真实 root 创建主体发起，接管同 Store 的原活动 Run 及其准确子任务闭包；恢复不创建替代任务树。公开 HTTP、Store baseline 和备份格式保持。
+[Runtime](../../runtime.ts) 与 [Store](run-resume-operations.ts) 将持久任务意图、可替换的 Model 尝试、已确认效果及进程监督分开。显式 `run.resume` 仍由真实 root 创建主体发起，接管同 Store 的原活动 Run 及其准确子任务闭包；恢复不创建替代任务树。公开 HTTP、format major 1 和原 baseline 保持；新增闭合的 0002-recovery-audit 增量迁移，备份按实际迁移链核 schema/checksum。
 
 ## 恢复协议
 
-只读预检核原身份、控制状态、完整 ledger 和当前可恢复 frontier。宿主取得同一 root OS 锁，增加唯一 generation，以受限准备 lease 保留执行权。Runtime 沿父到子核原 spawning Model 的完整工具目录及 capability snapshot，重建可信动态工具 ceiling、原配置、权限交集和 record read-set；全部成功后，最终事务核原组摘要、配置、选择、取消与 fence，才交给普通 owner。失败不部分交接或调用 Provider。
+只读预检核原身份、控制状态、事务恢复证明及当前可恢复 frontier。宿主取得同一 root OS 锁，增加唯一 generation，以受限准备 lease 保留执行权。Runtime 沿父到子核原 spawning Model 的完整工具目录及 capability snapshot，重建可信动态工具 ceiling、原配置、权限交集和 record read-set；全部成功后，最终事务核原组摘要、配置、选择、取消与 fence，才交给普通 owner。失败不部分交接或调用 Provider。
 
 子任务目录从实际 live carrier 和原 parent Execution 链闭合，只加载仍需监督的节点与必要祖先；不遍历已结束的全部子任务正文。准确 `child-start-{carrier}`、原 Command、root work、配置、reference 和 Session/Run 关系进入组摘要，不以最新 Session Run 或有限 View 猜关系。非所选任务的其他 live/unknown 工作仍阻止接管。
 
@@ -28,14 +28,22 @@ Host 在父 Loop 重入前把全部原操作登记到同一 operation 目录，�
 
 每个新 Model 尝试在原 `decision_source_json` 封存 version 1 continuation：原 Run/selection、当前完整来源请求集合和同工具相同参数失败 streak。压缩尝试使用同一状态。超过正文传输阈值时使用既有不可变 sourceBody Artifact，预览不复制 checkpoint。Runtime 从完整原作用域核验并恢复该状态，当前 Model 的 Tool 批次再按声明顺序结算一次；恢复不会重置五次失败规则。没有该字段的旧记录继续完整历史重建，未知版本或范围拒绝。
 
-SQL 首次冷预检仍流式验证全部历史并生成原 canonical 摘要；这项审计随历史线性增长。已验证快照只在同一 SQLite 连接的 `data_version/total_changes()` 都未改变时复用，最多保留一个 frontier。begin 仅提交 root epoch、准备申请与事件后可更新这个快照；最终 commit 先核当前身份/控制，再匹配快照或重新完整审计。任何其他本机写入、peer commit、无 change_event 的 raw SQL 变化都使复用失效。快照不跨进程持久化，不替代最终 CAS，也不以通知 cursor 当历史完整性证明。
+SQL 的[事务证明](recovery-audit.ts)由普通 Store 写事务维护。持久 trigger 登记每次 Execution/Interaction 的 OLD/NEW Run 与准确 key，包括无 change_event 的外部 SQL 和关闭递归 trigger 时的 REPLACE 身份冲突；failed Model 的效果依赖、原 Command/Session/child 身份及交互资格也会失效。业务提交前核验已结算历史的增量，保存完整行摘要和资格问题，并推进受保护的单调序号。活动 Execution 不重复保存正文摘要，恢复时独立完整检查当前前沿；活动写入同样推进序号，不能绕过最终 CAS。同一 WAL 事务提交或回滚业务与证明，不提前 ACK；没有相关变更的事务无需认证。正常压缩、checkpoint、关闭和重开不使已认证历史失效。原 Run 正式删除时派生证明及队列同事务清理，不改变删除准入或其他 ledger 记录。
 
-这消除正常准备路径的重复全扫描和新记录的旧 Model 正文重读，并未把恢复变成与全部历史或独特来源数量无关的常数成本。当前 frontier 的单次传输和完整 ledger 审计边界仍保留；没有通过新增额度结束长 Run。
+冷读在同一只读事务核证明及尚未认证的增量，再按索引读取实际 live 前沿、最后 Model、未决 Interaction 和原子接管所需的真实任务树。未知 Tool/Job 始终按实际状态阻挡；删除或跨 Run 移走已登记身份留下不合格记录。原来源和 Model 大正文仍在准确作用域内完整核 scope/hash，证明不代替配置、审批、当前权限、原 generation、取消或最终 CAS。新的 bindingDigest 绑定版本、当前 Run/selection 及单调审计序号；历史任一列变化使旧申请失效，改回原字节也不倒退序号。连接内 data_version/total_changes 缓存只加速重复准备，不承担跨进程证明。
+
+证明的信任边界是原 private profile、闭合 SQL schema 与受控写事务。客户端或模型不能提交证明；证明写门只在认证事务内开启并在 COMMIT 前关闭。原 0001 baseline 的既有历史在首次写入升级时完整认证一次；readonly/preflight 不升级。缺证据、未知协议或 schema cookie 失效沿原完整 canonical 审计回退，不默认证为安全。失效/旧来源证明退出增量认证并压实队列，后续普通写入不会反复积压其旧历史；它们仍须完整审计，未知事实保留在原 ledger。
+
+健康证明的恢复审计成本由当前前沿和未认证增量决定，索引查找仍有 B-tree 对数成本；实际 live 树、当前完整来源和旧版 continuation 重建保各自必要成本。没有清理原历史、重标身份、扩大重试或新增任务额度。首次升级及失效证明的安全回退仍可能线性，不能据此宣称任意损坏下的固定恢复时延。
 
 ## 证据与限制
 
 [单 Run](../../../test/isolated/recovery/run-resume-runtime.test.ts)、[任务组](../../../test/isolated/recovery/run-resume-group-runtime.test.ts)及[连续强杀](../../../test/isolated/recovery/run-resume-repeated-runtime.test.ts)使用所属子进程真实 SIGKILL、实际 SQLite 和独立效果 ledger。任务组覆盖后台必需等待、前台 continuation、多子、排队、嵌套、激活前、已完成子、原审批、超期与配置冲突；未知效果和组漂移另明确使用 SQL 故障注入。原 Run/Execution、结果与 deadline 断言分别判断，不把 accepted 当完成。
 
-[Store](../../../test/isolated/recovery/run-resume-store.test.ts)与[完整历史](../../../test/isolated/recovery/run-resume-history.test.ts)保原 canonical 摘要、事务回滚、准备/最终 raw SQL 漂移与有限分页反例。Windows 当前本机 412 条 Execution 的一次测量：冷校验 17.83ms、未变化快照 0.75ms；它不代表大型历史、RSS 或其他平台的耗时承诺。当前测试不证明实际连续运行数周、任意外部效果自动恢复或全部客户端平台资格。半完成任意 initializer、未知效果、无法准确重建的配置仍需核实。
+[增量审计](../../../test/isolated/recovery/run-resume-audit.test.ts)在真实冷重开后比较 100 和 10000 条已认证 SQL 历史，另配同等数量的已结束子任务，两种规模在 planned 前沿均读取18行 SQL结果、running 前沿均22行，并核末次 Model/效果依赖/live 状态索引；这是受控 SQL 容量夹具，耗时只作本机测量，不冒充真实 Provider 工作或固定性能 SLA。它另用所属子进程实际 SIGKILL 卡在证明已写、COMMIT 前/后，核业务与证明共同回滚/提交；真实 SQL 证明失败回滚原 Run 激活与回执。历史坏正文、坏来源、删除/跨 Run、unknown、旧 failed Model 新效果、无通知变化和 CAS 均有反例。
+
+[升级回归](../../../test/isolated/recovery/run-resume-audit-migration.test.ts)核原 0001 schema 的 readonly 原字节、一次写入认证、后续冷读、迁移 checksum 与未知版本拒绝。[完整历史](../../../test/isolated/recovery/run-resume-history.test.ts)保全部原身份分页和未在 frontier 中的漂移；[Store](../../../test/isolated/recovery/run-resume-store.test.ts)保事务回滚、原审批及接管。Windows [实际维护与包内 leaf](../../../test/isolated/maintenance/windows.test.ts)核真实 Worker、两项包内迁移、备份/新 Store 恢复和 GC。当前证据不代表实际持续数周、任意外部效果恢复、物理存储损坏认证或全部平台资格。
 
 持久取舍见[执行尝试与监督恢复 Note](../../../../../.agents/notes/implemented/architecture/2026-10-16-durable-continuations-and-group-recovery.md)。
+
+增量审计的持久取舍见[事务恢复证明 Note](../../../../../.agents/notes/implemented/architecture/2026-10-16-incremental-recovery-certificates.md)。

@@ -32,6 +32,10 @@ export function sqliteStorageAssets() {
       import.meta.url,
     ),
     baseline: new URL('./storage/migrations/0001-baseline.sql', import.meta.url),
+    migrations: Object.freeze([
+      new URL('./storage/migrations/0001-baseline.sql', import.meta.url),
+      new URL('./storage/migrations/0002-recovery-audit.sql', import.meta.url),
+    ]),
     preload: observer.preload,
     observerModules: observer.modules,
   });

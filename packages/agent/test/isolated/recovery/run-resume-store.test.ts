@@ -605,15 +605,17 @@ test('wrong root and original Run cancellation reject before preparing an intent
 test('final event fault rolls back all planned adoption and applied receipt atomically', async () => {
   const f = await fixture();
   try {
+    // Install before preflight so the fault tests the final SQL commit itself,
+    // rather than invalidating the certified schema protocol between its phases.
+    f.db.run(
+      "CREATE TRIGGER fail_resume_final BEFORE INSERT ON change_event WHEN NEW.type='run.resumed' BEGIN SELECT RAISE(ABORT,'fixture final fault'); END",
+    );
     const state = await f.store.verifyRunResume(f.input),
       begun = await f.store.beginRunResume({
         ...f.input,
         checkpoint: state.checkpoint!,
         instanceId: 'new',
       });
-    f.db.run(
-      "CREATE TRIGGER fail_resume_final BEFORE INSERT ON change_event WHEN NEW.type='run.resumed' BEGIN SELECT RAISE(ABORT,'fixture final fault'); END",
-    );
     const error = await f.store
       .commitRunResume({
         expectedStoreId: f.input.expectedStoreId,
@@ -623,6 +625,7 @@ test('final event fault rolls back all planned adoption and applied receipt atom
       })
       .catch((e) => e);
     expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('fixture final fault');
     expect(await f.store.getExecution('model')).toEqual(f.original);
     expect((await f.store.getCommand('resume'))!.status).toBe('accepted');
     expect((await f.store.getCommand('resume'))!.receipt).toBeNull();

@@ -14,6 +14,7 @@ import { assertConfigurationReads } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { identity as modelIdentity, sessionScope } from './model-input-operations';
 import type { SqliteOperations } from './operations';
+import { assertEffectFreeModel, assertHistoricalExecution } from './recovery-audit-validation';
 
 type Row = Record<string, string | number | bigint | null>;
 const parse = (value: Row[string] | undefined): Json =>
@@ -49,26 +50,6 @@ const scopeKey = (input: RunResumeInput) =>
     runId: input.runId,
     expectedOwnerGeneration: input.expectedOwnerGeneration,
   });
-function assertEffectFreeModel(db: SqliteOperations, execution: Row): void {
-  const source = parse(execution.decision_source_json) as Record<string, Json> | null;
-  const command = db.row('SELECT * FROM command WHERE id=?', execution.origin_command_id!);
-  const carrier = command && db.childCarrier(command, String(execution.run_id));
-  if (
-    execution.kind !== 'model' ||
-    execution.parent_execution_id !== (carrier?.id ?? null) ||
-    execution.cancel_requested ||
-    source?.kind !== 'model_request' ||
-    source.requestId !== execution.id ||
-    db.row(
-      "SELECT id FROM execution WHERE session_id=? AND kind IN('tool','job') AND (step_id=? OR parent_execution_id=? OR json_extract(decision_source_json,'$.modelExecutionId')=?) LIMIT 1",
-      execution.session_id!,
-      execution.step_id!,
-      execution.id!,
-      execution.id!,
-    )
-  )
-    throw new AgentError('run_resume_checkpoint_unavailable');
-}
 function canContinueTool(execution: Row, run: Row): boolean {
   const source = parse(execution.decision_source_json) as Record<string, Json>;
   const manifest = parse(run.config_json) as Record<string, Json>;
@@ -173,21 +154,43 @@ function scope(
     base.checkpoint = cached.state.checkpoint;
     return { state: base, run, session, original, executions: cached.executions, request, prior };
   }
-  // Hash exactly the original canonical object, streaming its sorted keys and row arrays.
-  // Every historical row is validated; only the latest Model and zero-dispatch frontier leave SQLite.
-  const digest = createHash('sha256').update('{"executions":[');
+  const certificate = db.recoveryAudit.read(run, input.expectedStoreId);
+  // Old or invalidated proof protocols retain the original full audit. Certified
+  // histories need only the live frontier, latest Model and uncertified deltas.
+  const digest = certificate ? null : createHash('sha256').update('{"executions":[');
   const planned: { row: Row; position: bigint }[] = [];
   let last: Row | undefined;
   let lastPosition = 0n;
   let count = 0n;
   let plannedModels = 0;
-  const rows = db.db.query<Row, [string, string]>(
-    'SELECT * FROM execution WHERE run_id=? AND session_id=? ORDER BY rowid',
-  );
-  (rows as typeof rows & { safeIntegers(value: boolean): typeof rows }).safeIntegers(true);
-  for (const e of rows.iterate(input.runId, input.sessionId)) {
-    if (count) digest.update(',');
-    digest.update(canonicalJson(jsonRow(e)));
+  let rows: Iterable<Row>;
+  if (certificate) {
+    const frontier = db.rows(
+      "SELECT rowid AS resume_position,* FROM execution WHERE run_id=? AND session_id=? AND state IN('planned','dispatching','running','outcome_unknown') ORDER BY rowid LIMIT 4097",
+      input.runId,
+      input.sessionId,
+    );
+    const latest = db.row(
+      "SELECT rowid AS resume_position,* FROM execution WHERE run_id=? AND kind='model' ORDER BY rowid DESC LIMIT 1",
+      input.runId,
+    );
+    if (latest && !frontier.some((row) => row.id === latest.id)) frontier.push(latest);
+    frontier.sort((a, b) => (BigInt(a.resume_position!) < BigInt(b.resume_position!) ? -1 : 1));
+    rows = frontier;
+  } else {
+    const statement = db.db.query<Row, [string, string]>(
+      'SELECT * FROM execution WHERE run_id=? AND session_id=? ORDER BY rowid',
+    );
+    (
+      statement as typeof statement & { safeIntegers(value: boolean): typeof statement }
+    ).safeIntegers(true);
+    rows = statement.iterate(input.runId, input.sessionId);
+  }
+  for (const e of rows) {
+    if (digest) {
+      if (count) digest.update(',');
+      digest.update(canonicalJson(jsonRow(e)));
+    }
     ++count;
     if (e.origin_store_id !== input.expectedStoreId) throw new AgentError('operation_unverifiable');
     if (
@@ -207,35 +210,9 @@ function scope(
         e.cancel_requested)
     )
       throw new AgentError('run_resume_checkpoint_unavailable');
-    if (e.kind === 'tool' && ['succeeded', 'failed', 'cancelled'].includes(String(e.state))) {
-      const result = parse(e.result_json) as Record<string, Json> | null;
-      if (!result || result.outcome !== e.state || typeof result.content !== 'string')
-        throw new AgentError('run_resume_checkpoint_unavailable');
-    }
-    if (e.run_id === input.runId && e.kind === 'model' && e.state !== 'planned') {
-      const result = parse(e.result_json) as Record<string, Json> | null;
-      if (['failed', 'dispatching', 'running'].includes(String(e.state))) {
-        // A closed incomplete attempt is historical data, never a dispatch checkpoint.
-        // No Tool or Job may have been derived from that incomplete Model decision.
-        if (
-          e.state === 'failed' &&
-          (result?.incomplete !== true || typeof result.content !== 'string')
-        )
-          throw new AgentError('run_resume_checkpoint_unavailable');
-        assertEffectFreeModel(db, e);
-      } else {
-        if (
-          e.state !== 'succeeded' ||
-          !result ||
-          typeof result.content !== 'string' ||
-          !['stop', 'tool_calls', 'length'].includes(String(result.finishReason)) ||
-          !Array.isArray(result.toolCalls) ||
-          (result.finishReason === 'length' && result.toolCalls.length !== 0) ||
-          (result.modelOutput && !(result.modelOutput as Record<string, Json>).complete)
-        )
-          throw new AgentError('run_resume_checkpoint_unavailable');
-      }
-    }
+    assertHistoricalExecution(db, e, input.expectedStoreId, String(session.root_id));
+    if (e.kind === 'model' && ['dispatching', 'running'].includes(String(e.state)))
+      assertEffectFreeModel(db, e);
     if (e.state === 'planned' || canContinueTool(e, run)) {
       planned.push({ row: e, position: count });
       if (planned.length > 4096) throw new AgentError('run_resume_checkpoint_unavailable');
@@ -248,7 +225,13 @@ function scope(
   }
   if (plannedModels > 1 || (plannedModels && last?.state !== 'planned'))
     throw new AgentError('run_resume_checkpoint_unavailable');
-  if (run.initialization_state === 'started' || (run.initialization_state === 'unstarted' && count))
+  if (
+    run.initialization_state === 'started' ||
+    (run.initialization_state === 'unstarted' &&
+      (certificate
+        ? !!db.row('SELECT id FROM execution WHERE run_id=? LIMIT 1', input.runId)
+        : count > 0n))
+  )
     throw new AgentError('run_initialization_incomplete');
   const boundary: RunResumeCheckpoint['boundary'] =
     last?.state !== 'succeeded' ||
@@ -259,18 +242,20 @@ function scope(
         : 'completion';
   if (boundary === 'before_model_dispatch' && planned.some(({ row }) => row.kind !== 'model'))
     throw new AgentError('run_resume_checkpoint_unavailable');
-  digest.update('],"interactions":[');
+  digest?.update('],"interactions":[');
   const interactions = db.db.query<Row, [string]>(
-    'SELECT * FROM interaction WHERE run_id=? ORDER BY id',
+    certificate
+      ? "SELECT * FROM interaction WHERE run_id=? AND state IN('pending','answered') ORDER BY id"
+      : 'SELECT * FROM interaction WHERE run_id=? ORDER BY id',
   );
   (
     interactions as typeof interactions & { safeIntegers(value: boolean): typeof interactions }
   ).safeIntegers(true);
   let firstInteraction = true;
   for (const i of interactions.iterate(input.runId)) {
-    if (!firstInteraction) digest.update(',');
+    if (!firstInteraction) digest?.update(',');
     firstInteraction = false;
-    digest.update(canonicalJson(jsonRow(i)));
+    digest?.update(canonicalJson(jsonRow(i)));
     if (['pending', 'answered'].includes(String(i.state))) {
       const e = db.row(
         'SELECT * FROM execution WHERE id=? AND run_id=? AND session_id=?',
@@ -288,7 +273,7 @@ function scope(
     }
   }
   digest
-    .update('],"run":')
+    ?.update('],"run":')
     .update(canonicalJson(jsonRow(run)))
     .update(',"selection":')
     .update(canonicalJson(String(session.context_selection_id)))
@@ -302,7 +287,14 @@ function scope(
     boundary,
     contextSelectionId: String(session.context_selection_id),
     initializationState: run.initialization_state as RunResumeCheckpoint['initializationState'],
-    bindingDigest: digest.digest('hex'),
+    bindingDigest: certificate
+      ? hash({
+          kind: 'transactional-recovery-audit-v1',
+          certificate,
+          run: jsonRow(run),
+          selection: String(session.context_selection_id),
+        })
+      : digest!.digest('hex'),
   };
   base.checkpoint = checkpoint;
   if (!member) attachGroup(db, input, base, run);
@@ -317,12 +309,20 @@ function attachGroup(
 ) {
   const runs = new Set([input.runId]);
   const pending = db.rows(
-    `WITH RECURSIVE ancestry(id) AS (
-      SELECT e.id FROM execution e LEFT JOIN run r ON r.origin_command_id='child-start-'||e.id AND r.session_id=e.child_session_id
+    `WITH RECURSIVE seeds(id) AS (
+      SELECT e.id FROM execution e
       WHERE e.root_session_id=? AND e.root_work_command_id=? AND e.root_work_seq=? AND e.child_session_id IS NOT NULL
-        AND (e.state IN('planned','dispatching','running','outcome_unknown') OR r.is_active=1)
+        AND e.state IN('planned','dispatching','running','outcome_unknown')
+      UNION SELECT e.id FROM run r JOIN command c ON c.id=r.origin_command_id JOIN execution e
+        ON e.id=CASE WHEN c.kind='child.start' THEN json_extract(c.request_json,'$.parentExecutionId') ELSE c.agent_carrier_execution_id END
+      WHERE r.is_active=1 AND e.root_session_id=? AND e.root_work_command_id=? AND e.root_work_seq=? AND e.child_session_id IS NOT NULL
+    ), ancestry(id) AS (
+      SELECT id FROM seeds
       UNION SELECT e.parent_execution_id FROM execution e JOIN ancestry a ON e.id=a.id WHERE e.parent_execution_id IS NOT NULL
     ) SELECT e.* FROM execution e JOIN ancestry a ON e.id=a.id WHERE e.child_session_id IS NOT NULL ORDER BY e.rowid`,
+    input.sessionId,
+    rootRun.root_work_command_id!,
+    rootRun.root_work_seq!,
     input.sessionId,
     rootRun.root_work_command_id!,
     rootRun.root_work_seq!,
@@ -495,13 +495,14 @@ function attachGroup(
   );
   for (const child of root.children) allowed.add(child.carrier.id);
   for (const execution of db.rows(
-    "SELECT id FROM execution WHERE root_session_id=? AND state IN('planned','dispatching','running','outcome_unknown')",
+    "SELECT e.id FROM execution e LEFT JOIN session s ON s.id=e.session_id WHERE (s.root_id=? OR e.root_session_id=?) AND e.state IN('planned','dispatching','running','outcome_unknown')",
+    input.sessionId,
     input.sessionId,
   ))
     if (!allowed.has(String(execution.id)))
       throw new AgentError('run_resume_checkpoint_unavailable');
   for (const active of db.rows(
-    'SELECT id FROM run WHERE session_id IN(SELECT id FROM session WHERE root_id=?) AND is_active=1',
+    'SELECT r.id FROM run r JOIN session s ON s.id=r.session_id WHERE r.is_active=1 AND s.root_id=?',
     input.sessionId,
   ))
     if (!runs.has(String(active.id))) throw new AgentError('run_resume_checkpoint_unavailable');
@@ -767,11 +768,14 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
       } else if (e.state === 'planned' || e.kind === 'tool') {
         if (e.state === 'planned')
           transferAuthorizationReviewOwnership(db, e, String(e.owner_generation), lease.generation);
-        const changed = db.db.run(
-          'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=?',
-          [BigInt(lease.generation), e.id!, e.owner_generation!, e.state!],
+        const changed = db.row(
+          'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=? RETURNING id',
+          BigInt(lease.generation),
+          e.id!,
+          e.owner_generation!,
+          e.state!,
         );
-        if (Number(changed.changes) !== 1) throw new AgentError('run_resume_checkpoint_changed');
+        if (!changed) throw new AgentError('run_resume_checkpoint_changed');
       }
     for (const child of children) {
       if (!['planned', 'dispatching', 'running'].includes(child.carrier.status)) continue;

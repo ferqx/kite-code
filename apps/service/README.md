@@ -617,3 +617,6 @@ Session closed query 新增可选 `snapshotCursor`；续页元数据变化返回
 `SessionView.session` 可携同一次 Store 视图已有的 `ownerInstanceId`／`ownerGeneration`；普通 Session DTO 保持原范围。字段沿同源 schema／Client decoder 传递，不新增 Store 读取或 owner 存活判定。当前连接可将已认证 Service 实例与原 owner 比较，只用于活动显示的可确认性；不同实例不证明 owner 死亡，不授恢复、取消或派发权。原 [恢复 HTTP](test/isolated/session-recovery.test.ts)核实际 owner 字段与显式中断边界，多 Service 的原锁、执行与观察规则保持。
 
 目录专用的原 `mcp.auth.status` Query 支持可选严格 boolean `onlyLoginEligible`。为 true 时，仅消费已观察 target.loginAllowed；不具资格返回带原 serverId／workspaceId 的有限 eligible:false，未调用 Vault status／resolve，也不补任何凭据状态。省略或 false 保显式 Auth／Remove 的原安全状态读取；原 Command/result Query 不变。此分支只做既有目标资格的接口过滤，不增加权限策略、连接或执行授权。
+
+
+SQLite 增量恢复证明由 Agent Store 的正常事务维护，公开 HTTP 保持。`sqliteStorageAssets().migrations` 给出完整的包内迁移 URL，默认 Files 的 protectedRoots 逐项保护原 baseline 和增量 SQL；构建与只读格式预检使用同一闭合迁移链，不用源码 fallback。准确升级、来源/身份/unknown 校验及冷读成本归[恢复协议](../../packages/agent/src/storage/sqlite/run-resume.README.md)。

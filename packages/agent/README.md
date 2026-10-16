@@ -105,7 +105,7 @@ Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execu
 
 显式 `resumeRun` 接续仍活动的同 Store 根 Run，支持原 `run.start/input.follow_up` 的三个持久边界：原 Model 派发前、完整 Model 的工具序列、完成判定。只读 `verifyRunResume` 核原身份和安全状态，再通过独立 `RunResumeLease` 封存检查点；准确重建原配置并复核选择、取消与 generation 后，才转成普通 owner，进入同一个 `executeRun/defaultLoop`。HTTP 的 generation 由 Service 内部派生，Core 可信入口仍要求准确 CAS。原 planned Model 使用完整封存请求，原 planned Tool 保留执行身份与审批，已完成调用跳过；完整无工具 stop 回复进入完成门禁，纯文本 length 段保留原响应并继续原任务。原 Model 输入/输出及大正文都从原作用域完整核验，不用预览重建参数；length 段含调用或没有有效正文不能取得恢复资格。
 
-累计已完成历史不以4096条拒绝接续。首次 SQL 审计仍完整流式核 ledger；未变化的实际 SQLite 快照可跨准备阶段复用，任何写入使其失效。新 Model 在原来源封存版本化 continuation，用于恢复当前来源请求和五次失败 streak；大 checkpoint 沿原 sourceBody Artifact 完整核验。旧记录仍完整分页重建，不把有限 View 当全集；实际成本和未知边界见[冷恢复协议](src/storage/sqlite/run-resume.README.md)。
+累计已完成历史不以4096条拒绝接续。Store 在正常业务事务内维护增量审计证明；健康证明的首次冷读按索引核当前前沿和未认证变更，不扫描累计已认证历史。旧库一次性升级和失效证明仍完整审计回退。未变化的实际 SQLite 快照可跨准备阶段复用，任何写入使其失效。新 Model 在原来源封存版本化 continuation，用于恢复当前来源请求和五次失败 streak；大 checkpoint 沿原 sourceBody Artifact 完整核验。旧记录仍完整分页重建，不把有限 View 当全集；实际成本和未知边界见[冷恢复协议](src/storage/sqlite/run-resume.README.md)。
 
 Run 的初始化三态与原 selection 保持。明确 root 接续可在同一 OS 锁/generation 下原子接管所选 Run 的活动 child 树，沿原配置、权限交集、carrier 与截止时间继续；queued、激活前、已结束子结果、原审批和前台 task.execute 共用普通监督与唯一 Loop。纯 Model 中断结束旧尝试并创建新请求；自动压缩 pending/未发布摘要重新尝试，已发布点保持。普通工具和外部 Job 的未知效果、半完成任意 initializer、无法重建的绑定继续拒绝；受限 continuation 合同不按工具名称放行。资源和证明边界归[协议 owner](src/storage/sqlite/run-resume.README.md)。
 

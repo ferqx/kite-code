@@ -31,6 +31,7 @@ import {
   privateDirectory,
 } from '../../../src/platform/windows-path-security';
 import { openSqliteStore } from '../../../src/sqlite';
+import { buildStorageAssets } from '../../../src/storage/worker/build-assets';
 
 let qualified: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>> | undefined;
 beforeAll(async () => {
@@ -166,6 +167,7 @@ async function fixture() {
       config,
       intents,
       scope,
+      preload,
       argv,
       close: () => rmSync(root, { recursive: true, force: true }),
     };
@@ -428,9 +430,11 @@ test.skipIf(process.platform !== 'win32')(
       };
       const shared = acquireProfileAccess(f.profile);
       try {
-        await expect(
-          collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
-        ).rejects.toThrow('owner_busy');
+        const busy = await collectProfileGarbage({
+          profile: f.profile,
+          expectedStoreId: f.storeId,
+        }).catch((error) => error);
+        expect(busy).toMatchObject({ code: 'owner_busy' });
         original();
       } finally {
         shared.lock.release();
@@ -476,7 +480,7 @@ test.skipIf(process.platform !== 'win32')(
         expect((await cold.getMetadata()).storeId).toBe(f.storeId);
         expect((await cold.getSession('s'))?.title).toBe('original title');
         expect(await cold.getCommand('pending')).toMatchObject({
-          status: 'needs_review',
+          status: 'accepted',
           originStoreId: f.storeId,
         });
       } finally {
@@ -485,6 +489,79 @@ test.skipIf(process.platform !== 'win32')(
       expect((await f.argv(['status', ...f.scope])).result?.restore).toBeNull();
     } finally {
       Date.now = originalNow;
+      f.close();
+    }
+  },
+  60000,
+);
+
+test.skipIf(process.platform !== 'win32')(
+  'Windows built SQLite and maintenance leaves use both packaged migrations and a real Worker',
+  async () => {
+    const f = await fixture();
+    let child: ReturnType<typeof Bun.spawn> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const packaged = join(f.root, 'package');
+      const src = fileURLToPath(new URL('../../../src/', import.meta.url));
+      const build = await Bun.build({
+        entrypoints: [join(src, 'sqlite.ts'), join(src, 'maintenance/index.ts')],
+        root: src,
+        outdir: packaged,
+        target: 'bun',
+        packages: 'bundle',
+        splitting: true,
+      });
+      if (!build.success) throw new AggregateError(build.logs, 'built_sqlite_maintenance_failed');
+      await buildStorageAssets(packaged);
+      writeFileSync(
+        join(packaged, 'package.json'),
+        JSON.stringify({
+          name: '@kite-ai/agent',
+          type: 'module',
+          exports: { './sqlite': './sqlite.js', './maintenance': './maintenance/index.js' },
+        }),
+      );
+      const script = join(packaged, 'consumer.ts');
+      writeFileSync(
+        script,
+        `import {fileURLToPath} from 'node:url';
+import {openSqliteStore,sqliteStorageAssets} from '@kite-ai/agent/sqlite';
+import {createProfileBackup,inspectProfileBackup} from '@kite-ai/agent/maintenance';
+const assets=sqliteStorageAssets();
+if(!fileURLToPath(assets.module).startsWith(${JSON.stringify(packaged)}) || !assets.worker.pathname.endsWith('/storage/worker/main.js'))throw Error('sqlite_source_fallback');
+const store=await openSqliteStore(${JSON.stringify(f.profile)});
+const meta=await store.getMetadata();const pending=await store.getCommand('pending');await store.close();
+const backup=await createProfileBackup({profile:${JSON.stringify(f.profile)},destinationRoot:${JSON.stringify(join(f.root, 'built-backups'))}});
+const inspected=await inspectProfileBackup({directory:backup.directory});
+console.log(JSON.stringify({storeId:meta.storeId,pending:pending.status,backupStore:inspected.manifest.source.storeId,migrations:assets.migrations.map(url=>url.pathname.split('/').at(-1))}));`,
+      );
+      const running = Bun.spawn([process.execPath, '--preload', f.preload, script], {
+        cwd: packaged,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      child = running;
+      timer = setTimeout(() => child?.kill('SIGKILL'), 45000);
+      const [exit, stdout, stderr] = await Promise.all([
+        running.exited,
+        new Response(running.stdout).text(),
+        new Response(running.stderr).text(),
+      ]);
+      expect(exit).toBe(0);
+      expect(stderr).toBe('');
+      expect(JSON.parse(stdout)).toEqual({
+        storeId: f.storeId,
+        pending: 'accepted',
+        backupStore: f.storeId,
+        migrations: ['0001-baseline.sql', '0002-recovery-audit.sql'],
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (child?.exitCode === null) {
+        child.kill('SIGKILL');
+        await child.exited;
+      }
       f.close();
     }
   },

@@ -26,7 +26,7 @@ backup、inspect、restore／reconcile 和 GC 在各自调用的资源 owner 内
 
 [backup.ts](backup.ts) 在原 profile-use 排他锁内，先由 [files.ts](files.ts) 将完整 Core DB 与实际存在的 WAL 配对复制到本次私有 scratch，只打开该副本，核原 schema/capture 后执行 `VACUUM INTO` 生成一致候选。原 DB/WAL 的完整字节、存在状态及 dev/ino/ctime/size/mode/uid/nlink 在配对采集、每次复制之后和 SQL 回调前后重新核对；缺失 WAL 不创建替代，原 SHM 不复制，任何变化均拒绝发布。SQL 不打开原库，因此关闭后没有副文件的原 Profile 不会因只读 SQLite 连接而新建 WAL/SHM。scratch 在后续候选验证和发布前删除，不进入备份树。
 
-候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配当前基线 schema/checksum，通过 integrity/FK 检查；清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。
+候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配原 0001 或加 0002-recovery-audit 的准确闭合 schema/checksum，通过 integrity/FK 检查；baseline 原 checksum 保持，新增迁移的 capture checksum 绑定完整已应用链，未知项拒绝。只读维护不升级旧库；恢复生成新 Store 后旧证明不能授予执行权，原来源/未知状态继续保留。清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。
 
 仅本次创建的私有 staging 会在失败时删除。数据库、媒体、清单完成验证和 fsync 后才发布 `ready.json`，最后将 staging 改名到独立备份目录并同步父目录。检查备份重新核对数据库、媒体清单、每个媒体完整 hash 和目录内容，不能仅凭 ready 标记认定有效。文件要求私有、当前主体持有、非软链接、单一硬链接；媒体不可写。检查失败不会修改原 profile。
 
