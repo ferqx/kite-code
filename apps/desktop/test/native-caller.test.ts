@@ -1619,6 +1619,195 @@ test('same creation command shares one in-flight POST across view switches; cold
   }
 });
 
+test('Native caller serializes a waiting scheduled save before provider removal and rechecks the new reference', async () => {
+  const { ScheduledTaskRunner } = await import('../electron/scheduled-task-runner');
+  const data = memoryPrivateData();
+  const connectionId = 'e'.repeat(64);
+  let release!: () => void,
+    entered!: () => void,
+    writes = 0;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const port = client();
+  Object.assign(port, {
+    listWorkspaces: async () => [{ id: 'w' }],
+    getProviderSettings: async () => ({
+      storeId: 'store',
+      errors: [],
+      readSet: {
+        userEtag: 'a'.repeat(64),
+        workspaceEtag: null,
+        explicitDigest: 'b'.repeat(64),
+        effectiveDigest: 'c'.repeat(64),
+      },
+      providers: [
+        {
+          id: 'ollama',
+          label: 'Ollama',
+          defaultBaseURL: 'http://localhost:11434/v1',
+          requiresCredential: false,
+          connections: [
+            {
+              id: connectionId,
+              name: 'Local',
+              baseURL: 'http://localhost:11434/v1',
+              protocol: 'chat-completions',
+              hasCredential: false,
+              modelNames: ['local'],
+              modelIds: ['local-model'],
+              defaultModelIds: [],
+              canWrite: true,
+            },
+          ],
+        },
+      ],
+    }),
+    getModelSettings: async () => {
+      entered();
+      await gate;
+      return { models: [{ id: 'local-model', enabled: true, configured: true }] };
+    },
+    updateProviderSettings: async () => {
+      writes++;
+      throw Error('unexpected_delete');
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, data);
+  caller.setScheduledTasks(new ScheduledTaskRunner(port, data));
+  try {
+    const state = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const facts = await caller.invoke({
+      method: 'settings.providers.read',
+      generation: state.generation,
+    });
+    if (!facts || !('observationId' in facts)) throw Error('missing_provider_facts');
+    const save = caller.invoke({
+      method: 'scheduled.save',
+      operation: 'create',
+      generation: state.generation,
+      input: {
+        name: 'Race task',
+        storeId: 'store',
+        workspaceId: 'w',
+        modelId: 'local-model',
+        prompt: 'test-only',
+        enabled: false,
+        schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+      },
+    });
+    await ready;
+    const remove = caller.invoke({
+      method: 'settings.providers.save',
+      generation: state.generation,
+      observationId: facts.observationId,
+      operation: {
+        kind: 'remove',
+        provider: 'ollama',
+        connectionId,
+        baseURL: 'http://localhost:11434/v1',
+        modelNames: [],
+        credential: 'none',
+      },
+    });
+    const checked = remove.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(writes).toBe(0);
+    release();
+    await save;
+    expect(await checked).toMatchObject({ code: 'provider_scheduled_model_in_use' });
+    expect(data.scheduledTasks()).toHaveLength(1);
+    expect(writes).toBe(0);
+  } finally {
+    release();
+    await caller.close();
+  }
+});
+
+test('Native caller orders confirmed deletion after earlier scheduled save or enable validation', async () => {
+  const { ScheduledTaskRunner } = await import('../electron/scheduled-task-runner');
+  for (const operation of ['save', 'enable'] as const) {
+    const data = memoryPrivateData(),
+      port = client();
+    const task = data.saveScheduledTask({
+      name: 'Original',
+      storeId: 'store',
+      workspaceId: 'w',
+      modelId: 'fixed',
+      prompt: 'Instructions',
+      enabled: operation === 'save',
+      schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+    });
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    Object.assign(port, {
+      listWorkspaces: async () => [{ id: 'w' }],
+      getModelSettings: async () => {
+        entered();
+        await gate;
+        return { models: [{ id: 'fixed', enabled: true, configured: true }] };
+      },
+    });
+    const caller = new NativeCaller(port, () => {}, data);
+    caller.setScheduledTasks(new ScheduledTaskRunner(port, data));
+    try {
+      const state = (await caller.invoke({ method: 'attach' })) as NativeState;
+      const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = task;
+      const saving = caller.invoke(
+        operation === 'save'
+          ? {
+              method: 'scheduled.save',
+              operation: 'update',
+              generation: state.generation,
+              input: { ...input, prompt: 'Earlier edit' },
+            }
+          : {
+              method: 'scheduled.toggle',
+              generation: state.generation,
+              id: task.id,
+              enabled: true,
+            },
+      );
+      await ready;
+      let deleted = false;
+      const removing = caller
+        .invoke({ method: 'scheduled.delete', generation: state.generation, id: task.id })
+        .then((value) => {
+          deleted = true;
+          return value;
+        });
+      await Promise.resolve();
+      expect(deleted).toBe(false);
+      release();
+      await saving;
+      await removing;
+      expect(data.scheduledTasks()).toHaveLength(0);
+      await expect(
+        caller.invoke({
+          method: 'scheduled.save',
+          operation: 'update',
+          generation: state.generation,
+          input,
+        }),
+      ).rejects.toThrow('scheduled_task_not_found');
+      expect(data.scheduledTasks()).toHaveLength(0);
+    } finally {
+      release();
+      await caller.close();
+    }
+  }
+});
+
 test('global observation routes foreign metadata away from the selected View while retaining directory, descendant environment and read admission', async () => {
   const connection = client();
   connection.serverInfo!.capabilities.push('sessions');
@@ -1730,6 +1919,68 @@ test('global observation routes foreign metadata away from the selected View whi
     expect(caller.state().historyEpoch).toBe(before.historyEpoch! + 1);
     expect(connection.lastAppliedCursor).toEqual({ storeId: 'store', sequence: '102' });
     expect(connection.writes).toBe(0);
+  } finally {
+    release();
+    await caller.close();
+  }
+});
+
+test('Native close drains an in-flight scheduled save before releasing private data ownership', async () => {
+  const { ScheduledTaskRunner } = await import('../electron/scheduled-task-runner');
+  const data = memoryPrivateData(),
+    port = client();
+  let release!: () => void, entered!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  Object.assign(port, {
+    listWorkspaces: async () => [{ id: 'w' }],
+    getModelSettings: async () => {
+      entered();
+      await gate;
+      return { models: [{ id: 'fixed', enabled: true, configured: true }] };
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, data);
+  caller.setScheduledTasks(new ScheduledTaskRunner(port, data));
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const saving = caller
+      .invoke({
+        method: 'scheduled.save',
+        operation: 'create',
+        generation,
+        input: {
+          id: 'new-task',
+          name: 'New',
+          storeId: 'store',
+          workspaceId: 'w',
+          modelId: 'fixed',
+          prompt: 'Test',
+          enabled: false,
+          schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+        },
+      })
+      .catch((cause: unknown) => cause);
+    await ready;
+    let closed = false;
+    const closing = caller.close().then(() => {
+      closed = true;
+    });
+    await Bun.sleep(0);
+    expect(closed).toBe(false);
+    expect(data.scheduledTasks()).toHaveLength(0);
+    release();
+    await saving;
+    await closing;
+    expect(closed).toBe(true);
+    expect(data.scheduledTasks()).toHaveLength(1);
+    const settled = JSON.stringify(data.scheduledTasks());
+    await Bun.sleep(0);
+    expect(JSON.stringify(data.scheduledTasks())).toBe(settled);
   } finally {
     release();
     await caller.close();

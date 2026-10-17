@@ -40,6 +40,7 @@ import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
 import { canonicalProtectedPath } from './protected-path';
 import { inspectNativeQuitWork, settleDesktopQuit } from './quit-settlement';
+import { ScheduledTaskRunner } from './scheduled-task-runner';
 import { assertNativeSqliteEngine } from './sqlite-engine';
 import {
   acquireWindowsNativeCandidate,
@@ -95,6 +96,7 @@ let opening: Promise<NativeCaller> | undefined;
 let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
+let scheduledTasks: ScheduledTaskRunner | undefined;
 let privateAccess: DesktopProfileAccess | undefined;
 let windowsArtifactAccess: WindowsNativeCandidateAccess | undefined;
 const acquireFormalWindowsAccess = () => {
@@ -132,6 +134,8 @@ let developmentReload: Promise<void> | undefined;
 let switchingService = false;
 function setQuitting(value: boolean) {
   quitting = value;
+  if (value) void scheduledTasks?.stop().catch(() => {});
+  else scheduledTasks?.start();
   sendLifecycle(value);
 }
 function sendLifecycle(value: boolean) {
@@ -220,14 +224,14 @@ async function openCaller(): Promise<NativeCaller> {
           }
         : {}),
     });
-    if (quitting) {
+    if (quitting || switchingService) {
       await paired.close();
       throw Error('native_draining');
     }
     if (process.platform === 'win32' && !paired.bootstrap.storeId)
       throw Error('native_profile_store_unavailable');
     privateAccess ??= await acquirePrivateAccess();
-    if (quitting) {
+    if (quitting || switchingService) {
       privateAccess.close();
       await paired.close();
       throw Error('native_draining');
@@ -255,6 +259,9 @@ async function openCaller(): Promise<NativeCaller> {
         },
       },
     );
+    scheduledTasks = new ScheduledTaskRunner(paired.client, privateData);
+    caller.setScheduledTasks(scheduledTasks);
+    scheduledTasks.start();
     return caller;
   })().catch(async (error) => {
     if (error instanceof PairedServiceError) startupDiagnostic = error.startupDiagnostic;
@@ -277,6 +284,8 @@ async function openCaller(): Promise<NativeCaller> {
 }
 async function closeNativeResources() {
   await opening?.catch(() => {});
+  await scheduledTasks?.stop();
+  scheduledTasks = undefined;
   await caller?.close();
   privateData?.close();
   privateAccess?.close();

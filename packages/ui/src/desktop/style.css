@@ -3261,3 +3261,38 @@ body {
   justify-content: space-between;
   font-size: 14px;
 }
+
+.kite-client .scheduled-editor-row input {
+  width: min(62%, 220px);
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: right;
+}
+.kite-client .scheduled-card-actions {
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.kite-client .scheduled-history {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.kite-client .scheduled-history summary {
+  cursor: pointer;
+}
+.kite-client .scheduled-history-row,
+.kite-client .scheduled-delete-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+  overflow-wrap: anywhere;
+}
+.kite-client .scheduled-error {
+  color: var(--destructive);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

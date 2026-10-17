@@ -123,7 +123,8 @@ try {
   await page.getByText('当前模式：accept_edits；默认模式：auto', { exact: true }).waitFor();
   await openSettings(page);
   await page.getByRole('button', { name: '提供商', exact: true }).click();
-  await page.getByRole('button', { name: '配置 OpenAI-compatible', exact: true }).click();
+  await page.getByRole('button', { name: '新增提供商', exact: true }).click();
+  await page.getByRole('combobox', { name: '服务商预设', exact: true }).selectOption('compatible');
   await page.getByRole('textbox', { name: '服务地址', exact: true }).fill(`${control}/model/v1`);
   await page.getByRole('combobox', { name: '凭据处理', exact: true }).selectOption('none');
   await page.getByRole('textbox', { name: '模型名称', exact: true }).fill('owned-mcp-model');
@@ -132,7 +133,7 @@ try {
     .getByRole('region', { name: '提供商设置', exact: true })
     .getByText('已保存提供商配置。', { exact: true })
     .waitFor();
-  await page.getByRole('button', { name: '关闭提供商配置', exact: true }).click();
+  await page.locator('.settings-editor-panel .right-sidebar').waitFor({ state: 'detached' });
   const modelConfiguration = (await page.evaluate(
     async () =>
       await window.kiteNative!.request({
@@ -166,6 +167,19 @@ try {
   await openSettings(page);
   await page.getByRole('button', { name: 'MCP', exact: true }).click();
   const panel = () => page.getByRole('region', { name: 'MCP settings', exact: true });
+  const editor = () => page.locator('.settings-editor-panel').getByRole('complementary');
+  async function manageServer(id: string) {
+    await panel()
+      .getByRole('button', { name: `管理连接 ${id}`, exact: true })
+      .click();
+    await editor().getByRole('heading', { name: 'MCP 连接详情', exact: true }).waitFor();
+  }
+  async function manageSource(id: string, scope: 'user' | 'workspace') {
+    await panel()
+      .getByRole('button', { name: `管理来源 ${scope} ${id}`, exact: true })
+      .click();
+    await editor().getByRole('heading', { name: '管理 MCP 来源', exact: true }).waitFor();
+  }
   await panel().getByRole('heading', { name: 'Safe directory', exact: true }).waitFor();
   async function refresh() {
     await openSettings(page);
@@ -244,7 +258,9 @@ try {
     }
   }
   async function confirm() {
-    await panel().getByRole('button', { name: 'Confirm exact MCP operation', exact: true }).click();
+    await editor()
+      .getByRole('button', { name: 'Confirm exact MCP operation', exact: true })
+      .click();
   }
   async function add(
     name: string,
@@ -253,27 +269,31 @@ try {
     address: string,
   ) {
     await refresh();
-    const form = panel().getByRole('form', { name: 'Add MCP source', exact: true });
+    await panel().getByRole('button', { name: '新增 MCP', exact: true }).click();
+    const form = editor().getByRole('form', { name: 'Add MCP source', exact: true });
     await form.getByRole('textbox', { name: 'Name', exact: true }).fill(name);
     await form.getByRole('combobox', { name: 'Scope', exact: true }).selectOption(scope);
     await form.getByRole('combobox', { name: 'Transport', exact: true }).selectOption(transport);
     await form.getByRole('textbox', { name: 'URL or command', exact: true }).fill(address);
-    await form.getByRole('button', { name: 'Review add source', exact: true }).click();
+    await editor().getByRole('button', { name: 'Review add source', exact: true }).click();
     await confirm();
     await settle('mcp.source.add');
     await refresh();
     const source = panel()
       .getByRole('region', { name: 'MCP sources', exact: true })
       .getByRole('article')
-      .filter({ has: page.getByRole('heading', { name: new RegExp(`^${name} · mcp-`) }) });
-    const text = await source.innerText();
-    const id = text.match(/mcp-[a-f0-9]{64}/)?.[0];
+      .filter({ has: page.getByRole('heading', { name, exact: true }) });
+    const sourceAction = await source
+      .getByRole('button', { name: new RegExp(`^管理来源 ${scope} `) })
+      .getAttribute('aria-label');
+    const id = sourceAction?.match(/mcp-[a-f0-9]{64}$/)?.[0];
     assert.ok(id);
     return id;
   }
   async function selectServer(id: string, scope: 'user' | 'workspace') {
     await refresh();
-    await panel()
+    await manageServer(id);
+    await editor()
       .getByRole('button', { name: `Select ${scope} ${id}: enable`, exact: true })
       .click();
     await confirm();
@@ -282,16 +302,20 @@ try {
   const manual = panel()
     .getByRole('region', { name: 'MCP sources', exact: true })
     .getByRole('article')
-    .filter({ has: page.getByRole('heading', { name: /^window-manual · mcp-/ }) });
-  const manualId = (await manual.innerText()).match(/mcp-[a-f0-9]{64}/)?.[0];
+    .filter({ has: page.getByRole('heading', { name: 'window-manual', exact: true }) });
+  const manualAction = await manual
+    .getByRole('button', { name: /^管理来源 user / })
+    .getAttribute('aria-label');
+  const manualId = manualAction?.match(/mcp-[a-f0-9]{64}$/)?.[0];
   assert.ok(manualId);
   const beforeBinding = Number(await (await fetch(`${control}/count`)).text());
   for (const decision of ['bind', 'revoke'] as const) {
     await refresh();
-    await panel()
+    await manageSource(manualId, 'user');
+    await editor()
       .getByRole('textbox', { name: 'Binding expiry (Unix milliseconds)', exact: true })
       .fill(String(Date.now() + 3600000));
-    await panel()
+    await editor()
       .getByRole('button', { name: `Review existing credential binding ${manualId}`, exact: true })
       .click();
     await confirm();
@@ -321,7 +345,8 @@ try {
   const stdioId = await add('window-stdio', 'user', 'stdio', join(home!, 'mcp-stdio'));
   await selectServer(stdioId, 'user');
   await refresh();
-  await panel()
+  await manageServer(stdioId);
+  await editor()
     .getByRole('button', { name: `Connect ${stdioId}`, exact: true })
     .click();
   const connected = await settle('mcp.connect');
@@ -332,8 +357,8 @@ try {
     .getByRole('button', { name: /^Open tools / })
     .first();
   await open.click();
-  await panel().getByRole('button', { name: 'Read full descriptor 0', exact: true }).click();
-  const full = panel().locator('[data-mcp-descriptor="verified"]');
+  await editor().getByRole('button', { name: 'Read full descriptor 0', exact: true }).click();
+  const full = editor().locator('[data-mcp-descriptor="verified"]');
   await full.waitFor();
   const descriptor = await full.innerText();
   assert.ok(new TextEncoder().encode(descriptor).length > 65536);
@@ -344,12 +369,14 @@ try {
     bytes: new TextEncoder().encode(descriptor).length,
     additionalRpc: 0,
   });
-  await panel()
+  await manageServer(stdioId);
+  await editor()
     .getByRole('button', { name: `Refresh catalogue from ${connected.commandId}`, exact: true })
     .click();
   await settle('mcp.catalogue.refresh');
   await refresh();
-  await panel()
+  await manageServer(stdioId);
+  await editor()
     .getByRole('button', { name: `Strong reconnect from ${connected.commandId}`, exact: true })
     .click();
   await confirm();
@@ -392,31 +419,35 @@ try {
   stage('one_remote_effect');
   const projectId = await add('window-project', 'workspace', 'http', `${control}/mcp`);
   await refresh();
-  await panel()
+  await manageSource(projectId, 'workspace');
+  await editor()
     .getByRole('button', { name: `Request project approval ${projectId}`, exact: true })
     .click();
   await settle('mcp.source.approve', 'approved');
   await selectServer(projectId, 'workspace');
   await refresh();
-  await panel()
+  await manageServer(projectId);
+  await editor()
     .getByRole('button', { name: `Connect ${projectId}`, exact: true })
     .click();
   await settle('mcp.connect');
   // This controlled HTTP peer uses the baked trusted-loopback test candidate; productionDefaultNetwork is false.
   await refresh();
-  await panel()
+  await manageSource(projectId, 'workspace');
+  await editor()
     .getByRole('button', { name: `Remove exact workspace source ${projectId}`, exact: true })
     .click();
-  await panel()
+  await editor()
     .getByRole('region', { name: 'Exact source removal preview', exact: true })
     .waitFor();
   await confirm();
   await settle('mcp.source.remove');
   await refresh();
-  await panel()
+  await manageSource(stdioId, 'user');
+  await editor()
     .getByRole('button', { name: `Remove exact user source ${stdioId}`, exact: true })
     .click();
-  await panel()
+  await editor()
     .getByRole('region', { name: 'Exact source removal preview', exact: true })
     .waitFor();
   await confirm();
@@ -446,7 +477,7 @@ try {
   await select();
   await openSettings(page);
   await page.getByRole('button', { name: 'MCP', exact: true }).click();
-  await panel().getByRole('heading', { name: 'Original submissions', exact: true }).waitFor();
+  await panel().getByRole('region', { name: 'Original MCP submissions', exact: true }).waitFor();
   const before = await app!.evaluate(() => (globalThis as FixtureGlobals).mcpPhysical);
   assert.equal(before.filter((value: Physical) => value.method === 'POST').length, 0);
   const commandId = submissions[0]!.commandId;

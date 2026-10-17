@@ -1,6 +1,7 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { type ModelAdapter, ModelAttemptError, type ModelEvent } from '@kite-ai/ai';
 import type { Extension } from '../../../src/extensions';
+import { canonicalJson } from '../../../src/json';
 import type { RunConfiguration } from '../../../src/runtime';
 
 const finish: ModelEvent = {
@@ -8,6 +9,8 @@ const finish: ModelEvent = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
+export const opaqueContinuation = { protocol: 'recovery.fixture', state: 'opaque'.repeat(14000) };
+
 export function binding(directory: string, mode: string): RunConfiguration {
   const model: ModelAdapter = {
     async *stream(request) {
@@ -20,6 +23,23 @@ export function binding(directory: string, mode: string): RunConfiguration {
       )
         throw Error('sealed large source not rehydrated');
       appendFileSync(`${directory}/ledger`, `model:${request.requestId}\n`);
+      if (
+        mode.startsWith('continuation_') &&
+        request.messages.some((message) => message.role === 'tool')
+      ) {
+        const original = request.messages.find((message) => message.role === 'assistant');
+        if (canonicalJson(original?.continuation ?? null) !== canonicalJson(opaqueContinuation))
+          throw Error('original opaque continuation not rehydrated');
+        appendFileSync(`${directory}/ledger`, `continuation:${request.requestId}\n`);
+        const attempts = readFileSync(`${directory}/ledger`, 'utf8')
+          .split('\n')
+          .filter((line) => line.startsWith('model:')).length;
+        if (mode === 'continuation_failed' && attempts === 2)
+          throw new ModelAttemptError('provider_unavailable');
+        yield { type: 'text_delta', text: 'done' };
+        yield finish;
+        return;
+      }
       if (mode.startsWith('compression_') && request.tools.length === 0) {
         yield { type: 'text_delta', text: 'cold recovery summary' };
         yield finish;
@@ -86,7 +106,11 @@ export function binding(directory: string, mode: string): RunConfiguration {
             value: mode.includes('large') ? 'x'.repeat(80000) : 'original',
           }),
         };
-        yield { ...finish, reason: 'tool_calls' };
+        yield {
+          ...finish,
+          reason: 'tool_calls',
+          ...(mode.startsWith('continuation_') ? { continuation: opaqueContinuation } : {}),
+        };
       }
     },
   };

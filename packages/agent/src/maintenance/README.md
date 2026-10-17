@@ -1,5 +1,7 @@
 # 显式离线备份
 
+Desktop DB10 使用独立 closed manifest v19；定时任务快照与旧格式隔离见[DB10合同](#desktop-db10-与-manifest-v19)。
+
 MCP 五类申请与文件恢复申请的 document reader 共用内部 [intent-document](intent-document.ts)：沿原 `openPrivate/closePrivate` 保有同一 FD／Windows pin，执行 16MiB 完整读取、实体前后复核、fatal UTF-8 和闭合 version/records envelope；各资产继续独立核原 records grammar、摘要、数量及错误码。普通 caller reader 保留自己的 `backup_content_changed`、实体字段、平台前置检查及布尔返回合同，不以共享 reader 改写其兼容语义。
 
 实际 Desktop DB9 优先使用专属 closed manifest v18；公共扩展申请与旧格式隔离见[DB9 合同](#desktop-db9-与-manifest-v18)。其余 Desktop DB8 使用 closed manifest v17，原 Workspace 移除申请见[DB8 合同](#desktop-db8-与-manifest-v17)。未升级 DB8／DB9 的 Profile 才按下面 v5–v16 条件选择。空间历史与无引用附件的显式清理见[GC 合同](#显式无引用附件-gc)。
@@ -259,3 +261,12 @@ macOS真实代码版本链另由未修改的包内 `bin/kite maintenance backup/
 [真实 GC／离线 argv 测试](../../test/isolated/maintenance/gc.test.ts)用选定SQLite3.51.3核原owner busy／Store／宽限／引用／备份／Core字节、hostile预检零SQL和文件删除、取消，以及实际Runtime完成正文和同空间Fork清理、外部关系拒绝、原回执与去重／迟到新建封锁、未知Execution原证据完整保留。测试只推进维护时钟，不改真实mtime／ctime。当前 macOS证据覆盖POSIX端口；Windows GC原对象端口已接源码、原生验收未运行，详见上节。新增实际Runtime单组测试核live Fork空历史祖先保留、最后依赖删除后同批清链、原delete receipt／控制快照／digest及其他空间登记保留、unknown组Core完整bytes不变。macOS installed Native／登记前门的实际 DB8／v17 五项常用维护、过期 GC 的安装包 Host 选择器范围见[Native owner](../../../../apps/desktop/docs/native-release.md#macos-安装版离线维护)。DB9 原代码回退的本机有限运行边界另见[Native owner](../../../../apps/desktop/docs/native-release.md#真实代码升级与冷回退)；其余恢复发布窗口与完整W19／三平台资格仍按[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)闭合；新基线前版样本的当前适用范围归[release control](../../../../docs/active/release-control.md#sqlite-与可选能力)。
 
 模型运行配置现由 Service 唯一读取用户根目录 `~/.kite-code/kite-code.jsonc`，不属于 Profile 备份资产。这里保留的 `config.jsonc` 采集/恢复仅用于原 Profile 资产与已有清单兼容，不被当前 Service 解析；恢复 Profile 不覆盖或迁移全局用户文件，也不授予凭据。决定见[单用户配置 Note](../../../../.agents/notes/implemented/architecture/2026-10-15-single-user-configuration.md)。
+
+
+## Desktop DB10 与 manifest v19
+
+[资产验证](assets.ts)在DB9十表上只接受准确的 scheduled_tasks 和 scheduled_task_runs schema；[独立行验证](desktop-schedules.ts)核闭合字段、UTF8原字节、SQL主键／task_id／occurrence_at、时区、状态、快照和同任务、同 Store 绑定的活动运行唯一性。频率和状态必须是原枚举字符串，数组等可转为同名文本的值仍拒绝。运行的可选 `settlementVersion: 1` 只记录可信 Main 已核原组的终态结算，不由恢复或终态字符串自动补造；旧缺标识历史保持原样。任务上限128条／1MiB，运行上限10000条／32MiB；坏行、未知字段和超限拒绝发表备份或恢复。manifest v19只接受实际DB10，v2–v18仍按原白名单，不可只修改版本标签升级。
+
+备份和恢复保留原任务 Store 与 Command／Session 身份，不改写为新授权；Native 在新Store拒绝自动和手动执行旧任务。恢复后用户可明确编辑保存任务到当前Store，旧运行结果仍留原身份、只供历史阅读，不阻止新绑定运行。维护仍以原字节容量检查备份；超容量旧历史需先由用户明确清理已结算任务，不能借只读展示兼容性发表超限备份。DB10不新增 Core schema，Core仍按实际0001／0002迁移链校验。[真实Node DB10备份恢复测试](../../test/isolated/maintenance/desktop-schedules-profile.test.ts)核原文件字节保持、manifest19 inspect、实际新Store恢复、冷读快照及零Service请求，并核0002链checksum、原恢复证书与执行来源不重绑、新Store拒绝旧Run接续；[闭合manifest测试](../../test/isolated/maintenance/desktop-schedules.test.ts)覆盖改标签拒绝及严格行格式。
+
+Provider原配置意图新增有限可选kind（upsert/remove）与name；省略kind仍表示原保存语义。DB6及其后继格式的配置codec核命名和删除形状，删除要求准确连接ID、无新凭据、空模型数组；备份恢复仍只保留同一原GET身份，不重建连接、不重发删除、不接触Vault。该闭合扩展由[实际Node配置备份回归](../../test/isolated/maintenance/desktop-configurations.test.ts)覆盖，旧manifest/数据库版本接纳范围不扩大。

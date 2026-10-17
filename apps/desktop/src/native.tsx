@@ -74,6 +74,7 @@ import { desktopDirectory, desktopMessages } from './native-presentation';
 import { NativeProviderSettings } from './native-provider-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeExecutionResult } from './native-result';
+import { useNativeScheduledTasks } from './native-scheduled-tasks';
 import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
 import { NativeStartup } from './native-startup';
@@ -126,6 +127,8 @@ function NativeDesktopContent({
   const startupDirectoryUnavailable = useRef(false);
   const theme = useNativeTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsEditorHost, setSettingsEditorHost] = useState<HTMLDivElement | null>(null);
+  const settingsEditorControl = useRef<{ close: () => void } | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -462,15 +465,17 @@ function NativeDesktopContent({
     if (value && 'observationId' in value && 'page' in value && 'items' in value.page)
       setGrantFacts({ observationId: value.observationId, page: value.page });
   }
-  async function select(sessionId: string, keepCurrentDraft = true) {
+  async function select(sessionId: string, keepCurrentDraft = true, keepTaskPage = false) {
     if (!bridge || readLifecycle.current.quitting) return;
     if (keepCurrentDraft) rememberDraft();
     const firstHandoff =
       preparing && !keepCurrentDraft && firstRef.current?.creation.sessionId === sessionId;
     const page = pageIntent.current;
     // Keep the submitted preparation visible until its own selected facts arrive.
-    if (!firstHandoff) setPreparing(false);
-    setScheduledTasksView(false);
+    if (!keepTaskPage) {
+      if (!firstHandoff) setPreparing(false);
+      setScheduledTasksView(false);
+    }
     const nonce = ++viewIntent.current,
       current = generation.current,
       epoch = readLifecycle.current.epoch;
@@ -2157,6 +2162,22 @@ function NativeDesktopContent({
     </section>
   );
   const workspaceModels = directory ? desktopDirectory(directory, selection) : [];
+  const scheduledTaskProps = useNativeScheduledTasks({
+    bridge,
+    generation: state?.generation ?? 0,
+    storeId: directory?.storeId,
+    active: scheduledTasksView,
+    revision: settingsRevision,
+    workspaces: workspaceModels.filter((workspace) => workspace.state === 'loaded'),
+    onOpen: async (sessionId) => {
+      const original = pageIntent.current;
+      await select(sessionId, true, true);
+      if (pageIntent.current !== original) return;
+      pageIntent.current++;
+      setScheduledTasksView(false);
+      setPreparing(false);
+    },
+  });
   const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
     if (childDetail) {
       const message = childMessagesById.get(model.id),
@@ -2637,14 +2658,7 @@ function NativeDesktopContent({
             }
           : undefined
       }
-      scheduledTasks={
-        scheduledTasksView
-          ? {
-              tasks: [],
-              workspaces: workspaceModels.filter((workspace) => workspace.state === 'loaded'),
-            }
-          : undefined
-      }
+      scheduledTasks={scheduledTasksView ? scheduledTaskProps : undefined}
       headerActions={
         <>
           {childDetail ? (
@@ -3138,6 +3152,12 @@ function NativeDesktopContent({
               className="desktop-settings-dialog translate-x-0 translate-y-0"
               showCloseButton={false}
               showOverlay={false}
+              onEscapeKeyDown={(event) => {
+                if (settingsEditorControl.current) {
+                  event.preventDefault();
+                  settingsEditorControl.current.close();
+                }
+              }}
               onInteractOutside={(event) => {
                 if (
                   nativeWindow &&
@@ -3220,6 +3240,8 @@ function NativeDesktopContent({
                     />
                   ) : settingsPage === 'skills' ? (
                     <NativeSkillsSettings
+                      panelHost={settingsEditorHost}
+                      editorControl={settingsEditorControl}
                       bridge={bridge}
                       generation={generation.current}
                       selection={selection}
@@ -3227,6 +3249,8 @@ function NativeDesktopContent({
                     />
                   ) : settingsPage === 'mcp' ? (
                     <NativeMcpSettings
+                      panelHost={settingsEditorHost}
+                      editorControl={settingsEditorControl}
                       bridge={bridge}
                       generation={generation.current}
                       selection={selection}
@@ -3234,6 +3258,8 @@ function NativeDesktopContent({
                     />
                   ) : settingsPage === 'providers' ? (
                     <NativeProviderSettings
+                      panelHost={settingsEditorHost}
+                      editorControl={settingsEditorControl}
                       bridge={bridge}
                       generation={generation.current}
                       selection={selection}
@@ -3250,6 +3276,7 @@ function NativeDesktopContent({
                     />
                   )}
                 </div>
+                <div className="settings-editor-panel" ref={setSettingsEditorHost} />
               </div>
             </DialogContent>
           </Dialog>

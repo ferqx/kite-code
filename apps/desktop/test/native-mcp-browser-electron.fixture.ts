@@ -108,6 +108,13 @@ try {
         (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
     );
   const panel = () => page.getByRole('region', { name: 'MCP settings', exact: true });
+  const editor = () => page.locator('.settings-editor-panel').getByRole('complementary');
+  async function manageServer() {
+    await panel()
+      .getByRole('button', { name: `管理连接 ${serverId}`, exact: true })
+      .click();
+    await editor().getByRole('heading', { name: 'MCP 连接详情', exact: true }).waitFor();
+  }
   async function settings() {
     await openSettings(page);
     await page.getByRole('button', { name: 'MCP', exact: true }).click();
@@ -179,18 +186,22 @@ try {
   }
   async function auth(label: string, action: string, cancel = false) {
     await refresh();
-    await panel()
+    await manageServer();
+    await editor()
       .getByRole('button', { name: `${label} ${serverId}`, exact: true })
       .click();
-    await panel().getByRole('button', { name: 'Confirm exact MCP operation', exact: true }).click();
+    await editor()
+      .getByRole('button', { name: 'Confirm exact MCP operation', exact: true })
+      .click();
     return settle(action, cancel ? 'cancelled' : 'completed', cancel);
   }
   async function presence(expected: boolean) {
     await refresh();
-    await panel()
+    await manageServer();
+    await editor()
       .getByRole('button', { name: `Read auth status ${serverId}`, exact: true })
       .click();
-    await panel()
+    await editor()
       .getByText(new RegExp(`"credentialPresent": ${expected}`))
       .waitFor();
   }
@@ -204,10 +215,11 @@ try {
   await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
   await page.getByText('当前模式：accept_edits；默认模式：auto', { exact: true }).waitFor();
   await settings();
-  await panel()
+  await manageServer();
+  await editor()
     .getByRole('button', { name: `Select user ${serverId}: enable`, exact: true })
     .click();
-  await panel().getByRole('button', { name: 'Confirm exact MCP operation', exact: true }).click();
+  await editor().getByRole('button', { name: 'Confirm exact MCP operation', exact: true }).click();
   await settle('mcp.server.select');
   await presence(false);
   stage('default_browser_login_ready');
@@ -243,7 +255,8 @@ try {
   assert.equal(physical.filter((value) => value.method === 'POST').length, 0);
   assert.equal(physical.filter((value) => value.path === `/v1/commands/${originalId}`).length, 1);
   await refresh();
-  await panel()
+  await manageServer();
+  await editor()
     .getByRole('button', { name: `Connect ${serverId}`, exact: true })
     .click();
   const connection = await settle('mcp.connect');

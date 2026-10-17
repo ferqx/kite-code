@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { verifyPublishedArtifact } from '../../artifacts-files';
 import type { Store } from '../port';
 import { AgentError, type ArtifactReference, type ArtifactScope } from '../types';
+import { isLegacyPublicReviewRequest } from './authorization-review';
 import type { SqliteOperations } from './operations';
 import { blobReferences, blobs } from './schema';
 
@@ -125,12 +126,18 @@ function get(ops: SqliteOperations, input: Get, publishing = false): ArtifactRef
 }
 export function callArtifact(ops: SqliteOperations, method: string, args: unknown[]): unknown {
   const input = args[0] as Register;
-  if (method === 'getArtifactReference') {
+  if (method === 'getArtifactReference' || method === 'getLegacyReviewArtifactReference') {
     ops.db.run('BEGIN');
     try {
       ops.identity(input.expectedStoreId);
       scope(ops, input, false);
-      const result = get(ops, input);
+      const reference = get(ops, input);
+      const result =
+        method === 'getLegacyReviewArtifactReference' && reference
+          ? isLegacyPublicReviewRequest(ops, reference)
+            ? reference
+            : null
+          : reference;
       ops.db.run('COMMIT');
       return result;
     } catch (error) {

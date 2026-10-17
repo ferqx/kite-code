@@ -2,6 +2,7 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "shadcn/tailwind.css";
 @import "./native-typeset.css";
+@import "./native-provider-settings.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 @source "../../../packages/ui/src/desktop";
@@ -164,33 +165,36 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   gap: 0;
   height: 100%;
 }
-.kite-client .desktop-settings.settings-layout.has-provider-panel {
-  grid-template-columns: 236px minmax(0, 1fr) minmax(320px, 390px);
+.kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
+  grid-template-columns: 236px minmax(0, 1fr) minmax(340px, 420px);
 }
-.kite-client .desktop-settings .settings-provider-panel {
+.kite-client .desktop-settings .settings-editor-panel:empty {
+  display: none;
+}
+.kite-client .desktop-settings .settings-editor-panel {
   min-width: 0;
   height: 100%;
   border-left: 1px solid var(--border);
   overflow: hidden;
 }
-.kite-client .desktop-settings .settings-provider-panel .right-sidebar-content {
+.kite-client .desktop-settings .settings-editor-panel .right-sidebar-content {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding: 20px;
+  overflow: hidden;
+  padding: 0;
 }
-.kite-client .desktop-settings .settings-provider-panel .right-sidebar-heading {
+.kite-client .desktop-settings .settings-editor-panel .right-sidebar-heading {
   min-height: 52px;
   padding-top: 8px;
   -webkit-app-region: no-drag;
 }
-.kite-client .desktop-settings .settings-provider-panel .right-sidebar-close {
+.kite-client .desktop-settings .settings-editor-panel .right-sidebar-close {
   position: relative;
   z-index: 1;
   pointer-events: auto;
   -webkit-app-region: no-drag;
 }
-html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-provider-panel {
+html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-editor-panel {
   -webkit-app-region: no-drag;
 }
 .kite-client .settings-sidebar {
@@ -237,7 +241,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   padding: 76px clamp(28px, 8vw, 144px) 76px clamp(28px, 11vw, 214px);
   overflow: auto;
 }
-.kite-client .desktop-settings.has-provider-panel .settings-content {
+.kite-client .desktop-settings:has(> .settings-editor-panel > .right-sidebar) .settings-content {
   padding-inline: clamp(24px, 4vw, 72px);
 }
 .kite-client .desktop-settings .settings-content > section {
@@ -620,20 +624,20 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   margin: 0 0 14px;
   color: var(--muted-foreground);
 }
-.kite-client .desktop-settings .settings-provider-panel .settings-provider-form {
+.kite-client .desktop-settings .settings-editor-panel .settings-provider-form {
   min-width: 0;
   padding: 0;
   margin: 0;
   border: 0;
 }
-.kite-client .desktop-settings .settings-provider-panel .settings-provider-form label {
+.kite-client .desktop-settings .settings-editor-panel .settings-provider-form label {
   display: flex;
   flex-direction: column;
   gap: 7px;
   margin: 18px 0;
   font-size: 13px;
 }
-.kite-client .desktop-settings .settings-provider-panel .settings-provider-form input {
+.kite-client .desktop-settings .settings-editor-panel .settings-provider-form input {
   width: 100%;
   min-height: 34px;
   padding: 5px 10px;
@@ -644,28 +648,28 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
 }
 .kite-client
   .desktop-settings
-  .settings-provider-panel
+  .settings-editor-panel
   .settings-provider-form
   input[aria-invalid="true"] {
   border-color: var(--destructive);
 }
 .kite-client
   .desktop-settings
-  .settings-provider-panel
+  .settings-editor-panel
   .settings-provider-form
   label
   small[role="alert"] {
   color: var(--destructive);
   font-size: 12px;
 }
-.kite-client .desktop-settings .settings-provider-panel .settings-provider-form > p {
+.kite-client .desktop-settings .settings-editor-panel .settings-provider-form > p {
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.5;
 }
 .kite-client
   .desktop-settings
-  .settings-provider-panel
+  .settings-editor-panel
   .settings-provider-form
   button[type="submit"] {
   margin-top: 16px;
@@ -677,15 +681,15 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   color: var(--foreground);
 }
 @media (max-width: 900px) {
-  .kite-client .desktop-settings.settings-layout.has-provider-panel {
+  .kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
     grid-template-columns: 236px minmax(0, 1fr);
   }
-  .kite-client .desktop-settings .settings-provider-panel {
+  .kite-client .desktop-settings .settings-editor-panel {
     position: absolute;
     z-index: 2;
     top: 0;
     right: 0;
-    width: min(390px, calc(100vw - 236px));
+    width: min(420px, calc(100vw - 236px));
     box-shadow: -8px 0 24px #20221e12;
   }
 }
@@ -693,11 +697,11 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   .kite-client .desktop-settings.settings-layout {
     grid-template-columns: 180px minmax(0, 1fr);
   }
-  .kite-client .desktop-settings.settings-layout.has-provider-panel {
+  .kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
     grid-template-columns: 180px minmax(0, 1fr);
   }
-  .kite-client .desktop-settings .settings-provider-panel {
-    width: min(390px, calc(100vw - 180px));
+  .kite-client .desktop-settings .settings-editor-panel {
+    width: min(420px, calc(100vw - 20px));
   }
   .kite-client .desktop-settings-header {
     width: 180px;

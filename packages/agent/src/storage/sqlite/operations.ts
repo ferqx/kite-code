@@ -2,6 +2,7 @@ import type { Database, Statement } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { semanticReviewContent } from '../../authorization-review-context';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
 import { recordedTokenUsage } from '../../token-usage';
@@ -646,6 +647,25 @@ export class SqliteOperations {
   }
   message(row: Row): MessageRecord {
     const source = parse(row.source_json) as Record<string, Json>;
+    let content = String(source.content ?? '');
+    if (row.role === 'user' && row.run_id !== null && content.includes('"decisionContext"')) {
+      const run = this.row(
+        'SELECT * FROM run WHERE id=? AND session_id=?',
+        row.run_id!,
+        row.session_id!,
+      );
+      const command = run && this.row('SELECT * FROM command WHERE id=?', run.origin_command_id!);
+      const carrier = command && this.childCarrier(command, String(run!.id));
+      if (
+        carrier &&
+        command!.kind === 'child.start' &&
+        canonicalJson(source.sourceIds!) ===
+          canonicalJson([String(command!.id), String(carrier.id)]) &&
+        this.row('SELECT kind FROM command WHERE id=?', carrier.origin_command_id!)?.kind ===
+          'authorization.review'
+      )
+        content = semanticReviewContent(content);
+    }
     return {
       id: String(row.id),
       sessionId: String(row.session_id),
@@ -653,7 +673,7 @@ export class SqliteOperations {
       seq: String(row.seq),
       status: row.status as MessageRecord['status'],
       role: row.role as MessageRecord['role'],
-      content: String(source.content ?? ''),
+      content,
       ...(['content', 'reasoning', 'tool_calls'].includes(String(source.firstOutput))
         ? { firstOutput: source.firstOutput as MessageRecord['firstOutput'] }
         : {}),
@@ -793,6 +813,7 @@ export class SqliteOperations {
         return activateChildRun(this, args[0] as Parameters<Store['activateChildRun']>[0]);
       case 'registerArtifact':
       case 'getArtifactReference':
+      case 'getLegacyReviewArtifactReference':
         return callArtifact(this, method, args);
       case 'getExtensionRecord':
       case 'listExtensionRecords':

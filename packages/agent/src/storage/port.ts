@@ -734,6 +734,10 @@ export interface Store {
       scope: ArtifactScope;
     },
   ): Promise<ArtifactReference | null>;
+  /** Exact public human-card binding for legacy Auto request bodies only. */
+  getLegacyReviewArtifactReference(
+    input: Parameters<Store['getArtifactReference']>[0],
+  ): Promise<ArtifactReference | null>;
   beginHostMutation(
     input: WriteContext & {
       commandId: string;

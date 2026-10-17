@@ -80,4 +80,6 @@ macOS host在读取deny中精确减去该子树及必要祖先metadata，单独�
 
 Linux [build-assets](build-assets.ts)在构建机器使用 C compiler生成 ELF64 native init，核对应 x64／arm64 machine、0755后纳入完整候选 inventory；已安装机器只定位包内 `platform/process/linux-shell-init`，不编译或退回 `.ts`。构建依赖 compiler、执行依赖 Bubblewrap及相应内核能力；缺依赖失败封闭，代码与静态检查不证明其存在。
 
+Shell 与 MCP 两个 Linux init 的 unknown-owner 固定 stderr 诊断按 `sizeof(diagnostic)-1` 的准确长度写入，EINTR重试，短写或错误继续标记unknown；原无限等待和零完成receipt保持。该修复保正式FORTIFY／Werror构建约束，不增加产品能力。[诊断回归](../../test/isolated/jobs/linux-init-diagnostic.test.ts)在正式C编译参数下分别核成功、EINTR、短写及EIO（两项／20断言）；完整八workspace build通过不替代namespace或安装运行资格。
+
 [准备层](../../test/isolated/jobs/linux-preparation.test.ts)、[原 owner mock](../../test/isolated/jobs/linux-owned-shell.test.ts)、[普通 Job 生命周期](../../test/isolated/jobs/linux-shell.test.ts)、[冷证据](../../test/isolated/jobs/linux-shell-process-evidence.test.ts)和[正式 Service 装配](../../../../apps/service/test/isolated/linux-shell-configuration.test.ts)已分别实际执行纯布局／身份、模拟内核交接、输出／取消／unknown、严格冷形状与真实配置接线；不执行 Linux 内核。[四个原生整例](../../test/isolated/jobs/linux-native-shell.test.ts)定义文件／网络／fork／temp exec、自然脱离后代和准确取消的验收；[正式Workflow来源整例](../../../../apps/service/test/isolated/skill-workflow-profile-host.test.ts)另定义Profile／Workspace与零启动漂移闭环。Linux缺工具／编译／执行失败直接失败，本机platform skip及macOS通过不计Linux资格。Profile准确来源投影源码已接，Linux ABI／完整 installed用户链仍依用户安排留重构后Actions，Windows权限后端、RSS与完整Runtime观测仍保退出缺口。

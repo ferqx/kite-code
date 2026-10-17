@@ -24,6 +24,8 @@ export interface ModelMessage {
   readonly toolCalls?: readonly ModelToolCall[];
   readonly toolCallId?: string;
   readonly sourceIds?: readonly string[];
+  /** Opaque adapter continuation. Private model history, never display text or authority. */
+  readonly continuation?: Json;
 }
 
 export interface ModelTool {
@@ -61,6 +63,7 @@ export type ModelEvent =
       readonly type: 'finish';
       readonly reason: 'stop' | 'tool_calls' | 'length' | 'cancelled';
       readonly usage: ModelUsage;
+      readonly continuation?: Json;
     };
 
 export interface ModelAdapter {

@@ -148,7 +148,7 @@ Native 的[单次 Plan 入口与审核](../../apps/desktop/README.md#native-计�
 
 Interaction 只有实际发起 Session 的权威请求，父展示与回答引用同一 ID。展示根与 ancestry 来自 Store，HTTP 不接收内部接纳或自报主体。答案保存后仍须原 owner 接纳并在派发事务核对绑定；`requestInput` 的 question 只提供信息。有限原 schema 的 oneOf/anyOf 分支及准确非空白 pattern `\\S` 沿同一节点、深度与关键字预算，由 Core 校验实际 JSON 自身字段，其他正则仍拒绝；DOM/TUI 共用中立的有限原 schema 解析，无法完整保留约束时明确回退 JSON。默认问卷的闭合 object 与 const:null 只构成普通信息答案：null 由 leaf 返回取消信息，同一 Run 继续，不调用业务取消。Native 页面草稿按完整原身份保留，pending 页缺席不清理，仅准确 accepted 回执或观察到替代／终态清原键；所选 pending question 隐藏主输入并保留原主草稿，具体页面合同归[Native owner](../../apps/desktop/README.md#native-普通问题与页面草稿)。默认普通 [ask_user](../../packages/agent/src/tools/ask-user/README.md)由 leaf 解释原 ID／闭合自由对象为文案，Service 的根选择、child 排除和可信零效果事实不提供其他 Tool grant。选项标题不替代内部值，自定义输入不扩大 schema 或权限，完整答案仍沿原 interaction.answer；边界归[Interaction owner](../../packages/agent/src/storage/sqlite/interactions/README.md)。Artifact 的 Core 端口保持中立，实际内容授权、不可变发布和二进制交付分别由 leaf 与 Service/Client 负责；知道 hash 或 renderer 路径不能代替原 scope。
 
-[完整 Model 正文](../../packages/agent/src/model-body/README.md)把 Tool summary 和原 Artifact 全文一起交给实际 Model；大请求、来源与 Auto 审核使用准确原 scope 的不可变正文和有限持久 header。Provider 前完整核实并展开，成功 Model 保存实际 inputBodyHash。最终 SQL 事务仅核 metadata/原绑定与真实执行 proof，不读取正文或调用 Provider。64KiB 路由阈值不裁剪任务或来源；Worker 有限队列和控制预留保持。Auto 专用 carrier 的 planned-parent 准入只能由具名 Store 方法提供，公开 snapshot 不生成豁免；审查是同 Loop 的一个无 Tool Model，文本自报引用不授予权限。大请求的人工回退附件需要客户端实际完整加载资格，不能把引用展示当作已经审阅全文。
+[完整 Model 正文](../../packages/agent/src/model-body/README.md)把 Tool summary 和原 Artifact 全文一起交给实际 Model；大请求、来源与 Auto 审核使用准确原 scope 的不可变正文和有限持久 header。Provider 前完整核实并展开，成功 Model 保存实际 inputBodyHash。最终 SQL 事务仅核 metadata/原绑定与真实执行 proof，不读取正文或调用 Provider。64KiB 路由阈值不裁剪任务或来源；Worker 有限队列和控制预留保持。Auto 专用 carrier 的 planned-parent 准入只能由具名 Store 方法提供，公开 snapshot 不生成豁免；审查是同 Loop 的一个无 Tool Model，文本自报引用不授予权限。审核历史只包含明确的语义消息字段，Provider 私有 continuation 不进入审核普通正文、后续审核历史或公开 Inspector；原私有请求仍在原 scope 完整验证，投影不替代原 carrier／payload 绑定证明。大请求的人工回退附件需要客户端实际完整加载资格，不能把引用展示当作已经审阅全文。
 
 steer 定位原活动 Run 的安全检查点，follow-up 保留独立命令及原前驱；已派发调用不会因新输入而改写原决策。模型输入取当前上下文选择，分别穷尽消息与结果引用的固定上界分页。合法 pending delivery 仅由原执行 owner 在准备模型请求时消费，完成游标保存在执行事实中，不依赖可裁剪通知。idle 或只读查询不创建模型请求。Rewind 核实整个执行组，原子隔离旧 pending 并保留历史；显式 include 只增加准确原来源，不重跑、不恢复旧交付。子内部结果与父 carrier 结果保持各自 Session 范围，实际模型请求记录准确 source IDs。
 
@@ -340,3 +340,14 @@ Native MCP 的 renderer通过固定IPC提交有限参数，Main固定真实观�
 ## 三项 token 口径
 
 Core 分离累计实际用量、最近请求实际输入与下一请求上下文预测。新增只读 Store usage 聚合只取本 Store／Session 原 Model 终态，覆盖缺失保留未知，读取不写入；不受有限 View 截断。跨包 `CompressionInput` 传实际工具及经 scope／路由核验的测量基线；纯投影在原输入被改写、移除或换工具时全量回退。已测输入与新增估算不会伪装成新的 Provider 统计或派发资格。Service、Client 与 TUI 的只读预测保准确原请求和 selection/upper，不捕获新来源、不初始化模型。完整接口与验证归[Core owner](../../packages/agent/src/context-estimate.README.md)。
+
+## Desktop 本地定时任务
+
+Desktop Main在应用存续期内触发本地定时任务，调度元数据属desktop-private DB10／closed manifest19；Agent业务执行仍只由普通Session创建与run.start拥有。每次新Session，运行前持久稳定原身份与完整快照，未知及冷恢复只查询原申请，不恢复POST权利；新Store不retag原任务，也不自动重放。权限、审批、Agent baseline与schema保持。精确实现和验证归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)与[maintenance DB10合同](../../packages/agent/src/maintenance/README.md#desktop-db10-与-manifest-v19)。
+
+
+### 显式模型协议与私有 continuation
+
+默认宿主的 OpenAI/compatible 连接可显式选择 Responses；旧配置缺省仍为 Chat Completions。协议冻结在实际 Run 绑定与公开非秘密 metadata 中；定时任务继续复用同一选择和 Agent Loop，不另建模型执行器。Responses 由官方 SDK 传输，单次零内部重试、`store:false`，错误不回退其他协议。
+
+加密推理状态与 SDK assistant parts 只作为不透明 continuation，沿已有私有 ModelOutput Artifact 链保存、恢复并传回匹配的 endpoint/provider/model/账户/header/路由绑定；它不授予工具执行权限，也不作为用户可见消息或 Inspector 正文。取消、流异常、截断工具批次及未完成压缩不提交可重放状态；非空纯文本 length 仍按长任务续接保存原文本段与其私有 continuation，由下一 Model Execution 继续。技术契约与测试见 [AI owner](../../packages/ai/README.md) 和 [ModelOutput owner](../../packages/agent/src/model-output/README.md)。

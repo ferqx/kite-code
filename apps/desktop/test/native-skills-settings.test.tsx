@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { SkillCataloguePage } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
-import { act } from 'react';
+import { act, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import type {
   NativeBridge,
@@ -68,10 +68,13 @@ async function fixture(
       bridge: NativeBridge,
       selection?: NativeSelection,
       historyEpoch?: number,
+      generation?: number,
     ) => Promise<void>,
+    panelHost: HTMLElement,
+    editorControl: RefObject<{ close: () => void } | null>,
   ) => Promise<void>,
 ) {
-  const dom = new JSDOM('<div id="root"></div>');
+  const dom = new JSDOM('<main id="root"></main><div id="panel"></div>');
   const prior = {
     window: globalThis.window,
     document: globalThis.document,
@@ -86,20 +89,30 @@ async function fixture(
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   const host = dom.window.document.getElementById('root')!,
+    panelHost = dom.window.document.getElementById('panel')!,
     root = createRoot(host);
+  const editorControl: RefObject<{ close: () => void } | null> = { current: null };
   try {
-    await run(host, root, async (bridge, selection = selected(), historyEpoch = 0) => {
-      await act(async () =>
-        root.render(
-          <NativeSkillsSettings
-            bridge={bridge}
-            generation={1}
-            selection={selection}
-            historyEpoch={historyEpoch}
-          />,
-        ),
-      );
-    });
+    await run(
+      host,
+      root,
+      async (bridge, selection = selected(), historyEpoch = 0, generation = 1) => {
+        await act(async () =>
+          root.render(
+            <NativeSkillsSettings
+              bridge={bridge}
+              generation={generation}
+              selection={selection}
+              historyEpoch={historyEpoch}
+              panelHost={panelHost}
+              editorControl={editorControl}
+            />,
+          ),
+        );
+      },
+      panelHost,
+      editorControl,
+    );
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
@@ -115,9 +128,15 @@ const refresh = async (host: HTMLElement) =>
       .click(),
   );
 
-test('Skills DOM publishes all fixed-revision pages with full descriptions, finite sources and local statuses', async () =>
-  fixture(async (host, _root, render) => {
+const openDetail = async (host: HTMLElement, name: string) =>
+  act(async () =>
+    host.querySelector<HTMLButtonElement>(`[aria-label="查看 ${name} 详情"]`)!.click(),
+  );
+
+test('Skills DOM publishes all fixed-revision pages as readonly rows with full detail metadata', async () =>
+  fixture(async (host, _root, render, panelHost) => {
     const rows = structuredClone(entries);
+    rows[299]!.source = undefined;
     rows[300]!.source = { scope: 'project', origin: '.kite-code' };
     rows[301] = {
       ...rows[301]!,
@@ -132,6 +151,7 @@ test('Skills DOM publishes all fixed-revision pages with full descriptions, fini
       ...rows[302]!,
       state: 'unavailable',
       reason: 'skill_capability_missing',
+      requiredCapabilities: ['files.read', 'files.write'],
       missingCapabilities: ['files.write'],
       source: { scope: 'user', origin: 'profile' },
     };
@@ -155,17 +175,51 @@ test('Skills DOM publishes all fixed-revision pages with full descriptions, fini
     expect(host.textContent).toContain('配置来源：项目 · .kite-code');
     expect(host.textContent).toContain('配置来源：用户 · Profile Skills');
     expect(host.textContent).toContain('来源无法确定');
-    expect(host.textContent).toContain('缺少能力：files.write');
-    expect([...host.querySelectorAll('summary')].at(-2)?.textContent).toContain('已禁用');
+    expect(host.textContent).toContain('来源未记录');
+    expect(host.querySelectorAll('summary')).toHaveLength(0);
+    expect(host.querySelectorAll('input, textarea, select')).toHaveLength(0);
+    expect(host.querySelector('[aria-label="查看 skill-301 详情"]')?.textContent).toContain(
+      '已禁用',
+    );
+    expect(
+      [...host.querySelectorAll('button')].some((value) =>
+        /新增|添加|上传|安装|启用/.test(value.textContent ?? ''),
+      ),
+    ).toBe(false);
+    expect(panelHost.textContent).toBe('');
+    expect(host.textContent).not.toContain('缺少能力：files.write');
+    await openDetail(host, 'Skill 302');
+    expect(panelHost.querySelector('aside')?.getAttribute('aria-label')).toBe('Skill 302 详情');
+    expect(panelHost.textContent).toContain('摘要 302 保留全文\n尾部🙂');
+    expect(panelHost.textContent).toContain('缺少能力：files.write');
+    expect(panelHost.textContent).toContain('需要能力：files.read、files.write');
+    expect(panelHost.textContent).toContain('原因：skill_capability_missing');
+    expect(panelHost.textContent).toContain(`版本：${'a'.repeat(64)}`);
+    const technicalDetails = panelHost.querySelector('details')!;
+    expect(technicalDetails.open).toBe(false);
+    expect(technicalDetails.querySelector('summary')?.textContent).toBe('技术详情');
+    expect(technicalDetails.textContent).toContain('配置 ID：skill-302');
+    expect(panelHost.querySelectorAll('input, textarea, select')).toHaveLength(0);
+    await openDetail(host, 'skill-301');
+    expect(panelHost.textContent).toContain('摘要未记录');
+    expect(panelHost.textContent).toContain('版本：未记录');
+    expect(panelHost.textContent).toContain('来源无法确定');
     expect(calls.filter((call) => call.method === 'settings.skills.next')).toHaveLength(8);
     expect(calls.at(-1)?.method).toBe('settings.skills.close');
+    expect(
+      calls.every((call) =>
+        ['settings.skills.open', 'settings.skills.next', 'settings.skills.close'].includes(
+          call.method,
+        ),
+      ),
+    ).toBe(true);
     const count = calls.length;
     await render(bridge, { ...selected(), viewGeneration: 9 });
     expect(calls).toHaveLength(count);
   }));
 
-test('same scope refresh failure retains the complete directory and never presents a partial new prefix', async () =>
-  fixture(async (host, _root, render) => {
+test('same scope refresh failure retains the complete directory and detail without a partial new prefix', async () =>
+  fixture(async (host, _root, render, panelHost) => {
     let pass = 0;
     const bridge = bridgeOf(async (request) => {
       if (request.method === 'settings.skills.close') return null;
@@ -179,9 +233,12 @@ test('same scope refresh failure retains the complete directory and never presen
     });
     await render(bridge);
     expect(host.textContent).toContain('已完整读取 1 项 Skill。');
+    await openDetail(host, 'Skill 0');
     await refresh(host);
     expect(host.textContent).toContain('保留上次完整目录，尚未确认最新状态');
-    expect(host.querySelector('summary')?.textContent).toContain('Skill 0');
+    expect(host.querySelector('li button')?.textContent).toContain('Skill 0');
+    expect(panelHost.textContent).toContain('详情尚未确认最新状态：skill_catalogue_changed');
+    expect(panelHost.textContent).toContain('配置 ID：skill-000');
     expect(host.textContent).not.toContain('摘要 1 保留全文');
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('skill_catalogue_changed');
   }));
@@ -240,7 +297,7 @@ test('switching workspace closes the stalled old reader, ignores its late page a
     expect(
       calls.some((call) => call.method === 'settings.skills.close' && call.readId === old.readId),
     ).toBe(true);
-    expect(host.querySelector('summary')?.textContent).toContain('Other workspace');
+    expect(host.querySelector('li button')?.textContent).toContain('Other workspace');
     await act(async () => resolve(result(old, entries)));
     expect(host.querySelectorAll('li')).toHaveLength(1);
     expect(host.textContent).not.toContain('摘要 302');
@@ -268,4 +325,190 @@ test('observation reset cancels a stalled page and an unmounted page never publi
     expect(closed).toEqual(held.map((value) => value.request.readId));
     await act(async () => held[1]!.resolve(result(held[1]!.request, entries)));
     expect(host.textContent).toBe('');
+  }));
+
+test('Skill details live only in the far-right host and close controls restore the selected row focus', async () =>
+  fixture(async (host, root, render, panelHost, editorControl) => {
+    const calls: NativeSkillsRequest[] = [];
+    const bridge = bridgeOf(async (request) => {
+      calls.push(request);
+      return request.method === 'settings.skills.close'
+        ? null
+        : result(request, entries.slice(0, 2));
+    });
+    await render(bridge);
+    const first = host.querySelector<HTMLButtonElement>('[aria-label="查看 Skill 0 详情"]')!;
+    const second = host.querySelector<HTMLButtonElement>('[aria-label="查看 Skill 1 详情"]')!;
+    expect(editorControl.current).toBeNull();
+    await openDetail(host, 'Skill 0');
+    expect(host.querySelector('aside')).toBeNull();
+    expect(panelHost.querySelector('aside')).not.toBeNull();
+    expect(first.getAttribute('aria-expanded')).toBe('true');
+    expect(first.getAttribute('aria-controls')).toBe(panelHost.querySelector('aside')!.id);
+    expect(host.ownerDocument.activeElement).toBe(panelHost.querySelector('h3'));
+    const count = calls.length;
+    await openDetail(host, 'Skill 1');
+    expect(panelHost.textContent).toContain('配置 ID：skill-001');
+    expect(panelHost.textContent).not.toContain('配置 ID：skill-000');
+    expect(first.getAttribute('aria-expanded')).toBe('false');
+    expect(second.getAttribute('aria-expanded')).toBe('true');
+    await act(async () =>
+      panelHost.querySelector<HTMLButtonElement>('[aria-label="关闭"]')!.click(),
+    );
+    expect(panelHost.textContent).toBe('');
+    expect(editorControl.current).toBeNull();
+    expect(host.ownerDocument.activeElement).toBe(second);
+    await openDetail(host, 'Skill 0');
+    await act(async () =>
+      [...panelHost.querySelectorAll('button')]
+        .find((button) => button.textContent === '返回列表')!
+        .click(),
+    );
+    expect(host.ownerDocument.activeElement).toBe(first);
+    await openDetail(host, 'Skill 1');
+    // The settings Dialog routes its first Escape through this shared control.
+    await act(async () => editorControl.current!.close());
+    expect(panelHost.textContent).toBe('');
+    expect(editorControl.current).toBeNull();
+    expect(host.ownerDocument.activeElement).toBe(second);
+    expect(calls).toHaveLength(count);
+    await openDetail(host, 'Skill 0');
+    await act(async () => root.unmount());
+    expect(panelHost.textContent).toBe('');
+    expect(editorControl.current).toBeNull();
+  }));
+
+test('refresh keeps selected details marked stale while loading and removes missing entry metadata', async () =>
+  fixture(async (host, _root, render, panelHost, editorControl) => {
+    let pass = 0;
+    let pending!: NativeSkillsRequest;
+    let resolve!: (value: NativeSkillsPage) => void;
+    const bridge = bridgeOf(async (request) => {
+      if (request.method === 'settings.skills.close') return null;
+      if (++pass === 1) return result(request, entries.slice(0, 1));
+      pending = request;
+      return new Promise<NativeSkillsPage>((done) => {
+        resolve = done;
+      });
+    });
+    await render(bridge);
+    await openDetail(host, 'Skill 0');
+    await refresh(host);
+    expect(host.textContent).toContain('当前显示上次完整目录');
+    expect(panelHost.textContent).toContain('当前详情为上次完整目录');
+    expect(panelHost.textContent).toContain('配置 ID：skill-000');
+    expect(host.querySelector<HTMLButtonElement>('.provider-refresh')!.disabled).toBe(true);
+    await act(async () => resolve(result(pending, [])));
+    expect(host.textContent).toContain('当前工作区没有可发现的 Skill');
+    expect(panelHost.textContent).not.toContain('配置 ID：skill-000');
+    expect(panelHost.textContent).toContain('此 Skill 已不在最新目录中');
+    await act(async () => editorControl.current!.close());
+    expect(host.ownerDocument.activeElement).toBe(host.querySelector('.provider-refresh'));
+  }));
+
+test.each([
+  'workspace',
+  'observation',
+  'generation',
+  'capability',
+] as const)('%s changes clear open Skill details and reject late refresh responses', async (change) =>
+  fixture(async (host, _root, render, panelHost, editorControl) => {
+    let pass = 0;
+    const held: { request: NativeSkillsRequest; resolve: (value: NativeSkillsPage) => void }[] = [];
+    const closed: string[] = [];
+    const bridge = bridgeOf(async (request) => {
+      if (request.method === 'settings.skills.close') {
+        closed.push(request.readId);
+        return null;
+      }
+      if (++pass === 1) return result(request, entries.slice(0, 1));
+      return new Promise<NativeSkillsPage>((resolve) => held.push({ request, resolve }));
+    });
+    await render(bridge);
+    await openDetail(host, 'Skill 0');
+    await refresh(host);
+    const old = held[0]!;
+    expect(panelHost.textContent).toContain('配置 ID：skill-000');
+    const nextSelection =
+      change === 'workspace'
+        ? selected('other', 'other-workspace', 3)
+        : change === 'capability'
+          ? { ...selected(), canReadSkills: false }
+          : selected();
+    await render(
+      bridge,
+      nextSelection,
+      change === 'observation' ? 1 : 0,
+      change === 'generation' ? 2 : 1,
+    );
+    expect(closed).toContain(old.request.readId);
+    expect(panelHost.textContent).toBe('');
+    expect(editorControl.current).toBeNull();
+    expect(host.querySelectorAll('li')).toHaveLength(0);
+    await act(async () => old.resolve(result(old.request, entries)));
+    expect(panelHost.textContent).toBe('');
+    expect(host.querySelectorAll('li')).toHaveLength(0);
+    if (change !== 'capability') {
+      const next = held[1]!;
+      const value = result(next.request, [{ ...entries[0]!, description: 'New scope details' }]);
+      if (change === 'workspace') {
+        value.scope.sessionId = 'other';
+        value.scope.workspaceId = 'other-workspace';
+        value.page.workspaceId = 'other-workspace';
+      }
+      await act(async () => next.resolve(value));
+      expect(host.querySelectorAll('li')).toHaveLength(1);
+      expect(panelHost.textContent).toBe('');
+      expect(editorControl.current).toBeNull();
+      await openDetail(host, 'Skill 0');
+      expect(panelHost.textContent).toContain('New scope details');
+      expect(panelHost.textContent).not.toContain('摘要 0 保留全文');
+    }
+  }));
+
+test('no selection keeps the catalogue readonly and does not issue a workspace read', async () =>
+  fixture(async (host, root, _render, panelHost, editorControl) => {
+    const calls: NativeSkillsRequest[] = [];
+    const bridge = bridgeOf(async (request) => {
+      calls.push(request);
+      return null;
+    });
+    await act(async () =>
+      root.render(
+        <NativeSkillsSettings
+          bridge={bridge}
+          generation={1}
+          historyEpoch={0}
+          panelHost={panelHost}
+          editorControl={editorControl}
+        />,
+      ),
+    );
+    expect(host.textContent).toContain('选择会话后查看所属工作区的 Skills');
+    expect(host.querySelector<HTMLButtonElement>('.provider-refresh')!.disabled).toBe(true);
+    expect(host.querySelectorAll('li, input, textarea, select')).toHaveLength(0);
+    expect(panelHost.textContent).toBe('');
+    expect(calls).toHaveLength(0);
+  }));
+
+test('initial read failure is distinct from an empty catalogue and hides unsafe error text', async () =>
+  fixture(async (host, _root, render, panelHost) => {
+    let fail = true;
+    const bridge = bridgeOf(async (request) => {
+      if (request.method === 'settings.skills.close') return null;
+      if (fail) throw Error('/private/unsafe/skill-source.md');
+      return result(request, []);
+    });
+    await render(bridge);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'skill_catalogue_unavailable',
+    );
+    expect(host.textContent).toContain('尚未取得完整目录');
+    expect(host.textContent).not.toContain('/private/unsafe');
+    expect(host.textContent).not.toContain('没有可发现');
+    expect(panelHost.textContent).toBe('');
+    fail = false;
+    await refresh(host);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.textContent).toContain('当前工作区没有可发现的 Skill');
   }));

@@ -1,0 +1,845 @@
+/* Native provider settings: presentation only; connection and credential intent stays in the host. */
+.kite-client .desktop-settings .settings-content:has(:is(.provider-settings, .catalogue-settings)) {
+  padding: 54px clamp(24px, 4vw, 64px) 56px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) {
+  container: provider-settings / inline-size;
+  max-width: 1080px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-page-heading
+  h2 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.7px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-page-heading
+  p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  background: var(--card);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 120ms,
+    border-color 120ms;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: 3px;
+  box-shadow: none;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-workspace {
+  display: grid;
+  gap: 24px;
+  align-items: start;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-directory {
+  min-width: 0;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-directory-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 550;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-directory-heading
+  span:last-child {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-mark-compatible {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 16px;
+  letter-spacing: -2px;
+  padding-right: 2px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  opacity: 0.55;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-badge.is-configured
+  .provider-status-dot {
+  background: #22845b;
+  opacity: 1;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-directory-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 18px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-directory-note
+  svg {
+  margin-top: 1px;
+  width: 14px;
+  height: 14px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--card);
+}
+.kite-client .desktop-settings .provider-panel-content {
+  container: provider-editor / inline-size;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-editor-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-editor-heading
+  > div {
+  min-width: 0;
+  flex: 1;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-editor-heading
+  h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-editor-heading
+  p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-icon-button {
+  width: 30px;
+  min-height: 30px;
+  padding: 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-form-section {
+  padding: 0 0 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-form-section:last-child {
+  border-bottom: 0;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-form-section
+  h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 14px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-form-section
+  h4
+  svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted-foreground);
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-editor
+  .provider-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-form-section
+  > .provider-field
+  + .provider-field,
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-field-help
+  + .provider-field,
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-form-grid
+  + .provider-field {
+  margin-top: 14px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-field-optional {
+  margin-left: 6px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 400;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-field
+  :is(input, select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 37px;
+  padding: 9px 11px;
+  margin: 0;
+  border: 1px solid var(--input);
+  border-radius: 7px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 400;
+  line-height: 1.45;
+  box-shadow: 0 1px 2px #00000003;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-field select {
+  padding-right: 26px;
+  text-overflow: ellipsis;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-field
+  textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-field
+  :is(input, textarea)::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.75;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-field
+  [aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-field
+  :disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-field-help,
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-field-error {
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-field-error {
+  color: var(--destructive);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 20px;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-editor-footer
+  > span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-button.provider-save {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-button.provider-save:hover:not(:disabled) {
+  background: var(--primary);
+  opacity: 0.85;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-notice {
+  margin: 0 0 20px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-notice-error {
+  border-color: var(--destructive);
+  color: var(--destructive);
+  background: var(--card);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-notice-success {
+  border-left: 3px solid #22845b;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-editor
+  > .provider-notice {
+  margin: 12px 22px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-page-note {
+  margin: 24px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+@container provider-settings (max-width: 420px) {
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-page-heading {
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-refresh
+    span {
+    display: none;
+  }
+}
+@container provider-editor (max-width: 360px) {
+  .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-editor-heading,
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-editor-footer {
+    padding: 16px;
+  }
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-editor-body {
+    padding: 16px;
+  }
+}
+
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-instance-list {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-instance {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 17px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-instance[data-selected] {
+  background: var(--accent);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-instance-info {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-instance-info
+  strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-instance-info
+  > span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-instance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-instance-actions
+  .provider-button {
+  min-height: 30px;
+  padding: 6px 9px;
+  background: transparent;
+  border-color: transparent;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-instance-actions
+  .provider-button:hover {
+  background: var(--accent);
+  border-color: var(--border);
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-delete-link {
+  color: var(--destructive);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-button.provider-remove {
+  background: var(--destructive);
+  border-color: var(--destructive);
+  color: var(--destructive-foreground, white);
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-empty {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 56px 20px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-empty > svg {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 4px;
+  color: var(--muted-foreground);
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-empty h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-empty p {
+  margin: 0 0 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-removal-impact {
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-removal-impact
+  h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-removal-impact
+  ul {
+  padding-left: 20px;
+  margin: 8px 0 16px;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-removal-impact
+  .provider-notice {
+  margin-top: 20px;
+}
+@container provider-settings (max-width: 540px) {
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-page-actions {
+    justify-content: flex-start;
+  }
+  .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-instance {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-instance-info {
+    flex-basis: calc(100% - 50px);
+  }
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-instance
+    > .provider-badge {
+    margin-left: 46px;
+  }
+  .kite-client
+    .desktop-settings
+    :is(.provider-settings, .catalogue-settings)
+    .provider-instance-actions {
+    margin-left: auto;
+  }
+}
+
+/* Skills and MCP reuse the provider page, list, field and right-rail primitives. */
+.kite-client .desktop-settings .catalogue-settings .catalogue-section {
+  margin-bottom: 28px;
+}
+.kite-client .desktop-settings .catalogue-settings .provider-directory-heading h3 {
+  margin: 0;
+  font: inherit;
+}
+.kite-client .desktop-settings .catalogue-settings .provider-instance-info h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.kite-client .desktop-settings .catalogue-settings .catalogue-mark {
+  font-size: 20px;
+  font-weight: 450;
+}
+.kite-client .desktop-settings .catalogue-settings .catalogue-identifier {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.kite-client .desktop-settings .catalogue-settings .catalogue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.kite-client .desktop-settings .catalogue-settings .catalogue-actions .provider-button,
+.kite-client .desktop-settings .catalogue-settings .provider-form-section > .provider-button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  max-width: 100%;
+}
+.kite-client .desktop-settings .catalogue-settings .catalogue-pagination {
+  margin-top: 12px;
+}
+.kite-client .desktop-settings .catalogue-settings .catalogue-empty-note {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  padding: 16px 0;
+}
+.kite-client .desktop-settings .catalogue-settings pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.7;
+}
+.kite-client .desktop-settings .catalogue-settings .catalogue-details {
+  margin-top: 12px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .desktop-settings .catalogue-settings .catalogue-details summary {
+  cursor: pointer;
+}
+.kite-client .desktop-settings .settings-catalogue-row {
+  width: 100%;
+  color: var(--foreground);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border: 0;
+  border-radius: 0;
+}
+.kite-client .desktop-settings .settings-catalogue-row:hover {
+  background: var(--accent);
+}
+.kite-client .desktop-settings .settings-catalogue-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.kite-client .desktop-settings .settings-catalogue-details {
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.kite-client .desktop-settings .settings-catalogue-details dt {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  margin-top: 18px;
+}
+.kite-client .desktop-settings .settings-catalogue-details dd {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+
+.kite-client .desktop-settings .provider-settings .provider-pending .provider-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.kite-client .desktop-settings .provider-settings .provider-pending p {
+  flex: 1;
+  min-width: 160px;
+  margin: 0;
+}
+.kite-client .desktop-settings .catalogue-settings .provider-submissions {
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+.kite-client .desktop-settings .catalogue-settings .provider-submission {
+  padding: 14px 16px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  overflow-wrap: anywhere;
+}
+.kite-client .desktop-settings .catalogue-settings .provider-submission p {
+  margin: 4px 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .desktop-settings .catalogue-settings .provider-submission .provider-button {
+  margin-top: 12px;
+}
+.kite-client .desktop-settings .catalogue-settings .provider-submission-details {
+  margin-top: 10px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .desktop-settings .catalogue-settings .provider-submission-details summary {
+  cursor: pointer;
+}
+.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row {
+  background: transparent;
+}
+.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row:hover,
+.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row[data-selected] {
+  background: var(--accent);
+}
+.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row {
+  justify-content: flex-start;
+}
+.kite-client
+  .desktop-settings
+  .catalogue-settings.skills-settings
+  .provider-instance
+  > .provider-badge {
+  margin-left: 0;
+}

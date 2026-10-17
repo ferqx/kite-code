@@ -166,16 +166,24 @@ try {
     await complete(count);
   }
   async function details(summary: string, expected: string[]) {
-    const entry = panel()
-      .locator('details')
-      .filter({ has: page.locator('summary', { hasText: summary }) });
-    assert.equal(await entry.count(), 1);
-    if ((await entry.getAttribute('open')) === null) await entry.locator('summary').click();
+    const separator = summary.lastIndexOf(' · ');
+    const name = summary.slice(0, separator);
+    const state = summary.slice(separator + 3);
+    const row = panel().getByRole('button', { name: `查看 ${name} 详情`, exact: true });
+    assert.equal(await row.count(), 1);
+    assert.ok((await row.innerText()).includes(state));
+    await row.click();
+    const entry = page
+      .locator('.settings-editor-panel')
+      .getByRole('complementary', { name: `${name} 详情`, exact: true });
+    await entry.waitFor();
     const text = await entry.innerText();
     for (const value of expected)
       assert.ok(text.includes(value), JSON.stringify({ summary, value, text }));
     assert.ok(!text.includes(home!));
     assert.ok(!text.includes('PRIVATE_SKILL_BODY'));
+    await entry.getByRole('button', { name: '返回列表', exact: true }).click();
+    await entry.waitFor({ state: 'hidden' });
   }
   await select('Skills Window', 'w');
   await skills();
@@ -227,7 +235,9 @@ try {
     '---\nname: Refreshed metadata\ndescription: OWNED_FILE_REFRESH_TAIL\n---\nPRIVATE_SKILL_BODY',
   );
   await refresh(306);
-  await panel().locator('summary').filter({ hasText: 'Refreshed metadata · 可用' }).waitFor();
+  await panel()
+    .getByRole('button', { name: '查看 Refreshed metadata 详情', exact: true })
+    .waitFor();
   await details('Refreshed metadata · 可用', ['OWNED_FILE_REFRESH_TAIL']);
   const edited = JSON.parse(originalProject);
   edited.skills.push({ id: 'config-refresh', path: 'absent-refresh' });
@@ -268,7 +278,9 @@ try {
     '配置来源：项目 · .kite-code',
   ]);
   assert.equal(
-    await panel().locator('summary').filter({ hasText: 'Refreshed metadata' }).count(),
+    await panel()
+      .getByRole('button', { name: '查看 Refreshed metadata 详情', exact: true })
+      .count(),
     0,
   );
   await openSettings(page);
@@ -276,7 +288,9 @@ try {
   await select('Skills Window', 'w');
   await skills();
   await complete(306);
-  await panel().locator('summary').filter({ hasText: 'Refreshed metadata · 可用' }).waitFor();
+  await panel()
+    .getByRole('button', { name: '查看 Refreshed metadata 详情', exact: true })
+    .waitFor();
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   assert.equal(await panel().count(), 0);
@@ -296,7 +310,9 @@ try {
   await select('Skills Window', 'w');
   await skills();
   await complete(306);
-  await panel().locator('summary').filter({ hasText: 'Refreshed metadata · 可用' }).waitFor();
+  await panel()
+    .getByRole('button', { name: '查看 Refreshed metadata 详情', exact: true })
+    .waitFor();
   const coldPhysical = await app!.evaluate(() => (globalThis as FixtureGlobals).skillsPhysical);
   assert.equal(coldPhysical.filter((row) => row.method !== 'GET').length, 0);
   const persisted = await app!.evaluate((_, home) => {

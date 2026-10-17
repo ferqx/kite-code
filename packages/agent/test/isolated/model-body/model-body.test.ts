@@ -451,15 +451,18 @@ test('large Auto ask_user preserves a real bounded human card with the exact com
     expect(JSON.stringify(request)).not.toContain('subjectId');
     expect(JSON.stringify(request)).not.toContain('owner');
     const ref = request.policy.review.reference;
+    expect(ref.id).toStartWith('authorization-review-request-');
     const complete = JSON.parse(
       Buffer.from(
-        await f.artifacts.read({
-          expectedStoreId: f.expectedStoreId,
-          sessionId: 's',
-          subjectId: 'owner',
-          refId: ref.id,
-          scope: ref.scope!,
-        }),
+        (
+          await f.runtime.readArtifact({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            refId: ref.id,
+            scope: ref.scope!,
+          })
+        ).content,
       ).toString('utf8'),
     );
     expect(complete.task).toBe(body);

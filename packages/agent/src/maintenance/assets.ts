@@ -9,6 +9,7 @@ import { verifyDesktopAnswerRows } from './desktop-answers';
 import { verifyDesktopCallerRows } from './desktop-callers';
 import { verifyDesktopConfigurationRows } from './desktop-configurations';
 import { verifyDesktopMcpRows } from './desktop-mcp';
+import { verifyDesktopScheduleRows } from './desktop-schedules';
 import { verifyDesktopWorkspaceRows } from './desktop-workspaces';
 import {
   verifyDesktopFileRecoveryRows,
@@ -167,17 +168,31 @@ export function openUiDatabase(path: string): Database {
       .query<{ user_version: number }, []>('PRAGMA user_version')
       .get()?.user_version;
     const schema =
-      version === 6 || version === 7 || version === 8 || version === 9
+      version === 6 || version === 7 || version === 8 || version === 9 || version === 10
         ? [
             answerSchema,
             callerSchema,
             configurationSchema,
             ...uiSchema,
             fileRecoverySchema,
-            ...(version === 7 || version === 8 || version === 9 ? [mcpSchema] : []),
+            ...(version === 7 || version === 8 || version === 9 || version === 10
+              ? [mcpSchema]
+              : []),
             routeSchema,
             recoverySchema,
-            ...(version === 8 || version === 9
+            ...(version === 10
+              ? [
+                  [
+                    'scheduled_task_runs',
+                    'CREATE TABLE scheduled_task_runs(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,occurrence_at INTEGER NOT NULL,state TEXT NOT NULL)',
+                  ],
+                  [
+                    'scheduled_tasks',
+                    'CREATE TABLE scheduled_tasks(id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+                  ],
+                ]
+              : []),
+            ...(version === 8 || version === 9 || version === 10
               ? [
                   [
                     'workspace_removal_intents',
@@ -206,7 +221,8 @@ export function openUiDatabase(path: string): Database {
         version !== 6 &&
         version !== 7 &&
         version !== 8 &&
-        version !== 9) ||
+        version !== 9 &&
+        version !== 10) ||
       actual.length !== schema.length ||
       actual.some(
         (row, i) =>
@@ -230,7 +246,8 @@ export function openUiDatabase(path: string): Database {
       version === 6 ||
       version === 7 ||
       version === 8 ||
-      version === 9
+      version === 9 ||
+      version === 10
     )
       verifyRecoveryRows(db);
     if (
@@ -240,12 +257,13 @@ export function openUiDatabase(path: string): Database {
       version === 6 ||
       version === 7 ||
       version === 8 ||
-      version === 9
+      version === 9 ||
+      version === 10
     )
       verifyDesktopCallerRows(
         db,
-        version === 6 || version === 7 || version === 8 || version === 9,
-        version === 9,
+        version === 6 || version === 7 || version === 8 || version === 9 || version === 10,
+        version === 9 || version === 10,
       );
     if (
       version === 4 ||
@@ -253,15 +271,24 @@ export function openUiDatabase(path: string): Database {
       version === 6 ||
       version === 7 ||
       version === 8 ||
-      version === 9
+      version === 9 ||
+      version === 10
     )
       verifyDesktopFileRecoveryRows(db);
-    if (version === 5 || version === 6 || version === 7 || version === 8 || version === 9)
+    if (
+      version === 5 ||
+      version === 6 ||
+      version === 7 ||
+      version === 8 ||
+      version === 9 ||
+      version === 10
+    )
       verifyDesktopAnswerRows(db);
-    if (version === 6 || version === 7 || version === 8 || version === 9)
+    if (version === 6 || version === 7 || version === 8 || version === 9 || version === 10)
       verifyDesktopConfigurationRows(db);
-    if (version === 7 || version === 8 || version === 9) verifyDesktopMcpRows(db);
-    if (version === 8 || version === 9) verifyDesktopWorkspaceRows(db);
+    if (version === 7 || version === 8 || version === 9 || version === 10) verifyDesktopMcpRows(db);
+    if (version === 8 || version === 9 || version === 10) verifyDesktopWorkspaceRows(db);
+    if (version === 10) verifyDesktopScheduleRows(db);
     return db;
   } catch (error) {
     db.close(true);
@@ -447,23 +474,28 @@ export async function captureAssets(
   const mcpApprovals = await capture('mcp-approvals.json', false);
   const mcpAuthBindings = await capture('mcp-auth-bindings.json', false);
   const rawMcp = mcpConfiguration.present || mcpApprovals.present || mcpAuthBindings.present;
-  let uiVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | undefined;
+  let uiVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | undefined;
   if (desktopUi.present) {
     const db = openUiDatabase(join(target, desktopUi.path));
     try {
       uiVersion = db
-        .query<{ user_version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 }, []>('PRAGMA user_version')
+        .query<{ user_version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 }, []>('PRAGMA user_version')
         .get()!.user_version;
     } finally {
       db.close(true);
     }
   }
   const currentAssets =
-    uiVersion === 6 || uiVersion === 7 || uiVersion === 8 || uiVersion === 9 || rawMcp;
+    uiVersion === 6 ||
+    uiVersion === 7 ||
+    uiVersion === 8 ||
+    uiVersion === 9 ||
+    uiVersion === 10 ||
+    rawMcp;
   return {
     configuration: await capture('config.jsonc', false),
     skillWorkflowConfiguration: await capture('skill-workflow.jsonc', false),
-    ...(rawMcp || uiVersion === 8 || uiVersion === 9
+    ...(rawMcp || uiVersion === 8 || uiVersion === 9 || uiVersion === 10
       ? { mcpConfiguration, mcpApprovals, mcpAuthBindings }
       : {}),
     desktopUi: {

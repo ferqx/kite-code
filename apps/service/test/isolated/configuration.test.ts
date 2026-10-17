@@ -761,3 +761,166 @@ test('explicit recovery resolver preserves the persisted model selection and ref
     f.close();
   }
 }, 15000);
+
+test('user provider Responses protocol reaches the real runtime endpoint and never falls back on failure', async () => {
+  const f = fixture();
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  let fail = false;
+  writeFileSync(join(f.workspace, 'responses-source.txt'), 'Responses tool result marker');
+  const event = (type: string, value: Record<string, unknown>) =>
+    `event: ${type}\ndata: ${JSON.stringify({ type, ...value })}\n\n`;
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      requests.push({
+        path: new URL(request.url).pathname,
+        body: (await request.json()) as Record<string, unknown>,
+      });
+      if (fail) return Response.json({ error: { message: 'fixture rejection' } }, { status: 400 });
+      if (requests.length === 1) {
+        const reasoning = {
+          type: 'reasoning',
+          id: 'rs_service',
+          encrypted_content: 'owned-encrypted-reasoning',
+        };
+        const call = {
+          type: 'function_call',
+          id: 'fc_service',
+          call_id: 'call_service',
+          name: 'files_read',
+          arguments: JSON.stringify({ path: 'responses-source.txt' }),
+          status: 'completed',
+        };
+        return new Response(
+          event('response.created', {
+            response: { id: 'resp_tool', created_at: 1, model: 'same-name' },
+          }) +
+            event('response.output_item.added', { output_index: 0, item: reasoning }) +
+            event('response.reasoning_summary_text.delta', {
+              item_id: reasoning.id,
+              summary_index: 0,
+              delta: 'Read file',
+            }) +
+            event('response.output_item.done', { output_index: 0, item: reasoning }) +
+            event('response.output_item.added', {
+              output_index: 1,
+              item: { ...call, arguments: '' },
+            }) +
+            event('response.function_call_arguments.delta', {
+              output_index: 1,
+              item_id: call.id,
+              delta: call.arguments,
+            }) +
+            event('response.output_item.done', { output_index: 1, item: call }) +
+            event('response.completed', {
+              response: { usage: { input_tokens: 5, output_tokens: 3 } },
+            }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
+      return new Response(
+        event('response.created', {
+          response: { id: 'resp_service', created_at: 1, model: 'same-name' },
+        }) +
+          event('response.output_item.added', {
+            output_index: 0,
+            item: { type: 'message', id: 'msg_service' },
+          }) +
+          event('response.output_text.delta', {
+            item_id: 'msg_service',
+            delta: 'Responses configured',
+          }) +
+          event('response.output_item.done', {
+            output_index: 0,
+            item: { type: 'message', id: 'msg_service' },
+          }) +
+          event('response.completed', {
+            response: { usage: { input_tokens: 5, output_tokens: 3 } },
+          }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    },
+  });
+  let child: Awaited<ReturnType<typeof launch>> | undefined;
+  try {
+    writeFileSync(
+      f.file,
+      JSON.stringify({
+        provider: {
+          local: {
+            type: 'openai-compatible',
+            protocol: 'responses',
+            baseURL: `${provider.url.href}v1`,
+            models: ['same-name'],
+          },
+        },
+        model: 'local:same-name',
+      }),
+    );
+    child = await launch(f);
+    const trust = await child.handle.client.getWorkspaceTrust('workspace', {
+      storeId: child.storeId,
+    });
+    await child.handle.client.setWorkspaceTrust('workspace', {
+      expectedStoreId: child.storeId,
+      commandId: 'trust-responses-workspace',
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      trusted: true,
+      ifRevision: trust.revision,
+    });
+    expect(await child.run('responses-success')).toMatchObject({ status: 'applied' });
+    const view = await child.finished('responses-success');
+    expect(view.runs.find((run) => run.originCommandId === 'responses-success')?.status).toBe(
+      'completed',
+    );
+    expect(requests.map((request) => request.path)).toEqual(['/v1/responses', '/v1/responses']);
+    expect(requests[1]!.body.input).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'reasoning',
+          id: 'rs_service',
+          encrypted_content: 'owned-encrypted-reasoning',
+        }),
+        expect.objectContaining({
+          type: 'function_call',
+          call_id: 'call_service',
+          name: 'files_read',
+        }),
+        expect.objectContaining({
+          type: 'function_call_output',
+          call_id: 'call_service',
+          output: expect.stringContaining('Responses tool result marker'),
+        }),
+      ]),
+    );
+    expect(requests[1]!.body.previous_response_id).toBeUndefined();
+    expect(requests[0]!.body).toMatchObject({ model: 'same-name', store: false });
+    expect(requests[0]!.body.input).toBeArray();
+    const inputs = await child.handle.client.listModelInputs('session');
+    expect(inputs.items).toHaveLength(2);
+    // Exercise the real client schema + canonical body hash verifier after redaction.
+    const inspected = await child.handle.client.getModelInput(
+      'session',
+      inputs.items.at(-1)!.executionId,
+    );
+    expect(inspected.request.messages.some((message) => message.role === 'tool')).toBe(true);
+    expect(JSON.stringify(inspected)).not.toContain('owned-encrypted-reasoning');
+    fail = true;
+    expect(await child.run('responses-failure')).toMatchObject({ status: 'applied' });
+    const failed = await child.finished('responses-failure');
+    expect(failed.runs.find((run) => run.originCommandId === 'responses-failure')?.status).toBe(
+      'failed',
+    );
+    expect(requests.map((request) => request.path)).toEqual([
+      '/v1/responses',
+      '/v1/responses',
+      '/v1/responses',
+    ]);
+  } finally {
+    await child?.handle.close();
+    provider.stop(true);
+    f.close();
+  }
+}, 15000);

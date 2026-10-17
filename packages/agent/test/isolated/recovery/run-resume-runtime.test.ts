@@ -20,6 +20,9 @@ async function until(check: () => Promise<boolean>) {
 for (const mode of [
   'planned_model',
   'planned_large',
+  'continuation_planned',
+  'continuation_running',
+  'continuation_failed',
   'length_response',
   'length_planned',
   'length_history',
@@ -186,6 +189,18 @@ for (const mode of [
       });
       const original = (await store.getView('s')).executions;
       const before = readFileSync(join(directory, 'ledger'), 'utf8');
+      if (mode.startsWith('continuation_')) {
+        const snapshot = await runtime.readModelInput({
+          expectedStoreId: ready.expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+          executionId: ready.executionId,
+        });
+        expect(
+          snapshot.request.messages.every((message) => message.continuation === undefined),
+        ).toBe(true);
+        expect(JSON.stringify(snapshot)).not.toContain('opaqueopaque');
+      }
       await runtime.getView('s');
       expect(readFileSync(join(directory, 'ledger'), 'utf8')).toBe(before);
       expect(resolves).toBe(0);
@@ -305,22 +320,46 @@ for (const mode of [
             : 1,
       );
       expect(ledger.filter((v) => v.startsWith('model:')).length).toBe(
-        seedMode === 'retry_lineage'
-          ? 5
-          : ['compression_running', 'compression_pending'].includes(seedMode)
-            ? 4
-            : seedMode === 'compression_published'
-              ? 3
-              : seedMode === 'length_history'
+        ['continuation_running', 'continuation_failed'].includes(seedMode)
+          ? 3
+          : seedMode === 'retry_lineage'
+            ? 5
+            : ['compression_running', 'compression_pending'].includes(seedMode)
+              ? 4
+              : seedMode === 'compression_published'
                 ? 3
-                : seedMode === 'repeat_failure'
-                  ? 5
-                  : ['steer', 'follow_up'].includes(mode)
-                    ? 2
-                    : seedMode === 'completion'
-                      ? 1
-                      : 2,
+                : seedMode === 'length_history'
+                  ? 3
+                  : seedMode === 'repeat_failure'
+                    ? 5
+                    : ['steer', 'follow_up'].includes(mode)
+                      ? 2
+                      : seedMode === 'completion'
+                        ? 1
+                        : 2,
       );
+      if (mode.startsWith('continuation_')) {
+        expect(ledger.filter((value) => value.startsWith('continuation:'))).toHaveLength(
+          mode === 'continuation_planned' ? 1 : 2,
+        );
+        const inputs = await runtime.listModelInputs({
+          expectedStoreId: ready.expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+        });
+        for (const entry of inputs.items) {
+          const snapshot = await runtime.readModelInput({
+            expectedStoreId: ready.expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            executionId: entry.executionId,
+          });
+          expect(
+            snapshot.request.messages.every((message) => message.continuation === undefined),
+          ).toBe(true);
+          expect(JSON.stringify(snapshot)).not.toContain('opaqueopaque');
+        }
+      }
       if (mode === 'repeat_failure')
         expect(await store.getRun(ready.runId)).toMatchObject({
           status: 'cancelled',
@@ -339,7 +378,14 @@ for (const mode of [
         });
       }
       if (
-        ['running_model', 'running_large', 'retry_failed', 'compression_running'].includes(seedMode)
+        [
+          'running_model',
+          'running_large',
+          'retry_failed',
+          'compression_running',
+          'continuation_running',
+          'continuation_failed',
+        ].includes(seedMode)
       ) {
         expect(after.find((execution) => execution.id === ready.executionId)).toMatchObject({
           status: 'failed',
@@ -365,7 +411,9 @@ for (const mode of [
         expect(after.find((e) => e.id === ex.id)).toEqual(ex);
       if (
         seedMode.startsWith('planned_') ||
-        ['length_planned', 'length_history', 'retry_planned'].includes(seedMode)
+        ['length_planned', 'length_history', 'retry_planned', 'continuation_planned'].includes(
+          seedMode,
+        )
       ) {
         const resumed = after.find((e) => e.id === ready.executionId)!;
         expect(resumed.status).toBe('succeeded');

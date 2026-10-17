@@ -22,10 +22,13 @@ import { parseModelPreset } from './model-options';
 import {
   discoverProviderModels,
   isSupportedModelProvider,
+  type ModelProtocol,
+  modelProtocol,
   modelProviders,
   type ProviderDiscoveryOperation,
   type ProviderSettingsOperation,
   providerConnectionId,
+  providerConnectionName,
   providerModelNames,
   providerSettingsFacts,
   safeProviderEndpoint,
@@ -87,6 +90,7 @@ export interface ModelSettingsView extends ConfigurationLocation {
     enabled: boolean;
     configured: boolean;
     provider?: string;
+    protocol?: ModelProtocol;
     model?: string;
     connectionId?: string;
     reasoningEffort?: ReasoningEffort | null;
@@ -250,6 +254,7 @@ function redacted(value: JsonObject): JsonObject {
               'enabled',
               'remove',
               'provider',
+              'protocol',
               'model',
               'definitionVersion',
               'path',
@@ -423,7 +428,7 @@ export function createConfigurationManagement(options: {
   }
   function prepareProvider(input: {
     expectedReadSet: ModelSettingsReadSet;
-    operation: ProviderDiscoveryOperation;
+    operation: ProviderDiscoveryOperation & { kind?: 'upsert' | 'remove' };
     secret?: string;
   }) {
     const operation = input.operation;
@@ -431,8 +436,14 @@ export function createConfigurationManagement(options: {
     const provider = modelProviders.find((entry) => entry.id === operation.provider);
     if (!provider || input.expectedReadSet.workspaceEtag !== null)
       throw new AgentError('invalid_request');
+    if (operation.name !== undefined) providerConnectionName(operation.name);
+    modelProtocol(operation.provider, operation.protocol);
     const baseURL = safeProviderEndpoint(operation.baseURL);
-    const facts = providerSettingsFacts(state.user.value, state.effective.models ?? []);
+    const facts = providerSettingsFacts(
+      state.user.value,
+      state.effective.models ?? [],
+      state.effective.modelId ?? null,
+    );
     const connection = facts
       .find((entry) => entry.id === provider.id)
       ?.connections.find((entry) => entry.id === operation.connectionId);
@@ -443,15 +454,33 @@ export function createConfigurationManagement(options: {
       operation.connectionId === null
         ? []
         : raw.filter((entry) => providerConnectionId(entry) === operation.connectionId);
-    const originalRef = existing[0]?.credentialRef;
-    if (
+    const declaration = Array.isArray(state.user.value._providerConnections)
+      ? (state.user.value._providerConnections as JsonObject[]).find(
+          (entry) => providerConnectionId(entry) === operation.connectionId,
+        )
+      : undefined;
+    const originalRef = existing[0]?.credentialRef ?? declaration?.credentialRef;
+    if (operation.kind === 'remove') {
+      if (
+        operation.connectionId === null ||
+        operation.credential !== 'none' ||
+        input.secret !== undefined
+      )
+        throw new AgentError('invalid_request');
+      if (
+        existing.some(
+          (model) => model.id === state.effective.modelId || model.id === state.user.value.modelId,
+        )
+      )
+        throw new AgentError('provider_default_model_in_use');
+    } else if (
       (operation.credential === 'replace') !== (input.secret !== undefined) ||
       (operation.credential === 'replace' && !input.secret?.trim()) ||
       (operation.credential === 'keep' && typeof originalRef !== 'string') ||
       (provider.requiresCredential && operation.credential === 'none')
     )
       throw new AgentError('provider_credential_required');
-    return { state, provider, baseURL, connection, raw, existing, originalRef };
+    return { state, provider, baseURL, connection, raw, existing, originalRef, declaration };
   }
   async function mutate(
     input: MutationIdentity,
@@ -626,12 +655,17 @@ export function createConfigurationManagement(options: {
               : undefined;
             return {
               id: model.id,
+              protocol: modelProtocol(model.provider, model.protocol),
               enabled: model.enabled !== false,
               configured: diagnostics.length === 0,
               ...(typeof model.provider === 'string'
                 ? {
                     provider:
-                      typeof model.providerName === 'string' ? model.providerName : model.provider,
+                      typeof model.providerLabel === 'string'
+                        ? model.providerLabel
+                        : typeof model.providerName === 'string'
+                          ? model.providerName
+                          : model.provider,
                   }
                 : {}),
               ...(typeof model.model === 'string' ? { model: model.model } : {}),
@@ -678,14 +712,30 @@ export function createConfigurationManagement(options: {
         return {
           storeId: input.expectedStoreId,
           readSet: state.readSet,
-          providers: providerSettingsFacts(state.user.value, state.effective.models ?? []),
+          providers: providerSettingsFacts(
+            state.user.value,
+            state.effective.models ?? [],
+            state.effective.modelId ?? null,
+          ),
           errors: [],
         };
       } catch (error) {
         return {
           storeId: input.expectedStoreId,
           readSet: null,
-          providers: providerSettingsFacts({}, []),
+          providers: (() => {
+            try {
+              const facts = providerSettingsFacts(
+                { _providerConnections: userConfiguration.readProviderConnections() },
+                [],
+              );
+              for (const provider of facts)
+                for (const connection of provider.connections) connection.canWrite = false;
+              return facts;
+            } catch {
+              return providerSettingsFacts({}, []);
+            }
+          })(),
           errors: [publicError(error).code],
         };
       }
@@ -753,10 +803,51 @@ export function createConfigurationManagement(options: {
           let configurationState: ConfigurationState = 'not_attempted';
           let storedRef: string | undefined;
           try {
-            const { state, provider, baseURL, raw, existing, originalRef } = prepareProvider({
-              ...input,
-              operation,
-            });
+            const { state, provider, baseURL, raw, existing, originalRef, declaration } =
+              prepareProvider({
+                ...input,
+                operation,
+              });
+            if (operation.kind === 'remove') {
+              const removedIds = new Set(existing.map((model) => model.id));
+              const models = raw.filter((model) => !removedIds.has(model.id));
+              const validateRemoval = (candidate: JsonObject) => {
+                const fresh = assertReadSet(input.expectedReadSet);
+                const effective = resolveConfiguration({
+                  defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
+                  user: candidate,
+                  explicit: fresh.explicit,
+                });
+                createConfigurationSnapshot(effective);
+                if (effective.models?.some((model) => removedIds.has(model.id)))
+                  throw new AgentError('provider_settings_override');
+                if (effective.modelId !== fresh.effective.modelId)
+                  throw new AgentError('provider_default_model_in_use');
+              };
+              validateRemoval({ ...state.user.value, models });
+              configurationState = 'outcome_unknown';
+              let result: ReturnType<typeof updateConfigurationFile>;
+              try {
+                result = userConfiguration.update({
+                  ifMatch,
+                  operations: [{ kind: 'set', path: ['models'], value: models }],
+                  ...(declaration ? { removeProviderConnection: operation.connectionId! } : {}),
+                  validateCandidate: validateRemoval,
+                  validatePublication() {
+                    assertReadSet(input.expectedReadSet);
+                  },
+                });
+              } catch (error) {
+                if (
+                  !(error instanceof ConfigurationError) ||
+                  error.code !== 'configuration_publication_uncertain'
+                )
+                  configurationState = 'not_attempted';
+                throw error;
+              }
+              configurationState = 'published';
+              return { etag: result.etag, credentialState, configurationState };
+            }
             let names = providerModelNames(operation.modelNames);
             if (!names.length) {
               const secret =
@@ -775,11 +866,17 @@ export function createConfigurationManagement(options: {
                 : operation.credential === 'replace'
                   ? `credential:${crypto.randomUUID()}`
                   : undefined;
+            const connectionId = operation.connectionId ?? randomBytes(32).toString('hex');
+            const name =
+              operation.name === undefined ? undefined : providerConnectionName(operation.name);
             const models = structuredClone(raw);
             const changed: JsonObject[] = [];
             for (const model of models) {
               if (!existing.some((entry) => entry.id === model.id)) continue;
+              model.connectionId = connectionId;
+              if (name !== undefined) model.providerLabel = name;
               model.baseURL = baseURL;
+              model.protocol = modelProtocol(provider.id, operation.protocol);
               if (opaqueRef) model.credentialRef = opaqueRef;
               else delete model.credentialRef;
               changed.push(model);
@@ -788,12 +885,25 @@ export function createConfigurationManagement(options: {
             const additions = userConfiguration.createModels(
               provider.id,
               names.filter((name) => !existingNames.has(name)),
-              changed,
+              changed.length ? changed : declaration ? [declaration] : [],
             );
             for (const identity of additions) {
               const model: JsonObject = {
                 ...identity,
                 provider: provider.id,
+                connectionId,
+                ...(name !== undefined
+                  ? { providerLabel: name }
+                  : typeof changed[0]?.providerLabel === 'string'
+                    ? { providerLabel: changed[0].providerLabel }
+                    : typeof declaration?.providerLabel === 'string'
+                      ? { providerLabel: declaration.providerLabel }
+                      : operation.connectionId === null &&
+                          'providerName' in identity &&
+                          typeof identity.providerName === 'string'
+                        ? { providerLabel: provider.label }
+                        : {}),
+                protocol: modelProtocol(provider.id, operation.protocol),
                 baseURL,
                 enabled: false,
                 ...(opaqueRef ? { credentialRef: opaqueRef } : {}),
@@ -813,7 +923,7 @@ export function createConfigurationManagement(options: {
                 const actual = effective.models?.find((entry) => entry.id === model.id);
                 if (
                   !actual ||
-                  ['provider', 'model', 'baseURL', 'credentialRef'].some(
+                  ['provider', 'protocol', 'model', 'baseURL', 'credentialRef'].some(
                     (key) => actual[key] !== model[key],
                   ) ||
                   configured(actual).length

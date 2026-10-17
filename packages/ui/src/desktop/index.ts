@@ -78,6 +78,9 @@ export {
 } from './markdown-parse-cache';
 export { RightSidebar, type RightSidebarProps, type RightSidebarTab } from './RightSidebar';
 export {
+  type ScheduledTaskDraft,
+  ScheduledTaskEditor,
+  type ScheduledTaskRunSummary,
   type ScheduledTaskSummary,
   ScheduledTasks,
   type ScheduledTasksProps,

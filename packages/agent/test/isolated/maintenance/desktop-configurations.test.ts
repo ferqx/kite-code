@@ -54,6 +54,9 @@ test('actual Node DB6 and manifest v14 preserve original configuration GETs, Ses
   try {
     const original = await nodeConfigurationAssets(f.root, f.profile, f.storeId);
     expect(original.configurations).toHaveLength(2);
+    expect(
+      original.configurations.find((row) => row.kind === 'provider')!.input.operation,
+    ).toMatchObject({ protocol: 'responses' });
     expect(original.callers).toHaveLength(7);
     expect(original.httpRequests).toBe(0);
     expect(original.originalRoute).toBe('original_model');
@@ -173,6 +176,62 @@ test('DB6 rejects secret-bearing original metadata, invalid UTF8 and route autho
           : [],
       ).toEqual([]);
     }
+  } finally {
+    f.close();
+  }
+}, 30000);
+
+test('DB6 backup preserves a named provider deletion as cold GET metadata without recreating its connection or credentials', async () => {
+  const f = await fixture();
+  try {
+    await nodeConfigurationAssets(f.root, f.profile, f.storeId);
+    mutate(f.path, (db) => {
+      const row = db
+        .query<{ state: string }, []>(
+          "SELECT state FROM configuration_intents WHERE command_id='provider-original'",
+        )
+        .get()!;
+      const value = JSON.parse(row.state);
+      value.input.operation = {
+        ...value.input.operation,
+        kind: 'remove',
+        name: 'Removed connection',
+        connectionId: 'e'.repeat(64),
+        credential: 'none',
+        modelNames: [],
+      };
+      value.state.operation = value.input.operation;
+      db.query("UPDATE configuration_intents SET state=? WHERE command_id='provider-original'").run(
+        JSON.stringify(value),
+      );
+    });
+    const before = readFileSync(f.path);
+    const backup = await createProfileBackup(f);
+    expect(readFileSync(f.path)).toEqual(before);
+    const restored = await restoreProfileBackup({
+      profile: f.profile,
+      expectedStoreId: f.storeId,
+      backup,
+      intent: 'replace_with_selected_backup',
+    });
+    const cold = await nodeConfigurationAssets(
+      f.root,
+      f.profile,
+      f.storeId,
+      'read',
+      restored.storeId,
+    );
+    expect(
+      cold.configurations.find((row) => row.kind === 'provider')!.input.operation,
+    ).toMatchObject({
+      kind: 'remove',
+      name: 'Removed connection',
+      connectionId: 'e'.repeat(64),
+      modelNames: [],
+      credential: 'none',
+    });
+    expect(cold.httpRequests).toBe(0);
+    expect(cold.configurations.find((row) => row.kind === 'provider')!.state.phase).toBe('unknown');
   } finally {
     f.close();
   }

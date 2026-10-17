@@ -28,57 +28,162 @@ export type ModelProvider = (typeof modelProviders)[number]['id'];
 export function isSupportedModelProvider(value: unknown): value is ModelProvider {
   return modelProviders.some((provider) => provider.id === value);
 }
+export type ModelProtocol = 'chat-completions' | 'responses';
+export function modelProtocol(provider: unknown, protocol: unknown): ModelProtocol {
+  if (protocol === undefined) return 'chat-completions';
+  if (protocol !== 'chat-completions' && protocol !== 'responses')
+    throw new AgentError('invalid_model_protocol');
+  if (protocol === 'responses' && provider !== 'openai' && provider !== 'compatible')
+    throw new AgentError('model_protocol_unsupported');
+  return protocol;
+}
+
 export type ProviderSettingsOperation = {
+  kind?: 'upsert' | 'remove';
+  name?: string;
   provider: ModelProvider;
+  protocol?: ModelProtocol;
   connectionId: string | null;
   baseURL: string;
   modelNames: string[];
   credential: 'keep' | 'replace' | 'none';
 };
-export type ProviderDiscoveryOperation = Omit<ProviderSettingsOperation, 'modelNames'>;
+export type ProviderDiscoveryOperation = Omit<ProviderSettingsOperation, 'modelNames' | 'kind'>;
 export type ProviderSettingsConnection = {
+  protocol: ModelProtocol;
   id: string;
+  name?: string;
+  modelIds?: string[];
+  defaultModelIds?: string[];
   baseURL: string;
   hasCredential: boolean;
   modelNames: string[];
   canWrite: boolean;
 };
 export function providerConnectionId(model: JsonObject): string {
+  // User-format aliases already own route identity; their display name is independent.
+  if (typeof model.providerName === 'string')
+    return createHash('sha256')
+      .update(JSON.stringify(['user-provider-v1', model.providerName]))
+      .digest('hex');
+  if (typeof model.connectionId === 'string' && /^[a-f0-9]{64}$/.test(model.connectionId))
+    return model.connectionId;
   return createHash('sha256')
-    .update(JSON.stringify([model.provider, model.baseURL ?? null, model.credentialRef ?? null]))
+    .update(
+      JSON.stringify([
+        model.provider,
+        model.baseURL ?? null,
+        model.credentialRef ?? null,
+        ...(model.protocol === 'responses' ? ['responses'] : []),
+      ]),
+    )
     .digest('hex');
 }
-export function providerSettingsFacts(raw: JsonObject, models: readonly ModelConfiguration[]) {
+export function providerConnectionName(value: string): string {
+  const name = value.trim();
+  if (
+    !name ||
+    name.length > 120 ||
+    [...name].some(
+      (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+    ) ||
+    Buffer.from(name, 'utf8').toString('utf8') !== name
+  )
+    throw new AgentError('invalid_provider_name');
+  return name;
+}
+export function providerSettingsFacts(
+  raw: JsonObject,
+  models: readonly ModelConfiguration[],
+  defaultModelId: string | null = null,
+) {
+  const declarations = Array.isArray(raw._providerConnections)
+    ? (raw._providerConnections as JsonObject[])
+    : [];
+  const localModels = Array.isArray(raw.models)
+    ? (raw.models as ModelConfiguration[]).filter((model) => model.remove !== true)
+    : [];
+  const owners = new Map<string, JsonObject>();
+  const conflicting = new Set<string>();
+  for (const entry of [...declarations, ...localModels, ...models]) {
+    const id = providerConnectionId(entry);
+    const owner = owners.get(id);
+    if (
+      owner &&
+      ['provider', 'protocol', 'baseURL', 'credentialRef', 'providerName', 'providerLabel'].some(
+        (key) => owner[key] !== entry[key],
+      )
+    )
+      conflicting.add(id);
+    else owners.set(id, entry);
+  }
   return modelProviders.map((provider) => {
     const groups = new Map<string, ProviderSettingsConnection>();
-    for (const model of models) {
-      if (model.provider !== provider.id || typeof model.baseURL !== 'string') continue;
+    const family = (entry: JsonObject) =>
+      isSupportedModelProvider(entry.provider) ? entry.provider : 'compatible';
+    const add = (model: JsonObject) => {
       const id = providerConnectionId(model);
       let connection = groups.get(id);
-      if (!connection) {
-        connection = {
-          id,
-          baseURL: safeProviderEndpoint(model.baseURL),
-          hasCredential: typeof model.credentialRef === 'string',
-          modelNames: [],
-          canWrite: true,
-        };
-        groups.set(id, connection);
+      if (connection) return connection;
+      let baseURL = '',
+        protocol: ModelProtocol = 'chat-completions',
+        canWrite =
+          !conflicting.has(id) &&
+          isSupportedModelProvider(model.provider) &&
+          (model.credentialRef === undefined ||
+            (typeof model.credentialRef === 'string' &&
+              /^credential:[0-9a-f-]{36}$/.test(model.credentialRef)));
+      try {
+        baseURL = safeProviderEndpoint(String(model.baseURL ?? ''));
+        protocol = modelProtocol(model.provider, model.protocol);
+      } catch {
+        canWrite = false;
       }
+      let name = provider.label as string;
+      try {
+        name = providerConnectionName(
+          String(model.providerLabel ?? model.providerName ?? provider.label),
+        );
+      } catch {
+        /* Legacy labels are not trusted display or write targets. */
+      }
+      connection = {
+        id,
+        name,
+        protocol,
+        baseURL,
+        hasCredential: typeof model.credentialRef === 'string',
+        modelNames: [],
+        modelIds: [],
+        defaultModelIds: [],
+        canWrite,
+      };
+      groups.set(id, connection);
+      return connection;
+    };
+    // Include explicit declarations even when they currently have no model routes.
+    for (const declaration of declarations)
+      if (family(declaration) === provider.id) add(declaration);
+    for (const model of localModels) {
+      if (family(model) !== provider.id) continue;
+      const connection = add(model);
       connection.modelNames.push(model.model);
-      const local = Array.isArray(raw.models)
-        ? raw.models.find(
-            (entry) =>
-              entry && typeof entry === 'object' && !Array.isArray(entry) && entry.id === model.id,
-          )
-        : undefined;
+      connection.modelIds!.push(model.id);
+      if (model.id === defaultModelId || model.id === raw.modelId)
+        connection.defaultModelIds!.push(model.id);
+      const actual = models.find((entry) => entry.id === model.id);
       if (
-        !local ||
-        typeof local !== 'object' ||
-        Array.isArray(local) ||
-        providerConnectionId(local) !== id ||
-        local.model !== model.model
+        !actual ||
+        providerConnectionId(actual) !== connection.id ||
+        ['provider', 'protocol', 'baseURL', 'credentialRef', 'model'].some(
+          (key) => actual[key] !== model[key],
+        )
       )
+        connection.canWrite = false;
+    }
+    for (const actual of models) {
+      const connection = groups.get(providerConnectionId(actual));
+      if (connection && !localModels.some((model) => model.id === actual.id))
         connection.canWrite = false;
     }
     return { ...provider, connections: [...groups.values()] };

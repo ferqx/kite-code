@@ -139,7 +139,16 @@ export function getModelInputSnapshot(
     );
     if (!execution) throw new AgentError('execution_not_found');
     const bound = identity(db, input, session, execution);
+    const origin = db.row('SELECT * FROM command WHERE id=?', bound.originCommandId);
+    // identity() already verified this exact carrier and origin under the same read snapshot.
+    const carrier = session.parent_id === null ? null : db.childCarrier(origin!, bound.runId);
+    const carrierOrigin =
+      carrier && db.row('SELECT kind FROM command WHERE id=?', carrier.origin_command_id!);
     const snapshot = {
+      authorizationReview:
+        carrierOrigin?.kind === 'authorization.review'
+          ? { sourceIds: [bound.originCommandId, String(carrier!.id)] as [string, string] }
+          : null,
       storeId: input.expectedStoreId,
       originStoreId: String(execution.origin_store_id),
       identity: bound,

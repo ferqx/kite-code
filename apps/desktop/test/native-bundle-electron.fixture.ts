@@ -454,8 +454,18 @@ try {
       .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)),
     ['w'],
   );
-  await scheduledEditor.getByRole('combobox', { name: /^运行环境/ }).selectOption('local');
-  await scheduledEditor.getByRole('combobox', { name: /^重复/ }).selectOption('weekly-monday-0900');
+  assert.equal(
+    await scheduledEditor.getByRole('combobox', { name: /^运行环境/ }).isDisabled(),
+    true,
+  );
+  assert.equal(
+    await scheduledEditor.getByRole('combobox', { name: /^运行环境/ }).inputValue(),
+    'local',
+  );
+  await scheduledEditor.getByRole('combobox', { name: /^重复/ }).selectOption('weekly');
+  await scheduledEditor.getByRole('combobox', { name: /^星期/ }).selectOption('1');
+  // Invalid draft must not create work; complete CRUD has its own isolated suite.
+  await scheduledEditor.getByRole('textbox', { name: '名称', exact: true }).fill('');
   assert.equal(
     await scheduledEditor.getByRole('button', { name: '保存任务', exact: true }).isDisabled(),
     true,
@@ -479,7 +489,7 @@ try {
   assert.equal(await (await fetch(`${control}/count`)).text(), '0');
   await openSessionTools(page);
   console.log(
-    'native_driver_stage: original scheduled page, disabled persistence, exact draft and zero work',
+    'native_driver_stage: scheduled page, invalid draft blocked, exact draft and zero work',
   );
   page.on('console', (message) => {
     const text = message.text();

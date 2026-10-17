@@ -7,10 +7,12 @@ import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/a
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
+import { canonicalJson, semanticDigest } from '../../../src/json';
 import { readModelOutput } from '../../../src/model-output';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
+import type { Json } from '../../../src/storage/types';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -542,6 +544,166 @@ test('stale checkpoint cannot replace current immutable head; retry preserves or
     expect(original[0]?.status).toBe('complete');
   } finally {
     release();
+    await f.close();
+  }
+});
+
+test('opaque continuation survives tool loops and cold multi-turn history without appearing in Inspectors', async () => {
+  const continuation = {
+    version: 1,
+    protocol: 'fixture',
+    content: [{ encrypted: 'opaque🚀'.repeat(12000), id: 'reasoning_1' }],
+  };
+  const finalContinuation = {
+    version: 1,
+    protocol: 'fixture',
+    content: [{ encrypted: 'next', id: 'message_2' }],
+  };
+  const model = createFixedModel([
+    [
+      { type: 'text_delta', text: 'Working' },
+      { type: 'tool_call', id: 'call_1', name: 'local.check', arguments: '{}' },
+      { ...finish, reason: 'tool_calls', continuation },
+    ],
+    [
+      { type: 'text_delta', text: 'Done' },
+      { ...finish, continuation: finalContinuation },
+    ],
+  ]);
+  const f = await smallFixture(model);
+  try {
+    await f.start();
+    const settled = await f.runtime.waitForCommand('work', { timeoutMs: 20000 });
+    expect((await f.runtime.getRun((settled.receipt as { runId: string }).runId))?.status).toBe(
+      'completed',
+    );
+    expect(f.effects).toBe(1);
+    const previous = model.requests[1]!.messages.find((message) => message.role === 'assistant');
+    expect(previous?.continuation).toEqual(continuation);
+    expect(previous?.toolCalls?.[0]?.id).toBe('call_1');
+    const source = model.requests[0]!.requestId;
+    expect(
+      JSON.stringify(await f.runtime.readModelOutput({ ...f.scope, executionId: source })),
+    ).not.toContain('opaque');
+    const inspected = await f.runtime.readModelInput({
+      ...f.scope,
+      executionId: model.requests[1]!.requestId,
+    });
+    expect(
+      inspected.request.messages.find((message) => message.role === 'assistant'),
+    ).not.toHaveProperty('continuation');
+    const publicBody = inspected.request as unknown as Json;
+    expect(inspected.bodyBytes).toBe(String(Buffer.byteLength(canonicalJson(publicBody))));
+    expect(inspected.bodyHash).toBe(await semanticDigest(publicBody));
+    const privateRequest = model.requests[1]! as unknown as Json;
+    expect(inspected.bodyHash).not.toBe(await semanticDigest(privateRequest));
+    const secondExecution = await f.store.getExecution(model.requests[1]!.requestId);
+    const privateHash = (secondExecution!.result as Record<string, Json>).modelInputBodyHash;
+    expect(typeof privateHash).toBe('string');
+    const expectPrivateArtifactDenied = async (
+      input: Parameters<typeof f.runtime.readArtifact>[0],
+    ) => {
+      // Await the real Worker response before matching: Bun 1.4's rejects matcher
+      // can block delivery of a pending Worker-backed rejection.
+      let rejected: unknown;
+      try {
+        await f.runtime.readArtifact(input);
+      } catch (error) {
+        rejected = error;
+      }
+      expect(rejected).toMatchObject({ code: 'artifact_scope_denied' });
+    };
+    await expectPrivateArtifactDenied({
+      ...f.scope,
+      refId: `model-body-${privateHash}`,
+      scope: { kind: 'session', id: f.scope.sessionId },
+    });
+    const privateOutput = await f.store.getModelOutputSnapshot({ ...f.scope, executionId: source });
+    await expectPrivateArtifactDenied({
+      ...f.scope,
+      refId: privateOutput.output!.head.id,
+      scope: { kind: 'execution', id: source },
+    });
+    const publicArtifact = await f.artifacts.publish({
+      ...f.scope,
+      refId: 'downloadable-result',
+      scope: { kind: 'session', id: f.scope.sessionId },
+      mediaType: 'text/plain',
+      content: new TextEncoder().encode('Public result'),
+    });
+    const downloaded = await f.runtime.readArtifact({
+      ...f.scope,
+      refId: publicArtifact.id,
+      scope: publicArtifact.scope,
+    });
+    expect(new TextDecoder().decode(downloaded.content)).toBe('Public result');
+    expect(JSON.stringify(await f.store.listMessages('s', { limit: 200 }))).not.toContain('opaque');
+    await f.runtime.close();
+
+    const store = await openSqliteStore(f.profile);
+    const next = createFixedModel([[{ type: 'text_delta', text: 'Again' }, finish]]);
+    const cold = createRuntime({
+      store,
+      artifacts: createArtifactStore({ profile: f.profile, store }),
+      model: next,
+      permissions: {
+        async authorize() {
+          return { allowed: true, revision: 'fixture' };
+        },
+      },
+    });
+    try {
+      await cold.submitCommand({
+        ...f.scope,
+        commandId: 'again',
+        request: { kind: 'run.start', content: 'Continue' },
+      });
+      const result = await cold.waitForCommand('again', { timeoutMs: 20000 });
+      expect((await cold.getRun((result.receipt as { runId: string }).runId))?.status).toBe(
+        'completed',
+      );
+      const assistants = next.requests[0]!.messages.filter(
+        (message) => message.role === 'assistant',
+      );
+      expect(assistants.map((message) => message.continuation)).toEqual([
+        continuation,
+        finalContinuation,
+      ]);
+      expect(assistants[0]!.toolCalls?.[0]?.id).toBe('call_1');
+    } finally {
+      await cold.close();
+    }
+  } finally {
+    await f.close();
+  }
+}, 30000);
+
+test('truncated tool batch retries without persisting opaque continuation or dispatching a tool', async () => {
+  const model = createFixedModel([
+    [
+      { type: 'text_delta', text: 'Partial' },
+      { type: 'tool_call', id: 'call_1', name: 'local.check', arguments: '{}' },
+      { ...finish, reason: 'length', continuation: { encrypted: 'must-not-replay' } },
+    ],
+    [{ type: 'text_delta', text: 'Fresh attempt succeeds' }, finish],
+  ]);
+  const f = await smallFixture(model);
+  try {
+    await f.start();
+    await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+    expect(f.effects).toBe(0);
+    expect(model.requests).toHaveLength(2);
+    expect(JSON.stringify(model.requests[1])).not.toContain('must-not-replay');
+    const snapshot = await f.runtime.readModelOutput({
+      ...f.scope,
+      executionId: model.requests[0]!.requestId,
+    });
+    expect(snapshot.output.complete).toBe(false);
+    expect(JSON.stringify(snapshot)).not.toContain('must-not-replay');
+    expect(JSON.stringify(await f.store.getExecution(model.requests[0]!.requestId))).not.toContain(
+      'must-not-replay',
+    );
+  } finally {
     await f.close();
   }
 });

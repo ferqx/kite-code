@@ -28,6 +28,8 @@ Host 在父 Loop 重入前把全部原操作登记到同一 operation 目录，�
 
 每个新 Model 尝试在原 `decision_source_json` 封存 version 2 continuation：原 Run/selection、当前完整来源请求集合和同工具相同参数失败 streak。版本2绑定 Core 派发事实下的刷新中性分类；版本1摘要按旧规则计数，恢复时保其来源请求并从原历史派发事实重建 streak，不直接沿用或清零旧计数。下一新 Model 保存版本2，压缩尝试使用同一状态。超过正文传输阈值时使用既有不可变 sourceBody Artifact，预览不复制 checkpoint。Runtime 从完整原作用域核验并恢复该状态，当前 Model 的 Tool 批次再按声明顺序结算一次；恢复不会重置五次失败规则。没有该字段的旧记录继续完整历史重建，未知版本或范围拒绝。
 
+这里的 Core continuation 与 Adapter 的 opaque continuation 分属不同字段。尚未派发 Model 的恢复读取经过原 scope/hash 核验的私有完整请求，不能使用已移除 opaque 字段的公开 Inspector 投影；中断或失败尝试仍创建新的 Execution，并从完整已确认历史恢复 Adapter 状态。公开 Inspector、reviewer 语义历史继续不暴露此私有字段。[真实强杀回归](../../../test/isolated/recovery/run-resume-runtime.test.ts)覆盖带大 opaque 状态的 planned/running/failed 边界、原效果只执行一次及恢复前后的公开投影。
+
 SQL 的[事务证明](recovery-audit.ts)由普通 Store 写事务维护。持久 trigger 登记每次 Execution/Interaction 的 OLD/NEW Run 与准确 key，包括无 change_event 的外部 SQL 和关闭递归 trigger 时的 REPLACE 身份冲突；failed Model 的效果依赖、原 Command/Session/child 身份及交互资格也会失效。业务提交前核验已结算历史的增量，保存完整行摘要和资格问题，并推进受保护的单调序号。活动 Execution 不重复保存正文摘要，恢复时独立完整检查当前前沿；活动写入同样推进序号，不能绕过最终 CAS。同一 WAL 事务提交或回滚业务与证明，不提前 ACK；没有相关变更的事务无需认证。正常压缩、checkpoint、关闭和重开不使已认证历史失效。原 Run 正式删除时派生证明及队列同事务清理，不改变删除准入或其他 ledger 记录。
 
 冷读在同一只读事务核证明及尚未认证的增量，再按索引读取实际 live 前沿、最后 Model、未决 Interaction 和原子接管所需的真实任务树。未知 Tool/Job 始终按实际状态阻挡；删除或跨 Run 移走已登记身份留下不合格记录。原来源和 Model 大正文仍在准确作用域内完整核 scope/hash，证明不代替配置、审批、当前权限、原 generation、取消或最终 CAS。新的 bindingDigest 绑定版本、当前 Run/selection 及单调审计序号；历史任一列变化使旧申请失效，改回原字节也不倒退序号。连接内 data_version/total_changes 缓存只加速重复准备，不承担跨进程证明。

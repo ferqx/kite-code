@@ -74,7 +74,11 @@ static void close_owned(int *fd) {
 static void retain_unknown(void) __attribute__((noreturn));
 static void retain_unknown(void) {
   /* Fixed diagnostic: no command, nonce, path or environment disclosure. */
-  (void)write(STDERR_FILENO, "kite_linux_stdio_close_unknown\n", sizeof("kite_linux_stdio_close_unknown\n") - 1);
+  const char diagnostic[] = "kite_linux_stdio_close_unknown\n";
+  ssize_t sent;
+  do { sent = write(STDERR_FILENO, diagnostic, sizeof(diagnostic) - 1); }
+  while (sent < 0 && errno == EINTR);
+  if (sent != (ssize_t)(sizeof(diagnostic) - 1)) uncertain();
   for (;;) pause();
 }
 static int configure_signals(int child) {

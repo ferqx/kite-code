@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { semanticReviewContext } from '../../authorization-review-context';
 import {
   authorizationReviewAnswer,
   authorizationReviewOutput,
@@ -15,6 +16,7 @@ import type {
 } from '../port';
 import {
   AgentError,
+  type ArtifactReference,
   type ExecutionAuthorizationObservation,
   type ExecutionStatus,
   type Json,
@@ -436,6 +438,104 @@ export function ensureAuthorizationReview(
     };
   });
 }
+
+/** The old producer used model-body IDs for public Auto fallback attachments too.
+ * Only an exact, durably bound human card authorizes those bytes for public reading.
+ * This runs inside the caller's artifact read snapshot; it grants no execution authority.
+ */
+export function isLegacyPublicReviewRequest(
+  db: SqliteOperations,
+  reference: ArtifactReference,
+): boolean {
+  if (!reference.id.startsWith('model-body-')) return false;
+  const candidates = db.rows(
+    `SELECT i.* FROM interaction i
+     WHERE i.session_id=? AND i.subject_id=? AND i.origin_store_id=? AND i.kind='approval'
+       AND json_extract(i.request_json,'$.policy.review.reference.id')=?`,
+    reference.sessionId,
+    reference.subjectId,
+    reference.storeId,
+    reference.id,
+  );
+  for (const human of candidates) {
+    try {
+      const target = db.row('SELECT * FROM execution WHERE id=?', human.execution_id!);
+      const request = object(JSON.parse(String(human.request_json)));
+      const review = object(object(request.policy!).review!);
+      const binding = target?.interaction_binding_json
+        ? object(JSON.parse(String(target.interaction_binding_json)))
+        : undefined;
+      if (
+        !target ||
+        binding?.interactionId !== human.id ||
+        human.origin_store_id !== target.origin_store_id ||
+        human.session_id !== target.session_id ||
+        human.run_id !== target.run_id ||
+        human.presentation_session_id !== target.root_session_id ||
+        human.attempt !== target.attempt ||
+        human.definition_id !== target.adapter_id ||
+        human.definition_version !== target.definition_version ||
+        human.input_digest !== hash(JSON.parse(String(target.intent_json))) ||
+        human.source_json !== target.decision_source_json ||
+        human.information_permission_json !== null ||
+        human.request_digest !==
+          hash({
+            executionId: String(human.execution_id),
+            attempt: Number(human.attempt),
+            kind: 'approval',
+            definitionId: String(human.definition_id),
+            definitionVersion: String(human.definition_version),
+            inputDigest: String(human.input_digest),
+            policyRevision: String(human.policy_revision),
+            requiredRefs: JSON.parse(String(human.required_refs_json)),
+            source: JSON.parse(String(human.source_json)),
+            request,
+          }) ||
+        canonicalJson(review) !==
+          canonicalJson({
+            kind: 'artifact',
+            complete: true,
+            reference: {
+              id: reference.id,
+              mediaType: reference.mediaType,
+              size: reference.size,
+              scope: reference.scope,
+            },
+          })
+      )
+        continue;
+      const reviews = db.rows(
+        `SELECT e.id FROM execution e JOIN command c ON c.id=e.origin_command_id
+         WHERE e.parent_execution_id=? AND c.kind='authorization.review'`,
+        target.id!,
+      );
+      for (const carrier of reviews) {
+        try {
+          const verified = fact(
+            db,
+            String(target.id),
+            String(carrier.id),
+            String(human.policy_revision),
+            true,
+          );
+          const body = bodyReference(verified.payload.requestBody);
+          if (
+            body &&
+            canonicalJson(body.reference as unknown as Json) ===
+              canonicalJson(reference as unknown as Json)
+          )
+            return true;
+        } catch {
+          // An earlier policy/carrier cannot hide a later exact public binding.
+        }
+      }
+    } catch {
+      // A malformed, stale, or unrelated card supplies no public read authority.
+    }
+  }
+  return false;
+}
+
 function fact(
   db: SqliteOperations,
   targetId: string,
@@ -557,7 +657,12 @@ function fact(
       : !Array.isArray(intent.messages) ||
         !intent.messages.some(
           (message) =>
-            object(message).role === 'user' && object(message).content === canonicalJson(payload),
+            object(message).role === 'user' &&
+            object(message).content ===
+              canonicalJson({
+                ...payload,
+                decisionContext: semanticReviewContext(payload.decisionContext!),
+              }),
         )) ||
     response.finishReason !== 'stop' ||
     canonicalJson(response.toolCalls ?? []) !== '[]' ||

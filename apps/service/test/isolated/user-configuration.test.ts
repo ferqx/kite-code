@@ -292,3 +292,29 @@ test('actual default paired Services share the host user file across Profiles wi
     f.close();
   }
 }, 20000);
+
+test('provider protocol round-trips through normalized edits without changing sibling providers or secrets', () => {
+  const f = fixture();
+  try {
+    const raw = JSON.parse(readFileSync(f.path, 'utf8').replace('// keep user comment\n', ''));
+    raw.provider.qwen.protocol = 'responses';
+    writeFileSync(f.path, '// keep user comment\n' + JSON.stringify(raw), { mode: 0o600 });
+    const original = f.source.read();
+    const models = original.value.models as JsonObject[];
+    expect(models[0]!.protocol).toBeUndefined();
+    expect(models[2]!.protocol).toBe('responses');
+    const result = f.source.update({
+      ifMatch: original.etag,
+      operations: [{ kind: 'set', path: ['models', 2, 'protocol'], value: 'chat-completions' }],
+    });
+    expect((result.value.models as JsonObject[])[2]!.protocol).toBe('chat-completions');
+    const text = readFileSync(f.path, 'utf8');
+    expect(text).toContain('// keep user comment');
+    const saved = JSON.parse(text.replace('// keep user comment\n', ''));
+    expect(saved.provider.qwen.protocol).toBe('chat-completions');
+    expect(saved.provider.qwen.apiKey).toBe('OWNED_QWEN_KEY');
+    expect(saved.provider.deepseek).toEqual(raw.provider.deepseek);
+  } finally {
+    f.close();
+  }
+});

@@ -24,11 +24,17 @@ import {
 } from '../src/native-bridge';
 import { parseNativeMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
+import { parseScheduledTaskInput } from './scheduled-tasks';
 import { saveStartupDiagnosticReport } from './startup-report';
 
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'scheduled.list': [],
+  'scheduled.save': ['input', 'operation'],
+  'scheduled.toggle': ['id', 'enabled'],
+  'scheduled.delete': ['id'],
+  'scheduled.runNow': ['id'],
   'extensions.open': ['readId', 'viewSelection', 'historyEpoch'],
   'extensions.query': ['readId', 'observationId', 'extensionId', 'queryId', 'input'],
   'extensions.read': ['readId', 'offset', 'limit'],
@@ -210,6 +216,23 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     method = input.method;
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
+  if (method === 'scheduled.save') {
+    parseScheduledTaskInput(input.input);
+    if (input.operation !== 'create' && input.operation !== 'update')
+      throw Error('invalid_native_request');
+    if (input.operation === 'update' && !(input.input as { id?: string }).id)
+      throw Error('invalid_native_request');
+  }
+  if (
+    method.startsWith('scheduled.') &&
+    method !== 'scheduled.list' &&
+    method !== 'scheduled.save'
+  ) {
+    if (typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.id))
+      throw Error('invalid_native_request');
+    if (method === 'scheduled.toggle' && typeof input.enabled !== 'boolean')
+      throw Error('invalid_native_request');
+  }
   if (method === 'extensions.open') {
     for (const key of ['viewSelection', 'historyEpoch'])
       if (!Number.isSafeInteger(input[key]) || Number(input[key]) < 0)
@@ -340,9 +363,40 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (method === 'settings.providers.save') {
     const operation = record(input.operation);
-    exact(operation, ['provider', 'connectionId', 'baseURL', 'modelNames', 'credential']);
+    exact(operation, [
+      'kind',
+      'name',
+      'provider',
+      'protocol',
+      'connectionId',
+      'baseURL',
+      'modelNames',
+      'credential',
+    ]);
     if (
+      (operation.kind !== undefined &&
+        operation.kind !== 'upsert' &&
+        operation.kind !== 'remove') ||
+      (operation.name !== undefined &&
+        (typeof operation.name !== 'string' ||
+          !operation.name.trim() ||
+          operation.name.length > 120 ||
+          [...operation.name].some(
+            (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+          ))) ||
+      (operation.kind === 'remove' &&
+        (operation.connectionId === null ||
+          operation.credential !== 'none' ||
+          input.secret !== undefined ||
+          !Array.isArray(operation.modelNames) ||
+          operation.modelNames.length !== 0)) ||
       !['openai', 'deepseek', 'compatible', 'ollama'].includes(String(operation.provider)) ||
+      (operation.protocol !== undefined &&
+        operation.protocol !== 'chat-completions' &&
+        operation.protocol !== 'responses') ||
+      (operation.protocol === 'responses' &&
+        operation.provider !== 'openai' &&
+        operation.provider !== 'compatible') ||
       !(
         operation.connectionId === null ||
         (typeof operation.connectionId === 'string' &&

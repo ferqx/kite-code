@@ -20,7 +20,12 @@ import {
 } from './NewConversation';
 import { RightSidebar } from './RightSidebar';
 import { ReadingStateCache } from './reading-state';
-import { ScheduledTaskEditor, ScheduledTasks, type ScheduledTasksProps } from './ScheduledTasks';
+import {
+  ScheduledTaskEditor,
+  type ScheduledTaskSummary,
+  ScheduledTasks,
+  type ScheduledTasksProps,
+} from './ScheduledTasks';
 import { type PageActions, Sidebar } from './Sidebar';
 import type { Message, TurnActivity, WorkspaceSummary } from './types';
 import { Button } from './ui';
@@ -128,7 +133,11 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const [changesKey, setChangesKey] = useState<string>();
   const hasFileChanges = fileChanges !== undefined || props.fileChangesContent !== undefined;
   const changesOpen = changesKey === props.readingKey && hasFileChanges;
-  const [scheduledEditorOpen, setScheduledEditorOpen] = useState(false);
+  const scheduledEditorGeneration = useRef(0);
+  const [scheduledEditor, setScheduledEditor] = useState<{
+    generation: number;
+    task?: ScheduledTaskSummary;
+  }>();
   const [sessionViewElement, setSessionViewElement] = useState<HTMLDivElement | null>(null);
   const [environmentPreference, setEnvironmentPreference] = useState<'default' | 'open' | 'closed'>(
     'default',
@@ -166,7 +175,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
   const rightSidebarOpen =
-    hostDetailsOpen || changesOpen || (scheduledEditorOpen && !!props.scheduledTasks);
+    hostDetailsOpen || changesOpen || (!!scheduledEditor && !!props.scheduledTasks);
   const changesToggle = useRef<HTMLButtonElement>(null);
   const scheduledEditorToggle = useRef<HTMLButtonElement | null>(null);
   const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
@@ -213,8 +222,19 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     () => schedulePanelChange(detailsPanelFrame, detailsPanel, false),
     [schedulePanelChange],
   );
+  const closeScheduledEditor = useCallback(
+    (generation: number) => {
+      if (scheduledEditorGeneration.current !== generation) return;
+      scheduledEditorGeneration.current++;
+      collapseDetails();
+      setScheduledEditor(undefined);
+      focusControlAfterCommit(scheduledEditorToggle);
+    },
+    [collapseDetails, focusControlAfterCommit],
+  );
   useEffect(
     () => () => {
+      scheduledEditorGeneration.current++;
       if (navigationPanelFrame.current !== undefined)
         cancelAnimationFrame(navigationPanelFrame.current);
       if (navigationAnimationTimer.current !== undefined)
@@ -242,7 +262,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   useEffect(() => {
     if (!props.scheduledTasks) {
       collapseDetails();
-      setScheduledEditorOpen(false);
+      scheduledEditorGeneration.current++;
+      setScheduledEditor(undefined);
     }
   }, [props.scheduledTasks, collapseDetails]);
   useEffect(() => {
@@ -310,7 +331,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         detailClose.current?.();
         collapseDetails();
         setChangesKey(undefined);
-        setScheduledEditorOpen(false);
+        scheduledEditorGeneration.current++;
+        setScheduledEditor(undefined);
         focusControlAfterCommit(changesOpen ? changesToggle : scheduledEditorToggle);
         return;
       }
@@ -446,24 +468,18 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         focusControlAfterCommit(changesToggle);
       }}
     />
-  ) : scheduledEditorOpen && props.scheduledTasks ? (
+  ) : scheduledEditor && props.scheduledTasks ? (
     <RightSidebar
       key="scheduled-editor"
-      label="新建安排任务"
-      title="新建"
-      onClose={() => {
-        collapseDetails();
-        setScheduledEditorOpen(false);
-        focusControlAfterCommit(scheduledEditorToggle);
-      }}
+      label={scheduledEditor.task ? '编辑安排任务' : '新建安排任务'}
+      title={scheduledEditor.task ? '编辑' : '新建'}
+      onClose={() => closeScheduledEditor(scheduledEditor.generation)}
     >
       <ScheduledTaskEditor
+        key={scheduledEditor.generation}
+        task={scheduledEditor.task}
         props={props.scheduledTasks}
-        onClose={() => {
-          collapseDetails();
-          setScheduledEditorOpen(false);
-          focusControlAfterCommit(scheduledEditorToggle);
-        }}
+        onClose={() => closeScheduledEditor(scheduledEditor.generation)}
       />
     </RightSidebar>
   ) : null;
@@ -618,10 +634,18 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   {props.scheduledTasks ? (
                     <ScheduledTasks
                       {...props.scheduledTasks}
+                      onEditTask={(task, trigger) => {
+                        scheduledEditorToggle.current = trigger;
+                        setScheduledEditor({
+                          generation: ++scheduledEditorGeneration.current,
+                          task,
+                        });
+                        expandDetails();
+                      }}
                       onNewTask={(trigger) => {
                         scheduledEditorToggle.current = trigger;
+                        setScheduledEditor({ generation: ++scheduledEditorGeneration.current });
                         expandDetails();
-                        setScheduledEditorOpen(true);
                       }}
                     />
                   ) : props.workbench ? (

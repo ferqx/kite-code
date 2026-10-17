@@ -26,7 +26,7 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, priorBootstrap);
 bootstrap.window.close();
 
-function fixture() {
+function fixture(failedResult = false) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -92,6 +92,7 @@ function fixture() {
           sessions,
         };
       if (input.method === 'select') {
+        if (failedResult && input.sessionId === 'missing') throw Error('session_missing');
         selected = input.sessionId;
         return state();
       }
@@ -126,6 +127,40 @@ function fixture() {
           defaultModelId: 'model',
           models: [{ id: 'model', enabled: true, configured: true, diagnostics: [] }],
         };
+      if (input.method === 'scheduled.list') {
+        const task = {
+          id: 'task',
+          name: 'Failed creation',
+          prompt: 'Review',
+          workspaceId: 'w',
+          modelId: 'model',
+          storeId: 'store',
+          enabled: false,
+          nextRunAt: null,
+          createdAt: 1,
+          updatedAt: 1,
+          schedule: { frequency: 'daily' as const, time: '09:00', timeZone: 'UTC' },
+        };
+        return {
+          kind: 'scheduled.tasks',
+          tasks: failedResult ? [task] : [],
+          runs: failedResult
+            ? [
+                {
+                  id: 'run',
+                  taskId: 'task',
+                  occurrenceAt: 1,
+                  sessionId: 'missing',
+                  createCommandId: 'create',
+                  startCommandId: 'start',
+                  status: 'failed',
+                  createdAt: 1,
+                  updatedAt: 1,
+                },
+              ]
+            : [],
+        };
+      }
       if (input.method === 'conversation.send') return creation;
       return null;
     },
@@ -184,7 +219,7 @@ function fixture() {
   };
 }
 
-test('Native reuses the scheduled page and editor with real projects, disabled persistence, and original conversation drafts', async () => {
+test('Native reuses the scheduled page and editor with real projects, model validation, and original conversation drafts', async () => {
   const f = fixture();
   const input = () =>
     f.host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前会话私有草稿"]');
@@ -194,7 +229,9 @@ test('Native reuses the scheduled page and editor with real projects, disabled p
     await f.edit(input()!, 'unsaved original\n雪🙂');
     const baseline = f.calls.length;
     const expectResumedReads = (count: number) => {
-      const calls = f.calls.slice(baseline);
+      const calls = f.calls
+        .slice(baseline)
+        .filter((call) => !['scheduled.list', 'conversation.models.read'].includes(call.method));
       expect(calls).toHaveLength(count * 3);
       for (let index = 0; index < count; index++) {
         const page = calls[index * 3];
@@ -240,15 +277,16 @@ test('Native reuses the scheduled page and editor with real projects, disabled p
       ['empty', 'Empty Workspace'],
     ]);
     await f.edit(selects[0]!, 'empty');
-    await f.edit(selects[1]!, 'local');
-    await f.edit(selects[2]!, 'weekly-monday-0900');
-    expect(selects.map((select) => select.value)).toEqual(['empty', 'local', 'weekly-monday-0900']);
-    expect(f.button('保存任务')!.disabled).toBe(true);
-    expect(editor.textContent).toContain('当前桌面服务尚未接入任务保存与后台运行');
-    await act(async () => {
-      editor.dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true }));
-    });
-    expect(f.calls.slice(baseline)).toEqual([]);
+    expect(selects[1]!.value).toBe('model');
+    expect(selects[2]!.value).toBe('local');
+    expect(selects[2]!.disabled).toBe(true);
+    await f.edit(selects[3]!, 'weekly');
+    expect(f.button('保存任务')!.disabled).toBe(false);
+    expect(editor.textContent).toContain('仅在应用运行时执行');
+    expect(f.calls.slice(baseline).map((call) => call.method)).toEqual([
+      'scheduled.list',
+      'conversation.models.read',
+    ]);
     await f.click('返回会话');
     expect(input()?.value).toBe('unsaved original\n雪🙂');
     expectResumedReads(1);
@@ -296,6 +334,22 @@ test('a late creation receipt cannot replace the scheduled page or the original 
     expect(f.calls.filter((call) => call.method === 'createSession')).toHaveLength(0);
   } finally {
     f.releaseCreation();
+    await f.close();
+  }
+});
+
+test('a missing scheduled result keeps the task page and exposes the navigation error', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('安排任务');
+    await f.click('打开会话');
+    expect(f.host.querySelector('.scheduled-tasks-page')).not.toBeNull();
+    expect(f.host.body.textContent).toContain('session_missing');
+    expect(
+      f.calls.filter((call) => call.method === 'select' && call.sessionId === 'missing'),
+    ).toHaveLength(1);
+  } finally {
     await f.close();
   }
 });

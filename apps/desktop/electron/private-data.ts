@@ -47,6 +47,11 @@ import {
   verifyWindowsPrivateUi,
 } from './profile-access';
 import { recoveryPending, validateRecoveryIntent } from './recovery-journal';
+import {
+  createScheduledTaskData,
+  type NativeScheduledTaskData,
+  scheduledTaskSchemas,
+} from './scheduled-tasks';
 
 import {
   parseWorkspaceRemovalIntent,
@@ -55,7 +60,8 @@ import {
 } from './workspace-removal';
 
 export type DraftScope = { storeId: string; workspaceId: string; rootSessionId: string };
-export type PrivateData = WorkspaceRemovalData &
+export type PrivateData = NativeScheduledTaskData &
+  WorkspaceRemovalData &
   NativeFileRecoveryJournal &
   NativeAnswerData & {
     read(scope: DraftScope): NativeDraft;
@@ -155,7 +161,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       version !== 6 &&
       version !== 7 &&
       version !== 8 &&
-      version !== 9
+      version !== 9 &&
+      version !== 10
     )
       failure();
     if (
@@ -212,6 +219,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         'mcp_intents',
         'model_routes',
         'recovery_intents',
+        ...(version >= 10 ? ['scheduled_task_runs', 'scheduled_tasks'] : []),
         ...(version >= 8 ? ['workspace_removal_intents'] : []),
       ])
     )
@@ -249,6 +257,16 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)'
     )
       failure();
+    if (version >= 10) {
+      for (const schema of scheduledTaskSchemas) {
+        const name = schema.split(' ')[2]!.split('(')[0]!;
+        if (
+          db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(name)
+            ?.sql !== schema
+        )
+          failure();
+      }
+    }
     db.prepare('SELECT command_id,state FROM recovery_intents LIMIT 0').all();
     if (
       db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='mcp_intents'").get()
@@ -498,6 +516,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     return row ? draft(row) : { id, ...scope, revision: 0, content: '' };
   };
   const port: PrivateData = {
+    ...createScheduledTaskData(database),
     workspaceRemovals: workspaceRemovalRows,
     saveWorkspaceRemoval(input) {
       const intent = parseWorkspaceRemovalIntent(input);
@@ -1039,6 +1058,12 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     },
   };
   const localCodes = new Set([
+    'scheduled_task_invalid',
+    'scheduled_task_not_found',
+    'scheduled_task_run_not_found',
+    'scheduled_task_capacity_exceeded',
+    'scheduled_task_active',
+    'scheduled_task_store_changed',
     'mcp_storage_unavailable',
     'mcp_capacity_exceeded',
     'mcp_intent_conflict',
