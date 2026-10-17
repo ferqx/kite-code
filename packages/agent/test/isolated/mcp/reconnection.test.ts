@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpSourceReadSet } from '../../../src/config/mcp-sources';
 import type {
@@ -221,7 +222,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   for (const sessionId of ['s', 'other'])
     await runtime.createSession({

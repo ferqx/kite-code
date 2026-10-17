@@ -330,8 +330,7 @@ async function materializeWindowsPredecessorVersion(
     [
       '--no-env-file',
       '--no-install',
-      '--config',
-      config,
+      `--config=${config}`,
       mirror,
       realpathSync(join(repository, 'node_modules')),
       join(source, 'node_modules'),
@@ -350,7 +349,7 @@ await buildTerminalBundle(${JSON.stringify({ destination: terminal, repositoryRo
 await buildNativeCandidate({terminalRoot:${JSON.stringify(terminal)},electronDist:${JSON.stringify(electron)},outdir:${JSON.stringify(native)},windowsBuildPort:windowsNativeCandidateBuildPort});
 `,
   );
-  await command(bun, ['--no-env-file', '--no-install', '--config', config, build], source);
+  await command(bun, ['--no-env-file', '--no-install', `--config=${config}`, build], source);
   const after = await identity();
   if (after.commit !== before.commit || after.dirty)
     throw Error('windows_predecessor_source_changed');

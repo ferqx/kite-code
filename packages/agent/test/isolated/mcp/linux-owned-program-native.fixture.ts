@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   LinuxOwnedProgramStartError,
   startLinuxOwnedProgram,
@@ -19,7 +20,7 @@ export async function qualifyLinuxOwnedProgram() {
   let failure: unknown;
   const cleanup: unknown[] = [];
   try {
-    mkdirSync(join(root, 'cwd'), { mode: 0o700 });
+    privateDirectory(join(root, 'cwd'));
     const init = join(root, 'init');
     const built = spawnSync(
       compiler,

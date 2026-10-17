@@ -2,7 +2,15 @@
 
 状态：active
 
+Windows daemon 的可信装配可借用本进程已经完成准入的原 live artifact owner，绑定 proof、entry、executable 与 build；借用未归还、关闭开始、复制或伪造均拒绝。新的实际进程仍独立取得锁/原文件 pin 并全量核验，不向 startup JSON、配置或 HTTP 增加借用能力。原 HANDLE 内容事实和批量私有复制不改变 Files 授权、维护 EX、精确取消或关闭未知保资源的合同。实现归 [Service owner](../../apps/service/README.md)和 [platform owner](../../packages/agent/src/platform/README.md)，取舍归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
+
 Model 用量通过 [AI 中立事件](../../packages/ai/src/index.ts)的独立 `usage` 快照交接，完整 finish 与工具派发仍分别核实。[Agent Execution](../../packages/agent/src/execution/index.ts)在成功、失败、取消结果中保留已收输入／输出、缓存、推理、原服务端总数及 `usage.raw`；只保存响应中的用量叶子，不复制 headers、凭据或其他原响应。未收到、无效或旧记录未保存的测量保持未知，原始明细不生成授权或执行成功。TUI 同原请求优先显示实测输入，缺失才用本地估算；完整 Model 输入身份与冻结容量仍独立核实，累计统计不代替当前上下文。既有 JSON result 承载新增可选字段，SQL baseline 与公开 HTTP schema 保持。当前接口、限制和实测范围归 [AI](../../packages/ai/README.md)、[Agent](../../packages/agent/README.md)和 [CLI Host](../../apps/cli/README.md)。
+
+Workspace Files 模型工具在 [Files owner](../../packages/agent/src/tools/files/README.md#模型工具路径)按可信固定根把项目内绝对路径转换为相对路径，转换发生在原 IO／检查点 capture 前；原调用及审批保存完整原参数。底层相对路径和原目录对象约束、独立外部文件授权保持。Native 仅对唯一原 `files.list@1` 调用的省略／空路径显示已知默认 `.`；缺来源／歧义／未来版本不补目标，显示文本不授予文件动作。
+
+外部文件授权摘要、派发复查和读取 baseline 共用 [Files 原生身份](../../packages/agent/src/tools/files/README.md#绝对用户文件)；Windows 的 volume／128-bit FileID 不与 Node stat 身份混比。派发在实际已锚定的父目录对象上重核，目标或父对象替换继续拒绝；严格 owner／单链接、受保护路径、准确原参数和外部文件排除 Workspace 检查点的合同保持。
+
+Files 的原生 I/O 沿 [Node-API owner](../../packages/agent/native/files/README.md)统一；cap-std 提供能力对象和读写，官方 SDK 补齐 Windows 原 HANDLE／完整 FileID／DACL／发布与关闭未知。Tool、Loop、检查点格式和授权接口不变；固定资产先核平台、CPU、ABI、hash 和无 symlink／单链接，缺失不回退。正式 Service 将 `filesNativeAssets()` 的加载器和整个 companion 加入普通／外部 Files 与恢复保护，包含 Full；位置不来自 Model／HTTP／JSONC。其他原生 owner 不随此切换。
 
 客户端测试专用的调试入口、诊断展示和辅助控件只允许由隔离测试夹具或明确测试制品开启，dev 与 prod 客户端必须关闭。公开启动参数、环境变量、URL 或环境名不提供开启资格；TUI 普通入口拒绝 `--test-ui-diagnostics`，Native 的开发与正式 renderer 将测试常量固定为 false，组件传入 true 也不能覆盖该值。测试目录的入口可向可信 host 显式传 `testDiagnostics:true`，测试 Native 可单独构建诊断制品；共享 Desktop context 默认关闭，不再按 `NODE_ENV=development` 增加技术详情。测试诊断只控制展示，不改变公共请求、身份、原申请持久化、审批与取消权，也不跳过制品完整验证。普通界面仍保未知／失败／未确认清理、完整业务结果和用户明确的原内容检查；移植原 Ink 的纯 Header／Footer／面板不能恢复旧 provider 或执行 authority。负责实现归 [TUI](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)与 [Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
 

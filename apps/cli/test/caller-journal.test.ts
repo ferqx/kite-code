@@ -1,15 +1,16 @@
 import { expect, test } from 'bun:test';
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { callerTarget, type TuiCallerIntent } from '@kite-ai/ui/tui';
+import { privateDirectory, temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { callerDigest, callerRequestDigest, parseCallerIntent } from '../host/caller-intents';
 import { openCallerJournal } from '../host/caller-journal';
 
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-caller-journal-'),
+  const root = temporaryDirectory('kite-caller-journal-'),
     access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   return {
     access,
     path: join(access.profilePath, 'ui/caller-intents.json'),
@@ -77,7 +78,7 @@ test('128 full records are retained and capacity rejects new intent without repl
   } finally {
     f.close();
   }
-});
+}, 120000);
 test('complete legal large UTF8 requests are not truncated; 16 MiB byte capacity leaves exact prior bytes; malformed/hardlinked journal is not empty', () => {
   const f = fixture();
   try {

@@ -131,7 +131,7 @@ export function retainWindowsInstallationRemoval(input: {
     // outside the removal root retain ordinary no-delete pins and are never deleted.
     const handle = kernel.symbols.CreateFileW(
       ptr(wide(path)),
-      relative === null ? 0x20080 : 0x30080,
+      relative === null ? 0x200a0 : 0x30080,
       relative === null ? 3 : 1,
       null,
       3,

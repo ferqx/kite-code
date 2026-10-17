@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import {
   decodeSessionRecoveryCommand,
   type RecoverSessionRequest,
 } from '@kite-ai/client';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 
 async function bounded<T>(value: Promise<T>): Promise<T> {
@@ -42,7 +43,7 @@ async function readyLine(stream: ReadableStream<Uint8Array>): Promise<string> {
 
 for (const mode of ['tool', 'model'] as const)
   test(`actual SIGKILL ${mode} public Session interruption preserves original facts; lost receipt only GETs original identity`, async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-http-session-recovery-'));
+    const root = realpathSync(temporaryDirectory('kite-http-session-recovery-'));
     const ledger = join(root, 'effects');
     const profile = { dataRoot: join(root, 'data'), profile: 'test' };
     const child = Bun.spawn(

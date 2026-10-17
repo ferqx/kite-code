@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import {
   cpSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -14,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 async function execute(argv: string[], cwd: string, home: string) {
@@ -45,7 +45,7 @@ async function execute(argv: string[], cwd: string, home: string) {
 test('actual single-file default Service protects loader companions without protecting its Workspace parent', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-protection-')));
   const home = join(root, 'home');
-  mkdirSync(home, { mode: 0o700 });
+  privateDirectory(home);
   const userConfiguration = ownedUserConfiguration(home);
   let provider: ReturnType<typeof Bun.serve> | undefined;
   let runtime = '';
@@ -100,10 +100,7 @@ test('actual single-file default Service protects loader companions without prot
       'storage/migrations/0001-baseline.sql',
       'storage/migrations/0002-recovery-audit.sql',
     ]) {
-      mkdirSync(join(root, path.substring(0, path.lastIndexOf('/'))), {
-        recursive: true,
-        mode: 0o700,
-      });
+      privateDirectory(join(root, path.substring(0, path.lastIndexOf('/'))));
       cpSync(join(agent, path), join(root, path));
     }
     const preload = join(root, 'storage/worker/observer-preload.js');
@@ -259,7 +256,7 @@ try {
     verifyTerminalBundle(built.root);
     // A trusted custom extractor owns its exact real parser/checksum inventory; the default
     // sibling parser is absent and must not be invented as loaded authority.
-    mkdirSync(join(root, 'custom-parser'), { mode: 0o700 });
+    privateDirectory(join(root, 'custom-parser'));
     for (const name of ['extractor-worker.js', 'extractor-worker.sha256'])
       renameSync(join(root, name), join(root, 'custom-parser', name));
     expect(existsSync(join(root, 'extractor-worker.js'))).toBe(false);

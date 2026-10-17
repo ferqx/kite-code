@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { createFileRecoveryPort } from '../../host/file-recovery';
 import { openFileRecoveryJournal } from '../../host/file-recovery-intents';
@@ -19,14 +20,14 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) 
   }
 }
 test('actual default file recovery engine seals both legs before POST and cold lookup cannot start Fork', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-file-fork-'));
+  const root = realpathSync(temporaryDirectory('kite-cli-file-fork-'));
   const workspace = join(root, 'workspace');
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(workspace);
   const file = join(workspace, 'original.txt');
   writeFileSync(file, 'original bytes\r\n');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   let requests = 0;
   const provider = Bun.serve({
     hostname: '127.0.0.1',

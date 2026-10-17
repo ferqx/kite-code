@@ -20,7 +20,7 @@
     "./daemon-main": "./src/daemon-main.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/paired.ts ./src/main.ts ./src/bootstrap.ts ./src/configuration.ts ./src/runtime-assets.ts ./src/native-runtime-assets.ts ./src/windows-native-bootstrap.ts ./src/runtime-protection.ts ./src/sqlite-release-assets.ts ./src/mcp-http-port.ts ./src/development-web.ts ./src/daemon.ts ./src/daemon-main.ts --target=bun --packages=external --root=./src --outdir=dist",
+    "build": "bun build ./src/index.ts ./src/paired.ts ./src/main.ts ./src/bootstrap.ts ./src/configuration.ts ./src/runtime-assets.ts ./src/native-runtime-assets.ts ./src/windows-native-bootstrap.ts ./src/runtime-protection.ts ./src/sqlite-release-assets.ts ./src/mcp-http-port.ts ./src/development-web.ts ./src/daemon.ts ./src/daemon-main.ts --target=bun --splitting --packages=bundle --external=@kite-ai/agent --external=@kite-ai/ai --external=@kite-ai/client --root=./src --outdir=dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import type { Extension, OperationRef, ToolDefinition } from '../../../src/extensions';
@@ -118,7 +119,7 @@ test('ordinary detached Tool preserves its sealed cancellation edge through actu
     await runtime.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
       name: 'fixture',
     });
     await runtime.createSession({

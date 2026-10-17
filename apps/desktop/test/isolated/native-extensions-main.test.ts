@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Extension } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -13,6 +14,7 @@ import {
   type PublicView,
 } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { NativeCaller } from '../../electron/native-caller';
 import type {
   NativeExtensionChunk,
@@ -24,7 +26,7 @@ import type { NativeState } from '../../src/native-bridge';
 import { memoryPrivateData } from '../private-data.fixture';
 
 test('Native formal extensions caller completes mini-review through real SQLite, HTTP and Client without replaying read or cold intents', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-native-extensions-main-'));
+  const root = realpathSync(temporaryDirectory('kite-native-extensions-main-'));
   const fixture = (await import(
     join(import.meta.dir, '../../../../tests/fixtures/extensions/mini-review/src/index.ts')
   )) as {
@@ -55,7 +57,7 @@ test('Native formal extensions caller completes mini-review through real SQLite,
     expectedStoreId: storeId,
     id: 'w',
     name: 'Owned',
-    rootUri: `file://${root}/`,
+    rootUri: pathToFileURL(`${root}/`).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,

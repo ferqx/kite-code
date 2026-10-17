@@ -1,14 +1,16 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 
 const finish: ModelEvent = {
@@ -18,7 +20,7 @@ const finish: ModelEvent = {
 };
 
 test('real cold SQLite Job report resumes only through authenticated original HTTP command; physical lost response is queried without resubmit', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-http-report-resume-')),
+  const root = realpathSync(temporaryDirectory('kite-http-report-resume-')),
     profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const warmStore = await openSqliteStore(profile),
     expectedStoreId = (await warmStore.getMetadata()).storeId;
@@ -110,7 +112,7 @@ test('real cold SQLite Job report resumes only through authenticated original HT
     await warm.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'owned',
     });
     await warm.createSession({

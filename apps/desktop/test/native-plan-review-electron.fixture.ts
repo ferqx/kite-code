@@ -976,7 +976,7 @@ try {
         }),
       );
       await page.screenshot({
-        path: '/private/tmp/kite-native-plan-window-failure.png',
+        path: join(home, 'kite-native-plan-window-failure.png'),
         fullPage: true,
       });
     } catch {}

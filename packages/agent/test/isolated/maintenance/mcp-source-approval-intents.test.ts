@@ -5,7 +5,6 @@ import {
   chmodSync,
   existsSync,
   linkSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -16,6 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -77,7 +77,7 @@ async function fixture() {
   const storeId = (await store.getMetadata()).storeId;
   await store.close();
   const path = join(selectProfile(profile).profilePath, 'ui/mcp-source-approval-intents.json');
-  mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(path, '..'));
   return {
     root,
     profile,

@@ -1,17 +1,6 @@
-import { expect, test } from 'bun:test';
+import { expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  cpSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, linkSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -20,8 +9,18 @@ import {
   terminalBundleEntries,
   verifyTerminalBundle,
 } from '../../../apps/cli/host/terminal-artifact';
+import {
+  releaseCopy as cpSync,
+  directoryAlias,
+  fileAlias,
+  releaseDirectory as mkdirSync,
+  releaseScratch as mkdtempSync,
+  unsafeReleasePermissions,
+} from '../../fixtures/unified-agent/release-filesystem';
 import { fixtureTerminalSqlite } from '../../fixtures/unified-agent/sqlite-engine-fixture';
 
+// Real Windows ACL and installation I/O needs a fixture budget; product qualification deadlines remain fixed.
+setDefaultTimeout(30_000);
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 function fixture() {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-artifact-'))),
@@ -29,9 +28,13 @@ function fixture() {
   mkdirSync(root);
   const entries = terminalBundleEntries(process.platform),
     files: TerminalBundleManifest['files'][number][] = [];
-  for (const path of [...Object.values(entries), 'node_modules/example/index.js']) {
+  for (const path of [
+    ...Object.values(entries),
+    'node_modules/example/index.js',
+    ...(process.platform === 'win32' ? ['node_modules/alias/index.js'] : []),
+  ]) {
     const bytes = Buffer.from(
-        path === 'node_modules/example/index.js' ? 'export const value=1;' : `fixture ${path}`,
+        path.startsWith('node_modules/') ? 'export const value=1;' : `fixture ${path}`,
       ),
       mode = path === entries.runtime ? 493 : 420;
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -49,9 +52,9 @@ function fixture() {
     source: { commit: 'a'.repeat(40), dirty: true },
     entries,
     files,
-    links: [{ path: 'node_modules/alias', target: 'example' }],
+    links: process.platform === 'win32' ? [] : [{ path: 'node_modules/alias', target: 'example' }],
   };
-  symlinkSync('example', join(root, 'node_modules/alias'));
+  if (process.platform !== 'win32') directoryAlias('example', join(root, 'node_modules/alias'));
   const save = (value: unknown = manifest) => {
     writeFileSync(join(root, 'terminal-manifest.json'), JSON.stringify(value) + '\n', {
       mode: 0o644,
@@ -115,8 +118,12 @@ test('every inventoried file is checked; missing, extra, same-size tamper and al
       if (action === 'missing') rmSync(path);
       if (action === 'extra') writeFileSync(join(f.root, 'extra.txt'), 'unlisted');
       if (action === 'tamper') writeFileSync(path, 'export const value=2;');
-      if (action === 'mode') chmodSync(path, 0o755);
-      expect(() => verifyTerminalBundle(f.root)).toThrow('terminal_bundle_identity_mismatch');
+      if (action === 'mode') unsafeReleasePermissions(path, 0o755);
+      expect(() => verifyTerminalBundle(f.root)).toThrow(
+        process.platform === 'win32' && (action === 'missing' || action === 'mode')
+          ? 'terminal_bundle_unavailable'
+          : 'terminal_bundle_identity_mismatch',
+      );
     } finally {
       f.close();
     }
@@ -127,19 +134,19 @@ test('relative internal links are exact; external, escaping, dangling, cycle, pa
     const f = fixture();
     try {
       const link = join(f.root, 'node_modules/alias');
-      rmSync(link);
+      rmSync(link, { recursive: true });
       if (action === 'external') {
-        symlinkSync(f.parent, link);
+        directoryAlias(f.parent, link);
         f.save({ ...f.manifest, links: [{ path: 'node_modules/alias', target: f.parent }] });
       }
       if (action === 'escape') {
-        symlinkSync('../../outside', link);
+        directoryAlias('../../outside', link);
         f.save({ ...f.manifest, links: [{ path: 'node_modules/alias', target: '../../outside' }] });
       }
-      if (action === 'dangling') symlinkSync('missing', link);
-      if (action === 'cycle') symlinkSync('alias', link);
+      if (action === 'dangling') directoryAlias('missing', link);
+      if (action === 'cycle') directoryAlias('alias', link);
       if (action === 'alias') {
-        symlinkSync('example', link);
+        directoryAlias('example', link);
         f.save({
           ...f.manifest,
           files: [
@@ -149,7 +156,7 @@ test('relative internal links are exact; external, escaping, dangling, cycle, pa
         });
       }
       if (action === 'hardlink') {
-        symlinkSync('example', link);
+        directoryAlias('example', link);
         const original = join(f.root, 'node_modules/example/index.js');
         linkSync(original, join(f.root, 'node_modules/duplicate.js'));
         f.save({
@@ -184,16 +191,30 @@ test('closed schema rejects unknown fields, path aliases, duplicate identity and
       { ...f.manifest, links: [{ path: 'node_modules/alias', target: 'C:/external' }] },
     ])
       expect(() => parseTerminalBundleManifest(input)).toThrow('terminal_manifest_invalid');
-    f.save({
-      ...f.manifest,
-      target: { ...f.manifest.target, arch: process.arch === 'arm64' ? 'x64' : 'arm64' },
-    });
+    // Windows admits only x64. Use another admitted target rather than an invalid Win/arm64 schema.
+    f.save(
+      process.platform === 'win32'
+        ? {
+            ...f.manifest,
+            target: { platform: 'linux', arch: 'x64' },
+            entries: terminalBundleEntries('linux'),
+            files: f.manifest.files.map((file) =>
+              file.path === f.manifest.entries.runtime
+                ? { ...file, path: terminalBundleEntries('linux').runtime }
+                : file,
+            ),
+          }
+        : {
+            ...f.manifest,
+            target: { ...f.manifest.target, arch: process.arch === 'arm64' ? 'x64' : 'arm64' },
+          },
+    );
     expect(() => verifyTerminalBundle(f.root)).toThrow('terminal_target_mismatch');
   } finally {
     f.close();
   }
 });
-test('manifest identity uses full original bytes; symlink manifest cannot become installed authority', () => {
+test('manifest identity uses full original bytes; aliased manifest cannot become installed authority', () => {
   const f = fixture();
   try {
     const first = verifyTerminalBundle(f.root);
@@ -207,7 +228,7 @@ test('manifest identity uses full original bytes; symlink manifest cannot become
     const manifest = join(f.root, 'terminal-manifest.json');
     cpSync(manifest, join(f.parent, 'manifest-copy'));
     rmSync(manifest);
-    symlinkSync('../manifest-copy', manifest);
+    fileAlias('../manifest-copy', manifest);
     expect(() => verifyTerminalBundle(f.root)).toThrow('terminal_bundle_unavailable');
   } finally {
     f.close();

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { AgentError, createRuntime } from '../../../src';
 import { defineExtension } from '../../../src/extensions';
@@ -72,7 +73,7 @@ test.each([
     await runtime.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'fixture',
     });
     await runtime.createSession({

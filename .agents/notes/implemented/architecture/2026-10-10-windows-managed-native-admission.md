@@ -16,7 +16,9 @@ PPID 和出生时间不足以证明实际创建者。[Microsoft UpdateProcThread
 
 outer 使用候选 ID，inner 使用 `SHA256(ID + NUL + "terminal")`，两锁位于安装 prefix 外的固定私有协调 namespace。Main 自己执行 SH acquire；[配套 Service](../../../../apps/service/src/windows-paired-artifact.ts)独立核完整候选并取得自己的使用权。任何一个 holder 退出不证明另一 holder 已结束。原文件、进程、pipe、overlapped I/O 和 fresh probe 在成功关闭前保持 owner；关闭未知不交出 SH，全部所属文件资源确认关闭后才释放使用权。
 
-加载器同样属于前置边界。固定 C/Bun/helper 使用 System32，Electron 新副本的静态依赖只使用完整已 pin 的应用目录和 System32；PE/import/LoadConfig 或 delay-import 不符合要求就拒绝，不修改 publisher 原文件。[Microsoft DEPENDENTLOADFLAG](https://learn.microsoft.com/en-us/cpp/build/reference/dependentloadflag?view=msvc-170)说明了静态依赖搜索限制；父进程运行后调用 SetDefaultDllDirectories 不能充当尚未运行的 child 的静态加载证明。完整当前实现以 [Native release owner](../../../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)为准。
+Main配套启动器使用同进程原生owner的不可伪造借用，避免Electron Node误入Bun FFI；仍绑定原root/digest/entry/runtime/build，原Service退出未兑现时Main不得关闭。文件/祖先共享保护和Node/libuv默认强杀Job的实际修正归[后续原对象决定](../bug-fix/2026-10-17-windows-original-object-sharing.md)，不替代本决定的证书、Main独立SH或子Service独立准入。
+
+加载器同样属于前置边界。固定 C/Bun/helper 使用 System32，Electron 新副本的静态依赖只使用完整已 pin 的应用目录和 System32；最终 PE/import/LoadConfig 或 delay-import 不符合要求就拒绝，不修改 publisher 原文件。源 console Bun/helper 与GUI Electron的受限 RVA v2 delay imports 现在可由 builder 提前转为普通 imports；这一部分由[后续决定](../bug-fix/2026-10-16-windows-bun-eager-system-imports.md)取代，最终镜像仍拒绝delay directory，原加载前 pin／双 SH／两跳证书和其他要求保持。[Microsoft DEPENDENTLOADFLAG](https://learn.microsoft.com/en-us/cpp/build/reference/dependentloadflag?view=msvc-170)说明了静态依赖搜索限制；父进程运行后调用 SetDefaultDllDirectories 不能充当尚未运行的 child 的静态加载证明。完整当前实现以 [Native release owner](../../../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)为准。
 
 ## Alternatives considered
 
@@ -28,4 +30,4 @@ outer 使用候选 ID，inner 使用 `SHA256(ID + NUL + "terminal")`，两锁位
 
 本决定部分替代[原 Main Profile/Artifact 使用权提案](../../proposed/architecture/2026-10-04-windows-node-owned-profile-and-artifact-leases.md)中“所有正式 Windows candidate 一律前置拒绝、尚无加载前根”的描述。缺交接或错误证书仍拒绝；raw directory launch 的 Windows 限制保持，正式 desktop 前门当前只接受无附加用户参数的启动。原提案的 Profile 私有文件、独立锁和原生资格要求仍适用，继续 proposed。
 
-`implemented` 仅表示上述源码决定已交付。本机类型、字节契约与 POSIX 邻接证据不证明 Windows syscall、MSVC、真实 Electron 分发符合 PE guard、安装／窗口／维护恢复或准确退出资格。Windows/Linux 原生资格按用户顺序留到重构后；签名、publisher 认证及完整平台发行仍未取得。本决定不改变业务恢复、权限或发布授权，也不宣布整体 V1.3 完成。
+`implemented` 仅表示上述源码决定已交付。Windows实际MSVC前门和真实Electron分发PE／引擎探针已有[后续构建决定](../bug-fix/2026-10-16-windows-bun-eager-system-imports.md)的限定证据；类型、mock或这些探针均不代完整安装／窗口／维护恢复或准确退出资格。各平台完整原生结果归当前owner；签名、publisher认证及完整平台发行仍未取得。本决定不改变业务恢复、权限或发布授权，也不宣布整体V1.3完成。

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -162,7 +163,7 @@ test('actual Model exhausts both selected-context cursors and rewind preserves o
     await runtime.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'temporary',
     });
     await runtime.createSession({

@@ -1,14 +1,6 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -17,6 +9,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 import type { NativeMcpSubmission } from '../../src/native-bridge';
@@ -26,13 +19,13 @@ const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'source-free relocated trusted-loopback Native MCP formal window source operations, independent reviews, immutable tools and cold original GET',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-mcp-bundle-')),
+    const root = realpathSync(temporaryDirectory('kite-native-mcp-bundle-')),
       home = join(root, 'home'),
       moved = join(root, 'relocated');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     linkOwnedDefaultKeychain(home);
     mkdirSync(join(home, 'workspace'));
-    mkdirSync(join(home, 'workspace', '.kite-code'), { mode: 0o700 });
+    privateDirectory(join(home, 'workspace', '.kite-code'));
     const profile = selectProfile({
         dataRoot: join(home, '.kite-code/unified-agent'),
         profile: 'default',
@@ -136,7 +129,7 @@ else throw Error('owned_credential_operation_invalid');
           expectedStoreId: storeId,
           id: 'w',
           name: 'MCP',
-          rootUri: new URL(`file://${join(home, 'workspace')}`).href,
+          rootUri: pathToFileURL(join(home, 'workspace')).href,
         });
         await seed.createSession({
           expectedStoreId: storeId,

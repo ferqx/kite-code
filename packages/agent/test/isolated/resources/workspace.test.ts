@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceSerialLocks } from '../../../src/resources';
 import { acquireProfileAccess } from '../../../src/sqlite';
 
@@ -41,7 +42,7 @@ function lines(stream: ReadableStream<Uint8Array>) {
   };
 }
 test('real Workspace OS key excludes frozen process, permits other keys, and releases on SIGKILL', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-workspace-lock-');
+  const dataRoot = temporaryDirectory('kite-workspace-lock-');
   chmodSync(dataRoot, 0o700);
   const locks = createWorkspaceSerialLocks({ dataRoot, profile: 'test' });
   const child = Bun.spawn(
@@ -93,7 +94,7 @@ test('real Workspace OS key excludes frozen process, permits other keys, and rel
   }
 }, 10000);
 test('lock descriptors are not inherited by spawned process and close drains active permits', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-workspace-close-');
+  const dataRoot = temporaryDirectory('kite-workspace-close-');
   chmodSync(dataRoot, 0o700);
   const locks = createWorkspaceSerialLocks({ dataRoot, profile: 'test' });
   const held = await locks.acquire(
@@ -144,7 +145,7 @@ test('lock descriptors are not inherited by spawned process and close drains act
   }
 }, 10000);
 test('Workspace waiters are bounded, cancelled without ownership, and unfinished restore journal blocks factory', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-workspace-bound-');
+  const dataRoot = temporaryDirectory('kite-workspace-bound-');
   chmodSync(dataRoot, 0o700);
   const locks = createWorkspaceSerialLocks({ dataRoot, profile: 'test' });
   const release = await locks.acquire(

@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -18,6 +17,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -25,10 +25,10 @@ const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'source-free relocated default Native Skills window reads complete byte-paged metadata, refreshes owned files, switches scopes and cold DB7 with zero execution',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-skills-bundle-')),
+    const root = realpathSync(temporaryDirectory('kite-native-skills-bundle-')),
       home = join(root, 'home'),
       moved = join(root, 'relocated');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     const workspace = join(home, 'workspace'),
       secondWorkspace = join(home, 'workspace-two');
     mkdirSync(workspace);
@@ -101,7 +101,7 @@ test.skipIf(process.platform !== 'darwin')(
         await seed.close();
       }
       const metadata = (path: string, name: string, description: string) => {
-        mkdirSync(path, { recursive: true, mode: 0o700 });
+        privateDirectory(path);
         writeFileSync(
           join(path, 'SKILL.md'),
           `---\nname: ${name}\ndescription: ${description}\n---\nPRIVATE_SKILL_BODY\n`,

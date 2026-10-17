@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -124,7 +125,7 @@ test('CLI public management commits once after physical lost response; original 
     await client.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'owned',
     });
     await client.createSession({

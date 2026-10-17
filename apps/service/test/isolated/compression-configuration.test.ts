@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { type ContextCompressor, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -181,7 +182,7 @@ for (const { guardedReset, rejectedSummary } of [
       await client.createWorkspace({
         expectedStoreId,
         id: 'w',
-        rootUri: `file://${workspace}`,
+        rootUri: pathToFileURL(workspace).href,
         name: 'Owned',
       });
       await client.createSession({

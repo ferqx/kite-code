@@ -72,6 +72,7 @@ static bool same(const BY_HANDLE_FILE_INFORMATION& a, const BY_HANDLE_FILE_INFOR
 struct Policy {
   std::vector<unsigned char> user;
   PSID sid = nullptr;
+  mutable std::vector<unsigned char> securityBytes = std::vector<unsigned char>(131072);
   Policy() {
     HANDLE raw = nullptr;
     need(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw));
@@ -87,13 +88,18 @@ struct Policy {
   void verify(HANDLE h) const {
     PSID owner = nullptr;
     PACL dacl = nullptr;
-    Local descriptor;
-    need(GetSecurityInfo(h, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-      &owner, nullptr, &dacl, nullptr, reinterpret_cast<PSECURITY_DESCRIPTOR*>(&descriptor.value)) == ERROR_SUCCESS);
+    DWORD needed = 0;
+    // Read the original HANDLE's raw owner/DACL; do not resolve parent inheritance by name.
+    need(GetKernelObjectSecurity(h, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+      securityBytes.data(), static_cast<DWORD>(securityBytes.size()), &needed));
+    need(needed >= SECURITY_DESCRIPTOR_MIN_LENGTH && needed <= securityBytes.size());
+    BOOL present = FALSE, defaulted = FALSE;
+    need(GetSecurityDescriptorOwner(securityBytes.data(), &owner, &defaulted));
+    need(GetSecurityDescriptorDacl(securityBytes.data(), &present, &dacl, &defaulted) && present);
     need(owner && dacl && EqualSid(owner, sid));
     SECURITY_DESCRIPTOR_CONTROL control{};
     DWORD revision = 0;
-    need(GetSecurityDescriptorControl(descriptor.value, &control, &revision));
+    need(GetSecurityDescriptorControl(securityBytes.data(), &control, &revision));
     need(control & SE_DACL_PRESENT);
     need(dacl->AceCount <= 4096);
     for (DWORD i = 0; i < dacl->AceCount; ++i) {
@@ -119,7 +125,7 @@ struct Pin {
   BY_HANDLE_FILE_INFORMATION original;
   bool directory;
   Pin(std::wstring name, bool isDirectory, const Policy& policy, bool publicAcl)
-    : path(std::move(name)), handle(CreateFileW(path.c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES | (isDirectory ? 0 : GENERIC_READ),
+    : path(std::move(name)), handle(CreateFileW(path.c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES | (isDirectory ? FILE_TRAVERSE : GENERIC_READ),
         isDirectory ? FILE_SHARE_READ | FILE_SHARE_WRITE : FILE_SHARE_READ, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT | (isDirectory ? FILE_FLAG_BACKUP_SEMANTICS : 0), nullptr)), directory(isDirectory) {
     need(handle.value != INVALID_HANDLE_VALUE);

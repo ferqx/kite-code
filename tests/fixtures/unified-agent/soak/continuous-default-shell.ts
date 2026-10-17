@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -28,7 +28,6 @@ import {
   type ContinuousLinuxShellEvidence,
   type ContinuousShellEvidence,
 } from '../../../../scripts/runtime/unified-soak-continuous';
-
 import {
   type NativeProcessObservation,
   observeNativeProcess,
@@ -36,6 +35,7 @@ import {
   observeOwnedProcessExit,
 } from '../../../../scripts/runtime/unified-soak-native';
 import type { PairedServiceResources } from '../../../../scripts/runtime/unified-soak-service-resources';
+import { privateDirectory } from '../../test-filesystem';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -72,17 +72,17 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
     return closing;
   };
   try {
-    mkdirSync(root, { recursive: true, mode: 0o700 });
+    privateDirectory(root);
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const workspace = join(root, 'workspace');
-    mkdirSync(join(workspace, 'effects'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(workspace, 'effects'));
     const candidate = candidateRoot
       ? verifyTerminalBundle(candidateRoot)
       : await buildTerminalBundle({ destination: join(root, 'candidate') });
     const access = acquireArtifactAccess({ root: candidate.root, mode: 'shared' });
     cleanup.push(async () => access.release());
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'continuous' });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     let childCalls = 0,
       providerCalls = 0;
     const provider = Bun.serve({

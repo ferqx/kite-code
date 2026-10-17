@@ -8,10 +8,11 @@
     "./tui": "./src/tui/index.tsx",
     "./desktop": "./src/desktop/index.ts",
     "./desktop/markdown": "./src/desktop/markdown-parser.ts",
-    "./desktop/style.css": "./src/desktop/style.css"
+    "./desktop/style.css": "./src/desktop/style.css",
+    "./tui/ink": "./src/tui/ink.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.tsx --target=browser --packages=external --outdir=dist && bun build ./src/tui/index.tsx --target=bun --packages=external --outdir=dist/tui && bun run scripts/build-desktop.ts --outdir=dist/desktop",
+    "build": "bun build ./src/index.tsx --target=browser --packages=bundle --external=react --external=react-dom --external=@kite-ai/client --outdir=dist && bun scripts/build-tui.ts --outdir=dist/tui && bun run scripts/build-desktop.ts --outdir=dist/desktop",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test ./test"
   },
@@ -47,7 +48,8 @@
     "ink-text-input": "^6.0.0"
   },
   "peerDependencies": {
-    "react": "^19"
+    "react": "^19",
+    "react-dom": "^19"
   },
   "devDependencies": {
     "react": "^19.2.6",

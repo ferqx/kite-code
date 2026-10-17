@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createPlanningValidation } from '../../../src/business/planning';
 import type { ExtensionRecord, Json, ReadContext } from '../../../src/extensions';
@@ -209,7 +210,7 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
       expectedStoreId,
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       ...base,

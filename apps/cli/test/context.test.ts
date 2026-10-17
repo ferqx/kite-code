@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { ModelRequest } from '@kite-ai/ai';
 import { createDesktopController } from '@kite-ai/desktop';
@@ -40,7 +41,7 @@ test('actual paired Context rewind/include saves exact source without replay; on
       expectedStoreId,
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await client.createSession({
       expectedStoreId,

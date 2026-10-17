@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { recoveryProfile } from '../fixtures/recovery-profile';
 import { runRecoveryPTY } from '../fixtures/tui-recovery-pty';
@@ -145,11 +146,10 @@ for (const kind of ['run', 'interrupt'] as const)
 
 test('80x24 configured-host TUI original report ID creates one source-bound report Run after lost receipt and original GET', async () => {
   const { recoveryReportProfile } = await import('../fixtures/recovery-report-profile');
-  const { mkdirSync } = await import('node:fs');
   const f = await recoveryReportProfile();
   const transcript = `${f.root}-report.pty.log`;
   try {
-    mkdirSync(join(f.profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(f.profile.profilePath, 'ui'));
     writeFileSync(join(f.profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

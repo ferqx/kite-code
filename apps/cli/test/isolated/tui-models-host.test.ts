@@ -1,7 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -9,6 +8,7 @@ import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 
 import { ptyDeadline } from '../fixtures/tui-pty';
@@ -17,17 +17,13 @@ const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 for (const mode of ['paired', 'shared'] as const)
   test(`actual ${mode} TUI model/default/effort CAS preserves held Run and lost original reply never resubmits`, async () => {
-    const root = realpathSync(
-        mkdtempSync(
-          join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'kite-tui-model-'),
-        ),
-      ),
+    const root = realpathSync(temporaryDirectory('kite-tui-model-')),
       workspace = join(root, 'workspace'),
       profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     const home = join(root, 'home');
     const userConfiguration = ownedUserConfiguration(home);
     const userEnvironment = { ...process.env, ...userConfiguration.homeEnvironment };
-    mkdirSync(workspace, { mode: 0o700 });
+    privateDirectory(workspace);
     privateDirectory(profile.profilePath);
     // This fixture asserts English labels independently of the host device locale.
     privateDirectory(join(profile.profilePath, 'ui'));
@@ -133,7 +129,7 @@ for (const mode of ['paired', 'shared'] as const)
         }
       } else {
         const web = join(root, 'web');
-        mkdirSync(web, { mode: 0o700 });
+        privateDirectory(web);
         const assets = [
           ['/index.html', 'text/html; charset=utf-8', '<!doctype html><title>owned</title>'],
           ['/app.js', 'text/javascript; charset=utf-8', 'globalThis.owned=true;'],

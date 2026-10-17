@@ -2,8 +2,10 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 
 interface AssemblyObservation {
@@ -115,7 +117,7 @@ async function setup(
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   writeFileSync(
     join(profile.profilePath, 'config.jsonc'),
     JSON.stringify({
@@ -139,7 +141,7 @@ async function setup(
   observation?.stage('setup.workspace');
   await handle.client.createWorkspace({
     id: 'workspace',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
     name: 'Assembly',
     expectedStoreId: storeId,
   });

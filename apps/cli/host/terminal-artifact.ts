@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   parseTerminalBundleManifest as parseManifest,
+  type retainWindowsTerminalRuntimeFiles,
   type TerminalBundleManifest,
   TerminalRuntimeAssetError,
   terminalBundleEntries,
@@ -37,9 +38,16 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
   return translate(() => parseManifest(value));
 }
 /** Shared entire-closure verification; the selected artifact retains its host-only protection proof. */
-export function verifyTerminalBundle(bundleRoot: string): VerifiedTerminalBundle {
+export function verifyTerminalBundle(
+  bundleRoot: string,
+  retainedFiles?: ReturnType<typeof retainWindowsTerminalRuntimeFiles>,
+): VerifiedTerminalBundle {
   return translate(() => {
-    const { root, manifest, digest } = verifyTerminalRuntimeBundle(bundleRoot);
+    const { root, manifest, digest } = verifyTerminalRuntimeBundle(
+      bundleRoot,
+      undefined,
+      retainedFiles,
+    );
     const buildId = `terminal-${digest}`;
     const files = new Map(manifest.files.map((file) => [file.path, file]));
     const fileDigest = (path: string) => files.get(path)!.sha256;

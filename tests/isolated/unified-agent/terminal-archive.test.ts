@@ -1,20 +1,17 @@
-import { expect, test } from 'bun:test';
+import { expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
   lstatSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import {
   type TerminalBundleManifest,
@@ -25,6 +22,13 @@ import {
   packTerminalBundle,
   unpackTerminalBundle,
 } from '../../../scripts/release/terminal-archive';
+import { privateDirectory } from '../../fixtures/test-filesystem';
+import {
+  directoryAlias,
+  expectReleaseMode,
+  fileAlias,
+  releaseScratch as mkdtempSync,
+} from '../../fixtures/unified-agent/release-filesystem';
 import { fixtureTerminalSqlite } from '../../fixtures/unified-agent/sqlite-engine-fixture';
 
 const hash = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -32,15 +36,21 @@ const hash = (value: Uint8Array) => createHash('sha256').update(value).digest('h
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-archive-'))),
     bundleRoot = join(root, 'candidate');
-  mkdirSync(bundleRoot, { mode: 0o700 });
+  privateDirectory(bundleRoot);
   const entries = terminalBundleEntries(process.platform),
     content: Record<string, Uint8Array> = Object.create(null),
     files: TerminalBundleManifest['files'][number][] = [];
-  for (const path of [...Object.values(entries), 'node_modules/example/index.js']) {
-    const bytes = Buffer.from(`INERT ${path}`),
+  for (const path of [
+    ...Object.values(entries),
+    'node_modules/example/index.js',
+    ...(process.platform === 'win32' ? ['node_modules/alias/index.js'] : []),
+  ]) {
+    const bytes = Buffer.from(
+        `INERT ${path.replace('node_modules/alias/', 'node_modules/example/')}`,
+      ),
       mode = path === entries.runtime ? 493 : 420;
     content[path] = bytes;
-    mkdirSync(dirname(join(bundleRoot, path)), { recursive: true, mode: 0o700 });
+    privateDirectory(dirname(join(bundleRoot, path)));
     writeFileSync(join(bundleRoot, path), bytes, { mode });
     chmodSync(join(bundleRoot, path), mode);
     files.push({ path, size: bytes.length, sha256: hash(bytes), mode });
@@ -55,12 +65,13 @@ function fixture() {
     source: { commit: 'a'.repeat(40), dirty: true },
     entries,
     files,
-    links: [{ path: 'node_modules/alias', target: 'example' }],
+    links: process.platform === 'win32' ? [] : [{ path: 'node_modules/alias', target: 'example' }],
   };
   for (const file of files) content[file.path] ??= readFileSync(join(bundleRoot, file.path));
   content['terminal-manifest.json'] = Buffer.from(JSON.stringify(manifest) + '\n');
   writeFileSync(join(bundleRoot, 'terminal-manifest.json'), content['terminal-manifest.json']!);
-  symlinkSync('example', join(bundleRoot, 'node_modules/alias'));
+  if (process.platform !== 'win32')
+    directoryAlias('example', join(bundleRoot, 'node_modules/alias'));
   const archivePath = join(root, 'bundle.tar.gz'),
     destination = join(root, 'unpacked');
   const unpack = (bytes: Uint8Array, maxUnpackedBytes?: number) => {
@@ -115,6 +126,9 @@ function paxRecord(key: string, value: string) {
 const tar = (entries: Uint8Array[]) => gzipSync(Buffer.concat([...entries, Buffer.alloc(1024)]));
 const normalEntries = (content: Record<string, Uint8Array>) =>
   Object.entries(content).map(([path, bytes]) => tarEntry(path, bytes));
+// Real filesystem fixtures; this does not change product qualification deadlines.
+setDefaultTimeout(30_000);
+
 test('authenticated Terminal modes survive private umask077 without changing the process mask beyond synchronous unpack', async () => {
   const f = fixture();
   try {
@@ -132,8 +146,8 @@ test('authenticated Terminal modes survive private umask077 without changing the
       });
       expect(result.digest).toBe(original.digest);
       for (const file of original.manifest.files)
-        expect(lstatSync(join(result.root, file.path)).mode & 0o777).toBe(file.mode);
-      expect(lstatSync(join(result.root, 'terminal-manifest.json')).mode & 0o777).toBe(0o644);
+        expectReleaseMode(join(result.root, file.path), file.mode);
+      expectReleaseMode(join(result.root, 'terminal-manifest.json'), 0o644);
     } finally {
       process.umask(previous);
     }
@@ -160,13 +174,16 @@ test('actual Bun archive roundtrip stores no symlink entries and reconstructs on
       sha256: packed.sha256,
     });
     expect(result.candidateId).toBe(original.candidateId);
-    expect(result.artifact.executable.startsWith(f.destination + '/')).toBe(true);
-    expect(lstatSync(join(f.destination, 'node_modules/alias')).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(join(f.destination, 'node_modules/alias'))).toBe('example');
+    expect(result.artifact.executable.startsWith(f.destination + sep)).toBe(true);
+    expect(lstatSync(join(f.destination, 'node_modules/alias')).isSymbolicLink()).toBe(
+      process.platform !== 'win32',
+    );
+    if (process.platform === 'win32') expect(result.manifest.links).toEqual([]);
+    else expect(readlinkSync(join(f.destination, 'node_modules/alias'))).toBe('example');
     expect(readFileSync(join(f.destination, 'node_modules/alias/index.js'))).toEqual(
       Buffer.from(f.content['node_modules/example/index.js']!),
     );
-    expect(lstatSync(result.artifact.executable).mode & 0o777).toBe(0o755);
+    expectReleaseMode(result.artifact.executable, 0o755);
   } finally {
     f.close();
   }
@@ -304,12 +321,12 @@ test('authenticated regular-file/link ancestor collisions and external manifest 
     f.close();
   }
 });
-test('pre-existing checksum sidecar symlink is refused without overwriting its external target', async () => {
+test('pre-existing checksum sidecar alias is refused without overwriting its external target', async () => {
   const f = fixture();
   try {
     const outside = join(f.root, 'outside-user-notes');
     writeFileSync(outside, 'DO_NOT_OVERWRITE');
-    symlinkSync(outside, `${f.archivePath}.sha256`);
+    fileAlias(outside, `${f.archivePath}.sha256`);
     let failure: unknown;
     try {
       await packTerminalBundle({ bundleRoot: f.bundleRoot, archivePath: f.archivePath });
@@ -332,7 +349,7 @@ test('packer refuses archive and sidecar publication inside the source, includin
       let parent = f.bundleRoot;
       if (alias) {
         parent = join(f.root, 'source-alias');
-        symlinkSync(f.bundleRoot, parent);
+        directoryAlias(f.bundleRoot, parent);
       }
       const archivePath = join(parent, 'nested-output', 'bundle.tar.gz');
       let failure: unknown;

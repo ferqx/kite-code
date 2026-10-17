@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -13,6 +14,7 @@ import {
 } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { createDesktopController } from '../src';
 
 async function errorCode(work: Promise<unknown>) {
@@ -37,7 +39,7 @@ function gate() {
   };
 }
 async function fixture() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-desktop-permission-'));
+  const root = realpathSync(temporaryDirectory('kite-desktop-permission-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
@@ -82,7 +84,7 @@ async function fixture() {
   await client.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
     name: 'temporary project',
   });
   for (const id of ['s', 'other'])

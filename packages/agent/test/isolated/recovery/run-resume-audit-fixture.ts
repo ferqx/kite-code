@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
@@ -22,7 +23,7 @@ export async function auditFixture(history = 4, failed = false, endedChildren = 
     await store.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
       name: 'audit',
     });
     await store.createSession({

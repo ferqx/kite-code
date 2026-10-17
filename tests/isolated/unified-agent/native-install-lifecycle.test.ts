@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import {
   cpSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -33,6 +32,7 @@ import {
   installTerminalBundle,
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 import { hash } from '../../fixtures/unified-agent/native-artifact-fixture';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
@@ -42,7 +42,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-live-'))),
       home = join(root, 'home'),
       workspace = join(home, 'workspace');
-    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    privateDirectory(workspace);
     const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
         dataRoot: join(home, '.kite-code/unified-agent'),

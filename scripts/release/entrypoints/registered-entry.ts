@@ -2,10 +2,13 @@ export async function registeredEntrypoint(run: () => Promise<number>): Promise<
   try {
     process.exitCode = await run();
   } catch (error) {
-    const code =
-      error instanceof Error && /^[a-z][a-z0-9_]{0,80}$/.test(error.message)
-        ? error.message
-        : 'cli_registration_failed';
+    const value =
+      error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : error instanceof Error
+          ? error.message
+          : '';
+    const code = /^[a-z][a-z0-9_]{0,80}$/.test(value) ? value : 'cli_registration_failed';
     process.stderr.write(`${code}\n`);
     process.exitCode = 1;
   }

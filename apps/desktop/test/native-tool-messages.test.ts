@@ -371,6 +371,38 @@ test('tool receipts outside the bounded View retain exact outcomes and only uniq
   }
 });
 
+test('list_directory displays the known root default only for a unique verified original call', async () => {
+  const f = fixture();
+  try {
+    for (const [id, input] of [
+      ['omitted', { limit: 50 }],
+      ['empty', { path: '' }],
+      ['dot', { path: '.' }],
+      ['absolute', { path: 'C:\\workspace\\project' }],
+      ['invalid', { path: null }],
+      ['future', {}],
+    ] as const) {
+      f.add(id, 'succeeded', id, 'files.list');
+      f.messages.get(`call-${id}`)!.toolCalls![0]!.arguments = JSON.stringify(input);
+    }
+    f.executions.get('execution-future')!.definitionVersion = '9';
+    expect(
+      (await f.list(['omitted', 'empty', 'dot', 'absolute', 'invalid', 'future'])).entries.map(
+        (entry) => entry.target,
+      ),
+    ).toEqual(['.', '.', '.', 'C:\\workspace\\project', undefined, undefined]);
+    f.messages.delete('call-omitted');
+    expect((await f.list(['omitted'])).entries[0]!.target).toBeUndefined();
+    f.add('ambiguous-first', 'succeeded', 'shared', 'files.list');
+    f.add('ambiguous-second', 'succeeded', 'shared', 'files.list');
+    for (const id of ['ambiguous-first', 'ambiguous-second'])
+      f.messages.get(`call-${id}`)!.toolCalls![0]!.arguments = '{}';
+    expect((await f.list(['ambiguous-second'])).entries[0]!.target).toBeUndefined();
+  } finally {
+    f.manager.release();
+  }
+});
+
 test('sealed Fork provenance is read-only, mismatched original Stores are rejected, unsupported results cause no Execution GET, and close/selection change abort only the owned metadata read', async () => {
   const f = fixture();
   try {

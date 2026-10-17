@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { includeHistoricalResult, lookupContextOutcome, rewindContext, run } from '../src';
@@ -41,7 +42,7 @@ test('active include is queued for original Run; actual checkpoint supplies exac
       expectedStoreId,
       id: 'w',
       name: 'tmp',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await client.createSession({
       expectedStoreId,

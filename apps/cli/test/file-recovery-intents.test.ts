@@ -1,26 +1,23 @@
 import { expect, test } from 'bun:test';
-import {
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import {
   type FileRecoveryIntent,
   planFileRecoveryIntent,
 } from '@kite-ai/client/file-recovery-intent';
+import {
+  expectPrivateMode,
+  privateDirectory,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../tests/fixtures/test-filesystem';
 import { openFileRecoveryJournal } from '../host/file-recovery-intents';
 
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-file-recovery-journal-'),
+  const root = temporaryDirectory('kite-file-recovery-journal-'),
     access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   return {
     access,
     path: join(access.profilePath, 'ui/file-recovery-intents.json'),
@@ -80,7 +77,7 @@ test('both complete original legs and identities survive fsync/reopen; unknown i
     const original = await intent(),
       j = f.open();
     expect(await j.prepare(original)).toBe(true);
-    expect(statSync(f.path).mode & 0o777).toBe(0o600);
+    expectPrivateMode(f.path, 0o600);
     const bytes = readFileSync(f.path);
     j.close();
     const cold = f.open();
@@ -153,7 +150,7 @@ test('torn UTF8/JSON, duplicate IDs, hardlink and symlink are never treated as e
     await expect(f.open().list()).rejects.toThrow();
     rmSync(alias);
     rmSync(f.path);
-    symlinkSync(alias, f.path);
+    recordReparseEntry(alias, f.path);
     await expect(f.open().list()).rejects.toThrow();
     rmSync(f.path);
     writeFileSync(f.path, before, { mode: 0o600 });
@@ -168,7 +165,7 @@ test('128 intent capacity retains unknown without eviction; oversize physical as
     const j = f.open();
     const records = [];
     for (let n = 0; n < 128; n++) records.push(await intent(`c${n}`, 'code'));
-    mkdirSync(join(f.path, '..'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(f.path, '..'));
     writeFileSync(f.path, `${JSON.stringify({ version: 1, records })}\n`, { mode: 0o600 });
     const before = readFileSync(f.path);
     await expect(j.prepare(await intent('overflow'))).rejects.toThrow(

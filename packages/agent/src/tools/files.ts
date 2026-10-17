@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { AgentError } from '../storage/types';
 import { fileChangePreview } from './files-diff';
 import { createWorkspaceFileIo } from './files-io';
@@ -7,6 +7,10 @@ import { createWorkspaceFileIo } from './files-io';
 export interface FileBaseline {
   hash: string;
   size: number;
+  device: string;
+  inode: string;
+}
+export interface FileIdentity {
   device: string;
   inode: string;
 }
@@ -46,6 +50,10 @@ export interface FileEntry {
   kind: 'file' | 'directory' | 'symlink' | 'other';
 }
 export interface WorkspaceFiles {
+  /** Model Tool boundary: resolve against the fixed Workspace, never process cwd. */
+  relativePath(path: string): string;
+  /** Trusted host metadata only: strict parent/file identity from the actual native IO. */
+  inspectIdentity(path: string): Promise<{ parent: FileIdentity; file: FileIdentity | null }>;
   /** Trusted host byte primitives; not additional Model tools or authority. */
   readBytes(path: string, options: { maxBytes: number }): Promise<FileByteSnapshot>;
   restore(input: {
@@ -566,6 +574,58 @@ export function createWorkspaceFiles(options: {
     });
   }
   return {
+    relativePath(path) {
+      if (
+        typeof path !== 'string' ||
+        Buffer.from(path).toString('utf8') !== path ||
+        path.length > 4096 ||
+        path.includes('\0')
+      )
+        fail('file_path_invalid');
+      if (path === '.' || path === '') return '';
+      const windows = process.platform === 'win32';
+      const logical = windows ? path.replaceAll('\\', '/') : path;
+      // Check before path.relative can erase traversal components.
+      if (logical.split('/').some((part) => part === '.' || part === '..'))
+        fail('file_path_invalid');
+      if (isAbsolute(path)) {
+        // The Windows engine supports local drive paths, never UNC/device or drive-relative paths.
+        if (windows && !/^[a-z]:[\\/]/i.test(path)) fail('file_path_invalid');
+        const selected = relative(root, path);
+        return segments(windows ? selected.replaceAll('\\', '/') : selected).join('/');
+      }
+      if (windows && /^[a-z]:/i.test(path)) fail('file_path_invalid');
+      return segments(logical).join('/');
+    },
+    async inspectIdentity(path) {
+      return withParent(
+        path,
+        (parent, name) => {
+          let fd: number | undefined;
+          try {
+            fd = io.openAt(parent, name, 'read', true);
+          } catch (error) {
+            if (!missing(error)) throw error;
+          }
+          let file: FileIdentity | null = null;
+          if (fd !== undefined) {
+            try {
+              const stat = io.stat(fd);
+              if (!stat.isFile()) fail('file_not_regular');
+              io.verifyOwner(fd);
+              if (stat.nlink !== 1n) fail('file_owner_invalid');
+              file = { device: String(stat.dev), inode: String(stat.ino) };
+            } finally {
+              io.closeHandle(fd);
+            }
+          }
+          check();
+          const stat = io.stat(parent);
+          return { parent: { device: String(stat.dev), inode: String(stat.ino) }, file };
+        },
+        true,
+      );
+    },
     async readBytes(path, options) {
       const limit = byteLimit(options.maxBytes);
       return withParent(

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createArtifactStore } from '../../../src/artifacts';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -13,7 +14,12 @@ test('bounded Artifact streams publish and verify more than the old whole-blob l
   const artifacts = createArtifactStore({ profile, store });
   try {
     const expectedStoreId = (await store.getMetadata()).storeId;
-    await store.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: `file://${root}` });
+    await store.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      name: 'w',
+      rootUri: pathToFileURL(root).href,
+    });
     await store.createSession({
       expectedStoreId,
       sessionId: 's',

@@ -1,18 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
 import { NativeOwnedProcesses } from '../native-owned-processes.fixture';
@@ -47,7 +41,7 @@ async function bounded<T>(promise: Promise<T>, milliseconds = 15000) {
 test.skipIf(process.platform !== 'darwin')(
   'actual Electron Fork reads linked >17MiB output in original scope; rename CAS and unknown delete remain exact and view-only',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-sessions-')),
+    const root = realpathSync(temporaryDirectory('kite-native-sessions-')),
       barrier = gate();
     const userConfiguration = ownedUserConfiguration(root);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
@@ -59,7 +53,7 @@ test.skipIf(process.platform !== 'darwin')(
       expectedStoreId: storeId,
       id: 'w',
       name: 'Native fixture',
-      rootUri: new URL(`file://${workspace}`).href,
+      rootUri: pathToFileURL(workspace).href,
     });
     for (const id of ['s', 'other'])
       await store.createSession({

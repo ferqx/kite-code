@@ -2,10 +2,12 @@ import { join } from 'node:path';
 import {
   type NativeRuntimeProtection,
   parseNativeRuntimeProtection,
+  type retainWindowsNativeRuntimeFiles,
   verifyNativeRuntimeProtection,
 } from './native-runtime-assets';
 import {
   parseTerminalRuntimeProtection,
+  type retainWindowsTerminalRuntimeFiles,
   type TerminalRuntimeProtection,
   verifyTerminalRuntimeProtection,
 } from './runtime-assets';
@@ -38,9 +40,18 @@ export function runtimeProtectionRoots(value: RuntimeProtection): readonly strin
 export function verifyRuntimeProtection(
   value: RuntimeProtection,
   actual: { entrypoint: string; executable: string; buildId: string },
+  retainedFiles?: {
+    outer?: ReturnType<typeof retainWindowsNativeRuntimeFiles>;
+    terminal: ReturnType<typeof retainWindowsTerminalRuntimeFiles>;
+  },
 ): readonly string[] {
   const proof = parseRuntimeProtection(value);
-  if (proof.kind === 'native.candidate') verifyNativeRuntimeProtection(proof, actual);
-  else verifyTerminalRuntimeProtection(proof, actual);
+  if (proof.kind === 'native.candidate')
+    verifyNativeRuntimeProtection(
+      proof,
+      actual,
+      retainedFiles ? { outer: retainedFiles.outer!, terminal: retainedFiles.terminal } : undefined,
+    );
+  else verifyTerminalRuntimeProtection(proof, actual, retainedFiles?.terminal);
   return runtimeProtectionRoots(proof);
 }

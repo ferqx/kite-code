@@ -14,13 +14,13 @@ import { type ConfigureProcessHost, type PrivateStartup, privateStartupSchema } 
 import { createDefaultProcessConfiguration, type ShellConfigurationOptions } from './configuration';
 import { startService } from './index';
 import { assertMcpSourceStdioAssetsClosed } from './mcp-source-configuration';
-import {
-  retainWindowsNativeRuntimeFiles,
-  windowsRuntimePinCloseUnknown,
-} from './native-runtime-assets';
-import { retainWindowsTerminalRuntimeFiles } from './runtime-assets';
+import { windowsRuntimePinCloseUnknown } from './native-runtime-assets';
 import { runtimeProtectionRoots, verifyRuntimeProtection } from './runtime-protection';
 import { encodeServiceStartupDiagnostic } from './startup-diagnostic';
+import {
+  borrowWindowsPairedArtifact,
+  retainWindowsPairedArtifact,
+} from './windows-paired-artifact';
 
 type ProcessResources = {
   runtime?: ReturnType<typeof createRuntime>;
@@ -58,6 +58,8 @@ export class ProcessServiceCleanupError extends Error {
 }
 
 export interface ProcessServiceOptions {
+  /** Genuine same-process owner only; never accepted from private startup JSON. */
+  windowsArtifact?: ReturnType<typeof retainWindowsPairedArtifact>;
   configure?: ConfigureProcessHost;
   /** Concrete host ports; never accepted from startup JSON, workspace configuration or HTTP. */
   mcpSources?: NonNullable<Parameters<typeof createDefaultProcessConfiguration>[0]['mcpSources']>;
@@ -114,15 +116,32 @@ export async function assembleProcessService(
     throw new Error('profile_identity_mismatch');
   let runtimeAssetAccess: { release(): void } | undefined;
   let runtimeAssets = startup.runtimeProtection ? [] : defaultRuntimeAssets(entrypoint);
-  if (startup.runtimeProtection) {
+  if (startup.runtimeProtection && process.platform === 'win32') {
+    try {
+      const actual = {
+        entrypoint: entrypoint ?? '',
+        executable: process.execPath,
+        buildId: startup.buildId,
+      };
+      const access = options.windowsArtifact
+        ? borrowWindowsPairedArtifact(options.windowsArtifact, startup.runtimeProtection, actual)
+        : retainWindowsPairedArtifact(startup.runtimeProtection, actual);
+      runtimeAssetAccess = access;
+      runtimeAssets = [...runtimeProtectionRoots(startup.runtimeProtection)];
+    } catch (error) {
+      if (
+        windowsRuntimePinCloseUnknown(error) ||
+        (error instanceof Error && error.message === 'paired_artifact_close_unknown')
+      )
+        throw new ProcessServiceCleanupError('runtime_assembly', error, error, {
+          runtimeAssetAccess,
+        });
+      throw error;
+    }
+  } else if (startup.runtimeProtection) {
     const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
-    const windowsFiles: ReturnType<typeof retainWindowsTerminalRuntimeFiles>[] = [];
     runtimeAssetAccess = {
       release() {
-        while (windowsFiles.length) {
-          windowsFiles.at(-1)!.release();
-          windowsFiles.pop();
-        }
         for (;;) {
           const lease = leases.at(-1);
           if (!lease) return;
@@ -134,17 +153,6 @@ export async function assembleProcessService(
     try {
       for (const root of runtimeProtectionRoots(startup.runtimeProtection))
         leases.push(acquireArtifactAccess({ root: realpathSync(root), mode: 'shared' }));
-      if (process.platform === 'win32') {
-        if (startup.runtimeProtection.kind === 'native.candidate')
-          windowsFiles.push(retainWindowsNativeRuntimeFiles(startup.runtimeProtection.root));
-        windowsFiles.push(
-          retainWindowsTerminalRuntimeFiles(
-            startup.runtimeProtection.kind === 'native.candidate'
-              ? join(startup.runtimeProtection.root, 'terminal')
-              : startup.runtimeProtection.root,
-          ),
-        );
-      }
       runtimeAssets = [
         ...verifyRuntimeProtection(startup.runtimeProtection, {
           entrypoint: entrypoint ?? '',

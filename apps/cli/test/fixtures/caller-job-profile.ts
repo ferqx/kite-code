@@ -14,6 +14,7 @@ import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import {
   createStdioPermissionReader,
@@ -36,7 +37,7 @@ export async function callerJobProfile() {
   );
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(workspace);
-  mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(profile.profilePath, 'ui'));
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
     mode: 0o600,
   });

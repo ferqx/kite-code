@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
@@ -57,7 +58,7 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
         expectedStoreId: storeId,
         id: `w-${i}`,
         name: `Workspace ${i}`,
-        rootUri: `file://${root}/${i}`,
+        rootUri: pathToFileURL(`${root}/${i}`).href,
       });
     for (let i = 0; i < 205; i++)
       await client.createSession({
@@ -96,7 +97,7 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
       expectedStoreId: storeId,
       id: 'late-w',
       name: 'late',
-      rootUri: `file://${root}/late`,
+      rootUri: pathToFileURL(`${root}/late`).href,
     });
     expect(
       await errorCode(
@@ -242,7 +243,12 @@ test('actual Core activity follows queued work, the active or latest Run and per
   let db: Database | undefined;
   try {
     const expectedStoreId = (await store.getMetadata()).storeId;
-    await store.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: `file://${root}` });
+    await store.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      name: 'w',
+      rootUri: pathToFileURL(root).href,
+    });
     for (const sessionId of ['working', 'old'])
       await store.createSession({
         expectedStoreId,
@@ -357,7 +363,7 @@ test('cold readonly directory preserves original allocation upper and Store/subj
       expectedStoreId: storeId,
       id: 'empty',
       name: 'Empty valid workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await store.createSession({
       expectedStoreId: storeId,

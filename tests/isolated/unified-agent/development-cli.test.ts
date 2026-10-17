@@ -24,6 +24,7 @@ import {
 } from '../../../apps/service/src/daemon/endpoint';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { runDevelopmentCLI, selectDevelopmentCLI } from '../../../scripts/development/unified-cli';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
 test('CLI development selection binds only the exact built entry and executable; read-only argv needs no asset or profile', () => {
@@ -255,7 +256,7 @@ test('actual CLI development argv runs one paired built Service with the selecte
   let child: ReturnType<typeof Bun.spawn> | undefined;
   try {
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     writeFileSync(
       userConfiguration.path,
       JSON.stringify({
@@ -348,11 +349,7 @@ test('actual CLI development argv runs one paired built Service with the selecte
 }, 15000);
 
 test('daemon asset resolution is lazy and exact; read-only and compatible reuse need no target build', async () => {
-  const root = realpathSync(
-    mkdtempSync(
-      join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'kite-cli-dev-daemon-'),
-    ),
-  );
+  const root = realpathSync(temporaryDirectory('kite-cli-dev-daemon-'));
   let owner: Awaited<ReturnType<typeof reserveDaemonEndpoint>> | undefined,
     service: Awaited<ReturnType<typeof startService>> | undefined;
   try {
@@ -514,7 +511,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
   let running: ReturnType<typeof Bun.spawn> | undefined;
   try {
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     writeFileSync(
       userConfiguration.path,
       JSON.stringify({

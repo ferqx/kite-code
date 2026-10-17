@@ -2,17 +2,52 @@
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
+## Node-API 文件后端
+
+文件工具的手写 Bun FFI 已由 [cap-std＋napi-rs 模块](../../../native/files/README.md)替换，[唯一加载器](../../files-native-binding.ts)保持原 `WorkspaceFileIo` 交接，TS 继续拥有完整字节／UTF-8、baseline、CAS、查询与 checkpoint 语义。Windows 由官方生成的 windows-sys 绑定补齐完整 FileID、原 HANDLE 路径与发布、私有创建和关闭未知；仅套用 cap-std 的 metadata／rename 不能满足这些边界。原 `files-native.ts/files-windows.ts` 已删除，没有旧后端回退；Profile／SQLite／Shell 等独立原生 owner 不随此迁移。
+
+Agent build 将固定 CPU／平台的 `native/files/files.node`、ABI／来源／完整 hash manifest、Cargo.lock 和第三方许可证一同交付；加载前核无符号链接／单链接、平台、CPU、ABI 和完整字节哈希。缺少或改变资产明确失败，运行期不编译、不查找源码／环境变量替代。可信 `filesNativeAssets()` 让正式 Service 把加载器和整个 native companion 加入普通／外部文件及检查点保护，Full 也不开放。Windows 静态 CRT 的实际依赖仅为系统 DLL。源码开发要求固定 Rust 工具链及平台 linker，用户运行制品不需要 Rust。
+
+Windows DLL 固定 `/DEPENDENTLOADFLAG:0x800`，将静态依赖解析限定 System32；搬迁测试核实际 PE 的准确平台、无 delay import 与加载标志，再实际加载，不把系统 DLL 名单当作搜索路径证明。链接标志适用系统及准确 API 合同归上述 native owner，不据此扩展产品支持系统集合。
+
+2026-10-16，基于 `70cb5718` 的本任务未提交 diff，先在 `codex/native-files` 隔离验证，三方合回主工作区后复验。环境为实际 Windows x64／Bun1.4.2／Node24.15.0／Rust1.97.1 MSVC；下方43／63项等旧执行记录对应替换前后端，不能用于授予新后端资格。
+
+- `bun test packages/agent/test/isolated/files/native-addon.test.ts packages/agent/test/isolated/files/windows.test.ts packages/agent/test/isolated/files/path-files.test.ts packages/agent/test/isolated/files/tool-paths.test.ts packages/agent/test/isolated/files/native-path-lifetime.test.ts packages/agent/test/isolated/files/native-packaged.test.ts packages/agent/test/isolated/files/built-large.test.ts apps/service/test/isolated/files-native-boundary.test.ts`：20项通过，覆盖真实原生读写／恢复、准确授权、GC、Bun／Node 空 PATH 搬迁加载、篡改拒绝、完整 Agent 包和默认 Service 的 Full 保护拒绝。新增链接数断言及 Service 类型修正另与完整 CI 合同整文件复验，共23项361断言通过。
+- `bun test --timeout=30000 packages/agent/test/isolated/file-checkpoints/capture.test.ts`：19项267断言通过。首次与整包构建同时运行时三例达到默认5秒时限；未删断言，30秒单例时限的完整独立复验通过，平台 CI 使用同一时限。原恢复、新建反向删除、原 Run／Execution、取消、漂移和 unknown 均实际运行。
+- `bun test --timeout=30000 packages/agent/test/isolated/files/recovery-primitives.test.ts packages/agent/test/isolated/storage/build.test.ts`：7项112断言通过。旧 Node fsync mock 迁到真实 Node-API 的 sync／close 交接点，实际 native IO 仍执行；独立字节包及 Store／Worker 包携带同次构建的 companion，Windows 在所属子进程退出后才清理已映射 DLL。POSIX 保文件／目录 symlink 和根替换断言；Windows 用真实 junction 与禁止根 rename 的原 HANDLE 合同，不要求改变机器的 symlink 特权。
+- 在 [crate](../../../native/files/README.md)目录运行 `cargo fmt --check`、`cargo test --locked --lib`：4项真实 Windows 故障／8.3测试通过，包含取得后确认未知与关闭未知的原父链持有；`cargo check --locked --target x86_64-unknown-linux-gnu` 和 `--target aarch64-apple-darwin` 通过，只证明目标编译。Windows release 的 `dumpbin /dependents` 仅列系统 DLL，无 Rust／MSVC 运行时分发依赖。
+
+最终主工作区将上述八文件连同 `recovery-primitives.test.ts`、`storage/build.test.ts`、`large.test.ts`、`artifact-cancel.test.ts` 整文件以 `bun test --timeout=30000` 同次运行：30项497断言通过。检查点 capture、change-preview、两份 Native 工具展示整文件另同次36项412断言通过；原生4项及完整 CI 合同21项332断言也在主工作区复验通过。
+
+依赖加载标志固定后的最终 DLL 再对 native-packaged、native-addon、built-large、recovery-primitives、storage/build 五文件以相同命令整文件运行：10项203断言通过；新增7条 PE 断言实际核 `0x800`，`dumpbin /LOADCONFIG`也确认同值。该变化只限制 DLL 导入解析，文件业务与 TS／Rust 资源状态实现未变，前述其余结果按该范围复用。
+
+Agent／Service／Desktop typecheck、原包边界与 API／测试归属、文档链接和新增 CI 合同已核对。[平台 workflow](../../../../../.github/workflows/platform-capability-probe.yml)接入 native／工具／恢复实际用例，但未 dispatch，不能声称远端三平台已通过。完整安装、全部客户端和其他平台继续保原门禁。
+
+此前正式 `buildTerminalBundle` 被 nvm Bun 的原 owner 和 Bun1.4.2 delay imports 阻断。2026-10-17 的 [Terminal 构建修复](../../../../../apps/cli/docs/terminal-release.md#windows-managed-terminal-当前实现)在新私有输入与新 console 副本中完成受限导入转换，保留最终无 delay／System32／ACL 门禁；完整 Windows Terminal 已实际构建并全量核验。候选自带 Bun 在空 PATH 下通过公开 Files 入口发布、完整读回和删除1,450,000字节，实际加载同包 Node-API companion。原 nvm 权限拒绝保持；完整 installed／Native／三平台及发布资格仍独立验收。
+
+## 模型工具路径
+
+六个 Workspace 模型工具接受相对路径及当前 Workspace 内的绝对路径。`WorkspaceFiles.relativePath` 只按工厂固定的根转换，`createFileTools` 在实际 IO 和检查点 capture 前调用它；Shell 改变 cwd 不改变文件工具基准。list／glob／search 省略 path、传空字符串或 `.` 均选择根目录；Windows 另接受普通盘符绝对路径和相对路径的原生反斜杠。目录穿越段在转换前拒绝，其他盘符、UNC／设备路径和 Workspace 外目标不能借转换取得访问。
+
+原 `WorkspaceFiles` IO 和字节恢复原语仍只接收相对路径，原目录对象锚定、reparse／symlink／短名、受保护路径和 baseline 检查继续生效。文件结果、变更预览与检查点 capture 使用转换后的相对路径；原模型调用、审批与执行记录保留原始参数。工具 schema 明确路径范围，绝对用户文件工具另保准确绝对目标契约，不借此扩大外部访问。设计理由见[路径分层决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-16-workspace-tool-paths.md)。
+
+[工具路径回归](../../../test/isolated/files/tool-paths.test.ts)实际调用全部六工具，核工作区绝对路径、目录默认、原生分隔符、准确 capture／结果及越界和保护拒绝；[真实 capture](../../../test/isolated/file-checkpoints/capture.test.ts)让同一路径的首个绝对调用和后续相对调用共用原 preimage／末 postimage。[Windows Core 用例](../../../test/isolated/files/windows.test.ts)经原 Runtime 实际列绝对工作区并读取绝对文件，将完整 Artifact 交给下一 Model。具体本机范围见下节。
+
 ## 绝对用户文件
 
-同一公开入口的 [createPathFileTools](../path-files.ts) 新增 `files.read_path/files.write_path/files.edit_path`，定义版本1，由正式宿主注册为 `builtin.files.path`。原 WorkspaceFiles 的 relative-only 路径合同不变；绝对 Tool 不是 Model 自报 root 或回退旧 filesystem authority。工厂冻结可信 `qualifiedPlatforms/protectedRoots`；保护根先逐项通过原路径校验，再按精确字符串去重、稳定排序，classifier 和快照使用同一集合边界。排列或重复不改变保护目标，真正增删目标仍改变快照；不宽松比较 Run 配置或自动迁移旧快照。只有显式合格的当前 native 平台才能执行；源码存在不提供 Win/Linux 实测资格。
+同一公开入口的 [createPathFileTools](../path-files.ts) 新增 `files.read_path/files.write_path/files.edit_path`，定义版本1，由正式宿主注册为 `builtin.files.path`。原 WorkspaceFiles IO 的 relative-only 路径合同不变；绝对 Tool 不是 Model 自报 root 或回退旧 filesystem authority。工厂冻结可信 `qualifiedPlatforms/protectedRoots`；保护根先逐项通过原路径校验，再按精确字符串去重、稳定排序，classifier 和快照使用同一集合边界。排列或重复不改变保护目标，真正增删目标仍改变快照；不宽松比较 Run 配置或自动迁移旧快照。只有显式合格的当前 native 平台才能执行；源码存在不提供 Win/Linux 实测资格。
 
-[路径 request classifier](../../permissions/files-request.ts) 选择 canonical 绝对路径的真实物理父目录，核 parent device/inode、目标 regular file 身份、本人 owner、单链接及完整原输入，并将其与可信边界一起纳入 revision。父链符号链接、目标 symlink／hardlink、私有 Profile／凭据／控制资产和危险系统写入目标在 Full 模式也拒绝。实际派发证明由 UnifiedExecution 注入，Tool 逐项核全部父子 policy snapshot 的准确定义、版本、信任、hardAllowed 和同一 revision，再打开并锚定 native parent，重核身份；宿主或 Model 输入不能伪造该证明。
+[路径 request classifier](../../permissions/files-request.ts) 选择 canonical 绝对路径的真实物理父目录，通过 `WorkspaceFiles.inspectIdentity` 从实际 native IO 核 parent device/inode、目标 regular file 身份、本人 owner、单链接及完整原输入，并将其与可信边界一起纳入 revision。该可信 host 方法只检查元数据，不读取正文，不是新增 Model Tool；Windows 使用与 baseline 相同的 volume／128-bit FileID，不与 Node stat 的 dev/ino 混比，也不截断 FileID。父链符号链接、目标 symlink／hardlink、私有 Profile／凭据／控制资产和危险系统写入目标在 Full 模式也拒绝。实际派发证明由 UnifiedExecution 注入，Tool 逐项核全部父子 policy snapshot 的准确定义、版本、信任、hardAllowed 和同一 revision，再打开 native parent，并直接在这个已锚定的引擎上重核身份；独立探针不能代替实际 IO 对象，宿主或 Model 输入不能伪造该证明。
 
 这些 Tool 复用原 `createFileTools/createWorkspaceFiles` 的完整 UTF-8、Artifact、文件 baseline 和原子 IO。仅把固定 basename 交给已选定物理 parent，不建立第二个写入引擎。绝对读取启用可信 `strictReads`，在原 FD 的读前／后核 owner 和单链接；这个选项不改变普通 Workspace 默认读取合同。write 的 `base=null` 只创建，existing base 核完整字节／hash／size／device／inode；edit 保原精确字面匹配和 occurrences，父对象或目标改绑拒绝。派发前取消零效果，发布后的同步或核实错误仍 `file_publish_outcome_unknown`，不能因包装成绝对路径降格为无效果失败。当前机制仍不承诺不合作外部编辑器的任意 rename／编辑原子 CAS。
 
 read 请求的固定效果是安全 `read`；write/edit 是 `external`。请求批准对外部写入要求实际人类决定，自动审核使用真实 reviewer，Full 保危险／私有／native 资格等硬门槛；child 另受准确父工具集合和全部权限 ceiling。完整策略由[权限 owner](../../permissions/README.md)维护。结果中的 path 与 fileChange 是实际绝对路径，保存的 `fileScope=external_path/workspaceCheckpoint=false` 明确排除 Workspace checkpoint 捕获、恢复和回退；外部文件成功不冒认为 Workspace 恢复点。
 
-本次 macOS 当前工作树执行 [path-files](../../../test/isolated/files/path-files.test.ts) 与原 [files](../../../test/isolated/files/files.test.ts) 完整叶文件，共9项、77断言通过：真实 native IO／Runtime 派发、完整 BOM／CRLF、create/edit/CAS、父目标换绑、Profile symlink／hardlink 别名、交集漂移、取消和未合格平台拒绝。原 [subagent 终端](../../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 整文件9项120断言及 [tool-approve](../../../../../tests/tui-system/scenarios/tool-approve.test.ts) 整文件1项12断言证明正式 Service 真实批准／自动审核后写入、拒绝零效果和外部摘要不泄露正文。Win/Linux 的实际验证依用户安排后置，发布 RSS／观测和整体阶段门禁不由这些本机证据解除。
+此前 macOS 工作树执行 [path-files](../../../test/isolated/files/path-files.test.ts) 与原 [files](../../../test/isolated/files/files.test.ts) 完整叶文件，共9项、77断言通过：真实 native IO／Runtime 派发、完整 BOM／CRLF、create/edit/CAS、父目标换绑、Profile symlink／hardlink 别名、交集漂移、取消和未合格平台拒绝。原 [subagent 终端](../../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 整文件9项120断言及 [tool-approve](../../../../../tests/tui-system/scenarios/tool-approve.test.ts) 整文件1项12断言证明正式 Service 真实批准／自动审核后写入、拒绝零效果和外部摘要不泄露正文。Linux 实际验证、发布 RSS／观测和整体阶段门禁不由这些本机证据解除。
+
+2026-10-16 在 Windows x64／Bun1.4.2、基于 `77662488` 的未提交 diff，先复现外部 path-files 的 `file_dispatch_scope_changed` 和私有 Profile 夹具失败。统一原生身份后，`bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/files/path-files.test.ts` 整文件8项122断言通过：包含真实工作区外的 Full／人工批准写入、批准前和拒绝后零效果、原持久回执、超过1MiB的完整 Artifact／下一 Model 正文、合法大小写及非法 Windows 路径拒绝。Profile 夹具用正式 `privateDirectory` 新建私有目录，不修复既有 ACL。普通 files 的两个 symlink 夹具仍受本机创建权限限制；本轮证据不证明正式安装版、完整 Service／客户端或全部平台资格。
+
+同轮相邻验证覆盖9个叶文件、63个不同用例，包括 [native path lifetime](../../../test/isolated/files/native-path-lifetime.test.ts) 在真实 `NtSetInformationFile(FileRenameInformation=10)` 前强制 GC，保原 rename／disposition 的借用内存。首轮与三个 typecheck 并行时，一个旧检查点恢复用例触发5秒超时；资源释放后单独重跑 capture 整文件19项267断言全部通过，该用例4.31秒，没有提高时限或修改恢复实现。其余44项在首轮全部通过；Agent／Service／Desktop typecheck、文档、测试归属与执行边界检查通过。这些分批结果不写成单次全套通过。
 
 `read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 3，write/edit/search/glob 为 2，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并同步，再次验证基线，最后原子替换或 create-only 发布并核实原对象。POSIX 使用文件 fsync、create-only hardlink 和目录 fsync；Windows 的同步与发布边界见下节。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
 
@@ -20,15 +55,19 @@ POSIX 使用目录 FD 与 no-follow openat 逐段锚定路径，macOS 调用非 
 
 ## Windows Workspace 文件源码
 
-[平台分派](../files-io.ts)让同一个 `WorkspaceFiles` 语义层使用 POSIX 原 FD 或 [Windows 原 HANDLE owner](../files-windows.ts)。正式 Service／六工具、完整 Artifact／Model 正文和检查点 restore／remove 沿原公开入口使用该分派；不增加第二套工具、权限来源、恢复状态或旧 filesystem fallback。Windows 源码接入不等于原生、全部正式客户端或安装制品资格已通过。
+[平台交接](../files-io.ts)让同一个 `WorkspaceFiles` 语义层使用 [Node-API 原资源 owner](../../../native/files/README.md)。正式 Service／六工具、完整 Artifact／Model 正文和检查点 restore／remove 沿原公开入口使用该后端；不增加第二套工具、权限来源、恢复状态或旧 filesystem fallback。源码接入不等于原生、全部正式客户端或安装制品资格已通过。
 
-Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他架构或路径范围不从源码接入推定可用。工厂固定当前 token SID 和 System DLL，只在实际创建能力时加载。它持有原根及祖先目录 HANDLE，以 `NtCreateFile` 的原父 HANDLE 逐段打开，不跟随 reparse；普通 Workspace 使用已有 DACL，不修 ACL。新 temporary 与 POSIX 的 0600 对应，使用当前 SID 私有权限。完整 baseline 使用实际 volume、128-bit FileID、完整 EOF／hash／size，并比较原 HANDLE 的 LastWriteTime 与 ChangeTime。只有字节恢复要求父链及文件的当前 SID owner 和单链接；普通文件读取保宿主已有权限。
+Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他架构或路径范围不从源码接入推定可用。工厂固定当前 token SID 和 System DLL，只在实际创建能力时加载。它持有原根及祖先目录 HANDLE，以 `NtCreateFile` 的原父 HANDLE 逐段打开，不跟随 reparse；普通 Workspace 使用已有 DACL，不修 ACL。新 temporary 与 POSIX 的 0600 对应，使用当前 SID 私有权限。完整 baseline 使用实际 volume、128-bit FileID、完整 EOF／hash／size，并比较原 HANDLE 的 LastWriteTime 与 ChangeTime。字节恢复及外部路径的严格身份检查要求父目录和文件的当前 SID owner、文件单链接；普通 Workspace 默认读取保宿主已有权限。
 
 组件拒绝 ADS、DOS 设备名、尾点／空格及非规范路径。实际原 HANDLE 的 canonical 长名对照拒绝 8.3 别名；保护范围按实际组件与 Windows 大小写等价核对，普通合法大小写变体仍可读取同一对象。目录枚举使用原 HANDLE，保护范围与原分页、search、glob 语义共用。未知类型、对象漂移、关闭或内存释放未确认均保明确失败，不从数字 HANDLE 重建资源。
 
 发布先完整写入和 flush 原 temporary，再核准确基线，从原 temporary HANDLE 向原父 HANDLE 相对 rename；create-only 不覆盖，replace 明确替换。删除由原对象 HANDLE 的 disposition、真实 close 及缺失确认组成。发布／删除后的确认或关闭失败保 `file_publish_outcome_unknown`；未知原资源强持整个 owner 及父链，`close` 不宣称释放成功。Windows 的 file flush 与目录身份复核不等于 POSIX directory fsync，也未证明断电持久性；该限制和平台验收保留，不能由异常注入或本机 POSIX 测试替代。API依据见 [NtCreateFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile)、[FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)和 [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)。
 
-[Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行六工具、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip；本机 macOS 未运行这些原生用例。共享原完整文件、正式默认装配及恢复后新 Store 的验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
+发布的相对 rename 使用 `NtSetInformationFile(FileRenameInformation=10)`，将准确原父 HANDLE 放入 `FILE_RENAME_INFORMATION.RootDirectory`，沿同步原 temporary HANDLE 核 native 返回与 `IO_STATUS_BLOCK`；不退回绝对名称 rename。[官方 ABI](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntsetinformationfile)说明对应结构与信息类别。2026-10-16 的实际 Windows x64 用例复现原 Win32 wrapper 返回 errno87，改用 native 调用后原字节恢复及六工具路径用例可完成；正式 Service／全部客户端、安装和故障资格仍按原门禁保留。
+
+同日本机 [capture 整文件](../../../test/isolated/file-checkpoints/capture.test.ts)19项267断言通过，首个绝对路径与后续相对路径保同一个准确文件及原检查点。冷回放夹具显式关闭自己创建的 serial-lock owner 后再删目录，修复原 Windows `EBUSY` 收尾失败；没有改变生产关闭顺序或把清理失败算作通过。
+
+[Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行六工具、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip。2026-10-16 在 Windows x64／Bun1.4.2，基于 `84b17867` 的本轮未提交 diff，本次路径、变更预览、检查点与 Native 工具展示六文件43项535断言通过（正常用户权限，51.69秒，包含实际会话的重复反斜杠输入），包含原生六工具、字节恢复、绝对路径 Core／完整 Artifact 和真实组件 DOM。原用例的 CRLF 搜索断言改为保留实际 `\r`，大正文夹具明确超过1MiB后才断言 Artifact，未降低验证要求。该结果不证明正式安装、完整 Service／客户端或其他平台。共享默认装配及恢复后新 Store 的原验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
 
 默认没有整文件、原文、搜索匹配数或长行总额度。读取使用固定 64 KiB 字节块，严格增量 UTF-8 解码、完整 hash 与前后 FD 事实校验；默认 read 返回全部剩余行。宿主显式 `maxFileBytes` 可声明该宿主的单文件能力约束，未设置时不回退为旧 8 MiB。真实内存、磁盘、IO 与字符串表示能力仍可能局部失败，不把它们假装 Provider 窗口。二进制控制字节采样检查和严格 UTF-8 保留，BOM/CRLF 不规范化；search 不将已识别二进制当文本。
 
@@ -48,7 +87,7 @@ read/write/edit 的 Model JSON 结果另带当前真实 `executionId/runId`，�
 
 没有新增 SQL 表、Store major、维护资产或 Model 工具权限。恢复检查点保首 preimage 与末 postimage，只服务准确恢复，不能冒充每次操作的差异。长期边界见[迁移决定](../../../../../.agents/notes/implemented/architecture/2026-10-08-native-file-change-receipts.md)。[真实预览与 Core receipt 测试](../../../test/isolated/files/change-preview.test.ts)核完整 BOM/CRLF pre/post、外部后改不改变历史、数 MiB 完整写入与 UTF-8 截断、失败/unknown 不保存成功预览，以及跨 Run 重复 call ID 的唯一原 source；各客户端实际资格由 owner 和进度维护。
 
-POSIX anchored 路径调用由 [files-native](../files-native.ts) 将 NUL 结尾的 Buffer 直接交给 Bun FFI；参数保持 JavaScript 引用直至 libc 调用结束。不能先对临时 Buffer 取数字指针再丢弃引用，否则 GC 可使仍存在的原路径返回 ENOENT。[路径寿命回归](../../../test/isolated/files/native-path-lifetime.test.ts)在真实 openat/renameat/linkat/unlinkat 前强制 GC，验证完整字节、原 inode 基线、创建与删除；实际资格当前只覆盖 macOS。捕获测试另核三条真实成功 Tool 回执与 first/last 的准确原 Execution ID，不把第二条单独成功误当成两次成功捕获。
+路径和字节现在通过 Node-API 的有主数据进入 Rust，原生读取返回有主缓冲后复制到 TS 解码块；不再把临时 Buffer 的数字地址传给 Bun FFI。[路径寿命回归](../../../test/isolated/files/native-path-lifetime.test.ts)在实际 Node-API open/read/write/publish/unlink 前后强制 GC，验证完整字节、原 inode、创建与删除。捕获测试另核三条真实成功 Tool 回执与 first/last 的准确原 Execution ID，不把第二条单独成功误当成两次成功捕获。
 
 文件系统不是 SQLite 事务：不合作的外部编辑器可能在最后一次基线核对与 rename 之间修改目标或移动目录，无法宣称任意外部 rename/编辑原子 CAS。当前机制绑定原目录对象，合作宿主可装配 Workspace serial 许可；不会创建另一个持久授权或文件状态机。
 

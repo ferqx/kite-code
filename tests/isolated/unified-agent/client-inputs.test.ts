@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelRequest } from '@kite-ai/ai';
@@ -135,7 +136,7 @@ async function fixture(oldTool = false) {
       expectedStoreId,
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await client.createSession({
       expectedStoreId,
@@ -544,7 +545,7 @@ test('an actual detached child remains readable but public additional inputs can
       expectedStoreId,
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await client.createSession({
       expectedStoreId,

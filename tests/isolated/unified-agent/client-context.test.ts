@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -66,7 +67,7 @@ test('actual HTTP context selection is idle CAS with original durable receipt an
       expectedStoreId,
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await client.createSession({
       expectedStoreId,
@@ -330,7 +331,7 @@ test('real detached Job blocks live rewind, terminal result is suppressed by idl
       expectedStoreId,
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await client.createSession({
       expectedStoreId,

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -7,6 +7,7 @@ import { type AfterTurnPolicy, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
 function gate() {
@@ -28,9 +29,9 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
 async function fixture(mode: 'allow' | 'deny' | 'json_only') {
   const root = mkdtempSync(join(tmpdir(), 'kite-default-after-turn-'));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const childGate = gate(),
     phases: string[] = [],
     requests: Record<string, unknown>[] = [];

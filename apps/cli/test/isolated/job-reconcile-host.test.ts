@@ -1,15 +1,8 @@
 import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -20,6 +13,7 @@ import {
   readDaemonReservation,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedDaemon } from '../../host/daemon';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { createLedgerExtension } from '../fixtures/job-reconcile-ledger';
@@ -36,7 +30,7 @@ async function until(check: () => Promise<boolean>) {
 nativeTest(
   'compiled CLI reconciles the exact cold Job through paired and shared Service without repeating its effect',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-reconcile-'));
+    const root = realpathSync(temporaryDirectory('kite-cli-reconcile-'));
     let daemonClosed = true;
     try {
       const baseEntry = await buildOwnedDaemon(join(root, 'artifact'));
@@ -56,7 +50,7 @@ nativeTest(
       const executable = realpathSync(process.execPath);
       for (const mode of ['paired', 'shared'] as const) {
         const base = join(root, mode);
-        mkdirSync(base, { mode: 0o700 });
+        privateDirectory(base);
         const dataRoot = join(base, 'data');
         const profile = selectProfile({ dataRoot, profile: 'owned' });
         const store = await openSqliteStore(profile);
@@ -88,7 +82,7 @@ nativeTest(
           await runtime.createWorkspace({
             expectedStoreId,
             id: 'w',
-            rootUri: `file://${base}`,
+            rootUri: pathToFileURL(base).href,
             name: 'owned',
           });
           await runtime.createSession({

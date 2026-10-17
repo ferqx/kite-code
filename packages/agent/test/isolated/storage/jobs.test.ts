@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { appendFileSync, chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { UnifiedExecution } from '../../../src/execution';
 import { ExecutionResources } from '../../../src/execution/resources';
 import type { JobDefinition } from '../../../src/extensions';
@@ -18,7 +19,7 @@ async function rejected(promise: Promise<unknown>, code: string) {
   expect((error as { code?: string } | undefined)?.code).toBe(code);
 }
 async function fixture() {
-  const dataRoot = mkdtempSync('/private/tmp/kite-job-store-');
+  const dataRoot = temporaryDirectory('kite-job-store-');
   chmodSync(dataRoot, 0o700);
   const store = await openSqliteStore({ dataRoot, profile: 'test' });
   const expectedStoreId = (await store.getMetadata()).storeId;

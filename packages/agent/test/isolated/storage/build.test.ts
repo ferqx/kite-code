@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { buildNativeFiles } from '../../../scripts/build-native-files';
 import { privateDirectory } from '../../../src/platform/windows-path-security';
 import { buildStorageAssets } from '../../../src/storage/worker/build-assets';
 
@@ -57,6 +58,7 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
       packages: 'external',
     });
     expect(result.success).toBe(true);
+    await buildNativeFiles(output);
     const profile = (await import(
       pathToFileURL(join(output, 'profile.js')).href
     )) as typeof import('../../../src/profile');
@@ -70,28 +72,38 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
     const store = await runner.openSqliteStore({ dataRoot, profile: 'built' });
     try {
       expect((await store.getMetadata()).formatMajor).toBe(1);
-      const filesEntry = (await import(
-        pathToFileURL(join(output, 'files.js')).href
-      )) as typeof import('../../../src/files');
-      const files = filesEntry.createWorkspaceFiles({ root: dataRoot });
-      try {
-        const written = await files.write({
-          path: 'built-file',
-          base: null,
-          content: 'built UTF-8',
-        });
-        expect((await files.read('built-file')).baseline).toEqual(written.baseline);
-        expect(filesEntry.createFileTools(files).map((tool) => tool.id)).toEqual([
-          'files.read',
-          'files.write',
-          'files.edit',
-          'files.list',
-          'files.glob',
-          'files.search',
-        ]);
-      } finally {
-        await files.close();
-      }
+      // A loaded Windows DLL remains mapped until process exit. Run the built file
+      // capability in its own process so cleanup does not pretend it was unloaded.
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          '--eval',
+          `import assert from 'node:assert/strict';
+const filesEntry=await import(${JSON.stringify(pathToFileURL(join(output, 'files.js')).href)});
+const files=filesEntry.createWorkspaceFiles({root:${JSON.stringify(dataRoot)}});
+try {
+ const written=await files.write({path:'built-file',base:null,content:'built UTF-8'});
+ assert.deepEqual((await files.read('built-file')).baseline,written.baseline);
+ console.log(JSON.stringify(filesEntry.createFileTools(files).map(tool=>tool.id)));
+}finally{await files.close();}`,
+        ],
+        { cwd: output, stdout: 'pipe', stderr: 'pipe' },
+      );
+      const [exit, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(exit, stderr).toBe(0);
+      expect(readFileSync(join(dataRoot, 'built-file'), 'utf8')).toBe('built UTF-8');
+      expect(JSON.parse(stdout)).toEqual([
+        'files.read',
+        'files.write',
+        'files.edit',
+        'files.list',
+        'files.glob',
+        'files.search',
+      ]);
       const expectedStoreId = (await store.getMetadata()).storeId;
       await store.createWorkspace({
         expectedStoreId,
@@ -146,4 +158,4 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
     rmSync(output, { recursive: true, force: true });
     rmSync(profileRoot, { recursive: true, force: true });
   }
-});
+}, 30000);

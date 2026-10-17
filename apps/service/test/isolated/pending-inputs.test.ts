@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
@@ -90,7 +91,7 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
       expectedStoreId,
       id: 'w',
       name: 'private',
-      rootUri: new URL(`file://${root}/`).href,
+      rootUri: pathToFileURL(`${root}/`).href,
     });
     await runtime.createSession({
       ...base,

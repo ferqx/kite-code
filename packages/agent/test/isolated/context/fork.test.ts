@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension } from '../../../src/extensions';
@@ -84,7 +85,7 @@ for (const large of [false, true])
         expectedStoreId: storeId,
         id: 'w',
         name: 'private',
-        rootUri: `file://${directory}`,
+        rootUri: pathToFileURL(directory).href,
       });
       await runtime.createSession({
         expectedStoreId: storeId,
@@ -273,7 +274,7 @@ test('Fork preserves future content as readonly and refuses to reinterpret it be
       expectedStoreId: storeId,
       id: 'w',
       name: 'w',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,
@@ -439,7 +440,7 @@ test('Fork retains only currently selected consumed result provenance; empty and
       expectedStoreId: storeId,
       id: 'w',
       name: 'w',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,
@@ -644,7 +645,7 @@ test('Fork refuses live and actual unknown group effects without creating a Sess
       expectedStoreId: storeId,
       id: 'w',
       name: 'w',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,

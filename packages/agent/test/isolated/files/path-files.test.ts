@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   linkSync,
@@ -13,10 +14,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
+import { createArtifactStore } from '../../../src/artifacts';
 import type { AuthorizationRequest, ToolContext } from '../../../src/extensions';
 import { createPermissionPolicy } from '../../../src/permissions';
+import { inspectPathFileTarget } from '../../../src/permissions/files-request';
+import { privateDirectory } from '../../../src/platform/windows-path-security';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage/types';
 import { createPathFileTools } from '../../../src/tools/path-files';
@@ -26,7 +31,7 @@ function fixture() {
   const home = join(root, 'home');
   const profile = join(root, 'profile');
   mkdirSync(home);
-  mkdirSync(profile, { mode: 0o700 });
+  privateDirectory(profile);
   const api = createPathFileTools({
     qualifiedPlatforms: [process.platform],
     protectedRoots: [profile],
@@ -87,6 +92,18 @@ test('absolute file tools retain native complete text, exact CAS and external ch
     const observed = JSON.parse((await f.execute('files.read_path', { path })).content);
     expect(observed.path).toBe(path);
     expect(observed.content).toBe('\uFEFFline1\r\nline2\r\n');
+    const target = await inspectPathFileTarget(
+      'files.read_path',
+      { path },
+      {
+        qualifiedPlatforms: [process.platform],
+        protectedRoots: [f.profile],
+      },
+    );
+    expect(target.identity).toEqual({
+      device: observed.baseline.device,
+      inode: observed.baseline.inode,
+    });
     const edit = {
       path,
       base: observed.baseline,
@@ -238,19 +255,79 @@ test('three strategies classify external mutations and safe reads through the ex
     f.close();
   }
 });
-test('real Runtime dispatch executes absolute files under actual policy proof and persists original execution facts', async () => {
-  const f = fixture();
-  const store = await openSqliteStore({ dataRoot: f.profile, profile: 'new' });
-  const path = join(f.home, 'actual');
-  const finish: Extract<ModelEvent, { type: 'finish' }> = {
-    type: 'finish',
-    reason: 'stop',
-    usage: { inputTokens: 1, outputTokens: 1 },
-  };
-  const runtime = createRuntime({
-    store,
-    modelId: 'fixed',
-    model: createFixedModel([
+
+(process.platform === 'win32' ? test : test.skip)(
+  'Windows external files accept ordinary casing and reject aliases before granting a dispatch scope',
+  async () => {
+    const f = fixture();
+    try {
+      const path = join(f.home, 'Exact.txt');
+      writeFileSync(path, 'original');
+      const variant = join(f.home.toUpperCase(), 'exact.txt');
+      const read = await f.execute('files.read_path', { path: variant });
+      expect(read.outcome).toBe('succeeded');
+      expect(JSON.parse(read.content)).toMatchObject({ path: variant, content: 'original' });
+      const created = join(f.home.toUpperCase(), 'NEW.txt');
+      expect(
+        await f.execute('files.write_path', { path: created, content: 'created', base: null }),
+      ).toMatchObject({ outcome: 'succeeded' });
+      expect(readFileSync(join(f.home, 'new.txt'), 'utf8')).toBe('created');
+      writeFileSync(join(f.profile, 'secret'), 'private');
+      expect(
+        await f.execute('files.read_path', { path: join(f.profile.toUpperCase(), 'SECRET') }),
+      ).toMatchObject({ outcome: 'failed', content: 'file_path_protected' });
+      for (const invalid of [
+        `${path}:stream`,
+        `${path}.`,
+        `${path} `,
+        join(f.home, 'NUL'),
+        join(f.home, 'CON.txt'),
+        join(f.home, 'COM1'),
+        `${path.slice(0, 2)}relative.txt`,
+        `\\\\?\\${path}`,
+        '\\\\localhost\\C$\\outside.txt',
+      ]) {
+        for (const [id, input] of [
+          ['files.read_path', { path: invalid }],
+          ['files.write_path', { path: invalid, content: 'bad', base: null }],
+        ] as const) {
+          expect(await f.api.describeRequest(f.request(id, input))).toMatchObject({
+            hardAllowed: false,
+            denialReason: 'file_path_invalid',
+          });
+          expect(await f.execute(id, input)).toMatchObject({
+            outcome: 'failed',
+            content: 'file_path_invalid',
+          });
+        }
+      }
+      expect(readFileSync(path, 'utf8')).toBe('original');
+      expect(readFileSync(join(f.profile, 'secret'), 'utf8')).toBe('private');
+    } finally {
+      f.close();
+    }
+  },
+);
+
+for (const decision of ['full', 'approve', 'deny'] as const) {
+  test(`real Runtime external files enforce ${decision} policy on the original absolute target`, async () => {
+    const f = fixture();
+    const profile = { dataRoot: f.profile, profile: 'new' };
+    const store = await openSqliteStore(profile);
+    const artifacts = createArtifactStore({ profile, store });
+    const workspace = join(f.root, 'workspace');
+    mkdirSync(workspace);
+    const path = join(f.home, 'actual');
+    const largePath = join(f.home, 'large.txt');
+    const content = `\uFEFFstart\r\n${'完整 α\r\n'.repeat(120000)}end\r\n`;
+    writeFileSync(largePath, content);
+    expect(Buffer.byteLength(content)).toBeGreaterThan(1024 * 1024);
+    const finish: Extract<ModelEvent, { type: 'finish' }> = {
+      type: 'finish',
+      reason: 'stop',
+      usage: { inputTokens: 1, outputTokens: 1 },
+    };
+    const model = createFixedModel([
       [
         {
           type: 'tool_call',
@@ -268,79 +345,172 @@ test('real Runtime dispatch executes absolute files under actual policy proof an
           name: 'files.read_path',
           arguments: JSON.stringify({ path }),
         },
+        {
+          type: 'tool_call',
+          id: 'large',
+          name: 'files.read_path',
+          arguments: JSON.stringify({ path: largePath }),
+        },
         { ...finish, reason: 'tool_calls' },
       ],
       [finish],
-    ]),
-    extensions: [{ id: 'builtin.files', version: '1', apiMajor: 1, tools: f.api.tools }],
-    permissions: createPermissionPolicy({
-      readPolicy: (request) => ({
-        mode: 'full',
-        workspaceTrust: true,
-        revision: 'source',
-        allowed: [
-          {
-            kind: request.kind,
-            definitionId: request.definitionId,
-            definitionVersion: request.definitionVersion,
-          },
-        ],
-      }),
-      describeCapability: async (request) =>
-        request.kind === 'model'
-          ? {
-              kind: 'model',
+    ]);
+    const runtime = createRuntime({
+      store,
+      artifacts,
+      modelId: 'fixed',
+      model,
+      extensions: [{ id: 'builtin.files.path', version: '1', apiMajor: 1, tools: f.api.tools }],
+      permissions: createPermissionPolicy({
+        readPolicy: (request) => ({
+          mode: decision === 'full' ? 'full' : 'accept_edits',
+          workspaceTrust: true,
+          revision: 'source',
+          allowed: [
+            {
+              kind: request.kind,
               definitionId: request.definitionId,
               definitionVersion: request.definitionVersion,
-              revision: 'fixed',
-              effects: [],
-              safeRead: false,
-              hardAllowed: true,
-            }
-          : f.api.describeRequest(request),
-    }),
-  });
-  try {
-    const expectedStoreId = (await store.getMetadata()).storeId;
-    await runtime.createWorkspace({
-      expectedStoreId,
-      id: 'w',
-      rootUri: `file://${f.root}`,
-      name: 'actual',
+            },
+          ],
+        }),
+        describeCapability: async (request) =>
+          request.kind === 'model'
+            ? {
+                kind: 'model',
+                definitionId: request.definitionId,
+                definitionVersion: request.definitionVersion,
+                revision: 'fixed',
+                effects: [],
+                safeRead: false,
+                hardAllowed: true,
+              }
+            : f.api.describeRequest(request),
+      }),
     });
-    await runtime.createSession({
-      expectedStoreId,
-      commandId: 'create',
-      sessionId: 's',
-      workspaceId: 'w',
-      subjectId: 'owner',
-      title: 'actual',
-    });
-    for (const commandId of ['write', 'read']) {
-      await runtime.submitCommand({
+    try {
+      const expectedStoreId = (await store.getMetadata()).storeId;
+      await runtime.createWorkspace({
         expectedStoreId,
-        commandId,
-        sessionId: 's',
-        subjectId: 'owner',
-        request: { kind: 'run.start', content: commandId },
+        id: 'w',
+        rootUri: pathToFileURL(workspace).href,
+        name: 'actual',
       });
-      await runtime.waitForCommand(commandId);
+      await runtime.createSession({
+        expectedStoreId,
+        commandId: 'create',
+        sessionId: 's',
+        workspaceId: 'w',
+        subjectId: 'owner',
+        title: 'actual',
+      });
+      for (const commandId of ['write', 'read']) {
+        await runtime.submitCommand({
+          expectedStoreId,
+          commandId,
+          sessionId: 's',
+          subjectId: 'owner',
+          request: { kind: 'run.start', content: commandId },
+        });
+        if (commandId === 'write' && decision !== 'full') {
+          const deadline = Date.now() + 5000;
+          let card:
+            | Awaited<ReturnType<typeof runtime.listInteractions>>['interactions'][number]
+            | undefined;
+          while (!card && Date.now() < deadline) {
+            card = (
+              await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
+            ).interactions[0];
+            if (!card) await Bun.sleep(10);
+          }
+          expect(card).toBeDefined();
+          expect(existsSync(path)).toBe(false);
+          expect(card!.request).toMatchObject({
+            input: { path, content: 'actual-runtime', base: null },
+          });
+          await runtime.answerInteraction({
+            expectedStoreId,
+            commandId: `human-${decision}`,
+            presentationSessionId: card!.presentationSessionId,
+            interactionId: card!.id,
+            expectedRevision: card!.revision,
+            subjectId: 'owner',
+            answer: { kind: 'approval', decision },
+          });
+        }
+        await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
+        if (decision === 'deny') {
+          expect(existsSync(path)).toBe(false);
+          const denied = (await store.listExecutions('s')).find(
+            (row) => row.definitionId === 'files.write_path',
+          )!;
+          expect(denied.status).toBe('failed');
+          expect(denied.result).toMatchObject({ content: 'approval_denied' });
+          expect(model.requests).toHaveLength(1);
+          return;
+        }
+      }
+      expect(readFileSync(path, 'utf8')).toBe('actual-runtime');
+      const executions = (await store.listExecutions('s')).filter((execution) =>
+        execution.definitionId.startsWith('files.'),
+      );
+      expect(executions.map((execution) => execution.status)).toEqual([
+        'succeeded',
+        'succeeded',
+        'succeeded',
+      ]);
+      const read = executions.find(
+        (execution) =>
+          execution.definitionId === 'files.read_path' &&
+          execution.input &&
+          (execution.input as { path?: string }).path === path,
+      )!;
+      expect(JSON.parse((read.result as { content: string }).content)).toMatchObject({
+        path,
+        content: 'actual-runtime',
+      });
+      const large = executions.find(
+        (execution) => execution.definitionId === 'files.read_path' && execution.id !== read.id,
+      )!;
+      const result = large.result as {
+        content: string;
+        artifactRefs: { id: string; scope: { kind: 'execution'; id: string } }[];
+      };
+      expect(JSON.parse(result.content)).toMatchObject({
+        path: largePath,
+        inlineBody: false,
+        baseline: { hash: createHash('sha256').update(content).digest('hex') },
+        body: { complete: true },
+      });
+      expect(result.artifactRefs).toHaveLength(1);
+      const ref = result.artifactRefs[0]!;
+      expect(
+        Buffer.from(
+          await artifacts.read({
+            expectedStoreId,
+            refId: ref.id,
+            sessionId: 's',
+            subjectId: 'owner',
+            scope: ref.scope,
+          }),
+        ).toString('utf8'),
+      ).toBe(content);
+      expect(
+        model.requests
+          .at(-1)!
+          .messages.some((message) => message.role === 'tool' && message.content.endsWith(content)),
+      ).toBe(true);
+      expect(
+        (await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' }))
+          .interactions,
+      ).toHaveLength(0);
+    } finally {
+      await runtime.close();
+      await artifacts.close();
+      f.close();
     }
-    expect(readFileSync(path, 'utf8')).toBe('actual-runtime');
-    const executions = (await store.listExecutions('s')).filter((execution) =>
-      execution.definitionId.startsWith('files.'),
-    );
-    expect(executions.map((execution) => execution.status)).toEqual(['succeeded', 'succeeded']);
-    const read = executions.find((execution) => execution.definitionId === 'files.read_path')!;
-    expect(JSON.parse((read.result as { content: string }).content)).toMatchObject({
-      path,
-      content: 'actual-runtime',
-    });
-  } finally {
-    await runtime.close();
-    f.close();
-  }
-});
+  });
+}
 
 test('protected root sets retain exact snapshot identity and actual denial across host entry ordering', async () => {
   const f = fixture();

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
@@ -50,7 +51,7 @@ test('actual development argv uses paired public management and exact supplied i
       await seed.client.createWorkspace({
         expectedStoreId: storeId,
         id: 'w',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
         name: 'owned',
       });
       const session = await seed.client.createSession({

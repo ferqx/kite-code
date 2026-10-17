@@ -119,7 +119,10 @@ export async function runWindowsNativeVerifier(
     resources.push(outerFiles);
     const innerFiles = retainWindowsTerminalRuntimeFiles(terminalRoot);
     resources.push(innerFiles);
-    const bundle = verifyNativeRuntimeBundle(root);
+    const bundle = verifyNativeRuntimeBundle(root, undefined, {
+      outer: outerFiles,
+      terminal: innerFiles,
+    });
     if (bundle.digest !== id || readManagedCLIActive(prefix) !== id)
       throw Error('native_windows_selection_changed');
     frontdoor.verify();
@@ -194,7 +197,7 @@ export function parseWindowsNativeSelection(argv: readonly string[]): {
     throw Error('native_windows_frontdoor_invalid');
   return { argv };
 }
-if (import.meta.main) {
+export async function runWindowsNativeVerifierMain(): Promise<void> {
   try {
     const selection = parseWindowsNativeSelection(process.argv.slice(5));
     process.exitCode = await runWindowsNativeVerifier(
@@ -209,3 +212,4 @@ if (import.meta.main) {
     process.exitCode = 1;
   }
 }
+if (import.meta.main) await runWindowsNativeVerifierMain();

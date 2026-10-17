@@ -126,7 +126,7 @@ export async function runWindowsTerminalVerifier(
     uses.push(acquireArtifactAccess({ root, mode: 'shared' }));
     const terminalFiles = retainWindowsTerminalRuntimeFiles(root);
     files.push(terminalFiles);
-    const bundle = verifyTerminalRuntimeBundle(root);
+    const bundle = verifyTerminalRuntimeBundle(root, undefined, terminalFiles);
     if (bundle.digest !== id || readManagedCLIActive(prefix) !== id)
       throw Error('terminal_windows_selection_changed');
     const registration = readCLIRegistration(prefix);
@@ -157,7 +157,10 @@ export async function runWindowsTerminalVerifier(
       files.push(outerFiles);
       const innerFiles = retainWindowsTerminalRuntimeFiles(innerRoot);
       files.push(innerFiles);
-      const nativeBundle = verifyNativeRuntimeBundle(nativeRoot);
+      const nativeBundle = verifyNativeRuntimeBundle(nativeRoot, undefined, {
+        outer: outerFiles,
+        terminal: innerFiles,
+      });
       if (
         nativeBundle.digest !== registration.candidateId ||
         !sameCLIRegistration(registration, readCLIRegistration(prefix)) ||
@@ -226,7 +229,7 @@ export async function runWindowsTerminalVerifier(
   return result;
 }
 
-if (import.meta.main) {
+export async function runWindowsTerminalVerifierMain(): Promise<void> {
   try {
     process.exitCode = await runWindowsTerminalVerifier(
       process.argv[2] ?? '',
@@ -238,3 +241,4 @@ if (import.meta.main) {
     process.exitCode = 1;
   }
 }
+if (import.meta.main) await runWindowsTerminalVerifierMain();

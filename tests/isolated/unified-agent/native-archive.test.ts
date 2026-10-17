@@ -1,23 +1,66 @@
-import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  existsSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { join } from 'node:path';
+import { expect, setDefaultTimeout, test } from 'bun:test';
+import { existsSync, linkSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { packNativeBundle, unpackNativeBundle } from '../../../scripts/release/native-archive';
 import { readCandidateArchiveFiles } from '../../../scripts/release/terminal-archive';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 import { finiteNativeFixture, hash } from '../../fixtures/unified-agent/native-artifact-fixture';
+import {
+  expectReleaseMode,
+  fileAlias,
+  releaseScratch as mkdtempSync,
+  unsafeReleasePermissions,
+} from '../../fixtures/unified-agent/release-filesystem';
+
+// Real filesystem fixtures; this does not change product qualification deadlines.
+setDefaultTimeout(30_000);
+
+test.skipIf(process.platform !== 'win32')(
+  'a closed manifest and valid Node entry cannot qualify missing Windows window packs',
+  async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-missing-packs-')));
+    try {
+      const root = finiteNativeFixture(parent),
+        path = join(root, 'native-manifest.json');
+      const manifest = JSON.parse(readFileSync(path, 'utf8'));
+      manifest.files = manifest.files.filter(
+        (file: { path: string }) => file.path !== 'electron/chrome_100_percent.pak',
+      );
+      rmSync(join(root, 'electron/chrome_100_percent.pak'));
+      writeFileSync(path, JSON.stringify(manifest));
+      expect(() => verifyNativeRuntimeBundle(root)).toThrow('native_manifest_invalid');
+      let calls = 0;
+      const output = join(parent, 'must-not-build');
+      await expect(
+        buildNativeCandidate({
+          terminalRoot: join(root, 'terminal'),
+          electronDist: join(root, 'electron'),
+          outdir: output,
+          windowsBuildPort: {
+            copyElectronExecutable() {
+              calls++;
+              throw Error('unexpected_copy');
+            },
+            async buildFrontdoors() {
+              calls++;
+              throw Error('unexpected_build');
+            },
+          },
+        }),
+      ).rejects.toThrow('native_electron_resources_incomplete');
+      expect(calls).toBe(0);
+      expect(existsSync(output)).toBe(false);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  },
+);
 
 test('finite Native archive preserves full two manifest bytes, relative link and emptydir; explicit bounds and exclusive outputs', async () => {
-  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-archive-'));
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-archive-')));
   try {
     const root = finiteNativeFixture(parent),
       original = verifyNativeRuntimeBundle(root),
@@ -52,7 +95,7 @@ test('finite Native archive preserves full two manifest bytes, relative link and
   }
 });
 test('finite Native archive closed regular inventory refuses bad SHA, extra/missing, ancestor, invalidempty and rehashed corrupt closure', async () => {
-  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-archive-bad-'));
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-archive-bad-')));
   try {
     const root = finiteNativeFixture(parent),
       packed = await packNativeBundle({
@@ -90,19 +133,19 @@ test('finite Native archive closed regular inventory refuses bad SHA, extra/miss
       }),
     ).toThrow();
     for (const mutate of [
-      (p: string) => chmodSync(join(p, '.use-terminal.lock'), 0o644),
+      (p: string) => unsafeReleasePermissions(join(p, '.use-terminal.lock'), 0o644),
       (p: string) => {
         rmSync(join(p, 'app/main.cjs'));
         linkSync(join(p, 'app/preload.cjs'), join(p, 'app/main.cjs'));
       },
-      (p: string) => mkdirSync(join(p, 'electron/undeclared'), { mode: 0o700 }),
+      (p: string) => privateDirectory(join(p, 'electron/undeclared')),
     ]) {
       const p = finiteNativeFixture(parent, `source-${Math.random().toString(16).slice(2)}`);
       mutate(p);
       await expect(
         packNativeBundle({
           bundleRoot: p,
-          archivePath: join(parent, `${p.split('/').at(-1)}.tgz`),
+          archivePath: join(parent, `${basename(p)}.tgz`),
         }),
       ).rejects.toThrow();
     }
@@ -140,9 +183,8 @@ function header(path: string, body = Buffer.alloc(0), type = '0', link = '') {
   ]);
 }
 test('Native unpack directly rejects duplicate, traversal, real links, bad PAX and rehashed checksum-invalid tar; sidecar aliases untouched', async () => {
-  const { gzipSync } = await import('node:zlib'),
-    { symlinkSync } = await import('node:fs');
-  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-archive-tar-'));
+  const { gzipSync } = await import('node:zlib');
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-archive-tar-')));
   try {
     const root = finiteNativeFixture(parent),
       archivePath = join(parent, 'good.tgz'),
@@ -172,7 +214,7 @@ test('Native unpack directly rejects duplicate, traversal, real links, bad PAX a
     const outside = join(parent, 'keep'),
       newArchive = join(parent, 'alias.tgz');
     writeFileSync(outside, 'keep exact');
-    symlinkSync(outside, `${newArchive}.sha256`);
+    fileAlias(outside, `${newArchive}.sha256`);
     await expect(packNativeBundle({ bundleRoot: root, archivePath: newArchive })).rejects.toThrow(
       'native_destination_exists',
     );
@@ -184,11 +226,10 @@ test('Native unpack directly rejects duplicate, traversal, real links, bad PAX a
 });
 
 test('exact verified Native file modes and installed launcher survive a private umask without weakening lock0600', async () => {
-  const { lstatSync } = await import('node:fs'),
-    { installNativeBundle, uninstallNativeBundle } = await import(
-      '../../../scripts/release/native-install'
-    );
-  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-umask-'));
+  const { installNativeBundle, uninstallNativeBundle } = await import(
+    '../../../scripts/release/native-install'
+  );
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-umask-')));
   try {
     const source = finiteNativeFixture(parent),
       packed = await packNativeBundle({
@@ -202,9 +243,16 @@ test('exact verified Native file modes and installed launcher survive a private 
           bundleRoot: moved.root,
           prefix: join(parent, 'installed'),
         });
-      expect(lstatSync(join(moved.root, 'native-manifest.json')).mode & 0o777).toBe(0o644);
-      expect(lstatSync(join(installed.root, 'bin/kite-desktop')).mode & 0o777).toBe(0o755);
-      expect(lstatSync(join(installed.releaseRoot, '.use-terminal.lock')).mode & 0o777).toBe(0o600);
+      expectReleaseMode(join(moved.root, 'native-manifest.json'), 0o644);
+      expectReleaseMode(
+        join(
+          installed.root,
+          'bin',
+          process.platform === 'win32' ? 'kite-desktop.exe' : 'kite-desktop',
+        ),
+        0o755,
+      );
+      expectReleaseMode(join(installed.releaseRoot, '.use-terminal.lock'), 0o600);
       expect(verifyNativeRuntimeBundle(installed.releaseRoot).digest).toBe(moved.digest);
       uninstallNativeBundle(installed.root);
     } finally {

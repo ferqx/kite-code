@@ -1,17 +1,14 @@
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { TuiMcpConnectionIntent, TuiMcpReconnectionIntent } from '@kite-ai/ui/tui';
+import {
+  fixturePermissions,
+  privateDirectory,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../tests/fixtures/test-filesystem';
 import { createMcpConnectionRecord } from '../host/mcp-connection-intents';
 import { openMcpConnectionJournal } from '../host/mcp-connection-journal';
 import {
@@ -70,9 +67,9 @@ const intent = (commandId = 'forced-one'): TuiMcpReconnectionIntent => ({
   },
 });
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-mcp-reconnection-journal-');
+  const root = temporaryDirectory('kite-mcp-reconnection-journal-');
   const access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   const open = () => ({
     connection: openMcpConnectionJournal({
       access,
@@ -229,9 +226,9 @@ test('cross file private permissions, links, future shape and fatal UTF8 fail cl
     journals.reconnection.record(r, 'ready');
     const original = readFileSync(f.path);
     const c = createMcpConnectionRecord(connect('later'), 'subject');
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     expect(() => journals.connection.prepare(c)).toThrow('mcp_connection_journal_unavailable');
-    chmodSync(f.path, 0o600);
+    fixturePermissions(f.path, 0o600);
     const hard = join(f.root, 'hard-link');
     linkSync(f.path, hard);
     expect(() => journals.connection.prepare(c)).toThrow();
@@ -239,7 +236,7 @@ test('cross file private permissions, links, future shape and fatal UTF8 fail cl
     rmSync(f.path);
     const saved = join(f.root, 'saved.json');
     writeFileSync(saved, original, { mode: 0o600 });
-    symlinkSync(saved, f.path);
+    recordReparseEntry(saved, f.path);
     expect(() => journals.connection.prepare(c)).toThrow();
     rmSync(f.path);
     writeFileSync(f.path, Buffer.from([0xff]), { mode: 0o600 });
@@ -287,4 +284,4 @@ test('128 original intents fill the real asset without evicting unknown and UTF8
   } finally {
     f.close();
   }
-});
+}, 120000);

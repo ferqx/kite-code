@@ -4,7 +4,6 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -13,6 +12,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import {
   type DynamicSqliteEngineManifest,
   parseSqliteEngineManifest,
@@ -48,11 +51,11 @@ test('engine metadata is closed and cannot supply path traversal, extra authorit
 test.skipIf(process.platform !== 'darwin')(
   'owned relocated patched engine selects before first DB, shared Worker measures exact source; missing/changed/late/wrong identity never silently fall back',
   async () => {
-    const root = mkdtempSync('/private/tmp/kite-sqlite-engine-');
+    const root = temporaryDirectory('kite-sqlite-engine-');
     try {
       const staging = join(root, 'staging'),
         selected = join(root, 'selected');
-      mkdirSync(staging, { mode: 0o700 });
+      privateDirectory(staging);
       copyFileSync(
         '/opt/homebrew/Cellar/sqlite/3.51.3/lib/libsqlite3.3.51.3.dylib',
         join(staging, 'libsqlite3.dylib'),
@@ -224,7 +227,7 @@ test('compiled default sidecar rejects missing manifest or changed asset before 
     });
     expect(built.success).toBe(true);
     const engine = join(output, 'storage/engine');
-    mkdirSync(engine, { recursive: true, mode: 0o700 });
+    privateDirectory(engine);
     const data = join(root, 'never-profile');
     const run = async () => {
       const script = join(root, 'check.ts');
@@ -265,7 +268,7 @@ test('compiled default sidecar rejects missing manifest or changed asset before 
 test.skipIf(process.platform !== 'darwin')(
   'compiled public Store default sidecar loads the owned patched engine before Worker/profile IO',
   async () => {
-    const root = mkdtempSync('/private/tmp/kite-sqlite-default-');
+    const root = temporaryDirectory('kite-sqlite-default-');
     try {
       const output = join(root, 'package');
       const built = await Bun.build({
@@ -277,7 +280,7 @@ test.skipIf(process.platform !== 'darwin')(
       expect(built.success).toBe(true);
       await buildStorageAssets(output);
       const engine = join(output, 'storage/engine');
-      mkdirSync(engine, { recursive: true, mode: 0o700 });
+      privateDirectory(engine);
       const bytes = readFileSync('/opt/homebrew/Cellar/sqlite/3.51.3/lib/libsqlite3.3.51.3.dylib');
       writeFileSync(join(engine, 'libsqlite3.dylib'), bytes, { mode: 0o644 });
       const metadata = Buffer.from(JSON.stringify(manifest(bytes)));

@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dir, '../../../..');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -123,7 +124,7 @@ for (const kind of ['paired', 'daemon'] as const)
     // Valid prefixes for 2-, 3-, and 4-byte code points were formerly held silently by the decoder.
     for (const [index, suffix] of [[0xc2], [0xe2, 0x82], [0xf0, 0x9f, 0x92]].entries()) {
       const directory = join(root, `${kind}-${index}`);
-      mkdirSync(directory, { mode: 0o700 });
+      privateDirectory(directory);
       const profile = selectProfile({ dataRoot: join(directory, 'data'), profile: 'owned' });
       const startup = {
         profile: {

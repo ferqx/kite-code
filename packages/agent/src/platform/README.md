@@ -1,5 +1,7 @@
 # Profile 使用权与平台锁
 
+完整候选 pin 的[原 opaque owner](windows-artifact-scope.ts)可向可信消费层提供已核的类型、大小、FileID 和原 HANDLE 完整读取/SHA；WeakMap 只认原 live 对象，部分关闭即失效，复制或释放对象不授读取权。每次 verifier 仍核实际准确库存、全字节 SHA、原 HANDLE 及当前命名对象的 stamp/ACL。重开探针只请求 metadata 权限，使用期保护仍来自未关闭的 GENERIC_READ/FILE_TRAVERSE 原对象；原 sharing、单链接和 ACL 策略保持。安全描述符与私有批量复制归[私有路径 owner](windows-path-security.README.md)，长期取舍与反例见[闭包成本决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
+
 macOS 的[原 Worker leaf](process/worker-thread.darwin.ts)在可信 preload 中自捕原 Mach send-right，以 pthread／Mach thread ID 独立核身份；父[唯一 owner](process/owned-worker.ts)保原权到 DEAD_NAME，再分别核 thread/task 权准确释放。SEND、thread_info 错误或 Bun close 不授死亡，释放未知保原权和原失败，五秒收尾期限不放宽业务执行预算。库只在显式调用时从固定 libSystem lazy-load，import无原生 I/O；不添加全局资源登记或停止其他线程的权。取舍及固定上游依据见[原 Worker Note](../../../../.agents/notes/implemented/bug-fix/2026-10-13-owned-worker-termination.md)。这项本机收尾不解除 Win/Linux、全 Runtime census、VM/RSS 或阶段门禁。
 
 [纯身份入口](../profile.ts) `@kite-ai/agent/profile` 只使用 Node 模块解析 canonical dataRoot、逻辑 profile、稳定 `profileAccessKey` 和路径，import/select 不创建文件或授予锁。显式宿主入口 [profile-access](../profile-access.ts) 由 Bun 平台运行，import 不 acquire；公开普通 `acquireProfileAccess(options)` 固定 shared，内部维护-exclusive 入口保持独立。
@@ -30,7 +32,9 @@ Windows Bun 使用独立的 [public candidate scope](windows-artifact-scope.ts)�
 
 scope 保留已核验的整个原目录祖先链 HANDLE，允许 read/write sharing、拒绝 delete sharing，直到该候选的原 shared/exclusive lease 结束；root/parent 另外复核 owner/DACL。既有固定 sibling lock 仍使用 private 文件策略与真实 LockFileEx。内部 attachment 保留原 FileLock 对象和 live authority；失败只清理自己已经打开的句柄，scope 关闭失败不报告完整释放，后续 release 重试未关闭的资源。原 Profile 父子锁依赖保持；Windows 严格关闭顺序见下文。scope 不验证 immutable inventory 或授予执行权限，完整制品校验仍由消费 owner 负责。
 
-本机 [Windows scope 测试](../../test/isolated/artifact-access/windows-scope.test.ts)仅实测 POSIX/Node 惰性 import 与伪造 attachment 拒绝；实际 Windows 的普通读 ACL、原 ancestry rename 阻止、宽写/错 owner/junction/hardlink 拒绝、双独立 Bun holder 生命周期必须在 Windows 执行，不能因 backend 缺失跳过。此 candidate scope 不补齐 Windows installer 或 Node/Electron inherited 使用权；维护 private 文件端口由其 owner 独立核验。原生权限与共享模式依据 [Microsoft 文件安全与访问权](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)、[CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)和 [ACCESS_MASK](https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask)。
+2026-10-17 本机 [Windows scope 测试](../../test/isolated/artifact-access/windows-scope.test.ts)整文件5项通过、1项原POSIX专用skip：核普通读ACL、真实文件改写/祖先重命名阻止、宽写/错owner/junction/hardlink拒绝、双独立Bun holder及原HANDLE关闭未知。不同owner反例只读现有OS目录，不要求普通用户拥有改变owner的特权。此candidate scope不补齐完整installer或Node/Electron inherited使用权；原生权限与共享模式依据 [Microsoft 文件安全与访问权](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)、[CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)和 [ACCESS_MASK](https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask)。
+
+使用期pin须请求实际读取/遍历权：文件为GENERIC_READ，祖先为FILE_TRAVERSE。仅属性HANDLE的共享标志不能证明上述保护；区域锁以GENERIC_READ执行原LockFileEx SH/EX，避免不必要的WRITE与真正只读候选pin冲突。原生scope逐项核持有HANDLE的最终准确路径并复用同步scratch，完整内容验证另保原库存/哈希；取舍与原生反例归[原对象决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)。
 
 
 `acquireInheritedArtifactAccess({root,fd})` 为可信一次性 Bun helper 提供固定 shared 使用权。它与普通入口共用 canonical root、原 owner、root/parent 禁止组或其他用户写入与安全 basename 检查；目标仍是固定 sibling `.use-<basename>.lock`，不接任意 lock path、mode、Profile、Store 或执行参数。仅采用 darwin/linux 的 inherited fd；非法 root/alias、foreign inode、symlink、hardlink、宽 lock mode、busy 或 unsupported 平台均关闭 helper 已接管的有效 fd。非法数字 descriptor 在接管前拒绝。

@@ -1,18 +1,11 @@
 import { expect, test } from 'bun:test';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
 import { semanticDigest } from '../../../../packages/agent/src/json';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import {
   ancestorText,
@@ -55,7 +48,7 @@ async function mapBatches<T>(ids: string[], read: (id: string) => Promise<T>) {
 }
 
 test('public cold resume preserves over 4096 genuine original executions and discovered sources without replaying completed work', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-long-run-resume-'));
+  const root = realpathSync(temporaryDirectory('kite-long-run-resume-'));
   const workspace = join(root, 'workspace');
   mkdirSync(join(workspace, 'nested'), { recursive: true });
   writeFileSync(join(workspace, 'AGENTS.md'), sourceText);

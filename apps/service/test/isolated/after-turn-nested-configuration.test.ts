@@ -7,6 +7,7 @@ import { type AfterTurnPolicy, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { readSkillSelection } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
@@ -29,9 +30,9 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
 async function fixture(mode: 'nested' | 'followup') {
   const root = mkdtempSync(join(tmpdir(), 'kite-nested-sdk-'));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const waiting = gate();
   const calls: { model: string; messages: { role: string; content: string | null }[] }[] = [];
   const approvals: { phase: string; definitionId: string; commandId: string; runId: string }[] = [];

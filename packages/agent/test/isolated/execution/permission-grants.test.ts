@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
@@ -31,7 +33,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
   }
 }
 async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknown) => string) {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-grant-core-'));
+  const root = realpathSync(temporaryDirectory('kite-grant-core-'));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   let held = false,
     release!: () => void,
@@ -105,7 +107,7 @@ async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknow
     expectedStoreId,
     id: 'w',
     name: 'Temporary',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     expectedStoreId,

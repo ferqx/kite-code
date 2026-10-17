@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { Permissions, ToolDefinition } from '../../../src/extensions';
@@ -105,7 +106,7 @@ async function fixture(
   await runtime.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'temporary',
   });
   const session = async (id = 's') =>

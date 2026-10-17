@@ -1,4 +1,5 @@
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { OperationRef } from '@kite-ai/agent/extensions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -108,7 +109,7 @@ await runtime.createWorkspace({
   expectedStoreId,
   id: 'w',
   name: 'temporary',
-  rootUri: `file://${dataRoot}`,
+  rootUri: pathToFileURL(dataRoot).href,
 });
 await runtime.createSession({
   expectedStoreId,

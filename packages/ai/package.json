@@ -9,7 +9,7 @@
     "./sdk": "./src/sdk.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/sdk.ts --outdir ./dist --target browser --packages external",
+    "build": "bun build ./src/index.ts ./src/sdk.ts --outdir ./dist --target browser --splitting --packages bundle",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

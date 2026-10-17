@@ -1,37 +1,51 @@
-import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { expect, setDefaultTimeout, test } from 'bun:test';
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
+import { windowsInstallationCoordination } from '../../../packages/agent/src/platform/windows-installation-coordination';
 import {
   installNativeBundle,
   rollbackNativeBundle,
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
 import { finiteNativeFixture } from '../../fixtures/unified-agent/native-artifact-fixture';
+import {
+  directoryAlias,
+  expectReleaseMode,
+  fileAlias,
+  releaseDirectory as mkdirSync,
+  releaseScratch as mkdtempSync,
+  unsafeReleasePermissions,
+} from '../../fixtures/unified-agent/release-filesystem';
+
+// Real filesystem fixtures; this does not change product qualification deadlines.
+setDefaultTimeout(30_000);
 
 test('finite Native managed install preserves lock0600 and closed launcher, rollback is pointer-only; holder is only a lock proof', () => {
-  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-install-'));
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-')));
   try {
     const root = finiteNativeFixture(parent),
       prefix = join(parent, 'installed'),
       installed = installNativeBundle({ bundleRoot: root, prefix });
     expect(installed.previousCandidateId).toBeNull();
     expect(readFileSync(join(prefix, 'active'), 'utf8')).toBe(`${installed.candidateId}\n\n`);
-    expect(readFileSync(join(prefix, 'bin/kite-desktop'), 'utf8')).toContain(
-      'unset NODE_PATH NODE_OPTIONS BUN_OPTIONS ELECTRON_RUN_AS_NODE',
+    if (process.platform === 'win32') {
+      for (const name of ['kite.exe', 'kite-tui.exe', 'kite-desktop.exe', 'native-verifier.exe']) {
+        expect(readFileSync(join(prefix, 'bin', name))).toEqual(
+          readFileSync(join(root, 'app', name)),
+        );
+        expectReleaseMode(join(prefix, 'bin', name), 0o755);
+      }
+    } else
+      expect(readFileSync(join(prefix, 'bin/kite-desktop'), 'utf8')).toContain(
+        'unset NODE_PATH NODE_OPTIONS BUN_OPTIONS ELECTRON_RUN_AS_NODE',
+      );
+    expect(() => rollbackNativeBundle(prefix)).toThrow(
+      process.platform === 'win32'
+        ? 'native_windows_previous_unavailable'
+        : 'native_previous_unavailable',
     );
-    expect(() => rollbackNativeBundle(prefix)).toThrow('native_previous_unavailable');
     const inner = acquireArtifactAccess({
       root: join(installed.releaseRoot, 'terminal'),
       mode: 'shared',
@@ -57,7 +71,7 @@ test('finite Native managed install preserves lock0600 and closed launcher, roll
   }
 });
 test('Native uninstall rejects a live inner holder before reading corrupted candidate content and releases its outer lease', () => {
-  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-install-busy-'));
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-busy-')));
   try {
     const source = finiteNativeFixture(parent),
       prefix = join(parent, 'installed'),
@@ -92,7 +106,7 @@ test('Native uninstall rejects a live inner holder before reading corrupted cand
 
 test('Native uninstall rejects candidate and inner directory aliases before taking their use locks', () => {
   for (const nested of [false, true]) {
-    const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-install-alias-'));
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-alias-')));
     try {
       const source = finiteNativeFixture(parent),
         prefix = join(parent, 'installed'),
@@ -101,7 +115,7 @@ test('Native uninstall rejects candidate and inner directory aliases before taki
         target = join(parent, 'alias-target'),
         active = readFileSync(join(prefix, 'active'));
       renameSync(path, target);
-      symlinkSync(target, path);
+      directoryAlias(target, path);
       expect(() => uninstallNativeBundle(prefix)).toThrow();
       expect(existsSync(prefix)).toBe(true);
       expect(readFileSync(join(prefix, 'active'))).toEqual(active);
@@ -117,14 +131,21 @@ test('finite Native install refuses unknown files, badactive/marker, lock aliase
     (p: string) => writeFileSync(join(p, 'active'), 'bad\n\n'),
     (p: string) => writeFileSync(join(p, '.kite-native-install.json'), '{}'),
     (p: string) => {
-      rmSync(join(p, '.install.lock'));
-      symlinkSync('active', join(p, '.install.lock'));
+      const coordination =
+        process.platform === 'win32' ? windowsInstallationCoordination(p) : undefined;
+      try {
+        const lock = coordination?.selectionLockPath ?? join(p, '.install.lock');
+        rmSync(lock);
+        fileAlias(join(p, 'active'), lock);
+      } finally {
+        coordination?.release();
+      }
     },
-    (p: string) => chmodSync(join(p, 'active'), 0o644),
+    (p: string) => unsafeReleasePermissions(join(p, 'active'), 0o644),
     (p: string) => writeFileSync(join(p, 'releases/.use-' + 'b'.repeat(64) + '.lock'), ''),
   ];
   for (const mutate of mutations) {
-    const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-install-bad-'));
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-bad-')));
     try {
       const source = finiteNativeFixture(parent),
         prefix = join(parent, 'installed'),
@@ -137,14 +158,16 @@ test('finite Native install refuses unknown files, badactive/marker, lock aliase
       rmSync(parent, { recursive: true, force: true });
     }
   }
-  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-install-user-'));
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-user-')));
   try {
     const source = finiteNativeFixture(parent),
       prefix = join(parent, 'user');
     mkdirSync(prefix);
     writeFileSync(join(prefix, 'user-file'), 'keep');
     expect(() => installNativeBundle({ bundleRoot: source, prefix })).toThrow(
-      'native_install_not_empty',
+      process.platform === 'win32'
+        ? 'native_windows_install_not_empty'
+        : 'native_install_not_empty',
     );
     expect(existsSync(join(prefix, '.install.lock'))).toBe(false);
     expect(readFileSync(join(prefix, 'user-file'), 'utf8')).toBe('keep');
@@ -157,7 +180,7 @@ test('finite Native install refuses unknown files, badactive/marker, lock aliase
 });
 
 test('Native install marker rejects invalid UTF8 even when replacement text would equal the owned Unicode root', () => {
-  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-marker-'));
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-marker-')));
   try {
     const source = finiteNativeFixture(parent),
       prefix = join(parent, 'owned-�'),

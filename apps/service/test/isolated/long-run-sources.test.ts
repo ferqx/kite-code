@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService, type PairedServiceChild } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
@@ -69,7 +70,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
     mkdirSync(workspace);
     mkdirSync(ownedHome);
     const userConfiguration = ownedUserConfiguration(ownedHome);
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     writeFileSync(join(workspace, 'AGENTS.md'), agents);
     provider = Bun.serve({
       hostname: '127.0.0.1',

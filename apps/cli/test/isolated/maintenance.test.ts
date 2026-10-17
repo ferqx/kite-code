@@ -1,19 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { inspectProfileBackup, type RestoreProfileBackupInput } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const repository = new URL('../../../../', import.meta.url).pathname;
 // Internal seams belong only to source fixtures; consumer processes use built public entries.
@@ -186,7 +179,7 @@ async function argv(entry: string, args: string[]) {
   return { exit, stdout, stderr };
 }
 async function fixture() {
-  const directory = mkdtempSync('/private/tmp/kite-cli-maintenance-'),
+  const directory = temporaryDirectory('kite-cli-maintenance-'),
     profile = { dataRoot: join(directory, 'data'), profile: 'selected' };
   let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {

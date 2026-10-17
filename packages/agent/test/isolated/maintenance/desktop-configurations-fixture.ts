@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
 import { retainLegacyDb6Fixture } from './assets-fixture';
 import { nodeCallerAssets } from './desktop-callers-fixture';
@@ -17,7 +18,7 @@ export async function nodeConfigurationAssets(
 ) {
   if (action === 'seed') await nodeCallerAssets(root, profile, storeId);
   const directory = join(root, 'node-configuration-fixture');
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  privateDirectory(directory);
   const helper = join(root, 'node-ui-fixture/profile-access-helper.js');
   const driver = join(directory, 'driver.js');
   if (action === 'seed') {

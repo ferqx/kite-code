@@ -19,6 +19,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   acquireArtifactAccess,
   acquireInheritedArtifactAccess,
@@ -31,7 +32,7 @@ function fixture() {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-artifact-access-')));
   chmodSync(parent, 0o700);
   const root = join(parent, 'bundle');
-  mkdirSync(root, { mode: 0o700 });
+  privateDirectory(root);
   const path = join(parent, '.use-bundle.lock');
   acquireArtifactAccess({ root, mode: 'shared' }).release();
   return {
@@ -69,17 +70,17 @@ test.skipIf(!posix)(
       rejects(join(f.parent, 'missing'));
       rejects(`${f.root}/`);
       const other = join(f.parent, 'other');
-      mkdirSync(other, { mode: 0o700 });
+      privateDirectory(other);
       acquireArtifactAccess({ root: other, mode: 'shared' }).release();
       rejects(other);
       const foreignParent = join(f.parent, 'foreign');
-      mkdirSync(foreignParent, { mode: 0o700 });
+      privateDirectory(foreignParent);
       const sameName = join(foreignParent, 'bundle');
-      mkdirSync(sameName, { mode: 0o700 });
+      privateDirectory(sameName);
       acquireArtifactAccess({ root: sameName, mode: 'shared' }).release();
       rejects(sameName);
       const control = join(f.parent, 'control\nname');
-      mkdirSync(control, { mode: 0o700 });
+      privateDirectory(control);
       rejects(control);
       const alias = join(f.parent, 'alias');
       symlinkSync(f.root, alias);

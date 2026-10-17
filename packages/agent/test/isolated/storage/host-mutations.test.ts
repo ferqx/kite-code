@@ -1,8 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHmac, randomBytes } from 'node:crypto';
-import { appendFileSync, chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -16,7 +17,7 @@ async function rejected(work: Promise<unknown>, code: string) {
   expect((actual as { code?: string })?.code).toBe(code);
 }
 async function fixture() {
-  const dataRoot = mkdtempSync('/private/tmp/kite-host-journal-');
+  const dataRoot = temporaryDirectory('kite-host-journal-');
   chmodSync(dataRoot, 0o700);
   const profile = { dataRoot, profile: 'new' };
   const store = await openSqliteStore(profile);

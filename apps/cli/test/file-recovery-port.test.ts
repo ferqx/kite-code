@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { AgentClient } from '@kite-ai/client';
@@ -8,13 +8,14 @@ import {
   parseFileRecoveryIntent,
   planFileRecoveryIntent,
 } from '@kite-ai/client/file-recovery-intent';
+import { privateDirectory, temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { createFileRecoveryPort } from '../host/file-recovery';
 import { openFileRecoveryJournal } from '../host/file-recovery-intents';
 
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-file-recovery-journal-'),
+  const root = temporaryDirectory('kite-file-recovery-journal-'),
     access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   return {
     access,
     path: join(access.profilePath, 'ui/file-recovery-intents.json'),

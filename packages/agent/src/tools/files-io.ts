@@ -1,18 +1,4 @@
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  fsyncSync,
-  lstatSync,
-  openSync,
-  readSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
-import { assertNoSymlinkPath } from '../platform/profile-identity';
-import { AgentError } from '../storage/types';
-import { directoryFlags, listAt, openAt, publishAt, unlinkAt } from './files-native';
-import { createWindowsWorkspaceFileIo } from './files-windows';
+import { createNativeWorkspaceFileIo } from '../files-native-binding';
 
 export interface WorkspaceFileStat {
   readonly dev: bigint;
@@ -56,68 +42,5 @@ export function createWorkspaceFileIo(
   protectedPaths: readonly string[],
   protectReads: boolean,
 ): WorkspaceFileIo {
-  if (process.platform === 'win32')
-    return createWindowsWorkspaceFileIo(root, protectedPaths, protectReads);
-  if (process.platform !== 'darwin' && process.platform !== 'linux')
-    throw new AgentError('file_platform_unsupported');
-  assertNoSymlinkPath(root);
-  const rootFd = openSync(root, directoryFlags);
-  const initial = fstatSync(rootFd, { bigint: true });
-  if (!initial.isDirectory()) {
-    closeSync(rootFd);
-    throw new AgentError('file_root_invalid');
-  }
-  const stat = (id: number): WorkspaceFileStat => {
-    const value = fstatSync(id, { bigint: true });
-    return {
-      dev: value.dev,
-      ino: value.ino,
-      size: value.size,
-      mtimeNs: value.mtimeNs,
-      ctimeNs: value.ctimeNs,
-      nlink: value.nlink,
-      owner: String(value.uid),
-      isFile: () => value.isFile(),
-      isDirectory: () => value.isDirectory(),
-    };
-  };
-  let closed = false;
-  return {
-    root: rootFd,
-    createOnlyLeavesTemporary: true,
-    verifyRoot() {
-      assertNoSymlinkPath(root);
-      const current = lstatSync(root, { bigint: true });
-      if (current.dev !== initial.dev || current.ino !== initial.ino || realpathSync(root) !== root)
-        throw new AgentError('file_root_changed');
-    },
-    stat,
-    verifyOwner(id) {
-      if (stat(id).owner !== String(process.getuid?.())) throw new AgentError('file_owner_invalid');
-    },
-    openAt(parent, name, kind) {
-      return openAt(
-        parent,
-        name,
-        kind === 'directory'
-          ? directoryFlags
-          : kind === 'temporary'
-            ? constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW
-            : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-        kind === 'temporary' ? 0o600 : 0,
-      );
-    },
-    read: (id, bytes) => readSync(id, bytes, 0, bytes.length, null),
-    write: (id, bytes) => writeFileSync(id, bytes),
-    sync: fsyncSync,
-    publishAt,
-    unlinkAt,
-    listAt,
-    closeHandle: closeSync,
-    close() {
-      if (closed) return;
-      closeSync(rootFd);
-      closed = true;
-    },
-  };
+  return createNativeWorkspaceFileIo(root, protectedPaths, protectReads);
 }

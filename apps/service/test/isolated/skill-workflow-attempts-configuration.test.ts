@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
 async function until<T>(read: () => Promise<T>, predicate: (value: T) => boolean) {
@@ -18,9 +20,9 @@ async function until<T>(read: () => Promise<T>, predicate: (value: T) => boolean
   }
 }
 test('default Service seals trusted Workflow decision policy and rejects cold policy drift before vault or Model', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-workflow-attempts-service-'));
+  const root = realpathSync(temporaryDirectory('kite-workflow-attempts-service-'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const skill = join(root, 'skill');
   mkdirSync(skill);
   const manifest = {
@@ -141,7 +143,7 @@ test('default Service seals trusted Workflow decision policy and rejects cold po
       expectedStoreId,
       id: 'w',
       name: 'fixture',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       ...base,

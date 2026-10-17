@@ -4,7 +4,6 @@ import { expect, test } from 'bun:test';
 import {
   closeSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -13,8 +12,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import {
   formatServiceStartupReport,
   launchPairedService,
@@ -109,7 +110,8 @@ test.each([
 test('actual default Store failure survives failed admission as a bounded diagnostic; external repair permits an explicit new launch', async () => {
   const data = fixture(),
     original = 'private database bytes /private/user credential session-content';
-  mkdirSync(data.profile.profilePath, { recursive: true, mode: 0o700 });
+  if (process.platform === 'win32') privateDirectory(data.profile.profilePath);
+  else privateDirectory(data.profile.profilePath);
   writeFileSync(data.profile.databasePath, original, { mode: 0o600 });
   const options = {
     entrypoint: join(import.meta.dir, '../../src/main.ts'),
@@ -177,7 +179,7 @@ test('two actual paired children distinguish network disconnect from parent EOF 
     await first.client.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: `file://${data.root}`,
+      rootUri: pathToFileURL(data.root).href,
       name: 'Disposable',
     });
     await first.client.createSession({
@@ -342,7 +344,7 @@ test('oversized stdout bootstrap fails within its own bounded launch', async () 
 
 test('a real damaged Store remains diagnostic and never masquerades as an empty session list', async () => {
   const data = fixture();
-  mkdirSync(data.profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(data.profile.profilePath);
   writeFileSync(data.profile.databasePath, 'not a SQLite database');
   const service = await data.launch('damaged');
   try {

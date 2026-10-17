@@ -1,26 +1,49 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { verifyTerminalBundle } from '../../apps/cli/host/terminal-artifact';
+import { windowsTerminalRuntimeArguments } from '../../apps/service/src/runtime-assets';
+import { privateDirectory } from '../../packages/agent/src/platform/windows-path-security';
+
+// A failed smoke keeps the original lease and private evidence until host exit.
+const pendingSmokes = new Set<object>();
 
 async function execute(command: string[], cwd: string, home: string): Promise<string> {
   const child = Bun.spawn(command, {
     cwd,
-    env: { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8' },
+    env:
+      process.platform === 'win32'
+        ? {
+            PATH: '',
+            HOME: home,
+            USERPROFILE: home,
+            SystemRoot: process.env.SystemRoot,
+            LANG: 'C.UTF-8',
+          }
+        : { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8' },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const timer = setTimeout(() => child.kill('SIGTERM'), 20000);
-  const forced = setTimeout(() => child.kill('SIGKILL'), 25000);
+  const timeoutMs = 20_000;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGTERM');
+  }, timeoutMs);
+  const forced = setTimeout(() => child.kill('SIGKILL'), timeoutMs + 5000);
   try {
     const [code, stdout, stderr] = await Promise.all([
       child.exited,
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ]);
-    if (code) throw Error(`release_smoke_child_failed:${stderr.slice(-512)}`);
+    if (timedOut || code !== 0 || child.signalCode)
+      throw new Error(timedOut ? 'release_smoke_child_timeout' : 'release_smoke_child_failed', {
+        cause: new Error(stderr.slice(-512) || `exit_${code}`),
+      });
     return stdout.trim();
   } finally {
     clearTimeout(timer);
@@ -38,18 +61,45 @@ export async function smokeTerminalBundle(directory: string) {
   let scratch: string | undefined;
   let stopped = false;
   let cli: ((argv: string[]) => Promise<string>) | undefined;
+  let socket: string | undefined;
+  let failure: unknown;
+  let failed = false;
+  let outcome:
+    | {
+        candidateId: string;
+        buildId: string;
+        entry: boolean;
+        daemon: boolean;
+        web: boolean;
+        cleanup: boolean;
+        modelInvoked: boolean;
+      }
+    | undefined;
   try {
     const bundle = verifyTerminalBundle(directory);
-    scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-smoke-')));
+    if (process.platform === 'win32') {
+      scratch = join(realpathSync(tmpdir()), `kite-terminal-smoke-${randomUUID()}`);
+      privateDirectory(scratch);
+    } else scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-smoke-')));
     const home = join(scratch, 'home'),
-      workspace = join(scratch, 'workspace'),
-      socket = join(scratch, 'owned.sock');
-    mkdirSync(home, { mode: 0o700 });
-    mkdirSync(workspace, { mode: 0o700 });
+      workspace = join(scratch, 'workspace');
+    socket =
+      process.platform === 'win32'
+        ? `\\\\.\\pipe\\kite-daemon-smoke-${randomUUID()}`
+        : join(scratch, 'owned.sock');
+    if (process.platform === 'win32') {
+      privateDirectory(home);
+      privateDirectory(workspace);
+    } else {
+      mkdirSync(home, { mode: 0o700 });
+      mkdirSync(workspace, { mode: 0o700 });
+    }
     const executable = join(bundle.root, bundle.manifest.entries.runtime),
       entry = join(bundle.root, bundle.manifest.entries.cli),
       scope = ['--server', socket, '--data-root', join(home, '.kite-code', 'unified-agent')];
-    cli = (argv) => execute([executable, entry, ...argv], workspace, home);
+    const runtimeArguments =
+      process.platform === 'win32' ? windowsTerminalRuntimeArguments(bundle.root) : [];
+    cli = (argv) => execute([executable, ...runtimeArguments, entry, ...argv], workspace, home);
     const help = await cli(['--help']),
       version = await cli(['--version']);
     if (!help.includes('kite run') || version !== 'kite unified-agent 0.1.0')
@@ -88,7 +138,7 @@ export async function smokeTerminalBundle(directory: string) {
       throw Error('release_smoke_cleanup_unconfirmed');
     if (verifyTerminalBundle(bundle.root).digest !== bundle.digest)
       throw Error('release_smoke_candidate_changed');
-    return {
+    outcome = {
       candidateId: bundle.candidateId,
       buildId: bundle.buildId,
       entry: true,
@@ -97,23 +147,41 @@ export async function smokeTerminalBundle(directory: string) {
       cleanup: true,
       modelInvoked: false,
     };
-  } finally {
-    // Cleanup errors preserve the owned profile and evidence instead of deleting a live daemon's data.
+  } catch (error) {
+    failed = true;
+    failure = error;
+  }
+  // Cleanup errors preserve the owned profile and evidence instead of deleting a live daemon's data.
+  const cleanupErrors: unknown[] = [];
+  try {
+    if (cli && !stopped) {
+      await cli([
+        'server',
+        'stop',
+        '--server',
+        socket!,
+        '--data-root',
+        join(scratch!, 'home/.kite-code/unified-agent'),
+      ]);
+      stopped = true;
+    }
+    if (scratch && stopped && !failed) rmSync(scratch, { recursive: true, force: true });
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  if (!failed && !cleanupErrors.length) {
     try {
-      if (cli && !stopped) {
-        await cli([
-          'server',
-          'stop',
-          '--server',
-          join(scratch!, 'owned.sock'),
-          '--data-root',
-          join(scratch!, 'home/.kite-code/unified-agent'),
-        ]);
-        stopped = true;
-      }
-      if (scratch && stopped) rmSync(scratch, { recursive: true, force: true });
-    } finally {
       lease.release();
+    } catch (error) {
+      cleanupErrors.push(error);
     }
   }
+  if (failed || cleanupErrors.length) pendingSmokes.add({ lease, scratch, cli, socket });
+  if (cleanupErrors.length)
+    throw new AggregateError(
+      [...(failed ? [failure] : []), ...cleanupErrors],
+      'release_smoke_cleanup_unknown',
+    );
+  if (failed) throw failure;
+  return outcome!;
 }

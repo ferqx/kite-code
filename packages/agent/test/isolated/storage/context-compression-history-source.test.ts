@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -57,7 +58,7 @@ test('an ordinary command sharing a prior compression Model ID remains an actual
       expectedStoreId: storeId,
       id: 'w',
       name: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 's' });
     await runtime.submitCommand({

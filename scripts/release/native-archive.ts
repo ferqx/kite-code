@@ -22,6 +22,7 @@ import {
 } from '@kite-ai/service/native-runtime-assets';
 import {
   parseTerminalBundleManifest,
+  readWindowsTerminalRuntimeFile,
   retainWindowsTerminalRuntimeFiles,
 } from '@kite-ai/service/runtime-assets';
 import { windowsInstallationCoordination } from '../../packages/agent/src/platform/windows-installation-coordination';
@@ -122,11 +123,16 @@ export async function packNativeBundle(input: { bundleRoot: string; archivePath:
   const produce = async () => {
     leases.push(acquireArtifactAccess({ root, mode: 'shared' }));
     leases.push(acquireArtifactAccess({ root: join(root, 'terminal'), mode: 'shared' }));
+    let retainedFiles: Parameters<typeof verifyNativeRuntimeBundle>[2];
     if (process.platform === 'win32') {
-      leases.push(retainWindowsNativeRuntimeFiles(root));
-      leases.push(retainWindowsTerminalRuntimeFiles(join(root, 'terminal')));
+      const outer = retainWindowsNativeRuntimeFiles(root);
+      leases.push(outer);
+      const terminal = retainWindowsTerminalRuntimeFiles(join(root, 'terminal'));
+      leases.push(terminal);
+      retainedFiles = { outer, terminal };
     }
-    const bundle = verifyNativeRuntimeBundle(root),
+    const readBundle = () => verifyNativeRuntimeBundle(root, undefined, retainedFiles);
+    const bundle = readBundle(),
       archivePath = resolve(input.archivePath),
       checksumPath = `${archivePath}.sha256`;
     for (const path of [archivePath, checksumPath]) {
@@ -138,7 +144,10 @@ export async function packNativeBundle(input: { bundleRoot: string; archivePath:
       ['native-manifest.json', bundle.digest],
       ['terminal/terminal-manifest.json', bundle.terminal.digest],
     ] as const) {
-      const bytes = readFileSync(join(root, path));
+      const bytes =
+        retainedFiles && path === 'terminal/terminal-manifest.json'
+          ? readWindowsTerminalRuntimeFile(retainedFiles.terminal, 'terminal-manifest.json')
+          : readFileSync(join(root, path));
       if (hash(bytes) !== digest) fail();
       files[path] = bytes;
     }
@@ -146,15 +155,21 @@ export async function packNativeBundle(input: { bundleRoot: string; archivePath:
       ...bundle.manifest.files,
       ...bundle.terminal.manifest.files.map((f) => ({ ...f, path: `terminal/${f.path}` })),
     ]) {
-      const bytes = readFileSync(join(root, file.path));
+      const bytes =
+        retainedFiles && file.path.startsWith('terminal/')
+          ? readWindowsTerminalRuntimeFile(
+              retainedFiles.terminal,
+              file.path.slice('terminal/'.length),
+            )
+          : readFileSync(join(root, file.path));
       if (bytes.length !== file.size || hash(bytes) !== file.sha256) fail();
       files[file.path] = bytes;
     }
-    if (verifyNativeRuntimeBundle(root).digest !== bundle.digest) fail();
+    if (readBundle().digest !== bundle.digest) fail();
     const bytes = await new Bun.Archive(files, { compress: 'gzip', level: 6 }).bytes(),
       sha256 = hash(bytes);
     // Awaiting compression cannot silently change which source closure was selected.
-    if (verifyNativeRuntimeBundle(root).digest !== bundle.digest) fail();
+    if (readBundle().digest !== bundle.digest) fail();
     if (process.platform === 'win32') privateDirectory(dirname(archivePath));
     else mkdirSync(dirname(archivePath), { recursive: true, mode: 0o700 });
     const created: string[] = [];
@@ -294,44 +309,31 @@ export function unpackNativeBundle(input: {
   if (process.platform === 'win32') pendingWindowsArchiveOwners.add(windowsCreated);
   try {
     const modes = new Map(expected.map((file) => [file.path, file.mode]));
-    for (const [path, bytes] of files) {
-      const target = join(destination, path);
-      if (process.platform === 'win32') {
-        const directories: string[] = [];
-        let parent = posix.dirname(path);
-        while (parent !== '.') {
-          directories.unshift(parent);
-          parent = posix.dirname(parent);
-        }
-        for (const directory of directories)
-          if (!lstatSync(join(destination, directory), { throwIfNoEntry: false })) {
-            privateDirectory(join(destination, directory));
-            windowsCreated.push({ path: directory, kind: 'directory' });
-          }
-        try {
-          defaultWindowsPathSecurity()!.writePrivateArtifactFile(target, bytes);
-          windowsCreated.push({ path, kind: 'file' });
-          defaultWindowsPathSecurity()!.syncPrivateFile(target);
-        } catch (error) {
-          windowsUnknown = true;
-          throw error;
-        }
-        continue;
-      }
-      mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-      const fd = openSync(
-        target,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
-        modes.get(path) ?? 0o644,
-      );
+    if (process.platform === 'win32') {
       try {
-        fchmodSync(fd, modes.get(path) ?? 0o644);
-        writeFileSync(fd, bytes);
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
+        defaultWindowsPathSecurity()!.writePrivateArtifactFiles(destination, files);
+        windowsCreated.push(...closedWindowsTree([...files.keys()], []));
+      } catch (error) {
+        windowsUnknown = true;
+        throw error;
       }
-    }
+    } else
+      for (const [path, bytes] of files) {
+        const target = join(destination, path);
+        mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+        const fd = openSync(
+          target,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+          modes.get(path) ?? 0o644,
+        );
+        try {
+          fchmodSync(fd, modes.get(path) ?? 0o644);
+          writeFileSync(fd, bytes);
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
+      }
     for (const directory of manifest.directories) {
       if (process.platform === 'win32') {
         for (const entry of closedWindowsTree([], [directory]))

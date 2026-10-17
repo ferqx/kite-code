@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
   type ModelAdapter,
@@ -390,7 +391,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'fixture',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     ...base,

@@ -1,12 +1,14 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Extension } from '@kite-ai/agent/extensions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient, decodeJobReconcileCommand, type ReconcileJobRequest } from '@kite-ai/client';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 
 const finish: ModelEvent = {
@@ -16,7 +18,7 @@ const finish: ModelEvent = {
 };
 
 test('real cold Job reconcile queries original external ledger once; physical lost HTTP reply only queries original command and preserves original unknown result', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-http-job-reconcile-'));
+  const root = realpathSync(temporaryDirectory('kite-http-job-reconcile-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const ledger = join(root, 'ledger.json');
   let releaseQuery!: () => void, queryEntered!: () => void;
@@ -128,7 +130,7 @@ test('real cold Job reconcile queries original external ledger once; physical lo
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await warm.createSession({
       expectedStoreId: storeId,

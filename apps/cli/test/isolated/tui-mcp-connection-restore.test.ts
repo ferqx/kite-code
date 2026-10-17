@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -22,6 +22,7 @@ import type {
   TuiMcpConnectionPort,
   TuiMcpSnapshot,
 } from '@kite-ai/ui/tui';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { openMcpConnectionJournal } from '../../host/mcp-connection-journal';
 import { createTuiMcpPort } from '../../host/tui-mcp';
 import { createTuiMcpConnectionPort } from '../../host/tui-mcp-connection';
@@ -50,11 +51,11 @@ const original = (facts: TuiMcpSnapshot, commandId: string): TuiMcpConnectionInt
   },
 });
 async function fixture(ask = false) {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-mcp-connection-host-'));
+  const root = realpathSync(temporaryDirectory('kite-mcp-connection-host-'));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   let access = acquireProfileAccess(profile);
   const openJournal = () =>
     openMcpConnectionJournal({

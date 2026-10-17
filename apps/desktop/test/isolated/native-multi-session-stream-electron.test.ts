@@ -1,18 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import {
   buildMixedShellSupervisor,
@@ -98,7 +92,7 @@ test.skipIf(process.platform !== 'darwin')(
     ? 'ordinary Native packaged Markdown Worker asset probe'
     : `ordinary Native ${mixedShell ? 'mixed real Shell and Model load' : 'Model load'} switches among four live roots and twelve live children without replay, scope leakage or growing readers`,
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-multi-stream-'));
+    const root = realpathSync(temporaryDirectory('kite-native-multi-stream-'));
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' });
     const memoryDirectory = memoryTag
       ? resolve(
@@ -126,7 +120,7 @@ test.skipIf(process.platform !== 'darwin')(
       expectedStoreId: storeId,
       id: 'w',
       name: 'Multi-session streams',
-      rootUri: new URL(`file://${workspace}`).href,
+      rootUri: pathToFileURL(workspace).href,
     });
     for (let index = 0; index < 4; index++)
       await store.createSession({

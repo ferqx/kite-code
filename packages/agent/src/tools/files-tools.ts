@@ -24,7 +24,16 @@ const base: JsonSchema = {
     inode: { type: 'string' },
   },
 };
-const path = { type: 'string', maxLength: 4096 };
+const path = {
+  type: 'string',
+  maxLength: 4096,
+  description:
+    'Path relative to the fixed workspace root, or an absolute path inside that workspace. No .. segments; paths outside the workspace are rejected.',
+};
+const directoryPath = {
+  ...path,
+  description: `${path.description} Omit path or use "." or "" for the workspace root.`,
+};
 const artifactSchema: JsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -209,7 +218,7 @@ export function createFileTools(
       name: 'list',
       required: [],
       properties: {
-        path,
+        path: directoryPath,
         afterName: { type: 'string', maxLength: 255 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
       },
@@ -225,7 +234,7 @@ export function createFileTools(
       required: ['pattern'],
       properties: {
         pattern: { type: 'string', minLength: 1, maxLength: 1024 },
-        path,
+        path: directoryPath,
         after: { type: 'string', maxLength: 4096 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
       },
@@ -241,7 +250,7 @@ export function createFileTools(
       name: 'search',
       required: ['text'],
       properties: {
-        path,
+        path: directoryPath,
         text: { type: 'string', minLength: 1, maxLength: 1024 },
         after: { type: 'string', maxLength: 4110 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
@@ -262,7 +271,7 @@ export function createFileTools(
       : {}),
     version:
       d.name === 'read' ? '3' : ['write', 'edit', 'search', 'glob'].includes(d.name) ? '2' : '1',
-    description: `Workspace ${d.name}; UTF-8, exact baseline for modifications, complete bodies or explicit immutable Artifact references.`,
+    description: `Workspace ${d.name}; paths are relative to the fixed workspace root or absolute within it, never relative to Shell cwd. UTF-8, exact baseline for modifications, complete bodies or explicit immutable Artifact references.`,
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -290,7 +299,13 @@ export function createFileTools(
       if (context.signal.aborted)
         return { outcome: 'cancelled', content: 'cancelled_before_file_io' };
       try {
-        const value = await d.call(object(input), context);
+        const parameters = object(input);
+        const value = await d.call(
+          parameters.path === undefined
+            ? parameters
+            : { ...parameters, path: files.relativePath(string(parameters.path)) },
+          context,
+        );
         const mutationResult =
           d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot) : undefined;
         const change = mutationResult?.change;

@@ -1,13 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -27,6 +18,7 @@ import type {
   TuiMcpReconnectionIntent,
   TuiMcpReconnectionObservation,
 } from '@kite-ai/ui/tui';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { openMcpConnectionJournal } from '../../host/mcp-connection-journal';
 import { openMcpReconnectionJournal } from '../../host/mcp-reconnection-journal';
 import { openMcpSourceApprovalJournal } from '../../host/mcp-source-approval-journal';
@@ -116,11 +108,11 @@ export function carrier(
 }
 /** Real public in-process assembly; setup engine belongs to the isolated test file, not this Profile. */
 export async function reconnectionHostFixture(ask = false, many = false) {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-reconnection-host-'));
+  const root = realpathSync(temporaryDirectory('kite-reconnection-host-'));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   let access = acquireProfileAccess(profile),
     accessHeld = true;
   const journalOptions = () => ({

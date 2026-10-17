@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -11,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dir, '../../..');
 
@@ -352,7 +352,7 @@ async function distribution() {
     exited: Promise<number>;
     exitCode: number | null;
   }[] = [];
-  const root = mkdtempSync('/private/tmp/kite-deferred-distribution-');
+  const root = temporaryDirectory('kite-deferred-distribution-');
   const directory = join(root, 'application'),
     modules = join(directory, 'node_modules');
   mkdirSync(modules, { recursive: true });
@@ -398,7 +398,7 @@ async function distribution() {
     extension,
     node,
     async run(mode: string, profileRoot: string) {
-      mkdirSync(profileRoot, { recursive: true, mode: 0o700 });
+      privateDirectory(profileRoot);
       return JSON.parse(
         await child(
           [

@@ -32,7 +32,7 @@ public static class KiteNativeUIA {
  public static IntPtr Window(uint pid) {
   IntPtr found=IntPtr.Zero; int count=0;
   EnumWindows((h,p)=> {uint actual; GetWindowThreadProcessId(h,out actual); if(actual==pid && IsWindowVisible(h)){found=h;count++;} return true;},IntPtr.Zero);
-  if(count!=1) throw new Exception("uia_original_window_not_unique"); return found;
+  if(count>1) throw new Exception("uia_original_window_not_unique"); return found;
  }
 }
 '@
@@ -44,13 +44,20 @@ function Verify-Original($h, $r) {
  $path=New-Object System.Text.StringBuilder 32768; [uint32]$length=32768
  if (-not [KiteNativeUIA]::QueryFullProcessImageName($h,0,$path,[ref]$length) -or -not [string]::Equals($path.ToString(),$r.executablePath,[StringComparison]::OrdinalIgnoreCase)) { Fail 'uia_original_image_changed' }
 }
-function Describe($e) {
- $c=$e.Current
- $row=@{runtimeId=@($e.GetRuntimeId());name=$c.Name;controlType=$c.ControlType.ProgrammaticName;automationId=$c.AutomationId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen}
+function Describe($e, [bool]$cached=$false) {
+ $c=if($cached){$e.Cached}else{$e.Current}
+ $runtime=if($cached){$e.GetCachedPropertyValue([System.Windows.Automation.AutomationElement]::RuntimeIdProperty)}else{$e.GetRuntimeId()}
+ $row=@{runtimeId=@($runtime);name=$c.Name;controlType=$c.ControlType.ProgrammaticName;automationId=$c.AutomationId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen}
  $pattern=$null
- if ($e.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern)) { $row.text=$pattern.DocumentRange.GetText(-1) }
+ # Text ranges always read the actual complete text; only this one snapshot's
+ # scalar properties/pattern availability are prefetched in one UIA request.
+ if (-not $cached -or $e.GetCachedPropertyValue([System.Windows.Automation.AutomationElement]::IsTextPatternAvailableProperty)) {
+  if ($e.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern)) { $row.text=$pattern.DocumentRange.GetText(-1) }
+ }
  $pattern=$null
- if ($e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) { $row.value=$pattern.Current.Value }
+ if($cached) {
+  if($e.GetCachedPropertyValue([System.Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)) { $pattern=$e.GetCachedPattern([System.Windows.Automation.ValuePattern]::Pattern); $row.value=$pattern.Cached.Value }
+ } elseif ($e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) { $row.value=$pattern.Current.Value }
  foreach($field in @('name','text','value')) { if ($row.ContainsKey($field) -and $row[$field].Length -gt 2097152) { Fail 'uia_full_property_too_large' } }
  return $row
 }
@@ -92,7 +99,9 @@ while ($null -ne ($line=[Console]::ReadLine())) {
   if ($line.Length -gt 1048576) { Fail 'uia_request_too_large' }
   $r=$line | ConvertFrom-Json; $id=$r.id
   $keys=@($r.PSObject.Properties.Name)
-  foreach($key in $keys) { if ($key -notin @('id','pid','creationTime','executablePath','action','name','match','text')) { Fail 'uia_request_unknown_field' } }
+  foreach($key in $keys) { if ($key -notin @('id','pid','creationTime','executablePath','action','name','match','text','budgetMs')) { Fail 'uia_request_unknown_field' } }
+  if (($r.budgetMs -isnot [int] -and $r.budgetMs -isnot [long]) -or $r.budgetMs -lt 1 -or $r.budgetMs -gt 10000) { Fail 'uia_action_budget_invalid' }
+  $actionClock=[System.Diagnostics.Stopwatch]::StartNew()
   if ($id -isnot [string] -or $id -notmatch '^[a-f0-9]{32}$' -or $r.pid -lt 1 -or $r.pid -gt 4294967295 -or $r.creationTime -isnot [string] -or $r.creationTime -notmatch '^[0-9]{1,20}$' -or $r.executablePath -isnot [string] -or $r.executablePath.Length -gt 32768 -or -not [IO.Path]::IsPathRooted($r.executablePath)) { Fail 'uia_identity_invalid' }
   if ($r.action -notin @('snapshot','clickByName','fillByName','quit')) { Fail 'uia_action_invalid' }
   if ($r.action -in @('clickByName','fillByName')) { if ($r.name -isnot [string] -or $r.name.Length -lt 1 -or $r.name.Length -gt 256 -or $r.match -notin @('exact','regex')) { Fail 'uia_selector_invalid' } }
@@ -101,21 +110,59 @@ while ($null -ne ($line=[Console]::ReadLine())) {
   if ($h -eq [IntPtr]::Zero) { Fail 'uia_original_process_unavailable' }
   Verify-Original $h $r
   $window=[KiteNativeUIA]::Window([uint32]$r.pid)
+  # A snapshot is an observation. The retained original process can still be
+  # opening its window; do not poison the driver before the caller's deadline.
+  if ($window -eq [IntPtr]::Zero) {
+   if ($r.action -ne 'snapshot') { Fail 'uia_original_window_missing' }
+   $result=@{elements=@()}
+  } else {
   $root=[System.Windows.Automation.AutomationElement]::FromHandle($window)
   if ($root.Current.ProcessId -ne $r.pid) { Fail 'uia_window_identity_changed' }
   if ($r.action -eq 'snapshot') {
-   $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-   if ($all.Count -eq 0) { Fail 'uia_tree_missing' }
+   try {
+   # A new request for every snapshot, never reused across reads or actions.
+   $cache=New-Object System.Windows.Automation.CacheRequest
+   $cache.TreeScope=[System.Windows.Automation.TreeScope]::Element
+   $cache.TreeFilter=[System.Windows.Automation.Automation]::RawViewCondition
+   foreach($property in @(
+    [System.Windows.Automation.AutomationElement]::NameProperty,
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+    [System.Windows.Automation.AutomationElement]::IsEnabledProperty,
+    [System.Windows.Automation.AutomationElement]::IsOffscreenProperty,
+    [System.Windows.Automation.AutomationElement]::IsTextPatternAvailableProperty,
+    [System.Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty,
+    [System.Windows.Automation.ValuePattern]::ValueProperty
+   )) { $cache.Add($property) }
+   $cache.Add([System.Windows.Automation.ValuePattern]::Pattern)
+   $active=$cache.Activate()
+   try { $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) }
+   finally { $active.Dispose() }
    if ($all.Count -gt 512) { Fail 'uia_tree_too_large' }
-   $rows=@(); foreach($e in $all) { Verify-Original $h $r; $rows+=,(Describe $e) }
-   if (@($rows | Where-Object { $_.controlType -eq 'ControlType.Document' }).Count -eq 0) { Fail 'uia_content_tree_missing' }
-   $result=@{elements=$rows}
+   $rows=@(); foreach($e in $all) { Verify-Original $h $r; $rows+=,(Describe $e $true) }
+   # Chromium creates its Document provider asynchronously. An empty snapshot
+   # never satisfies the caller's required full-text/Document assertions.
+   if (@($rows | Where-Object { $_.controlType -eq 'ControlType.Document' }).Count -eq 0) { $result=@{elements=@()} }
+   else { $result=@{elements=$rows} }
+   } catch {
+    $cause=$_.Exception
+    while($null -ne $cause.InnerException){$cause=$cause.InnerException}
+    # A renderer can replace its provider between FindAll/TryGetPattern/GetText.
+    # Discard the entire observation. Identity/protocol/size/other errors fail.
+    $providerChanged=$cause -is [System.Windows.Automation.ElementNotAvailableException] -or
+     $cause.HResult -eq -2147220991 -or $cause.HResult -eq -2147220988 -or
+     (($cause -is [InvalidOperationException] -or $cause -is [System.Runtime.InteropServices.COMException]) -and $cause.Message -ceq 'Pattern not found')
+    if(-not $providerChanged){throw}
+    $result=@{elements=@();observation=@{code='uia_snapshot_changed';type=$cause.GetType().FullName;hresult=$cause.HResult}}
+   }
   } elseif ($r.action -eq 'quit') {
    $file=Find-Named $root @{name='^(File|文件)(\(&F\))?$';match='regex';action='fileMenu'}
    Verify-Original $h $r
    $expand=$null
    if ($file.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$expand)) { $expand.Expand() } else { Invoke-Element $file }
    # The native menu popup may be a desktop child; only accept items whose kernel HWND belongs to this original Main.
+   do {
+   Verify-Original $h $r
    $menus=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,[int]$r.pid))
    $choices=@(); foreach($menu in $menus) {
     $items=$menu.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))
@@ -128,6 +175,10 @@ while ($null -ne ($line=[Console]::ReadLine())) {
      if (-not $duplicate) { $choices+=,$item }
     }
    }
+   if ($choices.Count -gt 1) { Fail 'uia_quit_menu_not_unique' }
+   if ($choices.Count -eq 1) { break }
+   Start-Sleep -Milliseconds 10
+   } while ($actionClock.ElapsedMilliseconds -lt $r.budgetMs)
    if ($choices.Count -ne 1) { Fail 'uia_quit_menu_not_unique' }
    Verify-Original $h $r; Invoke-Element $choices[0]; $result=@{quitRequested=$true}
   } else {
@@ -145,9 +196,16 @@ while ($null -ne ($line=[Console]::ReadLine())) {
      if (($old.ContainsKey('text') -and $old.text -ne '') -or ($old.ContainsKey('value') -and $old.value -ne '')) { Fail 'uia_keyboard_input_not_empty' }
      [KiteNativeUIA]::UnicodeText($r.text)
     }
-    Verify-Original $h $r; $actual=Describe $e
-    if (($actual.ContainsKey('value') -and $actual.value -ceq $r.text) -or ($actual.ContainsKey('text') -and $actual.text -ceq $r.text)) { $result=@{filled=$r.text;element=$actual} } else { Fail 'uia_full_input_mismatch' }
+    # Chromium applies UIA SetValue/keyboard input asynchronously. Observe the
+    # single original write within its existing action budget; never send twice.
+    do {
+     Verify-Original $h $r; $actual=Describe $e
+     if (($actual.ContainsKey('value') -and $actual.value -ceq $r.text) -or ($actual.ContainsKey('text') -and $actual.text -ceq $r.text)) { $result=@{filled=$r.text;element=$actual}; break }
+     Start-Sleep -Milliseconds 10
+    } while ($actionClock.ElapsedMilliseconds -lt $r.budgetMs)
+    if ($null -eq $result) { Fail 'uia_full_input_mismatch' }
    }
+  }
   }
  } catch { $failure=$_.Exception.Message }
  finally { if ($h -ne [IntPtr]::Zero -and -not [KiteNativeUIA]::CloseHandle($h)) { if ($null -ne $failure) { $failure += '; uia_original_handle_close_unknown' } else { $failure='uia_original_handle_close_unknown' } } }

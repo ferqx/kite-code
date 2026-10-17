@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import type { AgentRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createFixedModel } from '@kite-ai/ai';
@@ -79,7 +80,7 @@ try {
   await client.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${profile.dataRoot}`,
+    rootUri: pathToFileURL(profile.dataRoot).href,
     name: 'original',
   });
   await client.createSession({

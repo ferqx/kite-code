@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -100,7 +101,7 @@ async function fixture(child = false) {
     expectedStoreId,
     id: 'w',
     name: 'Temporary',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   for (const [sessionId, subjectId] of [
     ['s', 'owner'],

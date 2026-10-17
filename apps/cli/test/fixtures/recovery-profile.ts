@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -16,6 +15,7 @@ import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
@@ -41,8 +41,8 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
-  mkdirSync(workspace, { mode: 0o700 });
-  mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+  privateDirectory(workspace);
+  privateDirectory(join(profile.profilePath, 'ui'));
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
     mode: 0o600,
   });

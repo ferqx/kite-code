@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 
 test('grant directory has frozen keyset upper, preserves over 200 accepted facts and is cold-readable without replay', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-grant-directory-');
+  const dataRoot = temporaryDirectory('kite-grant-directory-');
   const profile = { dataRoot, profile: 'new' };
   let store = await openSqliteStore(profile);
   try {

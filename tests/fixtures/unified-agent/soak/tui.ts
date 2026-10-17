@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -10,6 +10,7 @@ import type {
   CaseEvidence,
   ResourceObservation,
 } from '../../../../scripts/runtime/unified-soak-cases';
+import { privateDirectory } from '../../test-filesystem';
 import { check } from './common';
 export async function runTuiCase(
   root: string,
@@ -34,10 +35,10 @@ export async function runTuiCase(
     e.unavailable.push('windows_owned_pty_backend_unavailable');
     return e;
   }
-  mkdirSync(root, { recursive: true, mode: 0o700 });
+  privateDirectory(root);
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   let calls = 0;
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -60,8 +61,8 @@ export async function runTuiCase(
     },
   });
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'soak-tui' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
-  mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
+  privateDirectory(profile.profilePath);
+  privateDirectory(join(profile.profilePath, 'ui'));
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
     mode: 0o600,
   });

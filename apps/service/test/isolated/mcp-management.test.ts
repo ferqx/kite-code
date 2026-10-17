@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
   createCredentialVault,
@@ -27,6 +28,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createConfigurationManagement } from '../../src/configuration-management';
 import { startService } from '../../src/index';
@@ -49,7 +51,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'private' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile }),
     expectedStoreId = (await store.getMetadata()).storeId;
   const configPath = join(profile.profilePath, 'config.jsonc'),
@@ -344,7 +346,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   for (const sessionId of ['a', 'b'])
     await runtime.createSession({

@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -20,6 +21,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src/index';
 import {
   createMcpSourceConfiguration,
@@ -47,7 +49,7 @@ async function fixture(
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const expectedStoreId = (await store.getMetadata()).storeId;
   const wire: string[] = [];
@@ -261,7 +263,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}/`,
+    rootUri: pathToFileURL(`${workspace}/`).href,
   });
   await runtime.createSession({
     expectedStoreId,
@@ -1026,7 +1028,7 @@ test('supported macOS ancestor alias binds actual canonical source root while fi
       expectedStoreId: f.expectedStoreId,
       id: 'alias-w',
       name: 'owned alias',
-      rootUri: `file://${alias}/`,
+      rootUri: pathToFileURL(`${alias}/`).href,
     });
     await f.runtime.createSession({
       expectedStoreId: f.expectedStoreId,
@@ -1050,7 +1052,7 @@ test('supported macOS ancestor alias binds actual canonical source root while fi
       expectedStoreId: f.expectedStoreId,
       id: 'symlink-w',
       name: 'owned final link',
-      rootUri: `file://${link}`,
+      rootUri: pathToFileURL(link).href,
     });
     await f.runtime.createSession({
       expectedStoreId: f.expectedStoreId,

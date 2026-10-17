@@ -1,27 +1,29 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 
 test.each(
   process.platform === 'darwin' ? ['repair', 'deny'] : [],
 )('configured default Service compensation %s keeps original failed proof and independent HTTP approvals', async (mode) => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-service-compensation-'));
+  const root = realpathSync(temporaryDirectory('kite-service-compensation-'));
   const workspace = join(root, 'workspace'),
     skill = join(workspace, 'skill'),
     checkLedger = join(workspace, 'checks'),
     effectLedger = join(workspace, 'compensations');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   mkdirSync(skill, { recursive: true });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
-  mkdirSync(profile.coordinationPath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
+  privateDirectory(profile.coordinationPath);
   const output = { text: `${'完整原正文🙂'.repeat(16000)}ORIGINAL_OUTPUT_TAIL` };
   writeFileSync(
     join(skill, 'SKILL.md'),
@@ -193,7 +195,7 @@ test.each(
       expectedStoreId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
     });
     await runtime.createSession({
       ...base,

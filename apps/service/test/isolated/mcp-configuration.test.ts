@@ -2,11 +2,13 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { McpLifecycleTransportPort } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
 async function until<T>(read: () => Promise<T | null>) {
@@ -23,7 +25,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const expectedStoreId = (await store.getMetadata()).storeId;
   let opens = 0,
@@ -188,7 +190,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     expectedStoreId,
     id: 'w',
     name: 'private',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   for (const sessionId of ['a', 'b'])
     await runtime.createSession({

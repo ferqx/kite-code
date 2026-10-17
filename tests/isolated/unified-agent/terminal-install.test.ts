@@ -1,17 +1,6 @@
-import { expect, test } from 'bun:test';
+import { expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -20,31 +9,40 @@ import {
   verifyTerminalBundle,
 } from '../../../apps/cli/host/terminal-artifact';
 import { acquireArtifactAccess } from '../../../packages/agent/src/artifact-access';
+import { windowsInstallationCoordination } from '../../../packages/agent/src/platform/windows-installation-coordination';
 import {
   installTerminalBundle,
   rollbackTerminalBundle,
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory } from '../../fixtures/test-filesystem';
+import {
+  directoryAlias,
+  expectReleaseMode,
+  releaseScratch as mkdtempSync,
+} from '../../fixtures/unified-agent/release-filesystem';
 import { fixtureTerminalSqlite } from '../../fixtures/unified-agent/sqlite-engine-fixture';
 
+// Real Windows ACL and installation I/O needs a fixture budget; product qualification deadlines remain fixed.
+setDefaultTimeout(30_000);
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 /** These are inert byte fixtures: fake Bun is never executed and no Runtime/Store is opened. */
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-install-'))),
     prefix = join(root, 'managed');
   const data = join(root, 'profiles', 'default', 'core.db');
-  mkdirSync(dirname(data), { recursive: true, mode: 0o700 });
+  privateDirectory(dirname(data));
   writeFileSync(data, 'ORIGINAL_APPLICATION_DATA');
   function candidate(name: string) {
     const candidate = join(root, name);
-    mkdirSync(candidate, { mode: 0o700 });
+    privateDirectory(candidate);
     const entries = terminalBundleEntries(process.platform),
       files: TerminalBundleManifest['files'][number][] = [];
     for (const path of Object.values(entries)) {
       const bytes = Buffer.from(`INERT ${name} ${path}`),
         mode = path === entries.runtime ? 493 : 420;
       const target = join(candidate, path);
-      mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+      privateDirectory(dirname(target));
       writeFileSync(target, bytes, { mode });
       chmodSync(target, mode);
       files.push({ path, size: bytes.length, sha256: sha(bytes), mode });
@@ -82,16 +80,32 @@ test('private umask077 preserves authenticated installed files, both launchers75
   try {
     const first = installTerminalBundle({ bundleRoot: f.first.root, prefix: f.prefix });
     for (const file of f.first.manifest.files)
-      expect(lstatSync(join(first.releaseRoot, file.path)).mode & 0o777).toBe(file.mode);
-    for (const name of ['kite', 'kite-tui'])
-      expect(lstatSync(join(f.prefix, 'bin', name)).mode & 0o777).toBe(0o755);
-    expect(lstatSync(join(f.prefix, '.install.lock')).mode & 0o777).toBe(0o600);
-    expect(lstatSync(join(f.prefix, 'active')).mode & 0o777).toBe(0o600);
+      expectReleaseMode(join(first.releaseRoot, file.path), file.mode);
+    for (const name of process.platform === 'win32'
+      ? ['kite.exe', 'kite-tui.exe', 'terminal-verifier.exe']
+      : ['kite', 'kite-tui'])
+      expectReleaseMode(join(f.prefix, 'bin', name), 0o755);
+    const coordination =
+      process.platform === 'win32' ? windowsInstallationCoordination(f.prefix) : undefined;
+    try {
+      expectReleaseMode(coordination?.selectionLockPath ?? join(f.prefix, '.install.lock'), 0o600);
+    } finally {
+      coordination?.release();
+    }
+    expectReleaseMode(join(f.prefix, 'active'), 0o600);
     const use = acquireArtifactAccess({ root: first.releaseRoot, mode: 'shared' });
     try {
-      expect(
-        lstatSync(join(f.prefix, 'releases', `.use-${f.first.digest}.lock`)).mode & 0o777,
-      ).toBe(0o600);
+      const coordination =
+        process.platform === 'win32' ? windowsInstallationCoordination(f.prefix) : undefined;
+      try {
+        expectReleaseMode(
+          coordination?.candidateLockPath(f.first.digest) ??
+            join(f.prefix, 'releases', `.use-${f.first.digest}.lock`),
+          0o600,
+        );
+      } finally {
+        coordination?.release();
+      }
     } finally {
       use.release();
     }
@@ -161,7 +175,7 @@ test('unknown bin file and forged use-lock directory are not recursively deleted
         kind === 'bin'
           ? join(f.prefix, 'bin')
           : join(f.prefix, 'releases', `.use-${'f'.repeat(64)}.lock`);
-      if (kind === 'lock-directory') mkdirSync(directory, { mode: 0o700 });
+      if (kind === 'lock-directory') privateDirectory(directory);
       const foreign = join(directory, 'user-notes.txt');
       writeFileSync(foreign, 'DO_NOT_DELETE');
       const before = pointer(f.prefix);
@@ -210,7 +224,7 @@ test('invalid active pointer cannot authorize cleanup and managed candidate dire
       } else {
         const before = pointer(f.prefix);
         rmSync(installed.releaseRoot, { recursive: true });
-        symlinkSync(f.first.root, installed.releaseRoot);
+        directoryAlias(f.first.root, installed.releaseRoot);
         expect(() =>
           installTerminalBundle({ bundleRoot: f.first.root, prefix: f.prefix }),
         ).toThrow();
@@ -231,7 +245,7 @@ test('installer rejects a prefix inside the source, including a symlink ancestor
       let parent = source;
       if (alias) {
         parent = join(f.root, 'source-alias');
-        symlinkSync(source, parent);
+        directoryAlias(source, parent);
       }
       const prefix = join(parent, 'nested-install');
       expect(() => installTerminalBundle({ bundleRoot: source, prefix })).toThrow(

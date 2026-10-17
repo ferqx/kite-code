@@ -4,7 +4,6 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -26,6 +25,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -33,7 +33,7 @@ const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'source-free default Native background overview retains original tasks, full child logs and exact stop across actual backup restore cold reopen plus original PC Workspace removal and installed offline maintenance',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-background-bundle-')),
+    const root = realpathSync(temporaryDirectory('kite-native-background-bundle-')),
       home = join(root, 'home'),
       moved = join(root, 'relocated');
     const runtimeRoots = [
@@ -41,7 +41,7 @@ test.skipIf(process.platform !== 'darwin')(
       join(root, 'installed-native/releases'),
       join(root, 'installed-terminal/releases'),
     ];
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     const workspace = join(home, 'workspace'),
       secondWorkspace = join(home, 'workspace-two');
     mkdirSync(workspace);
@@ -282,7 +282,7 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         await store.close();
       }
-      mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+      privateDirectory(profile.profilePath);
       writeFileSync(
         userConfigurationPath(home),
         JSON.stringify({
@@ -504,7 +504,7 @@ test.skipIf(process.platform !== 'darwin')(
           join(currentBackup.directory, 'desktop-private/data.sqlite'),
         );
       const probeDirectory = join(root, 'maintenance-probe');
-      mkdirSync(probeDirectory, { mode: 0o700 });
+      privateDirectory(probeDirectory);
       symlinkSync(
         join(nativeInstallation.releaseRoot, 'terminal/node_modules'),
         join(probeDirectory, 'node_modules'),

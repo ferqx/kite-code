@@ -8,12 +8,18 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
+import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
+import {
+  readWindowsTerminalRuntimeFile,
+  retainWindowsTerminalRuntimeFiles,
+} from '@kite-ai/service/runtime-assets';
 import {
   parseTerminalBundleManifest,
   verifyTerminalBundle,
@@ -26,6 +32,12 @@ import { rejectBundleOutput } from './terminal-paths';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const text = (bytes: Uint8Array) => new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+const pendingWindowsUnpacks = new Set<object>();
+const pendingWindowsPacks = new Set<object>();
+const closeUnknown = (error: unknown): boolean =>
+  error instanceof Error &&
+  (/(?:close|release).*?(?:unknown|failed)/u.test(error.message) ||
+    (error instanceof AggregateError && error.errors.some(closeUnknown)));
 function fail(): never {
   throw Error('terminal_archive_invalid');
 }
@@ -129,62 +141,105 @@ export function readCandidateArchiveFiles(input: {
 }
 /** Archive stores regular bytes and integrity-checked relative-link declarations, never external links. */
 export async function packTerminalBundle(input: { bundleRoot: string; archivePath: string }) {
-  const bundle = verifyTerminalBundle(input.bundleRoot),
-    archivePath = resolve(input.archivePath);
-  const checksumPath = `${archivePath}.sha256`;
-  rejectBundleOutput(bundle.root, archivePath);
-  rejectBundleOutput(bundle.root, checksumPath);
-  if ([archivePath, checksumPath].some((path) => lstatSync(path, { throwIfNoEntry: false })))
-    throw Error('terminal_destination_exists');
-  const files: Record<string, Uint8Array> = Object.create(null);
-  files['terminal-manifest.json'] = readFileSync(join(bundle.root, 'terminal-manifest.json'));
-  if (hash(files['terminal-manifest.json']) !== bundle.digest) fail();
-  for (const file of bundle.manifest.files) {
-    const bytes = readFileSync(join(bundle.root, file.path));
-    if (bytes.length !== file.size || hash(bytes) !== file.sha256) fail();
-    files[file.path] = bytes;
-  }
-  if (process.platform === 'win32') privateDirectory(dirname(archivePath));
-  else mkdirSync(dirname(archivePath), { recursive: true, mode: 0o700 });
-  const bytes = await new Bun.Archive(files, { compress: 'gzip', level: 6 }).bytes();
-  const sha256 = hash(bytes);
-  const created: string[] = [];
-  try {
-    for (const [path, content] of [
-      [archivePath, bytes],
-      [checksumPath, `${sha256}  ${basename(archivePath)}\n`],
-    ] as const) {
-      if (process.platform === 'win32') {
-        defaultWindowsPathSecurity()!.writePrivateArtifactFile(
-          path,
-          typeof content === 'string' ? new TextEncoder().encode(content) : content,
-        );
+  const owners: { release(): void }[] = [];
+  let pinned: ReturnType<typeof retainWindowsTerminalRuntimeFiles> | undefined;
+  const produce = async () => {
+    const root = realpathSync(input.bundleRoot);
+    if (process.platform === 'win32') {
+      owners.push(acquireArtifactAccess({ root, mode: 'shared' }));
+      pinned = retainWindowsTerminalRuntimeFiles(root);
+      owners.push(pinned);
+    }
+    const bundle = verifyTerminalBundle(root, pinned),
+      archivePath = resolve(input.archivePath);
+    const checksumPath = `${archivePath}.sha256`;
+    rejectBundleOutput(bundle.root, archivePath);
+    rejectBundleOutput(bundle.root, checksumPath);
+    if ([archivePath, checksumPath].some((path) => lstatSync(path, { throwIfNoEntry: false })))
+      throw Error('terminal_destination_exists');
+    const files: Record<string, Uint8Array> = Object.create(null);
+    files['terminal-manifest.json'] = pinned
+      ? readWindowsTerminalRuntimeFile(pinned, 'terminal-manifest.json')
+      : readFileSync(join(bundle.root, 'terminal-manifest.json'));
+    if (hash(files['terminal-manifest.json']) !== bundle.digest) fail();
+    for (const file of bundle.manifest.files) {
+      const bytes = pinned
+        ? readWindowsTerminalRuntimeFile(pinned, file.path)
+        : readFileSync(join(bundle.root, file.path));
+      if (bytes.length !== file.size || hash(bytes) !== file.sha256) fail();
+      files[file.path] = bytes;
+    }
+    if (process.platform === 'win32') privateDirectory(dirname(archivePath));
+    else mkdirSync(dirname(archivePath), { recursive: true, mode: 0o700 });
+    const bytes = await new Bun.Archive(files, { compress: 'gzip', level: 6 }).bytes();
+    if (pinned && verifyTerminalBundle(bundle.root, pinned).digest !== bundle.digest) fail();
+    const sha256 = hash(bytes);
+    const created: string[] = [];
+    try {
+      for (const [path, content] of [
+        [archivePath, bytes],
+        [checksumPath, `${sha256}  ${basename(archivePath)}\n`],
+      ] as const) {
+        if (process.platform === 'win32') {
+          defaultWindowsPathSecurity()!.writePrivateArtifactFile(
+            path,
+            typeof content === 'string' ? new TextEncoder().encode(content) : content,
+          );
+          created.push(path);
+          defaultWindowsPathSecurity()!.syncPrivateFile(path);
+          continue;
+        }
+        const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
         created.push(path);
-        defaultWindowsPathSecurity()!.syncPrivateFile(path);
-        continue;
+        try {
+          writeFileSync(fd, content);
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
       }
-      const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-      created.push(path);
-      try {
-        writeFileSync(fd, content);
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
+      if (process.platform !== 'win32') {
+        const directory = openSync(
+          dirname(archivePath),
+          constants.O_RDONLY | constants.O_DIRECTORY,
+        );
+        try {
+          fsyncSync(directory);
+        } finally {
+          closeSync(directory);
+        }
       }
+      return { archivePath, sha256, candidateId: bundle.candidateId };
+    } catch (error) {
+      for (const path of created.reverse()) rmSync(path, { force: true });
+      throw error;
     }
-    if (process.platform !== 'win32') {
-      const directory = openSync(dirname(archivePath), constants.O_RDONLY | constants.O_DIRECTORY);
-      try {
-        fsyncSync(directory);
-      } finally {
-        closeSync(directory);
-      }
-    }
-    return { archivePath, sha256, candidateId: bundle.candidateId };
+  };
+  let failure: unknown,
+    failed = false;
+  let result: Awaited<ReturnType<typeof produce>> | undefined;
+  try {
+    result = await produce();
   } catch (error) {
-    for (const path of created.reverse()) rmSync(path, { force: true });
-    throw error;
+    failed = true;
+    failure = error;
   }
+  if (closeUnknown(failure)) pendingWindowsPacks.add({ owners, input, failure });
+  else
+    try {
+      while (owners.length) {
+        owners.at(-1)!.release();
+        owners.pop();
+      }
+    } catch (cleanup) {
+      pendingWindowsPacks.add({ owners, input, failure, cleanup });
+      throw new AggregateError(
+        failed ? [failure, cleanup] : [cleanup],
+        'terminal_archive_close_unknown',
+      );
+    }
+  if (failed) throw failure;
+  return result!;
 }
 /** Explicit decompressed-byte budget is an archive input bound, not an Agent execution quota. */
 export function unpackTerminalBundle(input: {
@@ -219,25 +274,26 @@ export function unpackTerminalBundle(input: {
     mkdirSync(destination, { mode: 0o700 });
   }
   try {
-    for (const [path, content] of files) {
-      const target = join(destination, path);
-      if (process.platform === 'win32') {
-        privateDirectory(dirname(target));
-        defaultWindowsPathSecurity()!.writePrivateArtifactFile(target, content);
-        defaultWindowsPathSecurity()!.syncPrivateFile(target);
-        continue;
+    if (process.platform === 'win32')
+      defaultWindowsPathSecurity()!.writePrivateArtifactFiles(destination, files);
+    else
+      for (const [path, content] of files) {
+        const target = join(destination, path);
+        mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+        const mode = manifest.files.find((file) => file.path === path)?.mode ?? 0o644;
+        const fd = openSync(
+          target,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+          mode,
+        );
+        try {
+          fchmodSync(fd, mode);
+          writeFileSync(fd, content);
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
       }
-      mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-      const mode = manifest.files.find((file) => file.path === path)?.mode ?? 0o644;
-      const fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, mode);
-      try {
-        fchmodSync(fd, mode);
-        writeFileSync(fd, content);
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
-      }
-    }
     for (const link of manifest.links) {
       const target = join(destination, link.path);
       mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
@@ -245,6 +301,10 @@ export function unpackTerminalBundle(input: {
     }
     return verifyTerminalBundle(destination);
   } catch (error) {
+    if (process.platform === 'win32' && closeUnknown(error)) {
+      pendingWindowsUnpacks.add({ destination, files, error });
+      throw error;
+    }
     rmSync(destination, { recursive: true, force: true });
     throw error;
   }

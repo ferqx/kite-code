@@ -1,19 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
@@ -35,11 +27,7 @@ function alive(pid: number) {
 }
 
 test('sealed default process discovers and executes owned stdio sources using persistent SDK policy, then stops without cold respawn', async () => {
-  const root = realpathSync(
-    mkdtempSync(
-      join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'kite-packaged-default-mcp-'),
-    ),
-  );
+  const root = realpathSync(temporaryDirectory('kite-packaged-default-mcp-'));
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');
   mkdirSync(workspace);
@@ -70,7 +58,7 @@ test('sealed default process discovers and executes owned stdio sources using pe
     join(built.root, 'node_modules/@kite-ai/service/paired.js')
   )) as typeof import('../../src/paired');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const fixture = await Bun.build({
     entrypoints: [join(import.meta.dir, '../fixtures/mcp-source-packaged-server.ts')],
     outdir: join(root, 'fixture'),

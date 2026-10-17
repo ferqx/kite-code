@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -97,7 +98,7 @@ test('actual default host, SQL, HTTP and Native Client preserve explicit mode/tr
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${f.workspace}`,
+      rootUri: pathToFileURL(f.workspace).href,
       name: 'Permission API',
     });
     await client.createSession({
@@ -226,7 +227,7 @@ test('permission API rejects foreign Store, hidden authority fields, duplicate q
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${f.workspace}`,
+      rootUri: pathToFileURL(f.workspace).href,
       name: 'Strict',
     });
     await client.createSession({

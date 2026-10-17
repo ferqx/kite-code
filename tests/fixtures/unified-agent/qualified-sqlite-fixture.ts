@@ -1,12 +1,4 @@
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +13,7 @@ import {
   terminalSqliteEngineRoot,
 } from '@kite-ai/service/sqlite-release-assets';
 import { buildTerminalSqliteEngine } from '../../../scripts/release/sqlite-engine';
+import { privateDirectory } from '../test-filesystem';
 
 function verify(observation: SqliteEngineObservation): SqliteEngineObservation {
   const identity = parseSqliteReleaseIdentity({
@@ -89,7 +82,7 @@ export async function prepareQualifiedSqliteFixture() {
   try {
     chmodSync(root, 0o700);
     const leaf = join(root, 'node_modules/@kite-ai/agent');
-    mkdirSync(leaf, { recursive: true, mode: 0o700 });
+    privateDirectory(leaf);
     const built = await Bun.build({
       entrypoints: [fileURLToPath(import.meta.resolve('@kite-ai/agent/sqlite-engine'))],
       outdir: leaf,

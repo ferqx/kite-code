@@ -4,7 +4,6 @@ import {
   existsSync,
   linkSync,
   lstatSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -12,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { acquireProfileAccess as internalAcquire } from '../../../src/platform/profile';
 import {
   acquireProfileAccess,
@@ -22,7 +22,7 @@ import {
 test.skipIf(process.platform === 'win32')(
   'fixed TUI data lock competes immediately, retains original shared authority and cannot be forged or rebound',
   () => {
-    const root = mkdtempSync('/private/tmp/kite-profile-data-lock-'),
+    const root = temporaryDirectory('kite-profile-data-lock-'),
       options = { dataRoot: join(root, 'data'), profile: 'one' };
     const first = acquireProfileAccess(options),
       second = acquireProfileAccess(options),
@@ -75,7 +75,7 @@ test.skipIf(process.platform === 'win32')(
 test.skipIf(process.platform === 'win32')(
   'TUI data lock rejects unsafe permissions, links, journal and changed coordination with zero target effects',
   () => {
-    const root = mkdtempSync('/private/tmp/kite-profile-data-safety-'),
+    const root = temporaryDirectory('kite-profile-data-safety-'),
       options = { dataRoot: join(root, 'data'), profile: 'one' },
       access = acquireProfileAccess(options),
       path = join(access.coordinationPath, 'tui-private.lock');

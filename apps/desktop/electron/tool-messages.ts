@@ -71,7 +71,18 @@ export class NativeToolMessages {
       return undefined;
     }
   }
-  private target(input: Record<string, unknown> | undefined, definitionId: string) {
+  private target(
+    input: Record<string, unknown> | undefined,
+    definitionId: string,
+    definitionVersion: string,
+  ) {
+    if (
+      input &&
+      definitionId === 'files.list' &&
+      definitionVersion === '1' &&
+      (input.path === undefined || input.path === '')
+    )
+      return '.';
     const key =
       definitionId === 'shell.launch'
         ? 'command'
@@ -342,7 +353,7 @@ export class NativeToolMessages {
           definitionVersion: execution.definitionVersion,
           status: execution.status,
           resultRevision: execution.resultRevision,
-          target: this.target(call, execution.definitionId),
+          target: this.target(call, execution.definitionId, execution.definitionVersion),
           ...(!message.originMessage && execution.authorization
             ? { authorization: execution.authorization }
             : {}),

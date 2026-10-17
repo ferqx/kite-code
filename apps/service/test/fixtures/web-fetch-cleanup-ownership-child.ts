@@ -1,9 +1,10 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AgentRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { assembleProcessService } from '../../src/process-service';
 
@@ -92,7 +93,7 @@ const provider = Bun.serve({
     );
   },
 });
-mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+privateDirectory(profile.profilePath);
 writeFileSync(
   join(profile.profilePath, 'config.jsonc'),
   JSON.stringify({

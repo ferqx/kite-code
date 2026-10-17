@@ -3,7 +3,6 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -15,6 +14,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 
@@ -23,7 +23,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
   test(`built development TUI actual PTY ${mode} preserves work and owned lifecycle`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-host-')));
     const workspace = join(root, 'workspace');
-    mkdirSync(workspace, { mode: 0o700 });
+    privateDirectory(workspace);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const entrypoint = join(repository, 'apps/service/dist/main.js');
@@ -101,9 +101,9 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
       },
     });
     try {
-      mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+      privateDirectory(profile.profilePath);
       // This fixture asserts English labels independently of the host device locale.
-      mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+      privateDirectory(join(profile.profilePath, 'ui'));
       writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
         mode: 0o600,
       });

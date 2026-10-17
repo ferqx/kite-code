@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import type { JobContext } from '../../../src/extensions';
 import {
   captureLinuxLaunch,
@@ -30,7 +31,7 @@ function fixture(run: (options: LinuxPaths, shell: string) => void) {
       runtime = join(root, 'runtime'),
       temporaryRoot = join(root, 'temp');
     for (const path of [workspace, cwd, protectedRoot, runtime, temporaryRoot])
-      mkdirSync(path, { recursive: true, mode: 0o700 });
+      privateDirectory(path);
     const shell = join(runtime, 'shell'),
       bubblewrapPath = join(runtime, 'bwrap');
     writeFileSync(shell, 'fixed shell');

@@ -1,13 +1,15 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { type AgentClient, createClient, type ModelInputSnapshot } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { readModelDirectory } from '@kite-ai/ui';
+import { temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { type ModelOutputViewScope, NativeModelOutputReads } from '../electron/model-output-reads';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
@@ -205,7 +207,7 @@ test('input identity, bad chunk offsets/hash, abort and late selection are local
   ).toThrow('invalid_native_request');
 });
 test('actual Core fixed Adapter records 205 original requests; Native public SDK directory exhausts fixed upper through two pages with zero remote Provider', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-native-input-pages-')),
+  const root = realpathSync(temporaryDirectory('kite-native-input-pages-')),
     profile = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(profile),
     storeId = (await store.getMetadata()).storeId;
@@ -244,7 +246,7 @@ test('actual Core fixed Adapter records 205 original requests; Native public SDK
     await runtime.createWorkspace({
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       expectedStoreId: storeId,
     });
     await runtime.createSession({

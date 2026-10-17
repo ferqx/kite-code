@@ -2,6 +2,7 @@
 import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../packages/agent/src';
 import type {
@@ -196,7 +197,7 @@ try {
     expectedStoreId,
     id: 'w',
     name: 'private qualification',
-    rootUri: `file://${directory}`,
+    rootUri: pathToFileURL(directory).href,
   });
   await runtime.createSession({
     expectedStoreId,

@@ -2,8 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -11,9 +9,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { TuiMcpIntent } from '@kite-ai/ui/tui';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { createTuiMcpPort } from '../../host/tui-mcp';
 
@@ -29,11 +29,10 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   }
 }
 test('source-free original MCP prepare and physical first GET loss survive caller SIGKILL with GET-only cold lookup; shared stays and paired drains', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-mcp-cold-')),
-    evidence = `/private/tmp/kite-mcp-cold-evidence-${randomUUID()}`;
-  mkdirSync(evidence, { mode: 0o700 });
+  const root = realpathSync(temporaryDirectory('kite-mcp-cold-')),
+    evidence = temporaryDirectory('kite-mcp-cold-evidence-');
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const projectPath = join(workspace, 'kite-agent.jsonc');
   writeFileSync(
     projectPath,
@@ -42,7 +41,7 @@ test('source-free original MCP prepare and physical first GET loss survive calle
   );
   const dataRoot = join(root, 'data'),
     profile = selectProfile({ dataRoot, profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const configPath = join(profile.profilePath, 'config.jsonc');
   writeFileSync(
     configPath,
@@ -116,7 +115,7 @@ test('source-free original MCP prepare and physical first GET loss survive calle
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
       name: 'owned',
     });
     await client.createSession({
@@ -178,11 +177,11 @@ test('source-free original MCP prepare and physical first GET loss survive calle
       return JSON.parse(readFileSync(join(root, 'cold-result.json'), 'utf8'));
     };
     const preWorkspace = join(root, 'pre-workspace');
-    mkdirSync(preWorkspace, { mode: 0o700 });
+    privateDirectory(preWorkspace);
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'wpre',
-      rootUri: `file://${preWorkspace}`,
+      rootUri: pathToFileURL(preWorkspace).href,
       name: 'pre',
     });
     await client.createSession({

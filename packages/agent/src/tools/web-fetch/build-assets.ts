@@ -8,7 +8,9 @@ const build = await Bun.build({
   entrypoints: [resolve(import.meta.dir, 'extractor-worker.ts')],
   outdir: destination,
   target: 'bun',
-  packages: 'external',
+  packages: 'bundle',
+  // jsdom owns runtime CSS/DOM assets. Readability and Turndown/Domino are pure JS.
+  external: ['jsdom'],
   naming: 'extractor-worker.js',
 });
 if (!build.success) throw new Error('web_parser_build_failed');

@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -16,6 +15,7 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient, requiresInteractionAttachment } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 
@@ -40,9 +40,9 @@ type HttpRow = {
 test('80x24 cold TUI selects the second real original MCP intent from an empty catalogue with GET-only recovery', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-mcp-cold-pty-')));
   const evidence = join(tmpdir(), `kite-mcp-cold-pty-evidence-${randomUUID()}`);
-  mkdirSync(evidence, { mode: 0o700 });
+  privateDirectory(evidence);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   let rpc = 0;
   const remote = Bun.serve({
@@ -132,14 +132,14 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
         { mode: 0o600 },
       );
     publish();
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     writeFileSync(
       configPath,
       `// USER COMMENT\n${JSON.stringify({ unknown: { keep: true }, modelId: 'forbidden', models: [{ id: 'forbidden', provider: 'compatible', model: 'forbidden', baseURL: `${remote.url.href}v1` }], mcp: [{ id: 'owned-server', enabled: false }] })}\n`,
       { mode: 0o600 },
     );
     writeFileSync(projectPath, '// PROJECT COMMENT\n{"unknown":42}\n', { mode: 0o600 });
-    mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}\n', {
       mode: 0o600,
     });

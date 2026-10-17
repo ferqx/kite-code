@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -10,6 +11,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { type AgentClient, createClient, type Json } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { NativeMcpSettings } from '../../electron/mcp-settings';
 import { verifyNativeMcpSourceAnswer } from '../../electron/mcp-source-answer';
 import type { NativeMcpOperation, NativeMcpSubmission } from '../../src/native-bridge';
@@ -17,12 +19,12 @@ import { memoryPrivateData } from '../private-data.fixture';
 
 const fullDescription = 'Full Native immutable descriptor 雪🙂 '.repeat(3000);
 async function fixture() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-native-mcp-main-'));
+  const root = realpathSync(temporaryDirectory('kite-native-mcp-main-'));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
-  mkdirSync(join(workspace, '.kite-code'), { mode: 0o700 });
+  privateDirectory(workspace);
+  privateDirectory(join(workspace, '.kite-code'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const wire: string[] = [];
   let credentialReads = 0,
     posts = 0,
@@ -123,7 +125,7 @@ async function fixture() {
     expectedStoreId: storeId,
     id: 'w',
     name: 'Native',
-    rootUri: `file://${workspace}/`,
+    rootUri: pathToFileURL(`${workspace}/`).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,

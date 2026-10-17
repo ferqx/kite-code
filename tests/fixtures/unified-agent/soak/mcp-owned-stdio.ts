@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -11,6 +11,7 @@ import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import type { CaseEvidence } from '../../../../scripts/runtime/unified-soak-cases';
 import { verifyMcpStdioJobHandoff } from '../../../../scripts/runtime/unified-soak-mcp-handoff';
+import { privateDirectory } from '../../test-filesystem';
 import { check, until } from './common';
 
 /** Trusted original artifact assets; there is deliberately no source/build fallback. */
@@ -56,7 +57,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
   if (assets.linux && !Object.values(assets.linux).every(isAbsolute))
     throw Error('mcp_stdio_owned_assets_invalid');
   const directory = join(root, 'stdio');
-  mkdirSync(directory, { mode: 0o700 });
+  privateDirectory(directory);
   const marker = join(directory, 'wire');
   const script = join(directory, 'server.js');
   writeFileSync(
@@ -65,7 +66,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
     { mode: 0o600 },
   );
   const profile = selectProfile({ dataRoot: join(directory, 'data'), profile: 'soak' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   writeFileSync(
     join(profile.profilePath, 'mcp.json'),
     JSON.stringify({

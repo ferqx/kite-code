@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { type ChildAgentConfiguration, createRuntime, type RuntimeOptions } from '../../../src';
 import type {
@@ -113,7 +114,12 @@ async function fixture(
     ...options,
   });
   const expectedStoreId = (await store.getMetadata()).storeId;
-  await runtime.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: `file://${root}` });
+  await runtime.createWorkspace({
+    expectedStoreId,
+    id: 'w',
+    name: 'w',
+    rootUri: pathToFileURL(root).href,
+  });
   await runtime.createSession({
     expectedStoreId,
     commandId: 'create',

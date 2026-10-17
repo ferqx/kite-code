@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { retainWindowsArtifactObjects, type WindowsArtifactScope } from './windows-artifact-scope';
 
 /** Explicit verified-manifest file pin. Import does not open files or load native DLLs. */
@@ -11,6 +11,13 @@ export function retainWindowsCandidateFiles(
     throw Error('artifact_scope_platform_unsupported');
   if (!isAbsolute(root) || realpathSync.native(root) !== root || !Array.isArray(relativeFiles))
     throw Error('artifact_scope_denied');
+  // The scope checks each final HANDLE path while the entire original ancestry is held.
+  return retainWindowsArtifactObjects(root, windowsArtifactRelativeFiles(relativeFiles));
+}
+
+/** One closed Windows spelling for both original candidate pins and private tree creation. */
+export function windowsArtifactRelativeFiles(relativeFiles: readonly string[]): readonly string[] {
+  if (!Array.isArray(relativeFiles)) throw Error('artifact_scope_denied');
   const files: string[] = [];
   const seen = new Set<string>();
   for (const file of relativeFiles) {
@@ -38,9 +45,7 @@ export function retainWindowsCandidateFiles(
     const key = file.toLowerCase();
     if (seen.has(key)) throw Error('artifact_scope_denied');
     seen.add(key);
-    const path = join(root, ...file.split('/'));
-    if (realpathSync.native(path) !== path) throw Error('artifact_scope_denied');
     files.push(file);
   }
-  return retainWindowsArtifactObjects(root, Object.freeze(files));
+  return Object.freeze(files);
 }

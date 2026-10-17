@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -14,6 +13,10 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import type { JobDefinition, JobEvent, JobHandle } from '../../../src/extensions';
 import { launchIdentity } from '../../../src/jobs/launch-identity';
 import {
@@ -65,7 +68,7 @@ int main(int argc,char **argv) {
 `;
 beforeAll(async () => {
   if (process.platform !== 'darwin') return;
-  root = realpathSync.native(mkdtempSync('/private/tmp/kite-host-shell-'));
+  root = realpathSync.native(temporaryDirectory('kite-host-shell-'));
   workspace = join(root, 'workspace');
   control = join(root, 'control');
   assets = join(root, 'assets');
@@ -78,7 +81,7 @@ beforeAll(async () => {
     join(root, 'private'),
     join(root, 'home'),
   ])
-    mkdirSync(path, { mode: 0o700 });
+    privateDirectory(path);
   writeFileSync(join(root, 'outside'), 'broad host read');
   writeFileSync(join(root, 'private', 'secret'), 'private');
   writeFileSync(join(workspace, 'tree.c'), source);
@@ -374,8 +377,8 @@ macTest(
     const secret = join(parent, 'private');
     const runtime = join(parent, 'runtime');
     const moved = join(workspace, 'renamed-parent');
-    mkdirSync(secret, { recursive: true, mode: 0o700 });
-    mkdirSync(runtime, { mode: 0o700 });
+    privateDirectory(secret);
+    privateDirectory(runtime);
     writeFileSync(join(secret, 'secret'), 'ancestor-private-marker');
     writeFileSync(join(runtime, 'asset'), 'original asset');
     try {
@@ -501,7 +504,7 @@ macTest(
   'private launchd IPC works beyond sockaddr_un path length and slow observation preserves actual byte gaps',
   async () => {
     const longControl = join(control, 'x'.repeat(80));
-    mkdirSync(longControl, { mode: 0o700 });
+    privateDirectory(longControl);
     const job = createMacosHostShellJob({
       ...options(),
       controlBase: longControl,

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
@@ -129,7 +130,7 @@ test('actual 40 sibling Job approvals: CLI exhausts original pending pages and D
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     for (const id of ['s', 'other'])
       await client.createSession({

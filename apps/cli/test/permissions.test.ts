@@ -6,6 +6,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
@@ -45,7 +46,7 @@ async function paired() {
       expectedStoreId: storeId,
       id: 'w',
       name: 'Permission CLI',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
     });
     await client.createSession({
       expectedStoreId: storeId,

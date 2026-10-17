@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -95,7 +96,7 @@ test('actual Core original Model input reaches Native and Browser intact, remain
     await client.createWorkspace({
       expectedStoreId,
       id: 'workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'temporary',
     });
     for (const sessionId of ['session', 'other'])

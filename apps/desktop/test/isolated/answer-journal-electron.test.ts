@@ -1,23 +1,18 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'actual two Electron Main lifetimes retain complete original answer and reconcile only its command GET',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-answer-journal-'));
+    const root = realpathSync(temporaryDirectory('kite-native-answer-journal-'));
     const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -28,7 +23,7 @@ test.skipIf(process.platform !== 'darwin')(
         expectedStoreId: storeId,
         id: 'w',
         name: 'owned',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       for (const id of ['s', 'other'])
         await store.createSession({

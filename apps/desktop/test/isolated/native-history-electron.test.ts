@@ -2,19 +2,13 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -55,7 +49,7 @@ test.skipIf(process.platform !== 'darwin')(
   'actual Electron automatically reads 5001 stored short messages and >8MiB multi-message history; failed/late pages retain original text with zero Model',
   async () => {
     const parentDeadline = Date.now() + 90000;
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-history-')),
+    const root = realpathSync(temporaryDirectory('kite-native-history-')),
       barrier = gate(),
       compressionBarrier = gate();
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
@@ -67,7 +61,7 @@ test.skipIf(process.platform !== 'darwin')(
       expectedStoreId: storeId,
       id: 'w',
       name: 'Native fixture',
-      rootUri: new URL(`file://${workspace}`).href,
+      rootUri: pathToFileURL(workspace).href,
     });
     for (const id of ['s', 'other'])
       await store.createSession({

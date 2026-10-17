@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { openSqliteStore } from '../../../src/sqlite';
 import { readSessionLogs } from '../../../src/storage/session-logs';
 import type { Json } from '../../../src/storage/types';
@@ -15,7 +16,7 @@ async function rejection(promise: Promise<unknown>) {
   throw Error('expected rejection');
 }
 async function fixture() {
-  const dataRoot = mkdtempSync('/private/tmp/kite-core-session-log-');
+  const dataRoot = temporaryDirectory('kite-core-session-log-');
   chmodSync(dataRoot, 0o700);
   const store = await openSqliteStore({ dataRoot, profile: 'owned' });
   const expectedStoreId = (await store.getMetadata()).storeId;

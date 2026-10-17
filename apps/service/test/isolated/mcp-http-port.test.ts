@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createMcpAdapter, createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -326,7 +327,7 @@ test('actual SQLite/Core dispatched connection Jobs admit exact origin and cance
       expectedStoreId,
       id: 'w',
       name: 'private',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     for (const sessionId of ['a', 'b']) {
       await runtime.createSession({

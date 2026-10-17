@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createPlanningValidation, planningExtensionId } from '../../../src/business/planning';
@@ -107,7 +108,7 @@ async function commandFixture(
   await runtime.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'private',
   });
   await runtime.createSession({
@@ -393,7 +394,7 @@ async function mcpScenario(mode: 'repair' | 'bad_shape' | 'wrong_version' | 'wro
     await runtime.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'private',
     });
     await runtime.createSession({

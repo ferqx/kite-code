@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -23,6 +24,7 @@ import {
 } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 
@@ -46,7 +48,7 @@ async function fixture(
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'temporary' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const expectedStoreId = (await store.getMetadata()).storeId;
   const wire: { method: string; params?: Record<string, unknown> }[] = [];
@@ -426,7 +428,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'private',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   for (const sessionId of ['a', 'b'])
     await runtime.createSession({

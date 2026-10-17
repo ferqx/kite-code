@@ -22,14 +22,15 @@ import {
   readMcpSources,
   writeMcpSourceMetadata,
 } from '@kite-ai/agent/config';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { acquireFileLock } from '../../../src/platform/locks';
 
 function fixture() {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'kite-mcp-source-')));
   const profilePath = join(base, 'profile');
   const workspacePath = join(base, 'workspace');
-  mkdirSync(profilePath, { mode: 0o700 });
-  mkdirSync(workspacePath, { mode: 0o700 });
+  privateDirectory(profilePath);
+  privateDirectory(workspacePath);
   const options: McpSourceOptions = {
     profilePath,
     workspacePath,

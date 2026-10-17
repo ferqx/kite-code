@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   assertSqliteReleaseIdentity,
   parseSqliteReleaseIdentity,
@@ -9,8 +11,44 @@ import {
 import { runNativeRelease } from '../../../scripts/release/native';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { runUnifiedRelease } from '../../../scripts/release/unified';
+import { privateDirectory } from '../../fixtures/test-filesystem';
+import {
+  releaseDirectory as mkdirSync,
+  releaseScratch as mkdtempSync,
+} from '../../fixtures/unified-agent/release-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
+test('registered frontdoor preserves bounded business codes without exposing error details', async () => {
+  const entry = pathToFileURL(
+    join(repositoryRoot, 'scripts/release/entrypoints/registered-entry.ts'),
+  ).href;
+  for (const [error, expected] of [
+    ["Object.assign(Error('private details'),{code:'owner_busy'})", 'owner_busy'],
+    ["Error('cli_registration_invalid')", 'cli_registration_invalid'],
+    [
+      "Object.assign(Error('private details'),{code:'PRIVATE:secret/path'})",
+      'cli_registration_failed',
+    ],
+    ["Error('secret/path')", 'cli_registration_failed'],
+  ]) {
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        '--eval',
+        `import {registeredEntrypoint} from ${JSON.stringify(entry)};await registeredEntrypoint(async()=>{throw ${error};});`,
+      ],
+      { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
+    );
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(code).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toBe(`${expected}\n`);
+  }
+});
 test('reviewed Linux builtin source is exact; version ranges, near hashes and extra metadata cannot approve an engine', () => {
   const identity = {
     driver: 'bun:sqlite',
@@ -43,7 +81,16 @@ async function execute(entry: string, argv: string[], cwd: string, home: string)
     [process.execPath, join(repositoryRoot, 'scripts/release', entry), ...argv],
     {
       cwd,
-      env: { PATH: '/usr/bin:/bin', HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
+      env:
+        process.platform === 'win32'
+          ? {
+              PATH: '',
+              HOME: home,
+              USERPROFILE: home,
+              SystemRoot: process.env.SystemRoot,
+              BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
+            }
+          : { PATH: '/usr/bin:/bin', HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -68,7 +115,7 @@ async function execute(entry: string, argv: string[], cwd: string, home: string)
 test('actual release argv help and rejected installation inputs leave absent assets and private profiles untouched', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-release-tools-pure-'))),
     home = join(root, 'home');
-  mkdirSync(home, { mode: 0o700 });
+  privateDirectory(home);
   try {
     for (const entry of ['unified.ts', 'native.ts']) {
       for (const argv of [['--help'], ['build', '--help']]) {
@@ -122,8 +169,8 @@ test('native launch reports absent or incomplete local candidates before opening
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-launch-missing-')));
   const home = join(root, 'home'),
     partial = join(root, 'partial');
-  mkdirSync(home, { mode: 0o700 });
-  mkdirSync(partial, { mode: 0o700 });
+  privateDirectory(home);
+  privateDirectory(partial);
   try {
     for (const directory of [join(root, 'missing'), partial]) {
       const result = await execute('native.ts', ['launch', '--directory', directory], root, home);
@@ -143,56 +190,83 @@ test('native launch reports absent or incomplete local candidates before opening
   }
 });
 
-test('current formal release smoke uses a fresh complete candidate for daemon identity and readonly Web, then confirms stop', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-release-tools-actual-')));
-  try {
-    const bundle = await buildTerminalBundle({
-      destination: join(root, 'candidate'),
-      repositoryRoot,
-      bunExecutable: process.execPath,
-    });
-    const result = await runUnifiedRelease(['smoke', '--directory', bundle.root]);
-    expect(result).toEqual({
-      candidateId: bundle.candidateId,
-      buildId: bundle.buildId,
-      entry: true,
-      daemon: true,
-      web: true,
-      cleanup: true,
-      modelInvoked: false,
-    });
-    const verified = await runUnifiedRelease(['verify', '--directory', bundle.root]);
-    expect(verified).toMatchObject({ root: bundle.root, candidateId: bundle.candidateId });
-    const sourceVerified = await runUnifiedRelease([
-      'verify',
-      '--directory',
-      bundle.root,
-      '--source-commit',
-      bundle.manifest.source.commit,
-    ]);
-    expect(sourceVerified).toMatchObject({ candidateId: bundle.candidateId });
-    await expect(
-      runUnifiedRelease(['verify', '--directory', bundle.root, '--source-commit', '0'.repeat(40)]),
-    ).rejects.toThrow('release_source_mismatch');
-    const cleanVerification = runUnifiedRelease([
-      'verify',
-      '--directory',
-      bundle.root,
-      '--clean-source',
-      'true',
-    ]);
-    if (bundle.manifest.source.dirty)
-      await expect(cleanVerification).rejects.toThrow('release_source_mismatch');
-    else
-      await expect(cleanVerification).resolves.toMatchObject({ candidateId: bundle.candidateId });
-    console.log(
-      JSON.stringify({
-        qualification: 'release-tools',
+test(
+  'current formal release smoke uses a fresh complete candidate for daemon identity and readonly Web, then confirms stop',
+  async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-release-tools-actual-')));
+    let completed = false;
+    try {
+      const output = join(root, 'output');
+      privateDirectory(output);
+      let runtime = process.execPath;
+      if (process.platform === 'win32') {
+        // Qualify a new private, identical input; never repair the installed runtime's ACL.
+        const inputs = join(root, 'inputs');
+        mkdirSync(inputs);
+        runtime = join(inputs, 'bun.exe');
+        copyFileSync(process.execPath, runtime);
+        const hash = (path: string) =>
+          createHash('sha256').update(readFileSync(path)).digest('hex');
+        expect(hash(runtime)).toBe(hash(process.execPath));
+      }
+      const bundle = await buildTerminalBundle({
+        destination: join(output, 'candidate'),
+        repositoryRoot,
+        bunExecutable: runtime,
+      });
+      const result = await runUnifiedRelease(['smoke', '--directory', bundle.root]);
+      expect(result).toEqual({
+        candidateId: bundle.candidateId,
         buildId: bundle.buildId,
-        ...(result as object),
-      }),
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}, 60000);
+        entry: true,
+        daemon: true,
+        web: true,
+        cleanup: true,
+        modelInvoked: false,
+      });
+      const verified = await runUnifiedRelease(['verify', '--directory', bundle.root]);
+      expect(verified).toMatchObject({ root: bundle.root, candidateId: bundle.candidateId });
+      const sourceVerified = await runUnifiedRelease([
+        'verify',
+        '--directory',
+        bundle.root,
+        '--source-commit',
+        bundle.manifest.source.commit,
+      ]);
+      expect(sourceVerified).toMatchObject({ candidateId: bundle.candidateId });
+      await expect(
+        runUnifiedRelease([
+          'verify',
+          '--directory',
+          bundle.root,
+          '--source-commit',
+          '0'.repeat(40),
+        ]),
+      ).rejects.toThrow('release_source_mismatch');
+      const cleanVerification = runUnifiedRelease([
+        'verify',
+        '--directory',
+        bundle.root,
+        '--clean-source',
+        'true',
+      ]);
+      if (bundle.manifest.source.dirty)
+        await expect(cleanVerification).rejects.toThrow('release_source_mismatch');
+      else
+        await expect(cleanVerification).resolves.toMatchObject({ candidateId: bundle.candidateId });
+      console.log(
+        JSON.stringify({
+          qualification: 'release-tools',
+          buildId: bundle.buildId,
+          ...(result as object),
+        }),
+      );
+      completed = true;
+    } finally {
+      if (completed) rmSync(root, { recursive: true, force: true });
+      else console.error(`RELEASE_TOOLS_FAILED_ROOT_RETAINED ${root}`);
+    }
+    // This includes compiling and fingerprinting a complete closure, before the unchanged smoke command budgets.
+  },
+  process.platform === 'win32' ? 20 * 60_000 : 60_000,
+);

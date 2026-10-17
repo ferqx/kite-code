@@ -1,21 +1,15 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -23,10 +17,10 @@ const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'relocated actual Native candidate completes the default questionnaire and cancels another questionnaire while each original Run continues',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-questionnaire-bundle-'));
+    const root = realpathSync(temporaryDirectory('kite-native-questionnaire-bundle-'));
     const home = join(root, 'home'),
       moved = join(root, 'relocated');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     const workspace = join(home, 'workspace');
     mkdirSync(workspace);
     const profile = selectProfile({
@@ -77,7 +71,7 @@ test.skipIf(process.platform !== 'darwin')(
           expectedStoreId: storeId,
           id: 'w',
           name: 'Questionnaire',
-          rootUri: new URL(`file://${workspace}`).href,
+          rootUri: pathToFileURL(workspace).href,
         });
         for (const id of ['a', 'b'])
           await seed.createSession({

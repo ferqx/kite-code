@@ -71,8 +71,10 @@ await mkdir(outdir, { recursive: true });
 const result = await Bun.build({
   entrypoints: [join(source, 'index.ts'), join(source, 'markdown-parser.ts')],
   target: 'browser',
+  splitting: true,
   packages: 'bundle',
   external: [
+    'react-dom',
     ...Object.keys(manifest.dependencies).filter(
       (name) => !desktopBundledDependencies.includes(name),
     ),

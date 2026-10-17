@@ -131,7 +131,7 @@ test('future, unknown, broken schema and migration checksum reject without write
     expect(bytes(value.databasePath)).toBe(before);
   }
   const unknown = fixture();
-  mkdirSync(unknown.profilePath, { mode: 0o700 });
+  privateDirectory(unknown.profilePath);
   const unknownDb = new Database(unknown.databasePath, { create: true });
   unknownDb.exec('CREATE VIEW unknown_view AS SELECT 1');
   unknownDb.close(true);
@@ -140,7 +140,7 @@ test('future, unknown, broken schema and migration checksum reject without write
   await rejected(unknown.options, 'store_incompatible');
   expect(bytes(unknown.databasePath)).toBe(unknownBytes);
   const corrupt = fixture();
-  mkdirSync(corrupt.profilePath, { mode: 0o700 });
+  privateDirectory(corrupt.profilePath);
   writeFileSync(corrupt.databasePath, 'invalid SQLite bytes', { mode: 0o600 });
   await rejected(corrupt.options, 'store_incompatible');
   expect(bytes(corrupt.databasePath)).toBe(Buffer.from('invalid SQLite bytes').toString('hex'));

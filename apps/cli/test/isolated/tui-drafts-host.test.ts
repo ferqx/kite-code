@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -8,6 +8,7 @@ import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/mainte
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { openTuiDraftFile } from '../../host/tui-drafts';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
@@ -16,7 +17,7 @@ const repository = resolve(import.meta.dir, '../../../..');
 test('source-tree-external built PTY cold draft, Service SIGKILL holds host lease, final input flush and restored original remain read-only', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-draft-pty-')));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'draft' });
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const cleanups: (() => Promise<void>)[] = [];
@@ -40,9 +41,9 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
     apiMajor: 1,
   };
   try {
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     // This fixture asserts English labels independently of the host device locale.
-    mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

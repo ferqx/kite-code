@@ -1,16 +1,13 @@
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { TuiMcpSourceMutationIntent } from '@kite-ai/ui/tui';
+import {
+  fixturePermissions,
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../tests/fixtures/test-filesystem';
 import { createMcpSourceApprovalRecord } from '../host/mcp-source-approval-intents';
 import { openMcpSourceApprovalJournal } from '../host/mcp-source-approval-journal';
 import { assertMcpSourceJournalAvailable } from '../host/mcp-source-journal-files';
@@ -118,9 +115,9 @@ test('durable source identities conflict across S/W, foreign Store and genuinely
   ).not.toThrow();
 });
 test('real private publication, closed cross-journal conflict, terminal monotonicity and corrupt sibling fail closed', () => {
-  const root = mkdtempSync('/private/tmp/kite-source-mutation-journal-'),
+  const root = temporaryDirectory('kite-source-mutation-journal-'),
     access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   const input = { access, acquireWriteLock: () => acquireProfileDataLock(access, 'tui_private') };
   const m = openMcpSourceMutationJournal(input),
     p = openMcpSourceApprovalJournal(input);
@@ -166,9 +163,9 @@ test('real private publication, closed cross-journal conflict, terminal monotoni
 });
 
 test('mutation journal rejects full unknown capacity, oversized bytes, invalid UTF8, duplicates and insecure entities without eviction', () => {
-  const root = mkdtempSync('/private/tmp/kite-source-mutation-journal-negative-');
+  const root = temporaryDirectory('kite-source-mutation-journal-negative-');
   const access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(join(access.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(access.profilePath, 'ui'));
   const path = join(access.profilePath, 'ui/mcp-source-mutation-intents.json');
   const journal = openMcpSourceMutationJournal({
     access,
@@ -200,9 +197,9 @@ test('mutation journal rejects full unknown capacity, oversized bytes, invalid U
       expect(readFileSync(path)).toEqual(unchanged);
     }
     write(JSON.stringify({ version: 1, records: [] }));
-    chmodSync(path, 0o644);
+    fixturePermissions(path, 0o644);
     expect(() => journal.list()).toThrow();
-    chmodSync(path, 0o600);
+    fixturePermissions(path, 0o600);
     linkSync(path, join(root, 'linked'));
     expect(() => journal.list()).toThrow();
   } finally {

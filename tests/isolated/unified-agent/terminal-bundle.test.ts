@@ -3,7 +3,6 @@ import {
   cpSync,
   existsSync,
   lstatSync,
-  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -17,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import type { ProfileBackup, ProfileRestoreResult } from '@kite-ai/agent/maintenance';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 function verifyLocalLinks(root: string) {
@@ -64,10 +64,10 @@ async function execute(argv: string[], cwd: string, home: string) {
 test('sealed terminal bundle remains independent after archive relocation and temporary installation', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-bundle-')));
   const home = join(root, 'home');
-  mkdirSync(home, { mode: 0o700 });
+  privateDirectory(home);
   const userConfiguration = ownedUserConfiguration(home);
   const legacy = join(home, '.kite-code', 'unified-agent', 'default', 'config.jsonc');
-  mkdirSync(join(home, '.kite-code', 'unified-agent', 'default'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(home, '.kite-code', 'unified-agent', 'default'));
   writeFileSync(legacy, 'LEGACY_PROFILE_MUST_NOT_BE_READ', { mode: 0o600 });
   try {
     // Build/install are production APIs; runtime children below receive neither source imports nor NODE_PATH.
@@ -135,7 +135,7 @@ test('sealed terminal bundle remains independent after archive relocation and te
     ])
       expect(existsSync(join(candidate, 'node_modules/@kite-ai/agent', asset))).toBe(true);
     const workspace = join(root, 'workspace');
-    mkdirSync(workspace, { mode: 0o700 });
+    privateDirectory(workspace);
     const dataRoot = join(home, '.kite-code', 'unified-agent');
     const setup = join(home, 'setup.mjs');
     writeFileSync(

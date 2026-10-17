@@ -1,13 +1,6 @@
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -16,14 +9,15 @@ import { startDevelopmentWeb } from '@kite-ai/service/development-web';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { type AssetManifest, validateTrustedAssets } from '@kite-ai/web';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory, temporaryDirectory } from '../test-filesystem';
 
 // Independent actual browser qualifier. Only facts/hold/release/stop are accepted on stdin.
 // hold delays one real metadata GET response; it never changes its payload or executes a mutation.
-const root = realpathSync(mkdtempSync('/private/tmp/kite-web-file-checkpoints-'));
+const root = realpathSync(temporaryDirectory('kite-web-file-checkpoints-'));
 const workspace = join(root, 'workspace');
 mkdirSync(workspace);
 const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+privateDirectory(profile.profilePath);
 const original = Buffer.from(`\uFEFF${'原完整字节 😀 α\r\n'.repeat(10000)}`);
 writeFileSync(join(workspace, 'original.txt'), original);
 const hash = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex');

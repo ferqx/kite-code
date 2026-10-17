@@ -1,8 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import {
   createProfileBackup,
   inspectProfileBackup,
@@ -15,7 +19,7 @@ import { nodeCallerAssets } from './desktop-callers-fixture';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 test('actual Node DB9 reuses complete original caller rows in v18 restore and never acquires cold or foreign POST authority', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-desktop-extensions-'));
+  const root = realpathSync(temporaryDirectory('kite-desktop-extensions-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   try {
     const store = await openSqliteStore(profile),
@@ -24,7 +28,7 @@ test('actual Node DB9 reuses complete original caller rows in v18 restore and ne
     const old = await nodeCallerAssets(root, profile, storeId);
     const path = join(selectProfile(profile).profilePath, 'desktop-private/data.sqlite');
     const directory = join(root, 'node-extension');
-    mkdirSync(directory, { mode: 0o700 });
+    privateDirectory(directory);
     const source = join(directory, 'driver.ts');
     writeFileSync(
       source,

@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { createWriteStream, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { MixedShellLedger } from '../../service/test/isolated/multi-session-shell-load.shared';
@@ -33,7 +34,7 @@ const mixed = workload === 'mixed';
 const gpuEnabled = Boolean(memoryDirectory);
 const evidence = memoryDirectory
   ? join(memoryDirectory, 'report')
-  : `/private/tmp/kite-native-multi-session-${mixed ? 'shell-' : ''}stream`;
+  : join(tmpdir(), `kite-native-multi-session-${mixed ? 'shell-' : ''}stream`);
 const app = await _electron.launch({
   executablePath,
   args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
@@ -862,11 +863,11 @@ try {
     if (measurement === 'profile') {
       const { profile } = await cdp.send('Profiler.stop');
       writeFileSync(
-        '/private/tmp/kite-native-multi-session-navigation.cpuprofile',
+        join(tmpdir(), 'kite-native-multi-session-navigation.cpuprofile'),
         JSON.stringify(profile),
       );
       writeFileSync(
-        '/private/tmp/kite-native-multi-session-longtasks.json',
+        join(tmpdir(), 'kite-native-multi-session-longtasks.json'),
         JSON.stringify(
           await page.evaluate(
             () =>

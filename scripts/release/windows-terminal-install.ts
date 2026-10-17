@@ -34,6 +34,7 @@ import {
 } from '../../packages/agent/src/platform/windows-path-security';
 import type { InstalledTerminalBundle } from './terminal-bundle';
 import { rejectBundleOutput } from './terminal-paths';
+import { copyWindowsCandidate } from './windows-candidate-copy';
 
 const pattern = /^[a-f0-9]{64}$/;
 const markerName = '.kite-terminal-install.json';
@@ -222,23 +223,6 @@ function inventory(root: string): WindowsInstallationInventoryEntry[] {
   visit(root);
   return entries;
 }
-function copyCandidate(source: string, target: string, stage: ReturnType<typeof scratch>) {
-  const security = defaultWindowsPathSecurity()!;
-  for (const name of readdirSync(source).sort()) {
-    const from = join(source, name),
-      to = join(target, name),
-      stat = lstatSync(from);
-    if (stat.isDirectory() && !stat.isSymbolicLink()) {
-      stage.record(to, 'directory');
-      privateDirectory(to, security);
-      copyCandidate(from, to, stage);
-    } else if (stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1) {
-      stage.record(to, 'file');
-      security.copyPrivateFile(from, to);
-    } else denied('candidate_changed');
-  }
-}
-
 /** Windows-only managed owner. Coordination and application data are outside its deletion root. */
 export function installWindowsTerminalBundle(input: {
   bundleRoot: string;
@@ -278,7 +262,7 @@ export function installWindowsTerminalBundle(input: {
     const releaseRoot = join(root, 'releases', bundle.digest);
     if (!existsSync(releaseRoot)) {
       const stage = scratch(owner);
-      copyCandidate(bundle.root, stage.root, stage);
+      copyWindowsCandidate(bundle.root, inventory(bundle.root), stage, owner);
       if (verifyTerminalBundle(stage.root).digest !== bundle.digest) denied('candidate_changed');
       source.verify();
       security.movePrivateEntry(stage.root, releaseRoot);

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '../../../src';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -100,7 +101,7 @@ test('failed ordinary Action result commit retains its boundary across same-owne
       expectedStoreId,
       id: 'w',
       name: 'fixture',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     for (const sessionId of ['s', 'other']) {
       await runtime.createSession({

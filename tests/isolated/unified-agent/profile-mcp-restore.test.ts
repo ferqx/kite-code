@@ -1,15 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -25,6 +17,7 @@ import {
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
 import { observeNativeProcess } from '../../../scripts/runtime/unified-soak-native';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 const files = [
@@ -189,13 +182,12 @@ async function full(client: Client, storeId: string, phase: string, workspace: s
 }
 
 test('installed maintenance restores raw MCP configuration into a new Store; cold default Service preserves user trust and requires current project/credential Questions', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-profile-mcp-restore-'));
+  const root = realpathSync(temporaryDirectory('kite-profile-mcp-restore-'));
   const home = join(root, 'home'),
     workspace = join(root, 'workspace');
-  for (const path of [home, workspace, join(workspace, '.kite-code')])
-    mkdirSync(path, { mode: 0o700 });
+  for (const path of [home, workspace, join(workspace, '.kite-code')]) privateDirectory(path);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   let child: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     access: ReturnType<typeof acquireArtifactAccess> | undefined,
     reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;

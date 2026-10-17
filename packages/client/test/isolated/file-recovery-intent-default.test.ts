@@ -5,7 +5,6 @@ import {
   existsSync,
   fsyncSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   readFileSync,
   realpathSync,
@@ -18,8 +17,10 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createClient, type ExtensionCommandRequest, type ForkSessionRequest } from '../../src';
 import {
   canonicalFileRecoveryIntent,
@@ -43,7 +44,7 @@ async function until<T>(read: () => Promise<T>, match: (value: T) => boolean) {
 }
 
 test('actual packaged default SDK three scopes seal durable raw digests, independent Ask and lost accepted replies with cold GET-only partial recovery', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-sdk-file-recovery-')),
+  const root = realpathSync(temporaryDirectory('kite-sdk-file-recovery-')),
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const original = Buffer.from(`\uFEFF${'完整原文件 😀 é\r\n'.repeat(14000)}`),
@@ -53,7 +54,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
     writeFileSync(join(workspace, s, 'original.txt'), original);
   }
   const profile = selectProfile({ dataRoot: join(root, 'data-A'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const providerBodies: unknown[] = [],
     steps = new Map<string, number>();
   const provider = Bun.serve({
@@ -166,8 +167,11 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
       };
     }>;
   };
+  // Artifact admission pins and checks both the candidate parent and its own parent.
+  const artifactParent = join(root, 'artifacts');
+  privateDirectory(artifactParent);
   const built = await buildTerminalBundle({
-    destination: join(root, 'candidate'),
+    destination: join(artifactParent, 'candidate'),
     repositoryRoot: realpathSync(join(import.meta.dir, '../../../..')),
     bunExecutable: process.execPath,
   });
@@ -225,10 +229,19 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
         forkPhase: v.fork?.phase ?? null,
       })),
     });
-    const pending = `${journalPath}.pending`,
-      fd = openSync(pending, 'w', 0o600);
+    const bytes = Buffer.from(JSON.stringify({ version: 1, records: [...journal.values()] })),
+      pending = `${journalPath}.pending`;
+    if (process.platform === 'win32') {
+      const security = defaultWindowsPathSecurity()!;
+      security.writePrivateFile(pending, bytes);
+      security.movePrivateEntry(pending, journalPath, true);
+      security.syncPrivateFile(journalPath);
+      expect(readFileSync(journalPath)).toEqual(bytes);
+      return;
+    }
+    const fd = openSync(pending, 'w', 0o600);
     try {
-      writeFileSync(fd, JSON.stringify({ version: 1, records: [...journal.values()] }));
+      writeFileSync(fd, bytes);
       fsyncSync(fd);
     } finally {
       closeSync(fd);

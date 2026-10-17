@@ -12,7 +12,7 @@
 
 父子权限交集沿 [Runtime.childPermissions](../runtime.ts) 保留每一方的实际策略。自动审核策略同时提供 review 和审核不可用时的人工 fallback；fallback 不表示每次审核成功后还必须人工批准。只有某一方明确 `approval` 且没有 review，或 review 明确 `requireApproval=true`，才形成强制人工 ceiling，与原 [constraints](constraints.ts) 的组合规则一致。真实 reviewer 的 `approve_once` 仍不能覆盖硬拒绝、父人工要求或 Workflow minimum；审阅失败继续走原人工／拒绝合同，不制造自动成功。
 
-[files-request.ts](files-request.ts) 只为准确绝对路径 Files Tool 版本1建立当前物理父目录和目标身份摘要，并校验最终实际 `dispatchAuthorization` 的全部父子叶证明。请求批准模式对外部写入要求人工；自动审核交实际模型决定；完全访问只移除普通审批，仍保 protected/private、危险目标及未合格平台拒绝。读与 mutation 的完整路径、CAS 和 checkpoint 边界归 [Files owner](../tools/files/README.md#绝对用户文件)。
+[files-request.ts](files-request.ts) 只为准确绝对路径 Files Tool 版本1建立当前物理父目录和目标身份摘要，并校验最终实际 `dispatchAuthorization` 的全部父子叶证明。身份由 Files 引擎的可信 `inspectIdentity` 提供，Windows 不把 Node stat 身份与原生 volume／128-bit FileID 混比；派发重核使用实际已锚定的父对象。请求批准模式对外部写入要求人工；自动审核交实际模型决定；完全访问只移除普通审批，仍保 protected/private、危险目标及未合格平台拒绝。读与 mutation 的完整路径、CAS、checkpoint 和实际 Windows 验证范围归 [Files owner](../tools/files/README.md#绝对用户文件)。
 
 本次 macOS 当前工作树复用 [policy](../../test/isolated/permissions/policy.test.ts)、[Task 分类](../../test/isolated/permissions/task-request.test.ts) 和 [只读审阅上下文](../../test/isolated/permissions/review-context.test.ts) 的实际叶证据；另运行 [Task 整文件](../../test/isolated/business/task/task.test.ts)，11 项、74 断言通过，其中真实父人工／子自动组合证明审核后零效果、实际批准后效果一次且不重放 reviewer。原 [subagent 终端整文件](../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 9 项、120 断言通过，证明自动审核实际外部写入与人类拒绝／取消。局部证据不代替全体客户端或发布门禁。
 

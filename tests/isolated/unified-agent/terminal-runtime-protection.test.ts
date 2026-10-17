@@ -1,15 +1,8 @@
 import { expect, test } from 'bun:test';
-import {
-  cpSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { cpSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 async function execute(argv: string[], cwd: string, home: string) {
@@ -39,9 +32,9 @@ async function execute(argv: string[], cwd: string, home: string) {
 }
 
 test('actual candidate default paired and daemon children protect closure and retain their own artifact lifetime', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-runtime-protection-'));
+  const root = realpathSync(temporaryDirectory('kite-runtime-protection-'));
   const home = join(root, 'home');
-  mkdirSync(home, { mode: 0o700 });
+  privateDirectory(home);
   const userConfiguration = ownedUserConfiguration(home);
   let provider: ReturnType<typeof Bun.serve> | undefined;
   let daemonStarted = false;

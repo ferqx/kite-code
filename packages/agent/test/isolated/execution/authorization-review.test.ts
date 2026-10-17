@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { Permissions } from '../../../src/extensions';
@@ -132,7 +133,7 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
         expectedStoreId,
         id: 'w',
         name: 'owned',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       await runtime.createSession({
         ...base,
@@ -309,7 +310,12 @@ async function fixture(
     ...options,
   });
   const expectedStoreId = (await store.getMetadata()).storeId;
-  await runtime.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: `file://${root}` });
+  await runtime.createWorkspace({
+    expectedStoreId,
+    id: 'w',
+    name: 'w',
+    rootUri: pathToFileURL(root).href,
+  });
   await runtime.createSession({
     expectedStoreId,
     commandId: 'create',
@@ -805,7 +811,12 @@ test('cold planned review is observation only and ordinary child snapshots canno
   let store = await openSqliteStore(profile);
   try {
     const expectedStoreId = (await store.getMetadata()).storeId;
-    await store.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: `file://${root}` });
+    await store.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      name: 'w',
+      rootUri: pathToFileURL(root).href,
+    });
     await store.createSession({
       expectedStoreId,
       commandId: 'create',

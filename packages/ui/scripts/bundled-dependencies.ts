@@ -1,4 +1,26 @@
-/** Desktop browser output owns these dependencies; other npm imports remain external. */
+/** Ordinary browser dependencies owned by the Desktop output; React stays external. */
 export const desktopBundledDependencies: readonly string[] = Object.freeze([
   '@hugeicons/core-free-icons',
+  '@hugeicons/react',
+  '@radix-ui/react-alert-dialog',
+  '@radix-ui/react-collapsible',
+  '@radix-ui/react-dialog',
+  '@radix-ui/react-dropdown-menu',
+  '@radix-ui/react-popover',
+  '@radix-ui/react-scroll-area',
+  '@radix-ui/react-separator',
+  '@radix-ui/react-slider',
+  '@radix-ui/react-slot',
+  '@radix-ui/react-tabs',
+  '@radix-ui/react-tooltip',
+  '@shadcn/react',
+  'class-variance-authority',
+  'clsx',
+  'cmdk',
+  'react-markdown',
+  'react-resizable-panels',
+  'remark-gfm',
+  'remark-parse',
+  'tailwind-merge',
+  'unified',
 ]);

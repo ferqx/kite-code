@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { workflowManifest } from '../fixtures/workflow-manifest';
@@ -27,8 +28,8 @@ async function fixture(
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace'),
     elsewhere = join(root, 'elsewhere');
-  mkdirSync(workspace, { mode: 0o700 });
-  mkdirSync(elsewhere, { mode: 0o700 });
+  privateDirectory(workspace);
+  privateDirectory(elsewhere);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'driver' });
   let calls = 0;
   const observed: string[][] = [];
@@ -79,7 +80,7 @@ async function fixture(
       return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
     },
   });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   writeFileSync(
     userConfiguration.path,
     JSON.stringify({

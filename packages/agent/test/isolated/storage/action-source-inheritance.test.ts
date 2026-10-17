@@ -1,7 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson, semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage';
@@ -18,7 +20,7 @@ async function code(work: Promise<unknown>) {
   }
 }
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-action-inheritance-');
+  const root = temporaryDirectory('kite-action-inheritance-');
   const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
   const expectedStoreId = (await store.getMetadata()).storeId;
   const base = { expectedStoreId, subjectId: 'owner', sessionId: 's' };
@@ -26,7 +28,7 @@ async function fixture() {
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   for (const sessionId of ['s', 'other'])
     await store.createSession({

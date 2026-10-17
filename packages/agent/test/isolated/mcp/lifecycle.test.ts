@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -218,7 +219,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'private',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   for (const sessionId of ['a', 'b'])
     await runtime.createSession({

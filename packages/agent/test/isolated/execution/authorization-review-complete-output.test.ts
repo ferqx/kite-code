@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -162,7 +163,7 @@ for (const { shape, fault } of cases)
         expectedStoreId,
         id: 'w',
         name: 'owned',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       await runtime.createSession({
         ...base,

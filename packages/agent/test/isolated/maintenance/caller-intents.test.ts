@@ -4,14 +4,16 @@ import {
   chmodSync,
   existsSync,
   linkSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -25,13 +27,13 @@ import type { Json } from '../../../src/storage/types';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-caller-maintenance-');
+  const root = temporaryDirectory('kite-caller-maintenance-');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
   await store.close();
   const selected = selectProfile(profile);
-  mkdirSync(join(selected.profilePath, 'ui'), { mode: 0o700 });
+  privateDirectory(join(selected.profilePath, 'ui'));
   const path = join(selected.profilePath, 'ui/caller-intents.json');
   return {
     root,
@@ -358,7 +360,7 @@ test('v4 requires its asset field and old v2/v3 never whitelist a physical calle
     delete missing.assets.callerIntents;
     writeFileSync(ready, JSON.stringify(missing), { mode: 0o600 });
     await reject(inspectProfileBackup(backup), 'backup_invalid_manifest');
-    mkdirSync(join(backup.directory, 'ui'), { mode: 0o700 });
+    privateDirectory(join(backup.directory, 'ui'));
     write(join(backup.directory, 'ui/caller-intents.json'), [row('run.start')]);
     for (const version of [2, 3] as const) {
       const legacy = structuredClone(backup.manifest);

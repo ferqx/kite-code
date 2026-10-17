@@ -4,8 +4,6 @@ import {
   chmodSync,
   existsSync,
   linkSync,
-  mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -13,6 +11,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import {
   createProfileBackup,
@@ -30,7 +32,7 @@ beforeAll(async () => {
 afterAll(() => qualified?.close());
 
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-maintenance-assets-'),
+  const root = temporaryDirectory('kite-maintenance-assets-'),
     profile = { dataRoot: join(root, 'data'), profile: 'assets' },
     store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
@@ -66,7 +68,7 @@ test('raw private config capture preserves comments, unknown and credential refe
     );
     writeFileSync(join(f.selected.profilePath, 'config.jsonc'), bytes, { mode: 0o600 });
     writeFileSync(join(f.selected.profilePath, 'credentials'), 'never copy', { mode: 0o600 });
-    mkdirSync(join(f.selected.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(f.selected.profilePath, 'ui'));
     writeFileSync(join(f.selected.profilePath, 'ui', 'unrelated.txt'), 'uncollected', {
       mode: 0o600,
     });
@@ -447,7 +449,7 @@ test('real TUI preference JSONC is an exact raw-byte asset, including corruption
   const f = await fixture();
   try {
     const ui = join(f.selected.profilePath, 'ui');
-    mkdirSync(ui, { mode: 0o700 });
+    privateDirectory(ui);
     const path = join(ui, 'preferences.jsonc');
     const bytes = Buffer.from(
       '\ufeff// original preference comments\n{"language":"zh-CN","colorPreset":"purple","theme":"light","future":{"raw":true},\n',
@@ -497,7 +499,7 @@ test('preference asset is closed and private; absence never creates a preference
     writeFileSync(join(backup.directory, 'ready.json'), JSON.stringify(manifest), { mode: 0o600 });
     await reject(inspectProfileBackup(backup), 'backup_invalid_manifest');
     const ui = join(f.selected.profilePath, 'ui');
-    mkdirSync(ui, { mode: 0o700 });
+    privateDirectory(ui);
     const path = join(ui, 'preferences.jsonc');
     const outside = join(f.root, 'outside');
     writeFileSync(outside, '{}', { mode: 0o600 });

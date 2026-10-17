@@ -1,32 +1,24 @@
 import { expect, test } from 'bun:test';
 import {
   existsSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { shellProcessEvidenceEnded } from '@kite-ai/agent/jobs/shell';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import type { ContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyPairedServiceResources } from '../../../scripts/runtime/unified-soak-service-resources';
+import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
 test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   'two default packaged Services run twenty original Sessions with real Files, child Agents and Shell work; cold facts cannot qualify padded elapsed time',
   async () => {
-    const root = realpathSync.native(
-      mkdtempSync(
-        join(
-          process.platform === 'darwin' ? '/private/tmp' : tmpdir(),
-          'kite-default-shell-continuous-',
-        ),
-      ),
-    );
+    const root = realpathSync.native(temporaryDirectory('kite-default-shell-continuous-'));
     const candidate = await buildTerminalBundle({ destination: join(root, 'candidate') });
     symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'), 'dir');
     const workload = join(root, 'workload'),

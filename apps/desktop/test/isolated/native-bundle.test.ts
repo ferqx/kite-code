@@ -1,20 +1,14 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -33,9 +27,9 @@ test.skipIf(process.platform !== 'darwin')(
         }),
       );
     observe('begin');
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-bundle-')),
+    const root = realpathSync(temporaryDirectory('kite-native-bundle-')),
       home = join(root, 'home');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     writeFileSync(
       join(root, 'clipboard-guard.jxa'),
       readFileSync(resolve(import.meta.dir, '../native-clipboard-guard.fixture.jxa')),
@@ -58,7 +52,7 @@ test.skipIf(process.platform !== 'darwin')(
         expectedStoreId: storeId,
         id: 'w',
         name: 'Native bundled',
-        rootUri: new URL(`file://${workspace}`).href,
+        rootUri: pathToFileURL(workspace).href,
       });
       await store.createSession({
         expectedStoreId: storeId,
@@ -235,7 +229,7 @@ test.skipIf(process.platform !== 'darwin')(
           ],
         }),
       );
-      mkdirSync(join(home, 'old-user-data'), { mode: 0o700 });
+      privateDirectory(join(home, 'old-user-data'));
       writeFileSync(join(home, 'old-user-data/old-database'), 'must remain independent');
       const fixture = join(root, 'driver.ts');
       writeFileSync(
@@ -385,7 +379,7 @@ test.skipIf(process.platform !== 'darwin')(
           dataRoot: join(diagnosticHome, '.kite-code/unified-agent'),
           profile: 'default',
         });
-      mkdirSync(diagnosticProfile.profilePath, { recursive: true, mode: 0o700 });
+      privateDirectory(diagnosticProfile.profilePath);
       writeFileSync(
         diagnosticProfile.databasePath,
         'private-corrupt-database credential session-content',

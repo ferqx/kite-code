@@ -1,8 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import type { Extension, ReadContext } from '../../../src/extensions';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
@@ -36,7 +39,7 @@ async function fixture(
   wait?: { entered: ReturnType<typeof gate>; proceed: ReturnType<typeof gate> },
   namespace = false,
 ) {
-  const root = mkdtempSync('/private/tmp/kite-fork-record-sources-'),
+  const root = temporaryDirectory('kite-fork-record-sources-'),
     profile = { dataRoot: join(root, 'profile'), profile: 'test' };
   const store = await openSqliteStore(profile),
     storeId = (await store.getMetadata()).storeId;
@@ -187,7 +190,7 @@ async function fixture(
   await runtime.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'fixture',
   });
   await runtime.createSession({
@@ -558,7 +561,7 @@ test('sealed graph cycle and source Workspace mismatch are unverifiable, never a
         await f.runtime.createWorkspace({
           expectedStoreId: f.storeId,
           id: 'foreign-w',
-          rootUri: 'file:///private/tmp',
+          rootUri: pathToFileURL(tmpdir()).href,
           name: 'foreign',
         });
         f.physical.run("UPDATE session SET workspace_id='foreign-w' WHERE id='s'");

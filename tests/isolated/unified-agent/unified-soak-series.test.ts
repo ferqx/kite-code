@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { runStableCrashSeries } from '../../../scripts/runtime/unified-soak';
 import { sameNativeProcess } from '../../../scripts/runtime/unified-soak-native';
 import { runProbe } from '../../../scripts/runtime/unified-soak-probe';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 test.skipIf(process.platform === 'win32')(
   'lifecycle observations cover the active window without replacing earlier measured boundaries',
@@ -49,7 +50,7 @@ test.skipIf(process.platform === 'win32')(
       });
       expect(built.success).toBe(true);
       const directory = join(root, 'series');
-      mkdirSync(directory, { mode: 0o700 });
+      privateDirectory(directory);
       const spawn = (path: string, mode: string) =>
         Bun.spawn(
           [

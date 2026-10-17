@@ -2,8 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -19,6 +17,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 import {
@@ -30,7 +29,7 @@ const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'installed default Native creates host Shell Jobs, stops the exact full tree and cold reads original output after Main and Service faults',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-shell-lifecycle-')),
+    const root = realpathSync(temporaryDirectory('kite-native-shell-lifecycle-')),
       home = join(root, 'home'),
       moved = join(root, 'relocated'),
       prefix = join(root, 'installed'),
@@ -40,7 +39,7 @@ test.skipIf(process.platform !== 'darwin')(
     const { installNativeBundle, uninstallNativeBundle } = await import(
       resolve(import.meta.dir, '../../../../scripts/release/native-install.ts')
     );
-    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    privateDirectory(workspace);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',

@@ -4,7 +4,6 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -12,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dir, '../../..');
 const priorSha = '6d9ffc07b069d4314970727c0a74ef0b62ed0990e4298805119953c25efda8ef';
@@ -116,7 +116,7 @@ async function build(source: string, destination: string) {
   return manifest;
 }
 async function distribution() {
-  const root = mkdtempSync('/private/tmp/kite-unseen-distribution-');
+  const root = temporaryDirectory('kite-unseen-distribution-');
   const directory = join(root, 'application'),
     modules = join(directory, 'node_modules');
   mkdirSync(modules, { recursive: true });
@@ -183,7 +183,7 @@ async function distribution() {
     node,
     prior,
     async run(mode: string, profileRoot: string) {
-      mkdirSync(profileRoot, { recursive: true, mode: 0o700 });
+      privateDirectory(profileRoot);
       return JSON.parse(
         await child(
           [

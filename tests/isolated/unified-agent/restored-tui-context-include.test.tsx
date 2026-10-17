@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Extension } from '@kite-ai/agent/extensions';
@@ -149,7 +150,7 @@ test('restored TUI Context explicitly includes the original suppressed Job and t
       expectedStoreId: originalStoreId,
       id: 'workspace',
       name: 'Original workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await original.createSession({
       expectedStoreId: originalStoreId,

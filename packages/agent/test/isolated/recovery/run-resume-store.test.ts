@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { OwnerRef } from '../../../src/storage/types';
@@ -32,7 +33,7 @@ async function fixture(
   await store.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${dataRoot}`,
+    rootUri: pathToFileURL(dataRoot).href,
     name: 'w',
   });
   await store.createSession({

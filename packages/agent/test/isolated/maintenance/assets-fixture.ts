@@ -1,8 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   acquireProfileAccess,
   acquireProfileDataLock,
@@ -72,7 +73,7 @@ export async function nodeAssets(
   action: 'seed' | 'read' | 'add' = 'seed',
 ) {
   const directory = join(root, 'node-ui-fixture');
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  privateDirectory(directory);
   const helper = join(directory, 'profile-access-helper.js'),
     driver = join(directory, 'driver.js');
   if (action === 'seed') {
@@ -195,7 +196,7 @@ export function seedTuiAsset(
   text = tuiText,
 ) {
   const parent = join(selectProfile(profile).profilePath, 'ui');
-  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  privateDirectory(parent);
   const scope = [storeId, 'w', 's'];
   const id = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
   writeFileSync(

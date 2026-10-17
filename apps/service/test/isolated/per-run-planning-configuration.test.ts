@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
 import type { PermissionMode } from '@kite-ai/agent/permissions';
@@ -18,6 +19,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { readBusinessRunInputs } from '../../src/planning-configuration';
@@ -43,7 +45,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
   mkdirSync(workspace);
   writeFileSync(join(workspace, 'original.txt'), 'original Chinese 中文');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'plan' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const normal: Record<string, unknown>[] = [];
   const reviews: Record<string, unknown>[] = [];
   let step = 0;
@@ -214,7 +216,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await client.createSession({
     expectedStoreId,

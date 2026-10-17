@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { defineExtension, type JobEvent } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -158,7 +159,7 @@ test('public view keeps the current Run and an old live Job after 205 real compl
       expectedStoreId: storeId,
       id: 'w',
       name: 'fixture',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await client.createSession({
       expectedStoreId: storeId,

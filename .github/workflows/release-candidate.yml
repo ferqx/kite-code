@@ -36,7 +36,7 @@ jobs:
           repository: ${{ env.KITE_CANDIDATE_REPOSITORY }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.2
+          bun-version: ${{ runner.os == 'Windows' && '1.4.3' || '1.4.2' }}
       - run: bun install --frozen-lockfile
       - if: runner.os == 'Linux'
         name: Prepare Linux native qualification dependencies
@@ -55,6 +55,18 @@ jobs:
           tests/isolated/unified-agent/native-install.test.ts
           tests/isolated/unified-agent/cli-registration.test.ts
           tests/isolated/unified-agent/release-tools.test.ts
+          tests/isolated/unified-agent/release-smoke-ownership.test.ts
+          tests/isolated/unified-agent/windows-terminal-launcher.test.ts
+          tests/isolated/unified-agent/windows-terminal-runtime.test.ts
+          tests/isolated/unified-agent/windows-native-runtime.test.ts
+          tests/isolated/unified-agent/terminal-dependency-materialization.test.ts
+          tests/isolated/unified-agent/terminal-bundled-dependencies.test.ts
+          packages/agent/test/isolated/artifact-access/windows-scope.test.ts
+          packages/agent/test/isolated/artifact-access/windows-private-tree.test.ts
+          apps/service/test/isolated/windows-runtime-admission.test.ts
+          apps/desktop/test/isolated/windows-node-access.test.ts
+          apps/desktop/test/isolated/windows-native-candidate.test.ts
+          apps/desktop/test/isolated/node-process.test.ts
       - name: Build source-bound Terminal candidate and archive
         shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/terminal-build.log "{0}"
         run: bun run release:build --directory dist/unified-terminal --archive dist/unified-terminal.tar.gz

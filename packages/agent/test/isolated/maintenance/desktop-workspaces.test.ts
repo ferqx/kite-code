@@ -1,8 +1,13 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import {
   createProfileBackup,
@@ -20,7 +25,7 @@ afterAll(() => selected?.close());
 test.skipIf(process.platform !== 'darwin')(
   'actual Node DB8 unknown Workspace intent survives public v17 restore with original bytes and the cold foreign caller performs HTTP zero',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-desktop-workspaces-'));
+    const root = realpathSync(temporaryDirectory('kite-desktop-workspaces-'));
     const profile = { dataRoot: join(root, 'data'), profile: 'test' };
     try {
       const store = await openSqliteStore(profile),
@@ -29,11 +34,11 @@ test.skipIf(process.platform !== 'darwin')(
         expectedStoreId: storeId,
         id: 'w',
         name: 'w',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       await store.close();
       const directory = join(root, 'node');
-      mkdirSync(directory, { mode: 0o700 });
+      privateDirectory(directory);
       for (const [entry, name, target] of [
         [
           resolve(import.meta.dir, '../../../../../apps/desktop/electron/profile-access-helper.ts'),

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -67,7 +68,7 @@ export async function fixture(
   await client.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: new URL(`file://${root}/`).href,
+    rootUri: pathToFileURL(`${root}/`).href,
     name: 'owned',
   });
   const session = async (id: string = randomUUID()) => {

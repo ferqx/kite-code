@@ -23,6 +23,7 @@ export async function runDaemonProcess(options: { configure?: ConfigureProcessHo
           executable: process.execPath,
           buildId: startup.buildId,
         });
+      return artifact;
     });
   } catch (error) {
     if (
@@ -87,7 +88,9 @@ async function readStartup(): Promise<DaemonStartup> {
 /** Explicit shared process. Parent EOF only ends private startup; it is never daemon shutdown. */
 async function runDaemonProcessInner(
   options: { configure?: ConfigureProcessHost },
-  admit: (startup: DaemonStartup['startup']) => void,
+  admit: (
+    startup: DaemonStartup['startup'],
+  ) => ReturnType<typeof retainWindowsPairedArtifact> | undefined,
 ) {
   // A launcher may leave after the private handoff. Broken diagnostic pipes must not kill work.
   process.stderr.on('error', () => {});
@@ -95,7 +98,7 @@ async function runDaemonProcessInner(
   const input = await readStartup();
   const { startup } = input;
   // A preflight/endpoint failure must not drop the selected candidate's usage protection.
-  admit(startup);
+  const artifact = admit(startup);
   const selected = selectProfile({
     dataRoot: startup.profile.dataRoot,
     profile: startup.profile.profile,
@@ -149,6 +152,7 @@ async function runDaemonProcessInner(
   process.on('SIGINT', close);
   try {
     service = await assembleProcessService(startup, {
+      ...(artifact ? { windowsArtifact: artifact } : {}),
       configure: options.configure,
       beforeResourceClose: async () => {
         await gateway?.close();

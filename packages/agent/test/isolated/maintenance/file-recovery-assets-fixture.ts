@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
 import { nodeAssets, retainLegacyDb5Fixture } from './assets-fixture';
 
@@ -13,7 +14,7 @@ export async function nodeFileRecoveryAssets(
 ) {
   if (action === 'seed') await nodeAssets(root, profile, storeId);
   const directory = join(root, 'node-file-recovery-fixture');
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  privateDirectory(directory);
   const helper = join(root, 'node-ui-fixture/profile-access-helper.js');
   const driver = join(directory, 'driver.js');
   if (action === 'seed') {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
@@ -11,6 +11,7 @@ import {
   registerClient,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 import { createMcpOAuthNetwork } from '../../src/mcp-oauth-network';
 
@@ -330,7 +331,7 @@ test('HTTPS-only, URL secrets, mixed/private/metadata and invalid-family DNS den
 }, 10000);
 
 test('real pinned TLS uses original servername and rejects an untrusted certificate before HTTP', async () => {
-  const root = mkdtempSync('/private/tmp/kite-oauth-network-tls-');
+  const root = temporaryDirectory('kite-oauth-network-tls-');
   const key = join(root, 'key.pem'),
     cert = join(root, 'cert.pem');
   const certificate = Bun.spawn(
@@ -444,7 +445,7 @@ server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdi
 }, 10000);
 
 test('baked fixture certificate permits actual OAuth and MCP TLS while retaining hostname verification and owned shutdown', async () => {
-  const root = mkdtempSync('/private/tmp/kite-mcp-trusted-fixture-tls-');
+  const root = temporaryDirectory('kite-mcp-trusted-fixture-tls-');
   const key = join(root, 'key.pem'),
     cert = join(root, 'cert.pem'),
     config = join(root, 'certificate.cnf');

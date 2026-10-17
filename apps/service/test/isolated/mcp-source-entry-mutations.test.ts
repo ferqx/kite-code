@@ -3,7 +3,6 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -22,6 +21,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 
@@ -43,10 +43,10 @@ async function fixture(options: { mode?: 'full' | 'auto' | 'deny'; observer?: st
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-source-entry-')));
   chmodSync(root, 0o700);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
-  mkdirSync(join(workspace, '.kite-code'), { mode: 0o700 });
+  privateDirectory(workspace);
+  privateDirectory(join(workspace, '.kite-code'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const user = join(profile.profilePath, 'mcp.json');
   const project = join(workspace, '.kite-code', 'mcp.json');
   const originalUser = `// retained user comment\r\n{"env":{"UNRELATED":"${placeholder}"},"unknown":{"keep":true},"mcpServers":{"shared":{"type":"http","url":"https://controlled.invalid/user"}}}\r\n`;
@@ -454,8 +454,8 @@ for (const drift of ['user', 'workspace', 'approval', 'binding', 'variables', 'r
       const originalRoot = join(f.root, 'original-workspace');
       if (drift === 'root') {
         renameSync(f.workspace, originalRoot);
-        mkdirSync(f.workspace, { mode: 0o700 });
-        mkdirSync(join(f.workspace, '.kite-code'), { mode: 0o700 });
+        privateDirectory(f.workspace);
+        privateDirectory(join(f.workspace, '.kite-code'));
         writeFileSync(f.project, '{"mcpServers":{}}\n', { mode: 0o600 });
       }
       const before = readFileSync(f.project);

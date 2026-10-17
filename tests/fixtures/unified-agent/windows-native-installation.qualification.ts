@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { cpSync, existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -60,9 +60,29 @@ export async function qualifyWindowsNativeInstallation(
     '../../../packages/agent/src/platform/windows-path-security'
   );
   const security = defaultWindowsPathSecurity()!;
+  // Use the same protected, original-handle copy as the installer. Ordinary
+  // CopyFile can defer Windows scanning until the following full verification.
+  // Every destination is new; pack/install still independently verify all bytes.
+  const copyCandidate = (
+    bundle: ReturnType<typeof verifyNativeRuntimeBundle>,
+    destination: string,
+  ) => {
+    assert(!existsSync(destination), 'fixture_candidate_must_be_new');
+    privateDirectory(destination);
+    privateDirectory(join(destination, 'terminal'));
+    security.copyPrivateArtifactFiles(bundle.root, destination, [
+      'native-manifest.json',
+      'terminal/terminal-manifest.json',
+      ...bundle.manifest.files.map((file) => file.path),
+      ...bundle.terminal.manifest.files.map((file) => `terminal/${file.path}`),
+    ]);
+    for (const directory of bundle.manifest.directories)
+      privateDirectory(join(destination, directory));
+  };
   const currentCandidate = verifyNativeRuntimeBundle(candidate);
   const predecessor = crossCode ? realpathSync(predecessorInput!) : candidate;
   const originalCandidate = crossCode ? verifyNativeRuntimeBundle(predecessor) : currentCandidate;
+  assert(Date.now() < basicDeadline, 'windows_native_qualification_input_deadline');
   const agentEntry = 'node_modules/@kite-ai/agent/index.js';
   if (crossCode) {
     assert.equal(originalCandidate.terminal.manifest.source.commit, COMPATIBLE_PREDECESSOR_COMMIT);
@@ -344,7 +364,7 @@ export async function qualifyWindowsNativeInstallation(
   let result: Record<string, unknown> | undefined, firstError: unknown;
   try {
     const clone = join(root, 'clone-a');
-    cpSync(predecessor, clone, { recursive: true, dereference: false, verbatimSymlinks: true });
+    await stage('fixture_clone', () => copyCandidate(originalCandidate, clone));
     const packed = await stage('archive_pack', () =>
       packNativeBundle({ bundleRoot: clone, archivePath: join(root, 'native.tar.gz') }),
     );
@@ -359,7 +379,7 @@ export async function qualifyWindowsNativeInstallation(
     let witnessB: typeof currentCandidate;
     if (crossCode) witnessB = verifyNativeRuntimeBundle(sourceB);
     else {
-      cpSync(sourceA, sourceB, { recursive: true, dereference: false, verbatimSymlinks: true });
+      await stage('fixture_witness', () => copyCandidate(unpacked, sourceB));
       // Only private, unpublished witness manifests change. Runtime/app files stay byte-identical.
       const terminalManifestPath = join(sourceB, 'terminal', 'terminal-manifest.json');
       const terminalManifest = JSON.parse(readFileSync(terminalManifestPath, 'utf8'));
@@ -484,7 +504,7 @@ export async function qualifyWindowsNativeInstallation(
                   executionId: execution.id,
                 });
                 let full: Awaited<ReturnType<typeof readModelOutput>>;
-                if (crossCode && saved.output === null) {
+                if (saved.output === null) {
                   assert.equal(saved.complete, true);
                   full = {
                     content: saved.content,
@@ -492,7 +512,15 @@ export async function qualifyWindowsNativeInstallation(
                     toolCalls: saved.toolCalls,
                     complete: saved.complete,
                   };
-                  assert.equal(full.content, completedTasks[index]!.body);
+                  assert.equal(full.content, crossCode ? completedTasks[index]!.body : body);
+                  assert.equal(
+                    Buffer.byteLength(full.content),
+                    Buffer.byteLength(crossCode ? completedTasks[index]!.body : body),
+                  );
+                  assert.equal(
+                    sha(Buffer.from(full.content)),
+                    sha(Buffer.from(crossCode ? completedTasks[index]!.body : body)),
+                  );
                   assert.equal(full.reasoning, '');
                   assert.deepEqual(full.toolCalls, []);
                 } else {
@@ -687,9 +715,17 @@ export async function qualifyWindowsNativeInstallation(
       assert.equal(main.inspect(), 'alive');
       return await uia.perform(action, Math.min(10000, remaining()));
     };
+    let snapshotCount = 0,
+      pendingSnapshots = 0,
+      snapshotMs = 0;
     const snapshot = async (main: WindowsOwnedJobMember) => {
+      const started = Date.now();
       const value = await ui(main, { ...evidenceForUIA(main), action: 'snapshot' });
       assert(Array.isArray(value.elements));
+      snapshotCount++;
+      snapshotMs += Date.now() - started;
+      if (!value.elements.length) pendingSnapshots++;
+      if (value.observation) record('snapshot_changed', { observation: value.observation });
       return value.elements;
     };
     const waitText = async (main: WindowsOwnedJobMember, text: string, bodyText = false) => {
@@ -711,12 +747,14 @@ export async function qualifyWindowsNativeInstallation(
     const waitCompletedRuns = async (main: WindowsOwnedJobMember, count: number) => {
       const target = Date.now() + Math.min(10000, remaining());
       while (Date.now() < target) {
-        const elements = await snapshot(main);
-        const rows = elements.filter(
-          (element) =>
-            element.controlType === 'ControlType.Text' && element.name.startsWith('轮次：'),
+        assert.equal(main.inspect(), 'alive', 'original_main_must_still_be_alive');
+        // Normal clients hide completed-run diagnostics. Read the actual
+        // candidate's Store; visible complete body remains a separate UIA gate.
+        const view = await usingStore(
+          await sqlite.openSqliteStore({ dataRoot, profile: 'default', mode: 'readonly' }),
+          (store) => store.getView(sessionId),
         );
-        if (rows.length === count && rows.every((element) => element.name === '轮次：completed'))
+        if (view.runs.length === count && view.runs.every((run) => run.status === 'completed'))
           return;
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
@@ -738,7 +776,17 @@ export async function qualifyWindowsNativeInstallation(
       }
       const child = await start(launcher, []);
       const completion = consume(child);
-      const members = await findMembers(child, releaseRoot);
+      let members: Awaited<ReturnType<typeof findMembers>>;
+      try {
+        members = await findMembers(child, releaseRoot);
+      } catch (error) {
+        // A startup rejection can leave Electron's error window alive. Preserve
+        // the actual failure output after the original Job's confirmed cleanup.
+        const proof = await confirmedClose(child);
+        const [code, _stdout, stderr] = await completion;
+        record('window_startup_failed', { code, stderr, proof });
+        throw error;
+      }
       const window = {
         child,
         ...members,
@@ -758,6 +806,9 @@ export async function qualifyWindowsNativeInstallation(
       busyUninstall();
       record('window_opened', {
         candidateId,
+        snapshotCount,
+        pendingSnapshots,
+        snapshotMs,
         root: child.readEvidence().root,
         main: evidenceForUIA(window.main),
         service: evidenceForUIA(window.service),
@@ -770,6 +821,12 @@ export async function qualifyWindowsNativeInstallation(
       const exitDeadline = Math.min(Date.now() + 10000, deadline);
       const exiting = async () => {
         const result = await window.completion;
+        // close() releases every borrowed member handle. Observe the original
+        // Main/Service while those handles still carry kernel authority.
+        assert.equal(window.main.inspect(), 'dead');
+        assert.equal(window.service.inspect(), 'dead');
+        window.main.close();
+        window.service.close();
         const proof = await confirmedClose(window.child, exitDeadline);
         return { result, proof };
       };
@@ -782,10 +839,6 @@ export async function qualifyWindowsNativeInstallation(
         'native_normal_exit',
       );
       assert.equal(code, 0, stderr);
-      assert.equal(window.main.inspect(), 'dead');
-      assert.equal(window.service.inspect(), 'dead');
-      window.main.close();
-      window.service.close();
       leases(releaseRoot, false);
       if (crossCode) {
         await uia!.close();
@@ -801,6 +854,7 @@ export async function qualifyWindowsNativeInstallation(
       });
     };
     const driverDeadline = Math.min(basicDeadline, Date.now() + 45000);
+    record('driver_started', { deadlineMs: driverDeadline - startedAt, budgetMs: 45000 });
     currentDriverDeadline = driverDeadline;
     uia = await createWindowsNativeUIA({ home, env, deadline: driverDeadline });
     const first = await openWindow(a, installedA.candidateId);
@@ -816,8 +870,8 @@ export async function qualifyWindowsNativeInstallation(
       action: 'clickByName',
       name: '发送明确的新轮次',
     });
-    await waitText(first.main, '轮次：completed');
     const visibleA: WindowsNativeUIAElement = await waitText(first.main, body, true);
+    await waitCompletedRuns(first.main, 1);
     let originalHistory = await readHistory();
     const appendTask = async (window: Awaited<ReturnType<typeof openWindow>>, index: number) => {
       const prior = originalHistory,
@@ -1079,11 +1133,21 @@ export async function qualifyWindowsNativeInstallation(
     }
   }
   provider.stop(true);
-  if (firstError !== undefined || cleanupErrors.length)
+  if (firstError !== undefined || cleanupErrors.length) {
+    console.error(
+      JSON.stringify({
+        qualification: 'windows-native-installation-failed',
+        root,
+        candidateId: currentCandidate.digest,
+        elapsedMs: Date.now() - startedAt,
+        records,
+      }),
+    );
     throw new AggregateError(
       [...(firstError === undefined ? [] : [firstError]), ...cleanupErrors],
       'windows_native_qualification_failed',
     );
+  }
   assert(result, 'windows_native_evidence_required');
   remaining();
   return result;

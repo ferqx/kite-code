@@ -1,8 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -25,7 +26,7 @@ function proofs(row: CallerAssetRow) {
   return row;
 }
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-native-caller-maintenance-');
+  const root = temporaryDirectory('kite-native-caller-maintenance-');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;

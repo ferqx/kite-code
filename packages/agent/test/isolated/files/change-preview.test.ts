@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createFileTools, createWorkspaceFiles, type FileChangePreview } from '../../../src/files';
@@ -163,7 +164,7 @@ test('real Core saves the preview in original Execution receipts; repeated call 
     await runtime.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${f.root}`,
+      rootUri: pathToFileURL(f.root).href,
       name: 'owned',
     });
     await runtime.createSession({

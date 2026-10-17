@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter } from '@kite-ai/ai';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -86,7 +87,7 @@ test('small live reasoning prefix is publicly readable before finish without rel
       expectedStoreId,
       id: 'w',
       name: 'fixture',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({ ...scope, commandId: 'create', workspaceId: 'w', title: 'live' });
     await runtime.submitCommand({

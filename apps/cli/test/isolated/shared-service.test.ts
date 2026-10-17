@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -8,11 +8,12 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { startService } from '@kite-ai/service';
 import { readDaemonReservation, selectDaemonEndpoint } from '@kite-ai/service/daemon';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { assertSharedWorkspace, connectSharedService } from '../../host/shared-service';
 
 const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
 test('Node import outside the checkout does not load the native daemon entry', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-shared-import-'));
+  const root = realpathSync(temporaryDirectory('kite-shared-import-'));
   try {
     const build = await Bun.build({
       entrypoints: [join(import.meta.dir, '../../host/shared-service.ts')],
@@ -80,10 +81,10 @@ async function fixture(diagnostic = false, drift = false) {
   const { reserveDaemonEndpoint } = await import(
     new URL('../../../service/src/daemon/endpoint.ts', import.meta.url).href
   );
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-shared-client-'));
+  const root = realpathSync(temporaryDirectory('kite-shared-client-'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const held = barrier();
   let calls = 0;
   const store = diagnostic ? undefined : await openSqliteStore(profile);
@@ -167,9 +168,9 @@ async function fixture(diagnostic = false, drift = false) {
 }
 
 async function remoteFixture(drift = false) {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-shared-remote-'));
+  const root = realpathSync(temporaryDirectory('kite-shared-remote-'));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   const child = Bun.spawn(
     [
@@ -251,7 +252,7 @@ nativeTest(
         expectedStoreId: metadata.storeId,
         id: 'w',
         name: 'fixed',
-        rootUri: new URL(`file://${f.workspace}`).href,
+        rootUri: pathToFileURL(f.workspace).href,
       });
       await f.runtime!.createSession({
         expectedStoreId: metadata.storeId,
@@ -354,7 +355,7 @@ nativeTest(
 nativeTest(
   'absent and pre-aborted shared selections create no profile or endpoint files',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-shared-absent-'));
+    const root = realpathSync(temporaryDirectory('kite-shared-absent-'));
     try {
       const profile = selectProfile({ dataRoot: join(root, 'missing'), profile: 'owned' });
       const input = {

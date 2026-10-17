@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -132,7 +133,7 @@ await runtime.createWorkspace({
   expectedStoreId: storeId,
   id: 'w',
   name: 'temporary',
-  rootUri: `file://${root}`,
+  rootUri: pathToFileURL(root).href,
 });
 await runtime.createSession({
   expectedStoreId: storeId,

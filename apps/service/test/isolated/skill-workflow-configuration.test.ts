@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ExtensionRecord, Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   createWorkflowConfiguration,
   readSkillWorkflowFlags,
@@ -15,7 +17,7 @@ import {
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'kite-workflow-service-'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'fixture' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const skill = join(root, 'skill');
   mkdirSync(skill);
   const manifest = {
@@ -551,7 +553,7 @@ test.each(
       expectedStoreId,
       id: 'w',
       name: 'fixture',
-      rootUri: `file://${f.root}`,
+      rootUri: pathToFileURL(f.root).href,
     });
     await runtime.createSession({
       ...base,
@@ -855,7 +857,7 @@ test.each([
       expectedStoreId,
       id: 'w',
       name: 'fixture',
-      rootUri: `file://${f.root}`,
+      rootUri: pathToFileURL(f.root).href,
     });
     await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'fork' });
     await runtime.submitCommand({

@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -65,7 +66,217 @@ function pe(bytes: Buffer, subsystem: number | readonly number[] = 3) {
     rva: bytes.readUInt32LE(optional + 112 + index * 8),
     size: bytes.readUInt32LE(optional + 116 + index * 8),
   });
-  return { directory, offset, denied };
+  return { directory, offset, denied, range, optional, sections, count };
+}
+
+/** Materialize simple RVA-based delay imports in their own retired descriptor storage.
+ * IAT addresses, code, section layout, file length and standalone Bun's overlay stay intact.
+ */
+function importBasename(name: string, kind: 'console' | 'electron') {
+  return (
+    !name.includes('..') &&
+    (/^[a-z0-9_][a-z0-9_.-]*\.dll$/i.test(name) ||
+      (kind === 'electron' && ['winspool.drv', 'bthprops.cpl'].includes(name.toLowerCase())))
+  );
+}
+function eagerDelayImports(bytes: Buffer, kind: 'console' | 'electron') {
+  const image = pe(bytes, kind === 'electron' ? [2, 3] : 3);
+  const delay = image.directory(13);
+  if (!delay.rva && !delay.size) return;
+  if (!delay.rva || delay.size < 64 || delay.size > 4096 || delay.size % 32) image.denied();
+  const regions: { rva: number; virtual: number; raw: number; size: number }[] = [];
+  for (let i = 0; i < image.count; i++) {
+    const row = image.sections + i * 40;
+    const rva = bytes.readUInt32LE(row + 12),
+      raw = bytes.readUInt32LE(row + 20),
+      size = bytes.readUInt32LE(row + 16),
+      virtual = Math.max(size, bytes.readUInt32LE(row + 8));
+    if (rva + virtual > 0x100000000) image.denied();
+    if (size) {
+      image.range(raw, size);
+      if (raw < image.sections + image.count * 40) image.denied();
+    }
+    if (
+      regions.some(
+        (other) =>
+          (virtual &&
+            other.virtual &&
+            rva < other.rva + other.virtual &&
+            other.rva < rva + virtual) ||
+          (size && other.size && raw < other.raw + other.size && other.raw < raw + size),
+      )
+    )
+      image.denied();
+    regions.push({ rva, virtual, raw, size });
+  }
+  const storage = image.offset(delay.rva, delay.size);
+  // Reusing descriptors must never rewrite code or mutable runtime storage.
+  let storageSection = false;
+  for (let i = 0; i < image.count; i++) {
+    const row = image.sections + i * 40;
+    const address = bytes.readUInt32LE(row + 12);
+    const length = bytes.readUInt32LE(row + 8);
+    if (delay.rva >= address && delay.rva - address + delay.size <= length) {
+      const flags = bytes.readUInt32LE(row + 36);
+      if ((flags & 0x40000040) !== 0x40000040 || (flags & 0xa0000000) !== 0) image.denied();
+      storageSection = true;
+    }
+  }
+  if (!storageSection) image.denied();
+  const reads: [number, number][] = [];
+  const read = (rva: number, length: number) => {
+    const offset = image.offset(rva, length);
+    reads.push([offset, offset + length]);
+    return offset;
+  };
+  const name = (rva: number, dll: boolean) => {
+    const max = dll ? 256 : 4096;
+    let text = '';
+    for (let i = 0; i < max; i++) {
+      const ch = bytes[read(rva + i, 1)]!;
+      if (!ch) {
+        if (!text || (dll && !importBasename(text, kind))) image.denied();
+        return text.toLowerCase();
+      }
+      if (ch < 0x21 || ch > 0x7e) image.denied();
+      text += String.fromCharCode(ch);
+    }
+    return image.denied();
+  };
+  const section = (rva: number, length: number, flag: number) => {
+    for (let i = 0; i < image.count; i++) {
+      const row = image.sections + i * 40;
+      const start = bytes.readUInt32LE(row + 12),
+        size = bytes.readUInt32LE(row + 8);
+      if (rva >= start && rva - start + length <= size && bytes.readUInt32LE(row + 36) & flag)
+        return;
+    }
+    image.denied();
+  };
+  const base = bytes.readBigUInt64LE(image.optional + 24);
+  const iats: [number, number][] = [];
+  const thunks = (lookup: number, iat: number, delayed: boolean) => {
+    if (!lookup || !iat || lookup % 8 || iat % 8) image.denied();
+    for (let i = 0; i < 4096; i++) {
+      const value = bytes.readBigUInt64LE(read(lookup + i * 8, 8));
+      const address = bytes.readBigUInt64LE(read(iat + i * 8, 8));
+      if (!value) {
+        if (!i || address) image.denied();
+        const end = iat + (i + 1) * 8;
+        if (iats.some(([a, b]) => iat < b && a < end)) image.denied();
+        iats.push([iat, end]);
+        if (delayed) section(iat, (i + 1) * 8, 0x80000000);
+        return;
+      }
+      if (value & (1n << 63n)) {
+        if (value & ~((1n << 63n) | 65535n)) image.denied();
+      } else {
+        if (value > 0xffffffffn) image.denied();
+        read(Number(value), 2);
+        name(Number(value) + 2, false);
+      }
+      if (delayed) {
+        if (address < base || address - base > 0xffffffffn) image.denied();
+        section(Number(address - base), 1, 0x20000000);
+      }
+    }
+    image.denied();
+  };
+  const imports = image.directory(1);
+  if (!imports.rva || imports.size < 40 || imports.size > 65536) image.denied();
+  read(imports.rva, imports.size);
+  const records: Buffer[] = [],
+    seen = new Set<string>();
+  let ended = false;
+  for (let i = 0; i < 1024 && i * 20 + 20 <= imports.size; i++) {
+    const row = image.offset(imports.rva + i * 20, 20);
+    if (bytes.subarray(row, row + 20).every((v) => !v)) {
+      ended = true;
+      break;
+    }
+    const dll = name(bytes.readUInt32LE(row + 12), true);
+    if (seen.has(dll) || bytes.readUInt32LE(row + 4) || bytes.readUInt32LE(row + 8)) image.denied();
+    seen.add(dll);
+    const iat = bytes.readUInt32LE(row + 16);
+    thunks(bytes.readUInt32LE(row) || iat, iat, false);
+    records.push(Buffer.from(bytes.subarray(row, row + 20)));
+  }
+  if (!ended || !records.length) image.denied();
+  ended = false;
+  let added = 0;
+  for (let i = 0; i < delay.size / 32; i++) {
+    const row = storage + i * 32;
+    if (bytes.subarray(row, row + 32).every((v) => !v)) {
+      if (bytes.subarray(row, storage + delay.size).some((v) => v)) image.denied();
+      ended = true;
+      break;
+    }
+    if (
+      bytes.readUInt32LE(row) !== 1 ||
+      bytes.readUInt32LE(row + 20) ||
+      bytes.readUInt32LE(row + 24) ||
+      bytes.readUInt32LE(row + 28)
+    )
+      image.denied();
+    const dll = name(bytes.readUInt32LE(row + 4), true);
+    if (seen.has(dll)) image.denied();
+    seen.add(dll);
+    const module = bytes.readUInt32LE(row + 8),
+      iat = bytes.readUInt32LE(row + 12),
+      lookup = bytes.readUInt32LE(row + 16);
+    if (!module || module % 8 || bytes.readBigUInt64LE(read(module, 8))) image.denied();
+    section(module, 8, 0x80000000);
+    thunks(lookup, iat, true);
+    const record = Buffer.alloc(20);
+    record.writeUInt32LE(lookup);
+    record.writeUInt32LE(bytes.readUInt32LE(row + 4), 12);
+    record.writeUInt32LE(iat, 16);
+    records.push(record);
+    added++;
+  }
+  const size = (records.length + 1) * 20;
+  if (
+    !ended ||
+    !added ||
+    records.length >= 1024 ||
+    size > delay.size ||
+    reads.some(([a, b]) => a < storage + delay.size && storage < b)
+  )
+    image.denied();
+  // Retired v2 descriptors contain only RVAs. No relocation may rewrite their new role.
+  const reloc = image.directory(5);
+  if (!!reloc.rva !== !!reloc.size) image.denied();
+  for (let at = 0; at < reloc.size; ) {
+    const block = image.offset(reloc.rva + at, 8),
+      page = bytes.readUInt32LE(block),
+      length = bytes.readUInt32LE(block + 4);
+    if (length < 8 || length % 2 || at + length > reloc.size) image.denied();
+    image.offset(reloc.rva + at, length);
+    for (let entry = 8; entry < length; entry += 2) {
+      const value = bytes.readUInt16LE(block + entry),
+        type = value >>> 12;
+      if (!type) continue;
+      if (type !== 10 && type !== 3) image.denied();
+      const rva = page + (value & 4095),
+        width = type === 10 ? 8 : 4;
+      if (rva < delay.rva + delay.size && delay.rva < rva + width) image.denied();
+    }
+    at += length;
+  }
+  for (let i = 0; i < 16; i++) {
+    if ([1, 4, 13].includes(i)) continue;
+    const entry = image.directory(i);
+    if (entry.size && entry.rva < delay.rva + delay.size && delay.rva < entry.rva + entry.size)
+      image.denied();
+  }
+  bytes.fill(0, storage, storage + delay.size);
+  records.forEach((record, index) => {
+    record.copy(bytes, storage + index * 20);
+  });
+  bytes.writeUInt32LE(delay.rva, image.optional + 120);
+  bytes.writeUInt32LE(size, image.optional + 124);
+  bytes.writeUInt32LE(0, image.optional + 216);
+  bytes.writeUInt32LE(0, image.optional + 220);
 }
 
 function systemImportSearch(
@@ -103,8 +314,7 @@ function systemImportSearch(
     name = name.toLowerCase();
     if (
       !complete ||
-      !/^[a-z0-9_][a-z0-9_.-]*\.dll$/.test(name) ||
-      name.includes('..') ||
+      !importBasename(name, flags === 0xa00 ? 'electron' : 'console') ||
       seen.has(name)
     )
       image.denied();
@@ -124,7 +334,7 @@ function systemImportSearch(
   return configOffset + 78;
 }
 
-/** New owned image only: restrict its existing static import search on Windows 10 RS1+. */
+/** New owned image only: eager simple RVA imports, then seal static import search. */
 export function sealWindowsSystemImportSearch(
   bytes: Buffer,
   kind: 'console' | 'electron' = 'console',
@@ -132,8 +342,9 @@ export function sealWindowsSystemImportSearch(
   const subsystem = kind === 'electron' ? [2, 3] : 3;
   // Electron's private distribution supplies its own DLLs; all are pinned before launch.
   const flags = kind === 'electron' ? 0xa00 : 0x800;
-  const offset = systemImportSearch(bytes, false, subsystem, flags);
   const sealed = Buffer.from(bytes);
+  eagerDelayImports(sealed, kind);
+  const offset = systemImportSearch(sealed, false, subsystem, flags);
   sealed.writeUInt16LE(flags, offset);
   systemImportSearch(sealed, true, subsystem, flags);
   return sealed;
@@ -198,6 +409,76 @@ export function copyWindowsSystemExecutable(
       [...(failed ? [failure] : []), ...errors],
       'windows_terminal_launcher_release_failed',
     );
+  if (failed) throw failure;
+}
+
+/** Bun 1.4.2 copies the compiling process executable's DACL, even with executablePath.
+ * Compile inside the qualified private runtime instead of repairing an unsafe output.
+ */
+export async function compileWindowsVerifier(input: {
+  runtime: string;
+  entrypoint: string;
+  outfile: string;
+}): Promise<void> {
+  if (process.platform !== 'win32' || process.arch !== 'x64')
+    throw Error('windows_terminal_launcher_platform_unsupported');
+  for (const path of [input.runtime, input.entrypoint, input.outfile])
+    if (!isAbsolute(path)) throw Error('windows_terminal_launcher_input_invalid');
+  if (existsSync(input.outfile)) throw Error('windows_terminal_launcher_input_invalid');
+  const pin = retainWindowsCandidateFiles(dirname(input.runtime), [basename(input.runtime)]);
+  let failure: unknown;
+  let failed = false;
+  try {
+    systemImportSearch(readFileSync(input.runtime), true);
+    const script = `const result=await Bun.build(${JSON.stringify({
+      entrypoints: [input.entrypoint],
+      target: 'bun',
+      packages: 'bundle',
+      compile: {
+        executablePath: input.runtime,
+        outfile: input.outfile,
+        autoloadDotenv: false,
+        autoloadBunfig: false,
+        autoloadTsconfig: false,
+        autoloadPackageJson: false,
+      },
+    })});if(!result.success)throw new AggregateError(result.logs,'windows_verifier_build_failed');`;
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        input.runtime,
+        ['--no-env-file', '--no-clear-screen', '--eval', script],
+        {
+          cwd: dirname(input.outfile),
+          env: {
+            PATH: process.env.PATH ?? '',
+            SystemRoot: process.env.SystemRoot ?? '',
+            TEMP: process.env.TEMP ?? '',
+            TMP: process.env.TMP ?? '',
+          },
+          windowsHide: true,
+          timeout: 60000,
+          maxBuffer: 1048576,
+        },
+        (error, _stdout, stderr) => {
+          if (error) reject(new Error(`windows_verifier_build_failed:${stderr}`, { cause: error }));
+          else resolve();
+        },
+      );
+    });
+    pin.verify();
+    defaultWindowsPathSecurity()!.verifyFile(input.outfile);
+  } catch (error) {
+    failed = true;
+    failure = error;
+  }
+  try {
+    pin.release();
+  } catch (error) {
+    throw new AggregateError(
+      [...(failed ? [failure] : []), error],
+      'windows_verifier_build_close_unknown',
+    );
+  }
   if (failed) throw failure;
 }
 
@@ -276,7 +557,10 @@ export async function buildWindowsTerminalLauncher(
   )
     throw Error('windows_terminal_launcher_verifier_changed');
   privateDirectory(input.outdir);
-  const output = join(input.outdir, 'kite.exe');
+  // A copy must not add siblings inside its own pinned, immutable source inventory.
+  const compileRoot = join(input.outdir, 'compiler');
+  privateDirectory(compileRoot);
+  const output = join(compileRoot, 'kite.exe');
   const verifierPin = retainWindowsCandidateFiles(dirname(input.verifierPath), [
     basename(input.verifierPath),
   ]);
@@ -314,7 +598,7 @@ export async function buildWindowsTerminalLauncher(
         `/DKITE_TERMINAL_VERIFIER_SHA256="${input.verifierSha256}"`,
         `/DKITE_TERMINAL_VERIFIER_SIZE=${input.verifierSize}ULL`,
         join(import.meta.dir, 'native/terminal-launcher.cc'),
-        `/Fo${join(input.outdir, 'terminal-launcher.obj')}`,
+        `/Fo${join(compileRoot, 'terminal-launcher.obj')}`,
         `/Fe${output}`,
         '/link',
         '/SUBSYSTEM:CONSOLE',
@@ -325,7 +609,7 @@ export async function buildWindowsTerminalLauncher(
         'bcrypt.lib',
       ],
       {
-        cwd: input.outdir,
+        cwd: compileRoot,
         env: {
           ...process.env,
           CL: '',
@@ -408,6 +692,7 @@ export async function buildWindowsTerminalLauncher(
     )
       throw Error('windows_terminal_launcher_verifier_changed');
     const security = defaultWindowsPathSecurity()!;
+    security.copyPrivateFile(output, join(input.outdir, 'kite.exe'));
     security.copyPrivateFile(output, join(input.outdir, 'kite-tui.exe'));
     if (input.kind === 'native')
       security.copyPrivateFile(output, join(input.outdir, 'kite-desktop.exe'));
@@ -444,8 +729,7 @@ export async function buildWindowsTerminalLauncher(
     }
     pendingLauncherBuilds.delete(owner);
     try {
-      for (const suffix of ['obj', 'lib', 'exp'])
-        rmSync(join(input.outdir, `terminal-launcher.${suffix}`), { force: true });
+      rmSync(compileRoot, { recursive: true, force: true });
       if (!succeeded) rmSync(input.outdir, { recursive: true, force: true });
     } catch (error) {
       throw new AggregateError(

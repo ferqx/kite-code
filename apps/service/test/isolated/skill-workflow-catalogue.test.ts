@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import type { SkillCataloguePage } from '../../src/skill-catalogue';
@@ -26,11 +28,11 @@ function manifest(name: string) {
   };
 }
 test('manual Workflow HTTP projection is same-source, independently unavailable, complete and read only', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-workflow-catalogue-'));
+  const root = realpathSync(temporaryDirectory('kite-workflow-catalogue-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const skills: { id: string; path: string; enabled?: boolean }[] = [];
   const write = (id: string, value: unknown) => {
     const location = join(workspace, id);
@@ -136,7 +138,7 @@ test('manual Workflow HTTP projection is same-source, independently unavailable,
     expectedStoreId: storeId,
     id: 'w',
     name: 'fixture',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   const trust = await permissions.readTrust({ ...identity, workspaceId: 'w' });
   await permissions.setTrust({

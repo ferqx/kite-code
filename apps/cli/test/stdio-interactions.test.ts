@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { createStdioInteractionHandler, run } from '../src';
@@ -25,7 +26,7 @@ async function paired() {
     expectedStoreId: storeId,
     id: 'w',
     name: 'temporary',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await client.createSession({
     expectedStoreId: storeId,
@@ -372,7 +373,7 @@ async function coreFixture(child: boolean, delay: number | Promise<void> = 0) {
     expectedStoreId: storeId,
     id: 'w',
     name: 'temporary',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await client.createSession({
     expectedStoreId: storeId,

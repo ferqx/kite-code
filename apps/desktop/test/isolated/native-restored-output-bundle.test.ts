@@ -1,15 +1,6 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -19,13 +10,14 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
 test.skipIf(process.platform !== 'darwin')(
   'installed default PC reads the original large sealed Fork after explicit installed backup/restore and cold reopen, without new work',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-restored-output-')),
+    const root = realpathSync(temporaryDirectory('kite-native-restored-output-')),
       home = join(root, 'home'),
       workspace = join(home, 'workspace'),
       prefix = join(root, 'installed'),
@@ -34,7 +26,7 @@ test.skipIf(process.platform !== 'darwin')(
         dataRoot: join(home, '.kite-code/unified-agent'),
         profile: 'default',
       });
-    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    privateDirectory(workspace);
     expect(Buffer.byteLength(content)).toBeGreaterThan(65536);
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
       out: Promise<string> | undefined,

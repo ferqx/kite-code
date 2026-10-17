@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { defineExtension, type Json } from '../../../src/extensions';
@@ -108,7 +109,7 @@ test.each([
     await runtime.createWorkspace({
       expectedStoreId: metadata.storeId,
       id: 'workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Disposable',
     });
     await runtime.createSession({
@@ -258,7 +259,7 @@ test('unavailable required filesystem source blocks only its Action; Query, canc
       await runtime.createWorkspace({
         expectedStoreId: metadata.storeId,
         id,
-        rootUri: `file://${join(root, id)}`,
+        rootUri: pathToFileURL(join(root, id)).href,
         name: id,
       });
       await runtime.createSession({

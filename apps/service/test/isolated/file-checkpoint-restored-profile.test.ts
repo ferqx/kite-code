@@ -27,6 +27,7 @@ import {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 import { createFileCheckpointProvider } from '../fixtures/file-checkpoint-provider';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
@@ -73,7 +74,7 @@ test('default Files original capture survives public offline restore to a new pr
   const profileA = selectProfile({ dataRoot: join(root, 'data-a'), profile: 'owned' });
   const profileB = selectProfile({ dataRoot: join(root, 'data-b'), profile: 'owned' });
   let profile = profileA;
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const { provider, requests, model } = createFileCheckpointProvider({
     'SECOND_ACTUAL_RUN: read actual A postimage then update and create in B': 'second',
   });

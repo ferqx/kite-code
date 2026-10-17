@@ -50,6 +50,11 @@ export interface PairedServiceOptions {
   shutdownTimeoutMs?: number;
   executable?: string;
   spawnChild?: PairedServiceSpawner;
+  /** Trusted native host borrows its original process-owned admission; never startup/config JSON. */
+  retainWindowsArtifact?: (
+    proof: RuntimeProtection,
+    actual: { entrypoint: string; executable: string; buildId: string },
+  ) => { readonly arguments: readonly string[]; release(): void };
 }
 export class PairedServiceError extends Error {
   readonly code: string;
@@ -134,8 +139,10 @@ export async function launchPairedService(options: PairedServiceOptions) {
   let artifact: ReturnType<typeof retainWindowsPairedArtifact> | undefined;
   if (process.platform === 'win32' && options.runtimeProtection) {
     try {
-      const windows = await import('./windows-paired-artifact');
-      artifact = windows.retainWindowsPairedArtifact(options.runtimeProtection, {
+      const retain =
+        options.retainWindowsArtifact ??
+        (await import('./windows-paired-artifact')).retainWindowsPairedArtifact;
+      artifact = retain(options.runtimeProtection, {
         entrypoint: options.entrypoint,
         executable,
         buildId: options.buildId,

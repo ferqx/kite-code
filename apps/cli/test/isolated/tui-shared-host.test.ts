@@ -1,12 +1,13 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import { bootstrapSchema } from '@kite-ai/service/daemon';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 
 const repository = resolve(import.meta.dir, '../../../..');
@@ -36,11 +37,11 @@ async function deadline<T>(promise: Promise<T>): Promise<T> {
 nativeTest(
   'actual shared TUI exits detach; wrong workspace/absent create nothing; daemon loss retains draft and UI lease',
   async () => {
-    const root = mkdtempSync('/private/tmp/kite-tui-shared-');
+    const root = temporaryDirectory('kite-tui-shared-');
     const workspace = join(root, 'workspace');
     const wrongWorkspace = join(root, 'wrong');
     const web = join(root, 'web');
-    for (const directory of [workspace, wrongWorkspace, web]) mkdirSync(directory, { mode: 0o700 });
+    for (const directory of [workspace, wrongWorkspace, web]) privateDirectory(directory);
     const assets = [
       ['/index.html', 'text/html; charset=utf-8', '<!doctype html><title>Shared fixture</title>'],
       ['/app.js', 'text/javascript; charset=utf-8', 'globalThis.sharedFixture = true;'],
@@ -53,7 +54,7 @@ nativeTest(
     writeFileSync(join(web, 'manifest.json'), manifest);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
-    mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

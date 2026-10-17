@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -12,8 +11,10 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -33,7 +34,7 @@ async function bounded<T>(promise: Promise<T>) {
 test.skipIf(process.platform !== 'darwin')(
   'actual Native Context idle Rewind suppresses the original Job; exact active Include queues then reaches next Model checkpoint once with no Job replay',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-context-')),
+    const root = realpathSync(temporaryDirectory('kite-native-context-')),
       profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
       workspace = join(root, 'workspace'),
       ledger = join(root, 'ledger');
@@ -44,7 +45,7 @@ test.skipIf(process.platform !== 'darwin')(
       expectedStoreId: storeId,
       id: 'w',
       name: 'Native fixture',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
     });
     await store.createSession({
       expectedStoreId: storeId,

@@ -2,11 +2,13 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Extension, OperationRef, Permissions } from '@kite-ai/agent/extensions';
 import type { PermissionPolicyOptions } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { type ChildRole, createChildConfiguration } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
@@ -113,7 +115,7 @@ async function fixture(
   writeFileSync(join(workspace, 'input.txt'), 'full private input');
   writeFileSync(join(workspace, 'AGENTS.md'), 'actual old Workspace instruction');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const a = provider(),
     b = provider();
   const userPath = join(profile.profilePath, 'config.jsonc'),
@@ -227,7 +229,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'private',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'parent' });
   return {

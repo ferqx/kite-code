@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { canonicalJson, semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json, RunResumeExecutionPageInput } from '../../../src/storage/types';
@@ -39,7 +40,7 @@ test('certified cold resume keeps complete original history, pages exact identit
     await store.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${dataRoot}`,
+      rootUri: pathToFileURL(dataRoot).href,
       name: 'w',
     });
     await store.createSession({

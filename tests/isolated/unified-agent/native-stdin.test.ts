@@ -1,13 +1,5 @@
 import { expect, test } from 'bun:test';
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -19,24 +11,25 @@ import {
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 test.skipIf(process.platform !== 'darwin')(
   'installed full Native stdin keeps EOF pending and a new CLI process answers exact work once with original IDs and complete semantic text',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-stdin-'));
+    const root = realpathSync(temporaryDirectory('kite-native-stdin-'));
     const diagnostic = `${root}.commands.jsonl`;
     writeFileSync(diagnostic, '', { mode: 0o600 });
     const home = join(root, 'home'),
       workspace = join(home, 'workspace'),
       prefix = join(root, 'installed'),
       socket = join(root, 'daemon.sock');
-    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    privateDirectory(workspace);
     const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
     });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     const task = '完整 Native stdin 申请\r\n中🪁';
     const questions = {
       questions: [

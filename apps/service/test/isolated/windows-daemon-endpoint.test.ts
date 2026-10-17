@@ -94,7 +94,7 @@ import {mock} from 'bun:test';
 Object.defineProperty(process,'platform',{value:'win32'});
 const original=new AggregateError([Error('original_native_close_failed')],'paired_artifact_close_unknown');
 const retained=Error('retained_original_owner');let admissions=0,retentions=0;
-mock.module(${JSON.stringify(source('windows-paired-artifact.ts'))},()=>({retainWindowsPairedArtifact(){admissions++;throw original;}}));
+mock.module(${JSON.stringify(source('windows-paired-artifact.ts'))},()=>({retainWindowsPairedArtifact(){admissions++;throw original;},borrowWindowsPairedArtifact(){throw Error('unexpected_borrow_before_admission');}}));
 mock.module(${JSON.stringify(source('daemon/endpoint.ts'))},()=>({selectDaemonEndpoint(){throw Error('unexpected_endpoint_access');},reserveDaemonEndpoint(){throw Error('unexpected_endpoint_access');}}));
 mock.module(${JSON.stringify(source('process-failure.ts'))},()=>({async retainFailedProcess(value){retentions++;assert.equal(value.code,'daemon_artifact_close_unknown');assert.equal(value.phase,'daemon_artifact');assert.equal(value.cause.error,original);throw retained;}}));
 const {runDaemonProcess}=await import(${JSON.stringify(source('daemon-main.ts'))});

@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
@@ -177,7 +178,7 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
         expectedStoreId: storeId,
         id: 'w',
         name: 'private',
-        rootUri: `file://${directory}`,
+        rootUri: pathToFileURL(directory).href,
       });
       await runtime.createSession({
         expectedStoreId: storeId,
@@ -397,7 +398,7 @@ test('explicit followup_task after_turn binds the new carrier and sender Run, re
       expectedStoreId: storeId,
       id: 'w',
       name: 'private',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,

@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { InteractionRecord, Json } from '../../../src/storage';
@@ -15,7 +17,7 @@ async function errorCode(work: Promise<unknown>) {
   }
 }
 async function fixture() {
-  const dataRoot = mkdtempSync('/private/tmp/kite-group-dispatch-');
+  const dataRoot = temporaryDirectory('kite-group-dispatch-');
   const profile = { dataRoot, profile: 'new' };
   const store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -23,7 +25,7 @@ async function fixture() {
   await store.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${dataRoot}`,
+    rootUri: pathToFileURL(dataRoot).href,
     name: 'temporary',
   });
   for (const sessionId of ['s', 'other'])

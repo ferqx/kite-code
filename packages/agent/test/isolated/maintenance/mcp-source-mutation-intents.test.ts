@@ -4,7 +4,6 @@ import {
   chmodSync,
   existsSync,
   linkSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -15,6 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { canonicalJson } from '../../../src/json';
 import {
@@ -101,7 +101,7 @@ async function fixture() {
   await store.close();
   if (!originalSession) throw Error('original_session_missing');
   const path = join(selectProfile(profile).profilePath, 'ui/mcp-source-mutation-intents.json');
-  mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(path, '..'));
   return {
     root,
     profile,

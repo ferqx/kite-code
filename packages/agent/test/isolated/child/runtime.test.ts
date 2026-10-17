@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { type ChildAgentConfiguration, createRuntime } from '../../../src';
 import type { OperationRef, ToolDefinition } from '../../../src/extensions';
@@ -113,7 +114,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'temporary',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     expectedStoreId,

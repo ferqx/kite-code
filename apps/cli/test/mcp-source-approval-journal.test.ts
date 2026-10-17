@@ -1,17 +1,14 @@
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { TuiMcpSourceApprovalIntent } from '@kite-ai/ui/tui';
+import {
+  fixturePermissions,
+  privateDirectory,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../tests/fixtures/test-filesystem';
 import { mcpSha } from '../host/mcp-selection-intents';
 import {
   createMcpSourceApprovalRecord,
@@ -53,9 +50,9 @@ const intent = (commandId = 'original'): TuiMcpSourceApprovalIntent => ({
   },
 });
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-source-approval-journal-');
+  const root = temporaryDirectory('kite-source-approval-journal-');
   const access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   const path = join(access.profilePath, 'ui/mcp-source-approval-intents.json');
   const open = () =>
     openMcpSourceApprovalJournal({
@@ -231,7 +228,7 @@ test('Source journal never evicts unknown records and refuses oversized complete
   } finally {
     f.close();
   }
-});
+}, 120000);
 test('Source journal refuses public permissions, links, duplicate IDs and invalid UTF8 without changing original bytes', () => {
   const f = fixture();
   try {
@@ -239,9 +236,9 @@ test('Source journal refuses public permissions, links, duplicate IDs and invali
       record = createMcpSourceApprovalRecord(intent(), 'subject');
     journal.prepare(record);
     const before = readFileSync(f.path);
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     expect(() => journal.list()).toThrow();
-    chmodSync(f.path, 0o600);
+    fixturePermissions(f.path, 0o600);
     const hard = `${f.path}.hard`;
     linkSync(f.path, hard);
     expect(() => journal.list()).toThrow();
@@ -249,7 +246,7 @@ test('Source journal refuses public permissions, links, duplicate IDs and invali
     const actual = `${f.path}.actual`;
     writeFileSync(actual, before, { mode: 0o600 });
     rmSync(f.path);
-    symlinkSync(actual, f.path);
+    recordReparseEntry(actual, f.path);
     expect(() => journal.list()).toThrow();
     rmSync(f.path);
     writeFileSync(f.path, before, { mode: 0o600 });

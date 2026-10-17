@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { getLoadedSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 
@@ -19,7 +20,7 @@ try {
             expectedStoreId: storeId,
             id: `bundle-wal-${index}`,
             name: `workspace-${index}`,
-            rootUri: `file://${join(workspace, `wal-${index}`)}`,
+            rootUri: pathToFileURL(join(workspace, `wal-${index}`)).href,
           }),
         ),
       );

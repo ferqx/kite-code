@@ -1,5 +1,7 @@
 # 通用 Agent
 
+正式构建内联[声明的普通 JS 依赖](scripts/bundled-dependencies.ts)，包括独立 Web extraction Worker 的 Readability/Turndown；keyring、Files Node-API、tree-sitter WASM 与 jsdom 动态资源仍沿原外部资产闭包核验。生成物扫描、原许可全文及精确资源复制归 [Terminal owner](../../apps/cli/docs/terminal-release.md)，不改变权限或 Worker 生命周期。Windows 制品原 HANDLE 的类型/大小/身份、完整字节/SHA 和私有批量复制边界归 [platform owner](src/platform/README.md)。
+
 `@kite-ai/agent` 正在按 [V1.3](../../docs/plans/unified-agent-refactor-v1.md)实施。当前支持显式装配模型、外部工具、Action/Query、一个默认 Loop 与具名 Store；[Service](../../apps/service/README.md)、[Client](../client/README.md)和[通用 UI](../ui/README.md)已通过真实 HTTP/SSE 联验。正式 Terminal 已消费通用 TUI；完整客户端迁移和正式旧路径退役仍按门禁核对。已完成范围和未运行场景见[实施证据](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 公共当前会话视图保留最近的有限 Run/Execution 历史及原未结束／未知工作，长会话不会因最早200项投影而丢失当前 Run或较早的 live Job。查询只反映原事实，不改变取消和恢复资格；精确范围与真实长会话验收由[Store owner](src/storage/README.md#当前会话视图)维护。
@@ -24,6 +26,7 @@
 - [唯一 Loop](src/loop.ts)：只使用模型/输入/执行契约；工具参数只有在完整模型响应保存后才能派发。
 - [来源入口](src/sources.ts)：宿主显式配置的项目指令适配器，根 import 不读取文件。按可信目标链读取 AGENTS.md/CLAUDE.md 的实际内容摘要，相关新增、修改、删除进入派发前复核。具体 factory 的 disposer 与知识读取作用域保原文件资源到关闭确认；纯 `ContextSources` 及来源身份保持。
 - [文件入口](src/files.ts)与[普通文件 Tools](src/tools/files/README.md)：显式 Workspace 的目录 FD、完整内容基线与精确修改；行读取、glob、查询分页保留明确范围。大正文使用完整 Artifact，显式分页继续保留选择范围。
+- [Files 原生模块](native/files/README.md)：固定 cap-std／napi-rs 的 Node-API 能力 owner，官方 SDK 补齐 Windows 完整身份、句柄发布及关闭未知；build 携带固定原生资产，运行期无编译或旧 FFI 回退。
 - [Artifact 入口](src/artifacts/README.md)：不可变文件先发布，再事务登记原 Store、主体、Session 与准确授权 scope；相同 hash 不授予其他 scope 读取资格。
 - [完整 Model 正文与实际输入检查](src/model-body/README.md)：原产物正文与大 Model/Auto 请求以准确 scope 的不可变 Artifact 交接，Provider 前完整展开并核实 hash；只读原 Execution 请求及固定上界调用目录不捕获现在来源、不初始化 Provider，Worker 仍使用有限传输。
 - [上下文显示估算](src/context-estimate.ts)：独立 `@kite-ai/agent/context-estimate` 纯函数，沿原 cl100k 计数消息、调用与工具 Schema。每次估算按不拆 Unicode scalar 的最多 1024 个 UTF-16 code unit 分块，完整计入全部原字符；短文本保持原计数，长文本块边界允许近似差异。单次最多 128 块的局部缓存避免连续重复大段触发 BPE 病态耗时，调用结束不保留文本。取舍见[估算分块](../../.agents/notes/implemented/bug-fix/2026-10-15-context-estimate-bounded-tokenization.md)。最近请求显示优先取准确原请求已返回的输入统计，该 leaf 提供缺失时的独立本地估算；容量只接原冻结模型的明确窗口／输出预算，不猜容量、不修改请求或取得派发资格，累计 Provider 用量不代替当前请求大小。

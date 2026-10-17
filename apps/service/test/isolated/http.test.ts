@@ -11,6 +11,7 @@ import {
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { defineExtension, type Permissions, type ToolDefinition } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -89,7 +90,7 @@ async function fixture(
         await post('/v1/workspaces', {
           expectedStoreId: startup.storeId,
           id: 'workspace',
-          rootUri: `file://${root}`,
+          rootUri: pathToFileURL(root).href,
           name: 'Disposable',
         })
       ).status,

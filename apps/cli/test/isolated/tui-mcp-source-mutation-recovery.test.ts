@@ -1,18 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -23,6 +16,7 @@ import { type AgentClient, createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import type { TuiMcpSourceMutationIntent } from '@kite-ai/ui/tui';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { openMcpSourceApprovalJournal } from '../../host/mcp-source-approval-journal';
 import { openMcpSourceMutationJournal } from '../../host/mcp-source-mutation-journal';
 import { createTuiMcpSourceApprovalPort } from '../../host/tui-mcp-source-approval';
@@ -43,10 +37,10 @@ async function fixture(many: boolean) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-source-mutation-recovery-')));
   chmodSync(root, 0o700);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
-  mkdirSync(join(workspace, '.kite-code'), { mode: 0o700 });
+  privateDirectory(workspace);
+  privateDirectory(join(workspace, '.kite-code'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const servers: Record<string, { type: string; url: string }> = {};
   for (let i = 0; i < (many ? 52 : 1); i++)
     servers[`source-${String(i).padStart(3, '0')}`] = {
@@ -135,14 +129,14 @@ async function fixture(many: boolean) {
         expectedStoreId: storeId,
         id: `a-${String(i).padStart(3, '0')}`,
         name: 'owned earlier directory item',
-        rootUri: `file://${workspace}/`,
+        rootUri: pathToFileURL(`${workspace}/`).href,
       });
   const workspaceId = 'zz-target';
   await runtime.createWorkspace({
     expectedStoreId: storeId,
     id: workspaceId,
     name: 'owned target',
-    rootUri: `file://${workspace}/`,
+    rootUri: pathToFileURL(`${workspace}/`).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,
@@ -400,7 +394,7 @@ for (const operation of ['add', 'remove'] as const)
         );
         expect(
           (await f.client.listAllWorkspaces()).find((item) => item.id === f.workspaceId)?.rootUri,
-        ).toBe(`file://${join(f.root, 'workspace')}/`);
+        ).toBe(pathToFileURL(`${join(f.root, 'workspace')}/`).href);
         expect(f.wire.filter((row) => row.operation === 'query:mcp.sources').length).toBe(3);
       }
       const item = observed.items.at(-1)!;

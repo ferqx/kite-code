@@ -5,7 +5,6 @@ import {
   linkSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -15,6 +14,7 @@ import {
 import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   clearDeadDaemonEndpoint,
   readDaemonReservation,
@@ -31,7 +31,7 @@ const input = {
   webOrigin: 'http://127.0.0.1:12346',
 };
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-daemon-leaf-'),
+  const root = temporaryDirectory('kite-daemon-leaf-'),
     p = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
   const profile = { dataRoot: p.dataRoot, name: p.profile, accessKey: p.profileAccessKey },
     endpoint = selectDaemonEndpoint({

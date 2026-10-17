@@ -20,6 +20,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { cliBundledDependencies } from '../../apps/cli/bundled-dependencies';
 import { CLI_REGISTRATION_FILE, readCLIRegistration } from '../../apps/cli/host/cli-registration';
 import {
   type TerminalBundleManifest,
@@ -27,7 +28,9 @@ import {
   type VerifiedTerminalBundle,
   verifyTerminalBundle,
 } from '../../apps/cli/host/terminal-artifact';
+import { serviceBundledDependencies } from '../../apps/service/bundled-dependencies';
 import { createTrustedAssets } from '../../apps/web/src/assets';
+import { agentBundledDependencies } from '../../packages/agent/scripts/bundled-dependencies';
 import { acquireArtifactAccess } from '../../packages/agent/src/artifact-access';
 import { acquireFileLock } from '../../packages/agent/src/platform/locks';
 import { retainWindowsArtifactScope } from '../../packages/agent/src/platform/windows-artifact-scope';
@@ -35,13 +38,16 @@ import {
   defaultWindowsPathSecurity,
   privateDirectory,
 } from '../../packages/agent/src/platform/windows-path-security';
+import { aiBundledDependencies } from '../../packages/ai/bundled-dependencies';
 import { desktopBundledDependencies } from '../../packages/ui/scripts/bundled-dependencies';
+import { tuiBundledDependencies } from '../../packages/ui/scripts/tui-bundled-dependencies';
 import {
   buildWindowsTerminalLauncher,
+  compileWindowsVerifier,
   copyWindowsSystemExecutable,
 } from './build-windows-terminal-launcher';
 import { buildTerminalSqliteEngine } from './sqlite-engine';
-import { copyTerminalDependencies } from './terminal-dependencies';
+import { copyTerminalDependencies, terminalBundledNotices } from './terminal-dependencies';
 import { rejectBundleOutput } from './terminal-paths';
 import {
   installWindowsTerminalBundle,
@@ -130,7 +136,7 @@ function verifyBundledDependencies(root: string, names: readonly string[]): void
     } else if (stat.isFile() && path.endsWith('.js')) {
       for (const item of scanner.scanImports(readFileSync(path)))
         if (names.some((name) => item.path === name || item.path.startsWith(`${name}/`)))
-          error('bundled_dependency_external');
+          error(`bundled_dependency_external:${relative(root, path)}:${item.path}`);
     }
   };
   walk(root);
@@ -238,7 +244,18 @@ export async function buildTerminalBundle(input: {
         source: path,
         destination: join(root, 'node_modules', manifest.name),
         manifest,
-        bundledDependencies: manifest.name === '@kite-ai/ui' ? desktopBundledDependencies : [],
+        bundledDependencies:
+          manifest.name === '@kite-ai/ui'
+            ? [...desktopBundledDependencies, ...tuiBundledDependencies]
+            : manifest.name === '@kite-ai/agent'
+              ? agentBundledDependencies
+              : manifest.name === '@kite-ai/ai'
+                ? aiBundledDependencies
+                : manifest.name === '@kite-ai/service'
+                  ? serviceBundledDependencies
+                  : manifest.name === '@kite-ai/cli'
+                    ? cliBundledDependencies
+                    : [],
       };
     });
     for (const item of packages) {
@@ -254,6 +271,36 @@ export async function buildTerminalBundle(input: {
         await run(runtime, args, item.source);
       }
       verifyBundledDependencies(item.destination, item.bundledDependencies);
+      if (item.bundledDependencies.length) {
+        const notices = terminalBundledNotices({
+          repositoryRoot: repository,
+          workspaceRoot: item.source,
+          names: item.bundledDependencies,
+        });
+        writeFileSync(
+          join(item.destination, 'BUNDLED-DEPENDENCIES.json'),
+          JSON.stringify(
+            {
+              ...notices,
+              packages: notices.packages.map((pkg) => ({
+                ...pkg,
+                notices: pkg.notices.map(({ text: _, ...notice }) => notice),
+              })),
+            },
+            null,
+            2,
+          ),
+        );
+        writeFileSync(
+          join(item.destination, 'THIRD_PARTY_BUNDLED.txt'),
+          notices.packages
+            .map(
+              (pkg) =>
+                `${pkg.name} ${pkg.version}\n${pkg.manifestText}\n${pkg.notices.map((notice) => `${notice.name}\n${notice.text}`).join('\n\n')}`,
+            )
+            .join('\n\n'),
+        );
+      }
       const exports = Object.fromEntries(
         Object.entries(item.manifest.exports).map(([key, path]) => {
           if (typeof path !== 'string') error('workspace_export_unsupported');
@@ -398,21 +445,14 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
       const compileRoot = join(root, `.windows-verifier-${randomUUID()}`);
       privateDirectory(compileRoot);
       const compiledPath = join(compileRoot, 'terminal-verifier.exe');
-      const compiled = await Bun.build({
-        entrypoints: [join(repository, 'scripts/release/entrypoints/windows-terminal-verifier.ts')],
-        target: 'bun',
-        packages: 'bundle',
-        compile: {
-          executablePath: runtime,
-          outfile: compiledPath,
-          autoloadDotenv: false,
-          autoloadBunfig: false,
-          autoloadTsconfig: false,
-          autoloadPackageJson: false,
-        },
+      await compileWindowsVerifier({
+        runtime: join(root, entries.runtime),
+        entrypoint: join(
+          repository,
+          'scripts/release/entrypoints/windows-terminal-verifier-main.ts',
+        ),
+        outfile: compiledPath,
       });
-      if (!compiled.success)
-        throw new AggregateError(compiled.logs, 'terminal_windows_verifier_build_failed');
       copyWindowsSystemExecutable(compiledPath, verifierPath);
       rmSync(compileRoot, { recursive: true, force: false });
       const bytes = readFileSync(verifierPath);

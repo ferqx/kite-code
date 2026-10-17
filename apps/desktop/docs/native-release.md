@@ -2,9 +2,15 @@
 
 本页负责完整 Native 物化、归档、使用锁和安装注册。构建后的候选包含实际 Electron、完整新 Terminal、main/preload/renderer 与目录/框架链接；它不从运行环境搜索 Service、Bun、CLI 或 npm。根入口已切换，整体 V1.3、签名与三平台发布仍未完成。
 
+Windows 构建预检和运行清单均要求 Chromium 的 `chrome_100_percent.pak`、`chrome_200_percent.pak`、`resources.pak` 为非空普通资源文件，仍核完整递归库存与每字节摘要。只有 Electron Node/SQLite 通过不能证明窗口资源完整。本机原已安装 Electron 44.3.0 分发后来发现缺两份 scale pak；原字节一致性证据只证明当时副本与该输入相同。新的隔离输入从缓存原 ZIP 解出，SHA256 `26bf9a617d58d81772b3d68305d59ee48272969c15083c06db634a77358a8d9d` 与锁定 npm checksums 和[官方发布清单](https://github.com/electron/electron/releases/download/v44.3.0/SHASUMS256.txt)一致，不修改原安装。缺资源反例归[归档/构建合同](../../../tests/isolated/unified-agent/native-archive.test.ts)；真实窗口和维护仍须分别通过原 caller。
+
 当前 renderer 沿原桌面的 Vite/React/Tailwind 管线编译复用页面，CSS 与 Geist 字体是候选内的实际文件；Vite 输出保留 Main/preload/helper 的共同目录。新增 UI exports 在 workspace build 中产生实际 desktop/index.js 与 style.css，候选继续逐项核完整递归 manifest。macOS 源码外窗口范围与剩余迁移见[Desktop owner](../README.md#复用原桌面展示层)和[本片进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不替代完整 installed 或三平台资格。
 
-inner Terminal 的共享 UI Desktop build 现内联唯一核心图标依赖，保留原 exports、React peer、CSS 与准确许可，不再物化其完整独立 npm 包；其他真实依赖仍按原解析图复制，边界归[Terminal owner](../../cli/docs/terminal-release.md#制品闭包与身份)。outer、inner和每次启动的全部文件验证保持，启动收益须由原正式窗口及完整默认结果核实，见[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)。
+inner Terminal 的共享 UI 构建内联已声明的普通 JS 依赖，保留原 exports、React/React DOM peer、CSS 与准确许可；其余动态资源与原生资产仍按原解析图复制，边界归[Terminal owner](../../cli/docs/terminal-release.md#制品闭包与身份)和[闭包成本决定](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。outer、inner 和每次启动的全部文件验证保持；同一原 pin 只能在本进程复用完整核验，不跨进程授予准入。启动收益须由原正式窗口及完整默认结果核实，旧[图标收束证据](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)只覆盖当时范围。
+
+Windows 显式安装 caller 使用原安装器的受保护复制接口准备未发布 A/B，保全部 verifier 和原 120 秒基本／180 秒维护期限。UIA snapshot 在原进程身份核对后允许“尚无窗口／Document”的空观察，只有期限内实际出现的完整文本才通过；异步输入只写一次并在同一原动作截止前核完整回读。原 45 秒驱动、10 秒动作、多窗口拒绝、自然退出和原 Job 回收保持，理由见[发布夹具决定](../../../.agents/notes/implemented/testing/2026-10-17-windows-release-contracts.md)。隔离 renderer／HWND 诊断只存在于私有诊断制品，普通 dev／prod 不含该入口。
+
+Windows Main 保初始完整内容／语义验证，再由 [Node-API owner](../native/windows-access/README.md)独立取得全部原文件并核完整 SHA、manifest ID、闭合库存和两跳证书；后续复用该 Main 的 genuine owner，每次核原对象、有效 ACL、准确库存和双 SH，不再重复两次无 owner 的 Node 全扫描。持续 pin 拒绝字节改写／删除，目录新增项由重新枚举拒绝；子 Service 仍独立完整准入，不继承父 owner 的权利。未关闭 owner、close unknown 和借用依赖仍按[原对象决定](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)处理。
 
 ## 构建与安装
 
@@ -25,17 +31,35 @@ bun run release:native uninstall --prefix /absolute/install/native
 
 ## Windows managed Native 当前实现
 
+2026-10-17 范围审查的完整 Native候选为 `bc08c49a12bc7c767cd4fb6f68e7e08755dc46721ed8ea771549efadd5bdb2d2`，inner 为 Terminal `e9046c4e26d627ba99875131733a19d16545f71f45c8723af25a37ba88bc6e0a`。官方 Electron 输入73份原文件在 build 前后逐项保持。原整链 r20 中，A/B 两个实际窗口均读取原完整历史、实际 exit0、Main/Service dead、Job0/未Terminate、strict Close 和双 EX；第三次回退 A 时触发原45秒 UIA截止，基础120秒和维护180秒均未扩大。第三冷窗口、恢复后窗口与 installed Native维护没有通过证据，不能以两个窗口或 Node探针授完整资格。
+
+随后只补 bundled 原 manifest 许可来源的 r23 构建及完整校验候选为 `a7f3f3f24136de32437e2b3012d8c82e9de162904f2af06bbeaee7ce6ed61e97`，inner 为 Terminal `9f594260a611c2c5742785daa46cf7a681711fadcce7f5885e5f340e073c7025`。官方73份输入原哈希保持；当前 r23 没有第三冷窗口或维护恢复通过证据，原失败与门禁继续保留。
+
 [Windows installer](../../../scripts/release/windows-native-install.ts)复用明确 archive/prefix 的用户入口。format=2 marker 固定首次候选的四个稳定文件：`bin/kite.exe`、`kite-tui.exe`、`kite-desktop.exe`、`native-verifier.exe`。后续安装及 rollback 只切 current/previous，bootstrap A 保持；运行中的 A 持原 outer/inner 使用权，新启动核当前候选。两个 use 键分别为候选 ID 与 `SHA256(ID + NUL + "terminal")`，均位于 prefix 外同一私有协调 namespace，不与 Profile 交叠。
 
-[Root release build port](../../../scripts/release/windows-native-build.ts)负责固定 compiled verifier 与静态 C 前门，Desktop builder 只通过明确 typed port 调用。源 Terminal 与 Electron 完整原文件 pin 覆盖复制和所有构建 await；Windows 拒绝 links，以私有原 HANDLE 创建／写入／flush，并核全部文件、空目录及实际 SQLite 引擎。新副本的 Electron EXE/DLL 使用 APPDIR/System32 静态 import 搜索；固定 Bun/helper/C 使用 System32。PE 不完整、delay import 或不合格 loader 字段仍拒绝；真实 Electron 分发是否满足这些守卫须由 Windows 构建验证，不能以字节夹具放行。原 publisher 文件不修改，SHA 仍只提供完整性。
+[Root release build port](../../../scripts/release/windows-native-build.ts)负责固定 compiled verifier 与静态 C 前门，Desktop builder 只通过明确 typed port 调用。源 Terminal 与 Electron 完整原文件 pin 覆盖复制和所有构建 await；Windows 拒绝 links，以私有原 HANDLE 创建／写入／flush，并核全部文件、空目录及实际 SQLite 引擎。新副本的 Electron EXE/DLL 使用 APPDIR/System32 静态 import 搜索；固定 Bun/helper/C 使用 System32。构建新副本时可将严格受限的 RVA v2 delay imports 转为普通 imports，包含实际 GUI Electron；最终仍必须无 delay directory，未知形状、bound／unload、PE不完整或不合格 loader 字段拒绝。Electron 仅另接受准确系统 basename `winspool.drv`／`bthprops.cpl`，不允许任意DRV/CPL、路径或 console 模式豁免。verifier 由持续 pin 的私有候选 Bun 子进程编译，输出权限继续严格复验，转换和私有编译合同归 [Terminal owner](../../cli/docs/terminal-release.md#windows-managed-terminal-当前实现)。原 publisher 文件不修改，SHA 仍只提供完整性。
+
+2026-10-17，本机实际 Electron44.3.0 的52组 delay imports 经有界转换后，完整分发内7个EXE/DLL均通过原最终门禁。[真实运行回归](../../../tests/isolated/unified-agent/windows-native-runtime.test.ts)将其复制到新私有输入、保持原分发完整SHA不变，转换副本在空PATH、cwd伪造 `ffmpeg.dll`／`dbghelp.dll`／`USERENV.dll`／`WINSPOOL.DRV`／`bthprops.cpl` 下实际返回准确版本，独立 `node:sqlite` 探针通过；这是运行时与引擎资格，不代替完整 Native 包、可信创建链、Main/Service窗口或安装维护验收。提前加载会让缺失可选系统模块／符号在启动时失败，其他Windows变体仍须实际验证。
+
+同日实际构建并完整验证Native候选 `2f48062728567c921031fd59d031cb5508c94fd4fb648927c7dff243e18f7230`（99个outer清单文件），准确inner为Terminal候选 `5d46e164e8828f78e4cbe7f2cf6d9e26f694c9a472fd59a92953c788c3733261`。使用已安装Electron的72个原始文件创建同字节私有输入，原分发SHA不变；实际MSVC／renderer／四前门及compiled verifier生成完成。公开Native smoke成功，返回 `closure:true`、`electronVersionProbe:true`、`node:sqlite`3.53.4及 `mainLifecycleQualified:false`。实际归档322,733,021字节，SHA256为 `83242758a348a10e33a01cd853b97cc7c3f0e63ddbf6b19612ad1682a800ad5e`，已独立重算。
+
+原完整安装调用者在pack阶段从81.836秒至530.214秒，随后按原120秒基础门禁报 `windows_native_qualification_deadline`；未进入unpack／install／UIA／维护。保留失败私有根与phase记录，不将完整build／smoke／pack当窗口和安装成功，原180秒维护、窗口／命令期限及真实创建链要求均未放宽。
+
+原对象/Node配套修正后，再次实际构建并全量验证新Native `3475591a7e390500999efd7b88fa19e61523d5d6b22f054113911f2404b4407e`（99个outer文件），准确inner为Terminal `16a4041941db8870d828a492adbf6dce37d51704ae18618e7803d613d2687050`。包内Main核实包含原owner借用、准确固定argv、detached Service和原启动/清理错误同时保留。公开smoke再次成功，Electron44.3.0/独立SQLite3.53.4、closure/version为true，仍明确 `mainLifecycleQualified:false`。新实际归档322,733,688字节，SHA256 `097a2baf427b227d731ba2357b75bc788a8d54d5b59b9f998b90d7380ffde998`，已独立重算并核clone manifest身份/sidecar。
+
+新完整调用者仍失败：pack从51.056秒到399.228秒，399.230秒按原120秒门禁拒绝，未进入unpack/install/UIA/维护。该次与整组回归并行，耗时只说明实际这次调用，不能当独立性能基准；资格也不因并行负载豁免。失败根和原阶段记录保留，无正式窗口启动或模型调用，Windows完整安装/窗口/维护资格继续未取得。
 
 已安装 `kite-desktop.exe` 先由 C 清除运行时环境注入、固定并 pin 自身和 helper；[compiled verifier](../../../scripts/release/entrypoints/windows-native-verifier.ts)取得当前完整 outer/inner 文件 pin 与双 SH 后才创建 Electron。C 用实际创建的 helper HANDLE 出具第一份私有证书，verifier 用实际 Electron HANDLE 出具第二份；[Main 原生端口](../native/windows-access/README.md)在 BrowserWindow、Profile、UI SQLite 和 Service 前分别核真实管道 server/client PID、原 FILETIME 与固定映像，并取得自己的完整文件 pin／双 SH。Service 再取得独立使用权，继承 HANDLE 不作所有权证明。缺交接、伪造 parent、漂移或错误证书继续拒绝；原 SDK 允许指定 PPID，不能单凭 PPID/映像相同放行。
+
+实际Windows改写/重命名反例促使C/Node-API/Bun祖先pin显式请求FILE_TRAVERSE，普通候选文件pin请求GENERIC_READ；仅属性HANDLE不足以建立原共享保护。LockFileEx区域锁改为必要的只读权，与真正只读全文件pin相容，UI SQLite读写权保持。Main的配套启动由可信装配端口借用自己已接纳的原生owner，以WeakMap绑定原root/digest/entry/Bun/build；复制/伪造/closed owner拒绝，原child退出未兑现时Main不得关闭，不在Electron加载Bun FFI。子Service继续独立完整准入。
+
+[Node适配器](../electron/node-process.ts)接受原两参数或同一候选的四个准确固定Bun参数，拒绝额外或改投配置；Windows使用detached创建保私有stdin/双输出，让Main异常退出后Service实际EOF清理，避免libuv默认Job直接强杀。2026-10-17三个完整文件[原生owner](../test/isolated/windows-node-access.test.ts)、[原Main借用](../test/isolated/windows-native-candidate.test.ts)、[真实Node参数](../test/isolated/node-process.test.ts)共11项/74断言通过；包含实际Electron/Node-API、父原HANDLE异常退出、清理barrier期间EX仍busy、子进程自然0与原UI/锁归属，以及退出未知不归还借用的有限端口反例。不是完整installed窗口验收，取舍及原生证据边界归[原对象决定](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)。
 
 Windows 登记后的独立 Terminal CLI/TUI 转发到 Native 稳定 C 前门。双 prefix SH 内核原 nonce、完整候选和原 ID；内部 expected-candidate 只收窄选择。Native 自身准入若已合法切 B，明确返回 `cli_registration_changed`，不会将已核 A 的证据用于 B；接纳 A 后释放 selection，仍允许正常升级。普通任务与 `kite.exe maintenance` 随该候选进入原业务／离线维护，未增加 journal 自动决定、模型调用或数据回退。
 
 rollback 在发布前完整预检仍由原 nonce 持有的 Terminal；正常 Terminal 卸载后的历史登记不重建旧前门。Native uninstall 取得全部 outer/inner EX 和完整树 DELETE owner，复用 genuine removal 验证，原 nonce CAS 撤销外部前向登记，再逐原对象删除并确认根消失；Profile、配置、项目和独立备份不进入删除输入。opaque transfer／关闭未知保留本调用完整锁组与原资源，所有文件确认关闭后才释放使用权。归档私有 scratch 也只以完整库存的原 DELETE owner 清理。
 
-本机必要证据覆盖闭合 marker、版本/登记控制流、原关闭未知、完整 archive/POSIX 邻接和真实 owned builder child 退出；这些不等于 Windows C/MSVC、DACL、pipe、Electron／Service 或 installed 维护恢复资格。Windows/Linux 原生执行按用户顺序留到重构后，当前不 dispatch。raw `release:native launch --directory` 的 Windows 限制保持，正式 Windows 入口是已安装的稳定前门；desktop 前门当前只接受无附加用户参数的启动。完整用户链必须在 Windows 核普通任务／历史、A→B→A、维护新 Store 原完整结果冷读零重放、准确退出、双 EX 及卸载保数据，才能关闭该平台能力。
+本机现有Windows有限证据覆盖真实私有ACL下的归档／安装控制、原关闭未知、实际MSVC前门、Bun及上述Electron引擎探针；完整Native包、pipe、Main／Service窗口和installed维护恢复仍按各自实际结果判断，不将有限夹具升级为整链资格。未dispatch hosted Actions。raw `release:native launch --directory` 的 Windows 限制保持，正式 Windows 入口是已安装的稳定前门；desktop 前门当前只接受无附加用户参数的启动。完整用户链必须在 Windows 核普通任务／历史、A→B→A、维护新 Store 原完整结果冷读零重放、准确退出、双 EX 及卸载保数据，才能关闭该平台能力。
 
 [Windows 安装正式调用者](../../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)现已接入 release-candidate 的 Windows build／verify／smoke 后；[现行 CI 守卫](../../../scripts/check-unified-workspaces.ts)拒绝缺失、错平台、忽略错误、命令替代及前置顺序错误。该 caller 以同一个已核候选归档／解包并删除自己的构建副本，零参数启动稳定 `kite-desktop.exe`，由系统 [UIAutomation driver](../../../tests/fixtures/unified-agent/windows-native-uia.ts)操作实际会话输入、提交、完整回复和默认应用菜单退出，不增加产品调试参数或假创建证书。窗口关闭只隐藏，不能代替退出。
 

@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMcpAdapter } from '@kite-ai/agent/mcp';
 import { ModelAttemptError, type ModelEvent } from '@kite-ai/ai';
@@ -9,6 +9,7 @@ import type {
   CaseEvidence,
   UnifiedSoakCaseId,
 } from '../../../../scripts/runtime/unified-soak-cases';
+import { privateDirectory } from '../../test-filesystem';
 import { check, fixture, until } from './common';
 import { type McpSoakStdioAssets, runOwnedMcpStdio } from './mcp-owned-stdio';
 
@@ -25,7 +26,7 @@ export async function runFunctionalCase(
   caseId: UnifiedSoakCaseId,
   stdioAssets?: McpSoakStdioAssets,
 ): Promise<CaseEvidence> {
-  mkdirSync(root, { recursive: true, mode: 0o700 });
+  privateDirectory(root);
   const evidence: CaseEvidence = {
     caseId,
     status: 'passed',

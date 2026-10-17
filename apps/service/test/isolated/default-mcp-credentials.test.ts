@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
   type createCredentialVault,
@@ -34,7 +34,7 @@ async function fixture() {
   await store.createWorkspace({
     expectedStoreId: metadata.storeId,
     id: 'w',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'temporary',
   });
   for (const id of ['a', 'b'])

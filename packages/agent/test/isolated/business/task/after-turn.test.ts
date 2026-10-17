@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import type { Extension } from '../../../../src/extensions';
@@ -196,7 +197,7 @@ for (const mode of [
         expectedStoreId: storeId,
         id: 'w',
         name: 'private',
-        rootUri: `file://${directory}`,
+        rootUri: pathToFileURL(directory).href,
       });
       await runtime.createSession({
         expectedStoreId: storeId,

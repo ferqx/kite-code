@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentRuntime } from '@kite-ai/agent';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   assembleProcessService,
   ProcessServiceCleanupError,
@@ -14,11 +15,11 @@ import {
 
 for (const unavailable of [false, true])
   test(`common process assembly preserves selected identity and ${unavailable ? 'unavailable diagnostics' : 'cold Store'} without Model calls`, async () => {
-    const root = mkdtempSync('/private/tmp/kite-process-assembly-');
+    const root = temporaryDirectory('kite-process-assembly-');
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
     const corrupt = 'deliberately not SQLite';
     if (unavailable) {
-      mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+      privateDirectory(profile.profilePath);
       writeFileSync(profile.databasePath, corrupt, { mode: 0o600 });
     }
     let configurations = 0,
@@ -99,7 +100,7 @@ for (const unavailable of [false, true])
 
 for (const failedCleanup of [false, true])
   test(`failed process HTTP assembly ${failedCleanup ? 'marks actual unconfirmed cleanup and retains profile use' : 'preserves original error after successful cleanup'}`, async () => {
-    const root = mkdtempSync('/private/tmp/kite-process-cleanup-');
+    const root = temporaryDirectory('kite-process-cleanup-');
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
     const originalError = Error('fixture_private_initial_error');
     const cleanupError = Error('fixture_private_cleanup_error');
@@ -184,7 +185,7 @@ for (const failedCleanup of [false, true])
   });
 
 test('Runtime construction failure closes original SQLite and Artifact owners and preserves its original error', async () => {
-  const root = mkdtempSync('/private/tmp/kite-process-construction-');
+  const root = temporaryDirectory('kite-process-construction-');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
   try {
     const error = await assembleProcessService(
@@ -221,7 +222,7 @@ test('Runtime construction failure closes original SQLite and Artifact owners an
 });
 
 test('SQLite Worker construction failure preserves safe diagnostics and allows maintenance before cold original Store access', async () => {
-  const root = mkdtempSync('/private/tmp/kite-process-worker-construction-');
+  const root = temporaryDirectory('kite-process-worker-construction-');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
   const NativeWorker = globalThis.Worker;
   const originalError = Error('fixture_private_worker_construction_error');

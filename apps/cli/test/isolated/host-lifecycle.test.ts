@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -12,8 +11,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 
 async function until<T>(read: () => T | Promise<T | undefined> | undefined): Promise<T> {
@@ -28,7 +29,7 @@ async function until<T>(read: () => T | Promise<T | undefined> | undefined): Pro
 async function lifecycle(interleaveCancellation = false, loseCancelResponse = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-lifecycle-')));
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   symlinkSync(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'), 'dir');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const service = join(root, 'service.js');
@@ -64,7 +65,7 @@ async function lifecycle(interleaveCancellation = false, loseCancelResponse = fa
     await peer.client.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: new URL(`file://${workspace}`).href,
+      rootUri: pathToFileURL(workspace).href,
       name: 'actual workspace',
     });
     await peer.client.createSession({

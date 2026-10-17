@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { canonicalJson } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
@@ -18,7 +19,7 @@ async function rejected(promise: Promise<unknown>, code: string) {
 }
 for (const mode of ['tool', 'model'])
   test(`SIGKILL ${mode} retains durable facts without automatic execution`, async () => {
-    const dataRoot = mkdtempSync('/private/tmp/kite-recovery-crash-');
+    const dataRoot = temporaryDirectory('kite-recovery-crash-');
     chmodSync(dataRoot, 0o700);
     const ledger = join(dataRoot, 'external-ledger');
     const child = Bun.spawn(

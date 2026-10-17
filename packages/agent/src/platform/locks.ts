@@ -153,7 +153,9 @@ function acquireWindowsLock(
   });
   const handle = api.symbols.CreateFileW(
     ptr(Buffer.from(`${path}\0`, 'utf16le')),
-    0xc0000000,
+    // LockFileEx accepts a read handle for either region mode. The lock body
+    // is immutable; requesting WRITE conflicts with a real candidate file pin.
+    0x80000000,
     3,
     null,
     3,

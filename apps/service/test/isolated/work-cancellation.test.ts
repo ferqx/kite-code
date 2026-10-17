@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { defineExtension, type JobEvent } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -181,7 +182,7 @@ async function setup() {
     expectedStoreId: metadata.storeId,
     id: 'workspace',
     name: 'Test',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     expectedStoreId: metadata.storeId,

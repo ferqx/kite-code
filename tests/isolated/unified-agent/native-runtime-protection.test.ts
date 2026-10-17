@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,6 +14,7 @@ import { terminalSqliteEngineRoot } from '@kite-ai/service/sqlite-release-assets
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 type Message = { role: string; content: string };
@@ -29,15 +30,15 @@ function receiptRunId(receipt: unknown): string | null {
 test.skipIf(process.platform !== 'darwin')(
   'actual Native default paired proof protects outer and inner assets inside the Workspace while ordinary neighboring Files work and cold reads do not repeat effects',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-runtime-protection-')),
+    const root = realpathSync(temporaryDirectory('kite-native-runtime-protection-')),
       home = join(root, 'home');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
     });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     let service: Awaited<ReturnType<typeof launchPairedService>> | undefined,
       reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined,
       provider: ReturnType<typeof Bun.serve> | undefined;

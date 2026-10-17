@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
   type ModelAdapter,
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime, type RunConfiguration, type RuntimeOptions } from '../../../src';
 import type { ContextSources, SourceRequest } from '../../../src/context';
 import type {
@@ -36,7 +38,7 @@ function gate() {
   return { promise, release };
 }
 async function fixture(options: Omit<RuntimeOptions, 'store'>) {
-  const dataRoot = mkdtempSync('/private/tmp/kite-run-bindings-');
+  const dataRoot = temporaryDirectory('kite-run-bindings-');
   chmodSync(dataRoot, 0o700);
   const profile = { dataRoot, profile: 'test' };
   const store = await openSqliteStore(profile);
@@ -45,7 +47,7 @@ async function fixture(options: Omit<RuntimeOptions, 'store'>) {
   await runtime.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${dataRoot}`,
+    rootUri: pathToFileURL(dataRoot).href,
     name: 'temporary',
   });
   const create = (id: string) =>

@@ -1,5 +1,6 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -223,7 +224,7 @@ await runtime.createWorkspace({
   expectedStoreId,
   id: 'w',
   name: 'owned',
-  rootUri: `file://${directory}`,
+  rootUri: pathToFileURL(directory).href,
 });
 await runtime.createSession({
   expectedStoreId,

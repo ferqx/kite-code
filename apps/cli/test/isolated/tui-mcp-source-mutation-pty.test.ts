@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -28,6 +27,7 @@ import { ClientError, createClient, requiresInteractionAttachment } from '@kite-
 import { launchPairedService } from '@kite-ai/service/paired';
 import { assertSqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
 import type { TuiMcpSourceMutationFact } from '@kite-ai/ui/tui';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { parseMcpSourceMutationRecord } from '../../host/mcp-source-mutation-intents';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
@@ -78,10 +78,10 @@ type Wire = {
 test('80x24 basic source Add and exact Remove retain independent approval, cold original GET-only and foreign restored bytes', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-source-mutation-')));
   const evidence = join(tmpdir(), `kite-tui-source-mutation-evidence-${randomUUID()}`);
-  mkdirSync(evidence, { mode: 0o700 });
+  privateDirectory(evidence);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
-  mkdirSync(join(workspace, '.kite-code'), { mode: 0o700 });
+  privateDirectory(workspace);
+  privateDirectory(join(workspace, '.kite-code'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   const userPath = join(profile.profilePath, 'mcp.json'),
     projectPath = join(workspace, '.kite-code/mcp.json');
@@ -252,10 +252,10 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       candidateDigest: candidate.digest,
     });
     settings();
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     writeFileSync(userPath, originalUser, { mode: 0o600 });
     writeFileSync(projectPath, originalProject, { mode: 0o600 });
-    mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

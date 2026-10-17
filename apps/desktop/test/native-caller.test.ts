@@ -1,5 +1,8 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { AgentClient, Message, ModelOutputSnapshot, ServerInfo } from '@kite-ai/client';
 import { canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
@@ -61,7 +64,7 @@ function client() {
   } as unknown as AgentClient & { writes: number };
 }
 function authority() {
-  const frame = { url: 'file:///private/tmp/native/index.html' };
+  const frame = { url: pathToFileURL(join(tmpdir(), 'native', 'index.html')).href };
   const contents = { mainFrame: frame };
   return {
     window: { isDestroyed: () => false, webContents: contents } as unknown as BrowserWindow,
@@ -1003,7 +1006,7 @@ test('main IPC denies foreign/subframe senders and closed or oversized requests 
     ),
   ).toThrow('native_sender_denied');
   expect(() =>
-    assertNativeSender(auth.event, auth.window, 'file:///private/tmp/foreign.html'),
+    assertNativeSender(auth.event, auth.window, pathToFileURL(join(tmpdir(), 'foreign.html')).href),
   ).toThrow('native_sender_denied');
   expect(() => decodeNativeRequest({ method: 'attach', token: 'hidden' })).toThrow(
     'invalid_native_request',

@@ -1,16 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import {
@@ -18,20 +11,23 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedDaemon } from '../../host/daemon';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 let root: string, service: string, daemonEntry: string, driver: string;
-const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
+const supportsDaemonFixture = ['darwin', 'linux'].includes(process.platform);
+const nativeTest = supportsDaemonFixture ? test : test.skip;
 beforeAll(async () => {
-  root = realpathSync(mkdtempSync('/private/tmp/kite-status-host-'));
+  if (!supportsDaemonFixture) return;
+  root = realpathSync(temporaryDirectory('kite-status-host-'));
   const old = await buildOwnedDaemon(join(root, 'artifact'));
   const result = await Bun.build({
     entrypoints: [
-      new URL('../fixtures/status-host-driver.ts', import.meta.url).pathname,
-      new URL('../fixtures/status-host-daemon-child.ts', import.meta.url).pathname,
-      new URL('../fixtures/status-host-paired-child.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('../fixtures/status-host-driver.ts', import.meta.url)),
+      fileURLToPath(new URL('../fixtures/status-host-daemon-child.ts', import.meta.url)),
+      fileURLToPath(new URL('../fixtures/status-host-paired-child.ts', import.meta.url)),
     ],
     target: 'bun',
     packages: 'external',
@@ -55,13 +51,13 @@ async function until(check: () => Promise<boolean>) {
 }
 async function fixture() {
   const base = join(root, randomUUID());
-  mkdirSync(base, { mode: 0o700 });
+  privateDirectory(base);
   const workspace = join(base, 'workspace'),
     elsewhere = join(base, 'elsewhere');
   mkdirSync(workspace);
   mkdirSync(elsewhere);
   const profile = selectProfile({ dataRoot: join(base, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   let providers = 0;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -325,7 +321,7 @@ nativeTest(
       await client.createWorkspace({
         expectedStoreId: storeId,
         id: 'elsewhere',
-        rootUri: `file://${f.elsewhere}`,
+        rootUri: pathToFileURL(f.elsewhere).href,
         name: 'Other',
       });
       await client.createSession({

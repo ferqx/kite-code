@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { cpSync, existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import type {
   ProfileBackup,
   ProfileGarbageCollection,
@@ -35,12 +36,36 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     '../../../packages/agent/src/platform/windows-path-security'
   );
   const security = defaultWindowsPathSecurity()!;
+  const copyCandidate = (
+    source: string,
+    destination: string,
+    manifest: ReturnType<typeof verifyTerminalBundle>['manifest'],
+  ) => {
+    assert(!existsSync(destination), 'fixture_candidate_must_be_new');
+    privateDirectory(destination);
+    security.copyPrivateArtifactFiles(source, destination, [
+      'terminal-manifest.json',
+      ...manifest.files.map((file) => file.path),
+    ]);
+  };
   const built = verifyTerminalBundle(candidate);
+  assert(performance.now() < workDeadline, 'windows_terminal_qualification_input_deadline');
   const root = join(realpathSync(tmpdir()), `kite-windows-terminal-${randomUUID()}`);
   assert(!existsSync(root), 'qualification_root_must_be_new');
   // The private API creates the protected SID DACL; mkdtemp's inherited ACL is not adopted.
   privateDirectory(root);
   assert.equal(realpathSync(root), root);
+  const phase = (phase: string) =>
+    console.log(
+      JSON.stringify({
+        qualification: 'windows-terminal',
+        root,
+        candidateId: built.candidateId,
+        phase,
+        elapsedMs: performance.now() - startedAt,
+      }),
+    );
+  phase('input_verified');
   const home = join(root, 'home'),
     workspace = join(root, 'workspace'),
     prefix = join(root, 'prefix');
@@ -148,12 +173,17 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     announceProvider = resolve;
   });
   const body = 'WINDOWS_INSTALLED_MODEL_COMPLETE';
+  // A real frozen Model source must spill to referenced media. Short outputs
+  // legitimately stay inline; never seed an unrelated blob to satisfy backup.
+  const modelInstructions = 'WINDOWS_INSTALLED_ORIGINAL_CONTEXT '.repeat(4000);
+  security.writePrivateFile(join(workspace, 'AGENTS.md'), Buffer.from(modelInstructions));
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       const input = (await request.json()) as { messages?: unknown[] };
       assert(JSON.stringify(input.messages).includes('windows installed task'));
+      assert(JSON.stringify(input.messages).includes(modelInstructions));
       providerCalls++;
       announceProvider();
       await providerHeld;
@@ -187,44 +217,56 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
   const cleanupErrors: unknown[] = [];
   try {
     const clone = join(root, 'clone-a');
-    cpSync(candidate, clone, { recursive: true, dereference: false, verbatimSymlinks: true });
+    phase('clone_begin');
+    copyCandidate(candidate, clone, built.manifest);
+    phase('clone_end');
+    assert(remaining(false) > 0, 'windows_terminal_qualification_clone_deadline');
+    phase('pack_begin');
     const archive = await packTerminalBundle({
       bundleRoot: clone,
       archivePath: join(root, 'terminal.tar.gz'),
     });
+    phase('pack_end');
+    assert(remaining(false) > 0, 'windows_terminal_qualification_pack_deadline');
     const relocated = join(root, 'relocated');
+    phase('unpack_begin');
     const unpacked = await unpackTerminalBundle({
       archivePath: archive.archivePath,
       sha256: archive.sha256,
       destination: relocated,
     });
+    phase('unpack_end');
     assert.equal(unpacked.candidateId, built.candidateId);
     rmSync(clone, { recursive: true });
     assert(existsSync(candidate), 'input_candidate_preserved');
     assert(remaining(false) > 0, 'qualification_build_deadline');
+    phase('install_begin');
     const installed = await installTerminalBundle({ bundleRoot: relocated, prefix });
+    phase('install_end');
     assert.equal(installed.candidateId, built.candidateId);
     assert(existsSync(cli) && existsSync(tui));
-    for (const executable of [cli, tui]) {
-      const help = await execute(executable === cli ? 'cli_help' : 'tui_help', [
-        executable,
-        '--help',
-      ]);
-      assert.equal(help.code, 0);
-      assert(help.stdout.includes('--workspace'));
-      const version = await execute(executable === cli ? 'cli_version' : 'tui_version', [
-        executable,
-        '--version',
-      ]);
-      assert.equal(version.code, 0);
-      assert(version.stdout.includes(built.manifest.productVersion));
-    }
+    await Promise.all(
+      [cli, tui].map(async (executable) => {
+        const [help, version] = await Promise.all([
+          execute(executable === cli ? 'cli_help' : 'tui_help', [executable, '--help']),
+          execute(executable === cli ? 'cli_version' : 'tui_version', [executable, '--version']),
+        ]);
+        assert.equal(help.code, 0);
+        assert(help.stdout.includes('--workspace'));
+        assert.equal(help.stderr, '');
+        assert.equal(version.code, 0);
+        assert(version.stdout.includes(built.manifest.productVersion));
+        assert.equal(version.stderr, '');
+      }),
+    );
     const registration = join(prefix, '.kite-cli-registration.json');
     security.writePrivateFile(registration, Buffer.from('{}'));
     try {
       const denied = await execute('native_registration_guard', [cli, '--help']);
       assert.notEqual(denied.code, 0);
-      assert(denied.stderr.includes('native_windows_bootstrap_unqualified'));
+      // This is the Terminal selector's closed registration parser, before a Native handoff.
+      assert.equal(denied.stdout, '', 'invalid_registration_must_not_fall_back_to_cli');
+      assert.equal(denied.stderr.trim(), 'cli_registration_invalid');
     } finally {
       rmSync(registration);
     }
@@ -238,12 +280,29 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
               id: 'fixed',
               provider: 'compatible',
               model: 'fixed',
+              modelCapabilities: { contextWindowTokens: 1_000_000 },
               baseURL: `${provider.url.href}v1`,
             },
           ],
         }),
       ),
     );
+    // Profile bytes remain backup/restore evidence; model authority is the user file.
+    security.writePrivateFile(
+      ownedUserConfiguration(home).path,
+      readFileSync(join(profile.profilePath, 'config.jsonc')),
+    );
+    // Prepare the unpublished witness before holding a model response. The
+    // actual upgrade, rollback and busy assertions still run under A's live Run.
+    const upgrade = join(root, 'candidate-b');
+    copyCandidate(relocated, upgrade, unpacked.manifest);
+    const manifestPath = join(upgrade, 'terminal-manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.productVersion = built.manifest.productVersion === '0.1.1' ? '0.1.2' : '0.1.1';
+    rmSync(manifestPath);
+    security.writePrivateFile(manifestPath, Buffer.from(JSON.stringify(manifest)));
+    const b = verifyTerminalBundle(upgrade);
+    assert.notEqual(b.candidateId, built.candidateId);
     runPromise = execute('installed_run', [
       cli,
       'run',
@@ -262,8 +321,8 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     try {
       await Promise.race([
         providerReady,
-        runPromise.then(() => {
-          throw Error('installed_run_finished_before_held_provider');
+        runPromise.then((result) => {
+          throw Error(`installed_run_finished_before_held_provider:${JSON.stringify(result)}`);
         }),
         new Promise<never>((_, reject) => {
           readyTimer = setTimeout(
@@ -296,20 +355,10 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
       busyBackups,
     ]);
     assert.notEqual(busyBackup.code, 0);
-    assert(/owner_busy|store_busy|Lock is busy|in.use/i.test(busyBackup.stderr));
+    assert(/owner_busy|store_busy|Lock is busy|in.use/i.test(busyBackup.stderr), busyBackup.stderr);
     assert(!existsSync(busyBackups), 'busy_backup_must_not_publish');
     assert.deepEqual(readFileSync(profile.databasePath), busyDatabase);
     assert.equal(providerCalls, 1);
-    const upgrade = join(root, 'candidate-b');
-    cpSync(relocated, upgrade, { recursive: true, dereference: false, verbatimSymlinks: true });
-    const manifestPath = join(upgrade, 'terminal-manifest.json');
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    manifest.productVersion = built.manifest.productVersion === '0.1.1' ? '0.1.2' : '0.1.1';
-    // writePrivateFile creates a new private object; never reopen its existing file as a writer.
-    rmSync(manifestPath);
-    security.writePrivateFile(manifestPath, Buffer.from(JSON.stringify(manifest)));
-    const b = verifyTerminalBundle(upgrade);
-    assert.notEqual(b.candidateId, built.candidateId);
     const upgraded = await installTerminalBundle({ bundleRoot: upgrade, prefix });
     assert.equal(upgraded.previousCandidateId, built.candidateId);
     assert.equal(readFileSync(join(prefix, 'active'), 'utf8').split('\n')[0], b.candidateId);
@@ -422,10 +471,13 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
       }
     };
     verifyOriginalMedia();
-    const inspected = await maintenance('inspect', [backup.directory]);
+    const [inspected, beforeRestore] = await Promise.all([
+      maintenance('inspect', [backup.directory]),
+      maintenance('status', scope),
+    ]);
     assert.equal(inspected.status, 'verified');
     assert.deepEqual(inspected.backup, backup);
-    assert.equal((await maintenance('status', scope)).restore, null);
+    assert.equal(beforeRestore.restore, null);
     const restore = await maintenance('restore', [
       backup.directory,
       ...scope,
@@ -514,9 +566,11 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     assert.deepEqual(gcHistory, restoredHistory);
     assert.equal(providerCalls, 1);
     const daemonEvidence = await qualifyInstalledWindowsDaemon({
+      home,
       cli,
       prefix,
       dataRoot,
+      userConfigurationPath: ownedUserConfiguration(home).path,
       workspace,
       candidateA: {
         releaseRoot: installed.releaseRoot,
@@ -530,6 +584,7 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
       },
       execute,
       deadline: workDeadline,
+      cleanupDeadline: deadline,
       rollback: () => rollbackTerminalBundle(prefix),
       selectB: () => installTerminalBundle({ bundleRoot: upgrade, prefix }),
     });

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import {
@@ -9,6 +9,7 @@ import {
   type ServerInfo,
 } from '@kite-ai/client';
 import type { TuiCallerRequest } from '@kite-ai/ui/tui';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { callerDigest, callerRequestDigest, parseCallerIntent } from '../../host/caller-intents';
 import { openCallerJournal } from '../../host/caller-journal';
 import { createTuiCallerPort } from '../../host/caller-port';
@@ -60,9 +61,9 @@ function intent(r = request()) {
 
 // Actual HTTP/SDK and private journal transport contract. The loopback responder is not an OAuth producer or effect proof.
 async function fixture(storeId = 'store', subjectId = 'subject') {
-  const root = mkdtempSync('/private/tmp/kite-auth-caller-');
+  const root = temporaryDirectory('kite-auth-caller-');
   const access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   const journal = openCallerJournal({
     access,
     acquireWriteLock: () => acquireProfileDataLock(access, 'tui_private'),

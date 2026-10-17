@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
 import { createArtifactStore } from '../../../../src/artifacts';
@@ -126,7 +127,7 @@ test('followup_task creates a new required carrier in the same child Session and
       expectedStoreId,
       id: 'w',
       name: 'private',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId,
@@ -270,7 +271,7 @@ test('65 required children queue, hold one parent Run and all settle without a c
       expectedStoreId,
       id: 'w',
       name: 'private',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId,
@@ -413,7 +414,7 @@ test('default required children hold the same completion candidate, staggered re
       expectedStoreId,
       id: 'w',
       name: 'private',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId,
@@ -551,7 +552,7 @@ test('known failed required child is accepted as a failure source and parent can
       expectedStoreId,
       id: 'w',
       name: 'private',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId,
@@ -698,7 +699,7 @@ for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
         expectedStoreId,
         id: 'w',
         name: 'private',
-        rootUri: `file://${directory}`,
+        rootUri: pathToFileURL(directory).href,
       });
       await runtime.createSession({
         expectedStoreId,
@@ -834,7 +835,7 @@ test('unknown required carrier produces one status-only diagnosis Model and neve
       expectedStoreId,
       id: 'w',
       name: 'private',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId,
@@ -995,7 +996,7 @@ for (const disposition of ['required', 'background'] as const)
         expectedStoreId,
         id: 'w',
         name: 'private',
-        rootUri: `file://${directory}`,
+        rootUri: pathToFileURL(directory).href,
       });
       await runtime.createSession({
         expectedStoreId,
@@ -1178,7 +1179,7 @@ for (const domain of ['attached_tool', 'independent_job'] as const)
         expectedStoreId,
         id: 'w',
         name: 'private',
-        rootUri: `file://${directory}`,
+        rootUri: pathToFileURL(directory).href,
       });
       await runtime.createSession({
         expectedStoreId,

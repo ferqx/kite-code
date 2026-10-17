@@ -1,11 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AnswerInteractionRequest } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { workflowQuestionProfile } from '../fixtures/workflow-question-profile';
 
@@ -15,7 +16,7 @@ for (const scenario of ['replan', 'waive', 'cancel'] as const)
     const decision = scenario === 'cancel' ? 'waive' : scenario;
     const f = await workflowQuestionProfile(decision);
     const evidence = join(tmpdir(), `kite-workflow-question-pty-evidence-${crypto.randomUUID()}`);
-    mkdirSync(evidence, { mode: 0o700 });
+    privateDirectory(evidence);
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
       const seed = await launchPairedService({

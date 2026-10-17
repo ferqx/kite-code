@@ -1,6 +1,8 @@
 # 本地开发与验证
 
-仓库使用 Bun；CI 与正式 qualification 固定 Bun 1.4.2。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
+仓库使用 Bun；Linux/macOS CI 与正式 qualification 保持 Bun 1.4.2，Windows CI 固定 Bun 1.4.3，以采用固定 tsconfig 的上游修复。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
+
+源码安装的 postinstall 会构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，需要 rustup／固定 Rust1.97.1 和本机 linker；Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C 工具链。使用 `--ignore-scripts` 安装后，先显式运行 `bun run build:files-native` 再执行文件工具测试。正式 Agent build 会把同一原生模块、ABI/hash manifest 和许可证放进制品；用户机器不需要 Rust。运行期缺失资产明确失败，不能依靠源码或即时编译回退。
 
 | 目标 | 命令 | 说明 |
 | --- | --- | --- |

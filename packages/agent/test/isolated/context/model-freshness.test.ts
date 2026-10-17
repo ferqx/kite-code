@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { defineExtension, type Json } from '../../../src/extensions';
@@ -127,7 +128,7 @@ test.each([
     await runtime.createWorkspace({
       expectedStoreId: metadata.storeId,
       id: 'workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Disposable',
     });
     await runtime.createSession({

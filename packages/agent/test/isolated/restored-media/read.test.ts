@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { ArtifactRef, Extension } from '../../../src/extensions';
 import { createProfileBackup, restoreProfileBackup } from '../../../src/maintenance';
@@ -24,7 +26,7 @@ async function rejected(work: Promise<unknown>) {
   }
 }
 test('actual restore reads original full bodies and media, exports history and starts new work from original Fork and compression without replay', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-restored-media-'));
+  const root = realpathSync(temporaryDirectory('kite-restored-media-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
   const old = (await store.getMetadata()).storeId;
@@ -108,7 +110,7 @@ test('actual restore reads original full bodies and media, exports history and s
       expectedStoreId: old,
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       ...scope,

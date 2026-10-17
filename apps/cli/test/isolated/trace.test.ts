@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { readTrace, renderTrace, runTrace } from '../../src/trace';
 
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-cli-trace-');
+  const root = temporaryDirectory('kite-cli-trace-');
   return {
     root,
     path: join(root, 'events.jsonl'),

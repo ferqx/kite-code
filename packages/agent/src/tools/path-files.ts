@@ -50,6 +50,17 @@ export function createPathFileTools(boundaryInput: PathFileBoundary) {
     id: `${template.id}_path`,
     version: '1',
     description: `Absolute user-file ${template.id.slice(6)}; exact target permission, UTF-8 and complete bodies/Artifacts; modifications require exact baseline. External files are outside workspace checkpoints.`,
+    inputSchema: {
+      ...template.inputSchema,
+      properties: {
+        ...(template.inputSchema.properties as Record<string, Json>),
+        path: {
+          type: 'string',
+          maxLength: 4096,
+          description: 'Canonical absolute user-file path; exact target permission is required.',
+        },
+      },
+    },
     ...(template.id !== 'files.read'
       ? { resources: { serial: { scope: 'runtime' as const, key: 'files.path.mutation' } } }
       : {}),
@@ -61,7 +72,7 @@ export function createPathFileTools(boundaryInput: PathFileBoundary) {
         verifyPathFileDispatch(context, `${template.id}_path`, target.revision);
         context.signal.throwIfAborted();
         files = createWorkspaceFiles({ root: target.root, strictReads: true });
-        const anchored = await inspectPathFileTarget(`${template.id}_path`, input, boundary);
+        const anchored = await inspectPathFileTarget(`${template.id}_path`, input, boundary, files);
         if (anchored.revision !== target.revision)
           throw new AgentError('file_dispatch_scope_changed');
         const absolute = (snapshot: FileSnapshot): FileSnapshot => ({

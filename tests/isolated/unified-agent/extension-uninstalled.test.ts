@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -7,6 +7,7 @@ import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createLabelStation, extensionId } from '../../fixtures/extensions/label-station/src/index';
+import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
 function runId(receipt: unknown) {
   return receipt &&
@@ -18,7 +19,7 @@ function runId(receipt: unknown) {
     : null;
 }
 test('removing a trusted extension assembly preserves its original records and public history while refusing new actions and permitting ordinary Runs', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-extension-removed-'));
+  const root = realpathSync(temporaryDirectory('kite-extension-removed-'));
   const effects: unknown[] = [];
   let host: Awaited<ReturnType<typeof openHost>> | undefined;
   async function openHost(installed: boolean) {

@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { deriveMcpSourceReadSet, readMcpSources } from '@kite-ai/agent/config';
 import type { Extension, Json, OperationRef } from '@kite-ai/agent/extensions';
@@ -10,6 +11,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { InteractionRecord } from '@kite-ai/agent/storage';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   createMcpSourceConfiguration,
   type McpSelectedSourceSnapshot,
@@ -30,11 +32,11 @@ async function fixture(
   permission: 'allow' | 'ask' | 'deny' | 'deny_job' = 'allow',
   zero = false,
 ) {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-delegated-source-'));
+  const root = realpathSync(temporaryDirectory('kite-delegated-source-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;
   let effects = 0,
@@ -244,7 +246,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({
     expectedStoreId,
@@ -302,7 +304,7 @@ async function fixture(
         expectedStoreId,
         id: 'w2',
         name: 'same server another Workspace',
-        rootUri: `file://${other}`,
+        rootUri: pathToFileURL(other).href,
       });
       await runtime.createSession({
         expectedStoreId,
@@ -509,7 +511,7 @@ test('explicit zero child selection remains an ordinary child with no inherited 
 }, 20000);
 
 test('strict Session derivation validates both real scopes and rejects same-name sources in another canonical Workspace or parent byte drift', () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-source-derivation-'));
+  const root = realpathSync(temporaryDirectory('kite-source-derivation-'));
   const profilePath = join(root, 'profile'),
     a = join(root, 'a'),
     b = join(root, 'b');

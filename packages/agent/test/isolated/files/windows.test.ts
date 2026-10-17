@@ -96,7 +96,7 @@ nativeTest(
         next: null,
       });
       expect(await f.files.search({ text: 'changed' })).toEqual({
-        matches: [{ path: 'Exact.txt', line: 2, content: 'changed changed' }],
+        matches: [{ path: 'Exact.txt', line: 2, content: 'changed changed\r' }],
         next: null,
       });
       await f.files.close();
@@ -109,7 +109,7 @@ nativeTest(
 );
 
 nativeTest(
-  'Windows ordinary Core read publishes the complete Artifact and supplies the next Model',
+  'Windows ordinary Core accepts absolute workspace list/read paths and supplies the complete Artifact to the next Model',
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-windows-files-core-')));
     const workspace = join(root, 'workspace');
@@ -125,7 +125,8 @@ nativeTest(
       const profile = { dataRoot: join(root, 'data'), profile: 'new' };
       store = await openSqliteStore(profile);
       artifacts = createArtifactStore({ profile, store });
-      const content = `\uFEFFstart\r\n${'完整 α\r\n'.repeat(20000)}end\r\n`;
+      const content = `\uFEFFstart\r\n${'完整 α\r\n'.repeat(120000)}end\r\n`;
+      expect(Buffer.byteLength(content)).toBeGreaterThan(1024 * 1024);
       writeFileSync(join(workspace, 'large.txt'), content);
       const finish: Extract<ModelEvent, { type: 'finish' }> = {
         type: 'finish',
@@ -134,7 +135,18 @@ nativeTest(
       };
       const model = createFixedModel([
         [
-          { type: 'tool_call', id: 'read', name: 'files.read', arguments: '{"path":"large.txt"}' },
+          {
+            type: 'tool_call',
+            id: 'list',
+            name: 'files.list',
+            arguments: JSON.stringify({ path: workspace, limit: 50 }),
+          },
+          {
+            type: 'tool_call',
+            id: 'read',
+            name: 'files.read',
+            arguments: JSON.stringify({ path: join(workspace, 'large.txt') }),
+          },
           { ...finish, reason: 'tool_calls' },
         ],
         [finish],
@@ -174,6 +186,13 @@ nativeTest(
         request: { kind: 'run.start', content: 'read the complete file' },
       });
       await runtime.waitForCommand('read');
+      const listed = (await store.listExecutions('s')).find(
+        (row) => row.definitionId === 'files.list',
+      )!;
+      expect(listed.status).toBe('succeeded');
+      expect(JSON.parse((listed.result as { content: string }).content).entries).toEqual([
+        { name: 'large.txt', kind: 'file' },
+      ]);
       const execution = (await store.listExecutions('s')).find(
         (row) => row.definitionId === 'files.read',
       )!;

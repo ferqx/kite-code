@@ -1,9 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(label: string, read: () => Promise<T>, done: (value: T) => boolean) {
@@ -28,7 +29,7 @@ function canonical(value: unknown): string {
 }
 
 test('source-free default Task preserves full child result and emits exactly one after-turn report, with required/background controls', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-packaged-task-'));
+  const root = realpathSync(temporaryDirectory('kite-packaged-task-'));
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');
   mkdirSync(workspace);
@@ -65,7 +66,7 @@ test('source-free default Task preserves full child result and emits exactly one
     join(built.root, 'node_modules/@kite-ai/service/paired.js')
   )) as typeof import('../../src/paired');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   let disposition: 'after_turn' | 'required' | 'background' = 'after_turn';
   let parentCalls = 0,
     childCalls = 0,

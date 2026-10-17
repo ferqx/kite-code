@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import {
   existsSync,
   linkSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -23,6 +22,7 @@ import {
   writeMcpSourceEntry,
   writeMcpSourceMetadata,
 } from '@kite-ai/agent/config';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { acquireFileLock } from '../../../src/platform/locks';
 
 const http = { type: 'http', url: 'https://example.test/mcp' } as const;
@@ -30,8 +30,8 @@ function fixture() {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'kite-source-mutations-')));
   const profilePath = join(base, 'profile'),
     workspacePath = join(base, 'workspace');
-  mkdirSync(profilePath, { mode: 0o700 });
-  mkdirSync(workspacePath, { mode: 0o700 });
+  privateDirectory(profilePath);
+  privateDirectory(workspacePath);
   const options: McpSourceOptions = {
     profilePath,
     workspacePath,
@@ -40,7 +40,7 @@ function fixture() {
   const user = join(profilePath, 'mcp.json'),
     project = join(workspacePath, '.kite-code', 'mcp.json');
   const put = (path: string, value: unknown) => {
-    mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(path, '..'));
     writeFileSync(path, JSON.stringify(value), { mode: 0o600 });
   };
   const mutate = (mutation: McpSourceEntryMutation, operationId = 'op') =>
@@ -548,7 +548,7 @@ test('invalid UTF8, symlink, hardlink and root replacement refuse writes', () =>
         operationId: 'op',
         validatePublication() {
           renameSync(f.options.workspacePath!, moved);
-          mkdirSync(f.options.workspacePath!, { mode: 0o700 });
+          privateDirectory(f.options.workspacePath!);
         },
       }),
     ).toThrow('mcp_source_conflict');

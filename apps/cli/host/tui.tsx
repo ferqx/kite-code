@@ -10,7 +10,7 @@ import {
   TuiSession,
   translateTuiLabel,
 } from '@kite-ai/ui/tui';
-import { Box, render, Text, useInput } from 'ink';
+import { Box, render, Text, useInput } from '@kite-ai/ui/tui/ink';
 import { useState, useSyncExternalStore } from 'react';
 import {
   getCompleteContext,

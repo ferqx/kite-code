@@ -1,13 +1,5 @@
 import { expect, test } from 'bun:test';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -17,6 +9,7 @@ import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { candidate, probe } from '../../fixtures/formal-optional-capabilities/candidate';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 function runId(receipt: unknown) {
   return receipt &&
@@ -30,15 +23,15 @@ function runId(receipt: unknown) {
 test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   'relocated formal candidate loads native keyring without vault operations; default macOS Shell and ordinary Files/chat use the actual host',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-formal-optional-')),
+    const root = realpathSync(temporaryDirectory('kite-formal-optional-')),
       home = join(root, 'home');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
     });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     let service: Awaited<ReturnType<typeof launchPairedService>> | undefined;
     let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let coldAccess: ReturnType<typeof acquireArtifactAccess> | undefined;

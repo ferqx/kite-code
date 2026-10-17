@@ -1,8 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   createProfileBackup,
   inspectProfileRestore,
@@ -39,7 +40,7 @@ async function fails(work: Promise<unknown>, code: string) {
   expect((error as { code?: string })?.code ?? (error as Error)?.message).toBe(code);
 }
 async function fixture(seed = false) {
-  const directory = mkdtempSync('/private/tmp/kite-restore-'),
+  const directory = temporaryDirectory('kite-restore-'),
     profile = { dataRoot: join(directory, 'data'), profile: 'test' },
     store = await openSqliteStore(profile),
     storeId = (await store.getMetadata()).storeId;

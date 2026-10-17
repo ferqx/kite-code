@@ -45,10 +45,8 @@ export async function startWindowsInstalledTuiPty(options: {
       argv: [
         '--no-env-file',
         '--no-install',
-        '--config',
-        win32.join(win32.dirname(options.runtimeExecutable), 'windows-bunfig.toml'),
-        '--tsconfig-override',
-        win32.join(win32.dirname(options.runtimeExecutable), 'windows-tsconfig.json'),
+        `--config=${win32.join(win32.dirname(options.runtimeExecutable), 'windows-bunfig.toml')}`,
+        `--tsconfig-override=${win32.join(win32.dirname(options.runtimeExecutable), 'windows-tsconfig.json')}`,
         fileURLToPath(new URL('./windows-installed-tui-pty-driver.ts', import.meta.url)),
       ],
       cwd: options.cwd,

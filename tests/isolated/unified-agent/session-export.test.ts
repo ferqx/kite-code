@@ -5,6 +5,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -94,7 +95,7 @@ async function fixture(large = false) {
   await client.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${directory}`,
+    rootUri: pathToFileURL(directory).href,
     name: 'Owned',
   });
   await client.createSession({

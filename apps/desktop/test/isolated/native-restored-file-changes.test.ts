@@ -10,6 +10,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import type { AgentClient, Message } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) {
@@ -60,7 +61,7 @@ test('restored Native Files read original write/edit previews and read/write/edi
   writeFileSync(filePath, original);
   writeFileSync(join(workspace, 'AGENTS.md'), 'ORIGINAL_RESTORED_FILES_AGENT_SOURCE');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const requests: ProviderBody[] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',

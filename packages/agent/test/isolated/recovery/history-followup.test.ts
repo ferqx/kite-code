@@ -1,7 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -14,7 +16,7 @@ for (const mode of [
   'completion_decision',
 ] as const)
   test(`explicit interrupt ${mode} history preserves the original boundary once and rolls back with recovery`, async () => {
-    const dataRoot = mkdtempSync('/private/tmp/kite-recovery-history-');
+    const dataRoot = temporaryDirectory('kite-recovery-history-');
     let store = await openSqliteStore({ dataRoot, profile: 'owned' });
     const db = new Database(join(dataRoot, 'owned/core.db'));
     try {
@@ -22,7 +24,7 @@ for (const mode of [
       await store.createWorkspace({
         expectedStoreId,
         id: 'w',
-        rootUri: `file://${dataRoot}`,
+        rootUri: pathToFileURL(dataRoot).href,
         name: 'w',
       });
       await store.createSession({
@@ -266,14 +268,14 @@ for (const mode of [
   });
 
 test('runless Action Job and its ordinary Tool do not fabricate assistant tool-call history', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-recovery-runless-history-');
+  const dataRoot = temporaryDirectory('kite-recovery-runless-history-');
   let store = await openSqliteStore({ dataRoot, profile: 'owned' });
   try {
     const expectedStoreId = (await store.getMetadata()).storeId;
     await store.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${dataRoot}`,
+      rootUri: pathToFileURL(dataRoot).href,
       name: 'w',
     });
     await store.createSession({

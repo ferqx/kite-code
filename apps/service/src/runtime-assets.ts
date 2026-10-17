@@ -84,13 +84,14 @@ export function windowsTerminalRuntimeArguments(root: string): readonly string[]
   return Object.freeze([
     '--no-env-file',
     '--no-install',
-    '--config',
-    join(root, windowsTerminalRuntimeConfigFiles[0]!),
-    '--tsconfig-override',
-    join(root, windowsTerminalRuntimeConfigFiles[1]!),
+    `--config=${join(root, windowsTerminalRuntimeConfigFiles[0]!)}`,
+    `--tsconfig-override=${join(root, windowsTerminalRuntimeConfigFiles[1]!)}`,
   ]);
 }
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+// Windows' native final-path lookup preserves the same canonical-path check
+// without repeating the JS ancestor walk for every leaf in the full closure.
+const canonicalPath = process.platform === 'win32' ? realpathSync.native : realpathSync;
 function fail(code: string): never {
   throw new TerminalRuntimeAssetError(code);
 }
@@ -259,6 +260,16 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
   }) as TerminalBundleManifest;
 }
 /** Exact native file ownership, independently retained by each actual Windows consumer. */
+const windowsTerminalFileReaders = new WeakMap<
+  object,
+  {
+    root: string;
+    hash(path: string): string;
+    bytes(path: string): Uint8Array;
+    read(path: string): import('@kite-ai/agent/artifact-access').WindowsArtifactObject | undefined;
+  }
+>();
+
 export function retainWindowsTerminalRuntimeFiles(root: string): {
   verify(): void;
   release(): void;
@@ -266,10 +277,16 @@ export function retainWindowsTerminalRuntimeFiles(root: string): {
   if (process.platform !== 'win32') fail('terminal_target_mismatch');
   // Node/Electron also imports the pure verifier on POSIX. Native Bun ownership
   // loads only at this explicit Windows boundary, never during metadata parsing.
-  const { retainWindowsCandidateFiles } =
-    require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+  const {
+    retainWindowsCandidateFiles,
+    readWindowsArtifactObject,
+    hashWindowsArtifactFile,
+    readWindowsArtifactFile,
+  } = require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
   const pins: ReturnType<typeof retainWindowsCandidateFiles>[] = [];
+  let access: { verify(): void; release(): void } | undefined;
   const release = () => {
+    if (access) windowsTerminalFileReaders.delete(access);
     while (pins.length) {
       pins.at(-1)!.release();
       pins.pop();
@@ -292,19 +309,41 @@ export function retainWindowsTerminalRuntimeFiles(root: string): {
       for (const pin of pins) pin.verify();
       if (!pins.length) fail('terminal_bundle_unavailable');
     };
-    verify();
-    return Object.freeze({ verify, release });
+    // Each original scope has completed its own initial verification. The manifest
+    // remains read-pinned while the second scope admits every exact declared path.
+    access = Object.freeze({ verify, release });
+    windowsTerminalFileReaders.set(access, {
+      root,
+      hash: (path) => hashWindowsArtifactFile(pins[1]!, path),
+      bytes: (path) =>
+        readWindowsArtifactFile(
+          path === join(root, 'terminal-manifest.json') ? pins[0]! : pins[1]!,
+          path,
+        ),
+      read: (path) => readWindowsArtifactObject(pins[1]!, path),
+    });
+    return access;
   } catch (error) {
     release();
     throw error;
   }
 }
+/** Raw original bytes only; callers still hash every file and reverify the genuine owner. */
+export function readWindowsTerminalRuntimeFile(
+  access: ReturnType<typeof retainWindowsTerminalRuntimeFiles>,
+  path: string,
+): Uint8Array {
+  const state = windowsTerminalFileReaders.get(access);
+  if (!state || !relativePath(path)) return fail('terminal_bundle_unavailable');
+  return state.bytes(join(state.root, ...path.split('/')));
+}
 /** Verify the entire installed closure at its canonical startup root; no global executable fallback. */
 export function verifyTerminalRuntimeBundle(
   bundleRoot: string,
   removal?: WindowsInstallationRemoval,
+  retainedFiles?: ReturnType<typeof retainWindowsTerminalRuntimeFiles>,
 ): VerifiedTerminalRuntimeBundle {
-  return terminalRuntimeBundleContent(bundleRoot, removal, false);
+  return terminalRuntimeBundleContent(bundleRoot, removal, false, retainedFiles);
 }
 /** Complete content/hash/inventory only. No ACL, native file pin or usage authority. */
 export function readTerminalRuntimeBundleContent(
@@ -316,10 +355,13 @@ function terminalRuntimeBundleContent(
   bundleRoot: string,
   removal: WindowsInstallationRemoval | undefined,
   contentOnly: boolean,
+  retainedFiles?: ReturnType<typeof retainWindowsTerminalRuntimeFiles>,
 ): VerifiedTerminalRuntimeBundle {
   let windowsFiles: ReturnType<typeof retainWindowsTerminalRuntimeFiles> | undefined;
   try {
     const root = realpathSync(bundleRoot);
+    if (retainedFiles && (removal || windowsTerminalFileReaders.get(retainedFiles)?.root !== root))
+      fail('terminal_bundle_unavailable');
     if (!lstatSync(root).isDirectory()) fail('terminal_bundle_unavailable');
     const manifestPath = join(root, 'terminal-manifest.json');
     if (
@@ -334,7 +376,7 @@ function terminalRuntimeBundleContent(
         require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
       assertWindowsInstallationRemoval(removal, root);
     } else if (!contentOnly && process.platform === 'win32')
-      windowsFiles = retainWindowsTerminalRuntimeFiles(root);
+      windowsFiles = retainedFiles ?? retainWindowsTerminalRuntimeFiles(root);
     const bytes = readFileSync(manifestPath);
     let json: unknown;
     try {
@@ -362,8 +404,31 @@ function terminalRuntimeBundleContent(
       for (const name of readdirSync(directory)) {
         const path = prefix ? `${prefix}/${name}` : name;
         if (path === 'terminal-manifest.json') continue;
-        const absolute = join(directory, name),
-          stat = lstatSync(absolute);
+        const absolute = join(directory, name);
+        if (windowsFiles) {
+          // The same original handles already checked kind, exact final path,
+          // no reparse, single link and full 64-bit identity/size. Keep every
+          // inventory and byte hash check; reverify all original stamps/ACLs below.
+          const object = windowsTerminalFileReaders.get(windowsFiles)!.read(absolute);
+          if (!object) fail('terminal_bundle_identity_mismatch');
+          if (object.directory) {
+            if (!directories.has(path)) fail('terminal_bundle_identity_mismatch');
+            walk(absolute, path);
+          } else {
+            const file = expected.get(path);
+            if (
+              !file ||
+              object.size !== BigInt(file.size) ||
+              windowsTerminalFileReaders.get(windowsFiles)!.hash(absolute) !== file.sha256
+            )
+              fail('terminal_bundle_identity_mismatch');
+            if (identities.has(object.identity)) fail('terminal_bundle_path_alias');
+            identities.add(object.identity);
+            actual.add(path);
+          }
+          continue;
+        }
+        const stat = lstatSync(absolute, { bigint: true });
         if (stat.isSymbolicLink()) {
           const link = links.get(path);
           if (!link || readlinkSync(absolute) !== link.target)
@@ -377,17 +442,17 @@ function terminalRuntimeBundleContent(
           actual.add(path);
         } else if (stat.isDirectory()) {
           if (!directories.has(path)) fail('terminal_bundle_identity_mismatch');
-          if (realpathSync(absolute) !== absolute) fail('terminal_bundle_path_alias');
+          if (canonicalPath(absolute) !== absolute) fail('terminal_bundle_path_alias');
           walk(absolute, path);
         } else if (stat.isFile()) {
           const file = expected.get(path);
           if (
             !file ||
-            stat.nlink !== 1 ||
-            stat.size !== file.size ||
-            (process.platform !== 'win32' && (stat.mode & 0o777) !== file.mode) ||
-            realpathSync(absolute) !== absolute ||
-            fileHash(absolute, stat.size) !== file.sha256
+            stat.nlink !== 1n ||
+            stat.size !== BigInt(file.size) ||
+            (process.platform !== 'win32' && (stat.mode & 0o777n) !== BigInt(file.mode)) ||
+            canonicalPath(absolute) !== absolute ||
+            fileHash(absolute, file.size) !== file.sha256
           )
             fail('terminal_bundle_identity_mismatch');
           const identity = `${stat.dev}:${stat.ino}`;
@@ -433,7 +498,7 @@ function terminalRuntimeBundleContent(
     if (error instanceof TerminalRuntimeAssetError) throw error;
     return fail('terminal_bundle_unavailable');
   } finally {
-    windowsFiles?.release();
+    if (!retainedFiles) windowsFiles?.release();
   }
 }
 /** Host-only deny metadata. Parsing performs no filesystem or package access. */
@@ -459,9 +524,10 @@ export function parseTerminalRuntimeProtection(value: unknown): TerminalRuntimeP
 export function verifyTerminalRuntimeProtection(
   proof: TerminalRuntimeProtection,
   actual: { entrypoint: string; executable: string; buildId: string },
+  retainedFiles?: ReturnType<typeof retainWindowsTerminalRuntimeFiles>,
 ): string {
   const selected = parseTerminalRuntimeProtection(proof);
-  const bundle = verifyTerminalRuntimeBundle(selected.root);
+  const bundle = verifyTerminalRuntimeBundle(selected.root, undefined, retainedFiles);
   try {
     if (
       bundle.digest !== selected.manifestSha256 ||

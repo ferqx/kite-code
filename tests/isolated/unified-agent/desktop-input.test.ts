@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { DesktopInput, type InputSubmission } from '../../../apps/desktop/src/input';
@@ -40,7 +41,7 @@ async function fixture() {
     expectedStoreId,
     id: 'w',
     name: 'temporary',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   for (const sessionId of ['a', 'b'])
     await client.createSession({

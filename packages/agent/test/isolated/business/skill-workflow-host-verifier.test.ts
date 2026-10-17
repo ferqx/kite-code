@@ -3,8 +3,6 @@ import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
-  mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -12,6 +10,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { createSkillWorkflowVerifier } from '../../../src/business/skill-workflow/verifier';
 import type { JobEvent, JobHandle } from '../../../src/extensions';
 import { captureMacosHostLaunch } from '../../../src/jobs/host-preparation';
@@ -33,7 +35,7 @@ let library: string;
 const roots: string[] = [];
 beforeAll(async () => {
   if (process.platform !== 'darwin') return;
-  assets = realpathSync.native(mkdtempSync('/private/tmp/kite-workflow-host-assets-'));
+  assets = realpathSync.native(temporaryDirectory('kite-workflow-host-assets-'));
   const built = await Bun.build({
     entrypoints: [join(import.meta.dir, '../../../src/platform/process/shell-supervisor.ts')],
     outdir: assets,
@@ -81,7 +83,7 @@ afterAll(() => {
     rmSync(assets, { recursive: true, force: true });
 });
 function fixture(script: string, timeout = 5000, full = false) {
-  const root = realpathSync.native(mkdtempSync('/private/tmp/kite-workflow-host-verifier-'));
+  const root = realpathSync.native(temporaryDirectory('kite-workflow-host-verifier-'));
   roots.push(root);
   const workspace = join(root, 'workspace');
   const data = join(root, 'data');
@@ -89,7 +91,7 @@ function fixture(script: string, timeout = 5000, full = false) {
   const temp = join(root, 'temp');
   const skill = join(data, 'profiles', 'selected', 'skills', 'checker');
   for (const path of [workspace, control, temp, skill, join(skill, 'node_modules', 'ignored')])
-    mkdirSync(path, { recursive: true, mode: 0o700 });
+    privateDirectory(path);
   writeFileSync(join(data, 'secret'), 'other private data');
   writeFileSync(join(control, 'secret'), 'coordination data');
   writeFileSync(join(skill, 'helper.ts'), "export const selected = 'relative original helper';\n");

@@ -1,16 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import {
@@ -19,21 +12,24 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedCLI } from '../../host';
 import { runSelectedDaemon } from '../../host/daemon';
 import type { RunCLIArguments } from '../../src/arguments';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 
 let root: string, entry: string, driver: string;
-const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
+const supportsDaemonFixture = ['darwin', 'linux'].includes(process.platform);
+const nativeTest = supportsDaemonFixture ? test : test.skip;
 const hash = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex');
 beforeAll(async () => {
-  root = mkdtempSync('/private/tmp/kite-shared-cli-');
+  if (!supportsDaemonFixture) return;
+  root = temporaryDirectory('kite-shared-cli-');
   const old = await buildOwnedDaemon(join(root, 'artifact'));
   const result = await Bun.build({
     entrypoints: [
-      new URL('../fixtures/shared-cli-daemon-child.ts', import.meta.url).pathname,
-      new URL('../fixtures/shared-cli-driver.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('../fixtures/shared-cli-daemon-child.ts', import.meta.url)),
+      fileURLToPath(new URL('../fixtures/shared-cli-driver.ts', import.meta.url)),
     ],
     target: 'bun',
     packages: 'external',
@@ -68,7 +64,7 @@ async function limit<T>(value: Promise<T>) {
 }
 async function fixture() {
   const base = join(root, randomUUID());
-  mkdirSync(base, { mode: 0o700 });
+  privateDirectory(base);
   const dataRoot = join(base, 'data');
   const profile = selectProfile({ dataRoot, profile: 'owned' });
   const endpoint = selectDaemonEndpoint({
@@ -131,7 +127,7 @@ async function fixture() {
   await client.createWorkspace({
     expectedStoreId: storeId,
     id: 'workspace',
-    rootUri: `file://${base}`,
+    rootUri: pathToFileURL(base).href,
     name: 'Owned',
   });
   const session = (id: string, workspaceId = 'workspace') =>
@@ -251,7 +247,7 @@ nativeTest(
       await f.client.createWorkspace({
         expectedStoreId: f.storeId,
         id: 'foreign-workspace',
-        rootUri: `file://${elsewhere}`,
+        rootUri: pathToFileURL(elsewhere).href,
         name: 'Foreign',
       });
       await f.session('foreign', 'foreign-workspace');

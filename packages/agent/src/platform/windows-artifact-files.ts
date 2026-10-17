@@ -3,6 +3,10 @@ import { realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { AgentError } from '../storage/types';
 import { defaultWindowsPathSecurity, privateDirectory } from './windows-path-security';
+import {
+  windowsSecurityDescriptorReader,
+  windowsSecurityDescriptorSymbols,
+} from './windows-security-descriptor';
 
 /** Fixed native media policy. Import is inert on Node/POSIX; no supplied HANDLE, SID or DLL. */
 export interface WindowsArtifactTemporary {
@@ -93,12 +97,8 @@ function native() {
         args: ['ptr', 'u32', 'ptr', 'ptr'],
         returns: 'bool',
       },
-      GetSecurityDescriptorDacl: { args: ['ptr', 'ptr', 'ptr', 'ptr'], returns: 'bool' },
       GetSecurityDescriptorControl: { args: ['ptr', 'ptr', 'ptr'], returns: 'bool' },
-      GetSecurityInfo: {
-        args: ['u64', 'u32', 'u32', 'ptr', 'ptr', 'ptr', 'ptr', 'ptr'],
-        returns: 'u32',
-      },
+      ...windowsSecurityDescriptorSymbols,
       SetSecurityInfo: { args: ['u64', 'u32', 'u32', 'ptr', 'ptr', 'ptr', 'ptr'], returns: 'u32' },
       EqualSid: { args: ['ptr', 'ptr'], returns: 'bool' },
       GetAce: { args: ['ptr', 'u32', 'ptr'], returns: 'bool' },
@@ -205,41 +205,36 @@ function native() {
     if (!handle || BigInt(handle) === 18446744073709551615n) fail();
     return handle;
   };
+  const readSecurity = windowsSecurityDescriptorReader(adv.symbols, ptr, fail);
   const roleAcl = (handle: bigint | number, readOnly: boolean, directory = false) => {
     // Referencing user here keeps its native SID storage live, not only the numeric pointer.
     if (!user.byteLength) fail();
-    const owner = out(),
-      dacl = out(),
-      sd = out();
-    if (adv.symbols.GetSecurityInfo(handle, 1, 5, ptr(owner), null, ptr(dacl), null, ptr(sd)) !== 0)
+    const security = readSecurity(handle);
+    const owner = security.owner,
+      dacl = security.dacl;
+    if (!owner || !dacl || !adv.symbols.EqualSid(pointer(owner), sid)) fail();
+    const control = new Uint16Array(1),
+      revision = new Uint32Array(1);
+    if (
+      !adv.symbols.GetSecurityDescriptorControl(security.descriptor, ptr(control), ptr(revision)) ||
+      (control[0]! & 0x1004) !== 0x1004
+    )
       fail();
-    try {
-      if (!owner[0] || !dacl[0] || !adv.symbols.EqualSid(pointer(owner[0]), sid)) fail();
-      const control = new Uint16Array(1),
-        revision = new Uint32Array(1);
-      if (
-        !adv.symbols.GetSecurityDescriptorControl(pointer(sd[0]!), ptr(control), ptr(revision)) ||
-        (control[0]! & 0x1004) !== 0x1004
-      )
-        fail();
-      const acl = new DataView(toArrayBuffer(pointer(dacl[0]!), 0, 8));
-      if (acl.getUint16(4, true) !== 1) fail();
-      const ace = out();
-      if (!adv.symbols.GetAce(pointer(dacl[0]!), 0, ptr(ace))) fail();
-      const address = pointer(ace[0]!);
-      const header = new DataView(toArrayBuffer(address, 0, 8));
-      if (
-        header.getUint8(0) !== 0 ||
-        (readOnly ? header.getUint8(1) !== 0 : (header.getUint8(1) & ~0x13) !== 0) ||
-        (directory && (header.getUint8(1) & 3) !== 3) ||
-        header.getUint16(2, true) < 12 ||
-        header.getUint32(4, true) !== (readOnly ? 0x120089 : 0x1f01ff) ||
-        !adv.symbols.EqualSid(pointer(BigInt(address) + 8n), sid)
-      )
-        fail();
-    } finally {
-      if (sd[0]) kernel.symbols.LocalFree(pointer(sd[0]));
-    }
+    const acl = new DataView(toArrayBuffer(pointer(dacl), 0, 8));
+    if (acl.getUint16(4, true) !== 1) fail();
+    const ace = out();
+    if (!adv.symbols.GetAce(pointer(dacl), 0, ptr(ace))) fail();
+    const address = pointer(ace[0]!);
+    const header = new DataView(toArrayBuffer(address, 0, 8));
+    if (
+      header.getUint8(0) !== 0 ||
+      (readOnly ? header.getUint8(1) !== 0 : (header.getUint8(1) & ~0x13) !== 0) ||
+      (directory && (header.getUint8(1) & 3) !== 3) ||
+      header.getUint16(2, true) < 12 ||
+      header.getUint32(4, true) !== (readOnly ? 0x120089 : 0x1f01ff) ||
+      !adv.symbols.EqualSid(pointer(BigInt(address) + 8n), sid)
+    )
+      fail();
   };
   const readonlyAcl = (handle: bigint | number) => roleAcl(handle, true);
   const verifyFile = (handle: bigint | number, path: string, readOnly: boolean, size?: string) => {

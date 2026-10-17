@@ -5,7 +5,6 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -34,10 +33,11 @@ import {
   uninstallTerminalBundle,
   verifyTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { temporaryDirectory } from '../../fixtures/test-filesystem';
 import { finiteNativeFixture } from '../../fixtures/unified-agent/native-artifact-fixture';
 
 function fixture() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-registration-'));
+  const root = realpathSync(temporaryDirectory('kite-cli-registration-'));
   const source = finiteNativeFixture(root);
   const terminal = installTerminalBundle({
     bundleRoot: join(source, 'terminal'),

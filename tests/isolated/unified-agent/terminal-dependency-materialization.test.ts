@@ -5,13 +5,17 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { desktopBundledDependencies } from '../../../packages/ui/scripts/bundled-dependencies';
 import { copyTerminalDependencies } from '../../../scripts/release/terminal-dependencies';
 
 function pkg(path: string, manifest: Record<string, unknown>, code?: string) {
@@ -285,3 +289,162 @@ test('an unrepresentable same-name version-shadowing cycle fails instead of chan
     rmSync(root, { recursive: true, force: true });
   }
 }, 20000);
+
+test(
+  'the complete installed materialized graph keeps every resolution edge and original asset while sharing real common ancestors',
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-terminal-actual-materialized-'));
+    try {
+      const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
+      const destination = join(root, 'node_modules');
+      const workspacePackages = [
+        'packages/ai',
+        'packages/agent',
+        'packages/client',
+        'packages/ui',
+        'apps/service',
+        'apps/cli',
+      ].map((location) => {
+        const source = join(repositoryRoot, location);
+        const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'));
+        return {
+          name: manifest.name,
+          source,
+          destination: pkg(join(destination, manifest.name), {
+            name: manifest.name,
+            version: manifest.version,
+          }),
+          bundledDependencies: manifest.name === '@kite-ai/ui' ? desktopBundledDependencies : [],
+        };
+      });
+      const result = copyTerminalDependencies({
+        repositoryRoot,
+        destination,
+        workspacePackages,
+        dependencyLayout: 'materialized',
+      });
+      expect(result.links).toEqual([]);
+      const lookup = (from: string, name: string): string | undefined => {
+        for (const search of createRequire(join(from, 'package.json')).resolve.paths(
+          `${name}/package.json`,
+        ) ?? []) {
+          const path = join(search, name, 'package.json');
+          if (existsSync(path)) return realpathSync(path);
+        }
+        return undefined;
+      };
+      const supports = (values: string[] | undefined, actual: string) =>
+        !values ||
+        (!values.includes(`!${actual}`) &&
+          (!values.some((value) => !value.startsWith('!')) ||
+            values.includes(actual) ||
+            values.includes('any')));
+      for (const placement of [
+        ...workspacePackages,
+        ...result.packages.map((row) => ({
+          ...row,
+          destination: join(destination, row.destination),
+          bundledDependencies: [] as readonly string[],
+        })),
+      ]) {
+        const manifest = JSON.parse(readFileSync(join(placement.source, 'package.json'), 'utf8'));
+        for (const name of Object.keys({
+          ...manifest.dependencies,
+          ...manifest.peerDependencies,
+          ...manifest.optionalDependencies,
+        })) {
+          if (
+            name.startsWith('node:') ||
+            name.startsWith('bun:') ||
+            placement.bundledDependencies.includes(name)
+          )
+            continue;
+          const original = lookup(placement.source, name);
+          const actual = lookup(placement.destination, name);
+          if (!original) {
+            expect(actual).toBeUndefined();
+            continue;
+          }
+          const dep = JSON.parse(readFileSync(original, 'utf8'));
+          if (!supports(dep.os, process.platform) || !supports(dep.cpu, process.arch)) {
+            expect(actual).toBeUndefined();
+            continue;
+          }
+          expect(actual).toBeDefined();
+          if (name.startsWith('@kite-ai/')) expect(dirname(actual!)).toBe(join(destination, name));
+          else expect(readFileSync(actual!)).toEqual(readFileSync(original));
+        }
+      }
+      for (const placement of result.packages) {
+        const target = join(destination, placement.destination);
+        const assets = (relative: string) => {
+          const source = realpathSync(join(placement.source, relative));
+          if (lstatSync(source).isDirectory()) {
+            for (const name of readdirSync(source))
+              if (name !== 'node_modules') assets(join(relative, name));
+          } else expect(readFileSync(join(target, relative))).toEqual(readFileSync(source));
+        };
+        assets('');
+      }
+      physicalTree(destination);
+      expect(result.packages.some((row) => row.destination === 'zod')).toBe(true);
+      expect(result.packages.some((row) => row.name === 'typescript')).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  process.platform === 'win32' ? 10 * 60_000 : 60_000,
+);
+
+test('shared physical defaults do not make an absent optional peer available to another workspace', () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-terminal-absent-materialized-'));
+  try {
+    const repositoryRoot = join(root, 'repository'),
+      destination = join(root, 'bundle/node_modules');
+    const present = pkg(join(repositoryRoot, 'node_modules/.installed/present'), {
+      name: 'optional',
+      version: '1',
+    });
+    const one = pkg(join(repositoryRoot, 'one'), {
+      name: '@kite-ai/one',
+      version: '1',
+      dependencies: { optional: '1' },
+    });
+    const two = pkg(join(repositoryRoot, 'two'), {
+      name: '@kite-ai/two',
+      version: '1',
+      peerDependencies: { optional: '1' },
+      peerDependenciesMeta: { optional: { optional: true } },
+    });
+    edge(one, 'optional', present);
+    const result = copyTerminalDependencies({
+      repositoryRoot,
+      destination,
+      dependencyLayout: 'materialized',
+      workspacePackages: [
+        {
+          name: '@kite-ai/one',
+          source: one,
+          destination: pkg(join(destination, '@kite-ai/one'), {
+            name: '@kite-ai/one',
+            version: '1',
+          }),
+        },
+        {
+          name: '@kite-ai/two',
+          source: two,
+          destination: pkg(join(destination, '@kite-ai/two'), {
+            name: '@kite-ai/two',
+            version: '1',
+          }),
+        },
+      ],
+    });
+    expect(result.packages).toHaveLength(1);
+    expect(existsSync(join(destination, 'optional'))).toBe(false);
+    expect(existsSync(join(destination, '@kite-ai/one/node_modules/optional/index.js'))).toBe(true);
+    expect(existsSync(join(destination, '@kite-ai/two/node_modules/optional'))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { ArtifactRef, OperationRef } from '../../../src/extensions';
@@ -90,7 +91,7 @@ test('an actual same-Loop child seals its seventeen MiB final output in its orig
     await runtime.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Owned',
     });
     await runtime.createSession({

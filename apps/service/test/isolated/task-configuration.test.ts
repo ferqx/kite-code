@@ -8,6 +8,7 @@ import type { Json } from '@kite-ai/agent/extensions';
 import { taskToolCapability } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createTaskConfiguration } from '../../src/task-configuration';
 
@@ -111,7 +112,7 @@ async function fixture(
   mkdirSync(workspace);
   writeFileSync(join(workspace, 'input.txt'), 'actual complete private input');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const a = endpoint(options.defaultRole),
     b = endpoint();
   const configurationPath = join(profile.profilePath, 'config.jsonc');

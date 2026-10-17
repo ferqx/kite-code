@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -19,6 +19,7 @@ import { createClient, decodeMcpAuthResult } from '@kite-ai/client';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 import { createMcpOAuthBrowser } from '../../src/mcp-oauth-browser';
@@ -197,12 +198,12 @@ async function fixture(
   auth: Auth = 'oauth',
   options: { ask?: boolean; observer?: string; ownedLauncher?: boolean } = {},
 ) {
-  const root = mkdtempSync('/private/tmp/kite-source-oauth-integration-');
+  const root = temporaryDirectory('kite-source-oauth-integration-');
   chmodSync(root, 0o700);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const sourcePath = join(profile.profilePath, 'mcp.json');
   const remote = await peer(options.ownedLauncher),
     temporary = createTemporaryCredentialBackend();

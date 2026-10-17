@@ -1,6 +1,6 @@
 /** Integrity-only metadata. Fake library bytes never qualify an executable SQLite engine. */
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type TerminalBundleManifest,
@@ -12,6 +12,7 @@ import {
   reviewedSqliteSources,
   terminalSqliteEngineRoot,
 } from '@kite-ai/service/sqlite-release-assets';
+import { privateDirectory } from '../test-filesystem';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 export function fixtureTerminalSqlite(
@@ -19,8 +20,8 @@ export function fixtureTerminalSqlite(
   files: TerminalBundleManifest['files'][number][],
 ): TerminalBundleManifest['sqlite'] {
   const directory = join(root, terminalSqliteEngineRoot);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  mkdirSync(join(root, 'entrypoints'), { recursive: true, mode: 0o700 });
+  privateDirectory(directory);
+  privateDirectory(join(root, 'entrypoints'));
   for (const path of terminalHostEntrypoints) {
     const bytes = Buffer.from(`integrity-only inert entry ${path}`);
     writeFileSync(join(root, path), bytes, { mode: 0o644 });
@@ -30,7 +31,7 @@ export function fixtureTerminalSqlite(
   if (process.platform === 'win32') {
     for (const path of [...windowsTerminalFrontdoorFiles, ...windowsTerminalRuntimeConfigFiles]) {
       const bytes = Buffer.from(`integrity-only inert Windows asset ${path}`);
-      mkdirSync(join(root, path, '..'), { recursive: true, mode: 0o700 });
+      privateDirectory(join(root, path, '..'));
       const mode = path.endsWith('.exe') ? 493 : 420;
       writeFileSync(join(root, path), bytes, { mode });
       files.push({ path, size: bytes.length, sha256: sha(bytes), mode });

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   linkSync,
@@ -18,7 +19,13 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '../../../src/artifact-access';
 import { assertLiveLock, attachLockResource } from '../../../src/platform/locks';
-import { retainWindowsArtifactScope } from '../../../src/platform/windows-artifact-scope';
+import {
+  hashWindowsArtifactFile,
+  readWindowsArtifactFile,
+  readWindowsArtifactObject,
+  retainWindowsArtifactScope,
+} from '../../../src/platform/windows-artifact-scope';
+import { retainWindowsCandidateFiles } from '../../../src/platform/windows-candidate-files';
 
 const windows = process.platform === 'win32';
 function command(args: string[]) {
@@ -148,6 +155,101 @@ test.skipIf(!windows)(
 );
 
 test.skipIf(!windows)(
+  'manifest pins check exact native paths and every original object without a preceding realpath per leaf',
+  () => {
+    const f = fixture();
+    try {
+      const directory = join(f.root, 'nested');
+      mkdirSync(directory);
+      const longName = `${'long-'.repeat(16)}asset`;
+      writeFileSync(join(directory, longName), 'long path');
+      const paths = [`nested/${longName}`, 'asset'];
+      const pin = retainWindowsCandidateFiles(f.root, paths);
+      try {
+        pin.verify();
+        expect(readFileSync(join(directory, longName), 'utf8')).toBe('long path');
+        expect(readFileSync(join(f.root, 'asset'), 'utf8')).toBe('original immutable asset');
+        expect(() => writeFileSync(join(f.root, 'asset'), 'changed')).toThrow();
+        expect(() => renameSync(directory, join(f.root, 'moved'))).toThrow();
+        expect(() => renameSync(f.root, join(f.parent, 'moved'))).toThrow();
+        expect(() => writeFileSync(join(directory, 'unlisted.js'), 'new child')).not.toThrow();
+        expect(() => pin.verify()).toThrow('artifact_scope_denied');
+      } finally {
+        pin.release();
+      }
+      unlinkSync(join(directory, 'unlisted.js'));
+      for (const paths of [
+        ['asset', 'ASSET'],
+        ['nested/../asset'],
+        ['asset:stream'],
+        ['nested\\asset'],
+        ['missing'],
+      ])
+        expect(() => retainWindowsCandidateFiles(f.root, paths)).toThrow('artifact_scope_denied');
+      const alias = join(f.root, 'alias');
+      symlinkSync(directory, alias, 'junction');
+      expect(() => retainWindowsCandidateFiles(f.root, [`alias/${longName}`])).toThrow(
+        'artifact_scope_denied',
+      );
+      unlinkSync(alias);
+      linkSync(join(f.root, 'asset'), alias);
+      expect(() => retainWindowsCandidateFiles(f.root, ['asset'])).toThrow('artifact_scope_denied');
+      unlinkSync(alias);
+      const final = retainWindowsCandidateFiles(f.root, paths);
+      final.verify();
+      final.release();
+      renameSync(directory, join(f.root, 'moved'));
+      writeFileSync(join(f.root, 'asset'), 'changed after release');
+    } finally {
+      f.close();
+    }
+  },
+);
+
+test.skipIf(!windows)(
+  'original object facts reject copied or released owners and live ACL changes are still rejected',
+  () => {
+    const f = fixture();
+    try {
+      const path = join(f.root, 'asset');
+      const pin = retainWindowsCandidateFiles(f.root, ['asset']);
+      try {
+        expect(readWindowsArtifactObject(pin, path)?.size).toBe(
+          BigInt(Buffer.byteLength('original immutable asset')),
+        );
+        expect(readWindowsArtifactObject(pin, f.root)?.directory).toBe(true);
+        expect(readWindowsArtifactObject(pin, join(f.root, 'absent'))).toBeUndefined();
+        const expected = Buffer.from('original immutable asset');
+        const bytes = readWindowsArtifactFile(pin, path);
+        expect(bytes).toEqual(expected);
+        bytes[0] = 0;
+        expect(readWindowsArtifactFile(pin, path)).toEqual(expected);
+        expect(hashWindowsArtifactFile(pin, path)).toBe(
+          createHash('sha256').update(expected).digest('hex'),
+        );
+        expect(hashWindowsArtifactFile(pin, path)).toBe(
+          createHash('sha256').update(expected).digest('hex'),
+        );
+        expect(() => readWindowsArtifactObject({ ...pin }, path)).toThrow('artifact_scope_denied');
+        command([path, '/grant', '*S-1-1-0:(W)']);
+        expect(() => pin.verify()).toThrow('artifact_scope_denied');
+        command([path, '/remove:g', '*S-1-1-0']);
+        command([path, '/grant', '*S-1-1-0:(RX)']);
+        pin.verify();
+      } finally {
+        pin.release();
+      }
+      expect(() => readWindowsArtifactObject(pin, path)).toThrow('artifact_scope_denied');
+      expect(() => readWindowsArtifactFile(pin, path)).toThrow('artifact_scope_denied');
+      expect(() => hashWindowsArtifactFile(pin, path)).toThrow('artifact_scope_denied');
+      expect(readFileSync(path, 'utf8')).toBe('original immutable asset');
+    } finally {
+      f.close();
+    }
+  },
+);
+
+test.skipIf(!windows)(
   'candidate root and parent unsafe ACL, owner, junction and lock hardlink are rejected without repair',
   () => {
     const f = fixture();
@@ -161,9 +263,24 @@ test.skipIf(!windows)(
           command([path, '/remove:g', '*S-1-1-0']);
           command([path, '/grant', '*S-1-1-0:(RX)']);
         }
-      command([f.root, '/setowner', '*S-1-5-32-544']);
-      expect(() => acquireArtifactAccess({ root: f.root, mode: 'shared' })).toThrow();
-      command([f.root, '/setowner', `*${f.sid}`]);
+      // A different owner cannot be assigned by an ordinary user's token.
+      // Read an existing OS-owned directory; never change its ACL or create a lock there.
+      const systemRoot = realpathSync(process.env.SystemRoot!);
+      const owner = spawnSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          '[System.IO.Directory]::GetAccessControl($env:SystemRoot).GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
+        ],
+        { encoding: 'utf8', windowsHide: true },
+      );
+      if (owner.status !== 0)
+        throw Error(`owned_system_owner_query_failed:${owner.stderr}:${owner.stdout}`);
+      expect(owner.stdout.trim()).toMatch(/^S-1-/);
+      expect(owner.stdout.trim()).not.toBe(f.sid);
+      expect(() => retainWindowsArtifactScope(systemRoot)).toThrow('artifact_scope_denied');
       const alias = join(f.parent, 'alias');
       symlinkSync(f.root, alias, 'junction');
       expect(() => acquireArtifactAccess({ root: alias, mode: 'shared' })).toThrow();

@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -20,6 +19,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -27,10 +27,10 @@ const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'source-free default Native cold window reads real opt-in Shell Job complete Unicode output without execution replay',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-job-output-bundle-')),
+    const root = realpathSync(temporaryDirectory('kite-native-job-output-bundle-')),
       home = join(root, 'home'),
       moved = join(root, 'relocated');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     const workspace = join(home, 'workspace'),
       secondWorkspace = join(home, 'workspace-two');
     mkdirSync(workspace);
@@ -410,7 +410,7 @@ async function seedJob({
       );
     },
   });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const config = {
     modelId: 'fixed',
     models: [

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { type ContextCompressor, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
@@ -271,7 +272,7 @@ test('restored compression opens the exact sensitive original input through the 
       expectedStoreId: originalStoreId,
       id: 'workspace',
       name: 'Original workspace',
-      rootUri: `file://${rootPath}`,
+      rootUri: pathToFileURL(rootPath).href,
     });
     for (const [sessionId, title] of [
       ['session', 'Original compression'],

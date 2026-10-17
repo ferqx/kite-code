@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { defineExtension, type Permissions, type ToolDefinition } from '@kite-ai/agent/extensions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -43,7 +44,7 @@ async function setup(tool: ToolDefinition, permissions: Permissions, responses: 
   const { storeId: expectedStoreId } = await store.getMetadata();
   await runtime.createWorkspace({
     id: 'workspace',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'Disposable',
     expectedStoreId,
   });
@@ -154,7 +155,7 @@ for (const failure of [
       await store.createWorkspace({
         expectedStoreId,
         id: 'workspace',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
         name: 'Model dispatch control',
       });
       await store.createSession({

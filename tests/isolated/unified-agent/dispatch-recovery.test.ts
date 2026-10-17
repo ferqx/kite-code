@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
@@ -15,7 +16,7 @@ test('an orphaned Run produces a local dispatch failure without repeated owner a
   await store.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${dataRoot}`,
+    rootUri: pathToFileURL(dataRoot).href,
     name: 'fixture',
   });
   for (const sessionId of ['orphaned', 'healthy'])

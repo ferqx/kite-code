@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
   type ModelAdapter,
@@ -185,7 +186,7 @@ async function fixture() {
     expectedStoreId,
     id: 'w',
     name: 'temporary',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({ ...base, workspaceId: 'w', commandId: 'create', title: 'parent' });
   return {

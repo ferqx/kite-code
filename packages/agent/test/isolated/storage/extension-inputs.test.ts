@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFixedModel, type ModelAdapter } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { AgentError, createRuntime } from '../../../src';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { CommandRequest } from '../../../src/storage/types';
@@ -12,7 +13,7 @@ async function reject(work: Promise<unknown>, code: string) {
 }
 
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-extension-inputs-');
+  const root = temporaryDirectory('kite-extension-inputs-');
   const profile = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;

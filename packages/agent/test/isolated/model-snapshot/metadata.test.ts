@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -132,7 +133,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'private',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     ...scope,

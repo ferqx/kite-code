@@ -17,11 +17,11 @@ const streamFailure=Error('original_compiler_stream_failure'),signalFailure=Erro
 let actual,signals=0,exitObserved=false,releases=0;const events=[];
 Object.defineProperty(process,'platform',{value:'win32'});Object.defineProperty(process,'arch',{value:'x64'});
 mock.module('node:fs',()=>({...fs,rmSync(p,options){assert.ok(actual);assert.equal(actual.exitCode,0);assert.equal(exitObserved,true);events.push('rm:'+p);fs.rmSync(p,options);}}));
-mock.module(${JSON.stringify(path('packages/agent/src/platform/windows-path-security.ts'))},()=>({defaultWindowsPathSecurity:()=>({}),privateDirectory(p){assert.equal(p,outdir);assert.equal(fs.existsSync(p),false);fs.mkdirSync(p);}}));
+mock.module(${JSON.stringify(path('packages/agent/src/platform/windows-path-security.ts'))},()=>({defaultWindowsPathSecurity:()=>({}),privateDirectory(p){assert.ok([outdir,join(outdir,'compiler')].includes(p));assert.equal(fs.existsSync(p),false);fs.mkdirSync(p);}}));
 mock.module(${JSON.stringify(path('packages/agent/src/platform/windows-candidate-files.ts'))},()=>({retainWindowsCandidateFiles(p,files){assert.equal(p,root);assert.deepEqual(files,['verifier.exe']);return {verify(){},release(){assert.equal(actual.exitCode,0);assert.equal(exitObserved,true);releases++;events.push('pin-release');}};}}));
 const originalSpawn=Bun.spawn;
 Bun.spawn=new Proxy(originalSpawn,{apply(target,receiver,args){
- assert.equal(args[1].cwd,outdir);assert.equal(args[1].stdout,'pipe');assert.equal(args[1].stderr,'pipe');
+ assert.equal(args[1].cwd,join(outdir,'compiler'));assert.equal(args[1].stdout,'pipe');assert.equal(args[1].stderr,'pipe');
  actual=Reflect.apply(target,receiver,[[process.execPath,'-e','setTimeout(() => process.exit(0), 150);'],args[1]]);
  actual.exited.then(code=>{assert.equal(code,0);exitObserved=true;events.push('actual-exit:0');});
  return new Proxy(actual,{get(child,key){if(key==='stderr')return new ReadableStream({start(controller){controller.error(streamFailure);}});if(key==='kill')return ()=>{signals++;assert.equal(child.exitCode,null);throw signalFailure;};const value=Reflect.get(child,key,child);return typeof value==='function'?value.bind(child):value;}});
@@ -31,7 +31,7 @@ try {
  const started=performance.now();
  const error=await buildWindowsTerminalLauncher({outdir,verifierPath,verifierSha256:createHash('sha256').update(pe).digest('hex'),verifierSize:pe.length},fs.realpathSync(process.execPath)).catch(e=>e);
  assert.equal(error,streamFailure);assert.equal(signals,1);assert.equal(await actual.exited,0);assert.equal(actual.exitCode,0);assert.ok(performance.now()-started>=100);
- assert.equal(releases,1);assert.equal(events[0],'actual-exit:0');assert.equal(events[1],'pin-release');assert.equal(events.filter(e=>e.startsWith('rm:')).length,4);assert.equal(events.at(-1),'rm:'+outdir);assert.equal(fs.existsSync(outdir),false);assert.deepEqual(fs.readFileSync(verifierPath),pe);
+ assert.equal(releases,1);assert.equal(events[0],'actual-exit:0');assert.equal(events[1],'pin-release');assert.deepEqual(events.filter(e=>e.startsWith('rm:')),['rm:'+join(outdir,'compiler'),'rm:'+outdir]);assert.equal(events.at(-1),'rm:'+outdir);assert.equal(fs.existsSync(outdir),false);assert.deepEqual(fs.readFileSync(verifierPath),pe);
  assert.equal(await new Response(actual.stderr).text(),'');
 }finally{
  Bun.spawn=originalSpawn;

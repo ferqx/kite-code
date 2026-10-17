@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import type {
@@ -118,7 +119,7 @@ test('Host output pages bind original Store/namespace/Session/ref, freeze upper 
     await runtime.createWorkspace({
       expectedStoreId,
       id: 'w',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
       name: 'private',
     });
     await runtime.createSession({

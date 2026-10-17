@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   lstatSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -12,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -28,6 +28,7 @@ import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { createMcpHttpTransportPort } from '@kite-ai/service/mcp-http-port';
 import type { TuiMcpIntent, TuiMcpSnapshot } from '@kite-ai/ui/tui';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createMcpSelectionRecord, mcpCanonical } from '../../host/mcp-selection-intents';
 import { openMcpSelectionJournal } from '../../host/mcp-selection-journal';
 import { createTuiMcpPort } from '../../host/tui-mcp';
@@ -83,9 +84,9 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
 async function fixture(source = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-host-'))),
     workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
   const journal = openMcpSelectionJournal({
     access,
@@ -194,7 +195,7 @@ async function fixture(source = false) {
   await client.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
     name: 'owned',
   });
   await client.createSession({
@@ -413,9 +414,9 @@ test('actual publication with unavailable durable mutation result stays original
 }, 15000);
 
 test('MCP saved phase requires original command, exact action binding and full mutation digest; admission alone stays pending', async () => {
-  const pureRoot = realpathSync(mkdtempSync('/private/tmp/kite-mcp-receipt-'));
+  const pureRoot = realpathSync(temporaryDirectory('kite-mcp-receipt-'));
   const pureAccess = acquireProfileAccess({ dataRoot: join(pureRoot, 'data'), profile: 'owned' });
-  mkdirSync(pureAccess.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(pureAccess.profilePath);
   const pureJournal = openMcpSelectionJournal({
     access: pureAccess,
     acquireWriteLock: () => acquireProfileDataLock(pureAccess, 'tui_private'),
@@ -525,7 +526,7 @@ test('MCP saved phase requires original command, exact action binding and full m
         } as Awaited<ReturnType<AgentClient['getView']>>;
       },
       async listWorkspaces() {
-        return [{ id: 'w', rootUri: `file://${pureRoot}`, name: 'owned' }];
+        return [{ id: 'w', rootUri: pathToFileURL(pureRoot).href, name: 'owned' }];
       },
       async queryExtension() {
         throw Error('unused');

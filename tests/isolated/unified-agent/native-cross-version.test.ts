@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -16,6 +15,7 @@ import {
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -32,6 +32,7 @@ import {
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 import {
   COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
   materializeCompatibleTerminalPredecessor,
@@ -109,9 +110,9 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       home = join(root, 'home'),
       workspace = join(root, 'workspace'),
       prefix = join(root, 'installed');
-    for (const path of [home, workspace]) mkdirSync(path, { mode: 0o700 });
+    for (const path of [home, workspace]) privateDirectory(path);
     if (process.platform === 'darwin') {
-      mkdirSync(`${workspace}-db8`, { mode: 0o700 });
+      privateDirectory(`${workspace}-db8`);
       writeFileSync(join(`${workspace}-db8`, 'retained-project'), 'original DB8 project bytes');
     }
     const profile = selectProfile({
@@ -801,8 +802,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         const caseRoot = join(root, boundary),
           home = join(caseRoot, 'home'),
           workspace = join(caseRoot, 'workspace');
-        for (const path of [caseRoot, home, workspace, `${workspace}-db8`])
-          mkdirSync(path, { mode: 0o700 });
+        for (const path of [caseRoot, home, workspace, `${workspace}-db8`]) privateDirectory(path);
         const profile = selectProfile({
           dataRoot: join(home, '.kite-code/unified-agent'),
           profile: 'default',
@@ -820,7 +820,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
               expectedStoreId: storeId,
               id: 'native-version-workspace',
               name: 'Native versions',
-              rootUri: new URL(`file://${workspace}`).href,
+              rootUri: pathToFileURL(workspace).href,
             });
             await store.createSession({
               expectedStoreId: storeId,
@@ -854,7 +854,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         // inspection cannot create sidecars for an otherwise read-only schema assertion.
         const wal = `${profile.databasePath}-wal`;
         expect(!existsSync(wal) || lstatSync(wal).size === 0).toBe(true);
-        const databaseUri = new URL(`file://${profile.databasePath}`);
+        const databaseUri = new URL(pathToFileURL(profile.databasePath).href);
         databaseUri.searchParams.set('immutable', '1');
         const database = new Database(
           databaseUri.href,

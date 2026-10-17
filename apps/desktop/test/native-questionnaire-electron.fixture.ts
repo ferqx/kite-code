@@ -454,7 +454,7 @@ try {
         }),
       );
       await page.screenshot({
-        path: '/private/tmp/kite-native-questionnaire-window-failure-20261006.png',
+        path: join(home, 'kite-native-questionnaire-window-failure-20261006.png'),
         fullPage: true,
       });
     } catch (diagnostic) {

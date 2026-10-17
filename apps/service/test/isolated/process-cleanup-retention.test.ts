@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -14,6 +13,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   readDaemonReservation,
   requestDaemonBootstrap,
@@ -57,7 +57,7 @@ async function build(args: string[], cwd: string) {
   }
 }
 beforeAll(async () => {
-  root = mkdtempSync('/private/tmp/kite-process-retention-');
+  root = temporaryDirectory('kite-process-retention-');
   artifact = join(root, 'artifact');
   const modules = join(artifact, 'node_modules');
   const dependencies = new Map<string, Set<string>>();
@@ -127,7 +127,7 @@ afterAll(() => {
 });
 function selection(kind: string) {
   const directory = join(root, kind);
-  mkdirSync(directory, { mode: 0o700 });
+  privateDirectory(directory);
   const profile = selectProfile({ dataRoot: join(directory, 'data'), profile: 'owned' });
   const web = join(directory, 'web');
   mkdirSync(web);

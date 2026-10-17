@@ -4,8 +4,6 @@ import {
   chmodSync,
   existsSync,
   linkSync,
-  mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -13,6 +11,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -39,7 +41,7 @@ function proofs(row: SelectionRecord) {
   return row;
 }
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-mcp-maintenance-');
+  const root = temporaryDirectory('kite-mcp-maintenance-');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
@@ -54,7 +56,7 @@ async function fixture() {
   };
 }
 function write(path: string, records: SelectionRecord[], version = 1) {
-  mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(path, '..'));
   const bytes = Buffer.from(`${JSON.stringify({ version, records }, null, 2)}\r\n`);
   writeFileSync(path, bytes, { mode: 0o600 });
   return bytes;

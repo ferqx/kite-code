@@ -25,7 +25,7 @@ import {
   resolveConfiguration,
 } from '@kite-ai/agent/config';
 import { defineExtension, type Extension, type Json } from '@kite-ai/agent/extensions';
-import { createPathFileTools } from '@kite-ai/agent/files';
+import { createPathFileTools, filesNativeAssets } from '@kite-ai/agent/files';
 import {
   createMcpResourceModelSource,
   type McpLifecycleOptions,
@@ -366,6 +366,7 @@ export function createDefaultProcessConfiguration(options: {
       dirname(userConfiguration.path),
       process.execPath,
       fileURLToPath(import.meta.url),
+      ...filesNativeAssets().map((asset) => fileURLToPath(asset)),
       fileURLToPath(storage.module),
       fileURLToPath(storage.worker),
       ...storage.migrations.map((migration) => fileURLToPath(migration)),

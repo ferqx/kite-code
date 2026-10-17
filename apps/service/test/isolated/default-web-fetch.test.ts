@@ -3,11 +3,13 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
@@ -17,7 +19,7 @@ async function fixture(off = false) {
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const expectedStoreId = (await store.getMetadata()).storeId;
   const webRequests: string[] = [];
@@ -170,7 +172,7 @@ async function fixture(off = false) {
   await client.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
     name: 'temporary',
   });
   await client.createSession({

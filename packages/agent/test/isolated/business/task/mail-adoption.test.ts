@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import type { Extension, OperationRef } from '../../../../src/extensions';
@@ -184,7 +185,7 @@ test('explicit follow-up seals the idle mail set: complete private body once, ol
       expectedStoreId: storeId,
       id: 'w',
       name: 'temp',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,
@@ -437,7 +438,7 @@ test('root stop at the new carrier permission barrier preserves idle mail but ad
       expectedStoreId: storeId,
       id: 'w',
       name: 'temp',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,

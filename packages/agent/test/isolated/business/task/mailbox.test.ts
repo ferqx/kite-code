@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import type { Extension, OperationRef } from '../../../../src/extensions';
@@ -336,7 +337,7 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
     await runtime.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
       name: 'temp',
     });
     await runtime.createSession({
@@ -577,7 +578,7 @@ for (const mode of ['idle', 'failed_sender', 'commit_fault', 'cancelled_target']
       await runtime.createWorkspace({
         expectedStoreId: storeId,
         id: 'w',
-        rootUri: `file://${directory}`,
+        rootUri: pathToFileURL(directory).href,
         name: 'temp',
       });
       await runtime.createSession({

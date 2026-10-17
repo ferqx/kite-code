@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 import { createFileCheckpointProvider } from '../fixtures/file-checkpoint-provider';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
@@ -51,7 +52,7 @@ test('Native fixed checkpoint GETs preserve two-Fork aliases, original media sco
     'ORIGINAL_CHECKPOINT_AGENT_SOURCE\nUse only the explicitly selected ordinary Files tools.';
   writeFileSync(join(workspace, 'AGENTS.md'), agents);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const { provider, requests, model } = createFileCheckpointProvider();
   writeFileSync(
     userConfiguration.path,

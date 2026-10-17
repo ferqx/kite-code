@@ -493,7 +493,7 @@ test('migrated Git leaf reads real branches and switches only at first send with
   const git = (...args: string[]) =>
     String(
       execFileSync(
-        '/usr/bin/git',
+        'git',
         ['-c', 'user.name=Native fixture', '-c', 'user.email=native@example.invalid', ...args],
         { cwd: f.root, encoding: 'utf8' },
       ),

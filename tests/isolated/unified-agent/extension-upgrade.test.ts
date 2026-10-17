@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -13,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dir, '../../..');
 async function child(argv: string[], cwd: string, home: string) {
@@ -79,8 +79,8 @@ test('E13 two standalone artifacts replace at a new Run while original active Jo
       repositoryRoot: repository,
     });
     const app = join(root, 'app');
-    mkdirSync(app, { mode: 0o700 });
-    mkdirSync(join(app, 'home'), { mode: 0o700 });
+    privateDirectory(app);
+    privateDirectory(join(app, 'home'));
     symlinkSync(
       join(candidate.root, 'node_modules'),
       join(app, 'node_modules'),
@@ -91,7 +91,7 @@ test('E13 two standalone artifacts replace at a new Run while original active Jo
     for (const version of ['1', '2']) {
       const fixture = join(repository, 'tests/fixtures/extensions/upgrade', `v${version}`);
       const target = join(app, `v${version}`);
-      mkdirSync(target, { mode: 0o700 });
+      privateDirectory(target);
       const manifest = JSON.parse(readFileSync(join(fixture, 'package.json'), 'utf8')) as {
         scripts: { build: string };
       };

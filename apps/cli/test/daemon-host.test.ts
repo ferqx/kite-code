@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import {
@@ -20,6 +21,7 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { privateDirectory } from '../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../host';
 import { runSelectedDaemon } from '../host/daemon';
 import type { CLIArguments } from '../src/arguments';
@@ -27,9 +29,11 @@ import { buildOwnedDaemon } from './fixtures/daemon-host-build';
 
 let root: string;
 let entrypoint: string;
-const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
+const supportsPosixDaemonFixture = ['darwin', 'linux'].includes(process.platform);
+const nativeTest = supportsPosixDaemonFixture ? test : test.skip;
 const hash = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex');
 beforeAll(async () => {
+  if (!supportsPosixDaemonFixture) return;
   // macOS's per-user tmpdir exceeds the original Unix socket path budget.
   root = realpathSync(
     mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'kite-cli-daemon-host-')),
@@ -41,7 +45,7 @@ afterAll(() => {
 });
 function fixture(absent = false, defaultEndpoint = false) {
   const base = join(root, randomUUID());
-  if (!absent) mkdirSync(base, { mode: 0o700 });
+  if (!absent) privateDirectory(base);
   const dataRoot = join(base, 'data');
   const profile = selectProfile({ dataRoot, profile: 'owned' });
   const identity = {
@@ -241,7 +245,7 @@ nativeTest(
       await network.createWorkspace({
         expectedStoreId: storeId,
         id: 'workspace',
-        rootUri: `file://${value.base}`,
+        rootUri: pathToFileURL(value.base).href,
         name: 'Owned',
       });
       await network.createSession({
@@ -352,7 +356,7 @@ nativeTest(
     const value = fixture();
     const build = artifact(value);
     const corrupt = Buffer.from('owned deliberately invalid SQLite Store\0bytes');
-    mkdirSync(value.profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(value.profile.profilePath);
     writeFileSync(value.profile.databasePath, corrupt, { mode: 0o600 });
     try {
       expect(await value.call(value.server('start'), build)).toBe(0);

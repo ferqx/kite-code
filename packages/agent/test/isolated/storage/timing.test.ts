@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { type DbTiming, openSqliteStore } from '../../../src/sqlite';
 
@@ -8,7 +9,7 @@ function percentile(values: number[], percent: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * percent))] ?? 0;
 }
 test('real dual Workers report SQL/COMMIT separately and throwing observer cannot affect writes', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-store-timing-');
+  const dataRoot = temporaryDirectory('kite-store-timing-');
   chmodSync(dataRoot, 0o700);
   const measurements: DbTiming[] = [];
   const perWorker: DbTiming[][] = [[], []];

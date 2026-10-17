@@ -2,8 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -19,19 +17,19 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import type { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { AgentClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { verifyTerminalBundle } from '../../../cli/host/terminal-artifact';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const obj = (value: unknown) => value as Record<string, Json>;
 const sha = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 test('actual cold Service needs a new explicit MCP connection and independent approvals; old facts never reconnect or acquire new authority', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-mcp-cold-reconnect-'));
-  const evidence = `/private/tmp/kite-mcp-cold-reconnect-evidence-${randomUUID()}`;
-  mkdirSync(evidence, { mode: 0o700 });
+  const root = realpathSync(temporaryDirectory('kite-mcp-cold-reconnect-'));
+  const evidence = temporaryDirectory('kite-mcp-cold-reconnect-evidence-');
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const sourcePath = join(profile.profilePath, 'mcp.json');
   const configPath = join(profile.profilePath, 'config.jsonc');
   let phase: 'warm' | 'cold' = 'warm';

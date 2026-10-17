@@ -1,8 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -252,7 +253,7 @@ test('Native MCP refuses row and byte limits without evicting unknown original r
   }
 });
 test('actual Node DB7 backup v15 inspect and restore preserve all original requests and reject relabeling or damaged bytes', async () => {
-  const root = mkdtempSync('/private/tmp/kite-db7-maintenance-');
+  const root = temporaryDirectory('kite-db7-maintenance-');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   try {
     const store = await openSqliteStore(profile);

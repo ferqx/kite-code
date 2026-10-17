@@ -92,7 +92,11 @@ test('fresh complete package outside source runs large file and streamed Artifac
       if (!installed) throw new Error(`missing_installed_dependency:${dependency}`);
       const destination = join(modules, dependency);
       mkdirSync(dirname(destination), { recursive: true });
-      symlinkSync(realpathSync(installed), destination, 'dir');
+      symlinkSync(
+        realpathSync(installed),
+        destination,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
     }
     const fixture = join(root, 'verify.mjs');
     writeFileSync(
@@ -100,12 +104,13 @@ test('fresh complete package outside source runs large file and streamed Artifac
       `
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {join,relative,isAbsolute,sep} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 const base=import.meta.dir;
 const pkg=join(base,'node_modules/@kite-ai/agent');
 const manifest=JSON.parse(readFileSync(join(pkg,'package.json'),'utf8'));
-for(const key of Object.keys(manifest.exports)){const spec=key==='.'?'@kite-ai/agent':'@kite-ai/agent/'+key.slice(2);const resolved=Bun.resolveSync(spec,base);assert(resolved.startsWith(pkg+'/')&&!resolved.includes('/src/'));await import(spec);}
+for(const key of Object.keys(manifest.exports)){const spec=key==='.'?'@kite-ai/agent':'@kite-ai/agent/'+key.slice(2);const resolved=Bun.resolveSync(spec,base);const local=relative(pkg,resolved);assert(!isAbsolute(local)&&!local.split(sep).some(x=>x==='..'||x==='src'));await import(spec);}
 const {createRuntime}=await import('@kite-ai/agent');
 const {createWorkspaceFiles,createFileTools}=await import('@kite-ai/agent/files');
 const {openSqliteStore}=await import('@kite-ai/agent/sqlite');
@@ -116,7 +121,7 @@ const files=createWorkspaceFiles({root:working});
 const body='start\\n'+'x'.repeat(9*1024*1024)+'\\nend\\n';
 const written=await files.write({path:'large',content:body,base:null});assert.equal(written.content,body);assert.equal(written.baseline.hash,createHash('sha256').update(body).digest('hex'));
 const store=await openSqliteStore({dataRoot:join(base,'data'),profile:'new'});const storeId=(await store.getMetadata()).storeId;
-await store.createWorkspace({expectedStoreId:storeId,id:'w',name:'w',rootUri:'file://'+working});await store.createSession({expectedStoreId:storeId,sessionId:'s',commandId:'create',workspaceId:'w',title:'s',subjectId:'owner'});
+await store.createWorkspace({expectedStoreId:storeId,id:'w',name:'w',rootUri:pathToFileURL(working).href});await store.createSession({expectedStoreId:storeId,sessionId:'s',commandId:'create',workspaceId:'w',title:'s',subjectId:'owner'});
 const artifacts=createArtifactStore({profile:{dataRoot:join(base,'data'),profile:'new'},store});
 const finish={type:'finish',reason:'stop',usage:{inputTokens:1,outputTokens:1}};
 const model=createFixedModel([[{type:'tool_call',id:'call',name:'files.read',arguments:'{"path":"large"}'},{...finish,reason:'tool_calls'}],[finish]]);
@@ -127,7 +132,7 @@ try{
  const chunk=Buffer.from('stream body\\n'.repeat(4096));let bytes=0;async function* stream(){for(let i=0;i<400;i++){bytes+=chunk.length;yield chunk;}}
  const streamInput={expectedStoreId:storeId,sessionId:'s',subjectId:'owner',scope:{kind:'session',id:'s'},refId:'stream',mediaType:'text/plain'};const streamed=await artifacts.publishStream({...streamInput,content:stream()});let count=0;for await(const part of artifacts.readStream(streamInput)){assert(part.length<=65536);count+=part.length;}assert.equal(count,bytes);assert(bytes>16*1024*1024);
  console.log(JSON.stringify({fileBytes:written.baseline.size,artifactBytes:streamed.size,modelCalls:model.requests.length,inlineBody:JSON.parse(execution.result.content).inlineBody}));
-}finally{await runtime.close();await files.close();}
+}finally{await runtime.close();await artifacts.close();await store.close();await files.close();}
 `,
     );
     const result = JSON.parse(await run([fixture], root)) as {

@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -15,7 +16,7 @@ async function rejected(promise: Promise<unknown>, code: string) {
   expect((error as { code?: string } | undefined)?.code).toBe(code);
 }
 test('explicit recovery cancels proven unstarted work, preserves cross-Store uncertainty and rolls back atomically', async () => {
-  const dataRoot = mkdtempSync('/private/tmp/kite-recovery-settlement-');
+  const dataRoot = temporaryDirectory('kite-recovery-settlement-');
   chmodSync(dataRoot, 0o700);
   let store = await openSqliteStore({ dataRoot, profile: 'test' });
   const db = new Database(join(dataRoot, 'test', 'core.db'));

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -107,7 +108,7 @@ for (const mode of ['apply', 'cancel', 'approval'] as const)
         expectedStoreId,
         id: 'w',
         name: 'private',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       await runtime.createSession({
         ...base,

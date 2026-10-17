@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelEvent } from '@kite-ai/ai';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
@@ -45,7 +46,7 @@ async function fixture() {
     expectedStoreId: storeId,
     id: 'w',
     name: 'w',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await store.createSession({
     expectedStoreId: storeId,
@@ -363,7 +364,7 @@ for (const deletionScope of ['session', 'workspace'] as const)
           expectedStoreId: f.storeId,
           id: 'sibling-workspace',
           name: 'sibling',
-          rootUri: `file://${f.root}`,
+          rootUri: pathToFileURL(f.root).href,
         });
       await runtime.createSession({
         expectedStoreId: f.storeId,

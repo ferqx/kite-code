@@ -2,8 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -22,6 +20,7 @@ import {
 } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { createTuiMcpPort } from '../../host/tui-mcp';
@@ -52,15 +51,11 @@ type HttpRow = {
 };
 
 test('80x24 TUI explicitly requests cold connections and checks original warm/cold receipts without replay; paired drains and shared detaches', async () => {
-  const root = realpathSync(
-    mkdtempSync(
-      join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'kite-tui-mcp-connection-'),
-    ),
-  );
+  const root = realpathSync(temporaryDirectory('kite-tui-mcp-connection-'));
   const evidence = join(tmpdir(), `kite-tui-mcp-connection-evidence-${randomUUID()}`);
-  mkdirSync(evidence, { mode: 0o700 });
+  privateDirectory(evidence);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   let phase: 'warm' | 'cold' = 'warm';
   let serviceMode: 'paired' | 'shared' = 'paired',
@@ -209,7 +204,7 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
         { mode: 0o600 },
       );
     settings();
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     writeFileSync(
       join(profile.profilePath, 'mcp.json'),
       JSON.stringify({
@@ -252,7 +247,7 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
     expect(directory.items).toHaveLength(1);
     const selectedServerId = directory.items[0]!.id;
     facts.push({ stage: 'configured-source', serverId: selectedServerId });
-    mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });
@@ -433,7 +428,7 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
           rmSync(join(root, 'observer-private.json'), { force: true });
           settings();
           const web = join(root, 'web');
-          mkdirSync(web, { mode: 0o700 });
+          privateDirectory(web);
           const assets = [
             ['/index.html', 'text/html; charset=utf-8', '<title>owned</title>'],
             ['/app.js', 'text/javascript; charset=utf-8', 'globalThis.owned=true;'],

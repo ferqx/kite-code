@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -20,7 +22,7 @@ async function denied(promise: Promise<unknown>, code?: string) {
   if (code) expect((error as { code: string }).code).toBe(code);
 }
 async function fixture(extra?: 'job' | 'tool') {
-  const dataRoot = mkdtempSync('/private/tmp/kite-job-reconcile-store-'),
+  const dataRoot = temporaryDirectory('kite-job-reconcile-store-'),
     profile = { dataRoot, profile: 'test' };
   let store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -28,7 +30,7 @@ async function fixture(extra?: 'job' | 'tool') {
     expectedStoreId,
     id: 'w',
     name: 'w',
-    rootUri: `file://${dataRoot}`,
+    rootUri: pathToFileURL(dataRoot).href,
   });
   await store.createSession({
     expectedStoreId,

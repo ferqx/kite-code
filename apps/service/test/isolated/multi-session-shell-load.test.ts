@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { decodeShellProcessEvidence, shellProcessEvidenceEnded } from '@kite-ai/agent/jobs/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { type BackgroundExecutionItem, createClient, ExecutionOutputPages } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 import {
   buildMixedShellSupervisor,
@@ -211,7 +212,7 @@ for (const slots of [4, 16])
       const scripts = writeMixedShellScript(workspace);
       const source = provider(scripts.shellCommand, slots);
       const profile = selectProfile({ dataRoot: join(directory, 'data'), profile: 'mixed' });
-      mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+      privateDirectory(profile.profilePath);
       const metricsPath = join(directory, 'metrics.json');
       writeFileSync(
         join(profile.profilePath, 'config.jsonc'),

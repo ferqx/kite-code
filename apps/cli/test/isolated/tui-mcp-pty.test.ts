@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -17,6 +16,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { createClient, requiresInteractionAttachment } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { openTuiDraftFile } from '../../host/tui-drafts';
@@ -36,9 +36,9 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
 test('80x24 source-free MCP selection and clear preserve original pending work and complete history', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-pty-')));
   const evidenceRoot = join(tmpdir(), `kite-tui-mcp-pty-evidence-${randomUUID()}`);
-  mkdirSync(evidenceRoot, { mode: 0o700 });
+  privateDirectory(evidenceRoot);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   let reviewCalls = 0;
   let calls = 0,
@@ -163,7 +163,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
       }),
       { mode: 0o600 },
     );
-    mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

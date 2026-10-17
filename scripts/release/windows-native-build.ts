@@ -9,6 +9,7 @@ import type {
 } from '../../apps/desktop/scripts/build-native';
 import {
   buildWindowsTerminalLauncher,
+  compileWindowsVerifier,
   copyWindowsSystemExecutable,
 } from './build-windows-terminal-launcher';
 
@@ -22,21 +23,11 @@ async function buildFrontdoors(
   const compileRoot = join(root, `.windows-native-verifier-${randomUUID()}`);
   privateDirectory(compileRoot);
   const compiledPath = join(compileRoot, 'native-verifier.exe');
-  const compiled = await Bun.build({
-    entrypoints: [resolve(import.meta.dir, 'entrypoints/windows-native-verifier.ts')],
-    target: 'bun',
-    packages: 'bundle',
-    compile: {
-      executablePath: runtime,
-      outfile: compiledPath,
-      autoloadDotenv: false,
-      autoloadBunfig: false,
-      autoloadTsconfig: false,
-      autoloadPackageJson: false,
-    },
+  await compileWindowsVerifier({
+    runtime,
+    entrypoint: resolve(import.meta.dir, 'entrypoints/windows-native-verifier-main.ts'),
+    outfile: compiledPath,
   });
-  if (!compiled.success)
-    throw new AggregateError(compiled.logs, 'native_windows_verifier_build_failed');
   const verifierPath = join(app, 'native-verifier.exe');
   const compiledPin = retainWindowsCandidateFiles(compileRoot, ['native-verifier.exe']);
   resources.pins.push(compiledPin);

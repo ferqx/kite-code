@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from './daemon-host-build';
 import { untilRecovery } from './recovery-profile';
@@ -27,7 +28,7 @@ export async function recoveryReportProfile() {
     ledger = join(root, 'ledger'),
     ready = join(root, 'ready');
   mkdirSync(workspace);
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));
   let parentCalls = 0,

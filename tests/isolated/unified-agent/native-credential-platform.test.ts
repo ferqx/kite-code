@@ -1,12 +1,13 @@
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { candidate, probe } from '../../fixtures/formal-optional-capabilities/candidate';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 const gated =
   process.env.KITE_RUN_UNIFIED_KEYRING_SMOKE === '1' && process.env.GITHUB_ACTIONS === 'true';
@@ -25,12 +26,12 @@ test.skipIf(!gated)(
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-unified-keyring-'))),
       home = join(root, 'home');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
     });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     const identityPath = join(root, 'identity.json'),
       secret = `synthetic-${randomUUID()}`;
     writeFileSync(

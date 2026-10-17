@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import type { DaemonBootstrap } from '../../../apps/service/src/daemon/bootstrap';
 import type { AgentClient } from '../../../packages/client/src';
 
@@ -11,9 +12,11 @@ const pendingColdOwners = new Set<object>();
 
 type Candidate = { releaseRoot: string; candidateId: string; buildId: string };
 export interface WindowsDaemonQualificationContext {
+  home: string;
   cli: string;
   prefix: string;
   dataRoot: string;
+  userConfigurationPath: string;
   workspace: string;
   candidateA: Candidate;
   candidateB: Candidate;
@@ -23,6 +26,8 @@ export interface WindowsDaemonQualificationContext {
     opts?: { cleanup?: boolean },
   ): Promise<{ code: number; stdout: string; stderr: string }>;
   deadline: number;
+  /** The caller's existing whole deadline; reserved time is cleanup-only. */
+  cleanupDeadline: number;
   rollback(): unknown;
   selectB(): unknown;
 }
@@ -36,8 +41,11 @@ export async function qualifyInstalledWindowsDaemon(
     process.platform === 'win32' && process.arch === 'x64',
     'windows_daemon_qualification_platform_required',
   );
+  assert(context.cleanupDeadline >= context.deadline);
+  assert(context.cleanupDeadline - context.deadline <= 10000);
+  let draining = false;
   const remaining = () => {
-    const ms = context.deadline - performance.now();
+    const ms = (draining ? context.cleanupDeadline : context.deadline) - performance.now();
     assert(ms > 0, 'windows_daemon_qualification_deadline');
     return ms;
   };
@@ -86,8 +94,23 @@ export async function qualifyInstalledWindowsDaemon(
     name: profile.profile,
     accessKey: profile.profileAccessKey,
   };
-  const endpoint = daemon.selectDaemonEndpoint({ profileAccessKey: profile.profileAccessKey });
-  const configPath = join(profile.profilePath, 'config.jsonc'),
+  // SHGetKnownFolderPath's default-path expansion observes USERPROFILE. The
+  // installed CLI runs in the owned HOME; bind this synchronous first selection
+  // to the same namespace, then restore the caller's environment immediately.
+  const previousHome = process.env.HOME,
+    previousProfile = process.env.USERPROFILE;
+  let endpoint: ReturnType<typeof daemon.selectDaemonEndpoint>;
+  try {
+    process.env.HOME = context.home;
+    process.env.USERPROFILE = context.home;
+    endpoint = daemon.selectDaemonEndpoint({ profileAccessKey: profile.profileAccessKey });
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousProfile;
+  }
+  const configPath = context.userConfigurationPath,
     config = readFileSync(configPath);
   const security = defaultWindowsPathSecurity()!;
   const fixedBody = 'WINDOWS_DAEMON_ORIGINAL_COMPLETE';
@@ -133,10 +156,20 @@ export async function qualifyInstalledWindowsDaemon(
     result: Record<string, unknown> | undefined;
   let store: Awaited<ReturnType<typeof sqlite.openSqliteStore>> | undefined;
   let configChanged = false,
-    draining = false,
     launchAttempted = false,
     launchUnconfirmed = false;
   const bootstrap = () => bounded(daemon.requestDaemonBootstrap(endpoint, expectedProfile));
+  const assertSameBootstrap = (observed: DaemonBootstrap, original: DaemonBootstrap) => {
+    const { requestId: observedRequest, ...observedIdentity } = observed;
+    const { requestId: originalRequest, ...originalIdentity } = original;
+    // The protocol validates each fresh nonce. Every stable field, including
+    // credentials, must still match; never print bootstrap credentials on error.
+    assert.notEqual(observedRequest, originalRequest);
+    assert(
+      isDeepStrictEqual(observedIdentity, originalIdentity),
+      'daemon_bootstrap_identity_changed',
+    );
+  };
   const argv = (action: string, extras: string[] = []) => [
     context.cli,
     'server',
@@ -204,6 +237,7 @@ export async function qualifyInstalledWindowsDaemon(
               id: 'fixed',
               provider: 'compatible',
               model: 'fixed',
+              modelCapabilities: { contextWindowTokens: 1_000_000 },
               baseURL: `${provider.url.href}v1`,
             },
           ],
@@ -286,7 +320,7 @@ export async function qualifyInstalledWindowsDaemon(
     assert.equal(rollbackStatus.instanceId, original.instanceId);
     assert.equal(rollbackStatus.runningBuildId, context.candidateB.buildId);
     assert.equal(rollbackStatus.targetBuildId, context.candidateA.buildId);
-    assert.deepEqual(await bootstrap(), original);
+    assertSameBootstrap(await bootstrap(), original);
     refuseEX(context.candidateB);
     const { uninstallTerminalBundle } = await import('../../../scripts/release/terminal-bundle');
     assert.throws(() => uninstallTerminalBundle(context.prefix), /busy|in.use/i);
@@ -344,18 +378,23 @@ export async function qualifyInstalledWindowsDaemon(
     assert.equal(cold.resultRevision, complete.resultRevision);
     assert(cold.result && typeof cold.result === 'object' && !Array.isArray(cold.result));
     const { modelOutput, ...publicResult } = cold.result;
-    assert(modelOutput && typeof modelOutput === 'object' && !Array.isArray(modelOutput));
-    assert.deepEqual(completeExecution.result, {
-      ...publicResult,
-      outputBody: {
-        kind: 'model_output',
-        executionId: cold.id,
-        complete: modelOutput.complete,
-        contentBytes: modelOutput.contentBytes,
-        reasoningBytes: modelOutput.reasoningBytes,
-        toolCallCount: modelOutput.toolCallCount,
-      },
-    });
+    if (modelOutput === undefined) {
+      assert.equal(publicResult.content, fixedBody);
+      assert.deepEqual(completeExecution.result, cold.result);
+    } else {
+      assert(modelOutput && typeof modelOutput === 'object' && !Array.isArray(modelOutput));
+      assert.deepEqual(completeExecution.result, {
+        ...publicResult,
+        outputBody: {
+          kind: 'model_output',
+          executionId: cold.id,
+          complete: modelOutput.complete,
+          contentBytes: modelOutput.contentBytes,
+          reasoningBytes: modelOutput.reasoningBytes,
+          toolCallCount: modelOutput.toolCallCount,
+        },
+      });
+    }
     const fullOutput = await client.getModelOutput(sessionId, cold.id, {
       expectedStoreId: storeId,
       signal: signal(),
@@ -411,7 +450,7 @@ export async function qualifyInstalledWindowsDaemon(
     const busy = await context.execute('daemon_busy_restart_original', argv('restart'));
     assert.notEqual(busy.code, 0);
     assert(/busy/.test(busy.stderr));
-    assert.deepEqual(await bootstrap(), original);
+    assertSameBootstrap(await bootstrap(), original);
     await command('daemon_restart_cancel_original', argv('restart', ['--cancel']));
     assert.equal(originalHandle.inspect(), 'dead');
     current = await bootstrap();
@@ -530,7 +569,7 @@ export async function qualifyInstalledWindowsDaemon(
       errors.push(error);
     }
   }
-  if (current && performance.now() < context.deadline) {
+  if (current && performance.now() < context.cleanupDeadline) {
     try {
       const observed = await bootstrap();
       assert.equal(observed.instanceId, current.instanceId, 'cleanup_original_daemon_required');
@@ -547,7 +586,12 @@ export async function qualifyInstalledWindowsDaemon(
   }
   if (launchUnconfirmed) errors.push(Error('daemon_launch_cleanup_unconfirmed'));
   if (current) errors.push(Error('daemon_cleanup_unconfirmed'));
-  if (configChanged && !current && !launchUnconfirmed && performance.now() < context.deadline) {
+  if (
+    configChanged &&
+    !current &&
+    !launchUnconfirmed &&
+    performance.now() < context.cleanupDeadline
+  ) {
     try {
       rmSync(configPath);
       security.writePrivateFile(configPath, config);

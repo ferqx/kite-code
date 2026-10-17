@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
@@ -9,6 +9,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startDevelopmentWeb } from '../../src/development-web';
@@ -33,7 +34,7 @@ async function until<T>(read: () => Promise<T> | T, check: (v: T) => boolean) {
   }
 }
 async function fixture(beforeResourceClose?: () => Promise<void>) {
-  const root = mkdtempSync('/private/tmp/kite-http-lifecycle-'),
+  const root = temporaryDirectory('kite-http-lifecycle-'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' }),
     store = await openSqliteStore(profile);
   const metadata = await store.getMetadata(),
@@ -252,7 +253,7 @@ test('an admitted configuration file mutation completes original receipt before 
   }
 });
 test('diagnostic no-Store lifecycle shutdown exits actual runner with parent channel open and leaves same-profile peer alive', async () => {
-  const root = mkdtempSync('/private/tmp/kite-lifecycle-runner-'),
+  const root = temporaryDirectory('kite-lifecycle-runner-'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' }),
     entrypoint = join(import.meta.dir, '../fixtures/paired-child.ts');
   const launch = (id: string) =>
@@ -407,7 +408,7 @@ test('actual Store metadata failure is reported unavailable without creating rep
 
 for (const entry of ['lifecycle-failed-child.ts', 'lifecycle-host-failed-child.ts'])
   test(`${entry}: unconfirmed cleanup retains actual runner and diagnostics; repeated shutdown does not pretend completion`, async () => {
-    const root = mkdtempSync('/private/tmp/kite-lifecycle-failed-'),
+    const root = temporaryDirectory('kite-lifecycle-failed-'),
       profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
     const child = await launchPairedService({
       entrypoint: join(import.meta.dir, '../fixtures', entry),

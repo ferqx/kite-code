@@ -1,22 +1,24 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import type { McpSelectedSourceSnapshot } from '../../src/mcp-source-configuration';
 
 type Scenario = 'allowed' | 'deny' | 'drift' | 'cold' | 'nested';
 async function fixture(scenario: Scenario) {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-default-child-source-'));
+  const root = realpathSync(temporaryDirectory('kite-default-child-source-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const rpc: string[] = [];
   let effects = 0,
     opens = 0;
@@ -255,7 +257,7 @@ async function fixture(scenario: Scenario) {
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await client.createSession({
     expectedStoreId,

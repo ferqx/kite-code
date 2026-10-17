@@ -11,10 +11,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AgentClient, Execution, Message } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { directoryLink } from '../../../tests/fixtures/test-filesystem';
 import { editorFileTarget } from '../electron/editor';
 import { NativeFileChanges } from '../electron/file-changes';
 import type { NativeCaller } from '../electron/native-caller';
@@ -26,8 +27,9 @@ function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-files-'))),
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
-  const path = 'space name 雪.txt',
+  const path = 'nested/space name 雪.txt',
     text = 'confirmed old bytes\r\n';
+  mkdirSync(dirname(join(workspace, path)));
   writeFileSync(join(workspace, path), text);
   const stat = statSync(join(workspace, path), { bigint: true });
   const baseline = {
@@ -238,17 +240,27 @@ test('editor opening rechecks actual registered root identity, confines symlinks
     await f.manager.open(copied.changeId, 'textedit', perform);
     expect(opened).toBe(1);
     const outside = join(f.root, 'outside');
-    writeFileSync(outside, 'outside');
-    rmSync(join(f.workspace, f.path));
-    symlinkSync(outside, join(f.workspace, f.path));
+    mkdirSync(outside);
+    const outsideFile = join(outside, 'space name 雪.txt');
+    writeFileSync(outsideFile, 'outside');
+    // Both paths resolve to a real regular file outside the registered Workspace.
+    // Windows traverses a junction in the parent; POSIX traverses the file symlink.
+    const alias =
+      process.platform === 'win32' ? dirname(join(f.workspace, f.path)) : join(f.workspace, f.path);
+    rmSync(alias, { recursive: true });
+    if (process.platform === 'win32') directoryLink(outside, alias);
+    else symlinkSync(outsideFile, alias);
+    expect(realpathSync(join(f.workspace, f.path))).toBe(outsideFile);
     await expect(f.manager.open(copied.changeId, 'vscode', perform)).rejects.toMatchObject({
       code: 'file_editor_target_unavailable',
     });
     expect(opened).toBe(1);
-    rmSync(join(f.workspace, f.path));
+    rmSync(alias, { recursive: true });
+    if (process.platform === 'win32') mkdirSync(alias);
     writeFileSync(join(f.workspace, f.path), 'current ordinary file');
     renameSync(f.workspace, `${f.workspace}-old`);
     mkdirSync(f.workspace);
+    mkdirSync(dirname(join(f.workspace, f.path)));
     writeFileSync(join(f.workspace, f.path), 'replacement root');
     await expect(f.manager.open(copied.changeId, 'vscode', perform)).rejects.toMatchObject({
       code: 'workspace_directory_unavailable',
@@ -353,7 +365,7 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
     },
   ])
     expect(() => decodeNativeRequest(invalid)).toThrow();
-  const frame = { url: 'file:///owned/index.html' },
+  const frame = { url: pathToFileURL(join(tmpdir(), 'owned', 'index.html')).href },
     contents = { mainFrame: frame };
   const window = { isDestroyed: () => false, webContents: contents } as unknown as BrowserWindow;
   const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent;
@@ -457,10 +469,15 @@ test('message file paths use the current registered project and original reading
     ])
       await expect(f.manager.openMessageFile(invalid, perform)).rejects.toThrow();
     const outside = join(f.root, 'outside');
-    writeFileSync(outside, 'outside');
-    symlinkSync(outside, join(f.workspace, 'outside-link'));
+    mkdirSync(outside);
+    const outsideFile = join(outside, 'file.txt');
+    writeFileSync(outsideFile, 'outside');
+    const linkedPath = process.platform === 'win32' ? 'outside-link/file.txt' : 'outside-link';
+    if (process.platform === 'win32') directoryLink(outside, join(f.workspace, 'outside-link'));
+    else symlinkSync(outsideFile, join(f.workspace, 'outside-link'));
+    expect(realpathSync(join(f.workspace, linkedPath))).toBe(outsideFile);
     await expect(
-      f.manager.openMessageFile({ ...input, path: 'outside-link' }, perform),
+      f.manager.openMessageFile({ ...input, path: linkedPath }, perform),
     ).rejects.toMatchObject({ code: 'file_editor_target_unavailable' });
     message.originMessage = {
       storeId: 'store',

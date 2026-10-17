@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import type { ToolContext } from '../../../src/extensions';
 import { defineExtension } from '../../../src/extensions';
@@ -199,7 +200,7 @@ test('MCP oversized stdio frames fail locally; ordinary no-MCP Runtime still com
     await store.createWorkspace({
       expectedStoreId: info.storeId,
       id: 'w',
-      rootUri: `file://${f.root}`,
+      rootUri: pathToFileURL(f.root).href,
       name: 'local',
     });
     await store.createSession({
@@ -257,7 +258,7 @@ test('MCP ToolDefinition is executed by actual UnifiedExecution with durable pro
     await store.createWorkspace({
       expectedStoreId: info.storeId,
       id: 'w',
-      rootUri: `file://${f.root}`,
+      rootUri: pathToFileURL(f.root).href,
       name: 'local',
     });
     await store.createSession({

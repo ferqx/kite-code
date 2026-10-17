@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { assetManifest, getTrustedAssets } from '@kite-ai/web/assets';
@@ -138,7 +139,7 @@ test('actual paired Service/Gateway serves only verified assets; Browser close d
       expectedStoreId: storeId,
       id: 'workspace',
       name: 'isolated',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await native.createSession({
       expectedStoreId: storeId,

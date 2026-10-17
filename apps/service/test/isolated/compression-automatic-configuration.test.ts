@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { type ContextCompressor, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -121,7 +122,7 @@ for (const rejectSummary of [false, true])
       await client.createWorkspace({
         expectedStoreId,
         id: 'w',
-        rootUri: `file://${workspace}`,
+        rootUri: pathToFileURL(workspace).href,
         name: 'Owned',
       });
       await client.createSession({

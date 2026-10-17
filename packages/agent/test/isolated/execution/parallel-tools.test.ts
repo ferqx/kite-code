@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { defineExtension } from '../../../src/extensions';
@@ -66,7 +67,7 @@ test('parallel Tools retain actual reverse completion and original Model call-re
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,
@@ -231,7 +232,7 @@ test('a later parallel Tool terminal SQLite rejection survives the earlier unkno
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       ...base,
@@ -410,7 +411,7 @@ test('denying a parallel sibling waits for attempted Tool cleanup before releasi
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       ...base,

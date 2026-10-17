@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import type { ExecutionResources } from '../../../src/execution/resources';
 import type { ResourceRequest } from '../../../src/extensions';
@@ -24,7 +26,7 @@ const call: ModelEvent[] = [
 ];
 
 test('ordinary serial Tool completion and cancellation preserve original cold results and release idle keys without breaking handoff', async () => {
-  const root = mkdtempSync('/private/tmp/kite-serial-resource-');
+  const root = temporaryDirectory('kite-serial-resource-');
   let ownedStore: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let ownedRuntime: ReturnType<typeof createRuntime> | undefined;
   let cold: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
@@ -93,7 +95,7 @@ test('ordinary serial Tool completion and cancellation preserve original cold re
     await runtime.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'original',
     });
     await runtime.createSession({

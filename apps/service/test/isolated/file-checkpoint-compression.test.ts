@@ -13,6 +13,7 @@ import type {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
@@ -49,7 +50,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
     writeFileSync(join(workspace, 'original.txt'), original);
     writeFileSync(join(workspace, 'AGENTS.md'), 'CHECKPOINT_COMPRESSION_ORIGINAL_AGENT_SOURCE');
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     const seed = `REAL_SEED_USER:${'真正被消费的用户来源\r\n'.repeat(5000)}`,
       summaries = [
         `PUBLISHED_SUMMARY_ONE:${'完整第一摘要 α\n'.repeat(4000)}`,

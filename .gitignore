@@ -57,3 +57,5 @@ bun.lock
 native/windows-sandbox-runner/target/
 native/windows-sandbox-runner/target-*/
 release/windows-shell-runner/
+packages/agent/native/files/target/
+packages/agent/src/native/files/

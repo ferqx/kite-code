@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
@@ -179,7 +180,7 @@ test('real UnifiedExecution dispatches paged read/glob; denied requests have zer
     await runtime.createWorkspace({
       expectedStoreId: id,
       id: 'w',
-      rootUri: `file://${f.root}`,
+      rootUri: pathToFileURL(f.root).href,
       name: 'local',
     });
     await runtime.createSession({

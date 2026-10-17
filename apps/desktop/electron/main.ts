@@ -44,6 +44,8 @@ import { assertNativeSqliteEngine } from './sqlite-engine';
 import {
   acquireWindowsNativeCandidate,
   parseWindowsNativeHandoff,
+  retainWindowsNativePairedArtifact,
+  type WindowsNativeCandidateAccess,
 } from './windows-native-candidate';
 
 declare const __KITE_DESKTOP_NATIVE_ASSETS__: unknown;
@@ -94,6 +96,7 @@ let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
 let privateAccess: DesktopProfileAccess | undefined;
+let windowsArtifactAccess: WindowsNativeCandidateAccess | undefined;
 const acquireFormalWindowsAccess = () => {
   if (!formalAssets || !windowsAsset || !formalAssets.windowsCandidateFiles || !windowsHandoff)
     throw Object.assign(Error('native_windows_bootstrap_unqualified'), {
@@ -106,10 +109,10 @@ const acquireFormalWindowsAccess = () => {
     handoff: windowsHandoff,
   });
   try {
-    const fresh = resolveNativeCandidate(app.getAppPath());
-    if (fresh.runtimeProtection.manifestSha256 !== formalAssets.runtimeProtection.manifestSha256)
-      throw Error('native_asset_identity_mismatch');
+    // The native factory independently hashes every original file and binds
+    // the raw manifest to this ID. Its live owner also checks closed inventory.
     lease.verify();
+    windowsArtifactAccess = lease;
     return lease;
   } catch (error) {
     try {
@@ -150,7 +153,10 @@ async function openCaller(): Promise<NativeCaller> {
     if (formalAssets) {
       if (windowsHandoff) {
         if (!artifactAccess.length) artifactAccess.push(acquireFormalWindowsAccess());
-      } else
+        if (!windowsArtifactAccess) throw Error('native_windows_bootstrap_unqualified');
+        windowsArtifactAccess.verify();
+        assertNativeSqliteEngine(formalAssets.sqlite);
+      } else {
         for (const root of [formalAssets.candidateRoot, formalAssets.terminalRoot])
           artifactAccess.push(
             await acquireNodeArtifactAccess({
@@ -162,10 +168,13 @@ async function openCaller(): Promise<NativeCaller> {
               ...(windowsAsset ? { windowsAsset } : {}),
             }),
           );
-      const fresh = resolveNativeCandidate(app.getAppPath());
-      if (fresh.runtimeProtection.manifestSha256 !== formalAssets.runtimeProtection.manifestSha256)
-        throw Error('native_asset_identity_mismatch');
-      assertNativeSqliteEngine(fresh.sqlite);
+        const fresh = resolveNativeCandidate(app.getAppPath());
+        if (
+          fresh.runtimeProtection.manifestSha256 !== formalAssets.runtimeProtection.manifestSha256
+        )
+          throw Error('native_asset_identity_mismatch');
+        assertNativeSqliteEngine(fresh.sqlite);
+      }
     }
     verifyNativeAsset(activeAssets.serviceEntrypoint, activeAssets.serviceSha256);
     verifyNativeAsset(activeAssets.bunExecutable, activeAssets.bunSha256);
@@ -202,6 +211,14 @@ async function openCaller(): Promise<NativeCaller> {
       apiMajor: assets.apiMajor,
       requiredCapabilities: assets.requiredCapabilities,
       ...(formalAssets ? { runtimeProtection: formalAssets.runtimeProtection } : {}),
+      ...(windowsHandoff
+        ? {
+            retainWindowsArtifact(proof, actual) {
+              if (!windowsArtifactAccess) throw Error('native_windows_bootstrap_unqualified');
+              return retainWindowsNativePairedArtifact(windowsArtifactAccess, proof, actual);
+            },
+          }
+        : {}),
     });
     if (quitting) {
       await paired.close();
@@ -241,11 +258,18 @@ async function openCaller(): Promise<NativeCaller> {
     return caller;
   })().catch(async (error) => {
     if (error instanceof PairedServiceError) startupDiagnostic = error.startupDiagnostic;
-    privateData?.close();
-    privateAccess?.close();
-    await paired?.close();
-    for (const lease of artifactAccess.reverse()) lease.close();
+    try {
+      privateData?.close();
+      privateAccess?.close();
+      await paired?.close();
+      for (const lease of artifactAccess.reverse()) lease.close();
+    } catch (cleanup) {
+      // Keep the rejected opening and every original owner. A cleanup error
+      // must neither mask the startup cause nor permit a replacement launch.
+      throw new AggregateError([error, cleanup], 'native_startup_cleanup_unknown');
+    }
     artifactAccess = [];
+    windowsArtifactAccess = undefined;
     opening = undefined;
     throw error;
   });
@@ -260,6 +284,7 @@ async function closeNativeResources() {
   if (paired && (await paired.exited) !== 0) throw Error('native_service_cleanup_unverified');
   for (const lease of artifactAccess.reverse()) lease.close();
   artifactAccess = [];
+  windowsArtifactAccess = undefined;
   caller = undefined;
   opening = undefined;
   paired = undefined;

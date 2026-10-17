@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.2
+          bun-version: ${{ runner.os == 'Windows' && '1.4.3' || '1.4.2' }}
       - run: bun install --frozen-lockfile
       - if: runner.os == 'Linux'
         name: Prepare Linux native MCP dependencies
@@ -61,6 +61,22 @@ jobs:
       - if: runner.os == 'Windows'
         name: Prepare installed Windows x64 Native compiler
         run: bun run scripts/release/prepare-windows-native-ci.ts
+      - name: Native Files resource ownership and failure semantics
+        working-directory: packages/agent/native/files
+        run: cargo test --locked --lib
+      - name: Actual Files tools and relocated Node-API companion
+        run: >-
+          bun test --parallel=1 --max-concurrency=1 --timeout=30000
+          packages/agent/test/isolated/files/native-addon.test.ts
+          packages/agent/test/isolated/files/native-packaged.test.ts
+          packages/agent/test/isolated/files/native-path-lifetime.test.ts
+          packages/agent/test/isolated/files/windows.test.ts
+          packages/agent/test/isolated/files/path-files.test.ts
+          packages/agent/test/isolated/files/tool-paths.test.ts
+          packages/agent/test/isolated/files/recovery-primitives.test.ts
+          packages/agent/test/isolated/file-checkpoints/capture.test.ts
+          packages/agent/test/isolated/storage/build.test.ts
+          apps/service/test/isolated/files-native-boundary.test.ts
       - name: Current public boundary and fail-closed contracts
         run: >-
           bun test --parallel=1 --max-concurrency=1

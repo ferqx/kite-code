@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
@@ -142,7 +143,7 @@ test('actual CLI answers original second-page question while 20 unrelated earlie
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     for (const id of ['s', 'other'])
       await client.createSession({

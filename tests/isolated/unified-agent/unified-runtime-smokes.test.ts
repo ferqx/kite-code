@@ -1,13 +1,5 @@
 import { expect, test } from 'bun:test';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -18,6 +10,7 @@ import {
   parseSessionLogAclArgs,
   runUnifiedSessionLogAcl,
 } from '../../../scripts/runtime/unified-session-log-acl';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 test('MCP live gate is closed by default and is not network qualification', async () => {
   expect(parseUnifiedMcpSmoke([], undefined)).toEqual({ output: null, enabled: false });
@@ -121,8 +114,8 @@ test('source-free runtime smokes use the candidate Bun and actual public SQLite 
     });
     const app = join(root, 'app'),
       home = join(root, 'home');
-    mkdirSync(app, { mode: 0o700 });
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(app);
+    privateDirectory(home);
     symlinkSync(
       join(candidate.root, 'node_modules'),
       join(app, 'node_modules'),

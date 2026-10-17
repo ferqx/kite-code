@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Extension, Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { readSkillSelection } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -19,7 +21,7 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
   }
 }
 async function fixture(runlessTools = false, nested = true) {
-  const root = mkdtempSync('/private/tmp/kite-run-skills-');
+  const root = temporaryDirectory('kite-run-skills-');
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
@@ -178,7 +180,7 @@ async function fixture(runlessTools = false, nested = true) {
     expectedStoreId: storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,

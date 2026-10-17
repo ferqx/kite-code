@@ -1,5 +1,7 @@
 # UI
 
+正式 UI 根入口与 Desktop 构建内联[声明的普通浏览器依赖](scripts/bundled-dependencies.ts)，React、React DOM 和 Client 保持外部身份；原 CSS 与许可全文保留。TUI 在[同一次 splitting 构建](scripts/build-tui.ts)输出展示入口及 `@kite-ai/ui/tui/ink`，CLI 的 renderer 与 hooks 共同使用这份 Ink。锁定 Ink 7.1.1 的 DEV/devtools 分支在构建核实原文件结构后固定关闭，环境与普通组件参数不能开启。原行为与真实客户端验证边界见[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)和 [Terminal owner](../../apps/cli/docs/terminal-release.md)。
+
 当前 TUI 复用原 Ink 展示，输入、消息／工具阅读、审核和管理面板经公共 Server port 接入；功能迁移、普通模式与显式测试诊断由[终端 owner](src/tui/README.md#原-ink-展示与明确测试诊断)维护。Desktop 的[诊断展示 context](src/desktop/diagnostics.tsx)默认 false，回复失败技术详情与客户端面板只按显式测试值显示，不从 `NODE_ENV=development` 等环境名推断。dev／prod 客户端不得开启测试专用调试功能，测试 fixture 可显式提供 true；Native 另外执行构建常量的关闭门禁，见[Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)。这份展示开关不扩大控制权限。
 
 ## 原桌面展示层

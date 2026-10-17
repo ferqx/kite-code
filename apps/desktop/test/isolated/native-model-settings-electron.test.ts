@@ -1,19 +1,13 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
@@ -47,7 +41,7 @@ async function bounded<T>(promise: Promise<T>, milliseconds = 15000) {
 test.skipIf(process.platform !== 'darwin')(
   'actual Electron model Settings preserve held Run binding, CAS and original lost receipt across selection and cold restart',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-model-settings-')),
+    const root = realpathSync(temporaryDirectory('kite-native-model-settings-')),
       barrier = gate();
     const userConfiguration = ownedUserConfiguration(root);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
@@ -59,7 +53,7 @@ test.skipIf(process.platform !== 'darwin')(
       expectedStoreId: storeId,
       id: 'w',
       name: 'Native fixture',
-      rootUri: new URL(`file://${workspace}`).href,
+      rootUri: pathToFileURL(workspace).href,
     });
     for (const id of ['s', 'other'])
       await store.createSession({

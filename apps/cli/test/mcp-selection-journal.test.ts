@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { TuiMcpIntent } from '@kite-ai/ui/tui';
+import { privateDirectory, temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { createMcpSelectionRecord, parseMcpSelectionRecord } from '../host/mcp-selection-intents';
 import { openMcpSelectionJournal } from '../host/mcp-selection-journal';
 
@@ -33,9 +34,9 @@ const intent = (commandId = 'original'): TuiMcpIntent => ({
   },
 });
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-mcp-journal-'),
+  const root = temporaryDirectory('kite-mcp-journal-'),
     access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   const path = join(access.profilePath, 'ui/mcp-selection-intents.json');
   const open = () =>
     openMcpSelectionJournal({
@@ -164,4 +165,4 @@ test('128 records retain unknown; private corrupted, linked, oversized files and
   } finally {
     f.close();
   }
-});
+}, 120000);

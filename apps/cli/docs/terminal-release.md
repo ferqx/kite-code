@@ -4,9 +4,11 @@
 
 ## 构建与操作
 
+Windows 的完整原文件 owner 现可由同进程 verifier/归档复用；每次仍扫描准确库存、全部 SHA 和原对象/ACL，复制、错根、关闭或部分关闭的对象不提供权利。归档从原 HANDLE 读完整字节，压缩后复验保持。私有批量写入仅合并祖先持有，CREATE_NEW、每文件 Flush 和关闭未知保资源的合同保持。AI/Agent/Service/UI 的[明确普通 JS 构建声明](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)减少重复 npm 文件，React/React DOM、原生资产、WASM 和 jsdom 动态资源仍完整物化；构建扫描残余 bare import，并保安装声明图的原 manifest 摘要和许可全文。CLI renderer 与 hooks 共用 UI 的 Ink 入口。安装前门的错误出口优先保留有界业务 `code`（如 `owner_busy`），未知细节仍只返回原封闭 fallback；不把维护忙拒绝误写成注册失败。
+
 根 `npm run agent`／`npm run tui` 使用固定 `dist/unified-terminal`，先执行 `npm run release:build`。缺候选路径现沿同一结构化资产错误返回 `terminal_bundle_unavailable` 并说明构建／开发命令；纯帮助、版本和非TTY拒绝仍先于候选与Profile访问。取锁、完整闭包验证和原finally释放保持，不自动构建或转向源码。日常源码调整使用 `npm run build` 后 `npm run cli:dev`／`npm run tui:dev`，步骤见[本地开发](../../../docs/development/local-development.md)。
 
-在已经安装仓库依赖的 checkout 中使用 Bun 1.4.2。所有目标路径由调用者明确指定；构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新的目录或本工具已经标记的安装根。下例的占位路径需要替换；SHA256 使用 pack 返回的准确值。
+在已经安装仓库依赖的 checkout 中，Windows 使用 Bun 1.4.3，Linux/macOS 保持 Bun 1.4.2。所有目标路径由调用者明确指定；构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新的目录或本工具已经标记的安装根。下例的占位路径需要替换；SHA256 使用 pack 返回的准确值。
 
 ```sh
 bun run release:terminal build --directory /absolute/output/candidate
@@ -27,7 +29,7 @@ bun run release:terminal uninstall --prefix /absolute/install/kite-terminal
 
 [构建器](../../../scripts/release/terminal-bundle.ts)从六个 workspace 的 build 生成 AI、Agent、Client、UI、Service、CLI，固定实际 Bun 文件，加入 Agent SQLite Worker、迁移、Shell/MCP 监督资源、Web extractor 和 Web 静态资产。workspace 的 exports 指向实际 JS。CLI/TUI 入口引用公开 CLI 子路径，保留 package-local npm 解析位置。
 
-[依赖复制器](../../../scripts/release/terminal-dependencies.ts)按已安装包的物理依赖图复制实际版本、正文、资源与许可证；每个包保留自己的依赖边，支持 peer、多版本、alias 与循环。POSIX 只允许指向候选内部的相对链接。Windows 采用全部普通文件的物理展开，保留包内解析位置、资源及许可证；同版本循环复用原祖先，无法有限表达的多版本遮蔽循环明确拒绝，不将依赖链接降级为空包。它不在运行时搜索 checkout、全局 node_modules 或 PATH Bun；manifest 固定实际文件字节，并不证明 npm 来源或锁文件真实性。
+[依赖复制器](../../../scripts/release/terminal-dependencies.ts)按已安装包的物理依赖图复制实际版本、正文、资源与许可证；每个包保留自己的依赖边，支持 peer、多版本、alias 与循环。POSIX 只允许指向候选内部的相对链接。Windows 采用全部普通文件的物理展开，以实际共同 `node_modules` 祖先放置每个查找名的确定默认源节点；版本或 peer context 冲突仍在局部放置准确源节点，原本缺失的 optional／peer 名称不提升。保留资源及许可证，不按版本文本合并不同源节点；同版本循环复用原祖先，无法有限表达的多版本遮蔽循环明确拒绝。它不在运行时搜索 checkout、全局 node_modules 或 PATH Bun；manifest 固定实际文件字节，并不证明 npm 来源或锁文件真实性。
 
 共享 UI 的 Desktop 产物已内联唯一的 `@hugeicons/core-free-icons`；builder扫描全部生成 JS，拒绝残留该包或子路径的外部引用，然后从生成 UI manifest 与该 workspace 的复制边中移除这条已内联普通依赖。peer、optional、workspace 不能借此跳过；其他 npm 包若真正依赖它仍按原图复制。UI exports、其他解析边和原许可证继续保留，详见[UI build owner](../../../packages/ui/README.md#原桌面展示层)。新闭包的每个实际文件仍由同一完整 verifier 核验，未添加运行时豁免或内容缓存。
 
@@ -47,17 +49,45 @@ stable shell launcher 固定一次 active，清除 NODE_PATH/NODE_OPTIONS/BUN_OP
 
 ## Windows managed Terminal 当前实现
 
+2026-10-17 范围审查按[因果分组](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md#scope-review)核对连续任务，撤回 Linux/macOS CI、formal soak 和实验 census 的版本迁移，只保 Windows Bun1.4.3；工具 smoke 恢复原每命令20秒。同进程借用新增库存反例先红后绿，许可记录补保完整原 manifest，不能以摘要代替仅在 manifest 内的声明。
+
+审查使用完整候选 `e9046c4e26d627ba99875131733a19d16545f71f45c8723af25a37ba88bc6e0a`（2,225文件）。真实安装 r22 已通过归档、安装、一次 Model、冷读、原媒体/config/preferences 的 backup/inspect/status/restore/GC，再实际 start/status/Web；之后在原110秒业务截止拒绝。失败 stop 于113.596秒返回0，原 HANDLE 确认为 dead 且 record 撤除，总120秒未扩大；这不是完整 daemon/安装通过。Native 的第三冷窗口和维护仍受[其原门禁](../../desktop/docs/native-release.md#windows-managed-native-当前实现)阻断。更早记录保原输入范围，不覆盖本轮未执行或失败的分支。
+
+补齐原 manifest 许可来源后，r23 完整构建及校验候选为 `9f594260a611c2c5742785daa46cf7a681711fadcce7f5885e5f340e073c7025`（仍2,225文件）。五个 bundled workspace 的481份原 manifest 均核准确SHA及通知全文，其中7份只有 manifest 许可声明，不能省略。修正跨平台测试路径后，原发布八个完整文件在 Windows 40pass／6原平台skip／0fail，包含原20秒每命令 smoke；这不把上一候选的 installed／TUI 失败改记为 r23 通过。
+
 Windows x64 的 [安装 owner](../../../scripts/release/windows-terminal-install.ts)现接入相同 build/pack/install/rollback/uninstall 命令。prefix 必须是准确盘符路径，父目录属当前 SID 且其他用户不可写；UNC、短名别名、reparse、hardlink、未知条目或宽权限拒绝。format=2 marker 固定首次候选的三个前门资产与完整身份，升级只发布 current/previous，保留最初 bootstrap；旧 POSIX marker 不被当作 Windows 安装根。
 
 固定 `kite.exe`／`kite-tui.exe` 是 [原生第一阶段](../../../scripts/release/native/terminal-launcher.cc)，在 Bun 初始化前清除 NODE_PATH/NODE_OPTIONS/BUN_OPTIONS/BUN_BE_BUN/ELECTRON_RUN_AS_NODE，以自身位置确定 prefix，保持原祖先、自身与准确 helper 的只读 HANDLE，并核固定 helper 大小/SHA。独立编译的 [verifier](../../../scripts/release/entrypoints/windows-terminal-verifier.ts)关闭 dotenv/bunfig/tsconfig/package.json 自动加载，取得 selection SH 后核 marker、三前门文件、current、原候选 SH 和所有清单文件，再以固定空配置启动候选内 Bun。完整准入先于帮助/版本返回，仍不为纯帮助建立 Profile。Native 登记现在固定顺序持双 prefix SH，核双方 nonce／active 和完整两层候选，转发 Native 稳定 C 前门；内部 expected-candidate 在 Native 自身准入再次核原选择，漂移明确拒绝。整个实际 child 生命周期保持原文件与 use SH，关闭未知保完整 owner。源码范围及实际 Windows 待验见 [Native owner](../../desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
-第一阶段使用静态 CRT；[builder](../../../scripts/release/build-windows-terminal-launcher.ts)要求闭合系统 DLL import 与 `DependentLoadFlags=0x800`。新的候选 Bun 与 compiled helper 在原完整 pin 下读取，仅对新副本中已存在的 PE LoadConfig 字段写入该值，缺字段、delay import 或路径 DLL 拒绝；原 Bun 不修改。这一静态 import 搜索约束要求 Windows 10 RS1+，不宣称动态 DLL 或发布者已获资格，依据 [Microsoft 编译器合同](https://learn.microsoft.com/en-us/cpp/build/reference/dependentloadflag?view=msvc-170)。
+第一阶段使用静态 CRT；[builder](../../../scripts/release/build-windows-terminal-launcher.ts)仍要求闭合系统 DLL import、无 delay import 与 `DependentLoadFlags=0x800`。候选 Bun 与 compiled helper 在原完整 pin 下读取；对新 console 副本，builder 可将经严格验证的 RVA v2 delay descriptors 转为普通 import descriptors，再封闭已有 LoadConfig 字段。转换只复用原 delay descriptor 的只读非执行存储；原 IAT／INT 地址、代码、节布局、文件长度和 Bun 嵌入程序保持不变。bound／unload 状态、未知属性、路径或重复 DLL、别名／重叠／重定位冲突、空间不足、缺字段均拒绝；转换后的 delay directory 必须为空。原 Bun 不修改，不能修复任意既有 ACL 或补造 LoadConfig。这一静态 import 搜索约束要求 Windows 10 RS1+，不宣称动态 DLL 或发布者已获资格，依据 [Microsoft 编译器合同](https://learn.microsoft.com/en-us/cpp/build/reference/dependentloadflag?view=msvc-170)。真实 Bun 1.4.2 的11组 delay imports 可按该形状转换；长期取舍归[构建决定](../../../.agents/notes/implemented/bug-fix/2026-10-16-windows-bun-eager-system-imports.md)。
+
+`compileWindowsVerifier` 通过已封闭且持续 pin 的候选私有 Bun 子进程编译固定 verifier source，关闭配置自动加载，等待真实进程关闭后核输出权限，再物化新 helper。Bun 1.4.2 实际编译会沿用编译进程 executable 的权限，仅传 `compile.executablePath` 不能保证私有输出；构建器不事后放宽或修补它。实际 standalone 的 `import.meta.main` 为 false，因此固定 [Terminal executable entry](../../../scripts/release/entrypoints/windows-terminal-verifier-main.ts)在顶层显式调用原 verifier，避免生成静默返回0的空入口；可导入 verifier 的原 guard 和业务准入保持。Native 使用对应独立 entry。C 编译中间文件另置私有子目录，复制输出不改变正在 pin 的源目录库存。
+
+固定运行参数将路径绑定为 `--config=<包内空配置>` 和 `--tsconfig-override=<包内配置>`；Bun 的可选 `--config` 值若拆为两个 argv，会把 TOML 当作入口并静默返回0。实际回归必须断言应用正文执行且 cwd 恶意 preload 未执行，退出0本身不构成成功。两个完整 verifier 用 BigInt 的 `dev/ino` 比较文件身份，避免真实 NTFS 64位文件 ID 在 Number 精度范围外被误判为重复；single-link、完整 hash／库存、ACL 和原 HANDLE 检查保持。
+
+Windows 归档与安装有限夹具使用真实私有 SID 目录、junction／hardlink 拒绝反例、ACL 宽权限反例和准确 `.exe` 资产及外部协调锁位置；不靠 `chmod` 代证 Windows 权限。跨平台专用测试的夹具时限允许真实 Windows I/O；[release smoke](../../../scripts/release/release-smoke.ts)采用 Windows 私有 pipe、空 PATH、固定配置及原每命令20秒预算，保原实际 daemon／Web／stop 断言。该预算不改变下面 installed qualification 的120秒整链／30秒命令，准备阶段超时也明确失败，不计完整安装通过。精确身份、夹具与共同祖先的取舍归[发布合同决定](../../../.agents/notes/implemented/testing/2026-10-17-windows-release-contracts.md)。
 
 selection EX、候选 use SH/EX 位于 prefix 外的稳定私有协调目录，卸载后仍保留同一键，不与 Profile 混用。安装 stage 也在该目录，以本调用登记的有限库存清理；复制使用新私有文件、真实短写/Flush，完整验证后同卷原生移动并读回 active。Windows syncDirectory 不冒称 POSIX fsync 或断电持久性。运行 A 时发布 B 不替换 A 的权威；父 CLI 与实际 paired Service 分别持原候选 SH/完整文件 pin，至实际子进程退出才关闭。精确 HANDLE 关闭未知时保真实锁，不以 error 当关闭证明。
 
 卸载在 selection EX 和全部候选 EX 下，以完整库存一次取得原 DELETE-purpose 对象，whole verifier 复用同一 owner，而不关闭后重开普通 scope；核 bootstrap、全部候选与原指针后按原对象逐叶删除，确认原根消失才释放。取得 DELETE owner 后清理未知或删除部分完成都保 EX 至准确收尾/宿主退出，没有递归路径删除兜底。安装与卸载不接收应用 data-root，因此原用户 DB/config 保留。损坏拒绝、版本切换和未知发布不自动选择恢复方向；本实现没有补造通用断电修复。
 
-Windows 原生 build/ACL/PE/安装链尚未执行。显式 [qualification 工具](../../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts)消费已构建候选，核前门、环境拒绝、真实 paired Run、A 保锁时发布 B／回退及冷读零重放、全部 EX 和卸载保数据。真实 Run 期间 busy backup 拒绝，退出后以同一 `kite.exe` 完成 backup／inspect／status／restore／status／GC及新 Store 原完整历史冷读，核原媒体和 config／preferences 字节、旧 Store 拒绝与零重放。前门 GC 只核 referenced／recent保留，过宽限删除由维护 owner 的 Windows 公共用例单独验收。
+2026-10-17，在基于 `af6cfad2` 的本任务未提交 diff、Windows x64／Bun1.4.2／Rust1.97.1 MSVC 环境，实际 `buildTerminalBundle` 使用新建私有目录内与当前 Bun 完整 SHA 一致的输入，构建并完整验证39,306文件候选 `a1526b6e56d892a0271b5b00f8b9077a73ba56d0d6027d0ece170064b19387f3`；实际 C 第一阶段与 compiled verifier 已生成并通过原 PE 门禁。该同包 verifier 真实启动后执行原准入，缺安装身份以1及 `terminal_windows_frontdoor_invalid` 拒绝，未超时或强制终止。原 nvm 输入权限不合格的拒绝保持，不修改原安装 ACL。候选自带 Bun 在空 PATH、隔离 cwd 下执行 `entrypoints/cli.js --help/--version`，并通过候选公开 Files 入口创建、发布、完整读回和删除1,450,000字节 Unicode 文件；不引用源码、编译器或内部未导出模块。
+
+`bun test tests/isolated/unified-agent/windows-terminal-launcher.test.ts tests/isolated/unified-agent/windows-terminal-runtime.test.ts` 整文件6项116断言通过：真实 Bun 与 standalone 在 cwd／EXE目录同名 DLL 阴影下运行 SQLite、crypto、HTTP，source删除后嵌入程序继续运行，未封闭输入和覆盖既有输出均拒绝；另实际编译 Terminal／Native 两个正式 verifier entry，缺少安装身份必须执行原准入并以1拒绝。根 typecheck、边界、workspace／测试归属、文档检查及 CI 合同21项332断言通过。扩展执行 release job 的旧有限安装／归档合同在 Windows 有32项失败，涉及 `/private/tmp`、POSIX mode／fixture 布局，不能计为通过；本轮未改变这些独立夹具，也未 dispatch Actions。
+
+同一候选的实际 gzip 归档为153,902,005字节，SHA256为 `a258e36039ca2e0ce78874bbf20a78055c81cc76a523cf33440c3b5adbffd35c`。实际 `packTerminalBundle`／`unpackTerminalBundle` 完成普通归档、私有逐文件物化及搬迁后的全量验证，39,306清单文件和 candidate ID 保持一致；搬迁后再次执行上述空 PATH 的 CLI／1,450,000字节 Files 探针和同包 verifier 原身份拒绝，均自然退出，未超时或强制终止。将三个准确前门文件复制到新私有 `bin` 后，实际 C→verifier 创建链自然退出1并报 `terminal_windows_install_identity_mismatch`，证明正确进入原安装身份检查；这项缺 marker 的拒绝不代替正式安装验收。
+
+后续基于 `4172d483` 的本任务未提交工作树构建并全量验证新候选 `5d46e164e8828f78e4cbe7f2cf6d9e26f694c9a472fd59a92953c788c3733261`，共同祖先布局为22,309清单文件。完整锁图4项／142,679条断言核每条原解析边、所有资源字节、缺失optional与搬迁解析；同包公开Files入口在空PATH下通过1,500,000字节Unicode创建／完整读回／删除，Node-API资产的Bun／Node搬迁及损坏拒绝另有2项／55断言通过。Bun1.4.2的 `--tsconfig-override` 仍会输出实际已观察的内部directory-mismatch诊断，未隐藏或移除固定配置。
+
+再修正实际HANDLE共享保护后，新建Terminal候选 `16a4041941db8870d828a492adbf6dce37d51704ae18618e7803d613d2687050`（22,309清单文件）已实际MSVC构建并全量验证。原生最终路径在持原祖先下核验，不再JS逐叶重复预先realpath；完整内容扫描在Windows使用native realpath，保同一canonical/别名、single-link、精确身份、全字节SHA与库存检查。候选文件请求真实GENERIC_READ，祖先请求FILE_TRAVERSE，锁文件仅请求LockFileEx所需读取权，不放宽write/delete sharing。五个完整归档/安装控制文件再次32pass/283断言；这是有限32项测试，原失败集合中的完整smoke仍另计。原对象反例、C/Node-API同步与Native配套生命周期归[持久决定](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)。
+
+该新候选实际归档126,006,927字节，SHA256为 `a1d705f90eada7403e87ccdd8d5556ffcffb7ad2bd580535121f4e0b87d2aa86`，已独立重算核对。完整Windows安装调用者在392.121秒的pack准备后以原120秒门禁拒绝，尚未进入unpack／install；这是失败证据，不计安装通过。原七文件重跑为35pass／6项原POSIX平台skip／1fail，原32项失败中31项已修复；剩余完整smoke已实际定位 `daemon_startup_unknown`，原15秒确认前完整准入尚未结束，随后递归清理又被live对象拒绝。失败smoke现保留原错误、清理错误、私有根和原lease，不能据stop返回absent删除仍在启动的对象；[隔离回归](../../../tests/isolated/unified-agent/release-smoke-ownership.test.ts)核两种反例。3个准确本轮测试实例之后均经公开stop及原FILETIME核为dead，未强杀开发桌面或删除未知根。正式120秒／30秒命令、业务准入及原关闭期限不变，当前完整Windows安装资格未取得。
+
+最终七文件再次整跑为35pass/6项原平台skip/1fail、374断言；fresh smoke使用新候选 `661143b2ce99036c591f7b505fbaff834d87d2d8171ecdce0fcf697407ee325b`，全例443.771秒，仍保原 `daemon_startup_unknown` 与实际Bun directory-mismatch诊断。失败没有再被递归删除错误覆盖，原私有根和lease保留；晚到的同次daemon随后按准确build/profile/workspace/pipe hash/原FILETIME匹配，经公开stop返回0并核原birth为dead，准确候选已无live进程，未删除证据或终止开发桌面。原32项失败仍剩该整包smoke一项，不能把五文件有限32项全绿表述为全部问题已解决。
+
+其他构建和整组回归结束后，单独对 `16a40419…` 执行原完整Terminal安装caller，仍在275.019秒的pack准备后以原120秒门禁拒绝，未进入unpack/install。实际归档126,008,695字节，SHA256 `c7c6218b18591301962cb6415f0c2668c521972eaf47f38a66ed8178d6c71fb9`，已独立核完整字节/sidecar/clone manifest。另对同候选22,310项原字节逐项核SHA后在内存单独计时，读取3.203秒、Bun.Archive constructor3.442秒、bytes完成6.746秒；该诊断不含准入/原对象/发布，不能代正式pack或安装资格，只用于把后续排查聚焦到完整准入和原生对象路径。没有据此删除跨await复核或扩大门禁。
+
+完整 installed 生命周期仍须独立执行。显式 [qualification 工具](../../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts)消费已构建候选，核前门、环境拒绝、真实 paired Run、A 保锁时发布 B／回退及冷读零重放、全部 EX 和卸载保数据。真实 Run 期间 busy backup 拒绝，退出后以同一 `kite.exe` 完成 backup／inspect／status／restore／status／GC及新 Store 原完整历史冷读，核原媒体和 config／preferences 字节、旧 Store 拒绝与零重放。前门 GC 只核 referenced／recent保留，过宽限删除由维护 owner 的 Windows 公共用例单独验收。
 
 正式 [Daemon编排](../host/daemon.ts)已接Windows当前SID私有pipe/原record/kernel process HANDLE，保HTTP生命周期和共享CLI/TUI准入。启动父在完整验证/固定Bun配置后持候选SH/full pin至原child实际退出或准确handoff；Daemon和只读preflight自身在endpoint/Store前取得独立使用权，pipe/record/候选关闭未知保原owner。原qualification在同一120秒整链／30秒命令内再调用[完整Daemon helper](../../../tests/fixtures/unified-agent/windows-daemon-qualification.ts)：B实际start/status/Web→rollbackA仍reuse原B→A前门共享完整Model→client detach／busy保原→明确cancel restart实际原birth退出→新A冷读完整原结果零重放→正常stop／两候选EX／恢复原config。原paired模型计数与全部维护/卸载断言保持，Daemon使用独立Provider计数。
 

@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -20,6 +19,7 @@ import {
   requiresInteractionAttachment,
 } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 
@@ -51,9 +51,9 @@ type HttpRow = {
 test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original generations without restoring authority', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-tools-')));
   const evidence = join(tmpdir(), `kite-tui-mcp-tools-evidence-${randomUUID()}`);
-  mkdirSync(evidence, { mode: 0o700 });
+  privateDirectory(evidence);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   let phase: 'warm' | 'cold' = 'warm',
     remoteVersion = 1;
@@ -208,7 +208,7 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
         { mode: 0o600 },
       );
     settings();
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     writeFileSync(
       join(profile.profilePath, 'mcp.json'),
       JSON.stringify({
@@ -247,7 +247,7 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
       ifRevision: trust.revision,
     });
     expect((await seed.client.getWorkspaceTrust('w', { storeId })).trusted).toBe(true);
-    mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

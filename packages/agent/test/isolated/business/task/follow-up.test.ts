@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
 import { createTaskExtension } from '../../../../src/extensions/task';
@@ -251,7 +252,7 @@ test.each([
       expectedStoreId,
       id: 'w',
       name: 'private',
-      rootUri: `file://${directory}`,
+      rootUri: pathToFileURL(directory).href,
     });
     await runtime.createSession({
       expectedStoreId,

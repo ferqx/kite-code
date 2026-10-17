@@ -1,4 +1,3 @@
-import * as ffi from 'bun:ffi';
 import { expect, mock, test } from 'bun:test';
 import {
   existsSync,
@@ -11,59 +10,39 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createWorkspaceFiles } from '../../../src/files';
+import { createNativeWorkspaceFileIo } from '../../../src/files-native-binding';
 
-// The Windows leaf deliberately uses lazy CJS FFI; initialize that builtin cache
-// before replacing it so the shim observes real native calls in both loaders.
-if (process.platform === 'win32') require('bun:ffi');
-const originalFFI = { ...ffi };
 const collectedCalls = new Set<string>();
-mock.module('bun:ffi', () => ({
-  ...originalFFI,
-  dlopen(
-    filename: Parameters<typeof ffi.dlopen>[0],
-    definitions: Parameters<typeof ffi.dlopen>[1],
-  ) {
-    const library = originalFFI.dlopen(filename, definitions);
-    if (
-      !(
-        '__openat' in definitions ||
-        'openat' in definitions ||
-        'NtCreateFile' in definitions ||
-        'SetFileInformationByHandle' in definitions
-      )
-    )
-      return library;
-    return {
-      ...library,
-      symbols: Object.fromEntries(
-        Object.entries(library.symbols).map(([name, call]) => [
-          name,
-          (...args: unknown[]) => {
-            const windowsRenameOrRemove =
-              name === 'SetFileInformationByHandle' && (args[1] === 3 || args[1] === 4);
-            if (
-              name.includes('openat') ||
-              ['renameat', 'linkat', 'unlinkat'].includes(name) ||
-              name === 'NtCreateFile' ||
-              windowsRenameOrRemove
-            ) {
-              collectedCalls.add(windowsRenameOrRemove ? `${name}:${args[1]}` : name);
+const actualNative = createNativeWorkspaceFileIo;
+mock.module('../../../src/files-native-binding', () => ({
+  createNativeWorkspaceFileIo(...args: Parameters<typeof createNativeWorkspaceFileIo>) {
+    const io = actualNative(...args);
+    return new Proxy(
+      { ...io },
+      {
+        get(source, key) {
+          const value = Reflect.get(source, key);
+          if (typeof value !== 'function') return value;
+          return (...args: unknown[]) => {
+            if (['openAt', 'read', 'write', 'publishAt', 'unlinkAt'].includes(String(key))) {
+              collectedCalls.add(String(key));
               Bun.gc(true);
               const churn = Array.from({ length: 256 }, () => Buffer.alloc(256, 120));
-              const result = Reflect.apply(call, undefined, args);
+              const result = Reflect.apply(value, source, args);
+              Bun.gc(true);
               if (churn[0]![0] !== 120) throw new Error('allocation changed');
               return result;
             }
-            return Reflect.apply(call, undefined, args);
-          },
-        ]),
-      ),
-    };
+            return Reflect.apply(value, source, args);
+          };
+        },
+      },
+    );
   },
 }));
+const { createWorkspaceFiles } = await import('../../../src/files');
 
-test('anchored Files path bytes survive collection through actual read, rename, link and unlink calls', async () => {
+test('Node-API Files paths and owned buffers survive collection across actual read, publication and deletion', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-files-native-path-')));
   const directory = '目录';
   mkdirSync(join(root, directory));
@@ -97,16 +76,13 @@ test('anchored Files path bytes survive collection through actual read, rename, 
     expect(readFileSync(join(root, createdPath))).toEqual(updated);
     await files.remove({ path: createdPath, base: created.baseline, maxBytes });
     expect(existsSync(join(root, createdPath))).toBe(false);
-    expect([...collectedCalls].sort()).toEqual(
-      process.platform === 'win32'
-        ? ['NtCreateFile', 'SetFileInformationByHandle:3', 'SetFileInformationByHandle:4'].sort()
-        : [
-            process.platform === 'darwin' ? '__openat' : 'openat',
-            'linkat',
-            'renameat',
-            'unlinkat',
-          ].sort(),
-    );
+    expect([...collectedCalls].sort()).toEqual([
+      'openAt',
+      'publishAt',
+      'read',
+      'unlinkAt',
+      'write',
+    ]);
   } finally {
     await files.close();
     rmSync(root, { recursive: true, force: true });

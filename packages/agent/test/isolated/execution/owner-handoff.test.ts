@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { defineExtension, type Json } from '../../../src/extensions';
@@ -119,7 +120,7 @@ for (const scenario of ['pending', 'unknown', 'cancel', 'other_session'] as cons
       expectedStoreId,
       id: 'w',
       name: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     for (const id of ['s', 'other'])
       await runtime.createSession({
@@ -391,7 +392,7 @@ test('actual SQLite root owner keeps peer Action intake after an empty control p
       expectedStoreId,
       id: 'w',
       name: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtimeA.createSession({
       expectedStoreId,

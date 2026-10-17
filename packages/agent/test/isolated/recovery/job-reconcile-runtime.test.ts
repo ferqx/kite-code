@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { JobReconcileResult } from '../../../src/extensions';
@@ -183,7 +183,7 @@ for (const mode of [
       await runtime.createWorkspace({
         expectedStoreId,
         id: 'w',
-        rootUri: `file://${directory}`,
+        rootUri: pathToFileURL(directory).href,
         name: 'ledger',
       });
       await runtime.createSession({

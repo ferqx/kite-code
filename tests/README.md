@@ -2,6 +2,12 @@
 
 本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
+共享测试的临时根使用实际 OS 的 `tmpdir()` 并解析真实路径；有私有存储要求的夹具沿[测试文件系统原语](fixtures/test-filesystem.ts)创建 Windows 受保护 ACL 或 POSIX 0700 目录，不能以 Windows 的 `mode`／`chmod` 代证权限。工作区 file URL 使用 `pathToFileURL`，保留空格、Unicode、百分号与平台盘符。公开权限反例在 Windows 实际加入外部可读 ACL；私有记录的 reparse 拒绝分别用真实 junction／符号链接，硬链接反例另保原断言。编辑器目录外访问反例必须先确认路径确实穿越到外部普通文件，再验证拒绝。[完整回归](isolated/unified-agent/test-filesystem.test.ts)还检查当前八个 owner 的测试与统一夹具，拒绝重新写入固定 POSIX 临时根或拼接 file URL。历史原始 VM 证据和明确 POSIX 协议的反例不改写；除下述六项容量用例的等待预算外，业务断言、容量、调度及其余超时继续保留。路径可移植不等于三平台完整资格，实际结果仍须分别记录。
+
+Caller、Recovery、MCP Selection／Connection／Reconnection／Source Approval journal 中连续执行128次真实持久化的六项容量测试，各平台统一使用显式120秒上限，核满额拒绝、原记录完整及未知记录不被淘汰。这是适应主机I/O差异的功能测试等待预算，不定义单次保存延迟或产品性能承诺；全局默认超时、其他用例、IPC／启动／安装／窗口门禁不变。原32–37秒超时记录保留，不能据此宣称数据丢失，也不能以本次容量用例通过授予性能资格。
+
+[daemon宿主](../apps/cli/test/daemon-host.test.ts)、[共享CLI](../apps/cli/test/isolated/shared-cli.test.ts)、[管理](../apps/cli/test/isolated/shared-management.test.ts)、[状态](../apps/cli/test/isolated/status-host.test.ts)和[Skills](../apps/cli/test/isolated/shared-skills.test.ts)夹具的 `beforeAll` 必须沿各自用例的同一既有平台条件：前四份在macOS/Linux构建，Skills保持仅macOS。构建入口的file URL用 `fileURLToPath` 转成真实本地路径。Windows不执行这些原已跳过用例的构建准备，实际适用的恢复等调用者仍执行完整四workspace构建。共享构建器的每个子命令20秒、上述五份文件的准备60秒保持。Windows专属endpoint／pipe及实际安装链另行验证，不能将平台跳过计作Windows daemon能力通过。
+
 客户端 UI 迁移回归沿当前 TUI 全库存、Desktop／UI／Web owner 整文件及受影响的 Browser／Cookie Gateway／恢复调用者执行，实际整轮结果归[客户端 UI 收束记录](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-15客户端-ui-迁移缺口与回归收束)。模型夹具只读写自有 HOME 的用户配置，不再依赖退役的 Profile 配置。Thought 的快速搜索通过实际下一次 Model 请求的显式同步点观察活动画面，保原步骤、终态及超时，不靠生产延迟或伪造终端帧。
 
 共享恢复夹具的真实管理进程从启动时绑定自有 HOME，并持续存活到原 daemon 正常停止；正式 `--no-orphans` 规则仍保留。只收到真实 start 成功信号后运行原恢复／查询旅程，完成后通过管理进程调用原 stop 并核退出，不能将短命管理进程被清理后的连接失败归为恢复结果。
@@ -24,7 +30,7 @@ Native Provider／MCP 的实际 macOS 凭据场景使用[自有 HOME 的默认�
 
 历史 Store9/11 确属旧数据库格式；其转换按 D08 不适用，对应旅程改验隔离的新 Store／Profile 的会话、重启和维护能力，不能将这些结果记作旧格式兼容；实际旧 State26 文件只作为不读取、不覆盖的隔离反例，遵守 D08。当前新 Store 的版本与维护恢复验证继续由正式测试负责。可选的旧 lifecycle 诊断 fixture 与 `in-process-service-connector` 尚属历史参考，不参与当前 52 个旅程，也不证明全 Runtime 资源或出生后代资格。当前完整执行结果归[进度](../docs/plans/unified-agent-refactor-v1-progress.md)，下面此前默认结果保持其原提交和范围。
 
-当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出，当前为 847 个默认文件；新增的权限树回归沿实际 Shell／Files consumer 核节点边界、错误优先级与独立叶校验。Files／MCP intent 文件、Native 分片和目录分页的测试继续保留各自业务断言，共享夹具只集中同域重复数据或传输，不改变默认发现、隔离与预算。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
+当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出，当前为 864 个默认文件；新增的权限树回归沿实际 Shell／Files consumer 核节点边界、错误优先级与独立叶校验。Files／MCP intent 文件、Native 分片和目录分页的测试继续保留各自业务断言，共享夹具只集中同域重复数据或传输，不改变默认发现、隔离与预算。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
 
 本轮原 TUI 迁移前最近完整默认为macOS `a99fdf29` 加当轮最终冻结改动的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1472.848秒，原四并发／604排空后7独占保持；4493输入、11资产、HEAD和Git零漂移。恢复Actions守卫、四份正式恢复、原Terminal／Web／80×24 TUI与Native头部错误／草稿完整文件均在该图内通过，原三轮失败及修复证据保留。准确冻结、原log与result归[集中收尾进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。最终结果归档仅补文档，不重新命名未变执行输入为新一轮测试；原RSS／完整资源与出生后代仍未闭合，wholeV13／phaseExit保持false，Win/Linux只有配置完成与未实测备注。
 
@@ -48,7 +54,7 @@ Native Provider／MCP 的实际 macOS 凭据场景使用[自有 HOME 的默认�
 
 [Windows TUI 私有记录完整文件](../apps/cli/test/isolated/windows-tui-private-files.test.ts)归 CLI owner，九份 closed 文件、9 MiB 原记录／CAS、recovery 262144／config 8 MiB 边界和原 native hardlink／rebound 拒绝只能由实际 Windows 执行；本机另核非平台拒绝与验证期 Close mock，不能 availability skip 冒充通过。原九份 journal 单测和四份 Profile／路径邻接整文件分别保持原断言与预算。准确输入／日志与未执行范围见 [当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-installed-tui-私有持久化与正式调用者)；Win/Linux 实机按用户最新安排留到最后交 GitHub Actions，用户独立 Windows 验证不由本机 mock 代替，现有接线保留。
 
-Required CI、release/platform 与正式 soak 固定 Bun 1.4.2。性能或稳定性结果只适用于准确代码、运行时和平台；workflow 定义不等于执行证据。
+Required CI、正式 soak 与 macOS／Linux 保持 Bun 1.4.2；现有七份含 Windows 的验证矩阵只在 Windows 选择 1.4.3，以覆盖已复现的 tsconfig override 路径问题。性能或稳定性结果只适用于准确代码、运行时和平台；workflow 定义不等于执行证据。
 
 正式 Terminal wrapper 夹具的子环境保三端必要宿主变量及私有HOME／Profile，但清除测试运行器内部 `BUN_FEATURE_FLAG_NO_ORPHANS`：该模式只属于外层测试进程，不能传给短命CLI而提前关闭有明确stop责任的独立daemon。默认运行器原 `--no-orphans`、原完整文件／业务断言／预算及实际daemon stop保持；同默认flag的完整文件已验证此边界，不以关闭全局门禁或自动重试解决失败。
 

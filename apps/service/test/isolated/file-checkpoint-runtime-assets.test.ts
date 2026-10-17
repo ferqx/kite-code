@@ -318,7 +318,7 @@ function fixture() {
 
 test('pure default Files metadata does not resolve Runtime or filesystem assets and assets are not caller schema inputs', () => {
   const profile = selectProfile({
-    dataRoot: '/private/tmp/unopened-checkpoint-runtime-assets',
+    dataRoot: join(tmpdir(), 'unopened-checkpoint-runtime-assets'),
     profile: 'owned',
   });
   let calls = 0;

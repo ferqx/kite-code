@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -16,6 +15,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { ptyDeadline } from '../fixtures/tui-pty';
@@ -38,12 +38,12 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
       ledger = join(root, 'reads'),
       ownedPid = join(root, 'owned-pid');
     const evidence = `${root}-${mode}`;
-    mkdirSync(workspace, { mode: 0o700 });
+    privateDirectory(workspace);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     // This fixture asserts English labels independently of the host device locale.
-    mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });
@@ -176,7 +176,7 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
         }
       } else {
         const web = join(root, 'web');
-        mkdirSync(web, { mode: 0o700 });
+        privateDirectory(web);
         const assets = [
           ['/index.html', 'text/html; charset=utf-8', '<title>owned</title>'],
           ['/app.js', 'text/javascript; charset=utf-8', 'globalThis.owned=true;'],

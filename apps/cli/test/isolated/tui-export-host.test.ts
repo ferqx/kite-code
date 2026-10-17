@@ -23,7 +23,7 @@ for (const mode of ['complete'] as readonly string[]) {
         : realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-host-')));
     if (process.platform === 'win32') privateDirectory(root);
     const workspace = join(root, 'workspace');
-    mkdirSync(workspace, { mode: 0o700 });
+    privateDirectory(workspace);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'default' });
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const evidence = join(tmpdir(), `kite-export-evidence-${randomUUID()}`);
@@ -131,9 +131,9 @@ for (const mode of ['complete'] as readonly string[]) {
         version: candidate.manifest.sqlite.version,
         sourceId: candidate.manifest.sqlite.sourceId,
       });
-      mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+      privateDirectory(profile.profilePath);
       // This fixture asserts English labels independently of the host device locale.
-      mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+      privateDirectory(join(profile.profilePath, 'ui'));
       writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
         mode: 0o600,
       });

@@ -1,18 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
@@ -46,7 +40,7 @@ async function bounded<T>(promise: Promise<T>, milliseconds = 15000) {
 test.skipIf(process.platform !== 'darwin')(
   'actual cold Electron restart preserves private draft; physically lost creation response only queries original command with one POST',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-electron-')),
+    const root = realpathSync(temporaryDirectory('kite-native-electron-')),
       barrier = gate();
     const userConfiguration = ownedUserConfiguration(root);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
@@ -58,7 +52,7 @@ test.skipIf(process.platform !== 'darwin')(
       expectedStoreId: storeId,
       id: 'w',
       name: 'Native fixture',
-      rootUri: new URL(`file://${workspace}`).href,
+      rootUri: pathToFileURL(workspace).href,
     });
     for (const id of ['s', 'other'])
       await store.createSession({
@@ -193,7 +187,7 @@ import {openSqliteStore} from '@kite-ai/agent/sqlite';
 const profile=selectProfile(${JSON.stringify({ dataRoot: profile.dataRoot, profile: profile.profile })});
 for(const suffix of ['','-wal','-shm'])if(existsSync(profile.databasePath+suffix))renameSync(profile.databasePath+suffix,profile.databasePath+'.original-generation'+suffix);
 const store=await openSqliteStore({dataRoot:profile.dataRoot,profile:profile.profile});const storeId=(await store.getMetadata()).storeId;
-await store.createWorkspace({expectedStoreId:storeId,id:'w',name:'Native fixture',rootUri:${JSON.stringify(new URL(`file://${workspace}`).href)}});
+await store.createWorkspace({expectedStoreId:storeId,id:'w',name:'Native fixture',rootUri:${JSON.stringify(pathToFileURL(workspace).href)}});
 await store.createSession({expectedStoreId:storeId,subjectId:'local-user',commandId:'create-new-s',sessionId:'s',workspaceId:'w',title:'Native A'});
 await store.close();console.log(storeId);`,
     );

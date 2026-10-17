@@ -63,7 +63,9 @@
     "test:desktop:native": "bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-bundle.test.ts apps/desktop/test/isolated/native-process.test.ts apps/desktop/test/isolated/native-file-recovery-paired.test.ts",
     "test:desktop:window": "bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-install-lifecycle.test.ts",
     "release:native": "bun run scripts/release/native.ts",
-    "test:shell:native": "bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/jobs/confined-shell.test.ts"
+    "test:shell:native": "bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/jobs/confined-shell.test.ts",
+    "build:files-native": "bun packages/agent/scripts/build-native-files.ts packages/agent/src",
+    "postinstall": "bun run build:files-native"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.7",

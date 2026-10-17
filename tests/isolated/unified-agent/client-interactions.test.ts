@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
@@ -31,7 +32,7 @@ async function fixture(options: { artifacts?: boolean; sealed?: boolean } = {}) 
     expectedStoreId,
     id: 'w',
     name: 'temporary',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await store.createSession({
     expectedStoreId,
@@ -848,7 +849,7 @@ test('actual Core approval and Tool question wait for HTTP answers before the or
       expectedStoreId,
       id: 'w',
       name: 'temporary',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await client.createSession({
       expectedStoreId,

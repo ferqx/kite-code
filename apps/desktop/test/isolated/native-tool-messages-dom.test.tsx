@@ -199,6 +199,32 @@ test('the retained tool UI shows exact failures, Shell acceptance and expandable
   }
 });
 
+test('the directory row retains the verified workspace root target when the path was omitted', async () => {
+  const f = fixture();
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeToolMessage
+          message={desktopToolMessage(
+            {
+              definitionId: 'files.list',
+              definitionVersion: '1',
+              status: 'succeeded',
+              target: '.',
+            },
+            'root-directory',
+            '{"entries":[],"next":null}',
+          )}
+        />,
+      ),
+    );
+    expect(f.host.textContent).toContain('列出目录.');
+    expect(f.host.querySelector('.tool-activity-step.failed')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
 test('all metadata batches are scope-bound, a late old-Session read cannot replace the later page, and changed original content is never shown with a stale status', async () => {
   const f = fixture(),
     requests: NativeRequest[] = [];

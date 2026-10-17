@@ -12,6 +12,7 @@ import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src/index';
 import { createMcpSourceConfiguration } from '../../src/mcp-source-configuration';
 import { assembleProcessService } from '../../src/process-service';
@@ -35,7 +36,7 @@ async function fixture(
   mkdirSync(workspace);
   mkdirSync(join(workspace, '.kite-code'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   writeFileSync(
     join(workspace, '.kite-code', 'mcp.json'),
     JSON.stringify({

@@ -3,8 +3,6 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -12,9 +10,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { runSelectedMaintenance } from '../../../../../apps/cli/host/maintenance';
 import { parseCLIArguments } from '../../../../../apps/cli/src/arguments';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
@@ -29,7 +32,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(() => selected?.close());
 async function fixture() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-gc-')),
+  const root = realpathSync(temporaryDirectory('kite-gc-')),
     profile = { dataRoot: join(root, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile),
     storeId = (await store.getMetadata()).storeId,
@@ -37,7 +40,7 @@ async function fixture() {
   await store.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'w',
   });
   await store.createSession({
@@ -52,7 +55,7 @@ async function fixture() {
     const bytes = Buffer.from(text),
       hash = createHash('sha256').update(bytes).digest('hex'),
       file = artifactPath(path, hash);
-    mkdirSync(join(path, 'blobs', hash.slice(0, 2)), { recursive: true, mode: 0o700 });
+    privateDirectory(join(path, 'blobs', hash.slice(0, 2)));
     writeFileSync(file, bytes, { mode: 0o400 });
     return { bytes, hash, file };
   };
@@ -353,7 +356,7 @@ test.skipIf(process.platform === 'win32')(
       await f.store.createWorkspace({
         expectedStoreId: f.storeId,
         id: 'other',
-        rootUri: `file://${f.root}`,
+        rootUri: pathToFileURL(f.root).href,
         name: 'keep',
       });
       await f.store.createSession({

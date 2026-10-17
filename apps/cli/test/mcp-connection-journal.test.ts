@@ -1,17 +1,14 @@
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { TuiMcpConnectionIntent } from '@kite-ai/ui/tui';
+import {
+  fixturePermissions,
+  privateDirectory,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../tests/fixtures/test-filesystem';
 import {
   createMcpConnectionRecord,
   parseMcpConnectionRecord,
@@ -34,9 +31,9 @@ const intent = (commandId = 'original'): TuiMcpConnectionIntent => ({
   },
 });
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-mcp-connection-journal-');
+  const root = temporaryDirectory('kite-mcp-connection-journal-');
   const access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   const path = join(access.profilePath, 'ui/mcp-connection-intents.json');
   const open = () =>
     openMcpConnectionJournal({
@@ -174,9 +171,9 @@ test('private physical journal rejects public permissions, links, duplicate IDs,
       record = createMcpConnectionRecord(intent(), 'subject');
     journal.prepare(record);
     const original = readFileSync(f.path);
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     expect(() => journal.list()).toThrow();
-    chmodSync(f.path, 0o600);
+    fixturePermissions(f.path, 0o600);
     linkSync(f.path, join(f.root, 'linked'));
     expect(() => journal.list()).toThrow();
     rmSync(join(f.root, 'linked'));
@@ -195,7 +192,7 @@ test('private physical journal rejects public permissions, links, duplicate IDs,
     writeFileSync(f.path, original);
     rmSync(f.path);
     writeFileSync(join(f.root, 'original.json'), original, { mode: 0o600 });
-    symlinkSync(join(f.root, 'original.json'), f.path);
+    recordReparseEntry(join(f.root, 'original.json'), f.path);
     expect(() => journal.list()).toThrow();
     expect(readFileSync(join(f.root, 'original.json'))).toEqual(original);
     rmSync(f.path);
@@ -229,4 +226,4 @@ test('128 independently scoped unknown intents reach finite capacity and are nev
   } finally {
     f.close();
   }
-});
+}, 120000);

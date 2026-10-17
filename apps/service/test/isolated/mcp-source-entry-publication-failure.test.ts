@@ -1,8 +1,10 @@
 import { expect, mock, test } from 'bun:test';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { Json } from '@kite-ai/agent/extensions';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const flag = '--owned-source-publication-child';
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -164,7 +166,7 @@ async function faultChild(root: string, packetPath: string) {
       expectedStoreId: storeId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${workspace}/`,
+      rootUri: pathToFileURL(`${workspace}/`).href,
     });
     await runtime.createSession({
       expectedStoreId: storeId,
@@ -326,10 +328,9 @@ if (process.argv.includes(flag)) {
   );
 } else {
   test('published source remains unknown across directory fsync plus lock-release failure; original duplicate never writes again', async () => {
-    const root = fs.realpathSync(fs.mkdtempSync('/private/tmp/kite-service-source-publication-'));
+    const root = fs.realpathSync(temporaryDirectory('kite-service-source-publication-'));
     fs.chmodSync(root, 0o700);
-    const evidence = `/private/tmp/kite-source-publication-evidence-${randomUUID()}`;
-    fs.mkdirSync(evidence, { mode: 0o700 });
+    const evidence = temporaryDirectory('kite-source-publication-evidence-');
     const packetPath = join(evidence, 'packet.json');
     const logFd = fs.openSync(
       join(evidence, 'child.log'),

@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -14,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient, type Interaction } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 
@@ -35,9 +35,9 @@ type Wire = { method: string; path: string; body?: Record<string, unknown> };
 test('actual 80x24 default ask_user wizard preserves labeled original IDs, edited Unicode text across Ctrl+A and Custom answer; only final Answer completes original Tool and Run', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-question-')));
   const evidence = join(tmpdir(), `kite-tui-question-evidence-${randomUUID()}`);
-  mkdirSync(evidence, { mode: 0o700 });
+  privateDirectory(evidence);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   const rows = (name: string): Record<string, unknown>[] =>
     existsSync(join(root, name))
@@ -151,7 +151,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
       JSON.stringify({ root, workspace, dataRoot: profile.dataRoot, artifact }),
       { mode: 0o600 },
     );
-    mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

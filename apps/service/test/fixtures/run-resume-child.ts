@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createResumeRuntime } from './run-resume-binding';
 
@@ -10,7 +11,7 @@ await runtime.createWorkspace({
   expectedStoreId,
   id: 'w',
   name: 'owned',
-  rootUri: `file://${dataRoot}`,
+  rootUri: pathToFileURL(dataRoot).href,
 });
 await runtime.createSession({
   expectedStoreId,

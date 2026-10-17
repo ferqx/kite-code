@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -8,6 +8,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { ptyDeadline } from '../fixtures/tui-pty';
@@ -44,11 +45,11 @@ for (const mode of ['paired', 'shared'] as const)
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-preferences-')));
     const workspace = join(root, 'workspace'),
       ownedPid = join(root, 'owned-pid');
-    mkdirSync(workspace, { mode: 0o700 });
+    privateDirectory(workspace);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
-    mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(profile.profilePath);
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(
       join(profile.profilePath, 'ui', 'preferences.jsonc'),
       JSON.stringify({ language: 'en-US', colorPreset: 'teal' }),
@@ -143,7 +144,7 @@ for (const mode of ['paired', 'shared'] as const)
         }
       } else {
         const web = join(root, 'web');
-        mkdirSync(web, { mode: 0o700 });
+        privateDirectory(web);
         const assets = [
           ['/index.html', 'text/html; charset=utf-8', '<title>owned</title>'],
           ['/app.js', 'text/javascript; charset=utf-8', 'globalThis.owned=true;'],

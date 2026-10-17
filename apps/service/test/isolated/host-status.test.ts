@@ -1,16 +1,18 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createDefaultHostStatusSource } from '../../src/host-status';
 
 test('real default HTTP status reads current controls and host facts without creating work or touching providers/credentials', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-host-status-'));
+  const root = realpathSync(temporaryDirectory('kite-host-status-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -56,13 +58,13 @@ test('real default HTTP status reads current controls and host facts without cre
     expectedStoreId: metadata.storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createWorkspace({
     expectedStoreId: metadata.storeId,
     id: 'other',
     name: 'other',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({
     ...identity,

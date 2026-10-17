@@ -1,15 +1,8 @@
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createPermissionPolicy } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -20,6 +13,7 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkflowConfiguration } from '../../src/skill-workflow-configuration';
 
 const native = process.platform === 'darwin' || process.platform === 'linux' ? test : test.skip;
@@ -46,7 +40,7 @@ native.each(['profile', 'workspace', 'profile-drift'] as const)(
     let failure: unknown;
     try {
       for (const path of [workspace, control, profile.profilePath, skill, join(skill, 'dist')])
-        mkdirSync(path, { recursive: true, mode: 0o700 });
+        privateDirectory(path);
       const ledger = join(workspace, 'verification-ledger');
       const privateSibling = join(profile.profilePath, 'private-sibling');
       const coordinationSecret = join(control, 'private-coordination');
@@ -98,7 +92,7 @@ console.log('original verifier full output');\n`;
           bubblewrapPath = Bun.which('bwrap');
         if (!compiler || !bubblewrapPath)
           throw Error('linux_workflow_qualification_dependencies_unavailable');
-        mkdirSync(join(root, 'assets'), { mode: 0o700 });
+        privateDirectory(join(root, 'assets'));
         supervisorPath = join(root, 'assets', 'linux-shell-init');
         const compiled = Bun.spawnSync(
           [
@@ -258,7 +252,7 @@ console.log('original verifier full output');\n`;
         expectedStoreId,
         id: 'w',
         name: 'Original Workspace',
-        rootUri: `file://${workspace}`,
+        rootUri: pathToFileURL(workspace).href,
       });
       await runtime.createSession({
         ...base,

@@ -1,20 +1,14 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -34,7 +28,7 @@ async function bounded<T>(promise: Promise<T>, ms = 15000) {
 test.skipIf(process.platform !== 'darwin')(
   'actual Electron grant directory/keyboard clear uses accepted Core facts, lost response only queries original ID, CAS conflict never retries and no Provider restarts',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-grants-')),
+    const root = realpathSync(temporaryDirectory('kite-native-grants-')),
       profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
       workspace = join(root, 'workspace');
     mkdirSync(workspace);
@@ -103,7 +97,7 @@ test.skipIf(process.platform !== 'darwin')(
       expectedStoreId: storeId,
       id: 'w',
       name: 'Native fixture',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
     });
     for (const id of ['s', 'other']) {
       await runtime.createSession({

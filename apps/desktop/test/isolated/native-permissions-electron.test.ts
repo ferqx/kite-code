@@ -1,18 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -45,7 +39,7 @@ async function bounded<T>(promise: Promise<T>, milliseconds = 15000) {
 test.skipIf(process.platform !== 'darwin')(
   'actual Electron keyboard mode/default/trust/revoke and unknown original permission lookup create no Model work',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-electron-')),
+    const root = realpathSync(temporaryDirectory('kite-native-electron-')),
       barrier = gate();
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' }),
       workspace = join(root, 'workspace');
@@ -56,7 +50,7 @@ test.skipIf(process.platform !== 'darwin')(
       expectedStoreId: storeId,
       id: 'w',
       name: 'Native fixture',
-      rootUri: new URL(`file://${workspace}`).href,
+      rootUri: pathToFileURL(workspace).href,
     });
     for (const id of ['s', 'other'])
       await store.createSession({

@@ -1,14 +1,15 @@
 import { expect, test } from 'bun:test';
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
+import { privateDirectory, temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { openRecoveryJournal } from '../host/recovery-journal';
 import type { RecoveryIntent } from '../src/recovery';
 
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-recovery-journal-'),
+  const root = temporaryDirectory('kite-recovery-journal-'),
     access = acquireProfileAccess({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   const open = () =>
     openRecoveryJournal({
       access,
@@ -79,7 +80,7 @@ test('128 original pending slots never evict unknown and full journal refuses ne
   } finally {
     f.close();
   }
-});
+}, 120000);
 for (const scenario of ['corrupt', 'unknownVersion', 'hardlink', 'privateField'] as const)
   test(`journal ${scenario} stays unavailable and preserves original bytes`, () => {
     const f = fixture();

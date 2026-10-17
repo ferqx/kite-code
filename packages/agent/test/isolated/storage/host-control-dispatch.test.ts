@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import type { PermissionControlRead } from '../../../src/extensions';
 import { semanticDigest } from '../../../src/json';
@@ -44,13 +46,18 @@ async function bounded<T>(promise: Promise<T>) {
   }
 }
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-control-dispatch-'),
+  const root = temporaryDirectory('kite-control-dispatch-'),
     profile = { dataRoot: root, profile: 'new' },
     store = await openSqliteStore(profile),
     expectedStoreId = (await store.getMetadata()).storeId;
   const base = { expectedStoreId, subjectId: 'user' };
   for (const id of ['w', 'other-w'])
-    await store.createWorkspace({ expectedStoreId, id, rootUri: `file://${root}`, name: id });
+    await store.createWorkspace({
+      expectedStoreId,
+      id,
+      rootUri: pathToFileURL(root).href,
+      name: id,
+    });
   for (const sessionId of ['s', 'other'])
     await store.createSession({
       ...base,

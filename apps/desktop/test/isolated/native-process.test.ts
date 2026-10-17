@@ -1,15 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { parseNativeAssets } from '../../electron/native-assets';
 import { decodeNativeRequest } from '../../electron/native-ipc';
 import { buildNativeDesktop } from '../../scripts/build-native';
@@ -28,7 +22,7 @@ async function bounded<T>(promise: Promise<T>, timeout = 10000) {
   }
 }
 test('actual Node paired spawn uses the one public launcher with private bootstrap; EOF reaps only its owned Service', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-node-paired-'));
+  const root = realpathSync(temporaryDirectory('kite-node-paired-'));
   const serviceEntry = realpathSync(resolve(import.meta.dir, '../../../service/dist/main.js'));
   const bunExecutable = realpathSync(process.execPath);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'native' });

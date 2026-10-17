@@ -1,5 +1,6 @@
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createTaskExtension } from '../../../src/extensions/task';
@@ -139,7 +140,7 @@ if (import.meta.main) {
   await runtime.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'owned crash fixture',
   });
   await runtime.createSession({

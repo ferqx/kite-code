@@ -1,5 +1,6 @@
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
@@ -74,7 +75,7 @@ try {
     expectedStoreId: storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${join(root, 'workspace')}`,
+    rootUri: pathToFileURL(join(root, 'workspace')).href,
   });
   await client.createSession({
     expectedStoreId: storeId,

@@ -1,15 +1,16 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Json } from '@kite-ai/agent/storage';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 
 test('actual HTTP forwards independent original start/followup intents and publishes only actual Runtime support', async () => {
-  const root = mkdtempSync('/private/tmp/kite-http-extension-inputs-');
+  const root = temporaryDirectory('kite-http-extension-inputs-');
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   const expectedStoreId = (await store.getMetadata()).storeId;
   await store.createWorkspace({ expectedStoreId, id: 'w', rootUri: 'file:///fixture', name: 'w' });
@@ -143,7 +144,7 @@ test('actual HTTP forwards independent original start/followup intents and publi
 });
 
 test('custom Service capability cannot advertise extension input support for unsupported fixed Runtime', async () => {
-  const root = mkdtempSync('/private/tmp/kite-http-extension-inputs-unsupported-');
+  const root = temporaryDirectory('kite-http-extension-inputs-unsupported-');
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   const runtime = createRuntime({
     store,

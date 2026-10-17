@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { ArtifactContentStore } from '../../../src/artifact-port';
@@ -53,7 +54,7 @@ async function setup(model: ModelAdapter, options: Partial<RuntimeOptions> = {})
     expectedStoreId,
     id: 'w',
     name: 'private',
-    rootUri: `file://${directory}`,
+    rootUri: pathToFileURL(directory).href,
   });
   await runtime.createSession({
     expectedStoreId,

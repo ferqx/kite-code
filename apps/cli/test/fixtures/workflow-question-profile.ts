@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from './daemon-host-build';
@@ -16,7 +17,7 @@ export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(join(workspace, 'skill'), { recursive: true });
-  mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(profile.profilePath, 'ui'));
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
     mode: 0o600,
   });

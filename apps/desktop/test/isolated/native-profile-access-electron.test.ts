@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -14,16 +13,18 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'actual Electron private SQLite retains profile lock after Service crash until UI close or Node death; maintenance and journals cannot create an empty UI store',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-profile-access-'));
+    const root = realpathSync(temporaryDirectory('kite-native-profile-access-'));
     const { acquireProfileAccess } = await import(
       resolve(import.meta.dir, '../../../../packages/agent/src/platform/profile.ts')
     );
@@ -38,7 +39,7 @@ test.skipIf(process.platform !== 'darwin')(
       await store.createWorkspace({
         expectedStoreId: storeId,
         id: 'w',
-        rootUri: new URL(`file://${workspace}`).href,
+        rootUri: pathToFileURL(workspace).href,
         name: 'fixture',
       });
       await store.createSession({

@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
 import type { AuthorizationRequest, ToolContext } from '../extensions';
 import { AgentError, type Json } from '../storage/types';
+import { createWorkspaceFiles, type WorkspaceFiles } from '../tools/files';
 import { dispatchScopeLeaves } from './dispatch-scope';
 import type { CapabilityDescription } from './index';
 
@@ -73,46 +73,38 @@ function guardedPath(value: Json, boundary: PathFileBoundary, write: boolean) {
     throw new AgentError('file_system_target_denied');
   return path;
 }
-/** Select a concrete physical parent; the existing native engine separately anchors/no-follows it. */
+/** Classify with the same native identities used by actual file baselines, never Node stat IDs. */
 export async function inspectPathFileTarget(
   definitionId: string,
   input: Json,
   boundary: PathFileBoundary,
+  /** Actual dispatch can recheck its already anchored parent rather than reopen the path. */
+  anchoredFiles?: WorkspaceFiles,
 ): Promise<PathFileTarget> {
   if (!pathFileToolIds.includes(definitionId as (typeof pathFileToolIds)[number]))
     throw new AgentError('file_input_invalid');
   const path = guardedPath(input, boundary, definitionId !== 'files.read_path');
   const root = dirname(path);
-  if ((await realpath(root)) !== root) throw new AgentError('file_symlink');
-  const stat = await lstat(root, { bigint: true });
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new AgentError('file_root_invalid');
-  if (process.getuid && stat.uid !== BigInt(process.getuid()))
-    throw new AgentError('file_owner_invalid');
-  let identity: PathFileTarget['identity'] = null;
+  const files = anchoredFiles ?? createWorkspaceFiles({ root, strictReads: true });
   try {
-    const target = await lstat(path, { bigint: true });
-    if (target.isSymbolicLink()) throw new AgentError('file_symlink');
-    if (!target.isFile()) throw new AgentError('file_not_regular');
-    if (target.nlink !== 1n || (process.getuid && target.uid !== BigInt(process.getuid())))
-      throw new AgentError('file_owner_invalid');
-    identity = { device: String(target.dev), inode: String(target.ino) };
-  } catch (error) {
-    if ((error as { code?: string }).code !== 'ENOENT') throw error;
+    const { parent, file: identity } = await files.inspectIdentity(basename(path));
+    const revision = createHash('sha256')
+      .update(
+        JSON.stringify({
+          namespace: 'builtin.files.path',
+          version: 1,
+          definitionId,
+          input,
+          root: { path: root, ...parent },
+          identity,
+          boundary,
+        }),
+      )
+      .digest('hex');
+    return { path, root, name: basename(path), identity, revision: `path-files:1:${revision}` };
+  } finally {
+    if (!anchoredFiles) await files.close();
   }
-  const revision = createHash('sha256')
-    .update(
-      JSON.stringify({
-        namespace: 'builtin.files.path',
-        version: 1,
-        definitionId,
-        input,
-        root: { path: root, device: String(stat.dev), inode: String(stat.ino) },
-        identity,
-        boundary,
-      }),
-    )
-    .digest('hex');
-  return { path, root, name: basename(path), identity, revision: `path-files:1:${revision}` };
 }
 export async function describePathFileRequest(
   request: AuthorizationRequest,

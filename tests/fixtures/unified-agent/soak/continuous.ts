@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
@@ -13,6 +13,7 @@ import {
   type ContinuousEvidence,
   verifyContinuousEvidence,
 } from '../../../../scripts/runtime/unified-soak-continuous';
+import { privateDirectory } from '../../test-filesystem';
 import { until } from './common';
 
 const finish: ModelEvent = {
@@ -38,7 +39,7 @@ export async function openContinuousFixture(root: string) {
     if (failures.length) throw new AggregateError(failures, 'continuous_cleanup_failed');
   };
   try {
-    mkdirSync(root, { recursive: true, mode: 0o700 });
+    privateDirectory(root);
     const profile = { dataRoot: join(root, 'data'), name: 'continuous', accessKey: 'owned' };
     const stores: Awaited<ReturnType<typeof openSqliteStore>>[] = [];
     for (let index = 0; index < 2; index++) {

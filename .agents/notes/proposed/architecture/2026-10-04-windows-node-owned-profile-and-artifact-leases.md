@@ -16,7 +16,7 @@ Main 在启动 child 前持有原候选 outer/inner 及 Profile SH，保持到�
 
 固定 `.node` 字节由既有 manifest、SHA 和资产 inventory 验证。构建使用原样 Node v22.21.1 官方四个 Node-API header 和许可，明确 NAPI_VERSION=8；官方声明提供函数类型和注册宏，有限 symbol 从当前原 executable 解析。Windows builder 要求明确 canonical MSVC 与已配置 SDK 环境，缺资产、编译器或 symbol 明确失败，已安装入口不编译或回退源码/PATH。此方案参考 [Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules)，实际 Electron ABI 仍须本平台运行核实。
 
-当前负责位置是 [native owner](../../../../apps/desktop/native/windows-access/README.md) 与 [固定 builder](../../../../apps/desktop/scripts/build-windows-access.ts)。源码和 header 契约已部分实现，本提案尚未取得 Windows MSVC、实际 Electron/Service 或完整私有 UI 文件生命周期资格；保持 proposed。它不代替 [Profile/Workspace 分角色策略](2026-10-04-windows-private-and-workspace-scope-paths.md)、[Artifact 发布策略](2026-10-04-windows-artifact-handle-publication.md)，也不宣布维护或 installer 已支持。
+当前负责位置是 [native owner](../../../../apps/desktop/native/windows-access/README.md) 与 [固定 builder](../../../../apps/desktop/scripts/build-windows-access.ts)。源码/header以及2026-10-17本机Windows MSVC、实际Electron Node/Bun双holder、私有UI原文件和父异常退出后EOF的有限后端资格已交付，精确范围归owner和[后续原对象决定](../../implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)。完整installed创建链、窗口与维护恢复仍未取得资格，提案保持proposed。它不代替 [Profile/Workspace 分角色策略](2026-10-04-windows-private-and-workspace-scope-paths.md)、[Artifact 发布策略](2026-10-04-windows-artifact-handle-publication.md)，也不宣布完整维护或installer通过。
 
 ## 当前实现与加载根限制
 
@@ -24,7 +24,7 @@ Main 在启动 child 前持有原候选 outer/inner 及 Profile SH，保持到�
 
 原 Node hash读取后关FD再require的加载窗口曾导致正式candidate全面前置拒绝。现 [managed Native 创建链决定](../../implemented/architecture/2026-10-10-windows-managed-native-admission.md)部分替代该描述：固定C前门在Bun初始化前pin自身/helper，compiled verifier在创建Electron前取得完整outer/inner pin与双SH，两跳证书分别绑定实际创建返回的原child HANDLE；Main核证书和真实pipe进程，再取得自己的完整文件pin/双SH。PPID可指定，不能代替创建证明；缺handoff、错误证书或漂移仍前置拒绝，没有formal环境bypass。事后hash仍不能补回加载前对象身份。
 
-该源码决定不替代本篇Profile/私有UI对象、原锁进程归属和原生验收理由。本篇继续proposed：Windows MSVC、Electron ABI、真实文件权限、Profile前加载与lock交接、配套Service及双holder全生命周期尚未取得本平台资格。既有macOS formal-guard负例只证明当时的拒绝断言，直接owned后端fixture也不作installed/fullNative资格。签名、publisher认证及完整平台发行仍未实施或验收。
+该源码决定不替代本篇Profile/私有UI对象、原锁进程归属和完整原生验收理由。后续真实读取/遍历共享权、只读区域锁、同Main不可伪造借用及Node/libuv Job接线修正部分归上述原对象决定；其真实Windows后端结果不作installed/fullNative资格。本篇继续proposed，实际加载前完整创建、普通窗口/退出及维护恢复仍待验。既有macOS负例仅证明对应拒绝，签名、publisher认证及完整平台发行仍未实施或验收。
 
 ## 当前 CI 编译准备
 

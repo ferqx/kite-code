@@ -5,14 +5,16 @@ import {
   chmodSync,
   existsSync,
   linkSync,
-  mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -43,13 +45,13 @@ function mutateUntrustedFixture(value: unknown, [path, ...replacement]: FixtureM
 }
 
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-file-recovery-maintenance-');
+  const root = temporaryDirectory('kite-file-recovery-maintenance-');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
   await store.close();
   const selected = selectProfile(profile);
-  mkdirSync(join(selected.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(selected.profilePath, 'ui'));
   return {
     root,
     profile,

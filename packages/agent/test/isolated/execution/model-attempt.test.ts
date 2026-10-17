@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { type ModelAdapter, ModelAttemptError } from '@kite-ai/ai';
 import { waitForModelRetry } from '../../../src/model-attempt';
 import { createRuntime } from '../../../src/runtime';
@@ -46,7 +47,7 @@ async function fixture(model: ModelAdapter) {
   await runtime.createWorkspace({
     expectedStoreId,
     id: 'workspace',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'test',
   });
   await runtime.createSession({

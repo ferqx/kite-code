@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -97,7 +98,7 @@ test('actual HTTP Fork/rename/delete commit once across lost physical replies; o
       expectedStoreId,
       id: 'w',
       name: 'Owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     for (const sessionId of ['source', 'other'])
       await client.createSession({

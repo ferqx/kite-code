@@ -1,7 +1,15 @@
 import { existsSync, lstatSync, mkdirSync } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { WindowsPathSecurity } from './locks';
-import { retainWindowsCandidateFiles } from './windows-candidate-files';
+import { readWindowsArtifactObject } from './windows-artifact-scope';
+import {
+  retainWindowsCandidateFiles,
+  windowsArtifactRelativeFiles,
+} from './windows-candidate-files';
+import {
+  windowsSecurityDescriptorReader,
+  windowsSecurityDescriptorSymbols,
+} from './windows-security-descriptor';
 
 /** Fixed OS policy; no caller supplied SID, descriptor, DLL or privilege escalation. */
 let cached: NativeWindowsPathSecurity | undefined;
@@ -20,6 +28,8 @@ export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
   writePrivateRecordFile(path: string, bytes: Uint8Array): { remove(): void };
   writePrivateFile(path: string, bytes: Uint8Array): void;
   writePrivateArtifactFile(path: string, bytes: Uint8Array): void;
+  writePrivateArtifactFiles(root: string, files: ReadonlyMap<string, Uint8Array>): void;
+  copyPrivateArtifactFiles(sourceRoot: string, targetRoot: string, files: readonly string[]): void;
   copyPrivateFile(source: string, target: string): void;
   createDirectory(path: string): void;
   createFile(path: string): void;
@@ -92,10 +102,7 @@ function createNativeWindowsPathSecurity(): Implementation {
       args: ['ptr', 'u32', 'ptr', 'ptr'],
       returns: 'bool',
     },
-    GetSecurityInfo: {
-      args: ['u64', 'u32', 'u32', 'ptr', 'ptr', 'ptr', 'ptr', 'ptr'],
-      returns: 'u32',
-    },
+    ...windowsSecurityDescriptorSymbols,
     GetSecurityDescriptorControl: { args: ['ptr', 'ptr', 'ptr'], returns: 'bool' },
     EqualSid: { args: ['ptr', 'ptr'], returns: 'bool' },
     GetAce: { args: ['ptr', 'u32', 'ptr'], returns: 'bool' },
@@ -215,38 +222,33 @@ function createNativeWindowsPathSecurity(): Implementation {
   };
   const identity = (value: DataView) =>
     `${value.getUint32(28, true)}:${value.getUint32(44, true)}:${value.getUint32(48, true)}`;
+  const readSecurity = windowsSecurityDescriptorReader(adv.symbols, ptr, fail);
   const verifyAcl = (handle: bigint | number, directory: boolean, readOnly = false) => {
-    const owner = out(),
-      dacl = out(),
-      sd = out();
-    if (adv.symbols.GetSecurityInfo(handle, 1, 5, ptr(owner), null, ptr(dacl), null, ptr(sd)) !== 0)
+    const security = readSecurity(handle);
+    const owner = security.owner,
+      dacl = security.dacl;
+    if (!owner || !dacl || !adv.symbols.EqualSid(pointer(owner), sid)) fail();
+    const control = new Uint16Array(1),
+      revision = new Uint32Array(1);
+    if (!adv.symbols.GetSecurityDescriptorControl(security.descriptor, ptr(control), ptr(revision)))
       fail();
-    try {
-      if (!owner[0] || !dacl[0] || !adv.symbols.EqualSid(pointer(owner[0]), sid)) fail();
-      const control = new Uint16Array(1),
-        revision = new Uint32Array(1);
-      if (!adv.symbols.GetSecurityDescriptorControl(pointer(sd[0]!), ptr(control), ptr(revision)))
-        fail();
-      if (!(control[0]! & 4) || ((directory || readOnly) && !(control[0]! & 0x1000))) fail();
-      const acl = new DataView(toArrayBuffer(pointer(dacl[0]!), 0, 8));
-      if (acl.getUint16(4, true) !== 1) fail();
-      const ace = out();
-      if (!adv.symbols.GetAce(pointer(dacl[0]!), 0, ptr(ace))) fail();
-      const address = pointer(ace[0]!);
-      const header = new DataView(toArrayBuffer(address, 0, 8));
-      const flags = header.getUint8(1);
-      if (
-        header.getUint8(0) !== 0 ||
-        header.getUint16(2, true) < 12 ||
-        (readOnly ? flags !== 0 : (flags & ~0x13) !== 0) ||
-        header.getUint32(4, true) !== (readOnly ? 0x120089 : 0x1f01ff) ||
-        (directory && (flags & 3) !== 3) ||
-        !adv.symbols.EqualSid(pointer(BigInt(address) + 8n), sid)
-      )
-        fail();
-    } finally {
-      if (sd[0]) kernel.symbols.LocalFree(pointer(sd[0]));
-    }
+    if (!(control[0]! & 4) || ((directory || readOnly) && !(control[0]! & 0x1000))) fail();
+    const acl = new DataView(toArrayBuffer(pointer(dacl), 0, 8));
+    if (acl.getUint16(4, true) !== 1) fail();
+    const ace = out();
+    if (!adv.symbols.GetAce(pointer(dacl), 0, ptr(ace))) fail();
+    const address = pointer(ace[0]!);
+    const header = new DataView(toArrayBuffer(address, 0, 8));
+    const flags = header.getUint8(1);
+    if (
+      header.getUint8(0) !== 0 ||
+      header.getUint16(2, true) < 12 ||
+      (readOnly ? flags !== 0 : (flags & ~0x13) !== 0) ||
+      header.getUint32(4, true) !== (readOnly ? 0x120089 : 0x1f01ff) ||
+      (directory && (flags & 3) !== 3) ||
+      !adv.symbols.EqualSid(pointer(BigInt(address) + 8n), sid)
+    )
+      fail();
   };
   const verifyHandle = (
     handle: bigint | number,
@@ -285,8 +287,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     if (error) throw error;
     ownedTransfers.delete(held);
   };
-  const retainParents = (paths: string[], held: Held[]) => {
-    const parents = new Set<string>();
+  const retainParents = (paths: string[], held: Held[], parents = new Set<string>()) => {
     for (const path of paths) {
       const chain: string[] = [];
       for (let current = dirname(path); ; ) {
@@ -297,7 +298,7 @@ function createNativeWindowsPathSecurity(): Implementation {
       }
       for (const entry of chain) {
         if (parents.has(entry)) continue;
-        const handle = open(entry, false, undefined, 0x20080, false, 3);
+        const handle = open(entry, false, undefined, 0x200a0, false, 3);
         held.push({ path: entry, handle, directory: true });
         parents.add(entry);
         verifyHandle(handle, entry, true, false);
@@ -442,6 +443,91 @@ function createNativeWindowsPathSecurity(): Implementation {
     }
     if (failure) throw failure;
   };
+  /** One synchronous CREATE_NEW tree operation retains each original directory once. */
+  const artifactBatch = (
+    root: string,
+    paths: readonly string[],
+    provide: (path: string, output: bigint | number, held: Held[]) => void,
+  ) => {
+    root = resolve(root);
+    windowsArtifactRelativeFiles(paths);
+    api.verifyPath(root);
+    api.verifyDirectory(root);
+    const held: Held[] = [],
+      parents = new Set<string>();
+    ownedTransfers.add(held);
+    let failure: unknown,
+      failed = false,
+      closeUnknown = false;
+    const directory = (path: string) => {
+      if (parents.has(path)) return;
+      directory(dirname(path));
+      if (!existsSync(path)) {
+        const sd = descriptor(true);
+        const sa = new Uint8Array(24),
+          view = new DataView(sa.buffer);
+        view.setUint32(0, 24, true);
+        view.setBigUint64(8, BigInt(sd), true);
+        try {
+          if (!kernel.symbols.CreateDirectoryW(ptr(wide(path)), ptr(sa))) fail();
+        } finally {
+          kernel.symbols.LocalFree(sd);
+        }
+      }
+      const handle = open(path, false, undefined, 0x200a0, false, 3);
+      held.push({ path, handle, directory: true });
+      verifyHandle(handle, path, true);
+      parents.add(path);
+    };
+    try {
+      retainParents([join(root, 'entry')], held, parents);
+      for (const path of paths) {
+        const target = join(root, ...path.split('/'));
+        directory(dirname(target));
+        const sd = descriptor(false);
+        let handle: bigint | number;
+        try {
+          handle = open(target, true, sd, 0x40020080, false, 1);
+        } finally {
+          kernel.symbols.LocalFree(sd);
+        }
+        const entry = { path: target, handle, directory: false };
+        held.push(entry);
+        verifyHandle(handle, target, false);
+        const original = identity(info(handle));
+        provide(path, handle, held);
+        if (!kernel.symbols.FlushFileBuffers(handle) || identity(info(handle)) !== original) fail();
+        verifyHandle(handle, target, false);
+        if (!kernel.symbols.CloseHandle(handle)) {
+          closeUnknown = true;
+          throw Error('windows_path_security_close_failed');
+        }
+        held.splice(held.indexOf(entry), 1);
+      }
+      for (const entry of held)
+        verifyHandle(
+          entry.handle,
+          entry.path,
+          true,
+          entry.path === root || entry.path.startsWith(`${root}\\`),
+        );
+    } catch (error) {
+      failed = true;
+      failure = error;
+    }
+    // A failed strict leaf close keeps the entire original collection and is never
+    // treated as permission to remove scratch or to publish the partly written tree.
+    if (closeUnknown) throw failure;
+    try {
+      closeHeld(held);
+    } catch (cleanup) {
+      throw new AggregateError(
+        failed ? [failure, cleanup] : [cleanup],
+        'windows_path_security_close_failed',
+      );
+    }
+    if (failed) throw failure;
+  };
   const api: Implementation = {
     verifyPath(path) {
       let current = resolve(path);
@@ -520,6 +606,86 @@ function createNativeWindowsPathSecurity(): Implementation {
         const actual = info(handle);
         if (actual.getUint32(32, true) || actual.getUint32(36, true) !== bytes.length) fail();
       });
+    },
+    writePrivateArtifactFiles(root, files) {
+      const paths = windowsArtifactRelativeFiles([...files.keys()]);
+      for (const path of paths) {
+        const bytes = files.get(path);
+        if (!(bytes instanceof Uint8Array) || bytes.length > 1024 * 1024 * 1024) fail();
+      }
+      artifactBatch(root, paths, (path, output) => {
+        const bytes = files.get(path)!;
+        writeChunks(output, bytes);
+        const written = info(output);
+        if (written.getUint32(32, true) || written.getUint32(36, true) !== bytes.length) fail();
+      });
+    },
+    copyPrivateArtifactFiles(sourceRoot, targetRoot, files) {
+      const paths = windowsArtifactRelativeFiles(files);
+      const sourcePin = retainWindowsCandidateFiles(sourceRoot, paths);
+      try {
+        artifactBatch(targetRoot, paths, (path, output, held) => {
+          const source = join(sourceRoot, ...path.split('/'));
+          const expected = readWindowsArtifactObject(sourcePin, source);
+          if (!expected || expected.directory) return fail();
+          const input = open(source, false, undefined, 0x80020080, false, 1);
+          const entry = { path: source, handle: input, directory: false };
+          held.push(entry);
+          const before = info(input);
+          if (
+            before.getUint32(0, true) & 0x410 ||
+            before.getUint32(40, true) !== 1 ||
+            identity(before) !== expected.identity
+          )
+            fail();
+          const bytes = new Uint8Array(65536),
+            count = new Uint32Array(1);
+          let total = 0n;
+          for (;;) {
+            if (
+              !kernel.symbols.ReadFile(input, ptr(bytes), bytes.length, ptr(count), null) ||
+              count[0]! > bytes.length
+            )
+              fail();
+            if (!count[0]) break;
+            writeChunks(output, bytes.subarray(0, count[0]));
+            total += BigInt(count[0]!);
+          }
+          const after = info(input);
+          // LastAccessTime is allowed to advance during a legitimate read.
+          const stamp = (value: DataView) =>
+            Buffer.concat([
+              Buffer.from(value.buffer, 0, 12),
+              Buffer.from(value.buffer, 20),
+            ]).toString('hex');
+          if (total !== expected.size || stamp(before) !== stamp(after)) fail();
+          const written = info(output);
+          if (
+            ((BigInt(written.getUint32(32, true)) << 32n) | BigInt(written.getUint32(36, true))) !==
+            total
+          )
+            fail();
+          if (!kernel.symbols.CloseHandle(input)) throw Error('windows_path_security_close_failed');
+          held.splice(held.indexOf(entry), 1);
+        });
+        sourcePin.verify();
+        sourcePin.release();
+      } catch (error) {
+        const unknown = (error: unknown): boolean =>
+          error instanceof Error &&
+          (/(?:close|release).*?(?:unknown|failed)/u.test(error.message) ||
+            (error instanceof AggregateError && error.errors.some(unknown)));
+        if (unknown(error)) unclosedNativeOwners.add({ sourcePin, error });
+        else {
+          try {
+            sourcePin.release();
+          } catch (cleanup) {
+            unclosedNativeOwners.add({ sourcePin, error, cleanup });
+            throw new AggregateError([error, cleanup], 'windows_path_security_close_failed');
+          }
+        }
+        throw error;
+      }
     },
     copyPrivateFile(source, target) {
       source = resolve(source);

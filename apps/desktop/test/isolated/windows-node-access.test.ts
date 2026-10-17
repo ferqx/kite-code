@@ -16,14 +16,135 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { loadWindowsAccess } from '../../electron/windows-access';
 import { buildWindowsAccess, verifyNodeApiHeaders } from '../../scripts/build-windows-access';
 
+test.skipIf(process.platform !== 'win32')(
+  'native closed inventory rejects new files and directories while original candidate handles stay live',
+  async () => {
+    const root = join(tmpdir(), `kite-node-inventory-${crypto.randomUUID()}`);
+    privateDirectory(root);
+    try {
+      const source = verifyNodeApiHeaders();
+      const translation = join(root, 'inventory.cc');
+      // An isolated test executable includes the actual private implementation.
+      // The normal addon gets no test export, flag or alternate factory.
+      writeFileSync(
+        translation,
+        `#include ${JSON.stringify(join(source, 'access.cc').replaceAll('\\', '/'))}
+#include <iostream>
+int wmain(int argc,wchar_t** argv) {
+ std::unique_ptr<Lease> lease;
+ try {
+  need(argc==2); const auto root=canonical(argv[1]); lease=std::make_unique<Lease>();
+  lease->ancestors(root,true);
+  for(const auto& path:{root+L"\\\\nested",root+L"\\\\empty"}) lease->pin(path,false,true);
+  lease->pinFile(root+L"\\\\a.txt",false); lease->pinFile(root+L"\\\\nested\\\\b.txt",false);
+  lease->candidateRoot=root;
+  lease->candidateFiles={root+L"\\\\a.txt",root+L"\\\\nested\\\\b.txt"};
+  lease->candidateDirectories={root,root+L"\\\\nested",root+L"\\\\empty"};
+  lease->acquire(parent(root)+L"\\\\unit.lock");
+  std::cout<<"READY\\n"<<std::flush; std::cin.get();
+  lease->verify(); lease->release(); std::cout<<"VERIFIED\\n"; return 0;
+ }catch(const std::exception& error){
+  if(lease)try{lease->release();}catch(...){return 3;}
+  std::cerr<<error.what()<<"\\n";return 2;
+ }
+}
+`,
+      );
+      const executable = join(root, 'inventory.exe');
+      const compiled = spawnSync(
+        process.env.KITE_WINDOWS_MSVC!,
+        [
+          '/nologo',
+          '/MT',
+          '/O2',
+          '/std:c++17',
+          '/EHsc',
+          '/DUNICODE',
+          '/D_UNICODE',
+          '/D_WIN32_WINNT=0x0A00',
+          `/I${join(source, 'include')}`,
+          translation,
+          `/Fo${join(root, 'inventory.obj')}`,
+          `/Fe${executable}`,
+          '/link',
+          'advapi32.lib',
+          'bcrypt.lib',
+        ],
+        { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 15000 },
+      );
+      expect(compiled.status, compiled.stdout + compiled.stderr).toBe(0);
+      const security = (
+        await import('@kite-ai/agent/windows-path-security')
+      ).defaultWindowsPathSecurity()!;
+      for (const mode of ['unchanged', 'new-file', 'new-directory', 'declared-empty']) {
+        const directory = join(root, mode);
+        privateDirectory(directory);
+        privateDirectory(join(directory, 'nested'));
+        privateDirectory(join(directory, 'empty'));
+        security.writePrivateFile(join(directory, 'a.txt'), Buffer.from('a'));
+        security.writePrivateFile(join(directory, 'nested/b.txt'), Buffer.from('b'));
+        const child = Bun.spawn([executable, directory], {
+          cwd: root,
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          windowsHide: true,
+          timeout: 5000,
+        });
+        const reader = child.stdout.getReader();
+        let stdout = '';
+        try {
+          while (!stdout.replaceAll('\r\n', '\n').includes('READY\n')) {
+            const next = await reader.read();
+            expect(next.done).toBe(false);
+            stdout += Buffer.from(next.value!).toString('utf8');
+            expect(stdout.length).toBeLessThan(4096);
+          }
+          if (mode === 'new-file')
+            security.writePrivateFile(join(directory, 'nested/unknown'), Buffer.from('unknown'));
+          if (mode === 'new-directory') privateDirectory(join(directory, 'unknown'));
+          if (mode === 'declared-empty')
+            security.writePrivateFile(join(directory, 'empty/unknown'), Buffer.from('unknown'));
+          await child.stdin.write('\n');
+          await child.stdin.end();
+          for (;;) {
+            const next = await reader.read();
+            if (next.done) break;
+            stdout += Buffer.from(next.value).toString('utf8');
+          }
+          const [code, stderr] = await Promise.all([
+            child.exited,
+            new Response(child.stderr).text(),
+          ]);
+          expect(code).toBe(mode === 'unchanged' ? 0 : 2);
+          expect(stdout.replaceAll('\r\n', '\n')).toBe(
+            mode === 'unchanged' ? 'READY\nVERIFIED\n' : 'READY\n',
+          );
+          expect(stderr.replaceAll('\r\n', '\n')).toBe(
+            mode === 'unchanged' ? '' : 'windows_access_denied\n',
+          );
+        } finally {
+          if (child.exitCode === null) child.kill();
+          await child.exited;
+          reader.releaseLock();
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  30000,
+);
+
 test('fixed Windows Node-API headers retain reviewed identity and inert imports grant no authority', async () => {
   const source = verifyNodeApiHeaders();
-  expect(source.endsWith('native/windows-access')).toBe(true);
+  expect(source.endsWith(normalize('native/windows-access'))).toBe(true);
   if (process.platform === 'win32') return; // Native factories have separate mandatory cases.
   expect(() =>
     loadWindowsAccess({ path: '/nonexistent/asset.node', sha256: '0'.repeat(64) }),
@@ -55,6 +176,49 @@ test('fixed Windows Node-API headers retain reviewed identity and inert imports 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform !== 'win32')(
+  'actual Electron Node private Profile handles support long local paths while device input stays rejected',
+  async () => {
+    const root = join(tmpdir(), `kite-node-long-path-${crypto.randomUUID()}`);
+    privateDirectory(root);
+    try {
+      const nativeRoot = join(root, 'native');
+      privateDirectory(nativeRoot);
+      const built = await buildWindowsAccess(nativeRoot);
+      const dataRoot = join(
+        root,
+        ...Array.from({ length: 4 }, (_, i) => `${i}-${'segment'.repeat(10)}`),
+      );
+      expect(dataRoot.length).toBeGreaterThan(300);
+      privateDirectory(dataRoot);
+      privateDirectory(join(dataRoot, 'long'));
+      const electron = createRequire(join(import.meta.dir, '../../package.json'))(
+        'electron',
+      ) as string;
+      const code = `const assert=require('node:assert/strict'),api=require(${JSON.stringify(join(nativeRoot, built.relativePath))});
+const root=${JSON.stringify(dataRoot)};
+for(const path of ${JSON.stringify(['relative', `\\\\?\\${dataRoot}`, `${dataRoot}\\.`])})assert.throws(()=>api.profileShared(path,'long'));
+const first=api.profileShared(root,'long'),second=api.profileShared(root,'long');
+first.preparePrivateUi();first.verifyPrivateUi();second.verify();first.release();second.verify();second.release();second.release();
+assert.throws(()=>first.verify());console.log('LONG_LOCAL_PROFILE_CONFIRMED');`;
+      const result = spawnSync(electron, ['--eval', code], {
+        env: { SystemRoot: process.env.SystemRoot, PATH: '', ELECTRON_RUN_AS_NODE: '1' },
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 15000,
+      });
+      if (result.status !== 0) throw Error(`long_native_profile_failed:${result.stderr}`);
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe('LONG_LOCAL_PROFILE_CONFIRMED');
+      expect(result.stderr).toBe('');
+      expect(existsSync(join(dataRoot, 'long', 'desktop-private'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  30000,
+);
 
 async function nativeFixture() {
   const { acquireProfileAccess } = await import(
@@ -95,6 +259,7 @@ async function nativeFixture() {
   mkdirSync(roots[1]!);
   const gate = join(root, 'gate'),
     closing = join(root, 'closing'),
+    trace = join(root, 'service-trace'),
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const helperPath = join(root, 'profile-access.js');
@@ -118,7 +283,7 @@ async function nativeFixture() {
   const wrapperSource = join(root, 'wrapper.ts');
   writeFileSync(
     wrapperSource,
-    `import {writeFileSync,existsSync} from 'node:fs';import{acquireArtifactAccess}from '@kite-ai/agent/artifact-access';import{runServiceProcess}from '@kite-ai/service/main';const leases=${JSON.stringify(roots)}.map(root=>acquireArtifactAccess({root,mode:'shared'}));try{await runServiceProcess({beforeResourceClose:async()=>{writeFileSync(${JSON.stringify(closing)},'held');const deadline=Date.now()+10000;while(!existsSync(${JSON.stringify(gate)})){if(Date.now()>deadline)throw Error('owned_close_gate_deadline');await Bun.sleep(10);}}});}finally{for(const lease of leases.reverse())lease.release();}`,
+    `import {writeFileSync,appendFileSync,existsSync} from 'node:fs';import{acquireArtifactAccess}from '@kite-ai/agent/artifact-access';import{runServiceProcess}from '@kite-ai/service/main';const trace=${JSON.stringify(trace)};writeFileSync(trace,'wrapper-started\\n');process.on('exit',code=>appendFileSync(trace,'exit:'+code+'\\n'));const leases=${JSON.stringify(roots)}.map(root=>acquireArtifactAccess({root,mode:'shared'}));try{await runServiceProcess({beforeResourceClose:async()=>{appendFileSync(trace,'before-close\\n');writeFileSync(${JSON.stringify(closing)},'held');const deadline=Date.now()+10000;while(!existsSync(${JSON.stringify(gate)})){if(Date.now()>deadline)throw Error('owned_close_gate_deadline');await Bun.sleep(10);}}});appendFileSync(trace,'service-returned\\n');}finally{for(const lease of leases.reverse())lease.release();}`,
   );
   const wrapper = await Bun.build({
     entrypoints: [wrapperSource],
@@ -214,6 +379,7 @@ async function nativeFixture() {
     roots,
     gate,
     closing,
+    trace,
     spawn,
     busy,
     free,
@@ -234,6 +400,7 @@ function originalChildHandle(pid: number, executable: string) {
   const api = dlopen('kernel32.dll', {
     OpenProcess: { args: ['u32', 'bool', 'u32'], returns: 'u64' },
     QueryFullProcessImageNameW: { args: ['u64', 'u32', 'ptr', 'ptr'], returns: 'bool' },
+    GetExitCodeProcess: { args: ['u64', 'ptr'], returns: 'bool' },
     WaitForSingleObject: { args: ['u64', 'u32'], returns: 'u32' },
     TerminateProcess: { args: ['u64', 'u32'], returns: 'bool' },
     CloseHandle: { args: ['u64'], returns: 'bool' },
@@ -257,6 +424,16 @@ function originalChildHandle(pid: number, executable: string) {
     throw error;
   }
   return {
+    state() {
+      const result = api.symbols.WaitForSingleObject(handle, 0);
+      return result === 0 ? 'dead' : result === 258 ? 'live' : 'uncertain';
+    },
+    exitCode() {
+      const result = new Uint32Array(1);
+      if (!api.symbols.GetExitCodeProcess(handle, ptr(result)))
+        throw Error('owned_process_exit_unknown');
+      return result[0]!;
+    },
     async close() {
       let failure: unknown;
       try {
@@ -360,20 +537,29 @@ test.skipIf(process.platform !== 'win32')(
   60000,
 );
 test.skipIf(process.platform !== 'win32')(
-  'parent SIGKILL releases only parent Windows handles while real child EOF drain keeps EX busy until child exits',
+  'parent-only native termination releases its Windows handles while real child EOF drain keeps EX busy until child exits',
   async () => {
     const f = await nativeFixture();
     let original: ReturnType<typeof originalChildHandle> | undefined;
+    let parent: ReturnType<typeof originalChildHandle> | undefined;
     try {
       const holder = f.spawn();
       const held = await holder.next('paired-held');
       original = originalChildHandle(held.childPid, f.input.access.bunExecutable);
       f.busy();
-      holder.child.kill('SIGKILL');
+      const electron = createRequire(join(import.meta.dir, '../../package.json'))(
+        'electron',
+      ) as string;
+      parent = originalChildHandle(holder.child.pid, electron);
+      await parent.close();
+      parent = undefined;
       await holder.child.exited;
       const deadline = Date.now() + 5000;
       while (!existsSync(f.closing)) {
-        if (Date.now() > deadline) throw Error('owned_child_not_draining');
+        if (Date.now() > deadline)
+          throw Error(
+            `owned_child_not_draining:${original.state()}:${original.exitCode()}:${readFileSync(f.trace, 'utf8')}`,
+          );
         await Bun.sleep(10);
       }
       f.busy();
@@ -387,8 +573,15 @@ test.skipIf(process.platform !== 'win32')(
           await Bun.sleep(10);
         }
       }
+      while (original.state() !== 'dead') {
+        if (Date.now() > deadline + 5000) throw Error('owned_child_exit_unconfirmed');
+        await Bun.sleep(10);
+      }
+      expect(original.exitCode()).toBe(0);
+      expect(readFileSync(f.trace, 'utf8')).toContain('before-close');
     } finally {
       try {
+        await parent?.close();
         await original?.close();
       } finally {
         await f.close();
@@ -404,6 +597,7 @@ test.skipIf(process.platform !== 'win32')(
     try {
       const holder = f.spawn({ ...f.input, mode: 'gc' });
       await holder.next('gc-held');
+      expect(() => renameSync(f.roots[0]!, `${f.roots[0]}-moved`)).toThrow();
       expect(() => acquireArtifactAccess({ root: f.roots[0]!, mode: 'exclusive' })).toThrow();
       holder.send('gc');
       await holder.next('gc-requested');

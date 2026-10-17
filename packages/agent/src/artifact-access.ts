@@ -170,6 +170,12 @@ export function acquireInheritedArtifactAccess(input: { root: string; fd: number
   }
 }
 
+export {
+  hashWindowsArtifactFile,
+  readWindowsArtifactFile,
+  readWindowsArtifactObject,
+  type WindowsArtifactObject,
+} from './platform/windows-artifact-scope';
 /** Explicit host pin after complete candidate manifest verification. */
 export { retainWindowsCandidateFiles } from './platform/windows-candidate-files';
 export {

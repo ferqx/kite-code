@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { launchIdentity } from '../../../src/jobs/launch-identity';
@@ -556,7 +557,7 @@ macTest(
         expectedStoreId,
         id: 'w',
         name: 'private',
-        rootUri: `file://${f.root}`,
+        rootUri: pathToFileURL(f.root).href,
       });
       const statesBySession = new Map<string, ReturnType<typeof f.states>[number]>();
       for (const sessionId of ['a', 'b']) {
@@ -904,7 +905,7 @@ macTest(
         expectedStoreId,
         id: 'w',
         name: 'owned',
-        rootUri: `file://${f.root}`,
+        rootUri: pathToFileURL(f.root).href,
       });
       await runtime.createSession({
         expectedStoreId,

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
@@ -114,7 +115,7 @@ async function fixture(large = false, many = false, child = false) {
     expectedStoreId: storeId,
     id: 'w',
     name: 'private',
-    rootUri: `file://${directory}`,
+    rootUri: pathToFileURL(directory).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,

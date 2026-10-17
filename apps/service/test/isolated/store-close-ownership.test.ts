@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime, type ModelOutputSnapshot } from '@kite-ai/agent';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 async function within<T>(work: Promise<T>, milliseconds: number, phase: string): Promise<T> {
   if (milliseconds <= 0) {
@@ -27,7 +28,7 @@ async function within<T>(work: Promise<T>, milliseconds: number, phase: string):
 
 // One actual failed strict-close handoff, not a physical Worker thread exit qualification.
 test('unconfirmed Service Store close retains original ownership until its process exits and cold reads preserve completed work', async () => {
-  const root = mkdtempSync('/private/tmp/kite-store-close-ownership-');
+  const root = temporaryDirectory('kite-store-close-ownership-');
   const profile = selectProfile({ dataRoot: root, profile: 'test' });
   let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
   let cold: Awaited<ReturnType<typeof openSqliteStore>> | undefined;

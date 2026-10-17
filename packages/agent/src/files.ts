@@ -15,12 +15,14 @@ export {
   type FileCheckpointRestoreJournal,
   type FileCheckpointSelectedLineage,
 } from './business/file-checkpoints';
+export { filesNativeAssets } from './files-native-binding';
 export {
   createWorkspaceFiles,
   type FileBaseline,
   type FileByteSnapshot,
   type FileChangePreview,
   type FileEntry,
+  type FileIdentity,
   type FileRemoval,
   type FileSnapshot,
   type WorkspaceFiles,

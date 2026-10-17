@@ -1514,6 +1514,8 @@ export function createScopedFileCheckpointing(
     const unavailable = async (): Promise<never> => fail('checkpoint_descriptor_not_executable');
     // The existing builder is pure. This capability has no root/FD and its execute is never retained.
     const descriptorOnly: WorkspaceFiles = {
+      relativePath: () => fail('checkpoint_descriptor_not_executable'),
+      inspectIdentity: unavailable,
       readBytes: unavailable,
       restore: unavailable,
       remove: unavailable,

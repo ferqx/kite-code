@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { readConfigurationFile, updateConfigurationFile } from '../../../src/config/files';
 import { readMcpSources } from '../../../src/config/mcp-sources';
 import { closePrivate, fingerprint, openPrivate } from '../../../src/maintenance/files';
@@ -51,7 +52,7 @@ test.skipIf(process.platform === 'win32')(
         [
           '--input-type=module',
           '-e',
-          `const m=await import(${JSON.stringify(new URL(`file://${join(root, 'windows-path-security.js')}`).href)});if(m.defaultWindowsPathSecurity()!==undefined)throw Error('unexpected authority')`,
+          `const m=await import(${JSON.stringify(pathToFileURL(join(root, 'windows-path-security.js')).href)});if(m.defaultWindowsPathSecurity()!==undefined)throw Error('unexpected authority')`,
         ],
         { encoding: 'utf8' },
       );

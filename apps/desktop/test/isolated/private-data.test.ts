@@ -1,24 +1,16 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 test('actual Node private file cold restore, two-process CAS, paginated retained drafts and damaged bytes fail closed', async () => {
-  const root = mkdtempSync('/private/tmp/kite-private-node-');
+  const root = temporaryDirectory('kite-private-node-');
   try {
     const profile = { dataRoot: join(root, 'data'), profile: 'desktop' };
     const initialized = acquireProfileAccess(profile);
-    mkdirSync(initialized.profilePath, { mode: 0o700 });
+    privateDirectory(initialized.profilePath);
     initialized.lock.release();
     const helper = await Bun.build({
       entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],

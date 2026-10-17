@@ -1,5 +1,6 @@
 import { renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
@@ -36,7 +37,7 @@ const runtime = createRuntime({
 await runtime.createWorkspace({
   expectedStoreId,
   id: 'w',
-  rootUri: `file://${directory}`,
+  rootUri: pathToFileURL(directory).href,
   name: 'crash ledger',
 });
 await runtime.createSession({

@@ -13,6 +13,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from './daemon-host-build';
@@ -31,13 +32,13 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
   const workspace = join(root, 'workspace'),
     home = join(root, 'home');
   mkdirSync(workspace);
-  mkdirSync(home, { mode: 0o700 });
+  privateDirectory(home);
   const userConfiguration = ownedUserConfiguration(home);
   const file = join(workspace, 'original.txt');
   writeFileSync(file, 'original bytes\r\n');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
-  mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
+  privateDirectory(profile.profilePath);
+  privateDirectory(join(profile.profilePath, 'ui'));
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
     mode: 0o600,
   });

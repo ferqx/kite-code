@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -196,7 +197,7 @@ async function fixture(
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     expectedStoreId,
@@ -416,7 +417,7 @@ test('real paginated peer, immutable complete UTF8 descriptor, refresh generatio
       }
       expect(denied).toBe(true);
       const originalCommand = await coldStore.getCommand('connect');
-      const evidencePath = `/private/tmp/kite-mcp-tools-evidence-${randomUUID()}.json`;
+      const evidencePath = join(tmpdir(), `kite-mcp-tools-evidence-${randomUUID()}.json`);
       writeFileSync(
         evidencePath,
         JSON.stringify(

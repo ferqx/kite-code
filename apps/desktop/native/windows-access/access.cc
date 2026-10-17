@@ -70,8 +70,16 @@ static std::wstring canonical(const std::wstring& path) {
   }
   return fixed;
 }
+// Only internally validated local DOS paths reach this adapter. Do not depend
+// on the embedding Electron executable or the machine's longPathAware opt-in.
+// Named-pipe certificates retain their separately validated \\.\pipe namespace.
+static std::wstring nativePath(const std::wstring& path) {
+  need(path.size() >= 3 && path[1] == L':' && path[2] == L'\\');
+  return L"\\\\?\\" + path;
+}
 static Handle openDirectory(const std::wstring& path) {
-  auto h = CreateFileW(path.c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES,
+  // Attribute-only opens do not take part in the intended sharing protection.
+  auto h = CreateFileW(nativePath(path).c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES | FILE_TRAVERSE,
     FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
   need(h != INVALID_HANDLE_VALUE);
@@ -99,6 +107,7 @@ static bool same(const BY_HANDLE_FILE_INFORMATION& a, const BY_HANDLE_FILE_INFOR
 struct Policy {
   std::vector<unsigned char> user;
   PSID sid = nullptr;
+  mutable std::vector<unsigned char> securityBytes = std::vector<unsigned char>(131072);
   std::wstring text;
   Policy() {
     HANDLE raw;
@@ -118,13 +127,18 @@ struct Policy {
   void acl(HANDLE h, bool directory, bool privateObject) const {
     PSID owner = nullptr;
     PACL dacl = nullptr;
-    Local descriptor;
-    need(GetSecurityInfo(h, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-      &owner, nullptr, &dacl, nullptr, reinterpret_cast<PSECURITY_DESCRIPTOR*>(&descriptor.value)) == ERROR_SUCCESS);
+    DWORD needed = 0;
+    // Read the original HANDLE's raw owner/DACL; do not resolve parent inheritance by name.
+    need(GetKernelObjectSecurity(h, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+      securityBytes.data(), static_cast<DWORD>(securityBytes.size()), &needed));
+    need(needed >= SECURITY_DESCRIPTOR_MIN_LENGTH && needed <= securityBytes.size());
+    BOOL present = FALSE, defaulted = FALSE;
+    need(GetSecurityDescriptorOwner(securityBytes.data(), &owner, &defaulted));
+    need(GetSecurityDescriptorDacl(securityBytes.data(), &present, &dacl, &defaulted) && present);
     need(owner && dacl && EqualSid(owner, sid));
     SECURITY_DESCRIPTOR_CONTROL control{};
     DWORD revision;
-    need(GetSecurityDescriptorControl(descriptor.value, &control, &revision));
+    need(GetSecurityDescriptorControl(securityBytes.data(), &control, &revision));
     need(control & SE_DACL_PRESENT);
     if (privateObject) {
       need(!directory || (control & SE_DACL_PROTECTED));
@@ -205,8 +219,8 @@ struct Lease {
     const auto* original = &value;
     probes.erase(std::remove_if(probes.begin(), probes.end(), [original](const auto& item) { return item.get() == original; }), probes.end());
   }
-  Probe& privateProbe(const std::wstring& path) {
-    auto& held = probe(CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+  Probe& privateProbe(const std::wstring& path, bool readOnly = false) {
+    auto& held = probe(CreateFileW(nativePath(path).c_str(), GENERIC_READ | (readOnly ? 0 : GENERIC_WRITE) | READ_CONTROL,
       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     info(held.handle.value, false); policy.acl(held.handle.value, false, true);
     return held;
@@ -218,6 +232,8 @@ struct Lease {
   BY_HANDLE_FILE_INFORMATION innerLockIdentity{};
   bool innerAcquired = false;
   bool candidate = false;
+  std::wstring candidateRoot;
+  std::set<std::wstring> candidateFiles, candidateDirectories;
   Handle broker;
   Handle processSnapshot;
   OVERLAPPED region{};
@@ -231,9 +247,36 @@ struct Lease {
   bool acquired = false;
   bool closed = false;
   ~Lease() { if (acquired && lock.value != INVALID_HANDLE_VALUE) UnlockFileEx(lock.value, 0, 1, 0, &region); }
+  void verifyCandidateInventory() {
+    if (candidateRoot.empty()) return;
+    std::set<std::wstring> files, directories{candidateRoot};
+    const auto walk = [&](const auto& self, const std::wstring& path, size_t depth) -> void {
+      need(depth < 256);
+      WIN32_FIND_DATAW data{};
+      HANDLE raw = FindFirstFileW((nativePath(path) + L"\\*").c_str(), &data);
+      if (raw == INVALID_HANDLE_VALUE) { need(GetLastError() == ERROR_FILE_NOT_FOUND); return; }
+      auto& held = probe(raw); held.enumeration = true;
+      for (size_t count = 0;; ++count) {
+        need(count <= candidateFiles.size() + candidateDirectories.size() + 2);
+        const std::wstring name(data.cFileName);
+        if (name != L"." && name != L"..") {
+          need(!(data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT));
+          const auto entry = path + L"\\" + name;
+          if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            need(candidateDirectories.count(entry) && directories.insert(entry).second);
+            self(self, entry, depth + 1);
+          } else need(candidateFiles.count(entry) && files.insert(entry).second);
+        }
+        if (!FindNextFileW(raw, &data)) { need(GetLastError() == ERROR_NO_MORE_FILES); break; }
+      }
+      closeProbe(held);
+    };
+    walk(walk, candidateRoot, 0);
+    need(files == candidateFiles && directories == candidateDirectories);
+  }
   void verifyEmpty(const std::wstring& path) {
     WIN32_FIND_DATAW data{};
-    const HANDLE raw = FindFirstFileW((path + L"\\*").c_str(), &data);
+    const HANDLE raw = FindFirstFileW((nativePath(path) + L"\\*").c_str(), &data);
     if (raw == INVALID_HANDLE_VALUE) { need(GetLastError() == ERROR_FILE_NOT_FOUND); return; }
     auto& held = probe(raw); held.enumeration = true;
     for (size_t count = 0;; ++count) {
@@ -251,7 +294,7 @@ struct Lease {
     if (checkAcl) policy.acl(entry.handle.value, true, privateObject);
   }
   HANDLE pinFile(const std::wstring& path, bool privateObject) {
-    auto raw = CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
+    auto raw = CreateFileW(nativePath(path).c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
       nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     need(raw != INVALID_HANDLE_VALUE);
     entries.push_back({path, Handle(raw), {}, privateObject, true, false});
@@ -272,27 +315,28 @@ struct Lease {
     }
   }
   void privateDirectory(const std::wstring& path) {
-    DWORD attributes = GetFileAttributesW(path.c_str());
+    DWORD attributes = GetFileAttributesW(nativePath(path).c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES) {
       need(GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND);
-      if (GetFileAttributesW(parent(path).c_str()) == INVALID_FILE_ATTRIBUTES) privateDirectory(parent(path));
+      if (GetFileAttributesW(nativePath(parent(path)).c_str()) == INVALID_FILE_ATTRIBUTES) privateDirectory(parent(path));
       auto sd = policy.descriptor(true);
       SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), sd.value, FALSE};
-      need(CreateDirectoryW(path.c_str(), &security) || GetLastError() == ERROR_ALREADY_EXISTS);
+      need(CreateDirectoryW(nativePath(path).c_str(), &security) || GetLastError() == ERROR_ALREADY_EXISTS);
     }
-    auto& held = probe(CreateFileW(path.c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES,
+    auto& held = probe(CreateFileW(nativePath(path).c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES,
       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     info(held.handle.value, true);
     policy.acl(held.handle.value, true, true); closeProbe(held);
   }
-  Handle privateFile(const std::wstring& path, bool create) {
+  Handle privateFile(const std::wstring& path, bool create, bool readOnly = false) {
     auto sd = policy.descriptor(false);
     SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), sd.value, FALSE};
-    HANDLE raw = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+    const DWORD access = GENERIC_READ | (readOnly ? 0 : GENERIC_WRITE) | READ_CONTROL;
+    HANDLE raw = CreateFileW(nativePath(path).c_str(), access,
       FILE_SHARE_READ | FILE_SHARE_WRITE, create ? &security : nullptr,
       create ? CREATE_NEW : OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (raw == INVALID_HANDLE_VALUE && create && (GetLastError() == ERROR_FILE_EXISTS || GetLastError() == ERROR_ALREADY_EXISTS))
-      raw = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+      raw = CreateFileW(nativePath(path).c_str(), access,
         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     need(raw != INVALID_HANDLE_VALUE);
     auto& held = probe(raw);
@@ -303,7 +347,7 @@ struct Lease {
   }
   void acquire(const std::wstring& path) {
     lockPath = path;
-    lock = privateFile(path, true);
+    lock = privateFile(path, true, true);
     lockIdentity = info(lock.value, false);
     if (!LockFileEx(lock.value, LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &region)) {
       if (GetLastError() == ERROR_LOCK_VIOLATION) throw std::runtime_error("owner_busy");
@@ -316,7 +360,7 @@ struct Lease {
     need(!closed && acquired && lock.value != INVALID_HANDLE_VALUE);
     for (auto& entry : entries) {
       need(entry.handle.value != INVALID_HANDLE_VALUE && same(info(entry.handle.value, entry.directory), entry.identity));
-      auto& fresh = probe(CreateFileW(entry.path.c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES,
+      auto& fresh = probe(CreateFileW(nativePath(entry.path).c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES,
         entry.directory ? FILE_SHARE_READ | FILE_SHARE_WRITE : FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | (entry.directory ? FILE_FLAG_BACKUP_SEMANTICS : 0), nullptr));
       canonicalHandle(fresh.handle.value, entry.path);
@@ -325,27 +369,30 @@ struct Lease {
       closeProbe(fresh);
       if (entry.empty) verifyEmpty(entry.path);
     }
-    auto& fresh = privateProbe(lockPath);
+    auto& fresh = privateProbe(lockPath, true);
     need(same(info(lock.value, false), lockIdentity) && same(info(fresh.handle.value, false), lockIdentity));
     closeProbe(fresh);
     if (candidate) {
       need(innerAcquired && innerLock.value != INVALID_HANDLE_VALUE);
-      auto& original = privateProbe(innerLockPath);
+      auto& original = privateProbe(innerLockPath, true);
       need(same(info(innerLock.value, false), innerLockIdentity) && same(info(original.handle.value, false), innerLockIdentity));
       closeProbe(original);
     }
     if (!profilePath.empty()) {
       const auto journal = parent(lockPath) + L"\\restore-journal.json";
-      if (GetFileAttributesW(journal.c_str()) != INVALID_FILE_ATTRIBUTES) throw std::runtime_error("restore_reconciliation_required");
+      if (GetFileAttributesW(nativePath(journal).c_str()) != INVALID_FILE_ATTRIBUTES) throw std::runtime_error("restore_reconciliation_required");
       need(GetLastError() == ERROR_FILE_NOT_FOUND);
-      const auto attributes = GetFileAttributesW(profilePath.c_str());
+      const auto attributes = GetFileAttributesW(nativePath(profilePath).c_str());
       if (attributes != INVALID_FILE_ATTRIBUTES) {
-        auto& profile = probe(CreateFileW(profilePath.c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES,
+        auto& profile = probe(CreateFileW(nativePath(profilePath).c_str(), READ_CONTROL | FILE_READ_ATTRIBUTES,
           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
         info(profile.handle.value, true); closeProbe(profile);
       }
       else need(GetLastError() == ERROR_FILE_NOT_FOUND);
     }
+    // Directory sharing permits child creation. Original file pins protect
+    // bytes, but only a fresh closed enumeration excludes new unknown entries.
+    verifyCandidateInventory();
   }
   void release() {
     if (closed) return;
@@ -407,7 +454,7 @@ struct Lease {
     need(same(info(original.handle.value, false), uiIdentity)); closeProbe(original);
     for (const auto suffix : {L"-wal", L"-shm", L"-journal"}) {
       const auto path = directory + L"\\data.sqlite" + suffix;
-      if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) { auto& file = privateProbe(path); closeProbe(file); }
+      if (GetFileAttributesW(nativePath(path).c_str()) != INVALID_FILE_ATTRIBUTES) { auto& file = privateProbe(path); closeProbe(file); }
       else need(GetLastError() == ERROR_FILE_NOT_FOUND);
     }
   }
@@ -613,7 +660,7 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
     const auto hash = argument(env, element(env, file, 1)); need(hashValue(hash));
     const auto size = decimal(argument(env, element(env, file, 2)));
     const auto handle = lease.pinFile(path, false);
-    if (path == root + L"\\native-manifest.json") nativeManifest = handle;
+    if (path == root + L"\\native-manifest.json") { need(hash == id); nativeManifest = handle; }
     const auto bytes = readFile(handle, 512 * 1048576);
     need(bytes.size() == size && digestBytes(bytes) == hash);
   }
@@ -632,9 +679,14 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
     while (ancestor != root) { need(ancestor.size() > root.size()); if (directories.insert(ancestor).second) lease.pin(ancestor, false, true); ancestor = parent(ancestor); }
     lease.pin(path, false, true); lease.entries.back().empty = true; lease.verifyEmpty(path);
   }
+  lease.candidateRoot = root;
+  lease.candidateFiles = std::move(paths);
+  lease.candidateDirectories = std::move(directories);
+  lease.candidateDirectories.insert(root);
+  lease.candidateDirectories.insert(emptyPaths.begin(), emptyPaths.end());
   lease.acquire(coordination + L"\\use-" + id + L".lock");
   lease.innerLockPath = coordination + L"\\use-" + digestBytes(utf8(id + std::wstring(1, L'\0') + L"terminal")) + L".lock";
-  lease.innerLock = lease.privateFile(lease.innerLockPath, true); lease.innerLockIdentity = info(lease.innerLock.value, false);
+  lease.innerLock = lease.privateFile(lease.innerLockPath, true, true); lease.innerLockIdentity = info(lease.innerLock.value, false);
   if (!LockFileEx(lease.innerLock.value, LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &lease.innerRegion)) {
     if (GetLastError() == ERROR_LOCK_VIOLATION) throw std::runtime_error("owner_busy"); need(false);
   }
@@ -704,7 +756,7 @@ static napi_value factory(napi_env env, napi_callback_info info) {
       need(profile.front() != L'_' && profile.front() != L'-');
       const auto key = profileKey(root, profile);
       auto existing = root;
-      while (GetFileAttributesW(existing.c_str()) == INVALID_FILE_ATTRIBUTES) { need(GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND); const auto next = parent(existing); need(next != existing); existing = next; }
+      while (GetFileAttributesW(nativePath(existing).c_str()) == INVALID_FILE_ATTRIBUTES) { need(GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND); const auto next = parent(existing); need(next != existing); existing = next; }
       lease->ancestors(existing, false);
       lease->privateDirectory(root);
       lease->privateDirectory(root + L"\\.coordination");

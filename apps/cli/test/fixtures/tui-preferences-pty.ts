@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmdirSync, writeFileSync } from 'node:fs';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 type Settings = {
@@ -188,7 +189,7 @@ async function main(settings: Settings) {
     await wait('主题');
     await choice('蓝', { current: '当前' });
     renameSync(settings.preferencePath, `${settings.preferencePath}.saved`);
-    mkdirSync(settings.preferencePath, { mode: 0o700 });
+    privateDirectory(settings.preferencePath);
     await key('\x1b[B');
     await choice('紫', { selected: true });
     await key('\r');

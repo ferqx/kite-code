@@ -1,14 +1,15 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 
 test('actual HTTP forwards independent original start/followup selections and publishes only actual Runtime support', async () => {
-  const root = mkdtempSync('/private/tmp/kite-http-skills-');
+  const root = temporaryDirectory('kite-http-skills-');
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   const expectedStoreId = (await store.getMetadata()).storeId;
   await store.createWorkspace({ expectedStoreId, id: 'w', rootUri: 'file:///fixture', name: 'w' });
@@ -126,7 +127,7 @@ test('actual HTTP forwards independent original start/followup selections and pu
 });
 
 test('custom Service capability cannot advertise selection for unsupported fixed Runtime', async () => {
-  const root = mkdtempSync('/private/tmp/kite-http-skills-unsupported-');
+  const root = temporaryDirectory('kite-http-skills-unsupported-');
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   const runtime = createRuntime({
     store,

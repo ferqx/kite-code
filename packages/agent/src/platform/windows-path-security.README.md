@@ -1,8 +1,12 @@
 # Default Windows private paths
 
+Owner/DACL 查询由[固定 reader](windows-security-descriptor.ts)对原 HANDLE 调用系统 `GetKernelObjectSecurity`，逐项保留原 SID、protected/present DACL、ACE 与全部有效 grant 检查，不修既有 ACL。`writePrivateArtifactFiles`/`copyPrivateArtifactFiles` 在一次有限库存内共享原父目录持有，叶子仍 CREATE_NEW、protected SID DACL、准确短读写、每文件 Flush、原身份/ACL 复核和严格关闭；source 原只读 pin 在复制结束前保持。关闭未知保原 source/target owner，不按路径递归清理未知对象。完整合同及反例归 [platform owner](README.md)与[闭包成本决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
+
 The Bun host selects a lazy, fixed native Windows x64 policy. Importing this leaf in Node or POSIX does not load a DLL or inspect a token. Windows uses kernel32 and the actual SystemDirectory advapi32, the current process token SID, and handle-based owner/DACL inspection. There is no configuration, Model, HTTP, arbitrary descriptor or SID input.
 
 `TOKEN_USER` 的 SID 指向原返回缓冲区内部；原生调用前即分配显式 ArrayBuffer backing，避免当前 Bun 小 TypedArray 首次读取 `.buffer` 时移动存储而使指针失效。私有路径、媒体、候选scope与daemon security同样保持这一要求，并保留原缓冲区到全部SID比较结束；不靠放宽owner／DACL检查或修复既有ACL解决失败。
+
+使用期原祖先HANDLE现在显式请求FILE_TRAVERSE，使no-delete sharing真实生效；仅属性探针不充当持有期保护。实际文件读取、CREATE_NEW、短写/Flush、发布身份及关闭未知保原owner的合同保持，依据及真实改写/重命名反例归[原对象决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)。
 
 2026-10-14 Windows本机已实际通过原private Profile／Worker／WAL／config／cold logs和unsafe ACL拒绝两项，但完整原文件仍有媒体发布错误87及普通Workspace配置写入失败；这里的scope支持仍是应满足的合同，不能据源码接口当作本机已通过。原命令、有限通过和剩余缺口见[本机证据](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-14windows-本机首次实际验证)。后文旧“未运行”描述对应原轮次，完整维护／发行资格继续未取得。
 

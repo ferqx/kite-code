@@ -4,7 +4,6 @@ import {
   chmodSync,
   existsSync,
   linkSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -13,6 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import {
   createProfileBackup,
@@ -36,7 +36,7 @@ const files = [
 ] as const;
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-maintenance-mcp-configuration-'),
+  const root = temporaryDirectory('kite-maintenance-mcp-configuration-'),
     profile = { dataRoot: join(root, 'data'), profile: 'mcp' },
     store = await openSqliteStore(profile),
     storeId = (await store.getMetadata()).storeId;

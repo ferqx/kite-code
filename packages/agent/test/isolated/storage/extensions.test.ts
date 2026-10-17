@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -10,7 +11,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 async function setup(dispatch = true) {
-  const dataRoot = mkdtempSync('/private/tmp/kite-store-extension-');
+  const dataRoot = temporaryDirectory('kite-store-extension-');
   chmodSync(dataRoot, 0o700);
   const store = await openSqliteStore({ dataRoot, profile: 'test' });
   cleanups.push(async () => {

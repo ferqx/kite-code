@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
 import { openSqliteStore, preflightSqliteStore } from '@kite-ai/agent/sqlite';
 import {
   initializeDefaultSqliteEngine,
   initializeSqliteEngine,
 } from '@kite-ai/agent/sqlite-engine';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 
 const [root, manifestSha256, data] = process.argv.slice(2);
 assert(root && manifestSha256 && data);
@@ -24,7 +26,7 @@ try {
         expectedStoreId: storeId,
         id: `w-${i}`,
         name: `workspace-${i}`,
-        rootUri: `file://${join(data, `w-${i}`)}`,
+        rootUri: pathToFileURL(join(data, `w-${i}`)).href,
       }),
     ),
   );
@@ -39,7 +41,7 @@ const source = await openSqliteStore({ ...profile, mode: 'readonly' });
 const oldId = (await source.getMetadata()).storeId;
 await source.close();
 const backupRoot = join(data, 'backups');
-mkdirSync(backupRoot, { mode: 0o700 });
+privateDirectory(backupRoot);
 const backup = await createProfileBackup({ profile, destinationRoot: backupRoot });
 assert.equal(backup.manifest.engine.version, '3.51.3');
 assert.equal(

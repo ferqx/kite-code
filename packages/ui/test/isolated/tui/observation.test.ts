@@ -1,15 +1,20 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { TuiController, type TuiPort } from '../../../src/tui';
 
 test('actual invalid SSE with healthy HTTP cannot restore observation via snapshot; original validated ready can', async () => {
-  const root = mkdtempSync('/private/tmp/kite-tui-observation-');
+  const root = join(realpathSync.native(tmpdir()), `kite-tui-observation-${randomUUID()}`);
+  privateDirectory(root);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'fixture' });
   const store = await openSqliteStore(profile);
   const runtime = createRuntime({
@@ -78,7 +83,7 @@ test('actual invalid SSE with healthy HTTP cannot restore observation via snapsh
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'w',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Fixture',
     });
     for (const id of ['a', 'b'])

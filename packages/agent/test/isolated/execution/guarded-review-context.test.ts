@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -93,7 +94,7 @@ async function fixture() {
     expectedStoreId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'owned' });
   await runtime.submitCommand({

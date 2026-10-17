@@ -1,5 +1,7 @@
 # 模型边界
 
+构建使用 Bun splitting 内联[明确声明的 SDK 普通 JS 依赖](bundled-dependencies.ts)，中立入口与 SDK 入口仍独立导出。Terminal 打包扫描全部生成模块，拒绝声明已内联的残余 bare import，并保存安装声明图的原 package manifest 摘要与许可全文；不改变实际 Provider 尝试、取消或用量合同。跨包打包取舍归[Windows 闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
+
 `@kite-ai/ai` 负责可移植的模型请求、流事件、用量和取消类型，不负责 Session、Run、执行权限、持久化或 HTTP。导入这个包不打开资源。完整模型响应是否可以派发工具由 Agent Loop 决定；不完整响应不能作为执行授权。
 
 `createFixedModel` 保存请求副本并消费显式响应序列，不发起网络调用、不重试，也不隐式生成 finish 事件。这个本地适配器用于确定性测试。

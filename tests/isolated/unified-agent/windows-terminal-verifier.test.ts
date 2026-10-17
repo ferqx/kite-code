@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 const source = (name: string) => fileURLToPath(new URL(`../../../${name}`, import.meta.url));
 function run(scenario: string) {
   const code = `
-import {mock} from 'bun:test';import assert from 'node:assert/strict';import * as fs from 'node:fs';
+import {mock} from 'bun:test';import assert from 'node:assert/strict';import * as fs from 'node:fs';import * as path from 'node:path';
+// These virtual roots use POSIX spelling on every host; real Windows paths are covered separately.
+mock.module('node:path',()=>({...path,...path.posix}));
 const scenario=${JSON.stringify(scenario)},t='/z-terminal',n='/a-native',a='a'.repeat(64),b='b'.repeat(64),tid='c'.repeat(64);
 Object.defineProperty(process,'platform',{value:'win32'});Object.defineProperty(process,'arch',{value:'x64'});
 for(const k of ['NODE_PATH','NODE_OPTIONS','BUN_OPTIONS','BUN_BE_BUN','ELECTRON_RUN_AS_NODE'])delete process.env[k];
@@ -20,7 +22,7 @@ mock.module(${JSON.stringify(source('apps/cli/host/windows-native-installation.t
 mock.module(${JSON.stringify(source('packages/agent/src/platform/windows-installation-coordination.ts'))},()=>({windowsInstallationCoordination:p=>({...resource('coord',p),selectionLockPath:p+'/selection'})}));
 mock.module(${JSON.stringify(source('packages/agent/src/platform/locks.ts'))},()=>({acquireFileLock(p,mode){assert.equal(mode,'shared');events.push('select:'+p);return resource('selection',p);}}));
 mock.module(${JSON.stringify(source('packages/agent/src/artifact-access.ts'))},()=>({acquireArtifactAccess:({root,mode})=>{assert.equal(mode,'shared');return resource('use',root);}}));
-const terminal={retainWindowsTerminalRuntimeFiles:r=>resource('file',r),verifyTerminalRuntimeBundle:r=>{events.push('verify-terminal:'+r);return {digest:tid,manifest:{entries:{runtime:'runtime/bun.exe'}}};},windowsTerminalRuntimeArguments:r=>['--no-env-file','--no-install','--config',r+'/runtime/windows-bunfig.toml','--tsconfig-override',r+'/runtime/windows-tsconfig.json']};
+const terminal={retainWindowsTerminalRuntimeFiles:r=>resource('file',r),verifyTerminalRuntimeBundle:r=>{events.push('verify-terminal:'+r);return {digest:tid,manifest:{entries:{runtime:'runtime/bun.exe'}}};},windowsTerminalRuntimeArguments:r=>['--no-env-file','--no-install','--config='+r+'/runtime/windows-bunfig.toml','--tsconfig-override='+r+'/runtime/windows-tsconfig.json']};
 mock.module(${JSON.stringify(source('apps/service/src/runtime-assets.ts'))},()=>terminal);mock.module('@kite-ai/service/runtime-assets',()=>terminal);
 const native={retainWindowsNativeRuntimeFiles:r=>resource('file',r),verifyNativeRuntimeBundle:r=>{events.push('verify-native:'+r);return {digest:a,terminal:{manifest:{entries:{runtime:'runtime/bun.exe'}}},manifest:{entries:{electron:'electron/electron.exe'}}};}};
 mock.module(${JSON.stringify(source('apps/service/src/native-runtime-assets.ts'))},()=>native);mock.module('@kite-ai/service/native-runtime-assets',()=>native);

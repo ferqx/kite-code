@@ -135,6 +135,90 @@ function resolvePackage(name: string, from: string) {
   }
   return undefined;
 }
+
+/** Notices cover the installed declared graph of proven bundled roots, conservatively
+ * including unused branches. No package code or package-manager scripts execute here.
+ */
+export function terminalBundledNotices(input: {
+  repositoryRoot: string;
+  workspaceRoot: string;
+  names: readonly string[];
+}) {
+  const allowed = realpathSync(join(input.repositoryRoot, 'node_modules'));
+  const workspace = realpathSync(input.workspaceRoot),
+    root = readManifest(workspace).manifest;
+  const pending: string[] = [];
+  for (const name of input.names) {
+    if (!validPackageName(name) || !Object.hasOwn(root.dependencies ?? {}, name))
+      fail('bundled_dependency_invalid');
+    const source = resolvePackage(name, workspace);
+    if (!source) fail('missing');
+    pending.push(source);
+  }
+  const seen = new Set<string>();
+  const packages: {
+    name: string;
+    version: string;
+    manifestSha256: string;
+    manifestText: string;
+    notices: { name: string; sha256: string; text: string }[];
+  }[] = [];
+  for (let index = 0; index < pending.length; index++) {
+    const source = pending[index]!;
+    if (seen.has(source)) continue;
+    if (!inside(allowed, source)) fail('source_escape');
+    seen.add(source);
+    const { manifest, bytes } = readManifest(source);
+    const manifestText = bytes.toString('utf8');
+    if (!Buffer.from(manifestText).equals(bytes)) fail('manifest_invalid');
+    const notices = readdirSync(source)
+      .filter((name) => /^(?:LICENSE|LICENCE|COPYING|NOTICE)(?:[-_.].*)?$/iu.test(name))
+      .sort()
+      .map((name) => {
+        const file = join(source, name),
+          target = realpathSync(file);
+        if (
+          !inside(source, target) ||
+          !lstatSync(file).isFile() ||
+          lstatSync(file).isSymbolicLink()
+        )
+          fail('notice_invalid');
+        const bytes = readFileSync(file),
+          text = bytes.toString('utf8');
+        if (!Buffer.from(text).equals(bytes)) fail('notice_invalid');
+        return { name, sha256: createHash('sha256').update(bytes).digest('hex'), text };
+      });
+    packages.push({
+      name: manifest.name,
+      version: manifest.version,
+      manifestSha256: createHash('sha256').update(bytes).digest('hex'),
+      manifestText,
+      notices,
+    });
+    for (const [name, options] of dependencies(manifest)) {
+      if (name.startsWith('node:') || name.startsWith('bun:') || name.startsWith('@kite-ai/'))
+        continue;
+      const child = resolvePackage(name, source);
+      if (!child) {
+        if (!options.optional) fail('missing');
+        continue;
+      }
+      pending.push(child);
+    }
+  }
+  packages.sort(
+    (a, b) =>
+      a.name.localeCompare(b.name) ||
+      a.version.localeCompare(b.version) ||
+      a.manifestSha256.localeCompare(b.manifestSha256),
+  );
+  return {
+    version: 1 as const,
+    coverage: 'installed-declared-graph' as const,
+    roots: [...input.names],
+    packages,
+  };
+}
 /** Copy the exact installed resolution graph. No installs, package scripts or source links are used. */
 export function copyTerminalDependencies(input: {
   repositoryRoot: string;
@@ -284,6 +368,38 @@ export function copyTerminalDependencies(input: {
       if (node.destination !== join(destination, name)) fail('workspace_destination_invalid');
       outer.set(name, { node, target: node.destination });
     }
+    // A real common ancestor can satisfy repeated edges without duplicate files.
+    // Pick a deterministic default for each lookup name, preserving the exact
+    // source node (including peer context). Conflicts still materialize locally.
+    const absent = new Set<string>();
+    for (const node of pending)
+      for (const name of dependencies(node.manifest).keys())
+        if (
+          !name.startsWith('node:') &&
+          !name.startsWith('bun:') &&
+          !node.bundledDependencies?.has(name) &&
+          !node.edges.has(name)
+        )
+          absent.add(name);
+    for (const node of pending)
+      for (const [name, child] of node.edges)
+        if (!outer.has(name) && !absent.has(name))
+          outer.set(name, { node: child, target: join(destination, name) });
+    const place = (placement: Placement) => {
+      if (!inside(destination, placement.target) || existsSync(placement.target))
+        fail('destination_exists');
+      copy(placement.node.source, placement.target, placement.node.source, new Set());
+      if (!readFileSync(join(placement.target, 'package.json')).equals(placement.node.bytes))
+        fail('content_changed');
+      result.packages.push({
+        name: placement.node.manifest.name,
+        version: placement.node.manifest.version,
+        source: placement.node.source,
+        destination: relative(destination, placement.target).split(sep).join('/'),
+      });
+    };
+    for (const placement of outer.values())
+      if (!workspaces.has(placement.node.manifest.name)) place(placement);
     const materialize = (
       node: Node,
       target: string,
@@ -315,17 +431,7 @@ export function copyTerminalDependencies(input: {
       // Place every local edge before descending, so peers and cycles see real siblings.
       for (const [name, placement] of resolved) {
         if (available.get(name) === placement) continue;
-        if (!inside(destination, placement.target) || existsSync(placement.target))
-          fail('destination_exists');
-        copy(placement.node.source, placement.target, placement.node.source, new Set());
-        if (!readFileSync(join(placement.target, 'package.json')).equals(placement.node.bytes))
-          fail('content_changed');
-        result.packages.push({
-          name: placement.node.manifest.name,
-          version: placement.node.manifest.version,
-          source: placement.node.source,
-          destination: relative(destination, placement.target).split(sep).join('/'),
-        });
+        place(placement);
         nextAvailable.set(name, placement);
       }
       // npm's derived .bin shims are not consumed by the fixed product frontdoors.
@@ -356,7 +462,8 @@ export function copyTerminalDependencies(input: {
       for (const placement of children)
         materialize(placement.node, placement.target, nextAvailable, nextAncestors);
     };
-    for (const node of workspaces.values()) materialize(node, node.destination, outer, new Set());
+    for (const placement of outer.values())
+      materialize(placement.node, placement.target, outer, new Set());
     result.packages.sort((a, b) => a.destination.localeCompare(b.destination));
     return result;
   }

@@ -1,5 +1,5 @@
 import { mock } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AgentRuntime } from '@kite-ai/agent';
@@ -7,6 +7,7 @@ import * as filesModule from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { createPermissionManagement } from '../../src/permission-management';
 import { assembleProcessService } from '../../src/process-service';
@@ -42,9 +43,9 @@ mock.module('@kite-ai/agent/files', () => ({
   },
 }));
 const profile = selectProfile({ dataRoot: process.argv[2]!, profile: 'test' });
-mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+privateDirectory(profile.profilePath);
 const workspaceRoot = join(profile.dataRoot, 'workspace');
-mkdirSync(workspaceRoot, { mode: 0o700 });
+privateDirectory(workspaceRoot);
 const fileBody = '原实际目录内容 中🙂e\u0301\r\n完整第二行';
 writeFileSync(join(workspaceRoot, 'original.txt'), fileBody, { mode: 0o600 });
 const model = createFixedModel([]);

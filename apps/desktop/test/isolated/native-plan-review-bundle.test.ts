@@ -2,23 +2,17 @@ import { expect, test } from 'bun:test';
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import type { Json } from '@kite-ai/client';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 import type { PlanReviewReport } from '../native-plan-review-electron.fixture';
@@ -27,10 +21,10 @@ const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
   'relocated source-free Native Plan reviews preserve exact feedback, independent user approval, real Files progress and cold Store proofs',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-plan-review-bundle-'));
+    const root = realpathSync(temporaryDirectory('kite-native-plan-review-bundle-'));
     const home = join(root, 'home'),
       moved = join(root, 'relocated');
-    mkdirSync(home, { mode: 0o700 });
+    privateDirectory(home);
     const workspace = join(home, 'workspace');
     mkdirSync(workspace);
     const profile = selectProfile({
@@ -82,7 +76,7 @@ test.skipIf(process.platform !== 'darwin')(
           expectedStoreId: storeId,
           id: 'w',
           name: 'Plan review',
-          rootUri: new URL(`file://${workspace}`).href,
+          rootUri: pathToFileURL(workspace).href,
         });
         for (const id of ['a', 'b', 'd', 'c'])
           await seed.createSession({

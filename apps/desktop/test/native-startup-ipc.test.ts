@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { registerNativeStartupIpc } from '../electron/native-ipc';
 import {
@@ -12,8 +15,9 @@ test('startup save has no renderer path/body; capture, cancellation and late fra
     event: IpcMainInvokeEvent,
     payload?: unknown,
   ) => NativeStartupReply | Promise<NativeStartupReply>;
+  const rendererUrl = pathToFileURL(join(tmpdir(), 'own', 'index.html')).href;
   const handlers = new Map<string, Handler>(),
-    frame = { url: 'file:///private/tmp/own/index.html' },
+    frame = { url: rendererUrl },
     contents = { mainFrame: frame },
     window = { webContents: contents, isDestroyed: () => false } as unknown as BrowserWindow,
     event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent,
@@ -60,7 +64,7 @@ test('startup save has no renderer path/body; capture, cancellation and late fra
     ).ok,
   ).toBe(false);
   expect(picks).toBe(1);
-  path = '/selected/report.json';
+  path = join(tmpdir(), 'selected', 'report.json');
   expect(await send(save)).toEqual({ ok: true, value: true });
   expect(writes).toEqual([[path, report]]);
   for (const changed of ['frame', 'report']) {
@@ -69,11 +73,11 @@ test('startup save has no renderer path/body; capture, cancellation and late fra
       release = resolve;
     });
     const saving = send(save);
-    if (changed === 'frame') frame.url = 'file:///private/tmp/foreign.html';
+    if (changed === 'frame') frame.url = pathToFileURL(join(tmpdir(), 'foreign.html')).href;
     else report = null;
     release(path);
     expect((await saving).ok).toBe(false);
-    frame.url = 'file:///private/tmp/own/index.html';
+    frame.url = rendererUrl;
   }
   expect(writes.length).toBe(1);
   close();

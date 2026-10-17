@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -13,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -32,6 +32,7 @@ import {
   rollbackTerminalBundle,
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 import {
   COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
   materializeCompatibleTerminalPredecessor,
@@ -91,7 +92,7 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-versions-')));
   const home = join(root, 'home'),
     workspace = join(root, 'workspace');
-  for (const path of [home, workspace]) mkdirSync(path, { mode: 0o700 });
+  for (const path of [home, workspace]) privateDirectory(path);
   const profile = selectProfile({
     dataRoot: join(home, '.kite-code/unified-agent'),
     profile: 'default',
@@ -200,7 +201,7 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
         return new Response(response, { headers: { 'content-type': 'text/event-stream' } });
       },
     });
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     const configurationPath = join(profile.profilePath, 'config.jsonc');
     writeFileSync(
       configurationPath,
@@ -437,7 +438,7 @@ test('the original Terminal predecessor rejects recovery-audit schema without ch
     prefix = join(root, 'installed'),
     socket = join(root, 'owned.sock'),
     cli = join(prefix, 'bin/kite');
-  for (const path of [home, workspace]) mkdirSync(path, { mode: 0o700 });
+  for (const path of [home, workspace]) privateDirectory(path);
   const profile = selectProfile({
     dataRoot: join(home, '.kite-code/unified-agent'),
     profile: 'default',
@@ -466,7 +467,7 @@ test('the original Terminal predecessor rejects recovery-audit schema without ch
     await runtime.createWorkspace({
       expectedStoreId,
       id: 'workspace',
-      rootUri: `file://${workspace}`,
+      rootUri: pathToFileURL(workspace).href,
       name: 'Schema rejection',
     });
     await runtime.createSession({

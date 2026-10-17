@@ -1,11 +1,13 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { openSqliteStore } from '../../../src/sqlite';
 
 async function fixture() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-workspace-remove-'));
+  const root = realpathSync(temporaryDirectory('kite-workspace-remove-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'test' },
     store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
@@ -13,7 +15,7 @@ async function fixture() {
     await store.createWorkspace({
       expectedStoreId: storeId,
       id,
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: id,
     });
   for (const id of ['a', 'b', 'sibling'])
@@ -115,10 +117,10 @@ test('one real transaction removes all roots, shares the original receipt across
     await f.store.createWorkspace({
       expectedStoreId: f.storeId,
       id: 'fresh',
-      rootUri: `file://${f.root}`,
+      rootUri: pathToFileURL(f.root).href,
       name: 'same directory',
     });
-    expect((await f.store.getWorkspace('fresh'))!.rootUri).toBe(`file://${f.root}`);
+    expect((await f.store.getWorkspace('fresh'))!.rootUri).toBe(pathToFileURL(f.root).href);
     expect(await peer.getWorkspaceRemoval(f.input)).toEqual(results[0]);
   } finally {
     physical.close();

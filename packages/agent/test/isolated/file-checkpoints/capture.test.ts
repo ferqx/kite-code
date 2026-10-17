@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -181,7 +182,10 @@ async function fixture(
         type: 'tool_call',
         id: `call-${step}`,
         name: 'files.write',
-        arguments: JSON.stringify(input),
+        // The first absolute and later relative paths must share one original checkpoint target.
+        arguments: JSON.stringify(
+          step === 0 ? { ...input, path: join(workspace, input.path) } : input,
+        ),
       };
       yield { ...finish, reason: 'tool_calls' };
     },
@@ -405,7 +409,7 @@ async function fixture(
   await runtime.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
     name: 'w',
   });
   await runtime.createSession({
@@ -1103,6 +1107,7 @@ test('actual code-only restore independently asks, aggregates selected later Run
     );
     await f.runtime.close();
     const cold = await openSqliteStore(f.profile);
+    const coldLocks = createWorkspaceSerialLocks(f.profile);
     const runtime = createRuntime({
       store: cold,
       extensions: [f.checkpoint.extension],
@@ -1112,7 +1117,7 @@ test('actual code-only restore independently asks, aggregates selected later Run
         },
       },
       modelId: 'fixed',
-      workspaceSerialLocks: createWorkspaceSerialLocks(f.profile),
+      workspaceSerialLocks: coldLocks,
       permissions: {
         async authorize() {
           return { allowed: true, revision: 'cold' };
@@ -1158,6 +1163,7 @@ test('actual code-only restore independently asks, aggregates selected later Run
       expect([physicalRestore, physicalRemove]).toEqual([1, 2]);
     } finally {
       await runtime.close();
+      await coldLocks.close();
     }
   } finally {
     await f.close();

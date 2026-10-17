@@ -1,20 +1,14 @@
 import { expect, test } from 'bun:test';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
@@ -25,7 +19,7 @@ const cases = ['approved', 'rejected', 'manual', 'unavailable', 'stopped'] as co
 test.skipIf(process.platform !== 'darwin')(
   'original current-Session controls drive actual Auto decisions, fallback and precise stop, with source-free cold history and no replay',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-auto-approval-'));
+    const root = realpathSync(temporaryDirectory('kite-native-auto-approval-'));
     const home = join(root, 'home'),
       moved = join(root, 'relocated'),
       workspace = join(home, 'workspace');
@@ -88,7 +82,7 @@ test.skipIf(process.platform !== 'darwin')(
           expectedStoreId: storeId,
           id: 'w',
           name: 'Auto controls',
-          rootUri: new URL(`file://${workspace}`).href,
+          rootUri: pathToFileURL(workspace).href,
         });
         for (const id of cases)
           await seed.createSession({

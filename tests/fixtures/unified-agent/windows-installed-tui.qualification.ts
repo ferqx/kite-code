@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Terminal } from '@xterm/headless';
 import { parseCallerIntent } from '../../../apps/cli/host/caller-intents';
 import { parseTuiDraftDocument } from '../../../apps/cli/host/tui-drafts';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { readModelOutput } from '../../../packages/agent/src/model-output';
 import type { WindowsOwnedJobMember } from '../../../packages/agent/src/platform/process/windows-owned-child';
 import { startWindowsInstalledTuiPty } from './windows-installed-tui-pty';
@@ -114,11 +115,13 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
     sessionId: `installed-tui-${phase}`,
     work: `Complete original installed TUI ${phase} task`,
     cancel: `Cancel original installed TUI ${phase} task`,
-    body: `${'完整正文🙂e\u0301 '.repeat(2048)}\nFULL_INSTALLED_TUI_${phase}_TAIL`,
+    body: `${'完整正文🙂e\u0301 '.repeat(4096)}\nFULL_INSTALLED_TUI_${phase}_TAIL`,
     reasoning: `ORIGINAL_INSTALLED_TUI_${phase}_REASON`,
     partial: `PENDING_INSTALLED_TUI_${phase}`,
     draft: `UNSUBMITTED_${phase}_原完整🙂e\u0301_DRAFT_TAIL`,
   }));
+  for (const scenario of cases)
+    assert(Buffer.byteLength(scenario.body) > 64 * 1024, 'sealed_output_input_required');
   const calls = new Map<string, number>();
   const cancelledStreams = new Set<string>();
   let providerError: unknown;
@@ -191,6 +194,7 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
   );
   const originalConfig = readFileSync(join(profile.profilePath, 'config.jsonc')),
     originalPreferences = readFileSync(preferencesPath);
+  security.writePrivateFile(ownedUserConfiguration(home).path, originalConfig);
   const records: Record<string, unknown>[] = [];
   const owners = new Set<Awaited<ReturnType<typeof startWindowsInstalledTuiPty>>>();
   let deadline = 0,
@@ -456,10 +460,23 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
         !value.includes('Working') &&
         !value.includes('Cancelling') &&
         !value.includes('Error:');
+      const beforeAdmission = [...calls];
+      const opening = await waitFrame(
+        'workspace_admission_or_idle',
+        (value) => idle(value) || value.includes('Trust this workspace and continue'),
+      );
+      if (opening.frame.includes('Trust this workspace and continue')) {
+        await pty.write('\x1b[A', Math.min(10000, remaining()));
+        await waitFrame('explicit_workspace_trust_selected', (value) =>
+          value.includes('› Trust this workspace and continue'),
+        );
+        await pty.write('\r', Math.min(10000, remaining()));
+      }
       await waitFrame(
         'current_session_idle',
         (value) => idle(value) && !value.includes(`Session ${scenario.sessionId} ·`),
       );
+      assert.deepEqual([...calls], beforeAdmission, 'workspace_admission_must_not_submit_work');
       const members = await poll(
         'original_tui_and_service',
         () => {

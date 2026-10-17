@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -49,7 +50,7 @@ async function fixture() {
   await store.createWorkspace({
     expectedStoreId: storeId,
     id: 'w',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
     name: 'fixture',
   });
   for (const sessionId of ['a', 'b'])

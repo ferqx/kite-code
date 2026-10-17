@@ -1,14 +1,16 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createProfileBackup, restoreProfileBackup } from '../../../src/maintenance';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
 test('offline restore preserves immutable original Store provenance for inline user, Model and Tool Fork history in cold read-only Core', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-restored-inline-origin-')),
+  const root = realpathSync(temporaryDirectory('kite-restored-inline-origin-')),
     profile = { dataRoot: join(root, 'data'), profile: 'test' },
     store = await openSqliteStore(profile),
     originalStoreId = (await store.getMetadata()).storeId,
@@ -59,7 +61,7 @@ test('offline restore preserves immutable original Store provenance for inline u
       expectedStoreId: originalStoreId,
       id: 'w',
       name: 'original',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       expectedStoreId: originalStoreId,

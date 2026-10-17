@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -19,6 +18,7 @@ import {
   createLinuxHostShellJob,
   decodeLinuxShellProcessEvidence,
 } from '@kite-ai/agent/jobs/shell';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 
 const linuxTest = process.platform === 'linux' ? test : test.skip;
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -73,8 +73,7 @@ function setup() {
     profile = join(root, 'profile'),
     control = join(profile, '.coordination'),
     temporaryRoot = join(root, 'temp');
-  for (const path of [workspace, assets, control, temporaryRoot])
-    mkdirSync(path, { recursive: true, mode: 0o700 });
+  for (const path of [workspace, assets, control, temporaryRoot]) privateDirectory(path);
   const init = join(assets, 'init'),
     tree = join(workspace, 'tree');
   const compile = (source: string, output: string) => {

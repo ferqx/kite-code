@@ -18,6 +18,7 @@ import { userConfigurationPath } from '../../../apps/service/src/user-configurat
 import { sourceServerArguments } from '../../../scripts/development/ensure-web';
 import { sourceTerminalRoot } from '../../../scripts/release/source-terminal';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 function childEnvironment(home: string): NodeJS.ProcessEnv {
@@ -269,7 +270,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     home = join(root, 'home'),
     workspace = join(root, 'workspace'),
     candidate = sourceTerminalRoot(root);
-  mkdirSync(home, { mode: 0o700 });
+  privateDirectory(home);
   mkdirSync(workspace);
   const cli = driver(root, 'CLI'),
     tui = driver(root, 'TUI', false, true),
@@ -393,7 +394,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     expect(prepared.code).toBe(0);
     const profile = JSON.parse(prepared.stdout) as { profilePath: string; databasePath: string };
     databasePath = profile.databasePath;
-    mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

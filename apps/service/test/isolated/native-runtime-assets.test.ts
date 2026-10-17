@@ -15,6 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   fixtureNativeSqlite,
   fixtureTerminalSqlite,
@@ -37,9 +38,9 @@ const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 function fixture(largeAssets = false) {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-integrity-'))),
     root = join(parent, 'candidate');
-  mkdirSync(root, { mode: 0o700 });
+  privateDirectory(root);
   const terminal = join(root, 'terminal');
-  mkdirSync(terminal, { mode: 0o700 });
+  privateDirectory(terminal);
   const terminalEntries = terminalBundleEntries(process.platform),
     innerFiles: TerminalBundleManifest['files'][number][] = [];
   for (const path of [
@@ -110,7 +111,7 @@ function fixture(largeAssets = false) {
     links: [{ path: 'electron/current', target: 'framework' }],
     directories: ['electron/locale-empty'],
   };
-  mkdirSync(join(root, 'electron/locale-empty'), { mode: 0o700 });
+  privateDirectory(join(root, 'electron/locale-empty'));
   writeFileSync(join(root, 'native-manifest.json'), JSON.stringify(manifest), { mode: 0o644 });
   return {
     root,

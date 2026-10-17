@@ -5,7 +5,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -16,6 +15,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import specification from '../../generated/openapi.json';
 import {
   type DaemonBootstrap,
@@ -63,7 +63,7 @@ async function runBuild(args: string[], cwd: string) {
   }
 }
 beforeAll(async () => {
-  root = mkdtempSync('/private/tmp/kite-daemon-process-');
+  root = temporaryDirectory('kite-daemon-process-');
   artifact = join(root, 'artifact');
   const modules = join(artifact, 'node_modules');
   const dependencies = new Map<string, Set<string>>();
@@ -132,7 +132,7 @@ afterAll(() => {
 });
 function selection() {
   const directory = join(root, randomUUID());
-  mkdirSync(directory, { mode: 0o700 });
+  privateDirectory(directory);
   const profile = selectProfile({ dataRoot: join(directory, 'data'), profile: 'owned' });
   const webDirectory = join(directory, 'web');
   mkdirSync(webDirectory);

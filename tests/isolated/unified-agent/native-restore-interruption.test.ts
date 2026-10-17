@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import {
   existsSync,
   lstatSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -28,6 +27,7 @@ import {
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 test.skipIf(process.platform !== 'darwin')(
@@ -37,7 +37,7 @@ test.skipIf(process.platform !== 'darwin')(
       home = join(root, 'home'),
       workspace = join(home, 'workspace'),
       prefix = join(root, 'installed');
-    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    privateDirectory(workspace);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',

@@ -14,6 +14,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { buildNativeFiles } from '../../../scripts/build-native-files';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
 
 const budget = { maxBytes: 1024 * 1024 };
@@ -158,8 +160,15 @@ test('root, protected component prefixes, unsafe paths, symlinks, hardlinks and 
     }
     for (const path of ['', '/', '../data', './data', 'a/../data', 'a\\data'])
       await denied(f.files.readBytes(path, budget), 'file_path_invalid');
-    symlinkSync(join(f.root, 'protected'), join(f.root, 'escape'));
-    symlinkSync(join(f.root, '.gitignore'), join(f.root, 'link'));
+    const windows = process.platform === 'win32';
+    // Exercise an actual NTFS reparse point without requiring machine-wide
+    // Developer Mode or the file-symlink privilege. POSIX retains both kinds.
+    symlinkSync(join(f.root, 'protected'), join(f.root, 'escape'), windows ? 'junction' : 'dir');
+    symlinkSync(
+      join(f.root, windows ? 'protected' : '.gitignore'),
+      join(f.root, 'link'),
+      windows ? 'junction' : 'file',
+    );
     for (const path of ['escape/data', 'link', 'dir']) {
       await denied(f.files.readBytes(path, budget));
       await denied(
@@ -198,25 +207,37 @@ test('original Workspace identity and explicit host size bound survive new primi
     } finally {
       await limited.close();
     }
-    renameSync(f.root, moved);
-    mkdirSync(f.root);
-    writeFileSync(join(f.root, 'data'), 'foreign');
-    await denied(f.files.readBytes('data', budget), 'file_root_changed');
-    await denied(
-      f.files.restore({ path: 'data', bytes: Buffer.from('bad'), base: baseline, ...budget }),
-      'file_root_changed',
-    );
-    await denied(f.files.remove({ path: 'data', base: baseline, ...budget }), 'file_root_changed');
-    expect(readFileSync(join(f.root, 'data'), 'utf8')).toBe('foreign');
-    expect(readFileSync(join(moved, 'data'), 'utf8')).toBe('original');
+    if (process.platform === 'win32') {
+      // The held original root denies delete sharing; the OS prevents rebinding.
+      expect(() => renameSync(f.root, moved)).toThrow();
+      expect((await f.files.readBytes('data', budget)).baseline).toEqual(baseline);
+      expect(readFileSync(join(f.root, 'data'), 'utf8')).toBe('original');
+      expect(existsSync(moved)).toBe(false);
+    } else {
+      renameSync(f.root, moved);
+      mkdirSync(f.root);
+      writeFileSync(join(f.root, 'data'), 'foreign');
+      await denied(f.files.readBytes('data', budget), 'file_root_changed');
+      await denied(
+        f.files.restore({ path: 'data', bytes: Buffer.from('bad'), base: baseline, ...budget }),
+        'file_root_changed',
+      );
+      await denied(
+        f.files.remove({ path: 'data', base: baseline, ...budget }),
+        'file_root_changed',
+      );
+      expect(readFileSync(join(f.root, 'data'), 'utf8')).toBe('foreign');
+      expect(readFileSync(join(moved, 'data'), 'utf8')).toBe('original');
+    }
   } finally {
     await f.close();
     rmSync(moved, { recursive: true, force: true });
   }
 });
 
-test('real fsync failures distinguish zero publication, committed restore/remove unknown, and last-check drift', () => {
-  const entry = new URL('../../../src/files.ts', import.meta.url).pathname;
+test('native sync and close boundary failures distinguish zero publication, committed restore/remove unknown, and last-check drift', () => {
+  const entry = new URL('../../../src/files.ts', import.meta.url).href;
+  const binding = fileURLToPath(new URL('../../../src/files-native-binding.ts', import.meta.url));
   const child = Bun.spawnSync(
     [
       process.execPath,
@@ -224,26 +245,34 @@ test('real fsync failures distinguish zero publication, committed restore/remove
       `
     import {mock} from 'bun:test';
     import * as fs from 'node:fs';
+    import {tmpdir} from 'node:os';
+    import {join} from 'node:path';
+    import {createNativeWorkspaceFileIo} from ${JSON.stringify(pathToFileURL(binding).href)};
     const actual = {...fs};
+    const actualNative = createNativeWorkspaceFileIo;
     let mode = '';
     let target = '';
     let writtenFd = -1;
     let directorySynced = false;
-    mock.module('node:fs', () => ({...actual, fsyncSync(fd) {
-      if (mode === 'before' && actual.fstatSync(fd).isFile()) throw new Error('injected before publication');
-      if (mode === 'drift' && actual.fstatSync(fd).isFile()) actual.writeFileSync(target, 'external');
-      actual.fsyncSync(fd);
-      if (mode === 'close' && actual.fstatSync(fd).isDirectory()) directorySynced = true;
-      if (mode === 'after' && actual.fstatSync(fd).isDirectory()) throw new Error('injected after publication');
-    }, writeFileSync(fd, ...args) {
-      if (mode === 'close' && typeof fd === 'number') writtenFd = fd;
-      return actual.writeFileSync(fd, ...args);
-    }, closeSync(fd) {
-      actual.closeSync(fd);
-      if (mode === 'close' && directorySynced && fd === writtenFd) throw new Error('injected published fd close');
+    mock.module(${JSON.stringify(binding)}, () => ({createNativeWorkspaceFileIo(...args) {
+      const io = actualNative(...args);
+      return {...io, sync(id) {
+        const stat = io.stat(id);
+        if (mode === 'before' && stat.isFile()) throw new Error('injected before publication');
+        if (mode === 'drift' && stat.isFile()) actual.writeFileSync(target, 'external');
+        io.sync(id);
+        if (mode === 'close' && stat.isDirectory()) directorySynced = true;
+        if (mode === 'after' && stat.isDirectory()) throw new Error('injected after publication');
+      }, write(id, bytes) {
+        if (mode === 'close') writtenFd = id;
+        return io.write(id, bytes);
+      }, closeHandle(id) {
+        io.closeHandle(id);
+        if (mode === 'close' && directorySynced && id === writtenFd) throw new Error('injected published handle close');
+      }};
     }}));
     const {createWorkspaceFiles} = await import(${JSON.stringify(entry)});
-    const root = actual.realpathSync(actual.mkdtempSync('/private/tmp/kite-files-fsync-'));
+    const root = actual.realpathSync(actual.mkdtempSync(join(tmpdir(),'kite-files-sync-')));
     const files = createWorkspaceFiles({root});
     const budget = {maxBytes:1024};
     const facts = [];
@@ -288,23 +317,24 @@ test('real fsync failures distinguish zero publication, committed restore/remove
   );
 });
 
-test('built public byte leaf executes outside the source tree with exact restore/remove facts', () => {
+test('built public byte leaf executes outside the source tree with exact restore/remove facts', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-built-files-recovery-')));
   try {
-    const entry = new URL('../../../src/files.ts', import.meta.url).pathname;
+    const entry = fileURLToPath(new URL('../../../src/files.ts', import.meta.url));
     const built = join(root, 'files.js');
     const build = Bun.spawnSync(
       [process.execPath, 'build', entry, '--target=bun', '--outfile', built],
       { stdout: 'pipe', stderr: 'pipe' },
     );
     expect(build.exitCode, build.stderr.toString()).toBe(0);
+    await buildNativeFiles(root);
     const child = Bun.spawnSync(
       [
         process.execPath,
         '--eval',
         `
       import {readFileSync, mkdirSync} from 'node:fs';
-      const {createWorkspaceFiles}=await import(${JSON.stringify(built)});
+      const {createWorkspaceFiles}=await import(${JSON.stringify(pathToFileURL(built).href)});
       mkdirSync('workspace');
       const files=createWorkspaceFiles({root:process.cwd()+'/workspace'});
       const bytes=Buffer.from([239,187,191,13,10,0,255,128]);
@@ -329,4 +359,4 @@ test('built public byte leaf executes outside the source tree with exact restore
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 30000);

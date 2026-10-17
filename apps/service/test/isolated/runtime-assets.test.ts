@@ -5,7 +5,6 @@ import {
   copyFileSync,
   linkSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -13,7 +12,9 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { fixtureTerminalSqlite } from '../../../../tests/fixtures/unified-agent/sqlite-engine-fixture';
 import {
   parseTerminalBundleManifest,
@@ -26,7 +27,7 @@ import {
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 function fixture() {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-runtime-closure-'));
+  const root = realpathSync(temporaryDirectory('kite-runtime-closure-'));
   const entries = terminalBundleEntries(process.platform);
   const files: TerminalBundleManifest['files'][number][] = [];
   for (const path of [...Object.values(entries), 'node_modules/dependency/index.js']) {
@@ -79,13 +80,13 @@ function fixture() {
 test('pure closed proof parse freezes metadata without probing even an absent root', () => {
   const raw = {
     kind: 'terminal.candidate',
-    root: '/private/tmp/absent-runtime-parse-only',
+    root: join(tmpdir(), 'absent-runtime-parse-only'),
     manifestSha256: 'a'.repeat(64),
   };
   const proof = parseTerminalRuntimeProtection(raw);
   expect(Object.isFrozen(proof)).toBe(true);
-  raw.root = '/private/tmp/changed';
-  expect(proof.root).toBe('/private/tmp/absent-runtime-parse-only');
+  raw.root = join(tmpdir(), 'changed');
+  expect(proof.root).toBe(join(tmpdir(), 'absent-runtime-parse-only'));
   for (const invalid of [
     { ...raw, root: 'relative' },
     { ...raw, root: `/${'x'.repeat(4096)}` },

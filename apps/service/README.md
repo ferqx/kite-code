@@ -1,5 +1,7 @@
 # 本机 Agent Service
 
+Windows daemon 在本进程首次完整准入后，把原 live artifact owner 交给 Service 装配；[同进程借用](src/windows-paired-artifact.ts)只接受 WeakMap 登记的原对象及准确 proof/entry/executable/build，关闭开始、伪造、复制或错根均拒绝，未归还借用时原 owner 不能关闭。每个新进程仍独立取得 SH、原文件 pin、完整库存与全字节 SHA，startup JSON 不传借用权。Runtime verifier 和归档可复用同一原 pin，但每次仍核全部内容与对象，关闭未知保原资源。普通 JS 依赖按[构建声明](bundled-dependencies.ts)内联；原跨进程和恢复合同保持，理由归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
+
 `GET /v1/sessions/{id}/inputs` 的有限 response request 联合包括 steer、follow-up 和 Core 已接受的 `result.include`；只读投影保原 selection／execution／result revision／target Run。原 Store reader 同时供 Runtime checkpoint消费，不能过滤掉 result include 来迁就客户端显示；接口 schema 负责正确投影，TUI 只把文本输入显示为队列并正常推进所有 cursor。原写路由、权限与 Core 应用顺序不变，[真实混合页回归](test/isolated/pending-inputs.test.ts)核完整原申请与零重执行。
 
 ## 默认装配与业务规则归属
@@ -121,7 +123,9 @@ heap／external／ArrayBuffer明显回落，但RSS仍较高，不能仅据此判
 
 显式 Desktop 开发宿主监听 Service 源码，构建新的独立开发 bundle，并沿同一 paired 关闭／实际退出与新 SHA／build 准入替换进程。第三方依赖随版本打包，workspace 保外部 source 解析及原运行资产；开发版本不成为正式完整制品证明。UI 整页重新 attach 原 Store，不自动重发工作；编译失败保持旧服务，未知关闭和回执阻止继续替换。此行为归[Desktop 开发 owner](../desktop/README.md#开发热更新与服务重载)，Service 公共 API、Core 生命周期和正式 caller 合同保持。
 
-Windows 且明确传入 `runtimeProtection` 时，[paired parent admission](src/windows-paired-artifact.ts)在实际 spawn 前取得自己对所有 proof roots 的 SH，保留各自 manifest 与完整普通文件的原 HANDLE pin，再执行原 `verifyRuntimeProtection`。Native proof 包含 outer／Terminal inner 两层 roots及 outer 空目录；实际 [Service 装配](src/process-service.ts)独立取得自己的 SH／完整文件 pin 并再次核验，parent 不能代持 child 的使用权。启动命令只加候选固定的 `--no-env-file`、`--no-install`、`--config` 与 `--tsconfig-override` 路径，避免工作目录配置、preload、alias 或自动安装改变闭合制品。正式 Windows Native 已接安装前门和 Main 独立交接的源码，实际平台资格仍归 [Native owner](../desktop/docs/native-release.md#windows-managed-native-当前实现)。
+Windows 且明确传入 `runtimeProtection` 时，Bun默认 [paired parent admission](src/windows-paired-artifact.ts)在spawn前取得所有proof roots的SH、manifest与全文件原HANDLE pin，再执行原 `verifyRuntimeProtection`。Native proof包含outer/Terminal inner及outer空目录。Electron Node由可信 `retainWindowsArtifact` 装配端口借用同Main已独立取得的原生owner；不导入Bun FFI，不从startup JSON/配置接收端口，借用未归还阻止Main关闭，原child退出兑现后才归还。实际 [Service 装配](src/process-service.ts)始终另取自己的SH/全文件pin并完整核验，父不能代持子进程。启动只加候选固定 `--no-env-file`、`--no-install`、`--config=<路径>`、`--tsconfig-override=<路径>`；可选config值必须等号绑定，防止Bun误把TOML当入口而返回0。完整内容验证的dev/ino用BigInt保NTFS精确64位身份，Windows canonical逐项用原生realpath，single-link、完整SHA/库存和原对象检查保持。Main借用与Windows实际Node EOF清理取舍归[原对象决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)，平台资格仍归[Native owner](../desktop/docs/native-release.md#windows-managed-native-当前实现)。
+
+2026-10-17实际Windows的[完整paired回归](test/isolated/paired.test.ts)6项/53断言通过，核默认Bun路径的API/能力拒绝、真实Store失败的有界诊断与显式修复后重试、双child网络断连/父EOF区分及原资源释放。损坏Store夹具先新建真实private profile，不用POSIX mode代证Windows ACL；不会修复既有对象权限。这组默认宿主结果与Native装配端口、实际整包及完整平台资格分别核对。
 
 parent pin 与 SH 保持至原 `child.exited` 实际结算；spawn 没有产生 child 时才独立清理。返回的 `exited` 同时反映原退出事实与严格父资源关闭，关闭失败以 `PairedServiceError.code = 'paired_artifact_close_unknown'` 保留错误和未闭 owner，不将 terminate、stdout EOF 或关闭请求当退出／释放证明。文件 pin 先于 lease 关闭，Windows lease 在附件完整关闭后才由原 CloseHandle 释放 region；详细权限与失败重试边界归[平台 owner](../../packages/agent/src/platform/README.md#制品使用权)。POSIX／无 proof 的原配对命令、准入与关闭期限保持。
 
@@ -210,6 +214,8 @@ Skills 是明确 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 
 resolver 返回每 Run 的 `extensions`、`sources` 与 `dispose`。项目来源针对实际 File Tool 的可信相对目标，读取从 root 到目标的 `AGENTS.md`/`CLAUDE.md`。Runtime 冻结选中定义，并在关闭 Workspace 文件 handle 前为后台操作保留 binding lease；后续配置不能替换活动 Run 的定义或快照。Files 保留其实际 FD/path/hash 身份、POSIX/no-follow 和外部编辑 CAS 约束；大正文通过原 scope Artifact 和通用 Model 正文交接，范围以 [Files owner](../../packages/agent/src/tools/files/README.md)和[Model 正文 owner](../../packages/agent/src/model-body/README.md)为准，不声明 Windows 资格完成。
 
 默认全局 [Files checkpoint 配置](src/file-checkpoint-configuration.ts) 唯一登记 `builtin.files@1` 和准确六个 Files Tool，Run resolver 只选择这组定义，不重复注册。纯 metadata factory 不解析 Runtime 或打开文件；实际 scope 从当前 Store/Session/Workspace 的可信事实取得 canonical root，每次独立关闭 FD。捕获固定原 Run 已封存的 `contextSelectionId`，逐项核实际 Tool→成功 Model decisionSource、完整 sealed Model input/hash、原 Command/subject 与完整消费 User 的准确 source IDs/正文。nullable Execution delivery selection 不替代原 Run pin，后来 User 不成为旧 Tool trigger。
+
+默认装配把 Agent `filesNativeAssets()` 的加载器及整个 Node-API companion 纳入原 runtime assets，普通读取、外部路径和 checkpoint／restore 共用该保护。它只来自可信 public entry，JSONC／HTTP／Model 不能重标；Full 仍在 adapter 前拒绝。原[真实 Service 验证](test/isolated/files-native-boundary.test.ts)经 compatible SDK 与实际 Runtime 核普通外部文件可读、加载器／manifest／目录内新建拒绝和零写入，不冒称安装版或任意未运行平台资格。
 
 当前selected history按实际selection/upper完整分页；8192 Messages、64MiB累计来源证明、8MiB单页超限明确拒绝。历史capture verification改由私有`readOriginalRunSelection`从actual Run/Command pin读取当时选择，再按原trigger上界读取完整历史；当前point资格另核current selection。同Session保全Messages但换ID不会误拒旧点，排除trigger仍unavailable。已发布compression逐层核完整input/output/origin，前缀仅定位候选，真实User碰撞不被排除。生成摘要指令只按唯一准确 `sourceIds=[compressionId]` 及 user 身份从完整原输入定位；项目／Runtime 尾部来源不冒充该指令，不假设它位于最后，也不移除其他真实 User 或碰撞正文。restore逐项核原Source、Artifact EOF/hash/size及真实postbaseline；v2 journal/effect ledger保实际新inode或确认missing，v1只读不回填。默认full仍独立人类Ask，不继承原Tool/旧Store授权；原ID/cold只读原journal/carrier。
 

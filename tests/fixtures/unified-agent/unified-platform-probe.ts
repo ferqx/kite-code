@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -9,20 +9,21 @@ import { getLoadedSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { privateDirectory } from '../test-filesystem';
 
 const [workspace, candidateRoot, barrier] = process.argv.slice(2);
 if (!workspace || !candidateRoot || !barrier) throw Error('platform_probe_helper_arguments');
 const lease = acquireArtifactAccess({ root: candidateRoot, mode: 'shared' });
 const candidate = verifyTerminalRuntimeBundle(candidateRoot);
 const home = join(workspace, 'home');
-mkdirSync(home, { recursive: true, mode: 0o700 });
+privateDirectory(home);
 process.env.HOME = home;
 const userConfiguration = ownedUserConfiguration(home);
 const profile = selectProfile({
   dataRoot: join(home, '.kite-code/unified-agent'),
   profile: 'default',
 });
-mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+privateDirectory(profile.profilePath);
 writeFileSync(join(barrier, 'ready'), 'second-owned-shared', { mode: 0o600, flag: 'wx' });
 let service: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;

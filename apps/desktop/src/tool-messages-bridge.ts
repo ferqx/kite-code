@@ -14,7 +14,7 @@ export type NativeToolMessageFact = Pick<
 > & {
   messageId: string;
   executionId: string;
-  /** Display only: a unique original Model call in the already observed history. */
+  /** Display only: unique original Model call fields, or its known version's directory default. */
   target?: string;
   /** Read-only original Execution authorization; never a grant or answer capability. */
   authorization?: Execution['authorization'];

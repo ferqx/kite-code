@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { lookupManagementOutcome, submitManagement } from '../../src/session-management';
 
@@ -17,16 +18,16 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) 
   }
 }
 test('actual default Files rebuild Fork false receipt is applied and cold original lookup stays accurate', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-file-fork-'));
+  const root = realpathSync(temporaryDirectory('kite-cli-file-fork-'));
   const workspace = join(root, 'workspace'),
     home = join(root, 'home');
   mkdirSync(workspace);
-  mkdirSync(home, { mode: 0o700 });
+  privateDirectory(home);
   const userConfiguration = ownedUserConfiguration(home);
   const file = join(workspace, 'original.txt');
   writeFileSync(file, 'original bytes\r\n');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   let requests = 0;
   const provider = Bun.serve({
     hostname: '127.0.0.1',

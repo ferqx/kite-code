@@ -1,12 +1,13 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
@@ -18,11 +19,11 @@ test('built Service and actual PTY permission controls create exact Shell grants
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   const userConfiguration = ownedUserConfiguration(root);
   const evidence = join(tmpdir(), `kite-tui-permissions-evidence-${randomUUID()}`);
-  mkdirSync(evidence, { mode: 0o700 });
-  mkdirSync(workspace, { mode: 0o700 });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(evidence);
+  privateDirectory(workspace);
+  privateDirectory(profile.profilePath);
   // This fixture asserts English labels independently of the host device locale.
-  mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(profile.profilePath, 'ui'));
   writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
     mode: 0o600,
   });

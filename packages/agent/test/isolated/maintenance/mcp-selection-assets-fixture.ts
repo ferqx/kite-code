@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   acquireProfileAccess,
   acquireProfileDataLock,
@@ -108,7 +109,7 @@ export async function coldNodeMcpAssets(
   currentStoreId: string,
 ) {
   const directory = join(root, 'node-mcp-assets');
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  privateDirectory(directory);
   const source = join(directory, 'reader.ts');
   writeFileSync(
     source,

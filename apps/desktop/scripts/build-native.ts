@@ -21,6 +21,7 @@ import {
   type NativeBundleManifest,
   nativeBundleEntries,
   verifyNativeRuntimeBundle,
+  windowsNativeElectronResources,
 } from '@kite-ai/service/native-runtime-assets';
 import {
   readTerminalRuntimeBundleContent,
@@ -167,6 +168,15 @@ export async function buildNativeCandidate(input: {
       process.platform === 'win32' ? readTerminalRuntimeBundleContent : verifyTerminalRuntimeBundle
     )(input.terminalRoot),
     electron = realpathSync(input.electronDist);
+  if (
+    process.platform === 'win32' &&
+    windowsNativeElectronResources.some((path) => {
+      const resource = join(electron, path.slice('electron/'.length));
+      const stat = lstatSync(resource, { throwIfNoEntry: false });
+      return !stat?.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size === 0;
+    })
+  )
+    throw Error('native_electron_resources_incomplete');
   let parent = resolve(input.outdir);
   while (!existsSync(parent)) parent = dirname(parent);
   const actualDestination = join(realpathSync(parent), relative(parent, input.outdir));
@@ -232,7 +242,14 @@ export async function buildNativeCandidate(input: {
       privateDirectory(input.outdir);
     } else mkdirSync(input.outdir, { mode: 0o700 });
     const root = realpathSync(input.outdir);
-    copy(terminal.root, join(root, 'terminal'));
+    if (process.platform === 'win32') {
+      const target = join(root, 'terminal');
+      privateDirectory(target);
+      defaultWindowsPathSecurity()!.copyPrivateArtifactFiles(terminal.root, target, [
+        'terminal-manifest.json',
+        ...terminal.manifest.files.map((file) => file.path),
+      ]);
+    } else copy(terminal.root, join(root, 'terminal'));
     copy(electron, join(root, 'electron'));
     const electronVersion = readFileSync(join(electron, 'version'), 'utf8').trim();
     const entries = nativeBundleEntries(process.platform);

@@ -3,18 +3,18 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   renameSync,
   rmSync,
   symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/profile';
 import { openSqliteStore, resolveProfile } from '../../../src/sqlite';
 
 test('readonly profile selection creates no paths and opening reuses the selected stable identity', async () => {
-  const fixture = mkdtempSync('/private/tmp/kite-profile-selection-');
+  const fixture = temporaryDirectory('kite-profile-selection-');
   chmodSync(fixture, 0o700);
   const missingRoot = join(fixture, 'missing', 'root');
   const before = readdirSync(fixture, { recursive: true });
@@ -45,7 +45,7 @@ test('readonly profile selection creates no paths and opening reuses the selecte
   }
 });
 test('profile selection preserves invalid-name, dangling-symlink and private opening restrictions', () => {
-  const fixture = mkdtempSync('/private/tmp/kite-profile-safety-');
+  const fixture = temporaryDirectory('kite-profile-safety-');
   chmodSync(fixture, 0o700);
   try {
     expect(() => selectProfile({ dataRoot: fixture, profile: '../escape' })).toThrow(

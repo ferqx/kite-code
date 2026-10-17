@@ -8,11 +8,23 @@
 
 ## 当前发行与源身份
 
+Windows CI 固定 Bun 1.4.3；Linux/macOS CI 与 formal 资格基线保留 1.4.2。Windows 采用上游对 `--tsconfig-override` directory-mismatch 的修复；固定配置、零意外 stderr、PE/System32/no-delay 与 SQLite 精确来源门禁保留，未过滤原 1.4.2 警告。Windows 隔离输入的官方 ZIP SHA 为 `0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d`，实际内嵌 SQLite 3.53.4/sourceId 仍在原已审查集合内。旧 1.4.2 的构建/测试事实保历史范围；固定 1.4.2 的实验 resource-census 补丁未移植，也未替换正式运行时，不授 1.4.3 资源或跨平台资格。
+
+Windows 的原 HANDLE 内容读取、同进程完整 pin 复用、安全描述符查询和私有批量复制减少重复开销；每次完整内容验证保全库存/全 SHA；Bun 借用继续用原句柄复验全部内容，Main 的独立准入后则以持续强 pin、重新枚举、原 identity/ACL 与双 SH 代替同进程重复哈希，子 Service 仍独立完整准入。分享模式、每文件 Flush、严格关闭与原超时保持。普通 JS 依赖按各 workspace 明确声明内联，生成物拒绝残余 bare import，保原 manifest 字节、声明与许可全文；React/React DOM、动态资源、原生资产和 optional/peer 仍按真实图处理。理由与已拒绝的降门限/过滤警告/cwd pivot 方案归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。完整安装 caller 使用当前用户模型配置，并单独保旧 Profile 原字节作维护证据；新的 B manifest 目录在复制前私有创建，不修既有 ACL。当前真实资格与未通过门禁只由对应 Terminal/Native owner 的实测记录认定。
+
+Windows发布合同现以真实私有ACL、平台锁位置与链接拒绝夹具验证，完整Terminal／Native验证器保留精确64位文件身份；固定Bun配置参数和构建期Electron导入转换已接实际运行回归。Windows物理npm图使用真实共同祖先复用准确源节点，全部解析边与资源原字节继续核对。实际整包、安装期限与未取得资格由[Terminal owner](../../apps/cli/docs/terminal-release.md#windows-managed-terminal-当前实现)和[Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)负责；有限测试或工具smoke时限不替代正式120秒安装、窗口、维护和退出门禁。
+
+Windows原对象pin现以实际读取/遍历权限建立共享保护，区域锁保持只读SH/EX；Native配套的固定argv、同Main原生owner借用和Node/libuv退出Job接线已修正。子Service仍独立完整准入，退出未知保原使用权；真实反例、可信装配边界和未取得资格归[原对象决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)及上述owners，不把Node探针或有限控制测试计为installed完成。
+
 旧 Desktop 的普通开发、服务准备、Electron构建和打包调用者已明确退役：六个package命令及四个直接脚本在任何旧producer或制品写入前以 `legacy_desktop_entrypoint_retired`／2退出，并指向当前Native命令。完整行为和历史追溯归[开发入口](../development/local-development.md)与[旧Desktop owner](../../apps/kite-desktop/README.md)，实际拒绝及原数据保全由[完整调用者测试](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)核验。此项可独立于RSS／完整观测推进；当前完整Native仍使用新Service／Terminal闭包。旧历史测试／已保存制品及全部旧源码最终退役不因这些命令闭合而自动完成，三平台和§35门禁保持。
 
 普通旧CLI/TUI／Service入口随后也已收束：真实源码启动和两个package构建命令在旧依赖／Profile前拒绝，公共leaf只输出当前入口与2，不执行迁移或自动fallback。历史import API保原函数对象和同步语义，Service四个private helper仍沿原router；当前formal CI、候选和安装继续拒旧闭包。这些具体消费者的源码／bundle及原数据保全证据归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。用户要求Web端保持现状，旧Web已还原；其他历史producer／整树和阶段门禁不由本片关闭。
 
 根 workspaces 精确为 AI、Agent、Client、UI、Service、CLI、Desktop、Web。正式 CLI/TUI 固定完整 Terminal，Desktop 固定完整 Native；独立 source/development 显式入口不发现旧发布包或旧用户数据。业务通过唯一 HTTP/SSE Client；私有 bootstrap/发现只负责配套进程，不是第二业务 carrier。
+
+[Files Node-API companion](../../packages/agent/native/files/README.md)由 Agent build 使用固定 Rust／Cargo.lock 和明确本机目标编译，与 ABI／来源／binary hash manifest 及第三方许可证一起进入同一 Terminal／Native 完整 inventory。运行期不找编译器、源码、环境或旧 FFI 替代；正式 Service 保护加载器及整个资产目录。源码构建需要 Rust/linker，用户运行制品不需要；Windows 使用静态 CRT。搬迁 Bun/Node 与完整 Agent 包的通过不代替整产品 installed／publisher／三平台资格，实际 Windows 候选仍须经过原 ACL 和完整 manifest 验证。
+
+2026-10-16 本机 Windows 的 companion／完整 Agent 包搬迁已实际通过，准确命令与范围归 [Files owner](../../packages/agent/src/tools/files/README.md#node-api-文件后端)。2026-10-17，Bun1.4.2 的受限 RVA delay imports 在新 console 副本中提前物化为普通 imports，私有 Bun 子进程编译 verifier，C 中间输出与源目录 pin 分离；最终仍强制无 delay directory、System32 导入与原 ACL／完整 manifest。实际 Windows Terminal 整包39,306文件已构建并全量核验，候选自带 Bun／CLI／Files 已执行；准确身份、命令、验证及旧 POSIX 夹具限制归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-managed-terminal-当前实现)。不据此授完整 installed、Native、其他平台或发布资格。
 
 显式 `desktop:dev` 可由 builder 固定开发 loopback renderer／nonce 和独立认证父控制连接，用于 UI Fast Refresh 与 Service 新字节重载；只允许明确 development 资产，正式 candidate 拒绝开发配置。重载在原配套服务退出0后使用新 SHA／build 身份准入，保留原 Profile／Store／申请并保持零自动重放，未知关闭或回执不启动后续替代。Vite 不服务 Profile 或私有应用资源，父认证 token 不进入 renderer／argv／日志。当前实现及仅开发模式的 Windows 实际证据归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)，不扩展正式 Runtime protection、installed Main 加载政策或三平台资格。
 

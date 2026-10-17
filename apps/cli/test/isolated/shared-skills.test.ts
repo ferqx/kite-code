@@ -1,18 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import {
@@ -21,6 +14,7 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedCLI } from '../../host';
 import { runSelectedDaemon } from '../../host/daemon';
 import { selectWorkflowActivations } from '../../host/workflow-activations';
@@ -34,15 +28,19 @@ import {
 } from '../fixtures/original-tool-results';
 import { workflowManifest } from '../fixtures/workflow-manifest';
 
-const nativeTest = process.platform === 'darwin' ? test : test.skip;
+const supportsDaemonFixture = process.platform === 'darwin';
+const nativeTest = supportsDaemonFixture ? test : test.skip;
 const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 let root: string, entry: string;
 const cleanups = new Set<() => Promise<void>>();
 beforeAll(async () => {
-  root = realpathSync(mkdtempSync('/private/tmp/kite-shared-skills-'));
+  if (!supportsDaemonFixture) return;
+  root = realpathSync(temporaryDirectory('kite-shared-skills-'));
   const built = await buildOwnedDaemon(join(root, 'artifact'));
   const result = await Bun.build({
-    entrypoints: [new URL('../fixtures/shared-skills-daemon-child.ts', import.meta.url).pathname],
+    entrypoints: [
+      fileURLToPath(new URL('../fixtures/shared-skills-daemon-child.ts', import.meta.url)),
+    ],
     target: 'bun',
     packages: 'external',
     outdir: dirname(built),
@@ -72,7 +70,7 @@ function gate() {
 }
 async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
   const base = join(root, randomUUID());
-  mkdirSync(base, { mode: 0o700 });
+  privateDirectory(base);
   const profile = selectProfile({ dataRoot: join(base, 'data'), profile: 'owned' });
   const endpoint = selectDaemonEndpoint({
     profileAccessKey: profile.profileAccessKey,
@@ -217,7 +215,7 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
   }
   cleanups.add(close);
   try {
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     const skills = ['alpha', 'beta', 'ambiguous-a', 'ambiguous-b'];
     for (const id of skills) {
       const directory = join(base, 'skills', id);
@@ -340,7 +338,7 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
     await a.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: `file://${base}`,
+      rootUri: pathToFileURL(base).href,
       name: 'Owned',
     });
     async function session(id: string) {

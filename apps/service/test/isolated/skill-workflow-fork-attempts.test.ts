@@ -1,22 +1,24 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { workflowSnapshotDigest } from '../../src/skill-workflow-configuration';
 
 test.each(
   process.platform === 'darwin' ? ['repair', 'replan'] : [],
 )('Service fork %s uses a new real child and preserves original failed verification', async (decision) => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-service-fork-attempts-'));
+  const root = realpathSync(temporaryDirectory('kite-service-fork-attempts-'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   const skill = join(root, 'skill');
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   mkdirSync(skill);
   const originalInput = `${'Exact original input. '.repeat(400)}ORIGINAL_INPUT_TAIL`;
   const instructions = 'Original immutable fork instructions. ORIGINAL_INSTRUCTIONS_TAIL';
@@ -186,7 +188,7 @@ test.each(
       expectedStoreId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       ...base,

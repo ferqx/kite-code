@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, statSync, symlinkSync } from 'node:fs';
+import { existsSync, lstatSync, statSync, symlinkSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { privateDirectory } from '../../../tests/fixtures/test-filesystem';
 
 /** Keep fixture configuration isolated while using this OS user's actual default vault. */
 export function linkOwnedDefaultKeychain(home: string): void {
@@ -35,7 +36,7 @@ export function linkOwnedDefaultKeychain(home: string): void {
   if (typeof keychain !== 'string' || !isAbsolute(keychain) || !statSync(keychain).isFile())
     throw Error('owned_default_keychain_invalid');
   const directory = join(home, 'Library', 'Keychains');
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  privateDirectory(directory);
   const target = join(directory, 'login.keychain-db');
   if (existsSync(target)) throw Error('owned_default_keychain_target_exists');
   try {

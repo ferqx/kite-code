@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import {
   chmodSync,
   linkSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -14,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
+import { privateDirectory } from '../../../tests/fixtures/test-filesystem';
 import { createTuiDraftPort } from '../host/tui-draft-port';
 import { openTuiDraftFile, TuiDraftError } from '../host/tui-drafts';
 
@@ -21,7 +21,7 @@ function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-draft-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'draft' };
   const access = acquireProfileAccess(profile);
-  mkdirSync(access.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(access.profilePath);
   const open = () =>
     openTuiDraftFile({
       access,
@@ -112,7 +112,7 @@ test('debounced latest editor flush and accepted revision protect ABA and late e
 test('malformed, links, permissions and capacity fail without recreating or truncating original bytes', () => {
   const f = fixture();
   try {
-    mkdirSync(join(f.access.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(f.access.profilePath, 'ui'));
     for (const bytes of ['{broken', JSON.stringify({ version: 2, revision: '0', drafts: [] })]) {
       writeFileSync(f.path, bytes, { mode: 0o600 });
       expect(() => f.open().save(scope, '0', 'new')).toThrow('tui_draft_storage_unavailable');
@@ -178,7 +178,7 @@ test('rapid large text edits debounce document I/O and explicit exit flush store
 test('failed initial storage never masquerades as a saved empty editor at close', () => {
   const f = fixture();
   try {
-    mkdirSync(join(f.access.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(f.access.profilePath, 'ui'));
     writeFileSync(f.path, '{broken', { mode: 0o600 });
     const adapter = createTuiDraftPort({
       file: f.open(),

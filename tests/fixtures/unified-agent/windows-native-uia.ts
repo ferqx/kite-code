@@ -28,6 +28,7 @@ export type WindowsNativeUIARequest = {
 );
 export interface WindowsNativeUIAResult {
   elements?: WindowsNativeUIAElement[];
+  observation?: { code: 'uia_snapshot_changed'; type: string; hresult: number };
   invoked?: WindowsNativeUIAElement;
   element?: WindowsNativeUIAElement;
   filled?: string;
@@ -218,6 +219,7 @@ export async function createWindowsNativeUIA(options: {
         throw Error('uia_action_budget_invalid');
       performing = true;
       const id = randomBytes(16).toString('hex');
+      const actionDeadline = Math.min(Date.now() + timeoutMs, deadline);
       let actionTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         const response = new Promise<WindowsNativeUIAResult>((resolve, reject) => {
@@ -227,7 +229,7 @@ export async function createWindowsNativeUIA(options: {
               fail(Error('uia_action_deadline'));
               void close().catch(() => {});
             },
-            Math.max(1, Math.min(timeoutMs, deadline - Date.now())),
+            Math.max(1, actionDeadline - Date.now()),
           );
         });
         void response.catch(() => {});
@@ -235,6 +237,7 @@ export async function createWindowsNativeUIA(options: {
           ...request,
           ...('name' in request ? { match: request.match ?? 'exact' } : {}),
           id,
+          budgetMs: Math.max(1, actionDeadline - Date.now()),
         });
         if (frame.length > 1048576) throw Error('uia_request_too_large');
         await child.writeStdin(Buffer.from(`${frame}\n`, 'utf8'));

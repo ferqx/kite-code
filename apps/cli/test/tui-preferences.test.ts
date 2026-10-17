@@ -1,26 +1,23 @@
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  existsSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readConfigurationFile, updateConfigurationFile } from '@kite-ai/agent/config';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import {
+  directoryLink,
+  fixturePermissions,
+  privateDirectory,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../tests/fixtures/test-filesystem';
 import { openTuiPreferenceFile } from '../host/tui-preferences';
 
 function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-tui-prefs-');
+  const root = temporaryDirectory('kite-tui-prefs-');
   const profile = { dataRoot: join(root, 'data'), profile: 'prefs' };
   const access = acquireProfileAccess(profile);
-  mkdirSync(access.profilePath, { mode: 0o700, recursive: true });
+  privateDirectory(access.profilePath);
   return {
     root,
     profile,
@@ -127,7 +124,7 @@ test('stale revision and actual configuration lock reject once, preserving the c
 test('malformed documents, invalid finite values and file/path authority failures never repair or overwrite original data', () => {
   const f = fixture();
   try {
-    mkdirSync(join(f.access.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(f.access.profilePath, 'ui'));
     for (const bytes of [
       '{broken',
       '{"language":"other"}',
@@ -157,13 +154,13 @@ test('malformed documents, invalid finite values and file/path authority failure
     ])
       expect(() => a.save(edit as never)).toThrow('tui_preferences_invalid');
     expect(readFileSync(f.path, 'utf8')).toBe('{}');
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     expect(() => a.read()).toThrow('tui_preferences_unavailable');
-    chmodSync(f.path, 0o600);
+    fixturePermissions(f.path, 0o600);
     rmSync(f.path);
     const outside = join(f.root, 'outside');
     writeFileSync(outside, '{}', { mode: 0o600 });
-    symlinkSync(outside, f.path);
+    recordReparseEntry(outside, f.path);
     expect(() => a.read()).toThrow('tui_preferences_unavailable');
     rmSync(f.path);
     linkSync(outside, f.path);
@@ -174,8 +171,8 @@ test('malformed documents, invalid finite values and file/path authority failure
     rmSync(f.path);
     rmSync(join(f.access.profilePath, 'ui'), { recursive: true });
     const other = join(f.root, 'other');
-    mkdirSync(other, { mode: 0o700 });
-    symlinkSync(other, join(f.access.profilePath, 'ui'));
+    privateDirectory(other);
+    directoryLink(other, join(f.access.profilePath, 'ui'));
     expect(() => a.save({ expectedRevision: revision, key: 'language', value: 'en-US' })).toThrow(
       'tui_preferences_unavailable',
     );
@@ -217,7 +214,7 @@ test('only the original live profile access can read or publish preferences', ()
 test('file owner seals the original profile access instead of following a caller-mutated input alias', () => {
   const f = fixture();
   const other = acquireProfileAccess({ ...f.profile, profile: 'other' });
-  mkdirSync(other.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(other.profilePath);
   try {
     const input = { access: f.access, deviceLocale: 'en-US' };
     const file = openTuiPreferenceFile(input);

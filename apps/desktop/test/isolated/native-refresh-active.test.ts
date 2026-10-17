@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -10,11 +9,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { NativeCaller } from '../../electron/native-caller';
 
 function gate() {
@@ -38,7 +39,7 @@ async function bounded<T>(promise: Promise<T>) {
   }
 }
 test('actual active Model remains dispatched while persistent notifications and a held successor view cannot starve original Native steer', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-native-refresh-active-'));
+  const root = realpathSync(temporaryDirectory('kite-native-refresh-active-'));
   const store = await openSqliteStore({ dataRoot: root, profile: 'new' }),
     storeId = (await store.getMetadata()).storeId;
   const modelGate = gate(),
@@ -83,7 +84,7 @@ test('actual active Model remains dispatched while persistent notifications and 
     expectedStoreId: storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,

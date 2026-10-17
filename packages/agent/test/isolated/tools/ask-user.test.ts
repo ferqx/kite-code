@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createAskUserExtension } from '@kite-ai/agent/ask-user';
 import type { Json, ToolContext, ToolResult } from '@kite-ai/agent/extensions';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
@@ -66,7 +67,7 @@ async function fixture(arguments_: Json = input) {
     expectedStoreId,
     id: 'w',
     name: 'test',
-    rootUri: `file://${root}`,
+    rootUri: pathToFileURL(root).href,
   });
   await runtime.createSession({
     expectedStoreId,

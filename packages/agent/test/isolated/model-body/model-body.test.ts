@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import type { ArtifactContentStore } from '../../../src/artifact-port';
@@ -196,7 +197,12 @@ async function setup(
     },
   });
   const expectedStoreId = (await store.getMetadata()).storeId;
-  await runtime.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: `file://${root}` });
+  await runtime.createWorkspace({
+    expectedStoreId,
+    id: 'w',
+    name: 'w',
+    rootUri: pathToFileURL(root).href,
+  });
   await runtime.createSession({
     expectedStoreId,
     commandId: 'create',

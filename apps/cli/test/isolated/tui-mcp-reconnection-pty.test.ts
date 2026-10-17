@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -28,6 +27,7 @@ import { ClientError, createClient, requiresInteractionAttachment } from '@kite-
 import { launchPairedService } from '@kite-ai/service/paired';
 import { assertSqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
 import type { TuiMcpReconnectionFact } from '@kite-ai/ui/tui';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { parseMcpConnectionRecord } from '../../host/mcp-connection-intents';
 import { parseMcpReconnectionRecord } from '../../host/mcp-reconnection-intents';
@@ -82,10 +82,10 @@ function installed(name: string, owner: string) {
 test('80x24 forced warm reconnect targets original warm carrier, independently rejects replacement Job, and cold/foreign original checks preserve identity', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-reconnection-')));
   const evidence = join(tmpdir(), `kite-tui-mcp-reconnection-evidence-${randomUUID()}`);
-  mkdirSync(evidence, { mode: 0o700 });
+  privateDirectory(evidence);
   const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
-  mkdirSync(join(workspace, '.kite-code'), { mode: 0o700 });
+  privateDirectory(workspace);
+  privateDirectory(join(workspace, '.kite-code'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   const ledger = (name: string): Record<string, unknown>[] =>
     existsSync(join(root, name))
@@ -300,7 +300,7 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
       candidateDigest: candidate.digest,
     });
     settings();
-    mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+    privateDirectory(profile.profilePath);
     writeFileSync(
       join(profile.profilePath, 'mcp.json'),
       JSON.stringify({
@@ -310,7 +310,7 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
       }),
       { mode: 0o600 },
     );
-    mkdirSync(join(profile.profilePath, 'ui'), { mode: 0o700 });
+    privateDirectory(join(profile.profilePath, 'ui'));
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });

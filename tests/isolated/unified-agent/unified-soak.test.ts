@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -44,6 +43,7 @@ import {
   verifyBlockedWorkloadCollection,
   verifyUnifiedSoakReport,
 } from '../../../scripts/runtime/unified-soak-report';
+import { privateDirectory } from '../../fixtures/test-filesystem';
 
 function packet(): UnifiedSoakReport {
   const point = (sequence: number) => ({
@@ -381,7 +381,7 @@ test.skipIf(process.platform === 'win32')(
       expect(prepareUnifiedSoakReportPath(requested)).toBe(requested);
       expect(statSync(join(root, 'dist', 'unified-evidence')).mode & 0o777).toBe(0o700);
       const unsafe = join(root, 'unsafe');
-      mkdirSync(unsafe, { mode: 0o700 });
+      privateDirectory(unsafe);
       chmodSync(unsafe, 0o777);
       expect(() => prepareUnifiedSoakReportPath(join(unsafe, 'missing', 'report.json'))).toThrow(
         'report_parent_identity_invalid',

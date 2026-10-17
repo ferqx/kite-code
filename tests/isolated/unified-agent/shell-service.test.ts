@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Execution } from '@kite-ai/client';
@@ -74,7 +75,7 @@ async function setup(serial = false) {
     const storeId = a.bootstrap.storeId!;
     await a.client.createWorkspace({
       id: 'workspace',
-      rootUri: `file://${cwd}`,
+      rootUri: pathToFileURL(cwd).href,
       name: 'fixture',
       expectedStoreId: storeId,
     });

@@ -1,16 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -46,7 +39,7 @@ function states(path: string) {
   }
 }
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-answer-maintenance-'),
+  const root = temporaryDirectory('kite-answer-maintenance-'),
     profile = { dataRoot: join(root, 'data'), profile: 'owned' },
     store = await openSqliteStore(profile),
     storeId = (await store.getMetadata()).storeId;

@@ -190,6 +190,8 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 工具目标仅展示同一原来源／Run、结果之前且已读历史中唯一 Model call 的请求字段；重复 callId 不建立执行关联，有歧义不补目标。请求文本不证明实际文件变更，也不授予打开文件资格。成功 Files 路径按钮仍沿独立原 receipt／观察 ID；Files read 的当前版本3与已知版本2均核原 baseline，write/edit 仍限版本2。文件读取失败继续原单行状态，不附原始错误段落。
 
+唯一原调用属于已知 `files.list@1` 且省略 path 或传空字符串时，目标按该版本的已知默认值显示 `.`，表示工作区根目录；显式路径保原文。缺原调用、重复身份或未知版本不补默认路径，目录文本不获得文件打开动作。[Main 回归](test/native-tool-messages.test.ts)核默认／显式路径及缺来源／歧义／未来版本，[原组件 DOM](test/isolated/native-tool-messages-dom.test.tsx)核目录行实际保留根路径。
+
 执行中的工具行只来自当前 Store、所选会话活动 Run 的真实 tool Execution，与同 Run 的原结果消息接管；旧 Store 恢复记录不遮掉新工作。停止申请尚非终态时明确等待结果，视图不可核实时标“上次确认状态”。Shell launch/read/wait/stop 显示各自实际操作；启动受理不表示后台 Job 已完成，Job 的准确停止与完整输出仍归原环境／Runtime logs 入口。未知定义或版本保原 ID／version 和可展开原文，不借旧 UI 同名分类解释未来结果。
 
 [Main 与有限 IPC](test/native-tool-messages.test.ts)、[正式 caller 路由](test/native-caller.test.ts)、[原工具 DOM](test/isolated/native-tool-messages-dom.test.tsx)和原[源码外窗口](test/isolated/native-bundle.test.ts)分别核关联、作用域、原交互和真实执行／Files读取失败及冷读；准确输入和结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。轮次阅读、聚合与已知 Ask 回执的后续接入见下一节；自动审批历史、完整 PC、安装版全路径及其他平台资格仍未闭合。取舍见[工具消息观察决定](../../.agents/notes/implemented/architecture/2026-10-08-native-tool-message-observations.md)。
@@ -236,17 +238,27 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 [NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的请求批准／自动审核／完全访问菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；请求批准直接提交 `accept_edits`，不再映射为旧 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、工作区未信任、事实不可用或原权限申请未核实时等待；提交回调也拒绝未信任的模式写入。会话工具中的模式表单在工作区未信任时同样只读，核对并明确设置信任后才提供模式选择；信任控制保持独立，修改模式不自动设置信任或启动 Model。原计划窗口按真实信任→Auto 顺序运行，由真实审核返回 `ask_user` 后保独立工具审批；完整审核、Files 与冷读断言保持；准确回归范围见[PC 迁移主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)。
 
+普通历史／View 后台刷新只暂停操作，原输入区保留同一 generation、Store、Session、Workspace、阅读选择和 history epoch 内上次确认的权限标签。标签仅用于展示，不恢复已撤销的权限事实；真实权限／观察失败或切换范围即失效。[页面 DOM 回归](test/isolated/native-session-navigation-dom.test.tsx)模拟 Main 在普通 View 刷新时暂撤 permissions，核标签、计时和输入节点保留，操作仍禁用，真实失败提示仍出现。
+
 停止沿现有 [NativeCaller](electron/native-caller.ts)保存并提交 `command.cancel`，目标是已核实当前 Store／Session 活动 Run 的 `originCommandId`。它不新增停止端口，也不把申请当成终态；原保存／提交中／未知申请禁止重复，准确结果仍由原 Run 和持久申请核实。只读子详情没有这组控制，切换阅读不停止原工作。
 
 [原页面 DOM](test/isolated/native-new-conversation-dom.test.tsx)核模式、Full 取消／跨会话确认撤销、草稿和零任务提交；[原 Main 权限](test/native-permissions.test.ts)保独立原申请及未知结果。[实际源码外 Auto 窗口](test/isolated/native-auto-approval-bundle.test.ts)经完整候选的默认 Core／Service／Main 和原 Renderer，核批准、拒绝、请求人工、无效审查结果和审批中准确停止。转人工保原原因，只有实际批准产生准确文件效果；拒绝终止原任务，停止后迟到批准没有效果。普通退出后五种原记录完整冷读，Provider 与回答次数保持。该窗口只证明本机 macOS 当前 Store；全部封存／恢复、完整 PC 和独立迁移审查仍开放。实际执行及原失败见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原会话权限停止与自动审批闭环)。共享 Composer、Core／公共 API、SQL 和私有持久格式均未改。
 
 ## 原输入区累计缓存命中率
 
-[NativeDesktop](src/native.tsx)通过 [cache metrics adapter](src/native-cache-metrics.ts)给原 [Composer](../../packages/ui/src/desktop/Composer.tsx)传累计缓存用量，继续使用原百分比、token 提示和无样本隐藏行为。完整历史读到固定高水位后，按所选会话全部已观察的完整助手消息读取，不限于 View 近200项；真实 cached input为0且input大于0才显示0%，缺缓存字段或总量为0不补造样本。分叉／包含的封存消息保原来源，同一个原 Store／Model Execution只计一次。切换选择、generation或history epoch不沿用上一范围的指标；未完成历史校准时隐藏，失败可显式重新读取，不启动或重放任务。
+[NativeDesktop](src/native.tsx)通过 [cache metrics adapter](src/native-cache-metrics.ts)给原 [Composer](../../packages/ui/src/desktop/Composer.tsx)传累计缓存用量，继续使用原百分比、token 提示和无样本隐藏行为。完整历史读到固定高水位后，按所选会话全部已观察的完整助手消息读取，不限于 View 近200项；真实 cached input为0且input大于0才显示0%，缺缓存字段或总量为0不补造样本。分叉／包含的封存消息保原来源，同一个原 Store／Model Execution只计一次。后台历史／View 校准和新一轮用量读取期间，保留同一阅读范围内、正文与来源仍匹配的已核实样本；新样本整批核实后才更新累计值。原消息改变或移除即剔除对应样本；切换会话只恢复目标会话自己的样本，在新 viewSelection 下仍重新读取。generation、Store 或 history epoch 变化清空旧指标快照。失败保留仍匹配的原样本，可显式重新读取，不启动或重放任务。
 
 [Main reader](electron/tool-messages.ts)沿已有有限IPC增加 `toolMessages.usage`，复用close与所属read lease，每批至多32个已观察 Message ID，从当前生成 Client GET核原 Model Execution／Session／Run、成功结果和准确content，以及前后连接与原消息未变。它只返回已核实的缓存命中／未命中token；整数、非负及cached不大于input分别校验，不将缺失视为0。封存来源读取不可变Model用量，不借来源Run后来状态取得热事实；当前Store保存的旧Store结果另核终态出处，foreign active拒绝。读取失败不发布部分新样本；原历史正文、权限与准确停止继续独立，未新增Core／HTTP／SQL／私有持久格式。
 
 [Main与有限IPC测试](test/native-tool-messages.test.ts)、[原Composer DOM](test/isolated/native-cache-metrics-dom.test.tsx)和原[源码外默认窗口](test/isolated/native-bundle.test.ts)分别负责来源资格、累计／去重／迟到／无样本和默认SDK用量的首次及冷读。实际输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原输入区累计缓存命中率)，原共享UI实现保持；完整PC、全部恢复组合、资源退出和全阶段独立审查仍按原计划核对。
+
+## 会话工具栏显示快照
+
+[NativeDisplayCache](src/native-display-cache.ts)仅保留进程内展示数据，每个模型／指标缓存至多 12 项、总计 16MiB，单项超过 4MiB 不保留；按访问顺序淘汰，没有隐藏的会话组件或持久存储。模型目录按当前 generation、Store 和配置 revision 隔离，分别保存每个 Session／Workspace 及新对话准备页的已读事实；返回时不先清空标签，后台 GET 完成前模型与发送仍不可用。缓存率按当前 generation、Store、Session、Workspace 和 history epoch 隔离，复用时逐条核当前已读消息的准确内容与来源，去重、真实零和缺样行为保持；读 lease 仍绑定新的 viewSelection，迟到读取不能替换其他会话。
+
+[NativeDesktop](src/native.tsx)在选择交接时先暂停旧历史读取并门禁操作，目标选择确认后一次交接其缓存正文与元数据，避免旧选择配新正文造成工具栏短暂清空。Main 在本次选择期间暂未发布 selection 时，仅保留旧选择的只读展示，撤销 permissions 并标记 viewLoading／permissionUnavailable；它不能恢复发送、审批或停止资格。目标草稿直接从原独立草稿缓存恢复，不先置空再填回。模型控件在后台核对时保留原 DOM 与文字颜色，弹层随禁用关闭；真实失败保留原错误。
+
+[模型 DOM](test/isolated/native-model-picker-dom.test.tsx)、[缓存率 DOM](test/isolated/native-cache-metrics-dom.test.tsx)和[完整会话页 DOM](test/isolated/native-new-conversation-dom.test.tsx)分别核模型与比例不串会话、原节点保留、延迟响应、epoch 失效、容量限制、无选择交接时禁止写入及首条自动进入。
 
 ## 原交互记录只读历史
 
@@ -286,13 +298,13 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 新对话准备与首次发送
 
-[NativeDesktop](src/native.tsx)直接消费原 SessionPage 的欢迎区、四项建议、项目／分支菜单与 Composer。全局及项目新对话入口只进入准备页，不创建空 Session；建议只追加草稿、聚焦并移动光标。准备草稿和已有 Session 未保存草稿分别保留，页面、项目及分支选择不清空原文。实际模型目录由 [NativeModelPicker](src/native-model-picker.tsx)经独立只读 `conversation.models.read` 读取全局配置；选择项目只读取其分支，不重挂目录或改变全局默认，首次发送仍核所选项目实际配置和支持档位。原 Full 风险确认保留；本次权限选择在创建原 Session 后、首条输入前应用，不写项目默认。
+[NativeDesktop](src/native.tsx)直接消费原 SessionPage 的欢迎区、四项建议、项目／分支菜单与 Composer。全局及项目新对话入口只进入准备页，不创建空 Session；建议只追加草稿、聚焦并移动光标。准备草稿和已有 Session 未保存草稿分别保留，页面、项目及分支选择不清空原文。实际模型目录由 [NativeModelPicker](src/native-model-picker.tsx)经独立只读 `conversation.models.read` 读取全局配置。普通客户端读取期间只将原模型选择区标为 `aria-busy` 并禁用模型／发送操作，不在工具栏插入加载段落，避免会话切到准备页后先增高再收缩；输入与独立草稿保留，真实目录失败仍显示原错误。选择项目只读取其分支，不重挂目录或改变全局默认，首次发送仍核所选项目实际配置和支持档位。原 Full 风险确认保留；本次权限选择在创建原 Session 后、首条输入前应用，不写项目默认。
 
 [NativeConversation](electron/conversation.ts)负责有限编排，复用原 NativeCaller 创建意图、私有草稿、permission controller、caller journal 和 DesktopInput。发送前冻结创建五元身份、输入 Command、原文、模型／effort、Plan 与权限；先保存未来原 Session 的准确草稿，再执行原创建。准备的权限 controller 与正在阅读的选择分别持有观察，迟到结果不抢回后来页面。选择项目仅授权该根目录；实际权限包含额外宿主只读范围时，保留创建后的 Session 和原文，打开已有权限面板供明确确认。
 
 原 [Git leaf](electron/git.ts)从 kite-desktop 迁入，保原分支与工作区语义，并使用上文的所属 helper 退出收束。Main 从同代次／Store 完整目录中的已登记 Workspace 解出规范路径；renderer 只能传 ID，分支结果没有路径或控制句柄。普通目录、缺 Git 的读取均可准备；只有显式选择另一分支才在首次创建前切换。实际根、HEAD、本地分支、脏文件与全部活动 Run／Job 均重新核对；Profile 和 Native／Terminal 制品根及其交叠目录不可切换。目标已与当前分支相同不执行切换，未显式选分支时使用发送时的真实环境。Service 按新 Run 读取／冻结项目配置，不沿旧单项目拓扑关闭或重启 Service。
 
-首次发送立即清空准备输入并显示原文等待项。真实消息按原 Command，或 `sourceIds` 加同 Store／Session 的实际 Run 原 Command 证明接管，避免重复展示；不按相同文本猜配，原 Store 的等待项不进入新 Store。发送后切到安排任务等页面时，迟到成功保留当前页面，返回准备页显示已提交，可明确「打开本次会话」读取原 Session，不继续假称发送中。创建后权限或输入失败保留准确 Session 和原文，明确重试只用原创建身份、新输入意图。结果未知停用重复发送，「查询原首次提交」只核原创建／权限／输入；核实预备步骤成功后仍须明确发送，不自动续写。冷创建与持久原命令只具原 GET 资格，不恢复热首次写入权限。空间、Git、分支和命令错误沿现行手册的 shadcn AlertDialog 单次确认；刷新及 SSE 不提前清除它。私有 SQLite 格式与公开 HTTP API 未扩展。
+首次发送立即清空准备输入并显示原首条消息，创建成功后自动进入同一会话；正常过程不显示“正在发送／已提交／请打开本次会话”等额外提示，也不增加手动打开步骤。首条消息沿未来原 Store／Session 的同一阅读 key 保持，选择与历史读取期间不切到加载页或欢迎页。真实消息按原 Command，或 `sourceIds` 加同 Store／Session 的实际 Run 原 Command 证明接管，避免重复展示；不按相同文本猜配，原 Store 的等待项不进入新 Store。发送后切到安排任务等页面时，迟到成功保留当前页面；用户返回时直接读取原 Session，返回时仍在创建则在原回执到达后自动进入。自动进入只跟随当前页面意图，后来的会话或页面选择会撤销旧意图。创建后权限或输入失败保留准确 Session 和原文，明确重试只用原创建身份、新输入意图。结果未知停用重复发送，「查询原首次提交」只核原创建／权限／输入；核实预备步骤成功后仍须明确发送，不自动续写。冷创建与持久原命令只具原 GET 资格，不恢复热首次写入权限。空间、Git、分支和命令错误沿现行手册的 shadcn AlertDialog 单次确认；刷新及 SSE 不提前清除它。私有 SQLite 格式与公开 HTTP API 未扩展。
 
 [Main 测试](test/native-conversation.test.ts)核准确原文保存、独立阅读选择、冷原 GET、权限失败／未知及真实 Git 切换守卫；[实际准备页 DOM](test/isolated/native-new-conversation-dom.test.tsx)核原建议／选择器、草稿、晚结果、同会话重试与实际消息接管。源码外 [默认候选窗口](test/isolated/native-bundle.test.ts)、[冷草稿窗口](test/isolated/native-drafts-electron.test.ts)和[Provider 窗口](test/isolated/native-provider-bundle.test.ts)覆盖受影响正式入口；准确输入、已执行结果及未验范围归[本片进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-新对话准备与首次发送)。
 
@@ -452,7 +464,7 @@ ANGLE Metal同期123.22→15.59MiB、Skia资源4.79MiB→4096字节，SharedImag
 
 ## Native 跨会话后台总览
 
-[当前会话](src/native.tsx)在原 Run 状态旁显示当前 Session/Store 的未结束 Job 与 outcome_unknown 数量；planned/dispatching/running 包含停止未结算的项，终态、其他 Session、旧 Store、非 Job 不计入。计数使用 getView 的全部非终态投影，不是跨会话完整目录；父 Run 完成不清除后台状态。观察或视图不可用时保留上次事实并标明，数量不授予停止权或证明实际进程存活。[installed 默认 Shell](test/isolated/native-shell-lifecycle-bundle.test.ts)沿实际页面核父已完成、2 项未结束及准确停止后 1 项未结束，原完整输出、Main/Service fault、冷读与保数据卸载断言保持；准确证据和未验范围见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。
+[当前会话](src/native.tsx)在原 Run 状态旁显示当前 Session/Store 的未结束 Job 与 outcome_unknown 数量；planned/dispatching/running 包含停止未结算的项，终态、其他 Session、旧 Store、非 Job 不计入。计数使用 getView 的全部非终态投影，不是跨会话完整目录；父 Run 完成不清除后台状态。已有后台项或真实观察／权限失败时保留上次事实并标明；普通 View 后台刷新不因临时不可用额外插入底部状态行，避免输入区外层反复增高。数量不授予停止权或证明实际进程存活。[installed 默认 Shell](test/isolated/native-shell-lifecycle-bundle.test.ts)沿实际页面核父已完成、2 项未结束及准确停止后 1 项未结束，原完整输出、Main/Service fault、冷读与保数据卸载断言保持；准确证据和未验范围见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。
 
 正式 renderer 的[后台总览](src/native-background-panel.tsx)是独立于选中会话的主动入口。它读取原主体根会话树内全部当前来源 Job，以及准确恢复根中的旧来源历史，包含 child/task carrier 与子会话中的 Job；超过200项仍穷尽全部页，不从有限 `selection.executions` 猜完整集合。每项分别显示原 Store、原父 Run、准确 `child-start-${executionId}` 子 Run、required 等待与 delivery；较新的子 Run 不替换原载体。公共来源与快照合同由[Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录)、[Service](../service/README.md#完整后台执行目录)和[Client](../../packages/client/README.md#完整后台执行目录)维护。
 

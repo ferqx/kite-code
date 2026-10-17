@@ -1,17 +1,24 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createProfileBackup, restoreProfileBackup } from '../../../src/maintenance';
 import { openSqliteStore } from '../../../src/sqlite';
 
 async function fixture() {
-  const root = mkdtempSync('/private/tmp/kite-original-selection-');
+  const root = temporaryDirectory('kite-original-selection-');
   chmodSync(root, 0o700);
   const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
   const expectedStoreId = (await store.getMetadata()).storeId;
   const base = { expectedStoreId, sessionId: 's', subjectId: 'user' };
-  await store.createWorkspace({ expectedStoreId, id: 'w', rootUri: `file://${root}`, name: 'w' });
+  await store.createWorkspace({
+    expectedStoreId,
+    id: 'w',
+    rootUri: pathToFileURL(root).href,
+    name: 'w',
+  });
   await store.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 's' });
   async function run(sessionId: string, commandId: string) {
     await store.acceptCommand({

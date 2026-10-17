@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { defineExtension } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -141,7 +142,7 @@ async function pair(gate: 'model' | 'permission' = 'model') {
       await post(serviceA, '/v1/workspaces', {
         expectedStoreId: metadata.storeId,
         id: 'workspace',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
         name: 'Disposable',
       })
     ).status,

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createAskUserExtension } from '@kite-ai/agent/ask-user';
@@ -15,6 +16,7 @@ import type { Interaction } from '@kite-ai/client';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const questions: Json = {
   questions: [
@@ -46,7 +48,7 @@ async function fixture() {
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const requests: Record<string, unknown>[] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -150,7 +152,7 @@ async function fixture() {
   await client.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: `file://${workspace}`,
+    rootUri: pathToFileURL(workspace).href,
     name: 'Owned',
   });
   await client.createSession({

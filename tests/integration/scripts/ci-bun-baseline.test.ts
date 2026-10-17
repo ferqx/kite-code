@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parse } from 'yaml';
 import { FORMAL_QUALIFICATION_BUN_VERSION } from '../../../scripts/runtime/verify-fault-soak-qualification';
 
 const repositoryRoot = join(import.meta.dir, '..', '..', '..');
@@ -28,7 +29,7 @@ describe('CI Bun baseline', () => {
     }
   });
 
-  test('pins every setup-bun workflow to the formal qualification version', () => {
+  test('keeps the formal baseline and confines the upstream Windows fix to Windows runners', () => {
     expect(FORMAL_QUALIFICATION_BUN_VERSION).toBe('1.4.2');
 
     const setupWorkflows = readdirSync(workflowRoot)
@@ -38,9 +39,24 @@ describe('CI Bun baseline', () => {
 
     expect(setupWorkflows.length).toBeGreaterThan(0);
     for (const { name, source } of setupWorkflows) {
-      const versions = [...source.matchAll(/bun-version:\s*([^\s#]+)/gu)].map((match) => match[1]);
-      expect(versions, name).not.toEqual([]);
-      expect(new Set(versions), name).toEqual(new Set([FORMAL_QUALIFICATION_BUN_VERSION]));
+      const jobs = Object.values(parse(source).jobs) as {
+        'runs-on': unknown;
+        strategy?: unknown;
+        steps?: { uses?: string; with?: Record<string, string> }[];
+      }[];
+      let setupCount = 0;
+      for (const job of jobs) {
+        const runners = JSON.stringify([job['runs-on'], job.strategy]).toLowerCase();
+        const expected = runners.includes('"windows-')
+          ? `\${{ runner.os == 'Windows' && '1.4.3' || '1.4.2' }}`
+          : FORMAL_QUALIFICATION_BUN_VERSION;
+        for (const step of job.steps ?? []) {
+          if (!step.uses?.startsWith('oven-sh/setup-bun@')) continue;
+          setupCount++;
+          expect(step.with?.['bun-version'], name).toBe(expected);
+        }
+      }
+      expect(setupCount, name).toBeGreaterThan(0);
     }
   });
 
@@ -73,13 +89,14 @@ describe('CI Bun baseline', () => {
   test('keeps the native keyring workflow on the qualification-owned test path', () => {
     const workflow = readFileSync(join(workflowRoot, 'mcp-native-keyring-smoke.yml'), 'utf8');
     expect(workflow).toMatch(/push:\n\s+branches: \[main\]/u);
-    expect(workflow).toContain('tests/qualification/mcp-keyring-platform-smoke.test.ts');
+    expect(workflow).toContain('tests/isolated/unified-agent/native-credential-platform.test.ts');
+    expect(workflow).not.toContain('tests/qualification/mcp-keyring-platform-smoke.test.ts');
     expect(workflow).not.toContain('tests/mcp-keyring-platform-smoke.test.ts');
   });
 
   test('bounds platform jobs and keeps stdio owned by one workflow', () => {
     const expectedTimeouts = new Map([
-      ['execution-boundary-conformance.yml', 20],
+      ['execution-boundary-conformance.yml', 30],
       ['platform-capability-probe.yml', 30],
       ['runtime-stdio-smoke.yml', 15],
       ['runtime-transport-qualification.yml', 15],
@@ -103,15 +120,19 @@ describe('CI Bun baseline', () => {
   test('keeps execution-boundary triggers and commands on current test owners', () => {
     const workflow = readFileSync(join(workflowRoot, 'execution-boundary-conformance.yml'), 'utf8');
     const currentPaths = [
-      'apps/kite-service/test/policies/protected-path.test.ts',
-      'apps/kite-service/test/sandbox/network-boundary.test.ts',
-      'apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts',
-      'tests/qualification/sandbox/process-tree-limit.test.ts',
-      'tests/isolated/workspace/worktree-controller.test.ts',
-      'tests/integration/builtin-runtime/mcp-transport-boundary.test.ts',
-      'packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts',
+      'packages/agent/test/isolated/jobs/confined-shell.test.ts',
+      'packages/agent/test/isolated/files/runtime.test.ts',
+      'packages/agent/test/isolated/execution/authorization-review.test.ts',
+      'apps/service/test/isolated/runtime-assets.test.ts',
+      'tests/isolated/unified-agent/formal-optional-capabilities.test.ts',
+      'tests/isolated/unified-agent/native-runtime-protection.test.ts',
     ];
     const retiredPaths = [
+      'apps/kite-service/',
+      'packages/builtin-runtime/',
+      'tests/qualification/sandbox/',
+      'tests/isolated/workspace/worktree-controller.test.ts',
+      'tests/integration/builtin-runtime/',
       'apps/kite-cli/test/policies/protected-path.test.ts',
       'apps/kite-cli/test/sandbox/network-boundary.test.ts',
       'apps/kite-cli/test/sandbox/network-boundary-concurrency.test.ts',

@@ -437,10 +437,8 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
         runtime,
         [
           '--no-env-file',
-          '--config',
-          join(win32.dirname(runtime), 'windows-bunfig.toml'),
-          '--tsconfig-override',
-          join(win32.dirname(runtime), 'windows-tsconfig.json'),
+          `--config=${join(win32.dirname(runtime), 'windows-bunfig.toml')}`,
+          `--tsconfig-override=${join(win32.dirname(runtime), 'windows-tsconfig.json')}`,
           reader,
           releaseRoot,
           profile.dataRoot,

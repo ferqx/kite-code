@@ -1,15 +1,7 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -29,13 +21,14 @@ import {
   buildTerminalBundle,
   installTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 test.skipIf(process.platform !== 'darwin')(
   'actual installed standard and Native PATH entries run the selected full Native closure; cached standard recovers and Native-path stale hash is explicit',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-registration-live-'));
+    const root = realpathSync(temporaryDirectory('kite-cli-registration-live-'));
     const began = performance.now();
     const phase = (name: string, detail: Record<string, unknown> = {}) =>
       console.log(
@@ -49,7 +42,7 @@ test.skipIf(process.platform !== 'darwin')(
       );
     const home = join(root, 'home'),
       workspace = join(home, 'workspace');
-    mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    privateDirectory(workspace);
     const userConfiguration = ownedUserConfiguration(home);
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),

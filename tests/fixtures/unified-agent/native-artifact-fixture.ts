@@ -1,27 +1,30 @@
 /** Small integrity-only fixture, never executable/product/Electron qualification. */
 import { createHash } from 'node:crypto';
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   type NativeBundleManifest,
   nativeBundleEntries,
+  windowsNativeElectronResources,
 } from '@kite-ai/service/native-runtime-assets';
 import {
   type TerminalBundleManifest,
   terminalBundleEntries,
 } from '@kite-ai/service/runtime-assets';
+import { privateDirectory } from '../test-filesystem';
+
 import { fixtureNativeSqlite, fixtureTerminalSqlite } from './sqlite-engine-fixture';
 export const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 export function finiteNativeFixture(parent: string, name = 'candidate') {
   const root = join(parent, name),
     terminal = join(root, 'terminal');
-  mkdirSync(terminal, { recursive: true, mode: 0o700 });
+  privateDirectory(terminal);
   const innerEntries = terminalBundleEntries(process.platform),
     innerFiles: TerminalBundleManifest['files'][number][] = [];
   for (const path of Object.values(innerEntries)) {
     const bytes = Buffer.from(path),
       mode = path === innerEntries.runtime ? 493 : 420;
-    mkdirSync(dirname(join(terminal, path)), { recursive: true, mode: 0o700 });
+    privateDirectory(dirname(join(terminal, path)));
     writeFileSync(join(terminal, path), bytes, { mode });
     innerFiles.push({ path, size: bytes.length, sha256: hash(bytes), mode });
   }
@@ -46,6 +49,15 @@ export function finiteNativeFixture(parent: string, name = 'candidate') {
     'electron/version',
     '.use-terminal.lock',
     'electron/framework/actual',
+    ...(process.platform === 'win32'
+      ? [
+          'app/kite.exe',
+          'app/kite-tui.exe',
+          'app/kite-desktop.exe',
+          'app/native-verifier.exe',
+          ...windowsNativeElectronResources,
+        ]
+      : []),
   ]) {
     const bytes = Buffer.from(
         path === '.use-terminal.lock'
@@ -56,13 +68,18 @@ export function finiteNativeFixture(parent: string, name = 'candidate') {
               ? JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' })
               : path,
       ),
-      mode = path === '.use-terminal.lock' ? 384 : path === entries.electron ? 493 : 420;
-    mkdirSync(dirname(join(root, path)), { recursive: true, mode: 0o700 });
+      mode =
+        path === '.use-terminal.lock'
+          ? 384
+          : path === entries.electron || path.endsWith('.exe')
+            ? 493
+            : 420;
+    privateDirectory(dirname(join(root, path)));
     writeFileSync(join(root, path), bytes, { mode });
     files.push({ path, size: bytes.length, sha256: hash(bytes), mode });
   }
-  symlinkSync('framework', join(root, 'electron/current'));
-  mkdirSync(join(root, 'electron/empty-locale'), { mode: 0o700 });
+  if (process.platform !== 'win32') symlinkSync('framework', join(root, 'electron/current'));
+  privateDirectory(join(root, 'electron/empty-locale'));
   const manifest: NativeBundleManifest = {
     version: 1,
     apiMajor: 1,
@@ -73,7 +90,7 @@ export function finiteNativeFixture(parent: string, name = 'candidate') {
     terminalManifestSha256: hash(terminalBytes),
     entries,
     files,
-    links: [{ path: 'electron/current', target: 'framework' }],
+    links: process.platform === 'win32' ? [] : [{ path: 'electron/current', target: 'framework' }],
     directories: ['electron/empty-locale'],
   };
   writeFileSync(join(root, 'native-manifest.json'), JSON.stringify(manifest), { mode: 0o644 });

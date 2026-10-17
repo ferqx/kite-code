@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
@@ -210,8 +211,9 @@ try {
     console.error('live_tick', tick, Date.now() - sent, (await state()).environmentRevision);
   }
   if (mode === 'capture') {
-    await page.screenshot({ path: '/private/tmp/kite-native-child-stream-after.png' });
-    console.log(JSON.stringify({ screenshot: '/private/tmp/kite-native-child-stream-after.png' }));
+    const screenshot = join(tmpdir(), 'kite-native-child-stream-after.png');
+    await page.screenshot({ path: screenshot });
+    console.log(JSON.stringify({ screenshot }));
     await fetch(`${control}/finish`);
   } else {
     await close();
@@ -331,7 +333,7 @@ try {
     };
     console.log(JSON.stringify(report));
     writeFileSync(
-      '/private/tmp/kite-native-child-stream-after-markdown-cache-settled.json',
+      join(tmpdir(), 'kite-native-child-stream-after-markdown-cache-settled.json'),
       JSON.stringify(report, null, 2),
     );
     assert.ok(

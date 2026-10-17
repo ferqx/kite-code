@@ -7,7 +7,6 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -15,6 +14,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import {
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { artifactPath } from '../../../src/artifacts-files';
 import { createProfileBackup, inspectProfileBackup } from '../../../src/maintenance';
@@ -38,7 +41,7 @@ async function failure(work: Promise<unknown>, code?: string) {
   if (code) expect((error as { code?: string }).code ?? (error as Error).message).toBe(code);
 }
 async function fixture(large = false) {
-  const directory = mkdtempSync('/private/tmp/kite-backup-');
+  const directory = temporaryDirectory('kite-backup-');
   const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
@@ -66,10 +69,7 @@ async function fixture(large = false) {
   );
   const hash = createHash('sha256').update(bytes).digest('hex');
   const mediaPath = artifactPath(selected.profilePath, hash);
-  mkdirSync(join(selected.profilePath, 'blobs', hash.slice(0, 2)), {
-    recursive: true,
-    mode: 0o700,
-  });
+  privateDirectory(join(selected.profilePath, 'blobs', hash.slice(0, 2)));
   writeFileSync(mediaPath, bytes, { mode: 0o400 });
   db.query('INSERT INTO blob VALUES(?,?,?)').run(hash, bytes.length, 'fixture');
   db.query('INSERT INTO blob_ref VALUES(?,?,?,?,?,?,?,?)').run(

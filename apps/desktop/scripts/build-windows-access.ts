@@ -35,6 +35,7 @@ export async function buildWindowsAccess(outdir: string, compiler = process.env.
       '/nologo',
       '/LD',
       '/MT',
+      '/O2',
       '/std:c++17',
       '/EHsc',
       '/W4',

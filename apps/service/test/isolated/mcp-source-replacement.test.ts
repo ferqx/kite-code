@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { type McpSourceReadSet, mcpCanonical } from '@kite-ai/agent/config';
@@ -12,6 +13,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src/index';
 import { createMcpConfiguration } from '../../src/mcp-configuration';
 import { createMcpSourceConfiguration } from '../../src/mcp-source-configuration';
@@ -64,7 +66,7 @@ async function fixture(observerSubjectId = 'owner') {
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const sourcePath = join(profile.profilePath, 'mcp.json');
   let revision = 1;
   const writeSource = () =>
@@ -174,7 +176,7 @@ async function fixture(observerSubjectId = 'owner') {
     expectedStoreId: storeId,
     id: 'w',
     name: 'owned',
-    rootUri: `file://${workspace}/`,
+    rootUri: pathToFileURL(`${workspace}/`).href,
   });
   await runtime.createSession({
     expectedStoreId: storeId,
